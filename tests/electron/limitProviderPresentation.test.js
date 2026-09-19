@@ -232,10 +232,32 @@ function limitsViewSource() {
 }
 
 function viewBody(name, nextName = '') {
-  // The last function in the module is followed by its export block, so slice
-  // against a sentinel placed ahead of that rather than the end of the file.
-  const source = limitsViewSource().replace(/\n\s*return \{\n\s*antigravityQuotaGroups,/, '\nfunction __endOfView__() {}\n    return {\n      antigravityQuotaGroups,');
-  return functionBody(source, name, nextName || '__endOfView__');
+  const source = limitsViewSource();
+  if (nextName) return functionBody(source, name, nextName);
+  // Without a named terminator the body runs to the next line at the factory's
+  // own indent: the brace that closes it, or the declaration that follows.
+  // Slicing to the export block instead sweeps in whatever factory-scope tables
+  // sit further down, and a test that evals the slice a second time into the same
+  // context then redeclares them.
+  const start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `${name} function should exist`);
+  const rest = source.slice(start);
+  const end = rest.search(/\n {0,2}(?:\}|(?:async )?function |const |let |var )/);
+  assert.notEqual(end, -1, `${name} function should end`);
+  const closing = rest.slice(end).match(/^\n {0,2}\}/);
+  return rest.slice(0, closing ? end + closing[0].length : end);
+}
+
+// A factory-scope table — `const NAME = { … };` — which is where the per-provider
+// policies live now that both surfaces read them.
+function viewTable(name) {
+  const source = limitsViewSource();
+  const start = source.indexOf(`const ${name} = `);
+  assert.notEqual(start, -1, `${name} table should exist`);
+  const rest = source.slice(start);
+  const end = rest.indexOf('\n  };');
+  assert.notEqual(end, -1, `${name} table should close`);
+  return rest.slice(0, end + '\n  };'.length);
 }
 
 function runLocalProviderStatus(source, state, providerName) {
@@ -726,19 +748,23 @@ test('capability tags are settings-only and do not alter the main Limits panel',
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  const renderHead = functionBody(app, 'renderLimitProviderHead', 'codexResetForecastDate');
-  const renderMeta = functionBody(app, 'limitProviderMeta', 'limitProviderPlan');
+  const renderHead = viewBody('renderLimitProviderHead', 'codexResetForecastDate');
+  const renderMeta = viewBody('limitProviderMeta', 'limitProviderPlan');
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'onToolTrackingToggle');
 
   assert.doesNotMatch(renderLimits, /limitProviderCapabilityTags|limit-status|limitProviderStatus/);
-  assert.match(renderHead, /const provenance = limitProviderProvenance\(provider\);/);
+  assert.match(renderHead, /const provenance = presentationApi\.limitProviderProvenance\(provider\);/);
   assert.match(renderHead, /limitProviderMeta\(provider, provenance\)/);
-  assert.match(renderMeta, /limitProviderMainDeviceLabel\(provenance, \{ showSource: Boolean\(state\.settings\?\.showLimitSource\) \}\)/);
+  assert.match(renderMeta, /presentationApi\.limitProviderMainDeviceLabel\(provenance, \{ showSource: Boolean\(settings\(\)\?\.showLimitSource\) \}\)/);
   assert.doesNotMatch(renderLimits, /limitProviderSettingsTags/);
   // The head still carries exactly the title block and the plan label. The plan
   // is wrapped so hovering it can reveal manual subscription details, which adds
-  // no tag and no status of its own.
-  assert.match(renderHead, /head\.append\(titleBlock, decoratePlanWithSubscription\(plan, provider\)\);/);
+  // no tag and no status of its own — and the wrapping is the view's own now, so
+  // both surfaces get it and neither can supply a different answer.
+  assert.match(
+    renderHead,
+    /head\.append\(titleBlock, decoratePlanWithSubscription\(plan, provider, !options\.accountRow\)\);/
+  );
   assert.match(renderSettings, /limitProviderSettingsTags\(provider, provenance/);
   assert.doesNotMatch(styles, /\.limit-status\b/);
 });
@@ -747,12 +773,23 @@ test('Codex limits render as one provider group with account subrows', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  const renderGroup = functionBody(app, 'renderCodexAccountGroup', 'renderClaudeAccountGroup');
+  const renderGroup = viewBody('renderLimitProviderGroup');
+  const policy = viewTable('LIMIT_ACCOUNT_ROW_POLICIES');
+  const groupPolicy = viewTable('LIMIT_GROUP_POLICIES');
 
   assert.match(renderLimits, /providersByLimitProviderId\(state\.stats\?\.limits\?\.providers \|\| \[\]\)/);
-  assert.match(renderLimits, /renderCodexAccountGroup\(/);
-  assert.match(renderGroup, /planText: t\('settings\.codex\.nAccounts', \{ count: providers\.length \}\)/);
+  // The dispatch is by account count, not by provider: which providers have a
+  // group is now the view's policy, so the page cannot forget one and the dock
+  // card cannot render a bare row for the same provider.
+  assert.match(renderLimits, /renderLimitProviderGroup\(id, label, visibleProviders, color\)/);
+  assert.doesNotMatch(renderLimits, /renderCodexAccountGroup|renderClaudeAccountGroup/);
   assert.doesNotMatch(renderLimits, /new Map\(\(state\.stats\?\.limits\?\.providers \|\| \[\]\)\.map\(\(provider\) => \[provider\.provider, provider\]\)\)/);
+  assert.match(policy, /codex: \(provider, color, \{ grouped \}\) => \(\{/);
+  assert.match(policy, /accountTitle: true,\s*allowSystemSwitch: true,\s*\.\.\.\(grouped \? \{ showActiveBadge: true, showIcon: false \} : \{\}\)/);
+  // The forecast describes the account set, so it is appended once below the
+  // rows rather than on each of them.
+  assert.match(groupPolicy, /codex: \(\) => \(\{ forecastOnGroup: true \}\)/);
+  assert.match(renderGroup, /if \(forecastOnGroup\) appendCodexResetForecast\(row\);/);
   assert.match(styles, /\.limit-account-list\s*\{/);
   assert.match(styles, /\.limit-account-row\s*\{/);
 });
@@ -760,24 +797,30 @@ test('Codex limits render as one provider group with account subrows', () => {
 test('Claude limits render as one provider group with account subrows', () => {
   const app = readRendererFile('app.js');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  const renderGroup = functionBody(app, 'renderClaudeAccountGroup', 'mimoSettingsAccountTitle');
+  const renderGroup = viewBody('renderLimitProviderGroup');
+  const policy = viewTable('LIMIT_ACCOUNT_ROW_POLICIES');
 
-  assert.match(renderLimits, /renderClaudeAccountGroup\(/);
-  assert.match(renderGroup, /limitAccountTitle\('claude', provider, index, providers\)/);
-  assert.match(renderGroup, /planText: t\('settings\.claude\.nAccounts', \{ count: providers\.length \}\)/);
-  assert.match(renderGroup, /accountRow: true/);
-  assert.match(renderGroup, /showIcon: false/);
+  assert.match(renderLimits, /renderLimitProviderGroup\(id, label, visibleProviders, color\)/);
+  assert.match(renderGroup, /limitAccountTitle\(providerId, provider, index, providers\)/);
+  // The mark is dropped only for a group row. Standing alone the row is the card's
+  // whole identity, and that is the shape the Edge Dock card renders.
+  assert.match(policy, /claude: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
+  assert.match(renderGroup, /\{ accountRow: true, \.\.\.account\.options \}/);
 });
 
 test('every multi-account Limits group uses its provider-localized account count', () => {
-  const app = readRendererFile('app.js');
+  const view = readRendererFile('limitWindowsView.js');
+  const i18n = readRendererFile('i18n.js');
+  // One derivation instead of one string per wrapper: a provider that has a key
+  // gets its own phrase, and one that does not renders no count rather than the
+  // key itself.
+  assert.match(view, /const key = GROUP_COUNT_KEYS\[providerId\] \|\| `settings\.\$\{providerId\}\.nAccounts`;/);
+  assert.match(view, /return text === key \? '' : text;/);
+  assert.match(view, /planText: limitGroupCountText\(providerId, providers\.length\)/);
+  assert.doesNotMatch(view, /settings\.(claude|codex|mimo|opencode|openrouter|thirdparty)\.nAccounts/);
   for (const provider of ['claude', 'codex', 'mimo', 'opencode', 'openrouter', 'thirdparty']) {
-    assert.match(
-      app,
-      new RegExp(`settings\\.${provider}\\.nAccounts`)
-    );
+    assert.match(i18n, new RegExp(`'settings\\.${provider}\\.nAccounts'`));
   }
-  assert.doesNotMatch(app, /settings\.limits\.nAccounts|accountCountText/);
 });
 
 test('tray primary-limit modes use the shared provider-aware resolver', () => {
@@ -1345,7 +1388,10 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(styles, /\.limit-reset-credits-timeline\s*\{[^}]*opacity: 0\.66;/s);
   assert.match(styles, /\.limit-reset-credits-time\s*\{[^}]*gap: 3px;/s);
   assert.match(styles, /\.limit-detail-tooltip-wrap\s*\{[^}]*position: relative;/s);
-  assert.match(styles, /\.limit-detail-tooltip\s*\{[^}]*position: absolute;[^}]*width: max-content;[^}]*grid-template-columns: max-content max-content;/s);
+  // A popover, not an absolutely positioned box: the top layer is what lets the
+  // tooltip escape the panel it is drawn inside, and `inset: auto` is what keeps
+  // the UA's viewport stretch from coming with it.
+  assert.match(styles, /\.limit-detail-tooltip\s*\{[^}]*position: fixed;[^}]*inset: auto;[^}]*width: max-content;[^}]*grid-template-columns: max-content max-content;/s);
   assert.match(styles, /\.limit-detail-tooltip-row\s*\{[^}]*display: contents;/s);
   assert.match(styles, /\.limit-detail-tooltip-row span:last-child\s*\{[^}]*text-align: right;/s);
   assert.doesNotMatch(styles, /\.limit-reset-credits-clock/);
@@ -1611,8 +1657,7 @@ test('MiMo expired Token Plan renders a localized status without a meter', () =>
 });
 
 test('main Limits plan text shows failure status before account labels', () => {
-  const app = readRendererFile('app.js');
-  const planBody = functionBody(app, 'limitProviderPlan', 'configuredLimitProviderOrder');
+  const planBody = viewBody('limitProviderPlan');
 
   assert.match(planBody, /if \(provider\?\.status && provider\.status !== 'ok' && !provider\.stale\) return limitStatusLabel\(provider\.status, false\);/);
   assert.match(planBody, /const label = String\(provider\?\.planLabel \|\| provider\?\.accountLabel \|\| ''\)\.trim\(\);/);
@@ -2688,20 +2733,35 @@ function cssBlock(styles, selector) {
 }
 
 test('the subscription tooltip escapes both the plan label and the scrolling panel', () => {
-  const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  const decorate = functionBody(app, 'decoratePlanWithSubscription', 'subscriptionRowTitle');
-  const position = functionBody(app, 'positionSubscriptionTooltip', 'decoratePlanWithSubscription');
+  const decorate = viewBody('decoratePlanWithSubscription');
 
-  // The wrap also carries .limit-plan, whose overflow:hidden clips the card away
-  // entirely — the card sits above the label, outside that 10px-tall box.
+  // The subscription card is a tooltip like every other on this surface, so it
+  // goes through the shared attacher rather than a second copy of the
+  // anchor/flip/top-layer wiring that has to be kept in step by hand. That is
+  // also what frees it from `.limits-panel`'s clipping: whichever element draws
+  // it, the popover paints in the top layer.
+  assert.match(decorate, /wrap\.className = 'limit-plan limit-detail-tooltip-wrap subscription-plan-wrap';/);
+  assert.match(decorate, /attachLimitDetailTooltip\(wrap, card\);/);
+  assert.doesNotMatch(decorate, /positionSubscriptionTooltip/);
+  // The wrap also carries .limit-plan, whose overflow:hidden would clip the card
+  // away entirely — the card sits above the label, outside that 10px-tall box.
   assert.match(cssBlock(styles, '.subscription-plan-wrap'), /overflow: visible;/);
-  // And .limits-panel clips its own overflow, so on the topmost row the upward
-  // card lands outside the panel. It flips below when there is no room above.
-  assert.match(decorate, /positionSubscriptionTooltip\(wrap, card\);/);
-  assert.match(position, /closest\('\.limits-panel'\)/);
-  assert.match(position, /classList\.toggle\('is-below'/);
-  assert.match(styles, /\.subscription-tooltip\.is-below \{/);
+  // The trigger is still the plan label, so the card has to keep clearing the
+  // inherited right-alignment and anchoring to it.
+  assert.match(cssBlock(styles, '.subscription-tooltip'), /right: anchor\(right\);/);
+});
+
+test('every limits tooltip flips below when the row has no room above it', () => {
+  const styles = readRendererFile('styles.css');
+  const attach = viewBody('attachLimitDetailTooltip');
+
+  assert.match(attach, /classList\.toggle\('is-below'/);
+  assert.match(styles, /\.limit-detail-tooltip\.is-below \{/);
+  // One flip rule for the whole surface: the dock card is 280px tall, so the
+  // first row usually has nothing above it, and that is the same problem the
+  // limits panel has on its own topmost row.
+  assert.doesNotMatch(styles, /\.subscription-tooltip\.is-below \{/);
 });
 
 test('an attached subscription adds no resting decoration to the plan label', () => {
@@ -3365,7 +3425,7 @@ test('the record kind swaps whole field groups, and the user has the last word',
 test('a top-up record keeps a ledger, and the tooltip reads from it', () => {
   const app = readRendererFile('app.js');
   const subscriptionApi = require('../../src/shared/subscriptionDisplay');
-  const rows = functionBody(app, 'topUpTooltipRows', 'topUpRollupRows');
+  const rows = viewBody('topUpTooltipRows', 'topUpRollupRows');
   const meta = functionBody(app, 'subscriptionRowMeta', 'renderSubscriptionRows');
   const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
 
@@ -3386,9 +3446,13 @@ test('a top-up record keeps a ledger, and the tooltip reads from it', () => {
       today: '2026-08-11',
       subscriptionApi,
       t: (key) => key,
-      topUpMinorText: (record, minor) => `$${(minor / 100).toFixed(2)}`,
-      subscriptionDateText: (date) => date,
-      subscriptionDaysText: (days) => `${days}d`,
+      currentLocale: () => 'en-US',
+      // The wording module, stubbed at the same seam the view calls it through.
+      subscriptionText: {
+        dateText: (_locale, date) => date,
+        daysText: (_t, days) => `${days}d`,
+        topUpMinorText: (_currencyApi, _subscription, minor) => `$${(minor / 100).toFixed(2)}`
+      },
       isCreditsWindow: (window) => window?.metric === 'credits',
       creditsAmount: (_provider, window) => window?.amount ?? null,
       formatMoney: (value) => `${value}`,
@@ -3441,7 +3505,7 @@ test('the settings row is titled by account and carries the plan name in its met
       subscription,
       account,
       state: { settings: {} },
-      subscriptionProviderLabel: (id) => id,
+      subscriptionText: { providerLabel: (id) => id },
       accountIdentityApi: {
         accountTitleLabel: (entry) => entry?.accountName || entry?.accountEmail || ''
       }
@@ -3464,15 +3528,19 @@ test('the settings row is titled by account and carries the plan name in its met
       subscription,
       account,
       state: { settings: {} },
-      subscriptionProviderLabel: (id) => id,
+      subscriptionText: {
+        providerLabel: (id) => id,
+        priceText: () => '$20.00 / mo',
+        shortDateText: (_locale, date) => date,
+        topUpMinorText: (_currencyApi, _subscription, minor) => `$${minor / 100}`
+      },
       accountIdentityApi: {
         accountTitleLabel: (entry) => entry?.accountName || entry?.accountEmail || ''
       },
       subscriptionApi: require('../../src/shared/subscriptionDisplay'),
       t: (key, vars) => `${key}(${vars?.date || ''})`,
-      subscriptionPriceText: () => '$20.00 / mo',
-      subscriptionShortDateText: (date) => date,
-      topUpMinorText: (_record, minor) => `$${minor / 100}`
+      currentLocale: () => 'en-US',
+      currencyApi: require('../../src/shared/currency')
     }
   );
   const named = { provider: 'codex', planName: 'Plus', startDate: '2026-06-08', autoRenew: true, binding: { accountEmail: 'b@example.com' } };
@@ -3481,13 +3549,12 @@ test('the settings row is titled by account and carries the plan name in its met
 });
 
 test('a subscription card belongs to one account, and a group header summarises', () => {
-  const app = readRendererFile('app.js');
-  const forProvider = functionBody(app, 'subscriptionForProvider', 'subscriptionsForProviderGroup');
-  const cardFor = functionBody(app, 'subscriptionCardForRow', 'positionSubscriptionTooltip');
+  const forProvider = viewBody('subscriptionForProvider', 'subscriptionsForProviderGroup');
+  const cardFor = viewBody('subscriptionCardForRow', 'decoratePlanWithSubscription');
 
   // matchProviderAccount falls back to "the provider has exactly one account",
   // so it must see every account, not just the row being rendered.
-  assert.match(forProvider, /const accounts = limitProvidersForSubscriptions\(\);/);
+  assert.match(forProvider, /const accounts = subscriptionAccounts\(\);/);
   assert.match(forProvider, /subscriptionAccountValue\(account\) === identity/);
   assert.doesNotMatch(forProvider, /matchProviderAccount\(subscription, \[provider\]\)/);
   assert.match(cardFor, /provider\?\.accountGroup === true/);
@@ -3503,16 +3570,15 @@ test('the seeded plan name is a real plan, never a status label', () => {
 });
 
 test("one account's subscription never appears on its siblings", () => {
-  const app = readRendererFile('app.js');
   const subscriptionApi = require('../../src/shared/subscriptionDisplay');
-  const accountValue = functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName');
-  const forProvider = functionBody(app, 'subscriptionForProvider', 'subscriptionsForProviderGroup');
+  const accountValue = viewBody('subscriptionAccountValue', 'subscriptionUsageCostUsd');
+  const forProvider = viewBody('subscriptionForProvider', 'subscriptionsForProviderGroup');
 
   const resolve = (accounts, subscriptions, provider) => vm.runInNewContext(
     `${accountValue}\n${forProvider}\nsubscriptionForProvider(provider)?.id || null;`,
     {
       subscriptionApi,
-      limitProvidersForSubscriptions: () => accounts,
+      subscriptionAccounts: () => accounts,
       subscriptionList: () => subscriptions,
       provider
     }
@@ -3541,11 +3607,9 @@ test("one account's subscription never appears on its siblings", () => {
 });
 
 test('the provider rollup appears once, on the row that stands for the provider', () => {
-  const app = readRendererFile('app.js');
   const subscriptionApi = require('../../src/shared/subscriptionDisplay');
-  const planRows = functionBody(app, 'subscriptionPlanTooltipRows', 'subscriptionGroupTooltipRows');
-  const hasHeader = functionBody(app, 'subscriptionProviderHasGroupHeader', 'subscriptionCardForRow');
-  const cardFor = functionBody(app, 'subscriptionCardForRow', 'positionSubscriptionTooltip');
+  const planRows = viewBody('subscriptionPlanTooltipRows', 'topUpTooltipRows');
+  const cardFor = viewBody('subscriptionCardForRow', 'decoratePlanWithSubscription');
 
   const subscription = subscriptionApi.normalizeSubscription({
     provider: 'codex', startDate: '2026-06-08', amountMinor: 2000, currency: 'USD'
@@ -3558,13 +3622,16 @@ test('the provider rollup appears once, on the row that stands for the provider'
       includeRollup,
       subscriptionApi,
       t: (key) => key,
-      subscriptionPriceText: () => '$20.00 / mo',
-      subscriptionDateText: (date) => date,
-      subscriptionDaysText: (days) => `${days}d`,
-      subscriptionElapsedText: () => '2 mo',
+      subscriptionText: {
+        priceText: () => '$20.00 / mo',
+        dateText: (_locale, date) => date,
+        daysText: (_t, days) => `${days}d`,
+        elapsedText: () => '2 mo',
+        providerLabel: (id) => id
+      },
+      currentLocale: () => 'en-US',
       subscriptionUsageCostUsd: () => 125,
       subscriptionList: () => [subscription],
-      subscriptionProviderLabel: (id) => id,
       currencyApi: { normalizeCurrency: () => 'USD', CURRENCY_RATES: { USD: { symbol: '$' } } },
       formatCost: (value) => `$${value}`
     }
@@ -3581,25 +3648,25 @@ test('the provider rollup appears once, on the row that stands for the provider'
     'subscription.tooltip.valueMultiple'
   ]);
 
-  // A group header exists exactly when the provider has more than one account,
-  // and that is what moves the rollup off the member rows. Counted from the list
-  // renderLimits() groups on, not the device-narrowed matching list.
-  assert.match(hasHeader, /state\.stats\?\.limits\?\.providers/);
-  assert.doesNotMatch(hasHeader, /limitProvidersForSubscriptions/);
-  const headerFor = (accounts) => vm.runInNewContext(
-    `${hasHeader}\nsubscriptionProviderHasGroupHeader('codex');`,
-    { state: { stats: { limits: { providers: accounts } } } }
-  );
-  assert.equal(headerFor([{ provider: 'codex' }]), false);
-  assert.equal(headerFor([{ provider: 'codex' }, { provider: 'codex' }]), true);
-  assert.equal(headerFor([{ provider: 'codex' }, { provider: 'claude' }]), false);
-  assert.match(cardFor, /!subscriptionProviderHasGroupHeader\(provider\.provider\)/);
+  // Which row carries it is read off the row itself — the head is told whether
+  // it is drawing an account inside a group — rather than counted a second time
+  // from the stats list. A count would have to agree with the grouping
+  // renderLimits() already did, and the two could drift apart on the surface
+  // that did not do the grouping.
+  const head = viewBody('renderLimitProviderHead', 'codexResetForecastDate');
+  const group = viewBody('renderLimitProviderGroup');
+  assert.match(head, /decoratePlanWithSubscription\(plan, provider, !options\.accountRow\)/);
+  assert.doesNotMatch(head, /state\.stats/);
+  // The group's own head is drawn without the flag, and each member passes it —
+  // so the summary lands once, on the header.
+  assert.match(group, /renderLimitProviderHead\(providerId, label, groupProvider, color, \{/);
+  assert.match(group, /accountRow: true/);
+  assert.match(cardFor, /provider\?\.accountGroup === true/);
 });
 
 test('the subscription card carries no heading of its own', () => {
-  const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  const card = functionBody(app, 'subscriptionCardNode', 'subscriptionProviderHasGroupHeader');
+  const card = viewBody('subscriptionCardNode', 'subscriptionCardForRow');
   // Hovering the plan label is what names the card; a "Subscription" line above
   // the rows only repeats the gesture.
   assert.doesNotMatch(card, /subscription-tooltip-title/);
@@ -3608,12 +3675,15 @@ test('the subscription card carries no heading of its own', () => {
 });
 
 test('elapsed subscription time never reads as zero months', () => {
-  const app = readRendererFile('app.js');
   const subscriptionApi = require('../../src/shared/subscriptionDisplay');
-  const elapsed = functionBody(app, 'subscriptionElapsedText', 'subscriptionPlanTooltipRows');
+  // The wording lives in src/shared/subscriptionText.js now, so the settings
+  // rows and the tooltip read one implementation rather than two that agree.
+  const text = readSharedFile('subscriptionText.js');
+  const symbol = functionBody(text, 'symbolFor', 'amountText');
+  const elapsed = functionBody(text, 'elapsedText', 'topUpMinorText');
 
   const run = (startDate, today) => vm.runInNewContext(
-    `${elapsed}\nsubscriptionElapsedText(subscription, today);`,
+    `${symbol}\n${elapsed}\nelapsedText(t, currencyApi, subscription, today);`,
     {
       subscription: subscriptionApi.normalizeSubscription({
         provider: 'codex', startDate, amountMinor: 16000, currency: 'USD'
@@ -3669,7 +3739,7 @@ test('one account holds one subscription record', () => {
   const app = readRendererFile('app.js');
   const subscriptionApi = require('../../src/shared/subscriptionDisplay');
   const accountValue = functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName');
-  const forAccount = functionBody(app, 'subscriptionForAccountValue', 'subscriptionTooltipRows');
+  const forAccount = functionBody(app, 'subscriptionForAccountValue', 'subscriptionRowTitle');
   const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
 
   const accounts = [
@@ -3710,9 +3780,8 @@ test('the subscription card is revealed by having a record, not by a preference'
   // A second switch on top of "did you enter the data" only made it possible to
   // fill the form in and see nothing happen. An account with no record still
   // decorates nothing, so the record itself is the switch.
-  const app = readRendererFile('app.js');
-  const decorate = functionBody(app, 'decoratePlanWithSubscription', 'subscriptionRowTitle');
-  assert.match(decorate, /subscriptionCardForRow\(provider\)/);
+  const decorate = viewBody('decoratePlanWithSubscription');
+  assert.match(decorate, /subscriptionCardForRow\(provider, includeRollup\)/);
   assert.doesNotMatch(decorate, /state\.settings\?\.show/);
 
   for (const file of ['app.js', 'index.html', 'i18n.js']) {
@@ -3765,9 +3834,8 @@ test('a plan that does not auto-renew asks when it ends, and stores it there', (
 });
 
 test('a lapsed plan reads as ended rather than counting days backwards', () => {
-  const app = readRendererFile('app.js');
-  const rows = functionBody(app, 'subscriptionPlanTooltipRows', 'subscriptionGroupTooltipRows');
-  const elapsed = functionBody(app, 'subscriptionElapsedText', 'subscriptionPlanTooltipRows');
+  const rows = viewBody('subscriptionPlanTooltipRows', 'topUpTooltipRows');
+  const elapsed = functionBody(readSharedFile('subscriptionText.js'), 'elapsedText', 'topUpMinorText');
   assert.match(rows, /daysLeft < 0 \? t\('subscription\.tooltip\.expired'\)/);
   assert.equal(readRendererFile('i18n.js').split("'subscription.tooltip.expired':").length - 1, 5);
   // Time on the plan stops at the day coverage ran out; it does not keep ageing
@@ -3813,17 +3881,18 @@ test('every provider a subscription can name has a mark to identify it by', () =
 test('the settings rows date themselves in short form, the tooltip in full', () => {
   const app = readRendererFile('app.js');
   const meta = functionBody(app, 'subscriptionRowMeta', 'renderSubscriptionRows');
-  const short = functionBody(app, 'subscriptionShortDateText', 'subscriptionLocalDate');
-  const full = functionBody(app, 'subscriptionDateText', 'subscriptionShortDateText');
-  const planRows = functionBody(app, 'subscriptionPlanTooltipRows', 'subscriptionGroupTooltipRows');
+  const text = readSharedFile('subscriptionText.js');
+  const short = functionBody(text, 'shortDateText', 'elapsedText');
+  const full = functionBody(text, 'dateText', 'shortDateText');
+  const planRows = viewBody('subscriptionPlanTooltipRows', 'topUpTooltipRows');
 
   // Two dense lines in a ~300px panel: the date is the longest thing on the
   // second one, and the locale already defines a numeric short form for it.
   assert.match(short, /dateStyle: 'short'/);
   assert.match(full, /month: 'short'/);
-  assert.doesNotMatch(meta, /subscriptionDateText\(/);
+  assert.doesNotMatch(meta, /subscriptionText\.dateText\(/);
   // The tooltip has the room, so it keeps spelling the date out.
-  assert.match(planRows, /subscriptionDateText\(/);
+  assert.match(planRows, /subscriptionText\.dateText\(/);
 });
 
 test('the section says where the recorded data shows up', () => {

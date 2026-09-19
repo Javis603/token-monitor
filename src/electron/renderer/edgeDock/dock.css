@@ -297,6 +297,19 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   scrollbar-width: none;
 }
 .edge-dock-accounts::-webkit-scrollbar { display: none; }
+/* A provider row carries the Limits page's own bottom rule and the space under
+   it, both of which are the *inter-card* separator there: the panel goes on below
+   the row, so the rule marks where the next card starts and the padding is the
+   room it gets. The card ends at the row, so both are spent on nothing — the rule
+   would be a line drawn under the last thing the card says, and the padding added
+   12px of dead space under it on top of the card's own section gap (307px → 319px
+   for the same Claude card). The card's sections already separate themselves with
+   the feathered hairline above (see `.edge-dock-sessions::before`), so nothing is
+   lost by dropping them at the edge. */
+.edge-dock-accounts > .limit-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
 
 .edge-dock-account {
   display: flex;

@@ -67,6 +67,21 @@ test('every renderer stylesheet is brace-balanced', () => {
   }
 });
 
+test('the card edge spends none of the quota row separator the page needs', () => {
+  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
+  const rule = css.match(/\.edge-dock-accounts > \.limit-row:last-child\s*\{([^}]*)\}/);
+  assert.ok(rule, 'the last row in a card must reset what the shared row brings');
+  // A `.limit-row` ends with a rule and 13px under it, which is the *inter-card*
+  // separator on the page: the panel goes on below the row, so the rule marks
+  // where the next card starts and the padding is the room it gets. The card ends
+  // at the row, so both are spent on nothing — the rule becomes a line drawn under
+  // the last thing the card says, and the padding pushed the section below it to
+  // 23px against the card's own 10px gap (319px against the pre-refactor card's
+  // 307px, for the same account and nothing else changed).
+  assert.match(rule[1], /border-bottom: 0;/);
+  assert.match(rule[1], /padding-bottom: 0;/);
+});
+
 test('the Sessions list uses a plain dot, not the dock card glyph stack', () => {
   // This row already leads with the client's own icon, so a spinner or check
   // drawn at its corner reads as part of that logo. The card has no such icon,

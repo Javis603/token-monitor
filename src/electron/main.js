@@ -5148,15 +5148,24 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     displayFontFamily: source.displayFontFamily,
     showLimitUsed: source.showLimitUsed,
     // The card's quota rows are built by the same view as the Limits page, so
-    // the two display preferences that view reads have to reach this renderer
-    // as well — otherwise the card silently renders a different page's answer.
+    // every preference that view reads has to reach this renderer as well —
+    // otherwise the card silently renders a different page's answer.
     showCodexAdditionalLimits: source.showCodexAdditionalLimits,
+    showLimitSource: source.showLimitSource,
+    codexResetForecastEnabled: source.codexResetForecastEnabled,
     claudePrepaidBalanceEnabled: source.claudePrepaidBalanceEnabled,
     // The dock's session rows carry the same context gauge as the Sessions
     // list, so its Remaining/Used preference has to reach this renderer too.
     sessionContextMetric: source.sessionContextMetric,
     maskLimitAccountEmails: source.maskLimitAccountEmails,
-    edgeDockWarnColors: source.edgeDockWarnColors === true
+    edgeDockWarnColors: source.edgeDockWarnColors === true,
+    // The user's own subscription records, so the card's plan cell can decorate
+    // itself exactly as the page's does. They belong here rather than on a cell
+    // because a record is not a property of a provider: it binds to one account
+    // of one, and the card also shows the provider-wide rollup that spans them.
+    // The same list the widget renders — in client mode that is the hub's copy,
+    // not this device's cache.
+    subscriptions: source.subscriptions || []
   };
 }
 
@@ -5345,6 +5354,9 @@ function ensureEdgeDockController() {
     // The dock card's Switch button runs the same swap the Limits view does,
     // then repaints from the refreshed records. It is the dock's only write.
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
+    onOpenResetForecastSource: () => {
+      if (isAllowedExternalUrl(CODEX_RESET_FORECAST_SOURCE_URL)) void shell.openExternal(CODEX_RESET_FORECAST_SOURCE_URL);
+    },
     // The same setting the widget's rate readout toggles, so both stay in step.
     onToggleRateMode: () => {
       settings.tokenRateMode = settings.tokenRateMode === 'burn' ? 'speed' : 'burn';
@@ -6488,6 +6500,10 @@ async function installDownloadedAppUpdate() {
   }
   return deriveAppUpdateState();
 }
+
+// The one URL the edge dock can ask for: the Codex reset forecast row is the
+// Limits page's row, and that row is a link to its source.
+const CODEX_RESET_FORECAST_SOURCE_URL = 'https://codex-resets.com/';
 
 function isAllowedExternalUrl(value) {
   let parsed;

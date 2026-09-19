@@ -20,6 +20,8 @@ const limitWindowLabels = window.TokenMonitorLimitWindowLabels;
 const limitWindowTextApi = window.TokenMonitorLimitWindowText;
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
 const limitWindowsViewApi = window.TokenMonitorLimitWindowsView;
+const subscriptionDisplayApi = window.TokenMonitorSubscriptionDisplay;
+const subscriptionTextApi = window.TokenMonitorSubscriptionText;
 const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMode;
 const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 const { clientColors } = window.TokenMonitorUsageCharts;
@@ -172,10 +174,18 @@ function readableColor(color) {
   return contrast < 1.8 ? 'var(--text)' : color;
 }
 
+// The provider's own colour, as the Limits view resolves it.
+function limitProviderColor(id) {
+  if (id === 'factory') return clientColors.droid;
+  if (id === 'mimo') return clientColors.xiaomi;
+  return clientColors[id] || clientColors.default;
+}
+
+// The same colour corrected for contrast against the current glass tint. Only
+// the rail uses it: a near-black brand mark vanishes as a ring, while a meter
+// on the card is a filled bar the page paints in the raw brand colour.
 function providerColor(id) {
-  if (id === 'factory') return readableColor(clientColors.droid);
-  if (id === 'mimo') return readableColor(clientColors.xiaomi);
-  return readableColor(clientColors[id] || clientColors.default);
+  return readableColor(limitProviderColor(id));
 }
 
 function providerLabel(id) {
@@ -236,6 +246,21 @@ function percentText(remainingPercent) {
   const shown = presentation.displayPercent(remainingPercent, appearance().showLimitUsed === true);
   return shown === null ? '--' : `${Math.round(shown)}%`;
 }
+
+// The Codex account the card can switch to, resolved from the cell projection
+// rather than from settings: the dock renderer has none. The shared row asks
+// about the collector record, so the projection is looked up by it.
+const accountSummaries = new WeakMap();
+let cardForecast = null;
+
+const codexAccounts = {
+  matchesActive: (provider) => accountSummaries.get(provider)?.active === true,
+  switchTarget: (provider) => {
+    const id = String(accountSummaries.get(provider)?.switchAccountId || '');
+    return id ? { id } : null;
+  },
+  canSwitchSystemAccount: () => typeof bridge.switchCodexAccount === 'function'
+};
 
 // The card's quota rows are the Limits page's quota rows: the same builder,
 // the same DOM, the same CSS (this page loads ../styles.css for exactly that).
@@ -317,35 +342,39 @@ const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
   isCreditsWindow: balanceDisplay.isCreditsWindow,
   spendWindow: balanceDisplay.spendWindow,
   limitWindowLabel: limitWindowLabels.limitWindowLabel,
-  limitWindowText: limitWindowTextApi.limitWindowText
+  limitWindowText: limitWindowTextApi.limitWindowText,
+  accountIdentity: accountIdentityApi,
+  accountControl: codexAccountControl,
+  codexAccounts,
+  // Probed off the stylesheet the dock borrows, so the card can never disagree
+  // with the page about which providers have a mark.
+  hasMark: hasMask,
+  formatAgo: relativeAgo,
+  // The renderer names the intent; the main process owns the URL.
+  openExternal: () => bridge.openResetForecastSource?.(),
+  // The subscription records the widget holds, pushed with the appearance. The
+  // card's plan cell decorates itself from them exactly as the page's does —
+  // same rows, same wording — so a recorded subscription shows the same hover
+  // card here as it does there. What is not pushed is nothing: an empty list
+  // renders a plain plan label on both surfaces.
+  subscriptionApi: subscriptionDisplayApi,
+  subscriptionText: subscriptionTextApi,
+  currencyApi,
+  formatCost,
+  subscriptions: () => appearance().subscriptions,
+  // The row being decorated is one of this card's own accounts, and a record
+  // binds through the same list the page matches against — every account the
+  // provider has, never a one-element list, or matchProviderAccount()'s
+  // sole-account fallback would bind a record to whichever row asked.
+  subscriptionAccounts: () => (state.payload?.cell?.accounts || [])
+    .map((account) => account?.record)
+    .filter(Boolean),
+  // What this month's tokens would have cost, which the subscription card
+  // compares the plan's price against. It rides the cell because it changes with
+  // every stats push, while the appearance is only re-pushed on a settings edit.
+  monthClientCosts: () => state.payload?.cell?.monthClientCosts,
+  resetForecast: () => ({ busy: false, forecast: cardForecast })
 });
-
-// Same wording as the Limits view: a stale row says "Stale · 54m ago" on both,
-// rather than the card reporting a plain update time and explaining staleness
-// in a separate line underneath.
-function freshnessOf(account) {
-  return limitPresentationApi.limitProviderFreshness(account);
-}
-
-function accountTitle(account) {
-  const name = account.accountName || '';
-  if (name) return name;
-  const email = account.accountEmail || '';
-  if (!email) return '';
-  return appearance().maskLimitAccountEmails === true ? accountIdentityApi.maskEmailAddress(email) : email;
-}
-
-// The Limits view and dock both call the same renderer control. This wrapper
-// only maps the dock card's projected account shape into that shared contract.
-function accountControl(account, titleNode, options = {}) {
-  const accountId = String(account.switchAccountId || '');
-  return codexAccountControl.render({
-    titleNode,
-    active: options.showActive !== false && account.active === true,
-    switchAccount: accountId ? { id: accountId } : null,
-    accountLabel: accountTitle(account)
-  });
-}
 
 // ---- Silhouette -------------------------------------------------------------
 
@@ -566,54 +595,6 @@ function usageTile(label, usage) {
   return tile;
 }
 
-function forecastDate(value) {
-  const ms = Date.parse(value || '');
-  if (!Number.isFinite(ms)) return '';
-  const date = new Date(ms);
-  const dayDelta = Math.round((new Date(date).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86_400_000);
-  const time = new Intl.DateTimeFormat(state.locale, { hour: 'numeric', minute: '2-digit' }).format(date);
-  if (Math.abs(dayDelta) <= 1) {
-    return `${new Intl.RelativeTimeFormat(state.locale, { numeric: 'auto' }).format(dayDelta, 'day')} ${time}`;
-  }
-  return new Intl.DateTimeFormat(state.locale, { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date);
-}
-
-// The Codex reset forecast, when the Limits view's opt-in is on: the same
-// states and wording as there, condensed to one row and a detail line.
-function forecastNode(forecast) {
-  if (!forecast || forecast.status === 'disabled') return null;
-  const node = el('div', 'edge-dock-forecast');
-  const row = el('div', 'edge-dock-detail-row');
-  row.append(el('span', 'edge-dock-forecast-title', t('limits.codexResetForecast.title')));
-  let value;
-  let detail = '';
-  const expired = forecast.status === 'active' && Date.parse(forecast.expiresAt || '') <= Date.now();
-  if (forecast.status === 'scheduled') {
-    value = t('limits.codexResetForecast.scheduled');
-    const when = forecastDate(forecast.scheduledFor);
-    detail = when ? t('limits.codexResetForecast.expected', { date: when }) : t('limits.codexResetForecast.schedulePending');
-  } else if (forecast.status === 'active' && !expired) {
-    value = Number.isFinite(forecast.chancePercent)
-      ? t('limits.codexResetForecast.chance', {
-        percent: new Intl.NumberFormat(state.locale, { maximumFractionDigits: 2 }).format(forecast.chancePercent)
-      })
-      : t('limits.codexResetForecast.signal');
-    const when = forecastDate(forecast.predictedAt);
-    detail = when ? t('limits.codexResetForecast.expected', { date: when }) : '';
-  } else if (forecast.status === 'inactive' || expired) {
-    value = t('limits.codexResetForecast.noSignal');
-  } else {
-    value = forecast.error && forecast.errorKind !== 'invalid-response'
-      ? t('limits.codexResetForecast.connectionFailed')
-      : t('limits.codexResetForecast.unavailable');
-  }
-  if (forecast.stale) detail = [detail, t('limits.codexResetForecast.stale')].filter(Boolean).join(' · ');
-  row.append(el('span', 'edge-dock-detail-value', value));
-  node.append(row);
-  if (detail) node.append(el('div', 'edge-dock-forecast-detail', detail));
-  return node;
-}
-
 function relativeAgo(value) {
   const ms = Date.parse(value || '');
   if (!Number.isFinite(ms)) return '';
@@ -760,65 +741,33 @@ function sessionsNode(sessions) {
 
 function providerCard(cell) {
   const card = el('section', 'edge-dock-card');
-  const color = providerColor(cell.provider);
-  const single = cell.accounts.length === 1 ? cell.accounts[0] : null;
-  // The refresh time sits under the name it belongs to, as in the Limits view:
-  // under the provider for a single account, under each account otherwise.
-  // Name row (mark, name, plan), then the refresh time on its own line starting
-  // at the mark's edge, as in the Limits view.
-  const head = el('header', 'edge-dock-card-head');
-  const nameRow = el('div', 'edge-dock-card-name-row');
-  nameRow.append(markNode(cell.provider));
-  // With one account the email moves to the header, and so does the switch
-  // affordance; with several, each row carries its own (below).
-  const headTitle = el('span', 'limit-name-title edge-dock-card-title', providerLabel(cell.provider));
-  const headControl = single ? accountControl(single, headTitle, { showActive: false }) : headTitle;
-  nameRow.append(headControl);
-  if (single?.planLabel) nameRow.append(el('span', 'edge-dock-pill', single.planLabel));
-  head.append(nameRow);
-  if (single) {
-    const freshness = freshnessOf(single);
-    const subtitle = el('span', 'edge-dock-card-subtitle', freshness.text);
-    if (freshness.tone === 'stale') subtitle.classList.add('is-warning');
-    head.append(subtitle);
-  }
-  card.append(head);
-
-  const accounts = el('div', 'edge-dock-accounts');
-  card.append(accounts);
+  const color = limitProviderColor(cell.provider);
+  const label = providerLabel(cell.provider);
+  const records = [];
   for (const account of cell.accounts) {
-    const block = el('div', 'edge-dock-account');
-    if (!single) {
-      const name = el('div', 'edge-dock-account-name');
-      const names = el('div', 'edge-dock-card-titles');
-      const title = accountTitle(account) || account.planLabel || providerLabel(cell.provider);
-      const titleNode = el('span', 'limit-name-title edge-dock-account-title', title);
-      // The row is one of three things, exactly as in the Limits view: the
-      // account in use here (check badge plus a "Local" hint), a row that can be
-      // switched to (hover reveals Switch), or a plain title.
-      names.append(accountControl(account, titleNode));
-      const freshness = freshnessOf(account);
-      const updated = el('span', 'edge-dock-card-subtitle', freshness.text);
-      if (freshness.tone === 'stale') updated.classList.add('is-warning');
-      names.append(updated);
-      name.append(names);
-      if (account.planLabel && accountTitle(account)) name.append(el('span', 'edge-dock-pill', account.planLabel));
-      block.append(name);
-    }
-    // The quota rows — meters, spend and balance lines, banked resets, info
-    // tooltips — are the Limits page's, built from the collector record rather
-    // than from a projection of it.
-    const record = account.record;
-    if (record?.windows?.length) {
-      block.append(limitWindowsView.renderProviderWindows(record, color));
-    } else if (account.status !== 'ok') {
-      block.append(el('div', 'edge-dock-note', t('edgeDock.unavailable')));
-    }
-    accounts.append(block);
+    if (!account.record) continue;
+    accountSummaries.set(account.record, account);
+    records.push(account.record);
   }
-  if (!cell.accounts.length) accounts.append(el('div', 'edge-dock-note', t('edgeDock.unavailable')));
-  const forecast = forecastNode(cell.forecast);
-  if (forecast) accounts.append(forecast);
+  cardForecast = cell.forecast || null;
+
+  // The card is the Limits page's provider row: one row for a single account,
+  // the page's group header and account list for several. Everything the card
+  // used to build by hand — the mark, the plan pill, the "Updated · OAuth" meta
+  // line, the account count, the switch affordance, the meters, the spend and
+  // balance lines, the reset forecast and its tooltip — is that row, and the
+  // per-provider choices the page makes are the view's own policy now, so this
+  // caller passes the provider and nothing else.
+  const accounts = el('div', 'edge-dock-accounts');
+  if (records.length > 1) {
+    accounts.append(limitWindowsView.renderLimitProviderGroup(cell.provider, label, records, color));
+  } else if (records.length === 1) {
+    accounts.append(limitWindowsView.renderLimitProviderSolo(cell.provider, label, records[0], color));
+  } else {
+    accounts.append(el('div', 'edge-dock-note', t('edgeDock.unavailable')));
+  }
+  card.append(accounts);
+
   const sessions = sessionsNode(cell.sessions);
   if (sessions) card.append(sessions);
 

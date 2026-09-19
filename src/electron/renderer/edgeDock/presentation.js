@@ -270,6 +270,12 @@
       accountCount: accounts.length,
       accounts: projected.slice(0, MAX_BUBBLE_ACCOUNTS).map((account) => account.summary),
       usage: options.showUsage === false ? null : providerUsage(options.stats, id),
+      // The month's cost per client, for the subscription card on this card's
+      // plan cell. It is the same map the Limits page reads — the card cannot
+      // compute it from `usage` above, which sums every client that maps to the
+      // provider while the page charges one client id — and it rides the cell
+      // because it moves with every stats push.
+      monthClientCosts: options.stats?.periods?.month?.clientCosts || {},
       sessions,
       forecast: id === 'codex' ? options.codexResetForecast || null : null
     };

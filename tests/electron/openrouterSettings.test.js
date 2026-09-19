@@ -103,11 +103,9 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
 
   assert.equal(LIMIT_PROVIDER_LABELS.openrouter, 'OpenRouter');
   assert.match(limitsViewSource(), /provider\.provider === 'openrouter'/);
-  assert.match(app, /function renderOpenRouterAccountGroup/);
-  assert.match(
-    app,
-    /if \(id === 'openrouter' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{\s*nodes\.push\(renderOpenRouterAccountGroup\(label, visibleProviders, color\)\);\s*continue;\s*\}/
-  );
+  // Several OpenRouter keys render as the shared group, by account count rather
+  // than by a wrapper of their own — the same dispatch the dock card uses.
+  assert.match(app, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\)/);
   assert.match(limitsViewSource(), /function providerSpendEntries\(balance\)/);
   assert.match(limitsViewSource(), /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
   assert.match(limitsViewSource(), /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
@@ -117,8 +115,10 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   assert.match(limitsViewSource(), /tooltip\.className = \['limit-detail-tooltip', columns > 2 \? 'limit-detail-tooltip-triple' : ''\]/);
   assert.match(limitsViewSource(), /info\.tabIndex = 0/);
   // The tooltip's render-hold is page state, so the shared view calls back into
-  // it rather than reaching for it: the handler stays wired here.
-  assert.match(limitsViewSource(), /const release = \(\) => tooltipHost\.release\(\);/);
+  // it rather than reaching for it: the handler stays wired here, and every
+  // tooltip — spend, third-party, forecast — is opened and released by the one
+  // attacher rather than by a per-row copy.
+  assert.match(limitsViewSource(), /function attachLimitDetailTooltip\(wrap, tooltip\)[\s\S]*?const close = \(\) => \{[\s\S]*?tooltipHost\.release\(\);/);
   assert.match(app, /release\(\) \{\s*requestAnimationFrame\(\(\) => \{\s*if \(limitDetailTooltipShouldHoldRender\(\)\) return;/);
   assert.match(limitsViewSource(), /entries\.map\(\(\[entryLabel, value\]\) => \[entryLabel, formatBalanceSpendAmount\(value, balance\)\]\)/);
   assert.match(limitsViewSource(), /const spendNode = providerSpendNode\(balance\)/);
@@ -164,7 +164,7 @@ test('OpenRouter settings status uses collision-free row identity and a stable e
   assert.match(app, /info\.dataset\.managedProfileName = name/);
   assert.match(app, /info\.dataset\.managedProfileEnvironment = 'true'/);
   assert.match(app, /byName\.get\('environment'\)/);
-  assert.match(app, /function namedApiAccountTitle/);
+  assert.match(limitsViewSource(), /function namedApiAccountTitle/);
   assert.doesNotMatch(app, /appendRow\('default \(env\)'/);
   assert.doesNotMatch(app, /openrouter-info-\$\{/);
 });

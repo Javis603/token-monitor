@@ -4,7 +4,6 @@
 // catalog (loaded as a script before this file). Destructured to the bare
 // names the call sites below already use.
 const {
-  CLIENT_IDS,
   CLIENT_LABELS: clientLabels,
   KNOWN_CLIENT_LIST: KNOWN_CLIENTS
 } = window.TokenMonitorClientCatalog;
@@ -177,6 +176,10 @@ const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMod
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
 const subscriptionApi = window.TokenMonitorSubscriptionDisplay;
+// What a recorded subscription reads. Shared with the Limits view, which builds
+// the same sentences into the plan cell's tooltip — so this page and that one
+// cannot describe one record two ways.
+const subscriptionText = window.TokenMonitorSubscriptionText;
 const compactTokenApi = window.TokenMonitorCompactTokens;
 const trayLayoutApi = window.TokenMonitorTrayLayout;
 const sessionRowsApi = window.TokenMonitorSessionRows;
@@ -198,7 +201,6 @@ const windowShortcutApi = window.TokenMonitorWindowShortcut;
 const LIMIT_REFRESH_OPTIONS = [60000, 120000, 300000, 900000, 1800000];
 const WINDOW_BEHAVIOR_VALUES = ['floating', 'normal', 'desktop'];
 const WINDOW_BEHAVIOR_ICONS = { floating: '⇧', normal: '○', desktop: '⇩' };
-const LIMIT_SOURCE_LABELS = { oauth: 'OAuth', cli: 'CLI', web: 'Web', rpc: 'RPC', local: 'Local', api: 'API' };
 const LIMIT_CAPABILITY_TAG_KEYS = {
   Auto: 'settings.limits.capability.auto',
   'OAuth/CLI': 'settings.limits.capability.oauthCli',
@@ -2883,18 +2885,6 @@ function ensureBreakdownVisible() {
   if (next !== state.breakdown) setBreakdown(next);
 }
 
-function limitStatusLabel(status) {
-  if (status === 'ok') return 'Live';
-  if (status === 'disabled') return 'Disabled';
-  if (status === 'notConfigured') return 'Not signed in';
-  if (status === 'noSyncedData') return 'No synced data';
-  if (status === 'unauthorized') return 'Sign in again';
-  if (status === 'rateLimited') return 'Limited';
-  if (status === 'sourceRateLimited') return 'Usage API limited';
-  if (status === 'unavailable') return 'Unavailable';
-  return 'Error';
-}
-
 function syncProvenanceActive() {
   return state.mode === 'sync' || Boolean(String(state.settings?.hubUrl || '').trim());
 }
@@ -2907,35 +2897,6 @@ function limitProviderProvenance(provider) {
   });
 }
 
-function limitProviderMeta(provider, provenance = null) {
-  const sourceDevice = limitProviderPresentationApi.limitProviderMainDeviceLabel(provenance, { showSource: Boolean(state.settings?.showLimitSource) });
-  // The freshness wording is shared with the edge dock so a row cannot read as
-  // stale on one surface and merely old on the other.
-  const freshness = limitProviderPresentationApi.limitProviderFreshness(provider);
-  if (provider.stale) {
-    const parts = [freshness.text];
-    if (sourceDevice) parts.push(sourceDevice);
-    return parts.join(' · ');
-  }
-  if (provider.status === 'ok') {
-    const parts = [];
-    if (state.settings?.showLimitSource) {
-      const sourceLabel = limitProviderPresentationApi.limitProviderSourceLabel(provider) || LIMIT_SOURCE_LABELS[provider.source];
-      if (sourceLabel) parts.push(sourceLabel);
-    }
-    if (sourceDevice) parts.push(sourceDevice);
-    return `${freshness.text}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
-  }
-  return limitStatusLabel(provider.status, false);
-}
-
-function limitProviderPlan(provider) {
-  if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
-  const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
-  if (label) return limitProviderPresentationApi.limitProviderPlanDisplayLabel(provider, label);
-  return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
-}
-
 // ---------------------------------------------------------------------------
 // Subscriptions
 //
@@ -2946,11 +2907,6 @@ function limitProviderPlan(provider) {
 
 function subscriptionList() {
   return subscriptionApi.normalizeSubscriptions(state.settings?.subscriptions, { currencyApi });
-}
-
-function subscriptionProviderLabel(providerId) {
-  const entry = LIMIT_PROVIDERS.find((provider) => provider.id === providerId);
-  return entry?.settingsLabel || entry?.label || providerId;
 }
 
 // Keyed off the same list the label comes from, because a `.row-icon-<id>` with
@@ -2996,7 +2952,7 @@ function subscriptionAccountChoices() {
     label: accountIdentityApi.accountTitleLabel(provider, visible, {
       maskEmail: state.settings?.maskLimitAccountEmails === true,
       index
-    }) || subscriptionProviderLabel(provider.provider)
+    }) || subscriptionText.providerLabel(provider.provider)
   }));
 }
 
@@ -3019,108 +2975,6 @@ function subscriptionSelectedAccount() {
   return subscriptionAccountChoices().find((choice) => choice.value === value)?.provider || null;
 }
 
-function subscriptionAmountText(subscription) {
-  const code = currencyApi.normalizeCurrency(subscription?.currency);
-  const symbol = currencyApi.CURRENCY_RATES[code]?.symbol || `${code} `;
-  return `${symbol}${subscriptionApi.amountUnits(subscription).toFixed(2)}`;
-}
-
-function subscriptionCadenceText(subscription) {
-  const count = Number(subscription?.intervalCount) || 1;
-  const unit = subscription?.interval === 'year'
-    ? t('settings.subscriptions.unitYear')
-    : t('settings.subscriptions.unitMonth');
-  return count === 1 ? unit : t('settings.subscriptions.everyN', { count, unit });
-}
-
-function subscriptionPriceText(subscription) {
-  return `${subscriptionAmountText(subscription)} / ${subscriptionCadenceText(subscription)}`;
-}
-
-// "0 days left" reads like a bug on the day itself, which is exactly the day the
-// user is most likely to be looking.
-function subscriptionDaysText(days) {
-  return days === 0
-    ? t('subscription.tooltip.today')
-    : t('subscription.tooltip.daysLeft', { days });
-}
-
-function subscriptionDateText(dateString) {
-  if (!dateString) return '';
-  // Construct in local time from the calendar parts so the rendered day always
-  // matches the stored one, whatever the timezone.
-  return subscriptionLocalDate(dateString)?.toLocaleDateString(currentLocale(), {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  }) || '';
-}
-
-// The settings rows are two dense lines inside a ~300px panel and the date is the
-// longest thing on the second one, so there it is the numeric short form the
-// locale itself defines. Everywhere with room to spell it out — the tooltip
-// above all — still uses subscriptionDateText().
-function subscriptionShortDateText(dateString) {
-  if (!dateString) return '';
-  return subscriptionLocalDate(dateString)?.toLocaleDateString(currentLocale(), { dateStyle: 'short' }) || '';
-}
-
-function subscriptionLocalDate(dateString) {
-  const [year, month, day] = String(dateString).split('-').map(Number);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
-  return new Date(year, month - 1, day);
-}
-
-// Usage cost is keyed by client, and every provider whose id names a tracked
-// client can be compared against it. Providers with no same-named client
-// (openrouter, deepseek, thirdparty, zai…) simply produce nothing, which is the
-// correct answer: their spend is either pay-as-you-go or spread across clients
-// with no way to attribute it.
-//
-// Membership comes from the catalog rather than from clientLabels. That map is a
-// display lookup and deliberately carries ids that are not tracked clients, so
-// keying off it would let "we can render a name for this" stand in for "this
-// provider names a client we count tokens for". The two happen to agree today
-// only because the one label-only id is not a limits provider.
-const catalogClientIds = new Set(CLIENT_IDS);
-
-function subscriptionUsageCostUsd(providerId) {
-  if (!catalogClientIds.has(providerId)) return null;
-  const month = state.stats?.periods?.month;
-  const cost = Number(month?.clientCosts?.[providerId] || 0);
-  return cost > 0 ? cost : null;
-}
-
-// Matched against every account the provider has, never against a one-element
-// list of the row being rendered: matchProviderAccount() falls back to "the
-// provider has exactly one account, so there is no ambiguity", and a single-row
-// universe makes that fallback true for every sibling. That is what put one
-// Codex subscription's card on all three Codex accounts.
-function subscriptionForProvider(provider) {
-  const id = String(provider?.provider || '').toLowerCase();
-  const accounts = limitProvidersForSubscriptions();
-  const identity = subscriptionAccountValue(provider);
-  for (const subscription of subscriptionList()) {
-    if (subscription.provider !== id) continue;
-    const account = subscriptionApi.matchProviderAccount(subscription, accounts);
-    if (account && subscriptionAccountValue(account) === identity) return subscription;
-  }
-  return null;
-}
-
-// Every subscription recorded against a provider, paired with the account it
-// resolves to. Drives the group header, which stands for all of them at once.
-function subscriptionsForProviderGroup(providerId) {
-  const id = String(providerId || '').toLowerCase();
-  const accounts = limitProvidersForSubscriptions();
-  return subscriptionList()
-    .filter((subscription) => subscription.provider === id)
-    .map((subscription) => ({
-      subscription,
-      account: subscriptionApi.matchProviderAccount(subscription, accounts)
-    }));
-}
-
 // The record already held against an account, if any. One account holds one
 // record: a second one saved without complaint and then never appeared — the
 // card resolves the first match and stops — which read as the new entry having
@@ -3134,329 +2988,6 @@ function subscriptionForAccountValue(list, providerId, accountValue, excludeId) 
   }) || null;
 }
 
-// Rows are {label, value} pairs so the tooltip stays a table and the caller does
-// not have to know which shape it is looking at.
-// Keyed off what the user recorded, never off the account's balance marker: the
-// marker only seeds the choice, and reading it here would show subscription rows
-// for a ledger the moment a provider started reporting a balance.
-function subscriptionTooltipRows(subscription, provider, includeRollup) {
-  const today = subscriptionApi.todayString();
-  return subscriptionApi.isTopUp(subscription)
-    ? topUpTooltipRows(subscription, provider, today, includeRollup)
-    : subscriptionPlanTooltipRows(subscription, provider, today, includeRollup);
-}
-
-// How long the user has been paying, plus what that adds up to. Months is the
-// unit people quote a subscription in, but it rounds a three-week-old plan down
-// to "0 months" — which reads as a bug beside a non-zero total, and does so for
-// most of the first month of every subscription anyone records. Below a month
-// the honest unit is days. A start date that has not arrived yet has no elapsed
-// time and nothing paid, so it says so instead of reporting zero of both.
-//
-// Once coverage has lapsed the clock stops there: a plan bought for one month
-// and never renewed stays "1 month", it does not keep ageing after it ended.
-function subscriptionElapsedText(subscription, today) {
-  const stop = subscriptionApi.coverageStopDate(subscription);
-  const asOf = stop && stop < today ? stop : today;
-  const daysSinceStart = subscriptionApi.daysBetween(subscription.startDate, asOf);
-  if (daysSinceStart !== null && daysSinceStart < 0) return t('subscription.tooltip.notStarted');
-
-  const months = subscriptionApi.subscribedMonths(subscription, asOf);
-  const elapsed = months >= 1
-    ? t('subscription.tooltip.months', { months })
-    : t('subscription.tooltip.daysCount', { days: Math.max(0, daysSinceStart || 0) });
-  const code = currencyApi.normalizeCurrency(subscription.currency);
-  const symbol = currencyApi.CURRENCY_RATES[code]?.symbol || `${code} `;
-  const paid = subscriptionApi.paidToDateMinor(subscription, today) / 100;
-  return `${elapsed} · ${t('subscription.tooltip.paidTotal', { total: `${symbol}${paid.toFixed(2)}` })}`;
-}
-
-function subscriptionPlanTooltipRows(subscription, provider, today, includeRollup) {
-  const rows = [];
-  rows.push({ label: t('subscription.tooltip.price'), value: subscriptionPriceText(subscription) });
-
-  const endDate = subscriptionApi.coverageEndDate(subscription, today);
-  const daysLeft = subscriptionApi.daysUntilRenewal(subscription, today);
-  const whenLabel = subscription.autoRenew
-    ? t('subscription.tooltip.nextCharge')
-    : t('subscription.tooltip.validUntil');
-  // A lapsed plan has no days left to count down. Saying so beats a negative
-  // number, and beats the silent roll-forward that used to keep a cancelled
-  // plan permanently four days from renewing.
-  const whenSuffix = daysLeft === null
-    ? ''
-    : ` · ${daysLeft < 0 ? t('subscription.tooltip.expired') : subscriptionDaysText(daysLeft)}`;
-  rows.push({ label: whenLabel, value: `${subscriptionDateText(endDate)}${whenSuffix}` });
-  if (!subscription.autoRenew) {
-    rows.push({ label: t('subscription.tooltip.autoRenew'), value: t('subscription.tooltip.autoRenewOff') });
-  }
-
-  rows.push({
-    label: t('subscription.tooltip.subscribed'),
-    value: subscriptionElapsedText(subscription, today)
-  });
-
-  // The rollup covers every account of the provider at once, so it belongs on
-  // whichever row stands for the provider as a whole. When a group header is
-  // rendered that is the header, and repeating the same three lines under each
-  // member is the noise the header exists to avoid.
-  if (!includeRollup) return rows;
-
-  // tokscale records which client produced the tokens, never which signed-in
-  // account did, so three logins share one usage figure. Charging that figure
-  // against a single account would claim it three times over; the rollup is the
-  // only honest denominator.
-  const usageCostUsd = subscriptionUsageCostUsd(subscription.provider);
-  if (usageCostUsd === null) return rows;
-  const rollup = subscriptionApi.providerRollup(subscriptionList(), subscription.provider, currencyApi, today);
-  const multiple = subscriptionApi.valueMultiple(rollup.monthlyUsd, usageCostUsd);
-  if (multiple === null) return rows;
-
-  rows.push({ separator: true });
-  if (rollup.count > 1) {
-    rows.push({
-      label: t('subscription.tooltip.providerTotal', { provider: subscriptionProviderLabel(subscription.provider) }),
-      value: t('subscription.tooltip.providerTotalValue', {
-        count: rollup.count,
-        total: formatCost(rollup.monthlyUsd)
-      })
-    });
-  }
-  rows.push({
-    label: t('subscription.tooltip.monthUsage'),
-    // Prefixed with "≈" and titled below: this is tokscale's equivalent API
-    // pricing, not money owed. Under a subscription nothing is billed per token.
-    value: `≈ ${formatCost(usageCostUsd)}${rollup.count > 1 ? ` · ${t('subscription.tooltip.allAccounts')}` : ''}`,
-    title: t('subscription.tooltip.monthUsageNote')
-  });
-  rows.push({
-    label: t('subscription.tooltip.valueMultiple'),
-    value: `${multiple.toFixed(1)}×`
-  });
-  return rows;
-}
-
-// The group header stands for every account at once, so it summarises rather
-// than picking one of them. Usage and the value multiple are already provider
-// level on the per-account card; here the price is too.
-function subscriptionGroupTooltipRows(providerId, today) {
-  const rollup = subscriptionApi.providerRollup(subscriptionList(), providerId, currencyApi, today);
-  const rows = [{
-    label: t('subscription.tooltip.providerTotal', { provider: subscriptionProviderLabel(providerId) }),
-    value: t('subscription.tooltip.providerTotalValue', {
-      count: rollup.count,
-      total: formatCost(rollup.monthlyUsd)
-    })
-  }];
-
-  const usageCostUsd = subscriptionUsageCostUsd(providerId);
-  if (usageCostUsd === null) return rows;
-  rows.push({ separator: true });
-  rows.push({
-    label: t('subscription.tooltip.monthUsage'),
-    value: `≈ ${formatCost(usageCostUsd)} · ${t('subscription.tooltip.allAccounts')}`,
-    title: t('subscription.tooltip.monthUsageNote')
-  });
-  const multiple = subscriptionApi.valueMultiple(rollup.monthlyUsd, usageCostUsd);
-  if (multiple !== null) {
-    rows.push({ label: t('subscription.tooltip.valueMultiple'), value: `${multiple.toFixed(1)}×` });
-  }
-  return rows;
-}
-
-function topUpMinorText(subscription, amountMinor) {
-  const code = currencyApi.normalizeCurrency(subscription?.currency);
-  const symbol = currencyApi.CURRENCY_RATES[code]?.symbol || `${code} `;
-  return `${symbol}${(amountMinor / 100).toFixed(2)}`;
-}
-
-function topUpTooltipRows(subscription, provider, today, includeRollup) {
-  const rows = [];
-  const last = subscriptionApi.lastTopUp(subscription);
-  if (last) {
-    rows.push({
-      label: t('subscription.tooltip.lastTopUp'),
-      value: `${subscriptionDateText(last.date)} · ${topUpMinorText(subscription, last.amountMinor)}`
-    });
-  }
-  const monthMinor = subscriptionApi.topUpMonthMinor(subscription, today);
-  if (monthMinor > 0) {
-    rows.push({
-      label: t('subscription.tooltip.topUpMonth'),
-      value: topUpMinorText(subscription, monthMinor)
-    });
-  }
-  const entries = subscriptionApi.topUpEntries(subscription);
-  if (entries.length > 1) {
-    rows.push({
-      label: t('subscription.tooltip.topUpTotal'),
-      value: `${topUpMinorText(subscription, subscriptionApi.topUpTotalMinor(subscription))} · ${t('subscription.tooltip.topUpCount', { count: entries.length })}`
-    });
-  }
-
-  const creditsWindow = (provider?.windows || []).find(isCreditsWindow) || null;
-  const balance = creditsAmount(provider, creditsWindow);
-  if (balance === null) return topUpRollupRows(rows, subscription, today, includeRollup);
-  const balanceCurrency = String(creditsWindow?.currency || provider?.balance?.currency || subscription.currency);
-  rows.push({ label: t('subscription.tooltip.balance'), value: formatMoney(balance, balanceCurrency) });
-
-  const projection = subscriptionApi.topUpProjection(subscription, balance, today, {
-    currencyApi,
-    balanceCurrency
-  });
-  if (!projection || projection.dailyBurn <= 0) return topUpRollupRows(rows, subscription, today, includeRollup);
-  rows.push({
-    label: t('subscription.tooltip.burnRate'),
-    value: t('subscription.tooltip.perDay', { amount: formatMoney(projection.dailyBurn, balanceCurrency) })
-  });
-  if (projection.exhaustDate) {
-    rows.push({
-      label: t('subscription.tooltip.exhausts'),
-      value: `${subscriptionDateText(projection.exhaustDate)} · ${subscriptionDaysText(projection.daysRemaining)}`
-    });
-  }
-  return topUpRollupRows(rows, subscription, today, includeRollup);
-}
-
-// A ledger earns the same provider-level comparison a plan gets: what went in
-// this month against what the month's tokens would have cost.
-function topUpRollupRows(rows, subscription, today, includeRollup) {
-  if (!includeRollup) return rows;
-  const usageCostUsd = subscriptionUsageCostUsd(subscription.provider);
-  if (usageCostUsd === null) return rows;
-  const rollup = subscriptionApi.providerRollup(subscriptionList(), subscription.provider, currencyApi, today);
-  const multiple = subscriptionApi.valueMultiple(rollup.monthlyUsd, usageCostUsd);
-  if (multiple === null) return rows;
-  rows.push({ separator: true });
-  rows.push({
-    label: t('subscription.tooltip.monthUsage'),
-    value: `≈ ${formatCost(usageCostUsd)}`,
-    title: t('subscription.tooltip.monthUsageNote')
-  });
-  rows.push({ label: t('subscription.tooltip.valueMultiple'), value: `${multiple.toFixed(1)}×` });
-  return rows;
-}
-
-// No heading. The card is already reached by hovering a plan label, and every
-// row names itself — a "Subscription" line above them only repeats what the
-// gesture said, and the other tooltips in this panel carry no title either.
-function subscriptionCardNode(rows) {
-  if (rows.length === 0) return null;
-  const card = document.createElement('span');
-  card.className = 'limit-detail-tooltip subscription-tooltip';
-  for (const row of rows) {
-    if (row.separator) {
-      const rule = document.createElement('span');
-      rule.className = 'subscription-tooltip-rule';
-      card.append(rule);
-      continue;
-    }
-    // display:contents on the row lets label and value land directly in the
-    // card's two-column grid, so the existing tooltip cell styling applies.
-    const line = document.createElement('span');
-    line.className = 'limit-detail-tooltip-row';
-    const label = document.createElement('span');
-    label.textContent = row.label;
-    const value = document.createElement('span');
-    if (row.warn) value.className = 'subscription-tooltip-warn';
-    value.textContent = row.value;
-    if (row.title) {
-      label.title = row.title;
-      value.title = row.title;
-    }
-    line.append(label, value);
-    card.append(line);
-  }
-  return card;
-}
-
-// A group header is rendered whenever a provider has more than one account, and
-// it is the row that stands for the provider as a whole — which is what decides
-// where the provider-wide rollup goes.
-//
-// Counted from the list renderLimits() groups on, deliberately not from
-// limitProvidersForSubscriptions(): that one narrows to this device so a
-// subscription binds to an account you actually hold, while the question here is
-// only what the panel drew. In sync mode the two lists differ, and answering
-// from the wrong one puts the rollup on every member row of a group.
-function subscriptionProviderHasGroupHeader(providerId) {
-  const id = String(providerId || '').toLowerCase();
-  return (state.stats?.limits?.providers || [])
-    .filter((account) => String(account?.provider || '').toLowerCase() === id).length > 1;
-}
-
-// An account row shows its own subscription and nothing else. A group header
-// stands for all of them, so it summarises — except when only one account is
-// recorded, where the summary would just restate that one card with less in it.
-function subscriptionCardForRow(provider) {
-  if (provider?.accountGroup === true) {
-    const entries = subscriptionsForProviderGroup(provider.provider);
-    if (entries.length === 0) return null;
-    if (entries.length === 1) {
-      return subscriptionCardNode(
-        subscriptionTooltipRows(entries[0].subscription, entries[0].account || provider, true)
-      );
-    }
-    return subscriptionCardNode(
-      subscriptionGroupTooltipRows(provider.provider, subscriptionApi.todayString())
-    );
-  }
-  const subscription = subscriptionForProvider(provider);
-  if (!subscription) return null;
-  return subscriptionCardNode(
-    subscriptionTooltipRows(subscription, provider, !subscriptionProviderHasGroupHeader(provider.provider))
-  );
-}
-
-// The card opens upward, but the limits list scrolls inside a clipping panel, so
-// on the topmost row every pixel of it landed outside that panel and vanished.
-// Measured on open rather than on render: the row's offset within the panel
-// changes as the user scrolls. Kept to a class flip so the card's own placement
-// stays declarative.
-function positionSubscriptionTooltip(wrap, card) {
-  const clip = wrap.closest('.limits-panel');
-  if (!clip) return;
-  const roomAbove = wrap.getBoundingClientRect().top - clip.getBoundingClientRect().top;
-  card.classList.toggle('is-below', roomAbove < card.offsetHeight + 5);
-}
-
-// Wraps the plan label so hovering it reveals the subscription card. Reuses the
-// limit-detail tooltip plumbing, which already holds off the six-second list
-// re-render while the pointer is inside (limitDetailTooltipShouldHoldRender).
-//
-// Deliberately not behind a preference: an account with no record decorates
-// nothing, so having recorded one IS the switch. A separate toggle only made it
-// possible to enter the data and see nothing happen.
-function decoratePlanWithSubscription(plan, provider) {
-  const card = subscriptionCardForRow(provider);
-  if (!card) return plan;
-
-  const wrap = document.createElement('div');
-  wrap.className = 'limit-plan limit-detail-tooltip-wrap subscription-plan-wrap';
-  wrap.classList.toggle('has-opened', state.limitDetailTooltipHasOpened);
-  wrap.tabIndex = 0;
-  const trigger = document.createElement('span');
-  trigger.className = 'subscription-plan-trigger';
-  trigger.textContent = plan.textContent;
-  wrap.append(trigger, card);
-
-  const markOpened = () => {
-    state.limitDetailTooltipHasOpened = true;
-    state.limitDetailTooltipActive = true;
-    wrap.classList.add('has-opened');
-    positionSubscriptionTooltip(wrap, card);
-  };
-  const release = () => {
-    state.limitDetailTooltipActive = false;
-    flushPendingLimitDetailTooltipRender();
-  };
-  wrap.addEventListener('pointerenter', markOpened);
-  wrap.addEventListener('focusin', markOpened);
-  wrap.addEventListener('pointerleave', release);
-  wrap.addEventListener('focusout', release);
-  return wrap;
-}
-
 // The title's job is to say WHICH record this is, so it names the account. The
 // plan name is not an identity — three Codex rows all reading "Codex · Plus"
 // name nothing — so it moved to the meta line, where it always shows.
@@ -3466,7 +2997,7 @@ function decoratePlanWithSubscription(plan, provider) {
 // picked, it survives the provider being signed out or still loading, and it
 // keeps sibling rows distinct in exactly the moment the plan name could not.
 function subscriptionRowTitle(subscription, account) {
-  const providerLabel = subscriptionProviderLabel(subscription.provider);
+  const providerLabel = subscriptionText.providerLabel(subscription.provider);
   return [providerLabel, subscriptionRowAccountLabel(subscription, account) || subscription.planName]
     .filter(Boolean)
     .join(' · ');
@@ -3494,18 +3025,18 @@ function subscriptionRowMeta(subscription, account) {
   if (subscriptionApi.isTopUp(subscription)) {
     const monthMinor = subscriptionApi.topUpMonthMinor(subscription, today);
     parts.push(t('settings.subscriptions.topUpMonthMeta', {
-      total: topUpMinorText(subscription, monthMinor)
+      total: subscriptionText.topUpMinorText(currencyApi, subscription, monthMinor)
     }));
     const last = subscriptionApi.lastTopUp(subscription);
     if (last) {
-      parts.push(t('settings.subscriptions.topUpLastMeta', { date: subscriptionShortDateText(last.date) }));
+      parts.push(t('settings.subscriptions.topUpLastMeta', { date: subscriptionText.shortDateText(currentLocale(), last.date) }));
     }
     return parts.join(' · ');
   }
-  parts.push(subscriptionPriceText(subscription));
+  parts.push(subscriptionText.priceText(t, currencyApi, subscription));
   const endDate = subscriptionApi.coverageEndDate(subscription, today);
   if (endDate) {
-    const date = subscriptionShortDateText(endDate);
+    const date = subscriptionText.shortDateText(currentLocale(), endDate);
     parts.push(t(subscription.autoRenew ? 'settings.subscriptions.renewsOn' : 'settings.subscriptions.endsOn', { date }));
   }
   return parts.join(' · ');
@@ -3710,7 +3241,7 @@ function renderSubscriptionPickers() {
   for (const id of providerIds) {
     const option = document.createElement('option');
     option.value = id;
-    option.textContent = subscriptionProviderLabel(id);
+    option.textContent = subscriptionText.providerLabel(id);
     providerSelect.append(option);
   }
   if (providerIds.includes(previousProvider)) providerSelect.value = previousProvider;
@@ -4108,7 +3639,7 @@ function renderSubscriptionTopUpEntries() {
     row.className = 'subscription-topup-row';
     const date = document.createElement('span');
     date.className = 'subscription-topup-date';
-    date.textContent = subscriptionDateText(entry.date);
+    date.textContent = subscriptionText.dateText(currentLocale(), entry.date);
     const amount = document.createElement('span');
     amount.className = 'subscription-topup-amount';
     amount.textContent = `${symbol}${(entry.amountMinor / 100).toFixed(2)}`;
@@ -4483,15 +4014,37 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   isCreditsWindow,
   spendWindow,
   limitWindowLabel,
-  limitWindowText
+  limitWindowText,
+  accountIdentity: accountIdentityApi,
+  accountControl: codexAccountControl,
+  codexAccounts: {
+    matchesActive: (provider) => codexActiveAccountMatchesProvider(provider),
+    switchTarget: (provider) => codexSwitchAccountForProvider(provider),
+    canSwitchSystemAccount: () => Boolean(window.tokenMonitor?.codex?.switchSystemAccount)
+  },
+  hasMark: (id) => limitMarksWithIcon.has(id),
+  formatAgo: (ms) => formatAgo(ms),
+  openExternal: (url) => window.tokenMonitor.openExternal?.(url),
+  // The subscription side of the plan cell. The records are the user's own, so
+  // they are read at paint time rather than captured; the tooltip's own rows are
+  // built by the view from these.
+  subscriptionApi,
+  subscriptionText,
+  currencyApi,
+  formatCost,
+  subscriptions: () => state.settings?.subscriptions,
+  subscriptionAccounts: () => limitProvidersForSubscriptions(),
+  monthClientCosts: () => state.stats?.periods?.month?.clientCosts,
+  resetForecast: () => ({ busy: state.codexResetForecastBusy, forecast: state.codexResetForecast })
 });
 
 const {
-  expiryDateLabel,
-  limitDetailInfoNode,
-  renderProviderWindows
+  codexResetForecastExpired,
+  limitAccountTitle,
+  limitProviderPlan,
+  renderLimitProviderGroup,
+  renderLimitProviderSolo
 } = limitWindowsView;
-
 
 
 function optionalFiniteNumber(value) {
@@ -4531,19 +4084,6 @@ function providersByLimitProviderId(providers) {
     byId.get(id).push(provider);
   }
   return byId;
-}
-
-function renderLimitProviderMark(id, color) {
-  const mark = document.createElement('span');
-  if (limitMarksWithIcon.has(id)) {
-    // .limit-icon sizes the mark, .row-icon-<id> supplies the mask: one table,
-    // shared with the breakdown rows, instead of a second copy per provider.
-    mark.className = `limit-icon row-icon-${id}`;
-  } else {
-    mark.className = 'dot';
-    mark.style.background = color;
-  }
-  return mark;
 }
 
 function codexSwitchAccountForProvider(provider) {
@@ -4649,288 +4189,6 @@ function applyCodexActiveAccountFromStats() {
   state.codexActiveAccount = activeAccount;
 }
 
-function renderLimitProviderHead(id, label, provider, color, options = {}) {
-  const head = document.createElement('div');
-  head.className = 'limit-head';
-  const titleBlock = document.createElement('div');
-  titleBlock.className = 'limit-title';
-  const name = document.createElement('div');
-  name.className = 'limit-name';
-  if (options.showIcon !== false) name.append(renderLimitProviderMark(options.markId || id, color));
-  const title = document.createElement('span');
-  title.className = 'limit-name-title';
-  title.textContent = options.title || label;
-  const provenance = limitProviderProvenance(provider);
-  // The ✓ marks the account THIS device's Codex is signed into
-  // (state.codexActiveAccount, derived locally by codexActiveAccountFromStats).
-  // It only disambiguates rows in the multi-account group, so it's gated on
-  // showActiveBadge. Never re-derive "live" from the row being rendered — in
-  // sync mode that row can be a remote device's record for a different account,
-  // which would move the ✓ onto the wrong one.
-  const activeCodexAccount = options.showActiveBadge && codexActiveAccountMatchesProvider(provider);
-  const switchAccount = options.allowSystemSwitch && !activeCodexAccount ? codexSwitchAccountForProvider(provider) : null;
-  name.append(codexAccountControl.render({
-    titleNode: title,
-    active: Boolean(activeCodexAccount),
-    switchAccount: window.tokenMonitor?.codex?.switchSystemAccount ? switchAccount : null,
-    accountLabel: switchAccount?.email || ''
-  }));
-  titleBlock.append(name);
-  // The multi-account group header has no quota of its own, and its accounts can
-  // update at different times (different devices too), so it omits the meta line
-  // entirely — each account row below shows its own "Updated" time.
-  if (!options.hideMeta) {
-    const meta = document.createElement('div');
-    meta.className = 'limit-meta';
-    const metaParts = [];
-    // A single Codex account stays clean like every other provider (just the
-    // "Updated" line). The email only matters when several accounts share the
-    // group, where it's each subrow's title (options.accountTitle) — not here.
-    if (provider.status === 'ok' || provider.stale) metaParts.push(limitProviderMeta(provider, provenance));
-    const metaText = metaParts.filter(Boolean).join(' · ');
-    if (metaText) meta.append(document.createTextNode(metaText));
-    titleBlock.append(meta);
-  }
-  const plan = document.createElement('div');
-  plan.className = 'limit-plan';
-  plan.textContent = options.planText ?? limitProviderPlan(provider);
-  head.append(titleBlock, decoratePlanWithSubscription(plan, provider));
-  return head;
-}
-
-
-function codexResetForecastDate(value, options = {}) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return '';
-  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
-  const locale = options.locale || currentLocale();
-  const timeZone = options.timeZone;
-  const dayNumber = (input) => {
-    const parts = new Intl.DateTimeFormat('en-US-u-ca-gregory-nu-latn', {
-      year: 'numeric',
-      month: 'numeric',
-      day: 'numeric',
-      ...(timeZone ? { timeZone } : {})
-    }).formatToParts(input);
-    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-    return Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day));
-  };
-  const dayDelta = Math.round((dayNumber(date) - dayNumber(new Date(nowMs))) / 86_400_000);
-  if (dayDelta >= -1 && dayDelta <= 1) {
-    const time = new Intl.DateTimeFormat(locale, {
-      hour: 'numeric',
-      minute: '2-digit',
-      ...(locale.startsWith('zh') ? { hourCycle: 'h23' } : {}),
-      ...(timeZone ? { timeZone } : {})
-    }).format(date);
-    const relativeDay = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(dayDelta, 'day');
-    return `${relativeDay} ${time}`;
-  }
-  return expiryDateLabel(date);
-}
-
-function codexResetForecastTimeUntil(value, options = {}) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return '';
-  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
-  const remainingMs = date.getTime() - nowMs;
-  if (remainingMs <= 0) return '';
-  const locale = options.locale || currentLocale();
-  const hours = remainingMs / 3_600_000;
-  const unit = hours >= 48 ? 'day' : (hours >= 1 ? 'hour' : 'minute');
-  const divisor = unit === 'day' ? 86_400_000 : (unit === 'hour' ? 3_600_000 : 60_000);
-  const amount = Math.max(1, Math.round(remainingMs / divisor));
-  const duration = new Intl.NumberFormat(locale, {
-    style: 'unit',
-    unit,
-    unitDisplay: 'long'
-  }).format(amount);
-  return t('limits.codexResetForecast.approximately', { duration });
-}
-
-function codexResetForecastAge(value) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return '';
-  return formatAgo(Math.max(0, Date.now() - date.getTime()));
-}
-
-function codexResetForecastSourceAuthor(value) {
-  const author = String(value || '').trim().replace(/^@+/, '');
-  return author ? `@${author}` : '';
-}
-
-function codexResetForecastPercent(value, locale = currentLocale()) {
-  return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value);
-}
-
-function positionCodexResetForecastTooltip(wrap) {
-  const tooltip = wrap?.querySelector('.limit-detail-tooltip');
-  const clip = wrap?.closest('.limits-panel');
-  if (!tooltip || !clip) return;
-  const roomAbove = wrap.getBoundingClientRect().top - clip.getBoundingClientRect().top;
-  tooltip.classList.toggle('is-below', roomAbove < tooltip.offsetHeight + 5);
-}
-
-function codexResetForecastType(value) {
-  const type = String(value || '').trim().toLowerCase();
-  if (type !== 'banked' && type !== 'regular') return '';
-  return t(`limits.codexResetForecast.resetType.${type}`);
-}
-
-function codexResetForecastTooltip(forecast) {
-  const entries = [];
-  const disclaimer = t('limits.codexResetForecast.disclaimer');
-  const resetType = codexResetForecastType(
-    forecast?.status === 'scheduled' ? forecast?.scheduledResetType : forecast?.latestResetType
-  );
-  if (resetType) {
-    entries.push([t('limits.codexResetForecast.resetType'), resetType]);
-  }
-  const scheduledFor = codexResetForecastDate(forecast?.scheduledFor);
-  const scheduledIn = codexResetForecastTimeUntil(forecast?.scheduledFor);
-  if (scheduledFor) {
-    entries.push([
-      t('limits.codexResetForecast.scheduledFor'),
-      [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
-    ]);
-  }
-  const latestReset = codexResetForecastDate(forecast?.latestResetAt);
-  if (latestReset) {
-    const age = codexResetForecastAge(forecast.latestResetAt);
-    entries.push([t('limits.codexResetForecast.lastReset'), [latestReset, age].filter(Boolean).join(' · ')]);
-  }
-  const sourceObservedAt = forecast?.status === 'scheduled'
-    ? forecast?.scheduledAnnouncedAt
-    : forecast?.observedAt;
-  const source = [
-    codexResetForecastSourceAuthor(forecast?.sourceAuthor),
-    codexResetForecastAge(sourceObservedAt)
-  ].filter(Boolean).join(' · ');
-  if (source) {
-    const sourceLabel = forecast?.status === 'scheduled'
-      ? 'limits.codexResetForecast.sourceAnnouncement'
-      : 'limits.codexResetForecast.sourceSignal';
-    entries.push([t(sourceLabel), source]);
-  }
-  const expiresAt = codexResetForecastDate(forecast?.expiresAt);
-  const expiresIn = codexResetForecastTimeUntil(forecast?.expiresAt);
-  if (expiresAt) {
-    entries.push([
-      t('limits.codexResetForecast.expiresLabel'),
-      [expiresAt, expiresIn].filter(Boolean).join(' · ')
-    ]);
-  }
-  if (forecast?.error && forecast.errorKind !== 'invalid-response') {
-    entries.push([
-      t('limits.codexResetForecast.connectionFailed'),
-      t('limits.codexResetForecast.connectionHelp')
-    ]);
-  }
-  if (forecast?.error) {
-    const lastAttempt = codexResetForecastAge(forecast.checkedAt);
-    if (lastAttempt) entries.push([t('limits.codexResetForecast.lastAttempt'), lastAttempt]);
-  }
-  if (entries.length === 0) return null;
-  const info = limitDetailInfoNode(
-    entries,
-    'codex-reset-forecast-info-wrap',
-    [...entries.map(([label, value]) => `${label}: ${value}`), disclaimer].join(', ')
-  );
-  const tooltip = info.querySelector('.limit-detail-tooltip');
-  if (tooltip) {
-    const footer = document.createElement('span');
-    footer.className = 'codex-reset-forecast-disclaimer';
-    footer.textContent = disclaimer;
-    tooltip.append(footer);
-  }
-  const position = () => positionCodexResetForecastTooltip(info);
-  info.addEventListener('pointerenter', position);
-  info.addEventListener('focusin', position);
-  return info;
-}
-
-function renderCodexResetForecast() {
-  if (state.settings?.codexResetForecastEnabled !== true) return null;
-  const forecast = state.codexResetForecast;
-  const expired = codexResetForecastExpired(forecast);
-  const item = document.createElement('div');
-  item.className = 'codex-reset-forecast';
-  const openButton = document.createElement('button');
-  openButton.type = 'button';
-  openButton.className = 'codex-reset-forecast-open';
-  openButton.addEventListener('click', () => window.tokenMonitor.openExternal?.('https://codex-resets.com/'));
-
-  const head = document.createElement('span');
-  head.className = 'codex-reset-forecast-head';
-  const title = document.createElement('span');
-  title.className = 'codex-reset-forecast-title';
-  const label = document.createElement('span');
-  label.className = 'codex-reset-forecast-label';
-  label.textContent = t('limits.codexResetForecast.title');
-  title.append(label);
-  const forecastInfo = codexResetForecastTooltip(forecast);
-  if (forecastInfo) title.append(forecastInfo);
-  const value = document.createElement('span');
-  value.className = 'codex-reset-forecast-value';
-
-  const detail = document.createElement('span');
-  detail.className = 'codex-reset-forecast-detail';
-  if (state.codexResetForecastBusy && !forecast) {
-    item.classList.add('is-loading');
-    value.textContent = t('limits.codexResetForecast.loading');
-  } else if (forecast?.status === 'scheduled') {
-    value.textContent = t('limits.codexResetForecast.scheduled');
-    const scheduledFor = codexResetForecastDate(forecast.scheduledFor);
-    const scheduledIn = codexResetForecastTimeUntil(forecast.scheduledFor);
-    detail.textContent = [
-      scheduledFor
-        ? t('limits.codexResetForecast.expected', {
-            date: [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
-          })
-        : t('limits.codexResetForecast.schedulePending'),
-      forecast.stale ? t('limits.codexResetForecast.stale') : ''
-    ].filter(Boolean).join(' · ');
-  } else if (forecast?.status === 'active' && !expired) {
-    const chance = forecast.chancePercent;
-    value.textContent = Number.isFinite(chance)
-      ? t('limits.codexResetForecast.chance', { percent: codexResetForecastPercent(chance) })
-      : t('limits.codexResetForecast.signal');
-    const predictedAt = codexResetForecastDate(forecast.predictedAt);
-    const expiresAt = codexResetForecastDate(forecast.expiresAt);
-    detail.textContent = [
-      predictedAt
-        ? t('limits.codexResetForecast.expected', { date: predictedAt })
-        : (expiresAt || ''),
-      forecast.stale ? t('limits.codexResetForecast.stale') : ''
-    ].filter(Boolean).join(' · ');
-  } else if (forecast?.status === 'inactive' || expired) {
-    value.textContent = t('limits.codexResetForecast.noSignal');
-    detail.textContent = forecast.stale ? t('limits.codexResetForecast.stale') : '';
-  } else {
-    item.classList.add('is-unavailable');
-    value.textContent = forecast?.error && forecast.errorKind !== 'invalid-response'
-      ? t('limits.codexResetForecast.connectionFailed')
-      : t('limits.codexResetForecast.unavailable');
-  }
-
-  head.append(title, value);
-  item.append(openButton, head, detail);
-  openButton.title = t('limits.codexResetForecast.openSource');
-  openButton.setAttribute('aria-label', [label.textContent, value.textContent, detail.textContent, t('limits.codexResetForecast.openSource')].filter(Boolean).join(', '));
-  return item;
-}
-
-function appendCodexResetForecast(parent) {
-  const node = renderCodexResetForecast();
-  if (node) parent.append(node);
-}
-
-function codexResetForecastExpired(forecast, nowMs = Date.now()) {
-  if (forecast?.status !== 'active') return false;
-  const expiresAtMs = Date.parse(forecast.expiresAt || '');
-  return Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs;
-}
-
 function clearCodexResetForecastRetryTimer() {
   if (state.codexResetForecastRetryTimer) clearTimeout(state.codexResetForecastRetryTimer);
   state.codexResetForecastRetryTimer = null;
@@ -4991,327 +4249,6 @@ function maybeFetchCodexResetForecast() {
       }
     }, remainingMs);
   }
-}
-
-function renderLimitProviderRow(id, label, provider, color, options = {}) {
-  const row = document.createElement('div');
-  const classes = ['limit-row'];
-  if (options.accountRow) classes.push('limit-account-row');
-  if (provider.stale) classes.push('stale');
-  row.className = classes.join(' ');
-  row.dataset.limitMotionKey = limitResetMotionApi.providerKey(provider);
-  row.append(
-    renderLimitProviderHead(id, label, provider, color, options),
-    renderProviderWindows(provider, color)
-  );
-  if (id === 'codex' && !options.accountRow) appendCodexResetForecast(row);
-  return row;
-}
-
-// Every limits surface (the limits panel and the Home cards) resolves account
-// titles here. One table keeps a provider from masking its email on one surface
-// while leaking it on the other, and from rendering two different titles for the
-// same account. Providers identified by email need no entry — the default below
-// already masks them.
-const LIMIT_ACCOUNT_TITLES = {
-  codex: codexAccountTitle,
-  opencode: opencodeAccountTitle,
-  openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
-  thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
-  volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers)
-};
-
-function limitAccountTitle(id, provider, index, providerEntries = [provider]) {
-  const resolve = LIMIT_ACCOUNT_TITLES[String(id || '').trim().toLowerCase()];
-  return resolve
-    ? resolve(provider, index, providerEntries)
-    : limitAccountDefaultTitle(provider, index, providerEntries);
-}
-
-// maskLimitAccountEmails is display-only: it hides the address on the limits
-// surfaces without changing what is collected, synced, or stored.
-function limitAccountEmailsMasked() {
-  return state.settings?.maskLimitAccountEmails === true;
-}
-
-function limitAccountDefaultTitle(provider, index, providerEntries = [provider]) {
-  return accountIdentityApi.accountTitleLabel(provider, providerEntries, {
-    maskEmail: limitAccountEmailsMasked(),
-    index
-  }) || `Account ${index + 1}`;
-}
-
-function codexAccountTitle(provider, index, providers = [provider]) {
-  const label = accountIdentityApi.codexAccountDisplayLabel(provider, providers, {
-    maskEmail: limitAccountEmailsMasked(),
-    index,
-    // Limits presents raw account data such as email and Plus/Pro labels, so
-    // keep the provider's canonical English workspace name on this surface.
-    personalWorkspaceLabel: 'Personal'
-  });
-  if (label) return label;
-  // Never fall back to the plan label here — "Plus" as a title reads like an
-  // account name. The plan still shows on the right via limitProviderPlan().
-  return `Account ${index + 1}`;
-}
-
-function renderCodexAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: 'codex', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('codex', label, groupProvider, color, {
-    planText: t('settings.codex.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('codex', limitAccountTitle('codex', provider, index, providers), provider, color, {
-      accountRow: true,
-      accountTitle: true,
-      allowSystemSwitch: true,
-      showActiveBadge: true,
-      showIcon: false
-    }));
-  });
-  row.append(head, accountList);
-  appendCodexResetForecast(row);
-  return row;
-}
-
-function renderClaudeAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: 'claude', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('claude', label, groupProvider, color, {
-    planText: t('settings.claude.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('claude', limitAccountTitle('claude', provider, index, providers), provider, color, {
-      accountRow: true,
-      accountTitle: true,
-      showIcon: false
-    }));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function mimoSettingsAccountTitle(account, index) {
-  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
-}
-
-function renderMimoAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: 'mimo', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('mimo', label, groupProvider, color, {
-    planText: t('settings.mimo.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('mimo', limitAccountTitle('mimo', provider, index, providers), provider, color, {
-      accountRow: true,
-      accountTitle: true,
-      showIcon: false
-    }));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function renderCursorAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: 'cursor', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('cursor', label, groupProvider, color, {
-    planText: t('settings.cursor.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('cursor', limitAccountTitle('cursor', provider, index, providers), provider, color, {
-      accountRow: true,
-      accountTitle: true,
-      showIcon: false
-    }));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function renderAntigravityAccountGroup(label, providers, color) {
-  return renderNamedApiAccountGroup('antigravity', label, providers, color, {
-    groupPlanText: t('settings.antigravity.nAccounts', { count: providers.length })
-  });
-}
-
-function opencodeAccountTitle(provider, index) {
-  const name = String(provider?.accountName || '').trim();
-  // The collector's canonical name is shown as-is. This column holds account
-  // names, which are user strings and almost never translated, so a localized
-  // phrase reads as a stray UI label among them — and the plan and source
-  // columns beside it are English for the same reason.
-  if (name) return name;
-  // Older synced clients put the user-defined profile name in accountLabel.
-  // Keep those rows identifiable while new clients carry profile and plan in
-  // separate fields. Go/Zen are plan labels, never account identities.
-  const legacyName = String(provider?.accountLabel || '').trim();
-  return legacyName && legacyName !== 'Go' && legacyName !== 'Zen'
-    ? legacyName
-    : `Account ${index + 1}`;
-}
-
-function renderOpenCodeAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = 'limit-row limit-row-group';
-  const groupProvider = { provider: 'opencode', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('opencode', label, groupProvider, color, {
-    planText: t('settings.opencode.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    const legacyProfileLabel = !provider?.accountName
-      && provider?.accountLabel
-      && provider.accountLabel !== 'Go'
-      && provider.accountLabel !== 'Zen';
-    accountList.append(renderLimitProviderRow('opencode', limitAccountTitle('opencode', provider, index, providers), provider, color, {
-      accountRow: true,
-      showIcon: false,
-      ...(legacyProfileLabel ? { planText: '' } : {})
-    }));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function namedApiAccountTitle(provider, index, providerId) {
-  const accountName = String(provider?.accountName || provider?.accountLabel || '').trim();
-  if (accountName.toLowerCase() === 'environment') return t(`settings.${providerId}.environment`);
-  return accountName || `Account ${index + 1}`;
-}
-
-// Both Volcengine plans sit on one account, so the row title carries the plan
-// name from accountLabel. accountTitleLabel reads accountName/accountEmail,
-// neither of which these rows have, so without this they would all render as
-// "Account N".
-function volcenginePlanAccountTitle(provider, index, providers) {
-  return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
-}
-
-// '' while healthy, because the title already shows the plan and there is no
-// second fact to put here; undefined once it is not, so the head falls back to
-// the status label the same way thirdPartyPlanText does.
-function volcenginePlanRowText(provider) {
-  return provider?.status === 'ok' ? '' : undefined;
-}
-
-function thirdPartyPlanText(provider) {
-  if (provider?.status !== 'ok') return undefined;
-  const adapterId = String(provider?.adapterId || '').toLowerCase();
-  if (adapterId === 'newapi-account') return 'New API · Account';
-  if (adapterId === 'newapi-token') return 'New API · API key';
-  if (adapterId === 'sub2api') return 'Sub2API · Account';
-  if (adapterId === 'custom') return 'Custom';
-  const planLabel = String(provider?.planLabel || '').toLowerCase();
-  if (planLabel === 'account') return 'Account';
-  if (planLabel === 'api key') return 'API key';
-  if (planLabel === 'custom') return 'Custom';
-  return undefined;
-}
-
-const THIRD_PARTY_ADAPTER_VISUALS = Object.freeze({
-  'newapi-account': { color: '#C738FB', markId: 'newapi' },
-  'newapi-token': { color: '#C738FB', markId: 'newapi' },
-  sub2api: { color: '#39D9E7', markId: 'sub2api' },
-  custom: { color: '#8A96A8', markId: 'thirdparty' }
-});
-
-function thirdPartyAdapterVisual(provider, fallbackColor) {
-  return THIRD_PARTY_ADAPTER_VISUALS[String(provider?.adapterId || '').toLowerCase()]
-    || { color: fallbackColor, markId: 'thirdparty' };
-}
-
-function thirdPartyAdapterFamily(provider) {
-  const adapterId = String(provider?.adapterId || '').toLowerCase();
-  if (adapterId === 'newapi-account' || adapterId === 'newapi-token') return 'newapi';
-  if (adapterId === 'sub2api') return 'sub2api';
-  if (adapterId === 'custom') return 'thirdparty';
-  return '';
-}
-
-function thirdPartySharedAdapterFamily(providers) {
-  const families = new Set((providers || []).map(thirdPartyAdapterFamily));
-  return families.size === 1 ? [...families][0] : null;
-}
-
-function renderNamedApiAccountGroup(providerId, label, providers, color, options = {}) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: providerId, status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead(providerId, label, groupProvider, color, {
-    planText: options.groupPlanText,
-    hideMeta: true,
-    ...(options.groupMarkId ? { markId: options.groupMarkId } : {})
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    const providerColor = options.colorForProvider?.(provider) || color;
-    const markId = options.markIdForProvider?.(provider);
-    accountList.append(renderLimitProviderRow(
-      providerId,
-      limitAccountTitle(providerId, provider, index, providers),
-      provider,
-      providerColor,
-      {
-        accountRow: true,
-        showIcon: Boolean(markId),
-        ...(markId ? { markId } : {}),
-        ...(options.planTextForProvider
-          ? { planText: options.planTextForProvider(provider) }
-          : {})
-      }
-    ));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function renderOpenRouterAccountGroup(label, providers, color) {
-  return renderNamedApiAccountGroup('openrouter', label, providers, color, {
-    groupPlanText: t('settings.openrouter.nAccounts', { count: providers.length })
-  });
-}
-
-function renderThirdPartyAccountGroup(label, providers, color) {
-  const sharedFamily = thirdPartySharedAdapterFamily(providers);
-  return renderNamedApiAccountGroup('thirdparty', label, providers, color, {
-    groupPlanText: t('settings.thirdparty.nAccounts', { count: providers.length }),
-    groupMarkId: sharedFamily || 'thirdparty',
-    planTextForProvider: thirdPartyPlanText,
-    colorForProvider: (provider) => thirdPartyAdapterVisual(provider, color).color,
-    ...(sharedFamily === null
-      ? { markIdForProvider: (provider) => thirdPartyAdapterVisual(provider, color).markId }
-      : {})
-  });
-}
-
-// The Coding Plan and the Agent Plan are two subscriptions on one Volcengine
-// account, so they are rows of one card rather than two provider cards.
-function renderVolcengineAccountGroup(label, providers, color) {
-  return renderNamedApiAccountGroup('volcengine', label, providers, color, {
-    groupPlanText: t('settings.volcengine.nPlans', { count: providers.length }),
-    planTextForProvider: volcenginePlanRowText
-  });
 }
 
 function captureLimitResetMotion() {
@@ -5459,53 +4396,16 @@ function renderLimits() {
   for (const { id, label } of rows) {
     const visibleProviders = visibleProviderEntries.get(id) || [{ provider: id, status: 'disabled', windows: [] }];
     const color = limitProviderColor(id);
-    if (id === 'claude' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderClaudeAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'codex' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderCodexAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'opencode' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderOpenCodeAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'openrouter' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderOpenRouterAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'thirdparty' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderThirdPartyAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'mimo' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderMimoAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'cursor' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderCursorAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'antigravity' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderAntigravityAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'volcengine' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderVolcengineAccountGroup(label, visibleProviders, color));
+    // Several accounts of one provider are a group; one is a row. Both builders
+    // take the provider id and nothing else — which mark, colour and plan text
+    // each account takes is the view's own per-provider policy, so the dock card
+    // renders this loop's output without being told any of it.
+    if (Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderLimitProviderGroup(id, label, visibleProviders, color));
       continue;
     }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
-    const thirdPartyVisual = id === 'thirdparty' ? thirdPartyAdapterVisual(provider, color) : null;
-    const rowOptions = id === 'codex'
-      ? { accountTitle: true, allowSystemSwitch: true }
-      : id === 'thirdparty'
-        ? {
-            planText: thirdPartyPlanText(provider),
-            markId: thirdPartyVisual.markId
-          }
-        : undefined;
-    nodes.push(renderLimitProviderRow(id, label, provider, thirdPartyVisual?.color || color, rowOptions));
+    nodes.push(renderLimitProviderSolo(id, label, provider, color));
   }
   els.limitsPanel.replaceChildren(...nodes);
   animateLimitResets(resetMotionSnapshot);
@@ -6626,10 +5526,14 @@ function homeLimitRows() {
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
     accountColor: (provider, id, fallbackColor) => (
-      id === 'thirdparty' ? thirdPartyAdapterVisual(provider, fallbackColor).color : fallbackColor
+      id === 'thirdparty'
+        ? limitProviderPresentationApi.thirdPartyAdapterVisual(provider, fallbackColor).color
+        : fallbackColor
     ),
     accountIcon: (provider, id) => (
-      id === 'thirdparty' ? thirdPartyAdapterVisual(provider, clientColors.thirdparty).markId : id
+      id === 'thirdparty'
+        ? limitProviderPresentationApi.thirdPartyAdapterVisual(provider, clientColors.thirdparty).markId
+        : id
     ),
     accountName: (provider, index, providerEntries) => {
       const id = String(provider?.provider || '').trim().toLowerCase();
@@ -13537,7 +12441,7 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
   const items = resolved.items.map((item) => (
     item.type === 'text'
       && item.metric === 'account'
-      && limitAccountEmailsMasked()
+      && state.settings?.maskLimitAccountEmails === true
       ? { ...item, text: accountIdentityApi.maskEmailAddress(item.text) }
       : item
   ));
@@ -14515,6 +13419,10 @@ function renderAntigravityStatus() {
     listEl.append(row);
   });
   renderSettingsSummaries();
+}
+
+function mimoSettingsAccountTitle(account, index) {
+  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
 }
 
 function renderMimoStatus() {

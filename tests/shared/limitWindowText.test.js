@@ -143,9 +143,13 @@ test('both renderers paint from the shared modules, not their own copies', () =>
     assert.doesNotMatch(app, new RegExp(`function ${name}\\(`), `${name} should live in the shared module`);
   }
 
-  // One age formatter, called by both, replacing three hand-rolled copies.
-  assert.match(app, /limitProviderPresentationApi\.limitProviderFreshness\(provider\)/);
-  assert.match(dock, /limitPresentationApi\.limitProviderFreshness\(account\)/);
+  // One age formatter, called by both, replacing three hand-rolled copies. The
+  // limits meta line is the shared view's, so the page reaches it through the
+  // view rather than formatting an age of its own.
+  assert.match(read('src/electron/renderer/limitWindowsView.js'), /presentationApi\.limitProviderFreshness\(provider\)/);
+  // The card formats no age of its own — it renders the page's rows, so the
+  // freshness wording has exactly one call site across both surfaces.
+  assert.doesNotMatch(dock, /limitProviderFreshness/);
   assert.doesNotMatch(app, /function formatUpdatedAge\(/);
   assert.doesNotMatch(dock, /function updatedText\(/);
   // The card's separate staleness line is gone with the wording it explained.
@@ -154,8 +158,16 @@ test('both renderers paint from the shared modules, not their own copies', () =>
 
   // The wording module is reached through the shared view now: the card builds
   // the Limits page's rows rather than a second set that reads the same text.
-  assert.match(dock, /limitWindowsView\.renderProviderWindows\(record, color\)/);
+  // Both card branches go through the view's own entry points, and neither page
+  // hands the view per-provider options — which mark, colour and plan text an
+  // account takes is the view's policy, so the two surfaces cannot be told
+  // different things about the same provider.
+  assert.match(dock, /limitWindowsView\.renderLimitProviderSolo\(/);
+  assert.match(dock, /limitWindowsView\.renderLimitProviderGroup\(/);
   assert.match(dock, /limitWindowText: limitWindowTextApi\.limitWindowText/);
+  for (const page of [app, dock]) {
+    assert.doesNotMatch(page, /groupPlanText|markIdForProvider|colorForProvider|planTextForProvider/);
+  }
   for (const name of ['windowNode', 'windowGrid', 'appendWindows', 'meterNode', 'windowValueText']) {
     assert.doesNotMatch(dock, new RegExp(`function ${name}\\(`), `${name} should come from the shared view`);
   }

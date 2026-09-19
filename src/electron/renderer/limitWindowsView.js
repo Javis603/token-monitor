@@ -20,6 +20,8 @@
 //                                      does not care which page loaded them
 //   balance                            limitBalanceDisplay
 //   windowLabels, windowText           the shared wording modules
+//   subscriptionApi, subscriptionText  the recorded subscriptions and how they
+//                                      read, for the plan cell's hover card
 //   format*, limitFillPercent, …       the page's own number formatting
 //   tooltip                            { hasOpened(), markOpened(), release() },
 //                                      the host's render-hold bookkeeping
@@ -52,7 +54,30 @@
       isCreditsWindow,
       spendWindow,
       limitWindowLabel,
-      limitWindowText
+      limitWindowText,
+      accountIdentity,
+      accountControl,
+      codexAccounts,
+      hasMark,
+      formatAgo,
+      openExternal,
+      // Subscriptions — everything the plan cell's hover card is built from.
+      // None of these has a default: a host that supplied nothing would not fail
+      // loudly, it would render a plan label with no card under it, which is
+      // exactly the drift this list exists to prevent (the dock showed a bare
+      // plan label while the page showed the card for as long as the decoration
+      // was a hook only the widget passed).
+      subscriptionApi,
+      subscriptionText,
+      currencyApi,
+      formatCost,
+      subscriptions,
+      subscriptionAccounts,
+      monthClientCosts,
+      // `{ enabled, busy, forecast }` — the Codex reset forecast as this host
+      // currently holds it, read at paint time because the widget refreshes it
+      // on its own timer.
+      resetForecast = () => ({ busy: false, forecast: null })
     } = deps;
     const document = deps.document || globalThis.document;
 
@@ -264,6 +289,47 @@
     return item;
   }
 
+  // Tooltips paint in the top layer, as popovers. Both surfaces that draw these
+  // rows scroll inside a clipping box — the limits panel and the dock card's
+  // account list — and an absolutely positioned tooltip was cut off by it, or
+  // covered by the header above it. A popover escapes every ancestor's overflow
+  // and stacking context at once, so this is the one place that has to know.
+  //
+  // What the top layer does NOT escape is the window, and a 280px dock card
+  // often has nothing above its first row, so the flip below is still measured —
+  // against the viewport now rather than against a clip box, which is why both
+  // surfaces can share one measurement.
+  let tooltipAnchorSeq = 0;
+
+  function attachLimitDetailTooltip(wrap, tooltip) {
+    // A popover has no positioned ancestor to lay out against, so it is anchored
+    // to its own trigger. Anchor names are per-element and the panel draws many
+    // of these, so each pair gets its own rather than a name declared in CSS.
+    const anchorName = `--limit-detail-anchor-${tooltipAnchorSeq += 1}`;
+    wrap.style.setProperty('anchor-name', anchorName);
+    tooltip.style.setProperty('position-anchor', anchorName);
+    // 'manual' rather than 'auto': these are hover affordances, not dismissible
+    // dialogs, and light-dismiss would close them on the first click anywhere.
+    tooltip.setAttribute('popover', 'manual');
+
+    const open = () => {
+      tooltipHost.markOpened();
+      wrap.classList.add('has-opened');
+      if (!wrap.isConnected) return;
+      tooltip.showPopover?.();
+      // Measured after opening: a closed popover has no box to measure.
+      tooltip.classList.toggle('is-below', wrap.getBoundingClientRect().top < tooltip.offsetHeight + 8);
+    };
+    const close = () => {
+      tooltip.hidePopover?.();
+      tooltipHost.release();
+    };
+    wrap.addEventListener('pointerenter', open);
+    wrap.addEventListener('focusin', open);
+    wrap.addEventListener('pointerleave', close);
+    wrap.addEventListener('focusout', close);
+  }
+
   // Entries are rows of cells: `[label, value]`, or `[label, middle, value]` when
   // a row carries an extra field. Rows are grid cells (`display: contents`), so a
   // short row would slide into the next row's columns — pad every row to the
@@ -297,16 +363,8 @@
       }
       tooltip.append(row);
     });
-    const markOpened = () => {
-      tooltipHost.markOpened();
-      infoWrap.classList.add('has-opened');
-    };
-    const release = () => tooltipHost.release();
-    infoWrap.addEventListener('pointerenter', markOpened);
-    infoWrap.addEventListener('focusin', markOpened);
-    infoWrap.addEventListener('pointerleave', release);
-    infoWrap.addEventListener('focusout', release);
     infoWrap.append(info, tooltip);
+    attachLimitDetailTooltip(infoWrap, tooltip);
     return infoWrap;
   }
 
@@ -1144,30 +1202,937 @@
     return windows;
   }
 
-    return {
-      antigravityQuotaGroups,
-      claudeBalanceNode,
-      codexAdditionalWindowLabel,
-      codexResetCreditsNode,
-      creditsBalanceValue,
-      expiryDateLabel,
-      formatLimitAmount,
-      formatLimitWindowValue,
-      limitDetailInfoNode,
-      limitMeterNode,
-      limitNoteRowNode,
-      limitWindowNode,
-      mimoTokenPlanWindowFromBalance,
-      openrouterCreditsWindow,
-      providerSpendNode,
-      providerWindowLabel,
-      providerWindowText,
-      renderProviderWindows,
-      thirdPartyQuotaWindow,
-      thirdPartySpendNode,
-      windowForKind,
-      windowsForKind
+  // Every limits surface (the limits panel and the Home cards) resolves account
+  // titles here. One table keeps a provider from masking its email on one surface
+  // while leaking it on the other, and from rendering two different titles for the
+  // same account. Providers identified by email need no entry — the default below
+  // already masks them.
+  const LIMIT_ACCOUNT_TITLES = {
+    codex: codexAccountTitle,
+    opencode: opencodeAccountTitle,
+    openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
+    thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
+    volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers)
+  };
+
+  // Fallback names for `provider.source`, used when the provider has no override
+  // of its own in limitProviderSourceLabel.
+  const LIMIT_SOURCE_LABELS = { oauth: 'OAuth', cli: 'CLI', web: 'Web', rpc: 'RPC', local: 'Local', api: 'API' };
+
+  function limitStatusLabel(status) {
+    if (status === 'ok') return 'Live';
+    if (status === 'disabled') return 'Disabled';
+    if (status === 'notConfigured') return 'Not signed in';
+    if (status === 'noSyncedData') return 'No synced data';
+    if (status === 'unauthorized') return 'Sign in again';
+    if (status === 'rateLimited') return 'Limited';
+    if (status === 'sourceRateLimited') return 'Usage API limited';
+    if (status === 'unavailable') return 'Unavailable';
+    return 'Error';
+  }
+
+  function limitProviderMeta(provider, provenance = null) {
+    const sourceDevice = presentationApi.limitProviderMainDeviceLabel(provenance, { showSource: Boolean(settings()?.showLimitSource) });
+    // The freshness wording is shared with the edge dock so a row cannot read as
+    // stale on one surface and merely old on the other.
+    const freshness = presentationApi.limitProviderFreshness(provider);
+    if (provider.stale) {
+      const parts = [freshness.text];
+      if (sourceDevice) parts.push(sourceDevice);
+      return parts.join(' · ');
+    }
+    if (provider.status === 'ok') {
+      const parts = [];
+      if (settings()?.showLimitSource) {
+        const sourceLabel = presentationApi.limitProviderSourceLabel(provider) || LIMIT_SOURCE_LABELS[provider.source];
+        if (sourceLabel) parts.push(sourceLabel);
+      }
+      if (sourceDevice) parts.push(sourceDevice);
+      return `${freshness.text}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
+    }
+    return limitStatusLabel(provider.status, false);
+  }
+
+  function limitProviderPlan(provider) {
+    if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
+    const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
+    if (label) return presentationApi.limitProviderPlanDisplayLabel(provider, label);
+    return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
+  }
+
+  function renderLimitProviderMark(id, color) {
+    const mark = document.createElement('span');
+    if (hasMark(id)) {
+      // .limit-icon sizes the mark, .row-icon-<id> supplies the mask: one table,
+      // shared with the breakdown rows, instead of a second copy per provider.
+      mark.className = `limit-icon row-icon-${id}`;
+    } else {
+      mark.className = 'dot';
+      mark.style.background = color;
+    }
+    return mark;
+  }
+
+  function renderLimitProviderHead(id, label, provider, color, options = {}) {
+    const head = document.createElement('div');
+    head.className = 'limit-head';
+    const titleBlock = document.createElement('div');
+    titleBlock.className = 'limit-title';
+    const name = document.createElement('div');
+    name.className = 'limit-name';
+    if (options.showIcon !== false) name.append(renderLimitProviderMark(options.markId || id, color));
+    const title = document.createElement('span');
+    title.className = 'limit-name-title';
+    title.textContent = options.title || label;
+    const provenance = presentationApi.limitProviderProvenance(provider);
+    // The ✓ marks the account THIS device's Codex is signed into
+    // (state.codexActiveAccount, derived locally by codexActiveAccountFromStats).
+    // It only disambiguates rows in the multi-account group, so it's gated on
+    // showActiveBadge. Never re-derive "live" from the row being rendered — in
+    // sync mode that row can be a remote device's record for a different account,
+    // which would move the ✓ onto the wrong one.
+    const activeCodexAccount = options.showActiveBadge && codexAccounts.matchesActive(provider);
+    const switchAccount = options.allowSystemSwitch && !activeCodexAccount ? codexAccounts.switchTarget(provider) : null;
+    name.append(accountControl.render({
+      titleNode: title,
+      active: Boolean(activeCodexAccount),
+      switchAccount: codexAccounts.canSwitchSystemAccount() ? switchAccount : null,
+      accountLabel: switchAccount?.email || ''
+    }));
+    titleBlock.append(name);
+    // The multi-account group header has no quota of its own, and its accounts can
+    // update at different times (different devices too), so it omits the meta line
+    // entirely — each account row below shows its own "Updated" time.
+    if (!options.hideMeta) {
+      const meta = document.createElement('div');
+      meta.className = 'limit-meta';
+      const metaParts = [];
+      // A single Codex account stays clean like every other provider (just the
+      // "Updated" line). The email only matters when several accounts share the
+      // group, where it's each subrow's title (options.accountTitle) — not here.
+      if (provider.status === 'ok' || provider.stale) metaParts.push(limitProviderMeta(provider, provenance));
+      const metaText = metaParts.filter(Boolean).join(' · ');
+      if (metaText) meta.append(document.createTextNode(metaText));
+      titleBlock.append(meta);
+    }
+    const plan = document.createElement('div');
+    plan.className = 'limit-plan';
+    plan.textContent = options.planText ?? limitProviderPlan(provider);
+    // A record binds to one account, so the provider-wide rollup belongs on the
+    // row that stands for the provider as a whole — the header of a group, or a
+    // provider's single row — and not on each member of a group, which would
+    // repeat the same three lines once per account. Which of those this row is,
+    // is what it just told us: an account row inside a group says so, and the
+    // group header carries `accountGroup`.
+    head.append(titleBlock, decoratePlanWithSubscription(plan, provider, !options.accountRow));
+    return head;
+  }
+
+
+  function codexResetForecastDate(value, options = {}) {
+    const date = value ? new Date(value) : null;
+    if (!date || Number.isNaN(date.getTime())) return '';
+    const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+    const locale = options.locale || currentLocale();
+    const timeZone = options.timeZone;
+    const dayNumber = (input) => {
+      const parts = new Intl.DateTimeFormat('en-US-u-ca-gregory-nu-latn', {
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        ...(timeZone ? { timeZone } : {})
+      }).formatToParts(input);
+      const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+      return Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day));
     };
+    const dayDelta = Math.round((dayNumber(date) - dayNumber(new Date(nowMs))) / 86_400_000);
+    if (dayDelta >= -1 && dayDelta <= 1) {
+      const time = new Intl.DateTimeFormat(locale, {
+        hour: 'numeric',
+        minute: '2-digit',
+        ...(locale.startsWith('zh') ? { hourCycle: 'h23' } : {}),
+        ...(timeZone ? { timeZone } : {})
+      }).format(date);
+      const relativeDay = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(dayDelta, 'day');
+      return `${relativeDay} ${time}`;
+    }
+    return expiryDateLabel(date);
+  }
+
+  function codexResetForecastTimeUntil(value, options = {}) {
+    const date = value ? new Date(value) : null;
+    if (!date || Number.isNaN(date.getTime())) return '';
+    const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+    const remainingMs = date.getTime() - nowMs;
+    if (remainingMs <= 0) return '';
+    const locale = options.locale || currentLocale();
+    const hours = remainingMs / 3_600_000;
+    const unit = hours >= 48 ? 'day' : (hours >= 1 ? 'hour' : 'minute');
+    const divisor = unit === 'day' ? 86_400_000 : (unit === 'hour' ? 3_600_000 : 60_000);
+    const amount = Math.max(1, Math.round(remainingMs / divisor));
+    const duration = new Intl.NumberFormat(locale, {
+      style: 'unit',
+      unit,
+      unitDisplay: 'long'
+    }).format(amount);
+    return t('limits.codexResetForecast.approximately', { duration });
+  }
+
+  function codexResetForecastAge(value) {
+    const date = value ? new Date(value) : null;
+    if (!date || Number.isNaN(date.getTime())) return '';
+    return formatAgo(Math.max(0, Date.now() - date.getTime()));
+  }
+
+  function codexResetForecastSourceAuthor(value) {
+    const author = String(value || '').trim().replace(/^@+/, '');
+    return author ? `@${author}` : '';
+  }
+
+  function codexResetForecastPercent(value, locale = currentLocale()) {
+    return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value);
+  }
+
+  function codexResetForecastType(value) {
+    const type = String(value || '').trim().toLowerCase();
+    if (type !== 'banked' && type !== 'regular') return '';
+    return t(`limits.codexResetForecast.resetType.${type}`);
+  }
+
+  function codexResetForecastTooltip(forecast) {
+    const entries = [];
+    const disclaimer = t('limits.codexResetForecast.disclaimer');
+    const resetType = codexResetForecastType(
+      forecast?.status === 'scheduled' ? forecast?.scheduledResetType : forecast?.latestResetType
+    );
+    if (resetType) {
+      entries.push([t('limits.codexResetForecast.resetType'), resetType]);
+    }
+    const scheduledFor = codexResetForecastDate(forecast?.scheduledFor);
+    const scheduledIn = codexResetForecastTimeUntil(forecast?.scheduledFor);
+    if (scheduledFor) {
+      entries.push([
+        t('limits.codexResetForecast.scheduledFor'),
+        [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
+      ]);
+    }
+    const latestReset = codexResetForecastDate(forecast?.latestResetAt);
+    if (latestReset) {
+      const age = codexResetForecastAge(forecast.latestResetAt);
+      entries.push([t('limits.codexResetForecast.lastReset'), [latestReset, age].filter(Boolean).join(' · ')]);
+    }
+    const sourceObservedAt = forecast?.status === 'scheduled'
+      ? forecast?.scheduledAnnouncedAt
+      : forecast?.observedAt;
+    const source = [
+      codexResetForecastSourceAuthor(forecast?.sourceAuthor),
+      codexResetForecastAge(sourceObservedAt)
+    ].filter(Boolean).join(' · ');
+    if (source) {
+      const sourceLabel = forecast?.status === 'scheduled'
+        ? 'limits.codexResetForecast.sourceAnnouncement'
+        : 'limits.codexResetForecast.sourceSignal';
+      entries.push([t(sourceLabel), source]);
+    }
+    const expiresAt = codexResetForecastDate(forecast?.expiresAt);
+    const expiresIn = codexResetForecastTimeUntil(forecast?.expiresAt);
+    if (expiresAt) {
+      entries.push([
+        t('limits.codexResetForecast.expiresLabel'),
+        [expiresAt, expiresIn].filter(Boolean).join(' · ')
+      ]);
+    }
+    if (forecast?.error && forecast.errorKind !== 'invalid-response') {
+      entries.push([
+        t('limits.codexResetForecast.connectionFailed'),
+        t('limits.codexResetForecast.connectionHelp')
+      ]);
+    }
+    if (forecast?.error) {
+      const lastAttempt = codexResetForecastAge(forecast.checkedAt);
+      if (lastAttempt) entries.push([t('limits.codexResetForecast.lastAttempt'), lastAttempt]);
+    }
+    if (entries.length === 0) return null;
+    const info = limitDetailInfoNode(
+      entries,
+      'codex-reset-forecast-info-wrap',
+      [...entries.map(([label, value]) => `${label}: ${value}`), disclaimer].join(', ')
+    );
+    const tooltip = info.querySelector('.limit-detail-tooltip');
+    if (tooltip) {
+      const footer = document.createElement('span');
+      footer.className = 'codex-reset-forecast-disclaimer';
+      footer.textContent = disclaimer;
+      tooltip.append(footer);
+    }
+    return info;
+  }
+
+  function renderCodexResetForecast() {
+    if (settings()?.codexResetForecastEnabled !== true) return null;
+    const forecast = resetForecast().forecast;
+    const expired = codexResetForecastExpired(forecast);
+    const item = document.createElement('div');
+    item.className = 'codex-reset-forecast';
+    const openButton = document.createElement('button');
+    openButton.type = 'button';
+    openButton.className = 'codex-reset-forecast-open';
+    openButton.addEventListener('click', () => openExternal('https://codex-resets.com/'));
+
+    const head = document.createElement('span');
+    head.className = 'codex-reset-forecast-head';
+    const title = document.createElement('span');
+    title.className = 'codex-reset-forecast-title';
+    const label = document.createElement('span');
+    label.className = 'codex-reset-forecast-label';
+    label.textContent = t('limits.codexResetForecast.title');
+    title.append(label);
+    const forecastInfo = codexResetForecastTooltip(forecast);
+    if (forecastInfo) title.append(forecastInfo);
+    const value = document.createElement('span');
+    value.className = 'codex-reset-forecast-value';
+
+    const detail = document.createElement('span');
+    detail.className = 'codex-reset-forecast-detail';
+    if (resetForecast().busy && !forecast) {
+      item.classList.add('is-loading');
+      value.textContent = t('limits.codexResetForecast.loading');
+    } else if (forecast?.status === 'scheduled') {
+      value.textContent = t('limits.codexResetForecast.scheduled');
+      const scheduledFor = codexResetForecastDate(forecast.scheduledFor);
+      const scheduledIn = codexResetForecastTimeUntil(forecast.scheduledFor);
+      detail.textContent = [
+        scheduledFor
+          ? t('limits.codexResetForecast.expected', {
+              date: [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
+            })
+          : t('limits.codexResetForecast.schedulePending'),
+        forecast.stale ? t('limits.codexResetForecast.stale') : ''
+      ].filter(Boolean).join(' · ');
+    } else if (forecast?.status === 'active' && !expired) {
+      const chance = forecast.chancePercent;
+      value.textContent = Number.isFinite(chance)
+        ? t('limits.codexResetForecast.chance', { percent: codexResetForecastPercent(chance) })
+        : t('limits.codexResetForecast.signal');
+      const predictedAt = codexResetForecastDate(forecast.predictedAt);
+      const expiresAt = codexResetForecastDate(forecast.expiresAt);
+      detail.textContent = [
+        predictedAt
+          ? t('limits.codexResetForecast.expected', { date: predictedAt })
+          : (expiresAt || ''),
+        forecast.stale ? t('limits.codexResetForecast.stale') : ''
+      ].filter(Boolean).join(' · ');
+    } else if (forecast?.status === 'inactive' || expired) {
+      value.textContent = t('limits.codexResetForecast.noSignal');
+      detail.textContent = forecast.stale ? t('limits.codexResetForecast.stale') : '';
+    } else {
+      item.classList.add('is-unavailable');
+      value.textContent = forecast?.error && forecast.errorKind !== 'invalid-response'
+        ? t('limits.codexResetForecast.connectionFailed')
+        : t('limits.codexResetForecast.unavailable');
+    }
+
+    head.append(title, value);
+    item.append(openButton, head, detail);
+    openButton.title = t('limits.codexResetForecast.openSource');
+    openButton.setAttribute('aria-label', [label.textContent, value.textContent, detail.textContent, t('limits.codexResetForecast.openSource')].filter(Boolean).join(', '));
+    return item;
+  }
+
+  function appendCodexResetForecast(parent) {
+    const node = renderCodexResetForecast();
+    if (node) parent.append(node);
+  }
+
+  function codexResetForecastExpired(forecast, nowMs = Date.now()) {
+    if (forecast?.status !== 'active') return false;
+    const expiresAtMs = Date.parse(forecast.expiresAt || '');
+    return Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs;
+  }
+
+  function renderLimitProviderRow(id, label, provider, color, options = {}) {
+    const row = document.createElement('div');
+    const classes = ['limit-row'];
+    if (options.accountRow) classes.push('limit-account-row');
+    if (provider.stale) classes.push('stale');
+    row.className = classes.join(' ');
+    row.dataset.limitMotionKey = motion.providerKey(provider);
+    row.append(
+      renderLimitProviderHead(id, label, provider, color, options),
+      renderProviderWindows(provider, color)
+    );
+    if (id === 'codex' && !options.accountRow) appendCodexResetForecast(row);
+    return row;
+  }
+
+  // How each provider's accounts are drawn, read by every surface that draws
+  // them. The Limits page and the dock card are two callers of one builder, and
+  // every option a caller had to remember to pass was a way for the two to drift
+  // apart — the card passed none, so a third-party group wore the generic mark
+  // with no adapter name on its rows, and a Codex group lost the switch
+  // affordance and the reset forecast below it. Which mark, which colour and
+  // which plan text a provider's accounts take is a fact about the provider, not
+  // about the surface, so it lives with the builder that paints them.
+  //
+  // Each entry returns `{ color?, options }` for one account row. `grouped` is
+  // the one thing the surface decides: inside a group the header already names
+  // the provider and the ✓ badge is what separates one row from another;
+  // standing alone, the row keeps its own mark and has nothing to be told apart
+  // from.
+  //
+  // Every rule that takes something away is therefore gated on `grouped`. Drop
+  // the mark unconditionally and the provider loses it in both shapes, which is
+  // exactly what a policy that reads as if it were about the account did: a solo
+  // Claude row is the card's whole identity and it came back to the page with no
+  // mark at all. The same holds for a rule that replaces the plan cell — a group
+  // row has a sibling to be told apart from, a solo row's plan cell is its own.
+  const LIMIT_ACCOUNT_ROW_POLICIES = {
+    codex: (provider, color, { grouped }) => ({
+      options: {
+        accountTitle: true,
+        allowSystemSwitch: true,
+        ...(grouped ? { showActiveBadge: true, showIcon: false } : {})
+      }
+    }),
+    claude: (provider, color, { grouped }) => ({
+      options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
+    }),
+    mimo: (provider, color, { grouped }) => ({
+      options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
+    }),
+    cursor: (provider, color, { grouped }) => ({
+      options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
+    }),
+    opencode: (provider, color, { grouped }) => ({
+      options: {
+        // A profile name that is neither Go nor Zen predates accountName, and it
+        // is the only label the row has — repeating it in the plan cell says
+        // nothing. Only a group row has a sibling whose plan cell it could be
+        // mistaken for.
+        ...(grouped && legacyOpencodeProfileLabel(provider) ? { planText: '' } : {}),
+        ...(grouped ? { showIcon: false } : {})
+      }
+    }),
+    // The Coding Plan and the Agent Plan are two subscriptions on one Volcengine
+    // account, so they are rows of one card rather than two provider cards. The
+    // title carries the plan, so the cell stays empty while the account is
+    // healthy and hands back over to the status label once it is not.
+    volcengine: (provider, color, { grouped }) => ({
+      options: grouped ? { planText: provider?.status === 'ok' ? '' : undefined, showIcon: false } : {}
+    }),
+    thirdparty: (provider, color, { grouped, sharedFamily }) => {
+      const visual = presentationApi.thirdPartyAdapterVisual(provider, color);
+      // One mark per adapter, not one per group. With several adapters in the
+      // group each row's mark is the only thing telling New API from Sub2API, so
+      // the rows keep theirs and the header falls back to the generic mark; with
+      // a single adapter there is nothing to tell apart and it moves up.
+      const perRowMark = !(grouped && sharedFamily);
+      return {
+        color: visual.color,
+        options: {
+          planText: presentationApi.thirdPartyGroupPlanText(provider),
+          ...(perRowMark ? { markId: visual.markId } : { showIcon: false })
+        }
+      };
+    }
+  };
+
+  // The part only a multi-account group needs: the mark its header wears, and the
+  // adapter family its rows share (null when they differ).
+  const LIMIT_GROUP_POLICIES = {
+    thirdparty: (providers) => {
+      const family = presentationApi.thirdPartySharedAdapterFamily(providers);
+      return { markId: family || 'thirdparty', sharedFamily: family };
+    },
+    // A Codex group's forecast describes the account set, not one account, so it
+    // is appended once below the rows instead of on each of them.
+    codex: () => ({ forecastOnGroup: true })
+  };
+
+  function limitAccountRowPolicy(id, provider, color, context) {
+    const policy = LIMIT_ACCOUNT_ROW_POLICIES[String(id || '').trim().toLowerCase()];
+    const resolved = policy ? policy(provider, color, context) : {};
+    return { color: resolved.color || color, options: resolved.options || {} };
+  }
+
+  // A provider's row standing on its own. Both surfaces call this rather than
+  // renderLimitProviderRow, so the policy cannot be skipped by a caller that did
+  // not know there was one to pass.
+  function renderLimitProviderSolo(id, label, provider, color) {
+    const policy = limitAccountRowPolicy(id, provider, color, { grouped: false, sharedFamily: null });
+    return renderLimitProviderRow(id, label, provider, policy.color, policy.options);
+  }
+
+  // maskLimitAccountEmails is display-only: it hides the address on the limits
+  // surfaces without changing what is collected, synced, or stored.
+  function limitAccountEmailsMasked() {
+    return settings()?.maskLimitAccountEmails === true;
+  }
+
+  // Before accountName existed, an OpenCode account's profile name was stored as
+  // its accountLabel. Go and Zen are plan names, not profiles, so anything else
+  // in that field is a user label the row's title already shows.
+  function legacyOpencodeProfileLabel(provider) {
+    const label = String(provider?.accountLabel || '').trim();
+    return !String(provider?.accountName || '').trim()
+      && Boolean(label)
+      && label !== 'Go'
+      && label !== 'Zen';
+  }
+
+  function limitAccountDefaultTitle(provider, index, providerEntries = [provider]) {
+    return accountIdentity.accountTitleLabel(provider, providerEntries, {
+      maskEmail: limitAccountEmailsMasked(),
+      index
+    }) || `Account ${index + 1}`;
+  }
+
+  function codexAccountTitle(provider, index, providers = [provider]) {
+    const label = accountIdentity.codexAccountDisplayLabel(provider, providers, {
+      maskEmail: limitAccountEmailsMasked(),
+      index,
+      // Limits presents raw account data such as email and Plus/Pro labels, so
+      // keep the provider's canonical English workspace name on this surface.
+      personalWorkspaceLabel: 'Personal'
+    });
+    if (label) return label;
+    // Never fall back to the plan label here — "Plus" as a title reads like an
+    // account name. The plan still shows on the right via limitProviderPlan().
+    return `Account ${index + 1}`;
+  }
+
+  function opencodeAccountTitle(provider, index) {
+    const name = String(provider?.accountName || '').trim();
+    // The collector's canonical name is shown as-is. This column holds account
+    // names, which are user strings and almost never translated, so a localized
+    // phrase reads as a stray UI label among them — and the plan and source
+    // columns beside it are English for the same reason.
+    if (name) return name;
+    // Older synced clients put the user-defined profile name in accountLabel.
+    // Keep those rows identifiable while new clients carry profile and plan in
+    // separate fields. Go/Zen are plan labels, never account identities.
+    const legacyName = String(provider?.accountLabel || '').trim();
+    return legacyName && legacyName !== 'Go' && legacyName !== 'Zen'
+      ? legacyName
+      : `Account ${index + 1}`;
+  }
+
+  function namedApiAccountTitle(provider, index, providerId) {
+    const accountName = String(provider?.accountName || provider?.accountLabel || '').trim();
+    if (accountName.toLowerCase() === 'environment') return t(`settings.${providerId}.environment`);
+    return accountName || `Account ${index + 1}`;
+  }
+
+  // Both Volcengine plans sit on one account, so the row title carries the plan
+  // name from accountLabel. accountTitleLabel reads accountName/accountEmail,
+  // neither of which these rows have, so without this they would all render as
+  // "Account N".
+  function volcenginePlanAccountTitle(provider, index, providers) {
+    return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
+  }
+
+  function limitAccountTitle(id, provider, index, providerEntries = [provider]) {
+    const resolve = LIMIT_ACCOUNT_TITLES[String(id || '').trim().toLowerCase()];
+    return resolve
+      ? resolve(provider, index, providerEntries)
+      : limitAccountDefaultTitle(provider, index, providerEntries);
+  }
+
+  // Volcengine's two rows are one account's two subscriptions, so its header
+  // counts plans; every other group counts accounts.
+  const GROUP_COUNT_KEYS = { volcengine: 'settings.volcengine.nPlans' };
+
+  // "4 accounts" on the group header. A caller that has a better phrase passes
+  // one; leaving it to the caller is what let the dock card render a group with
+  // no count at all while the page showed one.
+  function limitGroupCountText(providerId, count) {
+    const key = GROUP_COUNT_KEYS[providerId] || `settings.${providerId}.nAccounts`;
+    const text = t(key, { count });
+    // A provider with no key of its own would otherwise print the key itself.
+    return text === key ? '' : text;
+  }
+
+  // A provider's several accounts, as the page's group header plus one row each.
+  // No options: what the header wears and what each row says is the provider's
+  // policy above, so a second surface cannot render the same group differently by
+  // passing a different set.
+  function renderLimitProviderGroup(providerId, label, providers, color) {
+    const policy = LIMIT_GROUP_POLICIES[providerId] || (() => ({}));
+    const { markId, sharedFamily, forecastOnGroup } = policy(providers);
+    const row = document.createElement('div');
+    row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
+    const groupProvider = { provider: providerId, status: 'ok', windows: [], accountGroup: true };
+    const head = renderLimitProviderHead(providerId, label, groupProvider, color, {
+      planText: limitGroupCountText(providerId, providers.length),
+      hideMeta: true,
+      ...(markId ? { markId } : {})
+    });
+    const accountList = document.createElement('div');
+    accountList.className = 'limit-account-list';
+    providers.forEach((provider, index) => {
+      const account = limitAccountRowPolicy(providerId, provider, color, { grouped: true, sharedFamily });
+      accountList.append(renderLimitProviderRow(
+        providerId,
+        limitAccountTitle(providerId, provider, index, providers),
+        provider,
+        account.color,
+        { accountRow: true, ...account.options }
+      ));
+    });
+    row.append(head, accountList);
+    if (forecastOnGroup) appendCodexResetForecast(row);
+    return row;
+  }
+
+  // ---- The plan cell's subscription card ------------------------------------
+  //
+  // Recording what an account costs buys a hover card on its plan label: what
+  // the plan is, when it renews, what it has cost so far, and — for a provider
+  // whose tokens we also count — what those tokens would have cost instead.
+  //
+  // It used to be the widget's own decoration, handed to the row through a
+  // `decoratePlan` hook a second surface had nothing to pass, so the dock card
+  // showed the plan as dead text while the page showed the card. The plan cell
+  // is this file's DOM on both surfaces either way, so the card is built here
+  // and the hook is gone: there is no longer a way to render the cell without
+  // it. Everything it reads is a dep, and none of the subscription deps has a
+  // default, so a host that forgets one fails rather than rendering less.
+
+  function subscriptionList() {
+    return subscriptionApi.normalizeSubscriptions(subscriptions(), { currencyApi });
+  }
+
+  function subscriptionAccountValue(provider) {
+    return [provider?.provider || '', provider?.accountKey || '', provider?.accountName || ''].join('\0');
+  }
+
+  // Usage cost is keyed by client, and every provider whose id names a tracked
+  // client can be compared against it. Providers with no same-named client
+  // (openrouter, deepseek, thirdparty, zai…) simply have no entry, which is the
+  // correct answer: their spend is either pay-as-you-go or spread across
+  // clients with no way to attribute it.
+  function subscriptionUsageCostUsd(providerId) {
+    const cost = Number(monthClientCosts()?.[providerId] || 0);
+    return cost > 0 ? cost : null;
+  }
+
+  // Matched against every account the provider has, never against a one-element
+  // list of the row being rendered: matchProviderAccount() falls back to "the
+  // provider has exactly one account, so there is no ambiguity", and a
+  // single-row universe makes that fallback true for every sibling. That is what
+  // put one Codex subscription's card on all three Codex accounts.
+  function subscriptionForProvider(provider) {
+    const id = String(provider?.provider || '').toLowerCase();
+    const accounts = subscriptionAccounts();
+    const identity = subscriptionAccountValue(provider);
+    for (const subscription of subscriptionList()) {
+      if (subscription.provider !== id) continue;
+      const account = subscriptionApi.matchProviderAccount(subscription, accounts);
+      if (account && subscriptionAccountValue(account) === identity) return subscription;
+    }
+    return null;
+  }
+
+  // Every subscription recorded against a provider, paired with the account it
+  // resolves to. Drives the group header, which stands for all of them at once.
+  function subscriptionsForProviderGroup(providerId) {
+    const id = String(providerId || '').toLowerCase();
+    const accounts = subscriptionAccounts();
+    return subscriptionList()
+      .filter((subscription) => subscription.provider === id)
+      .map((subscription) => ({
+        subscription,
+        account: subscriptionApi.matchProviderAccount(subscription, accounts)
+      }));
+  }
+
+  // Rows are {label, value} pairs so the tooltip stays a table and the caller
+  // does not have to know which shape it is looking at.
+  // Keyed off what the user recorded, never off the account's balance marker:
+  // the marker only seeds the choice, and reading it here would show
+  // subscription rows for a ledger the moment a provider started reporting a
+  // balance.
+  function subscriptionTooltipRows(subscription, provider, includeRollup) {
+    const today = subscriptionApi.todayString();
+    return subscriptionApi.isTopUp(subscription)
+      ? topUpTooltipRows(subscription, provider, today, includeRollup)
+      : subscriptionPlanTooltipRows(subscription, provider, today, includeRollup);
+  }
+
+  function subscriptionPlanTooltipRows(subscription, provider, today, includeRollup) {
+    const rows = [];
+    rows.push({ label: t('subscription.tooltip.price'), value: subscriptionText.priceText(t, currencyApi, subscription) });
+
+    const endDate = subscriptionApi.coverageEndDate(subscription, today);
+    const daysLeft = subscriptionApi.daysUntilRenewal(subscription, today);
+    const whenLabel = subscription.autoRenew
+      ? t('subscription.tooltip.nextCharge')
+      : t('subscription.tooltip.validUntil');
+    // A lapsed plan has no days left to count down. Saying so beats a negative
+    // number, and beats the silent roll-forward that used to keep a cancelled
+    // plan permanently four days from renewing.
+    const whenSuffix = daysLeft === null
+      ? ''
+      : ` · ${daysLeft < 0 ? t('subscription.tooltip.expired') : subscriptionText.daysText(t, daysLeft)}`;
+    rows.push({ label: whenLabel, value: `${subscriptionText.dateText(currentLocale(), endDate)}${whenSuffix}` });
+    if (!subscription.autoRenew) {
+      rows.push({ label: t('subscription.tooltip.autoRenew'), value: t('subscription.tooltip.autoRenewOff') });
+    }
+
+    rows.push({
+      label: t('subscription.tooltip.subscribed'),
+      value: subscriptionText.elapsedText(t, currencyApi, subscription, today)
+    });
+
+    // The rollup covers every account of the provider at once, so it belongs on
+    // whichever row stands for the provider as a whole. When a group header is
+    // rendered that is the header, and repeating the same three lines under each
+    // member is the noise the header exists to avoid.
+    if (!includeRollup) return rows;
+
+    // tokscale records which client produced the tokens, never which signed-in
+    // account did, so three logins share one usage figure. Charging that figure
+    // against a single account would claim it three times over; the rollup is
+    // the only honest denominator.
+    const usageCostUsd = subscriptionUsageCostUsd(subscription.provider);
+    if (usageCostUsd === null) return rows;
+    const rollup = subscriptionApi.providerRollup(subscriptionList(), subscription.provider, currencyApi, today);
+    const multiple = subscriptionApi.valueMultiple(rollup.monthlyUsd, usageCostUsd);
+    if (multiple === null) return rows;
+
+    rows.push({ separator: true });
+    if (rollup.count > 1) {
+      rows.push({
+        label: t('subscription.tooltip.providerTotal', { provider: subscriptionText.providerLabel(subscription.provider) }),
+        value: t('subscription.tooltip.providerTotalValue', {
+          count: rollup.count,
+          total: formatCost(rollup.monthlyUsd)
+        })
+      });
+    }
+    rows.push({
+      label: t('subscription.tooltip.monthUsage'),
+      // Prefixed with "≈" and titled below: this is tokscale's equivalent API
+      // pricing, not money owed. Under a subscription nothing is billed per token.
+      value: `≈ ${formatCost(usageCostUsd)}${rollup.count > 1 ? ` · ${t('subscription.tooltip.allAccounts')}` : ''}`,
+      title: t('subscription.tooltip.monthUsageNote')
+    });
+    rows.push({
+      label: t('subscription.tooltip.valueMultiple'),
+      value: `${multiple.toFixed(1)}×`
+    });
+    return rows;
+  }
+
+  function topUpTooltipRows(subscription, provider, today, includeRollup) {
+    const rows = [];
+    const last = subscriptionApi.lastTopUp(subscription);
+    if (last) {
+      rows.push({
+        label: t('subscription.tooltip.lastTopUp'),
+        value: `${subscriptionText.dateText(currentLocale(), last.date)} · ${subscriptionText.topUpMinorText(currencyApi, subscription, last.amountMinor)}`
+      });
+    }
+    const monthMinor = subscriptionApi.topUpMonthMinor(subscription, today);
+    if (monthMinor > 0) {
+      rows.push({
+        label: t('subscription.tooltip.topUpMonth'),
+        value: subscriptionText.topUpMinorText(currencyApi, subscription, monthMinor)
+      });
+    }
+    const entries = subscriptionApi.topUpEntries(subscription);
+    if (entries.length > 1) {
+      rows.push({
+        label: t('subscription.tooltip.topUpTotal'),
+        value: `${subscriptionText.topUpMinorText(currencyApi, subscription, subscriptionApi.topUpTotalMinor(subscription))} · ${t('subscription.tooltip.topUpCount', { count: entries.length })}`
+      });
+    }
+
+    const creditsWindow = (provider?.windows || []).find(isCreditsWindow) || null;
+    const balance = creditsAmount(provider, creditsWindow);
+    if (balance === null) return topUpRollupRows(rows, subscription, today, includeRollup);
+    const balanceCurrency = String(creditsWindow?.currency || provider?.balance?.currency || subscription.currency);
+    rows.push({ label: t('subscription.tooltip.balance'), value: formatMoney(balance, balanceCurrency) });
+
+    const projection = subscriptionApi.topUpProjection(subscription, balance, today, {
+      currencyApi,
+      balanceCurrency
+    });
+    if (!projection || projection.dailyBurn <= 0) return topUpRollupRows(rows, subscription, today, includeRollup);
+    rows.push({
+      label: t('subscription.tooltip.burnRate'),
+      value: t('subscription.tooltip.perDay', { amount: formatMoney(projection.dailyBurn, balanceCurrency) })
+    });
+    if (projection.exhaustDate) {
+      rows.push({
+        label: t('subscription.tooltip.exhausts'),
+        value: `${subscriptionText.dateText(currentLocale(), projection.exhaustDate)} · ${subscriptionText.daysText(t, projection.daysRemaining)}`
+      });
+    }
+    return topUpRollupRows(rows, subscription, today, includeRollup);
+  }
+
+  // A ledger earns the same provider-level comparison a plan gets: what went in
+  // this month against what the month's tokens would have cost.
+  function topUpRollupRows(rows, subscription, today, includeRollup) {
+    if (!includeRollup) return rows;
+    const usageCostUsd = subscriptionUsageCostUsd(subscription.provider);
+    if (usageCostUsd === null) return rows;
+    const rollup = subscriptionApi.providerRollup(subscriptionList(), subscription.provider, currencyApi, today);
+    const multiple = subscriptionApi.valueMultiple(rollup.monthlyUsd, usageCostUsd);
+    if (multiple === null) return rows;
+    rows.push({ separator: true });
+    rows.push({
+      label: t('subscription.tooltip.monthUsage'),
+      value: `≈ ${formatCost(usageCostUsd)}`,
+      title: t('subscription.tooltip.monthUsageNote')
+    });
+    rows.push({ label: t('subscription.tooltip.valueMultiple'), value: `${multiple.toFixed(1)}×` });
+    return rows;
+  }
+
+  // The group header stands for every account at once, so it summarises rather
+  // than picking one of them. Usage and the value multiple are already provider
+  // level on the per-account card; here the price is too.
+  function subscriptionGroupTooltipRows(providerId, today) {
+    const rollup = subscriptionApi.providerRollup(subscriptionList(), providerId, currencyApi, today);
+    const rows = [{
+      label: t('subscription.tooltip.providerTotal', { provider: subscriptionText.providerLabel(providerId) }),
+      value: t('subscription.tooltip.providerTotalValue', {
+        count: rollup.count,
+        total: formatCost(rollup.monthlyUsd)
+      })
+    }];
+
+    const usageCostUsd = subscriptionUsageCostUsd(providerId);
+    if (usageCostUsd === null) return rows;
+    rows.push({ separator: true });
+    rows.push({
+      label: t('subscription.tooltip.monthUsage'),
+      value: `≈ ${formatCost(usageCostUsd)} · ${t('subscription.tooltip.allAccounts')}`,
+      title: t('subscription.tooltip.monthUsageNote')
+    });
+    const multiple = subscriptionApi.valueMultiple(rollup.monthlyUsd, usageCostUsd);
+    if (multiple !== null) {
+      rows.push({ label: t('subscription.tooltip.valueMultiple'), value: `${multiple.toFixed(1)}×` });
+    }
+    return rows;
+  }
+
+  // No heading. The card is already reached by hovering a plan label, and every
+  // row names itself — a "Subscription" line above them only repeats what the
+  // gesture said, and the other tooltips in this panel carry no title either.
+  function subscriptionCardNode(rows) {
+    if (rows.length === 0) return null;
+    const card = document.createElement('span');
+    card.className = 'limit-detail-tooltip subscription-tooltip';
+    for (const row of rows) {
+      if (row.separator) {
+        const rule = document.createElement('span');
+        rule.className = 'subscription-tooltip-rule';
+        card.append(rule);
+        continue;
+      }
+      // display:contents on the row lets label and value land directly in the
+      // card's two-column grid, so the existing tooltip cell styling applies.
+      const line = document.createElement('span');
+      line.className = 'limit-detail-tooltip-row';
+      const label = document.createElement('span');
+      label.textContent = row.label;
+      const value = document.createElement('span');
+      if (row.warn) value.className = 'subscription-tooltip-warn';
+      value.textContent = row.value;
+      if (row.title) {
+        label.title = row.title;
+        value.title = row.title;
+      }
+      line.append(label, value);
+      card.append(line);
+    }
+    return card;
+  }
+
+  // An account row shows its own subscription and nothing else. A group header
+  // stands for all of them, so it summarises — except when only one account is
+  // recorded, where the summary would just restate that one card with less in it.
+  function subscriptionCardForRow(provider, includeRollup) {
+    if (provider?.accountGroup === true) {
+      const entries = subscriptionsForProviderGroup(provider.provider);
+      if (entries.length === 0) return null;
+      if (entries.length === 1) {
+        return subscriptionCardNode(
+          subscriptionTooltipRows(entries[0].subscription, entries[0].account || provider, true)
+        );
+      }
+      return subscriptionCardNode(
+        subscriptionGroupTooltipRows(provider.provider, subscriptionApi.todayString())
+      );
+    }
+    const subscription = subscriptionForProvider(provider);
+    if (!subscription) return null;
+    return subscriptionCardNode(subscriptionTooltipRows(subscription, provider, includeRollup));
+  }
+
+  // Wraps the plan label so hovering it reveals the subscription card. Reuses the
+  // limit-detail tooltip plumbing, which already holds off the list re-render
+  // while the pointer is inside.
+  //
+  // Deliberately not behind a preference: an account with no record decorates
+  // nothing, so having recorded one IS the switch. A separate toggle only made it
+  // possible to enter the data and see nothing happen.
+  function decoratePlanWithSubscription(plan, provider, includeRollup) {
+    const card = subscriptionCardForRow(provider, includeRollup);
+    if (!card) return plan;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'limit-plan limit-detail-tooltip-wrap subscription-plan-wrap';
+    wrap.classList.toggle('has-opened', tooltipHost.hasOpened());
+    wrap.tabIndex = 0;
+    const trigger = document.createElement('span');
+    trigger.className = 'subscription-plan-trigger';
+    trigger.textContent = plan.textContent;
+    wrap.append(trigger, card);
+    // The same plumbing as every other tooltip here: top layer, anchored to its
+    // own trigger, flipped below when the row has no room above it.
+    attachLimitDetailTooltip(wrap, card);
+    return wrap;
+  }
+
+  return {
+    antigravityQuotaGroups,
+    attachLimitDetailTooltip,
+    codexResetForecastExpired,
+    limitAccountTitle,
+    limitProviderMeta,
+    limitProviderPlan,
+    limitStatusLabel,
+    renderLimitProviderGroup,
+    renderLimitProviderHead,
+    renderLimitProviderMark,
+    renderLimitProviderRow,
+    renderLimitProviderSolo,
+    claudeBalanceNode,
+    codexAdditionalWindowLabel,
+    codexResetCreditsNode,
+    creditsBalanceValue,
+    expiryDateLabel,
+    formatLimitAmount,
+    formatLimitWindowValue,
+    limitDetailInfoNode,
+    limitMeterNode,
+    limitNoteRowNode,
+    limitWindowNode,
+    mimoTokenPlanWindowFromBalance,
+    openrouterCreditsWindow,
+    providerSpendNode,
+    providerWindowLabel,
+    providerWindowText,
+    renderProviderWindows,
+    thirdPartyQuotaWindow,
+    thirdPartySpendNode,
+    windowForKind,
+    windowsForKind
+  };
   }
 
   return { createLimitWindowsView };
