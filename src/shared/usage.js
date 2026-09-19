@@ -492,6 +492,13 @@ function emptySession(client, id) {
     projectLabel: '',
     title: '',
     sessionKind: '',
+    // mavis provider writes one row per LLM call across six sub-agents
+    // (coder, explore, general, mavis, verifier, worker). The agent
+    // name is carried on the row and copied onto the session by
+    // sessionFromRow. Empty for every other client. Listed here so the
+    // field is always present on serialized sessions even when the
+    // runtime hasn't filled it yet.
+    agent: '',
     models: {},
     modelCosts: {},
     providers: {}
@@ -571,6 +578,13 @@ function sessionFromRow(row) {
   session.projectLabel = String(row.projectLabel || row.project_label || '').trim();
   session.title = normalizeSessionTitle(firstString(row, SESSION_TITLE_KEYS));
   session.sessionKind = normalizeSessionKind(row.sessionKind || row.session_kind);
+  // mavis runtime writes one row per LLM call across six sub-agents
+  // (coder, explore, general, mavis, verifier, worker). Carry the
+  // agent name onto the session so daily-history-archive and the
+  // sessions panel can split per-agent totals. Empty for every other
+  // client because their rows never set this field.
+  const agent = String(row.agent || row.agent_name || '').trim();
+  if (agent) session.agent = agent;
   let model = detectModel(row, client);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
