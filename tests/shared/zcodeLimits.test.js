@@ -748,6 +748,40 @@ test('a fresh 3.12.3 install with no mirror recovers its key from the store', ()
   assert.equal(discovery.billing.credential.token, 'fresh-billing-jwt');
 });
 
+test('a non-zai profile resolves its store key from the normalized shape', () => {
+  // ZCode stores a zai profile as the raw user-info document and every other
+  // family as the normalized profile, so a bigmodel profile carries the identity
+  // on `id` and has no `user_id` at all. Reading `user_id` alone would return
+  // null for every bigmodel account and leave it on the plaintext mirror — the
+  // behavior this store read replaces — so the reachable shape is pinned here.
+  const identity = 'e4d5f6a7-3333-4444-5555-666677778888';
+  const discovery = discoverZcodeConnection({}, {
+    readFileSync: fileSystem({
+      'setting.json': JSON.stringify({
+        providerFamilyDomain: 'bigmodel',
+        providerFamilyConnectionSelections: { bigmodel: { kind: 'individual-coding-plan' } }
+      }),
+      'config.json': JSON.stringify({ provider: {
+        'builtin:bigmodel-coding-plan': { enabled: true, options: { apiKey: 'bigmodel-mirror' } }
+      } }),
+      'credentials.json': JSON.stringify({
+        'oauth:bigmodel:user_info': encryptCredential(
+          JSON.stringify({ id: identity, username: 'x', displayName: 'x' }),
+          TEST_CREDENTIAL_SECRET
+        ),
+        [`account-provider:coding-plan:account:bigmodel-individual-coding-plan:account:${identity}:api-key`]:
+          encryptCredential('bigmodel-account-key', TEST_CREDENTIAL_SECRET)
+      })
+    }),
+    homeDir: '/home/test',
+    env: { ZCODE_CREDENTIAL_SECRET: TEST_CREDENTIAL_SECRET }
+  });
+  assert.equal(discovery.kind, 'coding-quota');
+  assert.equal(discovery.family, 'bigmodel');
+  assert.equal(discovery.providerId, 'builtin:bigmodel-coding-plan');
+  assert.equal(discovery.credential.token, 'bigmodel-account-key');
+});
+
 test('the store entry is chosen by the profile identity, not by entry order', () => {
   // One machine can hold entries for several accounts; only the one the
   // profile names may be used, whatever order the store lists them in.

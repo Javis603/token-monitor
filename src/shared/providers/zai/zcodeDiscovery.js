@@ -153,12 +153,16 @@ function storedZcodeJwtCredential(store, env) {
 
 // The selected account's own coding key, mirrored by ZCode into the credential
 // store under a name built from the provider id and the logged-in identity
-// (its accountProviderCredentialKey). That identity is the profile's user id —
-// the same source ZCode's loadAccountIdentity reads — so the name can be
-// reconstructed exactly, and a machine that has held several accounts can
-// never surface a previous one's key by accident. Anything that does not line
-// up (missing profile, unknown shape, no such entry) resolves to null and the
-// caller falls back to the provider entry's mirror.
+// (its accountProviderCredentialKey). That identity is what ZCode's
+// loadAccountIdentity hands the key builder — loadUserProfile()?.id — and the
+// field carrying it depends on the family, because saveUserProfile unwraps a
+// zai profile down to its raw user-info document: zai keeps it in `user_id`,
+// every other family stores the normalized profile where it is `id`. Reading
+// one spelling and not the other would leave that family's accounts on the
+// mirror forever; no third spelling is consulted, so a machine that has held
+// several accounts can never surface a previous one's key by accident.
+// Anything that does not line up (missing profile, unknown shape, no such
+// entry) resolves to null and the caller falls back to the mirror.
 function storedAccountKeyCredential(store, env, { family, selectionKind }) {
   if (!store || !family || !selectionKind) return null;
   const profileJson = decryptZcodeCredential(store[`oauth:${family}:user_info`], env);
@@ -166,7 +170,17 @@ function storedAccountKeyCredential(store, env, { family, selectionKind }) {
   let identity;
   try {
     const profile = JSON.parse(profileJson);
-    identity = String(profile?.user_id ?? profile?.id ?? profile?.userId ?? '').trim();
+    // Reads the document the way ZCode's own loadUserProfileFromKey does: a
+    // stored normalized profile (id, username, displayName) is taken as it
+    // stands, and only a zai document is mapped from its raw user-info field.
+    // That is where the two spellings come from — a zai profile keeps the
+    // identity in `user_id`, every other family in `id` — so this stays a
+    // reading of ZCode's own rule rather than a field preference of ours.
+    const normalizedProfile = typeof profile?.id === 'string'
+      && typeof profile?.username === 'string'
+      && typeof profile?.displayName === 'string';
+    const identityField = normalizedProfile ? profile.id : (family === 'zai' ? profile?.user_id : '');
+    identity = typeof identityField === 'string' ? identityField.trim() : '';
   } catch (_) {
     return null;
   }
