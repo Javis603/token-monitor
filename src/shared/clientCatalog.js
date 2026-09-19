@@ -65,6 +65,7 @@
     { id: 'workbuddy', label: 'WorkBuddy' },
     { id: 'proma', label: 'Proma', locallyParsed: true },
     { id: 'qodercn', label: 'Qoder CN', defaultTracked: false, locallyParsed: true },
+    { id: 'mavis', label: 'Mavis (MiniMax Code)', locallyParsed: true },
     { id: 'reasonix', label: 'Reasonix' },
     { id: 'dsh', label: 'DeepSeek Harness' },
     { id: 'cherrystudio', label: 'Cherry Studio' },

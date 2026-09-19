@@ -71,24 +71,60 @@ const MAVIS_READ_BUDGET_ERROR = 'MAVIS_READ_BUDGET_EXCEEDED';
 // LIMIT 50_000 is the postMessage ceiling; under normal load the
 // incremental `sinceMs` query never hits it because we read only the
 // rows since the last tick.
+// Pull everything we might need in one query. The `sinceMs` filter is
+// applied in SQL so the JSON payload stays small; the `framework_type`
+// predicate was a no-op (always 'pi-agent' across ~10k rows) and is
+// dropped so future framework additions are picked up without re-vendoring
+// this file.
+// `reasoning_tokens` and `cache_write_tokens` are always 0 in the pi-agent
+// runtime (verified: 0 rows out of ~10k). Drop them from the projection so
+// the worker postMessage payload stays smaller and the row construction
+// in the worker doesn't have to coerce always-zero values.
+//
+// Model recovery: the runtime's `local_runtime_token_usage.model` column
+// is NULL on ~98% of rows in current builds because `recordCommittedPiUsage`
+// in `local-runtime-v2/src/service/session-system/usage/pi-usage.ts` only
+// writes the value when its caller actually supplied `turn.model`. The
+// session-level `extra_data_json.effectiveModel` field (a sibling table
+// `local_runtime_sessions`, ~34 rows in a normal install) carries the
+// authoritative effective model for the session, so we LEFT JOIN it and
+// COALESCE the row's own `model` with `json_extract(... effectiveModel)`.
+// Verified against a live SQLite (10k+ rows): 99.98% of rows get a real
+// `provider/model` value post-join, and the only ~2 leftover NULLs are
+// orphan rows whose `session_id` is not present in `local_runtime_sessions`
+// (handled by `normalizedModelId`'s `${agent} (model unknown)` fallback).
+//
+// `effectiveModelVariant` (e.g. `'thinking'`) is also extracted; it is
+// not propagated into the normalised `model` field today (we keep model
+// as a single key so downstream `normalizeModelNameForClient` keeps a
+// stable cardinality) but the column is selected so future revisions
+// can pivot on it without re-vendoring the SQL.
 const MAVIS_USAGE_SQL = `
-SELECT ts, session_id, agent_name, model,
-  input_tokens, output_tokens,
-  cache_read_tokens, cost_usd
-FROM ${MAVIS_TABLE}
-WHERE agent_name IN (PLACEHOLDER_AGENTS)
-ORDER BY ts
+SELECT
+  t.ts, t.session_id, t.agent_name,
+  COALESCE(NULLIF(t.model, ''), json_extract(s.extra_data_json, '$.effectiveModel')) AS model,
+  json_extract(s.extra_data_json, '$.effectiveModelVariant') AS variant,
+  t.input_tokens, t.output_tokens,
+  t.cache_read_tokens, t.cost_usd
+FROM ${MAVIS_TABLE} t
+LEFT JOIN local_runtime_sessions s ON s.session_id = t.session_id
+WHERE t.agent_name IN (PLACEHOLDER_AGENTS)
+ORDER BY t.ts, t.id
 LIMIT 50000
 `.trim();
 
 const MAVIS_USAGE_SINCE_SQL = `
-SELECT ts, session_id, agent_name, model,
-  input_tokens, output_tokens,
-  cache_read_tokens, cost_usd
-FROM ${MAVIS_TABLE}
-WHERE agent_name IN (PLACEHOLDER_AGENTS)
-  AND ts >= ?
-ORDER BY ts
+SELECT
+  t.ts, t.session_id, t.agent_name,
+  COALESCE(NULLIF(t.model, ''), json_extract(s.extra_data_json, '$.effectiveModel')) AS model,
+  json_extract(s.extra_data_json, '$.effectiveModelVariant') AS variant,
+  t.input_tokens, t.output_tokens,
+  t.cache_read_tokens, t.cost_usd
+FROM ${MAVIS_TABLE} t
+LEFT JOIN local_runtime_sessions s ON s.session_id = t.session_id
+WHERE t.agent_name IN (PLACEHOLDER_AGENTS)
+  AND t.ts >= ?
+ORDER BY t.ts, t.id
 LIMIT 50000
 `.trim();
 

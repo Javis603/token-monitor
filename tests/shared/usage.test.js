@@ -1438,3 +1438,31 @@ test('merging a session keeps one source occupancy rather than summing two', () 
   assert.equal(unknown.periods.today.sessions[key].contextTokens, 140);
   assert.equal(unknown.periods.today.sessions[key].contextWindow, 200_000);
 });
+
+test('normalizePeriod preserves mavis per-session agent (coder/explore/...)', () => {
+  // The mavis adapter writes `agent` onto every normalised session row so
+  // the UI can break mavis totals down by sub-agent. `normalizePeriod`
+  // must carry that field through `normalizeSession` (it was previously
+  // stripped because `normalizeSession` only assigned `components` to the
+  // session without looking at `input.agent`).
+  const period = normalizePeriod({
+    sessions: {
+      'mavis:mvs_1234': {
+        client: 'mavis',
+        sessionId: 'mvs_1234',
+        agent: 'coder',
+        inputTokens: 10,
+        outputTokens: 5
+      },
+      'mavis:mvs_5678': {
+        client: 'mavis',
+        sessionId: 'mvs_5678',
+        agent: 'explore',
+        inputTokens: 20,
+        outputTokens: 0
+      }
+    }
+  });
+  assert.equal(period.sessions['mavis:mvs_1234'].agent, 'coder');
+  assert.equal(period.sessions['mavis:mvs_5678'].agent, 'explore');
+});
