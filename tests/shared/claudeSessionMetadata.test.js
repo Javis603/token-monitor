@@ -158,6 +158,43 @@ test('readSessionTurnEnded follows the newest stop_reason, and tool_use is not a
   fs.writeFileSync(unterminated.file, bigAssistant('tool_use'));
   assert.equal(readSessionTurnEnded(unterminated.file, { cache: new Map() }), false, '...and its reason is the newer one');
 
+  // EOF is often only a write boundary, not the end of the record: a transcript
+  // being appended to stops mid-record, and the next tick reads only the new
+  // bytes. The fragments therefore have to survive, or the suffix that arrives
+  // later carries no head and can never be recognised as an assistant record
+  // again — the completion would be lost for good.
+  const resume = fixture([]);
+  t.after(() => fs.rmSync(resume.dir, { recursive: true, force: true }));
+  const resumeCache = new Map();
+  const parted = bigAssistant('tool_use');
+  const cut = parted.indexOf('"stop_reason"');
+  // The earlier records are complete; only the oversized one is mid-write, so it
+  // is unterminated exactly as a live transcript is.
+  fs.writeFileSync(resume.file, [
+    assistant('end_turn'),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: 'go on' }] } })
+  ].join('\n') + '\n' + parted.slice(0, cut));
+  // Half-written: the prompt already retired the old completion, and the new
+  // record states no reason yet.
+  assert.equal(readSessionTurnEnded(resume.file, { cache: resumeCache }), false, 'a half-written answer is not a finished turn');
+  // The writer finishes the record on a later tick, same cache.
+  fs.appendFileSync(resume.file, parted.slice(cut) + '\n');
+  assert.equal(readSessionTurnEnded(resume.file, { cache: resumeCache }), false, 'the appended stop_reason is read');
+
+  // ...and the same resume can turn the reading back on.
+  const resumeEnded = fixture([]);
+  t.after(() => fs.rmSync(resumeEnded.dir, { recursive: true, force: true }));
+  const endedCache = new Map();
+  const endedPart = bigAssistant('end_turn');
+  const endedCut = endedPart.indexOf('"stop_reason"');
+  fs.writeFileSync(resumeEnded.file, [
+    assistant('tool_use'),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: 'go on' }] } })
+  ].join('\n') + '\n' + endedPart.slice(0, endedCut));
+  assert.equal(readSessionTurnEnded(resumeEnded.file, { cache: endedCache }), false, 'still generating');
+  fs.appendFileSync(resumeEnded.file, endedPart.slice(endedCut) + '\n');
+  assert.equal(readSessionTurnEnded(resumeEnded.file, { cache: endedCache }), true, 'the completed answer is read from the suffix');
+
   // The title still resolves from the same shared index, so asking for both
   // costs one pass rather than two.
   const both = fixture([

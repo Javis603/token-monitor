@@ -137,11 +137,18 @@ function scanRange(fd, start, length, state, fsApi) {
   // newline. Keep the bytes as trailing state too, so a partial concurrent
   // write can still be completed on the next append-only scan.
   if (state.droppingLongLine) {
-    // The oversized record ended at EOF instead of at a newline, which is what
-    // a transcript being written right now looks like. Its boundary still has
-    // to be read, and the tail was already kept by the caller of this loop.
+    // EOF is not necessarily the end of the record: a transcript being written
+    // right now stops mid-record, and the next tick reads only the bytes that
+    // were appended. The boundary is evaluated for whatever the fragments show
+    // so far, but they are kept and the record stays open, because the suffix
+    // that arrives later carries no head and could never be identified as an
+    // assistant record again. Consuming them here lost the stop_reason for
+    // good, and the previous turn's reading survived.
+    const head = state.longLineHead;
+    const tail = state.longLineTail;
     applyLongLineFragments(state);
-    state.droppingLongLine = false;
+    state.longLineHead = head || Buffer.alloc(0);
+    state.longLineTail = tail || Buffer.alloc(0);
   } else if (state.trailing.length > 0) {
     applyMetadataLine(state, state.trailing);
   }
@@ -190,7 +197,13 @@ function applyLongLineFragments(state) {
     // stop_reason is the last occurrence, and it trails the assistant text.
     const matches = [...tail.matchAll(/"stop_reason"\s*:\s*"([^"]*)"/g)];
     const reason = matches.length ? matches[matches.length - 1][1] : '';
-    if (reason) state.stopReason = reason;
+    // A record still being written has no reason yet, and that absence is not
+    // the same as a finished turn: clearing the flag here would retire the
+    // prompt that started this record and let the previous completion show
+    // through again while the model is mid-answer. Only a stated reason is a
+    // reading.
+    if (!reason) return;
+    state.stopReason = reason;
     state.userSinceStop = false;
     return;
   }
