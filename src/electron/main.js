@@ -6532,6 +6532,7 @@ function revealWindow(target = mainWindow, options = {}) {
   const inactive = options.inactive === true || (target === mainWindow && floatingBubbleState.collapsed);
   if (inactive && typeof target.showInactive === 'function') {
     target.showInactive();
+    target.emit('show');
     return;
   }
   target.show();
@@ -6765,12 +6766,27 @@ function replaceMainWindow(bounds, options = {}) {
     inactive: options.inactive === true
   });
   const next = mainWindow;
-  next.once('show', () => {
+  let fallbackTimer = null;
+  const destroyOld = () => {
+    if (fallbackTimer) {
+      clearTimeout(fallbackTimer);
+      fallbackTimer = null;
+    }
     if (old && !old.isDestroyed()) old.destroy();
     if ((options.focus === true || (options.focus !== false && wasFocused)) && !next.isDestroyed()) {
       next.focus();
     }
-  });
+  };
+  if (!next || next.isDestroyed()) {
+    if (old && !old.isDestroyed()) old.destroy();
+    return;
+  }
+  if (next.isVisible()) {
+    destroyOld();
+    return;
+  }
+  next.once('show', destroyOld);
+  fallbackTimer = setTimeout(destroyOld, 3000);
 }
 
 function discardFailedDashboardWindow(win, reason) {
@@ -8634,13 +8650,21 @@ app.whenReady().then(() => {
     }
     return { ok: true };
   });
-  ipcMain.on('window:minimize', () => {
-    if (settings?.trayMode) hidePopover();
-    else mainWindow?.minimize();
+  ipcMain.on('window:minimize', (event) => {
+    if (settings?.trayMode) {
+      hidePopover();
+      return;
+    }
+    const win = (event?.sender ? BrowserWindow.fromWebContents(event.sender) : null) || mainWindow;
+    if (win && !win.isDestroyed()) win.minimize();
   });
-  ipcMain.on('window:close', () => {
-    if (settings?.trayMode) hidePopover();
-    else mainWindow?.close();
+  ipcMain.on('window:close', (event) => {
+    if (settings?.trayMode) {
+      hidePopover();
+      return;
+    }
+    const win = (event?.sender ? BrowserWindow.fromWebContents(event.sender) : null) || mainWindow;
+    if (win && !win.isDestroyed()) win.close();
   });
   ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
