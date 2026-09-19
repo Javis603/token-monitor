@@ -531,6 +531,12 @@ function mergeSession(target, source) {
   }
   if (!target.title && source.title) target.title = normalizeSessionTitle(source.title);
   if (!target.sessionKind && source.sessionKind) target.sessionKind = normalizeSessionKind(source.sessionKind);
+  // mavis provider writes the agent on the session (coder, explore,
+  // general, mavis, verifier, worker). Once one source row fills it
+  // in, every later row from the same session must carry the same
+  // agent — copy on first sighting, never overwrite with empty.
+  const sourceAgent = String(source.agent || '').trim();
+  if (sourceAgent && !String(target.agent || '').trim()) target.agent = sourceAgent;
   for (const [model, tokens] of Object.entries(source.models || {})) {
     const key = normalizeModelNameForClient(model, target.client);
     if (key) target.models[key] = (target.models[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
