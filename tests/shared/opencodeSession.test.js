@@ -91,8 +91,10 @@ maybe('readSessionMeta reports a finished turn only when the newest assistant me
     ]
   });
   const mid = ocs.readSessionMeta(['mid'], { dbPaths: [midTurn], sqlite }).get('mid');
-  // The newer tool-calls message wins, so the turn is not over.
-  assert.equal(mid.turnEnded, undefined);
+  // The newer tool-calls message wins, so the turn is not over. Reported as an
+  // explicit false rather than omitted: an omitted boundary cannot clear a
+  // `true` that an earlier tick wrote.
+  assert.equal(mid.turnEnded, false);
 
   // A transcript that never recorded a finish reports nothing, which leaves the
   // caller on its own time window rather than guessing either way.
@@ -112,7 +114,9 @@ maybe('readSessionMeta reports a finished turn only when the newest assistant me
       { id: 'd2', role: 'user', createdMs: T0 + 2000 }
     ]
   });
-  assert.equal(ocs.readSessionMeta(['trail'], { dbPaths: [trailing], sqlite }).get('trail').turnEnded, undefined);
+  // The newest row is the user's, so the previous completion is not the current
+  // turn: an explicit false, which is what lets it clear an earlier true.
+  assert.equal(ocs.readSessionMeta(['trail'], { dbPaths: [trailing], sqlite }).get('trail').turnEnded, false);
   // A tool-calls pause is still mid-turn, and only the newest row decides.
   const paused = makeDb({
     session: { id: 'pause', title: 'pause', created: T0, updated: T0 + 2000 },

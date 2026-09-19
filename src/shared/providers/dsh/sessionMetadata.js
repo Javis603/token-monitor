@@ -141,7 +141,9 @@ function resolveSessionMetadata(sessionIds, context) {
       startedAt: startedAt || lastUsedAt,
       lastUsedAt: lastUsedAt || startedAt,
       ...(sessionState?.title ? { title: sessionState.title } : {}),
-      ...(sessionState?.turnEnded === true ? { turnEnded: true } : {}),
+      // Forwarded in both directions, as with the other readers: `false`
+      // records an open turn and has to clear a `true` from an earlier tick.
+      ...(typeof sessionState?.turnEnded === 'boolean' ? { turnEnded: sessionState.turnEnded } : {}),
       ...(live ? { contextWindow: sessionState?.contextWindow, contextTokens: sessionState?.contextTokens } : {})
     });
   }

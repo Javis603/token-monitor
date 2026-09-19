@@ -42,11 +42,12 @@ test('readSessionTurnEnded follows the newest stop_reason, and tool_use is not a
   t.after(() => fs.rmSync(truncated.dir, { recursive: true, force: true }));
   assert.equal(readSessionTurnEnded(truncated.file, { cache: new Map() }), true);
 
-  // A transcript that never recorded one reports false rather than guessing.
+  // A transcript that never recorded one reports no evidence rather than
+  // guessing, which is distinct from `false` ("a turn is under way").
   const silent = fixture([JSON.stringify({ type: 'user', message: { content: 'hi' } })]);
   t.after(() => fs.rmSync(silent.dir, { recursive: true, force: true }));
-  assert.equal(readSessionTurnEnded(silent.file, { cache: new Map() }), false);
-  assert.equal(readSessionTurnEnded('', { cache: new Map() }), false);
+  assert.equal(readSessionTurnEnded(silent.file, { cache: new Map() }), undefined);
+  assert.equal(readSessionTurnEnded('', { cache: new Map() }), undefined);
 
   // A prompt accepted after a completion starts the next turn, so that
   // completion no longer describes the current one. Without this the old
@@ -94,6 +95,19 @@ test('readSessionTurnEnded follows the newest stop_reason, and tool_use is not a
   assert.equal(readSessionTurnEnded(appended.file, { cache: appendCache }), true);
   fs.appendFileSync(appended.file, JSON.stringify({ type: 'user', message: { content: 'keep going' } }) + '\n');
   assert.equal(readSessionTurnEnded(appended.file, { cache: appendCache }), false, 'the prompt must survive the append resume');
+
+  // The three states are distinct, and a caller has to be able to tell them
+  // apart: `true` = finished, `false` = a turn is under way, `undefined` = the
+  // transcript states nothing. Collapsing the last two is what let a stale
+  // `true` from an earlier tick survive, since only an explicit `false` can
+  // clear it.
+  const waiting = fixture([assistant('end_turn'), JSON.stringify({ type: 'user', message: { content: 'go' } })]);
+  t.after(() => fs.rmSync(waiting.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(waiting.file, { cache: new Map() }), false, 'a waiting prompt is active, not unknown');
+
+  const midTool = fixture([assistant('tool_use')]);
+  t.after(() => fs.rmSync(midTool.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(midTool.file, { cache: new Map() }), false, 'a tool pause is active, not unknown');
 
   // The title still resolves from the same shared index, so asking for both
   // costs one pass rather than two.

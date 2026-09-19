@@ -779,19 +779,20 @@ function sessionsNode(sessions) {
     const state = stateByKey.get(key) || 'idle';
     row.classList.toggle('is-running', state === 'running');
     const name = session.title || session.projectLabel || String(session.sessionId || '').slice(0, 12) || '—';
-    // The mark itself is decorative (aria-hidden) because a bare glyph says
-    // nothing to a screen reader, and its `title` only reaches pointer users.
-    // The translated state therefore rides the row's accessible name, which is
-    // the only place a non-visual user can get it.
-    const stateLabel = state === 'running' ? t('session.running')
-      : state === 'ended' ? t('session.finished') : '';
-    if (stateLabel) row.setAttribute('aria-label', `${name} · ${stateLabel}`);
     const nameNode = el('span', 'edge-dock-session-name');
     // The dot sits with the name rather than recolouring it: a green title
     // made the row read as a different kind of row, and the colour carried no
     // more information than the dot does.
     nameNode.append(stateMark(session, key, state));
     nameNode.append(document.createTextNode(name));
+    // The glyph is decorative and its `title` only reaches pointer users, so the
+    // translated state is rendered as real text for assistive technology. It
+    // cannot go on the row itself: a plain `div` has the generic role and
+    // Chromium ignores an accessible name set on one.
+    const stateLabel = state === 'running' ? t('session.running')
+      : state === 'ended' ? t('session.finished')
+        : t('session.idle');
+    nameNode.append(el('span', 'sr-only', ` ${stateLabel}`));
     // The meta line carries model, age, and (when the transcript stated one)
     // the context reading, so nothing the row showed before is displaced.
     const meta = el('span', 'edge-dock-session-meta');

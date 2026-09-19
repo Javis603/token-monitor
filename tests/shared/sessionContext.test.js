@@ -67,6 +67,18 @@ test('normalizeSessionContext requires both halves and reports overflow as repor
   assert.equal(normalizeSessionContext({ contextTokens: 120, contextWindow: 0 }), null);
   assert.equal(normalizeSessionContext(null), null);
   assert.deepEqual(normalizeSessionContext({ contextTokens: 300, contextWindow: 200 }), { contextTokens: 300, contextWindow: 200 });
+
+  // Non-scalars are rejected before coercion. The Codex reader passes parsed
+  // transcript fields straight through, so without this a malformed record
+  // would read as a real measurement: `Number(true)` is 1 and `Number([200])`
+  // is 200, and the row would draw a gauge from it.
+  assert.equal(normalizeSessionContext({ contextTokens: true, contextWindow: 200 }), null);
+  assert.equal(normalizeSessionContext({ contextTokens: 120, contextWindow: [200] }), null);
+  assert.equal(normalizeSessionContext({ contextTokens: {}, contextWindow: 200 }), null);
+  assert.equal(normalizeSessionContext({ contextTokens: 120, contextWindow: null }), null);
+  assert.equal(normalizeSessionContext({ contextTokens: '   ', contextWindow: 200 }), null);
+  // Numeric strings are still accepted, since the DSH reader folds them.
+  assert.deepEqual(normalizeSessionContext({ contextTokens: '150', contextWindow: '200' }), { contextTokens: 150, contextWindow: 200 });
 });
 
 test('readCodexSessionContext reads the newest reported window and last request', () => {

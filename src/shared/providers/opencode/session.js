@@ -64,7 +64,11 @@ function readSessionMeta(sessionIds, deps = {}) {
       // finished its answer, `tool-calls` means it paused to run tools and is
       // still mid-turn. Read beside the last-message timestamp so one query
       // answers both, and only `stop` counts as finished.
-      const lastFinishBySession = new Map();
+      // Tri-state per session: true = the newest word was a completed answer,
+      // false = a prompt is waiting on one, absent = no evidence. A boolean
+      // pair could not express the third case, and collapsing it into "omit"
+      // is what let a stale completion survive.
+      const turnEndedBySession = new Map();
       if (messageColumns.has('session_id') && (messageColumns.has('data') || messageColumns.has('time_created'))) {
         const jsonCreated = messageColumns.has('data')
           ? "CASE WHEN json_valid(data) THEN CAST(json_extract(data,'$.time.created') AS INTEGER) END"
@@ -90,23 +94,40 @@ function readSessionMeta(sessionIds, deps = {}) {
           // started the next turn, so that completion no longer describes the
           // current one. Taking the newest assistant row unconditionally latched
           // the previous `stop` and marked a freshly prompted session finished.
+          // Order by the same effective timestamp the query above used rather
+          // than an unconditional `time_created, id`: the guard only requires
+          // `session_id` plus `data` or `time_created`, so a schema without
+          // `id` (or without `time_created`) would make SQLite reject this
+          // query, and the caller's catch would read that as "this session has
+          // no metadata" and blank its title and timestamps.
+          const orderId = messageColumns.has('id') ? 'id' : 'rowid';
           const finishSql = `SELECT sessionId, role, finish FROM (
                                SELECT session_id AS sessionId,
                                       json_extract(data,'$.role') AS role,
                                       json_extract(data,'$.finish') AS finish,
                                       ROW_NUMBER() OVER (
                                         PARTITION BY session_id
-                                        ORDER BY time_created DESC, id DESC
+                                        ORDER BY CAST(COALESCE(${jsonCreated}, ${storedCreated}) AS INTEGER) DESC,
+                                                 ${orderId} DESC
                                       ) AS rank
                                FROM message
                                WHERE session_id IN (${placeholders})
                                  AND json_valid(data)
                              ) WHERE rank = 1`;
           for (const row of db.prepare(finishSql).all(...ids)) {
-            // Only a completion that is still the newest word counts; when the
-            // newest row is the user's, the turn is open again.
-            if (String(row.role || '') !== 'assistant') continue;
-            lastFinishBySession.set(String(row.sessionId), String(row.finish || ''));
+            const sessionId = String(row.sessionId);
+            const role = String(row.role || '');
+            const finish = String(row.finish || '');
+            if (role === 'assistant') {
+              // A row with no `finish` is the pre-v2 shape, which recorded no
+              // boundary at all and therefore is not evidence of one.
+              if (!finish) continue;
+              turnEndedBySession.set(sessionId, finish === 'stop');
+            } else if (role === 'user') {
+              // The newest message is the user's, so a prompt is waiting on an
+              // answer and the previous completion no longer describes this turn.
+              turnEndedBySession.set(sessionId, false);
+            }
           }
         }
       }
@@ -122,10 +143,12 @@ function readSessionMeta(sessionIds, deps = {}) {
         const lastUsedAt = isoFromMs(lastMessageBySession.get(id)) || startedAt;
         const meta = { startedAt, lastUsedAt, title: String(r.title || '') };
         if (r.directory) meta.projectPath = String(r.directory);
-        // Only a completed answer ends the turn; a `tool-calls` pause is still
-        // work in progress, which is why the flag is omitted rather than set
-        // false — an omitted flag leaves the caller on its time window.
-        if (lastFinishBySession.get(id) === 'stop') meta.turnEnded = true;
+        // A completion ends the turn and a waiting prompt clears one; a
+        // `tool-calls` pause is still work in progress (a `false`), and a session
+        // whose newest row states nothing is left without evidence rather than
+        // guessed at.
+        const ended = turnEndedBySession.get(id);
+        if (ended !== undefined) meta.turnEnded = ended;
         out.set(id, meta);
       }
     } catch (_) { /* skip unreadable db */ } finally {
@@ -164,7 +187,9 @@ function resolveSessionMetadata(sessionIds, context) {
         lastUsedAt,
         ...identity,
         title,
-        ...(meta.turnEnded === true ? { turnEnded: true } : {})
+        // Forwarded in both directions: `false` is evidence of an active turn
+        // and has to reach the merge to clear a `true` from an earlier tick.
+        ...(meta.turnEnded === undefined ? {} : { turnEnded: meta.turnEnded === true })
       });
     }
   }

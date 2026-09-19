@@ -195,16 +195,20 @@ function readSessionTitle(filePath, deps = {}) {
  */
 function readSessionTurnEnded(filePath, deps = {}) {
   const file = String(filePath || '');
-  if (!file) return false;
+  if (!file) return undefined;
   const cache = deps.cache || titleCache;
   // Reading the title first populates or refreshes the shared index; an
   // unchanged file short-circuits both through the same size+mtime check.
   readSessionTitle(file, deps);
   const cached = cache.get(file);
+  // No index means nothing was read from this transcript, so there is no
+  // evidence either way and the caller must stay on its time window.
+  if (!cached) return undefined;
   const stopReason = String(cached?.stopReason || '');
   // A completion is only the current turn while nothing newer has been asked of
   // the session. `tool_use` never counts: the client paused to run tools.
-  return stopReason !== '' && stopReason !== 'tool_use' && cached?.userSinceStop !== true;
+  if (stopReason === '') return undefined;
+  return stopReason !== 'tool_use' && cached?.userSinceStop !== true;
 }
 
 function resolveSessionMetadata(sessionIds, context) {
@@ -226,11 +230,17 @@ function resolveSessionMetadata(sessionIds, context) {
     // costs no second pass. Reported for every session rather than only a recent
     // one: it is what stops a session reading as running, and gating it on the
     // time window would keep a finished session green for that whole window.
+    //
+    // Emitted in all three states, not just the truthy one. A transcript that
+    // shows a new prompt has `false`, which is evidence of an active turn and
+    // has to reach the merge to clear a `true` from an earlier tick; omitting it
+    // left the stale completion in place and the row read Finished while the
+    // model was generating. `undefined` is reserved for "no evidence".
     const turnEnded = readSessionTurnEnded(filePath, deps.claudeMetadataDeps);
     result.set(sessionId, {
       ...meta,
       ...(title ? { title } : {}),
-      ...(turnEnded ? { turnEnded: true } : {})
+      ...(turnEnded === undefined ? {} : { turnEnded })
     });
   };
   const projectFiles = findSessionFiles(roots.projects, sessionIds);

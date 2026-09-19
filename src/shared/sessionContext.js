@@ -37,6 +37,13 @@ function shouldReadSessionContext(lastUsedAt, now = Date.now()) {
 }
 
 function positiveInteger(value) {
+  // Reject non-scalars before coercion: the Codex reader hands parsed
+  // transcript fields straight through, and `Number(true)` is 1 while
+  // `Number([200])` is 200, so a malformed record would otherwise read as a
+  // real measurement. Rounding stays as it was, since the DSH parser shares
+  // this policy and tightening it to safe integers would change that.
+  if (typeof value !== 'number' && typeof value !== 'string') return 0;
+  if (typeof value === 'string' && value.trim() === '') return 0;
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? Math.round(number) : 0;
 }
