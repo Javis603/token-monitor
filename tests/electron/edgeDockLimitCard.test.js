@@ -98,8 +98,10 @@ function balancedCall(source, opening) {
 }
 
 // The dock's own wiring, read off dock.js rather than restated: what is being
-// checked is that THAT list is complete.
-function dockView(appearance = {}) {
+// checked is that THAT list is complete. A test may override one dependency to
+// watch what the builder asks it (the account control is the one that reports
+// back), and gets the real one for everything it does not name.
+function dockView(appearance = {}, overrides = {}) {
   const settings = { showLimitUsed: false, claudePrepaidBalanceEnabled: true, ...appearance };
   return createLimitWindowsView({
     document: {
@@ -149,7 +151,8 @@ function dockView(appearance = {}) {
     subscriptions: () => appearance.subscriptions || [],
     subscriptionAccounts: () => appearance.accounts || [],
     monthClientCosts: () => appearance.monthClientCosts || {},
-    resetForecast: () => ({ busy: false, forecast: appearance.forecast || null })
+    resetForecast: () => ({ busy: false, forecast: appearance.forecast || null }),
+    ...overrides
   });
 }
 
@@ -315,6 +318,59 @@ test('a grouped provider heads with the account count the page shows', () => {
   // untranslated key.
   const untranslated = dockView().renderLimitProviderGroup('deepseek', 'DeepSeek', [account('a@x'), account('b@x')], '#4D6BFE');
   assert.equal(untranslated.find('limit-plan').textContent, '');
+});
+
+// The switch control reads "Use {account} as this device's Codex account", and
+// the name in that sentence was read off the object switchTarget() resolved —
+// which the two surfaces resolve differently: the page looks the account up in
+// its managed entries, which carry the raw `email`, while the card's projection
+// reports an id and nothing else. So one control named the account on the page
+// and read the unnamed placeholder on the card, and the page printed, under a
+// masked title, exactly the address masking hides. The builder names the account
+// itself now, from the record, in the form the row is titled with.
+test('the Codex switch names the account the row beside it is titled with', () => {
+  const accounts = ['a@example.com', 'b@example.com'].map((accountEmail) => ({
+    provider: 'codex',
+    status: 'ok',
+    accountKey: `sha256:${accountEmail}`,
+    accountEmail,
+    updatedAt: new Date().toISOString(),
+    windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }]
+  }));
+  const render = (switchTarget) => {
+    const labels = [];
+    const view = dockView({ maskLimitAccountEmails: true }, {
+      accountControl: {
+        // Only a render that gets a target draws a switch (the control returns
+        // the title untouched otherwise), so only those labels are collected.
+        render: (options) => {
+          if (options.switchAccount) labels.push(options.accountLabel);
+          return options.titleNode;
+        }
+      },
+      codexAccounts: { matchesActive: () => false, switchTarget, canSwitchSystemAccount: () => true }
+    });
+    const group = view.renderLimitProviderGroup('codex', 'Codex', accounts, '#10A37F');
+    const solo = view.renderLimitProviderSolo('codex', 'Codex', accounts[0], '#10A37F');
+    return {
+      labels,
+      titles: group.find('limit-account-list').children.map((row) => row.find('limit-name-title').textContent),
+      soloTitle: solo.find('limit-name-title').textContent
+    };
+  };
+
+  // The page's target is the managed entry; the card's carries the id alone.
+  const page = render((provider) => ({ id: `codex-${provider.accountEmail}`, email: provider.accountEmail }));
+  const card = render((provider) => ({ id: `codex-${provider.accountEmail}` }));
+
+  assert.deepEqual(page.labels, ['a***@example.com', 'b***@example.com', 'a***@example.com']);
+  assert.deepEqual(card.labels, page.labels, 'an id-only target names the account too');
+  assert.deepEqual(page.labels.slice(0, 2), page.titles, 'and it is the name the row itself shows');
+  assert.doesNotMatch(page.labels.join(' '), /[ab]@example\.com/, 'the address masking hides stays off the tooltip');
+  // Standing alone the row is the provider, so the switch is the only place the
+  // account is named at all — the card named it there before the card became
+  // this builder, and does again.
+  assert.equal(page.soloTitle, 'Codex');
 });
 
 // The mark rule reads like a rule about the provider and is a rule about the

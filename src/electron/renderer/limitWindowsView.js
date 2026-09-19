@@ -1297,7 +1297,12 @@
       titleNode: title,
       active: Boolean(activeCodexAccount),
       switchAccount: codexAccounts.canSwitchSystemAccount() ? switchAccount : null,
-      accountLabel: switchAccount?.email || ''
+      // Who the switch would move this device to, named by the caller that knows
+      // it (see renderLimitProviderSolo/Group). The control used to read the name
+      // off the object switchTarget() resolved, which only the page's managed
+      // entries carry — so the same control named the account on one surface and
+      // fell back to the unnamed placeholder on the other.
+      accountLabel: options.accountLabel || ''
     }));
     titleBlock.append(name);
     // The multi-account group header has no quota of its own, and its accounts can
@@ -1660,7 +1665,13 @@
   // not know there was one to pass.
   function renderLimitProviderSolo(id, label, provider, color) {
     const policy = limitAccountRowPolicy(id, provider, color, { grouped: false, sharedFamily: null });
-    return renderLimitProviderRow(id, label, provider, policy.color, policy.options);
+    // Standing alone, the row is titled with the provider's name, so the account
+    // name is resolved here instead: the switch control still has to say which
+    // account it would move this device to.
+    return renderLimitProviderRow(id, label, provider, policy.color, {
+      ...policy.options,
+      accountLabel: limitAccountTitle(id, provider, 0, [provider])
+    });
   }
 
   // maskLimitAccountEmails is display-only: it hides the address on the limits
@@ -1771,12 +1782,16 @@
     accountList.className = 'limit-account-list';
     providers.forEach((provider, index) => {
       const account = limitAccountRowPolicy(providerId, provider, color, { grouped: true, sharedFamily });
+      // The row's own title is also the name the switch control offers, so the
+      // account is named one way on both surfaces — and named the same way the
+      // row under the button is.
+      const title = limitAccountTitle(providerId, provider, index, providers);
       accountList.append(renderLimitProviderRow(
         providerId,
-        limitAccountTitle(providerId, provider, index, providers),
+        title,
         provider,
         account.color,
-        { accountRow: true, ...account.options }
+        { accountRow: true, accountLabel: title, ...account.options }
       ));
     });
     row.append(head, accountList);

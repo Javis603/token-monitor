@@ -801,11 +801,14 @@ test('Claude limits render as one provider group with account subrows', () => {
   const policy = viewTable('LIMIT_ACCOUNT_ROW_POLICIES');
 
   assert.match(renderLimits, /renderLimitProviderGroup\(id, label, visibleProviders, color\)/);
-  assert.match(renderGroup, /limitAccountTitle\(providerId, provider, index, providers\)/);
+  // The row's title is also the name its switch control offers, so an account is
+  // named one way whichever surface renders the row — the card's projection has
+  // no settings behind it and cannot resolve a name of its own.
+  assert.match(renderGroup, /const title = limitAccountTitle\(providerId, provider, index, providers\);/);
   // The mark is dropped only for a group row. Standing alone the row is the card's
   // whole identity, and that is the shape the Edge Dock card renders.
   assert.match(policy, /claude: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
-  assert.match(renderGroup, /\{ accountRow: true, \.\.\.account\.options \}/);
+  assert.match(renderGroup, /\{ accountRow: true, accountLabel: title, \.\.\.account\.options \}/);
 });
 
 test('every multi-account Limits group uses its provider-localized account count', () => {
