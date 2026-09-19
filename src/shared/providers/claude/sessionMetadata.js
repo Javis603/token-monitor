@@ -209,11 +209,22 @@ function applyLongLineFragments(state) {
   }
   if (!/"type"\s*:\s*"user"/.test(head)) return;
   if (/"isMeta"\s*:\s*true/.test(head) || /"isCompactSummary"\s*:\s*true/.test(head)) return;
-  // The first content block decides it: a tool_result hands work back to the
-  // model and is not a prompt, while text or an image is.
+  // This has to agree with what isUserPrompt() accepts, or the same record is a
+  // prompt when it fits in one line and not one when it does not. That function
+  // takes a plain string content as a real prompt, so this path does too; the
+  // array form is still decided by its leading block, where a tool_result hands
+  // work back to the model and is not a prompt while text or an image is.
   const contentAt = head.indexOf('"content"');
   if (contentAt < 0) return;
   const after = head.slice(contentAt);
+  // A string value is either blank (which the full parser also rejects) or a
+  // prompt. The capture stops at the first quote, so a value still being
+  // written is matched on the bytes that have arrived.
+  const asString = /^"content"\s*:\s*"([^"]*)/.exec(after);
+  if (asString) {
+    if (asString[1].trim().length > 0) state.userSinceStop = true;
+    return;
+  }
   if (/"type"\s*:\s*"tool_result"/.test(after.slice(0, 400))) return;
   if (/"type"\s*:\s*"(text|image)"/.test(after.slice(0, 400))) state.userSinceStop = true;
 }

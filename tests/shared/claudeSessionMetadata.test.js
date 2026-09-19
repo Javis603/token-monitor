@@ -195,6 +195,20 @@ test('readSessionTurnEnded follows the newest stop_reason, and tool_use is not a
   fs.appendFileSync(resumeEnded.file, endedPart.slice(endedCut) + '\n');
   assert.equal(readSessionTurnEnded(resumeEnded.file, { cache: endedCache }), true, 'the completed answer is read from the suffix');
 
+  // The oversized path has to accept exactly what the ordinary parser accepts,
+  // or the same record is a prompt when it fits on one line and not a prompt
+  // when it does not. A plain string content is one of those shapes: Claude
+  // writes it for a pasted blob, and `isUserPrompt` already treats it as a real
+  // prompt, while the fragment scan used to look only for array blocks.
+  const stringPrompt = fixture([assistant('end_turn'), JSON.stringify({ type: 'user', message: { content: Huge } })]);
+  t.after(() => fs.rmSync(stringPrompt.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(stringPrompt.file, { cache: new Map() }), false, 'an oversized string prompt is still a prompt');
+
+  // ...and a blank string is not one, which the ordinary parser also rejects.
+  const blankString = fixture([assistant('end_turn'), JSON.stringify({ type: 'user', message: { content: ' '.repeat(300 * 1024) } })]);
+  t.after(() => fs.rmSync(blankString.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(blankString.file, { cache: new Map() }), true, 'whitespace is not a prompt at any size');
+
   // The title still resolves from the same shared index, so asking for both
   // costs one pass rather than two.
   const both = fixture([
