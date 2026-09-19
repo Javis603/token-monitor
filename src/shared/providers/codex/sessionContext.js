@@ -157,11 +157,15 @@ function codexTurnEndedFromTail(text) {
 function readCodexTurnEnded(filePath, deps = {}) {
   const cache = deps.cache || turnEndCache;
   let stat;
-  try { stat = fs.statSync(filePath); } catch (_) { return false; }
+  // No file means no evidence, which is not the same as `false` ("a turn is
+  // under way"): only the latter may clear a `true` left by an earlier tick.
+  try { stat = fs.statSync(filePath); } catch (_) { return undefined; }
   const fingerprint = `${stat.size}:${stat.mtimeMs}`;
   const cached = cache.get(filePath);
   if (cached?.fingerprint === fingerprint) return cached.turnEnded;
-  let turnEnded = false;
+  // `undefined` until a boundary is actually found: a tail with no
+  // task_complete/task_started/turn_aborted says nothing about the turn.
+  let turnEnded;
   let budget = TURN_READ_START_BYTES;
   while (true) {
     const text = readFileTail(filePath, stat.size, budget);
@@ -172,7 +176,7 @@ function readCodexTurnEnded(filePath, deps = {}) {
       break;
     }
     // No boundary inside this window: widen. Codex can emit a single message
-    // of several megabytes, so a fixed tail is not enough — one real session
+    // of several megabytes, so a fixed tail is not enough - one real session
     // put its last boundary behind two lines that together exceeded 1 MiB.
     if (stat.size <= budget || budget >= TURN_READ_MAX_BYTES) break;
     budget = Math.min(budget * 2, TURN_READ_MAX_BYTES);

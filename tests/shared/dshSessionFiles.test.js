@@ -242,8 +242,6 @@ test('decodeSessionText reads raw .jsonl without decompression', () => {
   assert.equal(text, '{"type":"session"}\n');
 });
 
-test('readDshSessionState folds and preserves the latest persisted title', () => {
-
 test('readDshSessionState reports the newest turn boundary, not just the last one seen', () => {
   // DSH brackets every turn with `turn/start` and `turn/end`, so the newest of
   // the two is the answer. A `turn/end` that carries a reason is still an end:
@@ -267,14 +265,17 @@ test('readDshSessionState reports the newest turn boundary, not just the last on
     fs.appendFileSync(file, `${ev('turn/end', { turn: 2, reason: { kind: 'aborted', reason: { kind: 'user' } } })}\n`);
     assert.equal(readDshSessionState(file, {}).turnEnded, true);
 
-    // A log with no boundary at all reports false rather than guessing.
+    // A log with no boundary at all reports no reading rather than guessing,
+    // so it cannot clear a boundary that an earlier tick did record.
     const bare = path.join(root, 'bare.jsonl');
     fs.writeFileSync(bare, `${JSON.stringify({ type: 'session/title', seq: 1, data: { title: 'x' } })}\n`);
-    assert.equal(readDshSessionState(bare, {}).turnEnded, false);
+    assert.equal(readDshSessionState(bare, {}).turnEnded, undefined);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('readDshSessionState folds and preserves the latest persisted title', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-'));
   const file = path.join(root, 'session.jsonl');
   try {

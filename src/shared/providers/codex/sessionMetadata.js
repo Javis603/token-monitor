@@ -364,7 +364,9 @@ function resolveSessionMetadata(sessionIds, context) {
     // question the window cannot: whether the agent is still generating.
     const turnEnded = readTurnEnded(filePath);
     const decorated = sessionContext ? { ...meta, ...sessionContext } : meta;
-    return turnEnded ? { ...decorated, turnEnded: true } : decorated;
+    // Forwarded in all three states, so a \' + BT + 'false\' + BT + ' can clear a \' + BT + 'true\' + BT + ' from an
+    // earlier tick and an unknown transcript leaves the reading alone.
+    return turnEnded === undefined ? decorated : { ...decorated, turnEnded };
   };
   const missingIds = new Set();
   for (const sessionId of sessionIds) {

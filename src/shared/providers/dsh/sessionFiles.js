@@ -303,7 +303,10 @@ function foldDshSessionState(text, previous = {}) {
   // stopped: `completed`, or `aborted`/`error` with the cause. All three mean
   // nothing is generating, so the kind is not consulted - only which of the two
   // boundaries came last.
-  let turnEnded = previous.turnEnded === true;
+  // Carried as a tri-state: a log that never recorded a boundary reports none
+  // rather than claiming a turn is under way, which is what the old initial
+  // `false` did. Only a recorded boundary is a reading.
+  let turnEnded = typeof previous.turnEnded === 'boolean' ? previous.turnEnded : undefined;
   for (const line of String(text || '').split(/\r?\n/)) {
     if (!line.trim()) continue;
     let event;

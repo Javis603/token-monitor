@@ -122,7 +122,13 @@ function readSessionMeta(sessionIds, deps = {}) {
               // A row with no `finish` is the pre-v2 shape, which recorded no
               // boundary at all and therefore is not evidence of one.
               if (!finish) continue;
-              turnEndedBySession.set(sessionId, finish === 'stop');
+              // Only a pause to run tools leaves the turn open. Every other
+              // reason OpenCode can record is terminal — it stops the loop and
+              // waits for the next prompt — including `length` (the output
+              // budget ran out) and `content-filter`. Treating those as
+              // "still generating" held the running mark for the whole recency
+              // window after the model had already stopped.
+              turnEndedBySession.set(sessionId, finish !== 'tool-calls');
             } else if (role === 'user') {
               // The newest message is the user's, so a prompt is waiting on an
               // answer and the previous completion no longer describes this turn.

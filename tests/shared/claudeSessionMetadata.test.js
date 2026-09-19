@@ -109,6 +109,29 @@ test('readSessionTurnEnded follows the newest stop_reason, and tool_use is not a
   t.after(() => fs.rmSync(midTool.dir, { recursive: true, force: true }));
   assert.equal(readSessionTurnEnded(midTool.file, { cache: new Map() }), false, 'a tool pause is active, not unknown');
 
+  // A record too large to hold is still read for its boundary. The scanner
+  // drops anything past its line budget to bound memory, and the turn state
+  // rides the same pass — so a pasted screenshot (real ones here reach 1.9 MB,
+  // and 476 records exceed the 64 KiB guard) used to take the prompt with it and
+  // leave the previous completion latched.
+  const Huge = 'z'.repeat(300 * 1024);
+  const bigPrompt = fixture([assistant('end_turn'), JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: Huge }] } })]);
+  t.after(() => fs.rmSync(bigPrompt.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(bigPrompt.file, { cache: new Map() }), false, 'an oversized prompt is still a prompt');
+
+  // ...and an oversized record that is NOT a prompt must not be mistaken for one.
+  const bigToolResult = fixture([
+    assistant('end_turn'),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: Huge }] } })
+  ]);
+  t.after(() => fs.rmSync(bigToolResult.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(bigToolResult.file, { cache: new Map() }), true, 'an oversized tool_result does not retire the completion');
+
+  // Client bookkeeping rides the same oversized shape.
+  const bigMeta = fixture([assistant('end_turn'), JSON.stringify({ type: 'user', isMeta: true, message: { content: Huge } })]);
+  t.after(() => fs.rmSync(bigMeta.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(bigMeta.file, { cache: new Map() }), true, 'an oversized meta record is not a prompt');
+
   // The title still resolves from the same shared index, so asking for both
   // costs one pass rather than two.
   const both = fixture([

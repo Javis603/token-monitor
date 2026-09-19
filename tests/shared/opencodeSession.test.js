@@ -126,6 +126,22 @@ maybe('readSessionMeta reports a finished turn only when the newest assistant me
     ]
   });
   assert.equal(ocs.readSessionMeta(['pause'], { dbPaths: [paused], sqlite }).get('pause').turnEnded, true);
+
+  // Every reason other than a tool pause ends the turn. `length` is the output
+  // budget running out and `content-filter` a refusal — OpenCode stops the loop
+  // on both and waits for the next prompt, so treating them as "still
+  // generating" held the running mark for the whole recency window.
+  for (const finish of ['length', 'content-filter', 'error']) {
+    const terminal = makeDb({
+      session: { id: 'term', title: 'term', created: T0, updated: T0 + 1000 },
+      messages: [{ id: 't1', role: 'assistant', createdMs: T0 + 1000, finish, tokens: {}, cost: 0 }]
+    });
+    assert.equal(
+      ocs.readSessionMeta(['term'], { dbPaths: [terminal], sqlite }).get('term').turnEnded,
+      true,
+      `finish: '${finish}' ends the turn`
+    );
+  }
 });
 
 maybe('the reader still answers for every session after the turn-end query', () => {

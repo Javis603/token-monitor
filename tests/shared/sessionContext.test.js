@@ -129,8 +129,8 @@ test('the turn-end marker is read from each client transcript that reports one',
   // A transcript with no boundary at all reports nothing, which leaves the
   // caller on its time window rather than guessing.
   const silent = writeRollout(dir, 'silent.jsonl', [responseLine('no boundary here')]);
-  assert.equal(readCodexTurnEnded(silent, { cache: new Map() }), false);
-  assert.equal(readCodexTurnEnded(path.join(dir, 'missing.jsonl'), { cache: new Map() }), false);
+  assert.equal(readCodexTurnEnded(silent, { cache: new Map() }), undefined);
+  assert.equal(readCodexTurnEnded(path.join(dir, 'missing.jsonl'), { cache: new Map() }), undefined);
 });
 
 test('readCodexSessionContext escalates the tail budget past one oversized turn', () => {
