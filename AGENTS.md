@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This is the single source of project guidance, shared by every coding agent (Claude Code, Codex, Cursor, …). `CLAUDE.md` is a Claude Code compatibility shim that just imports this file — edit **this** file, not `CLAUDE.md`.
+This is the single source of project guidance, shared by every coding agent (Claude Code, Codex, Cursor, …).
 
 ## Commands
 
