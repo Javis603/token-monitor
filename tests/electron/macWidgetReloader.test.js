@@ -24,6 +24,27 @@ test('resolves the packaged Widget reloader only on macOS', () => {
   }
 });
 
+test('the development fallback resolves the helper under the repository build directory', () => {
+  // The helper this fallback looks for is a dev build at `<repo>/build/macos-widget`,
+  // a location that does not move when this module does — so the hop count in
+  // `resolveWidgetReloaderPath` has to follow the file rather than the artifact, and
+  // every candidate it derives from `__dirname` is captured here instead of probed
+  // on disk. Creating the file for real would overwrite a developer's own build.
+  const expected = path.join(__dirname, '..', '..', 'build', 'macos-widget', 'TokenMonitorWidgetReloader');
+  const seen = [];
+  const existsSync = fs.existsSync;
+  fs.existsSync = (candidate) => {
+    seen.push(String(candidate));
+    return false;
+  };
+  try {
+    assert.equal(resolveWidgetReloaderPath({ platform: 'darwin' }), null);
+  } finally {
+    fs.existsSync = existsSync;
+  }
+  assert.ok(seen.includes(expected), `resolver looked in ${seen.join(', ')}`);
+});
+
 test('does not resolve or launch the reloader on an unsupported macOS version', () => {
   let launches = 0;
   assert.deepEqual(requestMacWidgetReload({
