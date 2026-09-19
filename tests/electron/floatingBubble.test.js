@@ -31,7 +31,7 @@ const indexPath = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer'
 const bootPath = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'floatingBubbleBoot.js');
 
 function cssBlock(css, selectorPattern) {
-  const match = css.match(new RegExp(`${selectorPattern}\\s*\\{([\\s\\S]*?)\\}`));
+  const match = css.match(new RegExp(`^${selectorPattern}\\s*\\{([\\s\\S]*?)\\}`, 'm'));
   return match?.[1] || '';
 }
 

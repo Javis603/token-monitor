@@ -356,6 +356,9 @@ state.sessionSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
+let nativeMaterialRevision = 0;
+let appearancePreview = {};
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
@@ -364,6 +367,8 @@ const els = {
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
+  glassInputNote: document.getElementById('glassInputNote'),
+  blurInputNote: document.getElementById('blurInputNote'),
   fixedPeriodMessage: document.getElementById('fixedPeriodMessage'),
   toolDetailFooter: document.getElementById('toolDetailFooter'),
   toolDetailFooterTokens: document.getElementById('toolDetailFooterTokens'),
@@ -8812,11 +8817,12 @@ function applyFontSettings(settings) {
 }
 
 function applyAppearanceSettings(settings) {
+  glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
   const opacity = glassRenderingApi.renderedGlassOpacity(settings, {
     platform: state.appInfo?.platform,
     userAgent: navigator.userAgent
   });
-  const depth = clamp(settings?.glassBlur ?? 32, 0, 100) / 100;
+  const depth = (glassRenderingApi.usesNativeMaterial(nativeMaterialState) ? 32 : clamp(settings?.glassBlur ?? 32, 0, 100)) / 100;
   const systemGlassDisabled = settings?.systemGlass === false;
   const isWindows = navigator.userAgent.toLowerCase().includes('windows');
   const windowsGlass = windowsGlassApi.appearanceState(settings, { isWindows });
@@ -8825,6 +8831,13 @@ function applyAppearanceSettings(settings) {
   document.documentElement.style.setProperty('--line-strong-alpha', (0.18 + depth * 0.14).toFixed(3));
   document.documentElement.style.setProperty('--control-alpha', (0.03 + depth * 0.045).toFixed(3));
   document.documentElement.classList.toggle('system-glass-disabled', systemGlassDisabled);
+  const nativeMaterial = glassRenderingApi.usesNativeMaterial(nativeMaterialState);
+  for (const control of [els.glassInput, els.blurInput, els.resetGlassButton, els.resetDepthButton]) {
+    if (control) control.disabled = nativeMaterial;
+  }
+  for (const note of [els.glassInputNote, els.blurInputNote]) {
+    if (note) note.classList.toggle('hidden', !nativeMaterial);
+  }
   els.windowsBackdropRow?.classList.toggle('hidden', !windowsGlass.showBackdropControl);
   if (els.windowsBackdropInput) {
     els.windowsBackdropInput.value = windowsGlass.backdropMode;
@@ -9022,7 +9035,9 @@ function currentVendorOverrides() {
 function previewThemeColor(key, value) {
   if (!themePresetsApi.isValidHex(value)) return;
   const next = { ...currentThemeOverrides(), [key]: themePresetsApi.normalizeHex(value) };
+  appearancePreview = { ...appearancePreview, themeColors: next };
   applyThemeColors(next);
+  window.tokenMonitor.previewAppearance?.(appearancePreview).catch?.(() => {});
 }
 
 async function saveThemeColor(key, value) {
@@ -9627,9 +9642,10 @@ function syncSliderRows() {
 
 function applyAppearanceFromControls() {
   const patch = appearancePatchFromControls();
+  appearancePreview = { ...appearancePreview, ...patch };
   applyAppearanceSettings(patch);
   syncSliderRows();
-  window.tokenMonitor.previewAppearance?.(patch).catch(() => {});
+  window.tokenMonitor.previewAppearance?.(appearancePreview).catch(() => {});
 }
 
 async function saveAppearanceFromControls() {
@@ -12760,6 +12776,7 @@ function preserveSettingsPanelScroll(callback) {
 }
 
 async function saveSettings(patch) {
+  for (const key of Object.keys(patch)) delete appearancePreview[key];
   const settingsPushRevision = state.settingsPushRevision;
   try {
     state.settings = await window.tokenMonitor.updateSettings(patch);
@@ -12832,6 +12849,25 @@ window.addEventListener('blur', () => {
 });
 
 async function init() {
+  // Subscribe before querying: a native appearance/accessibility change can
+  // arrive while the initial state round trip is in flight.
+  const materialPush = window.tokenMonitor.onNativeMaterialState;
+  if (typeof materialPush === 'function') {
+    materialPush((next) => {
+      nativeMaterialRevision += 1;
+      nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState(next);
+      glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
+      applyAppearanceSettings({ ...(state.settings || {}), ...appearancePreview });
+    });
+  }
+  const materialQueryRevision = nativeMaterialRevision;
+  try {
+    const initialMaterial = await window.tokenMonitor.getNativeMaterialState?.();
+    if (materialQueryRevision === nativeMaterialRevision && initialMaterial) {
+      nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState(initialMaterial);
+      glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
+    }
+  } catch (_) {}
   // Subscribed before the app-info round trip, not after: a theme flipped while
   // that call is in flight would otherwise be missed until the next flip. The
   // seeded value then only fills in when no push has already answered.
@@ -13727,6 +13763,9 @@ els.appUpdateReleaseNotesButton.addEventListener('click', async () => {
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
   state.settingsPushRevision += 1;
+  for (const key of Object.keys(appearancePreview)) {
+    if (JSON.stringify(next[key]) !== JSON.stringify(state.settings?.[key])) delete appearancePreview[key];
+  }
   state.settings = next;
   applyEffectiveCurrencyRates();
   observeDisplayLiveTokenRates(state.stats);
