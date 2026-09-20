@@ -444,13 +444,34 @@ function ringNode(remainingPercent, color, mark) {
   fill.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE * (1 - remaining / 100)));
   if (remainingPercent === null) fill.style.opacity = '0';
   svg.append(track, fill);
-  ring.append(svg, mark);
+  // The halo the running state breathes (see dock.css). Always emitted and
+  // transparent until the cell is marked running, so the cell's own state is the
+  // only thing that decides whether it shows - a glow node appearing and
+  // disappearing would restart the animation on every repaint, and the rail
+  // repaints on a clock.
+  ring.append(svg, el('span', 'edge-dock-ring-glow'), mark);
   return ring;
 }
 
 function providerCellNode(cell) {
   const node = el('div', 'edge-dock-cell');
   node.dataset.status = cell.status;
+  // Work in flight for this provider's tools, asked of the rows at paint time for
+  // the same reason the sessions cell asks: running expires on a clock, so a count
+  // frozen into the payload would keep the mark breathing after the work stopped.
+  // The glow rides the mark rather than the ring's arc on purpose. A running
+  // session is not proof that this quota is what is draining - the tokens may be
+  // billed to an API key or another endpoint entirely, which is the same reason
+  // local usage is not an adaptive-polling trigger - so it is a fact about the
+  // tool, not about the arc. Keeping it off the arc also keeps the signal's
+  // strength independent of how much quota is left (an arc-confined glow is
+  // faintest at 5%, which is exactly when it matters most), leaves the focused
+  // ring's own glow unambiguous, and stays readable on a stale cell, where the
+  // dimmed arc means "this number is not to be trusted" while the tool really is
+  // working. An item whose card does not list sessions carries no rows and so
+  // never breathes, which doubles as the off switch for the animation.
+  const running = runningSessionSummary(cell.sessions).count;
+  if (running > 0) node.dataset.running = 'yes';
   const color = providerColor(cell.provider);
   const value = el('span', 'edge-dock-value');
   if (cell.credits && cell.credits.amount !== null && cell.credits.amount !== undefined) {
@@ -460,7 +481,11 @@ function providerCellNode(cell) {
   }
   value.dataset.severity = displaySeverity(cell.remainingPercent);
   node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider)), value);
-  node.setAttribute('aria-label', `${providerLabel(cell.provider)} ${value.textContent}`);
+  // The halo is decorative and carries no text, so the state it announces is
+  // spoken here instead, from the same reading it is drawn from.
+  const spoken = [providerLabel(cell.provider), value.textContent];
+  if (running > 0) spoken.push(t('edgeDock.runningCount', { count: running }));
+  node.setAttribute('aria-label', spoken.join(' '));
   return node;
 }
 
@@ -1137,9 +1162,17 @@ bridge.onRender(render);
 // tool marks it was pushed with, and a card opened later would disagree with the
 // cell that opened it. Every surface re-derives from the payload it already holds,
 // so this costs no IPC and asks the main process for nothing.
+// A cell whose reading moves with the sessions clock. Asked by "does it carry
+// rows" rather than by metric: the sessions item is not the only cell that reads
+// them any more - a provider cell breathes its mark while that tool is working,
+// and that has to stop on the same clock the count does.
+function cellReadsSessions(cell) {
+  return Array.isArray(cell?.sessions) && cell.sessions.length > 0;
+}
+
 function surfacesShowingSessions() {
-  if (surface === 'rail') return (state.payload?.cells || []).some((cell) => cell.metric === presentation.SESSIONS_METRIC);
-  if (surface === 'bubble') return state.payload?.cell?.metric === presentation.SESSIONS_METRIC;
+  if (surface === 'rail') return (state.payload?.cells || []).some(cellReadsSessions);
+  if (surface === 'bubble') return cellReadsSessions(state.payload?.cell);
   return false;
 }
 
@@ -1165,7 +1198,7 @@ function sessionsExpiryDelayMs() {
   let soonest = 0;
   const now = Date.now();
   for (const cell of cells) {
-    if (cell?.metric !== presentation.SESSIONS_METRIC) continue;
+    if (!cellReadsSessions(cell)) continue;
     // Asked of the rows rather than read off the cell. `runningExpiresAt` describes the
     // payload as it was projected, and a repaint does not re-project: once the soonest
     // expiry passes, that field is in the past for good, so a later row's expiry would

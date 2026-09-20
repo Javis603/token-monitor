@@ -142,6 +142,47 @@ html.edge-dock-no-material .edge-dock-shape-fill {
 .edge-dock-cell[data-status="stale"] .edge-dock-ring-fill,
 .edge-dock-cell[data-status="error"] .edge-dock-ring-fill { opacity: 0.35; }
 
+/* Running: a halo behind the provider's mark while that tool has work in flight.
+   It sits on the mark and not on the arc because a running session does not prove
+   this quota is what is draining (the tokens may be billed elsewhere), so it is a
+   fact about the tool rather than about the reading - see providerCellNode for the
+   full reasoning. Sized against the ring so the compact rail scales with it.
+
+   Opacity and transform only: this is the one animation in the dock that runs
+   whenever work is in flight rather than only while a card is open, in an
+   always-on-top window, so it has to stay on the compositor. Animating the arc's
+   `drop-shadow` instead would repaint a blur every frame for the whole life of a
+   session. */
+.edge-dock-ring-glow {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 58%;
+  height: 58%;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(closest-side, var(--ring-color, var(--accent)), transparent 70%);
+  transition: opacity 240ms ease;
+}
+/* The mark is an in-flow grid item and the halo is positioned, so without this the
+   halo paints over the glyph it is meant to sit behind - painting order puts a
+   positioned element above an in-flow sibling whatever the DOM order. Scoped to the
+   ring: the same class is drawn flat in the card's rows and its lists. */
+.edge-dock-ring .edge-dock-mark { position: relative; }
+/* The lit state is a still halo, and the keyframes only modulate it. Reduced
+   motion stops the animation but not the declaration, so it falls back to a
+   steady glow rather than to nothing - the same trade the session dot makes when
+   it swaps its spinner for a solid dot. */
+.edge-dock-cell[data-running="yes"] .edge-dock-ring-glow {
+  opacity: 0.42;
+  animation: edge-dock-mark-breathe 2600ms ease-in-out infinite;
+}
+@keyframes edge-dock-mark-breathe {
+  0%, 100% { opacity: 0.22; transform: scale(0.92); }
+  50%      { opacity: 0.62; transform: scale(1.06); }
+}
+
 .edge-dock-mark {
   width: 17px;
   height: 17px;
