@@ -269,6 +269,13 @@
       credits: headlineCredits,
       accountCount: accounts.length,
       accounts: projected.slice(0, MAX_BUBBLE_ACCOUNTS).map((account) => account.summary),
+      // Every account the provider has, hidden ones included. Hiding an account
+      // is a choice about what this card draws, while a subscription binds to
+      // the account itself — and matchProviderAccount() falls back to "the
+      // provider has exactly one account, so there is no ambiguity", so a
+      // universe narrowed to the drawn rows puts a hidden account's record on
+      // whichever row is left.
+      subscriptionAccounts: records,
       usage: options.showUsage === false ? null : providerUsage(options.stats, id),
       // The month's cost per client, for the subscription card on this card's
       // plan cell. It is the same map the Limits page reads — the card cannot

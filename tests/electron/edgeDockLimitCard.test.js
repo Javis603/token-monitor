@@ -26,6 +26,7 @@ const limitWindowTextApi = require('../../src/shared/limitWindowText');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 const i18n = require('../../src/electron/renderer/i18n');
 const { createLimitWindowsView } = require('../../src/electron/renderer/limitWindowsView');
+const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
 
 const root = path.join(__dirname, '../..');
 
@@ -380,26 +381,36 @@ test('the Codex switch names the account the row beside it is titled with', () =
 // MiMo, Cursor, OpenCode and Volcengine row lost its mark on both surfaces at
 // once — the card and the page agreed with each other and with nothing the user
 // had seen before.
+//
+// OpenRouter and Antigravity are in the list for the other half: one login per
+// row under a header that already wears the mark, so the rows drop theirs too.
+// They were the two the policy table was missing, and a group drew the mark on
+// its header and then again on every row beneath it.
 test('a provider that drops its mark inside a group keeps it standing alone', () => {
-  const account = (key, extra = {}) => ({
-    provider: 'claude',
+  const account = (provider, key) => ({
+    provider,
     status: 'ok',
     accountKey: key,
     updatedAt: new Date().toISOString(),
-    windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }],
-    ...extra
+    windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }]
   });
   const view = dockView();
 
-  const solo = view.renderLimitProviderSolo('claude', 'Claude', account('k1'), '#D97757');
-  assert.ok(solo.find('limit-icon'), 'a solo row wears the provider mark');
+  for (const [id, label, color] of [
+    ['claude', 'Claude', '#D97757'],
+    ['openrouter', 'OpenRouter', '#6566F1'],
+    ['antigravity', 'Antigravity', '#4285F4']
+  ]) {
+    const solo = view.renderLimitProviderSolo(id, label, account(id, 'k1'), color);
+    assert.ok(solo.find('limit-icon'), `${id}: a solo row wears the provider mark`);
 
-  const group = view.renderLimitProviderGroup('claude', 'Claude', [account('k1'), account('k2')], '#D97757');
-  assert.ok(group.find('limit-icon'), 'the group header wears it instead');
-  const list = group.find('limit-account-list');
-  assert.equal(list.children.length, 2);
-  for (const row of list.children) {
-    assert.equal(row.find('limit-icon'), null, 'an account row is named by its own title');
+    const group = view.renderLimitProviderGroup(id, label, [account(id, 'k1'), account(id, 'k2')], color);
+    assert.ok(group.find('limit-icon'), `${id}: the group header wears it instead`);
+    const list = group.find('limit-account-list');
+    assert.equal(list.children.length, 2);
+    for (const row of list.children) {
+      assert.equal(row.find('limit-icon'), null, `${id}: an account row is named by its own title`);
+    }
   }
 });
 
@@ -497,6 +508,63 @@ test('a recorded subscription decorates the card plan cell with the page hover c
   }, '#10A37F');
   assert.equal(bare.find('subscription-tooltip'), null);
   assert.equal(bare.find('limit-plan').textContent, 'Plus');
+});
+
+// A record binds to an account, and an account the composer hides is still one
+// the provider has. Matched against the rows on screen instead, a record bound
+// to the hidden account falls through matchProviderAccount()'s sole-account
+// fallback and hands its price, renewal and top-ups to the row that is left.
+test('a subscription bound to a hidden account does not decorate the row that is left', () => {
+  const record = (key) => ({
+    provider: 'codex',
+    status: 'ok',
+    accountKey: key,
+    accountName: `${key}@example.com`,
+    planLabel: 'Plus',
+    updatedAt: new Date().toISOString(),
+    windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }]
+  });
+  const subscription = {
+    id: 'sub-1',
+    provider: 'codex',
+    kind: 'subscription',
+    planName: 'Plus',
+    amountMinor: 2000,
+    currency: 'USD',
+    intervalCount: 1,
+    interval: 'month',
+    startDate: '2026-08-01',
+    autoRenew: true,
+    nextRenewalOverride: '',
+    endDate: null,
+    topUps: [],
+    binding: { accountKey: 'a' }
+  };
+  const stats = { limits: { providers: [record('a'), record('b')] } };
+  const cell = (hiddenAccounts) => buildEdgeDockCells(stats, {
+    items: [{ type: 'limit', provider: 'codex', hiddenAccounts, showUsage: true }]
+  })[0];
+  // The dock's own wiring, one line from dock.js: the universe rides the cell
+  // rather than being read back off the accounts it draws.
+  const rowFor = (built, key) => dockView({ subscriptions: [subscription] }, {
+    subscriptionAccounts: () => built.subscriptionAccounts || []
+  }).renderLimitProviderSolo(
+    'codex',
+    'Codex',
+    built.accounts.find((account) => account.record.accountKey === key).record,
+    '#10A37F'
+  );
+
+  assert.ok(rowFor(cell([]), 'a').find('subscription-tooltip'), 'the bound account wears its card');
+  assert.equal(rowFor(cell([]), 'b').find('subscription-tooltip'), null, 'and its sibling does not inherit it');
+  assert.equal(
+    rowFor(cell(['a']), 'b').find('subscription-tooltip'),
+    null,
+    'hiding the bound account must not move its card to the row beside it'
+  );
+
+  const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  assert.match(dock, /subscriptionAccounts: \(\) => state\.payload\?\.cell\?\.subscriptionAccounts \|\| \[\],/);
 });
 
 test('a stale row is dimmed by the page rule, not recoloured', () => {

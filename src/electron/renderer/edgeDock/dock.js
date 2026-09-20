@@ -364,11 +364,11 @@ const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
   subscriptions: () => appearance().subscriptions,
   // The row being decorated is one of this card's own accounts, and a record
   // binds through the same list the page matches against — every account the
-  // provider has, never a one-element list, or matchProviderAccount()'s
-  // sole-account fallback would bind a record to whichever row asked.
-  subscriptionAccounts: () => (state.payload?.cell?.accounts || [])
-    .map((account) => account?.record)
-    .filter(Boolean),
+  // provider has, never the rows this card happens to draw, or
+  // matchProviderAccount()'s sole-account fallback would bind a record to
+  // whichever row asked. The composer can hide an account from the card without
+  // it leaving the provider, so the cell carries that list beside its rows.
+  subscriptionAccounts: () => state.payload?.cell?.subscriptionAccounts || [],
   // What this month's tokens would have cost, which the subscription card
   // compares the plan's price against. It rides the cell because it changes with
   // every stats push, while the appearance is only re-pushed on a settings edit.

@@ -1625,6 +1625,15 @@
     volcengine: (provider, color, { grouped }) => ({
       options: grouped ? { planText: provider?.status === 'ok' ? '' : undefined, showIcon: false } : {}
     }),
+    // One login per row, under a header that already wears the mark, so a row
+    // only repeats it. Standing alone the row has nothing else to be recognised
+    // by and keeps its own.
+    openrouter: (provider, color, { grouped }) => ({
+      options: grouped ? { showIcon: false } : {}
+    }),
+    antigravity: (provider, color, { grouped }) => ({
+      options: grouped ? { showIcon: false } : {}
+    }),
     thirdparty: (provider, color, { grouped, sharedFamily }) => {
       const visual = presentationApi.thirdPartyAdapterVisual(provider, color);
       // One mark per adapter, not one per group. With several adapters in the

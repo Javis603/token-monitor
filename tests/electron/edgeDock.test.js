@@ -781,6 +781,10 @@ test('hidden accounts are left out of the headline and the card', () => {
   const [codex] = buildEdgeDockCells(stats, { items });
   assert.equal(codex.remainingPercent, 70);
   assert.deepEqual(codex.accounts.map((account) => account.accountKey), ['sha256:b']);
+  // Hidden is about what the card draws. The subscription matcher is handed both
+  // accounts, or a record bound to the one off screen would fall through
+  // matchProviderAccount()'s sole-account fallback onto the one on it.
+  assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountKey), ['sha256:a', 'sha256:b']);
 });
 
 test('item settings normalize to null for automatic and drop unknown entries', () => {
