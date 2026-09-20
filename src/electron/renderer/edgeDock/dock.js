@@ -412,6 +412,11 @@ function renderPeek(payload) {
   root.dataset.side = payload.side;
   root.title = t('settings.display.edgeDock');
   if (!contentLayer.firstChild) contentLayer.append(el('span', 'edge-dock-grip'));
+  // The handle's exit is a move, not a blink, so the withdrawn pose is held as a
+  // class and one transition carries it both ways (see the grip's rules). The class
+  // goes on in the same frame the grip is built, which is what keeps a page that
+  // loads with the rail already open from animating into a pose it starts in.
+  root.classList.toggle('is-handle-hidden', payload.peeking !== true);
 }
 
 if (surface === 'peek') root.addEventListener('click', () => bridge.click(null));
@@ -634,10 +639,37 @@ function statCellNode(cell) {
 }
 
 let railNode = null;
+// `null` until a payload has said: the entrance is keyed to the transition into
+// revealed, so a page that loads with the rail already up shows it instead of
+// replaying the slide.
+let railRevealed = null;
+
+// The motion itself is CSS (`edge-dock-rail-in`); this only decides when it
+// plays. The root wraps both the silhouette and the cells, so sliding it moves
+// the rail as one unit, and the window — which is the screen edge — is what
+// clips the part that starts off-screen.
+function playRailReveal() {
+  if (document.documentElement.classList.contains('edge-dock-reduced-motion')) return;
+  // The class is dropped on animationend; clearing it first and flushing the
+  // style is what makes a second reveal replay the animation rather than re-add
+  // a class whose animation has already finished.
+  root.classList.remove('is-revealing');
+  void root.offsetWidth;
+  root.classList.add('is-revealing');
+}
+
+root.addEventListener('animationend', (event) => {
+  if (event.animationName === 'edge-dock-rail-in') root.classList.remove('is-revealing');
+});
 
 function renderRail(payload) {
   root.dataset.side = payload.side;
   root.classList.toggle('is-always', payload.always === true);
+  // Stats arrive every few seconds and each one re-renders this surface, so the
+  // slide belongs to the reveal rather than to every payload that follows it.
+  const revealed = payload.revealed === true;
+  if (railRevealed === false && revealed) playRailReveal();
+  railRevealed = revealed;
   if (!railNode) {
     railNode = el('div', 'edge-dock-rail');
     contentLayer.append(railNode);

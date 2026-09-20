@@ -76,11 +76,29 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   margin-top: -7px;
   border-radius: 999px;
   background: rgba(var(--accent-rgb), 0.75);
-  transition: opacity 140ms ease, transform 140ms ease;
+  /* The return takes the window's own FADE_IN_MS, so the handle grows back out on
+     the beat the glass comes back. The retreat below overrides this with a shorter,
+     front-loaded curve, because the main process's fade-out outlasts the movement
+     and the window would otherwise dim past it before it had travelled. */
+  transition: opacity 150ms ease, transform 150ms cubic-bezier(0.33, 1, 0.68, 1);
 }
 .edge-dock-root[data-side="right"] .edge-dock-grip { right: 2px; }
 .edge-dock-root[data-side="left"] .edge-dock-grip { left: 2px; }
 .edge-dock-root[data-surface="peek"]:hover .edge-dock-grip { transform: scaleY(1.3); }
+/* Withdrawn: the handle retreats into the edge it hangs off, the way the rail slides
+   out of that same edge when it takes the handle's place. It shrinks along its own
+   length as it goes, because the window is only 7px wide - the grip has 4px of travel
+   before it is past the edge and clipped, which on its own is not a movement anyone
+   would see. The page holds this as a state rather than replaying an animation, so one
+   transition carries it both ways and a page that loads with the rail already open
+   starts here instead of animating into it. */
+.edge-dock-root[data-side="right"] { --edge-dock-grip-retreat: 4px; }
+.edge-dock-root[data-side="left"] { --edge-dock-grip-retreat: -4px; }
+.edge-dock-root[data-surface="peek"].is-handle-hidden .edge-dock-grip {
+  opacity: 0;
+  transform: translateX(var(--edge-dock-grip-retreat)) scaleY(0.2);
+  transition: opacity 110ms ease-out, transform 110ms ease-out;
+}
 
 /* ---- Rail --------------------------------------------------------------- */
 
@@ -146,23 +164,36 @@ html.edge-dock-no-material .edge-dock-shape-fill {
    It sits on the mark and not on the arc because a running session does not prove
    this quota is what is draining (the tokens may be billed elsewhere), so it is a
    fact about the tool rather than about the reading - see providerCellNode for the
-   full reasoning. Sized against the ring so the compact rail scales with it.
+   full reasoning.
 
    Opacity and transform only: this is the one animation in the dock that runs
    whenever work is in flight rather than only while a card is open, in an
    always-on-top window, so it has to stay on the compositor. Animating the arc's
    `drop-shadow` instead would repaint a blur every frame for the whole life of a
-   session. */
+   session.
+
+   The halo has to out-reach the glyph it sits behind, and only just. The mark is
+   17px across a 42px ring, so a glow that faded out at 58% of the ring reached
+   zero at 8.5px - the mark's own half-width - and was left with nothing to show
+   but whatever showed through the counters of the letterform, which is why it
+   read as barely there. Sizing that out to 88% fixed the reach and overshot it:
+   at that width the halo covers most of the ring and reads as a second, larger
+   circle behind the ring instead of as light around the glyph. 66% spends the
+   falloff a little past the mark - far enough to clear the glyph, well inside
+   the ring - and the colour still holds at the mark's edge, so the band that
+   survives the glyph is the bright part of the falloff rather than its tail. It
+   stays sized against the ring rather than the mark so the compact rail keeps
+   the same proportion. */
 .edge-dock-ring-glow {
   position: absolute;
   inset: 0;
   margin: auto;
-  width: 58%;
-  height: 58%;
+  width: 66%;
+  height: 66%;
   border-radius: 50%;
   pointer-events: none;
   opacity: 0;
-  background: radial-gradient(closest-side, var(--ring-color, var(--accent)), transparent 70%);
+  background: radial-gradient(closest-side, var(--ring-color, var(--accent)) 30%, transparent 100%);
   transition: opacity 240ms ease;
 }
 /* The mark is an in-flow grid item and the halo is positioned, so without this the
@@ -173,14 +204,16 @@ html.edge-dock-no-material .edge-dock-shape-fill {
 /* The lit state is a still halo, and the keyframes only modulate it. Reduced
    motion stops the animation but not the declaration, so it falls back to a
    steady glow rather than to nothing - the same trade the session dot makes when
-   it swaps its spinner for a solid dot. */
+   it swaps its spinner for a solid dot. The still value is the midpoint of the
+   breath, so the state that replaces the animation is the one the animation
+   spends most of its time near rather than either end of the swing. */
 .edge-dock-cell[data-running="yes"] .edge-dock-ring-glow {
-  opacity: 0.42;
+  opacity: 0.43;
   animation: edge-dock-mark-breathe 2600ms ease-in-out infinite;
 }
 @keyframes edge-dock-mark-breathe {
-  0%, 100% { opacity: 0.22; transform: scale(0.92); }
-  50%      { opacity: 0.62; transform: scale(1.06); }
+  0%, 100% { opacity: 0.26; transform: scale(0.94); }
+  50%      { opacity: 0.6; transform: scale(1.05); }
 }
 
 .edge-dock-mark {
@@ -793,13 +826,29 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
 
 /* ---- Motion -------------------------------------------------------------- */
 
+/* The rail arrives by sliding out from under the screen edge, silhouette and
+   cells together, from the side that edge is on. `FADE_IN_MS` in the controller
+   is the same 150ms on the window's own fade, so both halves of the entrance —
+   the slide and the fade — run on one beat rather than reading as two stages. */
+@keyframes edge-dock-rail-in {
+  from { transform: translateX(var(--edge-dock-rail-shift, 14px)); }
+  to { transform: none; }
+}
+.edge-dock-root[data-side="left"] { --edge-dock-rail-shift: -14px; }
+.edge-dock-root.is-revealing { animation: edge-dock-rail-in 150ms cubic-bezier(0.33, 1, 0.68, 1) both; }
+
 @keyframes edge-dock-card-in {
   from { opacity: 0; transform: translateY(3px); }
   to { opacity: 1; transform: none; }
 }
 .edge-dock-root.is-card-changed .edge-dock-card { animation: edge-dock-card-in 160ms ease-out both; }
 
+/* The root is named beside its descendants because the rail's entrance animates
+   the root itself, and `*` does not match the element it hangs off — leaving the
+   one animation in this sheet that reduced motion would not stop. */
+html[data-reduce-motion="on"] .edge-dock-root,
 html[data-reduce-motion="on"] .edge-dock-root *,
+html.edge-dock-reduced-motion .edge-dock-root,
 html.edge-dock-reduced-motion .edge-dock-root * {
   animation: none !important;
   transition: none !important;

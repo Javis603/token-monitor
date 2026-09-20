@@ -276,6 +276,63 @@ test('macOS drops rectangular vibrancy when a surface mask cannot be applied', (
   assert.equal(fixture.maskWindows.length, attemptedMasks, 'the no-material fallback remains stable for this window');
 });
 
+// The rail's entrance is keyed to the reveal rather than to the push, so the page
+// has to be able to tell which payload is the reveal: without that it has neither
+// a transition to fire on nor a way to keep a stats update from replaying the
+// slide. `railVisible` therefore has to be true before the render it triggers.
+test('a rail payload carries the reveal that keys the entrance', (t) => {
+  const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const peek = fixture.windowFor('peek');
+
+  assert.equal(sentPayload(rail, 'rail').revealed, false);
+  assert.equal(rail.opacity, 0);
+
+  fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents }, {});
+  assert.equal(sentPayload(rail, 'rail').revealed, true);
+  assert.equal(rail.opacity, 1);
+
+  // Every push after it repaints the same surface and keeps saying revealed - the
+  // edge is the renderer's to hold, and this is what it must not re-fire on.
+  fixture.controller.setCells([{ id: 'cursor', kind: 'provider', label: 'Cursor' }]);
+  assert.equal(sentPayload(rail, 'rail').revealed, true);
+});
+
+// The handle's exit is played by the page, so the peek payload has to carry the
+// handle's own visibility the way the rail's carries its reveal. It is also what
+// used to put the handle back on top of an open rail: a settings push ran showPeek
+// whatever the rail was doing, and the handle faded in over the cells.
+test('a peek payload carries the handle, and an open rail keeps it away', (t) => {
+  const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+
+  assert.equal(sentPayload(peek, 'peek').peeking, true);
+  assert.equal(peek.ignoreMouse, false);
+
+  fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents }, {});
+  assert.equal(sentPayload(peek, 'peek').peeking, false);
+  assert.equal(peek.ignoreMouse, true);
+
+  // Every push after it repaints the same surface and keeps saying the handle is
+  // away - the page plays the exit on the transition alone.
+  fixture.controller.sync();
+  assert.equal(sentPayload(peek, 'peek').peeking, false);
+  assert.equal(peek.ignoreMouse, true);
+
+  // Always-visible mode has nothing to hide behind a handle, and leaving it again
+  // is what brings the handle back.
+  fixture.settings.edgeDockMode = 'always';
+  fixture.controller.sync();
+  assert.equal(sentPayload(peek, 'peek').peeking, false);
+
+  fixture.settings.edgeDockMode = 'autoHide';
+  fixture.controller.sync();
+  assert.equal(sentPayload(peek, 'peek').peeking, true);
+  assert.equal(peek.ignoreMouse, false);
+});
+
 test('display metric changes hide and remeasure an open card against the new work area', (t) => {
   const fixture = createFixture();
   t.after(() => fixture.controller.stop());
