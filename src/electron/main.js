@@ -5185,8 +5185,14 @@ let edgeDockRateContext = '';
 let edgeDockRateTimer = null;
 
 function edgeDockShowsLiveRate() {
-  return Array.isArray(settings?.edgeDockItems)
-    && settings.edgeDockItems.some((item) => item.type === 'stat' && item.metric === 'liveRate');
+  const items = Array.isArray(settings?.edgeDockItems) ? settings.edgeDockItems : [];
+  // A live-rate item needs the sample for its own headline; a sessions item needs
+  // it only when its rail cell was set to show the rate instead of tool marks. The
+  // tracker is the same either way, so this is the one gate that has to know both.
+  return items.some((item) => item.type === 'stat' && (
+    item.metric === 'liveRate'
+    || (item.metric === 'sessions' && item.cellDetail === 'rate')
+  ));
 }
 
 function edgeDockLiveRateSample(visibleStats) {

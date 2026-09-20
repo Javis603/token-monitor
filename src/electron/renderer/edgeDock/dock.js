@@ -469,6 +469,7 @@ function formatRate(rate) {
 
 function statLabel(metric) {
   if (metric === 'liveRate') return t('edgeDock.stat.liveRate');
+  if (metric === presentation.SESSIONS_METRIC) return t('edgeDock.sessions');
   return t(`edgeDock.period.${metric}`);
 }
 
@@ -489,7 +490,43 @@ function formatRailCost(value) {
 
 function statShortLabel(cell) {
   if (cell.metric === 'liveRate') return t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit');
+  if (cell.metric === presentation.SESSIONS_METRIC) return t('edgeDock.statGlyph.sessions');
   return t(`edgeDock.periodShort.${cell.metric}`);
+}
+
+// The live token rate on a sessions cell's third line, shaped like the live-rate
+// item's own readout so the two cards read alike. Muted while idle rather than
+// blank: "no traffic right now" is a reading, not an absence of one.
+function cellRateNode(cell) {
+  const missing = cell.rate === null || cell.rate === undefined;
+  const node = el('span', 'edge-dock-cell-rate');
+  node.classList.toggle('is-idle', missing || cell.rateIdle === true);
+  node.title = t('edgeDock.rate.switch');
+  node.append(
+    el('span', 'edge-dock-cell-rate-value', missing ? '—' : formatRate(cell.rate)),
+    el('span', 'edge-dock-cell-rate-unit', t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit'))
+  );
+  return node;
+}
+
+// The tools with a session running right now, as their own marks. This is what the
+// cell can say that no other cell can: which tools are working, in one glance,
+// including the tools that have no quota to draw a ring from. The count beside
+// them covers the marks that did not fit. Drawn only when the item's cell detail
+// asks for marks rather than a rate (see statCellNode).
+function runningMarksNode(cell) {
+  const clients = Array.isArray(cell.runningClients) ? cell.runningClients : [];
+  if (!clients.length) return null;
+  const row = el('span', 'edge-dock-cell-marks');
+  for (const client of clients) {
+    // Brand colour, corrected for contrast like every other mark the dock
+    // draws: the client id is what the mark is looked up by, and the rail
+    // already reserves colour for severity, so these stay marks and not meters.
+    row.append(markNode(client, readableColor(clientColors[client] || clientColors.default)));
+  }
+  const rest = (Number(cell.runningClientCount) || clients.length) - clients.length;
+  if (rest > 0) row.append(el('span', 'edge-dock-cell-more', `+${rest}`));
+  return row;
 }
 
 // Caption, tokens, and the period's cost in a smaller line beneath: one item
@@ -503,6 +540,21 @@ function statCellNode(cell) {
     node.classList.toggle('is-idle', cell.idle === true);
     node.title = t('edgeDock.rate.switch');
     node.append(el('span', 'edge-dock-stat-value', cell.rate === null || cell.rate === undefined ? '—' : formatRate(cell.rate)));
+  } else if (cell.metric === presentation.SESSIONS_METRIC) {
+    // Nothing running is a real reading, not a missing one, so the zero is
+    // shown - muted, exactly as the live-rate cell mutes its own idle state.
+    const running = Math.max(0, Number(cell.runningCount) || 0);
+    node.classList.toggle('is-idle', running === 0);
+    node.append(el('span', 'edge-dock-stat-value', String(running)));
+    // The third line is the item's own choice: the tools with work in flight, or
+    // the live token rate. Rate mode keeps its line even with nothing running, so
+    // the cell does not change height as work starts and stops.
+    if (cell.cellDetail === 'rate') {
+      node.append(cellRateNode(cell));
+    } else {
+      const marks = runningMarksNode(cell);
+      if (marks) node.append(marks);
+    }
   } else if (!cell.available) {
     node.classList.add('is-idle');
     node.append(el('span', 'edge-dock-stat-value', '—'));
@@ -512,8 +564,16 @@ function statCellNode(cell) {
       el('span', 'edge-dock-stat-cost', formatRailCost(cell.costUsd))
     );
   }
-  const readout = [...node.children].slice(1).map((child) => child.textContent).join(' ');
-  node.setAttribute('aria-label', `${statLabel(cell.metric)} ${readout}`);
+  // The tool marks are decorative: the count beside them already says how many
+  // are running, so folding their (empty) text into the label would only add
+  // whitespace. Everything else keeps contributing to it.
+  const readout = [...node.children]
+    .filter((child) => !child.classList.contains('edge-dock-cell-marks'))
+    .slice(1)
+    .map((child) => child.textContent)
+    .filter(Boolean)
+    .join(' ');
+  node.setAttribute('aria-label', `${statLabel(cell.metric)} ${readout}`.trim());
   return node;
 }
 
@@ -688,6 +748,14 @@ function stateMark(session, key, state) {
 function sessionsNode(sessions) {
   if (!Array.isArray(sessions) || !sessions.length) return null;
   pruneActivity(sessions);
+  // A provider card's rows are all one client, so their marks would only repeat
+  // the card's own header; the standalone Sessions card lists every client and
+  // names each row's tool (see sessionsCard).
+  const node = sessionsContainer(sessions, { title: t('edgeDock.sessions'), showClientMark: false });
+  return node;
+}
+
+function sessionsContainer(sessions, options = {}) {
   // Re-derived rather than trusted from the pushed cell: the card repaints
   // every 30s from its last payload, and a session that stopped in between must
   // stop reading as running (and must stop being counted).
@@ -696,15 +764,21 @@ function sessionsNode(sessions) {
   const stateByKey = new Map(sessions.map((session) => [sessionKey(session), sessionLive.sessionActivityState(session)]));
   const liveCount = [...stateByKey.values()].filter((state) => state === 'running').length;
   const node = el('div', 'edge-dock-sessions');
+  // The feathered rule above a section separates it from a quota row. A nested
+  // list already sits under its group's own header, so it draws none: one line
+  // per group would be a rule under every header instead of between sections.
+  if (options.separator === false) node.classList.add('is-plain');
   // "Recent" was doing no work - every row already carries its own `3m ago` -
   // while the running count is the one thing the section can say that the rows
   // cannot. Shown only when something is running: "none running" is noise.
   const head = el('div', 'edge-dock-section-head');
-  head.append(el('span', 'edge-dock-section-title', t('edgeDock.sessions')));
-  if (liveCount > 0) {
+  if (options.title) head.append(el('span', 'edge-dock-section-title', options.title));
+  // A grouped section states the count beside its tool name one line up, so the
+  // nested list stays silent rather than repeating the same number.
+  if (liveCount > 0 && options.showCount !== false) {
     head.append(el('span', 'edge-dock-section-count', t('edgeDock.runningCount', { count: liveCount })));
   }
-  node.append(head);
+  if (head.childElementCount) node.append(head);
   const list = el('div', 'edge-dock-session-list');
   for (const session of sessions) {
     const row = el('div', 'edge-dock-session');
@@ -713,6 +787,10 @@ function sessionsNode(sessions) {
     row.classList.toggle('is-running', state === 'running');
     const name = session.title || session.projectLabel || String(session.sessionId || '').slice(0, 12) || '—';
     const nameNode = el('span', 'edge-dock-session-name');
+    // The row's tool, as the same mark the rest of the widget draws for it. A
+    // mixed list has to name each row's client somewhere and the meta line has
+    // no room left for a label beside the model, the age and the gauge.
+    if (options.showClientMark && session.client) nameNode.append(markNode(session.client));
     // The dot sits with the name rather than recolouring it: a green title
     // made the row read as a different kind of row, and the colour carried no
     // more information than the dot does.
@@ -835,6 +913,7 @@ function statCard(cell) {
     appendLiveRate(card, head, cell);
     return card;
   }
+  if (cell.metric === presentation.SESSIONS_METRIC) return sessionsCard(cell, card, head);
   if (!cell.available) {
     card.append(el('div', 'edge-dock-note', t('edgeDock.periodUnavailable')));
     return card;
@@ -876,6 +955,55 @@ function statCard(cell) {
   if (cell.clientCount > cell.clients.length) {
     card.append(el('div', 'edge-dock-note', t('edgeDock.moreClients', { count: cell.clientCount - cell.clients.length })));
   }
+  return card;
+}
+
+// The standalone Sessions card: the widget's sessions across every tracked
+// client, including the clients that have no limits provider and therefore no
+// other card to appear on. Rows are the same rows a provider card draws, so the
+// two surfaces cannot disagree about what running means (see sessionsContainer).
+function sessionsCard(cell, card, head) {
+  const sessions = Array.isArray(cell.sessions) ? cell.sessions : [];
+  const running = sessions.filter((session) => sessionLive.sessionActivityState(session) === 'running');
+  // The count lives in exactly one place per layout. Grouped, each section states
+  // its own, and a card total above them printed the very same number whenever one
+  // tool happened to be the only one running. Ungrouped there are no section heads,
+  // so the card states it. Running rows keep their spinners either way.
+  if (running.length > 0 && cell.groupBy !== 'client') {
+    head.classList.add('is-inline');
+    head.append(el('span', 'edge-dock-card-status', t('edgeDock.runningCount', { count: running.length })));
+  }
+  if (!sessions.length) {
+    card.append(el('div', 'edge-dock-note', t(cell.runningOnly ? 'edgeDock.sessionsNoneRunning' : 'edgeDock.sessionsNone')));
+    return card;
+  }
+  if (cell.groupBy !== 'client') {
+    card.append(sessionsContainer(sessions, { showClientMark: true, showCount: false }));
+    return card;
+  }
+  // Grouped: one section per tool, in the order the tools first appear in the
+  // list (which is newest-activity order), so the header names the tool once
+  // instead of the mark repeating down every row.
+  const groups = new Map();
+  for (const session of sessions) {
+    const client = String(session.client || '');
+    if (!groups.has(client)) groups.set(client, []);
+    groups.get(client).push(session);
+  }
+  const grouped = el('div', 'edge-dock-accounts edge-dock-session-groups');
+  for (const [client, rows] of groups) {
+    const section = el('div', 'edge-dock-session-group');
+    // Its own header class rather than the shared section head: that one is a
+    // two-item caption row aligned on the baseline, and a mask-drawn mark has no
+    // baseline, so it floated above its label. This row centers its three parts.
+    const groupHead = el('div', 'edge-dock-session-group-head');
+    groupHead.append(markNode(client), el('span', 'edge-dock-section-title', clientLabel(client)));
+    const liveCount = rows.filter((session) => sessionLive.sessionActivityState(session) === 'running').length;
+    if (liveCount > 0) groupHead.append(el('span', 'edge-dock-section-count', t('edgeDock.runningCount', { count: liveCount })));
+    section.append(groupHead, sessionsContainer(rows, { showCount: false, separator: false }));
+    grouped.append(section);
+  }
+  card.append(grouped);
   return card;
 }
 

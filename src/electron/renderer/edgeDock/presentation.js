@@ -120,6 +120,84 @@
 
   const RECENT_SESSION_COUNT = 3;
 
+  // The standalone Sessions card is a timeline rather than a glance at one
+  // provider, so it carries a longer tail than a provider card's three rows.
+  const SESSIONS_RECENT_COUNT = 6;
+  // Marks the rail can draw before it starts counting instead: three fits the
+  // 56px cell beside its headline. The count beside them is the whole answer.
+  const SESSIONS_MARK_LIMIT = 3;
+
+  // Every session the widget knows about, newest first, as one list. Both the
+  // provider cards and the Sessions item read this instead of walking the
+  // periods themselves, so "which sessions exist and in what order" is decided
+  // once. Month detail includes today's sessions; today is the fallback for
+  // payloads that only carry today.
+  //
+  // `periods.today`/`month` are the source rather than allTime: under sync the
+  // aggregate drops all-time session detail (the sessions there are one
+  // machine's own view), so a list built from it would silently mean "some"
+  // rather than "all".
+  function sessionSourceRows(stats) {
+    const byKey = new Map();
+    for (const periodKey of ['month', 'today']) {
+      for (const [key, session] of Object.entries(stats?.periods?.[periodKey]?.sessions || {})) {
+        if (byKey.has(key)) continue;
+        if (session?.sessionKind === 'background-review') continue;
+        const lastUsedMs = Date.parse(session?.lastUsedAt || session?.startedAt || '');
+        if (!Number.isFinite(lastUsedMs)) continue;
+        byKey.set(key, { session, lastUsedMs });
+      }
+    }
+    return [...byKey.entries()]
+      .map(([key, value]) => ({ key, ...value }))
+      .sort((a, b) => b.lastUsedMs - a.lastUsedMs);
+  }
+
+  // One row shape for both callers. `client` rides the row because the Sessions
+  // item is a mixed list: it is what the row's mark is drawn from, and without
+  // it the card could not say which tool a row belongs to.
+  function sessionRowsFor(entries, stateByKey) {
+    return entries.map(({ key, session }) => {
+      const models = Object.entries(session.models || {}).sort((a, b) => (finite(b[1]) || 0) - (finite(a[1]) || 0));
+      return {
+        title: String(session.title || ''),
+        projectLabel: String(session.projectLabel || ''),
+        // Carried so the renderer keys its state map and its flare cache on
+        // the same identity this projection used, instead of re-deriving one
+        // from sessionId and colliding two clients.
+        key,
+        sessionId: String(session.sessionId || ''),
+        client: normalizedId(session.client),
+        model: models[0]?.[0] || '',
+        totalTokens: finite(session.totalTokens) || 0,
+        costUsd: finite(session.costUsd) || 0,
+        lastUsedAt: session.lastUsedAt || session.startedAt || null,
+        // Carried onto the projected row, not just used here: the dock renderer
+        // re-derives the state at paint time and needs the boundary to do it.
+        turnEnded: session.turnEnded === true,
+        running: stateByKey.get(key) === 'running',
+        // The same gate the Sessions list uses, so one surface cannot show a
+        // gauge for a session the other has already dropped it from.
+        context: sessionLive.sessionContextForRow(session) || null
+      };
+    });
+  }
+
+  // Split into the rows a card draws, with running rows kept preferentially:
+  // the cap is a budget for the whole list rather than an allowance stacked on
+  // top of the running ones, and a running row is never dropped (that would
+  // leave the card's "N running" count with no matching row).
+  function cappedSessionRows(entries, cap, runningOnly = false) {
+    const stateByKey = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
+    const running = entries.filter(({ key }) => stateByKey.get(key) === 'running');
+    const quiet = runningOnly
+      ? []
+      : entries
+        .filter(({ key }) => stateByKey.get(key) !== 'running')
+        .slice(0, Math.max(0, cap - running.length));
+    return { rows: sessionRowsFor([...running, ...quiet], stateByKey), running, stateByKey };
+  }
+
   // The sessions a provider card lists. Month detail includes today's sessions;
   // today's collection is the fallback for payloads that only carry today.
   //
@@ -128,62 +206,14 @@
   // caller can pin a clock in tests; the renderer recomputes from the same
   // shared predicate when it repaints between pushes.
   function recentSessionsFor(stats, provider) {
-    const byKey = new Map();
-    for (const periodKey of ['month', 'today']) {
-      for (const [key, session] of Object.entries(stats?.periods?.[periodKey]?.sessions || {})) {
-        if (byKey.has(key)) continue;
-        if (providerForClient(normalizedId(session?.client)) !== provider) continue;
-        if (session?.sessionKind === 'background-review') continue;
-        const lastUsedMs = Date.parse(session?.lastUsedAt || session?.startedAt || '');
-        if (!Number.isFinite(lastUsedMs)) continue;
-        byKey.set(key, { session, lastUsedMs });
-      }
-    }
     // The canonical `client:sessionId` key identifies a record, not the bare
     // sessionId: two clients can carry the same id, and collapsing them onto one
     // key made their states overwrite each other while the rows stayed distinct.
-    const ordered = [...byKey.entries()]
-      .map(([key, value]) => ({ key, ...value }))
-      .sort((a, b) => b.lastUsedMs - a.lastUsedMs);
+    const entries = sessionSourceRows(stats)
+      .filter(({ session }) => providerForClient(normalizedId(session?.client)) === provider);
     // One derivation for the run/quiet split and for the field the rows carry,
     // from the same shared function the card repaints with.
-    const stateByKey = new Map(ordered.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
-    const running = ordered.filter(({ key }) => stateByKey.get(key) === 'running');
-    // The cap is a budget for the whole list, not a second allowance stacked on
-    // top of the running rows. Adding the running ones to a full quiet tail made
-    // the card grow by one the moment a session went live - three idle rows plus
-    // the running one, when the session that started was already one of the
-    // three. Running rows are kept preferentially (dropping one would leave the
-    // card's "N running" count with no matching row), and the tail fills whatever
-    // budget they leave; if more than the cap is running, all of them show and the
-    // list scrolls rather than hiding live work.
-    const quiet = ordered
-      .filter(({ key }) => stateByKey.get(key) !== 'running')
-      .slice(0, Math.max(0, RECENT_SESSION_COUNT - running.length));
-    return [...running, ...quiet]
-      .map(({ key, session }) => {
-        const models = Object.entries(session.models || {}).sort((a, b) => (finite(b[1]) || 0) - (finite(a[1]) || 0));
-        return {
-          title: String(session.title || ''),
-          projectLabel: String(session.projectLabel || ''),
-          // Carried so the renderer keys its state map and its flare cache on
-          // the same identity this projection used, instead of re-deriving one
-          // from sessionId and colliding two clients.
-          key,
-          sessionId: String(session.sessionId || ''),
-          model: models[0]?.[0] || '',
-          totalTokens: finite(session.totalTokens) || 0,
-          costUsd: finite(session.costUsd) || 0,
-          lastUsedAt: session.lastUsedAt || session.startedAt || null,
-          // Carried onto the projected row, not just used here: the dock renderer
-          // re-derives the state at paint time and needs the boundary to do it.
-          turnEnded: session.turnEnded === true,
-          running: stateByKey.get(key) === 'running',
-          // The same gate the Sessions list uses, so one surface cannot show a
-          // gauge for a session the other has already dropped it from.
-          context: sessionLive.sessionContextForRow(session) || null
-        };
-      });
+    return cappedSessionRows(entries, RECENT_SESSION_COUNT).rows;
   }
 
   function providerUsage(stats, provider) {
@@ -324,6 +354,45 @@
         idle: !sample || sample.idle === true
       };
     }
+    if (metric === dockItems.SESSIONS_METRIC) {
+      // Every tracked client, not just the ones with a limits provider: this is
+      // the item that answers for the clients no quota card can show.
+      const rows = sessionSourceRows(stats);
+      // Only a cell that draws the rate carries one: attaching the sample to every
+      // sessions item would put live figures in a projection nothing reads them
+      // from, and would make "this cell shows marks" indistinguishable in the cell.
+      const wantsRate = options.cellDetail === 'rate';
+      const sample = wantsRate ? options.liveRate || null : null;
+      const stateByKey = new Map(rows.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
+      const runningEntries = rows.filter(({ key }) => stateByKey.get(key) === 'running');
+      // The marks name the tools with work in flight, in the order that work
+      // started most recently. `more` is the count the marks could not draw.
+      const runningClients = [...new Set(runningEntries.map(({ session }) => normalizedId(session.client)).filter(Boolean))];
+      const { rows: sessions } = cappedSessionRows(
+        rows,
+        options.runningOnly === true ? runningEntries.length : SESSIONS_RECENT_COUNT,
+        options.runningOnly === true
+      );
+      return {
+        id: `stat:${metric}`,
+        kind: 'stat',
+        metric,
+        runningOnly: options.runningOnly === true,
+        groupBy: options.groupBy === 'client' ? 'client' : 'none',
+        // The rail's third line: the tools that are working, or the live rate.
+        // The sample rides the cell because it moves on its own timer, and the
+        // dock renderer has no stats access to derive one from.
+        cellDetail: options.cellDetail === 'rate' ? 'rate' : 'clients',
+        rateMode: options.tokenRateMode === 'burn' ? 'burn' : 'speed',
+        rate: sample ? finite(options.tokenRateMode === 'burn' ? sample.burn : sample.speed) : null,
+        rateIdle: !sample || sample.idle === true,
+        runningCount: runningEntries.length,
+        runningClients: runningClients.slice(0, SESSIONS_MARK_LIMIT),
+        runningClientCount: runningClients.length,
+        markLimit: SESSIONS_MARK_LIMIT,
+        sessions
+      };
+    }
     // Native periods come straight from stats; week/last7/last30 are summed from
     // History by the caller and arrive as `derivedPeriods`, or not at all while
     // History is unavailable — which renders as unknown, never as zero.
@@ -398,7 +467,10 @@
     const cells = [];
     for (const item of items) {
       if (item.type === 'stat') {
-        cells.push(statCell(stats, item.metric, options));
+        // The item's own choices ride along: they are what a stored `sessions`
+        // item was configured with, and the projection is the only place that
+        // knows how to apply them.
+        cells.push(statCell(stats, item.metric, { ...options, ...item }));
       } else if (item.type === 'limit' && options.limitsEnabled !== false) {
         // An explicitly chosen provider keeps its slot while it has nothing to
         // report (it renders as `--`), so the user's layout does not reshuffle
@@ -452,6 +524,7 @@
   }
 
   return {
+    SESSIONS_METRIC: dockItems.SESSIONS_METRIC,
     buildEdgeDockCells,
     connectedLimitProviders,
     displayPercent,

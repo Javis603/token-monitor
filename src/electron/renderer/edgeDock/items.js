@@ -8,7 +8,9 @@
 // connected limit providers — or an ordered list the user composed:
 //   { type: 'limit', provider, hiddenAccounts: [accountKey], showUsage,
 //     accountMode: 'active' | 'lowest' }
-//   { type: 'stat', metric }   metric: a usage period, or 'liveRate'
+//   { type: 'stat', metric }   metric: a usage period, 'liveRate', or 'sessions'
+//                              ('sessions' additionally carries runningOnly
+//                              and groupBy; see normalizeItem)
 (function exposeEdgeDockItems(root, factory) {
   const node = typeof module === 'object' && module.exports;
   const api = factory(node ? require('../../../shared/limitProviders') : root?.TokenMonitorLimitProviders);
@@ -20,7 +22,11 @@
   const USAGE_PERIODS = Object.freeze(['today', 'week', 'last7', 'last30', 'month', 'allTime']);
   // Periods the collector does not report directly; they are summed from History.
   const DERIVED_PERIODS = Object.freeze(['week', 'last7', 'last30']);
-  const STAT_METRICS = Object.freeze([...USAGE_PERIODS, 'liveRate']);
+  // 'sessions' is a readout too, but of the tracked clients' own sessions rather
+  // than of a usage period: it is the one item that lists work every client can
+  // answer for, including the clients that have no limits provider at all.
+  const SESSIONS_METRIC = 'sessions';
+  const STAT_METRICS = Object.freeze([...USAGE_PERIODS, 'liveRate', SESSIONS_METRIC]);
   const STAT_METRIC_SET = new Set(STAT_METRICS);
   // Earlier development builds split tokens and cost into separate metrics.
   const LEGACY_METRICS = Object.freeze({
@@ -46,6 +52,12 @@
     return '';
   }
 
+// What a sessions item can put on the rail cell's third line. `clients` draws the
+// tools with work in flight; `rate` draws the live token rate instead. It is the
+// item's own choice rather than a global one: a second sessions item may want the
+// other reading, exactly as each limit item carries its own account mode.
+const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
+
   function normalizeItem(raw) {
     if (!raw || typeof raw !== 'object') return null;
     if (raw.type === 'limit') {
@@ -70,7 +82,20 @@
     if (raw.type === 'stat') {
       const rawMetric = String(raw.metric || '');
       const metric = LEGACY_METRICS[rawMetric] || rawMetric;
-      return STAT_METRIC_SET.has(metric) ? { type: 'stat', metric } : null;
+      if (!STAT_METRIC_SET.has(metric)) return null;
+      if (metric === SESSIONS_METRIC) {
+        // A plain item omits both: `runningOnly: false` keeps the timeline and
+        // `groupBy: 'none'` keeps it in one list, which is what the item did
+        // before either choice existed, so an older stored item loads unchanged.
+        return {
+          type: 'stat',
+          metric,
+          runningOnly: raw.runningOnly === true,
+          groupBy: raw.groupBy === 'client' ? 'client' : 'none',
+          cellDetail: raw.cellDetail === 'rate' ? 'rate' : 'clients'
+        };
+      }
+      return { type: 'stat', metric };
     }
     return null;
   }
@@ -123,6 +148,8 @@
   return {
     DEFAULT_LIMIT_COUNT,
     DERIVED_PERIODS,
+    SESSIONS_METRIC,
+    SESSION_CELL_DETAILS,
     STAT_METRICS,
     USAGE_PERIODS,
     defaultEdgeDockItems,

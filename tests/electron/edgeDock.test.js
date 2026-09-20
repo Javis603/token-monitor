@@ -33,6 +33,7 @@ const { canUseEdgeDock } = require('../../src/electron/edgeDock/controller');
 const { bubbleCommands, railCommands, toPolygons, toSvgPath } = require('../../src/electron/renderer/edgeDock/shapes');
 const { rasterizeMask, shapeRectsFromPolygons } = require('../../src/electron/edgeDock/mask');
 const { DEFAULT_LIMIT_COUNT, normalizeEdgeDockItems, reorderEdgeDockItems } = require('../../src/electron/renderer/edgeDock/items');
+const { SESSIONS_METRIC } = require('../../src/electron/renderer/edgeDock/presentation');
 const verticalDragSort = require('../../src/electron/renderer/verticalDragSort');
 const { matchProviderAccount } = require('../../src/shared/subscriptionDisplay');
 const accountIdentity = require('../../src/electron/renderer/accountIdentity');
@@ -327,6 +328,215 @@ test('an archived session never counts as running on a dock card', () => {
   };
   const [codex] = buildEdgeDockCells(stats, {});
   assert.equal(codex.sessions[0].running, false);
+});
+
+// The grouped layout and the timeline put the running count in different places,
+// and printing it in both is the bug this locks: with one tool running, the
+// section's "1 running" and the card's "1 running" were literally the same
+// number twice. The rule is one statement of the count per layout, not per card.
+test('the running count is stated once per layout, and the group header centers its mark', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
+  const card = dock.slice(dock.indexOf('function sessionsCard('), dock.indexOf('// Cards are built in a hidden staging layer'));
+  // Ungrouped: the card head states the total, and the list under it stays quiet.
+  assert.match(card, /if \(running\.length > 0 && cell\.groupBy !== 'client'\) \{/);
+  assert.match(card, /sessionsContainer\(sessions, \{ showClientMark: true, showCount: false \}\)/);
+  // Grouped: each section states its own, and only when it has one - a per-tool
+  // "0 running" on every idle tool would be noise, not information.
+  assert.match(card, /if \(liveCount > 0\) groupHead\.append/);
+  assert.doesNotMatch(card, /edge-dock-card-status[\s\S]{0,400}groupBy === 'client'/);
+  // A mask-drawn mark has no text baseline, so a baseline-aligned header row
+  // floats it above its own label. The group header is its own centered row.
+  assert.match(card, /const groupHead = el\('div', 'edge-dock-session-group-head'\)/);
+  assert.doesNotMatch(card, /groupHead = el\('div', 'edge-dock-section-head'\)/);
+  assert.match(css, /\.edge-dock-session-group-head \{[\s\S]*?align-items: center;/);
+  assert.doesNotMatch(css, /\.edge-dock-session-group-head \{[^}]*align-items: baseline/);
+  // The name yields space so a long tool name ellipsizes instead of pushing the
+  // count off the row, and the mark never shrinks.
+  assert.match(css, /\.edge-dock-session-group-head \.edge-dock-section-title \{[\s\S]*?text-overflow: ellipsis;/);
+  assert.match(css, /\.edge-dock-session-group-head \.edge-dock-mark \{[\s\S]*?flex: 0 0 auto;/);
+});
+
+
+// The Sessions item exists for the clients no quota card can show. A cell whose
+// rows all came from providers would be the same per-provider list again, one
+// level up, and would leave those clients with no surface at all.
+test('the sessions item lists every tracked client, including one with no limits provider', () => {
+  const nowIso = new Date().toISOString();
+  const session = (client, id, extra = {}) => ({
+    client, sessionId: id, lastUsedAt: nowIso, totalTokens: 10, models: { 'some-model': 10 }, ...extra
+  });
+  const stats = {
+    periods: {
+      month: { sessions: {
+        'codex:r1': session('codex', 'r1', { title: 'Dock work' }),
+        'kilo:r2': session('kilo', 'r2'),
+        'lmstudio:r3': session('lmstudio', 'r3')
+      } },
+      today: { sessions: { 'dsh:r4': session('dsh', 'r4') } }
+    },
+    // Only Codex has a quota record; the other three clients have none at all.
+    limits: { providers: [provider('codex')] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  assert.equal(cell.kind, 'stat');
+  assert.equal(cell.metric, SESSIONS_METRIC);
+  assert.equal(cell.runningCount, 4);
+  assert.deepEqual(cell.sessions.map((row) => row.client), ['codex', 'kilo', 'lmstudio', 'dsh']);
+  // Every row names its own tool, because this list mixes them.
+  assert.deepEqual([...new Set(cell.sessions.map((row) => row.client))].sort(), ['codex', 'dsh', 'kilo', 'lmstudio']);
+  // The rail's marks name the tools with work in flight, capped, with the
+  // remainder left to runningClientCount.
+  assert.deepEqual(cell.runningClients, ['codex', 'kilo', 'lmstudio']);
+  assert.equal(cell.runningClientCount, 4);
+  assert.equal(cell.markLimit, 3);
+});
+
+// The standalone item repeats none of a provider card's job, so its two options
+// have to change what it lists without changing what running means.
+test('the sessions item honours runningOnly and groupBy without changing the run predicate', () => {
+  const nowIso = new Date().toISOString();
+  const oldIso = new Date(Date.now() - 90 * 60_000).toISOString();
+  const session = (client, id, lastUsedAt) => ({ client, sessionId: id, lastUsedAt, totalTokens: 10, models: { m: 10 } });
+  const stats = {
+    periods: {
+      month: { sessions: {
+        'codex:live': session('codex', 'live', nowIso),
+        'kilo:quiet': session('kilo', 'quiet', oldIso),
+        'dsh:live2': session('dsh', 'live2', nowIso)
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [] }
+  };
+  const build = (item) => buildEdgeDockCells(stats, { items: [item] })[0];
+
+  // The timeline keeps the quiet row, and the running count is the same number
+  // the rail shows, from one derivation.
+  const timeline = build({ type: 'stat', metric: SESSIONS_METRIC });
+  assert.deepEqual(timeline.sessions.map((row) => row.sessionId), ['live', 'live2', 'quiet']);
+  assert.equal(timeline.runningCount, 2);
+  assert.equal(timeline.runningOnly, false);
+  assert.equal(timeline.groupBy, 'none');
+
+  // runningOnly is a list filter, not a second definition of running: the quiet
+  // row is gone and the counting is untouched.
+  const onlyRunning = build({ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true });
+  assert.deepEqual(onlyRunning.sessions.map((row) => row.sessionId), ['live', 'live2']);
+  assert.equal(onlyRunning.runningCount, 2);
+  assert.equal(onlyRunning.runningOnly, true);
+
+  // An empty running list is a real answer, not a missing one: still no rows.
+  const quietStats = {
+    periods: { month: { sessions: { 'codex:q': session('codex', 'q', oldIso) } }, today: { sessions: {} } },
+    limits: { providers: [] }
+  };
+  const [empty] = buildEdgeDockCells(quietStats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true }] });
+  assert.deepEqual(empty.sessions, []);
+  assert.equal(empty.runningCount, 0);
+
+  // groupBy is carried to the card, which is what draws one section per tool.
+  const grouped = build({ type: 'stat', metric: SESSIONS_METRIC, groupBy: 'client' });
+  assert.equal(grouped.groupBy, 'client');
+});
+
+// The rail cell's third line is the item's own choice. Showing the live rate there
+// must not disturb the card, and the sample has to ride the cell: the dock window
+// holds no settings and no stats, so it cannot derive a rate for itself.
+test('a sessions item can put the live rate on its rail cell instead of tool marks', () => {
+  const nowIso = new Date().toISOString();
+  const session = (client, id) => ({ client, sessionId: id, lastUsedAt: nowIso, totalTokens: 10, models: { m: 10 } });
+  const stats = {
+    periods: { month: { sessions: { 'codex:a': session('codex', 'a') } }, today: { sessions: {} } },
+    limits: { providers: [] }
+  };
+  const liveRate = { speed: 184, burn: 11_040, deviceCount: 1, idle: false };
+  const cells = (item, options) => buildEdgeDockCells(stats, { items: [item], liveRate, ...options });
+
+  // Default: the cell names the working tools and carries no rate at all.
+  const [marks] = cells({ type: 'stat', metric: SESSIONS_METRIC });
+  assert.equal(marks.cellDetail, 'clients');
+  assert.deepEqual(marks.runningClients, ['codex']);
+  assert.equal(marks.rate, null);
+
+  // Opt-in: the same cell carries the sample, in the mode the item is in.
+  const [rate] = cells({ type: 'stat', metric: SESSIONS_METRIC, cellDetail: 'rate' });
+  assert.equal(rate.cellDetail, 'rate');
+  assert.equal(rate.rate, 184);
+  assert.equal(rate.rateMode, 'speed');
+  assert.equal(rate.rateIdle, false);
+  // The marks still ride the cell, because the card and the item's other
+  // surfaces read the same projection; only which one the rail draws changes.
+  assert.deepEqual(rate.runningClients, ['codex']);
+
+  // Burn mode reads the other figure, from the same sample.
+  const [burn] = cells({ type: 'stat', metric: SESSIONS_METRIC, cellDetail: 'rate' }, { tokenRateMode: 'burn' });
+  assert.equal(burn.rate, 11_040);
+  assert.equal(burn.rateMode, 'burn');
+
+  // No sample is an absence, not a zero: the cell draws its placeholder and
+  // reports idle, rather than a confident 0 tok/s.
+  const [none] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, cellDetail: 'rate' }] });
+  assert.equal(none.rate, null);
+  assert.equal(none.rateIdle, true);
+
+  // A plain sessions item keeps the old stored shape exactly: adding this option
+  // must not rewrite what an existing item normalizes to beyond the new field.
+  assert.deepEqual(normalizeEdgeDockItems([{ type: 'stat', metric: 'sessions' }])[0], {
+    type: 'stat', metric: 'sessions', runningOnly: false, groupBy: 'none', cellDetail: 'clients'
+  });
+  assert.equal(normalizeEdgeDockItems([{ type: 'stat', metric: 'sessions', cellDetail: 'nope' }])[0].cellDetail, 'clients');
+});
+
+// The main process only keeps the live-rate tracker alive for items that show a
+// rate. A sessions item in rate mode is one of those, and missing it left the cell
+// permanently blank - the cell existed but nothing ever computed its sample.
+test('the live-rate tracker is kept alive by a rate-mode sessions item', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const gate = main.slice(main.indexOf('function edgeDockShowsLiveRate()'), main.indexOf('function edgeDockLiveRateSample('));
+  assert.match(gate, /item\.metric === 'liveRate'/);
+  assert.match(gate, /item\.metric === 'sessions' && item\.cellDetail === 'rate'/);
+});
+
+// The cell already prints one number above this line (the running count), so a
+// stacked figure-over-unit made the rate read as a second, unrelated number. The
+// unit has to sit on the same line as the figure it belongs to.
+test('the rail cell rate reads on one line, with its unit beside the figure', () => {
+  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
+  const row = css.match(/\.edge-dock-cell-rate \{([^}]*)\}/);
+  assert.ok(row, 'the rate row should be styled');
+  assert.match(row[1], /display: flex;/);
+  assert.match(row[1], /align-items: baseline;/);
+  assert.doesNotMatch(row[1], /display: grid;/);
+  assert.doesNotMatch(row[1], /flex-direction: column;/);
+  // One size and one family for the whole phrase. A smaller or differently-faced
+  // unit read as a second figure beside the running count above it, which is the
+  // thing this cell cannot afford: hierarchy comes from colour, not from type size.
+  assert.match(row[1], /font-size: 10\.5px;/);
+  assert.match(row[1], /font-family: var\(--display-font/);
+  assert.match(css, /\.edge-dock-cell-rate-unit \{ color: var\(--muted\); \}/);
+  // Neither part may reintroduce a size of its own, which is how the mismatch
+  // would come back the moment someone tweaks one of them.
+  const value = css.match(/\.edge-dock-cell-rate-value \{([^}]*)\}/);
+  assert.ok(value, 'the rate figure should be styled');
+  assert.doesNotMatch(value[1], /font-size:/);
+  assert.doesNotMatch(value[1], /font-family:/);
+});
+
+// A stored item round-trips through its own normalizer, or the choice the user
+// made in the composer is silently reset the next time the dock is rebuilt.
+test('a sessions item normalizes its options and defaults them off', () => {
+  const item = (raw) => normalizeEdgeDockItems([{ type: 'stat', metric: 'sessions', ...raw }])[0];
+  assert.deepEqual(item({}), { type: 'stat', metric: 'sessions', runningOnly: false, groupBy: 'none', cellDetail: 'clients' });
+  assert.deepEqual(item({ runningOnly: true, groupBy: 'client', cellDetail: 'rate' }), {
+    type: 'stat', metric: 'sessions', runningOnly: true, groupBy: 'client', cellDetail: 'rate'
+  });
+  // Unknown values fall back rather than surviving into the renderer.
+  assert.deepEqual(item({ runningOnly: 'yes', groupBy: 'provider', cellDetail: 'maybe' }), {
+    type: 'stat', metric: 'sessions', runningOnly: false, groupBy: 'none', cellDetail: 'clients'
+  });
+  // Every other stat metric stays exactly as it was: no options are invented.
+  assert.deepEqual(normalizeEdgeDockItems([{ type: 'stat', metric: 'today' }])[0], { type: 'stat', metric: 'today' });
 });
 
 test('edge dock is opt-in and limited to macOS and Windows', () => {

@@ -87,7 +87,9 @@
 
     function itemLabel(item) {
       if (item.type === 'stat') {
-        return item.metric === 'liveRate' ? t('edgeDock.stat.liveRate') : t(`edgeDock.period.${item.metric}`);
+        if (item.metric === 'liveRate') return t('edgeDock.stat.liveRate');
+        if (item.metric === itemsApi.SESSIONS_METRIC) return t('edgeDock.sessions');
+        return t(`edgeDock.period.${item.metric}`);
       }
       return providerLabel(item.provider);
     }
@@ -98,7 +100,9 @@
         mark.classList.add('is-stat');
         mark.textContent = item.metric === 'liveRate'
           ? t('edgeDock.statGlyph.liveRate')
-          : t(`edgeDock.periodShort.${item.metric}`);
+          : item.metric === itemsApi.SESSIONS_METRIC
+            ? t('edgeDock.statGlyph.sessions')
+            : t(`edgeDock.periodShort.${item.metric}`);
         return mark;
       }
       if (hasProviderMark(item.provider)) mark.classList.add(`row-icon-${item.provider}`);
@@ -153,8 +157,15 @@
         .map((provider) => ({ type: 'limit', provider, hiddenAccounts: [], showUsage: true }))
         .filter((item) => !present.has(itemsApi.itemId(item))));
       section('settings.edgeDock.addUsage', itemsApi.STAT_METRICS
+        .filter((metric) => metric !== itemsApi.SESSIONS_METRIC)
         .map((metric) => ({ type: 'stat', metric }))
         .filter((item) => !present.has(itemsApi.itemId(item))));
+      // Sessions is its own section rather than another usage figure: it lists
+      // the tracked clients' work, not a period's spend, and it is the only
+      // item that can show a client with no limits provider.
+      section('settings.edgeDock.addSessions', present.has(itemsApi.itemId({ type: 'stat', metric: itemsApi.SESSIONS_METRIC }))
+        ? []
+        : [{ type: 'stat', metric: itemsApi.SESSIONS_METRIC, runningOnly: false, groupBy: 'none' }]);
       if (!menu.childElementCount) menu.append(el('div', 'edge-dock-composer-empty', t('settings.edgeDock.nothingToAdd')));
       return menu;
     }
@@ -219,6 +230,28 @@
       pane.append(head);
 
       if (item.type === 'stat') {
+        if (item.metric === itemsApi.SESSIONS_METRIC) {
+          pane.append(el('p', 'edge-dock-composer-hint', t('settings.edgeDock.statNote.sessions')));
+          pane.append(switchRow('settings.edgeDock.runningOnly', item.runningOnly === true, (checked) => {
+            void updateItem(id, { runningOnly: checked });
+          }));
+          pane.append(choiceRow('settings.edgeDock.groupBy', item.groupBy === 'client' ? 'client' : 'none', [
+            { value: 'none', labelKey: 'settings.edgeDock.groupBy.none' },
+            { value: 'client', labelKey: 'settings.edgeDock.groupBy.client' }
+          ], (groupBy) => {
+            void updateItem(id, { groupBy });
+          }));
+          // What the rail cell's third line carries. Only the cell changes: the
+          // card is the same list either way, which is why this is named after the
+          // rail rather than the item.
+          pane.append(choiceRow('settings.edgeDock.cellDetail', item.cellDetail === 'rate' ? 'rate' : 'clients', [
+            { value: 'clients', labelKey: 'settings.edgeDock.cellDetail.clients' },
+            { value: 'rate', labelKey: 'settings.edgeDock.cellDetail.rate' }
+          ], (cellDetail) => {
+            void updateItem(id, { cellDetail });
+          }));
+          return pane;
+        }
         const noteKey = item.metric === 'liveRate'
           ? 'settings.edgeDock.statNote.liveRate'
           : itemsApi.DERIVED_PERIODS.includes(item.metric)

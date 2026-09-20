@@ -207,6 +207,55 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   text-overflow: clip;
 }
 .edge-dock-cell-stat.is-idle .edge-dock-stat-value { color: var(--muted); }
+/* The tools with work in flight, drawn with their own marks. The cell is 56px
+   of a 64px rail, so the row is capped in the projection (runningClients) and
+   the remainder is stated as a count rather than shrunk below legibility. */
+.edge-dock-cell-marks {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 13px;
+  overflow: hidden;
+}
+.edge-dock-cell-marks .edge-dock-mark { width: 11px; height: 11px; }
+.edge-dock-cell-more {
+  color: var(--muted);
+  font-size: 8.5px;
+  font-weight: 600;
+  line-height: 1;
+}
+.edge-dock-rail.is-compact .edge-dock-cell-marks { height: 11px; }
+.edge-dock-rail.is-compact .edge-dock-cell-marks .edge-dock-mark { width: 9px; height: 9px; }
+.edge-dock-rail.is-compact .edge-dock-cell-more { font-size: 8px; }
+/* The other third line: the live token rate as ONE reading, "184 tok/s". Stacking
+   the figure over its unit made it read as two separate numbers in a 56px cell
+   that already has one above it - the caption line of this cell is the sessions
+   count, so the rate line has to be self-describing on a single line. Muted while
+   idle rather than hidden, so the cell keeps one height either way. */
+.edge-dock-cell-rate {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 3px;
+  max-width: 100%;
+  overflow: hidden;
+  /* One size and one family for the whole reading. The unit sits on the same line
+     as the figure, so any difference between them reads as two things rather than
+     one: at 11.5/8.5px the figure looked like a second headline beside the running
+     count above it. Hierarchy comes from the unit's muted colour instead. */
+  font-family: var(--display-font, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif);
+  font-size: 10.5px;
+  line-height: 1;
+}
+.edge-dock-cell-rate-value {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.edge-dock-cell-rate-unit { color: var(--muted); }
+.edge-dock-cell-rate.is-idle .edge-dock-cell-rate-value { color: var(--muted); }
+.edge-dock-rail.is-compact .edge-dock-cell-rate { font-size: 10px; }
 .edge-dock-cell-stat.is-focused .edge-dock-stat-value {
   color: var(--accent);
   text-shadow: 0 0 6px rgba(var(--accent-rgb), 0.25);
@@ -242,6 +291,9 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   min-width: 0;
 }
 .edge-dock-card-head .edge-dock-mark { width: 15px; height: 15px; flex: 0 0 auto; }
+/* The card's own status line ("2 running"), the same slot and weight as the
+   live-rate card's status so the two stat cards' headers read alike. */
+.edge-dock-card-status { color: var(--muted); font-size: 10.5px; flex: 0 0 auto; }
 
 .edge-dock-accounts {
   display: flex;
@@ -297,6 +349,38 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   );
   content: '';
 }
+/* A nested list (grouped by tool) already sits under its group's own header: the
+   rule and the space above the section are for a block following a quota row,
+   and drawing them per group would put a line under every header. */
+.edge-dock-sessions.is-plain {
+  padding-top: 0;
+}
+.edge-dock-sessions.is-plain::before { display: none; }
+/* A group header is a mark + a tool name + an optional count, and the mark is a
+   masked box with no text baseline. Centering is therefore the only alignment
+   that holds all three on one line: `align-items: baseline` (what the shared
+   `.edge-dock-section-head` uses for two text parts) pushed the mark above its
+   own label. The name takes the slack so a long one ellipsizes instead of
+   shoving the count off the row. */
+.edge-dock-session-group-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.edge-dock-session-group-head .edge-dock-mark {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+.edge-dock-session-group-head .edge-dock-section-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.edge-dock-session-group-head .edge-dock-section-count { flex: 0 0 auto; }
 
 /* Shrinkable, unlike the rest of the card: the card is clamped to the work
    area, so a block that refuses to shrink is clipped rather than scrolled. The
@@ -431,6 +515,16 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   100% { filter: drop-shadow(0 0 2px rgba(var(--overlay-rgb), 0.36)); }
 }
 .edge-dock-session-tokens { color: var(--text); font-size: 11.5px; text-align: right; }
+/* The row's own tool, in the mixed Sessions list. Sized between the state mark
+   beside it and the card's provider mark: it is an identity, not a status, so it
+   reads as the smallest of the three. The slot is only emitted on a mixed list,
+   which is why it does not shift provider-card rows. */
+.edge-dock-session-name .edge-dock-mark { width: 11px; height: 11px; flex: 0 0 auto; }
+/* One section per tool when the item is grouped. The nested list drops its own
+   head (sessionsContainer showCount:false) because the group header states the
+   same count one line above it. */
+.edge-dock-session-groups { gap: 12px; }
+.edge-dock-session-group { display: grid; gap: 6px; }
 .edge-dock-session-meta {
   grid-column: 1 / -1;
   display: flex;
@@ -637,6 +731,7 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
 .edge-dock-section-title { font-size: 10px; }
 .edge-dock-session-name,
 .edge-dock-session-tokens { font-size: 11px; }
+.edge-dock-session-name .edge-dock-mark { width: 10px; height: 10px; }
 .edge-dock-session-meta { font-size: 9px; }
 .edge-dock-usage-label,
 .edge-dock-usage-cost { font-size: 9px; }
