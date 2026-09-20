@@ -384,7 +384,7 @@
     if (/nemotron|nvidia/.test(name)) return 'nvidia';
     if (/llama|meta|muse-spark(?:-|$)/.test(name)) return 'meta';
     if (/mistral|mixtral|codestral/.test(name)) return 'mistral';
-    if (/qwen|qwq|qvq|qmodel|dashscope/.test(name)) return 'qwen';
+    if (/qwen|qwq|qvq|qmodel/.test(name)) return 'qwen';
     if (/kimi|moonshot|k2d6-agent|k3-agent/.test(name)) return 'kimi';
     if (/chatglm|\bglm-|\bzai\b|z\.ai|zhipu/.test(name)) return 'zai';
     if (/cohere|command-r/.test(name)) return 'cohere';

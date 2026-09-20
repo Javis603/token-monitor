@@ -60,7 +60,10 @@ test('modelVendorFor maps families and modelColor falls back deterministically',
   assert.equal(modelVendorFor('k3-agent-swarm'), 'kimi');
   assert.equal(modelVendorFor('qmodel-38max'), 'qwen');
   assert.equal(modelVendorFor('qmodel_latest'), 'qwen');
-  assert.equal(modelVendorFor('dashscope_qmodel'), 'qwen');
+  assert.equal(modelVendorFor('dashscope_qmodel'), 'qwen'); // via qmodel, not a dashscope alias
+  assert.equal(modelVendorFor('dashscope_qwen3_coder'), 'qwen');
+  assert.equal(modelVendorFor('dashscope_qwen_max_latest'), 'qwen');
+  assert.equal(modelVendorFor('dashscope/kimi-k2'), 'kimi'); // must not be swallowed by a dashscope alias
   assert.equal(modelVendorFor('qwen3-max'), 'qwen');
   assert.equal(modelVendorFor('nemotron-70b-instruct'), 'nvidia');
   assert.equal(modelVendorFor('nvidia/nemotron-nano-9b-v2'), 'nvidia');
