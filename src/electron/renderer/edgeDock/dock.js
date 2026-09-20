@@ -587,7 +587,20 @@ function statCellNode(cell) {
     .map((child) => child.textContent)
     .filter(Boolean)
     .join(' ');
-  node.setAttribute('aria-label', `${statLabel(cell.metric)} ${readout}`.trim());
+  // The marks themselves are mask-painted spans with no text, so the tools they
+  // name are spoken here instead: which tools are working is the whole point of
+  // this cell, and it cannot ride on the marks alone. Named from the same summary
+  // the marks are drawn from, so the label and the picture cannot disagree, and
+  // read from the rows rather than from a frozen field so it ages with them.
+  const workingTools = cell.metric === presentation.SESSIONS_METRIC
+    ? runningSessionSummary(cell.sessions).clients.map((client) => clientLabel(client))
+    : [];
+  const spoken = cell.metric === presentation.SESSIONS_METRIC
+    // The count already reads as a number in `readout`; the tools are appended only
+    // when there are any, so a quiet cell does not end with an empty clause.
+    ? [statLabel(cell.metric), readout, workingTools.join(', ')].filter(Boolean).join(' ').trim()
+    : `${statLabel(cell.metric)} ${readout}`.trim();
+  node.setAttribute('aria-label', spoken);
   return node;
 }
 
@@ -804,7 +817,13 @@ function sessionsContainer(sessions, options = {}) {
     // The row's tool, as the same mark the rest of the widget draws for it. A
     // mixed list has to name each row's client somewhere and the meta line has
     // no room left for a label beside the model, the age and the gauge.
-    if (options.showClientMark && session.client) nameNode.append(markNode(session.client));
+    if (options.showClientMark && session.client) {
+      nameNode.append(markNode(session.client));
+      // The mark is a mask-painted span with no text, so the tool it stands for is
+      // invisible to assistive technology unless the name is said out loud. The
+      // client's own label, not its id: this is read as prose.
+      nameNode.append(el('span', 'sr-only', `${clientLabel(session.client)} `));
+    }
     // The dot sits with the name rather than recolouring it: a green title
     // made the row read as a different kind of row, and the colour carried no
     // more information than the dot does.
@@ -979,6 +998,11 @@ function statCard(cell) {
 function sessionsCard(cell, card, head) {
   const sessions = Array.isArray(cell.sessions) ? cell.sessions : [];
   const running = runningSessionSummary(sessions).rows;
+  // The flare cache is pruned against the whole list, not per group: a grouped card
+  // renders one section per tool, and pruning inside each of those would delete the
+  // entries belonging to every other section. Pruning here is what stops a long-lived
+  // card from keeping one entry per session that ever scrolled through it.
+  pruneActivity(sessions);
   // The count lives in exactly one place per layout. Grouped, each section states
   // its own, and a card total above them printed the very same number whenever one
   // tool happened to be the only one running. Ungrouped there are no section heads,

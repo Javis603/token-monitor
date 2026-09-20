@@ -26,11 +26,15 @@ test('the edge dock arms a re-projection for the moment its running reading expi
   assert.match(main, /const expiresAt = edgeDockNextSessionExpiry\(edgeDockLastCells\);/);
   // Both replacement paths go through it: a stats push, and a settings sync, which
   // had its own direct setCells call and would otherwise leave the rail unscheduled.
-  const pushes = main.match(/pushEdgeDockCells\(/g) || [];
-  assert.ok(pushes.length >= 2, 'both the push and the settings path hand cells over through one function');
+  // Asserted per path rather than by counting matches: the declaration itself contains
+  // the call shape, so a count would still pass with only one of the two call sites -
+  // which is the regression this guard exists for.
+  const statsPath = main.slice(main.indexOf('function updateEdgeDockCells('), main.indexOf('function pushEdgeDockCells('));
+  assert.match(statsPath, /pushEdgeDockCells\(cells\);/);
+  const syncPath = main.slice(main.indexOf('function syncEdgeDock('));
+  assert.match(syncPath, /if \(latestStats\) pushEdgeDockCells\(edgeDockCellsFor\(electronPresentationStats\(latestStats\)\)\);/);
   assert.doesNotMatch(main, /controller\.setCells\(edgeDockCellsFor/);
   // The tick re-projects through the same projection the pushes use, so the renderer
   // keeps re-deriving from cells that were built the same way.
   assert.match(main, /if \(latestStats\) updateEdgeDockCells\(electronPresentationStats\(latestStats\)\);/);
 });
-

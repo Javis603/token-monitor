@@ -547,7 +547,10 @@ test('a projected session row keeps the archive flags the card re-derives state 
 // again.
 test('a sessions cell re-derives running at the clock it is asked, and reports when that changes', () => {
   const { RUNNING_WINDOW_MS } = sessionLive;
-  const now = Date.parse('2026-09-20T12:00:00.000Z');
+  // A real clock, not a fixed date: `buildEdgeDockCells()` computes
+  // `runningExpiresAt` from `Date.now()`, so pinning the sessions to an absolute
+  // timestamp made this test pass only until the wall clock reached that date.
+  const now = Date.now();
   const iso = (ms) => new Date(ms).toISOString();
   const stats = {
     periods: {
@@ -563,12 +566,18 @@ test('a sessions cell re-derives running at the clock it is asked, and reports w
   // Both were inside the window when the cell was built.
   assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, now).count, 2);
   assert.deepEqual(edgeDockPresentation.runningSessionSummary(cell.sessions, now).clients, ['codex']);
-  // `b` expires first, one minute before `a`.
-  assert.equal(cell.runningExpiresAt, Date.parse(iso(now - 9 * 60_000)) + RUNNING_WINDOW_MS);
-  // At `b`'s expiry the boundary is inclusive (`nowMs(now) - last <= RUNNING_WINDOW_MS`),
-  // so `b` is still running there and both rows read running; a moment later it drops.
-  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, cell.runningExpiresAt).count, 2);
-  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, cell.runningExpiresAt + 1).count, 1);
+  // `b` expires first, one minute before `a`. The expiry is the first millisecond at
+  // which the row is NOT running, so the inclusive predicate's boundary (`last +
+  // window`, still running) is one millisecond before it.
+  const bBoundary = Date.parse(iso(now - 9 * 60_000)) + RUNNING_WINDOW_MS;
+  assert.equal(cell.runningExpiresAt, bBoundary + 1);
+  assert.equal(sessionLive.sessionActivityState(cell.sessions.find((row) => row.sessionId === 'b'), bBoundary), 'running');
+  assert.equal(sessionLive.sessionActivityState(cell.sessions.find((row) => row.sessionId === 'b'), bBoundary + 1), 'idle');
+  // So a scheduler that wakes exactly at the reported moment sees the drop, which is
+  // the whole point of reporting it: waking at the boundary itself would re-project a
+  // cell that still counts the row.
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, cell.runningExpiresAt).count, 1);
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, bBoundary).count, 2);
   // Past both they read none, which is the state the rail has to stop contradicting.
   const afterAll = now + RUNNING_WINDOW_MS;
   assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, afterAll).count, 0);
@@ -583,6 +592,70 @@ test('a sessions cell re-derives running at the clock it is asked, and reports w
   }, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
   assert.equal(quiet.runningExpiresAt, 0);
   assert.equal(edgeDockPresentation.runningSessionSummary(quiet.sessions).count, 0);
+});
+
+// The expiry a cell reports has to be the first millisecond at which the row is NOT
+// running. Reporting the inclusive boundary (`last + window`, still running) let a
+// stats push land on exactly that millisecond, re-project a cell that still counted
+// the row, and carry no next expiry for it - so the reading stuck until the next real
+// push, which in running-only mode is a row that should not be there.
+test('a reported expiry is the first millisecond the row is not running', () => {
+  const { RUNNING_WINDOW_MS } = sessionLive;
+  const now = Date.now();
+  const iso = (ms) => new Date(ms).toISOString();
+  const last = now - 9 * 60_000;
+  const stats = {
+    periods: {
+      month: { sessions: { 'codex:x': { client: 'codex', sessionId: 'x', lastUsedAt: iso(last), totalTokens: 5, models: { m: 5 } } } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  const boundary = last + RUNNING_WINDOW_MS;
+  const row = cell.sessions[0];
+  // The predicate is inclusive at the boundary, so that instant still counts.
+  assert.equal(sessionLive.sessionActivityState(row, boundary), 'running');
+  assert.equal(sessionLive.sessionActivityState(row, boundary + 1), 'idle');
+  // And the reported expiry is the other side of it, so waking there sees the drop.
+  assert.equal(cell.runningExpiresAt, boundary + 1);
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, cell.runningExpiresAt).count, 0);
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, cell.runningExpiresAt - 1).count, 1);
+});
+
+// The client mark is a mask-painted span with no text, so the tool it names is
+// invisible to assistive technology. The mixed list is exactly where that matters:
+// naming the tool is the feature's whole point, and a screen reader saw only the
+// session title. Asserted on the source, since the marks are painted in Electron.
+test('the sessions rail and mixed rows name their tools for assistive technology', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  // The rail cell's accessible name is built from the same summary the marks are
+  // drawn from, so the spoken tools and the drawn ones cannot disagree - and read
+  // from the rows rather than a frozen field, so it ages with them.
+  const statCell = dock.slice(dock.indexOf('function statCellNode('), dock.indexOf('let railNode = null;'));
+  assert.match(statCell, /runningSessionSummary\(cell\.sessions\)\.clients\.map\(\(client\) => clientLabel\(client\)\)/);
+  assert.match(statCell, /node\.setAttribute\('aria-label', spoken\)/);
+  // A mixed row states its own client in text, and does so only when it draws the
+  // mark: a provider card's rows are all one client and the card header names it.
+  const container = dock.slice(dock.indexOf('function sessionsContainer('), dock.indexOf('function providerCard('));
+  assert.match(container, /nameNode\.append\(el\('span', 'sr-only', `\$\{clientLabel\(session\.client\)\} `\)\)/);
+  assert.match(container, /if \(options\.showClientMark && session\.client\) \{/);
+  // The label is the client's own display name, not its raw id.
+  assert.doesNotMatch(container, /sr-only', `\$\{session\.client\}/);
+});
+
+// The flare cache keeps one entry per session it has seen, so a long-lived card has
+// to prune it against the whole list. Pruning per group would delete every other
+// group's entries, which is why this asserts the call sits in sessionsCard().
+test('the standalone sessions card prunes the activity cache against its whole list', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const card = dock.slice(dock.indexOf('function sessionsCard('), dock.indexOf('// Cards are built in a hidden staging layer'));
+  assert.match(card, /pruneActivity\(sessions\);/);
+  assert.doesNotMatch(card, /pruneActivity\(rows\);/);
+  // The grouped branch is the leak: it renders one section per tool, so the prune
+  // must happen before the split rather than inside it.
+  const beforeSplit = card.slice(0, card.indexOf('const groups = new Map()'));
+  assert.match(beforeSplit, /pruneActivity\(sessions\);/);
 });
 
 // The main process only keeps the live-rate tracker alive for items that show a

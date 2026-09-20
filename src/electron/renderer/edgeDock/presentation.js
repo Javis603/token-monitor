@@ -237,7 +237,12 @@
     for (const row of runningSessionSummary(sessions, now).rows) {
       const last = Date.parse(String(row?.lastUsedAt || ''));
       if (!Number.isFinite(last)) continue;
-      const expiry = last + sessionLive.RUNNING_WINDOW_MS;
+      // The first millisecond at which this row is NOT running, not the last one at
+      // which it is. sessionActivityState() reads `now - last <= window`, so
+      // `last + window` is still running; a caller that woke exactly then would
+      // re-project a cell that still counted the row and carry no next expiry for
+      // it, leaving that reading on screen until the next real push.
+      const expiry = last + sessionLive.RUNNING_WINDOW_MS + 1;
       if (expiry <= now) continue;
       if (!soonest || expiry < soonest) soonest = expiry;
     }
