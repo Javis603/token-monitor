@@ -666,6 +666,40 @@ test('probe resolves same-source process endpoints concurrently', async () => {
   assert.equal(result.sourceDetail, 'app');
 });
 
+test('probe returns a same-source grouped success without waiting for sibling discovery', async () => {
+  let siblingDiscoveryStarted = false;
+  const result = await probe.probe({
+    probeTimeoutMs: 500,
+    detectProcessInfos: async () => [
+      { pid: 10, kind: 'cli', csrfToken: 'hub-token', hubPort: 55555, extensionPort: null },
+      { pid: 20, kind: 'cli', csrfToken: '', hubPort: null, extensionPort: null }
+    ],
+    listeningPorts: (pid) => {
+      if (pid === 10) return Promise.resolve([]);
+      siblingDiscoveryStarted = true;
+      return new Promise(() => {});
+    },
+    callLs: async ({ port, method }) => {
+      if (port !== 55555) throw probe._errorWithStatus('unavailable', 'unexpected port');
+      if (method === 'GetUnleashData') return {};
+      if (method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.4 }]
+          }]
+        };
+      }
+      if (method === 'GetUserStatus') return { userStatus: { email: 'hub@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'unexpected method');
+    }
+  });
+
+  assert.equal(siblingDiscoveryStarted, true);
+  assert.equal(result.sourceDetail, 'cli');
+  assert.equal(result.accountEmail, 'hub@example.com');
+});
+
 test('probe enforces one provider-wide deadline and abort signal', async () => {
   let sawAbort = false;
   const startedAt = Date.now();

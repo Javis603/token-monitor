@@ -611,6 +611,35 @@ function dedupeCandidates(candidates) {
   ));
 }
 
+function firstSnapshotOrAll(tasks) {
+  if (tasks.length === 0) return Promise.resolve({ snapshot: null, results: [] });
+  return new Promise((resolve, reject) => {
+    const results = new Array(tasks.length);
+    let remaining = tasks.length;
+    let settled = false;
+    tasks.forEach((task, index) => {
+      Promise.resolve(task).then((result) => {
+        results[index] = result;
+        if (settled) return;
+        if (result.snapshot) {
+          settled = true;
+          resolve({ snapshot: result.snapshot, results });
+          return;
+        }
+        remaining -= 1;
+        if (remaining === 0) {
+          settled = true;
+          resolve({ snapshot: null, results });
+        }
+      }, (error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      });
+    });
+  });
+}
+
 async function resolveWorkingEndpoint(candidates, call, deadlineMs, signal) {
   let lastError = errorWithStatus('unavailable', 'no endpoint candidates');
   for (let index = 0; index < candidates.length; index += 1) {
@@ -875,7 +904,7 @@ async function probe(deps = {}) {
         }
       });
 
-      const groupedResults = await Promise.all(candidateStates.map(async (state) => {
+      const groupedTasks = candidateStates.map(async (state) => {
         const entry = await state;
         if (entry.candidates.length === 0) {
           return { ...entry, snapshot: null, lastError: entry.error };
@@ -914,10 +943,14 @@ async function probe(deps = {}) {
           snapshot: grouped.snapshot,
           lastError: groupedError
         };
-      }));
+      });
+      // Kind ordering is semantic; PID ordering within one kind is only stable
+      // enumeration. A valid grouped snapshot can therefore finish the kind
+      // immediately, while every grouped task must fail before legacy begins.
+      const groupedOutcome = await firstSnapshotOrAll(groupedTasks);
       throwIfAborted(signal);
-      const grouped = groupedResults.find((result) => result.snapshot);
-      if (grouped?.snapshot) return { ...grouped.snapshot, sourceDetail: kind };
+      if (groupedOutcome.snapshot) return { ...groupedOutcome.snapshot, sourceDetail: kind };
+      const groupedResults = groupedOutcome.results;
       for (const result of groupedResults) lastError = result.lastError || lastError;
 
       const candidatesByProcess = groupedResults.filter((entry) => entry.candidates.length > 0);
