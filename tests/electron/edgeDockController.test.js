@@ -279,24 +279,43 @@ test('macOS drops rectangular vibrancy when a surface mask cannot be applied', (
 // The rail's entrance is keyed to the reveal rather than to the push, so the page
 // has to be able to tell which payload is the reveal: without that it has neither
 // a transition to fire on nor a way to keep a stats update from replaying the
-// slide. `railVisible` therefore has to be true before the render it triggers.
+// slide. It is a count rather than a flag because only the reveal renders - the
+// retract fades the window out with no payload at all, so a page told the state
+// alone keeps believing the rail is up and reads the next reveal as no change,
+// which is what left the entrance playing once per page load.
 test('a rail payload carries the reveal that keys the entrance', (t) => {
   const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' } });
   t.after(() => fixture.controller.stop());
   const rail = fixture.windowFor('rail');
   const peek = fixture.windowFor('peek');
 
-  assert.equal(sentPayload(rail, 'rail').revealed, false);
+  assert.equal(sentPayload(rail, 'rail').reveal, 0);
   assert.equal(rail.opacity, 0);
 
   fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents }, {});
-  assert.equal(sentPayload(rail, 'rail').revealed, true);
+  assert.equal(sentPayload(rail, 'rail').reveal, 1);
   assert.equal(rail.opacity, 1);
 
-  // Every push after it repaints the same surface and keeps saying revealed - the
-  // edge is the renderer's to hold, and this is what it must not re-fire on.
+  // Every push after it repaints the same surface and keeps saying the same count -
+  // the edge is the renderer's to hold, and this is what it must not re-fire on.
   fixture.controller.setCells([{ id: 'cursor', kind: 'provider', label: 'Cursor' }]);
-  assert.equal(sentPayload(rail, 'rail').revealed, true);
+  assert.equal(sentPayload(rail, 'rail').reveal, 1);
+
+  // Leaving always-visible mode retracts the rail, and a retract renders nothing:
+  // the window goes dark while the page is still holding the payload that said 1 -
+  // as do the pushes the mode flip itself triggers, which repaint the rail without
+  // ever reporting that it went away.
+  fixture.settings.edgeDockMode = 'always';
+  fixture.controller.sync();
+  fixture.settings.edgeDockMode = 'autoHide';
+  fixture.controller.sync();
+  assert.equal(rail.opacity, 0, 'the retract takes the rail away');
+  assert.equal(sentPayload(rail, 'rail').reveal, 1, 'nothing tells the page the rail went away');
+
+  // So the count is the only thing that can tell the page this is a new entrance.
+  fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents }, {});
+  assert.equal(sentPayload(rail, 'rail').reveal, 2);
+  assert.equal(rail.opacity, 1);
 });
 
 // The handle's exit is played by the page, so the peek payload has to carry the

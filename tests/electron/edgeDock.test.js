@@ -1269,8 +1269,38 @@ test('provider cards list the newest sessions of their own clients this month', 
   assert.equal(codex.sessions[0].title, 'Fix dock');
   assert.equal(codex.sessions[1].projectLabel, 'token-monitor');
   assert.equal(codex.sessions[1].model, 'gpt-5');
+  // The rows are the rail's activity reading as well as this card's list, so hiding
+  // the list is a choice the cell carries rather than one it applies: the rows stay.
   const [hidden] = buildEdgeDockCells(stats, { items: [{ type: 'limit', provider: 'codex', showSessions: false }] });
-  assert.deepEqual(hidden.sessions, []);
+  assert.equal(hidden.showSessions, false);
+  assert.deepEqual(hidden.sessions.map((entry) => entry.sessionId), ['t', 'b', 'd']);
+});
+
+// The card's list and the rail's breathing mark read the same rows, so a switch
+// labelled "Show recent sessions in card" is a choice about the card. Emptying the
+// cell instead made it an off switch for the mark - a reading the label never
+// mentions, and one the card was never asked about.
+test('hiding a card\'s session list leaves the rail its running mark', () => {
+  const live = { client: 'codex', sessionId: 'live', lastUsedAt: new Date().toISOString(), totalTokens: 10, models: { 'gpt-5': 10 } };
+  const stats = {
+    periods: {
+      month: { sessions: { 'codex:live': live } },
+      today: { sessions: { 'codex:live': live } }
+    },
+    limits: { providers: [provider('codex')] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'limit', provider: 'codex', showSessions: false }] });
+
+  assert.equal(cell.showSessions, false);
+  // The mark is what the rail paints from, and these rows are also what arms the
+  // rail's own repaint clock (dock.js's `cellReadsSessions`), so both have to
+  // survive the card's list being switched off.
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions).count, 1);
+  // And the switch lands on the card alone: the rows stay on the cell, and the
+  // list is simply not drawn.
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const card = dock.slice(dock.indexOf('function providerCard('), dock.indexOf('function appendLiveRate('));
+  assert.match(card, /const sessions = cell\.showSessions === false \? null : sessionsNode\(cell\.sessions\);/);
 });
 
 test('the live Codex account is marked from this device only', () => {
@@ -1878,9 +1908,12 @@ test('the rail entrance moves the whole surface and stops under reduced motion',
   assert.match(selectors, /html\.edge-dock-reduced-motion \.edge-dock-root \*[,\s]/);
 
   // And the page plays it on the transition alone, so the push that re-renders this
-  // surface every few seconds does not replay the slide.
+  // surface every few seconds does not replay the slide. The transition is the count
+  // moving, not the rail being up: the retract takes the window away without a
+  // payload, so a page keying on the state would never see the rail leave and would
+  // read the next reveal as no change at all - one entrance per page load.
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  assert.match(dock, /if \(railRevealed === false && revealed\) playRailReveal\(\);/);
+  assert.match(dock, /if \(railReveal !== null && reveal !== railReveal\) playRailReveal\(\);/);
 });
 
 // The halo the running mark breathes is bounded on both sides, and both bounds are

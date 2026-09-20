@@ -84,6 +84,10 @@ function createEdgeDockController(deps) {
   let bubblePlaced = null;
   let bubbleVisible = false;
   let railVisible = false;
+  // How many times the rail has been revealed, as an event the page can key the
+  // entrance on. See revealRail: the page cannot derive this from `railVisible`,
+  // because the retract that takes the rail away never re-renders it.
+  let railReveal = 0;
   // Whether the edge is offering its handle. Tracked for the same reason
   // `railVisible` is: the handle's exit is an effect the page plays, so the
   // payload has to be able to say which push is the one that takes it away.
@@ -221,9 +225,11 @@ function createEdgeDockController(deps) {
         cells,
         focusCellId: bubbleCell !== null ? cells[bubbleCell]?.id || null : null,
         always: alwaysVisible(),
-        // The renderer plays the entrance on the transition into revealed, so a
-        // push that only repaints an already-visible rail does not replay it.
-        revealed: railVisible,
+        // The renderer plays the entrance when this count moves on, so a push that
+        // only repaints an already-visible rail does not replay it. It is a count
+        // rather than `railVisible` because only the reveal renders: the page would
+        // never be told about the retract, and would read the next reveal as no change.
+        reveal: railReveal,
         cellLayout: layout()?.rail?.cells || null
       };
     }
@@ -439,6 +445,13 @@ function createEdgeDockController(deps) {
     // the entrance; `entering` keeps the fade itself to the reveal.
     const entering = !railVisible;
     railVisible = true;
+    // Counted rather than reported as state, because the state has two edges and only
+    // one of them renders: `retractRail` fades the window out without re-rendering the
+    // page, so a page told the state alone still believes the rail is up and reads the
+    // next reveal as no change at all - which is what left the entrance playing once
+    // per page load. The count only moves on a real transition, so a hover that
+    // re-reveals an already-visible rail does not replay the slide.
+    if (entering) railReveal += 1;
     render('rail');
     positionRail();
     if (entering) setVisible('rail', true, FADE_IN_MS);

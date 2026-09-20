@@ -639,10 +639,10 @@ function statCellNode(cell) {
 }
 
 let railNode = null;
-// `null` until a payload has said: the entrance is keyed to the transition into
-// revealed, so a page that loads with the rail already up shows it instead of
+// `null` until a payload has said: the entrance is keyed to a reveal this page has
+// not seen, so a page that loads with the rail already up shows it instead of
 // replaying the slide.
-let railRevealed = null;
+let railReveal = null;
 
 // The motion itself is CSS (`edge-dock-rail-in`); this only decides when it
 // plays. The root wraps both the silhouette and the cells, so sliding it moves
@@ -666,10 +666,11 @@ function renderRail(payload) {
   root.dataset.side = payload.side;
   root.classList.toggle('is-always', payload.always === true);
   // Stats arrive every few seconds and each one re-renders this surface, so the
-  // slide belongs to the reveal rather than to every payload that follows it.
-  const revealed = payload.revealed === true;
-  if (railRevealed === false && revealed) playRailReveal();
-  railRevealed = revealed;
+  // slide belongs to the reveal rather than to every payload that follows it: the
+  // count moves only on a real reveal, and this plays when it has moved on.
+  const reveal = payload.reveal;
+  if (railReveal !== null && reveal !== railReveal) playRailReveal();
+  railReveal = reveal;
   if (!railNode) {
     railNode = el('div', 'edge-dock-rail');
     contentLayer.append(railNode);
@@ -944,7 +945,9 @@ function providerCard(cell) {
   }
   card.append(accounts);
 
-  const sessions = sessionsNode(cell.sessions);
+  // The rows are the cell's activity reading as well as this card's list, so the
+  // switch decides what is drawn here rather than whether the cell has them.
+  const sessions = cell.showSessions === false ? null : sessionsNode(cell.sessions);
   if (sessions) card.append(sessions);
 
   if (cell.usage) {

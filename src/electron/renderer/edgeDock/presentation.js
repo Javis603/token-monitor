@@ -361,7 +361,13 @@
         currency: balanceDisplay.creditsCurrency(headline.record, headlineWindow)
       }
       : null;
-    const sessions = options.showSessions === false ? [] : recentSessionsFor(options.stats, id);
+    // The recent rows are two readings at once: the card lists them, and the rail's
+    // running mark and its expiry clock are derived from them. So `showSessions` is a
+    // choice about what the card draws and rides the cell as one, rather than being
+    // applied here - emptying the rows here turned a switch labelled "Show recent
+    // sessions in card" into an off switch for the rail's activity mark, which is a
+    // reading the card was never asked about.
+    const sessions = recentSessionsFor(options.stats, id);
     return {
       id,
       kind: 'provider',
@@ -397,6 +403,9 @@
         syncActive: options.syncActive === true
       },
       sessions,
+      // What the card draws of those rows. The rail's mark reads them whatever this
+      // says, because whether a tool is working is not the card's question.
+      showSessions: options.showSessions !== false,
       forecast: id === 'codex' ? options.codexResetForecast || null : null
     };
   }
