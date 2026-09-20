@@ -18,6 +18,11 @@
     return Number.isFinite(number) ? number : 0;
   }
 
+  function addUnpricedTokens(target, value) {
+    const tokens = Math.max(0, finiteNumber(value));
+    if (tokens > 0) target.unpricedTokens = finiteNumber(target.unpricedTokens) + tokens;
+  }
+
   function normalizeDateKey(value) {
     const key = String(value || '').slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return '';
@@ -190,6 +195,7 @@
         messages: finiteNumber(previous?.perClient?.[client]?.messages),
         ...components
       };
+      addUnpricedTokens(perClient[client], period?.clientUnpricedTokens?.[client]);
     }
     const perModel = {};
     const models = new Set([
@@ -212,6 +218,7 @@
         cost: finiteNumber(period?.modelCosts?.[model]),
         ...components
       };
+      addUnpricedTokens(perModel[model], period?.modelUnpricedTokens?.[model]);
     }
     const totalComponents = liveComponentValues(
       period?.totalTokens,
@@ -222,7 +229,7 @@
       period?.unclassifiedTokens,
       Object.prototype.hasOwnProperty.call(period || {}, 'unclassifiedTokens')
     );
-    return {
+    const row = {
       ...previous,
       date,
       tokens: finiteNumber(period?.totalTokens),
@@ -232,6 +239,10 @@
       perClient,
       perModel
     };
+    // Today's replacement can resolve a previously missing price without new tokens.
+    delete row.unpricedTokens;
+    addUnpricedTokens(row, period?.unpricedTokens);
+    return row;
   }
 
   function dailyWithLiveToday(daily, todayKey, todayPeriod) {
@@ -438,6 +449,7 @@
       if (!target[field][name]) target[field][name] = { tokens: 0, cost: 0 };
       target[field][name].tokens += finiteNumber(value?.tokens);
       target[field][name].cost += finiteNumber(value?.cost);
+      addUnpricedTokens(target[field][name], value?.unpricedTokens);
       target[field][name].cacheReadTokens = finiteNumber(target[field][name].cacheReadTokens)
         + finiteNumber(value?.cacheReadTokens);
       target[field][name].cacheWriteTokens = finiteNumber(target[field][name].cacheWriteTokens)
@@ -477,6 +489,7 @@
         const target = byDate.get(date);
         target.tokens += finiteNumber(row?.tokens);
         target.cost += finiteNumber(row?.cost);
+        addUnpricedTokens(target, row?.unpricedTokens);
         target.activeTimeMs += finiteNumber(row?.activeTimeMs);
         target.cacheReadTokens += finiteNumber(row?.cacheReadTokens);
         target.cacheWriteTokens += finiteNumber(row?.cacheWriteTokens);
@@ -588,6 +601,7 @@
     for (const row of rows) {
       period.totalTokens += finiteNumber(row?.tokens);
       period.costUsd += finiteNumber(row?.cost);
+      addUnpricedTokens(period, row?.unpricedTokens);
       period.cacheReadTokens += finiteNumber(row?.cacheReadTokens);
       period.cacheWriteTokens += finiteNumber(row?.cacheWriteTokens);
       period.outputTokens += finiteNumber(row?.outputTokens);
@@ -595,6 +609,9 @@
       for (const [client, value] of Object.entries(row?.perClient || {})) {
         addMap(period.clients, client, value?.tokens);
         addMap(period.clientCosts, client, value?.cost);
+        if (finiteNumber(value?.unpricedTokens) > 0) {
+          addMap(period.clientUnpricedTokens ||= {}, client, value.unpricedTokens);
+        }
         addMap(period.clientCacheReads, client, value?.cacheReadTokens);
         addMap(period.clientCacheWrites, client, value?.cacheWriteTokens);
         addMap(period.clientOutputs, client, value?.outputTokens);
@@ -603,6 +620,9 @@
       for (const [model, value] of Object.entries(row?.perModel || {})) {
         addMap(period.models, model, value?.tokens);
         addMap(period.modelCosts, model, value?.cost);
+        if (finiteNumber(value?.unpricedTokens) > 0) {
+          addMap(period.modelUnpricedTokens ||= {}, model, value.unpricedTokens);
+        }
         addMap(period.modelCacheReads, model, value?.cacheReadTokens);
         addMap(period.modelCacheWrites, model, value?.cacheWriteTokens);
         addMap(period.modelOutputs, model, value?.outputTokens);

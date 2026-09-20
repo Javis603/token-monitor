@@ -440,7 +440,7 @@ function buildTokscaleJson(startMs, rows, pricingByModel, includeUndated = false
     // count only for allTime (includeUndated) — never for today/month.
     if (startMs && (row.createdAt ? row.createdAt < startMs : !includeUndated)) continue;
     const key = `${row.sessionId}\0${row.model}`;
-    if (!grouped.has(key)) grouped.set(key, { ...row, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, messages: 0, startedAt: 0, lastUsedAt: 0, cost: 0 });
+    if (!grouped.has(key)) grouped.set(key, { ...row, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, messages: 0, startedAt: 0, lastUsedAt: 0, cost: 0, unpricedTokens: 0 });
     const group = grouped.get(key);
     group.input += row.input;
     group.output += row.output;
@@ -448,7 +448,8 @@ function buildTokscaleJson(startMs, rows, pricingByModel, includeUndated = false
     group.cacheWrite += row.cacheWrite;
     group.messages += row.messages;
     const cost = estimatedQoderCnRowCost(row, pricingByModel);
-    group.cost += cost === null ? 0 : cost;
+    if (cost === null) group.unpricedTokens += row.input + row.output + row.cacheRead + row.cacheWrite;
+    else group.cost += cost;
     if (row.createdAt && (!group.startedAt || row.createdAt < group.startedAt)) group.startedAt = row.createdAt;
     if (row.createdAt > group.lastUsedAt) group.lastUsedAt = row.createdAt;
   }
@@ -457,6 +458,7 @@ function buildTokscaleJson(startMs, rows, pricingByModel, includeUndated = false
     client: 'qodercn', mergedClients: null, sessionId: row.sessionId, model: row.model, provider: 'qodercn',
     input: row.input, output: row.output, cacheRead: row.cacheRead, cacheWrite: row.cacheWrite,
     reasoning: 0, messageCount: row.messages, cost: row.cost,
+    ...(row.unpricedTokens > 0 ? { unpricedTokens: row.unpricedTokens } : {}),
     startedAt: row.startedAt ? new Date(row.startedAt).toISOString() : '',
     lastUsedAt: row.lastUsedAt ? new Date(row.lastUsedAt).toISOString() : '',
     projectLabel: row.projectLabel || '', performance: null
@@ -506,7 +508,8 @@ function buildQoderCnHistoryGraph(options = {}) {
     model.tokens.output += row.output;
     model.tokens.cacheRead += row.cacheRead;
     model.tokens.cacheWrite += row.cacheWrite;
-    model.cost += cost === null ? 0 : cost;
+    if (cost === null) model.unpricedTokens = (model.unpricedTokens || 0) + row.input + row.output + row.cacheRead + row.cacheWrite;
+    else model.cost += cost;
     model.messages += row.messages;
   }
   return { contributions: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)) };

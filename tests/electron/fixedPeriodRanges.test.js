@@ -17,6 +17,34 @@ function day(date, tokens, client = 'claude', model = 'opus') {
   };
 }
 
+test('fixed ranges retain missing-price coverage and clear it when live pricing recovers', () => {
+  const date = '2026-08-12';
+  const missing = {
+    ...day(date, 20, 'qodercn', 'unpriced'), cost: 0, unpricedTokens: 20,
+    perClient: { qodercn: { tokens: 20, cost: 0, unpricedTokens: 20 } },
+    perModel: { unpriced: { tokens: 20, cost: 0, unpricedTokens: 20 } }
+  };
+  const range = ranges.rangeForSelection('last7', { todayKey: date });
+  const period = ranges.derivePeriod([missing, day('2026-08-11', 100)], range);
+  assert.equal(period.unpricedTokens, 20);
+  assert.deepEqual(period.clientUnpricedTokens, { qodercn: 20 });
+  assert.deepEqual(period.modelUnpricedTokens, { unpriced: 20 });
+  assert.equal(period.costUsd, 1);
+  assert.equal(period.totalTokens, 120);
+  const recovered = ranges.derivePeriod([missing], range, {
+    todayKey: date, todayPeriod: {
+      totalTokens: 20, costUsd: 0,
+      clients: { qodercn: 20 }, clientCosts: { qodercn: 0 },
+      models: { unpriced: 20 }, modelCosts: { unpriced: 0 }
+    }
+  });
+  assert.equal(recovered.unpricedTokens, undefined);
+  assert.equal(recovered.clientUnpricedTokens, undefined);
+  assert.equal(recovered.modelUnpricedTokens, undefined);
+  assert.equal(recovered.costUsd, 0);
+  assert.equal(recovered.totalTokens, 20);
+});
+
 function deviceSource({
   deviceId,
   date = '2026-08-12',

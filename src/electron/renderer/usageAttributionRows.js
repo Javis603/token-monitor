@@ -12,15 +12,26 @@
     return Number.isFinite(number) ? number : 0;
   }
 
-  function attributionRows(values, costs, options = {}) {
+  function attributionRows(values, costs, unpricedTokens, options = {}) {
+    // Keep the former three-argument call shape for unrelated consumers while
+    // callers migrate to the explicit unpriced-token map.
+    if (options === undefined || (arguments.length === 3 && unpricedTokens && ('totalValue' in unpricedTokens || 'totalCost' in unpricedTokens))) {
+      options = unpricedTokens;
+      unpricedTokens = {};
+    }
     const valueMap = values && typeof values === 'object' ? values : {};
     const costMap = costs && typeof costs === 'object' ? costs : {};
-    const keys = new Set([...Object.keys(valueMap), ...Object.keys(costMap)]);
-    const rows = Array.from(keys, (key) => ({
-      key,
-      value: finiteNumber(valueMap[key]),
-      cost: finiteNumber(costMap[key])
-    })).filter((row) => row.value > 0 || row.cost > 0);
+    const unpricedMap = unpricedTokens && typeof unpricedTokens === 'object' ? unpricedTokens : {};
+    const keys = new Set([...Object.keys(valueMap), ...Object.keys(costMap), ...Object.keys(unpricedMap)]);
+    const rows = Array.from(keys, (key) => {
+      const unpriced = finiteNumber(unpricedMap[key]);
+      return {
+        key,
+        value: finiteNumber(valueMap[key]),
+        cost: finiteNumber(costMap[key]),
+        ...(unpriced > 0 ? { unpricedTokens: unpriced } : {})
+      };
+    }).filter((row) => row.value > 0 || row.cost > 0 || row.unpricedTokens > 0);
     const attributedValue = rows.reduce((sum, row) => sum + Math.max(0, row.value), 0);
     const attributedCost = rows.reduce((sum, row) => sum + Math.max(0, row.cost), 0);
     const remainderValue = Math.max(0, finiteNumber(options.totalValue) - attributedValue);

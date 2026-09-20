@@ -19,6 +19,51 @@ const period = {
   projects: { p1: { projectId: 'p1', models: { 'anthropic/claude-opus-5': 40, 'claude-opus-5': 30 } } }
 };
 
+test('aliases conserve unpriced token attribution alongside known costs without mutating the source', () => {
+  const row = {
+    totalTokens: 30, costUsd: 2, unpricedTokens: 20,
+    models: { raw: 10, canonical: 20 }, modelCosts: { canonical: 2 },
+    modelUnpricedTokens: { raw: 10, canonical: 10 },
+    clientUnpricedTokens: { qodercn: 20 },
+    clientModelUnpricedTokens: { qodercn: { raw: 10, canonical: 10 } }
+  };
+  const stats = { periods: { today: { ...row, sessions: { one: row }, projects: { one: row } } } };
+  const before = structuredClone(stats);
+  const result = projectModelAliasStats(stats, { raw: 'canonical' });
+  for (const projected of [result.periods.today, result.periods.today.sessions.one, result.periods.today.projects.one]) {
+    assert.deepEqual(projected.modelUnpricedTokens, { canonical: 20 });
+    assert.deepEqual(projected.clientModelUnpricedTokens, { qodercn: { canonical: 20 } });
+    assert.deepEqual(projected.clientUnpricedTokens, { qodercn: 20 });
+    assert.equal(projected.unpricedTokens, 20);
+    assert.equal(projected.costUsd, 2);
+    assert.equal(projected.totalTokens, 30);
+    assert.deepEqual(projected.modelCosts, { canonical: 2 });
+  }
+  assert.deepEqual(stats, before);
+});
+
+test('history aliases carry unpriced coverage through model buckets and attribution-only previews', () => {
+  const row = {
+    tokens: 30, cost: 2, unpricedTokens: 20,
+    perModel: { raw: { tokens: 10, cost: 0, unpricedTokens: 10 }, canonical: { tokens: 20, cost: 2, unpricedTokens: 10 } },
+    clientModelUnpricedTokens: { qodercn: { raw: 10, canonical: 10 } }
+  };
+  const history = { daily: [{ date: '2026-09-19', ...row }], monthly: [{ month: '2026-09', ...row }], summary: { totalCost: 2, unpricedTokens: 20, clientModelUnpricedTokens: row.clientModelUnpricedTokens } };
+  const before = structuredClone(history);
+  const result = projectModelAliasHistory(history, { raw: 'canonical' });
+  for (const projected of [result.daily[0], result.monthly[0]]) {
+    assert.equal(projected.perModel.canonical.unpricedTokens, 20);
+    assert.equal(projected.perModel.canonical.cost, 2);
+    assert.equal(projected.unpricedTokens, 20);
+    assert.deepEqual(projected.clientModelUnpricedTokens, { qodercn: { canonical: 20 } });
+  }
+  assert.deepEqual(result.summary.clientModelUnpricedTokens, { qodercn: { canonical: 20 } });
+  const preview = { daily: [{ date: '2026-09-19', clientModelUnpricedTokens: row.clientModelUnpricedTokens }], summary: history.summary };
+  const projectedPreview = projectModelAliasHistory(preview, { raw: 'canonical' });
+  assert.deepEqual(projectedPreview.daily[0].clientModelUnpricedTokens, { qodercn: { canonical: 20 } });
+  assert.deepEqual(history, before);
+});
+
 test('empty or malformed alias settings are a no-op until automatic grouping is on', () => {
   const stats = { periods: { today: period } };
   for (const input of [undefined, null, [], 'x', {}, { x: 3, ' ': 'x', y: '' }]) {
