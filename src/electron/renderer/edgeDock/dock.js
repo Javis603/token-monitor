@@ -505,13 +505,11 @@ function cellRateNode(cell) {
   const missing = cell.rate === null || cell.rate === undefined;
   const node = el('span', 'edge-dock-cell-rate');
   node.classList.toggle('is-idle', missing || cell.rateIdle === true);
-  // A description, not the live-rate item's "switch" tooltip. This cell's click
-  // opens the Sessions card, because that is the item's primary action; the
-  // toggle handler only fires for a liveRate cell (see the controller's click
-  // path), so borrowing that wording here would promise a click that does
-  // something else. Saying which reading is shown is still worth a tooltip: the
-  // unit alone does not say whether it is tok/s or TPM.
-  node.title = t('edgeDock.rate.reading', { unit: t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit') });
+  // No tooltip on this line. A `title` needs the pointer to rest on the node, but
+  // hovering this cell opens its card after bubbleDelayMs (70ms), so the tooltip
+  // is never reached - and the wording it would carry describes the live-rate
+  // item's readout, which really does toggle rate mode on click while this cell
+  // opens its card. A tooltip nobody can read is not worth five translations.
   node.append(
     el('span', 'edge-dock-cell-rate-value', missing ? '—' : formatRate(cell.rate)),
     el('span', 'edge-dock-cell-rate-unit', t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit'))

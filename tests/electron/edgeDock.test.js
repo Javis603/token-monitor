@@ -644,17 +644,20 @@ test('the sessions rail and mixed rows name their tools for assistive technology
   assert.doesNotMatch(container, /sr-only', `\$\{session\.client\}/);
 });
 
-// The sessions cell's rate line borrowed the live-rate item's "switch" tooltip, but
-// this cell's click opens the Sessions card: the controller only toggles the rate
-// mode for a `liveRate` cell, which is that item's own readout and primary action.
-// So the tooltip described a click that does something else. It now states the
-// reading instead, and the toggle wording stays with the cell it belongs to.
-test('the sessions rate line describes its reading instead of promising a toggle', () => {
+// The tooltip was wrong twice over: its wording belonged to the live-rate item, whose
+// readout really does toggle on click, and a `title` needs the pointer to rest while
+// hovering this cell opens a card after 70ms. It is gone, and the toggle wording stays
+// with the readout that toggles.
+test('the sessions rate line carries no unreachable tooltip', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const controller = fs.readFileSync(path.join(rendererDir, '..', 'edgeDock', 'controller.js'), 'utf8');
   const rateNode = dock.slice(dock.indexOf('function cellRateNode('), dock.indexOf('// The tools with a session running'));
-  assert.match(rateNode, /node\.title = t\('edgeDock\.rate\.reading'/);
-  assert.doesNotMatch(rateNode, /edgeDock\.rate\.switch/);
+  // No tooltip at all on this line. A `title` needs the pointer to rest, but hovering
+  // this cell opens its card after bubbleDelayMs (70ms in EDGE_DOCK_TIMING), so a
+  // tooltip here is unreachable - and the wording it would carry belongs to the
+  // live-rate item, whose readout really does toggle while this cell opens its card.
+  assert.doesNotMatch(rateNode, /node\.title =/);
+  assert.doesNotMatch(rateNode, /edgeDock\.rate\.(switch|reading)/);
   // The toggle wording is still used by the cell that really does toggle, so this
   // is a scoping fix rather than a removal of the affordance.
   const liveRateCard = dock.slice(dock.indexOf('function appendLiveRate('), dock.indexOf('function statCard('));
@@ -662,9 +665,9 @@ test('the sessions rate line describes its reading instead of promising a toggle
   const toggle = controller.slice(controller.indexOf("ipcMain.on('edgeDock:click'"), controller.indexOf("ipcMain.on('edgeDock:dragStart'"));
   assert.match(toggle, /metric === 'liveRate'/);
   assert.doesNotMatch(toggle, /cellDetail/);
-  // And the new key exists in every locale, since the tooltip is user-facing text.
+  // And the retired key is gone from every locale rather than left as dead copy.
   const i18n = readRendererFile('i18n.js');
-  assert.equal((i18n.match(/'edgeDock\.rate\.reading':/g) || []).length, 5);
+  assert.doesNotMatch(i18n, /'edgeDock\.rate\.reading'/);
 });
 
 // The flare cache keeps one entry per session it has seen, so a long-lived card has
