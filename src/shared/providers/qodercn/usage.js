@@ -9,6 +9,15 @@ const { promisify } = require('node:util');
 const execFileAsync = promisify(execFile);
 const { customPricingPath } = require('../../tokscaleConfig');
 const QODER_CN_DB_SUFFIX = path.join('SharedClientCache', 'cache', 'db', 'local.db');
+// Qoder CN builds from ~2026-09 dropped the SharedClientCache SQLite database
+// and persist sessions as Claude-compatible JSONL transcripts under the
+// home-relative `.qoder-cn/projects` tree (one directory per workspace, a
+// `<sessionId>.jsonl` per session, plus `<sessionId>/subagents/agent-*.jsonl`
+// for side-chain agents). This is the storage backend the database path can no
+// longer see, so the adapter reads both.
+const QODER_CN_PROJECTS_SUFFIX = path.join('.qoder-cn', 'projects');
+const QODER_CN_JSONL_MAX_DEPTH = 6;
+const QODER_CN_JSONL_MAX_FILES = 5000;
 // Qoder CN stores internal model codes (model_info.model_key) instead of real
 // model names. Official display names come from the app's bundled i18n keys
 // `modelSelector.item.<code>` (Qoder CN.app, 2026-07 build); the codes change
@@ -299,10 +308,17 @@ function qoderCnDataPaths(options = {}) {
   }
 
   const explicitDb = String(env.TOKEN_MONITOR_QODER_CN_DB_PATH || '').trim();
+  const explicitProjects = String(env.TOKEN_MONITOR_QODER_CN_PROJECTS_PATH || '').trim();
   return {
     dbPaths: explicitDb
       ? [path.resolve(explicitDb)]
-      : [path.join(appSupport, 'QoderCN', QODER_CN_DB_SUFFIX)]
+      : [path.join(appSupport, 'QoderCN', QODER_CN_DB_SUFFIX)],
+    // The transcript home is a dot-directory in the user's home on every
+    // platform (like ~/.proma), not the platform Application Support root the
+    // legacy database lived under.
+    projectsDir: explicitProjects
+      ? path.resolve(explicitProjects)
+      : path.join(home, QODER_CN_PROJECTS_SUFFIX)
   };
 }
 
@@ -411,6 +427,103 @@ async function readQoderCnDbRows(dbPath, options = {}) {
   }
 }
 
+// --- JSONL transcript source (Qoder CN 2026-09+ storage) ---
+
+function qoderCnJsonlModelName(rawModel) {
+  const model = String(rawModel || '').trim();
+  if (!model) return '';
+  // Custom-provider rows carry `qoder-custom-<profile-uuid>/<real model>`; the
+  // trailing segment is the actual model name and the only part a price
+  // catalog can resolve.
+  const slash = model.lastIndexOf('/');
+  const key = model.startsWith('qoder-custom-') && slash > 0 ? model.slice(slash + 1) : model;
+  return Object.prototype.hasOwnProperty.call(QODER_CN_MODEL_DISPLAY_NAMES, key)
+    ? QODER_CN_MODEL_DISPLAY_NAMES[key]
+    : key;
+}
+
+function qoderCnJsonlProjectLabel(cwd) {
+  const dir = String(cwd || '').replace(/[\\/]+$/, '');
+  if (!dir) return '';
+  // Remote-control sessions run inside the app data dir; their basename is a
+  // session hash, not a project name — leave them unattributed, same intent
+  // as the '.' sentinel handled by normalizeQoderCnProjectLabel.
+  if (/[\\/]remote-control[\\/]|com\.qodercn\.app\.stable/.test(dir)) return '';
+  const label = dir.slice(Math.max(dir.lastIndexOf('/'), dir.lastIndexOf('\\')) + 1);
+  return normalizeQoderCnProjectLabel(label);
+}
+
+// One JSONL line -> a normalized usage row, or null. Transcripts share the
+// Claude message format: assistant lines carry `usage` with *uncached*
+// `input_tokens` plus separate cache read/write counters — unlike the legacy
+// DB, whose `prompt_tokens` already includes the cached prefix.
+function normalizeQoderCnJsonlRow(obj, source = 'local') {
+  if (!obj || obj.type !== 'assistant') return null;
+  const usage = obj.message && obj.message.usage;
+  if (!usage) return null;
+  const input = numeric(usage.input_tokens);
+  const output = numeric(usage.output_tokens);
+  const cacheRead = numeric(usage.cache_read_input_tokens ?? 0);
+  const cacheWrite = numeric(usage.cache_creation_input_tokens ?? 0);
+  if (input === null || output === null || cacheRead === null || cacheWrite === null) return null;
+  if (input + output + cacheRead + cacheWrite === 0) return null;
+  const session = String(obj.sessionId || 'unknown');
+  const message = String((obj.message && obj.message.id) || obj.uuid || `${obj.timestamp || 0}`);
+  return {
+    sessionId: `qodercn:jsonl:${source}:${session}`,
+    messageId: `qodercn:jsonl:${source}:${session}:${message}`,
+    model: qoderCnJsonlModelName(obj.message && obj.message.model) || 'qoder-agent',
+    projectLabel: qoderCnJsonlProjectLabel(obj.cwd),
+    input,
+    output,
+    cacheRead,
+    cacheWrite,
+    createdAt: timestampMs(obj.timestamp),
+    messages: 1
+  };
+}
+
+function listQoderCnJsonlFiles(dir, depth, found) {
+  if (depth > QODER_CN_JSONL_MAX_DEPTH || found.length >= QODER_CN_JSONL_MAX_FILES) return;
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) listQoderCnJsonlFiles(full, depth + 1, found);
+    else if (entry.isFile() && entry.name.endsWith('.jsonl')) found.push(full);
+    if (found.length >= QODER_CN_JSONL_MAX_FILES) return;
+  }
+}
+
+function collectQoderCnJsonlRows(options = {}) {
+  const projectsDir = options.projectsDir || qoderCnDataPaths(options).projectsDir;
+  const sinceMs = options.sinceMs;
+  const rows = [];
+  const files = [];
+  listQoderCnJsonlFiles(projectsDir, 0, files);
+  for (const filePath of files) {
+    // A transcript cannot contain usage newer than its own mtime, so an
+    // anchored (today-only) tick can skip every file untouched since the
+    // window opened — real trees hold multi-megabyte session files.
+    try {
+      if (sinceMs && fs.statSync(filePath).mtimeMs < sinceMs) continue;
+    } catch (_) { continue; }
+    let content;
+    try { content = fs.readFileSync(filePath, 'utf8'); } catch (_) { continue; }
+    const source = sourceId(filePath);
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue;
+      let obj;
+      try { obj = JSON.parse(line); } catch (_) { continue; }
+      const row = normalizeQoderCnJsonlRow(obj, source);
+      if (!row) continue;
+      if (sinceMs && (!row.createdAt || row.createdAt < sinceMs)) continue;
+      rows.push(row);
+    }
+  }
+  return rows;
+}
+
 async function collectQoderCnRows(options = {}) {
   const paths = qoderCnDataPaths(options);
   const dbPaths = Array.isArray(options.dbPaths) ? options.dbPaths : paths.dbPaths;
@@ -425,6 +538,19 @@ async function collectQoderCnRows(options = {}) {
     for (const dbRow of dbRows) {
       const row = normalizeQoderCnDbRow(dbRow, source);
       if (row) rows.push(row);
+    }
+  }
+
+  // The JSONL tree is opt-in at the call site so DB-only unit tests keep their
+  // exact fixtures; the collector enables it in production, where a machine
+  // has either the legacy database, the new transcripts, or (after a storage
+  // migration) one historical and one current — never the same message in
+  // both, since they are different product surfaces.
+  if (options.includeJsonl) {
+    try {
+      rows.push(...collectQoderCnJsonlRows({ ...options, projectsDir: options.projectsDir || paths.projectsDir }));
+    } catch (err) {
+      if (typeof options.logger === 'function') options.logger(`qodercn jsonl read failed: ${err.message}`);
     }
   }
 
@@ -516,8 +642,10 @@ module.exports = {
   QODER_CN_MODEL_DISPLAY_NAMES,
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
+  collectQoderCnJsonlRows,
   collectQoderCnRows,
   normalizeQoderCnDbRow,
+  normalizeQoderCnJsonlRow,
   qoderCnDataPaths,
   readQoderCnDbRows,
   resolveQoderCnPricing,
