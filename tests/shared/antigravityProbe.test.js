@@ -911,6 +911,41 @@ test('probe reaches a reachable explicit --hub-port while port discovery is stil
   assert.equal(result.accountEmail, 'hub@example.com');
 });
 
+test('probe starts reachable hub quota before hanging discovery consumes its budget', async () => {
+  let hubPreflightCalls = 0;
+  let hubQuotaCalls = 0;
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    listeningPorts: () => new Promise(() => {}),
+    callLs: async ({ port, method }) => {
+      if (port !== 55555) throw probe._errorWithStatus('unavailable', 'unexpected port');
+      if (method === 'GetUnleashData') {
+        hubPreflightCalls += 1;
+        return {};
+      }
+      if (method === 'RetrieveUserQuotaSummary') {
+        hubQuotaCalls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.4 }]
+          }]
+        };
+      }
+      if (method === 'GetUserStatus') return { userStatus: { email: 'hub@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'hub endpoint unavailable');
+    },
+    probeTimeoutMs: 1500
+  });
+
+  assert.equal(hubPreflightCalls, 1, 'a resolved hub is not preflighted again');
+  assert.equal(hubQuotaCalls, 1);
+  assert.equal(result.accountEmail, 'hub@example.com');
+});
+
 // Discovery stays the fallback: a dead explicit hub port must not stop the
 // discovered listener from being probed.
 test('probe falls back to discovered ports when the explicit hub port is unreachable', async () => {

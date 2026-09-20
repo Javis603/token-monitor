@@ -599,6 +599,18 @@ function prioritizeCandidate(resolved, candidates) {
   ))];
 }
 
+function sameEndpoint(left, right) {
+  return left.scheme === right.scheme
+    && left.port === right.port
+    && left.csrfToken === right.csrfToken;
+}
+
+function dedupeCandidates(candidates) {
+  return candidates.filter((candidate, index) => (
+    !candidates.slice(0, index).some((existing) => sameEndpoint(existing, candidate))
+  ));
+}
+
 async function resolveWorkingEndpoint(candidates, call, deadlineMs, signal) {
   let lastError = errorWithStatus('unavailable', 'no endpoint candidates');
   for (let index = 0; index < candidates.length; index += 1) {
@@ -765,22 +777,24 @@ async function probe(deps = {}) {
       signal
     );
 
-    // Source priority is deliberate and independent of ps/PID order. Processes
-    // within one source are probed concurrently under the same provider-wide
-    // deadline, and grouped quota still wins before any legacy response.
+    // Probe scheduling contract:
+    // - source priority is independent of ps/PID order;
+    // - same-source processes run concurrently, with grouped quota before legacy;
+    // - each endpoint is preflighted at most once;
+    // - a reachable explicit hub starts quota without awaiting discovery;
+    // - preflight failure lowers priority but never drops a quota candidate; and
+    // - discovery keeps the full provider deadline when no explicit hub competes.
     for (const kind of PROCESS_KIND_ORDER) {
       const sourceInfos = infos.filter((info) => info.kind === kind);
-      const prepared = await Promise.all(sourceInfos.map(async (info) => {
+      const halfDeadlineMs = () => (
+        Date.now() + Math.max(1, Math.floor(remainingMs(probeDeadlineMs) / 2))
+      );
+      const candidateStates = sourceInfos.map(async (info) => {
         try {
-          const halfDeadlineMs = () => Date.now() + Math.max(1, Math.floor(remainingMs(probeDeadlineMs) / 2));
-
           // An explicit `--hub-port` is authoritative, and discovery must not be
-          // able to starve it: a slow or hanging lsof/Get-NetTCPConnection once
-          // consumed the whole provider deadline, leaving the endpoint named on
-          // the command line untried. Running the two concurrently is what makes
-          // both claims true at once. Sequential preflight-then-discovery is not
-          // equivalent, because whichever runs first can spend the budget the
-          // other needs, and a dead hub would then be preflighted twice.
+          // able to starve it. Start discovery concurrently, but expose it as a
+          // lazy fallback so a reachable hub can begin quota retrieval without
+          // waiting for lsof/Get-NetTCPConnection to settle.
           const explicitHub = info.hubPort ? endpointCandidates(info, []) : [];
           const discoveryBudgetMs = explicitHub.length > 0 ? halfDeadlineMs() : probeDeadlineMs;
           const discovery = (async () => {
@@ -797,92 +811,117 @@ async function probe(deps = {}) {
             }
           })();
 
-          let hubReachable = false;
-          let resolveFirst = [];
-          let failedHub = [];
-          if (explicitHub.length > 0) {
-            const resolvedHub = await resolveWorkingEndpoint(
-              explicitHub,
-              call,
-              halfDeadlineMs(),
-              signal
-            ).catch((error) => {
+          const resolveDiscoveredCandidates = async (failedHub = []) => {
+            const { ports, error: discoveryError } = await discovery;
+            if (discoveryError && explicitHub.length === 0) throw discoveryError;
+            // `endpointCandidates()` always re-prepends the hub port, so remove
+            // it here. A hub already failed or passed preflight and must not be
+            // resolved a second time through the discovered set.
+            const discovered = endpointCandidates(info, ports).filter((candidate) => (
+              candidate.port !== info.hubPort
+            ));
+            let resolved;
+            try {
+              resolved = await resolveWorkingEndpoint(
+                discovered,
+                call,
+                probeDeadlineMs,
+                signal
+              );
+            } catch (error) {
               if (signal?.aborted) throw error;
-              return null;
-            });
+              resolved = { candidates: discovered, lastError: error };
+            }
+            return {
+              info,
+              candidates: dedupeCandidates([...resolved.candidates, ...failedHub]),
+              error: resolved.lastError || discoveryError
+            };
+          };
+
+          if (explicitHub.length > 0) {
+            let resolvedHub;
+            try {
+              resolvedHub = await resolveWorkingEndpoint(
+                explicitHub,
+                call,
+                halfDeadlineMs(),
+                signal
+              );
+            } catch (error) {
+              if (signal?.aborted) throw error;
+              resolvedHub = { candidates: explicitHub, lastError: error };
+            }
             // `GetUnleashData` only proves the endpoint responds (an HTTP error is
-            // deliberately accepted for servers that do not implement it), so a
-            // reachable hub port keeps its place first but never removes the
-            // discovered candidates from the quota stage.
-            hubReachable = resolvedHub?.lastError === null;
-            if (hubReachable) resolveFirst = resolvedHub.candidates;
-            else failedHub = explicitHub;
+            // deliberately accepted for servers that do not implement it). Once
+            // the hub is reachable, hand it to the quota stage immediately and
+            // await discovery only if those quota calls fail.
+            if (resolvedHub.lastError === null) {
+              return {
+                info,
+                candidates: resolvedHub.candidates,
+                fallbackCandidates: resolveDiscoveredCandidates,
+                error: null
+              };
+            }
+            // A failed lightweight preflight lowers the hub's priority but does
+            // not remove it: older servers can still implement the quota RPCs.
+            return resolveDiscoveredCandidates(explicitHub);
           }
 
-          const { ports, error: discoveryError } = await discovery;
-          if (discoveryError && explicitHub.length === 0) throw discoveryError;
-          // `endpointCandidates()` always re-prepends the hub port, so the
-          // discovered set has to exclude it explicitly; otherwise the dead hub
-          // would be resolved a second time from inside this list.
-          const discovered = endpointCandidates(info, ports).filter((candidate) => (
-            candidate.port !== info.hubPort
-          ));
-
-          const sameEndpoint = (left, right) => (
-            left.scheme === right.scheme
-            && left.port === right.port
-            && left.csrfToken === right.csrfToken
-          );
-          const dedupe = (list) => list.filter((candidate, index) => (
-            !list.slice(0, index).some((existing) => sameEndpoint(existing, candidate))
-          ));
-          // A hub port that already failed its preflight goes behind the
-          // discovered listeners as a last-resort quota fallback instead of being
-          // resolved a second time, which would spend the same budget again.
-          const merged = dedupe([...resolveFirst, ...discovered, ...failedHub]);
-          const resolved = await resolveWorkingEndpoint(
-            dedupe([...resolveFirst, ...discovered]).length > 0
-              ? dedupe([...resolveFirst, ...discovered])
-              : merged,
-            call,
-            probeDeadlineMs,
-            signal
-          );
-          // A resolved candidate list must still carry the hub port whose
-          // preflight failed: `GetUnleashData` only proves the endpoint answers,
-          // so a hub port that failed it can still serve the quota RPCs. Dropping
-          // it here made the "last-resort fallback" below unreachable whenever a
-          // discovered listener resolved instead.
-          return {
-            info,
-            candidates: resolved.lastError === null
-              ? dedupe([...resolved.candidates, ...failedHub])
-              : merged,
-            error: resolved.lastError
-          };
+          return resolveDiscoveredCandidates();
         } catch (error) {
           return { info, candidates: [], error };
         }
-      }));
-      throwIfAborted(signal);
-      const candidatesByProcess = prepared.filter((entry) => entry.candidates.length > 0);
-      for (const entry of prepared) {
-        if (entry.error) lastError = entry.error;
-      }
-      if (candidatesByProcess.length === 0) continue;
+      });
 
-      const summaryDeadlineMs = Date.now() + Math.max(1, Math.floor(remainingMs(probeDeadlineMs) / 2));
-      const groupedResults = await Promise.all(candidatesByProcess.map((entry) => (
-        groupedQuotaFromCandidates(entry.candidates, call, {
-          summaryDeadlineMs,
+      const groupedResults = await Promise.all(candidateStates.map(async (state) => {
+        const entry = await state;
+        if (entry.candidates.length === 0) {
+          return { ...entry, snapshot: null, lastError: entry.error };
+        }
+
+        let candidates = entry.candidates;
+        let grouped = await groupedQuotaFromCandidates(candidates, call, {
+          summaryDeadlineMs: halfDeadlineMs(),
           probeDeadlineMs,
           signal
-        })
-      )));
+        });
+        let groupedError = grouped.lastError || entry.error;
+
+        if (!grouped.snapshot && entry.fallbackCandidates) {
+          let fallback;
+          try {
+            fallback = await entry.fallbackCandidates();
+          } catch (error) {
+            fallback = { candidates: [], error };
+          }
+          groupedError = fallback.error || groupedError;
+          if (fallback.candidates.length > 0) {
+            candidates = dedupeCandidates([...candidates, ...fallback.candidates]);
+            grouped = await groupedQuotaFromCandidates(fallback.candidates, call, {
+              summaryDeadlineMs: halfDeadlineMs(),
+              probeDeadlineMs,
+              signal
+            });
+            groupedError = grouped.lastError || groupedError;
+          }
+        }
+
+        return {
+          info: entry.info,
+          candidates,
+          snapshot: grouped.snapshot,
+          lastError: groupedError
+        };
+      }));
       throwIfAborted(signal);
       const grouped = groupedResults.find((result) => result.snapshot);
       if (grouped?.snapshot) return { ...grouped.snapshot, sourceDetail: kind };
       for (const result of groupedResults) lastError = result.lastError || lastError;
+
+      const candidatesByProcess = groupedResults.filter((entry) => entry.candidates.length > 0);
+      if (candidatesByProcess.length === 0) continue;
 
       const legacyResults = await Promise.all(candidatesByProcess.map((entry) => (
         legacyQuotaFromCandidates(entry.candidates, call, {
