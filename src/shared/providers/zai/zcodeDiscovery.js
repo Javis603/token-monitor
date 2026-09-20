@@ -264,7 +264,11 @@ function discoverZcodeConnection(options = {}, deps = {}) {
     // own key wins over the entry's mirror — on a machine that has switched
     // accounts the mirror still belongs to whoever wrote it last under 3.11.x,
     // while the store entry names the logged-in account — and it falls back to
-    // the mirror only when the store cannot name it.
+    // the mirror only when the store cannot name it. A missing entry beside a
+    // readable profile is incomplete or not-yet-filled local state: ZCode fills
+    // it lazily from the account's project key with no entitlement check (see
+    // the provider note), so the mirror stays the degradation #718 approved
+    // rather than an account guess.
     const credential = kind === 'start-billing'
       ? liveBillingCredential() || billingCredential(provider)
       : storedAccountKeyCredential(readStore(), env, { family, selectionKind }) || billingCredential(provider);

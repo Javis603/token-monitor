@@ -685,7 +685,10 @@ test('the selected account\'s own store key outranks a mirror left by another ac
   assert.equal(discovery.billing.credential.token, 'live-billing-jwt');
 
   // A profile whose id names no store entry resolves to no account key, so the
-  // mirror carries the lane rather than a wrong key being invented.
+  // mirror carries the lane rather than a wrong key being invented: ZCode fills
+  // that entry lazily from the account's project key with no entitlement check,
+  // so its absence beside a readable profile is incomplete local state
+  // (docs/providers/zai.md).
   const mismatched = { ...files, 'credentials.json': JSON.stringify({
     zcodejwttoken: encryptCredential('live-billing-jwt', TEST_CREDENTIAL_SECRET),
     'oauth:zai:user_info': encryptCredential(JSON.stringify({ user_id: 'nobody' }), TEST_CREDENTIAL_SECRET),
