@@ -34,6 +34,7 @@ const { bubbleCommands, railCommands, toPolygons, toSvgPath } = require('../../s
 const { rasterizeMask, shapeRectsFromPolygons } = require('../../src/electron/edgeDock/mask');
 const { DEFAULT_LIMIT_COUNT, normalizeEdgeDockItems, reorderEdgeDockItems } = require('../../src/electron/renderer/edgeDock/items');
 const verticalDragSort = require('../../src/electron/renderer/verticalDragSort');
+const { matchProviderAccount } = require('../../src/shared/subscriptionDisplay');
 const {
   buildEdgeDockCells,
   displayPercent,
@@ -886,23 +887,70 @@ test('one account is one candidate however each copy of it reads', () => {
   // The aggregate is still what the card draws.
   assert.deepEqual(codex.accounts.map((account) => account.accountName), ['Work']);
 
-  // Keys that disagree are two accounts, and a rotated one is bridged by the
-  // address rather than by the name.
-  const other = provider('codex', { accountKey: 'sha256:b', windows: [{ kind: 'session', remainingPercent: 60 }] });
-  const rotated = provider('codex', {
-    accountKey: 'sha256:c',
-    accountEmail: 'me@example.com',
+  // Two keys are two accounts even on one address, which is the shape the hub
+  // keeps apart on purpose: one address holds several Codex workspaces, and
+  // aggregateLimits pins that (limits.test.js). An address read as sameness
+  // dropped the second workspace out of the matcher universe, so a subscription
+  // bound to it resolved onto the first.
+  const personal = provider('codex', {
+    accountKey: 'sha256:personal',
+    accountEmail: 'member@example.com',
+    accountName: 'Personal',
     windows: [{ kind: 'session', remainingPercent: 60 }]
   });
-  const [split] = buildEdgeDockCells(
+  const team = provider('codex', {
+    accountKey: 'sha256:team',
+    accountEmail: 'member@example.com',
+    accountName: 'Team',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const [workspaces] = buildEdgeDockCells(
     {
-      devices: [{ deviceId: 'this-mac', limits: { providers: [{ ...other, accountEmail: 'me@example.com' }] } }],
-      limits: { providers: [rotated] }
+      devices: [{ deviceId: 'this-mac', limits: { providers: [personal] } }],
+      limits: { providers: [personal, team] }
     },
     { localDeviceId: 'this-mac', items: [{ type: 'limit', provider: 'codex', showUsage: true }] }
   );
-  assert.equal(split.subscriptionAccounts.length, 1, 'a rotation keeps the address, so it is one account');
-  assert.equal(split.accounts.length, 1, 'and one drawn account');
+  assert.deepEqual(
+    workspaces.subscriptionAccounts.map((account) => account.accountName),
+    ['Personal', 'Team'],
+    'two workspaces on one address stay two candidates'
+  );
+});
+
+test('an account nobody is signed into does not stand in for the ones that are', () => {
+  // The collector reports a provider with no credential as a bare
+  // `notConfigured` row (aggregateLimits emits the same shape), and the dock
+  // reads this device's own records. That record names nothing, so it cannot be
+  // an answer about an account that names something — letting it be one emptied
+  // the matcher universe of the accounts the hub does have.
+  const signedOut = { provider: 'codex', status: 'notConfigured', updatedAt: '2026-07-10T02:55:17.000Z', windows: [] };
+  const a = provider('codex', {
+    accountKey: 'sha256:a',
+    accountEmail: 'a@example.com',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const b = provider('codex', {
+    accountKey: 'sha256:b',
+    accountEmail: 'b@example.com',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const [codex] = buildEdgeDockCells(
+    {
+      devices: [{ deviceId: 'this-mac', limits: { providers: [signedOut] } }],
+      limits: { providers: [a, b] }
+    },
+    { localDeviceId: 'this-mac', items: [{ type: 'limit', provider: 'codex', showUsage: true }] }
+  );
+  assert.ok(
+    codex.subscriptionAccounts.some((account) => account.accountKey === 'sha256:a'),
+    'the signed-out row must not drop the accounts the hub reports'
+  );
+  assert.ok(codex.subscriptionAccounts.some((account) => account.accountKey === 'sha256:b'));
+  // And a binding to one of them lands on that one, rather than on whatever the
+  // universe happened to collapse to.
+  const bound = matchProviderAccount({ id: 's', provider: 'codex', binding: { accountKey: 'sha256:b' } }, codex.subscriptionAccounts);
+  assert.equal(bound?.accountKey, 'sha256:b');
 });
 
 test('two accounts that are only addresses stay two candidates', () => {

@@ -4277,6 +4277,22 @@ test('a device with no limits of its own can still name the accounts on the hub'
     run(localCopy, [{ ...remote[0], accountName: 'Work' }]).map((entry) => entry.accountName),
     ['work']
   );
+
+  // A provider nobody is signed into here reports a bare `notConfigured` row,
+  // and this device's own records are the first thing the list is built from. It
+  // names nothing, so it cannot stand in for the accounts the hub does name:
+  // deduping it against them dropped them, and subscriptionAccountChoices() then
+  // filters `notConfigured` out, leaving the picker empty for a provider with
+  // two accounts on the hub.
+  const signedOut = [{ provider: 'codex', status: 'notConfigured', windows: [] }];
+  const twoRemote = [
+    { provider: 'codex', accountKey: 'a', accountEmail: 'a@example.com' },
+    { provider: 'codex', accountKey: 'b', accountEmail: 'b@example.com' }
+  ];
+  assert.deepEqual(
+    run(signedOut, twoRemote).map((entry) => entry.accountKey || '(no key)'),
+    ['(no key)', 'a', 'b']
+  );
 });
 
 test('the account picker tells two address-only accounts apart', () => {

@@ -182,12 +182,16 @@ test('one account is one account, whatever each copy of it is called', () => {
   // own label, and it is not what makes an account one.
   assert.equal(sameAccount(codex({ accountKey: 'k', accountName: 'work' }), codex({ accountKey: 'k', accountName: 'Work' })), true);
 
-  // Keys that disagree are two accounts, unless the address bridges them — the
-  // rotation the matcher heals by falling through to it.
+  // Two keys decide, and the address is not evidence against them: one address
+  // holds several Codex workspaces, which the hub already keeps apart by key
+  // (limits.test.js, "preserves same-email Codex workspaces by hashed account
+  // key"). Reading the equal address as sameness merged two accounts the rest of
+  // the app treats as two, and the row the matcher then resolved was the wrong
+  // workspace.
   assert.equal(sameAccount(codex({ accountKey: 'k1' }), codex({ accountKey: 'k2' })), false);
   assert.equal(
-    sameAccount(codex({ accountKey: 'k1', accountEmail: 'me@example.com' }), codex({ accountKey: 'k2', accountEmail: 'me@example.com' })),
-    true
+    sameAccount(codex({ accountKey: 'personal', accountEmail: 'member@example.com' }), codex({ accountKey: 'team', accountEmail: 'member@example.com' })),
+    false
   );
   assert.equal(
     sameAccount(codex({ accountKey: 'k1', accountEmail: 'me@example.com' }), codex({ accountKey: 'k2', accountEmail: 'you@example.com' })),
@@ -199,11 +203,27 @@ test('one account is one account, whatever each copy of it is called', () => {
   // them as one.
   assert.equal(sameAccount(codex({ accountEmail: 'a@example.com' }), codex({ accountEmail: 'b@example.com' })), false);
   assert.equal(sameAccount(codex({ accountEmail: 'a@example.com' }), codex({ accountEmail: 'A@Example.com' })), true);
+  // One copy keyed and one copy not: the address is what is left to compare.
   assert.equal(sameAccount(codex({ accountEmail: 'a@example.com' }), codex({ accountKey: 'k', accountEmail: 'a@example.com' })), true);
 
-  // Nothing to tell them apart by: one account, which is also what keeps the
-  // matcher's sole-account fallback able to heal a credential.
+  // Nothing to tell them apart by, on either side: one account, which is also
+  // what keeps the matcher's sole-account fallback able to heal a credential.
   assert.equal(sameAccount(codex({}), codex({ accountName: 'work' })), true);
+  assert.equal(sameAccount(codex({}), codex({ status: 'notConfigured' })), true);
+
+  // A record with no identity beside one that has one is not the same account:
+  // the collector reports a provider nobody is signed into as a bare
+  // `notConfigured` row, and reading "no identity" as a match let that row
+  // absorb every identified account of the provider — the picker then offered
+  // none of them, and the row lookup answered for all of them.
+  assert.equal(sameAccount(codex({}), codex({ accountKey: 'k' })), false);
+  assert.equal(sameAccount(codex({}), codex({ accountEmail: 'a@example.com' })), false);
+  assert.equal(sameAccount(codex({ status: 'notConfigured' }), codex({ accountKey: 'k', accountEmail: 'a@example.com' })), false);
+  // A key with no address beside an address with no key: named on both sides,
+  // and nothing either can be compared against.
+  assert.equal(sameAccount(codex({ accountKey: 'k' }), codex({ accountEmail: 'a@example.com' })), false);
+  // Whatever this answers, it has to answer the same way round.
+  assert.equal(sameAccount(codex({ accountKey: 'k' }), codex({})), false);
 
   // Keys are only unique within a provider, so the provider is part of the rule.
   assert.equal(sameAccount(codex({ accountKey: 'k' }), { provider: 'claude', accountKey: 'k' }), false);

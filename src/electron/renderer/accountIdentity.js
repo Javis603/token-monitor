@@ -153,14 +153,22 @@
   // the keys it replaced — and two copies of one account need not carry the same
   // member of it.
   //
+  // Two records that both carry keys are decided by them and by nothing else. An
+  // address can hold several workspaces — the hub keeps same-email Codex
+  // workspaces apart by key (limits/core.js), and so does aggregateLimits — so
+  // reading an equal address as evidence of one account would merge two accounts
+  // the hub deliberately keeps apart. A key that rotated is recorded in the same
+  // family rather than as a second key.
+  //
+  // The address rung is therefore reached only when at least one side has no key
+  // to compare, which is the case it exists for: one account whose two copies do
+  // not both know a key.
+  //
   // The profile name is deliberately not a rung. The matcher reads it as
   // identity only while it names exactly one account, which is a property of the
   // list rather than of a pair: deduping two same-named accounts would hand the
   // matcher the single candidate it declined to choose between, and put the cost
-  // on the wrong row. So two records only disagree when a key or an address says
-  // so; with neither to compare they are one account, which is also how the hub
-  // already collapses them (limits/core.js) and what keeps the matcher's
-  // sole-account fallback able to heal a re-pasted credential.
+  // on the wrong row.
   function sameAccount(a, b) {
     if (String(a?.provider || '').trim().toLowerCase() !== String(b?.provider || '').trim().toLowerCase()) {
       return false;
@@ -173,12 +181,19 @@
       for (const key of keysA) {
         if (keysB.has(key)) return true;
       }
-      // Two different keys: a rotation keeps the address and that is what the
-      // matcher falls through to, while two addresses say two accounts.
-      return Boolean(emailA && emailB) && emailA === emailB;
+      return false;
     }
     if (emailA && emailB) return emailA === emailB;
-    return true;
+    // Nothing named on either side is not the same question as nothing named on
+    // one: an unnamed record is one observation we cannot name, not every
+    // unnamed account at once. Merging it with a named one drops the named one
+    // out of the list — and a row then asks this same rule about the account a
+    // binding resolved to, so the unnamed one would answer for it. Two unnamed
+    // observations stay one account, which is what lets the matcher's
+    // sole-account fallback heal a re-pasted credential.
+    const namedA = keysA.size > 0 || Boolean(emailA);
+    const namedB = keysB.size > 0 || Boolean(emailB);
+    return !namedA && !namedB;
   }
 
   // Default account title for providers that identify accounts by email or name.
