@@ -17,7 +17,8 @@ const {
   floatingBubbleNativeGlassEnabled,
   floatingBubbleWindowChrome,
   moveFloatingBubbleBounds,
-  normalizeInitialRendererViewState
+  normalizeInitialRendererViewState,
+  restoreFloatingBubbleWindow
 } = require('../../src/electron/floatingBubble');
 
 const workArea = { x: 0, y: 24, width: 1440, height: 876 };
@@ -290,6 +291,26 @@ test('expandedFloatingBubbleBounds opens near the mini-window and stays inside t
     width: 360,
     height: 520
   });
+});
+
+test('restoreFloatingBubbleWindow unlocks the collapsed window before resizing it', () => {
+  const calls = [];
+  const bounds = { x: 8, y: 32, width: 360, height: 520 };
+  const limits = { minWidth: 280, minHeight: 360, maxWidth: 720, maxHeight: 900 };
+  const win = {
+    setResizable(value) { calls.push(['resizable', value]); },
+    setMinimumSize(width, height) { calls.push(['minimum', width, height]); },
+    setMaximumSize(width, height) { calls.push(['maximum', width, height]); },
+    setBounds(value) { calls.push(['bounds', value]); }
+  };
+
+  assert.equal(restoreFloatingBubbleWindow(win, bounds, limits), true);
+  assert.deepEqual(calls, [
+    ['resizable', true],
+    ['minimum', 280, 360],
+    ['maximum', 720, 900],
+    ['bounds', bounds]
+  ]);
 });
 
 test('moveFloatingBubbleBounds drags the mini-window while clamping it inside the work area', () => {

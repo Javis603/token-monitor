@@ -150,6 +150,21 @@ function expandedFloatingBubbleBounds(collapsedBounds, workArea, previousExpande
   return clampBounds({ x, y, width, height }, workArea, margin);
 }
 
+function restoreFloatingBubbleWindow(win, bounds, limits = {}) {
+  if (!win || !bounds || typeof win.setBounds !== 'function') return false;
+  // GTK may ignore the larger bounds while the collapsed window is still
+  // non-resizable, so unlock it before restoring either size hint.
+  if (typeof win.setResizable === 'function') win.setResizable(true);
+  if (typeof win.setMinimumSize === 'function') {
+    win.setMinimumSize(limits.minWidth, limits.minHeight);
+  }
+  if (typeof win.setMaximumSize === 'function') {
+    win.setMaximumSize(limits.maxWidth, limits.maxHeight);
+  }
+  win.setBounds(bounds);
+  return true;
+}
+
 function floatingBubbleCollapsePlan(bounds, workArea, settings = {}, options = {}) {
   if (options.suppressNextCollapse || options.collapsed || !canUseFloatingBubble(settings)) return null;
   const expandedBounds = clampBounds(bounds, workArea);
@@ -213,5 +228,6 @@ module.exports = {
   floatingBubbleSide,
   floatingBubbleWindowChrome,
   normalizeInitialRendererViewState,
-  moveFloatingBubbleBounds
+  moveFloatingBubbleBounds,
+  restoreFloatingBubbleWindow
 };
