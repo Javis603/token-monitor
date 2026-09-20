@@ -96,10 +96,17 @@ function isAntigravityCommand(lowerCommand) {
 // server as the IDE, but launches it without a `--csrf_token` flag and under a
 // different process name. Path-anchor the match so unrelated binaries/arguments
 // (e.g. `/opt/imagytool/...`, `legacy-agent`) do not match.
+// `--hub` turns the CLI into a network-facing RPC service that does require a
+// CSRF token, so the flag is matched once here and reused by the "we saw it but
+// it had no token" diagnostic.
+function isHubModeCommand(command) {
+  return /(?:^|\s)--hub(?:\s|=|$)/.test(command);
+}
+
 function isAntigravityCliCommand(lowerCommand) {
   if (/(^|[/\\])(antigravity-cli|antigravity_cli)([\s/\\]|$)/.test(lowerCommand)) return true;
   if (/(^|[/\\])agy(\.exe)?(\s|$)/.test(lowerCommand)) {
-    return isLanguageServerCommand(lowerCommand) || /(?:^|\s)--hub(?:\s|=|$)/.test(lowerCommand);
+    return isLanguageServerCommand(lowerCommand) || isHubModeCommand(lowerCommand);
   }
   return false;
 }
@@ -173,7 +180,7 @@ function parseProcessLine(line) {
   const kind = antigravityProcessKind(lower);
   if (!kind) return null;
   const csrfToken = extractFlag('--csrf_token', command);
-  const isHubMode = /(?:^|\s)--hub(?:\s|=|$)/.test(command);
+  const isHubMode = isHubModeCommand(command);
   const hubPort = extractPortFlag('--hub-port', command);
   // Desktop app/IDE language servers authenticate local requests with
   // `--csrf_token`; tokenless matches are skipped so a later valid process can
@@ -231,7 +238,7 @@ function runProcessText(cmd, args, { timeoutMs = 10000, deps = {} } = {}) {
 
 function processInfosFromText(stdout) {
   const infos = [];
-  let sawDesktopWithoutCsrf = false;
+  let sawTokenlessCsrfClient = false;
   for (const line of String(stdout || '').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -243,17 +250,20 @@ function processInfosFromText(stdout) {
     const split = trimmed.indexOf(' ');
     const lower = split === -1 ? '' : commandForMatching(trimmed.slice(split + 1).trim());
     const kind = antigravityProcessKind(lower);
-    if ((kind === 'app' || kind === 'ide') && !extractFlag('--csrf_token', trimmed)) {
-      sawDesktopWithoutCsrf = true;
-    }
+    if (!kind || extractFlag('--csrf_token', trimmed)) continue;
+    // Desktop/IDE language servers and hub-mode CLI services both authenticate
+    // with `--csrf_token`, so a tokenless one of either is a real
+    // misconfiguration worth naming instead of reporting "not running". A plain
+    // tokenless CLI is legitimately skippable and does not count here.
+    if (kind !== 'cli' || isHubModeCommand(lower)) sawTokenlessCsrfClient = true;
   }
-  return { infos: sortProcessInfos(infos), sawDesktopWithoutCsrf };
+  return { infos: sortProcessInfos(infos), sawTokenlessCsrfClient };
 }
 
 function requireDetectedProcessInfos(stdout) {
-  const { infos, sawDesktopWithoutCsrf } = processInfosFromText(stdout);
+  const { infos, sawTokenlessCsrfClient } = processInfosFromText(stdout);
   if (infos.length > 0) return infos;
-  if (sawDesktopWithoutCsrf) throw errorWithStatus('unavailable', 'Antigravity LS missing --csrf_token');
+  if (sawTokenlessCsrfClient) throw errorWithStatus('unavailable', 'Antigravity LS missing --csrf_token');
   throw errorWithStatus('notConfigured', 'Antigravity language server not running');
 }
 
@@ -838,7 +848,18 @@ async function probe(deps = {}) {
             probeDeadlineMs,
             signal
           );
-          return { info, candidates: resolved.lastError === null ? resolved.candidates : merged, error: resolved.lastError };
+          // A resolved candidate list must still carry the hub port whose
+          // preflight failed: `GetUnleashData` only proves the endpoint answers,
+          // so a hub port that failed it can still serve the quota RPCs. Dropping
+          // it here made the "last-resort fallback" below unreachable whenever a
+          // discovered listener resolved instead.
+          return {
+            info,
+            candidates: resolved.lastError === null
+              ? dedupe([...resolved.candidates, ...failedHub])
+              : merged,
+            error: resolved.lastError
+          };
         } catch (error) {
           return { info, candidates: [], error };
         }

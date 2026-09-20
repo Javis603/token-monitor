@@ -226,6 +226,14 @@ test('detectProcessInfo (win32) reports unavailable for a quoted desktop LS with
   assert.equal(err.status, 'unavailable');
 });
 
+test('detectProcessInfo (win32) reports missing CSRF for a tokenless agy hub', async () => {
+  const stdout = '9001 C:\\Users\\j\\.antigravity\\agy.exe --hub --hub-port=55555 --app_data_dir=antigravity\n';
+  const err = await probe.detectProcessInfo({ platform: 'win32', spawn: fakeSpawn(stdout) })
+    .catch((e) => e);
+  assert.equal(err.status, 'unavailable');
+  assert.match(err.message, /missing --csrf_token/);
+});
+
 test('listeningPorts (posix) extracts ports from lsof output', async () => {
   const stdout = [
     'COMMAND     PID  USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME',
@@ -974,6 +982,45 @@ test('probe still tries discovered ports when the hub port answers the preflight
 
   assert.ok(calledPorts.includes(60000), 'the discovered port must still be reached once the hub cannot serve quota');
   assert.equal(result.accountEmail, 'discovered@example.com');
+});
+
+// A failed lightweight preflight lowers the explicit hub's priority, but it is
+// not proof that the quota RPC is unavailable. Keep it after resolved discovered
+// listeners so quota retrieval can still use it as a last resort.
+test('probe keeps a failed-preflight hub as a last-resort quota candidate', async () => {
+  const calls = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    listeningPorts: async () => [60000],
+    callLs: async ({ port, method }) => {
+      calls.push(`${port}:${method}`);
+      if (port === 55555) {
+        if (method === 'GetUnleashData') {
+          throw probe._errorWithStatus('unavailable', 'lightweight preflight unavailable');
+        }
+        if (method === 'RetrieveUserQuotaSummary') {
+          return {
+            groups: [{
+              displayName: 'Gemini Models',
+              buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.3 }]
+            }]
+          };
+        }
+        if (method === 'GetUserStatus') return { userStatus: { email: 'hub-quota@example.com' } };
+      }
+      if (port === 60000 && method === 'GetUnleashData') return {};
+      throw probe._errorWithStatus('unavailable', 'discovered quota unavailable');
+    },
+    probeTimeoutMs: 2000
+  });
+
+  assert.ok(
+    calls.includes('55555:RetrieveUserQuotaSummary'),
+    'the failed-preflight hub remains available to the quota stage'
+  );
+  assert.equal(result.accountEmail, 'hub-quota@example.com');
 });
 
 // The mirror of the discovery-hang case: a hub port that blackholes (stale entry,
