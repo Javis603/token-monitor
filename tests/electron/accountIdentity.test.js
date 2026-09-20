@@ -276,6 +276,24 @@ test('a list of accounts is deduped by the same rule, over the whole list', () =
     'a record naming two keys makes the accounts that hold them one'
   );
 
+  // The survivor stands for every member of the group, so it answers to every
+  // key the members were named by. The Hub's collapse hands one account's
+  // records different keys — the canonical one on the record, the ones it
+  // replaced beside it as aliases (limits/core.js) — and a device whose own row
+  // holds only the second of them would otherwise drop the key a binding made
+  // elsewhere resolves by. The record itself is left alone; no caller's app
+  // state gains an alias it did not have.
+  const keyOnly = codex({ accountKey: 'sha256:keyonly', accountName: 'Work' });
+  const collapsed = codex({ accountKey: 'sha256:workspace', webAccountKey: 'sha256:workspace', accountKeyAliases: ['sha256:keyonly'] });
+  const survivor = dedupeAccounts([keyOnly, collapsed])[0];
+  assert.deepEqual([...accountKeyFamily(survivor)].sort(), ['sha256:keyonly', 'sha256:workspace']);
+  assert.equal(survivor.accountName, 'Work');
+  assert.deepEqual(collapsed.accountKeyAliases, ['sha256:keyonly'], 'the input record is not amended');
+  // A group whose members already agree needs no alias, and gets none — the
+  // record comes back as it arrived rather than copied to say nothing.
+  assert.equal(dedupeAccounts([codex({ accountKey: 'k' }), codex({ accountKey: 'k' })])[0].accountKeyAliases, undefined);
+  assert.equal(dedupeAccounts([keyOnly])[0], keyOnly);
+
   // Two addresses with no key stay two accounts; one address with no key is one.
   assert.deepEqual(
     keysOf(dedupeAccounts([codex({ accountEmail: 'a@example.com' }), codex({ accountEmail: 'b@example.com' })])),

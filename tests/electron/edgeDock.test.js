@@ -1024,6 +1024,61 @@ test('a copy with no key is a copy, and never the account a binding lands on', (
   assert.deepEqual(single.subscriptionAccounts.map((account) => account.accountKey), ['sha256:personal']);
 });
 
+test('one account keeps every key its copies were named by', () => {
+  // One account, two copies that name it differently. This device holds an
+  // opencode API key and no cookie, so its own row is keyed by the key's own
+  // hash (providers/opencode/limits.js); the Hub's collapse of the same account
+  // — merged from the machine that does hold the cookie — keeps the workspace id
+  // as the canonical key and the key's hash beside it as an alias (limits/core.js,
+  // and the comment where the producer publishes that alias). Deduping one
+  // account down to one record must not be what decides which of the two keys
+  // survives: a subscription bound on the cookie machine names the canonical id,
+  // and a survivor left holding only this device's key stops resolving it.
+  const keyOnly = provider('opencode', {
+    accountKey: 'sha256:keyonly',
+    accountName: 'Work',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const collapsed = provider('opencode', {
+    accountKey: 'sha256:workspace',
+    webAccountKey: 'sha256:workspace',
+    accountKeyAliases: ['sha256:keyonly'],
+    accountName: 'Work',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  // A second account, so the matcher's sole-account fallback cannot be what
+  // answers: the key rung has to be the one that lands.
+  const other = provider('opencode', {
+    accountKey: 'sha256:other',
+    accountName: 'Personal',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const binding = { id: 's', provider: 'opencode', binding: { accountKey: 'sha256:workspace' } };
+
+  const [opencode] = buildEdgeDockCells(
+    {
+      devices: [{ deviceId: 'this-mac', limits: { providers: [keyOnly] } }],
+      limits: { providers: [collapsed, other] }
+    },
+    { localDeviceId: 'this-mac', items: [{ type: 'limit', provider: 'opencode', showUsage: true }] }
+  );
+  // One record per account, this device's copy first.
+  assert.deepEqual(
+    opencode.subscriptionAccounts.map((account) => account.accountKey),
+    ['sha256:keyonly', 'sha256:other']
+  );
+  const resolved = matchProviderAccount(binding, opencode.subscriptionAccounts);
+  assert.equal(resolved?.accountKey, 'sha256:keyonly', 'the canonical key still resolves');
+  // And it resolves to one account: the row lookup asks the pairwise rule about
+  // whatever the binding landed on, so the survivor has to answer for both
+  // copies of the account it stands for, and for no other account.
+  const drawnOn = opencode.subscriptionAccounts
+    .filter((account) => accountIdentity.sameAccount(resolved, account))
+    .map((account) => account.accountKey);
+  assert.deepEqual(drawnOn, ['sha256:keyonly']);
+  assert.equal(accountIdentity.sameAccount(resolved, other), false);
+});
+
 test('two accounts that are only addresses stay two candidates', () => {
   // Neither carries a key or a name, so an identity built out of those two fields
   // read both as the same account: one of them never reached the matcher, and a

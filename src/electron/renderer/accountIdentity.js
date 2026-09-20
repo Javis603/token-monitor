@@ -259,6 +259,25 @@
   // been deduped. Records are held by their position rather than by identity,
   // because the two lists can carry the same record object (the aggregate holds
   // this device's own records too) and a set of records would count it twice.
+  //
+  // One record stands for the whole group, so the union of the members' keys
+  // rides out on it. Two copies of one account need not carry the same member of
+  // the family: the Hub's collapse keeps the canonical key on the record and the
+  // keys it replaced beside it as aliases (limits/core.js), so a device whose own
+  // row for that account holds the credential's own hash — an opencode API key
+  // with no cookie, whose row is keyed by the key alone — would keep only that
+  // one, and a binding made on the device that holds the canonical key would stop
+  // resolving. The aliases are the place the producer already records them for
+  // exactly this reason (providers/opencode/limits.js). The survivor is copied
+  // rather than amended in place: the caller's list is app state.
+  function withGroupKeyFamily(record, group) {
+    const own = accountKeyFamily(record);
+    const missing = [...group.keys].filter((key) => !own.has(key));
+    if (missing.length === 0) return record;
+    const held = Array.isArray(record.accountKeyAliases) ? record.accountKeyAliases : [];
+    return { ...record, accountKeyAliases: [...held, ...missing] };
+  }
+
   function dedupeAccounts(records) {
     const list = (records || []).filter(Boolean);
     const indexesByProvider = new Map();
@@ -268,14 +287,16 @@
       indexesByProvider.get(provider).push(index);
     }
     const emailOf = (record) => accountEmailOf(record).toLowerCase();
-    const survivors = new Set();
+    const survivors = new Map();
     for (const indexes of indexesByProvider.values()) {
       const inProvider = indexes.map((index) => list[index]);
       const groups = keyedAccountGroups(inProvider, emailOf);
       const namedEmails = new Set(groups.flatMap((group) => [...group.emails]));
       // A group keeps its first member in input order, which is what preserves
       // the caller's own priority between two copies of one account.
-      for (const group of groups) survivors.add(indexes[group.survivor]);
+      for (const group of groups) {
+        survivors.set(indexes[group.survivor], withGroupKeyFamily(list[indexes[group.survivor]], group));
+      }
       const keptKeylessEmails = new Set();
       let keptAnonymous = false;
       for (let position = 0; position < inProvider.length; position += 1) {
@@ -285,15 +306,15 @@
         if (!email) {
           if (keptAnonymous) continue;
           keptAnonymous = true;
-          survivors.add(indexes[position]);
+          survivors.set(indexes[position], record);
           continue;
         }
         if (namedEmails.has(email) || keptKeylessEmails.has(email)) continue;
         keptKeylessEmails.add(email);
-        survivors.add(indexes[position]);
+        survivors.set(indexes[position], record);
       }
     }
-    return list.filter((record, index) => survivors.has(index));
+    return list.map((record, index) => survivors.get(index)).filter(Boolean);
   }
 
   // Default account title for providers that identify accounts by email or name.
