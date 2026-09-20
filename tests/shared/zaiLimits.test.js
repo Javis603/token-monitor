@@ -941,13 +941,11 @@ test('a 3.12.3-shaped install with a subscription renders the quota windows', as
   assert.equal(provider.windows[2].usedPercent, 40);
 });
 
-test('fetchZaiLimits never queries with the mirror once the account identity is known without its key', async () => {
-  // 3.12.3 store: the profile names the logged-in account, no entry exists for
-  // it, and config.json still carries the previous account's mirror. That
-  // mirror cannot be shown to belong to the account the profile just named, so
-  // the lane reports the state instead of riding it.
-  const identity = 'known-account-id';
-  const files = {
+// The refused quota half: the profile names the logged-in account, no entry
+// exists for it, and config.json still carries the previous account's mirror.
+// The live JWT is what decides whether an independent billing leg exists.
+function missingQuotaKeyFiles({ withBillingJwt }) {
+  return {
     'setting.json': JSON.stringify({
       providerFamilyDomain: 'zai',
       providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
@@ -956,13 +954,15 @@ test('fetchZaiLimits never queries with the mirror once the account identity is 
       'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'previous-account-mirror' } }
     } }),
     'credentials.json': JSON.stringify({
-      zcodejwttoken: encryptStoreValue('live-billing-jwt'),
-      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: identity }))
+      ...(withBillingJwt ? { zcodejwttoken: encryptStoreValue('live-billing-jwt') } : {}),
+      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: 'known-account-id' }))
     }),
     'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
   };
-  const urls = [];
-  const provider = await fetchZaiLimits({}, {
+}
+
+function missingQuotaKeyDeps(files, fetchMock) {
+  return {
     env: { ZCODE_CREDENTIAL_SECRET: FIXTURE_CREDENTIAL_SECRET },
     now: () => Date.parse('2026-09-05T12:00:00Z'),
     readFileSync: (filePath) => {
@@ -970,13 +970,47 @@ test('fetchZaiLimits never queries with the mirror once the account identity is 
       if (Object.hasOwn(files, name)) return files[name];
       throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
     },
-    fetch: async (url) => {
+    fetch: fetchMock
+  };
+}
+
+test('fetchZaiLimits never queries the quota lane with the mirror once the identity is known without its key', async () => {
+  // That mirror cannot be shown to belong to the account the profile just
+  // named, so the quota half refuses it — and with no live JWT and no start
+  // entry there is no billing leg either, so no request goes out at all.
+  const urls = [];
+  const provider = await fetchZaiLimits({}, missingQuotaKeyDeps(
+    missingQuotaKeyFiles({ withBillingJwt: false }),
+    async (url) => {
       urls.push(String(url));
       throw new Error('the mirror must not be queried');
     }
-  });
+  ));
   assert.equal(provider.status, 'unavailable');
   assert.equal(provider.source, 'oauth');
   assert.deepEqual(provider.windows, []);
   assert.deepEqual(urls, []);
+});
+
+test('fetchZaiLimits keeps the live billing leg when the account\'s own key is missing', async () => {
+  // The billing credential is a different one — the account-level JWT ZCode
+  // maintains on login — so refusing the quota half must not take Start/Weekend
+  // down with it: exactly one request, to billing, and the previous account's
+  // mirror is never carried to any endpoint.
+  const calls = [];
+  const provider = await fetchZaiLimits({}, missingQuotaKeyDeps(
+    missingQuotaKeyFiles({ withBillingJwt: true }),
+    async (url, options) => {
+      calls.push({ url: String(url), authorization: String(options?.headers?.Authorization || '') });
+      if (String(url).includes('zcode-plan/billing/balance')) return BILLING_OK;
+      throw new Error(`unexpected url ${url}`);
+    }
+  ));
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'oauth');
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].url.includes('zcode-plan/billing/balance'), 'the live billing leg queried');
+  assert.ok(calls.every((call) => !call.url.includes('/quota/limit')), 'no quota request');
+  assert.ok(calls.every((call) => !call.authorization.includes('previous-account-mirror')), 'the mirror is never carried');
+  assert.ok(provider.windows.some((window) => window.limitId), 'the Start/Weekend bucket is rendered');
 });

@@ -699,6 +699,10 @@ test('the selected account\'s own store key outranks a mirror left by another ac
   assert.equal(fallback.entitled, false);
   assert.equal(fallback.reason, 'coding_plan_key_missing');
   assert.equal(fallback.credential, undefined);
+  // The billing leg is a different credential — the account-level JWT ZCode
+  // maintains on login — so refusing the quota half leaves Start/Weekend
+  // queryable rather than taking it down with the mirror.
+  assert.equal(fallback.billing.credential.token, 'live-billing-jwt');
 
   // A team entry is named the same way (the real store carries
   // `…:zai-team-coding-plan:account:<id>:api-key`), so a team selection
@@ -724,6 +728,18 @@ test('the selected account\'s own store key outranks a mirror left by another ac
   assert.equal(teamMissing.entitled, false);
   assert.equal(teamMissing.reason, 'coding_plan_key_missing');
   assert.equal(teamMissing.credential, undefined);
+  assert.equal(teamMissing.billing.credential.token, 'live-billing-jwt');
+
+  // With the live JWT gone as well there is nothing for the billing leg either,
+  // and the refused quota half is the whole answer.
+  const noBilling = discoverZcodeConnection({}, { ...deps, readFileSync: fileSystem({
+    ...mismatched,
+    'credentials.json': JSON.stringify({
+      'oauth:zai:user_info': encryptCredential(JSON.stringify({ user_id: 'nobody' }), TEST_CREDENTIAL_SECRET)
+    })
+  }) });
+  assert.equal(noBilling.reason, 'coding_plan_key_missing');
+  assert.equal(noBilling.billing, undefined);
 });
 
 test('an unreadable profile or store still degrades the quota lane to the mirror', () => {

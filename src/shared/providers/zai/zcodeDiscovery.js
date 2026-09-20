@@ -86,12 +86,14 @@ function isCodingPlanProviderId(providerId) {
   return providerId === ZCODE_PROVIDER_IDS.codingPlan.zai || providerId === ZCODE_PROVIDER_IDS.codingPlan.bigmodel;
 }
 
-// ZCode 3.12.3 keeps the live session credentials in credentials.json,
+// ZCode 3.12.3+ keeps the live session credentials in credentials.json,
 // encrypted with AES-256-GCM under a key derived from machine-local values
 // (no user secret, no OS keychain — the envelope keeps a synced or backed-up
 // file from leaking, it does not gate a same-machine reader). The plaintext
-// mirror this lane used to rely on stopped being refreshed with that release,
-// so the billing credential is decrypted from the store on every call:
+// mirror this lane used to rely on stopped being refreshed with that release
+// (the layout, entry naming and secret derivation are verified against 3.12.3
+// and 3.14.0), so the billing credential is decrypted from the store on every
+// call:
 // in memory only, never logged, persisted, or handed to the renderer, and any
 // failure falls back to the mirror a 3.11.x install still carries.
 const ZCODE_CREDENTIAL_ENVELOPE = 'enc:v1:';
@@ -262,6 +264,19 @@ function discoverZcodeConnection(options = {}, deps = {}) {
       return storeCache;
     };
     const liveBillingCredential = () => storedZcodeJwtCredential(readStore(), env);
+    // Billing is an account-level endpoint: ZCode queries it even while the
+    // coding-plan provider is selected, because its family pass validates every
+    // plan provider the family has (validateFamilyAccountProviders) and the
+    // start-plan leg of that pass is the billing call
+    // (validateStartPlanAvailability). So the coding shape carries a billing
+    // credential alongside its own quota query — the live store's JWT first,
+    // the start entry's mirror as the 3.11.x fallback — and that leg resolves
+    // on its own credential, never on the quota half's.
+    const codingBillingLeg = () => {
+      const startCredential = liveBillingCredential()
+        || billingCredential(registry.provider?.[ZCODE_PROVIDER_IDS.startPlan[family]] || null);
+      return startCredential ? { credential: startCredential } : null;
+    };
     // The account key is looked up only for the quota lane: a start-plan
     // selection needs the account-level JWT alone, so it must not touch the
     // profile entry at all. Where the quota lane does read it, the selection's
@@ -279,7 +294,16 @@ function discoverZcodeConnection(options = {}, deps = {}) {
     } else {
       const accountKey = storedAccountKeyCredential(readStore(), env, { family, selectionKind });
       if (accountKey?.identityWithoutKey) {
-        return { kind, family, providerId, entitled: false, reason: 'coding_plan_key_missing' };
+        // The account is known but its own key is absent, so the quota half
+        // must not ride a mirror that may belong to the previous account. The
+        // billing credential is a different one — the account-level JWT, which
+        // ZCode maintains on login — so that leg keeps resolving here: refusing
+        // the quota credential must not take Start/Weekend down with it.
+        const billing = codingBillingLeg();
+        return {
+          kind, family, providerId, entitled: false, reason: 'coding_plan_key_missing',
+          ...(billing ? { billing } : {})
+        };
       }
       credential = accountKey || billingCredential(provider);
     }
@@ -287,19 +311,7 @@ function discoverZcodeConnection(options = {}, deps = {}) {
     // stopped writing the entitlement cache, a readable credential is the
     // only local signal; the query itself answers entitlement.
     if (!credential) return { kind, family, providerId, entitled: false, reason: 'coding_plan_not_authenticated' };
-    // Billing is an account-level endpoint: ZCode queries it even while the
-    // coding-plan provider is selected, because its family pass validates every
-    // plan provider the family has (validateFamilyAccountProviders) and the
-    // start-plan leg of that pass is the billing call
-    // (validateStartPlanAvailability). So the coding shape carries a billing
-    // credential alongside its own quota query — the live store's JWT first,
-    // the start entry's mirror as the 3.11.x fallback.
-    let billing;
-    if (kind === 'coding-quota') {
-      const startCredential = liveBillingCredential()
-        || billingCredential(registry.provider?.[ZCODE_PROVIDER_IDS.startPlan[family]] || null);
-      if (startCredential) billing = { credential: startCredential };
-    }
+    const billing = kind === 'coding-quota' ? codingBillingLeg() : null;
     return { kind, family, providerId, entitled: true, credential, ...(billing ? { billing } : {}) };
   }
 
