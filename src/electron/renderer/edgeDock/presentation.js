@@ -125,7 +125,6 @@
   const SESSIONS_RECENT_COUNT = 6;
   // Marks the rail can draw before it starts counting instead: three fits the
   // 56px cell beside its headline. The count beside them is the whole answer.
-  const SESSIONS_MARK_LIMIT = 3;
 
   // Every session the widget knows about, newest first, as one list. Both the
   // provider cards and the Sessions item read this instead of walking the
@@ -175,6 +174,15 @@
         // Carried onto the projected row, not just used here: the dock renderer
         // re-derives the state at paint time and needs the boundary to do it.
         turnEnded: session.turnEnded === true,
+        // The archive flags ride along for the same reason, and their absence was a
+        // real bug: `sessionActivityState()` reads them first, so a projection that
+        // dropped them let an archived row - idle by definition, whatever its
+        // timestamp says - come back as running in the card that re-derives state
+        // from this row. All three are carried rather than one alias, because three
+        // separate fields are what the shared predicate reads.
+        archived: session.archived === true,
+        deleted: session.deleted === true,
+        sourceDeleted: session.sourceDeleted === true,
         running: stateByKey.get(key) === 'running',
         // The same gate the Sessions list uses, so one surface cannot show a
         // gauge for a session the other has already dropped it from.
@@ -196,6 +204,44 @@
         .filter(({ key }) => stateByKey.get(key) !== 'running')
         .slice(0, Math.max(0, cap - running.length));
     return { rows: sessionRowsFor([...running, ...quiet], stateByKey), running, stateByKey };
+  }
+
+  // The running reading, derived from the projected rows at the clock the caller
+  // passes rather than frozen into the cell.
+  //
+  // Running is a function of time, not of the last push: a session crosses the
+  // ten-minute window with no new data at all, so a count computed once at
+  // projection time went stale on a rail that nothing re-projected - it promised
+  // "1 running" and then opened a card showing no running row, because the card
+  // has always re-derived its own state at paint time. This is that same
+  // derivation, shared so the rail, the card and the grouped sections answer
+  // identically, and so a caller can ask the same rows at a later clock.
+  //
+  // Every running row survives the cap (see cappedSessionRows), so the rows a cell
+  // carries are complete for this reading however many sessions are quiet.
+  function runningSessionSummary(sessions, now = Date.now()) {
+    const rows = Array.isArray(sessions) ? sessions : [];
+    const running = rows.filter((row) => sessionLive.sessionActivityState(row, now) === 'running');
+    // One entry per tool, in the row order the list already carries (newest
+    // first), so the rail's marks match the order the card shows.
+    const clients = [...new Set(running.map((row) => normalizedId(row?.client)).filter(Boolean))];
+    return { count: running.length, clients, clientCount: clients.length, rows: running };
+  }
+
+  // When the earliest still-running row stops reading as running, so the caller
+  // can re-project at that moment instead of leaving a stale count on screen.
+  // 0 when nothing is running: a quiet row never becomes running on its own, so
+  // there is nothing to wait for and a scheduler reading this cannot loop.
+  function nextRunningExpiryAt(sessions, now = Date.now()) {
+    let soonest = 0;
+    for (const row of runningSessionSummary(sessions, now).rows) {
+      const last = Date.parse(String(row?.lastUsedAt || ''));
+      if (!Number.isFinite(last)) continue;
+      const expiry = last + sessionLive.RUNNING_WINDOW_MS;
+      if (expiry <= now) continue;
+      if (!soonest || expiry < soonest) soonest = expiry;
+    }
+    return soonest;
   }
 
   // The sessions a provider card lists. Month detail includes today's sessions;
@@ -365,14 +411,16 @@
       const sample = wantsRate ? options.liveRate || null : null;
       const stateByKey = new Map(rows.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
       const runningEntries = rows.filter(({ key }) => stateByKey.get(key) === 'running');
-      // The marks name the tools with work in flight, in the order that work
-      // started most recently. `more` is the count the marks could not draw.
-      const runningClients = [...new Set(runningEntries.map(({ session }) => normalizedId(session.client)).filter(Boolean))];
       const { rows: sessions } = cappedSessionRows(
         rows,
         options.runningOnly === true ? runningEntries.length : SESSIONS_RECENT_COUNT,
         options.runningOnly === true
       );
+      // No frozen count: the cell carries its rows and the renderer asks them at
+      // paint time, so a rail left on screen stops claiming a running session the
+      // moment that session crosses the window. `expiresAt` lets the main process
+      // re-project at exactly that moment instead of waiting for the next push.
+      const expiryAt = nextRunningExpiryAt(sessions);
       return {
         id: `stat:${metric}`,
         kind: 'stat',
@@ -386,10 +434,10 @@
         rateMode: options.tokenRateMode === 'burn' ? 'burn' : 'speed',
         rate: sample ? finite(options.tokenRateMode === 'burn' ? sample.burn : sample.speed) : null,
         rateIdle: !sample || sample.idle === true,
-        runningCount: runningEntries.length,
-        runningClients: runningClients.slice(0, SESSIONS_MARK_LIMIT),
-        runningClientCount: runningClients.length,
-        markLimit: SESSIONS_MARK_LIMIT,
+        // When the newest reading in this cell stops being running, in epoch ms,
+        // or 0 when nothing is running (a quiet row never becomes running on its
+        // own, so nothing has to wake for it).
+        runningExpiresAt: expiryAt,
         sessions
       };
     }
@@ -526,6 +574,8 @@
   return {
     SESSIONS_METRIC: dockItems.SESSIONS_METRIC,
     buildEdgeDockCells,
+    nextRunningExpiryAt,
+    runningSessionSummary,
     connectedLimitProviders,
     displayPercent,
     edgeDockCellSignature,

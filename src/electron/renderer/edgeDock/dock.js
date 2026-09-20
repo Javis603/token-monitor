@@ -6,6 +6,10 @@
 
 const bridge = window.tokenMonitorEdgeDock;
 const presentation = window.TokenMonitorEdgeDockPresentation;
+// The running reading is derived from the projected rows at paint time rather than
+// frozen into the cell, so the rail and the card answer at the same clock (see
+// runningSessionSummary).
+const runningSessionSummary = presentation.runningSessionSummary;
 const i18n = window.TokenMonitorI18n;
 const themePresetsApi = window.TokenMonitorThemePresets;
 const fontSettingsApi = window.TokenMonitorFontSettings;
@@ -514,17 +518,25 @@ function cellRateNode(cell) {
 // including the tools that have no quota to draw a ring from. The count beside
 // them covers the marks that did not fit. Drawn only when the item's cell detail
 // asks for marks rather than a rate (see statCellNode).
-function runningMarksNode(cell) {
-  const clients = Array.isArray(cell.runningClients) ? cell.runningClients : [];
+// How many tool marks fit the 56px cell beside its headline. Past this the
+// remainder is a count rather than a mark shrunk past legibility. A drawing
+// limit, so it lives here rather than in the projection.
+const CELL_MARK_LIMIT = 3;
+
+function runningMarksNode(cell, now = Date.now()) {
+  // Derived from the rows at paint time, not from a count frozen into the cell:
+  // running expires on a clock, so a rail that never re-projects would keep
+  // drawing marks for work that has stopped (see presentation.js).
+  const { clients, clientCount } = runningSessionSummary(cell.sessions, now);
   if (!clients.length) return null;
   const row = el('span', 'edge-dock-cell-marks');
-  for (const client of clients) {
+  for (const client of clients.slice(0, CELL_MARK_LIMIT)) {
     // Brand colour, corrected for contrast like every other mark the dock
     // draws: the client id is what the mark is looked up by, and the rail
     // already reserves colour for severity, so these stay marks and not meters.
     row.append(markNode(client, readableColor(clientColors[client] || clientColors.default)));
   }
-  const rest = (Number(cell.runningClientCount) || clients.length) - clients.length;
+  const rest = clientCount - Math.min(clients.length, CELL_MARK_LIMIT);
   if (rest > 0) row.append(el('span', 'edge-dock-cell-more', `+${rest}`));
   return row;
 }
@@ -543,7 +555,9 @@ function statCellNode(cell) {
   } else if (cell.metric === presentation.SESSIONS_METRIC) {
     // Nothing running is a real reading, not a missing one, so the zero is
     // shown - muted, exactly as the live-rate cell mutes its own idle state.
-    const running = Math.max(0, Number(cell.runningCount) || 0);
+    // Asked of the rows at paint time, so a cell left on screen stops claiming a
+    // running session the moment that session crosses the ten-minute window.
+    const running = runningSessionSummary(cell.sessions).count;
     node.classList.toggle('is-idle', running === 0);
     node.append(el('span', 'edge-dock-stat-value', String(running)));
     // The third line is the item's own choice: the tools with work in flight, or
@@ -964,7 +978,7 @@ function statCard(cell) {
 // two surfaces cannot disagree about what running means (see sessionsContainer).
 function sessionsCard(cell, card, head) {
   const sessions = Array.isArray(cell.sessions) ? cell.sessions : [];
-  const running = sessions.filter((session) => sessionLive.sessionActivityState(session) === 'running');
+  const running = runningSessionSummary(sessions).rows;
   // The count lives in exactly one place per layout. Grouped, each section states
   // its own, and a card total above them printed the very same number whenever one
   // tool happened to be the only one running. Ungrouped there are no section heads,
@@ -998,7 +1012,7 @@ function sessionsCard(cell, card, head) {
     // baseline, so it floated above its label. This row centers its three parts.
     const groupHead = el('div', 'edge-dock-session-group-head');
     groupHead.append(markNode(client), el('span', 'edge-dock-section-title', clientLabel(client)));
-    const liveCount = rows.filter((session) => sessionLive.sessionActivityState(session) === 'running').length;
+    const liveCount = runningSessionSummary(rows).count;
     if (liveCount > 0) groupHead.append(el('span', 'edge-dock-section-count', t('edgeDock.runningCount', { count: liveCount })));
     section.append(groupHead, sessionsContainer(rows, { showCount: false, separator: false }));
     grouped.append(section);
@@ -1053,6 +1067,9 @@ function render(payload) {
   if (surface === 'peek') renderPeek(payload);
   else if (surface === 'rail') renderRail(payload);
   else if (!deferBubbleRender()) renderBubble(payload);
+  // A push carries fresh expiry times, so the self-repaint is re-armed from what
+  // was just painted rather than left on the schedule the previous payload set.
+  scheduleSelfRepaint();
 }
 
 // A repaint replaces the whole card, so it waits for whatever the pointer is
@@ -1065,12 +1082,61 @@ function deferBubbleRender() {
 }
 
 bridge.onRender(render);
-// Reset countdowns move without a stats push; repaint the open card each minute.
-setInterval(() => {
-  if (
-    surface === 'bubble'
-    && state.payload?.cell
-    && !deferBubbleRender()
-  ) renderBubble(state.payload);
-}, 30_000);
+// A repaint that no push triggers, because two readings here move on a clock
+// rather than on data: a session stops being running when its window expires
+// (sessionLive.RUNNING_WINDOW_MS) even with no new stats at all, and reset
+// countdowns tick down on their own. Without this the rail kept the count and the
+// tool marks it was pushed with, and a card opened later would disagree with the
+// cell that opened it. Every surface re-derives from the payload it already holds,
+// so this costs no IPC and asks the main process for nothing.
+function surfacesShowingSessions() {
+  if (surface === 'rail') return (state.payload?.cells || []).some((cell) => cell.metric === presentation.SESSIONS_METRIC);
+  if (surface === 'bubble') return state.payload?.cell?.metric === presentation.SESSIONS_METRIC;
+  return false;
+}
+
+// How long until the reading this surface holds could change by itself. A sessions
+// cell carries the moment its newest running row expires; anything else falls back
+// to the minute that reset countdowns need. Both ends are clamped so a payload
+// whose expiry has just passed cannot spin the timer.
+const SELF_REPAINT_FLOOR_MS = 1_000;
+const SELF_REPAINT_MAX_MS = 60_000;
+
+function selfRepaintDelayMs() {
+  if (!surfacesShowingSessions()) return SELF_REPAINT_MAX_MS;
+  const cells = surface === 'rail' ? state.payload?.cells || [] : [state.payload?.cell].filter(Boolean);
+  let soonest = 0;
+  for (const cell of cells) {
+    if (cell?.metric !== presentation.SESSIONS_METRIC) continue;
+    const expiresAt = Number(cell.runningExpiresAt) || 0;
+    if (expiresAt > 0 && (!soonest || expiresAt < soonest)) soonest = expiresAt;
+  }
+  if (!soonest) return SELF_REPAINT_MAX_MS;
+  return Math.min(SELF_REPAINT_MAX_MS, Math.max(SELF_REPAINT_FLOOR_MS, soonest - Date.now() + 50));
+}
+
+function repaintSelf() {
+  // The card defers while a gesture or an open tooltip is inside it, and asks
+  // again once that clears (limitTooltip.pending); the rail has nothing to defer.
+  if (surface === 'bubble') {
+    if (state.payload?.cell && !deferBubbleRender()) renderBubble(state.payload);
+    return;
+  }
+  if (surface === 'rail' && state.payload) renderRail(state.payload);
+}
+
+// Re-armed after every repaint rather than fixed at one interval, so a surface
+// wakes exactly when its reading can change instead of polling on a fixed period
+// and still being late. A stats push re-enters render() with a fresh payload and
+// reschedules from it.
+let selfRepaintTimer = null;
+function scheduleSelfRepaint() {
+  if (selfRepaintTimer) clearTimeout(selfRepaintTimer);
+  selfRepaintTimer = setTimeout(() => {
+    selfRepaintTimer = null;
+    repaintSelf();
+    scheduleSelfRepaint();
+  }, selfRepaintDelayMs());
+}
+scheduleSelfRepaint();
 bridge.ready();

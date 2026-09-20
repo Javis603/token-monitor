@@ -5342,7 +5342,57 @@ function edgeDockCellsFor(visibleStats) {
 
 function updateEdgeDockCells(visibleStats) {
   if (!edgeDockController?.isRunning() || !visibleStats) return;
-  edgeDockController.setCells(edgeDockCellsFor(visibleStats));
+  const cells = edgeDockCellsFor(visibleStats);
+  pushEdgeDockCells(cells);
+}
+
+// Hand cells to the controller and arm the expiry timer from them. Split out from
+// the guard above because the settings path calls it before the controller is
+// running: `setCells` stores the list regardless, and `sync()` starts the windows
+// afterwards, so the timer is armed there once the surface actually exists.
+function pushEdgeDockCells(cells) {
+  edgeDockLastCells = cells;
+  edgeDockController?.setCells(cells);
+  scheduleEdgeDockSessionExpiry();
+}
+
+// Running is a function of time: a session crosses the ten-minute window with no
+// new data at all, so the cells pushed at the last tick go stale on their own. The
+// renderer re-derives what it draws from the rows it already holds, but the cells
+// themselves (and the rail's height, which depends on the cell list) only change
+// when the main process re-projects. This wakes exactly when the soonest running
+// row in the current cells expires, instead of polling on a fixed period.
+let edgeDockSessionExpiryTimer = null;
+const EDGE_DOCK_EXPIRY_FLOOR_MS = 1_000;
+
+// The cells most recently handed to the controller, so the expiry timer can be
+// armed from what is actually on screen rather than re-projecting to find out.
+let edgeDockLastCells = [];
+
+// The soonest moment any sessions cell stops reading as running, or 0 when none
+// of them does. A quiet cell never becomes running on its own, so 0 means there
+// is nothing to wake for and the timer must not be armed.
+function edgeDockNextSessionExpiry(cells) {
+  let soonest = 0;
+  for (const cell of Array.isArray(cells) ? cells : []) {
+    if (cell?.metric !== 'sessions') continue;
+    const expiresAt = Number(cell.runningExpiresAt) || 0;
+    if (expiresAt > 0 && (!soonest || expiresAt < soonest)) soonest = expiresAt;
+  }
+  return soonest;
+}
+
+function scheduleEdgeDockSessionExpiry() {
+  if (edgeDockSessionExpiryTimer) clearTimeout(edgeDockSessionExpiryTimer);
+  edgeDockSessionExpiryTimer = null;
+  if (!edgeDockController?.isRunning()) return;
+  const expiresAt = edgeDockNextSessionExpiry(edgeDockLastCells);
+  if (!expiresAt) return;
+  const delay = Math.max(EDGE_DOCK_EXPIRY_FLOOR_MS, expiresAt - Date.now() + 50);
+  edgeDockSessionExpiryTimer = setTimeout(() => {
+    edgeDockSessionExpiryTimer = null;
+    if (latestStats) updateEdgeDockCells(electronPresentationStats(latestStats));
+  }, delay);
 }
 
 function ensureEdgeDockController() {
@@ -5403,8 +5453,14 @@ function syncEdgeDock(rendererSettings) {
   controller.setAppearance(edgeDockAppearance(rendererSettings));
   // Provider selection and order are settings too, so re-project on every sync
   // rather than waiting for the next stats push to reorder the rail.
-  if (latestStats) controller.setCells(edgeDockCellsFor(electronPresentationStats(latestStats)));
+  // Through the same path as a stats push, so the session-expiry timer is armed
+  // from these cells too: a settings change replaces what is on screen just as a
+  // push does, and skipping the reschedule here left the rail on a stale reading.
+  if (latestStats) pushEdgeDockCells(edgeDockCellsFor(electronPresentationStats(latestStats)));
   controller.sync();
+  // Now that the controller is running (sync() starts it when enabled), arm the
+  // timer against the cells that were just handed over.
+  scheduleEdgeDockSessionExpiry();
 }
 
 function refreshLimitStatsPresentation() {

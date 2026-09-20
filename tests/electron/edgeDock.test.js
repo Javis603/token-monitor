@@ -34,6 +34,10 @@ const { bubbleCommands, railCommands, toPolygons, toSvgPath } = require('../../s
 const { rasterizeMask, shapeRectsFromPolygons } = require('../../src/electron/edgeDock/mask');
 const { DEFAULT_LIMIT_COUNT, normalizeEdgeDockItems, reorderEdgeDockItems } = require('../../src/electron/renderer/edgeDock/items');
 const { SESSIONS_METRIC } = require('../../src/electron/renderer/edgeDock/presentation');
+const edgeDockPresentation = require('../../src/electron/renderer/edgeDock/presentation');
+// The predicate the projection, the rail and the card all answer with, so these
+// tests assert the same reading a surface would.
+const sessionLive = require('../../src/shared/sessionLive');
 const verticalDragSort = require('../../src/electron/renderer/verticalDragSort');
 const { matchProviderAccount } = require('../../src/shared/subscriptionDisplay');
 const accountIdentity = require('../../src/electron/renderer/accountIdentity');
@@ -381,15 +385,17 @@ test('the sessions item lists every tracked client, including one with no limits
   const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
   assert.equal(cell.kind, 'stat');
   assert.equal(cell.metric, SESSIONS_METRIC);
-  assert.equal(cell.runningCount, 4);
   assert.deepEqual(cell.sessions.map((row) => row.client), ['codex', 'kilo', 'lmstudio', 'dsh']);
   // Every row names its own tool, because this list mixes them.
   assert.deepEqual([...new Set(cell.sessions.map((row) => row.client))].sort(), ['codex', 'dsh', 'kilo', 'lmstudio']);
-  // The rail's marks name the tools with work in flight, capped, with the
-  // remainder left to runningClientCount.
-  assert.deepEqual(cell.runningClients, ['codex', 'kilo', 'lmstudio']);
-  assert.equal(cell.runningClientCount, 4);
-  assert.equal(cell.markLimit, 3);
+  // The rail's reading is derived from these rows at paint time rather than frozen
+  // into the cell, so what the cell owes its renderer is the rows plus the moment
+  // that reading changes (see the expiry test below).
+  const summary = edgeDockPresentation.runningSessionSummary(cell.sessions);
+  assert.equal(summary.count, 4);
+  assert.deepEqual(summary.clients, ['codex', 'kilo', 'lmstudio', 'dsh']);
+  assert.equal(summary.clientCount, 4);
+  assert.equal(cell.runningExpiresAt > Date.now(), true);
 });
 
 // The standalone item repeats none of a provider card's job, so its two options
@@ -415,7 +421,7 @@ test('the sessions item honours runningOnly and groupBy without changing the run
   // the rail shows, from one derivation.
   const timeline = build({ type: 'stat', metric: SESSIONS_METRIC });
   assert.deepEqual(timeline.sessions.map((row) => row.sessionId), ['live', 'live2', 'quiet']);
-  assert.equal(timeline.runningCount, 2);
+  assert.equal(edgeDockPresentation.runningSessionSummary(timeline.sessions).count, 2);
   assert.equal(timeline.runningOnly, false);
   assert.equal(timeline.groupBy, 'none');
 
@@ -423,7 +429,7 @@ test('the sessions item honours runningOnly and groupBy without changing the run
   // row is gone and the counting is untouched.
   const onlyRunning = build({ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true });
   assert.deepEqual(onlyRunning.sessions.map((row) => row.sessionId), ['live', 'live2']);
-  assert.equal(onlyRunning.runningCount, 2);
+  assert.equal(edgeDockPresentation.runningSessionSummary(onlyRunning.sessions).count, 2);
   assert.equal(onlyRunning.runningOnly, true);
 
   // An empty running list is a real answer, not a missing one: still no rows.
@@ -433,7 +439,7 @@ test('the sessions item honours runningOnly and groupBy without changing the run
   };
   const [empty] = buildEdgeDockCells(quietStats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true }] });
   assert.deepEqual(empty.sessions, []);
-  assert.equal(empty.runningCount, 0);
+  assert.equal(edgeDockPresentation.runningSessionSummary(empty.sessions).count, 0);
 
   // groupBy is carried to the card, which is what draws one section per tool.
   const grouped = build({ type: 'stat', metric: SESSIONS_METRIC, groupBy: 'client' });
@@ -456,7 +462,7 @@ test('a sessions item can put the live rate on its rail cell instead of tool mar
   // Default: the cell names the working tools and carries no rate at all.
   const [marks] = cells({ type: 'stat', metric: SESSIONS_METRIC });
   assert.equal(marks.cellDetail, 'clients');
-  assert.deepEqual(marks.runningClients, ['codex']);
+  assert.deepEqual(edgeDockPresentation.runningSessionSummary(marks.sessions).clients, ['codex']);
   assert.equal(marks.rate, null);
 
   // Opt-in: the same cell carries the sample, in the mode the item is in.
@@ -467,7 +473,7 @@ test('a sessions item can put the live rate on its rail cell instead of tool mar
   assert.equal(rate.rateIdle, false);
   // The marks still ride the cell, because the card and the item's other
   // surfaces read the same projection; only which one the rail draws changes.
-  assert.deepEqual(rate.runningClients, ['codex']);
+  assert.deepEqual(edgeDockPresentation.runningSessionSummary(rate.sessions).clients, ['codex']);
 
   // Burn mode reads the other figure, from the same sample.
   const [burn] = cells({ type: 'stat', metric: SESSIONS_METRIC, cellDetail: 'rate' }, { tokenRateMode: 'burn' });
@@ -486,6 +492,97 @@ test('a sessions item can put the live rate on its rail cell instead of tool mar
     type: 'stat', metric: 'sessions', runningOnly: false, groupBy: 'none', cellDetail: 'clients'
   });
   assert.equal(normalizeEdgeDockItems([{ type: 'stat', metric: 'sessions', cellDetail: 'nope' }])[0].cellDetail, 'clients');
+});
+
+// Blocker: the projection dropped the archive flags, so a row that reads idle in
+// the rail's own derivation came back running in the card, which re-derives state
+// from the projected row. `sessionActivityState` reads those flags first, and its
+// archived rule is absolute, so losing them is a predicate violation rather than a
+// display difference. The old test only checked the projection's own boolean, which
+// is exactly the reading the renderer does not use.
+test('a projected session row keeps the archive flags the card re-derives state from', () => {
+  const nowIso = new Date().toISOString();
+  const base = { lastUsedAt: nowIso, totalTokens: 10, models: { 'gpt-5': 10 } };
+  const stats = {
+    periods: {
+      month: { sessions: {
+        // Fresh timestamp, no turnEnded: running by time alone, and idle only
+        // because it is archived.
+        'codex:arch': { client: 'codex', sessionId: 'arch', ...base, archived: true },
+        'codex:gone': { client: 'codex', sessionId: 'gone', ...base, deleted: true },
+        'codex:src': { client: 'codex', sessionId: 'src', ...base, sourceDeleted: true },
+        'codex:live': { client: 'codex', sessionId: 'live', ...base }
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  const byId = new Map(cell.sessions.map((row) => [row.sessionId, row]));
+  // The projection's own reading is 1 running, and the renderer must agree with it
+  // on every single row - the disagreements were the bug.
+  assert.equal(cell.sessions.filter((row) => row.running).length, 1);
+  for (const id of ['arch', 'gone', 'src']) {
+    assert.equal(sessionLive.sessionActivityState(byId.get(id)), 'idle', `${id} must stay idle after projection`);
+  }
+  assert.equal(sessionLive.sessionActivityState(byId.get('live')), 'running');
+  // All three flags ride the row: the predicate reads three separate fields, so
+  // carrying one alias would leave the other two able to resurrect a session.
+  assert.deepEqual(
+    [byId.get('arch').archived, byId.get('gone').deleted, byId.get('src').sourceDeleted],
+    [true, true, true]
+  );
+  assert.deepEqual(
+    [byId.get('live').archived, byId.get('live').deleted, byId.get('live').sourceDeleted],
+    [false, false, false]
+  );
+  // And the shared summary the rail draws from must agree with the projection too.
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions).count, 1);
+});
+
+// Blocker: running expires on a clock, so a count frozen at projection time goes
+// stale on a rail that nothing re-projects - the cell would claim a running session
+// and the card it opened would show none. These lock the two halves: the reading is
+// derived at the clock it is asked about, and the cell says when it must be asked
+// again.
+test('a sessions cell re-derives running at the clock it is asked, and reports when that changes', () => {
+  const { RUNNING_WINDOW_MS } = sessionLive;
+  const now = Date.parse('2026-09-20T12:00:00.000Z');
+  const iso = (ms) => new Date(ms).toISOString();
+  const stats = {
+    periods: {
+      month: { sessions: {
+        'codex:a': { client: 'codex', sessionId: 'a', lastUsedAt: iso(now - 60_000), totalTokens: 10, models: { m: 10 } },
+        'codex:b': { client: 'codex', sessionId: 'b', lastUsedAt: iso(now - 9 * 60_000), totalTokens: 10, models: { m: 10 } }
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  // Both were inside the window when the cell was built.
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, now).count, 2);
+  assert.deepEqual(edgeDockPresentation.runningSessionSummary(cell.sessions, now).clients, ['codex']);
+  // `b` expires first, one minute before `a`.
+  assert.equal(cell.runningExpiresAt, Date.parse(iso(now - 9 * 60_000)) + RUNNING_WINDOW_MS);
+  // At `b`'s expiry the boundary is inclusive (`nowMs(now) - last <= RUNNING_WINDOW_MS`),
+  // so `b` is still running there and both rows read running; a moment later it drops.
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, cell.runningExpiresAt).count, 2);
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, cell.runningExpiresAt + 1).count, 1);
+  // Past both they read none, which is the state the rail has to stop contradicting.
+  const afterAll = now + RUNNING_WINDOW_MS;
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, afterAll).count, 0);
+  assert.equal(cell.runningExpiresAt <= afterAll, true);
+  // Nothing running is 0 rather than a time, so a scheduler reading it cannot arm a
+  // timer for a row that can only get quieter.
+  const [quiet] = buildEdgeDockCells({
+    // Relative to the real clock the projection reads, not to this test's fixed
+    // `now`: `runningExpiresAt` is computed at projection time.
+    periods: { month: { sessions: { 'codex:q': { client: 'codex', sessionId: 'q', lastUsedAt: new Date(Date.now() - RUNNING_WINDOW_MS - 1).toISOString(), totalTokens: 5, models: { m: 5 } } } }, today: { sessions: {} } },
+    limits: { providers: [] }
+  }, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  assert.equal(quiet.runningExpiresAt, 0);
+  assert.equal(edgeDockPresentation.runningSessionSummary(quiet.sessions).count, 0);
 });
 
 // The main process only keeps the live-rate tracker alive for items that show a
