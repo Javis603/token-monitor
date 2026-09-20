@@ -129,6 +129,17 @@
     );
   }
 
+  // One limits account, as a value two lists can be deduped against. The
+  // provider is part of it because account keys are only unique within one, and
+  // an account with neither key nor name still has to compare equal to itself.
+  function accountValue(account) {
+    return [
+      String(account?.provider || '').trim().toLowerCase(),
+      String(account?.accountKey || '').trim(),
+      String(account?.accountName || '').trim()
+    ].join('\0');
+  }
+
   // Default account title for providers that identify accounts by email or name.
   function accountTitleLabel(account, peers = [account], options = {}) {
     const resolvedPeers = Array.isArray(peers) && peers.length > 0 ? peers : [account];
@@ -187,6 +198,7 @@
   return {
     accountEmailLabel,
     accountTitleLabel,
+    accountValue,
     codexAccountDisplayLabel,
     codexAccountIdForProvider,
     codexAccountMatchesProvider,

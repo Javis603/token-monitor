@@ -818,6 +818,51 @@ test('a provider with nothing to report still carries its accounts to the matche
   assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountKey), ['sha256:a']);
 });
 
+// The rail's provider list is the *aggregate*, and the aggregate drops an
+// account the moment the same provider has a fresh one (limits/core.js collapses
+// by provider name, and one login hashes differently per platform). A record
+// bound to a dropped account is one the matcher cannot see, so it falls through
+// matchProviderAccount()'s sole-account fallback onto the account left on
+// screen — which is why the page reads the local device's own records beside the
+// aggregate, and why the card has to as well.
+test('the matcher sees the local accounts the aggregate collapsed away', () => {
+  const local = provider('codex', { accountKey: 'sha256:local', status: 'unauthorized', windows: [] });
+  const remote = provider('codex', { accountKey: 'sha256:remote', windows: [{ kind: 'session', remainingPercent: 60 }] });
+  const stats = {
+    devices: [
+      { deviceId: 'this-mac', limits: { providers: [local] } },
+      { deviceId: 'other-mac', limits: { providers: [remote] } }
+    ],
+    // What the aggregate holds: the stale local row is gone.
+    limits: { providers: [remote] }
+  };
+  const [codex] = buildEdgeDockCells(stats, {
+    localDeviceId: 'this-mac',
+    items: [{ type: 'limit', provider: 'codex', showUsage: true }]
+  });
+
+  assert.deepEqual(
+    codex.subscriptionAccounts.map((account) => account.accountKey),
+    ['sha256:local', 'sha256:remote'],
+    'both accounts reach the matcher, local first'
+  );
+  // The aggregate is still what the card draws: a collapsed account is not a row.
+  assert.deepEqual(codex.accounts.map((account) => account.accountKey), ['sha256:remote']);
+});
+
+test('the same account in both lists is one candidate, not two', () => {
+  const account = provider('codex', { accountKey: 'sha256:a', windows: [{ kind: 'session', remainingPercent: 60 }] });
+  const stats = {
+    devices: [{ deviceId: 'this-mac', limits: { providers: [account] } }],
+    limits: { providers: [account] }
+  };
+  const [codex] = buildEdgeDockCells(stats, {
+    localDeviceId: 'this-mac',
+    items: [{ type: 'limit', provider: 'codex', showUsage: true }]
+  });
+  assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountKey), ['sha256:a']);
+});
+
 test('item settings normalize to null for automatic and drop unknown entries', () => {
   assert.equal(normalizeEdgeDockItems(null), null);
   assert.equal(normalizeEdgeDockItems('nope'), null);

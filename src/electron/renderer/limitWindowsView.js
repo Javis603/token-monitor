@@ -18,6 +18,11 @@
 //   settings()                         the live settings object
 //   presentation, motion               renderer modules, injected so this file
 //                                      does not care which page loaded them
+//   provenance(provider)               which device a row's reading came from.
+//                                      Defaults to no context, because naming a
+//                                      device needs this host's own device id,
+//                                      sync mode and device list — none of which
+//                                      is in the record being rendered
 //   balance                            limitBalanceDisplay
 //   windowLabels, windowText           the shared wording modules
 //   subscriptionApi, subscriptionText  the recorded subscriptions and how they
@@ -36,6 +41,11 @@
       settings,
       currentLocale,
       presentation: presentationApi,
+      // The row shows which device a reading came from, and only the host knows
+      // what that device is called. A host that has no such context (the dock
+      // card is handed cells, not a device list) gets the plain reading rather
+      // than a device name nobody resolved.
+      provenance: provenanceFor = (provider) => presentationApi.limitProviderProvenance(provider),
       motion,
       tooltip: tooltipHost,
       formatCompact,
@@ -1284,7 +1294,7 @@
     const title = document.createElement('span');
     title.className = 'limit-name-title';
     title.textContent = options.title || label;
-    const provenance = presentationApi.limitProviderProvenance(provider);
+    const provenance = provenanceFor(provider);
     // The ✓ marks the account THIS device's Codex is signed into
     // (state.codexActiveAccount, derived locally by codexActiveAccountFromStats).
     // It only disambiguates rows in the multi-account group, so it's gated on
@@ -1836,8 +1846,12 @@
     return subscriptionApi.normalizeSubscriptions(subscriptions(), { currencyApi });
   }
 
+  // The account identity rule lives with the rest of them (accountIdentity.js),
+  // because the dock's matcher universe is deduped with it before this file ever
+  // sees it: two copies of "which account is this" is how one of them ends up
+  // counting an account twice.
   function subscriptionAccountValue(provider) {
-    return [provider?.provider || '', provider?.accountKey || '', provider?.accountName || ''].join('\0');
+    return accountIdentity.accountValue(provider);
   }
 
   // Usage cost is keyed by client, and every provider whose id names a tracked
@@ -2033,11 +2047,17 @@
   }
 
   // The group header stands for all of its accounts at once, so it summarises
-  // rather than picking one of them; `subscriptions` is that set as the caller
-  // resolved it, not the provider's whole list. Usage and the value multiple are
-  // already provider level on the per-account card; here the price is too.
-  function subscriptionGroupTooltipRows(providerId, today, subscriptions) {
-    const rollup = subscriptionApi.providerRollup(subscriptions, providerId, currencyApi, today);
+  // rather than picking one of them.
+  //
+  // The summary's money is the provider's, not the header's drawn set, and that
+  // is deliberate — it is the same scope the per-account card's rollup and the
+  // ledger's use, and it has to be, because the usage figure it is read against
+  // cannot be split per account at all: tokscale records the client, never the
+  // signed-in login. A narrowed price over a provider-wide usage would be a
+  // ratio of two different scopes. What the drawn set does narrow is the cards,
+  // since a card is about one account.
+  function subscriptionGroupTooltipRows(providerId, today) {
+    const rollup = subscriptionApi.providerRollup(subscriptionList(), providerId, currencyApi, today);
     const rows = [{
       label: t('subscription.tooltip.providerTotal', { provider: subscriptionText.providerLabel(providerId) }),
       value: t('subscription.tooltip.providerTotalValue', {
@@ -2101,19 +2121,17 @@
     if (provider?.accountGroup === true) {
       const entries = subscriptionsForProviderGroup(provider.provider, provider.groupAccounts);
       if (entries.length === 0) return null;
+      // Either shape rolls up the whole provider: one recorded subscription
+      // still restates that account's own card, several become a summary of
+      // them, and both are read against the provider's usage. Splitting them
+      // would put two different answers on the same header.
       if (entries.length === 1) {
         return subscriptionCardNode(
           subscriptionTooltipRows(entries[0].subscription, entries[0].account || provider, true)
         );
       }
-      // The same narrowed set the entries came from, or the total would count a
-      // record the header just declined to show.
       return subscriptionCardNode(
-        subscriptionGroupTooltipRows(
-          provider.provider,
-          subscriptionApi.todayString(),
-          entries.map((entry) => entry.subscription)
-        )
+        subscriptionGroupTooltipRows(provider.provider, subscriptionApi.todayString())
       );
     }
     const subscription = subscriptionForProvider(provider);

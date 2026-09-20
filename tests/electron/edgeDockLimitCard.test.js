@@ -619,7 +619,7 @@ test('an account the rail drops for reporting nothing does not lend its record t
 // from those accounts too. Computed from the provider's subscriptions instead,
 // a record bound to an account the composer hides is carded and counted on a
 // header that has already said how many accounts it covers.
-test('a group header summarises the accounts the card draws', () => {
+test('a group header cards the accounts it draws and totals the provider', () => {
   const codexRecord = (key) => ({
     provider: 'codex',
     status: 'ok',
@@ -651,7 +651,9 @@ test('a group header summarises the accounts the card draws', () => {
       items: [{ type: 'limit', provider: 'codex', hiddenAccounts, showUsage: true }]
     });
     const drawn = cell.accounts.map((account) => account.record);
-    return dockView({ subscriptions }, {
+    // The rollup is read against the month's usage, so a fixture without one
+    // would assert on a card the rollup never reaches.
+    return dockView({ subscriptions, monthClientCosts: { codex: 12 } }, {
       subscriptionAccounts: () => cell.subscriptionAccounts
     }).renderLimitProviderGroup('codex', 'Codex', drawn, '#10A37F');
   };
@@ -668,9 +670,85 @@ test('a group header summarises the accounts the card draws', () => {
     subscription('sub-2', 'b', 1000),
     subscription('sub-3', 'c', 1000)
   ], ['a']);
-  const tooltip = everyAccount.find('subscription-tooltip');
-  assert.ok(tooltip, 'the two accounts that do have records are still summarised');
-  assert.match(tooltip.text, /2 subscriptions · \$20\.00 \/ mo/, 'and the hidden one is neither counted nor charged');
+  const summary = everyAccount.find('subscription-tooltip');
+  assert.ok(summary, 'the two accounts that do have records are still summarised');
+  assert.match(summary.text, /3 subscriptions · \$30\.00 \/ mo/, "the total is the provider's, not the drawn set's");
+
+  // One matching record left, so the header falls back to that account's own
+  // card. It reads the same provider total the summary does: the two shapes are
+  // the same row, and a total that moved with the shape would be two answers to
+  // one question.
+  const oneAccount = headerFor([
+    subscription('sub-1', 'a', 2000),
+    subscription('sub-2', 'b', 1000)
+  ], ['a']);
+  const single = oneAccount.find('subscription-tooltip');
+  assert.ok(single, 'b keeps its own card');
+  assert.match(single.text, /\$10\.00 \/ mo/, "the card is b's, the account the header draws");
+  assert.match(single.text, /2 subscriptions · \$30\.00 \/ mo/, 'and the total still covers the provider');
+
+  // The same row hidden down to one account, which the card draws in its solo
+  // shape. Hiding accounts is a display choice; the money is still being spent.
+  const [soloCell] = buildEdgeDockCells(stats, {
+    items: [{ type: 'limit', provider: 'codex', hiddenAccounts: ['a', 'c'], showUsage: true }]
+  });
+  const solo = dockView({
+    subscriptions: [subscription('sub-1', 'a', 2000), subscription('sub-2', 'b', 1000)],
+    monthClientCosts: { codex: 12 }
+  }, {
+    subscriptionAccounts: () => soloCell.subscriptionAccounts
+  }).renderLimitProviderSolo('codex', 'Codex', soloCell.accounts[0].record, '#10A37F');
+  const soloCard = solo.find('subscription-tooltip');
+  assert.match(soloCard.text, /\$10\.00 \/ mo/);
+  assert.match(soloCard.text, /2 subscriptions · \$30\.00 \/ mo/, 'the solo shape answers the same way');
+});
+
+// The row's "· imac-m1" is the page's context, not the record's: a reading that
+// came from another device is only nameable against this device's id, whether
+// sync is on, and the device list. The shared view reads that through a dep, so
+// the surface that has the context has to hand it over — the page stopped doing
+// so when the row moved into the shared builder, and the device name silently
+// disappeared from a line that still said which collection source it came from.
+test('a row whose reading came from another device names that device', () => {
+  const record = {
+    provider: 'kiro',
+    status: 'ok',
+    source: 'cli',
+    sourceDeviceId: 'imac-m1',
+    updatedAt: new Date(Date.now() - 120_000).toISOString(),
+    windows: [{ kind: 'billing', label: 'Credits', remainingPercent: 100 }]
+  };
+  const context = { localDeviceId: 'this-mac', syncActive: true, devices: [{ deviceId: 'imac-m1' }] };
+  const rowFor = (overrides) => dockView({ showLimitSource: true }, overrides)
+    .renderLimitProviderSolo('kiro', 'Kiro', record, '#8B5CF6');
+
+  assert.match(
+    rowFor({ provenance: (provider) => limitPresentationApi.limitProviderProvenance(provider, context) })
+      .find('limit-meta').text,
+    /Updated 2m ago · CLI · imac-m1/
+  );
+  // A host with no device list gets the source and no name, rather than a name
+  // nobody resolved.
+  assert.match(rowFor({}).find('limit-meta').text, /Updated 2m ago · CLI$/);
+});
+
+test('the page hands the shared view the device context its rows read', () => {
+  const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+  const wiring = app.slice(
+    app.indexOf('const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsView({'),
+    app.indexOf('function optionalFiniteNumber(value) {', app.indexOf('const limitWindowsView = window'))
+  );
+  assert.match(wiring, /(^|[\s{,])provenance\s*[,:]/, 'the page must hand the view its device context');
+  // And it is the resolver carrying the context, not a second context-free
+  // module call that reads as wired while naming nothing.
+  const wrapper = app.slice(
+    app.indexOf('function limitProviderProvenance(provider) {'),
+    app.indexOf('// ---------------------------------------------------------------------------\n// Subscriptions')
+  );
+  assert.match(wrapper, /localDeviceId: state\.settings\?\.deviceId/);
+  assert.match(wrapper, /syncActive: syncProvenanceActive\(\)/);
+  assert.match(wrapper, /devices: state\.stats\?\.devices/);
+  assert.match(wiring, /provenance: \(provider\) => limitProviderProvenance\(provider\)/);
 });
 
 test('a stale row is dimmed by the page rule, not recoloured', () => {

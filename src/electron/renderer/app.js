@@ -3983,6 +3983,10 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   settings: () => state.settings,
   currentLocale,
   presentation: limitProviderPresentationApi,
+  // The row's "· imac-m1" needs this device's id, whether sync is on and the
+  // device list to name a reading's source against — the page's own context,
+  // which the shared view cannot read for itself.
+  provenance: (provider) => limitProviderProvenance(provider),
   motion: limitResetMotionApi,
   tooltip: {
     hasOpened: () => state.limitDetailTooltipHasOpened,

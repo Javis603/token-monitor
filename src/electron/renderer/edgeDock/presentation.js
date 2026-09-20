@@ -337,20 +337,36 @@
   // Two answers, because the rail and the subscription matcher want different
   // ones. `byId` is what the cell draws, so it is gated on `hasReportableData`.
   // `allById` is every account the provider has, gate ignored, because a
-  // subscription binds to the account rather than to the row — an account that
-  // is failing without last-known windows still has one, and a matcher that
-  // cannot see it falls through matchProviderAccount()'s sole-account fallback
-  // onto whichever account is left on screen.
-  function groupedProviders(stats) {
+  // subscription binds to the account rather than to the row.
+  //
+  // The matcher's universe is wider than the rail's in two directions, and only
+  // the first is a gate. `stats.limits.providers` is the *aggregate*, which drops
+  // a stale account the moment the same provider has a fresh one (limits/core.js
+  // collapses by provider name, and the same login hashes differently per
+  // platform). An account the aggregate no longer names is one the matcher
+  // cannot see, so a record bound to it falls through matchProviderAccount()'s
+  // sole-account fallback onto whichever account is left — which is why the page
+  // reads the local device's own records beside the aggregate, and why this does
+  // too. Display does not: an account the aggregate collapsed away is not a row.
+  function groupedProviders(stats, options = {}) {
     const providers = Array.isArray(stats?.limits?.providers) ? stats.limits.providers : [];
     const byId = new Map();
     const allById = new Map();
-    for (const provider of providers) {
+    const local = accountIdentity.localDeviceLimitsProviders(stats, options.localDeviceId);
+    // Local first, so this device wins a tie on an account both lists name.
+    const seen = new Set();
+    for (const provider of [...(local || []), ...providers]) {
       const id = normalizedId(provider?.provider);
       if (!id) continue;
+      const value = accountIdentity.accountValue(provider);
+      if (seen.has(value)) continue;
+      seen.add(value);
       if (!allById.has(id)) allById.set(id, []);
       allById.get(id).push(provider);
-      if (!hasReportableData(provider)) continue;
+    }
+    for (const provider of providers) {
+      const id = normalizedId(provider?.provider);
+      if (!id || !hasReportableData(provider)) continue;
       if (!byId.has(id)) byId.set(id, []);
       byId.get(id).push(provider);
     }
@@ -364,7 +380,7 @@
   }
 
   function buildEdgeDockCells(stats, options = {}) {
-    const { byId, allById } = groupedProviders(stats);
+    const { byId, allById } = groupedProviders(stats, options);
     const items = Array.isArray(options.items)
       ? options.items
       : dockItems.defaultEdgeDockItems(connectedLimitProviders(stats, options));

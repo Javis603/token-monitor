@@ -753,7 +753,11 @@ test('capability tags are settings-only and do not alter the main Limits panel',
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'onToolTrackingToggle');
 
   assert.doesNotMatch(renderLimits, /limitProviderCapabilityTags|limit-status|limitProviderStatus/);
-  assert.match(renderHead, /const provenance = presentationApi\.limitProviderProvenance\(provider\);/);
+  // The device context is the host's to supply: the view resolves it through
+  // its own dep rather than calling the module context-free, which is how the
+  // page lost the "· imac-m1" half of this line when the row moved in here.
+  assert.match(renderHead, /const provenance = provenanceFor\(provider\);/);
+  assert.doesNotMatch(renderHead, /presentationApi\.limitProviderProvenance\(provider\)/);
   assert.match(renderHead, /limitProviderMeta\(provider, provenance\)/);
   assert.match(renderMeta, /presentationApi\.limitProviderMainDeviceLabel\(provenance, \{ showSource: Boolean\(settings\(\)\?\.showLimitSource\) \}\)/);
   assert.doesNotMatch(renderLimits, /limitProviderSettingsTags/);
@@ -3561,17 +3565,26 @@ test('a subscription card belongs to one account, and a group header summarises'
   assert.match(forProvider, /subscriptionAccountValue\(account\) === identity/);
   assert.doesNotMatch(forProvider, /matchProviderAccount\(subscription, \[provider\]\)/);
   assert.match(cardFor, /provider\?\.accountGroup === true/);
-  // And the header summarises the accounts it draws: the entries are narrowed to
-  // them, and the rollup is computed from those entries rather than from the
-  // provider's whole list, so a hidden account is neither carded nor counted.
+  // The header cards the accounts it draws — the entries are narrowed to them,
+  // so a record bound to an account the composer hid is not carded on a header
+  // that does not cover it — and both of its shapes read the same provider
+  // total. The total is deliberately not narrowed with the cards: it is the
+  // denominator of a ratio whose numerator (this month's usage) cannot be split
+  // per account at all, so narrowing it would compare two different scopes.
+  assert.match(cardFor, /subscriptionsForProviderGroup\(provider\.provider, provider\.groupAccounts\)/);
   assert.match(
     cardFor,
-    /subscriptionGroupTooltipRows\(\s*provider\.provider,\s*subscriptionApi\.todayString\(\),\s*entries\.map\(\(entry\) => entry\.subscription\)\s*\)/
+    /subscriptionGroupTooltipRows\(provider\.provider, subscriptionApi\.todayString\(\)\)/
   );
-  assert.match(cardFor, /subscriptionsForProviderGroup\(provider\.provider, provider\.groupAccounts\)/);
+  assert.doesNotMatch(cardFor, /subscriptionGroupTooltipRows\([\s\S]{0,80}entries\.map/);
   const groupResolver = viewBody('subscriptionsForProviderGroup', 'subscriptionTooltipRows');
   assert.match(groupResolver, /const accounts = subscriptionAccounts\(\);/);
   assert.match(groupResolver, /drawnValues\.has\(subscriptionAccountValue\(entry\.account\)\)/);
+  assert.match(
+    viewBody('subscriptionPlanTooltipRows', 'topUpTooltipRows'),
+    /providerRollup\(subscriptionList\(\), subscription\.provider, currencyApi, today\)/,
+    'the per-account card rolls up the provider, like the header does'
+  );
 });
 
 test('the seeded plan name is a real plan, never a status label', () => {
@@ -3591,6 +3604,9 @@ test("one account's subscription never appears on its siblings", () => {
     `${accountValue}\n${forProvider}\nsubscriptionForProvider(provider)?.id || null;`,
     {
       subscriptionApi,
+      // The identity rule is the shared one, so the sandbox gets it from where
+      // the view does.
+      accountIdentity: require('../../src/electron/renderer/accountIdentity'),
       subscriptionAccounts: () => accounts,
       subscriptionList: () => subscriptions,
       provider
