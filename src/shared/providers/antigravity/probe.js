@@ -762,12 +762,24 @@ async function probe(deps = {}) {
       const sourceInfos = infos.filter((info) => info.kind === kind);
       const prepared = await Promise.all(sourceInfos.map(async (info) => {
         try {
-          const ports = await promiseBeforeDeadline(
-            (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs }),
-            probeDeadlineMs,
-            DEFAULT_RPC_TIMEOUT_MS,
-            signal
-          );
+          // An explicit `--hub-port` is authoritative on its own. Port discovery
+          // is only a fallback, and it fails for reasons that say nothing about
+          // the process (lsof/Get-NetTCPConnection blocked by permissions, binary
+          // missing, or no listener found yet). Discarding the one endpoint the
+          // command line already named would be strictly worse than trying it.
+          let ports = [];
+          let portDiscoveryError = null;
+          try {
+            ports = await promiseBeforeDeadline(
+              (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs }),
+              probeDeadlineMs,
+              DEFAULT_RPC_TIMEOUT_MS,
+              signal
+            );
+          } catch (error) {
+            if (!info.hubPort) throw error;
+            portDiscoveryError = error;
+          }
           const initialCandidates = endpointCandidates(info, ports);
           const resolved = await resolveWorkingEndpoint(
             initialCandidates,
@@ -775,7 +787,11 @@ async function probe(deps = {}) {
             probeDeadlineMs,
             signal
           );
-          return { info, candidates: resolved.candidates, error: resolved.lastError };
+          return {
+            info,
+            candidates: resolved.candidates,
+            error: resolved.lastError || (resolved.candidates.length === 0 ? portDiscoveryError : null)
+          };
         } catch (error) {
           return { info, candidates: [], error };
         }

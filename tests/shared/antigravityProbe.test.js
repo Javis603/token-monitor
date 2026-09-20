@@ -835,3 +835,48 @@ test('parseProcessLine returns null for interactive agy agent sessions', () => {
   const line = '28668 "C:\\Users\\yuwell\\AppData\\Local\\agy\\bin\\agy.exe" --mode=accept-edits --dangerously-skip-permissions';
   assert.equal(probe._parseProcessLine(line), null);
 });
+
+// Port discovery is a fallback, not a gate: it fails for reasons that say
+// nothing about the process (permission-blocked lsof/Get-NetTCPConnection, a
+// missing binary, or no listener yet). When the command line already named an
+// explicit --hub-port, that endpoint must still be probed.
+test('probe still tries an explicit --hub-port when port discovery throws', async () => {
+  const calledPorts = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    listeningPorts: async () => { throw new Error('lsof failed: operation not permitted'); },
+    callLs: async ({ port, method }) => {
+      calledPorts.push(port);
+      if (port === 55555 && method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.4 }]
+          }]
+        };
+      }
+      if (port === 55555 && method === 'GetUserStatus') return { userStatus: { email: 'hub@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'hub endpoint unavailable');
+    }
+  });
+
+  assert.ok(calledPorts.includes(55555), 'the explicit hub port must be probed');
+  assert.equal(result.sourceDetail, 'cli');
+  assert.equal(result.accountEmail, 'hub@example.com');
+});
+
+test('probe keeps reporting the discovery failure for a tokenless CLI with no hub port', async () => {
+  const calledPorts = [];
+  const err = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 60123, kind: 'cli', csrfToken: '', hubPort: null, extensionPort: null }
+    ],
+    listeningPorts: async () => { throw new Error('lsof failed: operation not permitted'); },
+    callLs: async ({ port }) => { calledPorts.push(port); throw probe._errorWithStatus('unavailable', 'nope'); }
+  }).catch((error) => error);
+
+  assert.equal(calledPorts.length, 0, 'nothing is probeable without a hub port or discovered ports');
+  assert.match(String(err.status || err.message), /lsof failed/);
+});

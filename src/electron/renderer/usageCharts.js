@@ -16,6 +16,50 @@
     return total;
   }
 
+  // Fold Tokscale's per-client aliases into the canonical identity the rest of
+  // the app uses, so a legacy row that still carries e.g. `antigravity-cli`
+  // cannot render as a second tool beside `antigravity`. This runs where the
+  // chart reads `perClient`, which is also where the legend's keys and segments
+  // come from, so both stay in sync without a second folding site. Keys not
+  // listed here pass through untouched.
+  const CLIENT_ALIASES = Object.freeze({
+    'antigravity-cli': 'antigravity',
+    omp: 'pi',
+    kilocode: 'kilo'
+  });
+
+  function canonicalClientKey(key) {
+    const raw = String(key == null ? '' : key);
+    return CLIENT_ALIASES[raw] || raw;
+  }
+
+  // Sum a `perClient` map by canonical key. Returns undefined for a non-object so
+  // callers can keep treating a missing map as "no data".
+  function foldClientMap(map) {
+    if (!map || typeof map !== 'object') return undefined;
+    const folded = {};
+    for (const [key, value] of Object.entries(map)) {
+      const client = canonicalClientKey(key);
+      const existing = Object.prototype.hasOwnProperty.call(folded, client);
+      if (!existing) {
+        folded[client] = { ...value };
+      } else {
+        const target = folded[client];
+        for (const [metric, metricValue] of Object.entries(value || {})) {
+          target[metric] = n(target[metric]) + n(metricValue);
+        }
+      }
+    }
+    return folded;
+  }
+
+  // The `perClient` map a chart stacks, folded when it is the client axis. The
+  // model axis keeps its own key space, so it is returned as-is.
+  function stackedClientField(entry, field) {
+    if (field !== 'perClient') return entry[field];
+    return foldClientMap(entry[field]);
+  }
+
   // Wall-clock "today" as a LOCAL day key. Day cells and the live period totals
   // patched into them are both local-day scoped (the collector keys periods with
   // localTodayKey), so reading today off toISOString() — which is UTC — pasted the
@@ -82,23 +126,32 @@
       { width: 600, height: 180, padTop: 8, padRight: 8, padBottom: 20, padLeft: 40, gap: 0.2, stackBy: 'client', metric: 'tokens', labelKey: 'date' },
       options || {}
     );
-    const field = o.stackBy === 'model' ? 'perModel' : 'perClient';
-    const entries = Array.isArray(series) ? series : [];
+  const field = o.stackBy === 'model' ? 'perModel' : 'perClient';
+  const entries = Array.isArray(series) ? series : [];
 
-    const keyTotals = {};
-    for (const e of entries) {
-      for (const [k, v] of Object.entries(e[field] || {})) keyTotals[k] = (keyTotals[k] || 0) + n(v && v[o.metric]);
-    }
-    const keys = Object.keys(keyTotals).sort((a, b) => keyTotals[b] - keyTotals[a] || a.localeCompare(b));
+  // Read the stacked map through the alias fold so a legacy key cannot become a
+  // second series. `keys` and each bar's `segments` are both derived from the
+  // folded map, which is why folding here covers the chart and the legend at
+  // once; the legend is built from `model.keys` / `bar.segments` downstream.
+  const foldedEntries = entries.map((entry) => {
+    const stacked = stackedClientField(entry || {}, field);
+    return stacked === entry?.[field] ? entry : { ...entry, [field]: stacked };
+  });
 
-    const totals = entries.map((e) => sumMetric(e[field], o.metric));
-    const maxTotal = Math.max(1, ...totals);
-    const innerW = o.width - o.padLeft - o.padRight;
-    const innerH = o.height - o.padTop - o.padBottom;
-    const slot = entries.length ? innerW / entries.length : innerW;
-    const barWidth = slot * (1 - o.gap);
+  const keyTotals = {};
+  for (const e of foldedEntries) {
+    for (const [k, v] of Object.entries(e[field] || {})) keyTotals[k] = (keyTotals[k] || 0) + n(v && v[o.metric]);
+  }
+  const keys = Object.keys(keyTotals).sort((a, b) => keyTotals[b] - keyTotals[a] || a.localeCompare(b));
 
-    const bars = entries.map((e, i) => {
+  const totals = foldedEntries.map((e) => sumMetric(e[field], o.metric));
+  const maxTotal = Math.max(1, ...totals);
+  const innerW = o.width - o.padLeft - o.padRight;
+  const innerH = o.height - o.padTop - o.padBottom;
+  const slot = foldedEntries.length ? innerW / foldedEntries.length : innerW;
+  const barWidth = slot * (1 - o.gap);
+
+  const bars = foldedEntries.map((e, i) => {
       const x = o.padLeft + i * slot + (slot - barWidth) / 2;
       const source = e[field] || {};
       let cum = 0;
