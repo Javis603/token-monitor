@@ -199,7 +199,16 @@
   // the cap is a budget for the whole list rather than an allowance stacked on
   // top of the running ones, and a running row is never dropped (that would
   // leave the card's "N running" count with no matching row).
-  function cappedSessionRows(entries, cap, runningOnly = false) {
+  // The rows a card draws, with running rows kept preferentially: the cap is a budget for
+  // the whole list rather than an allowance stacked on top of the running ones, and a
+  // running row is never dropped (that would leave the card's "N running" count with no
+  // matching row).
+  //
+  // `order` decides how the chosen rows are printed. The default is running-first, which
+  // is the provider card's long-standing behaviour; the standalone Sessions item asks for
+  // `timeline`, printing them newest-first instead. Selection does not change either way,
+  // so the cap protects live work in both.
+  function cappedSessionRows(entries, cap, runningOnly = false, order = 'running-first') {
     const stateByKey = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
     const running = entries.filter(({ key }) => stateByKey.get(key) === 'running');
     const quiet = runningOnly
@@ -207,14 +216,15 @@
       : entries
         .filter(({ key }) => stateByKey.get(key) !== 'running')
         .slice(0, Math.max(0, cap - running.length));
-    // Selection is running-first; the order that comes out is not. `entries` arrives
-    // newest-first (see sessionSourceRows) and that is the order a card prints, so the
-    // chosen subset is re-sorted back into it - otherwise every running row is hoisted
-    // above every quiet one, and a session with activity nine minutes ago is listed
-    // above one with activity a minute ago. A layout called a single timeline would be
-    // claiming an order it does not show.
-    const chosen = new Set([...running, ...quiet].map((entry) => entry.key));
-    const ordered = entries.filter((entry) => chosen.has(entry.key));
+    let ordered = [...running, ...quiet];
+    if (order === 'timeline') {
+      // `entries` arrives newest-first (see sessionSourceRows) and a timeline prints in
+      // that order. Composing the selection directly would hoist every running row above
+      // every quiet one, so a session active nine minutes ago would be listed above one
+      // active a minute ago - an order the layout does not claim.
+      const chosen = new Set(ordered.map((entry) => entry.key));
+      ordered = entries.filter((entry) => chosen.has(entry.key));
+    }
     return { rows: sessionRowsFor(ordered, stateByKey), running, stateByKey };
   }
 
@@ -431,7 +441,9 @@
       const { rows: sessions } = cappedSessionRows(
         rows,
         options.runningOnly === true ? runningEntries.length : SESSIONS_RECENT_COUNT,
-        options.runningOnly === true
+        options.runningOnly === true,
+        // A timeline prints newest-first; the provider card keeps running-first.
+        'timeline'
       );
       // No frozen count: the cell carries its rows and the renderer asks them at
       // paint time, so a rail left on screen stops claiming a running session the

@@ -479,6 +479,27 @@ test('the timeline keeps newest-first order even when a quiet row is the newer o
   // though it is the older one, and it is printed at its own position in the timeline.
   const [capped] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true }] });
   assert.deepEqual(capped.sessions.map((row) => row.sessionId), ['older-running']);
+  // A provider card keeps the running-first order it has always had. The timeline is the
+  // Sessions item's own order, so the shared selection cannot hand it to both: the same
+  // fixture through a provider card must come out the other way round.
+  // Both rows belong to Codex here: a provider card only lists its own clients, so the
+  // fixture above (one codex row, one kilo row) would leave it a single row to order.
+  const codexOnly = {
+    periods: {
+      month: { sessions: {
+        'codex:newer-quiet': stats.periods.month.sessions['codex:newer-quiet'],
+        'codex:older-running': { ...stats.periods.month.sessions['kilo:older-running'], client: 'codex' }
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [{ provider: 'codex', status: 'ok', accountKey: 'k', windows: [] }] }
+  };
+  const [provider] = buildEdgeDockCells(codexOnly, { items: [{ type: 'limit', provider: 'codex' }] });
+  assert.deepEqual(
+    provider.sessions.map((row) => row.sessionId),
+    ['older-running', 'newer-quiet'],
+    'a provider card stays running-first'
+  );
 });
 
 // A running-only card re-applies its filter as it paints, because the renderer repaints
