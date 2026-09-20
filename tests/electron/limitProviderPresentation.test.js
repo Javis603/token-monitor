@@ -4293,6 +4293,29 @@ test('a device with no limits of its own can still name the accounts on the hub'
     run(signedOut, twoRemote).map((entry) => entry.accountKey || '(no key)'),
     ['(no key)', 'a', 'b']
   );
+
+  // A keyless copy of an account is a copy, and both workspaces on one address
+  // are still two accounts. The copy names an address and no key, so pairwise it
+  // reads as the same account as each of them — and deduping the list that way
+  // let it displace both, which left the picker (and the matcher universe behind
+  // it) offering the copy instead of either workspace, whatever the user was
+  // actually signed in to. sortedKeys() is the assertion because the surviving
+  // accounts must not depend on the order the two lists arrive in.
+  const copyAccount = { provider: 'codex', accountEmail: 'member@example.com', windows: [] };
+  const copy = [copyAccount];
+  const personal = { provider: 'codex', accountKey: 'personal', accountEmail: 'member@example.com', accountName: 'Personal' };
+  const team = { provider: 'codex', accountKey: 'team', accountEmail: 'member@example.com', accountName: 'Team' };
+  const sortedKeys = (records) => records.map((entry) => entry.accountKey).sort();
+  assert.deepEqual(sortedKeys(run(copy, [personal, team])), ['personal', 'team']);
+  assert.deepEqual(sortedKeys(run(copy, [team, personal])), ['personal', 'team']);
+  assert.deepEqual(sortedKeys(run([personal], [copyAccount, team])), ['personal', 'team']);
+  assert.deepEqual(sortedKeys(run([team], [personal, copyAccount])), ['personal', 'team']);
+
+  // With one account on that address the copy really is its second copy, and the
+  // keyed record is the one that survives — it is the one a binding can be
+  // matched to by key.
+  assert.deepEqual(run(copy, [personal]).map((entry) => entry.accountKey), ['personal']);
+  assert.deepEqual(run([personal], [copyAccount]).map((entry) => entry.accountKey), ['personal']);
 });
 
 test('the account picker tells two address-only accounts apart', () => {

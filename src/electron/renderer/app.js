@@ -2932,14 +2932,14 @@ function isCreditsProvider(provider) {
 // aggregate's copy of this device's account is a different object, and it is not
 // the same record down to the fields a value would have read.
 function limitProvidersForSubscriptions() {
-  const seen = [];
-  const merged = [];
-  for (const provider of [...(localDeviceLimitsProviders() || []), ...(state.stats?.limits?.providers || [])]) {
-    if (seen.some((entry) => accountIdentityApi.sameAccount(entry, provider))) continue;
-    seen.push(provider);
-    merged.push(provider);
-  }
-  return merged;
+  // This device's own records first, so they win a tie with the aggregate's copy
+  // of one account. Which records are distinct accounts is decided over the whole
+  // list, not pair by pair: a keyless copy carries an address instead of a key,
+  // and an address is not enough to answer that question about one pair at a time.
+  return accountIdentityApi.dedupeAccounts([
+    ...(localDeviceLimitsProviders() || []),
+    ...(state.stats?.limits?.providers || [])
+  ]);
 }
 
 // Every configured account, balance ones included. They used to be hidden behind

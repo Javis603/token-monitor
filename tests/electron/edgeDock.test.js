@@ -35,6 +35,7 @@ const { rasterizeMask, shapeRectsFromPolygons } = require('../../src/electron/ed
 const { DEFAULT_LIMIT_COUNT, normalizeEdgeDockItems, reorderEdgeDockItems } = require('../../src/electron/renderer/edgeDock/items');
 const verticalDragSort = require('../../src/electron/renderer/verticalDragSort');
 const { matchProviderAccount } = require('../../src/shared/subscriptionDisplay');
+const accountIdentity = require('../../src/electron/renderer/accountIdentity');
 const {
   buildEdgeDockCells,
   displayPercent,
@@ -951,6 +952,76 @@ test('an account nobody is signed into does not stand in for the ones that are',
   // universe happened to collapse to.
   const bound = matchProviderAccount({ id: 's', provider: 'codex', binding: { accountKey: 'sha256:b' } }, codex.subscriptionAccounts);
   assert.equal(bound?.accountKey, 'sha256:b');
+});
+
+test('a copy with no key is a copy, and never the account a binding lands on', () => {
+  // One address holds two Codex workspaces, which aggregateLimits keeps apart by
+  // key (limits.test.js). A device can also report that address with no key at
+  // all — that is what mapCodexRateLimitsToProvider() emits when the payload
+  // carries an email and no account key (limitCollector.codex.test.js), and what
+  // an older record posts. Read pair by pair the copy is the same account as
+  // *both* workspaces, so whichever order the two lists arrived in decided which
+  // of them survived; the losing order kept only the copy, a binding to the
+  // second workspace landed on it through the sole-account fallback, and the row
+  // lookup then answered yes for either workspace — one record drawing on two.
+  const workspaces = [
+    provider('codex', {
+      accountKey: 'sha256:personal',
+      accountEmail: 'member@example.com',
+      accountName: 'Personal',
+      windows: [{ kind: 'session', remainingPercent: 60 }]
+    }),
+    provider('codex', {
+      accountKey: 'sha256:team',
+      accountEmail: 'member@example.com',
+      accountName: 'Team',
+      windows: [{ kind: 'session', remainingPercent: 60 }]
+    })
+  ];
+  const copy = provider('codex', {
+    accountEmail: 'member@example.com',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const binding = { id: 's', provider: 'codex', binding: { accountKey: 'sha256:team' } };
+
+  const orders = [
+    ['the copy is this device\'s own record', [copy], workspaces],
+    ['the copy is the aggregate\'s', [], [copy, ...workspaces]],
+    ['the copy sits between them', [], [workspaces[0], copy, workspaces[1]]]
+  ];
+  for (const [label, local, aggregate] of orders) {
+    const [codex] = buildEdgeDockCells(
+      {
+        devices: [{ deviceId: 'this-mac', limits: { providers: local } }],
+        limits: { providers: aggregate }
+      },
+      { localDeviceId: 'this-mac', items: [{ type: 'limit', provider: 'codex', showUsage: true }] }
+    );
+    assert.deepEqual(
+      codex.subscriptionAccounts.map((account) => account.accountKey).sort(),
+      ['sha256:personal', 'sha256:team'],
+      `${label}: both workspaces stay candidates`
+    );
+    const resolved = matchProviderAccount(binding, codex.subscriptionAccounts);
+    assert.equal(resolved?.accountKey, 'sha256:team', `${label}: the binding lands on the workspace it names`);
+    // What the rows are then drawn from: a subscription may only answer for the
+    // account it resolved to.
+    const drawnOn = codex.subscriptionAccounts
+      .filter((account) => accountIdentity.sameAccount(resolved, account))
+      .map((account) => account.accountKey);
+    assert.deepEqual(drawnOn, ['sha256:team'], `${label}: the record draws on one workspace`);
+  }
+
+  // With one workspace on that address the copy is a second copy of it, and the
+  // keyed record is the one that survives — it is the one a binding matches by key.
+  const [single] = buildEdgeDockCells(
+    {
+      devices: [{ deviceId: 'this-mac', limits: { providers: [copy] } }],
+      limits: { providers: [workspaces[0]] }
+    },
+    { localDeviceId: 'this-mac', items: [{ type: 'limit', provider: 'codex', showUsage: true }] }
+  );
+  assert.deepEqual(single.subscriptionAccounts.map((account) => account.accountKey), ['sha256:personal']);
 });
 
 test('two accounts that are only addresses stay two candidates', () => {
