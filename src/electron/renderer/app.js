@@ -4,7 +4,6 @@
 // catalog (loaded as a script before this file). Destructured to the bare
 // names the call sites below already use.
 const {
-  CLIENT_IDS,
   CLIENT_LABELS: clientLabels,
   KNOWN_CLIENT_LIST: KNOWN_CLIENTS
 } = window.TokenMonitorClientCatalog;
@@ -177,6 +176,10 @@ const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMod
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
 const subscriptionApi = window.TokenMonitorSubscriptionDisplay;
+// What a recorded subscription reads. Shared with the Limits view, which builds
+// the same sentences into the plan cell's tooltip — so this page and that one
+// cannot describe one record two ways.
+const subscriptionText = window.TokenMonitorSubscriptionText;
 const compactTokenApi = window.TokenMonitorCompactTokens;
 const trayLayoutApi = window.TokenMonitorTrayLayout;
 const sessionRowsApi = window.TokenMonitorSessionRows;
@@ -198,7 +201,6 @@ const windowShortcutApi = window.TokenMonitorWindowShortcut;
 const LIMIT_REFRESH_OPTIONS = [60000, 120000, 300000, 900000, 1800000];
 const WINDOW_BEHAVIOR_VALUES = ['floating', 'normal', 'desktop'];
 const WINDOW_BEHAVIOR_ICONS = { floating: '⇧', normal: '○', desktop: '⇩' };
-const LIMIT_SOURCE_LABELS = { oauth: 'OAuth', cli: 'CLI', web: 'Web', rpc: 'RPC', local: 'Local', api: 'API' };
 const LIMIT_CAPABILITY_TAG_KEYS = {
   Auto: 'settings.limits.capability.auto',
   'OAuth/CLI': 'settings.limits.capability.oauthCli',
@@ -1246,28 +1248,10 @@ function syncCurrencyRateControls() {
 }
 function formatTime(value) { const date = value ? new Date(value) : new Date(); return Number.isNaN(date.getTime()) ? '--:--:--' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
 function formatPercent(value) { return Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'; }
-function formatLimitBoundary(window) {
-  const diffMs = limitProviderPresentationApi.limitResetRemainingMs(window?.resetsAt);
-  if (diffMs === null) return '';
-  const mixed = window?.boundaryKind === 'mixed';
-  const prefix = window?.boundaryKind === 'expiry'
-    ? 'Expires'
-    : mixed
-      ? 'Changes in'
-      : 'Reset';
-  if (diffMs === 0) return mixed ? 'Changes now' : `${prefix} now`;
-  return `${prefix} ${formatDuration(diffMs)}`;
-}
-function formatDuration(ms) {
-  const totalMinutes = Math.max(0, Math.round(ms / 60000));
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  const minutes = totalMinutes % 60;
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m`;
-  return '<1m';
-}
+// The quota-boundary wording lives beside the reset arithmetic it reads, so the
+// edge dock renders the same line from the same function rather than its own.
+const formatLimitBoundary = limitProviderPresentationApi.limitBoundaryText;
+const formatDuration = limitProviderPresentationApi.limitDurationText;
 function formatActiveDuration(ms) {
   const totalMinutes = Math.max(0, Math.round(Number(ms || 0) / 60000));
   const hours = Math.floor(totalMinutes / 60);
@@ -1275,17 +1259,6 @@ function formatActiveDuration(ms) {
   if (hours > 0) return `${hours}h ${minutes}m`;
   if (minutes > 0) return `${minutes}m`;
   return '0m';
-}
-function formatUpdatedAge(value) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return 'Update unknown';
-  const diffMs = Math.max(0, Date.now() - date.getTime());
-  if (diffMs < 45_000) return 'Updated just now';
-  const minutes = Math.round(diffMs / 60000);
-  if (minutes < 60) return `Updated ${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `Updated ${hours}h ago`;
-  return `Updated ${Math.round(hours / 24)}d ago`;
 }
 function versionText(value) {
   return value ? `v${value}` : 'unknown';
@@ -2912,18 +2885,6 @@ function ensureBreakdownVisible() {
   if (next !== state.breakdown) setBreakdown(next);
 }
 
-function limitStatusLabel(status) {
-  if (status === 'ok') return 'Live';
-  if (status === 'disabled') return 'Disabled';
-  if (status === 'notConfigured') return 'Not signed in';
-  if (status === 'noSyncedData') return 'No synced data';
-  if (status === 'unauthorized') return 'Sign in again';
-  if (status === 'rateLimited') return 'Limited';
-  if (status === 'sourceRateLimited') return 'Usage API limited';
-  if (status === 'unavailable') return 'Unavailable';
-  return 'Error';
-}
-
 function syncProvenanceActive() {
   return state.mode === 'sync' || Boolean(String(state.settings?.hubUrl || '').trim());
 }
@@ -2936,32 +2897,6 @@ function limitProviderProvenance(provider) {
   });
 }
 
-function limitProviderMeta(provider, provenance = null) {
-  const sourceDevice = limitProviderPresentationApi.limitProviderMainDeviceLabel(provenance, { showSource: Boolean(state.settings?.showLimitSource) });
-  if (provider.stale) {
-    const parts = ['Stale', formatUpdatedAge(provider.updatedAt).replace('Updated ', '')];
-    if (sourceDevice) parts.push(sourceDevice);
-    return parts.join(' · ');
-  }
-  if (provider.status === 'ok') {
-    const parts = [];
-    if (state.settings?.showLimitSource) {
-      const sourceLabel = limitProviderPresentationApi.limitProviderSourceLabel(provider) || LIMIT_SOURCE_LABELS[provider.source];
-      if (sourceLabel) parts.push(sourceLabel);
-    }
-    if (sourceDevice) parts.push(sourceDevice);
-    return `${formatUpdatedAge(provider.updatedAt)}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
-  }
-  return limitStatusLabel(provider.status, false);
-}
-
-function limitProviderPlan(provider) {
-  if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
-  const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
-  if (label) return limitProviderPresentationApi.limitProviderPlanDisplayLabel(provider, label);
-  return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
-}
-
 // ---------------------------------------------------------------------------
 // Subscriptions
 //
@@ -2972,11 +2907,6 @@ function limitProviderPlan(provider) {
 
 function subscriptionList() {
   return subscriptionApi.normalizeSubscriptions(state.settings?.subscriptions, { currencyApi });
-}
-
-function subscriptionProviderLabel(providerId) {
-  const entry = LIMIT_PROVIDERS.find((provider) => provider.id === providerId);
-  return entry?.settingsLabel || entry?.label || providerId;
 }
 
 // Keyed off the same list the label comes from, because a `.row-icon-<id>` with
@@ -2997,16 +2927,19 @@ function isCreditsProvider(provider) {
 // local account as the only candidate: matchProviderAccount()'s sole-account
 // fallback would then bind a remote subscription to whatever is signed in here.
 // Local entries come first so this device wins a tie on identical accounts.
+// The two copies are compared with the matcher's own identity rule
+// (accountIdentity.sameAccount), not with a value built out of the record: the
+// aggregate's copy of this device's account is a different object, and it is not
+// the same record down to the fields a value would have read.
 function limitProvidersForSubscriptions() {
-  const seen = new Set();
-  const merged = [];
-  for (const provider of [...(localDeviceLimitsProviders() || []), ...(state.stats?.limits?.providers || [])]) {
-    const key = subscriptionAccountValue(provider);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(provider);
-  }
-  return merged;
+  // This device's own records first, so they win a tie with the aggregate's copy
+  // of one account. Which records are distinct accounts is decided over the whole
+  // list, not pair by pair: a keyless copy carries an address instead of a key,
+  // and an address is not enough to answer that question about one pair at a time.
+  return accountIdentityApi.dedupeAccounts([
+    ...(localDeviceLimitsProviders() || []),
+    ...(state.stats?.limits?.providers || [])
+  ]);
 }
 
 // Every configured account, balance ones included. They used to be hidden behind
@@ -3022,12 +2955,23 @@ function subscriptionAccountChoices() {
     label: accountIdentityApi.accountTitleLabel(provider, visible, {
       maskEmail: state.settings?.maskLimitAccountEmails === true,
       index
-    }) || subscriptionProviderLabel(provider.provider)
+    }) || subscriptionText.providerLabel(provider.provider)
   }));
 }
 
+// The picker's value for one choice, which is only ever compared against another
+// choice from the same freshly built list: distinct per account, stable for one
+// record. It carries the address as well, so the two accounts a provider reports
+// by address alone are two choices rather than one — while "is this the same
+// account?" stays with accountIdentity.sameAccount(), where the matcher's rule
+// lives.
 function subscriptionAccountValue(provider) {
-  return [provider?.provider || '', provider?.accountKey || '', provider?.accountName || ''].join('\0');
+  return [
+    String(provider?.provider || '').trim().toLowerCase(),
+    String(provider?.accountKey || '').trim(),
+    String(provider?.accountEmail || provider?.email || '').trim(),
+    String(provider?.accountName || '').trim()
+  ].join('\0');
 }
 
 // The plan the account already reports ("Pro", "Plus") is nearly always what the
@@ -3045,442 +2989,18 @@ function subscriptionSelectedAccount() {
   return subscriptionAccountChoices().find((choice) => choice.value === value)?.provider || null;
 }
 
-function subscriptionAmountText(subscription) {
-  const code = currencyApi.normalizeCurrency(subscription?.currency);
-  const symbol = currencyApi.CURRENCY_RATES[code]?.symbol || `${code} `;
-  return `${symbol}${subscriptionApi.amountUnits(subscription).toFixed(2)}`;
-}
-
-function subscriptionCadenceText(subscription) {
-  const count = Number(subscription?.intervalCount) || 1;
-  const unit = subscription?.interval === 'year'
-    ? t('settings.subscriptions.unitYear')
-    : t('settings.subscriptions.unitMonth');
-  return count === 1 ? unit : t('settings.subscriptions.everyN', { count, unit });
-}
-
-function subscriptionPriceText(subscription) {
-  return `${subscriptionAmountText(subscription)} / ${subscriptionCadenceText(subscription)}`;
-}
-
-// "0 days left" reads like a bug on the day itself, which is exactly the day the
-// user is most likely to be looking.
-function subscriptionDaysText(days) {
-  return days === 0
-    ? t('subscription.tooltip.today')
-    : t('subscription.tooltip.daysLeft', { days });
-}
-
-function subscriptionDateText(dateString) {
-  if (!dateString) return '';
-  // Construct in local time from the calendar parts so the rendered day always
-  // matches the stored one, whatever the timezone.
-  return subscriptionLocalDate(dateString)?.toLocaleDateString(currentLocale(), {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  }) || '';
-}
-
-// The settings rows are two dense lines inside a ~300px panel and the date is the
-// longest thing on the second one, so there it is the numeric short form the
-// locale itself defines. Everywhere with room to spell it out — the tooltip
-// above all — still uses subscriptionDateText().
-function subscriptionShortDateText(dateString) {
-  if (!dateString) return '';
-  return subscriptionLocalDate(dateString)?.toLocaleDateString(currentLocale(), { dateStyle: 'short' }) || '';
-}
-
-function subscriptionLocalDate(dateString) {
-  const [year, month, day] = String(dateString).split('-').map(Number);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
-  return new Date(year, month - 1, day);
-}
-
-// Usage cost is keyed by client, and every provider whose id names a tracked
-// client can be compared against it. Providers with no same-named client
-// (openrouter, deepseek, thirdparty, zai…) simply produce nothing, which is the
-// correct answer: their spend is either pay-as-you-go or spread across clients
-// with no way to attribute it.
-//
-// Membership comes from the catalog rather than from clientLabels. That map is a
-// display lookup and deliberately carries ids that are not tracked clients, so
-// keying off it would let "we can render a name for this" stand in for "this
-// provider names a client we count tokens for". The two happen to agree today
-// only because the one label-only id is not a limits provider.
-const catalogClientIds = new Set(CLIENT_IDS);
-
-function subscriptionUsageCostUsd(providerId) {
-  if (!catalogClientIds.has(providerId)) return null;
-  const month = state.stats?.periods?.month;
-  const cost = Number(month?.clientCosts?.[providerId] || 0);
-  return cost > 0 ? cost : null;
-}
-
-// Matched against every account the provider has, never against a one-element
-// list of the row being rendered: matchProviderAccount() falls back to "the
-// provider has exactly one account, so there is no ambiguity", and a single-row
-// universe makes that fallback true for every sibling. That is what put one
-// Codex subscription's card on all three Codex accounts.
-function subscriptionForProvider(provider) {
-  const id = String(provider?.provider || '').toLowerCase();
-  const accounts = limitProvidersForSubscriptions();
-  const identity = subscriptionAccountValue(provider);
-  for (const subscription of subscriptionList()) {
-    if (subscription.provider !== id) continue;
-    const account = subscriptionApi.matchProviderAccount(subscription, accounts);
-    if (account && subscriptionAccountValue(account) === identity) return subscription;
-  }
-  return null;
-}
-
-// Every subscription recorded against a provider, paired with the account it
-// resolves to. Drives the group header, which stands for all of them at once.
-function subscriptionsForProviderGroup(providerId) {
-  const id = String(providerId || '').toLowerCase();
-  const accounts = limitProvidersForSubscriptions();
-  return subscriptionList()
-    .filter((subscription) => subscription.provider === id)
-    .map((subscription) => ({
-      subscription,
-      account: subscriptionApi.matchProviderAccount(subscription, accounts)
-    }));
-}
-
 // The record already held against an account, if any. One account holds one
 // record: a second one saved without complaint and then never appeared — the
 // card resolves the first match and stops — which read as the new entry having
 // replaced the old one.
-function subscriptionForAccountValue(list, providerId, accountValue, excludeId) {
+function subscriptionForAccount(list, providerId, account, excludeId) {
+  if (!account) return null;
   const accounts = limitProvidersForSubscriptions();
   return list.find((entry) => {
     if (entry.id === excludeId || entry.provider !== providerId) return false;
     const bound = subscriptionApi.matchProviderAccount(entry, accounts);
-    return Boolean(bound) && subscriptionAccountValue(bound) === accountValue;
+    return Boolean(bound) && accountIdentityApi.sameAccount(bound, account);
   }) || null;
-}
-
-// Rows are {label, value} pairs so the tooltip stays a table and the caller does
-// not have to know which shape it is looking at.
-// Keyed off what the user recorded, never off the account's balance marker: the
-// marker only seeds the choice, and reading it here would show subscription rows
-// for a ledger the moment a provider started reporting a balance.
-function subscriptionTooltipRows(subscription, provider, includeRollup) {
-  const today = subscriptionApi.todayString();
-  return subscriptionApi.isTopUp(subscription)
-    ? topUpTooltipRows(subscription, provider, today, includeRollup)
-    : subscriptionPlanTooltipRows(subscription, provider, today, includeRollup);
-}
-
-// How long the user has been paying, plus what that adds up to. Months is the
-// unit people quote a subscription in, but it rounds a three-week-old plan down
-// to "0 months" — which reads as a bug beside a non-zero total, and does so for
-// most of the first month of every subscription anyone records. Below a month
-// the honest unit is days. A start date that has not arrived yet has no elapsed
-// time and nothing paid, so it says so instead of reporting zero of both.
-//
-// Once coverage has lapsed the clock stops there: a plan bought for one month
-// and never renewed stays "1 month", it does not keep ageing after it ended.
-function subscriptionElapsedText(subscription, today) {
-  const stop = subscriptionApi.coverageStopDate(subscription);
-  const asOf = stop && stop < today ? stop : today;
-  const daysSinceStart = subscriptionApi.daysBetween(subscription.startDate, asOf);
-  if (daysSinceStart !== null && daysSinceStart < 0) return t('subscription.tooltip.notStarted');
-
-  const months = subscriptionApi.subscribedMonths(subscription, asOf);
-  const elapsed = months >= 1
-    ? t('subscription.tooltip.months', { months })
-    : t('subscription.tooltip.daysCount', { days: Math.max(0, daysSinceStart || 0) });
-  const code = currencyApi.normalizeCurrency(subscription.currency);
-  const symbol = currencyApi.CURRENCY_RATES[code]?.symbol || `${code} `;
-  const paid = subscriptionApi.paidToDateMinor(subscription, today) / 100;
-  return `${elapsed} · ${t('subscription.tooltip.paidTotal', { total: `${symbol}${paid.toFixed(2)}` })}`;
-}
-
-function subscriptionPlanTooltipRows(subscription, provider, today, includeRollup) {
-  const rows = [];
-  rows.push({ label: t('subscription.tooltip.price'), value: subscriptionPriceText(subscription) });
-
-  const endDate = subscriptionApi.coverageEndDate(subscription, today);
-  const daysLeft = subscriptionApi.daysUntilRenewal(subscription, today);
-  const whenLabel = subscription.autoRenew
-    ? t('subscription.tooltip.nextCharge')
-    : t('subscription.tooltip.validUntil');
-  // A lapsed plan has no days left to count down. Saying so beats a negative
-  // number, and beats the silent roll-forward that used to keep a cancelled
-  // plan permanently four days from renewing.
-  const whenSuffix = daysLeft === null
-    ? ''
-    : ` · ${daysLeft < 0 ? t('subscription.tooltip.expired') : subscriptionDaysText(daysLeft)}`;
-  rows.push({ label: whenLabel, value: `${subscriptionDateText(endDate)}${whenSuffix}` });
-  if (!subscription.autoRenew) {
-    rows.push({ label: t('subscription.tooltip.autoRenew'), value: t('subscription.tooltip.autoRenewOff') });
-  }
-
-  rows.push({
-    label: t('subscription.tooltip.subscribed'),
-    value: subscriptionElapsedText(subscription, today)
-  });
-
-  // The rollup covers every account of the provider at once, so it belongs on
-  // whichever row stands for the provider as a whole. When a group header is
-  // rendered that is the header, and repeating the same three lines under each
-  // member is the noise the header exists to avoid.
-  if (!includeRollup) return rows;
-
-  // tokscale records which client produced the tokens, never which signed-in
-  // account did, so three logins share one usage figure. Charging that figure
-  // against a single account would claim it three times over; the rollup is the
-  // only honest denominator.
-  const usageCostUsd = subscriptionUsageCostUsd(subscription.provider);
-  if (usageCostUsd === null) return rows;
-  const rollup = subscriptionApi.providerRollup(subscriptionList(), subscription.provider, currencyApi, today);
-  const multiple = subscriptionApi.valueMultiple(rollup.monthlyUsd, usageCostUsd);
-  if (multiple === null) return rows;
-
-  rows.push({ separator: true });
-  if (rollup.count > 1) {
-    rows.push({
-      label: t('subscription.tooltip.providerTotal', { provider: subscriptionProviderLabel(subscription.provider) }),
-      value: t('subscription.tooltip.providerTotalValue', {
-        count: rollup.count,
-        total: formatCost(rollup.monthlyUsd)
-      })
-    });
-  }
-  rows.push({
-    label: t('subscription.tooltip.monthUsage'),
-    // Prefixed with "≈" and titled below: this is tokscale's equivalent API
-    // pricing, not money owed. Under a subscription nothing is billed per token.
-    value: `≈ ${formatCost(usageCostUsd)}${rollup.count > 1 ? ` · ${t('subscription.tooltip.allAccounts')}` : ''}`,
-    title: t('subscription.tooltip.monthUsageNote')
-  });
-  rows.push({
-    label: t('subscription.tooltip.valueMultiple'),
-    value: `${multiple.toFixed(1)}×`
-  });
-  return rows;
-}
-
-// The group header stands for every account at once, so it summarises rather
-// than picking one of them. Usage and the value multiple are already provider
-// level on the per-account card; here the price is too.
-function subscriptionGroupTooltipRows(providerId, today) {
-  const rollup = subscriptionApi.providerRollup(subscriptionList(), providerId, currencyApi, today);
-  const rows = [{
-    label: t('subscription.tooltip.providerTotal', { provider: subscriptionProviderLabel(providerId) }),
-    value: t('subscription.tooltip.providerTotalValue', {
-      count: rollup.count,
-      total: formatCost(rollup.monthlyUsd)
-    })
-  }];
-
-  const usageCostUsd = subscriptionUsageCostUsd(providerId);
-  if (usageCostUsd === null) return rows;
-  rows.push({ separator: true });
-  rows.push({
-    label: t('subscription.tooltip.monthUsage'),
-    value: `≈ ${formatCost(usageCostUsd)} · ${t('subscription.tooltip.allAccounts')}`,
-    title: t('subscription.tooltip.monthUsageNote')
-  });
-  const multiple = subscriptionApi.valueMultiple(rollup.monthlyUsd, usageCostUsd);
-  if (multiple !== null) {
-    rows.push({ label: t('subscription.tooltip.valueMultiple'), value: `${multiple.toFixed(1)}×` });
-  }
-  return rows;
-}
-
-function topUpMinorText(subscription, amountMinor) {
-  const code = currencyApi.normalizeCurrency(subscription?.currency);
-  const symbol = currencyApi.CURRENCY_RATES[code]?.symbol || `${code} `;
-  return `${symbol}${(amountMinor / 100).toFixed(2)}`;
-}
-
-function topUpTooltipRows(subscription, provider, today, includeRollup) {
-  const rows = [];
-  const last = subscriptionApi.lastTopUp(subscription);
-  if (last) {
-    rows.push({
-      label: t('subscription.tooltip.lastTopUp'),
-      value: `${subscriptionDateText(last.date)} · ${topUpMinorText(subscription, last.amountMinor)}`
-    });
-  }
-  const monthMinor = subscriptionApi.topUpMonthMinor(subscription, today);
-  if (monthMinor > 0) {
-    rows.push({
-      label: t('subscription.tooltip.topUpMonth'),
-      value: topUpMinorText(subscription, monthMinor)
-    });
-  }
-  const entries = subscriptionApi.topUpEntries(subscription);
-  if (entries.length > 1) {
-    rows.push({
-      label: t('subscription.tooltip.topUpTotal'),
-      value: `${topUpMinorText(subscription, subscriptionApi.topUpTotalMinor(subscription))} · ${t('subscription.tooltip.topUpCount', { count: entries.length })}`
-    });
-  }
-
-  const creditsWindow = (provider?.windows || []).find(isCreditsWindow) || null;
-  const balance = creditsAmount(provider, creditsWindow);
-  if (balance === null) return topUpRollupRows(rows, subscription, today, includeRollup);
-  const balanceCurrency = String(creditsWindow?.currency || provider?.balance?.currency || subscription.currency);
-  rows.push({ label: t('subscription.tooltip.balance'), value: formatMoney(balance, balanceCurrency) });
-
-  const projection = subscriptionApi.topUpProjection(subscription, balance, today, {
-    currencyApi,
-    balanceCurrency
-  });
-  if (!projection || projection.dailyBurn <= 0) return topUpRollupRows(rows, subscription, today, includeRollup);
-  rows.push({
-    label: t('subscription.tooltip.burnRate'),
-    value: t('subscription.tooltip.perDay', { amount: formatMoney(projection.dailyBurn, balanceCurrency) })
-  });
-  if (projection.exhaustDate) {
-    rows.push({
-      label: t('subscription.tooltip.exhausts'),
-      value: `${subscriptionDateText(projection.exhaustDate)} · ${subscriptionDaysText(projection.daysRemaining)}`
-    });
-  }
-  return topUpRollupRows(rows, subscription, today, includeRollup);
-}
-
-// A ledger earns the same provider-level comparison a plan gets: what went in
-// this month against what the month's tokens would have cost.
-function topUpRollupRows(rows, subscription, today, includeRollup) {
-  if (!includeRollup) return rows;
-  const usageCostUsd = subscriptionUsageCostUsd(subscription.provider);
-  if (usageCostUsd === null) return rows;
-  const rollup = subscriptionApi.providerRollup(subscriptionList(), subscription.provider, currencyApi, today);
-  const multiple = subscriptionApi.valueMultiple(rollup.monthlyUsd, usageCostUsd);
-  if (multiple === null) return rows;
-  rows.push({ separator: true });
-  rows.push({
-    label: t('subscription.tooltip.monthUsage'),
-    value: `≈ ${formatCost(usageCostUsd)}`,
-    title: t('subscription.tooltip.monthUsageNote')
-  });
-  rows.push({ label: t('subscription.tooltip.valueMultiple'), value: `${multiple.toFixed(1)}×` });
-  return rows;
-}
-
-// No heading. The card is already reached by hovering a plan label, and every
-// row names itself — a "Subscription" line above them only repeats what the
-// gesture said, and the other tooltips in this panel carry no title either.
-function subscriptionCardNode(rows) {
-  if (rows.length === 0) return null;
-  const card = document.createElement('span');
-  card.className = 'limit-detail-tooltip subscription-tooltip';
-  for (const row of rows) {
-    if (row.separator) {
-      const rule = document.createElement('span');
-      rule.className = 'subscription-tooltip-rule';
-      card.append(rule);
-      continue;
-    }
-    // display:contents on the row lets label and value land directly in the
-    // card's two-column grid, so the existing tooltip cell styling applies.
-    const line = document.createElement('span');
-    line.className = 'limit-detail-tooltip-row';
-    const label = document.createElement('span');
-    label.textContent = row.label;
-    const value = document.createElement('span');
-    if (row.warn) value.className = 'subscription-tooltip-warn';
-    value.textContent = row.value;
-    if (row.title) {
-      label.title = row.title;
-      value.title = row.title;
-    }
-    line.append(label, value);
-    card.append(line);
-  }
-  return card;
-}
-
-// A group header is rendered whenever a provider has more than one account, and
-// it is the row that stands for the provider as a whole — which is what decides
-// where the provider-wide rollup goes.
-//
-// Counted from the list renderLimits() groups on, deliberately not from
-// limitProvidersForSubscriptions(): that one narrows to this device so a
-// subscription binds to an account you actually hold, while the question here is
-// only what the panel drew. In sync mode the two lists differ, and answering
-// from the wrong one puts the rollup on every member row of a group.
-function subscriptionProviderHasGroupHeader(providerId) {
-  const id = String(providerId || '').toLowerCase();
-  return (state.stats?.limits?.providers || [])
-    .filter((account) => String(account?.provider || '').toLowerCase() === id).length > 1;
-}
-
-// An account row shows its own subscription and nothing else. A group header
-// stands for all of them, so it summarises — except when only one account is
-// recorded, where the summary would just restate that one card with less in it.
-function subscriptionCardForRow(provider) {
-  if (provider?.accountGroup === true) {
-    const entries = subscriptionsForProviderGroup(provider.provider);
-    if (entries.length === 0) return null;
-    if (entries.length === 1) {
-      return subscriptionCardNode(
-        subscriptionTooltipRows(entries[0].subscription, entries[0].account || provider, true)
-      );
-    }
-    return subscriptionCardNode(
-      subscriptionGroupTooltipRows(provider.provider, subscriptionApi.todayString())
-    );
-  }
-  const subscription = subscriptionForProvider(provider);
-  if (!subscription) return null;
-  return subscriptionCardNode(
-    subscriptionTooltipRows(subscription, provider, !subscriptionProviderHasGroupHeader(provider.provider))
-  );
-}
-
-// The card opens upward, but the limits list scrolls inside a clipping panel, so
-// on the topmost row every pixel of it landed outside that panel and vanished.
-// Measured on open rather than on render: the row's offset within the panel
-// changes as the user scrolls. Kept to a class flip so the card's own placement
-// stays declarative.
-function positionSubscriptionTooltip(wrap, card) {
-  const clip = wrap.closest('.limits-panel');
-  if (!clip) return;
-  const roomAbove = wrap.getBoundingClientRect().top - clip.getBoundingClientRect().top;
-  card.classList.toggle('is-below', roomAbove < card.offsetHeight + 5);
-}
-
-// Wraps the plan label so hovering it reveals the subscription card. Reuses the
-// limit-detail tooltip plumbing, which already holds off the six-second list
-// re-render while the pointer is inside (limitDetailTooltipShouldHoldRender).
-//
-// Deliberately not behind a preference: an account with no record decorates
-// nothing, so having recorded one IS the switch. A separate toggle only made it
-// possible to enter the data and see nothing happen.
-function decoratePlanWithSubscription(plan, provider) {
-  const card = subscriptionCardForRow(provider);
-  if (!card) return plan;
-
-  const wrap = document.createElement('div');
-  wrap.className = 'limit-plan limit-detail-tooltip-wrap subscription-plan-wrap';
-  wrap.classList.toggle('has-opened', state.limitDetailTooltipHasOpened);
-  wrap.tabIndex = 0;
-  const trigger = document.createElement('span');
-  trigger.className = 'subscription-plan-trigger';
-  trigger.textContent = plan.textContent;
-  wrap.append(trigger, card);
-
-  const markOpened = () => {
-    state.limitDetailTooltipHasOpened = true;
-    state.limitDetailTooltipActive = true;
-    wrap.classList.add('has-opened');
-    positionSubscriptionTooltip(wrap, card);
-  };
-  const release = () => {
-    state.limitDetailTooltipActive = false;
-    flushPendingLimitDetailTooltipRender();
-  };
-  wrap.addEventListener('pointerenter', markOpened);
-  wrap.addEventListener('focusin', markOpened);
-  wrap.addEventListener('pointerleave', release);
-  wrap.addEventListener('focusout', release);
-  return wrap;
 }
 
 // The title's job is to say WHICH record this is, so it names the account. The
@@ -3492,7 +3012,7 @@ function decoratePlanWithSubscription(plan, provider) {
 // picked, it survives the provider being signed out or still loading, and it
 // keeps sibling rows distinct in exactly the moment the plan name could not.
 function subscriptionRowTitle(subscription, account) {
-  const providerLabel = subscriptionProviderLabel(subscription.provider);
+  const providerLabel = subscriptionText.providerLabel(subscription.provider);
   return [providerLabel, subscriptionRowAccountLabel(subscription, account) || subscription.planName]
     .filter(Boolean)
     .join(' · ');
@@ -3520,18 +3040,18 @@ function subscriptionRowMeta(subscription, account) {
   if (subscriptionApi.isTopUp(subscription)) {
     const monthMinor = subscriptionApi.topUpMonthMinor(subscription, today);
     parts.push(t('settings.subscriptions.topUpMonthMeta', {
-      total: topUpMinorText(subscription, monthMinor)
+      total: subscriptionText.topUpMinorText(currencyApi, subscription, monthMinor)
     }));
     const last = subscriptionApi.lastTopUp(subscription);
     if (last) {
-      parts.push(t('settings.subscriptions.topUpLastMeta', { date: subscriptionShortDateText(last.date) }));
+      parts.push(t('settings.subscriptions.topUpLastMeta', { date: subscriptionText.shortDateText(currentLocale(), last.date) }));
     }
     return parts.join(' · ');
   }
-  parts.push(subscriptionPriceText(subscription));
+  parts.push(subscriptionText.priceText(t, currencyApi, subscription));
   const endDate = subscriptionApi.coverageEndDate(subscription, today);
   if (endDate) {
-    const date = subscriptionShortDateText(endDate);
+    const date = subscriptionText.shortDateText(currentLocale(), endDate);
     parts.push(t(subscription.autoRenew ? 'settings.subscriptions.renewsOn' : 'settings.subscriptions.endsOn', { date }));
   }
   return parts.join(' · ');
@@ -3736,7 +3256,7 @@ function renderSubscriptionPickers() {
   for (const id of providerIds) {
     const option = document.createElement('option');
     option.value = id;
-    option.textContent = subscriptionProviderLabel(id);
+    option.textContent = subscriptionText.providerLabel(id);
     providerSelect.append(option);
   }
   if (providerIds.includes(previousProvider)) providerSelect.value = previousProvider;
@@ -4134,7 +3654,7 @@ function renderSubscriptionTopUpEntries() {
     row.className = 'subscription-topup-row';
     const date = document.createElement('span');
     date.className = 'subscription-topup-date';
-    date.textContent = subscriptionDateText(entry.date);
+    date.textContent = subscriptionText.dateText(currentLocale(), entry.date);
     const amount = document.createElement('span');
     amount.className = 'subscription-topup-amount';
     amount.textContent = `${symbol}${(entry.amountMinor / 100).toFixed(2)}`;
@@ -4343,7 +3863,7 @@ async function submitSubscription() {
     ? list.find((entry) => entry.id === state.subscriptionEditingId)
     : null;
 
-  if (subscriptionForAccountValue(list, providerId, accountValue, editing?.id)) {
+  if (subscriptionForAccount(list, providerId, account, editing?.id)) {
     setSubscriptionError(t('settings.subscriptions.errorDuplicate'));
     return;
   }
@@ -4422,195 +3942,20 @@ function missingLimitProviderStatus() {
   return state.mode === 'sync' || String(state.settings?.hubUrl || '').trim() ? 'noSyncedData' : 'notConfigured';
 }
 
-function windowForKind(provider, kind) {
-  return (provider?.windows || []).find((window) => window.kind === kind) || null;
-}
 
-function windowsForKind(provider, kind) {
-  return (provider?.windows || []).filter((window) => window.kind === kind);
-}
 
-function codexCanonicalWindow(provider, kind) {
-  return windowsForKind(provider, kind).find((window) => window?.additional !== true) || null;
-}
 
-function codexAdditionalWindowLabel(window, siblingWindows = []) {
-  const name = String(window?.label || '').trim();
-  const period = codexAdditionalWindowPeriodLabel(window);
-  if (!name) return period || 'Additional limit';
-  const normalizedName = name.toLowerCase();
-  const matchingWindowCount = siblingWindows.filter((candidate) => (
-    String(candidate?.label || '').trim().toLowerCase() === normalizedName
-  )).length;
-  const displayName = limitProviderPresentationApi.codexAdditionalQuotaDisplayName(name);
-  return matchingWindowCount > 1 && period ? `${displayName} · ${period}` : displayName;
-}
 
-function codexAdditionalWindowPeriodLabel(window) {
-  const minutes = Number(window?.windowMinutes);
-  if (Number.isFinite(minutes) && minutes > 0 && Number.isInteger(minutes)) {
-    if (minutes === 30 * 24 * 60) return 'Monthly';
-    if (minutes % (7 * 24 * 60) === 0) {
-      const weeks = minutes / (7 * 24 * 60);
-      return weeks === 1 ? 'Weekly' : `${weeks}-week`;
-    }
-    if (minutes % (24 * 60) === 0) {
-      const days = minutes / (24 * 60);
-      return days === 1 ? 'Daily' : `${days}-day`;
-    }
-    if (minutes % 60 === 0) return `${minutes / 60}-hour`;
-    return `${minutes}-minute`;
-  }
-  if (window?.kind === 'daily') return 'Daily';
-  if (window?.kind === 'weekly') return 'Weekly';
-  if (window?.kind === 'billing') return 'Monthly';
-  if (window?.kind === 'session') return 'Session';
-  return '';
-}
 
-function antigravityQuotaGroups(provider) {
-  const entries = (provider?.windows || [])
-    .filter((window) => window.kind === 'session' || window.kind === 'weekly')
-    .map((window) => {
-      const presentation = limitProviderPresentationApi.antigravityQuotaWindow(window);
-      return presentation ? { ...presentation, window } : null;
-    });
-  // Legacy GetUserStatus pools have model names rather than group + period
-  // labels. Keep their existing flat layout instead of guessing a hierarchy.
-  if (entries.length === 0 || entries.some((entry) => entry === null)) return [];
-  const groups = new Map();
-  for (const entry of entries) {
-    if (!groups.has(entry.groupLabel)) groups.set(entry.groupLabel, []);
-    groups.get(entry.groupLabel).push(entry);
-  }
-  return [...groups].map(([label, windows]) => ({ label, windows }));
-}
 
-function formatLimitAmount(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return '';
-  return `$${number.toFixed(2)}`;
-}
 
-function formatCursorSpendValue(window) {
-  const used = optionalFiniteNumber(window?.used);
-  const limit = optionalFiniteNumber(window?.limit);
-  if (used === null) return '';
-  const usedText = formatMoney(used, window?.currency || 'USD');
-  return limit !== null && limit > 0
-    ? `${usedText} / ${formatMoney(limit, window?.currency || 'USD')}`
-    : usedText;
-}
 
-// Zed's billing rows follow the Command Code shape: the headline and bar carry
-// the percentage, and the absolute figure sits under the bar — money for Token
-// Spend, a raw count for metered Edit Predictions. Both follow showLimitUsed,
-// so the number under the bar can never contradict the bar's own direction.
-// Unlimited Edit Predictions have no numbers at all; formatLimitWindowValue
-// already turns their `detail` into the translated headline.
-function formatZedBillingDetail(window) {
-  const used = optionalFiniteNumber(window?.used);
-  const limit = optionalFiniteNumber(window?.limit);
-  if (used === null || limit === null || limit <= 0) return '';
-  const showUsed = Boolean(state.settings?.showLimitUsed);
-  if (window?.limitId === 'zed.edit-predictions') return formatLimitCount(window, showUsed);
-  const currency = window?.currency || 'USD';
-  return `${formatMoney(showUsed ? used : Math.max(0, limit - used), currency)} / ${formatMoney(limit, currency)}`;
-}
 
-function formatBalanceAmount(value, source) {
-  return formatMoney(value, source?.currency);
-}
 
-function formatBalanceSpendAmount(value, balance) {
-  return formatBalanceAmount(value, balance);
-}
 
-// Absolute count for windows that expose units (credits). It follows the same
-// display mode as percent bars: remaining/total in quota mode, used/total in
-// used mode.
-function formatLimitCount(window, showUsed = false) {
-  const used = Number(window?.used);
-  const limit = Number(window?.limit);
-  if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return '';
-  const trim = (n) => Number(Math.max(0, n).toFixed(2)).toString();
-  return `${trim(showUsed ? used : limit - used)}/${trim(limit)}`;
-}
 
-// Command Code credits are USD, so the count under the bar is money rather than
-// the raw units formatLimitCount prints: "$8.78 / $10.00", or nothing at all for
-// a pool with no allowance (the headline already carries its amount).
-function formatCommandcodeCreditsDetail(window) {
-  const remaining = Number(window?.remaining);
-  const limit = Number(window?.limit);
-  if (!Number.isFinite(remaining) || !Number.isFinite(limit) || limit <= 0) return '';
-  const showUsed = Boolean(state.settings?.showLimitUsed);
-  const value = showUsed ? Math.max(0, limit - remaining) : remaining;
-  return `${formatMoney(value, window?.currency)} / ${formatMoney(limit, window?.currency)}`;
-}
 
-// ZCode plan buckets are token pools, so their detail counts tokens: "124M /
-// 305M" (remaining mode) or "181M / 305M" (used mode), from the same values
-// the meter derives from. Nothing when either side is missing — a bucket
-// without absolute units keeps its percentage-only look.
-function formatZcodeTokensDetail(window) {
-  const remaining = optionalFiniteNumber(window?.remaining);
-  const limit = optionalFiniteNumber(window?.limit);
-  if (remaining === null || limit === null || limit <= 0) return '';
-  const showUsed = Boolean(state.settings?.showLimitUsed);
-  const value = showUsed ? Math.max(0, limit - remaining) : remaining;
-  return `${formatCompact(value)} / ${formatCompact(limit)}`;
-}
 
-// One-line Overage value: "12.5 credits · $3.20" (credits used, then est. cost).
-// Either piece may be absent; the row only renders when at least one is present.
-function formatKiroOverageValue(window) {
-  const parts = [];
-  const credits = Number(window?.used);
-  if (Number.isFinite(credits)) parts.push(`${Number(credits.toFixed(2))} credits`);
-  const cost = Number(window?.remaining);
-  if (Number.isFinite(cost)) parts.push(formatLimitAmount(cost));
-  return parts.join(' · ');
-}
-
-function formatCodexResetCreditsValue(resetCredits) {
-  const available = Number(resetCredits?.availableCount);
-  if (!Number.isFinite(available)) return '';
-  const count = Math.max(0, Math.floor(available));
-  if (count <= 0) return '';
-  return `${count} reset${count === 1 ? '' : 's'}`;
-}
-
-function codexResetCreditExpirationDates(resetCredits) {
-  const values = Array.isArray(resetCredits?.expirations) ? resetCredits.expirations : [];
-  const dates = values
-    .map((value) => new Date(value))
-    .filter((date) => !Number.isNaN(date.getTime()))
-    .sort((a, b) => a.getTime() - b.getTime());
-  if (dates.length > 0) return dates;
-  const fallback = resetCredits?.nextExpiresAt ? new Date(resetCredits.nextExpiresAt) : null;
-  return fallback && !Number.isNaN(fallback.getTime()) ? [fallback] : [];
-}
-
-function codexResetCreditExpiryLabel(date) {
-  const diffMs = date.getTime() - Date.now();
-  return diffMs <= 0 ? 'now' : formatDuration(diffMs);
-}
-
-function codexResetCreditExpiryDetailLabel(date) {
-  const diffMs = date.getTime() - Date.now();
-  return diffMs <= 0 ? 'Expires now' : `Expires in ${formatDuration(diffMs)}`;
-}
-
-// Shared by Codex reset credits and Claude prepaid grants.
-function expiryDateLabel(date) {
-  return new Intl.DateTimeFormat(currentLocale(), {
-    month: 'numeric',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
-  }).format(date);
-}
 
 function limitDetailTooltipShouldHoldRender() {
   if (!state.limitDetailTooltipActive || !els.limitsPanel) return false;
@@ -4623,267 +3968,13 @@ function flushPendingLimitDetailTooltipRender() {
   renderLimits();
 }
 
-function codexResetCreditsNode(resetCredits) {
-  const valueText = formatCodexResetCreditsValue(resetCredits);
-  if (!valueText) return null;
-  const expirationDates = codexResetCreditExpirationDates(resetCredits);
-  const item = document.createElement('div');
-  item.className = 'limit-window limit-window-wide limit-window-note limit-reset-credits';
-  const line = document.createElement('div');
-  line.className = 'limit-reset-credits-line';
-  const value = document.createElement('span');
-  value.className = 'limit-reset-credits-value';
-  value.textContent = valueText;
-  line.append(value);
-  if (expirationDates.length > 0) {
-    const expiryGroup = document.createElement('span');
-    expiryGroup.className = 'limit-reset-credits-expiry-group';
-    const timeline = document.createElement('span');
-    timeline.className = 'limit-reset-credits-timeline';
-    const summaryParts = expirationDates.slice(0, 3).map(codexResetCreditExpiryLabel);
-    const hiddenExpirationCount = expirationDates.length - summaryParts.length;
-    if (hiddenExpirationCount > 0) summaryParts.push(`+${hiddenExpirationCount}`);
-    summaryParts.forEach((text, index) => {
-      const time = document.createElement('span');
-      time.className = 'limit-reset-credits-time';
-      if (index > 0) {
-        const separator = document.createElement('span');
-        separator.className = 'limit-reset-credits-separator';
-        separator.textContent = '·';
-        separator.setAttribute('aria-hidden', 'true');
-        time.append(separator);
-      }
-      time.append(document.createTextNode(text));
-      timeline.append(time);
-    });
-    expiryGroup.append(timeline);
-    if (expirationDates.length > 0) {
-      // A date paired with a bare duration doesn't read as `<name>: <value>`, so
-      // the spoken label is supplied rather than derived from the cells. Keep
-      // this detail available for a single reset as well as multiple resets.
-      const infoNode = limitDetailInfoNode(
-        expirationDates.map((date) => [expiryDateLabel(date), codexResetCreditExpiryLabel(date)]),
-        '',
-        expirationDates.map((date, index) => `Reset ${index + 1}: ${codexResetCreditExpiryDetailLabel(date)}`).join(', ')
-      );
-      if (infoNode) expiryGroup.append(infoNode);
-    }
-    line.append(expiryGroup);
-  }
-  item.append(line);
-  item.setAttribute('aria-label', ['Reset credits', valueText, expirationDates.map(codexResetCreditExpiryDetailLabel).join(', ')].filter(Boolean).join(', '));
-  return item;
-}
 
-function providerSpendEntries(balance) {
-  return [
-    ['Today', optionalFiniteNumber(balance?.todaySpend)],
-    ['Week', optionalFiniteNumber(balance?.weekSpend)],
-    ['Month', optionalFiniteNumber(balance?.monthSpend)],
-    ['All time', optionalFiniteNumber(balance?.allTimeSpend)]
-  ].filter(([, value]) => value !== null);
-}
 
-// The meter-less note row every balance/spend provider draws: a label on the
-// left, then an optional summary and an optional ⓘ tooltip on the right. The
-// wording stays with the callers — each provider says something different about
-// the same layout — so the spoken label is `label` plus whatever parts they pass.
-function limitNoteRowNode({ label, summary = '', detailEntries = null, ariaParts = [] }) {
-  const item = document.createElement('div');
-  item.className = 'limit-window limit-window-wide limit-window-note limit-spend';
-  const line = document.createElement('div');
-  line.className = 'limit-window-text limit-spend-line';
-  const labelNode = document.createElement('span');
-  labelNode.textContent = label;
-  const right = document.createElement('span');
-  right.className = 'limit-spend-right';
-  if (summary) {
-    const summaryNode = document.createElement('span');
-    summaryNode.className = 'limit-spend-summary';
-    summaryNode.textContent = summary;
-    right.append(summaryNode);
-  }
-  const infoNode = detailEntries ? limitDetailInfoNode(detailEntries, 'limit-spend-info-wrap') : null;
-  if (infoNode) right.append(infoNode);
-  line.append(labelNode, right);
-  item.append(line);
-  item.setAttribute('aria-label', [label, ...ariaParts].join(', '));
-  return item;
-}
 
-// Entries are rows of cells: `[label, value]`, or `[label, middle, value]` when
-// a row carries an extra field. Rows are grid cells (`display: contents`), so a
-// short row would slide into the next row's columns — pad every row to the
-// widest one and widen the grid to match. `ariaLabel` overrides the spoken label
-// for callers whose cells don't read as `<name>: <value>` on their own.
-function limitDetailInfoNode(entries, extraClass = '', ariaLabel = '') {
-  if (!Array.isArray(entries) || entries.length === 0) return null;
-  const columns = entries.reduce((widest, entry) => Math.max(widest, entry.length), 0);
-  const infoWrap = document.createElement('span');
-  infoWrap.className = ['limit-detail-tooltip-wrap', extraClass].filter(Boolean).join(' ');
-  infoWrap.classList.toggle('has-opened', state.limitDetailTooltipHasOpened);
-  const info = document.createElement('span');
-  info.className = 'limit-detail-tooltip-trigger';
-  info.textContent = 'i';
-  info.tabIndex = 0;
-  info.setAttribute(
-    'aria-label',
-    ariaLabel || entries.map(([entryLabel, ...rest]) => `${entryLabel}: ${rest.filter(Boolean).join(' ')}`).join(', ')
-  );
-  const tooltip = document.createElement('span');
-  tooltip.className = ['limit-detail-tooltip', columns > 2 ? 'limit-detail-tooltip-triple' : '']
-    .filter(Boolean).join(' ');
-  tooltip.setAttribute('role', 'tooltip');
-  entries.forEach((entry) => {
-    const row = document.createElement('span');
-    row.className = 'limit-detail-tooltip-row';
-    for (let column = 0; column < columns; column += 1) {
-      const cell = document.createElement('span');
-      cell.textContent = entry[column] ?? '';
-      row.append(cell);
-    }
-    tooltip.append(row);
-  });
-  const markOpened = () => {
-    state.limitDetailTooltipHasOpened = true;
-    state.limitDetailTooltipActive = true;
-    infoWrap.classList.add('has-opened');
-  };
-  const release = () => {
-    requestAnimationFrame(() => {
-      if (limitDetailTooltipShouldHoldRender()) return;
-      state.limitDetailTooltipActive = false;
-      flushPendingLimitDetailTooltipRender();
-    });
-  };
-  infoWrap.addEventListener('pointerenter', markOpened);
-  infoWrap.addEventListener('focusin', markOpened);
-  infoWrap.addEventListener('pointerleave', release);
-  infoWrap.addEventListener('focusout', release);
-  infoWrap.append(info, tooltip);
-  return infoWrap;
-}
 
-function providerSpendNode(balance) {
-  const entries = providerSpendEntries(balance);
-  if (entries.length === 0) return null;
-  const preferredSummary = entries.filter(([label]) => label === 'Today' || label === 'Month');
-  const summaryEntries = preferredSummary.length > 0 ? preferredSummary : entries.slice(0, 2);
-  const formatted = entries.map(([entryLabel, value]) => [entryLabel, formatBalanceSpendAmount(value, balance)]);
-  return limitNoteRowNode({
-    label: 'Spend',
-    summary: summaryEntries
-      .map(([label, value]) => `${label} ${formatBalanceSpendAmount(value, balance)}`)
-      .join(' · '),
-    // Only worth a tooltip when it would say more than the summary already does.
-    detailEntries: entries.length > summaryEntries.length ? formatted : null,
-    ariaParts: formatted.map(([entryLabel, value]) => `${entryLabel} ${value}`)
-  });
-}
 
-function thirdPartySpendNode(provider, quotaWindow) {
-  const balance = provider?.balance || null;
-  const usage = provider?.usageSummary || null;
-  const currency = balance?.currency || 'USD';
-  const allTimeSpend = optionalFiniteNumber(balance?.allTimeSpend);
-  const monthSpend = optionalFiniteNumber(balance?.monthSpend);
-  const entries = [];
-  const total = optionalFiniteNumber(quotaWindow?.limit);
-  const requestCount = optionalFiniteNumber(balance?.requestCount);
-  const quotaGroup = String(balance?.quotaGroup || '').trim();
-  const expiresAt = balance?.expiresAt ? new Date(balance.expiresAt) : null;
-  if (total !== null) entries.push([t('settings.thirdparty.totalQuota'), formatMoney(total, currency)]);
-  if (requestCount !== null) {
-    entries.push([t('settings.thirdparty.requests'), Math.max(0, Math.trunc(requestCount)).toLocaleString()]);
-  }
-  if (quotaGroup) entries.push([t('settings.thirdparty.group'), quotaGroup]);
-  if (expiresAt && !Number.isNaN(expiresAt.getTime())) {
-    entries.push([t('settings.thirdparty.expires'), expiresAt.toLocaleDateString()]);
-  }
-  const usageCountEntry = (key, value) => {
-    const number = optionalFiniteNumber(value);
-    if (number !== null) entries.push([t(key), Math.max(0, Math.trunc(number)).toLocaleString()]);
-  };
-  if (usage) {
-    usageCountEntry('settings.thirdparty.monthRequests', usage.requests);
-    usageCountEntry('settings.thirdparty.monthTokens', usage.totalTokens);
-    usageCountEntry('settings.thirdparty.inputTokens', usage.inputTokens);
-    usageCountEntry('settings.thirdparty.outputTokens', usage.outputTokens);
-    const cacheTokens = [usage.cacheReadTokens, usage.cacheCreationTokens]
-      .map(optionalFiniteNumber)
-      .filter((value) => value !== null)
-      .reduce((sum, value) => sum + value, 0);
-    if (cacheTokens > 0) usageCountEntry('settings.thirdparty.cacheTokens', cacheTokens);
-    const averageDurationMs = optionalFiniteNumber(usage.averageDurationMs);
-    if (averageDurationMs !== null) {
-      const duration = averageDurationMs < 1000
-        ? `${Math.round(averageDurationMs)} ms`
-        : `${(averageDurationMs / 1000).toFixed(averageDurationMs < 10000 ? 1 : 0)} s`;
-      entries.push([t('settings.thirdparty.avgResponse'), duration]);
-    }
-    const standardCost = optionalFiniteNumber(usage.standardCost);
-    if (standardCost !== null) entries.push([t('settings.thirdparty.standardCost'), formatMoney(standardCost, currency)]);
-  }
-  if (allTimeSpend === null && monthSpend === null && entries.length === 0) return null;
-  // Without a spend figure the row has nothing to summarize, so it retitles
-  // itself and leans entirely on the tooltip.
-  const summary = [
-    ...(monthSpend !== null ? [`Month ${formatMoney(monthSpend, currency)}`] : []),
-    ...(allTimeSpend !== null ? [`All time ${formatMoney(allTimeSpend, currency)}`] : [])
-  ].join(' · ');
-  return limitNoteRowNode({
-    label: summary ? 'Spend' : 'Details',
-    summary,
-    detailEntries: entries,
-    ariaParts: [
-      ...(summary ? [summary] : []),
-      ...entries.map(([entryLabel, value]) => `${entryLabel} ${value}`)
-    ]
-  });
-}
 
-// One tooltip row per prepaid grant: amount, expiry date, time left, the same
-// shape Codex's reset credits use. `aria` spells the expiry out, since the
-// terse columns no longer say what the date and duration mean.
-function claudePrepaidGrantRows(tranches, currency) {
-  return tranches
-    .filter((tranche) => optionalFiniteNumber(tranche?.amount) !== null)
-    .map((tranche) => {
-      const money = formatMoney(tranche.amount, tranche.currency || currency);
-      const expiresAt = tranche.expiresAt ? new Date(tranche.expiresAt) : null;
-      if (!expiresAt || Number.isNaN(expiresAt.getTime())) {
-        return { cells: [money, '', 'No expiry'], aria: `${money} no expiry` };
-      }
-      const diffMs = expiresAt.getTime() - Date.now();
-      const remaining = diffMs <= 0 ? 'Expired' : formatDuration(diffMs);
-      return {
-        cells: [money, expiryDateLabel(expiresAt), remaining],
-        aria: diffMs <= 0 ? `${money} expired` : `${money} expires in ${remaining}`
-      };
-    });
-}
 
-// Claude's prepaid credits. Deliberately meter-less: the headline is a sum of
-// grants whose expiries belong to its parts, so a bar would need a denominator
-// this pool doesn't report. Expiries live in the tooltip instead.
-function claudeBalanceNode(provider) {
-  // Also checked here, not just in the collector: a record collected before the
-  // setting was switched off is still in state, and the row should disappear on
-  // the toggle rather than on the next refresh.
-  if (state.settings?.claudePrepaidBalanceEnabled === false) return null;
-  const balance = provider?.balance || null;
-  const amount = optionalFiniteNumber(balance?.amount);
-  if (amount === null) return null;
-  const currency = balance?.currency || 'USD';
-  const tranches = Array.isArray(balance.tranches) ? balance.tranches : [];
-  const grants = claudePrepaidGrantRows(tranches, currency);
-  return limitNoteRowNode({
-    label: 'Balance',
-    summary: formatMoney(amount, currency),
-    detailEntries: grants.map((grant) => grant.cells),
-    ariaParts: [formatMoney(amount, currency), ...grants.map((grant) => grant.aria)]
-  });
-}
 
 const {
   creditsAmount,
@@ -4894,38 +3985,99 @@ const {
   spendWindow
 } = window.TokenMonitorLimitBalanceDisplay;
 
+const { limitWindowLabel } = window.TokenMonitorLimitWindowLabels;
+const { limitWindowText } = window.TokenMonitorLimitWindowText;
+
+// The Limits rows are built by the shared view, which the edge dock also calls
+// so its card is the same DOM rather than a second rendering of the same data.
+// Everything the builder needs from this page is handed over here; it reads no
+// globals of its own.
+const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsView({
+  document,
+  t,
+  settings: () => state.settings,
+  currentLocale,
+  presentation: limitProviderPresentationApi,
+  // The row's "· imac-m1" needs this device's id, whether sync is on and the
+  // device list to name a reading's source against — the page's own context,
+  // which the shared view cannot read for itself.
+  provenanceContext: () => ({
+    localDeviceId: state.settings?.deviceId || '',
+    syncActive: syncProvenanceActive(),
+    devices: state.stats?.devices || []
+  }),
+  motion: limitResetMotionApi,
+  tooltip: {
+    hasOpened: () => state.limitDetailTooltipHasOpened,
+    markOpened() {
+      state.limitDetailTooltipHasOpened = true;
+      state.limitDetailTooltipActive = true;
+    },
+    release() {
+      requestAnimationFrame(() => {
+        if (limitDetailTooltipShouldHoldRender()) return;
+        state.limitDetailTooltipActive = false;
+        flushPendingLimitDetailTooltipRender();
+      });
+    }
+  },
+  formatCompact,
+  formatMoney,
+  formatCompactMoney,
+  formatPercent,
+  formatDuration,
+  formatLimitBoundary,
+  limitFillPercent,
+  limitModeSuffix,
+  optionalFiniteNumber,
+  colorWithAlpha,
+  applyBarScale,
+  creditsAmount,
+  creditsMeterPercent,
+  isCreditsWindow,
+  spendWindow,
+  limitWindowLabel,
+  limitWindowText,
+  accountIdentity: accountIdentityApi,
+  accountControl: codexAccountControl,
+  codexAccounts: {
+    matchesActive: (provider) => codexActiveAccountMatchesProvider(provider),
+    switchTarget: (provider) => codexSwitchAccountForProvider(provider),
+    canSwitchSystemAccount: () => Boolean(window.tokenMonitor?.codex?.switchSystemAccount)
+  },
+  hasMark: (id) => limitMarksWithIcon.has(id),
+  formatAgo: (ms) => formatAgo(ms),
+  openExternal: (url) => window.tokenMonitor.openExternal?.(url),
+  // The subscription side of the plan cell. The records are the user's own, so
+  // they are read at paint time rather than captured; the tooltip's own rows are
+  // built by the view from these.
+  subscriptionApi,
+  subscriptionText,
+  currencyApi,
+  formatCost,
+  subscriptions: () => state.settings?.subscriptions,
+  subscriptionAccounts: () => limitProvidersForSubscriptions(),
+  monthClientCosts: () => state.stats?.periods?.month?.clientCosts,
+  resetForecast: () => ({ busy: state.codexResetForecastBusy, forecast: state.codexResetForecast })
+});
+
+const {
+  codexResetForecastExpired,
+  limitAccountTitle,
+  limitProviderPlan,
+  renderLimitProviderGroup,
+  renderLimitProviderSolo
+} = limitWindowsView;
+
+
 function optionalFiniteNumber(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
-function openrouterCreditsWindow(provider) {
-  const windows = Array.isArray(provider?.windows) ? provider.windows : [];
-  // Older hubs normalized windows before `metric` existed. Keep the label
-  // fallback only for those mixed-version payloads.
-  return windows.find((window) => window?.metric === 'credits')
-    || windows.find((window) => !window?.metric && window?.label === 'Credits')
-    || null;
-}
 
-function thirdPartyQuotaWindow(provider) {
-  const windows = Array.isArray(provider?.windows) ? provider.windows : [];
-  return windows.find((window) => window?.metric === 'credits') || null;
-}
 
-function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
-  if (hasPercent) return `${formatPercent(fillPercent)} ${limitModeSuffix(showUsed)}`;
-  if (!window) return '--';
-  if (String(window.detail || '').toLowerCase() === 'unlimited') return t('settings.thirdparty.unlimited');
-  const remaining = optionalFiniteNumber(window?.remaining);
-  if (remaining !== null) {
-    return window?.showMeter === false ? formatLimitAmount(remaining) : `${formatLimitAmount(remaining)} left`;
-  }
-  const limit = optionalFiniteNumber(window?.limit);
-  if (limit !== null) return `${formatLimitAmount(limit)} cap`;
-  return window.detail || '';
-}
 
 function formatHomeLimitWindowValue(window, showUsed) {
   if (window?.planStatus === 'expired') return t('limits.mimo.planExpired');
@@ -4942,114 +4094,9 @@ function formatHomeLimitWindowValue(window, showUsed) {
   return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
 }
 
-function creditsBalanceValue(provider, credits) {
-  const amount = creditsAmount(provider, credits);
-  if (amount !== null) {
-    return formatCompactMoney(amount, credits?.currency || provider?.balance?.currency);
-  }
-  return String(credits?.detail || '').toLowerCase() === 'unlimited'
-    ? t('settings.thirdparty.unlimited')
-    : '';
-}
 
-function mimoTokenPlanWindowFromBalance(balance) {
-  if (!balance) return null;
-  if (balance.planStatus === 'expired') return null;
-  const used = optionalFiniteNumber(balance.planUsed);
-  const limit = optionalFiniteNumber(balance.planLimit);
-  const percent = optionalFiniteNumber(balance.planPercent);
-  const hasUsed = used !== null;
-  const hasLimit = limit !== null;
-  const hasPercent = percent !== null;
-  if (!hasUsed && !hasLimit && !hasPercent) return null;
-  const resolvedPercent = hasPercent
-    ? Math.max(0, Math.min(100, percent))
-    : (hasUsed && hasLimit && limit > 0 ? Math.max(0, Math.min(100, (used / limit) * 100)) : null);
-  return {
-    kind: 'billing',
-    label: 'Token Plan',
-    used: hasUsed ? used : null,
-    limit: hasLimit ? limit : null,
-    remaining: hasUsed && hasLimit ? Math.max(0, limit - used) : null,
-    usedPercent: resolvedPercent,
-    remainingPercent: resolvedPercent == null ? null : Math.max(0, Math.min(100, 100 - resolvedPercent)),
-    showMeter: true
-  };
-}
 
-function limitMeterNode(color, percent, tone = 1) {
-  const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
-  const meter = document.createElement('div');
-  meter.className = 'limit-meter';
-  meter.style.background = colorWithAlpha(color, 0.16);
-  const fill = document.createElement('div');
-  fill.className = 'limit-meter-fill';
-  applyBarScale(fill, safePercent / 100);
-  fill.style.background = color;
-  fill.style.opacity = tone;
-  meter.append(fill);
-  return meter;
-}
 
-function limitWindowNode(label, window, color, tone = 1, valueOverride = null, detailText = '') {
-  const remaining = Number(window?.remainingPercent);
-  const used = Number(window?.usedPercent);
-  const motionRemaining = limitResetMotionApi.remainingPercent(window);
-  const showMeter = window?.showMeter !== false;
-  const hasPercent = showMeter && (Number.isFinite(remaining) || Number.isFinite(used));
-  // valueOverride windows carry a fixed (money/amount) label — keep their meter
-  // on "remaining" so bar and label stay consistent; only percent-labelled
-  // windows honour the used-mode flip.
-  const showUsed = Boolean(state.settings?.showLimitUsed) && valueOverride == null;
-  const fillPercent = limitResetMotionApi.displayPercent(
-    limitFillPercent(remaining, used, showUsed)
-  );
-  const item = document.createElement('div');
-  item.className = 'limit-window';
-  item.dataset.limitMotionKey = limitResetMotionApi.windowKey(label, window);
-  item.dataset.limitRemainingPercent = hasPercent && motionRemaining !== null
-    ? String(Math.max(0, Math.min(100, motionRemaining)))
-    : '';
-  item.dataset.limitDisplayPercent = hasPercent && fillPercent !== null ? String(fillPercent) : '';
-  item.dataset.limitResetAt = window?.resetsAt || '';
-  const text = document.createElement('div');
-  text.className = 'limit-window-text';
-  const name = document.createElement('span');
-  name.textContent = window?.label || label;
-  const value = document.createElement('span');
-  value.textContent = valueOverride != null ? valueOverride : formatLimitWindowValue(window, fillPercent, hasPercent, showUsed);
-  if (valueOverride == null && hasPercent && fillPercent !== null) {
-    value.dataset.limitMotionValue = String(fillPercent);
-    value.dataset.limitMotionSuffix = limitModeSuffix(showUsed);
-  }
-  text.append(name, value);
-  const meter = limitMeterNode(color, fillPercent, tone);
-  const reset = document.createElement('div');
-  reset.className = 'limit-reset';
-  const resetText = window?.resetsAt
-    ? formatLimitBoundary(window)
-    : window?.resetDescription || '';
-  if (detailText) {
-    // Keep the reset text left-aligned (consistent with every other provider)
-    // and add the absolute count on the right, under the top-line percentage.
-    reset.classList.add('limit-reset-split');
-    const resetSpan = document.createElement('span');
-    resetSpan.textContent = resetText;
-    const detailSpan = document.createElement('span');
-    detailSpan.className = 'limit-detail';
-    detailSpan.textContent = detailText;
-    reset.append(resetSpan, detailSpan);
-  } else {
-    reset.textContent = resetText;
-  }
-  if (showMeter) {
-    item.append(text, meter, reset);
-  } else {
-    item.classList.add('limit-window-note');
-    item.append(text, reset);
-  }
-  return item;
-}
 
 function providersByLimitProviderId(providers) {
   const byId = new Map();
@@ -5060,19 +4107,6 @@ function providersByLimitProviderId(providers) {
     byId.get(id).push(provider);
   }
   return byId;
-}
-
-function renderLimitProviderMark(id, color) {
-  const mark = document.createElement('span');
-  if (limitMarksWithIcon.has(id)) {
-    // .limit-icon sizes the mark, .row-icon-<id> supplies the mask: one table,
-    // shared with the breakdown rows, instead of a second copy per provider.
-    mark.className = `limit-icon row-icon-${id}`;
-  } else {
-    mark.className = 'dot';
-    mark.style.background = color;
-  }
-  return mark;
 }
 
 function codexSwitchAccountForProvider(provider) {
@@ -5178,830 +4212,6 @@ function applyCodexActiveAccountFromStats() {
   state.codexActiveAccount = activeAccount;
 }
 
-function renderLimitProviderHead(id, label, provider, color, options = {}) {
-  const head = document.createElement('div');
-  head.className = 'limit-head';
-  const titleBlock = document.createElement('div');
-  titleBlock.className = 'limit-title';
-  const name = document.createElement('div');
-  name.className = 'limit-name';
-  if (options.showIcon !== false) name.append(renderLimitProviderMark(options.markId || id, color));
-  const title = document.createElement('span');
-  title.className = 'limit-name-title';
-  title.textContent = options.title || label;
-  const provenance = limitProviderProvenance(provider);
-  // The ✓ marks the account THIS device's Codex is signed into
-  // (state.codexActiveAccount, derived locally by codexActiveAccountFromStats).
-  // It only disambiguates rows in the multi-account group, so it's gated on
-  // showActiveBadge. Never re-derive "live" from the row being rendered — in
-  // sync mode that row can be a remote device's record for a different account,
-  // which would move the ✓ onto the wrong one.
-  const activeCodexAccount = options.showActiveBadge && codexActiveAccountMatchesProvider(provider);
-  const switchAccount = options.allowSystemSwitch && !activeCodexAccount ? codexSwitchAccountForProvider(provider) : null;
-  name.append(codexAccountControl.render({
-    titleNode: title,
-    active: Boolean(activeCodexAccount),
-    switchAccount: window.tokenMonitor?.codex?.switchSystemAccount ? switchAccount : null,
-    accountLabel: switchAccount?.email || ''
-  }));
-  titleBlock.append(name);
-  // The multi-account group header has no quota of its own, and its accounts can
-  // update at different times (different devices too), so it omits the meta line
-  // entirely — each account row below shows its own "Updated" time.
-  if (!options.hideMeta) {
-    const meta = document.createElement('div');
-    meta.className = 'limit-meta';
-    const metaParts = [];
-    // A single Codex account stays clean like every other provider (just the
-    // "Updated" line). The email only matters when several accounts share the
-    // group, where it's each subrow's title (options.accountTitle) — not here.
-    if (provider.status === 'ok' || provider.stale) metaParts.push(limitProviderMeta(provider, provenance));
-    const metaText = metaParts.filter(Boolean).join(' · ');
-    if (metaText) meta.append(document.createTextNode(metaText));
-    titleBlock.append(meta);
-  }
-  const plan = document.createElement('div');
-  plan.className = 'limit-plan';
-  plan.textContent = options.planText ?? limitProviderPlan(provider);
-  head.append(titleBlock, decoratePlanWithSubscription(plan, provider));
-  return head;
-}
-
-function renderProviderWindows(provider, color) {
-  const windows = document.createElement('div');
-  windows.className = 'limit-windows';
-  if (provider.provider === 'codex') {
-    const session = codexCanonicalWindow(provider, 'session');
-    const weekly = codexCanonicalWindow(provider, 'weekly');
-    const monthly = codexCanonicalWindow(provider, 'billing');
-    const additionalWindows = state.settings?.showCodexAdditionalLimits === false
-      ? []
-      : (provider.windows || []).filter((window) => window?.additional === true);
-    if (session) {
-      const sessionNode = limitWindowNode(session.label || 'Session', session, color, 0.95);
-      if (!weekly && !monthly) sessionNode.classList.add('limit-window-wide');
-      windows.append(sessionNode);
-    }
-    if (weekly) {
-      const weeklyNode = limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68);
-      if (!session && !monthly) weeklyNode.classList.add('limit-window-wide');
-      windows.append(weeklyNode);
-    }
-    if (monthly) {
-      const monthlyNode = limitWindowNode(monthly.label || 'Monthly', monthly, color, 0.68);
-      monthlyNode.classList.add('limit-window-wide');
-      windows.append(monthlyNode);
-    }
-    for (const additional of additionalWindows) {
-      const additionalNode = limitWindowNode(
-        codexAdditionalWindowLabel(additional, additionalWindows),
-        { ...additional, label: '' },
-        color,
-        0.78
-      );
-      additionalNode.classList.add('limit-window-wide');
-      windows.append(additionalNode);
-    }
-    const resetNode = codexResetCreditsNode(provider.resetCredits);
-    if (resetNode) windows.append(resetNode);
-  } else if (provider.provider === 'cursor') {
-    windows.classList.add('limit-windows-cursor');
-    for (const quotaWindow of provider.windows || []) {
-      const valueOverride = quotaWindow.metric === 'spend'
-        ? formatCursorSpendValue(quotaWindow)
-        : null;
-      const node = limitWindowNode(quotaWindow.label || 'Quota', quotaWindow, color, 0.68, valueOverride);
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'antigravity') {
-    windows.classList.add('limit-windows-antigravity');
-    const quotaGroups = antigravityQuotaGroups(provider);
-    if (quotaGroups.length > 0) {
-      windows.classList.add('limit-windows-antigravity-grouped');
-      for (const group of quotaGroups) {
-        const groupNode = document.createElement('div');
-        groupNode.className = 'limit-window-group';
-        groupNode.setAttribute('role', 'group');
-        groupNode.setAttribute('aria-label', group.label);
-        const title = document.createElement('div');
-        title.className = 'limit-window-group-title';
-        title.textContent = group.label;
-        const groupWindows = document.createElement('div');
-        groupWindows.className = 'limit-window-group-items';
-        for (const entry of group.windows) {
-          const opacity = entry.window.kind === 'session' ? 0.95 : 0.78;
-          groupWindows.append(limitWindowNode(
-            entry.windowLabel,
-            { ...entry.window, label: entry.windowLabel },
-            color,
-            opacity
-          ));
-        }
-        groupNode.append(title, groupWindows);
-        windows.append(groupNode);
-      }
-    } else {
-      const weeklyWindows = windowsForKind(provider, 'weekly');
-      const visibleWindows = weeklyWindows.length > 0 ? weeklyWindows : [null];
-      for (const quotaWindow of visibleWindows) {
-        const node = limitWindowNode(quotaWindow?.label || 'Weekly', quotaWindow, color, 0.78);
-        node.classList.add('limit-window-wide');
-        windows.append(node);
-      }
-    }
-  } else if (provider.provider === 'opencode') {
-    // Go reports session/weekly/monthly windows ($12/$30/$60); Zen reports a prepaid balance (and,
-    // when the account is active, rolling/weekly). The monthly window normalizes to kind 'billing'
-    // (see normalizeWindowKind). Show only the windows that exist — no empty `--` placeholders — and
-    // surface the Zen balance as a full-width, no-meter note when present.
-    const session = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    const monthly = windowForKind(provider, 'billing');
-    if (session) windows.append(limitWindowNode('Session', session, color, 0.95));
-    if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
-    // Monthly spans the full row (like Balance) so it never leaves a half-empty grid cell.
-    if (monthly) {
-      const node = limitWindowNode('Monthly', monthly, color, 0.5);
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    // Balance is a Zen-only concept. Show it only when a real balance number came
-    // back (incl. $0.00). It can't key off `source === 'web'` anymore — Go usage is
-    // now fetched over the web too, so a pure-Go account (no Zen, balanceUsd null)
-    // must not get a phantom `Balance —` line.
-    const hasBalance = typeof provider.balanceUsd === 'number' && Number.isFinite(provider.balanceUsd);
-    if (hasBalance) {
-      const node = limitWindowNode('Balance', { showMeter: false }, color, 0.68, formatLimitAmount(provider.balanceUsd));
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'openrouter') {
-    windows.classList.add('limit-windows-openrouter');
-    const balance = provider.balance || null;
-    const currency = balance?.currency || 'USD';
-    const balanceAmount = optionalFiniteNumber(balance?.amount);
-    const creditsWindow = openrouterCreditsWindow(provider);
-    if (balanceAmount !== null) {
-      const balanceWindow = creditsWindow || (balanceAmount === 0
-        ? { usedPercent: 100, remainingPercent: 0, showMeter: true }
-        : { showMeter: false });
-      const balanceNode = limitWindowNode(
-        'Balance',
-        { ...balanceWindow, label: 'Balance' },
-        color,
-        0.95,
-        formatMoney(balanceAmount, currency)
-      );
-      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(balanceNode);
-    }
-    for (const quotaWindow of (provider.windows || []).filter((window) => window !== creditsWindow)) {
-      const hasMeter = quotaWindow?.showMeter !== false;
-      const remaining = optionalFiniteNumber(quotaWindow?.remaining);
-      const limit = optionalFiniteNumber(quotaWindow?.limit);
-      const absoluteDetail = hasMeter && remaining !== null && limit !== null
-        ? `${formatMoney(remaining, 'USD')} left · ${formatMoney(limit, 'USD')} total`
-        : '';
-      const valueOverride = hasMeter ? null : (quotaWindow?.detail || '—');
-      const node = limitWindowNode(
-        quotaWindow?.label || 'Usage',
-        quotaWindow,
-        color,
-        hasMeter ? 0.85 : 0.6,
-        valueOverride,
-        absoluteDetail
-      );
-      node.classList.add('limit-window-wide');
-      if (!hasMeter) node.classList.add('limit-window-no-reset');
-      windows.append(node);
-    }
-    const spendNode = providerSpendNode(balance);
-    if (spendNode) windows.append(spendNode);
-  } else if (provider.provider === 'thirdparty') {
-    windows.classList.add('limit-windows-thirdparty');
-    const balance = provider.balance || null;
-    const currency = balance?.currency || 'USD';
-    const balanceAmount = optionalFiniteNumber(balance?.amount);
-    const quotaWindow = thirdPartyQuotaWindow(provider);
-    const balanceLabel = quotaWindow?.label || 'Balance';
-    if (balanceAmount !== null) {
-      const balanceValue = formatMoney(balanceAmount, currency);
-      // Balance presets without a fixed quota denominator (Sub2API reports the
-      // remaining USD balance plus an observed monthSpend) get the same
-      // display-layer meter DeepSeek uses: balance / (balance + month spend).
-      // Windows that already carry provider percentages pass through unchanged.
-      const meterPercent = creditsMeterPercent(provider, quotaWindow);
-      const balanceNode = limitWindowNode(
-        balanceLabel,
-        {
-          ...(quotaWindow || { showMeter: false }),
-          label: balanceLabel,
-          ...(meterPercent !== null ? { remainingPercent: meterPercent, showMeter: true } : {})
-        },
-        color,
-        0.95,
-        balanceValue
-      );
-      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(balanceNode);
-    } else if (quotaWindow?.showMeter === false && quotaWindow.detail) {
-      const value = String(quotaWindow.detail).toLowerCase() === 'unlimited'
-        ? t('settings.thirdparty.unlimited')
-        : quotaWindow.detail;
-      const balanceNode = limitWindowNode(
-        balanceLabel,
-        { ...quotaWindow, label: balanceLabel },
-        color,
-        0.95,
-        value
-      );
-      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(balanceNode);
-    }
-    const spendNode = thirdPartySpendNode(provider, quotaWindow);
-    if (spendNode) windows.append(spendNode);
-  } else if (provider.provider === 'deepseek') {
-    // DeepSeek does not expose a fixed quota denominator. This intentionally
-    // visualizes the balance relative to this month's inferred starting funds:
-    // current / (current + observed month spend).
-    windows.classList.add('limit-windows-deepseek');
-    const balance = provider.balance || null;
-    if (balance) {
-      const currency = balance.currency;
-      const balanceNode = limitWindowNode(
-        'Balance',
-        { remainingPercent: creditsMeterPercent(provider, null) },
-        color,
-        0.95,
-        formatMoney(balance.amount, currency)
-      );
-      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(balanceNode);
-
-      const spendNode = providerSpendNode(balance);
-      if (spendNode) windows.append(spendNode);
-    }
-  } else if (provider.provider === 'mimo') {
-    windows.classList.add('limit-windows-mimo');
-    const balance = provider.balance || null;
-    const tokenPlan = windowForKind(provider, 'billing') || mimoTokenPlanWindowFromBalance(balance);
-    if (tokenPlan) {
-      const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    } else if (balance?.planStatus === 'expired') {
-      const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
-      node.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(node);
-    }
-    const amount = optionalFiniteNumber(balance?.amount);
-    const giftBalance = optionalFiniteNumber(balance?.giftBalance);
-    const cashBalance = optionalFiniteNumber(balance?.cashBalance);
-    if (amount !== null || giftBalance !== null || cashBalance !== null) {
-      const detailParts = [];
-      if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, balance.currency)}`);
-      if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, balance.currency)}`);
-      const balanceText = formatMoney(amount, balance.currency) || '—';
-      const balanceNode = limitWindowNode(
-        'Balance',
-        { showMeter: false },
-        color,
-        0.68,
-        balanceText,
-        detailParts.join(' · ')
-      );
-      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(balanceNode);
-    }
-  } else if (provider.provider === 'grok') {
-    // Grok exposes a single Monthly billing window (no session/weekly). Render it
-    // full-width so it doesn't share a row with an empty placeholder. This mirrors
-    // how Cursor's billing cycle and OpenCode's Monthly are handled.
-    windows.classList.add('limit-windows-grok');
-    const monthly = windowForKind(provider, 'billing');
-    if (monthly) {
-      const node = limitWindowNode(monthly.label || 'Monthly', monthly, color, 0.68);
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'copilot') {
-    windows.classList.add('limit-windows-copilot');
-    const billingWindows = windowsForKind(provider, 'billing');
-    for (const billing of billingWindows) {
-      const node = limitWindowNode(billing?.label || 'Monthly', billing, color, 0.68);
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'zed') {
-    windows.classList.add('limit-windows-zed');
-    for (const billing of windowsForKind(provider, 'billing')) {
-      const unlimitedEditPredictions = billing?.limitId === 'zed.edit-predictions'
-        && String(billing?.detail || '').trim().toLowerCase() === 'unlimited';
-      const node = limitWindowNode(
-        billing?.label || 'Token Spend',
-        billing,
-        color,
-        0.95,
-        null,
-        formatZedBillingDetail(billing)
-      );
-      node.classList.add('limit-window-wide');
-      if (unlimitedEditPredictions) node.classList.add('limit-window-no-reset');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'zai' || provider.provider === 'zaiteam') {
-    // Billing-kind windows are one of three things: the subscription MCP
-    // monthly bucket (no metric, no limitId), ZCode Start/Weekend plan
-    // buckets (limitId set, per-model labels), or the cash balance
-    // (metric 'credits'). Each renders in its own slot below.
-    const session = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    const billingWindows = windowsForKind(provider, 'billing');
-    const dailyWindows = windowsForKind(provider, 'daily');
-    const planBuckets = billingWindows.filter((window) => window?.limitId && !window?.metric);
-    const monthlyWindows = billingWindows.filter((window) => !window?.metric && !window?.limitId);
-    const balanceWindow = (provider.windows || []).find((window) => window?.metric === 'credits');
-    const nodes = [
-      session && limitWindowNode(session.label || '5-hour', session, color, 0.95),
-      ...dailyWindows.map((window, index) => limitWindowNode(
-        window.label || (dailyWindows.length > 1 ? `Daily ${index + 1}` : 'Daily'),
-        window,
-        color,
-        0.78,
-        null,
-        window.detail || formatZcodeTokensDetail(window)
-      )),
-      weekly && limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68),
-      ...planBuckets.map((window) => limitWindowNode(
-        window.label || 'Start Plan',
-        window,
-        color,
-        0.68,
-        null,
-        window.detail || formatZcodeTokensDetail(window)
-      ))
-    ].filter(Boolean);
-    if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
-    windows.append(...nodes);
-    // Monthly subscription buckets stay full width, independent of the
-    // paired quota count. Preserve all legacy billing windows without ids.
-    for (const monthly of monthlyWindows) {
-      const node = limitWindowNode(monthly.label || 'MCP', monthly, color, 0.68, null, monthly.detail || '');
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    // Balance sits at the bottom on its own full-width row: coding-plan quota
-    // is consumed before the cash pool, so the money line reads as the last
-    // resort.
-    if (balanceWindow) {
-      const balanceNode = limitWindowNode(
-        'Balance',
-        { remainingPercent: creditsMeterPercent(provider, balanceWindow) },
-        color,
-        0.95,
-        formatMoney(balanceWindow.remaining, balanceWindow.currency)
-      );
-      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(balanceNode);
-      const spendNode = provider.balance && providerSpendNode(provider.balance);
-      if (spendNode) windows.append(spendNode);
-    }
-  } else if (provider.provider === 'volcengine') {
-    const session = windowForKind(provider, 'session');
-    const daily = windowForKind(provider, 'daily');
-    const weekly = windowForKind(provider, 'weekly');
-    const monthly = windowForKind(provider, 'billing');
-    const nodes = [
-      session && limitWindowNode(session.label || '5-hour', session, color, 0.95),
-      daily && limitWindowNode('Daily', daily, color, 0.78),
-      weekly && limitWindowNode('Weekly', weekly, color, 0.68),
-      monthly && limitWindowNode('Monthly', monthly, color, 0.68)
-    ].filter(Boolean);
-    if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
-    windows.append(...nodes);
-  } else if (provider.provider === 'kiro') {
-    // Kiro exposes monthly credits (plus an optional bonus pool), both billing
-    // windows. Render them full-width like Copilot's quota windows.
-    windows.classList.add('limit-windows-kiro');
-    const billingWindows = windowsForKind(provider, 'billing');
-    for (const billing of billingWindows) {
-      if (billing?.showMeter === false) {
-        // Overage: a single compact line like Cursor's "Credits $0.00" (no bar,
-        // no reset) with the credits used and estimated cost joined on the right.
-        const node = limitWindowNode(billing.label || 'Overage', billing, color, 0.6, formatKiroOverageValue(billing));
-        node.classList.add('limit-window-wide', 'limit-window-no-reset');
-        windows.append(node);
-      } else {
-        const node = limitWindowNode(
-          billing?.label || 'Credits',
-          billing,
-          color,
-          0.68,
-          null,
-          formatLimitCount(billing, Boolean(state.settings?.showLimitUsed))
-        );
-        node.classList.add('limit-window-wide');
-        windows.append(node);
-      }
-    }
-  } else if (provider.provider === 'qoder') {
-    windows.classList.add('limit-windows-qoder');
-    const credits = windowForKind(provider, 'billing');
-    if (credits) {
-      const node = limitWindowNode(
-        credits?.label || 'Credits',
-        credits,
-        color,
-        0.68,
-        null,
-        formatLimitCount(credits, Boolean(state.settings?.showLimitUsed))
-      );
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'workbuddy' || provider.provider === 'trae') {
-    const credits = windowForKind(provider, 'billing');
-    const balance = provider.balance || null;
-    const value = creditsBalanceValue(provider, credits);
-    if (credits && value) {
-      const displayWindow = {
-        ...credits,
-        label: credits.label || 'Credits'
-      };
-      const node = limitWindowNode(
-        displayWindow.label,
-        displayWindow,
-        color,
-        0.95,
-        value
-      );
-      node.classList.add('limit-window-wide');
-      if (!displayWindow.resetsAt && !displayWindow.resetDescription) {
-        node.classList.add('limit-window-no-reset');
-      }
-      windows.append(node);
-      const spendNode = providerSpendNode(balance);
-      if (spendNode) windows.append(spendNode);
-    }
-  } else if (provider.provider === 'commandcode') {
-    // 5-hour and weekly are rate-limit windows (percent); the monthly grant and
-    // any rollover top-up are money, so they get the amount on the right of the
-    // reset line and span the row like Kimi's Monthly.
-    const fiveHour = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    if (fiveHour) {
-      const node = limitWindowNode('5-hour', fiveHour, color, 0.95);
-      if (!weekly) node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    if (weekly) {
-      const node = limitWindowNode('Weekly', weekly, color, 0.68);
-      if (!fiveHour) node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    for (const credits of windowsForKind(provider, 'billing')) {
-      const node = limitWindowNode(
-        credits.label || 'Monthly',
-        credits,
-        color,
-        0.5,
-        null,
-        formatCommandcodeCreditsDetail(credits)
-      );
-      node.classList.add('limit-window-wide');
-      // A grant with no known plan allowance has no meter, so there is no bar
-      // for a reset line to sit under either.
-      if (credits.showMeter === false) node.classList.add('limit-window-no-reset');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'kimi') {
-    const fiveHour = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    const monthly = windowForKind(provider, 'billing');
-    if (fiveHour) {
-      const node = limitWindowNode(fiveHour.label || '5-hour', fiveHour, color, 0.95);
-      if (!weekly) node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    if (weekly) {
-      const node = limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68);
-      if (!fiveHour) node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    if (monthly) {
-      const node = limitWindowNode(
-        monthly.label || 'Monthly',
-        monthly,
-        color,
-        0.5,
-        null,
-        monthly.detail || ''
-      );
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'alibaba') {
-    // Team returns one credit pool; Personal/Solo returns rolling 5-hour and
-    // weekly windows. Both are the same provider, so the shape decides the
-    // layout rather than the configured variant — a device syncing another
-    // machine's row has no access to that setting.
-    const billing = windowForKind(provider, 'billing');
-    const session = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    if (billing) {
-      const node = limitWindowNode(billing.label || 'Monthly', billing, color, 0.68);
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    if (session) {
-      const node = limitWindowNode(session.label || '5-hour', session, color, 0.95);
-      if (!weekly) node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    if (weekly) windows.append(limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68));
-  } else if (provider.provider === 'ollama') {
-    const session = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    if (session) {
-      const node = limitWindowNode('Session', session, color, 0.95);
-      if (!weekly) node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
-  } else if (provider.provider === 'claude') {
-    // Claude usually shows session + one all-models weekly, but can carry a second
-    // model-scoped weekly (the temporary "Fable only" promo cap). Render every
-    // weekly the response actually has, and nothing when a bucket is absent — no
-    // empty placeholder — so the scoped bar appears only while the promo is live.
-    const session = windowForKind(provider, 'session');
-    if (session) windows.append(limitWindowNode(session.label || 'Session', session, color, 0.95));
-    for (const weekly of windowsForKind(provider, 'weekly')) {
-      const node = limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68);
-      // The all-models weekly pairs with Session in the two-column grid; a
-      // model-scoped weekly (the "Fable only" promo cap) has no partner, so span
-      // the full row instead of leaving a half-empty cell.
-      if (weekly.label) node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    // Usage credits: "$2.35 / $20.00" with a meter when a monthly spend limit is
-    // set, "$2.35 spent" without one. Absent entirely when credits are off.
-    const usageCredits = spendWindow(provider);
-    if (usageCredits) {
-      const value = usageCredits.limit === null
-        ? `${formatMoney(usageCredits.used, usageCredits.currency)} spent`
-        : `${formatMoney(usageCredits.used, usageCredits.currency)} / ${formatMoney(usageCredits.limit, usageCredits.currency)}`;
-      const node = limitWindowNode('Usage credits', usageCredits, color, 0.5, value);
-      node.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(node);
-    }
-    const balanceNode = claudeBalanceNode(provider);
-    if (balanceNode) windows.append(balanceNode);
-  } else {
-    // Default: render only the windows the provider actually has. Providers
-    // that only expose a single window shouldn't leave a half-empty bar next to
-    // the real one. (Grok is handled above; this branch covers minimax's
-    // session + weekly pair and any future session/weekly provider.)
-    const session = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    if (session) windows.append(limitWindowNode(session.label || 'Session', session, color, 0.95));
-    if (weekly) windows.append(limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68));
-  }
-  return windows;
-}
-
-function codexResetForecastDate(value, options = {}) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return '';
-  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
-  const locale = options.locale || currentLocale();
-  const timeZone = options.timeZone;
-  const dayNumber = (input) => {
-    const parts = new Intl.DateTimeFormat('en-US-u-ca-gregory-nu-latn', {
-      year: 'numeric',
-      month: 'numeric',
-      day: 'numeric',
-      ...(timeZone ? { timeZone } : {})
-    }).formatToParts(input);
-    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-    return Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day));
-  };
-  const dayDelta = Math.round((dayNumber(date) - dayNumber(new Date(nowMs))) / 86_400_000);
-  if (dayDelta >= -1 && dayDelta <= 1) {
-    const time = new Intl.DateTimeFormat(locale, {
-      hour: 'numeric',
-      minute: '2-digit',
-      ...(locale.startsWith('zh') ? { hourCycle: 'h23' } : {}),
-      ...(timeZone ? { timeZone } : {})
-    }).format(date);
-    const relativeDay = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(dayDelta, 'day');
-    return `${relativeDay} ${time}`;
-  }
-  return expiryDateLabel(date);
-}
-
-function codexResetForecastTimeUntil(value, options = {}) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return '';
-  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
-  const remainingMs = date.getTime() - nowMs;
-  if (remainingMs <= 0) return '';
-  const locale = options.locale || currentLocale();
-  const hours = remainingMs / 3_600_000;
-  const unit = hours >= 48 ? 'day' : (hours >= 1 ? 'hour' : 'minute');
-  const divisor = unit === 'day' ? 86_400_000 : (unit === 'hour' ? 3_600_000 : 60_000);
-  const amount = Math.max(1, Math.round(remainingMs / divisor));
-  const duration = new Intl.NumberFormat(locale, {
-    style: 'unit',
-    unit,
-    unitDisplay: 'long'
-  }).format(amount);
-  return t('limits.codexResetForecast.approximately', { duration });
-}
-
-function codexResetForecastAge(value) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return '';
-  return formatAgo(Math.max(0, Date.now() - date.getTime()));
-}
-
-function codexResetForecastSourceAuthor(value) {
-  const author = String(value || '').trim().replace(/^@+/, '');
-  return author ? `@${author}` : '';
-}
-
-function codexResetForecastPercent(value, locale = currentLocale()) {
-  return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value);
-}
-
-function positionCodexResetForecastTooltip(wrap) {
-  const tooltip = wrap?.querySelector('.limit-detail-tooltip');
-  const clip = wrap?.closest('.limits-panel');
-  if (!tooltip || !clip) return;
-  const roomAbove = wrap.getBoundingClientRect().top - clip.getBoundingClientRect().top;
-  tooltip.classList.toggle('is-below', roomAbove < tooltip.offsetHeight + 5);
-}
-
-function codexResetForecastType(value) {
-  const type = String(value || '').trim().toLowerCase();
-  if (type !== 'banked' && type !== 'regular') return '';
-  return t(`limits.codexResetForecast.resetType.${type}`);
-}
-
-function codexResetForecastTooltip(forecast) {
-  const entries = [];
-  const disclaimer = t('limits.codexResetForecast.disclaimer');
-  const resetType = codexResetForecastType(
-    forecast?.status === 'scheduled' ? forecast?.scheduledResetType : forecast?.latestResetType
-  );
-  if (resetType) {
-    entries.push([t('limits.codexResetForecast.resetType'), resetType]);
-  }
-  const scheduledFor = codexResetForecastDate(forecast?.scheduledFor);
-  const scheduledIn = codexResetForecastTimeUntil(forecast?.scheduledFor);
-  if (scheduledFor) {
-    entries.push([
-      t('limits.codexResetForecast.scheduledFor'),
-      [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
-    ]);
-  }
-  const latestReset = codexResetForecastDate(forecast?.latestResetAt);
-  if (latestReset) {
-    const age = codexResetForecastAge(forecast.latestResetAt);
-    entries.push([t('limits.codexResetForecast.lastReset'), [latestReset, age].filter(Boolean).join(' · ')]);
-  }
-  const sourceObservedAt = forecast?.status === 'scheduled'
-    ? forecast?.scheduledAnnouncedAt
-    : forecast?.observedAt;
-  const source = [
-    codexResetForecastSourceAuthor(forecast?.sourceAuthor),
-    codexResetForecastAge(sourceObservedAt)
-  ].filter(Boolean).join(' · ');
-  if (source) {
-    const sourceLabel = forecast?.status === 'scheduled'
-      ? 'limits.codexResetForecast.sourceAnnouncement'
-      : 'limits.codexResetForecast.sourceSignal';
-    entries.push([t(sourceLabel), source]);
-  }
-  const expiresAt = codexResetForecastDate(forecast?.expiresAt);
-  const expiresIn = codexResetForecastTimeUntil(forecast?.expiresAt);
-  if (expiresAt) {
-    entries.push([
-      t('limits.codexResetForecast.expiresLabel'),
-      [expiresAt, expiresIn].filter(Boolean).join(' · ')
-    ]);
-  }
-  if (forecast?.error && forecast.errorKind !== 'invalid-response') {
-    entries.push([
-      t('limits.codexResetForecast.connectionFailed'),
-      t('limits.codexResetForecast.connectionHelp')
-    ]);
-  }
-  if (forecast?.error) {
-    const lastAttempt = codexResetForecastAge(forecast.checkedAt);
-    if (lastAttempt) entries.push([t('limits.codexResetForecast.lastAttempt'), lastAttempt]);
-  }
-  if (entries.length === 0) return null;
-  const info = limitDetailInfoNode(
-    entries,
-    'codex-reset-forecast-info-wrap',
-    [...entries.map(([label, value]) => `${label}: ${value}`), disclaimer].join(', ')
-  );
-  const tooltip = info.querySelector('.limit-detail-tooltip');
-  if (tooltip) {
-    const footer = document.createElement('span');
-    footer.className = 'codex-reset-forecast-disclaimer';
-    footer.textContent = disclaimer;
-    tooltip.append(footer);
-  }
-  const position = () => positionCodexResetForecastTooltip(info);
-  info.addEventListener('pointerenter', position);
-  info.addEventListener('focusin', position);
-  return info;
-}
-
-function renderCodexResetForecast() {
-  if (state.settings?.codexResetForecastEnabled !== true) return null;
-  const forecast = state.codexResetForecast;
-  const expired = codexResetForecastExpired(forecast);
-  const item = document.createElement('div');
-  item.className = 'codex-reset-forecast';
-  const openButton = document.createElement('button');
-  openButton.type = 'button';
-  openButton.className = 'codex-reset-forecast-open';
-  openButton.addEventListener('click', () => window.tokenMonitor.openExternal?.('https://codex-resets.com/'));
-
-  const head = document.createElement('span');
-  head.className = 'codex-reset-forecast-head';
-  const title = document.createElement('span');
-  title.className = 'codex-reset-forecast-title';
-  const label = document.createElement('span');
-  label.className = 'codex-reset-forecast-label';
-  label.textContent = t('limits.codexResetForecast.title');
-  title.append(label);
-  const forecastInfo = codexResetForecastTooltip(forecast);
-  if (forecastInfo) title.append(forecastInfo);
-  const value = document.createElement('span');
-  value.className = 'codex-reset-forecast-value';
-
-  const detail = document.createElement('span');
-  detail.className = 'codex-reset-forecast-detail';
-  if (state.codexResetForecastBusy && !forecast) {
-    item.classList.add('is-loading');
-    value.textContent = t('limits.codexResetForecast.loading');
-  } else if (forecast?.status === 'scheduled') {
-    value.textContent = t('limits.codexResetForecast.scheduled');
-    const scheduledFor = codexResetForecastDate(forecast.scheduledFor);
-    const scheduledIn = codexResetForecastTimeUntil(forecast.scheduledFor);
-    detail.textContent = [
-      scheduledFor
-        ? t('limits.codexResetForecast.expected', {
-            date: [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
-          })
-        : t('limits.codexResetForecast.schedulePending'),
-      forecast.stale ? t('limits.codexResetForecast.stale') : ''
-    ].filter(Boolean).join(' · ');
-  } else if (forecast?.status === 'active' && !expired) {
-    const chance = forecast.chancePercent;
-    value.textContent = Number.isFinite(chance)
-      ? t('limits.codexResetForecast.chance', { percent: codexResetForecastPercent(chance) })
-      : t('limits.codexResetForecast.signal');
-    const predictedAt = codexResetForecastDate(forecast.predictedAt);
-    const expiresAt = codexResetForecastDate(forecast.expiresAt);
-    detail.textContent = [
-      predictedAt
-        ? t('limits.codexResetForecast.expected', { date: predictedAt })
-        : (expiresAt || ''),
-      forecast.stale ? t('limits.codexResetForecast.stale') : ''
-    ].filter(Boolean).join(' · ');
-  } else if (forecast?.status === 'inactive' || expired) {
-    value.textContent = t('limits.codexResetForecast.noSignal');
-    detail.textContent = forecast.stale ? t('limits.codexResetForecast.stale') : '';
-  } else {
-    item.classList.add('is-unavailable');
-    value.textContent = forecast?.error && forecast.errorKind !== 'invalid-response'
-      ? t('limits.codexResetForecast.connectionFailed')
-      : t('limits.codexResetForecast.unavailable');
-  }
-
-  head.append(title, value);
-  item.append(openButton, head, detail);
-  openButton.title = t('limits.codexResetForecast.openSource');
-  openButton.setAttribute('aria-label', [label.textContent, value.textContent, detail.textContent, t('limits.codexResetForecast.openSource')].filter(Boolean).join(', '));
-  return item;
-}
-
-function appendCodexResetForecast(parent) {
-  const node = renderCodexResetForecast();
-  if (node) parent.append(node);
-}
-
-function codexResetForecastExpired(forecast, nowMs = Date.now()) {
-  if (forecast?.status !== 'active') return false;
-  const expiresAtMs = Date.parse(forecast.expiresAt || '');
-  return Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs;
-}
-
 function clearCodexResetForecastRetryTimer() {
   if (state.codexResetForecastRetryTimer) clearTimeout(state.codexResetForecastRetryTimer);
   state.codexResetForecastRetryTimer = null;
@@ -6062,327 +4272,6 @@ function maybeFetchCodexResetForecast() {
       }
     }, remainingMs);
   }
-}
-
-function renderLimitProviderRow(id, label, provider, color, options = {}) {
-  const row = document.createElement('div');
-  const classes = ['limit-row'];
-  if (options.accountRow) classes.push('limit-account-row');
-  if (provider.stale) classes.push('stale');
-  row.className = classes.join(' ');
-  row.dataset.limitMotionKey = limitResetMotionApi.providerKey(provider);
-  row.append(
-    renderLimitProviderHead(id, label, provider, color, options),
-    renderProviderWindows(provider, color)
-  );
-  if (id === 'codex' && !options.accountRow) appendCodexResetForecast(row);
-  return row;
-}
-
-// Every limits surface (the limits panel and the Home cards) resolves account
-// titles here. One table keeps a provider from masking its email on one surface
-// while leaking it on the other, and from rendering two different titles for the
-// same account. Providers identified by email need no entry — the default below
-// already masks them.
-const LIMIT_ACCOUNT_TITLES = {
-  codex: codexAccountTitle,
-  opencode: opencodeAccountTitle,
-  openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
-  thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
-  volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers)
-};
-
-function limitAccountTitle(id, provider, index, providerEntries = [provider]) {
-  const resolve = LIMIT_ACCOUNT_TITLES[String(id || '').trim().toLowerCase()];
-  return resolve
-    ? resolve(provider, index, providerEntries)
-    : limitAccountDefaultTitle(provider, index, providerEntries);
-}
-
-// maskLimitAccountEmails is display-only: it hides the address on the limits
-// surfaces without changing what is collected, synced, or stored.
-function limitAccountEmailsMasked() {
-  return state.settings?.maskLimitAccountEmails === true;
-}
-
-function limitAccountDefaultTitle(provider, index, providerEntries = [provider]) {
-  return accountIdentityApi.accountTitleLabel(provider, providerEntries, {
-    maskEmail: limitAccountEmailsMasked(),
-    index
-  }) || `Account ${index + 1}`;
-}
-
-function codexAccountTitle(provider, index, providers = [provider]) {
-  const label = accountIdentityApi.codexAccountDisplayLabel(provider, providers, {
-    maskEmail: limitAccountEmailsMasked(),
-    index,
-    // Limits presents raw account data such as email and Plus/Pro labels, so
-    // keep the provider's canonical English workspace name on this surface.
-    personalWorkspaceLabel: 'Personal'
-  });
-  if (label) return label;
-  // Never fall back to the plan label here — "Plus" as a title reads like an
-  // account name. The plan still shows on the right via limitProviderPlan().
-  return `Account ${index + 1}`;
-}
-
-function renderCodexAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: 'codex', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('codex', label, groupProvider, color, {
-    planText: t('settings.codex.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('codex', limitAccountTitle('codex', provider, index, providers), provider, color, {
-      accountRow: true,
-      accountTitle: true,
-      allowSystemSwitch: true,
-      showActiveBadge: true,
-      showIcon: false
-    }));
-  });
-  row.append(head, accountList);
-  appendCodexResetForecast(row);
-  return row;
-}
-
-function renderClaudeAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: 'claude', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('claude', label, groupProvider, color, {
-    planText: t('settings.claude.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('claude', limitAccountTitle('claude', provider, index, providers), provider, color, {
-      accountRow: true,
-      accountTitle: true,
-      showIcon: false
-    }));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function mimoSettingsAccountTitle(account, index) {
-  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
-}
-
-function renderMimoAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: 'mimo', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('mimo', label, groupProvider, color, {
-    planText: t('settings.mimo.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('mimo', limitAccountTitle('mimo', provider, index, providers), provider, color, {
-      accountRow: true,
-      accountTitle: true,
-      showIcon: false
-    }));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function renderCursorAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: 'cursor', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('cursor', label, groupProvider, color, {
-    planText: t('settings.cursor.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('cursor', limitAccountTitle('cursor', provider, index, providers), provider, color, {
-      accountRow: true,
-      accountTitle: true,
-      showIcon: false
-    }));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function renderAntigravityAccountGroup(label, providers, color) {
-  return renderNamedApiAccountGroup('antigravity', label, providers, color, {
-    groupPlanText: t('settings.antigravity.nAccounts', { count: providers.length })
-  });
-}
-
-function opencodeAccountTitle(provider, index) {
-  const name = String(provider?.accountName || '').trim();
-  // The collector's canonical name is shown as-is. This column holds account
-  // names, which are user strings and almost never translated, so a localized
-  // phrase reads as a stray UI label among them — and the plan and source
-  // columns beside it are English for the same reason.
-  if (name) return name;
-  // Older synced clients put the user-defined profile name in accountLabel.
-  // Keep those rows identifiable while new clients carry profile and plan in
-  // separate fields. Go/Zen are plan labels, never account identities.
-  const legacyName = String(provider?.accountLabel || '').trim();
-  return legacyName && legacyName !== 'Go' && legacyName !== 'Zen'
-    ? legacyName
-    : `Account ${index + 1}`;
-}
-
-function renderOpenCodeAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = 'limit-row limit-row-group';
-  const groupProvider = { provider: 'opencode', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('opencode', label, groupProvider, color, {
-    planText: t('settings.opencode.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    const legacyProfileLabel = !provider?.accountName
-      && provider?.accountLabel
-      && provider.accountLabel !== 'Go'
-      && provider.accountLabel !== 'Zen';
-    accountList.append(renderLimitProviderRow('opencode', limitAccountTitle('opencode', provider, index, providers), provider, color, {
-      accountRow: true,
-      showIcon: false,
-      ...(legacyProfileLabel ? { planText: '' } : {})
-    }));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function namedApiAccountTitle(provider, index, providerId) {
-  const accountName = String(provider?.accountName || provider?.accountLabel || '').trim();
-  if (accountName.toLowerCase() === 'environment') return t(`settings.${providerId}.environment`);
-  return accountName || `Account ${index + 1}`;
-}
-
-// Both Volcengine plans sit on one account, so the row title carries the plan
-// name from accountLabel. accountTitleLabel reads accountName/accountEmail,
-// neither of which these rows have, so without this they would all render as
-// "Account N".
-function volcenginePlanAccountTitle(provider, index, providers) {
-  return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
-}
-
-// '' while healthy, because the title already shows the plan and there is no
-// second fact to put here; undefined once it is not, so the head falls back to
-// the status label the same way thirdPartyPlanText does.
-function volcenginePlanRowText(provider) {
-  return provider?.status === 'ok' ? '' : undefined;
-}
-
-function thirdPartyPlanText(provider) {
-  if (provider?.status !== 'ok') return undefined;
-  const adapterId = String(provider?.adapterId || '').toLowerCase();
-  if (adapterId === 'newapi-account') return 'New API · Account';
-  if (adapterId === 'newapi-token') return 'New API · API key';
-  if (adapterId === 'sub2api') return 'Sub2API · Account';
-  if (adapterId === 'custom') return 'Custom';
-  const planLabel = String(provider?.planLabel || '').toLowerCase();
-  if (planLabel === 'account') return 'Account';
-  if (planLabel === 'api key') return 'API key';
-  if (planLabel === 'custom') return 'Custom';
-  return undefined;
-}
-
-const THIRD_PARTY_ADAPTER_VISUALS = Object.freeze({
-  'newapi-account': { color: '#C738FB', markId: 'newapi' },
-  'newapi-token': { color: '#C738FB', markId: 'newapi' },
-  sub2api: { color: '#39D9E7', markId: 'sub2api' },
-  custom: { color: '#8A96A8', markId: 'thirdparty' }
-});
-
-function thirdPartyAdapterVisual(provider, fallbackColor) {
-  return THIRD_PARTY_ADAPTER_VISUALS[String(provider?.adapterId || '').toLowerCase()]
-    || { color: fallbackColor, markId: 'thirdparty' };
-}
-
-function thirdPartyAdapterFamily(provider) {
-  const adapterId = String(provider?.adapterId || '').toLowerCase();
-  if (adapterId === 'newapi-account' || adapterId === 'newapi-token') return 'newapi';
-  if (adapterId === 'sub2api') return 'sub2api';
-  if (adapterId === 'custom') return 'thirdparty';
-  return '';
-}
-
-function thirdPartySharedAdapterFamily(providers) {
-  const families = new Set((providers || []).map(thirdPartyAdapterFamily));
-  return families.size === 1 ? [...families][0] : null;
-}
-
-function renderNamedApiAccountGroup(providerId, label, providers, color, options = {}) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: providerId, status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead(providerId, label, groupProvider, color, {
-    planText: options.groupPlanText,
-    hideMeta: true,
-    ...(options.groupMarkId ? { markId: options.groupMarkId } : {})
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    const providerColor = options.colorForProvider?.(provider) || color;
-    const markId = options.markIdForProvider?.(provider);
-    accountList.append(renderLimitProviderRow(
-      providerId,
-      limitAccountTitle(providerId, provider, index, providers),
-      provider,
-      providerColor,
-      {
-        accountRow: true,
-        showIcon: Boolean(markId),
-        ...(markId ? { markId } : {}),
-        ...(options.planTextForProvider
-          ? { planText: options.planTextForProvider(provider) }
-          : {})
-      }
-    ));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function renderOpenRouterAccountGroup(label, providers, color) {
-  return renderNamedApiAccountGroup('openrouter', label, providers, color, {
-    groupPlanText: t('settings.openrouter.nAccounts', { count: providers.length })
-  });
-}
-
-function renderThirdPartyAccountGroup(label, providers, color) {
-  const sharedFamily = thirdPartySharedAdapterFamily(providers);
-  return renderNamedApiAccountGroup('thirdparty', label, providers, color, {
-    groupPlanText: t('settings.thirdparty.nAccounts', { count: providers.length }),
-    groupMarkId: sharedFamily || 'thirdparty',
-    planTextForProvider: thirdPartyPlanText,
-    colorForProvider: (provider) => thirdPartyAdapterVisual(provider, color).color,
-    ...(sharedFamily === null
-      ? { markIdForProvider: (provider) => thirdPartyAdapterVisual(provider, color).markId }
-      : {})
-  });
-}
-
-// The Coding Plan and the Agent Plan are two subscriptions on one Volcengine
-// account, so they are rows of one card rather than two provider cards.
-function renderVolcengineAccountGroup(label, providers, color) {
-  return renderNamedApiAccountGroup('volcengine', label, providers, color, {
-    groupPlanText: t('settings.volcengine.nPlans', { count: providers.length }),
-    planTextForProvider: volcenginePlanRowText
-  });
 }
 
 function captureLimitResetMotion() {
@@ -6530,53 +4419,16 @@ function renderLimits() {
   for (const { id, label } of rows) {
     const visibleProviders = visibleProviderEntries.get(id) || [{ provider: id, status: 'disabled', windows: [] }];
     const color = limitProviderColor(id);
-    if (id === 'claude' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderClaudeAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'codex' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderCodexAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'opencode' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderOpenCodeAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'openrouter' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderOpenRouterAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'thirdparty' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderThirdPartyAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'mimo' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderMimoAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'cursor' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderCursorAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'antigravity' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderAntigravityAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'volcengine' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderVolcengineAccountGroup(label, visibleProviders, color));
+    // Several accounts of one provider are a group; one is a row. Both builders
+    // take the provider id and nothing else — which mark, colour and plan text
+    // each account takes is the view's own per-provider policy, so the dock card
+    // renders this loop's output without being told any of it.
+    if (Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderLimitProviderGroup(id, label, visibleProviders, color));
       continue;
     }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
-    const thirdPartyVisual = id === 'thirdparty' ? thirdPartyAdapterVisual(provider, color) : null;
-    const rowOptions = id === 'codex'
-      ? { accountTitle: true, allowSystemSwitch: true }
-      : id === 'thirdparty'
-        ? {
-            planText: thirdPartyPlanText(provider),
-            markId: thirdPartyVisual.markId
-          }
-        : undefined;
-    nodes.push(renderLimitProviderRow(id, label, provider, thirdPartyVisual?.color || color, rowOptions));
+    nodes.push(renderLimitProviderSolo(id, label, provider, color));
   }
   els.limitsPanel.replaceChildren(...nodes);
   animateLimitResets(resetMotionSnapshot);
@@ -7697,10 +5549,14 @@ function homeLimitRows() {
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
     accountColor: (provider, id, fallbackColor) => (
-      id === 'thirdparty' ? thirdPartyAdapterVisual(provider, fallbackColor).color : fallbackColor
+      id === 'thirdparty'
+        ? limitProviderPresentationApi.thirdPartyAdapterVisual(provider, fallbackColor).color
+        : fallbackColor
     ),
     accountIcon: (provider, id) => (
-      id === 'thirdparty' ? thirdPartyAdapterVisual(provider, clientColors.thirdparty).markId : id
+      id === 'thirdparty'
+        ? limitProviderPresentationApi.thirdPartyAdapterVisual(provider, clientColors.thirdparty).markId
+        : id
     ),
     accountName: (provider, index, providerEntries) => {
       const id = String(provider?.provider || '').trim().toLowerCase();
@@ -14608,7 +12464,7 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
   const items = resolved.items.map((item) => (
     item.type === 'text'
       && item.metric === 'account'
-      && limitAccountEmailsMasked()
+      && state.settings?.maskLimitAccountEmails === true
       ? { ...item, text: accountIdentityApi.maskEmailAddress(item.text) }
       : item
   ));
@@ -15586,6 +13442,10 @@ function renderAntigravityStatus() {
     listEl.append(row);
   });
   renderSettingsSummaries();
+}
+
+function mimoSettingsAccountTitle(account, index) {
+  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
 }
 
 function renderMimoStatus() {

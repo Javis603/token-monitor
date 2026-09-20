@@ -6,6 +6,10 @@
 
 const bridge = window.tokenMonitorEdgeDock;
 const presentation = window.TokenMonitorEdgeDockPresentation;
+// The running reading is derived from the projected rows at paint time rather than
+// frozen into the cell, so the rail and the card answer at the same clock (see
+// runningSessionSummary).
+const runningSessionSummary = presentation.runningSessionSummary;
 const i18n = window.TokenMonitorI18n;
 const themePresetsApi = window.TokenMonitorThemePresets;
 const fontSettingsApi = window.TokenMonitorFontSettings;
@@ -16,6 +20,13 @@ const balanceDisplay = window.TokenMonitorLimitBalanceDisplay;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const limitPresentationApi = window.TokenMonitorLimitProviderPresentation;
+const limitWindowLabels = window.TokenMonitorLimitWindowLabels;
+const limitWindowTextApi = window.TokenMonitorLimitWindowText;
+const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
+const limitWindowsViewApi = window.TokenMonitorLimitWindowsView;
+const subscriptionDisplayApi = window.TokenMonitorSubscriptionDisplay;
+const subscriptionTextApi = window.TokenMonitorSubscriptionText;
+const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMode;
 const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 const { clientColors } = window.TokenMonitorUsageCharts;
 const { LIMIT_PROVIDER_LABELS } = window.TokenMonitorLimitProviders;
@@ -167,10 +178,18 @@ function readableColor(color) {
   return contrast < 1.8 ? 'var(--text)' : color;
 }
 
+// The provider's own colour, as the Limits view resolves it.
+function limitProviderColor(id) {
+  if (id === 'factory') return clientColors.droid;
+  if (id === 'mimo') return clientColors.xiaomi;
+  return clientColors[id] || clientColors.default;
+}
+
+// The same colour corrected for contrast against the current glass tint. Only
+// the rail uses it: a near-black brand mark vanishes as a ring, while a meter
+// on the card is a filled bar the page paints in the raw brand colour.
 function providerColor(id) {
-  if (id === 'factory') return readableColor(clientColors.droid);
-  if (id === 'mimo') return readableColor(clientColors.xiaomi);
-  return readableColor(clientColors[id] || clientColors.default);
+  return readableColor(limitProviderColor(id));
 }
 
 function providerLabel(id) {
@@ -232,67 +251,138 @@ function percentText(remainingPercent) {
   return shown === null ? '--' : `${Math.round(shown)}%`;
 }
 
-// Limit figures use the Limits view's fixed English wording ("43% left",
-// "Reset 4h 26m", "Updated just now"): provider window labels such as
-// "Monthly" or "Gemini 5-hour" arrive in English, and translating only the
-// words around them produced a mixed card that read worse than either.
-function windowValueText(window) {
-  if (window.credits && window.credits.amount !== null && window.credits.amount !== undefined) {
-    return balanceDisplay.formatCompactMoney(window.credits.amount, window.credits.currency);
-  }
-  const showUsed = appearance().showLimitUsed === true;
-  const shown = presentation.displayPercent(window.remainingPercent, showUsed);
-  if (shown === null) return '--';
-  return `${Math.round(shown)}% ${showUsed ? 'used' : 'left'}`;
+// The Codex account the card can switch to, resolved from the cell projection
+// rather than from settings: the dock renderer has none. The shared row asks
+// about the collector record, so the projection is looked up by it.
+const accountSummaries = new WeakMap();
+let cardForecast = null;
+
+const codexAccounts = {
+  matchesActive: (provider) => accountSummaries.get(provider)?.active === true,
+  switchTarget: (provider) => {
+    const id = String(accountSummaries.get(provider)?.switchAccountId || '');
+    return id ? { id } : null;
+  },
+  canSwitchSystemAccount: () => typeof bridge.switchCodexAccount === 'function'
+};
+
+// The card's quota rows are the Limits page's quota rows: the same builder,
+// the same DOM, the same CSS (this page loads ../styles.css for exactly that).
+// It used to be a second implementation that had been told less — no spend
+// line under a balance, no denominator under a money pool, no info tooltips at
+// all — and every provider that needed special treatment had to be taught twice.
+//
+// Everything the builder reads from a page is handed to it here. The dock has
+// no renderer state of its own beyond the last pushed payload, so the settings
+// accessor is the appearance projection and the formatting is this page's.
+function optionalFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
-const WINDOW_KIND_LABELS = { session: 'Session', daily: 'Daily', weekly: 'Weekly', billing: 'Monthly' };
-
-function windowLabel(window) {
-  return window.label || WINDOW_KIND_LABELS[window.kind] || 'Limit';
+function colorWithAlpha(color, alpha) {
+  const rgb = parseColor(color);
+  return rgb ? `rgba(${rgb.join(', ')}, ${alpha})` : `rgba(183, 234, 212, ${alpha})`;
 }
 
-function boundaryText(window) {
-  const at = Date.parse(window.resetsAt || '');
-  if (!Number.isFinite(at)) return window.resetDescription || '';
-  const remaining = at - Date.now();
-  const mixed = window.boundaryKind === 'mixed';
-  const prefix = window.boundaryKind === 'expiry' ? 'Expires' : mixed ? 'Changes in' : 'Reset';
-  if (remaining <= 0) return mixed ? 'Changes now' : `${prefix} now`;
-  return `${prefix} ${presentation.formatResetDuration(remaining)}`;
+// The widget animates a meter from zero when a view is entered; the dock card
+// is built in a hidden staging layer and measured before it is shown, so it
+// only sets the value.
+function applyBarScale(fill, scale) {
+  fill.style.setProperty('--bar-scale', String(Math.max(0, Math.min(1, Number(scale) || 0))));
 }
 
-function updatedText(value) {
-  const at = Date.parse(value || '');
-  if (!Number.isFinite(at)) return '';
-  const diffMs = Math.max(0, Date.now() - at);
-  if (diffMs < 45_000) return 'Updated just now';
-  const minutes = Math.round(diffMs / 60000);
-  if (minutes < 60) return `Updated ${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `Updated ${hours}h ago`;
-  return `Updated ${Math.round(hours / 24)}d ago`;
+// A tooltip the pointer is inside has to survive the countdown repaint, the
+// same hold the Limits page keeps. Without it the 30-second tick replaces the
+// card out from under an open tooltip and it vanishes mid-read.
+const limitTooltip = {
+  opened: false,
+  active: false,
+  pending: false
+};
+
+function limitTooltipShouldHoldRender() {
+  if (!limitTooltip.active) return false;
+  return Boolean(contentLayer.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
 }
 
-function accountTitle(account) {
-  const name = account.accountName || '';
-  if (name) return name;
-  const email = account.accountEmail || '';
-  if (!email) return '';
-  return appearance().maskLimitAccountEmails === true ? accountIdentityApi.maskEmailAddress(email) : email;
-}
-
-// The Limits view and dock both call the same renderer control. This wrapper
-// only maps the dock card's projected account shape into that shared contract.
-function accountControl(account, titleNode, options = {}) {
-  const accountId = String(account.switchAccountId || '');
-  return codexAccountControl.render({
-    titleNode,
-    active: options.showActive !== false && account.active === true,
-    switchAccount: accountId ? { id: accountId } : null,
-    accountLabel: accountTitle(account)
-  });
-}
+const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
+  document,
+  t,
+  settings: appearance,
+  currentLocale: () => state.locale,
+  presentation: limitPresentationApi,
+  // Which device a row's reading came from — "· imac-m1" beside the provider's
+  // own source label. The card has no settings and no device list, so both
+  // facts ride the cell it is rendering, the same way its account set does.
+  provenanceContext: () => state.payload?.cell?.provenanceContext || {},
+  motion: limitResetMotionApi,
+  tooltip: {
+    hasOpened: () => limitTooltip.opened,
+    markOpened() {
+      limitTooltip.opened = true;
+      limitTooltip.active = true;
+    },
+    release() {
+      requestAnimationFrame(() => {
+        if (limitTooltipShouldHoldRender()) return;
+        limitTooltip.active = false;
+        if (!limitTooltip.pending) return;
+        limitTooltip.pending = false;
+        if (state.payload?.cell) renderBubble(state.payload);
+      });
+    }
+  },
+  formatCompact: formatTokens,
+  formatMoney: balanceDisplay.formatMoney,
+  formatCompactMoney: balanceDisplay.formatCompactMoney,
+  formatPercent: (value) => (Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'),
+  formatDuration: presentation.formatResetDuration,
+  formatLimitBoundary: limitPresentationApi.limitBoundaryText,
+  limitFillPercent,
+  limitModeSuffix,
+  optionalFiniteNumber,
+  colorWithAlpha,
+  applyBarScale,
+  creditsAmount: balanceDisplay.creditsAmount,
+  creditsMeterPercent: balanceDisplay.creditsMeterPercent,
+  isCreditsWindow: balanceDisplay.isCreditsWindow,
+  spendWindow: balanceDisplay.spendWindow,
+  limitWindowLabel: limitWindowLabels.limitWindowLabel,
+  limitWindowText: limitWindowTextApi.limitWindowText,
+  accountIdentity: accountIdentityApi,
+  accountControl: codexAccountControl,
+  codexAccounts,
+  // Probed off the stylesheet the dock borrows, so the card can never disagree
+  // with the page about which providers have a mark.
+  hasMark: hasMask,
+  formatAgo: relativeAgo,
+  // The renderer names the intent; the main process owns the URL.
+  openExternal: () => bridge.openResetForecastSource?.(),
+  // The subscription records the widget holds, pushed with the appearance. The
+  // card's plan cell decorates itself from them exactly as the page's does —
+  // same rows, same wording — so a recorded subscription shows the same hover
+  // card here as it does there. What is not pushed is nothing: an empty list
+  // renders a plain plan label on both surfaces.
+  subscriptionApi: subscriptionDisplayApi,
+  subscriptionText: subscriptionTextApi,
+  currencyApi,
+  formatCost,
+  subscriptions: () => appearance().subscriptions,
+  // The row being decorated is one of this card's own accounts, and a record
+  // binds through the same list the page matches against — every account the
+  // provider has, never the rows this card happens to draw, or
+  // matchProviderAccount()'s sole-account fallback would bind a record to
+  // whichever row asked. The composer can hide an account from the card without
+  // it leaving the provider, so the cell carries that list beside its rows.
+  subscriptionAccounts: () => state.payload?.cell?.subscriptionAccounts || [],
+  // What this month's tokens would have cost, which the subscription card
+  // compares the plan's price against. It rides the cell because it changes with
+  // every stats push, while the appearance is only re-pushed on a settings edit.
+  monthClientCosts: () => state.payload?.cell?.monthClientCosts,
+  resetForecast: () => ({ busy: false, forecast: cardForecast })
+});
 
 // ---- Silhouette -------------------------------------------------------------
 
@@ -383,6 +473,7 @@ function formatRate(rate) {
 
 function statLabel(metric) {
   if (metric === 'liveRate') return t('edgeDock.stat.liveRate');
+  if (metric === presentation.SESSIONS_METRIC) return t('edgeDock.sessions');
   return t(`edgeDock.period.${metric}`);
 }
 
@@ -403,7 +494,55 @@ function formatRailCost(value) {
 
 function statShortLabel(cell) {
   if (cell.metric === 'liveRate') return t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit');
+  if (cell.metric === presentation.SESSIONS_METRIC) return t('edgeDock.statGlyph.sessions');
   return t(`edgeDock.periodShort.${cell.metric}`);
+}
+
+// The live token rate on a sessions cell's third line, shaped like the live-rate
+// item's own readout so the two cards read alike. Muted while idle rather than
+// blank: "no traffic right now" is a reading, not an absence of one.
+function cellRateNode(cell) {
+  const missing = cell.rate === null || cell.rate === undefined;
+  const node = el('span', 'edge-dock-cell-rate');
+  node.classList.toggle('is-idle', missing || cell.rateIdle === true);
+  // No tooltip on this line. A `title` needs the pointer to rest on the node, but
+  // hovering this cell opens its card after bubbleDelayMs (70ms), so the tooltip
+  // is never reached - and the wording it would carry describes the live-rate
+  // item's readout, which really does toggle rate mode on click while this cell
+  // opens its card. A tooltip nobody can read is not worth five translations.
+  node.append(
+    el('span', 'edge-dock-cell-rate-value', missing ? '—' : formatRate(cell.rate)),
+    el('span', 'edge-dock-cell-rate-unit', t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit'))
+  );
+  return node;
+}
+
+// The tools with a session running right now, as their own marks. This is what the
+// cell can say that no other cell can: which tools are working, in one glance,
+// including the tools that have no quota to draw a ring from. The count beside
+// them covers the marks that did not fit. Drawn only when the item's cell detail
+// asks for marks rather than a rate (see statCellNode).
+// How many tool marks fit the 56px cell beside its headline. Past this the
+// remainder is a count rather than a mark shrunk past legibility. A drawing
+// limit, so it lives here rather than in the projection.
+const CELL_MARK_LIMIT = 3;
+
+function runningMarksNode(cell, now = Date.now()) {
+  // Derived from the rows at paint time, not from a count frozen into the cell:
+  // running expires on a clock, so a rail that never re-projects would keep
+  // drawing marks for work that has stopped (see presentation.js).
+  const { clients, clientCount } = runningSessionSummary(cell.sessions, now);
+  if (!clients.length) return null;
+  const row = el('span', 'edge-dock-cell-marks');
+  for (const client of clients.slice(0, CELL_MARK_LIMIT)) {
+    // Brand colour, corrected for contrast like every other mark the dock
+    // draws: the client id is what the mark is looked up by, and the rail
+    // already reserves colour for severity, so these stay marks and not meters.
+    row.append(markNode(client, readableColor(clientColors[client] || clientColors.default)));
+  }
+  const rest = clientCount - Math.min(clients.length, CELL_MARK_LIMIT);
+  if (rest > 0) row.append(el('span', 'edge-dock-cell-more', `+${rest}`));
+  return row;
 }
 
 // Caption, tokens, and the period's cost in a smaller line beneath: one item
@@ -417,6 +556,23 @@ function statCellNode(cell) {
     node.classList.toggle('is-idle', cell.idle === true);
     node.title = t('edgeDock.rate.switch');
     node.append(el('span', 'edge-dock-stat-value', cell.rate === null || cell.rate === undefined ? '—' : formatRate(cell.rate)));
+  } else if (cell.metric === presentation.SESSIONS_METRIC) {
+    // Nothing running is a real reading, not a missing one, so the zero is
+    // shown - muted, exactly as the live-rate cell mutes its own idle state.
+    // Asked of the rows at paint time, so a cell left on screen stops claiming a
+    // running session the moment that session crosses the ten-minute window.
+    const running = runningSessionSummary(cell.sessions).count;
+    node.classList.toggle('is-idle', running === 0);
+    node.append(el('span', 'edge-dock-stat-value', String(running)));
+    // The third line is the item's own choice: the tools with work in flight, or
+    // the live token rate. Rate mode keeps its line even with nothing running, so
+    // the cell does not change height as work starts and stops.
+    if (cell.cellDetail === 'rate') {
+      node.append(cellRateNode(cell));
+    } else {
+      const marks = runningMarksNode(cell);
+      if (marks) node.append(marks);
+    }
   } else if (!cell.available) {
     node.classList.add('is-idle');
     node.append(el('span', 'edge-dock-stat-value', '—'));
@@ -426,8 +582,29 @@ function statCellNode(cell) {
       el('span', 'edge-dock-stat-cost', formatRailCost(cell.costUsd))
     );
   }
-  const readout = [...node.children].slice(1).map((child) => child.textContent).join(' ');
-  node.setAttribute('aria-label', `${statLabel(cell.metric)} ${readout}`);
+  // The tool marks are decorative: the count beside them already says how many
+  // are running, so folding their (empty) text into the label would only add
+  // whitespace. Everything else keeps contributing to it.
+  const readout = [...node.children]
+    .filter((child) => !child.classList.contains('edge-dock-cell-marks'))
+    .slice(1)
+    .map((child) => child.textContent)
+    .filter(Boolean)
+    .join(' ');
+  // The marks themselves are mask-painted spans with no text, so the tools they
+  // name are spoken here instead: which tools are working is the whole point of
+  // this cell, and it cannot ride on the marks alone. Named from the same summary
+  // the marks are drawn from, so the label and the picture cannot disagree, and
+  // read from the rows rather than from a frozen field so it ages with them.
+  const workingTools = cell.metric === presentation.SESSIONS_METRIC
+    ? runningSessionSummary(cell.sessions).clients.map((client) => clientLabel(client))
+    : [];
+  const spoken = cell.metric === presentation.SESSIONS_METRIC
+    // The count already reads as a number in `readout`; the tools are appended only
+    // when there are any, so a quiet cell does not end with an empty clause.
+    ? [statLabel(cell.metric), readout, workingTools.join(', ')].filter(Boolean).join(' ').trim()
+    : `${statLabel(cell.metric)} ${readout}`.trim();
+  node.setAttribute('aria-label', spoken);
   return node;
 }
 
@@ -503,95 +680,6 @@ function indexFromTarget(target) {
 
 // ---- Detail card ------------------------------------------------------------
 
-// Meters match the widget's Limits view: a 6px bar on a tint of the provider's
-// own colour, the fill following the used/remaining display mode, and weekly
-// or longer windows a shade lighter than the session window above them.
-function meterNode(window, color) {
-  const meter = el('div', 'edge-dock-meter');
-  const rgb = parseColor(color);
-  if (rgb) meter.style.background = `rgba(${rgb.join(', ')}, 0.16)`;
-  const fill = el('div', 'edge-dock-meter-fill');
-  fill.style.background = color;
-  fill.style.opacity = window.kind === 'session' ? '0.95' : '0.78';
-  const shown = presentation.displayPercent(window.remainingPercent, appearance().showLimitUsed === true);
-  fill.style.transform = `scaleX(${Math.max(0, Math.min(100, shown ?? 0)) / 100})`;
-  meter.append(fill);
-  return meter;
-}
-
-function windowNode(window, color, labelOverride = '') {
-  const node = el('div', 'edge-dock-window');
-  const head = el('div', 'edge-dock-window-head');
-  const value = el('span', 'edge-dock-window-value', windowValueText(window));
-  value.dataset.severity = displaySeverity(window.remainingPercent);
-  head.append(el('span', 'edge-dock-window-label', labelOverride || windowLabel(window)), value);
-  node.append(head);
-  if (window.remainingPercent !== null && window.remainingPercent !== undefined) node.append(meterNode(window, color));
-  const boundary = boundaryText(window);
-  if (boundary) node.append(el('span', 'edge-dock-window-reset', boundary));
-  return node;
-}
-
-// Windows labelled "<group> 5-hour" / "<group> weekly" (Antigravity's model
-// pools) are shown under one group heading, the same hierarchy as the Limits
-// view. Anything that does not fully parse keeps the flat list.
-function windowGroups(windows) {
-  const parsed = windows.map((window) => ({
-    window,
-    label: limitPresentationApi?.antigravityQuotaWindow?.(window) || null
-  }));
-  if (parsed.length < 2 || parsed.some((entry) => !entry.label)) return null;
-  const groups = new Map();
-  for (const entry of parsed) {
-    const key = entry.label.groupLabel;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(entry);
-  }
-  return groups.size > 1 ? [...groups] : null;
-}
-
-// A metered short window (session/daily/weekly) sits in a half-width column
-// beside its neighbour, as in the Limits view; balances, monthly pools and an
-// unpaired window take the full width.
-function pairable(window) {
-  return ['session', 'daily', 'weekly'].includes(window.kind)
-    && !window.credits
-    && window.remainingPercent !== null && window.remainingPercent !== undefined;
-}
-
-function windowGrid(entries, color) {
-  const grid = el('div', 'edge-dock-windows');
-  for (let index = 0; index < entries.length; index += 1) {
-    const entry = entries[index];
-    const next = entries[index + 1];
-    const node = windowNode(entry.window, color, entry.label);
-    if (next && pairable(entry.window) && pairable(next.window)) {
-      grid.append(node, windowNode(next.window, color, next.label));
-      index += 1;
-    } else {
-      node.classList.add('is-wide');
-      grid.append(node);
-    }
-  }
-  return grid;
-}
-
-function appendWindows(block, windows, color) {
-  const groups = windowGroups(windows);
-  if (!groups) {
-    block.append(windowGrid(windows.map((window) => ({ window, label: '' })), color));
-    return;
-  }
-  for (const [label, entries] of groups) {
-    const group = el('div', 'edge-dock-window-group');
-    group.append(
-      el('div', 'edge-dock-window-group-title', label),
-      windowGrid(entries.map((entry) => ({ window: entry.window, label: entry.label.windowLabel })), color)
-    );
-    block.append(group);
-  }
-}
-
 function usageTile(label, usage) {
   const tile = el('div', 'edge-dock-usage-tile');
   tile.append(
@@ -600,70 +688,6 @@ function usageTile(label, usage) {
   );
   if (usage) tile.append(el('span', 'edge-dock-usage-cost', formatCost(usage.costUsd)));
   return tile;
-}
-
-// Banked Codex resets, as the Limits view lists them: how many, and how long
-// until each expires.
-function resetCreditsNode(credits) {
-  if (!credits?.count) return null;
-  const row = el('div', 'edge-dock-detail-row');
-  row.append(el('span', '', `${credits.count} reset${credits.count === 1 ? '' : 's'}`));
-  const now = Date.now();
-  const times = credits.expirations.slice(0, 3).map((value) => {
-    const remaining = Date.parse(value) - now;
-    return remaining <= 0 ? 'now' : presentation.formatResetDuration(remaining);
-  });
-  if (credits.expirations.length > 3) times.push(`+${credits.expirations.length - 3}`);
-  if (times.length) row.append(el('span', 'edge-dock-detail-value', times.join(' · ')));
-  return row;
-}
-
-function forecastDate(value) {
-  const ms = Date.parse(value || '');
-  if (!Number.isFinite(ms)) return '';
-  const date = new Date(ms);
-  const dayDelta = Math.round((new Date(date).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86_400_000);
-  const time = new Intl.DateTimeFormat(state.locale, { hour: 'numeric', minute: '2-digit' }).format(date);
-  if (Math.abs(dayDelta) <= 1) {
-    return `${new Intl.RelativeTimeFormat(state.locale, { numeric: 'auto' }).format(dayDelta, 'day')} ${time}`;
-  }
-  return new Intl.DateTimeFormat(state.locale, { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date);
-}
-
-// The Codex reset forecast, when the Limits view's opt-in is on: the same
-// states and wording as there, condensed to one row and a detail line.
-function forecastNode(forecast) {
-  if (!forecast || forecast.status === 'disabled') return null;
-  const node = el('div', 'edge-dock-forecast');
-  const row = el('div', 'edge-dock-detail-row');
-  row.append(el('span', 'edge-dock-forecast-title', t('limits.codexResetForecast.title')));
-  let value;
-  let detail = '';
-  const expired = forecast.status === 'active' && Date.parse(forecast.expiresAt || '') <= Date.now();
-  if (forecast.status === 'scheduled') {
-    value = t('limits.codexResetForecast.scheduled');
-    const when = forecastDate(forecast.scheduledFor);
-    detail = when ? t('limits.codexResetForecast.expected', { date: when }) : t('limits.codexResetForecast.schedulePending');
-  } else if (forecast.status === 'active' && !expired) {
-    value = Number.isFinite(forecast.chancePercent)
-      ? t('limits.codexResetForecast.chance', {
-        percent: new Intl.NumberFormat(state.locale, { maximumFractionDigits: 2 }).format(forecast.chancePercent)
-      })
-      : t('limits.codexResetForecast.signal');
-    const when = forecastDate(forecast.predictedAt);
-    detail = when ? t('limits.codexResetForecast.expected', { date: when }) : '';
-  } else if (forecast.status === 'inactive' || expired) {
-    value = t('limits.codexResetForecast.noSignal');
-  } else {
-    value = forecast.error && forecast.errorKind !== 'invalid-response'
-      ? t('limits.codexResetForecast.connectionFailed')
-      : t('limits.codexResetForecast.unavailable');
-  }
-  if (forecast.stale) detail = [detail, t('limits.codexResetForecast.stale')].filter(Boolean).join(' · ');
-  row.append(el('span', 'edge-dock-detail-value', value));
-  node.append(row);
-  if (detail) node.append(el('div', 'edge-dock-forecast-detail', detail));
-  return node;
 }
 
 function relativeAgo(value) {
@@ -755,6 +779,14 @@ function stateMark(session, key, state) {
 function sessionsNode(sessions) {
   if (!Array.isArray(sessions) || !sessions.length) return null;
   pruneActivity(sessions);
+  // A provider card's rows are all one client, so their marks would only repeat
+  // the card's own header; the standalone Sessions card lists every client and
+  // names each row's tool (see sessionsCard).
+  const node = sessionsContainer(sessions, { title: t('edgeDock.sessions'), showClientMark: false });
+  return node;
+}
+
+function sessionsContainer(sessions, options = {}) {
   // Re-derived rather than trusted from the pushed cell: the card repaints
   // every 30s from its last payload, and a session that stopped in between must
   // stop reading as running (and must stop being counted).
@@ -763,15 +795,21 @@ function sessionsNode(sessions) {
   const stateByKey = new Map(sessions.map((session) => [sessionKey(session), sessionLive.sessionActivityState(session)]));
   const liveCount = [...stateByKey.values()].filter((state) => state === 'running').length;
   const node = el('div', 'edge-dock-sessions');
+  // The feathered rule above a section separates it from a quota row. A nested
+  // list already sits under its group's own header, so it draws none: one line
+  // per group would be a rule under every header instead of between sections.
+  if (options.separator === false) node.classList.add('is-plain');
   // "Recent" was doing no work - every row already carries its own `3m ago` -
   // while the running count is the one thing the section can say that the rows
   // cannot. Shown only when something is running: "none running" is noise.
   const head = el('div', 'edge-dock-section-head');
-  head.append(el('span', 'edge-dock-section-title', t('edgeDock.sessions')));
-  if (liveCount > 0) {
+  if (options.title) head.append(el('span', 'edge-dock-section-title', options.title));
+  // A grouped section states the count beside its tool name one line up, so the
+  // nested list stays silent rather than repeating the same number.
+  if (liveCount > 0 && options.showCount !== false) {
     head.append(el('span', 'edge-dock-section-count', t('edgeDock.runningCount', { count: liveCount })));
   }
-  node.append(head);
+  if (head.childElementCount) node.append(head);
   const list = el('div', 'edge-dock-session-list');
   for (const session of sessions) {
     const row = el('div', 'edge-dock-session');
@@ -780,6 +818,16 @@ function sessionsNode(sessions) {
     row.classList.toggle('is-running', state === 'running');
     const name = session.title || session.projectLabel || String(session.sessionId || '').slice(0, 12) || '—';
     const nameNode = el('span', 'edge-dock-session-name');
+    // The row's tool, as the same mark the rest of the widget draws for it. A
+    // mixed list has to name each row's client somewhere and the meta line has
+    // no room left for a label beside the model, the age and the gauge.
+    if (options.showClientMark && session.client) {
+      nameNode.append(markNode(session.client));
+      // The mark is a mask-painted span with no text, so the tool it stands for is
+      // invisible to assistive technology unless the name is said out loud. The
+      // client's own label, not its id: this is read as prose.
+      nameNode.append(el('span', 'sr-only', `${clientLabel(session.client)} `));
+    }
     // The dot sits with the name rather than recolouring it: a green title
     // made the row read as a different kind of row, and the colour carried no
     // more information than the dot does.
@@ -812,59 +860,33 @@ function sessionsNode(sessions) {
 
 function providerCard(cell) {
   const card = el('section', 'edge-dock-card');
-  const color = providerColor(cell.provider);
-  const single = cell.accounts.length === 1 ? cell.accounts[0] : null;
-  // The refresh time sits under the name it belongs to, as in the Limits view:
-  // under the provider for a single account, under each account otherwise.
-  // Name row (mark, name, plan), then the refresh time on its own line starting
-  // at the mark's edge, as in the Limits view.
-  const head = el('header', 'edge-dock-card-head');
-  const nameRow = el('div', 'edge-dock-card-name-row');
-  nameRow.append(markNode(cell.provider));
-  // With one account the email moves to the header, and so does the switch
-  // affordance; with several, each row carries its own (below).
-  const headTitle = el('span', 'limit-name-title edge-dock-card-title', providerLabel(cell.provider));
-  const headControl = single ? accountControl(single, headTitle, { showActive: false }) : headTitle;
-  nameRow.append(headControl);
-  if (single?.planLabel) nameRow.append(el('span', 'edge-dock-pill', single.planLabel));
-  head.append(nameRow);
-  const singleUpdated = single ? updatedText(single.updatedAt) : '';
-  if (singleUpdated) head.append(el('span', 'edge-dock-card-subtitle', singleUpdated));
-  card.append(head);
-
-  const accounts = el('div', 'edge-dock-accounts');
-  card.append(accounts);
+  const color = limitProviderColor(cell.provider);
+  const label = providerLabel(cell.provider);
+  const records = [];
   for (const account of cell.accounts) {
-    const block = el('div', 'edge-dock-account');
-    if (!single) {
-      const name = el('div', 'edge-dock-account-name');
-      const names = el('div', 'edge-dock-card-titles');
-      const title = accountTitle(account) || account.planLabel || providerLabel(cell.provider);
-      const titleNode = el('span', 'limit-name-title edge-dock-account-title', title);
-      // The row is one of three things, exactly as in the Limits view: the
-      // account in use here (check badge plus a "Local" hint), a row that can be
-      // switched to (hover reveals Switch), or a plain title.
-      names.append(accountControl(account, titleNode));
-      const updated = updatedText(account.updatedAt);
-      if (updated) names.append(el('span', 'edge-dock-card-subtitle', updated));
-      name.append(names);
-      if (account.planLabel && accountTitle(account)) name.append(el('span', 'edge-dock-pill', account.planLabel));
-      block.append(name);
-    }
-    if (account.status === 'stale') block.append(el('div', 'edge-dock-note is-warning', t('edgeDock.stale')));
-    const windows = account.windows || [];
-    if (windows.length) {
-      appendWindows(block, windows, color);
-    } else if (account.status !== 'ok') {
-      block.append(el('div', 'edge-dock-note', t('edgeDock.unavailable')));
-    }
-    const credits = resetCreditsNode(account.resetCredits);
-    if (credits) block.append(credits);
-    accounts.append(block);
+    if (!account.record) continue;
+    accountSummaries.set(account.record, account);
+    records.push(account.record);
   }
-  if (!cell.accounts.length) accounts.append(el('div', 'edge-dock-note', t('edgeDock.unavailable')));
-  const forecast = forecastNode(cell.forecast);
-  if (forecast) accounts.append(forecast);
+  cardForecast = cell.forecast || null;
+
+  // The card is the Limits page's provider row: one row for a single account,
+  // the page's group header and account list for several. Everything the card
+  // used to build by hand — the mark, the plan pill, the "Updated · OAuth" meta
+  // line, the account count, the switch affordance, the meters, the spend and
+  // balance lines, the reset forecast and its tooltip — is that row, and the
+  // per-provider choices the page makes are the view's own policy now, so this
+  // caller passes the provider and nothing else.
+  const accounts = el('div', 'edge-dock-accounts');
+  if (records.length > 1) {
+    accounts.append(limitWindowsView.renderLimitProviderGroup(cell.provider, label, records, color));
+  } else if (records.length === 1) {
+    accounts.append(limitWindowsView.renderLimitProviderSolo(cell.provider, label, records[0], color));
+  } else {
+    accounts.append(el('div', 'edge-dock-note', t('edgeDock.unavailable')));
+  }
+  card.append(accounts);
+
   const sessions = sessionsNode(cell.sessions);
   if (sessions) card.append(sessions);
 
@@ -928,6 +950,7 @@ function statCard(cell) {
     appendLiveRate(card, head, cell);
     return card;
   }
+  if (cell.metric === presentation.SESSIONS_METRIC) return sessionsCard(cell, card, head);
   if (!cell.available) {
     card.append(el('div', 'edge-dock-note', t('edgeDock.periodUnavailable')));
     return card;
@@ -948,13 +971,13 @@ function statCard(cell) {
   for (const client of cell.clients) {
     const color = readableColor(clientColors[client.client] || clientColors.default);
     const row = el('div', 'edge-dock-client');
-    const meter = el('div', 'edge-dock-meter');
-    const rgb = parseColor(color);
-    if (rgb) meter.style.background = `rgba(${rgb.join(', ')}, 0.16)`;
-    const fill = el('div', 'edge-dock-meter-fill');
+    // The same bar as the quota meters above it, built by the same helper.
+    const meter = el('div', 'limit-meter');
+    meter.style.background = colorWithAlpha(color, 0.16);
+    const fill = el('div', 'limit-meter-fill');
     fill.style.background = color;
     fill.style.opacity = '0.95';
-    fill.style.transform = `scaleX(${Math.max(0.02, client.tokens / top)})`;
+    applyBarScale(fill, Math.max(0.02, client.tokens / top));
     meter.append(fill);
     row.append(
       markNode(client.client, color),
@@ -972,10 +995,84 @@ function statCard(cell) {
   return card;
 }
 
+// The standalone Sessions card: the widget's sessions across every tracked
+// client, including the clients that have no limits provider and therefore no
+// other card to appear on. Rows are the same rows a provider card draws, so the
+// two surfaces cannot disagree about what running means (see sessionsContainer).
+function sessionsCard(cell, card, head) {
+  const pushed = Array.isArray(cell.sessions) ? cell.sessions : [];
+  const running = runningSessionSummary(pushed).rows;
+  // A running-only card re-applies its own filter at paint time. The main process
+  // filters when it projects, but the renderer repaints from the payload it already
+  // holds when a running window expires, and this card is repainted before the
+  // re-projection arrives - so a row that has just gone idle would stay in a card that
+  // says it only shows running sessions. The same summary the count and the marks come
+  // from decides membership, so the list cannot disagree with the header above it.
+  // An empty result is a real reading, and the note below already says so.
+  const sessions = cell.runningOnly === true ? running : pushed;
+  // The flare cache is pruned against the whole list, not per group: a grouped card
+  // renders one section per tool, and pruning inside each of those would delete the
+  // entries belonging to every other section. Pruning here is what stops a long-lived
+  // card from keeping one entry per session that ever scrolled through it.
+  // Pruned against everything the card was handed, not the filtered list: a row that
+  // is merely quiet keeps its flare entry, so a session that starts running again flares
+  // on its next write rather than being treated as newly seen.
+  pruneActivity(pushed);
+  // The count lives in exactly one place per layout. Grouped, each section states
+  // its own, and a card total above them printed the very same number whenever one
+  // tool happened to be the only one running. Ungrouped there are no section heads,
+  // so the card states it. Running rows keep their spinners either way.
+  if (running.length > 0 && cell.groupBy !== 'client') {
+    head.classList.add('is-inline');
+    head.append(el('span', 'edge-dock-card-status', t('edgeDock.runningCount', { count: running.length })));
+  }
+  if (!sessions.length) {
+    card.append(el('div', 'edge-dock-note', t(cell.runningOnly ? 'edgeDock.sessionsNoneRunning' : 'edgeDock.sessionsNone')));
+    return card;
+  }
+  if (cell.groupBy !== 'client') {
+    card.append(sessionsContainer(sessions, { showClientMark: true, showCount: false }));
+    return card;
+  }
+  // Grouped: one section per tool, in the order the tools first appear in the
+  // list (which is newest-activity order), so the header names the tool once
+  // instead of the mark repeating down every row.
+  const groups = new Map();
+  for (const session of sessions) {
+    const client = String(session.client || '');
+    if (!groups.has(client)) groups.set(client, []);
+    groups.get(client).push(session);
+  }
+  const grouped = el('div', 'edge-dock-accounts edge-dock-session-groups');
+  for (const [client, rows] of groups) {
+    const section = el('div', 'edge-dock-session-group');
+    // Its own header class rather than the shared section head: that one is a
+    // two-item caption row aligned on the baseline, and a mask-drawn mark has no
+    // baseline, so it floated above its label. This row centers its three parts.
+    const groupHead = el('div', 'edge-dock-session-group-head');
+    groupHead.append(markNode(client), el('span', 'edge-dock-section-title', clientLabel(client)));
+    const liveCount = runningSessionSummary(rows).count;
+    if (liveCount > 0) groupHead.append(el('span', 'edge-dock-section-count', t('edgeDock.runningCount', { count: liveCount })));
+    section.append(groupHead, sessionsContainer(rows, { showCount: false, separator: false }));
+    grouped.append(section);
+  }
+  card.append(grouped);
+  return card;
+}
+
 // Cards are built in a hidden staging layer and measured there. The visible
 // card is only replaced once the main process reports that the window has been
 // sized and shaped for exactly that card, so a new card never paints into a
 // window still at the previous card's size (which read as a flash).
+//
+// Both scroll containers, because which one scrolls depends on the card. A provider
+// card and the grouped Sessions card scroll `.edge-dock-accounts`; the ungrouped
+// Sessions card's list is `.edge-dock-session-list`, and that is the one which overflows
+// there, since running rows are never capped. A repaint rebuilds the card, so a
+// selector that missed the container actually in use reset that card's scroll on every
+// clock tick - yanking the reader back to the top while they were reading it.
+const CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list';
+
 const stagingLayer = document.createElement('div');
 stagingLayer.className = 'edge-dock-staging';
 if (surface === 'bubble') root.append(stagingLayer);
@@ -983,9 +1080,9 @@ if (surface === 'bubble') root.append(stagingLayer);
 function commitCard(card, cellId) {
   const previous = contentLayer.querySelector('.edge-dock-card');
   const sameCard = previous?.dataset.cellId === cellId;
-  const scrollTop = sameCard ? previous.querySelector('.edge-dock-accounts')?.scrollTop || 0 : 0;
+  const scrollTop = sameCard ? previous.querySelector(CARD_SCROLL_SELECTOR)?.scrollTop || 0 : 0;
   contentLayer.replaceChildren(card);
-  const list = card.querySelector('.edge-dock-accounts');
+  const list = card.querySelector(CARD_SCROLL_SELECTOR);
   if (list) list.scrollTop = scrollTop;
 }
 
@@ -1017,16 +1114,112 @@ function render(payload) {
   updateShape(payload);
   if (surface === 'peek') renderPeek(payload);
   else if (surface === 'rail') renderRail(payload);
-  else if (!codexAccountControl.deferRender(contentLayer)) renderBubble(payload);
+  else if (!deferBubbleRender()) renderBubble(payload);
+  // A push carries fresh expiry times, so the self-repaint is re-armed from what
+  // was just painted rather than left on the schedule the previous payload set.
+  scheduleSelfRepaint();
+}
+
+// A repaint replaces the whole card, so it waits for whatever the pointer is
+// currently inside: an account control mid-gesture, or an open detail tooltip.
+function deferBubbleRender() {
+  if (codexAccountControl.deferRender(contentLayer)) return true;
+  if (!limitTooltipShouldHoldRender()) return false;
+  limitTooltip.pending = true;
+  return true;
 }
 
 bridge.onRender(render);
-// Reset countdowns move without a stats push; repaint the open card each minute.
-setInterval(() => {
-  if (
-    surface === 'bubble'
-    && state.payload?.cell
-    && !codexAccountControl.deferRender(contentLayer)
-  ) renderBubble(state.payload);
-}, 30_000);
+// A repaint that no push triggers, because two readings here move on a clock
+// rather than on data: a session stops being running when its window expires
+// (sessionLive.RUNNING_WINDOW_MS) even with no new stats at all, and reset
+// countdowns tick down on their own. Without this the rail kept the count and the
+// tool marks it was pushed with, and a card opened later would disagree with the
+// cell that opened it. Every surface re-derives from the payload it already holds,
+// so this costs no IPC and asks the main process for nothing.
+function surfacesShowingSessions() {
+  if (surface === 'rail') return (state.payload?.cells || []).some((cell) => cell.metric === presentation.SESSIONS_METRIC);
+  if (surface === 'bubble') return state.payload?.cell?.metric === presentation.SESSIONS_METRIC;
+  return false;
+}
+
+// How long until the reading this surface holds could change by itself. A sessions
+// cell carries the moment its newest running row expires; anything else falls back
+// to the minute that reset countdowns need. Both ends are clamped so a payload
+// whose expiry has just passed does not spin the timer.
+// The one floor every wait respects, so a payload whose expiry has just passed cannot
+// produce a zero-length timer.
+const SELF_REPAINT_FLOOR_MS = 1_000;
+
+// The card has always repainted on a period, because its reset countdowns move on the
+// clock alone; thirty seconds is that period, unchanged by this feature.
+const BUBBLE_REPAINT_MS = 30_000;
+
+// How long until the soonest sessions reading on this surface changes by itself. 0
+// when there is nothing to wake for, which is a real answer rather than a fallback: a
+// quiet cell never becomes running on its own, so a caller reading 0 must not arm a
+// timer at all. The floor keeps a payload whose expiry has just passed from spinning.
+function sessionsExpiryDelayMs() {
+  if (!surfacesShowingSessions()) return 0;
+  const cells = surface === 'rail' ? state.payload?.cells || [] : [state.payload?.cell].filter(Boolean);
+  let soonest = 0;
+  const now = Date.now();
+  for (const cell of cells) {
+    if (cell?.metric !== presentation.SESSIONS_METRIC) continue;
+    // Asked of the rows rather than read off the cell. `runningExpiresAt` describes the
+    // payload as it was projected, and a repaint does not re-project: once the soonest
+    // expiry passes, that field is in the past for good, so a later row's expiry would
+    // never wake anything and the cell would keep drawing it as running. The rows are
+    // what a repaint re-derives from, so they are what the next wait is computed from -
+    // recomputed each time, which is also what makes a second and third expiry wake the
+    // surface in turn. Only an expiry still ahead can shorten a wait; a stale one would
+    // otherwise pin the delay to the floor and re-arm on every pass.
+    const expiresAt = presentation.nextRunningExpiryAt(cell.sessions, now);
+    if (expiresAt > now && (!soonest || expiresAt < soonest)) soonest = expiresAt;
+  }
+  if (!soonest) return 0;
+  return Math.max(SELF_REPAINT_FLOOR_MS, soonest - Date.now() + 50);
+}
+
+// Per surface, because the two surfaces have different reasons to wake. The card keeps
+// its own period and lets an expiry shorten it; a rail that is not showing sessions
+// gets no timer at all, since it was push-driven before this feature and polling it
+// would rebuild its children for nothing. Both are re-armed after every repaint, so a
+// shortened wait does not lower the period that follows it.
+function selfRepaintDelayMs() {
+  const expiry = sessionsExpiryDelayMs();
+  const period = surface === 'bubble' ? BUBBLE_REPAINT_MS : 0;
+  const waits = [period, expiry].filter((value) => value > 0);
+  return waits.length ? Math.min(...waits) : 0;
+}
+
+function repaintSelf() {
+  // The card defers while a gesture or an open tooltip is inside it, and asks
+  // again once that clears (limitTooltip.pending); the rail has nothing to defer.
+  if (surface === 'bubble') {
+    if (state.payload?.cell && !deferBubbleRender()) renderBubble(state.payload);
+    return;
+  }
+  if (surface === 'rail' && state.payload) renderRail(state.payload);
+}
+
+// Re-armed after every repaint rather than fixed at one interval, so a surface
+// wakes exactly when its reading can change instead of polling on a fixed period
+// and still being late. A stats push re-enters render() with a fresh payload and
+// reschedules from it.
+let selfRepaintTimer = null;
+function scheduleSelfRepaint() {
+  if (selfRepaintTimer) clearTimeout(selfRepaintTimer);
+  selfRepaintTimer = null;
+  const delay = selfRepaintDelayMs();
+  // 0 means this surface has nothing to wake for: a rail with no sessions expiry, or
+  // the peek handle. Leaving the timer unarmed is what keeps the rail push-driven.
+  if (!delay) return;
+  selfRepaintTimer = setTimeout(() => {
+    selfRepaintTimer = null;
+    repaintSelf();
+    scheduleSelfRepaint();
+  }, delay);
+}
+scheduleSelfRepaint();
 bridge.ready();

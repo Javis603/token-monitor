@@ -62,6 +62,7 @@ function createEdgeDockController(deps) {
     primaryButtonDown = () => null,
     onToggleRateMode,
     onSwitchCodexAccount,
+    onOpenResetForecastSource,
     logger = () => {}
   } = deps;
 
@@ -653,6 +654,15 @@ function createEdgeDockController(deps) {
       } catch (error) {
         logger(`[edge-dock] codex account switch failed: ${error.message}`);
         return { ok: false, error: error?.message || 'Switch failed' };
+      }
+    });
+    // The forecast row on the card is the Limits page's row, link and all. The
+    // renderer reports the intent rather than a URL, so the dock's bridge stays
+    // a list of named actions instead of gaining a general "open anything" verb.
+    ipcMain.on('edgeDock:openResetForecastSource', (event) => {
+      if (surfaceFor(event.sender) !== 'bubble') return;
+      try { onOpenResetForecastSource?.(); } catch (error) {
+        logger(`[edge-dock] opening the reset forecast source failed: ${error.message}`);
       }
     });
     ipcMain.on('edgeDock:dismiss', (event) => {

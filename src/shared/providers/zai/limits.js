@@ -122,9 +122,9 @@ function zaiDashboardUrl(region = 'global') {
   return ZAI_REGIONS[zaiRegion({ zaiApiRegion: region })].dashboardUrl;
 }
 
-// Mirrors ZCode's pickCurrentSubscriptionFromList: the entry in the current
-// period wins, then any VALID one, then the first row — so a historical or
-// expired row listed first cannot name the account's plan.
+// Follows ZCode's pickCurrentSubscriptionFromList ordering (current-period
+// VALID, then current-period, then VALID); where ZCode stops at null, ours
+// keeps a first-row fallback so an all-expired list still names a plan.
 function firstSubscription(subscriptions) {
   const rows = Array.isArray(subscriptions?.data)
     ? subscriptions.data.filter((row) => row && typeof row === 'object')
@@ -454,6 +454,16 @@ async function fetchZaiLimits(options = {}, deps = {}) {
         };
       }
       return emptyLane(true);
+    }
+    // The account is known but its own key is absent: the quota half must not
+    // ride a mirror that may belong to the previous account, so no quota
+    // request is made. The billing leg carries its own credential — the
+    // account-level JWT, which ZCode maintains on login — so a readable one
+    // still queries Start/Weekend here; only a lane with neither returns the
+    // attempted-but-empty result, which keeps the row reporting unavailable
+    // rather than contradicting a detected login with "not configured".
+    if (discovery.kind === 'coding-quota' && discovery.reason === 'coding_plan_key_missing') {
+      return discovery.billing ? fetchZcodeBilling(discovery.billing.credential.token) : emptyLane(true);
     }
     if (discovery.kind !== 'start-billing' || !discovery.credential) {
       return emptyLane();

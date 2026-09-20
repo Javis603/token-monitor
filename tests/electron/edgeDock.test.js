@@ -33,7 +33,14 @@ const { canUseEdgeDock } = require('../../src/electron/edgeDock/controller');
 const { bubbleCommands, railCommands, toPolygons, toSvgPath } = require('../../src/electron/renderer/edgeDock/shapes');
 const { rasterizeMask, shapeRectsFromPolygons } = require('../../src/electron/edgeDock/mask');
 const { DEFAULT_LIMIT_COUNT, normalizeEdgeDockItems, reorderEdgeDockItems } = require('../../src/electron/renderer/edgeDock/items');
+const { SESSIONS_METRIC } = require('../../src/electron/renderer/edgeDock/presentation');
+const edgeDockPresentation = require('../../src/electron/renderer/edgeDock/presentation');
+// The predicate the projection, the rail and the card all answer with, so these
+// tests assert the same reading a surface would.
+const sessionLive = require('../../src/shared/sessionLive');
 const verticalDragSort = require('../../src/electron/renderer/verticalDragSort');
+const { matchProviderAccount } = require('../../src/shared/subscriptionDisplay');
+const accountIdentity = require('../../src/electron/renderer/accountIdentity');
 const {
   buildEdgeDockCells,
   displayPercent,
@@ -65,6 +72,36 @@ test('every renderer stylesheet is brace-balanced', () => {
     assert.equal(firstUnbalanced, 0, `${name} closes a block that was never opened (line ${firstUnbalanced})`);
     assert.equal(depth, 0, `${name} ends with ${depth} unclosed block(s)`);
   }
+});
+
+test('the card edge spends none of the quota row separator the page needs', () => {
+  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
+  const rule = css.match(/\.edge-dock-accounts > \.limit-row:last-child\s*\{([^}]*)\}/);
+  assert.ok(rule, 'the last row in a card must reset what the shared row brings');
+  // A `.limit-row` ends with a rule and 13px under it, which is the *inter-card*
+  // separator on the page: the panel goes on below the row, so the rule marks
+  // where the next card starts and the padding is the room it gets. The card ends
+  // at the row, so both are spent on nothing — the rule becomes a line drawn under
+  // the last thing the card says, and the padding pushed the section below it to
+  // 23px against the card's own 10px gap (319px against the pre-refactor card's
+  // 307px, for the same account and nothing else changed).
+  assert.match(rule[1], /border-bottom: 0;/);
+  assert.match(rule[1], /padding-bottom: 0;/);
+});
+
+test('the card takes the forecast separator from the page instead of redrawing it', () => {
+  // The rule above the reset forecast belongs to the Limits view — styles.css
+  // draws it for both of the shapes the forecast is appended to — and the card
+  // is built on that same row in a document that loads that stylesheet, so the
+  // card needs no rule of its own. A second copy is only a thing to drift: the
+  // page's rule used to be scoped to `.limit-row-group`, and the card's own copy
+  // existed to cover the single-account shape that scoping left out.
+  const css = readRendererFile(path.join('edgeDock', 'dock.css')).replace(/\/\*[\s\S]*?\*\//g, ' ');
+  assert.doesNotMatch(css, /\.codex-reset-forecast::before/);
+  assert.match(
+    readRendererFile(path.join('edgeDock', 'index.html')),
+    /<link rel="stylesheet" href="\.\.\/styles\.css" \/>/
+  );
 });
 
 test('the Sessions list uses a plain dot, not the dock card glyph stack', () => {
@@ -137,8 +174,12 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   assert.match(sessions, /nameNode\.append\(document\.createTextNode\(name\)\)/);
   assert.doesNotMatch(css, /\.edge-dock-session\.is-running \.edge-dock-session-name\s*\{[^}]*color/);
   // Three states: a spinner while working, a check once the transcript said the
-  // turn finished, and a faint dot for a session that has gone quiet.
-  assert.match(css, /\.edge-dock-session-spin\s*\{[\s\S]*?color: var\(--success\)/);
+  // turn finished, and a faint dot for a session that has gone quiet. The
+  // running glyph is monochrome like the other two — its spokes animate, so the
+  // state is already being said — but it wears the card's primary ink rather
+  // than `--muted`, so the live row is not weighed the same as the finished one.
+  assert.match(css, /\.edge-dock-session-spin \{\n {2}background: currentColor;\n {2}color: var\(--text\);/);
+  assert.doesNotMatch(css, /\.edge-dock-session-spin \{[^}]*--success/);
   assert.match(css, /\.edge-dock-session-check\s*\{[\s\S]*?color: var\(--muted\)/);
   assert.match(css, /\.edge-dock-session-idle::before/);
   assert.match(css, /edge-dock-session-dot\[data-state="running"\] \.edge-dock-session-spin/);
@@ -160,6 +201,15 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   // The flare rides along with the spin rather than replacing it, and adds no
   // `infinite` of its own: a flare always means a write.
   assert.match(css, /\.edge-dock-session-dot\.pulse \.edge-dock-session-spin \{/);
+  // Its glow is neutral too, so the flare cannot be the loudest green thing in a
+  // card whose running state no longer uses green at all.
+  assert.match(css, /@keyframes edge-dock-session-pulse \{[\s\S]*?rgba\(var\(--overlay-rgb\), 0\.62\)/);
+  assert.doesNotMatch(css, /@keyframes edge-dock-session-pulse \{[^}]*--success-rgb/);
+  // Reduced motion swaps the spinner for a still dot, and it is the card's ink
+  // rather than a hue too: a solid dot beside the quiet rows' faint one is the
+  // reading, so the dock spends no colour on the running state anywhere.
+  assert.match(css, /data-state="running"\] \.edge-dock-session-idle::before,\n[\s\S]*?background: var\(--text\)/);
+  assert.doesNotMatch(css, /edge-dock-session-(spin|idle)[^;]*--success/);
   // The context reading carries a bar plus the number, and the tone rule is
   // keyed on headroom so a healthy reading stays neutral.
   assert.match(css, /edge-dock-session-context-meter/);
@@ -282,6 +332,618 @@ test('an archived session never counts as running on a dock card', () => {
   };
   const [codex] = buildEdgeDockCells(stats, {});
   assert.equal(codex.sessions[0].running, false);
+});
+
+// The grouped layout and the timeline put the running count in different places,
+// and printing it in both is the bug this locks: with one tool running, the
+// section's "1 running" and the card's "1 running" were literally the same
+// number twice. The rule is one statement of the count per layout, not per card.
+test('the running count is stated once per layout, and the group header centers its mark', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
+  const card = dock.slice(dock.indexOf('function sessionsCard('), dock.indexOf('// Cards are built in a hidden staging layer'));
+  // Ungrouped: the card head states the total, and the list under it stays quiet.
+  assert.match(card, /if \(running\.length > 0 && cell\.groupBy !== 'client'\) \{/);
+  assert.match(card, /sessionsContainer\(sessions, \{ showClientMark: true, showCount: false \}\)/);
+  // Grouped: each section states its own, and only when it has one - a per-tool
+  // "0 running" on every idle tool would be noise, not information.
+  assert.match(card, /if \(liveCount > 0\) groupHead\.append/);
+  assert.doesNotMatch(card, /edge-dock-card-status[\s\S]{0,400}groupBy === 'client'/);
+  // A mask-drawn mark has no text baseline, so a baseline-aligned header row
+  // floats it above its own label. The group header is its own centered row.
+  assert.match(card, /const groupHead = el\('div', 'edge-dock-session-group-head'\)/);
+  assert.doesNotMatch(card, /groupHead = el\('div', 'edge-dock-section-head'\)/);
+  assert.match(css, /\.edge-dock-session-group-head \{[\s\S]*?align-items: center;/);
+  assert.doesNotMatch(css, /\.edge-dock-session-group-head \{[^}]*align-items: baseline/);
+  // The name yields space so a long tool name ellipsizes instead of pushing the
+  // count off the row, and the mark never shrinks.
+  assert.match(css, /\.edge-dock-session-group-head \.edge-dock-section-title \{[\s\S]*?text-overflow: ellipsis;/);
+  assert.match(css, /\.edge-dock-session-group-head \.edge-dock-mark \{[\s\S]*?flex: 0 0 auto;/);
+});
+
+
+// The Sessions item exists for the clients no quota card can show. A cell whose
+// rows all came from providers would be the same per-provider list again, one
+// level up, and would leave those clients with no surface at all.
+test('the sessions item lists every tracked client, including one with no limits provider', () => {
+  const nowIso = new Date().toISOString();
+  const session = (client, id, extra = {}) => ({
+    client, sessionId: id, lastUsedAt: nowIso, totalTokens: 10, models: { 'some-model': 10 }, ...extra
+  });
+  const stats = {
+    periods: {
+      month: { sessions: {
+        'codex:r1': session('codex', 'r1', { title: 'Dock work' }),
+        'kilo:r2': session('kilo', 'r2'),
+        'lmstudio:r3': session('lmstudio', 'r3')
+      } },
+      today: { sessions: { 'dsh:r4': session('dsh', 'r4') } }
+    },
+    // Only Codex has a quota record; the other three clients have none at all.
+    limits: { providers: [provider('codex')] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  assert.equal(cell.kind, 'stat');
+  assert.equal(cell.metric, SESSIONS_METRIC);
+  assert.deepEqual(cell.sessions.map((row) => row.client), ['codex', 'kilo', 'lmstudio', 'dsh']);
+  // Every row names its own tool, because this list mixes them.
+  assert.deepEqual([...new Set(cell.sessions.map((row) => row.client))].sort(), ['codex', 'dsh', 'kilo', 'lmstudio']);
+  // The rail's reading is derived from these rows at paint time rather than frozen
+  // into the cell, so what the cell owes its renderer is the rows plus the moment
+  // that reading changes (see the expiry test below).
+  const summary = edgeDockPresentation.runningSessionSummary(cell.sessions);
+  assert.equal(summary.count, 4);
+  assert.deepEqual(summary.clients, ['codex', 'kilo', 'lmstudio', 'dsh']);
+  assert.equal(summary.clientCount, 4);
+  assert.equal(cell.runningExpiresAt > Date.now(), true);
+});
+
+// The standalone item repeats none of a provider card's job, so its two options
+// have to change what it lists without changing what running means.
+test('the sessions item honours runningOnly and groupBy without changing the run predicate', () => {
+  const nowIso = new Date().toISOString();
+  const oldIso = new Date(Date.now() - 90 * 60_000).toISOString();
+  const session = (client, id, lastUsedAt) => ({ client, sessionId: id, lastUsedAt, totalTokens: 10, models: { m: 10 } });
+  const stats = {
+    periods: {
+      month: { sessions: {
+        'codex:live': session('codex', 'live', nowIso),
+        'kilo:quiet': session('kilo', 'quiet', oldIso),
+        'dsh:live2': session('dsh', 'live2', nowIso)
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [] }
+  };
+  const build = (item) => buildEdgeDockCells(stats, { items: [item] })[0];
+
+  // The timeline keeps the quiet row, and the running count is the same number
+  // the rail shows, from one derivation.
+  const timeline = build({ type: 'stat', metric: SESSIONS_METRIC });
+  assert.deepEqual(timeline.sessions.map((row) => row.sessionId), ['live', 'live2', 'quiet']);
+  assert.equal(edgeDockPresentation.runningSessionSummary(timeline.sessions).count, 2);
+  assert.equal(timeline.runningOnly, false);
+  assert.equal(timeline.groupBy, 'none');
+
+  // runningOnly is a list filter, not a second definition of running: the quiet
+  // row is gone and the counting is untouched.
+  const onlyRunning = build({ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true });
+  assert.deepEqual(onlyRunning.sessions.map((row) => row.sessionId), ['live', 'live2']);
+  assert.equal(edgeDockPresentation.runningSessionSummary(onlyRunning.sessions).count, 2);
+  assert.equal(onlyRunning.runningOnly, true);
+
+  // An empty running list is a real answer, not a missing one: still no rows.
+  const quietStats = {
+    periods: { month: { sessions: { 'codex:q': session('codex', 'q', oldIso) } }, today: { sessions: {} } },
+    limits: { providers: [] }
+  };
+  const [empty] = buildEdgeDockCells(quietStats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true }] });
+  assert.deepEqual(empty.sessions, []);
+  assert.equal(edgeDockPresentation.runningSessionSummary(empty.sessions).count, 0);
+
+  // groupBy is carried to the card, which is what draws one section per tool.
+  const grouped = build({ type: 'stat', metric: SESSIONS_METRIC, groupBy: 'client' });
+  assert.equal(grouped.groupBy, 'client');
+});
+
+// Running rows are selected ahead of quiet ones, but the list is still a timeline: it
+// prints newest activity first. Composing the selection as running-then-quiet hoisted
+// every running row above every quiet one, so a session active nine minutes ago was
+// listed above one active a minute ago - and the grouped layout inherited that as its
+// group order, since groups form from first appearance.
+test('the timeline keeps newest-first order even when a quiet row is the newer one', () => {
+  const now = Date.now();
+  const iso = (ms) => new Date(ms).toISOString();
+  const stats = {
+    periods: {
+      month: { sessions: {
+        // Active a minute ago, but its turn ended: quiet, and the newer of the two.
+        'codex:newer-quiet': { client: 'codex', sessionId: 'newer-quiet', lastUsedAt: iso(now - 60_000),
+          totalTokens: 20, models: { m: 20 }, turnEnded: true },
+        // Active nine minutes ago and still inside the running window: older, running.
+        'kilo:older-running': { client: 'kilo', sessionId: 'older-running', lastUsedAt: iso(now - 9 * 60_000),
+          totalTokens: 10, models: { m: 10 } }
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  // The quiet one is newer, so it leads - the running row is not hoisted.
+  assert.deepEqual(cell.sessions.map((row) => row.sessionId), ['newer-quiet', 'older-running']);
+  assert.equal(cell.sessions[0].running, false);
+  assert.equal(cell.sessions[1].running, true);
+  // And the running reading itself is unchanged by the ordering: it counts, not sorts.
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions).count, 1);
+  // The cap still prefers running rows: with room for one, the running row is kept even
+  // though it is the older one, and it is printed at its own position in the timeline.
+  const [capped] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true }] });
+  assert.deepEqual(capped.sessions.map((row) => row.sessionId), ['older-running']);
+  // A provider card keeps the running-first order it has always had. The timeline is the
+  // Sessions item's own order, so the shared selection cannot hand it to both: the same
+  // fixture through a provider card must come out the other way round.
+  // Both rows belong to Codex here: a provider card only lists its own clients, so the
+  // fixture above (one codex row, one kilo row) would leave it a single row to order.
+  const codexOnly = {
+    periods: {
+      month: { sessions: {
+        'codex:newer-quiet': stats.periods.month.sessions['codex:newer-quiet'],
+        'codex:older-running': { ...stats.periods.month.sessions['kilo:older-running'], client: 'codex' }
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [{ provider: 'codex', status: 'ok', accountKey: 'k', windows: [] }] }
+  };
+  const [provider] = buildEdgeDockCells(codexOnly, { items: [{ type: 'limit', provider: 'codex' }] });
+  assert.deepEqual(
+    provider.sessions.map((row) => row.sessionId),
+    ['older-running', 'newer-quiet'],
+    'a provider card stays running-first'
+  );
+});
+
+// A running-only card re-applies its filter as it paints, because the renderer repaints
+// from the payload it holds the moment a running window expires - before the main
+// process re-projects. Filtering only at projection time left a row that had just gone
+// idle sitting in a card titled "only show running sessions", until the next push.
+test('a running-only card drops a row the moment its window expires', () => {
+  const now = Date.now();
+  const iso = (ms) => new Date(ms).toISOString();
+  const stats = {
+    periods: {
+      month: { sessions: {
+        'codex:soon-quiet': { client: 'codex', sessionId: 'soon-quiet', lastUsedAt: iso(now - 9 * 60_000),
+          totalTokens: 20, models: { m: 20 } }
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true }] });
+  assert.equal(cell.runningOnly, true);
+  assert.deepEqual(cell.sessions.map((row) => row.sessionId), ['soon-quiet']);
+  // The projection carried it because it was running then; this is the payload the card
+  // repaints from after the window passes, with no new push.
+  const atExpiry = edgeDockPresentation.runningSessionSummary(cell.sessions, cell.runningExpiresAt).rows;
+  assert.deepEqual(atExpiry, [], 'the window this cell reported is the one that empties it');
+  // Re-applying the filter at paint time is what the card does with that.
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const card = dock.slice(dock.indexOf('function sessionsCard('), dock.indexOf('// Cards are built in a hidden staging layer'));
+  assert.match(card, /const sessions = cell\.runningOnly === true \? running : pushed;/);
+  // And the empty state it then renders is the running-only wording, not the generic one.
+  assert.match(card, /cell\.runningOnly \? 'edgeDock\.sessionsNoneRunning' : 'edgeDock\.sessionsNone'/);
+});
+
+// The rail cell's third line is the item's own choice. Showing the live rate there
+// must not disturb the card, and the sample has to ride the cell: the dock window
+// holds no settings and no stats, so it cannot derive a rate for itself.
+test('a sessions item can put the live rate on its rail cell instead of tool marks', () => {
+  const nowIso = new Date().toISOString();
+  const session = (client, id) => ({ client, sessionId: id, lastUsedAt: nowIso, totalTokens: 10, models: { m: 10 } });
+  const stats = {
+    periods: { month: { sessions: { 'codex:a': session('codex', 'a') } }, today: { sessions: {} } },
+    limits: { providers: [] }
+  };
+  const liveRate = { speed: 184, burn: 11_040, deviceCount: 1, idle: false };
+  const cells = (item, options) => buildEdgeDockCells(stats, { items: [item], liveRate, ...options });
+
+  // Default: the cell names the working tools and carries no rate at all.
+  const [marks] = cells({ type: 'stat', metric: SESSIONS_METRIC });
+  assert.equal(marks.cellDetail, 'clients');
+  assert.deepEqual(edgeDockPresentation.runningSessionSummary(marks.sessions).clients, ['codex']);
+  assert.equal(marks.rate, null);
+
+  // Opt-in: the same cell carries the sample, in the mode the item is in.
+  const [rate] = cells({ type: 'stat', metric: SESSIONS_METRIC, cellDetail: 'rate' });
+  assert.equal(rate.cellDetail, 'rate');
+  assert.equal(rate.rate, 184);
+  assert.equal(rate.rateMode, 'speed');
+  assert.equal(rate.rateIdle, false);
+  // The marks still ride the cell, because the card and the item's other
+  // surfaces read the same projection; only which one the rail draws changes.
+  assert.deepEqual(edgeDockPresentation.runningSessionSummary(rate.sessions).clients, ['codex']);
+
+  // Burn mode reads the other figure, from the same sample.
+  const [burn] = cells({ type: 'stat', metric: SESSIONS_METRIC, cellDetail: 'rate' }, { tokenRateMode: 'burn' });
+  assert.equal(burn.rate, 11_040);
+  assert.equal(burn.rateMode, 'burn');
+
+  // No sample is an absence, not a zero: the cell draws its placeholder and
+  // reports idle, rather than a confident 0 tok/s.
+  const [none] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, cellDetail: 'rate' }] });
+  assert.equal(none.rate, null);
+  assert.equal(none.rateIdle, true);
+
+  // A plain sessions item keeps the old stored shape exactly: adding this option
+  // must not rewrite what an existing item normalizes to beyond the new field.
+  assert.deepEqual(normalizeEdgeDockItems([{ type: 'stat', metric: 'sessions' }])[0], {
+    type: 'stat', metric: 'sessions', runningOnly: false, groupBy: 'none', cellDetail: 'clients'
+  });
+  assert.equal(normalizeEdgeDockItems([{ type: 'stat', metric: 'sessions', cellDetail: 'nope' }])[0].cellDetail, 'clients');
+});
+
+// Blocker: the projection dropped the archive flags, so a row that reads idle in
+// the rail's own derivation came back running in the card, which re-derives state
+// from the projected row. `sessionActivityState` reads those flags first, and its
+// archived rule is absolute, so losing them is a predicate violation rather than a
+// display difference. The old test only checked the projection's own boolean, which
+// is exactly the reading the renderer does not use.
+test('a projected session row keeps the archive flags the card re-derives state from', () => {
+  const nowIso = new Date().toISOString();
+  const base = { lastUsedAt: nowIso, totalTokens: 10, models: { 'gpt-5': 10 } };
+  const stats = {
+    periods: {
+      month: { sessions: {
+        // Fresh timestamp, no turnEnded: running by time alone, and idle only
+        // because it is archived.
+        'codex:arch': { client: 'codex', sessionId: 'arch', ...base, archived: true },
+        'codex:gone': { client: 'codex', sessionId: 'gone', ...base, deleted: true },
+        'codex:src': { client: 'codex', sessionId: 'src', ...base, sourceDeleted: true },
+        'codex:live': { client: 'codex', sessionId: 'live', ...base }
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  const byId = new Map(cell.sessions.map((row) => [row.sessionId, row]));
+  // The projection's own reading is 1 running, and the renderer must agree with it
+  // on every single row - the disagreements were the bug.
+  assert.equal(cell.sessions.filter((row) => row.running).length, 1);
+  for (const id of ['arch', 'gone', 'src']) {
+    assert.equal(sessionLive.sessionActivityState(byId.get(id)), 'idle', `${id} must stay idle after projection`);
+  }
+  assert.equal(sessionLive.sessionActivityState(byId.get('live')), 'running');
+  // All three flags ride the row: the predicate reads three separate fields, so
+  // carrying one alias would leave the other two able to resurrect a session.
+  assert.deepEqual(
+    [byId.get('arch').archived, byId.get('gone').deleted, byId.get('src').sourceDeleted],
+    [true, true, true]
+  );
+  assert.deepEqual(
+    [byId.get('live').archived, byId.get('live').deleted, byId.get('live').sourceDeleted],
+    [false, false, false]
+  );
+  // And the shared summary the rail draws from must agree with the projection too.
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions).count, 1);
+});
+
+// Blocker: running expires on a clock, so a count frozen at projection time goes
+// stale on a rail that nothing re-projects - the cell would claim a running session
+// and the card it opened would show none. These lock the two halves: the reading is
+// derived at the clock it is asked about, and the cell says when it must be asked
+// again.
+test('a sessions cell re-derives running at the clock it is asked, and reports when that changes', () => {
+  const { RUNNING_WINDOW_MS } = sessionLive;
+  // A real clock, not a fixed date: `buildEdgeDockCells()` computes
+  // `runningExpiresAt` from `Date.now()`, so pinning the sessions to an absolute
+  // timestamp made this test pass only until the wall clock reached that date.
+  const now = Date.now();
+  const iso = (ms) => new Date(ms).toISOString();
+  const stats = {
+    periods: {
+      month: { sessions: {
+        'codex:a': { client: 'codex', sessionId: 'a', lastUsedAt: iso(now - 60_000), totalTokens: 10, models: { m: 10 } },
+        'codex:b': { client: 'codex', sessionId: 'b', lastUsedAt: iso(now - 9 * 60_000), totalTokens: 10, models: { m: 10 } }
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  // Both were inside the window when the cell was built.
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, now).count, 2);
+  assert.deepEqual(edgeDockPresentation.runningSessionSummary(cell.sessions, now).clients, ['codex']);
+  // `b` expires first, one minute before `a`. The expiry is the first millisecond at
+  // which the row is NOT running, so the inclusive predicate's boundary (`last +
+  // window`, still running) is one millisecond before it.
+  const bBoundary = Date.parse(iso(now - 9 * 60_000)) + RUNNING_WINDOW_MS;
+  assert.equal(cell.runningExpiresAt, bBoundary + 1);
+  assert.equal(sessionLive.sessionActivityState(cell.sessions.find((row) => row.sessionId === 'b'), bBoundary), 'running');
+  assert.equal(sessionLive.sessionActivityState(cell.sessions.find((row) => row.sessionId === 'b'), bBoundary + 1), 'idle');
+  // So a scheduler that wakes exactly at the reported moment sees the drop, which is
+  // the whole point of reporting it: waking at the boundary itself would re-project a
+  // cell that still counts the row.
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, cell.runningExpiresAt).count, 1);
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, bBoundary).count, 2);
+  // Past both they read none, which is the state the rail has to stop contradicting.
+  const afterAll = now + RUNNING_WINDOW_MS;
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, afterAll).count, 0);
+  assert.equal(cell.runningExpiresAt <= afterAll, true);
+  // Nothing running is 0 rather than a time, so a scheduler reading it cannot arm a
+  // timer for a row that can only get quieter.
+  const [quiet] = buildEdgeDockCells({
+    // Relative to the real clock the projection reads, not to this test's fixed
+    // `now`: `runningExpiresAt` is computed at projection time.
+    periods: { month: { sessions: { 'codex:q': { client: 'codex', sessionId: 'q', lastUsedAt: new Date(Date.now() - RUNNING_WINDOW_MS - 1).toISOString(), totalTokens: 5, models: { m: 5 } } } }, today: { sessions: {} } },
+    limits: { providers: [] }
+  }, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  assert.equal(quiet.runningExpiresAt, 0);
+  assert.equal(edgeDockPresentation.runningSessionSummary(quiet.sessions).count, 0);
+});
+
+// The expiry a cell reports has to be the first millisecond at which the row is NOT
+// running. Reporting the inclusive boundary (`last + window`, still running) let a
+// stats push land on exactly that millisecond, re-project a cell that still counted
+// the row, and carry no next expiry for it - so the reading stuck until the next real
+// push, which in running-only mode is a row that should not be there.
+test('a reported expiry is the first millisecond the row is not running', () => {
+  const { RUNNING_WINDOW_MS } = sessionLive;
+  const now = Date.now();
+  const iso = (ms) => new Date(ms).toISOString();
+  const last = now - 9 * 60_000;
+  const stats = {
+    periods: {
+      month: { sessions: { 'codex:x': { client: 'codex', sessionId: 'x', lastUsedAt: iso(last), totalTokens: 5, models: { m: 5 } } } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  const boundary = last + RUNNING_WINDOW_MS;
+  const row = cell.sessions[0];
+  // The predicate is inclusive at the boundary, so that instant still counts.
+  assert.equal(sessionLive.sessionActivityState(row, boundary), 'running');
+  assert.equal(sessionLive.sessionActivityState(row, boundary + 1), 'idle');
+  // And the reported expiry is the other side of it, so waking there sees the drop.
+  assert.equal(cell.runningExpiresAt, boundary + 1);
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, cell.runningExpiresAt).count, 0);
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, cell.runningExpiresAt - 1).count, 1);
+});
+
+// The client mark is a mask-painted span with no text, so the tool it names is
+// invisible to assistive technology. The mixed list is exactly where that matters:
+// naming the tool is the feature's whole point, and a screen reader saw only the
+// session title. Asserted on the source, since the marks are painted in Electron.
+test('the sessions rail and mixed rows name their tools for assistive technology', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  // The rail cell's accessible name is built from the same summary the marks are
+  // drawn from, so the spoken tools and the drawn ones cannot disagree - and read
+  // from the rows rather than a frozen field, so it ages with them.
+  const statCell = dock.slice(dock.indexOf('function statCellNode('), dock.indexOf('let railNode = null;'));
+  assert.match(statCell, /runningSessionSummary\(cell\.sessions\)\.clients\.map\(\(client\) => clientLabel\(client\)\)/);
+  assert.match(statCell, /node\.setAttribute\('aria-label', spoken\)/);
+  // A mixed row states its own client in text, and does so only when it draws the
+  // mark: a provider card's rows are all one client and the card header names it.
+  const container = dock.slice(dock.indexOf('function sessionsContainer('), dock.indexOf('function providerCard('));
+  assert.match(container, /nameNode\.append\(el\('span', 'sr-only', `\$\{clientLabel\(session\.client\)\} `\)\)/);
+  assert.match(container, /if \(options\.showClientMark && session\.client\) \{/);
+  // The label is the client's own display name, not its raw id.
+  assert.doesNotMatch(container, /sr-only', `\$\{session\.client\}/);
+});
+
+// The tooltip was wrong twice over: its wording belonged to the live-rate item, whose
+// readout really does toggle on click, and a `title` needs the pointer to rest while
+// hovering this cell opens a card after 70ms. It is gone, and the toggle wording stays
+// with the readout that toggles.
+test('the sessions rate line carries no unreachable tooltip', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const controller = fs.readFileSync(path.join(rendererDir, '..', 'edgeDock', 'controller.js'), 'utf8');
+  const rateNode = dock.slice(dock.indexOf('function cellRateNode('), dock.indexOf('// The tools with a session running'));
+  // No tooltip at all on this line. A `title` needs the pointer to rest, but hovering
+  // this cell opens its card after bubbleDelayMs (70ms in EDGE_DOCK_TIMING), so a
+  // tooltip here is unreachable - and the wording it would carry belongs to the
+  // live-rate item, whose readout really does toggle while this cell opens its card.
+  assert.doesNotMatch(rateNode, /node\.title =/);
+  assert.doesNotMatch(rateNode, /edgeDock\.rate\.(switch|reading)/);
+  // The toggle wording is still used by the cell that really does toggle, so this
+  // is a scoping fix rather than a removal of the affordance.
+  const liveRateCard = dock.slice(dock.indexOf('function appendLiveRate('), dock.indexOf('function statCard('));
+  assert.match(liveRateCard, /t\('edgeDock\.rate\.switch'\)/);
+  const toggle = controller.slice(controller.indexOf("ipcMain.on('edgeDock:click'"), controller.indexOf("ipcMain.on('edgeDock:dragStart'"));
+  assert.match(toggle, /metric === 'liveRate'/);
+  assert.doesNotMatch(toggle, /cellDetail/);
+  // And the retired key is gone from every locale rather than left as dead copy.
+  const i18n = readRendererFile('i18n.js');
+  assert.doesNotMatch(i18n, /'edgeDock\.rate\.reading'/);
+});
+
+// A repaint rebuilds the card and restores the scroll of the container that scrolls.
+// That container differs by card: a provider card and the grouped Sessions card use
+// `.edge-dock-accounts`, while the ungrouped Sessions card's list is
+// `.edge-dock-session-list` - and that is the one which overflows there, because running
+// rows are never capped. Reading only the first selector meant every clock repaint of
+// that card reset it to the top, mid-read.
+test('a repainted card restores the scroll container it actually uses', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
+  const commit = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('function renderBubble('));
+  assert.match(commit, /querySelector\(CARD_SCROLL_SELECTOR\)/);
+  assert.match(commit, /list\.scrollTop = scrollTop;/);
+  // Both containers are named, read from the declaration so a third cannot be added to
+  // the card without this failing.
+  const declaration = dock.match(/const CARD_SCROLL_SELECTOR = '([^']+)';/);
+  assert.ok(declaration, 'the scroll containers are declared once');
+  const selectors = declaration[1].split(',').map((part) => part.trim());
+  assert.deepEqual(selectors, ['.edge-dock-accounts', '.edge-dock-session-list']);
+  // And each really scrolls, which is why it has to be restored.
+  for (const selector of selectors) {
+    // Plain string search: these selectors carry a leading dot and a hyphen, and
+    // escaping them into a RegExp literal inside this file is what broke the first
+    // version of this assertion.
+    const start = css.indexOf(`\n${selector} {`);
+    assert.ok(start >= 0, `${selector} should be styled`);
+    const body = css.slice(start, css.indexOf('}', start));
+    assert.match(body, /overflow-y: auto;/, `${selector} should be the scrolling element`);
+  }
+});
+
+// The self-repaint scheduler replaced the card's fixed 30s interval, and its first
+// shape changed behaviour it had no business touching: the card fell back to 60s (a
+// regression against the period reset countdowns are drawn at) and the rail, which was
+// push-driven, started rebuilding its children every minute for nothing. Per surface,
+// because the two wake for different reasons.
+test('the self-repaint cadence matches what each surface actually needs', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const period = dock.slice(dock.indexOf('const BUBBLE_REPAINT_MS'), dock.indexOf('function repaintSelf('));
+  // The card keeps the 30s it always had.
+  assert.match(period, /const BUBBLE_REPAINT_MS = 30_000;/);
+  assert.match(period, /const period = surface === 'bubble' \? BUBBLE_REPAINT_MS : 0;/);
+  // A rail only wakes for a sessions expiry, and reports 0 when there is none - which
+  // is what leaves its timer unarmed rather than polling it.
+  assert.match(period, /if \(!surfacesShowingSessions\(\)\) return 0;/);
+  assert.match(period, /if \(!soonest\) return 0;/);
+  assert.match(period, /return waits\.length \? Math\.min\(\.\.\.waits\) : 0;/);
+  // An expiry may shorten a wait but never lower the period after it: the shortest of
+  // the two applies to this one wake only, and the timer re-arms from a fresh read.
+  // Sliced to the end of the function body rather than to the first call of it, which
+  // is the recursive one inside and cut the slice before the lines under test.
+  const scheduler = dock.slice(dock.indexOf('function scheduleSelfRepaint('), dock.indexOf('bridge.ready();'));
+  assert.match(scheduler, /if \(!delay\) return;/);
+  assert.match(scheduler, /repaintSelf\(\);/);
+  assert.match(scheduler, /scheduleSelfRepaint\(\);/);
+  // The old fixed interval is gone, so nothing repaints a surface on a blind period.
+  assert.doesNotMatch(dock, /setInterval\(/);
+});
+
+// The wait has to be recomputed from the rows, not read off the cell. `runningExpiresAt`
+// describes the payload as it was projected and a repaint does not re-project, so once
+// the soonest expiry passed that field stayed in the past: the surface woke once and then
+// stopped, and a second session's expiry never fired. Measured on the real renderer
+// before the fix - two sessions expiring at 2s and 6s produced one repaint in eight
+// seconds and left the cell claiming a session that had gone quiet.
+test('the session wait is recomputed from the rows so every expiry wakes the surface', () => {
+  const now = Date.now();
+  const iso = (ms) => new Date(ms).toISOString();
+  const stats = {
+    periods: {
+      month: { sessions: {
+        'codex:a': { client: 'codex', sessionId: 'a', lastUsedAt: iso(now - 60_000), totalTokens: 10, models: { m: 10 } },
+        'kilo:b': { client: 'kilo', sessionId: 'b', lastUsedAt: iso(now - 5 * 60_000), totalTokens: 10, models: { m: 10 } }
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  // The cell reports the first expiry, which is what the surface wakes on...
+  assert.equal(cell.runningExpiresAt, edgeDockPresentation.nextRunningExpiryAt(cell.sessions, now));
+  // ...and asking the same rows again after it passes answers with the second one, which
+  // reading the cell's own field could not do.
+  const second = edgeDockPresentation.nextRunningExpiryAt(cell.sessions, cell.runningExpiresAt + 1);
+  assert.ok(second > cell.runningExpiresAt, 'a later expiry should be found after the first passes');
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, cell.runningExpiresAt + 1).count, 1);
+  // And the scheduler asks the rows, not the cell.
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const scheduler = dock.slice(dock.indexOf('function sessionsExpiryDelayMs('), dock.indexOf('function repaintSelf('));
+  assert.match(scheduler, /presentation\.nextRunningExpiryAt\(cell\.sessions, now\)/);
+  assert.doesNotMatch(scheduler, /cell\.runningExpiresAt/);
+});
+
+// The flare cache keeps one entry per session it has seen, so a long-lived card has
+// to prune it against the whole list. Pruning per group would delete every other
+// group's entries, which is why this asserts the call sits in sessionsCard().
+test('the standalone sessions card prunes the activity cache against its whole list', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const card = dock.slice(dock.indexOf('function sessionsCard('), dock.indexOf('// Cards are built in a hidden staging layer'));
+  // The grouped branch is the leak: it renders one section per tool, so the prune
+  // must happen before the split rather than inside it.
+  const beforeSplit = card.slice(0, card.indexOf('const groups = new Map()'));
+  // Pruned against everything the card was handed rather than the list it will draw: a
+  // row that is merely quiet keeps its flare entry, so it flares on its next write
+  // instead of being treated as newly seen when it starts running again.
+  assert.match(card, /pruneActivity\(pushed\);/);
+  assert.doesNotMatch(card, /pruneActivity\(rows\);/);
+  assert.match(beforeSplit, /pruneActivity\(pushed\);/);
+});
+
+// The main process only keeps the live-rate tracker alive for items that show a
+// rate. A sessions item in rate mode is one of those, and missing it left the cell
+// permanently blank - the cell existed but nothing ever computed its sample.
+test('the live-rate tracker is kept alive by a rate-mode sessions item', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const gate = main.slice(main.indexOf('function edgeDockShowsLiveRate()'), main.indexOf('function edgeDockLiveRateSample('));
+  assert.match(gate, /item\.metric === 'liveRate'/);
+  assert.match(gate, /item\.metric === 'sessions' && item\.cellDetail === 'rate'/);
+});
+
+// The cell already prints one number above this line (the running count), so a
+// stacked figure-over-unit made the rate read as a second, unrelated number. The
+// unit has to sit on the same line as the figure it belongs to.
+test('the rail cell rate is one line at one size, below the count it sits under', () => {
+  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
+  const row = css.match(/\.edge-dock-cell-rate \{([^}]*)\}/);
+  assert.ok(row, 'the rate row should be styled');
+  assert.match(row[1], /display: flex;/);
+  assert.match(row[1], /align-items: baseline;/);
+  assert.doesNotMatch(row[1], /display: grid;/);
+  assert.doesNotMatch(row[1], /flex-direction: column;/);
+  assert.match(row[1], /font-family: var\(--display-font/);
+  const value = css.match(/\.edge-dock-cell-rate-value \{([^}]*)\}/);
+  assert.ok(value, 'the rate figure should be styled');
+  assert.match(value[1], /font-weight: 650;/);
+  const unit = css.match(/\.edge-dock-cell-rate-unit \{([^}]*)\}/);
+  assert.ok(unit, 'the rate unit should be styled');
+  // The figure and its unit share ONE size, and neither may reintroduce a size of its
+  // own. That is the reading this line is for: it sits under the running count, so a
+  // larger figure reads as a second headline beside that count rather than as the
+  // reading under it. The live-rate cell below is the opposite case and keeps its own
+  // larger number, which is why this is asserted as sameness rather than a value.
+  const size = row[1].match(/font-size: ([\d.]+px);/);
+  assert.ok(size, 'the rate row owns the size both parts share');
+  assert.doesNotMatch(value[1], /font-size:/);
+  assert.doesNotMatch(unit[1], /font-size:/);
+  // The unit still carries the hierarchy the size no longer does.
+  // The unit IS the live-rate cell's label treatment, because it names the same unit
+  // for the same measurement: same size, weight and colour as that cell's `tok/s`.
+  // Read from that cell's own rule so this is an agreement rather than a value typed
+  // twice - the failure this replaced was the unit being restyled in passing.
+  const liveLabel = css.match(/\.edge-dock-stat-label \{([^}]*)\}/);
+  assert.ok(liveLabel, 'the live-rate cell keeps its own label style');
+  // Size lives on the row (both parts inherit it); weight and colour are the unit's
+  // own. Compared property by property against the label's declarations.
+  const liveSize = liveLabel[1].match(/font-size: ([^;]+);/)[1];
+  assert.equal(size[1], liveSize, 'the rate line should use the live-rate label size');
+  for (const property of ['font-weight', 'color']) {
+    const expected = liveLabel[1].match(new RegExp(`${property}: ([^;]+);`))[1];
+    assert.ok(
+      new RegExp(`${property}: ${expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')};`).test(unit[1]),
+      `the rate unit should keep the live-rate label's ${property} (${expected})`
+    );
+  }
+  // And the live-rate cell keeps its own scale: it is the headline of its cell, so the
+  // two must not be pulled to one number.
+  const liveValue = css.match(/\.edge-dock-stat-value \{([^}]*)\}/);
+  assert.ok(liveValue, 'the live-rate cell keeps its own type scale');
+  const liveFigureSize = liveValue[1].match(/font-size: ([\d.]+px);/);
+  assert.ok(liveFigureSize, 'the live-rate figure is sized');
+  assert.notEqual(liveFigureSize[1], size[1]);
+});
+
+// A stored item round-trips through its own normalizer, or the choice the user
+// made in the composer is silently reset the next time the dock is rebuilt.
+test('a sessions item normalizes its options and defaults them off', () => {
+  const item = (raw) => normalizeEdgeDockItems([{ type: 'stat', metric: 'sessions', ...raw }])[0];
+  assert.deepEqual(item({}), { type: 'stat', metric: 'sessions', runningOnly: false, groupBy: 'none', cellDetail: 'clients' });
+  assert.deepEqual(item({ runningOnly: true, groupBy: 'client', cellDetail: 'rate' }), {
+    type: 'stat', metric: 'sessions', runningOnly: true, groupBy: 'client', cellDetail: 'rate'
+  });
+  // Unknown values fall back rather than surviving into the renderer.
+  assert.deepEqual(item({ runningOnly: 'yes', groupBy: 'provider', cellDetail: 'maybe' }), {
+    type: 'stat', metric: 'sessions', runningOnly: false, groupBy: 'none', cellDetail: 'clients'
+  });
+  // Every other stat metric stays exactly as it was: no options are invented.
+  assert.deepEqual(normalizeEdgeDockItems([{ type: 'stat', metric: 'today' }])[0], { type: 'stat', metric: 'today' });
 });
 
 test('edge dock is opt-in and limited to macOS and Windows', () => {
@@ -738,6 +1400,320 @@ test('hidden accounts are left out of the headline and the card', () => {
   const [codex] = buildEdgeDockCells(stats, { items });
   assert.equal(codex.remainingPercent, 70);
   assert.deepEqual(codex.accounts.map((account) => account.accountKey), ['sha256:b']);
+  // Hidden is about what the card draws. The subscription matcher is handed both
+  // accounts, or a record bound to the one off screen would fall through
+  // matchProviderAccount()'s sole-account fallback onto the one on it.
+  assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountKey), ['sha256:a', 'sha256:b']);
+});
+
+test('an account the rail drops for reporting nothing still binds its subscription', () => {
+  // The rail only lists accounts that report something, but a subscription is
+  // bound to the account: a failing one with no last-known windows is still the
+  // account the user recorded, and a matcher that cannot see it reads the one
+  // account left as "no ambiguity" and puts its record on that row instead.
+  const stats = {
+    limits: {
+      providers: [
+        provider('codex', { accountKey: 'sha256:a', windows: [{ kind: 'session', remainingPercent: 5 }] }),
+        provider('codex', { accountKey: 'sha256:b', status: 'error', windows: [] })
+      ]
+    }
+  };
+  const [codex] = buildEdgeDockCells(stats, {
+    items: [{ type: 'limit', provider: 'codex', showUsage: true }]
+  });
+  assert.deepEqual(codex.accounts.map((account) => account.accountKey), ['sha256:a']);
+  assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountKey), ['sha256:a', 'sha256:b']);
+});
+
+test('a provider with nothing to report still carries its accounts to the matcher', () => {
+  const stats = {
+    limits: { providers: [provider('codex', { accountKey: 'sha256:a', status: 'error', windows: [] })] }
+  };
+  const [codex] = buildEdgeDockCells(stats, {
+    items: [{ type: 'limit', provider: 'codex', showUsage: true }]
+  });
+  assert.equal(codex.accounts.length, 0);
+  assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountKey), ['sha256:a']);
+});
+
+// The rail's provider list is the *aggregate*, and the aggregate drops an
+// account the moment the same provider has a fresh one (limits/core.js collapses
+// by provider name, and one login hashes differently per platform). A record
+// bound to a dropped account is one the matcher cannot see, so it falls through
+// matchProviderAccount()'s sole-account fallback onto the account left on
+// screen — which is why the page reads the local device's own records beside the
+// aggregate, and why the card has to as well.
+test('the matcher sees the local accounts the aggregate collapsed away', () => {
+  const local = provider('codex', { accountKey: 'sha256:local', status: 'unauthorized', windows: [] });
+  const remote = provider('codex', { accountKey: 'sha256:remote', windows: [{ kind: 'session', remainingPercent: 60 }] });
+  const stats = {
+    devices: [
+      { deviceId: 'this-mac', limits: { providers: [local] } },
+      { deviceId: 'other-mac', limits: { providers: [remote] } }
+    ],
+    // What the aggregate holds: the stale local row is gone.
+    limits: { providers: [remote] }
+  };
+  const [codex] = buildEdgeDockCells(stats, {
+    localDeviceId: 'this-mac',
+    items: [{ type: 'limit', provider: 'codex', showUsage: true }]
+  });
+
+  assert.deepEqual(
+    codex.subscriptionAccounts.map((account) => account.accountKey),
+    ['sha256:local', 'sha256:remote'],
+    'both accounts reach the matcher, local first'
+  );
+  // The aggregate is still what the card draws: a collapsed account is not a row.
+  assert.deepEqual(codex.accounts.map((account) => account.accountKey), ['sha256:remote']);
+});
+
+test('the same account in both lists is one candidate, not two', () => {
+  const account = provider('codex', { accountKey: 'sha256:a', windows: [{ kind: 'session', remainingPercent: 60 }] });
+  const stats = {
+    devices: [{ deviceId: 'this-mac', limits: { providers: [account] } }],
+    limits: { providers: [account] }
+  };
+  const [codex] = buildEdgeDockCells(stats, {
+    localDeviceId: 'this-mac',
+    items: [{ type: 'limit', provider: 'codex', showUsage: true }]
+  });
+  assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountKey), ['sha256:a']);
+});
+
+test('one account is one candidate however each copy of it reads', () => {
+  // The two copies are two records: this device's own and the aggregate's. A key
+  // that has rotated leaves the address behind, and the display name is not what
+  // makes an account one — a candidate list that counted these twice is what the
+  // matcher's sole-account fallback and its name rung are read against.
+  const local = provider('codex', { accountKey: 'sha256:a', accountName: 'work', windows: [] });
+  const aggregate = provider('codex', {
+    accountKey: 'sha256:a',
+    accountName: 'Work',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const stats = {
+    devices: [{ deviceId: 'this-mac', limits: { providers: [local] } }],
+    limits: { providers: [aggregate] }
+  };
+  const [codex] = buildEdgeDockCells(stats, {
+    localDeviceId: 'this-mac',
+    items: [{ type: 'limit', provider: 'codex', showUsage: true }]
+  });
+  assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountName), ['work']);
+  // The aggregate is still what the card draws.
+  assert.deepEqual(codex.accounts.map((account) => account.accountName), ['Work']);
+
+  // Two keys are two accounts even on one address, which is the shape the hub
+  // keeps apart on purpose: one address holds several Codex workspaces, and
+  // aggregateLimits pins that (limits.test.js). An address read as sameness
+  // dropped the second workspace out of the matcher universe, so a subscription
+  // bound to it resolved onto the first.
+  const personal = provider('codex', {
+    accountKey: 'sha256:personal',
+    accountEmail: 'member@example.com',
+    accountName: 'Personal',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const team = provider('codex', {
+    accountKey: 'sha256:team',
+    accountEmail: 'member@example.com',
+    accountName: 'Team',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const [workspaces] = buildEdgeDockCells(
+    {
+      devices: [{ deviceId: 'this-mac', limits: { providers: [personal] } }],
+      limits: { providers: [personal, team] }
+    },
+    { localDeviceId: 'this-mac', items: [{ type: 'limit', provider: 'codex', showUsage: true }] }
+  );
+  assert.deepEqual(
+    workspaces.subscriptionAccounts.map((account) => account.accountName),
+    ['Personal', 'Team'],
+    'two workspaces on one address stay two candidates'
+  );
+});
+
+test('an account nobody is signed into does not stand in for the ones that are', () => {
+  // The collector reports a provider with no credential as a bare
+  // `notConfigured` row (aggregateLimits emits the same shape), and the dock
+  // reads this device's own records. That record names nothing, so it cannot be
+  // an answer about an account that names something — letting it be one emptied
+  // the matcher universe of the accounts the hub does have.
+  const signedOut = { provider: 'codex', status: 'notConfigured', updatedAt: '2026-07-10T02:55:17.000Z', windows: [] };
+  const a = provider('codex', {
+    accountKey: 'sha256:a',
+    accountEmail: 'a@example.com',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const b = provider('codex', {
+    accountKey: 'sha256:b',
+    accountEmail: 'b@example.com',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const [codex] = buildEdgeDockCells(
+    {
+      devices: [{ deviceId: 'this-mac', limits: { providers: [signedOut] } }],
+      limits: { providers: [a, b] }
+    },
+    { localDeviceId: 'this-mac', items: [{ type: 'limit', provider: 'codex', showUsage: true }] }
+  );
+  assert.ok(
+    codex.subscriptionAccounts.some((account) => account.accountKey === 'sha256:a'),
+    'the signed-out row must not drop the accounts the hub reports'
+  );
+  assert.ok(codex.subscriptionAccounts.some((account) => account.accountKey === 'sha256:b'));
+  // And a binding to one of them lands on that one, rather than on whatever the
+  // universe happened to collapse to.
+  const bound = matchProviderAccount({ id: 's', provider: 'codex', binding: { accountKey: 'sha256:b' } }, codex.subscriptionAccounts);
+  assert.equal(bound?.accountKey, 'sha256:b');
+});
+
+test('a copy with no key is a copy, and never the account a binding lands on', () => {
+  // One address holds two Codex workspaces, which aggregateLimits keeps apart by
+  // key (limits.test.js). A device can also report that address with no key at
+  // all — that is what mapCodexRateLimitsToProvider() emits when the payload
+  // carries an email and no account key (limitCollector.codex.test.js), and what
+  // an older record posts. Read pair by pair the copy is the same account as
+  // *both* workspaces, so whichever order the two lists arrived in decided which
+  // of them survived; the losing order kept only the copy, a binding to the
+  // second workspace landed on it through the sole-account fallback, and the row
+  // lookup then answered yes for either workspace — one record drawing on two.
+  const workspaces = [
+    provider('codex', {
+      accountKey: 'sha256:personal',
+      accountEmail: 'member@example.com',
+      accountName: 'Personal',
+      windows: [{ kind: 'session', remainingPercent: 60 }]
+    }),
+    provider('codex', {
+      accountKey: 'sha256:team',
+      accountEmail: 'member@example.com',
+      accountName: 'Team',
+      windows: [{ kind: 'session', remainingPercent: 60 }]
+    })
+  ];
+  const copy = provider('codex', {
+    accountEmail: 'member@example.com',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const binding = { id: 's', provider: 'codex', binding: { accountKey: 'sha256:team' } };
+
+  const orders = [
+    ['the copy is this device\'s own record', [copy], workspaces],
+    ['the copy is the aggregate\'s', [], [copy, ...workspaces]],
+    ['the copy sits between them', [], [workspaces[0], copy, workspaces[1]]]
+  ];
+  for (const [label, local, aggregate] of orders) {
+    const [codex] = buildEdgeDockCells(
+      {
+        devices: [{ deviceId: 'this-mac', limits: { providers: local } }],
+        limits: { providers: aggregate }
+      },
+      { localDeviceId: 'this-mac', items: [{ type: 'limit', provider: 'codex', showUsage: true }] }
+    );
+    assert.deepEqual(
+      codex.subscriptionAccounts.map((account) => account.accountKey).sort(),
+      ['sha256:personal', 'sha256:team'],
+      `${label}: both workspaces stay candidates`
+    );
+    const resolved = matchProviderAccount(binding, codex.subscriptionAccounts);
+    assert.equal(resolved?.accountKey, 'sha256:team', `${label}: the binding lands on the workspace it names`);
+    // What the rows are then drawn from: a subscription may only answer for the
+    // account it resolved to.
+    const drawnOn = codex.subscriptionAccounts
+      .filter((account) => accountIdentity.sameAccount(resolved, account))
+      .map((account) => account.accountKey);
+    assert.deepEqual(drawnOn, ['sha256:team'], `${label}: the record draws on one workspace`);
+  }
+
+  // With one workspace on that address the copy is a second copy of it, and the
+  // keyed record is the one that survives — it is the one a binding matches by key.
+  const [single] = buildEdgeDockCells(
+    {
+      devices: [{ deviceId: 'this-mac', limits: { providers: [copy] } }],
+      limits: { providers: [workspaces[0]] }
+    },
+    { localDeviceId: 'this-mac', items: [{ type: 'limit', provider: 'codex', showUsage: true }] }
+  );
+  assert.deepEqual(single.subscriptionAccounts.map((account) => account.accountKey), ['sha256:personal']);
+});
+
+test('one account keeps every key its copies were named by', () => {
+  // One account, two copies that name it differently. This device holds an
+  // opencode API key and no cookie, so its own row is keyed by the key's own
+  // hash (providers/opencode/limits.js); the Hub's collapse of the same account
+  // — merged from the machine that does hold the cookie — keeps the workspace id
+  // as the canonical key and the key's hash beside it as an alias (limits/core.js,
+  // and the comment where the producer publishes that alias). Deduping one
+  // account down to one record must not be what decides which of the two keys
+  // survives: a subscription bound on the cookie machine names the canonical id,
+  // and a survivor left holding only this device's key stops resolving it.
+  const keyOnly = provider('opencode', {
+    accountKey: 'sha256:keyonly',
+    accountName: 'Work',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const collapsed = provider('opencode', {
+    accountKey: 'sha256:workspace',
+    webAccountKey: 'sha256:workspace',
+    accountKeyAliases: ['sha256:keyonly'],
+    accountName: 'Work',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  // A second account, so the matcher's sole-account fallback cannot be what
+  // answers: the key rung has to be the one that lands.
+  const other = provider('opencode', {
+    accountKey: 'sha256:other',
+    accountName: 'Personal',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const binding = { id: 's', provider: 'opencode', binding: { accountKey: 'sha256:workspace' } };
+
+  const [opencode] = buildEdgeDockCells(
+    {
+      devices: [{ deviceId: 'this-mac', limits: { providers: [keyOnly] } }],
+      limits: { providers: [collapsed, other] }
+    },
+    { localDeviceId: 'this-mac', items: [{ type: 'limit', provider: 'opencode', showUsage: true }] }
+  );
+  // One record per account, this device's copy first.
+  assert.deepEqual(
+    opencode.subscriptionAccounts.map((account) => account.accountKey),
+    ['sha256:keyonly', 'sha256:other']
+  );
+  const resolved = matchProviderAccount(binding, opencode.subscriptionAccounts);
+  assert.equal(resolved?.accountKey, 'sha256:keyonly', 'the canonical key still resolves');
+  // And it resolves to one account: the row lookup asks the pairwise rule about
+  // whatever the binding landed on, so the survivor has to answer for both
+  // copies of the account it stands for, and for no other account.
+  const drawnOn = opencode.subscriptionAccounts
+    .filter((account) => accountIdentity.sameAccount(resolved, account))
+    .map((account) => account.accountKey);
+  assert.deepEqual(drawnOn, ['sha256:keyonly']);
+  assert.equal(accountIdentity.sameAccount(resolved, other), false);
+});
+
+test('two accounts that are only addresses stay two candidates', () => {
+  // Neither carries a key or a name, so an identity built out of those two fields
+  // read both as the same account: one of them never reached the matcher, and a
+  // record bound to it resolved to the other one instead.
+  const local = provider('codex', { accountKey: '', accountEmail: 'a@example.com', status: 'unauthorized', windows: [] });
+  const remote = provider('codex', { accountKey: '', accountEmail: 'b@example.com' });
+  const stats = {
+    devices: [{ deviceId: 'this-mac', limits: { providers: [local] } }],
+    limits: { providers: [remote] }
+  };
+  const [codex] = buildEdgeDockCells(stats, {
+    localDeviceId: 'this-mac',
+    items: [{ type: 'limit', provider: 'codex', showUsage: true }]
+  });
+  assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountEmail), [
+    'a@example.com',
+    'b@example.com'
+  ]);
 });
 
 test('item settings normalize to null for automatic and drop unknown entries', () => {
@@ -787,28 +1763,30 @@ test('derived periods read History totals and stay unknown until they arrive', (
   assert.deepEqual(ready.clients.map((client) => client.client), ['claude']);
 });
 
-test('provider windows keep the collector order so model groups stay together', () => {
+// The card's quota rows are built by the Limits view's own builder, which reads
+// the collector record. A projection here is what made the card a second,
+// less-informed implementation of those rows — every field it forgot to copy
+// was a row the card could not draw — so the record rides across untouched and
+// the window-level decisions (ordering, Codex's additional-limit preference)
+// stay in the one builder that makes them.
+test('the card carries the collector record the shared Limits view renders from', () => {
   const windows = [
     { kind: 'session', label: 'Gemini 5-hour', remainingPercent: 90 },
     { kind: 'weekly', label: 'Gemini weekly', remainingPercent: 80 },
     { kind: 'session', label: 'Claude/GPT 5-hour', remainingPercent: 70 },
     { kind: 'weekly', label: 'Claude/GPT weekly', remainingPercent: 60 }
   ];
-  const [cell] = buildEdgeDockCells({ limits: { providers: [provider('antigravity', { windows })] } }, {});
-  assert.deepEqual(cell.accounts[0].windows.map((window) => window.label), windows.map((window) => window.label));
-});
+  const record = provider('antigravity', { windows });
+  const [cell] = buildEdgeDockCells({ limits: { providers: [record] } }, {});
+  assert.deepEqual(cell.accounts[0].record, record);
 
-test('Codex additional quota windows follow the shared display setting', () => {
-  const windows = [
+  const codexWindows = [
     { kind: 'session', label: 'Session', remainingPercent: 70 },
     { kind: 'daily', label: 'GPT-5.3-Codex-Spark', remainingPercent: 40, additional: true }
   ];
-  const stats = { limits: { providers: [provider('codex', { windows })] } };
-  const [shown] = buildEdgeDockCells(stats, { showCodexAdditionalLimits: true });
-  assert.deepEqual(shown.accounts[0].windows.map((window) => window.label), ['Session', 'GPT-5.3-Codex-Spark']);
-
-  const [hidden] = buildEdgeDockCells(stats, { showCodexAdditionalLimits: false });
-  assert.deepEqual(hidden.accounts[0].windows.map((window) => window.label), ['Session']);
+  const codexRecord = provider('codex', { windows: codexWindows });
+  const [codex] = buildEdgeDockCells({ limits: { providers: [codexRecord] } }, {});
+  assert.deepEqual(codex.accounts[0].record.windows, codexWindows);
 });
 
 test('live rate readout reports the selected mode and idle state', () => {
