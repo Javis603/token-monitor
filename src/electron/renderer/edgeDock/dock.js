@@ -1053,6 +1053,15 @@ function sessionsCard(cell, card, head) {
 // card is only replaced once the main process reports that the window has been
 // sized and shaped for exactly that card, so a new card never paints into a
 // window still at the previous card's size (which read as a flash).
+//
+// Both scroll containers, because which one scrolls depends on the card. A provider
+// card and the grouped Sessions card scroll `.edge-dock-accounts`; the ungrouped
+// Sessions card's list is `.edge-dock-session-list`, and that is the one which overflows
+// there, since running rows are never capped. A repaint rebuilds the card, so a
+// selector that missed the container actually in use reset that card's scroll on every
+// clock tick - yanking the reader back to the top while they were reading it.
+const CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list';
+
 const stagingLayer = document.createElement('div');
 stagingLayer.className = 'edge-dock-staging';
 if (surface === 'bubble') root.append(stagingLayer);
@@ -1060,9 +1069,9 @@ if (surface === 'bubble') root.append(stagingLayer);
 function commitCard(card, cellId) {
   const previous = contentLayer.querySelector('.edge-dock-card');
   const sameCard = previous?.dataset.cellId === cellId;
-  const scrollTop = sameCard ? previous.querySelector('.edge-dock-accounts')?.scrollTop || 0 : 0;
+  const scrollTop = sameCard ? previous.querySelector(CARD_SCROLL_SELECTOR)?.scrollTop || 0 : 0;
   contentLayer.replaceChildren(card);
-  const list = card.querySelector('.edge-dock-accounts');
+  const list = card.querySelector(CARD_SCROLL_SELECTOR);
   if (list) list.scrollTop = scrollTop;
 }
 

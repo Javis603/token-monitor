@@ -670,6 +670,36 @@ test('the sessions rate line carries no unreachable tooltip', () => {
   assert.doesNotMatch(i18n, /'edgeDock\.rate\.reading'/);
 });
 
+// A repaint rebuilds the card and restores the scroll of the container that scrolls.
+// That container differs by card: a provider card and the grouped Sessions card use
+// `.edge-dock-accounts`, while the ungrouped Sessions card's list is
+// `.edge-dock-session-list` - and that is the one which overflows there, because running
+// rows are never capped. Reading only the first selector meant every clock repaint of
+// that card reset it to the top, mid-read.
+test('a repainted card restores the scroll container it actually uses', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
+  const commit = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('function renderBubble('));
+  assert.match(commit, /querySelector\(CARD_SCROLL_SELECTOR\)/);
+  assert.match(commit, /list\.scrollTop = scrollTop;/);
+  // Both containers are named, read from the declaration so a third cannot be added to
+  // the card without this failing.
+  const declaration = dock.match(/const CARD_SCROLL_SELECTOR = '([^']+)';/);
+  assert.ok(declaration, 'the scroll containers are declared once');
+  const selectors = declaration[1].split(',').map((part) => part.trim());
+  assert.deepEqual(selectors, ['.edge-dock-accounts', '.edge-dock-session-list']);
+  // And each really scrolls, which is why it has to be restored.
+  for (const selector of selectors) {
+    // Plain string search: these selectors carry a leading dot and a hyphen, and
+    // escaping them into a RegExp literal inside this file is what broke the first
+    // version of this assertion.
+    const start = css.indexOf(`\n${selector} {`);
+    assert.ok(start >= 0, `${selector} should be styled`);
+    const body = css.slice(start, css.indexOf('}', start));
+    assert.match(body, /overflow-y: auto;/, `${selector} should be the scrolling element`);
+  }
+});
+
 // The flare cache keeps one entry per session it has seen, so a long-lived card has
 // to prune it against the whole list. Pruning per group would delete every other
 // group's entries, which is why this asserts the call sits in sessionsCard().
