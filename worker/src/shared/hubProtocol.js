@@ -98,6 +98,59 @@ function applyFreshnessEvent(stats, event) {
   };
 }
 
+function encodeSseEvent(event, data) {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+function sseClientKinds(clients) {
+  let hasFreshnessClients = false;
+  let hasLegacyClients = false;
+  for (const client of clients || []) {
+    if (client?.freshnessEvents) hasFreshnessClients = true;
+    else hasLegacyClients = true;
+    if (hasFreshnessClients && hasLegacyClients) break;
+  }
+  return { hasFreshnessClients, hasLegacyClients };
+}
+
+// One stringify per distinct frame. The content-key still chooses freshness vs
+// a full stats event; subscriber count must not multiply that work.
+function prepareSseFanout({
+  reason,
+  stats,
+  at,
+  lastContentKey = '',
+  hasFreshnessClients = false,
+  hasLegacyClients = false,
+  allowFreshness = true
+} = {}) {
+  const nextContentKey = hubStatsContentKey(stats);
+  const unchanged = Boolean(lastContentKey) && nextContentKey === lastContentKey;
+  const useFreshness = allowFreshness && unchanged;
+  const frames = {
+    contentKey: nextContentKey,
+    unchanged: useFreshness,
+    stats: '',
+    freshness: ''
+  };
+  if (!useFreshness) {
+    frames.stats = encodeSseEvent('stats', { type: 'stats', reason, stats, at });
+    return frames;
+  }
+  if (hasLegacyClients) {
+    frames.stats = encodeSseEvent('stats', { type: 'stats', reason, stats, at });
+  }
+  if (hasFreshnessClients) {
+    frames.freshness = encodeSseEvent('freshness', freshnessEvent(stats, reason, at));
+  }
+  return frames;
+}
+
+function sseFrameForClient(frames, client) {
+  if (frames?.unchanged && client?.freshnessEvents) return frames.freshness || '';
+  return frames?.stats || '';
+}
+
 module.exports = {
   HUB_RESPONSE_HEADER,
   HUB_RESPONSE_MINIMAL,
@@ -105,9 +158,13 @@ module.exports = {
   HUB_STREAM_VERSION,
   acceptsEncoding,
   applyFreshnessEvent,
+  encodeSseEvent,
   freshnessEvent,
   headerValue,
   hubStatsContentKey,
+  prepareSseFanout,
+  sseClientKinds,
+  sseFrameForClient,
   wantsFreshnessEvents,
   wantsMinimalResponse
 };

@@ -19,8 +19,11 @@ const {
 const { CURRENCY_CODES, normalizeCurrency } = require('../shared/currency');
 const { currentHubBuild } = require('../shared/hubBuildIdentity');
 const {
-  freshnessEvent,
+  encodeSseEvent,
   hubStatsContentKey,
+  prepareSseFanout,
+  sseClientKinds,
+  sseFrameForClient,
   wantsFreshnessEvents,
   wantsMinimalResponse
 } = require('../shared/hubProtocol');
@@ -45,6 +48,7 @@ function createHub({
   secret = '',
   staleAfterMs = DEFAULT_STALE_AFTER_MS,
   broadcastDelayMs = 100,
+  persistDelayMs,
   dataFile = path.join(projectRoot(), 'data', 'devices.json'),
   logger = console
 } = {}) {
@@ -57,10 +61,54 @@ function createHub({
   }
   const bindHost = resolveBindHost(host, secret);
 
-  function persist() {
+  const resolvedPersistDelayMs = persistDelayMs == null
+    ? Math.max(0, Number(broadcastDelayMs) || 0)
+    : Math.max(0, Number(persistDelayMs) || 0);
+  let persistTimer = null;
+  let persistDirty = false;
+
+  function persistNow() {
     store.version = 1;
     store.savedAt = new Date().toISOString();
     writeJsonAtomic(dataFile, store);
+    persistDirty = false;
+  }
+
+  function clearPersistTimer() {
+    if (!persistTimer) return;
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+
+  function flushPersist() {
+    clearPersistTimer();
+    if (!persistDirty) return;
+    persistNow();
+  }
+
+  function persistImmediately() {
+    persistDirty = true;
+    clearPersistTimer();
+    persistNow();
+  }
+
+  // First write of a burst window is immediate so a single ingest is still on
+  // disk; later ingest in the window share one trailing persist.
+  function queuePersist() {
+    persistDirty = true;
+    if (persistTimer) return;
+    persistNow();
+    if (resolvedPersistDelayMs <= 0) return;
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      if (!persistDirty) return;
+      try {
+        persistNow();
+      } catch (error) {
+        (logger.error || console.error)(error);
+      }
+    }, resolvedPersistDelayMs);
+    if (typeof persistTimer.unref === 'function') persistTimer.unref();
   }
 
   function getStats() {
@@ -91,18 +139,19 @@ function createHub({
   let broadcastTimer = null;
   let lastSseContentKey = '';
 
-  function sseFormat(event, data) {
-    return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  }
-
-  function writeSse(client, event, data) {
+  function writeSseFrame(client, frame) {
+    if (!frame) return false;
     try {
-      client.res.write(sseFormat(event, data));
+      client.res.write(frame);
       return true;
     } catch (_) {
       sseClients.delete(client);
       return false;
     }
+  }
+
+  function fanoutSseFrames(frames) {
+    for (const client of sseClients) writeSseFrame(client, sseFrameForClient(frames, client));
   }
 
   function notifyStatsListeners(reason, stats = getStats(), at = new Date().toISOString()) {
@@ -120,8 +169,16 @@ function createHub({
     const stats = getStats();
     const at = new Date().toISOString();
     if (sseClients.size > 0) {
-      lastSseContentKey = hubStatsContentKey(stats);
-      for (const client of sseClients) writeSse(client, 'stats', { type: 'stats', reason, stats, at });
+      const frames = prepareSseFanout({
+        reason,
+        stats,
+        at,
+        lastContentKey: lastSseContentKey,
+        ...sseClientKinds(sseClients),
+        allowFreshness: false
+      });
+      lastSseContentKey = frames.contentKey;
+      fanoutSseFrames(frames);
     }
     notifyStatsListeners(reason, stats, at);
   }
@@ -130,21 +187,16 @@ function createHub({
     broadcastTimer = null;
     if (sseClients.size === 0) return;
     const stats = getStats();
-    const nextContentKey = hubStatsContentKey(stats);
     const at = new Date().toISOString();
-    if (!lastSseContentKey || nextContentKey !== lastSseContentKey) {
-      lastSseContentKey = nextContentKey;
-      for (const client of sseClients) writeSse(client, 'stats', { type: 'stats', reason: 'ingest', stats, at });
-      return;
-    }
-    const event = freshnessEvent(stats, 'ingest', at);
-    for (const client of sseClients) {
-      if (client.freshnessEvents) {
-        writeSse(client, 'freshness', event);
-      } else {
-        writeSse(client, 'stats', { type: 'stats', reason: 'ingest', stats, at });
-      }
-    }
+    const frames = prepareSseFanout({
+      reason: 'ingest',
+      stats,
+      at,
+      lastContentKey: lastSseContentKey,
+      ...sseClientKinds(sseClients)
+    });
+    lastSseContentKey = frames.contentKey;
+    fanoutSseFrames(frames);
   }
 
   function queueStatsBroadcast() {
@@ -163,7 +215,7 @@ function createHub({
     const incoming = stripSessionTextFromDeviceRecord(payload);
     const record = mergeDeviceRecord(existing, { ...incoming, receivedAt: new Date().toISOString() });
     store.devices[record.deviceId] = record;
-    persist();
+    queuePersist();
     if (statsListeners.size > 0) notifyStatsListeners('ingest');
     queueStatsBroadcast();
     return record;
@@ -171,7 +223,7 @@ function createHub({
 
   function deleteDevice(deviceId) {
     delete store.devices[deviceId];
-    persist();
+    persistImmediately();
     broadcastStats('delete');
   }
 
@@ -218,7 +270,7 @@ function createHub({
     const previousSavedAt = store.savedAt;
     store.subscriptions = next;
     try {
-      persist();
+      persistImmediately();
     } catch (error) {
       store.subscriptions = previous;
       store.savedAt = previousSavedAt;
@@ -267,7 +319,7 @@ function createHub({
         'connection': 'keep-alive',
         'x-accel-buffering': 'no'
       });
-      res.write(sseFormat('snapshot', { type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString() }));
+      res.write(encodeSseEvent('snapshot', { type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString() }));
       const client = { res, freshnessEvents: wantsFreshnessEvents(req) };
       if (sseClients.size === 0) lastSseContentKey = hubStatsContentKey(stats);
       sseClients.add(client);
@@ -358,6 +410,7 @@ function createHub({
     return new Promise((resolve) => {
       if (broadcastTimer) clearTimeout(broadcastTimer);
       broadcastTimer = null;
+      try { flushPersist(); } catch (error) { (logger.error || console.error)(error); }
       for (const client of sseClients) { try { client.res.end(); } catch (_) {} }
       sseClients.clear();
       server.close(() => resolve());
@@ -386,6 +439,11 @@ if (require.main === module) {
     if (!secret) {
       console.warn(`Warning: TOKEN_MONITOR_SECRET is not set, so the hub is bound to ${hub.bindHost} (localhost only) to keep account identity off the network. Set a secret to accept connections from other devices.`);
     }
+    const shutdown = () => {
+      hub.stop().finally(() => process.exit(0));
+    };
+    process.once('SIGINT', shutdown);
+    process.once('SIGTERM', shutdown);
   }).catch((err) => {
     console.error(`Hub failed to start: ${err.message}`);
     process.exit(1);

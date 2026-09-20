@@ -618,3 +618,275 @@ test('the stats stream coalesces bursts and negotiates timestamp-only freshness 
     fs.rmSync(dataFile, { force: true });
   }
 });
+
+test('SSE fan-out serializes the stats payload once for every subscriber', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: 'shh',
+    broadcastDelayMs: 20,
+    persistDelayMs: 0,
+    dataFile,
+    logger: { error() {} }
+  });
+  await hub.start();
+  const clients = [];
+  const original = JSON.stringify;
+  const ingestPayloads = [];
+  try {
+    const initialAt = utcTodayAt('10:00:00.000');
+    const changedAt = utcTodayAt('10:03:00.000');
+    const base = {
+      deviceId: 'dev-a',
+      updatedAt: initialAt,
+      today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } }
+    };
+    hub.ingest(base);
+    const { port } = hub.server.address();
+    const streamUrl = `http://127.0.0.1:${port}/api/stats/stream`;
+    for (let index = 0; index < 3; index += 1) {
+      clients.push(await openSse(streamUrl, { authorization: 'Bearer shh' }));
+    }
+    await waitFor(() => clients.every((client) => client.events.length === 1));
+    for (const client of clients) client.events.length = 0;
+
+    JSON.stringify = (value, replacer, space) => {
+      if (value && value.type === 'stats' && value.reason === 'ingest') ingestPayloads.push(value);
+      return original(value, replacer, space);
+    };
+    hub.ingest({
+      ...base,
+      updatedAt: changedAt,
+      today: { ...base.today, totalTokens: 4 }
+    });
+    await waitFor(() => clients.every((client) => client.events.length === 1));
+    assert.equal(ingestPayloads.length, 1);
+    assert.equal(clients[0].events[0].data.stats.periods.today.totalTokens, 4);
+    assert.equal(clients[2].events[0].data.stats.periods.today.totalTokens, 4);
+  } finally {
+    JSON.stringify = original;
+    for (const client of clients) client.close();
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+function spyTypedStringify() {
+  const original = JSON.stringify;
+  const typed = [];
+  JSON.stringify = (value, replacer, space) => {
+    if (value && typeof value === 'object' && value.type) {
+      typed.push({ type: value.type, reason: value.reason });
+    }
+    return original(value, replacer, space);
+  };
+  return {
+    typed,
+    restore() { JSON.stringify = original; }
+  };
+}
+
+test('burst ingest coalesces devices.json writes and stop() flushes the tail', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: '',
+    persistDelayMs: 80,
+    dataFile,
+    logger: { error() {} }
+  });
+  await hub.start();
+  try {
+    hub.ingest({ deviceId: 'dev-a', today: { totalTokens: 1 } });
+    const firstWrite = fs.readFileSync(dataFile, 'utf8');
+    assert.match(firstWrite, /"totalTokens": 1/);
+
+    for (let totalTokens = 2; totalTokens <= 10; totalTokens += 1) {
+      hub.ingest({ deviceId: 'dev-a', today: { totalTokens } });
+    }
+    assert.equal(fs.readFileSync(dataFile, 'utf8'), firstWrite);
+    assert.equal(hub.getStats().devices[0].periods.today.totalTokens, 10);
+
+    await hub.stop();
+    const stored = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    assert.equal(stored.devices['dev-a'].periods.today.totalTokens, 10);
+  } finally {
+    try { await hub.stop(); } catch (_) { /* already stopped */ }
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('SSE subscribers receive identical frames and delete/subscription writes stay full stats', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: 'shh',
+    broadcastDelayMs: 20,
+    persistDelayMs: 0,
+    dataFile,
+    logger: { error() {} }
+  });
+  await hub.start();
+  let modernA;
+  let modernB;
+  let legacy;
+  try {
+    const initialAt = utcTodayAt('10:00:00.000');
+    const refreshedAt = utcTodayAt('10:01:00.000');
+    const base = {
+      deviceId: 'dev-a',
+      updatedAt: initialAt,
+      today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } }
+    };
+    hub.ingest(base);
+    const { port } = hub.server.address();
+    const streamUrl = `http://127.0.0.1:${port}/api/stats/stream`;
+    modernA = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' });
+    modernB = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' });
+    legacy = await openSse(streamUrl, { authorization: 'Bearer shh' });
+    await waitFor(() => modernA.events.length === 1 && modernB.events.length === 1 && legacy.events.length === 1);
+    assert.deepEqual(modernA.events[0].data.stats.periods, modernB.events[0].data.stats.periods);
+    assert.deepEqual(modernA.events[0].data.stats.periods, legacy.events[0].data.stats.periods);
+    for (const client of [modernA, modernB, legacy]) client.events.length = 0;
+
+    hub.ingest({ ...base, updatedAt: refreshedAt });
+    await waitFor(() => modernA.events.length === 1 && modernB.events.length === 1 && legacy.events.length === 1);
+    assert.equal(modernA.events[0].event, 'freshness');
+    assert.equal(modernB.events[0].event, 'freshness');
+    assert.deepEqual(modernA.events[0].data, modernB.events[0].data);
+    assert.equal(legacy.events[0].event, 'stats');
+    for (const client of [modernA, modernB, legacy]) client.events.length = 0;
+
+    const deleteSpy = spyTypedStringify();
+    try {
+      hub.deleteDevice('dev-a');
+      await waitFor(() => modernA.events.length === 1 && modernB.events.length === 1 && legacy.events.length === 1);
+      assert.deepEqual(deleteSpy.typed.filter((entry) => entry.reason === 'delete'), [
+        { type: 'stats', reason: 'delete' }
+      ]);
+    } finally {
+      deleteSpy.restore();
+    }
+    assert.equal(modernA.events[0].event, 'stats');
+    assert.equal(modernB.events[0].event, 'stats');
+    assert.equal(legacy.events[0].event, 'stats');
+    assert.equal(modernA.events[0].data.reason, 'delete');
+    assert.deepEqual(modernA.events[0].data.stats.devices, []);
+    assert.deepEqual(modernA.events[0].data, modernB.events[0].data);
+    assert.deepEqual(modernA.events[0].data.stats.devices, legacy.events[0].data.stats.devices);
+    for (const client of [modernA, modernB, legacy]) client.events.length = 0;
+
+    const record = { id: 'sub_1', provider: 'codex', planName: 'Plus', amountMinor: 9000, currency: 'HKD', startDate: '2026-05-31' };
+    const subSpy = spyTypedStringify();
+    let written;
+    try {
+      written = hub.setSubscriptions([record], '');
+      await waitFor(() => modernA.events.length === 1 && modernB.events.length === 1 && legacy.events.length === 1);
+      assert.deepEqual(subSpy.typed.filter((entry) => entry.reason === 'subscriptions'), [
+        { type: 'stats', reason: 'subscriptions' }
+      ]);
+    } finally {
+      subSpy.restore();
+    }
+    assert.equal(modernA.events[0].event, 'stats');
+    assert.equal(legacy.events[0].event, 'stats');
+    assert.equal(modernA.events[0].data.reason, 'subscriptions');
+    assert.equal(modernA.events[0].data.stats.subscriptionsUpdatedAt, written.updatedAt);
+    assert.equal('subscriptions' in modernA.events[0].data.stats, false);
+    assert.deepEqual(modernA.events[0].data, modernB.events[0].data);
+  } finally {
+    modernA?.close();
+    modernB?.close();
+    legacy?.close();
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('trailing persist lands without stop, and subscriptions or deletes flush immediately', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: 'shh',
+    persistDelayMs: 50,
+    dataFile,
+    logger: { error() {} }
+  });
+  await hub.start();
+  try {
+    hub.ingest({ deviceId: 'dev-a', today: { totalTokens: 1 } });
+    const firstWrite = fs.readFileSync(dataFile, 'utf8');
+    hub.ingest({ deviceId: 'dev-a', today: { totalTokens: 2 } });
+    hub.ingest({ deviceId: 'dev-a', today: { totalTokens: 3 } });
+    assert.equal(fs.readFileSync(dataFile, 'utf8'), firstWrite);
+
+    await waitFor(() => fs.readFileSync(dataFile, 'utf8') !== firstWrite);
+    assert.equal(JSON.parse(fs.readFileSync(dataFile, 'utf8')).devices['dev-a'].periods.today.totalTokens, 3);
+
+    hub.ingest({ deviceId: 'dev-a', today: { totalTokens: 4 } });
+    const midBurst = fs.readFileSync(dataFile, 'utf8');
+    hub.ingest({ deviceId: 'dev-a', today: { totalTokens: 5 } });
+    assert.equal(fs.readFileSync(dataFile, 'utf8'), midBurst);
+
+    const written = hub.setSubscriptions([{
+      id: 'sub_1', provider: 'codex', planName: 'Plus', amountMinor: 9000, currency: 'HKD', startDate: '2026-05-31'
+    }], '');
+    const afterSubscriptions = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    assert.equal(afterSubscriptions.devices['dev-a'].periods.today.totalTokens, 5);
+    assert.equal(afterSubscriptions.subscriptions.subscriptions[0].id, 'sub_1');
+    assert.equal(afterSubscriptions.subscriptions.updatedAt, written.updatedAt);
+
+    hub.ingest({ deviceId: 'dev-a', today: { totalTokens: 6 } });
+    const afterNextIngest = fs.readFileSync(dataFile, 'utf8');
+    hub.ingest({ deviceId: 'dev-a', today: { totalTokens: 7 } });
+    assert.equal(fs.readFileSync(dataFile, 'utf8'), afterNextIngest);
+    hub.deleteDevice('dev-a');
+    const afterDelete = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    assert.equal(afterDelete.devices['dev-a'], undefined);
+    assert.equal(afterDelete.subscriptions.subscriptions[0].id, 'sub_1');
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('persistDelayMs 0 writes every ingest and a lone ingest does not rewrite after the window', async () => {
+  const dataFile = tempDataFile();
+  const immediate = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: '',
+    persistDelayMs: 0,
+    dataFile,
+    logger: { error() {} }
+  });
+  try {
+    immediate.ingest({ deviceId: 'dev-a', today: { totalTokens: 1 } });
+    immediate.ingest({ deviceId: 'dev-a', today: { totalTokens: 2 } });
+    assert.equal(JSON.parse(fs.readFileSync(dataFile, 'utf8')).devices['dev-a'].periods.today.totalTokens, 2);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+
+  const windowedFile = tempDataFile();
+  const windowed = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: '',
+    persistDelayMs: 40,
+    dataFile: windowedFile,
+    logger: { error() {} }
+  });
+  try {
+    windowed.ingest({ deviceId: 'dev-a', today: { totalTokens: 1 } });
+    const firstWrite = fs.readFileSync(windowedFile, 'utf8');
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    assert.equal(fs.readFileSync(windowedFile, 'utf8'), firstWrite);
+  } finally {
+    fs.rmSync(windowedFile, { force: true });
+  }
+});

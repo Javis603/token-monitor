@@ -218,6 +218,21 @@ test('desktop comparison changes do not alter the portable Hub core closure', ()
   assert.ok(!WORKER_SHARED_MODULES.includes('hubBuildComparison.js'));
 });
 
+test('SSE fan-out helpers live in the portable Hub core and stay in the Worker copy', () => {
+  assert.ok(WORKER_SHARED_MODULES.includes('hubProtocol.js'));
+  assert.ok(CORE_SOURCE_FILES.includes('src/shared/hubProtocol.js'));
+  const protocol = fs.readFileSync(path.join(ROOT, 'src/shared/hubProtocol.js'), 'utf8');
+  const workerProtocol = fs.readFileSync(path.join(ROOT, 'worker/src/shared/hubProtocol.js'), 'utf8');
+  for (const name of ['prepareSseFanout', 'encodeSseEvent', 'sseClientKinds', 'sseFrameForClient', 'hubStatsContentKey']) {
+    assert.match(protocol, new RegExp(`function ${name}`));
+    assert.match(workerProtocol, new RegExp(`function ${name}`));
+  }
+  const sourceBuildIds = currentHubSourceBuildIds();
+  assert.equal(latestEntry(registry, 'core')?.buildId, sourceBuildIds.core);
+  assert.equal(latestEntry(registry, 'node-hub')?.buildId, sourceBuildIds['node-hub']);
+  assert.equal(latestEntry(registry, 'cloudflare-worker')?.buildId, sourceBuildIds['cloudflare-worker']);
+});
+
 test('Hub build manifests cover the complete Node and Worker local dependency graphs', () => {
   // The registry is runtime metadata produced from these hashes, so hashing it
   // back into either component would make the build identity self-referential.
