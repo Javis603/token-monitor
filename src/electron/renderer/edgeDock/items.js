@@ -118,8 +118,8 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
     return items;
   }
 
-  function defaultEdgeDockItems(providerIds = []) {
-    return providerIds.slice(0, DEFAULT_LIMIT_COUNT).map((provider) => ({
+  function defaultEdgeDockItems(providerIds = [], stats = null) {
+    const limitItems = providerIds.slice(0, DEFAULT_LIMIT_COUNT).map((provider) => ({
       type: 'limit',
       provider,
       hiddenAccounts: [],
@@ -127,6 +127,14 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
       showSessions: true,
       accountMode: provider === 'codex' ? 'active' : 'lowest'
     }));
+    // 当 stats 有任何 tracked client 的 token 数据时，在 limit cards 之外加一个
+    // today stat item — 这样 locallyParsed clients（mavis / qodercn / zcode /
+    // dsh / ...）即使没 limits 也能通过 stat 卡的 client breakdown 自然显示。
+    // 用户手动加 stat items 的路径不变；默认只补一个 today 让侧边栏不空。
+    const clients = (stats && stats.periods && stats.periods.today && stats.periods.today.clients) || {};
+    const hasTokenData = Object.values(clients).some((value) => Number(value) > 0);
+    if (!hasTokenData) return limitItems;
+    return [...limitItems, { type: 'stat', metric: 'today' }];
   }
 
   // Applies a drag order to the list. The shared drag sort hands ids back

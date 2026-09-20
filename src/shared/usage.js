@@ -503,6 +503,13 @@ function emptySession(client, id) {
     projectLabel: '',
     title: '',
     sessionKind: '',
+    // mavis provider writes one row per LLM call across six sub-agents
+    // (coder, explore, general, mavis, verifier, worker). The agent
+    // name is carried on the row and copied onto the session by
+    // sessionFromRow. Empty for every other client. Listed here so the
+    // field is always present on serialized sessions even when the
+    // runtime hasn't filled it yet.
+    agent: '',
     models: {},
     modelCosts: {},
     providers: {}
@@ -570,6 +577,12 @@ function mergeSession(target, source) {
   }
   if (!target.title && source.title) target.title = normalizeSessionTitle(source.title);
   if (!target.sessionKind && source.sessionKind) target.sessionKind = normalizeSessionKind(source.sessionKind);
+  // mavis provider writes the agent on the session (coder, explore,
+  // general, mavis, verifier, worker). Once one source row fills it
+  // in, every later row from the same session must carry the same
+  // agent — copy on first sighting, never overwrite with empty.
+  const sourceAgent = String(source.agent || '').trim();
+  if (sourceAgent && !String(target.agent || '').trim()) target.agent = sourceAgent;
   for (const [model, tokens] of Object.entries(source.models || {})) {
     const key = normalizeModelNameForClient(model, target.client);
     if (key) target.models[key] = (target.models[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
@@ -617,6 +630,16 @@ function sessionFromRow(row) {
   session.projectLabel = String(row.projectLabel || row.project_label || '').trim();
   session.title = normalizeSessionTitle(firstString(row, SESSION_TITLE_KEYS));
   session.sessionKind = normalizeSessionKind(row.sessionKind || row.session_kind);
+  // mavis runtime writes one row per LLM call across six sub-agents
+  // (coder, explore, general, mavis, verifier, worker). Carry the
+  // agent name onto the session so daily-history-archive and the
+  // sessions panel can split per-agent totals. Empty for every other
+  // client because their rows never set this field. normalizeDbRow
+  // in src/shared/providers/mavis/usage.js maps the SQLite
+  // `agent_name` column to a camelCase `agentName`, so that is the
+  // field name we look for here.
+  const agent = String(row.agentName || row.agent || '').trim();
+  if (agent) session.agent = agent;
   let model = detectModel(row, client);
   if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
@@ -635,6 +658,17 @@ function normalizeSession(input, fallbackKey) {
   const session = emptySession(client, id);
   const components = sessionTokenComponents(input);
   Object.assign(session, components);
+  // Mavis provider writes the per-sub-agent name (coder / explore / general /
+  // mavis / verifier / worker) onto each row. `normalizeDbRow` already mapped
+  // the runtime's snake_case `agent_name` to camelCase `agentName`, so that
+  // is the field the session row carries when it reaches this layer.
+  // `mergeSession` is a no-op when source.agent is empty (line 585) so a
+  // session that never observed an agent name simply keeps the empty
+  // default from `emptySession()`.
+  if (input.agent != null) {
+    const agent = String(input.agent).trim();
+    if (agent) session.agent = agent;
+  }
   const componentTotal = components.inputTokens + components.outputTokens + components.cacheReadTokens + components.cacheWriteTokens; // reasoning is a subset of output — see TOKEN_COMPONENT_KEYS
   session.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? input.tokens ?? componentTotal)));
   session.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
