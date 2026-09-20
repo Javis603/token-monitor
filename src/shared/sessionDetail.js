@@ -2,6 +2,12 @@
 
 const fs = require('node:fs');
 const { resolveSessionFile } = require('./sessionFiles');
+const {
+  contentText,
+  isUserPromptRecord,
+  messageIdOf,
+  usageTokens
+} = require('./providers/codebuddy/transcript');
 const opencodeSession = require('./providers/opencode/session');
 const { readReasonixSessionEvents } = require('./providers/reasonix/sessionDetail');
 
@@ -224,6 +230,71 @@ function parseCodexTranscript(text) {
   return events;
 }
 
+// CodeBuddy timestamps are epoch milliseconds; every other transcript here
+// stamps ISO strings, and the shared grouping compares timestamps as text, so
+// they are normalized on the way in.
+function codebuddyTimestamp(value) {
+  const ms = Number(value);
+  if (Number.isFinite(ms) && ms > 0) return new Date(ms).toISOString();
+  return typeof value === 'string' ? value : '';
+}
+
+// CodeBuddy persists one model response per `providerData.messageId`, as either
+// a `function_call` (the response asked for a tool) or an assistant message
+// (it answered in text), and puts the response's token usage on whichever of
+// the two records it wrote — overwhelmingly the call, so reading only assistant
+// messages would find usage for a fifth of the turns. Emitting one turn per
+// messageId also keeps the response count aligned with the message count
+// tokscale reports for this client, and folding the same records reproduces the
+// session's input, output and cache-read totals exactly.
+function parseCodebuddyTranscript(text) {
+  const events = [];
+  // The turn object is pushed on first sight and filled in place: a response's
+  // records are adjacent, and its usage may arrive on the call while its text
+  // arrives on the message (or the other way round).
+  const turns = new Map();
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    let entry;
+    try { entry = JSON.parse(trimmed); } catch (_) { continue; }
+
+    if (isUserPromptRecord(entry)) {
+      const prompt = contentText(entry.content).replace(/\s+/g, ' ').trim();
+      events.push({ kind: 'prompt', timestamp: codebuddyTimestamp(entry.timestamp), text: prompt });
+      continue;
+    }
+    const isResponse = entry.type === 'function_call'
+      || (entry.type === 'message' && entry.role === 'assistant');
+    if (!isResponse) continue;
+    const messageId = messageIdOf(entry);
+    if (!messageId) continue;
+
+    let turn = turns.get(messageId);
+    if (!turn) {
+      turn = { kind: 'turn', timestamp: '', tokens: emptyTokens(), tokensAvailable: false, tools: [] };
+      turns.set(messageId, turn);
+      events.push(turn);
+    }
+    if (!turn.timestamp) turn.timestamp = codebuddyTimestamp(entry.timestamp);
+    if (entry.type === 'function_call') {
+      const name = entry.name || entry.tool_name;
+      if (typeof name === 'string' && name) turn.tools.push(name);
+    }
+    // A response whose usage never arrived keeps `tokensAvailable: false`, which
+    // the shared grouping and the detail view both understand: the reply is
+    // still shown, with its tools, and only its token numbers are missing.
+    if (!turn.tokensAvailable) {
+      const tokens = usageTokens(entry);
+      if (tokens) {
+        turn.tokens = makeTokens(tokens);
+        turn.tokensAvailable = true;
+      }
+    }
+  }
+  return events;
+}
+
 function emptyTokens() {
   return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 0 };
 }
@@ -331,6 +402,7 @@ function distributeCost(exchanges, sessionCost) {
 
 function parseByClient(client, text) {
   if (client === 'claude') return parseClaudeTranscript(text);
+  if (client === 'codebuddy') return parseCodebuddyTranscript(text);
   if (client === 'codex') return parseCodexTranscript(text);
   return [];
 }
@@ -408,6 +480,7 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
 
 module.exports = {
   parseClaudeTranscript,
+  parseCodebuddyTranscript,
   parseCodexTranscript,
   makeTokens,
   groupEvents,

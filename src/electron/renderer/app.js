@@ -2393,7 +2393,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   }
   const interactive = reviewGroup === true || (
     kind === 'session'
-    && ['claude', 'codex', 'opencode', 'dsh'].includes(client)
+    && ['claude', 'codebuddy', 'codex', 'opencode', 'dsh'].includes(client)
   ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
   const mark = row.querySelector('.row-mark');
   const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '' }, state.breakdown);

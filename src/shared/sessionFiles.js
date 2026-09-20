@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { claudeSessionRoots } = require('./providers/claude/paths');
+const { codebuddyProjectsRoot } = require('./providers/codebuddy/paths');
 
 function isSafeSessionId(sessionId) {
   const id = String(sessionId || '');
@@ -77,6 +78,9 @@ function resolveSessionFile(client, sessionId, home, options = {}) {
     const projectFile = findSessionFiles(projects, [id]).get(id);
     if (projectFile) return projectFile;
     return findSessionFiles(transcripts, [id]).get(id) || '';
+  }
+  if (client === 'codebuddy') {
+    return findSessionFiles(codebuddyProjectsRoot({ homeDir: home }), [id]).get(id) || '';
   }
   if (client === 'codex') {
     const codexHome = options.codexHome || codexHomeDir(home, options);

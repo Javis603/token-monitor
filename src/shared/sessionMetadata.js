@@ -5,6 +5,7 @@ const os = require('node:os');
 const { hashKey } = require('./hashKey');
 const { normalizeSessionContext } = require('./sessionContext');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
+const codebuddySession = require('./providers/codebuddy/sessionMetadata');
 const codexSession = require('./providers/codex/sessionMetadata');
 const droidSessionMetadata = require('./providers/droid/sessionMetadata');
 const opencodeSession = require('./providers/opencode/session');
@@ -222,6 +223,7 @@ function fileSessionMetadata(sessionId, filePath, context, existing = {}) {
 // existing one-shot id-timestamp fallback.
 const SESSION_METADATA_RESOLVERS = new Map([
   ['claude', { resolve: claudeSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
+  ['codebuddy', { resolve: codebuddySession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['codex', { resolve: codexSession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['opencode', { resolve: opencodeSession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['droid', { resolve: droidSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],

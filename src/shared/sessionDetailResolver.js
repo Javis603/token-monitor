@@ -7,12 +7,14 @@ const { readSessionDetail } = require('./sessionDetail');
 const { readDshSessionDetail } = require('./providers/dsh/sessionDetail');
 const { wslUsageHomes } = require('./wslUsage');
 
-// wslUsage.js's MARKER_CLIENTS also scans `.dsh/sessions`, so a DSH session
-// surfaced from a WSL distro on Windows is a real, reachable case, not just
-// claude/codex — dsh must get the same native-miss -> WSL-hit fallback, just
-// through its own reader (it parses zstd transcripts directly, not tokscale
-// JSONL).
-const WSL_FALLBACK_CLIENTS = new Set(['claude', 'codex', 'dsh']);
+// wslUsage.js's MARKER_CLIENTS also scans `.dsh/sessions` and
+// `.codebuddy/projects`, so a session surfaced from a WSL distro on Windows is a
+// real, reachable case for them, not just claude/codex — dsh must get the same
+// native-miss -> WSL-hit fallback, just through its own reader (it parses zstd
+// transcripts directly, not tokscale JSONL). CodeBuddy resolves its transcripts
+// under the scoped home exactly as Claude and Codex do, so it needs the entry
+// and nothing else.
+const WSL_FALLBACK_CLIENTS = new Set(['claude', 'codebuddy', 'codex', 'dsh']);
 const SESSION_DETAIL_WORKER_TIMEOUT_MS = 20_000;
 
 function resolveSessionDetailForPlatform(args = {}, deps = {}) {
