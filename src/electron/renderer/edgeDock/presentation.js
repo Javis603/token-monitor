@@ -132,6 +132,10 @@
   // once. Month detail includes today's sessions; today is the fallback for
   // payloads that only carry today.
   //
+  // Newest activity first, and that order is what every card prints: a caller that picks
+  // a subset out of this list hands it back in this order rather than re-sorting it,
+  // which is what the "single timeline" layout promises.
+  //
   // `periods.today`/`month` are the source rather than allTime: under sync the
   // aggregate drops all-time session detail (the sessions there are one
   // machine's own view), so a list built from it would silently mean "some"
@@ -203,7 +207,15 @@
       : entries
         .filter(({ key }) => stateByKey.get(key) !== 'running')
         .slice(0, Math.max(0, cap - running.length));
-    return { rows: sessionRowsFor([...running, ...quiet], stateByKey), running, stateByKey };
+    // Selection is running-first; the order that comes out is not. `entries` arrives
+    // newest-first (see sessionSourceRows) and that is the order a card prints, so the
+    // chosen subset is re-sorted back into it - otherwise every running row is hoisted
+    // above every quiet one, and a session with activity nine minutes ago is listed
+    // above one with activity a minute ago. A layout called a single timeline would be
+    // claiming an order it does not show.
+    const chosen = new Set([...running, ...quiet].map((entry) => entry.key));
+    const ordered = entries.filter((entry) => chosen.has(entry.key));
+    return { rows: sessionRowsFor(ordered, stateByKey), running, stateByKey };
   }
 
   // The running reading, derived from the projected rows at the clock the caller

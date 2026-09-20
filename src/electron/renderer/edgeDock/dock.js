@@ -1000,13 +1000,24 @@ function statCard(cell) {
 // other card to appear on. Rows are the same rows a provider card draws, so the
 // two surfaces cannot disagree about what running means (see sessionsContainer).
 function sessionsCard(cell, card, head) {
-  const sessions = Array.isArray(cell.sessions) ? cell.sessions : [];
-  const running = runningSessionSummary(sessions).rows;
+  const pushed = Array.isArray(cell.sessions) ? cell.sessions : [];
+  const running = runningSessionSummary(pushed).rows;
+  // A running-only card re-applies its own filter at paint time. The main process
+  // filters when it projects, but the renderer repaints from the payload it already
+  // holds when a running window expires, and this card is repainted before the
+  // re-projection arrives - so a row that has just gone idle would stay in a card that
+  // says it only shows running sessions. The same summary the count and the marks come
+  // from decides membership, so the list cannot disagree with the header above it.
+  // An empty result is a real reading, and the note below already says so.
+  const sessions = cell.runningOnly === true ? running : pushed;
   // The flare cache is pruned against the whole list, not per group: a grouped card
   // renders one section per tool, and pruning inside each of those would delete the
   // entries belonging to every other section. Pruning here is what stops a long-lived
   // card from keeping one entry per session that ever scrolled through it.
-  pruneActivity(sessions);
+  // Pruned against everything the card was handed, not the filtered list: a row that
+  // is merely quiet keeps its flare entry, so a session that starts running again flares
+  // on its next write rather than being treated as newly seen.
+  pruneActivity(pushed);
   // The count lives in exactly one place per layout. Grouped, each section states
   // its own, and a card total above them printed the very same number whenever one
   // tool happened to be the only one running. Ungrouped there are no section heads,

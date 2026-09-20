@@ -446,6 +446,73 @@ test('the sessions item honours runningOnly and groupBy without changing the run
   assert.equal(grouped.groupBy, 'client');
 });
 
+// Running rows are selected ahead of quiet ones, but the list is still a timeline: it
+// prints newest activity first. Composing the selection as running-then-quiet hoisted
+// every running row above every quiet one, so a session active nine minutes ago was
+// listed above one active a minute ago - and the grouped layout inherited that as its
+// group order, since groups form from first appearance.
+test('the timeline keeps newest-first order even when a quiet row is the newer one', () => {
+  const now = Date.now();
+  const iso = (ms) => new Date(ms).toISOString();
+  const stats = {
+    periods: {
+      month: { sessions: {
+        // Active a minute ago, but its turn ended: quiet, and the newer of the two.
+        'codex:newer-quiet': { client: 'codex', sessionId: 'newer-quiet', lastUsedAt: iso(now - 60_000),
+          totalTokens: 20, models: { m: 20 }, turnEnded: true },
+        // Active nine minutes ago and still inside the running window: older, running.
+        'kilo:older-running': { client: 'kilo', sessionId: 'older-running', lastUsedAt: iso(now - 9 * 60_000),
+          totalTokens: 10, models: { m: 10 } }
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  // The quiet one is newer, so it leads - the running row is not hoisted.
+  assert.deepEqual(cell.sessions.map((row) => row.sessionId), ['newer-quiet', 'older-running']);
+  assert.equal(cell.sessions[0].running, false);
+  assert.equal(cell.sessions[1].running, true);
+  // And the running reading itself is unchanged by the ordering: it counts, not sorts.
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions).count, 1);
+  // The cap still prefers running rows: with room for one, the running row is kept even
+  // though it is the older one, and it is printed at its own position in the timeline.
+  const [capped] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true }] });
+  assert.deepEqual(capped.sessions.map((row) => row.sessionId), ['older-running']);
+});
+
+// A running-only card re-applies its filter as it paints, because the renderer repaints
+// from the payload it holds the moment a running window expires - before the main
+// process re-projects. Filtering only at projection time left a row that had just gone
+// idle sitting in a card titled "only show running sessions", until the next push.
+test('a running-only card drops a row the moment its window expires', () => {
+  const now = Date.now();
+  const iso = (ms) => new Date(ms).toISOString();
+  const stats = {
+    periods: {
+      month: { sessions: {
+        'codex:soon-quiet': { client: 'codex', sessionId: 'soon-quiet', lastUsedAt: iso(now - 9 * 60_000),
+          totalTokens: 20, models: { m: 20 } }
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC, runningOnly: true }] });
+  assert.equal(cell.runningOnly, true);
+  assert.deepEqual(cell.sessions.map((row) => row.sessionId), ['soon-quiet']);
+  // The projection carried it because it was running then; this is the payload the card
+  // repaints from after the window passes, with no new push.
+  const atExpiry = edgeDockPresentation.runningSessionSummary(cell.sessions, cell.runningExpiresAt).rows;
+  assert.deepEqual(atExpiry, [], 'the window this cell reported is the one that empties it');
+  // Re-applying the filter at paint time is what the card does with that.
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const card = dock.slice(dock.indexOf('function sessionsCard('), dock.indexOf('// Cards are built in a hidden staging layer'));
+  assert.match(card, /const sessions = cell\.runningOnly === true \? running : pushed;/);
+  // And the empty state it then renders is the running-only wording, not the generic one.
+  assert.match(card, /cell\.runningOnly \? 'edgeDock\.sessionsNoneRunning' : 'edgeDock\.sessionsNone'/);
+});
+
 // The rail cell's third line is the item's own choice. Showing the live rate there
 // must not disturb the card, and the sample has to ride the cell: the dock window
 // holds no settings and no stats, so it cannot derive a rate for itself.
@@ -734,12 +801,15 @@ test('the self-repaint cadence matches what each surface actually needs', () => 
 test('the standalone sessions card prunes the activity cache against its whole list', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const card = dock.slice(dock.indexOf('function sessionsCard('), dock.indexOf('// Cards are built in a hidden staging layer'));
-  assert.match(card, /pruneActivity\(sessions\);/);
-  assert.doesNotMatch(card, /pruneActivity\(rows\);/);
   // The grouped branch is the leak: it renders one section per tool, so the prune
   // must happen before the split rather than inside it.
   const beforeSplit = card.slice(0, card.indexOf('const groups = new Map()'));
-  assert.match(beforeSplit, /pruneActivity\(sessions\);/);
+  // Pruned against everything the card was handed rather than the list it will draw: a
+  // row that is merely quiet keeps its flare entry, so it flares on its next write
+  // instead of being treated as newly seen when it starts running again.
+  assert.match(card, /pruneActivity\(pushed\);/);
+  assert.doesNotMatch(card, /pruneActivity\(rows\);/);
+  assert.match(beforeSplit, /pruneActivity\(pushed\);/);
 });
 
 // The main process only keeps the live-rate tracker alive for items that show a
