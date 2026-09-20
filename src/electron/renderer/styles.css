@@ -3620,6 +3620,8 @@ html.is-windows .settings-panel select option {
 .row-icon-qodercn    { -webkit-mask-image: url(../../../assets/icons/qodercn.svg);      mask-image: url(../../../assets/icons/qodercn.svg); }
 .row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
 .row-icon-thirdparty { -webkit-mask-image: url(../../../assets/icons/thirdparty.svg);      mask-image: url(../../../assets/icons/thirdparty.svg); }
+.row-icon-nvidia    { -webkit-mask-image: url(../../../assets/icons/nvidia.svg);        mask-image: url(../../../assets/icons/nvidia.svg); }
+.row-icon-stepfun   { -webkit-mask-image: url(../../../assets/icons/stepfun.svg);       mask-image: url(../../../assets/icons/stepfun.svg); }
 .row-icon-newapi    { -webkit-mask-image: url(../../../assets/icons/newapi.svg);           mask-image: url(../../../assets/icons/newapi.svg); }
 .row-icon-sub2api   { -webkit-mask-image: url(../../../assets/icons/sub2api.svg);          mask-image: url(../../../assets/icons/sub2api.svg); }
 .row-icon-token-monitor { -webkit-mask-image: url(../../../assets/icons/token-monitor.svg); mask-image: url(../../../assets/icons/token-monitor.svg); }
