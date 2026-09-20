@@ -1957,6 +1957,26 @@ test('the running halo lights the mark without becoming the ring', () => {
   );
 });
 
+// The breath is the dock's longest-running animation and the rail rebuilds every cell
+// on every stats push, so the element it is declared on is new each time. A phase that
+// lived on that element restarted at 0% with each push - and the pushes come closest
+// together while a session is working, which is exactly when the mark is worth
+// something, so it could stutter or never reach the top of the swing at all. It is
+// anchored to the clock instead, which means the two numbers that anchor it have to
+// agree: the modulo has to be the animation's own period.
+test('the running halo resumes its phase rather than restarting on every repaint', () => {
+  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const period = Number(css.match(/animation: edge-dock-mark-breathe (\d+)ms/)[1]);
+  assert.equal(Number(dock.match(/const BREATH_MS = (\d+);/)[1]), period, 'the phase anchor has to be the animation\'s period');
+  // A negative delay is what starts a fresh node partway through the cycle - the
+  // point of the whole thing, since a delay of zero is the restart this avoids.
+  assert.match(dock, /glow\.style\.animationDelay = `-\$\{Date\.now\(\) % BREATH_MS\}ms`;/);
+  // And it is set where the glow is made, so no node can reach the document without it.
+  const ring = dock.slice(dock.indexOf('function ringNode('), dock.indexOf('function providerCellNode('));
+  assert.match(ring, /glow\.style\.animationDelay/);
+});
+
 // The handle's exit is a move now rather than a blink. The window's fade is the main
 // process's and outlasts it, so the retreat leads the fade - shorter and front-loaded
 // - or the glass dims past the movement before it has travelled, the same cancellation

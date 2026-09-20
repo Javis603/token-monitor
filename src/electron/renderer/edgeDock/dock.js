@@ -46,6 +46,9 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const RING_RADIUS = 19;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 const DRAG_THRESHOLD_PX = 4;
+// The period of `edge-dock-mark-breathe` in dock.css, which the running halo's phase
+// is taken modulo (see ringNode). A test holds the two numbers together.
+const BREATH_MS = 2600;
 
 const root = document.getElementById('edgeDockRoot');
 const query = new URLSearchParams(window.location.search);
@@ -449,12 +452,17 @@ function ringNode(remainingPercent, color, mark) {
   fill.setAttribute('stroke-dashoffset', String(RING_CIRCUMFERENCE * (1 - remaining / 100)));
   if (remainingPercent === null) fill.style.opacity = '0';
   svg.append(track, fill);
-  // The halo the running state breathes (see dock.css). Always emitted and
-  // transparent until the cell is marked running, so the cell's own state is the
-  // only thing that decides whether it shows - a glow node appearing and
-  // disappearing would restart the animation on every repaint, and the rail
-  // repaints on a clock.
-  ring.append(svg, el('span', 'edge-dock-ring-glow'), mark);
+  // The halo the running state breathes (see dock.css). It is always emitted and
+  // transparent until the cell is marked running, so what decides whether it shows is
+  // the cell's state alone. What it cannot carry is its own phase: renderRail rebuilds
+  // every cell from the payload on every push, so a fresh node restarts the breath at
+  // 0% each time - and the pushes are closest together exactly while a session is
+  // working, which is when this mark is worth anything. Anchoring the phase to the
+  // clock instead puts it somewhere a rebuild cannot reach, and the swap between the
+  // two nodes is invisible because they are at the same point of the same cycle.
+  const glow = el('span', 'edge-dock-ring-glow');
+  glow.style.animationDelay = `-${Date.now() % BREATH_MS}ms`;
+  ring.append(svg, glow, mark);
   return ring;
 }
 
