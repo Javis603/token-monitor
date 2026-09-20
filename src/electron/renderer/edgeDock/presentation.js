@@ -362,14 +362,16 @@
     const byId = new Map();
     const allById = new Map();
     const local = accountIdentity.localDeviceLimitsProviders(stats, options.localDeviceId);
-    // Local first, so this device wins a tie on an account both lists name.
-    const seen = new Set();
+    // Local first, so this device wins a tie on an account both lists name. The
+    // copies are compared with the matcher's own identity rule rather than with a
+    // value built out of the record, because the two copies of one account are
+    // two records and disagree about anything the rule does not read.
+    const seen = [];
     for (const provider of [...(local || []), ...providers]) {
       const id = normalizedId(provider?.provider);
       if (!id) continue;
-      const value = accountIdentity.accountValue(provider);
-      if (seen.has(value)) continue;
-      seen.add(value);
+      if (seen.some((entry) => accountIdentity.sameAccount(entry, provider))) continue;
+      seen.push(provider);
       if (!allById.has(id)) allById.set(id, []);
       allById.get(id).push(provider);
     }

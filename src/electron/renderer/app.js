@@ -2927,13 +2927,16 @@ function isCreditsProvider(provider) {
 // local account as the only candidate: matchProviderAccount()'s sole-account
 // fallback would then bind a remote subscription to whatever is signed in here.
 // Local entries come first so this device wins a tie on identical accounts.
+// The two copies are compared with the matcher's own identity rule
+// (accountIdentity.sameAccount), not with a value built out of the record: the
+// aggregate's copy of this device's account is a different object, and it is not
+// the same record down to the fields a value would have read.
 function limitProvidersForSubscriptions() {
-  const seen = new Set();
+  const seen = [];
   const merged = [];
   for (const provider of [...(localDeviceLimitsProviders() || []), ...(state.stats?.limits?.providers || [])]) {
-    const key = subscriptionAccountValue(provider);
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (seen.some((entry) => accountIdentityApi.sameAccount(entry, provider))) continue;
+    seen.push(provider);
     merged.push(provider);
   }
   return merged;
@@ -2956,8 +2959,19 @@ function subscriptionAccountChoices() {
   }));
 }
 
+// The picker's value for one choice, which is only ever compared against another
+// choice from the same freshly built list: distinct per account, stable for one
+// record. It carries the address as well, so the two accounts a provider reports
+// by address alone are two choices rather than one — while "is this the same
+// account?" stays with accountIdentity.sameAccount(), where the matcher's rule
+// lives.
 function subscriptionAccountValue(provider) {
-  return [provider?.provider || '', provider?.accountKey || '', provider?.accountName || ''].join('\0');
+  return [
+    String(provider?.provider || '').trim().toLowerCase(),
+    String(provider?.accountKey || '').trim(),
+    String(provider?.accountEmail || provider?.email || '').trim(),
+    String(provider?.accountName || '').trim()
+  ].join('\0');
 }
 
 // The plan the account already reports ("Pro", "Plus") is nearly always what the
@@ -2979,12 +2993,13 @@ function subscriptionSelectedAccount() {
 // record: a second one saved without complaint and then never appeared — the
 // card resolves the first match and stops — which read as the new entry having
 // replaced the old one.
-function subscriptionForAccountValue(list, providerId, accountValue, excludeId) {
+function subscriptionForAccount(list, providerId, account, excludeId) {
+  if (!account) return null;
   const accounts = limitProvidersForSubscriptions();
   return list.find((entry) => {
     if (entry.id === excludeId || entry.provider !== providerId) return false;
     const bound = subscriptionApi.matchProviderAccount(entry, accounts);
-    return Boolean(bound) && subscriptionAccountValue(bound) === accountValue;
+    return Boolean(bound) && accountIdentityApi.sameAccount(bound, account);
   }) || null;
 }
 
@@ -3848,7 +3863,7 @@ async function submitSubscription() {
     ? list.find((entry) => entry.id === state.subscriptionEditingId)
     : null;
 
-  if (subscriptionForAccountValue(list, providerId, accountValue, editing?.id)) {
+  if (subscriptionForAccount(list, providerId, account, editing?.id)) {
     setSubscriptionError(t('settings.subscriptions.errorDuplicate'));
     return;
   }

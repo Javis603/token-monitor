@@ -863,6 +863,68 @@ test('the same account in both lists is one candidate, not two', () => {
   assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountKey), ['sha256:a']);
 });
 
+test('one account is one candidate however each copy of it reads', () => {
+  // The two copies are two records: this device's own and the aggregate's. A key
+  // that has rotated leaves the address behind, and the display name is not what
+  // makes an account one — a candidate list that counted these twice is what the
+  // matcher's sole-account fallback and its name rung are read against.
+  const local = provider('codex', { accountKey: 'sha256:a', accountName: 'work', windows: [] });
+  const aggregate = provider('codex', {
+    accountKey: 'sha256:a',
+    accountName: 'Work',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const stats = {
+    devices: [{ deviceId: 'this-mac', limits: { providers: [local] } }],
+    limits: { providers: [aggregate] }
+  };
+  const [codex] = buildEdgeDockCells(stats, {
+    localDeviceId: 'this-mac',
+    items: [{ type: 'limit', provider: 'codex', showUsage: true }]
+  });
+  assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountName), ['work']);
+  // The aggregate is still what the card draws.
+  assert.deepEqual(codex.accounts.map((account) => account.accountName), ['Work']);
+
+  // Keys that disagree are two accounts, and a rotated one is bridged by the
+  // address rather than by the name.
+  const other = provider('codex', { accountKey: 'sha256:b', windows: [{ kind: 'session', remainingPercent: 60 }] });
+  const rotated = provider('codex', {
+    accountKey: 'sha256:c',
+    accountEmail: 'me@example.com',
+    windows: [{ kind: 'session', remainingPercent: 60 }]
+  });
+  const [split] = buildEdgeDockCells(
+    {
+      devices: [{ deviceId: 'this-mac', limits: { providers: [{ ...other, accountEmail: 'me@example.com' }] } }],
+      limits: { providers: [rotated] }
+    },
+    { localDeviceId: 'this-mac', items: [{ type: 'limit', provider: 'codex', showUsage: true }] }
+  );
+  assert.equal(split.subscriptionAccounts.length, 1, 'a rotation keeps the address, so it is one account');
+  assert.equal(split.accounts.length, 1, 'and one drawn account');
+});
+
+test('two accounts that are only addresses stay two candidates', () => {
+  // Neither carries a key or a name, so an identity built out of those two fields
+  // read both as the same account: one of them never reached the matcher, and a
+  // record bound to it resolved to the other one instead.
+  const local = provider('codex', { accountKey: '', accountEmail: 'a@example.com', status: 'unauthorized', windows: [] });
+  const remote = provider('codex', { accountKey: '', accountEmail: 'b@example.com' });
+  const stats = {
+    devices: [{ deviceId: 'this-mac', limits: { providers: [local] } }],
+    limits: { providers: [remote] }
+  };
+  const [codex] = buildEdgeDockCells(stats, {
+    localDeviceId: 'this-mac',
+    items: [{ type: 'limit', provider: 'codex', showUsage: true }]
+  });
+  assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountEmail), [
+    'a@example.com',
+    'b@example.com'
+  ]);
+});
+
 test('item settings normalize to null for automatic and drop unknown entries', () => {
   assert.equal(normalizeEdgeDockItems(null), null);
   assert.equal(normalizeEdgeDockItems('nope'), null);

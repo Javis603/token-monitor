@@ -472,23 +472,14 @@
     return status !== 'disabled' && status !== 'notConfigured';
   }
 
-  function accountKey(value) {
-    return String(value || '').trim();
-  }
-
-  function accountIdentityKeys(value) {
-    return new Set([
-      value?.accountKey,
-      value?.webAccountKey,
-      ...(Array.isArray(value?.accountKeyAliases) ? value.accountKeyAliases : [])
-    ].map(accountKey).filter(Boolean));
-  }
-
+  // The key family is read from accountIdentity.js rather than built again here:
+  // it is the same rule the subscription matcher binds with, and a second copy of
+  // it is a second answer to "which account is this" waiting to drift.
   function providerMatchesTarget(candidate, target) {
     if (providerId(candidate) !== providerId(target)) return false;
-    const targetAccountKeys = accountIdentityKeys(target);
+    const targetAccountKeys = accountIdentityApi.accountKeyFamily(target);
     if (targetAccountKeys.size === 0) return true;
-    return [...accountIdentityKeys(candidate)].some((key) => targetAccountKeys.has(key));
+    return [...accountIdentityApi.accountKeyFamily(candidate)].some((key) => targetAccountKeys.has(key));
   }
 
   function deviceProviderCandidate(device, target) {

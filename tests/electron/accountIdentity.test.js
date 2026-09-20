@@ -6,13 +6,15 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  accountKeyFamily,
   codexAccountDisplayLabel,
   codexAccountIdForProvider,
   codexAccountMatchesProvider,
   codexManagedAccountPlanLabel,
   isCodexLiveAccount,
   localLiveCodexProvider,
-  maskEmailAddress
+  maskEmailAddress,
+  sameAccount
 } = require('../../src/electron/renderer/accountIdentity');
 
 test('Codex account email masking uses the final separator in quoted local parts', () => {
@@ -161,6 +163,50 @@ test('live Codex provider selection uses local raw limits with a legacy aggregat
   assert.equal(localLiveCodexProvider(stats, 'this-device'), localLive);
   assert.equal(localLiveCodexProvider(stats, 'missing-device'), null);
   assert.equal(localLiveCodexProvider({ limits: stats.limits }, 'this-device'), remoteLive);
+});
+
+test('one account is one account, whatever each copy of it is called', () => {
+  const codex = (overrides) => ({ provider: 'codex', ...overrides });
+
+  // The key a record is named by, and the keys it was named by before: the
+  // family is what a rotation leaves behind, so it is a set rather than a string.
+  assert.deepEqual([...accountKeyFamily(codex({ accountKey: 'k', webAccountKey: 'w', accountKeyAliases: ['old', ''] }))], [
+    'k',
+    'w',
+    'old'
+  ]);
+  assert.equal(sameAccount(codex({ accountKey: 'k' }), codex({ webAccountKey: 'k' })), true);
+  assert.equal(sameAccount(codex({ accountKey: 'new', accountKeyAliases: ['old'] }), codex({ accountKey: 'old' })), true);
+
+  // The same key under two display names is one account: the name is the user's
+  // own label, and it is not what makes an account one.
+  assert.equal(sameAccount(codex({ accountKey: 'k', accountName: 'work' }), codex({ accountKey: 'k', accountName: 'Work' })), true);
+
+  // Keys that disagree are two accounts, unless the address bridges them — the
+  // rotation the matcher heals by falling through to it.
+  assert.equal(sameAccount(codex({ accountKey: 'k1' }), codex({ accountKey: 'k2' })), false);
+  assert.equal(
+    sameAccount(codex({ accountKey: 'k1', accountEmail: 'me@example.com' }), codex({ accountKey: 'k2', accountEmail: 'me@example.com' })),
+    true
+  );
+  assert.equal(
+    sameAccount(codex({ accountKey: 'k1', accountEmail: 'me@example.com' }), codex({ accountKey: 'k2', accountEmail: 'you@example.com' })),
+    false
+  );
+
+  // Accounts a provider reports by address alone: without keys the address is
+  // the only thing telling them apart, and an identity that read neither counted
+  // them as one.
+  assert.equal(sameAccount(codex({ accountEmail: 'a@example.com' }), codex({ accountEmail: 'b@example.com' })), false);
+  assert.equal(sameAccount(codex({ accountEmail: 'a@example.com' }), codex({ accountEmail: 'A@Example.com' })), true);
+  assert.equal(sameAccount(codex({ accountEmail: 'a@example.com' }), codex({ accountKey: 'k', accountEmail: 'a@example.com' })), true);
+
+  // Nothing to tell them apart by: one account, which is also what keeps the
+  // matcher's sole-account fallback able to heal a credential.
+  assert.equal(sameAccount(codex({}), codex({ accountName: 'work' })), true);
+
+  // Keys are only unique within a provider, so the provider is part of the rule.
+  assert.equal(sameAccount(codex({ accountKey: 'k' }), { provider: 'claude', accountKey: 'k' }), false);
 });
 
 test('renderer loads the shared Codex identity API before app.js', () => {

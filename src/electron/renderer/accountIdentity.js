@@ -129,15 +129,56 @@
     );
   }
 
-  // One limits account, as a value two lists can be deduped against. The
-  // provider is part of it because account keys are only unique within one, and
-  // an account with neither key nor name still has to compare equal to itself.
-  function accountValue(account) {
-    return [
-      String(account?.provider || '').trim().toLowerCase(),
-      String(account?.accountKey || '').trim(),
-      String(account?.accountName || '').trim()
-    ].join('\0');
+  // The keys one account can be named by: the key the provider reports today,
+  // the browser-session key beside it, and the keys a credential has rotated
+  // away from — kept on the record so a subscription bound before the rotation
+  // still lands. Trimmed and not lowercased, because keys are hashes and file
+  // paths, which is also how the shared matcher reads them.
+  function accountKeyFamily(account) {
+    return new Set([
+      account?.accountKey,
+      account?.webAccountKey,
+      ...(Array.isArray(account?.accountKeyAliases) ? account.accountKeyAliases : [])
+    ].map((key) => String(key === null || key === undefined ? '' : key).trim()).filter(Boolean));
+  }
+
+  // Whether two records name one account — the question a list is deduped with
+  // and a row asks about the account a record resolved to. The rungs are the
+  // subscription matcher's, in its order (subscriptionDisplay.js,
+  // matchProviderAccount), so a list deduped here and a binding resolved there
+  // cannot disagree about what one account is.
+  //
+  // The key rung asks whether the two families intersect rather than whether two
+  // chosen strings are equal, because a family is a set — the canonical key plus
+  // the keys it replaced — and two copies of one account need not carry the same
+  // member of it.
+  //
+  // The profile name is deliberately not a rung. The matcher reads it as
+  // identity only while it names exactly one account, which is a property of the
+  // list rather than of a pair: deduping two same-named accounts would hand the
+  // matcher the single candidate it declined to choose between, and put the cost
+  // on the wrong row. So two records only disagree when a key or an address says
+  // so; with neither to compare they are one account, which is also how the hub
+  // already collapses them (limits/core.js) and what keeps the matcher's
+  // sole-account fallback able to heal a re-pasted credential.
+  function sameAccount(a, b) {
+    if (String(a?.provider || '').trim().toLowerCase() !== String(b?.provider || '').trim().toLowerCase()) {
+      return false;
+    }
+    const keysA = accountKeyFamily(a);
+    const keysB = accountKeyFamily(b);
+    const emailA = accountEmailOf(a).toLowerCase();
+    const emailB = accountEmailOf(b).toLowerCase();
+    if (keysA.size > 0 && keysB.size > 0) {
+      for (const key of keysA) {
+        if (keysB.has(key)) return true;
+      }
+      // Two different keys: a rotation keeps the address and that is what the
+      // matcher falls through to, while two addresses say two accounts.
+      return Boolean(emailA && emailB) && emailA === emailB;
+    }
+    if (emailA && emailB) return emailA === emailB;
+    return true;
   }
 
   // Default account title for providers that identify accounts by email or name.
@@ -197,8 +238,8 @@
 
   return {
     accountEmailLabel,
+    accountKeyFamily,
     accountTitleLabel,
-    accountValue,
     codexAccountDisplayLabel,
     codexAccountIdForProvider,
     codexAccountMatchesProvider,
@@ -206,6 +247,7 @@
     isCodexLiveAccount,
     localDeviceLimitsProviders,
     localLiveCodexProvider,
-    maskEmailAddress
+    maskEmailAddress,
+    sameAccount
   };
 });

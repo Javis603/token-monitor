@@ -513,6 +513,43 @@ test('a recorded subscription decorates the card plan cell with the page hover c
   assert.equal(bare.find('limit-plan').textContent, 'Plus');
 });
 
+// The row is drawn from the aggregate's copy of an account, while the matcher
+// can resolve a record to this device's copy of the same account. Those are two
+// records, and what makes them one account is the key — not the display name,
+// which each copy may read differently. Asked as a value built out of the record
+// instead, the row that the record names lost its plan cell.
+test('a record decorates the row whose account it resolved to, copy or no copy', () => {
+  const subscription = {
+    id: 'sub-1',
+    provider: 'codex',
+    kind: 'subscription',
+    planName: 'Plus',
+    amountMinor: 2000,
+    currency: 'USD',
+    intervalCount: 1,
+    interval: 'month',
+    startDate: '2026-08-01',
+    autoRenew: true,
+    nextRenewalOverride: '',
+    endDate: null,
+    binding: { accountKey: 'k1' },
+    topUps: []
+  };
+  const drawn = { provider: 'codex', accountKey: 'k1', accountName: 'demo@example.com' };
+  const mine = { provider: 'codex', accountKey: 'k1', accountName: 'demo' };
+  const row = dockView({ subscriptions: [subscription], accounts: [mine] }).renderLimitProviderRow('codex', 'Codex', {
+    ...drawn,
+    status: 'ok',
+    planLabel: 'Plus',
+    updatedAt: new Date().toISOString(),
+    windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }]
+  }, '#10A37F');
+
+  const card = row.find('subscription-tooltip');
+  assert.ok(card, "the account's own record decorates its row");
+  assert.match(card.text, /\$20\.00/);
+});
+
 // A record binds to an account, and an account the composer hides is still one
 // the provider has. Matched against the rows on screen instead, a record bound
 // to the hidden account falls through matchProviderAccount()'s sole-account

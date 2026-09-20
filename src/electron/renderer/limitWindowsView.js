@@ -1850,9 +1850,11 @@
   // The account identity rule lives with the rest of them (accountIdentity.js),
   // because the dock's matcher universe is deduped with it before this file ever
   // sees it: two copies of "which account is this" is how one of them ends up
-  // counting an account twice.
-  function subscriptionAccountValue(provider) {
-    return accountIdentity.accountValue(provider);
+  // counting an account twice. It is the rule the matcher itself binds with —
+  // and it is a comparison rather than a value, because the account a record
+  // resolved to and the record being drawn are two objects, not one.
+  function subscriptionAccountMatches(account, provider) {
+    return accountIdentity.sameAccount(account, provider);
   }
 
   // Usage cost is keyed by client, and every provider whose id names a tracked
@@ -1873,11 +1875,10 @@
   function subscriptionForProvider(provider) {
     const id = String(provider?.provider || '').toLowerCase();
     const accounts = subscriptionAccounts();
-    const identity = subscriptionAccountValue(provider);
     for (const subscription of subscriptionList()) {
       if (subscription.provider !== id) continue;
       const account = subscriptionApi.matchProviderAccount(subscription, accounts);
-      if (account && subscriptionAccountValue(account) === identity) return subscription;
+      if (account && subscriptionAccountMatches(account, provider)) return subscription;
     }
     return null;
   }
@@ -1892,14 +1893,18 @@
   function subscriptionsForProviderGroup(providerId, drawn) {
     const id = String(providerId || '').toLowerCase();
     const accounts = subscriptionAccounts();
-    const drawnValues = Array.isArray(drawn) ? new Set(drawn.map(subscriptionAccountValue)) : null;
+    const drawnAccounts = Array.isArray(drawn) ? drawn : null;
     return subscriptionList()
       .filter((subscription) => subscription.provider === id)
       .map((subscription) => ({
         subscription,
         account: subscriptionApi.matchProviderAccount(subscription, accounts)
       }))
-      .filter((entry) => !entry.account || !drawnValues || drawnValues.has(subscriptionAccountValue(entry.account)));
+      .filter((entry) => (
+        !entry.account
+        || !drawnAccounts
+        || drawnAccounts.some((account) => subscriptionAccountMatches(entry.account, account))
+      ));
   }
 
   // Rows are {label, value} pairs so the tooltip stays a table and the caller

@@ -3190,7 +3190,7 @@ test('a successful subscription save defers the full render until close complete
     subscriptionFormIsTopUp: () => false,
     subscriptionAccountChoices: () => [{ value: 'acct-1', provider: account }],
     subscriptionList: () => list,
-    subscriptionForAccountValue: () => false,
+    subscriptionForAccount: () => null,
     saveCompleted: false,
     saveOptions: null,
     closeOptions: null,
@@ -3566,7 +3566,7 @@ test('a subscription card belongs to one account, and a group header summarises'
   // matchProviderAccount falls back to "the provider has exactly one account",
   // so it must see every account, not just the row being rendered.
   assert.match(forProvider, /const accounts = subscriptionAccounts\(\);/);
-  assert.match(forProvider, /subscriptionAccountValue\(account\) === identity/);
+  assert.match(forProvider, /subscriptionAccountMatches\(account, provider\)/);
   assert.doesNotMatch(forProvider, /matchProviderAccount\(subscription, \[provider\]\)/);
   assert.match(cardFor, /provider\?\.accountGroup === true/);
   // The header cards the accounts it draws — the entries are narrowed to them,
@@ -3583,7 +3583,10 @@ test('a subscription card belongs to one account, and a group header summarises'
   assert.doesNotMatch(cardFor, /subscriptionGroupTooltipRows\([\s\S]{0,80}entries\.map/);
   const groupResolver = viewBody('subscriptionsForProviderGroup', 'subscriptionTooltipRows');
   assert.match(groupResolver, /const accounts = subscriptionAccounts\(\);/);
-  assert.match(groupResolver, /drawnValues\.has\(subscriptionAccountValue\(entry\.account\)\)/);
+  assert.match(
+    groupResolver,
+    /drawnAccounts\.some\(\(account\) => subscriptionAccountMatches\(entry\.account, account\)\)/
+  );
   assert.match(
     viewBody('subscriptionPlanTooltipRows', 'topUpTooltipRows'),
     /providerRollup\(subscriptionList\(\), subscription\.provider, currencyApi, today\)/,
@@ -3601,11 +3604,11 @@ test('the seeded plan name is a real plan, never a status label', () => {
 
 test("one account's subscription never appears on its siblings", () => {
   const subscriptionApi = require('../../src/shared/subscriptionDisplay');
-  const accountValue = viewBody('subscriptionAccountValue', 'subscriptionUsageCostUsd');
+  const accountMatch = viewBody('subscriptionAccountMatches', 'subscriptionUsageCostUsd');
   const forProvider = viewBody('subscriptionForProvider', 'subscriptionsForProviderGroup');
 
   const resolve = (accounts, subscriptions, provider) => vm.runInNewContext(
-    `${accountValue}\n${forProvider}\nsubscriptionForProvider(provider)?.id || null;`,
+    `${accountMatch}\n${forProvider}\nsubscriptionForProvider(provider)?.id || null;`,
     {
       subscriptionApi,
       // The identity rule is the shared one, so the sandbox gets it from where
@@ -3771,8 +3774,7 @@ test('a date bound is only written when it actually changes', () => {
 test('one account holds one subscription record', () => {
   const app = readRendererFile('app.js');
   const subscriptionApi = require('../../src/shared/subscriptionDisplay');
-  const accountValue = functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName');
-  const forAccount = functionBody(app, 'subscriptionForAccountValue', 'subscriptionRowTitle');
+  const forAccount = functionBody(app, 'subscriptionForAccount', 'subscriptionRowTitle');
   const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
 
   const accounts = [
@@ -3781,9 +3783,10 @@ test('one account holds one subscription record', () => {
   ];
   const existing = [{ id: 's1', provider: 'codex', binding: { accountEmail: 'b@example.com' } }];
   const clash = (target, excludeId) => vm.runInNewContext(
-    `${accountValue}\n${forAccount}\nsubscriptionForAccountValue(list, 'codex', subscriptionAccountValue(target), excludeId)?.id || null;`,
+    `${forAccount}\nsubscriptionForAccount(list, 'codex', target, excludeId)?.id || null;`,
     {
       subscriptionApi,
+      accountIdentityApi: require('../../src/electron/renderer/accountIdentity'),
       limitProvidersForSubscriptions: () => accounts,
       list: existing,
       target,
@@ -3795,6 +3798,10 @@ test('one account holds one subscription record', () => {
   // A sibling account is free, and editing the record does not clash with itself.
   assert.equal(clash(accounts[0]), null);
   assert.equal(clash(accounts[1], 's1'), null);
+  // The account a record resolved to and the choice the user picked are two
+  // records of one account, and the aggregate's copy can read under another
+  // display name — the duplicate this check exists to refuse.
+  assert.equal(clash({ ...accounts[1], accountName: 'work' }), 's1');
   assert.match(submit, /settings\.subscriptions\.errorDuplicate/);
   assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.errorDuplicate':").length - 1, 5);
 });
@@ -4232,13 +4239,14 @@ test('a refused write says which problem it was', () => {
 
 test('a device with no limits of its own can still name the accounts on the hub', () => {
   const app = readRendererFile('app.js');
-  const source = [
-    functionBody(app, 'limitProvidersForSubscriptions', 'subscriptionAccountValue'),
-    functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName')
-  ].join('\n');
+  const source = functionBody(app, 'limitProvidersForSubscriptions', 'subscriptionAccountValue');
   const run = (local, aggregate) => plain(vm.runInNewContext(
     `${source}\nlimitProvidersForSubscriptions();`,
-    { localDeviceLimitsProviders: () => local, state: { stats: { limits: { providers: aggregate } } } }
+    {
+      accountIdentityApi: require('../../src/electron/renderer/accountIdentity'),
+      localDeviceLimitsProviders: () => local,
+      state: { stats: { limits: { providers: aggregate } } }
+    }
   ));
   const remote = [{ provider: 'codex', accountKey: 'remote', accountEmail: 'a@example.com' }];
 
@@ -4259,6 +4267,46 @@ test('a device with no limits of its own can still name the accounts on the hub'
   assert.deepEqual(run(sameProvider, remote).map((entry) => entry.accountKey), ['local', 'remote']);
   // The aggregate normally carries this device's accounts too; they appear once.
   assert.deepEqual(run(mine, [...mine, ...remote]).map((entry) => entry.accountKey), ['local', 'remote']);
+
+  // One account, two records: this device's copy and the aggregate's. They name
+  // the same key, so they are one account whatever either copy calls it — a list
+  // that kept both handed the matcher two candidates for one account, and its
+  // sole-account fallback is what stops healing a re-pasted credential.
+  const localCopy = [{ provider: 'codex', accountKey: 'remote', accountName: 'work' }];
+  assert.deepEqual(
+    run(localCopy, [{ ...remote[0], accountName: 'Work' }]).map((entry) => entry.accountName),
+    ['work']
+  );
+});
+
+test('the account picker tells two address-only accounts apart', () => {
+  const app = readRendererFile('app.js');
+  const source = functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName');
+  const value = (provider) => vm.runInNewContext(`${source}\nsubscriptionAccountValue(__provider)`, {
+    __provider: provider
+  });
+
+  // The select compares these strings, so two accounts a provider reports by
+  // address alone have to differ here or the user is offered one entry for two
+  // accounts — and picking it records the wrong one.
+  assert.notEqual(
+    value({ provider: 'codex', accountEmail: 'a@example.com' }),
+    value({ provider: 'codex', accountEmail: 'b@example.com' })
+  );
+  // One record keeps one value, so reopening the form lands back on the choice
+  // the record was saved against rather than on the first account in the list.
+  assert.equal(value({ provider: 'codex', accountKey: 'k' }), value({ provider: 'codex', accountKey: 'k' }));
+  // Keys are only unique within a provider, and the same address signed into two
+  // providers is two accounts.
+  assert.notEqual(
+    value({ provider: 'codex', accountEmail: 'a@example.com' }),
+    value({ provider: 'claude', accountEmail: 'a@example.com' })
+  );
+  // `email` is the field the matcher reads, so it has to count here too.
+  assert.notEqual(
+    value({ provider: 'codex', email: 'a@example.com' }),
+    value({ provider: 'codex', accountEmail: 'b@example.com' })
+  );
 });
 
 test('a hub timestamp that cannot be parsed does not turn a save into a crash', () => {
