@@ -46,7 +46,9 @@ test('a stale session expiry never shortens either self-repair wait to its floor
   const mainScheduler = main.slice(main.indexOf('function edgeDockNextSessionExpiry('), main.indexOf('function scheduleEdgeDockSessionExpiry('));
   assert.match(mainScheduler, /const now = Date\.now\(\);/);
   assert.match(mainScheduler, /if \(expiresAt > now &&/);
-  const rendererScheduler = dock.slice(dock.indexOf('function selfRepaintDelayMs('), dock.indexOf('function repaintSelf('));
+  // The renderer's sessions-expiry read, which is what both surfaces' waits are built
+  // from now that the card's period and the rail's expiry are separate concerns.
+  const rendererScheduler = dock.slice(dock.indexOf('function sessionsExpiryDelayMs('), dock.indexOf('function repaintSelf('));
   assert.match(rendererScheduler, /const now = Date\.now\(\);/);
   assert.match(rendererScheduler, /if \(expiresAt > now &&/);
   // The floor is a lower bound on a real wait, not a period to poll at.

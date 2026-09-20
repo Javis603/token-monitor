@@ -1136,11 +1136,20 @@ function surfacesShowingSessions() {
 // cell carries the moment its newest running row expires; anything else falls back
 // to the minute that reset countdowns need. Both ends are clamped so a payload
 // whose expiry has just passed does not spin the timer.
+// The one floor every wait respects, so a payload whose expiry has just passed cannot
+// produce a zero-length timer.
 const SELF_REPAINT_FLOOR_MS = 1_000;
-const SELF_REPAINT_MAX_MS = 60_000;
 
-function selfRepaintDelayMs() {
-  if (!surfacesShowingSessions()) return SELF_REPAINT_MAX_MS;
+// The card has always repainted on a period, because its reset countdowns move on the
+// clock alone; thirty seconds is that period, unchanged by this feature.
+const BUBBLE_REPAINT_MS = 30_000;
+
+// How long until the soonest sessions reading on this surface changes by itself. 0
+// when there is nothing to wake for, which is a real answer rather than a fallback: a
+// quiet cell never becomes running on its own, so a caller reading 0 must not arm a
+// timer at all. The floor keeps a payload whose expiry has just passed from spinning.
+function sessionsExpiryDelayMs() {
+  if (!surfacesShowingSessions()) return 0;
   const cells = surface === 'rail' ? state.payload?.cells || [] : [state.payload?.cell].filter(Boolean);
   let soonest = 0;
   // Only an expiry still in the future can shorten this wait. A stale one used to be
@@ -1154,8 +1163,20 @@ function selfRepaintDelayMs() {
     const expiresAt = Number(cell.runningExpiresAt) || 0;
     if (expiresAt > now && (!soonest || expiresAt < soonest)) soonest = expiresAt;
   }
-  if (!soonest) return SELF_REPAINT_MAX_MS;
-  return Math.min(SELF_REPAINT_MAX_MS, Math.max(SELF_REPAINT_FLOOR_MS, soonest - Date.now() + 50));
+  if (!soonest) return 0;
+  return Math.max(SELF_REPAINT_FLOOR_MS, soonest - Date.now() + 50);
+}
+
+// Per surface, because the two surfaces have different reasons to wake. The card keeps
+// its own period and lets an expiry shorten it; a rail that is not showing sessions
+// gets no timer at all, since it was push-driven before this feature and polling it
+// would rebuild its children for nothing. Both are re-armed after every repaint, so a
+// shortened wait does not lower the period that follows it.
+function selfRepaintDelayMs() {
+  const expiry = sessionsExpiryDelayMs();
+  const period = surface === 'bubble' ? BUBBLE_REPAINT_MS : 0;
+  const waits = [period, expiry].filter((value) => value > 0);
+  return waits.length ? Math.min(...waits) : 0;
 }
 
 function repaintSelf() {
@@ -1175,11 +1196,16 @@ function repaintSelf() {
 let selfRepaintTimer = null;
 function scheduleSelfRepaint() {
   if (selfRepaintTimer) clearTimeout(selfRepaintTimer);
+  selfRepaintTimer = null;
+  const delay = selfRepaintDelayMs();
+  // 0 means this surface has nothing to wake for: a rail with no sessions expiry, or
+  // the peek handle. Leaving the timer unarmed is what keeps the rail push-driven.
+  if (!delay) return;
   selfRepaintTimer = setTimeout(() => {
     selfRepaintTimer = null;
     repaintSelf();
     scheduleSelfRepaint();
-  }, selfRepaintDelayMs());
+  }, delay);
 }
 scheduleSelfRepaint();
 bridge.ready();

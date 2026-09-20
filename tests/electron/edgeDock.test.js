@@ -700,6 +700,34 @@ test('a repainted card restores the scroll container it actually uses', () => {
   }
 });
 
+// The self-repaint scheduler replaced the card's fixed 30s interval, and its first
+// shape changed behaviour it had no business touching: the card fell back to 60s (a
+// regression against the period reset countdowns are drawn at) and the rail, which was
+// push-driven, started rebuilding its children every minute for nothing. Per surface,
+// because the two wake for different reasons.
+test('the self-repaint cadence matches what each surface actually needs', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const period = dock.slice(dock.indexOf('const BUBBLE_REPAINT_MS'), dock.indexOf('function repaintSelf('));
+  // The card keeps the 30s it always had.
+  assert.match(period, /const BUBBLE_REPAINT_MS = 30_000;/);
+  assert.match(period, /const period = surface === 'bubble' \? BUBBLE_REPAINT_MS : 0;/);
+  // A rail only wakes for a sessions expiry, and reports 0 when there is none - which
+  // is what leaves its timer unarmed rather than polling it.
+  assert.match(period, /if \(!surfacesShowingSessions\(\)\) return 0;/);
+  assert.match(period, /if \(!soonest\) return 0;/);
+  assert.match(period, /return waits\.length \? Math\.min\(\.\.\.waits\) : 0;/);
+  // An expiry may shorten a wait but never lower the period after it: the shortest of
+  // the two applies to this one wake only, and the timer re-arms from a fresh read.
+  // Sliced to the end of the function body rather than to the first call of it, which
+  // is the recursive one inside and cut the slice before the lines under test.
+  const scheduler = dock.slice(dock.indexOf('function scheduleSelfRepaint('), dock.indexOf('bridge.ready();'));
+  assert.match(scheduler, /if \(!delay\) return;/);
+  assert.match(scheduler, /repaintSelf\(\);/);
+  assert.match(scheduler, /scheduleSelfRepaint\(\);/);
+  // The old fixed interval is gone, so nothing repaints a surface on a blind period.
+  assert.doesNotMatch(dock, /setInterval\(/);
+});
+
 // The flare cache keeps one entry per session it has seen, so a long-lived card has
 // to prune it against the whole list. Pruning per group would delete every other
 // group's entries, which is why this asserts the call sits in sessionsCard().
