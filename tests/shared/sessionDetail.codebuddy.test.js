@@ -141,6 +141,43 @@ test('reads the cached count from whichever field the client filled', () => {
   assert.equal(events[1].tokens.input, 750);
 });
 
+test('reads reasoning from whichever field the client filled', () => {
+  // `completion_thinking_tokens` is what the client usually writes, but a build
+  // that leaves it empty fills `completion_tokens_details` instead — the same
+  // instability the cached count has, and here the raw field is the only source
+  // when the `usage` mirror is missing too.
+  const viaDetails = JSON.stringify({
+    type: 'function_call',
+    timestamp: 1788851509000,
+    name: 'Read',
+    providerData: {
+      messageId: 'm1',
+      rawUsage: {
+        prompt_tokens: 100,
+        completion_tokens: 50,
+        completion_tokens_details: { reasoning_tokens: 30 }
+      }
+    }
+  });
+  const fromDetails = parseCodebuddyTranscript([user('hi'), viaDetails].join('\n'));
+  assert.equal(fromDetails[1].tokens.reasoning, 30);
+  // ...and reasoning stays a subset of output rather than a fourth bucket.
+  assert.equal(fromDetails[1].tokens.total, 150);
+
+  const viaMirror = JSON.stringify({
+    type: 'function_call',
+    timestamp: 1788851509000,
+    name: 'Read',
+    providerData: {
+      messageId: 'm2',
+      rawUsage: { prompt_tokens: 10, completion_tokens: 5 },
+      usage: { inputTokens: 10, outputTokens: 5, outputTokensDetails: [{ reasoning_tokens: 4 }] }
+    }
+  });
+  const fromMirror = parseCodebuddyTranscript([user('hi'), viaMirror].join('\n'));
+  assert.equal(fromMirror[1].tokens.reasoning, 4);
+});
+
 test('keeps a reply whose usage never arrived instead of dropping it', () => {
   // The reply is still a reply: the detail view shows it with its tools and
   // marks only its token numbers unavailable, which is what the shared

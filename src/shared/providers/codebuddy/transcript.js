@@ -133,6 +133,11 @@ function cachedTokens(rawUsage, usage) {
 function reasoningTokens(rawUsage, usage) {
   const thinking = num(rawUsage.completion_thinking_tokens);
   if (thinking) return thinking;
+  // Same instability as the cache count above: a build that leaves the friendly
+  // field empty fills `completion_tokens_details` instead, so the raw field is
+  // read before the `usage` mirror.
+  const details = num(rawUsage.completion_tokens_details?.reasoning_tokens);
+  if (details) return details;
   let total = 0;
   for (const part of Array.isArray(usage.outputTokensDetails) ? usage.outputTokensDetails : []) {
     total += num(part?.reasoning_tokens);
