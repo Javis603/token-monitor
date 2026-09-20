@@ -795,6 +795,40 @@ test('the self-repaint cadence matches what each surface actually needs', () => 
   assert.doesNotMatch(dock, /setInterval\(/);
 });
 
+// The wait has to be recomputed from the rows, not read off the cell. `runningExpiresAt`
+// describes the payload as it was projected and a repaint does not re-project, so once
+// the soonest expiry passed that field stayed in the past: the surface woke once and then
+// stopped, and a second session's expiry never fired. Measured on the real renderer
+// before the fix - two sessions expiring at 2s and 6s produced one repaint in eight
+// seconds and left the cell claiming a session that had gone quiet.
+test('the session wait is recomputed from the rows so every expiry wakes the surface', () => {
+  const now = Date.now();
+  const iso = (ms) => new Date(ms).toISOString();
+  const stats = {
+    periods: {
+      month: { sessions: {
+        'codex:a': { client: 'codex', sessionId: 'a', lastUsedAt: iso(now - 60_000), totalTokens: 10, models: { m: 10 } },
+        'kilo:b': { client: 'kilo', sessionId: 'b', lastUsedAt: iso(now - 5 * 60_000), totalTokens: 10, models: { m: 10 } }
+      } },
+      today: { sessions: {} }
+    },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] });
+  // The cell reports the first expiry, which is what the surface wakes on...
+  assert.equal(cell.runningExpiresAt, edgeDockPresentation.nextRunningExpiryAt(cell.sessions, now));
+  // ...and asking the same rows again after it passes answers with the second one, which
+  // reading the cell's own field could not do.
+  const second = edgeDockPresentation.nextRunningExpiryAt(cell.sessions, cell.runningExpiresAt + 1);
+  assert.ok(second > cell.runningExpiresAt, 'a later expiry should be found after the first passes');
+  assert.equal(edgeDockPresentation.runningSessionSummary(cell.sessions, cell.runningExpiresAt + 1).count, 1);
+  // And the scheduler asks the rows, not the cell.
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const scheduler = dock.slice(dock.indexOf('function sessionsExpiryDelayMs('), dock.indexOf('function repaintSelf('));
+  assert.match(scheduler, /presentation\.nextRunningExpiryAt\(cell\.sessions, now\)/);
+  assert.doesNotMatch(scheduler, /cell\.runningExpiresAt/);
+});
+
 // The flare cache keeps one entry per session it has seen, so a long-lived card has
 // to prune it against the whole list. Pruning per group would delete every other
 // group's entries, which is why this asserts the call sits in sessionsCard().

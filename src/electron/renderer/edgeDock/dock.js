@@ -1163,15 +1163,18 @@ function sessionsExpiryDelayMs() {
   if (!surfacesShowingSessions()) return 0;
   const cells = surface === 'rail' ? state.payload?.cells || [] : [state.payload?.cell].filter(Boolean);
   let soonest = 0;
-  // Only an expiry still in the future can shorten this wait. A stale one used to be
-  // picked as `soonest` anyway, which pinned the delay to the one-second floor and
-  // re-armed on the same payload after every repaint - a quiet repaint loop until the
-  // main process pushed a re-projection. Filtering here is what makes the floor a
-  // lower bound on a real wait rather than a period.
   const now = Date.now();
   for (const cell of cells) {
     if (cell?.metric !== presentation.SESSIONS_METRIC) continue;
-    const expiresAt = Number(cell.runningExpiresAt) || 0;
+    // Asked of the rows rather than read off the cell. `runningExpiresAt` describes the
+    // payload as it was projected, and a repaint does not re-project: once the soonest
+    // expiry passes, that field is in the past for good, so a later row's expiry would
+    // never wake anything and the cell would keep drawing it as running. The rows are
+    // what a repaint re-derives from, so they are what the next wait is computed from -
+    // recomputed each time, which is also what makes a second and third expiry wake the
+    // surface in turn. Only an expiry still ahead can shorten a wait; a stale one would
+    // otherwise pin the delay to the floor and re-arm on every pass.
+    const expiresAt = presentation.nextRunningExpiryAt(cell.sessions, now);
     if (expiresAt > now && (!soonest || expiresAt < soonest)) soonest = expiresAt;
   }
   if (!soonest) return 0;
