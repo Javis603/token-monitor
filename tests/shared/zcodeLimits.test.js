@@ -687,8 +687,8 @@ test('the selected account\'s own store key outranks a mirror left by another ac
   // A profile whose identity names no store entry resolves to no credential at
   // all: the mirror cannot be shown to belong to the account the profile just
   // named, so the lane reports that state instead of querying with it
-  // (docs/providers/zai.md — the store entry is a lazily filled cache, so its
-  // absence beside a readable profile is incomplete or not-yet-filled state).
+  // (docs/providers/zai.md — the store entry is filled lazily, so its absence
+  // beside a readable profile is a not-yet-filled or never-issued state).
   const mismatched = { ...files, 'credentials.json': JSON.stringify({
     zcodejwttoken: encryptCredential('live-billing-jwt', TEST_CREDENTIAL_SECRET),
     'oauth:zai:user_info': encryptCredential(JSON.stringify({ user_id: 'nobody' }), TEST_CREDENTIAL_SECRET),

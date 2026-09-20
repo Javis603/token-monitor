@@ -268,10 +268,11 @@ function discoverZcodeConnection(options = {}, deps = {}) {
     // own key wins over the entry's mirror — on a machine that has switched
     // accounts the mirror still belongs to whoever wrote it last under 3.11.x,
     // while the store entry names the logged-in account. The mirror is the
-    // fallback only where no identity was established (an absent, unreadable or
-    // undecryptable store, an unusable profile, a 3.11.x install); once the
-    // identity is known, an absent entry means the lane has no credential,
-    // because a mirror there cannot be shown to belong to that account.
+    // fallback wherever no credential can be established — no store, no
+    // identity, a profile or entry that fails to read or decrypt, a 3.11.x
+    // install — with one exception: once the identity is known, an absent entry
+    // means the lane has no credential, because a mirror there cannot be shown
+    // to belong to that account.
     let credential;
     if (kind === 'start-billing') {
       credential = liveBillingCredential() || billingCredential(provider);
