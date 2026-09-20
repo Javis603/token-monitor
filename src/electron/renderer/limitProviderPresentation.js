@@ -302,6 +302,13 @@
         tone: 'setup'
       };
     }
+    if (providerName === 'workbuddy' && provider?.actionRequired === 'appSessionEncrypted') {
+      return {
+        label: 'Encrypted by app',
+        key: 'settings.limits.status.appSessionEncrypted',
+        tone: 'warn'
+      };
+    }
     if (status === 'ok') return { label: isLinkedStatus(provider) ? 'Linked' : 'Live', tone: 'ok' };
     if (status === 'disabled') return { label: 'Disabled', tone: 'muted' };
     if (status === 'noSyncedData') return { label: 'No synced data', tone: 'sync' };

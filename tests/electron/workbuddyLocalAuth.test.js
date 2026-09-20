@@ -10,9 +10,11 @@ const {
   WORKBUDDY_AUTH_FILE_NAME,
   WORKBUDDY_LOGOUT_MARKER_SUFFIX,
   WORKBUDDY_SESSION_EXPIRY_SKEW_MS,
+  WORKBUDDY_SESSION_READ_REASONS,
   authDirectoriesForPlatform,
   authDirectoryForPlatform,
   createWorkbuddyLocalAuth,
+  inspectStoredSession,
   isAllowedWorkbuddyApiUrl,
   normalizeStoredSession,
   sanitizeRequestInit
@@ -390,4 +392,132 @@ test('WorkBuddy request sanitization never forwards caller authentication materi
     redirect: 'error',
     body: '{}'
   });
+});
+
+// WorkBuddy 5.6.0 seals credential fields with the at-rest key its own runtime
+// holds, so the access token arrives as a `{$wbEncrypted: 1, envelope: …}`
+// shell. Reporting that as a signed-out app sends the user to a sign-in screen
+// that cannot change the outcome, so the reader has to name the real reason.
+const ENCRYPTED_ACCESS_TOKEN = Object.freeze({
+  $wbEncrypted: 1,
+  envelope: 'eyJzdWl0ZSI6MSwia2V5SWQiOiJmaXh0dXJlLWtleSJ9'
+});
+
+function writeSealedSession(authPath, auth = {}) {
+  fs.writeFileSync(authPath, JSON.stringify({
+    account: { uid: 'local-user', accountType: 'personal' },
+    auth: {
+      accessToken: ENCRYPTED_ACCESS_TOKEN,
+      domain: 'copilot.tencent.com',
+      expiresAt: Date.now() + 60 * 60 * 1000,
+      ...auth
+    }
+  }), 'utf8');
+}
+
+test('WorkBuddy sealed credential fields are reported as unreadable instead of signed out', () => {
+  const fixture = createFixture();
+  try {
+    writeSealedSession(fixture.authPath);
+    const auth = createWorkbuddyLocalAuth({ authDirectory: fixture.root, platform: 'darwin' });
+    const sessionInfo = auth.getSessionInfo();
+
+    assert.equal(sessionInfo.authenticated, false);
+    assert.equal(sessionInfo.reason, WORKBUDDY_SESSION_READ_REASONS.encrypted);
+    assert.equal(sessionInfo.userId, '');
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('WorkBuddy local auth treats a sealed refresh token as unreadable as well', () => {
+  const fixture = createFixture();
+  try {
+    fs.writeFileSync(fixture.authPath, JSON.stringify(sessionDocument({
+      auth: { refreshToken: ENCRYPTED_ACCESS_TOKEN }
+    })), 'utf8');
+    const auth = createWorkbuddyLocalAuth({ authDirectory: fixture.root, platform: 'darwin' });
+
+    assert.equal(auth.getSessionInfo().reason, WORKBUDDY_SESSION_READ_REASONS.encrypted);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('WorkBuddy session read reasons cover every unusable state and leave the legacy accessor alone', () => {
+  const now = Date.parse('2026-08-11T00:00:00Z');
+
+  assert.deepEqual(
+    inspectStoredSession(sessionDocument({ auth: { accessToken: ENCRYPTED_ACCESS_TOKEN } }), now),
+    { session: null, reason: WORKBUDDY_SESSION_READ_REASONS.encrypted }
+  );
+  assert.equal(inspectStoredSession(null, now).reason, WORKBUDDY_SESSION_READ_REASONS.malformed);
+  assert.equal(
+    inspectStoredSession({ auth: {}, account: {} }, now).reason,
+    WORKBUDDY_SESSION_READ_REASONS.incomplete
+  );
+  assert.equal(inspectStoredSession(sessionDocument(), now).reason, '');
+  // normalizeStoredSession still answers with a session or null, never a result pair.
+  assert.equal(normalizeStoredSession(sessionDocument({ auth: { accessToken: ENCRYPTED_ACCESS_TOKEN } }), now), null);
+  assert.equal(normalizeStoredSession(sessionDocument(), now).userId, 'local-user');
+});
+
+test('WorkBuddy local auth names absent, malformed and expired canonical files', () => {
+  const fixture = createFixture();
+  try {
+    const read = () => createWorkbuddyLocalAuth({
+      authDirectory: fixture.root,
+      platform: 'darwin'
+    }).getSessionInfo();
+
+    fs.rmSync(fixture.authPath);
+    assert.equal(read().reason, WORKBUDDY_SESSION_READ_REASONS.absent);
+
+    fs.writeFileSync(fixture.authPath, '{ not json', 'utf8');
+    assert.equal(read().reason, WORKBUDDY_SESSION_READ_REASONS.malformed);
+
+    fs.writeFileSync(fixture.authPath, `${' '.repeat(1024 * 1024)} `, 'utf8');
+    assert.equal(read().reason, WORKBUDDY_SESSION_READ_REASONS.malformed);
+
+    fs.writeFileSync(fixture.authPath, JSON.stringify(sessionDocument({
+      auth: { expiresAt: Date.now() - 60 * 1000 }
+    })), 'utf8');
+    assert.equal(read().reason, WORKBUDDY_SESSION_READ_REASONS.expired);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('WorkBuddy readable app sessions stay free of a read reason', () => {
+  const fixture = createFixture();
+  try {
+    const sessionInfo = createWorkbuddyLocalAuth({
+      authDirectory: fixture.root,
+      platform: 'darwin'
+    }).getSessionInfo();
+
+    assert.equal(sessionInfo.authenticated, true);
+    assert.equal(Object.hasOwn(sessionInfo, 'reason'), false);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('WorkBuddy billing requests name a sealed credential instead of a missing sign-in', async () => {
+  const fixture = createFixture();
+  try {
+    writeSealedSession(fixture.authPath);
+    const auth = createWorkbuddyLocalAuth({
+      authDirectory: fixture.root,
+      platform: 'darwin',
+      fetch: async () => { throw new Error('the billing transport must not be reached'); }
+    });
+
+    await assert.rejects(
+      () => auth.request('https://copilot.tencent.com/v2/billing/meter/get-user-resource', { method: 'POST' }),
+      (error) => error?.status === 'notConfigured' && /encrypted/.test(error.message)
+    );
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
 });
