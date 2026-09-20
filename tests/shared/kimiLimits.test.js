@@ -1086,3 +1086,50 @@ test('fetchKimiLimits lets the seed session serve once a pasted access token exi
   assert.equal(usages.init.headers.Authorization, 'Bearer manual-rotated.body.sig');
   assert.equal(provider.accountKey, hashKey('kimi', 'manual:manual-user'));
 });
+
+test('#700 x desktop session: Code API stays primary and the session fills the monthly window', async () => {
+  const now = Date.parse('2026-09-20T00:00:00Z');
+  const requests = [];
+  const provider = await fetchKimiLimits(
+    { kimiApiKey: 'kimi-key' },
+    {
+      env: {},
+      now: () => now,
+      kimiDesktopSession: async () => desktopSession({ accessToken: 'desktop-access.body.sig', userId: 'user-1' }),
+      fetch: async (url, init) => {
+        requests.push({ url: String(url), auth: init.headers.Authorization });
+        if (String(url) === KIMI_CODE_USAGES_URL) {
+          // the old-scheme shape: weekly + 5h pools, no monthly field at all
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              usage: { limit: '100', used: '47', remaining: '53', resetTime: '2026-09-21T08:39:35Z' },
+              limits: [{ window: { duration: 300, timeUnit: 'TIME_UNIT_MINUTE' }, detail: { limit: '100', remaining: '100' } }],
+              usages: { limit_5h: { used_ratio: 0 }, limit_7d: { used_ratio: 0.473 } }
+            })
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            usages: [{ scope: 'FEATURE_CODING', detail: { limit: '100', remaining: '53' } }],
+            ratelimitCode5h: { ratio: 0, enabled: true },
+            ratelimitCode7d: { ratio: 0.473, enabled: true },
+            subscriptionBalance: { feature: 'FEATURE_OMNI', type: 'SUBSCRIPTION', amountUsedRatio: 0.09 }
+          })
+        };
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'api', 'Code API stays the primary source when a key is configured');
+  assert.equal(provider.accountKey, hashKey('kimi', 'kimi-key'), 'identity pins to the key per #700');
+  const kinds = provider.windows.map((window) => window.kind);
+  assert.ok(kinds.includes('billing'), 'the desktop session supplies the monthly window Code lacks');
+  const webCall = requests.find((request) => String(request.url) === KIMI_WEB_USAGES_URL);
+  assert.ok(webCall, 'the web membership source is consulted for the missing kind');
+  assert.match(webCall.auth, /desktop-access/);
+});
