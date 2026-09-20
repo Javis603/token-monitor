@@ -473,8 +473,9 @@ function providerCellNode(cell) {
   // faintest at 5%, which is exactly when it matters most), leaves the focused
   // ring's own glow unambiguous, and stays readable on a stale cell, where the
   // dimmed arc means "this number is not to be trusted" while the tool really is
-  // working. An item whose card does not list sessions carries no rows and so
-  // never breathes, which doubles as the off switch for the animation.
+  // working. It is read from the cell's rows whatever the card draws of them: whether
+  // a tool is working is not the card's list, so hiding that list is not an off switch
+  // for this. An item that genuinely has no session rows never breathes.
   const running = runningSessionSummary(cell.sessions).count;
   if (running > 0) node.dataset.running = 'yes';
   const color = providerColor(cell.provider);
