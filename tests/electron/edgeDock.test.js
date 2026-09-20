@@ -644,6 +644,29 @@ test('the sessions rail and mixed rows name their tools for assistive technology
   assert.doesNotMatch(container, /sr-only', `\$\{session\.client\}/);
 });
 
+// The sessions cell's rate line borrowed the live-rate item's "switch" tooltip, but
+// this cell's click opens the Sessions card: the controller only toggles the rate
+// mode for a `liveRate` cell, which is that item's own readout and primary action.
+// So the tooltip described a click that does something else. It now states the
+// reading instead, and the toggle wording stays with the cell it belongs to.
+test('the sessions rate line describes its reading instead of promising a toggle', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const controller = fs.readFileSync(path.join(rendererDir, '..', 'edgeDock', 'controller.js'), 'utf8');
+  const rateNode = dock.slice(dock.indexOf('function cellRateNode('), dock.indexOf('// The tools with a session running'));
+  assert.match(rateNode, /node\.title = t\('edgeDock\.rate\.reading'/);
+  assert.doesNotMatch(rateNode, /edgeDock\.rate\.switch/);
+  // The toggle wording is still used by the cell that really does toggle, so this
+  // is a scoping fix rather than a removal of the affordance.
+  const liveRateCard = dock.slice(dock.indexOf('function appendLiveRate('), dock.indexOf('function statCard('));
+  assert.match(liveRateCard, /t\('edgeDock\.rate\.switch'\)/);
+  const toggle = controller.slice(controller.indexOf("ipcMain.on('edgeDock:click'"), controller.indexOf("ipcMain.on('edgeDock:dragStart'"));
+  assert.match(toggle, /metric === 'liveRate'/);
+  assert.doesNotMatch(toggle, /cellDetail/);
+  // And the new key exists in every locale, since the tooltip is user-facing text.
+  const i18n = readRendererFile('i18n.js');
+  assert.equal((i18n.match(/'edgeDock\.rate\.reading':/g) || []).length, 5);
+});
+
 // The flare cache keeps one entry per session it has seen, so a long-lived card has
 // to prune it against the whole list. Pruning per group would delete every other
 // group's entries, which is why this asserts the call sits in sessionsCard().

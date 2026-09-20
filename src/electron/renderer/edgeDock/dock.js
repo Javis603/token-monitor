@@ -505,7 +505,13 @@ function cellRateNode(cell) {
   const missing = cell.rate === null || cell.rate === undefined;
   const node = el('span', 'edge-dock-cell-rate');
   node.classList.toggle('is-idle', missing || cell.rateIdle === true);
-  node.title = t('edgeDock.rate.switch');
+  // A description, not the live-rate item's "switch" tooltip. This cell's click
+  // opens the Sessions card, because that is the item's primary action; the
+  // toggle handler only fires for a liveRate cell (see the controller's click
+  // path), so borrowing that wording here would promise a click that does
+  // something else. Saying which reading is shown is still worth a tooltip: the
+  // unit alone does not say whether it is tok/s or TPM.
+  node.title = t('edgeDock.rate.reading', { unit: t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit') });
   node.append(
     el('span', 'edge-dock-cell-rate-value', missing ? '—' : formatRate(cell.rate)),
     el('span', 'edge-dock-cell-rate-unit', t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit'))
