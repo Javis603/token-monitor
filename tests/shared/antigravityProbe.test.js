@@ -867,6 +867,74 @@ test('probe still tries an explicit --hub-port when port discovery throws', asyn
   assert.equal(result.accountEmail, 'hub@example.com');
 });
 
+// The ordering matters, not just the candidate order. Port discovery shares the
+// provider-wide deadline, so a slow or hanging lsof/Get-NetTCPConnection can
+// consume all of it; awaiting discovery before probing would then leave the
+// explicit hub port untried even though the deadline guard is satisfied by the
+// rejection. This is the case the immediate-throw test above does not reach.
+test('probe reaches a reachable explicit --hub-port while port discovery is still hanging', async () => {
+  const calledPorts = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    // Never settles: the process-wide deadline is the only thing that ends it.
+    listeningPorts: () => new Promise(() => {}),
+    callLs: async ({ port, method }) => {
+      calledPorts.push(port);
+      if (port !== 55555) throw probe._errorWithStatus('unavailable', 'unexpected port');
+      if (method === 'GetUnleashData') return {};
+      if (method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.4 }]
+          }]
+        };
+      }
+      if (method === 'GetUserStatus') return { userStatus: { email: 'hub@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'hub endpoint unavailable');
+    },
+    probeTimeoutMs: 1500
+  });
+
+  assert.ok(calledPorts.includes(55555), 'the explicit hub port must be probed before discovery settles');
+  assert.equal(result.sourceDetail, 'cli');
+  assert.equal(result.accountEmail, 'hub@example.com');
+});
+
+// Discovery stays the fallback: a dead explicit hub port must not stop the
+// discovered listener from being probed.
+test('probe falls back to discovered ports when the explicit hub port is unreachable', async () => {
+  const calledPorts = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    listeningPorts: async () => [60000],
+    callLs: async ({ port, method }) => {
+      calledPorts.push(port);
+      if (port === 55555) throw probe._errorWithStatus('unavailable', 'hub port closed');
+      if (port === 60000 && method === 'GetUnleashData') return {};
+      if (port === 60000 && method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.3 }]
+          }]
+        };
+      }
+      if (port === 60000 && method === 'GetUserStatus') return { userStatus: { email: 'discovered@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'endpoint unavailable');
+    },
+    probeTimeoutMs: 2000
+  });
+
+  assert.ok(calledPorts.includes(55555), 'the explicit hub port is tried first');
+  assert.ok(calledPorts.includes(60000), 'the discovered port is still used as fallback');
+  assert.equal(result.accountEmail, 'discovered@example.com');
+});
+
 test('probe keeps reporting the discovery failure for a tokenless CLI with no hub port', async () => {
   const calledPorts = [];
   const err = await probe.probe({

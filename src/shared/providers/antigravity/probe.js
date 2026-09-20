@@ -762,13 +762,30 @@ async function probe(deps = {}) {
       const sourceInfos = infos.filter((info) => info.kind === kind);
       const prepared = await Promise.all(sourceInfos.map(async (info) => {
         try {
-          // An explicit `--hub-port` is authoritative on its own. Port discovery
-          // is only a fallback, and it fails for reasons that say nothing about
-          // the process (lsof/Get-NetTCPConnection blocked by permissions, binary
-          // missing, or no listener found yet). Discarding the one endpoint the
-          // command line already named would be strictly worse than trying it.
+          // An explicit `--hub-port` is authoritative, so probe it before any
+          // port discovery. Discovery shares the provider-wide deadline, and a
+          // slow or hanging lsof/Get-NetTCPConnection can consume all of it;
+          // awaiting discovery first would then leave a reachable hub port
+          // unprobed, because the deadline is already spent by the time the
+          // candidates are tried. Placing the port first in the list is not the
+          // same as probing it first.
+          const explicitHub = info.hubPort ? endpointCandidates(info, []) : [];
+          if (explicitHub.length > 0) {
+            const resolvedHub = await resolveWorkingEndpoint(
+              explicitHub,
+              call,
+              probeDeadlineMs,
+              signal
+            );
+            if (resolvedHub.lastError === null) {
+              return { info, candidates: resolvedHub.candidates, error: null };
+            }
+          }
+
+          // Discovered ports are the fallback, bounded by whatever remains of
+          // the deadline. A discovery failure is only fatal when there is no
+          // explicit hub port to keep probing instead.
           let ports = [];
-          let portDiscoveryError = null;
           try {
             ports = await promiseBeforeDeadline(
               (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs }),
@@ -777,8 +794,8 @@ async function probe(deps = {}) {
               signal
             );
           } catch (error) {
-            if (!info.hubPort) throw error;
-            portDiscoveryError = error;
+            if (explicitHub.length === 0) throw error;
+            return { info, candidates: explicitHub, error };
           }
           const initialCandidates = endpointCandidates(info, ports);
           const resolved = await resolveWorkingEndpoint(
@@ -787,11 +804,7 @@ async function probe(deps = {}) {
             probeDeadlineMs,
             signal
           );
-          return {
-            info,
-            candidates: resolved.candidates,
-            error: resolved.lastError || (resolved.candidates.length === 0 ? portDiscoveryError : null)
-          };
+          return { info, candidates: resolved.candidates, error: resolved.lastError };
         } catch (error) {
           return { info, candidates: [], error };
         }
