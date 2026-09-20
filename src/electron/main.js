@@ -7009,19 +7009,34 @@ app.whenReady().then(() => {
   setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
 
+  // The dock card decorates its plan cell from the subscription records the
+  // appearance carries, and only a settings push re-sends that appearance — while
+  // a subscription write is not a settings save, so it went out unseen and the
+  // card kept the list as it stood before the edit until something else pushed.
+  // The dock alone is re-synced rather than pushing the settings: the renderer
+  // already holds what it wrote back, and a push would re-render the form the
+  // user is editing.
   ipcMain.handle('subscriptions:adoptOrphans', async () => {
     try {
-      return await adoptOrphanedSubscriptions();
+      const next = await adoptOrphanedSubscriptions();
+      syncEdgeDock();
+      return next;
     } catch (error) {
       throw new Error(subscriptionWriteFailureCode(error), { cause: error });
     }
   });
 
-  ipcMain.handle('subscriptions:discardOrphans', () => discardOrphanedSubscriptions());
+  ipcMain.handle('subscriptions:discardOrphans', () => {
+    const next = discardOrphanedSubscriptions();
+    syncEdgeDock();
+    return next;
+  });
 
   ipcMain.handle('subscriptions:save', async (_event, subscriptions, base) => {
     try {
-      return await saveSubscriptions(subscriptions, base);
+      const next = await saveSubscriptions(subscriptions, base);
+      syncEdgeDock();
+      return next;
     } catch (error) {
       // The renderer has to tell "another device won" apart from "the hub is
       // down": one means re-read and redo, the other means try again later. Only
