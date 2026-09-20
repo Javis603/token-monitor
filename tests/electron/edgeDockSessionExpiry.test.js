@@ -24,10 +24,20 @@ test('the dock rate tracker is read on the same clock its timer is scheduled wit
   assert.match(tracker, /createLiveTokenRateGroupTracker\(\{/);
   assert.match(tracker, /now: Date\.now,/);
   assert.match(tracker, /Math\.max\(0, expiresAt - Date\.now\(\)\)/);
-  // The renderer's own tracker keeps the default on purpose: it only ever compares its
-  // clock with itself, so pinning it to epoch time there would be the wrong change.
-  const rendererTracker = dock.slice(dock.indexOf('bridge.onRender(render);'));
-  assert.doesNotMatch(rendererTracker, /createLiveTokenRateGroupTracker/);
+  // Every other group tracker in the tree takes an explicit epoch clock for the same
+  // reason - each of them is scheduled against `Date.now()` by the code that reads
+  // its expiry. Read from those call sites rather than from dock.js, which builds no
+  // group tracker of its own: a slice of that file matched nothing and asserted
+  // nothing, so it could not have caught the clock drifting back.
+  const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
+  const callSites = app.match(/createLiveTokenRateGroupTracker\(\{[^}]*\}/g) || [];
+  assert.ok(callSites.length >= 2, 'the renderer builds its group trackers through the shared factory');
+  for (const site of callSites) assert.match(site, /now: \(\) => Date\.now\(\)/);
+  // And the shared default stays monotonic, which is what makes the explicit clock a
+  // real choice at each call site rather than a no-op.
+  const shared = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'tokenRatePresentation.js'), 'utf8');
+  assert.match(shared, /function defaultNow\(\) \{/);
+  assert.match(shared, /performance\.now\(\)/);
 });
 
 test('a stale session expiry never shortens either self-repair wait to its floor', () => {
