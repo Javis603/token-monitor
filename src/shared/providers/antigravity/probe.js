@@ -762,21 +762,34 @@ async function probe(deps = {}) {
       const sourceInfos = infos.filter((info) => info.kind === kind);
       const prepared = await Promise.all(sourceInfos.map(async (info) => {
         try {
-          // Neither half of endpoint resolution may spend the whole provider
-          // deadline, because the quota stage still has to run against whatever
-          // candidates survive. Both steps therefore work inside a bounded
-          // budget, and the explicit hub port is probed before discovery so a
-          // hanging lsof/Get-NetTCPConnection cannot stop the one endpoint the
-          // command line already named from being tried.
           const halfDeadlineMs = () => Date.now() + Math.max(1, Math.floor(remainingMs(probeDeadlineMs) / 2));
 
-          // An explicit `--hub-port` is authoritative. Keep the reachability
-          // result even when the preflight fails, and keep it in front of the
-          // discovered candidates rather than returning early: `GetUnleashData`
-          // only proves the endpoint responds, so the quota RPCs behind a hub
-          // port can still fail while another discovered listener succeeds.
+          // An explicit `--hub-port` is authoritative, and discovery must not be
+          // able to starve it: a slow or hanging lsof/Get-NetTCPConnection once
+          // consumed the whole provider deadline, leaving the endpoint named on
+          // the command line untried. Running the two concurrently is what makes
+          // both claims true at once. Sequential preflight-then-discovery is not
+          // equivalent, because whichever runs first can spend the budget the
+          // other needs, and a dead hub would then be preflighted twice.
           const explicitHub = info.hubPort ? endpointCandidates(info, []) : [];
-          let hubCandidates = explicitHub;
+          const discoveryBudgetMs = explicitHub.length > 0 ? halfDeadlineMs() : probeDeadlineMs;
+          const discovery = (async () => {
+            try {
+              const ports = await promiseBeforeDeadline(
+                (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs }),
+                discoveryBudgetMs,
+                DEFAULT_RPC_TIMEOUT_MS,
+                signal
+              );
+              return { ports, error: null };
+            } catch (error) {
+              return { ports: [], error };
+            }
+          })();
+
+          let hubReachable = false;
+          let resolveFirst = [];
+          let failedHub = [];
           if (explicitHub.length > 0) {
             const resolvedHub = await resolveWorkingEndpoint(
               explicitHub,
@@ -787,44 +800,45 @@ async function probe(deps = {}) {
               if (signal?.aborted) throw error;
               return null;
             });
-            if (resolvedHub?.lastError === null) hubCandidates = resolvedHub.candidates;
+            // `GetUnleashData` only proves the endpoint responds (an HTTP error is
+            // deliberately accepted for servers that do not implement it), so a
+            // reachable hub port keeps its place first but never removes the
+            // discovered candidates from the quota stage.
+            hubReachable = resolvedHub?.lastError === null;
+            if (hubReachable) resolveFirst = resolvedHub.candidates;
+            else failedHub = explicitHub;
           }
 
-          // Discovered ports are the fallback, bounded so they cannot starve the
-          // quota stage either. The split budget exists only because an explicit
-          // hub port competes for the same provider deadline; without one,
-          // discovery keeps the full remaining deadline it always had, so a slow
-          // but legal lsof/Get-NetTCPConnection (they allow up to 6s) is not cut
-          // in half. A discovery failure is only fatal when there is no explicit
-          // hub port to keep probing instead.
-          const discoveryDeadlineMs = explicitHub.length > 0 ? halfDeadlineMs() : probeDeadlineMs;
-          let ports = [];
-          try {
-            ports = await promiseBeforeDeadline(
-              (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs }),
-              discoveryDeadlineMs,
-              DEFAULT_RPC_TIMEOUT_MS,
-              signal
-            );
-          } catch (error) {
-            if (hubCandidates.length === 0) throw error;
-            return { info, candidates: hubCandidates, error };
-          }
-          const discovered = endpointCandidates(info, ports);
-          const merged = hubCandidates.length === 0
-            ? discovered
-            : [...hubCandidates, ...discovered.filter((candidate) => !hubCandidates.some((existing) => (
-                existing.scheme === candidate.scheme
-                && existing.port === candidate.port
-                && existing.csrfToken === candidate.csrfToken
-              )))];
+          const { ports, error: discoveryError } = await discovery;
+          if (discoveryError && explicitHub.length === 0) throw discoveryError;
+          // `endpointCandidates()` always re-prepends the hub port, so the
+          // discovered set has to exclude it explicitly; otherwise the dead hub
+          // would be resolved a second time from inside this list.
+          const discovered = endpointCandidates(info, ports).filter((candidate) => (
+            candidate.port !== info.hubPort
+          ));
+
+          const sameEndpoint = (left, right) => (
+            left.scheme === right.scheme
+            && left.port === right.port
+            && left.csrfToken === right.csrfToken
+          );
+          const dedupe = (list) => list.filter((candidate, index) => (
+            !list.slice(0, index).some((existing) => sameEndpoint(existing, candidate))
+          ));
+          // A hub port that already failed its preflight goes behind the
+          // discovered listeners as a last-resort quota fallback instead of being
+          // resolved a second time, which would spend the same budget again.
+          const merged = dedupe([...resolveFirst, ...discovered, ...failedHub]);
           const resolved = await resolveWorkingEndpoint(
-            merged,
+            dedupe([...resolveFirst, ...discovered]).length > 0
+              ? dedupe([...resolveFirst, ...discovered])
+              : merged,
             call,
             probeDeadlineMs,
             signal
           );
-          return { info, candidates: resolved.candidates, error: resolved.lastError };
+          return { info, candidates: resolved.lastError === null ? resolved.candidates : merged, error: resolved.lastError };
         } catch (error) {
           return { info, candidates: [], error };
         }

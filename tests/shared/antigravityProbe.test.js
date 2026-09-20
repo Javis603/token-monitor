@@ -1008,6 +1008,48 @@ test('probe still reaches a discovered port when the explicit hub port never res
   assert.equal(result.accountEmail, 'healthy@example.com');
 });
 
+// The dead hub port must be preflighted at most once. Re-resolving it after
+// discovery spends the same resolution budget twice and starves the healthy
+// discovered listener, so a realistic quota round-trip (not the instant reply
+// the test above uses) starts timing out.
+test('probe does not re-resolve a dead hub port ahead of a healthy discovered listener', async () => {
+  const probeTimeoutMs = 1200;
+  const quotaDelayMs = 200;
+  const hubAttempts = [];
+
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    listeningPorts: async () => [60000],
+    callLs: async ({ port, method }) => {
+      if (port === 55555) {
+        hubAttempts.push(method);
+        return new Promise(() => {}); // firewall blackhole
+      }
+      if (method === 'GetUnleashData') return {};
+      if (method === 'RetrieveUserQuotaSummary') {
+        await new Promise((resolve) => setTimeout(resolve, quotaDelayMs));
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.3 }]
+          }]
+        };
+      }
+      if (method === 'GetUserStatus') return { userStatus: { email: 'healthy@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'endpoint unavailable');
+    },
+    probeTimeoutMs
+  });
+
+  assert.equal(result.accountEmail, 'healthy@example.com');
+  assert.ok(
+    hubAttempts.length <= 2,
+    `the dead hub port is preflighted once, not once per resolution pass (got ${hubAttempts.length})`
+  );
+});
+
 test('probe keeps reporting the discovery failure for a tokenless CLI with no hub port', async () => {
   const calledPorts = [];
   const err = await probe.probe({

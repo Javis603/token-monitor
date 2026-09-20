@@ -16,16 +16,20 @@
     return total;
   }
 
-  // Fold Tokscale's per-client aliases into the canonical identity the rest of
-  // the app uses, so a legacy row that still carries e.g. `antigravity-cli`
-  // cannot render as a second tool beside `antigravity`. This runs where the
-  // chart reads `perClient`, which is also where the legend's keys and segments
-  // come from, so both stay in sync without a second folding site. Keys not
-  // listed here pass through untouched.
+  // Fold Tokscale's per-client alias into the canonical identity, so a legacy
+  // row that still carries `antigravity-cli` cannot render as a second tool
+  // beside `antigravity`. This runs where the chart reads `perClient`, which is
+  // also where the legend's keys and segments come from, so both stay in sync
+  // without a second folding site.
+  //
+  // Deliberately the same single alias the other renderer paths fold
+  // (`dashboard.js` breakdown, `fixedPeriodRanges.js`): `coerceHistory()` does
+  // not canonicalize a wire payload, so folding a wider set here would make the
+  // chart and the breakdown under it disagree about the very same day. Other
+  // raw ids (`omp`, `kilocode`) are left unfolded on every renderer path alike;
+  // widening that belongs to one shared canonicalizer, not to this chart.
   const CLIENT_ALIASES = Object.freeze({
-    'antigravity-cli': 'antigravity',
-    omp: 'pi',
-    kilocode: 'kilo'
+    'antigravity-cli': 'antigravity'
   });
 
   function canonicalClientKey(key) {
