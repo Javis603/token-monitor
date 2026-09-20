@@ -705,18 +705,30 @@ test('the rail cell rate reads on one line, with its unit beside the figure', ()
   assert.match(row[1], /align-items: baseline;/);
   assert.doesNotMatch(row[1], /display: grid;/);
   assert.doesNotMatch(row[1], /flex-direction: column;/);
-  // One size and one family for the whole phrase. A smaller or differently-faced
-  // unit read as a second figure beside the running count above it, which is the
-  // thing this cell cannot afford: hierarchy comes from colour, not from type size.
-  assert.match(row[1], /font-size: 10\.5px;/);
   assert.match(row[1], /font-family: var\(--display-font/);
-  assert.match(css, /\.edge-dock-cell-rate-unit \{ color: var\(--muted\); \}/);
-  // Neither part may reintroduce a size of its own, which is how the mismatch
-  // would come back the moment someone tweaks one of them.
+  // The line matches the live-rate item's own treatment of the same reading - a 12px
+  // figure with a 9px semibold unit - because that is the pair the design already
+  // ships for a token rate. Asserted against that cell's own rules, so the two cannot
+  // drift apart without one of them failing here.
   const value = css.match(/\.edge-dock-cell-rate-value \{([^}]*)\}/);
   assert.ok(value, 'the rate figure should be styled');
-  assert.doesNotMatch(value[1], /font-size:/);
-  assert.doesNotMatch(value[1], /font-family:/);
+  assert.match(value[1], /font-size: 12px;/);
+  assert.match(value[1], /font-weight: 650;/);
+  const unit = css.match(/\.edge-dock-cell-rate-unit \{([^}]*)\}/);
+  assert.ok(unit, 'the rate unit should be styled');
+  assert.match(unit[1], /font-size: 9px;/);
+  assert.match(unit[1], /font-weight: 600;/);
+  // The live-rate cell's own rules for the same reading, read from the same sheet so
+  // this is an agreement between the two cells rather than a number copied twice.
+  const liveLabel = css.match(/\.edge-dock-stat-label \{([^}]*)\}/);
+  const liveValue = css.match(/\.edge-dock-stat-value \{([^}]*)\}/);
+  assert.ok(liveLabel && liveValue, 'the live-rate cell keeps its own type scale');
+  assert.match(liveLabel[1], /font-size: 9px;/);
+  assert.match(liveValue[1], /font-size: 12px;/);
+  // Which is the same pair this line now uses, so the two rate readouts are one
+  // measurement in two layouts rather than two treatments of it.
+  assert.match(liveLabel[1], new RegExp(`font-size: ${unit[1].match(/font-size: ([\d.]+px)/)[1]};`));
+  assert.match(liveValue[1], new RegExp(`font-size: ${value[1].match(/font-size: ([\d.]+px)/)[1]};`));
 });
 
 // A stored item round-trips through its own normalizer, or the choice the user
