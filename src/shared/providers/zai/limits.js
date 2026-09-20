@@ -455,6 +455,13 @@ async function fetchZaiLimits(options = {}, deps = {}) {
       }
       return emptyLane(true);
     }
+    // The account is known but its own key is absent: the lane ran and found no
+    // credential it can vouch for, so it must not ride a mirror that may belong
+    // to the previous account. Attempted, so the row reports unavailable rather
+    // than contradicting a detected login with "not configured".
+    if (discovery.kind === 'coding-quota' && discovery.reason === 'coding_plan_key_missing') {
+      return emptyLane(true);
+    }
     if (discovery.kind !== 'start-billing' || !discovery.credential) {
       return emptyLane();
     }

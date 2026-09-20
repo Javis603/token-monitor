@@ -161,8 +161,11 @@ function storedZcodeJwtCredential(store, env) {
 // one spelling and not the other would leave that family's accounts on the
 // mirror forever; no third spelling is consulted, so a machine that has held
 // several accounts can never surface a previous one's key by accident.
-// Anything that does not line up (missing profile, unknown shape, no such
-// entry) resolves to null and the caller falls back to the mirror.
+// An unknown identity (no store, unreadable profile, no usable identity field)
+// resolves to null and the caller falls back to the mirror. An identity that is
+// established while its entry is absent is reported instead, because a mirror
+// there may still name a previous account; an entry that is present but cannot
+// be decrypted stays a null, which is the decrypt-failure degradation.
 function storedAccountKeyCredential(store, env, { family, selectionKind }) {
   if (!store || !family || !selectionKind) return null;
   const profileJson = decryptZcodeCredential(store[`oauth:${family}:user_info`], env);
@@ -188,6 +191,7 @@ function storedAccountKeyCredential(store, env, { family, selectionKind }) {
   // Mirrors ZCode's accountProviderCredentialKey: `account:${providerId}` for
   // the plan kind, then the identity percent-encoded the way it writes it.
   const keyName = `account-provider:coding-plan:account:${family}-${selectionKind}:account:${encodeURIComponent(identity)}:api-key`;
+  if (store[keyName] === undefined) return { identityWithoutKey: identity };
   const token = decryptZcodeCredential(store[keyName], env);
   return token ? { token, source: 'zcode-auto' } : null;
 }
@@ -263,15 +267,21 @@ function discoverZcodeConnection(options = {}, deps = {}) {
     // profile entry at all. Where the quota lane does read it, the selection's
     // own key wins over the entry's mirror — on a machine that has switched
     // accounts the mirror still belongs to whoever wrote it last under 3.11.x,
-    // while the store entry names the logged-in account — and it falls back to
-    // the mirror only when the store cannot name it. A missing entry beside a
-    // readable profile is incomplete or not-yet-filled local state: ZCode fills
-    // it lazily from the account's project key with no entitlement check (see
-    // the provider note), so the mirror stays the degradation #718 approved
-    // rather than an account guess.
-    const credential = kind === 'start-billing'
-      ? liveBillingCredential() || billingCredential(provider)
-      : storedAccountKeyCredential(readStore(), env, { family, selectionKind }) || billingCredential(provider);
+    // while the store entry names the logged-in account. The mirror is the
+    // fallback only where no identity was established (an absent, unreadable or
+    // undecryptable store, an unusable profile, a 3.11.x install); once the
+    // identity is known, an absent entry means the lane has no credential,
+    // because a mirror there cannot be shown to belong to that account.
+    let credential;
+    if (kind === 'start-billing') {
+      credential = liveBillingCredential() || billingCredential(provider);
+    } else {
+      const accountKey = storedAccountKeyCredential(readStore(), env, { family, selectionKind });
+      if (accountKey?.identityWithoutKey) {
+        return { kind, family, providerId, entitled: false, reason: 'coding_plan_key_missing' };
+      }
+      credential = accountKey || billingCredential(provider);
+    }
     // `entitled` marks a result the lane can actually query. Since 3.12.3
     // stopped writing the entitlement cache, a readable credential is the
     // only local signal; the query itself answers entitlement.

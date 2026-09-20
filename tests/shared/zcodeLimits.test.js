@@ -684,11 +684,11 @@ test('the selected account\'s own store key outranks a mirror left by another ac
   // The billing lane still takes the store's account-level JWT.
   assert.equal(discovery.billing.credential.token, 'live-billing-jwt');
 
-  // A profile whose id names no store entry resolves to no account key, so the
-  // mirror carries the lane rather than a wrong key being invented: ZCode fills
-  // that entry lazily from the account's project key with no entitlement check,
-  // so its absence beside a readable profile is incomplete local state
-  // (docs/providers/zai.md).
+  // A profile whose identity names no store entry resolves to no credential at
+  // all: the mirror cannot be shown to belong to the account the profile just
+  // named, so the lane reports that state instead of querying with it
+  // (docs/providers/zai.md — the store entry is a lazily filled cache, so its
+  // absence beside a readable profile is incomplete or not-yet-filled state).
   const mismatched = { ...files, 'credentials.json': JSON.stringify({
     zcodejwttoken: encryptCredential('live-billing-jwt', TEST_CREDENTIAL_SECRET),
     'oauth:zai:user_info': encryptCredential(JSON.stringify({ user_id: 'nobody' }), TEST_CREDENTIAL_SECRET),
@@ -696,7 +696,9 @@ test('the selected account\'s own store key outranks a mirror left by another ac
       encryptCredential('current-account-key', TEST_CREDENTIAL_SECRET)
   }) };
   const fallback = discoverZcodeConnection({}, { ...deps, readFileSync: fileSystem(mismatched) });
-  assert.equal(fallback.credential.token, 'other-account-mirror');
+  assert.equal(fallback.entitled, false);
+  assert.equal(fallback.reason, 'coding_plan_key_missing');
+  assert.equal(fallback.credential, undefined);
 
   // A team entry is named the same way (the real store carries
   // `…:zai-team-coding-plan:account:<id>:api-key`), so a team selection
@@ -719,7 +721,9 @@ test('the selected account\'s own store key outranks a mirror left by another ac
   const team = discoverZcodeConnection({}, { ...deps, readFileSync: fileSystem(teamFiles(true)) });
   assert.equal(team.credential.token, 'team-account-key');
   const teamMissing = discoverZcodeConnection({}, { ...deps, readFileSync: fileSystem(teamFiles(false)) });
-  assert.equal(teamMissing.credential.token, 'other-account-mirror');
+  assert.equal(teamMissing.entitled, false);
+  assert.equal(teamMissing.reason, 'coding_plan_key_missing');
+  assert.equal(teamMissing.credential, undefined);
 });
 
 test('a fresh 3.12.3 install with no mirror recovers its key from the store', () => {

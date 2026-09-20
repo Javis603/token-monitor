@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -166,6 +167,18 @@ function keyLaneResponses({ balance, subscription }) {
     }
     return { ok: true, status: 200, json: async () => ({ data: [{ product_name: subscription }] }) };
   };
+}
+
+// Encrypts one store value the way ZCode's own credential service writes it,
+// so a provider-level test can build a store-backed install (the
+// discovery-level store cases live in zcodeLimits.test.js).
+const FIXTURE_CREDENTIAL_SECRET = 'fixture-credential-secret';
+function encryptStoreValue(value, secret = FIXTURE_CREDENTIAL_SECRET) {
+  const key = crypto.createHash('sha256').update(secret).digest();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  return `enc:v1:${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${ciphertext.toString('base64url')}`;
 }
 
 // ZCode on-disk fixture for the plan-lane tests: an entitled provider
@@ -926,4 +939,44 @@ test('a 3.12.3-shaped install with a subscription renders the quota windows', as
   assert.equal(provider.windows[0].usedPercent, 12.5);
   assert.equal(provider.windows[1].usedPercent, 25);
   assert.equal(provider.windows[2].usedPercent, 40);
+});
+
+test('fetchZaiLimits never queries with the mirror once the account identity is known without its key', async () => {
+  // 3.12.3 store: the profile names the logged-in account, no entry exists for
+  // it, and config.json still carries the previous account's mirror. That
+  // mirror cannot be shown to belong to the account the profile just named, so
+  // the lane reports the state instead of riding it.
+  const identity = 'known-account-id';
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'previous-account-mirror' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      zcodejwttoken: encryptStoreValue('live-billing-jwt'),
+      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: identity }))
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  const urls = [];
+  const provider = await fetchZaiLimits({}, {
+    env: { ZCODE_CREDENTIAL_SECRET: FIXTURE_CREDENTIAL_SECRET },
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url) => {
+      urls.push(String(url));
+      throw new Error('the mirror must not be queried');
+    }
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'oauth');
+  assert.deepEqual(provider.windows, []);
+  assert.deepEqual(urls, []);
 });
