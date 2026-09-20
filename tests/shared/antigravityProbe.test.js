@@ -935,6 +935,79 @@ test('probe falls back to discovered ports when the explicit hub port is unreach
   assert.equal(result.accountEmail, 'discovered@example.com');
 });
 
+// resolveWorkingEndpoint() treats any HTTP response to GetUnleashData as
+// reachability success, deliberately, because the lightweight RPC may simply be
+// unsupported. That is not proof the quota RPCs work, so a hub port that answers
+// the preflight must not remove the discovered candidates from the quota stage.
+test('probe still tries discovered ports when the hub port answers the preflight but cannot serve quota', async () => {
+  const calledPorts = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    listeningPorts: async () => [60000],
+    callLs: async ({ port, method }) => {
+      calledPorts.push(port);
+      if (port === 55555) {
+        // Reachable, but the lightweight RPC is unsupported.
+        if (method === 'GetUnleashData') {
+          const error = probe._errorWithStatus('unavailable', 'unsupported');
+          error.httpStatus = 404;
+          throw error;
+        }
+        throw probe._errorWithStatus('unavailable', 'quota unavailable');
+      }
+      if (port === 60000 && method === 'GetUnleashData') return {};
+      if (port === 60000 && method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.25 }]
+          }]
+        };
+      }
+      if (port === 60000 && method === 'GetUserStatus') return { userStatus: { email: 'discovered@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'endpoint unavailable');
+    },
+    probeTimeoutMs: 2000
+  });
+
+  assert.ok(calledPorts.includes(60000), 'the discovered port must still be reached once the hub cannot serve quota');
+  assert.equal(result.accountEmail, 'discovered@example.com');
+});
+
+// The mirror of the discovery-hang case: a hub port that blackholes (stale entry,
+// firewall drop) must not consume the whole provider deadline and lock out a
+// healthy discovered listener.
+test('probe still reaches a discovered port when the explicit hub port never responds', async () => {
+  const calledPorts = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    listeningPorts: async () => [60000],
+    callLs: async ({ port, method }) => {
+      calledPorts.push(port);
+      if (port === 55555) return new Promise(() => {}); // firewall blackhole
+      if (port === 60000 && method === 'GetUnleashData') return {};
+      if (port === 60000 && method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.25 }]
+          }]
+        };
+      }
+      if (port === 60000 && method === 'GetUserStatus') return { userStatus: { email: 'healthy@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'endpoint unavailable');
+    },
+    probeTimeoutMs: 1200
+  });
+
+  assert.ok(calledPorts.includes(60000), 'the healthy discovered port must still be probed');
+  assert.equal(result.accountEmail, 'healthy@example.com');
+});
+
 test('probe keeps reporting the discovery failure for a tokenless CLI with no hub port', async () => {
   const calledPorts = [];
   const err = await probe.probe({

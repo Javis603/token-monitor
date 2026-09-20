@@ -762,44 +762,59 @@ async function probe(deps = {}) {
       const sourceInfos = infos.filter((info) => info.kind === kind);
       const prepared = await Promise.all(sourceInfos.map(async (info) => {
         try {
-          // An explicit `--hub-port` is authoritative, so probe it before any
-          // port discovery. Discovery shares the provider-wide deadline, and a
-          // slow or hanging lsof/Get-NetTCPConnection can consume all of it;
-          // awaiting discovery first would then leave a reachable hub port
-          // unprobed, because the deadline is already spent by the time the
-          // candidates are tried. Placing the port first in the list is not the
-          // same as probing it first.
+          // Neither half of endpoint resolution may spend the whole provider
+          // deadline, because the quota stage still has to run against whatever
+          // candidates survive. Both steps therefore work inside a bounded
+          // budget, and the explicit hub port is probed before discovery so a
+          // hanging lsof/Get-NetTCPConnection cannot stop the one endpoint the
+          // command line already named from being tried.
+          const halfDeadlineMs = () => Date.now() + Math.max(1, Math.floor(remainingMs(probeDeadlineMs) / 2));
+
+          // An explicit `--hub-port` is authoritative. Keep the reachability
+          // result even when the preflight fails, and keep it in front of the
+          // discovered candidates rather than returning early: `GetUnleashData`
+          // only proves the endpoint responds, so the quota RPCs behind a hub
+          // port can still fail while another discovered listener succeeds.
           const explicitHub = info.hubPort ? endpointCandidates(info, []) : [];
+          let hubCandidates = explicitHub;
           if (explicitHub.length > 0) {
             const resolvedHub = await resolveWorkingEndpoint(
               explicitHub,
               call,
-              probeDeadlineMs,
+              halfDeadlineMs(),
               signal
-            );
-            if (resolvedHub.lastError === null) {
-              return { info, candidates: resolvedHub.candidates, error: null };
-            }
+            ).catch((error) => {
+              if (signal?.aborted) throw error;
+              return null;
+            });
+            if (resolvedHub?.lastError === null) hubCandidates = resolvedHub.candidates;
           }
 
-          // Discovered ports are the fallback, bounded by whatever remains of
-          // the deadline. A discovery failure is only fatal when there is no
-          // explicit hub port to keep probing instead.
+          // Discovered ports are the fallback, bounded so they cannot starve the
+          // quota stage either. A discovery failure is only fatal when there is
+          // no explicit hub port to keep probing instead.
           let ports = [];
           try {
             ports = await promiseBeforeDeadline(
               (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs }),
-              probeDeadlineMs,
+              halfDeadlineMs(),
               DEFAULT_RPC_TIMEOUT_MS,
               signal
             );
           } catch (error) {
-            if (explicitHub.length === 0) throw error;
-            return { info, candidates: explicitHub, error };
+            if (hubCandidates.length === 0) throw error;
+            return { info, candidates: hubCandidates, error };
           }
-          const initialCandidates = endpointCandidates(info, ports);
+          const discovered = endpointCandidates(info, ports);
+          const merged = hubCandidates.length === 0
+            ? discovered
+            : [...hubCandidates, ...discovered.filter((candidate) => !hubCandidates.some((existing) => (
+                existing.scheme === candidate.scheme
+                && existing.port === candidate.port
+                && existing.csrfToken === candidate.csrfToken
+              )))];
           const resolved = await resolveWorkingEndpoint(
-            initialCandidates,
+            merged,
             call,
             probeDeadlineMs,
             signal
