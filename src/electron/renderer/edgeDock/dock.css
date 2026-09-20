@@ -172,28 +172,26 @@ html.edge-dock-no-material .edge-dock-shape-fill {
    `drop-shadow` instead would repaint a blur every frame for the whole life of a
    session.
 
-   The halo has to out-reach the glyph it sits behind, and only just. The mark is
-   17px across a 42px ring, so a glow that faded out at 58% of the ring reached
-   zero at 8.5px - the mark's own half-width - and was left with nothing to show
-   but whatever showed through the counters of the letterform, which is why it
-   read as barely there. Sizing that out to 88% fixed the reach and overshot it:
-   at that width the halo covers most of the ring and reads as a second, larger
-   circle behind the ring instead of as light around the glyph. 66% spends the
-   falloff a little past the mark - far enough to clear the glyph, well inside
-   the ring - and the colour still holds at the mark's edge, so the band that
-   survives the glyph is the bright part of the falloff rather than its tail. It
-   stays sized against the ring rather than the mark so the compact rail keeps
-   the same proportion. */
+   The halo has to out-reach the glyph it sits behind, and only just: the mark is
+   17px across a 42px ring, so a glow that dies at the mark's own 8.5px half-width
+   is left with nothing to show beside the letterform but whatever comes through
+   its counters. The gradient carries no hold stop, so it is brightest at the
+   centre and spends itself from there out - and at 62% of the ring the last of
+   the colour lands at 9.4px, just clear of the glyph, with the band beside it
+   being the falloff's own tail. Holding colour out to a stop and spending the
+   falloff after it was what made an earlier cut read as a second, larger circle
+   behind the ring rather than as light around the mark. It stays sized against
+   the ring rather than the mark so the compact rail keeps the same proportion. */
 .edge-dock-ring-glow {
   position: absolute;
   inset: 0;
   margin: auto;
-  width: 66%;
-  height: 66%;
+  width: 62%;
+  height: 62%;
   border-radius: 50%;
   pointer-events: none;
   opacity: 0;
-  background: radial-gradient(closest-side, var(--ring-color, var(--accent)) 30%, transparent 100%);
+  background: radial-gradient(closest-side, var(--ring-color, var(--accent)), transparent 72%);
   transition: opacity 240ms ease;
 }
 /* The mark is an in-flow grid item and the halo is positioned, so without this the
@@ -208,12 +206,12 @@ html.edge-dock-no-material .edge-dock-shape-fill {
    breath, so the state that replaces the animation is the one the animation
    spends most of its time near rather than either end of the swing. */
 .edge-dock-cell[data-running="yes"] .edge-dock-ring-glow {
-  opacity: 0.43;
+  opacity: 0.45;
   animation: edge-dock-mark-breathe 2600ms ease-in-out infinite;
 }
 @keyframes edge-dock-mark-breathe {
-  0%, 100% { opacity: 0.26; transform: scale(0.94); }
-  50%      { opacity: 0.6; transform: scale(1.05); }
+  0%, 100% { opacity: 0.24; transform: scale(0.93); }
+  50%      { opacity: 0.66; transform: scale(1.06); }
 }
 
 .edge-dock-mark {

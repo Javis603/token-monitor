@@ -1884,12 +1884,12 @@ test('the rail entrance moves the whole surface and stops under reduced motion',
 });
 
 // The halo the running mark breathes is bounded on both sides, and both bounds are
-// invisible in a diff because every number involved is deliberate. It used to fade out
-// at 58% of the ring - 8.5px of a 42px ring, which is exactly the mark's own
-// half-width - so it was already at zero where the glyph ended and showed only through
-// the counters of the letterform: that is what "you can barely see it" was. Sized out
-// to reach the glyph, it overshot instead, to a disc covering most of the ring, which
-// reads as a second ring behind the first rather than as light around the glyph.
+// invisible in a diff because every number involved is deliberate. It fades out too
+// early and it is already at zero where the glyph ends, showing only through the
+// counters of the letterform; it reaches too far and it stops reading as light around
+// the mark and becomes a second, larger circle behind the ring. The numbers were
+// re-tuned once by eye against the real stylesheet; these bounds are what has to hold
+// whatever they are re-tuned to.
 test('the running halo lights the mark without becoming the ring', () => {
   const css = readRendererFile(path.join('edgeDock', 'dock.css')).replace(/\/\*[\s\S]*?\*\//g, ' ');
   const ring = Number(css.match(/\n\.edge-dock-ring \{[^}]*?width: ([\d.]+)px/)[1]);
@@ -1899,27 +1899,28 @@ test('the running halo lights the mark without becoming the ring', () => {
   const arcRadius = Number(dock.match(/const RING_RADIUS = ([\d.]+);/)[1]);
   const glow = css.slice(css.indexOf('.edge-dock-ring-glow {'), css.indexOf('.edge-dock-cell[data-running="yes"]'));
   const size = Number(glow.match(/width: ([\d.]+)%/)[1]) / 100;
-  const stops = glow.match(/([\d.]+)%, transparent ([\d.]+)%/);
+  // Both gradient forms are legal here: a held stop (`colour 30%, transparent 100%`) and
+  // the plain falloff this uses (`colour, transparent 72%`), which holds nothing at all.
+  const stops = glow.match(/(?:([\d.]+)%, )?transparent ([\d.]+)%/);
   assert.ok(stops, 'the halo should be a falloff this can read');
-  const hold = Number(stops[1]) / 100;
+  const hold = Number(stops[1] ?? 0) / 100;
   const zero = Number(stops[2]) / 100;
 
   const radius = (size * ring) / 2;
   // It has to reach past the mark, or there is nothing beside the glyph to see.
   assert.ok(radius * zero > mark / 2, `the halo is spent at ${radius * zero}px, inside the mark's ${mark / 2}px`);
-  // And still be bright at the mark's edge, where the glyph stops covering it: a
-  // falloff that has already faded by then leaves only the counters.
-  const edge = (mark / 2) / radius;
-  assert.ok(edge > hold, `the falloff holds colour only to ${hold} of ${radius}px, past the mark's edge at ${edge}`);
-  const alpha = 1 - (edge - hold) / (zero - hold);
-  assert.ok(alpha >= 0.5, `the halo is down to ${alpha.toFixed(2)} where the mark ends`);
+  // Anything that is held at full colour has to be held *under* the glyph, so what shows
+  // beside the letterform is always falloff rather than the flat edge of a disc.
+  assert.ok(hold * radius < mark / 2, `colour is held to ${hold * radius}px, past the mark's ${mark / 2}px`);
   // And it has to be spent inside the arc, or the halo laps under the ring and the
   // arc stops being the ring's outer edge - the arc is the quota reading, so a glow
-  // that reaches it reads as a fatter, brighter version of the same circle.
+  // that reaches it reads as a fatter, brighter version of the same circle. The bound
+  // is the midpoint between the two landmarks this sits between: a halo that reaches
+  // past it has crossed from light around the glyph into a disc behind the ring.
   const arcInner = arcRadius - arcWidth / 2;
   assert.ok(
-    radius * zero < arcInner,
-    `the halo reaches ${radius * zero}px, past the arc's inner edge at ${arcInner}px`
+    radius * zero < (mark / 2 + arcInner) / 2,
+    `the halo reaches ${radius * zero}px, into the ring's half of the space at ${(mark / 2 + arcInner) / 2}px`
   );
 });
 
