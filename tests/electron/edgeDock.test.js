@@ -536,18 +536,30 @@ function provider(id, overrides = {}) {
   };
 }
 
-test('automatic items follow the limits order and enabled set, capped at the default count', () => {
+test('automatic items follow the limits order and enabled set, capped at the default count, and include a today stat when any client has token data', () => {
   const stats = {
     periods: { today: { totalTokens: 1200, costUsd: 2.5, clients: { codex: 200, claude: 1000 }, clientCosts: { claude: 2 } } },
     limits: { providers: ['claude', 'codex', 'cursor', 'grok', 'kimi', 'zai'].map((id) => provider(id)) }
   };
   const cells = buildEdgeDockCells(stats, { limitProviders: 'codex,claude', limitProviderOrder: 'codex,claude,cursor' });
-  assert.equal(edgeDockCellSignature(cells), 'codex,claude');
+  assert.equal(edgeDockCellSignature(cells), 'codex,claude,stat:today');
   assert.equal(cells[0].remainingPercent, 40);
   assert.equal(cells[0].windowKind, 'session');
-  const all = buildEdgeDockCells(stats, {});
-  assert.equal(all.length, DEFAULT_LIMIT_COUNT);
-  assert.equal(edgeDockCellSignature(buildEdgeDockCells(stats, { limitsEnabled: false })), '');
+  // 3 enabled providers, plus the auto-injected today stat.
+  assert.equal(buildEdgeDockCells(stats, {}).length, DEFAULT_LIMIT_COUNT + 1);
+  // A locallyParsed-only client (no limits providers, but token data exists) still gets a stat cell.
+  const mavisOnly = buildEdgeDockCells({
+    periods: { today: { totalTokens: 31420463, clients: { mavis: 31420463 }, clientCosts: {} } },
+    limits: { providers: [] }
+  }, {});
+  assert.equal(edgeDockCellSignature(mavisOnly), 'stat:today');
+  // No token data, no stat injection.
+  const noToken = buildEdgeDockCells({ limits: { providers: ['codex'].map((id) => provider(id)) } }, {});
+  assert.equal(noToken.length, 1);
+  assert.equal(edgeDockCellSignature(noToken), 'codex');
+  // limitsEnabled: false drops limit cards but the stat cell survives, since the
+  // user disabling limits should not silence the usage readouts.
+  assert.equal(edgeDockCellSignature(buildEdgeDockCells(stats, { limitsEnabled: false })), 'stat:today');
 });
 
 test('explicit items keep their order, their empty providers, and add usage readouts', () => {

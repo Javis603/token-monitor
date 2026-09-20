@@ -61,7 +61,7 @@
     // What the dock shows right now: the stored list, or the automatic default
     // materialized from the current stats.
     function effectiveItems() {
-      return storedItems() ?? itemsApi.defaultEdgeDockItems(connectedProviders());
+      return storedItems() ?? itemsApi.defaultEdgeDockItems(connectedProviders(), getStats());
     }
 
     function persist(items) {

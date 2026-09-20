@@ -395,7 +395,7 @@
     const { byId } = groupedProviders(stats);
     const items = Array.isArray(options.items)
       ? options.items
-      : dockItems.defaultEdgeDockItems(connectedLimitProviders(stats, options));
+      : dockItems.defaultEdgeDockItems(connectedLimitProviders(stats, options), stats);
     const cells = [];
     for (const item of items) {
       if (item.type === 'stat') {
