@@ -1126,7 +1126,7 @@ function surfacesShowingSessions() {
 // How long until the reading this surface holds could change by itself. A sessions
 // cell carries the moment its newest running row expires; anything else falls back
 // to the minute that reset countdowns need. Both ends are clamped so a payload
-// whose expiry has just passed cannot spin the timer.
+// whose expiry has just passed does not spin the timer.
 const SELF_REPAINT_FLOOR_MS = 1_000;
 const SELF_REPAINT_MAX_MS = 60_000;
 
@@ -1134,10 +1134,16 @@ function selfRepaintDelayMs() {
   if (!surfacesShowingSessions()) return SELF_REPAINT_MAX_MS;
   const cells = surface === 'rail' ? state.payload?.cells || [] : [state.payload?.cell].filter(Boolean);
   let soonest = 0;
+  // Only an expiry still in the future can shorten this wait. A stale one used to be
+  // picked as `soonest` anyway, which pinned the delay to the one-second floor and
+  // re-armed on the same payload after every repaint - a quiet repaint loop until the
+  // main process pushed a re-projection. Filtering here is what makes the floor a
+  // lower bound on a real wait rather than a period.
+  const now = Date.now();
   for (const cell of cells) {
     if (cell?.metric !== presentation.SESSIONS_METRIC) continue;
     const expiresAt = Number(cell.runningExpiresAt) || 0;
-    if (expiresAt > 0 && (!soonest || expiresAt < soonest)) soonest = expiresAt;
+    if (expiresAt > now && (!soonest || expiresAt < soonest)) soonest = expiresAt;
   }
   if (!soonest) return SELF_REPAINT_MAX_MS;
   return Math.min(SELF_REPAINT_MAX_MS, Math.max(SELF_REPAINT_FLOOR_MS, soonest - Date.now() + 50));
