@@ -5420,9 +5420,13 @@ function ensureEdgeDockController() {
     preloadPath: path.join(__dirname, 'edgeDock', 'preload.js'),
     getSettings: () => settings,
     nativeGlass: () => nativeBlurEnabled(),
+    // The renderer reads this preference through a media query, which works on both
+    // platforms, but the dock's window fade is this process's own animation and can only
+    // see it through Electron. Windows reports the same OS-level setting here as macOS, so
+    // the gate is where the dock runs rather than where the API was first wired up.
     prefersReducedMotion: () => motionPreferenceApi.shouldReduceMotion(
       settings?.reduceMotion,
-      process.platform === 'darwin' && systemPreferences?.getAnimationSettings?.().prefersReducedMotion === true
+      edgeDockSupported(process.platform) && systemPreferences?.getAnimationSettings?.().prefersReducedMotion === true
     ),
     applyShapeMask: (win, commands, width, height, currentDisplay) => {
       const scale = currentDisplay?.scaleFactor || screen.getDisplayMatching?.(win.getBounds())?.scaleFactor || 2;
