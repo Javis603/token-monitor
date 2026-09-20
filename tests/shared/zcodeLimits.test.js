@@ -726,6 +726,51 @@ test('the selected account\'s own store key outranks a mirror left by another ac
   assert.equal(teamMissing.credential, undefined);
 });
 
+test('an unreadable profile or store still degrades the quota lane to the mirror', () => {
+  // The other half of the boundary above, and the behavior approved in #718:
+  // the mirror stays the fallback wherever no identity can be established,
+  // because there is no account for it to contradict. Every shape below must
+  // keep reading the mirror — turning one into "no credential" would dark the
+  // lane on a 3.11.x install or on a store this machine cannot read.
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'mirror-fallback' } }
+    } })
+  };
+  const token = (credentials) => discoverZcodeConnection({}, {
+    readFileSync: fileSystem(credentials ? { ...files, 'credentials.json': credentials } : files),
+    homeDir: '/home/test',
+    env: { ZCODE_CREDENTIAL_SECRET: TEST_CREDENTIAL_SECRET }
+  }).credential.token;
+  const store = (entries) => JSON.stringify(entries);
+
+  // No store at all (3.11.x), or a store file that does not parse.
+  assert.equal(token(null), 'mirror-fallback');
+  assert.equal(token('{'), 'mirror-fallback');
+  // The profile entry is encrypted under another machine's key, does not parse
+  // after decrypting, or carries no identity field at all.
+  assert.equal(token(store({
+    'oauth:zai:user_info': encryptCredential(JSON.stringify({ user_id: 'x' }), 'another-machine-secret')
+  })), 'mirror-fallback');
+  assert.equal(token(store({
+    'oauth:zai:user_info': encryptCredential('{not json', TEST_CREDENTIAL_SECRET)
+  })), 'mirror-fallback');
+  assert.equal(token(store({
+    'oauth:zai:user_info': encryptCredential(JSON.stringify({ name: 'x' }), TEST_CREDENTIAL_SECRET)
+  })), 'mirror-fallback');
+  // An entry that exists beside a readable identity but cannot be decrypted is
+  // the same read failure, not the identity-known-no-entry state above.
+  assert.equal(token(store({
+    'oauth:zai:user_info': encryptCredential(JSON.stringify({ user_id: 'known' }), TEST_CREDENTIAL_SECRET),
+    'account-provider:coding-plan:account:zai-individual-coding-plan:account:known:api-key':
+      encryptCredential('unreadable-key', 'another-machine-secret')
+  })), 'mirror-fallback');
+});
+
 test('a fresh 3.12.3 install with no mirror recovers its key from the store', () => {
   // The machine never ran 3.11.x, so the provider entry's mirror was never
   // written — the state that made a subscribed account render nothing at all.
