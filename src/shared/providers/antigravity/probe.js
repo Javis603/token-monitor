@@ -791,13 +791,18 @@ async function probe(deps = {}) {
           }
 
           // Discovered ports are the fallback, bounded so they cannot starve the
-          // quota stage either. A discovery failure is only fatal when there is
-          // no explicit hub port to keep probing instead.
+          // quota stage either. The split budget exists only because an explicit
+          // hub port competes for the same provider deadline; without one,
+          // discovery keeps the full remaining deadline it always had, so a slow
+          // but legal lsof/Get-NetTCPConnection (they allow up to 6s) is not cut
+          // in half. A discovery failure is only fatal when there is no explicit
+          // hub port to keep probing instead.
+          const discoveryDeadlineMs = explicitHub.length > 0 ? halfDeadlineMs() : probeDeadlineMs;
           let ports = [];
           try {
             ports = await promiseBeforeDeadline(
               (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs }),
-              halfDeadlineMs(),
+              discoveryDeadlineMs,
               DEFAULT_RPC_TIMEOUT_MS,
               signal
             );

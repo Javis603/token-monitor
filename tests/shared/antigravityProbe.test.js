@@ -1021,3 +1021,40 @@ test('probe keeps reporting the discovery failure for a tokenless CLI with no hu
   assert.equal(calledPorts.length, 0, 'nothing is probeable without a hub port or discovered ports');
   assert.match(String(err.status || err.message), /lsof failed/);
 });
+
+// The split budget exists only because an explicit hub port competes for the
+// same provider deadline. Without one, discovery must keep the full remaining
+// deadline: listeningPorts() itself allows up to 6s, so halving it silently
+// turns a slow-but-legal lsof/Get-NetTCPConnection into a false unavailable.
+test('probe keeps the full discovery budget when there is no explicit hub port', async () => {
+  const probeTimeoutMs = 800;
+  const discoveryDelayMs = 600; // >50% of the deadline, <100%
+  let discoveryResolved = false;
+
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 60123, kind: 'cli', csrfToken: '', hubPort: null, extensionPort: null }
+    ],
+    listeningPorts: () => new Promise((resolve) => {
+      setTimeout(() => { discoveryResolved = true; resolve([60000]); }, discoveryDelayMs);
+    }),
+    callLs: async ({ port, method }) => {
+      if (port !== 60000) throw probe._errorWithStatus('unavailable', 'unexpected port');
+      if (method === 'GetUnleashData') return {};
+      if (method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.3 }]
+          }]
+        };
+      }
+      if (method === 'GetUserStatus') return { userStatus: { email: 'nohub@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'endpoint unavailable');
+    },
+    probeTimeoutMs
+  });
+
+  assert.equal(discoveryResolved, true, 'discovery must be allowed to finish after half the deadline');
+  assert.equal(result.accountEmail, 'nohub@example.com');
+});
