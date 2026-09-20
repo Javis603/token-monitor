@@ -284,6 +284,15 @@
       // provider while the page charges one client id — and it rides the cell
       // because it moves with every stats push.
       monthClientCosts: options.stats?.periods?.month?.clientCosts || {},
+      // What a row needs to name the device its reading came from: which device
+      // this is, and whether syncing is on at all. Both are the main process's
+      // to know and neither is in a collector record, so they ride the cell the
+      // way the subscription universe and the month's cost do — the dock window
+      // holds no settings and no device list of its own.
+      provenanceContext: {
+        localDeviceId: String(options.localDeviceId || ''),
+        syncActive: options.syncActive === true
+      },
       sessions,
       forecast: id === 'codex' ? options.codexResetForecast || null : null
     };
@@ -397,6 +406,7 @@
           subscriptionAccounts: allById.get(item.provider) || [],
           stats,
           localDeviceId: options.localDeviceId,
+          syncActive: options.syncActive,
           codexManagedAccounts: options.codexManagedAccounts,
           activeCodexAccountId: options.activeCodexAccountId,
           codexResetForecast: options.codexResetForecast

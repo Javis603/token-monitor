@@ -753,11 +753,15 @@ test('capability tags are settings-only and do not alter the main Limits panel',
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'onToolTrackingToggle');
 
   assert.doesNotMatch(renderLimits, /limitProviderCapabilityTags|limit-status|limitProviderStatus/);
-  // The device context is the host's to supply: the view resolves it through
-  // its own dep rather than calling the module context-free, which is how the
-  // page lost the "· imac-m1" half of this line when the row moved in here.
-  assert.match(renderHead, /const provenance = provenanceFor\(provider\);/);
-  assert.doesNotMatch(renderHead, /presentationApi\.limitProviderProvenance\(provider\)/);
+  // The device context is the host's to supply, and the view asks for it every
+  // time it paints a row: calling the module context-free is how the page lost
+  // the "· imac-m1" half of this line when the row moved in here, and a dep the
+  // host may omit is how the dock card never had it at all.
+  assert.match(
+    renderHead,
+    /const provenance = presentationApi\.limitProviderProvenance\(provider, provenanceContext\(\)\);/
+  );
+  assert.doesNotMatch(renderHead, /limitProviderProvenance\(provider\)/);
   assert.match(renderHead, /limitProviderMeta\(provider, provenance\)/);
   assert.match(renderMeta, /presentationApi\.limitProviderMainDeviceLabel\(provenance, \{ showSource: Boolean\(settings\(\)\?\.showLimitSource\) \}\)/);
   assert.doesNotMatch(renderLimits, /limitProviderSettingsTags/);

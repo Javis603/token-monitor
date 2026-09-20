@@ -18,11 +18,11 @@
 //   settings()                         the live settings object
 //   presentation, motion               renderer modules, injected so this file
 //                                      does not care which page loaded them
-//   provenance(provider)               which device a row's reading came from.
-//                                      Defaults to no context, because naming a
-//                                      device needs this host's own device id,
-//                                      sync mode and device list — none of which
-//                                      is in the record being rendered
+//   provenanceContext()                what naming a reading's device needs:
+//                                      this host's own device id, whether it is
+//                                      syncing, and its device list. Read at
+//                                      paint time, because a row repaints while
+//                                      the stats behind it change
 //   balance                            limitBalanceDisplay
 //   windowLabels, windowText           the shared wording modules
 //   subscriptionApi, subscriptionText  the recorded subscriptions and how they
@@ -42,10 +42,11 @@
       currentLocale,
       presentation: presentationApi,
       // The row shows which device a reading came from, and only the host knows
-      // what that device is called. A host that has no such context (the dock
-      // card is handed cells, not a device list) gets the plain reading rather
-      // than a device name nobody resolved.
-      provenance: provenanceFor = (provider) => presentationApi.limitProviderProvenance(provider),
+      // what that device is called. No default: a host that supplied nothing
+      // would not fail, it would render every row as if it were this device's —
+      // the same silent-less drift the subscription block below exists to stop,
+      // and the dock card had exactly that gap while this had a default.
+      provenanceContext,
       motion,
       tooltip: tooltipHost,
       formatCompact,
@@ -1294,7 +1295,7 @@
     const title = document.createElement('span');
     title.className = 'limit-name-title';
     title.textContent = options.title || label;
-    const provenance = provenanceFor(provider);
+    const provenance = presentationApi.limitProviderProvenance(provider, provenanceContext());
     // The ✓ marks the account THIS device's Codex is signed into
     // (state.codexActiveAccount, derived locally by codexActiveAccountFromStats).
     // It only disambiguates rows in the multi-account group, so it's gated on

@@ -137,6 +137,9 @@ function dockView(appearance = {}, overrides = {}) {
     limitWindowLabel: limitWindowLabels.limitWindowLabel,
     limitWindowText: limitWindowTextApi.limitWindowText,
     accountIdentity: accountIdentityApi,
+    // Mirrored from the dock's own wiring: the device context rides the cell
+    // being rendered, since this page holds no settings and no device list.
+    provenanceContext: () => appearance.provenanceContext || {},
     accountControl: { render: (options) => options.titleNode },
     codexAccounts: { matchesActive: () => false, switchTarget: () => null, canSwitchSystemAccount: () => false },
     hasMark: () => true,
@@ -723,13 +726,40 @@ test('a row whose reading came from another device names that device', () => {
     .renderLimitProviderSolo('kiro', 'Kiro', record, '#8B5CF6');
 
   assert.match(
-    rowFor({ provenance: (provider) => limitPresentationApi.limitProviderProvenance(provider, context) })
-      .find('limit-meta').text,
+    rowFor({ provenanceContext: () => context }).find('limit-meta').text,
     /Updated 2m ago · CLI · imac-m1/
   );
-  // A host with no device list gets the source and no name, rather than a name
+  // A host with no such context gets the source and no name, rather than a name
   // nobody resolved.
   assert.match(rowFor({}).find('limit-meta').text, /Updated 2m ago · CLI$/);
+});
+
+// The dock card is the surface that had no context at all: it is handed cells,
+// so the two facts it needs — which device this is, and whether syncing is on —
+// have to ride the cell the main process builds.
+test('the dock card names the device from the cell it is handed', () => {
+  const record = {
+    provider: 'kiro',
+    status: 'ok',
+    source: 'cli',
+    sourceDeviceId: 'imac-m1',
+    accountKey: 'k',
+    updatedAt: new Date(Date.now() - 120_000).toISOString(),
+    windows: [{ kind: 'billing', label: 'Credits', remainingPercent: 100 }]
+  };
+  const [cell] = buildEdgeDockCells({ limits: { providers: [record] } }, {
+    items: [{ type: 'limit', provider: 'kiro' }],
+    localDeviceId: 'this-mac',
+    syncActive: true
+  });
+  assert.deepEqual(
+    cell.provenanceContext,
+    { localDeviceId: 'this-mac', syncActive: true },
+    'the cell carries the context the card has no other way to read'
+  );
+  const row = dockView({ showLimitSource: true }, { provenanceContext: () => cell.provenanceContext })
+    .renderLimitProviderSolo('kiro', 'Kiro', cell.accounts[0].record, '#8B5CF6');
+  assert.match(row.find('limit-meta').text, /Updated 2m ago · CLI · imac-m1/);
 });
 
 test('the page hands the shared view the device context its rows read', () => {
@@ -738,17 +768,24 @@ test('the page hands the shared view the device context its rows read', () => {
     app.indexOf('const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsView({'),
     app.indexOf('function optionalFiniteNumber(value) {', app.indexOf('const limitWindowsView = window'))
   );
-  assert.match(wiring, /(^|[\s{,])provenance\s*[,:]/, 'the page must hand the view its device context');
-  // And it is the resolver carrying the context, not a second context-free
-  // module call that reads as wired while naming nothing.
-  const wrapper = app.slice(
-    app.indexOf('function limitProviderProvenance(provider) {'),
-    app.indexOf('// ---------------------------------------------------------------------------\n// Subscriptions')
+  assert.match(wiring, /(^|[\s{,])provenanceContext\s*[,:]/, 'the page must hand the view its device context');
+  // And the context it hands over is the live one, not a context-free call that
+  // reads as wired while naming nothing.
+  assert.match(wiring, /localDeviceId: state\.settings\?\.deviceId/);
+  assert.match(wiring, /syncActive: syncProvenanceActive\(\)/);
+  assert.match(wiring, /devices: state\.stats\?\.devices/);
+});
+
+// The dock's half of the same wiring: it reads the context off the cell it is
+// rendering, because that page has no settings and no device list of its own.
+test('the dock hands the shared view the device context a cell carries', () => {
+  const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const wiring = balancedCall(dock, 'createLimitWindowsView({');
+  assert.match(
+    wiring,
+    /provenanceContext: \(\) => state\.payload\?\.cell\?\.provenanceContext/,
+    'the dock card must read the context off the cell it renders'
   );
-  assert.match(wrapper, /localDeviceId: state\.settings\?\.deviceId/);
-  assert.match(wrapper, /syncActive: syncProvenanceActive\(\)/);
-  assert.match(wrapper, /devices: state\.stats\?\.devices/);
-  assert.match(wiring, /provenance: \(provider\) => limitProviderProvenance\(provider\)/);
 });
 
 test('a stale row is dimmed by the page rule, not recoloured', () => {

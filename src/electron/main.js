@@ -3025,10 +3025,17 @@ let trayRefreshInFlight = false;
 let codexPresentationActiveAccountId = '';
 let codexPresentationPendingAccountId = '';
 
+// One answer, because two of them is how a row ends up naming the device it
+// came from on one surface and not on the other: the presentation projection
+// and the edge dock's cells both need it.
+function syncProvenanceActive() {
+  return mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim());
+}
+
 function electronPresentationStats(stats) {
   return projectModelAliasStats(projectLimitStatsForDisplay(stats, {
     localDeviceId: settings?.deviceId,
-    syncActive: mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim()),
+    syncActive: syncProvenanceActive(),
     opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
   }), settings?.modelAliases, { grouping: settings?.modelAliasGrouping });
 }
@@ -5313,6 +5320,9 @@ function edgeDockCellsFor(visibleStats) {
     derivedPeriods: edgeDockDerivedPeriods,
     codexResetForecast: edgeDockForecastWanted() ? edgeDockForecast : null,
     localDeviceId: settings?.deviceId,
+    // What the card's rows need to name the device a reading came from. The
+    // dock window is handed cells and nothing else, so both ride the cell.
+    syncActive: syncProvenanceActive(),
     items: settings?.edgeDockItems,
     codexManagedAccounts: codexAccountsForRenderer(),
     activeCodexAccountId: codexPresentationPendingAccountId || codexPresentationActiveAccountId,

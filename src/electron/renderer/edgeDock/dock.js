@@ -309,6 +309,10 @@ const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
   settings: appearance,
   currentLocale: () => state.locale,
   presentation: limitPresentationApi,
+  // Which device a row's reading came from — "· imac-m1" beside the provider's
+  // own source label. The card has no settings and no device list, so both
+  // facts ride the cell it is rendering, the same way its account set does.
+  provenanceContext: () => state.payload?.cell?.provenanceContext || {},
   motion: limitResetMotionApi,
   tooltip: {
     hasOpened: () => limitTooltip.opened,
