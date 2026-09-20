@@ -567,6 +567,112 @@ test('a subscription bound to a hidden account does not decorate the row that is
   assert.match(dock, /subscriptionAccounts: \(\) => state\.payload\?\.cell\?\.subscriptionAccounts \|\| \[\],/);
 });
 
+// Hiding is not the only display rule that narrows the universe. The rail lists
+// only accounts that report something, which is another choice about what to
+// draw — so a failing account with no last-known windows drops out of the rows
+// while its subscription stays recorded against it, and the matcher sees the one
+// account left.
+test('an account the rail drops for reporting nothing does not lend its record to the row left behind', () => {
+  const codexRecord = (key, status, windows) => ({
+    provider: 'codex',
+    status,
+    accountKey: key,
+    accountName: `${key}@example.com`,
+    planLabel: 'Plus',
+    updatedAt: new Date().toISOString(),
+    windows
+  });
+  const window = { kind: 'session', label: 'Session', remainingPercent: 70 };
+  const subscription = {
+    id: 'sub-1',
+    provider: 'codex',
+    kind: 'subscription',
+    planName: 'Plus',
+    amountMinor: 2000,
+    currency: 'USD',
+    intervalCount: 1,
+    interval: 'month',
+    startDate: '2026-08-01',
+    autoRenew: true,
+    nextRenewalOverride: '',
+    endDate: null,
+    topUps: [],
+    binding: { accountKey: 'b' }
+  };
+  const stats = { limits: { providers: [codexRecord('a', 'ok', [window]), codexRecord('b', 'error', [])] } };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'limit', provider: 'codex', showUsage: true }] });
+
+  assert.deepEqual(cell.accounts.map((account) => account.record.accountKey), ['a'], 'only a is drawn');
+  assert.deepEqual(
+    cell.subscriptionAccounts.map((account) => account.accountKey),
+    ['a', 'b'],
+    'b is still an account the provider has, and the record binds to it'
+  );
+
+  const row = dockView({ subscriptions: [subscription] }, {
+    subscriptionAccounts: () => cell.subscriptionAccounts
+  }).renderLimitProviderSolo('codex', 'Codex', cell.accounts[0].record, '#10A37F');
+  assert.equal(row.find('subscription-tooltip'), null, "b's plan must not appear on a");
+});
+
+// A group header stands for the rows under it, so its summary has to be drawn
+// from those accounts too. Computed from the provider's subscriptions instead,
+// a record bound to an account the composer hides is carded and counted on a
+// header that has already said how many accounts it covers.
+test('a group header summarises the accounts the card draws', () => {
+  const codexRecord = (key) => ({
+    provider: 'codex',
+    status: 'ok',
+    accountKey: key,
+    accountName: `${key}@example.com`,
+    planLabel: 'Plus',
+    updatedAt: new Date().toISOString(),
+    windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }]
+  });
+  const subscription = (id, key, amountMinor) => ({
+    id,
+    provider: 'codex',
+    kind: 'subscription',
+    planName: 'Plus',
+    amountMinor,
+    currency: 'USD',
+    intervalCount: 1,
+    interval: 'month',
+    startDate: '2026-08-01',
+    autoRenew: true,
+    nextRenewalOverride: '',
+    endDate: null,
+    topUps: [],
+    binding: { accountKey: key }
+  });
+  const stats = { limits: { providers: [codexRecord('a'), codexRecord('b'), codexRecord('c')] } };
+  const headerFor = (subscriptions, hiddenAccounts) => {
+    const [cell] = buildEdgeDockCells(stats, {
+      items: [{ type: 'limit', provider: 'codex', hiddenAccounts, showUsage: true }]
+    });
+    const drawn = cell.accounts.map((account) => account.record);
+    return dockView({ subscriptions }, {
+      subscriptionAccounts: () => cell.subscriptionAccounts
+    }).renderLimitProviderGroup('codex', 'Codex', drawn, '#10A37F');
+  };
+
+  const onlyHidden = headerFor([subscription('sub-1', 'a', 1000)], ['a']);
+  assert.equal(
+    onlyHidden.find('subscription-tooltip'),
+    null,
+    "the hidden account's card must not hang off a header that does not cover it"
+  );
+
+  const everyAccount = headerFor([
+    subscription('sub-1', 'a', 1000),
+    subscription('sub-2', 'b', 1000),
+    subscription('sub-3', 'c', 1000)
+  ], ['a']);
+  const tooltip = everyAccount.find('subscription-tooltip');
+  assert.ok(tooltip, 'the two accounts that do have records are still summarised');
+  assert.match(tooltip.text, /2 subscriptions · \$20\.00 \/ mo/, 'and the hidden one is neither counted nor charged');
+});
+
 test('a stale row is dimmed by the page rule, not recoloured', () => {
   const row = dockView().renderLimitProviderRow('openrouter', 'OpenRouter', {
     provider: 'openrouter',

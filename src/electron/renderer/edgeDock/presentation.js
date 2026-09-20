@@ -269,13 +269,14 @@
       credits: headlineCredits,
       accountCount: accounts.length,
       accounts: projected.slice(0, MAX_BUBBLE_ACCOUNTS).map((account) => account.summary),
-      // Every account the provider has, hidden ones included. Hiding an account
-      // is a choice about what this card draws, while a subscription binds to
-      // the account itself — and matchProviderAccount() falls back to "the
-      // provider has exactly one account, so there is no ambiguity", so a
-      // universe narrowed to the drawn rows puts a hidden account's record on
-      // whichever row is left.
-      subscriptionAccounts: records,
+      // Every account the provider has, hidden and non-reporting ones included.
+      // Hiding an account is a choice about what this card draws, and so is the
+      // rail's own "only accounts that report something" rule, while a
+      // subscription binds to the account itself — and matchProviderAccount()
+      // falls back to "the provider has exactly one account, so there is no
+      // ambiguity", so a universe narrowed to the drawn rows puts an account's
+      // record on whichever row is left.
+      subscriptionAccounts: options.subscriptionAccounts || records,
       usage: options.showUsage === false ? null : providerUsage(options.stats, id),
       // The month's cost per client, for the subscription card on this card's
       // plan cell. It is the same map the Limits page reads — the card cannot
@@ -333,16 +334,27 @@
     };
   }
 
+  // Two answers, because the rail and the subscription matcher want different
+  // ones. `byId` is what the cell draws, so it is gated on `hasReportableData`.
+  // `allById` is every account the provider has, gate ignored, because a
+  // subscription binds to the account rather than to the row — an account that
+  // is failing without last-known windows still has one, and a matcher that
+  // cannot see it falls through matchProviderAccount()'s sole-account fallback
+  // onto whichever account is left on screen.
   function groupedProviders(stats) {
     const providers = Array.isArray(stats?.limits?.providers) ? stats.limits.providers : [];
     const byId = new Map();
+    const allById = new Map();
     for (const provider of providers) {
       const id = normalizedId(provider?.provider);
-      if (!id || !hasReportableData(provider)) continue;
+      if (!id) continue;
+      if (!allById.has(id)) allById.set(id, []);
+      allById.get(id).push(provider);
+      if (!hasReportableData(provider)) continue;
       if (!byId.has(id)) byId.set(id, []);
       byId.get(id).push(provider);
     }
-    return { providers: providers.filter(hasReportableData), byId };
+    return { providers: providers.filter(hasReportableData), byId, allById };
   }
 
   // Limit providers that currently report something, in the user's limits order.
@@ -352,7 +364,7 @@
   }
 
   function buildEdgeDockCells(stats, options = {}) {
-    const { byId } = groupedProviders(stats);
+    const { byId, allById } = groupedProviders(stats);
     const items = Array.isArray(options.items)
       ? options.items
       : dockItems.defaultEdgeDockItems(connectedLimitProviders(stats, options));
@@ -366,6 +378,7 @@
         // every time an account refreshes or signs out.
         cells.push(providerCell(item.provider, byId.get(item.provider) || [], {
           ...item,
+          subscriptionAccounts: allById.get(item.provider) || [],
           stats,
           localDeviceId: options.localDeviceId,
           codexManagedAccounts: options.codexManagedAccounts,

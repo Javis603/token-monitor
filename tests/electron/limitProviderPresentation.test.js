@@ -3561,7 +3561,17 @@ test('a subscription card belongs to one account, and a group header summarises'
   assert.match(forProvider, /subscriptionAccountValue\(account\) === identity/);
   assert.doesNotMatch(forProvider, /matchProviderAccount\(subscription, \[provider\]\)/);
   assert.match(cardFor, /provider\?\.accountGroup === true/);
-  assert.match(cardFor, /subscriptionGroupTooltipRows\(provider\.provider/);
+  // And the header summarises the accounts it draws: the entries are narrowed to
+  // them, and the rollup is computed from those entries rather than from the
+  // provider's whole list, so a hidden account is neither carded nor counted.
+  assert.match(
+    cardFor,
+    /subscriptionGroupTooltipRows\(\s*provider\.provider,\s*subscriptionApi\.todayString\(\),\s*entries\.map\(\(entry\) => entry\.subscription\)\s*\)/
+  );
+  assert.match(cardFor, /subscriptionsForProviderGroup\(provider\.provider, provider\.groupAccounts\)/);
+  const groupResolver = viewBody('subscriptionsForProviderGroup', 'subscriptionTooltipRows');
+  assert.match(groupResolver, /const accounts = subscriptionAccounts\(\);/);
+  assert.match(groupResolver, /drawnValues\.has\(subscriptionAccountValue\(entry\.account\)\)/);
 });
 
 test('the seeded plan name is a real plan, never a status label', () => {

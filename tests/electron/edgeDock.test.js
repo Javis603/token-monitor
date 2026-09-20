@@ -787,6 +787,37 @@ test('hidden accounts are left out of the headline and the card', () => {
   assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountKey), ['sha256:a', 'sha256:b']);
 });
 
+test('an account the rail drops for reporting nothing still binds its subscription', () => {
+  // The rail only lists accounts that report something, but a subscription is
+  // bound to the account: a failing one with no last-known windows is still the
+  // account the user recorded, and a matcher that cannot see it reads the one
+  // account left as "no ambiguity" and puts its record on that row instead.
+  const stats = {
+    limits: {
+      providers: [
+        provider('codex', { accountKey: 'sha256:a', windows: [{ kind: 'session', remainingPercent: 5 }] }),
+        provider('codex', { accountKey: 'sha256:b', status: 'error', windows: [] })
+      ]
+    }
+  };
+  const [codex] = buildEdgeDockCells(stats, {
+    items: [{ type: 'limit', provider: 'codex', showUsage: true }]
+  });
+  assert.deepEqual(codex.accounts.map((account) => account.accountKey), ['sha256:a']);
+  assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountKey), ['sha256:a', 'sha256:b']);
+});
+
+test('a provider with nothing to report still carries its accounts to the matcher', () => {
+  const stats = {
+    limits: { providers: [provider('codex', { accountKey: 'sha256:a', status: 'error', windows: [] })] }
+  };
+  const [codex] = buildEdgeDockCells(stats, {
+    items: [{ type: 'limit', provider: 'codex', showUsage: true }]
+  });
+  assert.equal(codex.accounts.length, 0);
+  assert.deepEqual(codex.subscriptionAccounts.map((account) => account.accountKey), ['sha256:a']);
+});
+
 test('item settings normalize to null for automatic and drop unknown entries', () => {
   assert.equal(normalizeEdgeDockItems(null), null);
   assert.equal(normalizeEdgeDockItems('nope'), null);

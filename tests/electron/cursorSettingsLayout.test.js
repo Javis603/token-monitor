@@ -2545,9 +2545,14 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
   const groupBody = viewBody('renderLimitProviderGroup');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   // accountGroup marks the synthetic header provider, so a subscription card on
-  // it summarises the group instead of adopting one member's record. The count
+  // it summarises the group instead of adopting one member's record — and
+  // groupAccounts is the set that summary is drawn from, since the header stands
+  // for its own rows and not for every account the provider has. The count
   // phrase is the catalog's own, keyed by provider id.
-  assert.match(groupBody, /const groupProvider = \{ provider: providerId, status: 'ok', windows: \[\], accountGroup: true \};/);
+  assert.match(
+    groupBody,
+    /const groupProvider = \{\s*provider: providerId,\s*status: 'ok',\s*windows: \[\],\s*accountGroup: true,\s*groupAccounts: providers\s*\};/
+  );
   assert.match(groupBody, /planText: limitGroupCountText\(providerId, providers\.length\)/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
   assert.match(readRendererFile('limitWindowsView.js'), /mimo: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);

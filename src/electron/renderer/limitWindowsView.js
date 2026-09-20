@@ -1781,7 +1781,17 @@
     const { markId, sharedFamily, forecastOnGroup } = policy(providers);
     const row = document.createElement('div');
     row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-    const groupProvider = { provider: providerId, status: 'ok', windows: [], accountGroup: true };
+    // `groupAccounts` is the accounts this header stands for. The head is drawn
+    // from a synthetic record, so without it a subscription resolved against the
+    // wider universe could summarise an account the row does not draw — the
+    // card's composer can hide one from the group it is still part of.
+    const groupProvider = {
+      provider: providerId,
+      status: 'ok',
+      windows: [],
+      accountGroup: true,
+      groupAccounts: providers
+    };
     const head = renderLimitProviderHead(providerId, label, groupProvider, color, {
       planText: limitGroupCountText(providerId, providers.length),
       hideMeta: true,
@@ -1858,16 +1868,23 @@
   }
 
   // Every subscription recorded against a provider, paired with the account it
-  // resolves to. Drives the group header, which stands for all of them at once.
-  function subscriptionsForProviderGroup(providerId) {
+  // resolves to, and narrowed to the accounts this header draws — the group
+  // header stands for its own rows, not for the provider's whole account list.
+  // Matching still happens against that whole list, because a row is the wrong
+  // universe for it; the filter is what keeps a record on the account it belongs
+  // to, out of a summary of accounts that do not include it. An unbound record
+  // (nothing resolved) stays: there is no account to have hidden.
+  function subscriptionsForProviderGroup(providerId, drawn) {
     const id = String(providerId || '').toLowerCase();
     const accounts = subscriptionAccounts();
+    const drawnValues = Array.isArray(drawn) ? new Set(drawn.map(subscriptionAccountValue)) : null;
     return subscriptionList()
       .filter((subscription) => subscription.provider === id)
       .map((subscription) => ({
         subscription,
         account: subscriptionApi.matchProviderAccount(subscription, accounts)
-      }));
+      }))
+      .filter((entry) => !entry.account || !drawnValues || drawnValues.has(subscriptionAccountValue(entry.account)));
   }
 
   // Rows are {label, value} pairs so the tooltip stays a table and the caller
@@ -2015,11 +2032,12 @@
     return rows;
   }
 
-  // The group header stands for every account at once, so it summarises rather
-  // than picking one of them. Usage and the value multiple are already provider
-  // level on the per-account card; here the price is too.
-  function subscriptionGroupTooltipRows(providerId, today) {
-    const rollup = subscriptionApi.providerRollup(subscriptionList(), providerId, currencyApi, today);
+  // The group header stands for all of its accounts at once, so it summarises
+  // rather than picking one of them; `subscriptions` is that set as the caller
+  // resolved it, not the provider's whole list. Usage and the value multiple are
+  // already provider level on the per-account card; here the price is too.
+  function subscriptionGroupTooltipRows(providerId, today, subscriptions) {
+    const rollup = subscriptionApi.providerRollup(subscriptions, providerId, currencyApi, today);
     const rows = [{
       label: t('subscription.tooltip.providerTotal', { provider: subscriptionText.providerLabel(providerId) }),
       value: t('subscription.tooltip.providerTotalValue', {
@@ -2081,15 +2099,21 @@
   // recorded, where the summary would just restate that one card with less in it.
   function subscriptionCardForRow(provider, includeRollup) {
     if (provider?.accountGroup === true) {
-      const entries = subscriptionsForProviderGroup(provider.provider);
+      const entries = subscriptionsForProviderGroup(provider.provider, provider.groupAccounts);
       if (entries.length === 0) return null;
       if (entries.length === 1) {
         return subscriptionCardNode(
           subscriptionTooltipRows(entries[0].subscription, entries[0].account || provider, true)
         );
       }
+      // The same narrowed set the entries came from, or the total would count a
+      // record the header just declined to show.
       return subscriptionCardNode(
-        subscriptionGroupTooltipRows(provider.provider, subscriptionApi.todayString())
+        subscriptionGroupTooltipRows(
+          provider.provider,
+          subscriptionApi.todayString(),
+          entries.map((entry) => entry.subscription)
+        )
       );
     }
     const subscription = subscriptionForProvider(provider);
