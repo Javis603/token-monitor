@@ -698,7 +698,6 @@ async function fetchKimiLimits(options = {}, deps = {}) {
     });
   }
 
-  const errors = [];
   let codeWindows = [];
   let webWindows = [];
   if (key) {
