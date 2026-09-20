@@ -241,23 +241,25 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   max-width: 100%;
   overflow: hidden;
   font-family: var(--display-font, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif);
+  font-size: 9px;
   line-height: 1;
 }
-/* The live-rate item's own sizes for a rate reading: a 12px figure over a 9px
-   semibold unit, which is the pair that cell already ships and the one this line is
-   meant to match. Sharing the sizes is what makes the two cells read as the same
-   measurement rather than two treatments of it; sharing the line is what keeps this
-   cell's height, since the sessions count already sits above it. */
+/* One size for the whole line, taken from the live-rate cell's own unit style - the
+   9px semibold muted label it prints above its number. That cell can set its number
+   larger because the number IS that cell: the headline, alone under its caption.
+   Here the line sits under the running count, so an enlarged figure reads as a second
+   headline beside that count. The figure still leads through its ink and weight; the
+   size is what it shares. */
 .edge-dock-cell-rate-value {
-  font-size: 12px;
   font-weight: 650;
   letter-spacing: -0.01em;
   color: var(--text);
 }
-.edge-dock-cell-rate-unit { color: var(--muted); font-size: 9px; font-weight: 600; }
+/* The live-rate cell's label treatment, verbatim: same size, weight and colour as the
+   `tok/s` it prints, since this is the same unit naming the same measurement. */
+.edge-dock-cell-rate-unit { color: var(--muted); font-weight: 600; }
 .edge-dock-cell-rate.is-idle .edge-dock-cell-rate-value { color: var(--muted); }
-.edge-dock-rail.is-compact .edge-dock-cell-rate-value { font-size: 11px; }
-.edge-dock-rail.is-compact .edge-dock-cell-rate-unit { font-size: 8.5px; }
+.edge-dock-rail.is-compact .edge-dock-cell-rate { font-size: 8.5px; }
 .edge-dock-cell-stat.is-focused .edge-dock-stat-value {
   color: var(--accent);
   text-shadow: 0 0 6px rgba(var(--accent-rgb), 0.25);

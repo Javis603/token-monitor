@@ -697,7 +697,7 @@ test('the live-rate tracker is kept alive by a rate-mode sessions item', () => {
 // The cell already prints one number above this line (the running count), so a
 // stacked figure-over-unit made the rate read as a second, unrelated number. The
 // unit has to sit on the same line as the figure it belongs to.
-test('the rail cell rate reads on one line, with its unit beside the figure', () => {
+test('the rail cell rate is one line at one size, below the count it sits under', () => {
   const css = readRendererFile(path.join('edgeDock', 'dock.css'));
   const row = css.match(/\.edge-dock-cell-rate \{([^}]*)\}/);
   assert.ok(row, 'the rate row should be styled');
@@ -706,29 +706,45 @@ test('the rail cell rate reads on one line, with its unit beside the figure', ()
   assert.doesNotMatch(row[1], /display: grid;/);
   assert.doesNotMatch(row[1], /flex-direction: column;/);
   assert.match(row[1], /font-family: var\(--display-font/);
-  // The line matches the live-rate item's own treatment of the same reading - a 12px
-  // figure with a 9px semibold unit - because that is the pair the design already
-  // ships for a token rate. Asserted against that cell's own rules, so the two cannot
-  // drift apart without one of them failing here.
   const value = css.match(/\.edge-dock-cell-rate-value \{([^}]*)\}/);
   assert.ok(value, 'the rate figure should be styled');
-  assert.match(value[1], /font-size: 12px;/);
   assert.match(value[1], /font-weight: 650;/);
   const unit = css.match(/\.edge-dock-cell-rate-unit \{([^}]*)\}/);
   assert.ok(unit, 'the rate unit should be styled');
-  assert.match(unit[1], /font-size: 9px;/);
-  assert.match(unit[1], /font-weight: 600;/);
-  // The live-rate cell's own rules for the same reading, read from the same sheet so
-  // this is an agreement between the two cells rather than a number copied twice.
+  // The figure and its unit share ONE size, and neither may reintroduce a size of its
+  // own. That is the reading this line is for: it sits under the running count, so a
+  // larger figure reads as a second headline beside that count rather than as the
+  // reading under it. The live-rate cell below is the opposite case and keeps its own
+  // larger number, which is why this is asserted as sameness rather than a value.
+  const size = row[1].match(/font-size: ([\d.]+px);/);
+  assert.ok(size, 'the rate row owns the size both parts share');
+  assert.doesNotMatch(value[1], /font-size:/);
+  assert.doesNotMatch(unit[1], /font-size:/);
+  // The unit still carries the hierarchy the size no longer does.
+  // The unit IS the live-rate cell's label treatment, because it names the same unit
+  // for the same measurement: same size, weight and colour as that cell's `tok/s`.
+  // Read from that cell's own rule so this is an agreement rather than a value typed
+  // twice - the failure this replaced was the unit being restyled in passing.
   const liveLabel = css.match(/\.edge-dock-stat-label \{([^}]*)\}/);
+  assert.ok(liveLabel, 'the live-rate cell keeps its own label style');
+  // Size lives on the row (both parts inherit it); weight and colour are the unit's
+  // own. Compared property by property against the label's declarations.
+  const liveSize = liveLabel[1].match(/font-size: ([^;]+);/)[1];
+  assert.equal(size[1], liveSize, 'the rate line should use the live-rate label size');
+  for (const property of ['font-weight', 'color']) {
+    const expected = liveLabel[1].match(new RegExp(`${property}: ([^;]+);`))[1];
+    assert.ok(
+      new RegExp(`${property}: ${expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')};`).test(unit[1]),
+      `the rate unit should keep the live-rate label's ${property} (${expected})`
+    );
+  }
+  // And the live-rate cell keeps its own scale: it is the headline of its cell, so the
+  // two must not be pulled to one number.
   const liveValue = css.match(/\.edge-dock-stat-value \{([^}]*)\}/);
-  assert.ok(liveLabel && liveValue, 'the live-rate cell keeps its own type scale');
-  assert.match(liveLabel[1], /font-size: 9px;/);
-  assert.match(liveValue[1], /font-size: 12px;/);
-  // Which is the same pair this line now uses, so the two rate readouts are one
-  // measurement in two layouts rather than two treatments of it.
-  assert.match(liveLabel[1], new RegExp(`font-size: ${unit[1].match(/font-size: ([\d.]+px)/)[1]};`));
-  assert.match(liveValue[1], new RegExp(`font-size: ${value[1].match(/font-size: ([\d.]+px)/)[1]};`));
+  assert.ok(liveValue, 'the live-rate cell keeps its own type scale');
+  const liveFigureSize = liveValue[1].match(/font-size: ([\d.]+px);/);
+  assert.ok(liveFigureSize, 'the live-rate figure is sized');
+  assert.notEqual(liveFigureSize[1], size[1]);
 });
 
 // A stored item round-trips through its own normalizer, or the choice the user
