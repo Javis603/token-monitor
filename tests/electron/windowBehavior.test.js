@@ -127,22 +127,3 @@ test('main.js never passes a bare floating level to setAlwaysOnTop', () => {
     assert.match(call, /floatingAlwaysOnTopLevel\(\)/);
   }
 });
-
-test('window:close and window:minimize guard against destroyed windows and prefer event.sender', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src/electron/main.js'), 'utf8');
-  assert.match(main, /ipcMain\.on\('window:close',\s*\(event\)\s*=>\s*\{/);
-  assert.match(main, /ipcMain\.on\('window:minimize',\s*\(event\)\s*=>\s*\{/);
-  assert.doesNotMatch(main, /mainWindow\?\.close\(\)/);
-  assert.doesNotMatch(main, /mainWindow\?\.minimize\(\)/);
-});
-
-test('revealWindow emits show when showInactive is used', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src/electron/main.js'), 'utf8');
-  assert.match(main, /target\.showInactive\(\);\s*target\.emit\('show'\);/);
-});
-
-test('replaceMainWindow cleans up old window even if show event is delayed', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src/electron/main.js'), 'utf8');
-  assert.match(main, /fallbackTimer\s*=\s*setTimeout\(destroyOld,\s*\d+\);/);
-});
-

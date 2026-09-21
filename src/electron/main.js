@@ -87,6 +87,7 @@ const {
 } = require('../shared/providers/antigravity/selfSync');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
+const { actionWindowForEvent, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
@@ -6166,14 +6167,8 @@ function isAllowedExternalUrl(value) {
 }
 
 function revealWindow(target = mainWindow, options = {}) {
-  if (!target || target.isDestroyed() || target.isVisible()) return;
   const inactive = options.inactive === true || (target === mainWindow && floatingBubbleState.collapsed);
-  if (inactive && typeof target.showInactive === 'function') {
-    target.showInactive();
-    target.emit('show');
-    return;
-  }
-  target.show();
+  showWindow(target, inactive);
 }
 
 function loadWindowFile(target, options = {}) {
@@ -6398,27 +6393,9 @@ function replaceMainWindow(bounds, options = {}) {
     inactive: options.inactive === true
   });
   const next = mainWindow;
-  let fallbackTimer = null;
-  const destroyOld = () => {
-    if (fallbackTimer) {
-      clearTimeout(fallbackTimer);
-      fallbackTimer = null;
-    }
-    if (old && !old.isDestroyed()) old.destroy();
-    if ((options.focus === true || (options.focus !== false && wasFocused)) && !next.isDestroyed()) {
-      next.focus();
-    }
-  };
-  if (!next || next.isDestroyed()) {
-    if (old && !old.isDestroyed()) old.destroy();
-    return;
-  }
-  if (next.isVisible()) {
-    destroyOld();
-    return;
-  }
-  next.once('show', destroyOld);
-  fallbackTimer = setTimeout(destroyOld, 3000);
+  handoffWindow(old, next, {
+    focus: options.focus === true || (options.focus !== false && wasFocused)
+  });
 }
 
 function discardFailedDashboardWindow(win, reason) {
@@ -8274,16 +8251,14 @@ app.whenReady().then(() => {
       hidePopover();
       return;
     }
-    const win = (event?.sender ? BrowserWindow.fromWebContents(event.sender) : null) || mainWindow;
-    if (win && !win.isDestroyed()) win.minimize();
+    actionWindowForEvent(BrowserWindow, event, mainWindow)?.minimize();
   });
   ipcMain.on('window:close', (event) => {
     if (settings?.trayMode) {
       hidePopover();
       return;
     }
-    const win = (event?.sender ? BrowserWindow.fromWebContents(event.sender) : null) || mainWindow;
-    if (win && !win.isDestroyed()) win.close();
+    actionWindowForEvent(BrowserWindow, event, mainWindow)?.close();
   });
   ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
