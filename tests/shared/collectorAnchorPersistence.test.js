@@ -16,7 +16,8 @@ function freshCollector() {
 const {
   configFingerprint,
   collectUsageOnce,
-  localTodayKey
+  localTodayKey,
+  qoderCnSourcesForClients
 } = require('../../src/shared/collector');
 
 const { emptyPeriod } = require('../../src/shared/usage');
@@ -49,6 +50,40 @@ test('configFingerprint normalizes clients and includes allTimeSince and project
 
   const e = configFingerprint('claude,codex', '2024-01-01', false);
   assert.notEqual(a, e, 'project tracking changes should invalidate persisted anchors');
+});
+
+test('configFingerprint invalidates the anchor when the Qoder CN JSONL source moves', () => {
+  const legacy = configFingerprint('qodercn', '2024-01-01', true, '/cn/local.db');
+  assert.notEqual(
+    configFingerprint('qodercn', '2024-01-01', true, '/cn/local.db', '/home/.qoder-cn/projects'),
+    legacy,
+    'an anchor captured before the JSONL source existed must not be trusted for month/allTime'
+  );
+  assert.notEqual(
+    configFingerprint('qodercn', '2024-01-01', true, '/cn/local.db', '/moved/projects'),
+    configFingerprint('qodercn', '2024-01-01', true, '/cn/local.db', '/home/.qoder-cn/projects'),
+    'changing TOKEN_MONITOR_QODER_CN_PROJECTS_PATH must invalidate the anchor'
+  );
+  assert.equal(
+    configFingerprint('qodercn', '2024-01-01', true, '/cn/local.db', ''),
+    legacy,
+    'an empty projects source keeps the pre-JSONL fingerprint byte-identical'
+  );
+});
+
+test('qoderCnSourcesForClients resolves the JSONL projects dir alongside the legacy DB', () => {
+  const sources = qoderCnSourcesForClients('qodercn', {
+    homeDir: '/Users/test',
+    platform: 'darwin',
+    env: { TOKEN_MONITOR_QODER_CN_PROJECTS_PATH: '/custom/cn/projects' }
+  });
+  assert.equal(sources.projectsDir, path.resolve('/custom/cn/projects'));
+  assert.match(sources.dbPath, /QoderCN/);
+  assert.deepEqual(
+    qoderCnSourcesForClients('claude', { homeDir: '/Users/test', platform: 'darwin', env: {} }),
+    { dbPath: '', projectsDir: '' },
+    'clients without qodercn resolve no sources and keep the fingerprint unchanged'
+  );
 });
 
 test('configFingerprint handles undefined and empty clients', () => {

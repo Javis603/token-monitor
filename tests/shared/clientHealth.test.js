@@ -484,6 +484,20 @@ test('Qoder CN source health requires local.db, not only its watch parent', () =
   }
 });
 
+test('Qoder CN roots honor the injected environment over process globals', () => {
+  const roots = clientSourceRoots('qodercn', {
+    homeDir: '/inject',
+    platform: 'darwin',
+    env: {
+      TOKEN_MONITOR_QODER_CN_DB_PATH: '/inject/cn/local.db',
+      TOKEN_MONITOR_QODER_CN_PROJECTS_PATH: '/inject/cn/projects'
+    }
+  }).qodercn;
+  assert.equal(roots[0].sourcePath, path.resolve('/inject/cn/local.db'));
+  assert.equal(roots[1].id, 'qodercn-projects');
+  assert.equal(roots[1].dir, path.resolve('/inject/cn/projects'));
+});
+
 test('diagnostic roots expose antigravity native sources without treating them as watch roots', () => {
   const diagnostics = clientDiagnosticRoots('antigravity').antigravity;
   assert.deepEqual(diagnostics.map(({ id }) => id), [

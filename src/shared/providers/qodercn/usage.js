@@ -5,6 +5,7 @@ const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const readline = require('node:readline');
 const { promisify } = require('node:util');
 const execFileAsync = promisify(execFile);
 const { customPricingPath } = require('../../tokscaleConfig');
@@ -18,6 +19,13 @@ const QODER_CN_DB_SUFFIX = path.join('SharedClientCache', 'cache', 'db', 'local.
 const QODER_CN_PROJECTS_SUFFIX = path.join('.qoder-cn', 'projects');
 const QODER_CN_JSONL_MAX_DEPTH = 6;
 const QODER_CN_JSONL_MAX_FILES = 5000;
+// Streaming budgets for one full JSONL read. Memory is bounded by line
+// streaming; the byte budget bounds the tick's duration (real trees hold
+// hundreds of megabytes of sessions). Exceeding any budget throws the same
+// controlled read-budget error the SQLite reader uses, so the collector keeps
+// its last complete snapshot instead of publishing silently truncated totals.
+const QODER_CN_JSONL_MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
+const QODER_CN_JSONL_MAX_ROWS = 100_000;
 // Qoder CN stores internal model codes (model_info.model_key) instead of real
 // model names. Official display names come from the app's bundled i18n keys
 // `modelSelector.item.<code>` (Qoder CN.app, 2026-07 build); the codes change
@@ -483,24 +491,68 @@ function normalizeQoderCnJsonlRow(obj, source = 'local') {
   };
 }
 
-function listQoderCnJsonlFiles(dir, depth, found) {
-  if (depth > QODER_CN_JSONL_MAX_DEPTH || found.length >= QODER_CN_JSONL_MAX_FILES) return;
+function listQoderCnJsonlFiles(dir, depth, found, maxFiles = QODER_CN_JSONL_MAX_FILES, maxDepth = QODER_CN_JSONL_MAX_DEPTH) {
+  if (depth > maxDepth) return;
   let entries;
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+  // Sorted traversal: when the file budget below trips, the reported failure
+  // describes the same tree to every observer instead of whichever order the
+  // filesystem happened to return.
+  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) listQoderCnJsonlFiles(full, depth + 1, found);
-    else if (entry.isFile() && entry.name.endsWith('.jsonl')) found.push(full);
-    if (found.length >= QODER_CN_JSONL_MAX_FILES) return;
+    if (entry.isDirectory()) listQoderCnJsonlFiles(full, depth + 1, found, maxFiles, maxDepth);
+    else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+      found.push(full);
+      if (found.length > maxFiles) throw readBudgetError('files', maxFiles);
+    }
   }
 }
 
-function collectQoderCnJsonlRows(options = {}) {
+// Stream one transcript line by line. readFileSync would load a 65 MB session
+// whole and `split('\n')` would duplicate it as an array on every watch tick;
+// streaming bounds memory to one line at a time while the shared budget
+// accumulates across the whole scan.
+async function readQoderCnJsonlFileRows(filePath, source, budget) {
+  const out = [];
+  const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
+  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    for await (const line of rl) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      budget.bytes += Buffer.byteLength(trimmed, 'utf8') + 1;
+      if (budget.bytes > budget.maxBytes) throw readBudgetError('bytes', budget.maxBytes);
+      let obj;
+      try { obj = JSON.parse(trimmed); } catch (_) { continue; }
+      const row = normalizeQoderCnJsonlRow(obj, source);
+      if (!row) continue;
+      if (budget.sinceMs && (!row.createdAt || row.createdAt < budget.sinceMs)) continue;
+      out.push(row);
+      budget.rows += 1;
+      if (budget.rows > budget.maxRows) throw readBudgetError('rows', budget.maxRows);
+    }
+  } finally {
+    rl.close();
+    stream.destroy();
+  }
+  return out;
+}
+
+async function collectQoderCnJsonlRows(options = {}) {
   const projectsDir = options.projectsDir || qoderCnDataPaths(options).projectsDir;
   const sinceMs = options.sinceMs;
-  const rows = [];
   const files = [];
-  listQoderCnJsonlFiles(projectsDir, 0, files);
+  listQoderCnJsonlFiles(projectsDir, 0, files, positiveInteger(options.maxFiles, QODER_CN_JSONL_MAX_FILES));
+  files.sort();
+  const budget = {
+    bytes: 0,
+    rows: 0,
+    sinceMs: sinceMs || 0,
+    maxBytes: positiveInteger(options.maxReadBytes, QODER_CN_JSONL_MAX_TOTAL_BYTES),
+    maxRows: positiveInteger(options.maxReadRows, QODER_CN_JSONL_MAX_ROWS)
+  };
+  const rows = [];
   for (const filePath of files) {
     // A transcript cannot contain usage newer than its own mtime, so an
     // anchored (today-only) tick can skip every file untouched since the
@@ -508,17 +560,14 @@ function collectQoderCnJsonlRows(options = {}) {
     try {
       if (sinceMs && fs.statSync(filePath).mtimeMs < sinceMs) continue;
     } catch (_) { continue; }
-    let content;
-    try { content = fs.readFileSync(filePath, 'utf8'); } catch (_) { continue; }
-    const source = sourceId(filePath);
-    for (const line of content.split('\n')) {
-      if (!line.trim()) continue;
-      let obj;
-      try { obj = JSON.parse(line); } catch (_) { continue; }
-      const row = normalizeQoderCnJsonlRow(obj, source);
-      if (!row) continue;
-      if (sinceMs && (!row.createdAt || row.createdAt < sinceMs)) continue;
-      rows.push(row);
+    try {
+      rows.push(...(await readQoderCnJsonlFileRows(filePath, sourceId(filePath), budget)));
+    } catch (err) {
+      // A budget breach means the totals would be silently incomplete; fail
+      // the whole read so the collector keeps its last complete snapshot,
+      // exactly like the SQLite reader's budget does.
+      if (isReadBudgetError(err)) throw err;
+      if (typeof options.logger === 'function') options.logger(`qodercn jsonl file read failed: ${err.message}`);
     }
   }
   return rows;
@@ -545,13 +594,11 @@ async function collectQoderCnRows(options = {}) {
   // exact fixtures; the collector enables it in production, where a machine
   // has either the legacy database, the new transcripts, or (after a storage
   // migration) one historical and one current — never the same message in
-  // both, since they are different product surfaces.
+  // both, since they are different product surfaces. Read errors propagate
+  // like the database reader's do, so the collector's existing handler keeps
+  // the last complete snapshot instead of publishing partial totals.
   if (options.includeJsonl) {
-    try {
-      rows.push(...collectQoderCnJsonlRows({ ...options, projectsDir: options.projectsDir || paths.projectsDir }));
-    } catch (err) {
-      if (typeof options.logger === 'function') options.logger(`qodercn jsonl read failed: ${err.message}`);
-    }
+    rows.push(...(await collectQoderCnJsonlRows({ ...options, projectsDir: options.projectsDir || paths.projectsDir })));
   }
 
   const unique = new Map();

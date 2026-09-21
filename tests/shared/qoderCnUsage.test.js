@@ -597,7 +597,7 @@ test('normalizeQoderCnJsonlRow leaves remote-control sessions unattributed', () 
   assert.equal(row.projectLabel, '');
 });
 
-test('collectQoderCnJsonlRows walks sessions and side-chain subagent files', (t) => {
+test('collectQoderCnJsonlRows walks sessions and side-chain subagent files', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const projects = path.join(home, '.qoder-cn', 'projects');
@@ -613,7 +613,7 @@ test('collectQoderCnJsonlRows walks sessions and side-chain subagent files', (t)
     messageId: 'msg-sub1', sessionId: 'sess-1-sub', model: 'mmodel'
   }) + '\n');
 
-  const rows = collectQoderCnJsonlRows({ homeDir: home });
+  const rows = await collectQoderCnJsonlRows({ homeDir: home });
   assert.equal(rows.length, 2, 'main + side-chain rows, malformed lines skipped');
   const ids = rows.map((row) => row.messageId).sort();
   assert.ok(ids.some((id) => id.endsWith(':msg-a1')));
@@ -621,7 +621,7 @@ test('collectQoderCnJsonlRows walks sessions and side-chain subagent files', (t)
   assert.ok(rows.every((row) => row.sessionId.startsWith('qodercn:jsonl:')));
 });
 
-test('collectQoderCnJsonlRows applies sinceMs to both mtime and row timestamps', (t) => {
+test('collectQoderCnJsonlRows applies sinceMs to both mtime and row timestamps', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-since-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const project = path.join(home, '.qoder-cn', 'projects', '-Users-test-a');
@@ -635,9 +635,39 @@ test('collectQoderCnJsonlRows applies sinceMs to both mtime and row timestamps',
   }) + '\n');
   fs.utimesSync(path.join(project, 'old.jsonl'), oldStamp, oldStamp);
   const sinceMs = Date.parse('2026-09-10T00:00:00Z');
-  const rows = collectQoderCnJsonlRows({ homeDir: home, sinceMs });
+  const rows = await collectQoderCnJsonlRows({ homeDir: home, sinceMs });
   assert.equal(rows.length, 1);
   assert.equal(rows[0].messageId.split(':').pop(), 'new-1');
+});
+
+test('collectQoderCnJsonlRows fails loudly instead of publishing partial totals', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-budget-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const project = path.join(home, '.qoder-cn', 'projects', '-Users-test-c');
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, 'a.jsonl'), jsonlAssistant({ sessionId: 'a', messageId: 'a1' }) + '\n');
+  fs.writeFileSync(path.join(project, 'b.jsonl'), jsonlAssistant({ sessionId: 'b', messageId: 'b1' }) + '\n');
+  // Each breach — files, bytes, rows — must abort the whole read with the
+  // same controlled error the SQLite reader uses, so the collector keeps its
+  // last complete snapshot instead of a filesystem-order-dependent subset.
+  const isBudgetError = (err) => err.code === 'QODER_CN_READ_BUDGET_EXCEEDED';
+  await assert.rejects(() => collectQoderCnJsonlRows({ homeDir: home, maxFiles: 1 }), isBudgetError);
+  await assert.rejects(() => collectQoderCnJsonlRows({ homeDir: home, maxReadBytes: 10 }), isBudgetError);
+  await assert.rejects(() => collectQoderCnJsonlRows({ homeDir: home, maxReadRows: 1 }), isBudgetError);
+  const complete = await collectQoderCnJsonlRows({ homeDir: home });
+  assert.equal(complete.length, 2, 'the same tree reads fully within the default budgets');
+});
+
+test('collectQoderCnRows propagates JSONL budget failures rather than merging partials', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-propagate-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const project = path.join(home, '.qoder-cn', 'projects', '-Users-test-d');
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, 'a.jsonl'), jsonlAssistant({ sessionId: 'a', messageId: 'a1' }) + '\n');
+  await assert.rejects(
+    () => collectQoderCnRows({ homeDir: home, dbPaths: [], readDbRows: async () => [], includeJsonl: true, maxReadBytes: 1 }),
+    (err) => err.code === 'QODER_CN_READ_BUDGET_EXCEEDED'
+  );
 });
 
 test('collectQoderCnRows merges JSONL only when includeJsonl is set', async (t) => {

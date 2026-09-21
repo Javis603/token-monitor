@@ -1950,7 +1950,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // Qoder CN — legacy SQLite DB under the platform Application Support dir, or
   // (2026-09+ builds) the JSONL transcript tree in the home dot-dir. The two
   // are alternative installs, so watch whichever exists.
-  const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform: process.platform, env: process.env });
+  const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform, env });
   add(
     'qodercn',
     ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]),
@@ -2813,21 +2813,35 @@ function canTargetTodayPartitions(anchor, targetClients) {
   );
 }
 
-function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '') {
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '') {
   // Deterministic string that captures the config inputs anchor correctness
   // depends on. When this changes, the persisted anchor is invalidated.
   const qoderCn = String(qoderCnDbPath || '').trim();
   const qoderCnPart = qoderCn ? `|qodercn:${path.resolve(qoderCn)}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}`;
+  // The JSONL tree is a second Qoder CN source: an anchor captured before the
+  // storage migration (or under a different TOKEN_MONITOR_QODER_CN_PROJECTS_PATH)
+  // must not be trusted for month/allTime while only today's transcripts scan.
+  const qoderCnProjects = String(qoderCnProjectsDir || '').trim();
+  const qoderCnProjectsPart = qoderCnProjects ? `|qodercnProjects:${path.resolve(qoderCnProjects)}` : '';
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}`;
 }
 
-function qoderCnDbPathForClients(clientsCsv, options = {}) {
-  if (!normalizeClientsCsv(clientsCsv).split(',').includes('qodercn')) return '';
-  return qoderCnDataPaths({
+function qoderCnSourcesForClients(clientsCsv, options = {}) {
+  if (!normalizeClientsCsv(clientsCsv).split(',').includes('qodercn')) return { dbPath: '', projectsDir: '' };
+  const paths = qoderCnDataPaths({
     homeDir: options.homeDir,
     platform: options.platform || process.platform,
     env: options.env || process.env
-  }).dbPaths[0] || '';
+  });
+  return { dbPath: paths.dbPaths[0] || '', projectsDir: paths.projectsDir || '' };
+}
+
+function qoderCnDbPathForClients(clientsCsv, options = {}) {
+  return qoderCnSourcesForClients(clientsCsv, options).dbPath;
+}
+
+function qoderCnProjectsDirForClients(clientsCsv, options = {}) {
+  return qoderCnSourcesForClients(clientsCsv, options).projectsDir;
 }
 
 // The one place that decides whether a persisted anchor may be reused, shared by
@@ -2840,10 +2854,10 @@ function qoderCnDbPathForClients(clientsCsv, options = {}) {
 // collector still reuses the periods then and simply forces a full scan, while
 // a seed has nothing to stand on and declines.
 function collectorAnchorTrust(saved, options = {}) {
-  const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', now = new Date() } = options;
+  const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
-  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath)) return null;
+  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir)) return null;
   const parsed = Date.parse(saved.fullScanAt || '');
   const capturedAtMs = Number.isFinite(parsed) && parsed <= now.getTime() ? parsed : null;
   return { capturedAtMs };
@@ -3002,11 +3016,13 @@ function startCollector(options) {
     homeDir: options.homeDir,
     platform: options.platform
   };
-  const qoderCnDbPath = qoderCnDbPathForClients(normalizedClients, {
+  const qoderCnSources = qoderCnSourcesForClients(normalizedClients, {
     homeDir: options.homeDir,
     platform: process.platform,
     env: process.env
   });
+  const qoderCnDbPath = qoderCnSources.dbPath;
+  const qoderCnProjectsDir = qoderCnSources.projectsDir;
   let tickInFlight = false;
   let idleWaiters = [];
   let tickPending = false;
@@ -3143,7 +3159,8 @@ function startCollector(options) {
         clients,
         allTimeSince,
         projectsEnabled: options.projectsEnabled,
-        qoderCnDbPath
+        qoderCnDbPath,
+        qoderCnProjectsDir
       });
       if (trust) {
         anchor = {
@@ -3371,7 +3388,7 @@ function startCollector(options) {
               wslStatus: wslStatusAnchor,
               ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
               ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
-              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath),
+              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir),
               fullScanAt: new Date(lastFullScanAt).toISOString()
             }));
           } catch (_) {}
@@ -3893,6 +3910,8 @@ module.exports = {
   collectorAnchorTrust,
   configFingerprint,
   qoderCnDbPathForClients,
+  qoderCnProjectsDirForClients,
+  qoderCnSourcesForClients,
   deriveClientHealth,
   deriveClientStatus,
   mergeClientActivityDays,
