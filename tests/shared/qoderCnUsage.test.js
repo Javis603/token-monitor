@@ -729,6 +729,13 @@ test('prompt reconstruction refuses rows without a usable ratio or published win
   assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ model: 'auto' })), 'src', opts), null, 'routing tiers have an unknown denominator');
   assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: 0 })), 'src', opts), null);
   assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow()), 'src', { ...opts, modelWindows: {} }), null);
+  // Non-finite and above-window occupancies must never reconstruct more
+  // tokens than the context window holds (Infinity > 0 passes a naive guard).
+  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: 1.5 })), 'src', opts), null);
+  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: 'Infinity' })), 'src', opts), null);
+  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: null })), 'src', opts), null);
+  const full = normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: 1 })), 'src', opts);
+  assert.equal(full.input, 1_000_000, 'a full window is the boundary, inclusive');
 });
 
 test('collectQoderCnJsonlRows gates reconstruction on the env flag and merges window overrides', async (t) => {

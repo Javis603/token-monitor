@@ -513,7 +513,9 @@ function qoderCnModelWindows(options = {}) {
 // the row carries no usable ratio, or the model's window is not published.
 function qoderCnReconstructedPromptRow(obj, source, window) {
   const ratio = Number(obj.message?.usage?.context_usage_ratio);
-  if (!(ratio > 0) || !window) return null;
+  // (0,1] only: an occupancy above the window or a non-finite value would
+  // reconstruct more tokens than exist, and Infinity would poison totals.
+  if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1 || !window) return null;
   const session = String(obj.sessionId || 'unknown');
   const message = String(obj.message?.id || obj.uuid || `${obj.timestamp || 0}`);
   return {
