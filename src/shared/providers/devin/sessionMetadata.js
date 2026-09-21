@@ -30,12 +30,15 @@ function dbFingerprint(dbPath) {
   return `${main}|${fileStamp(`${dbPath}-wal`)}`;
 }
 
+// null = could not read (locked db, transient IO); only a successful read —
+// including an empty one — may be cached, or one failed open would serve as
+// the answer for the whole fingerprint lifetime.
 function readRows(dbPath, sqliteMod) {
   let db;
   try {
     db = new sqliteMod.DatabaseSync(dbPath, { readOnly: true });
   } catch (_) {
-    return new Map();
+    return null;
   }
   try {
     let rows;
@@ -55,7 +58,7 @@ function readRows(dbPath, sqliteMod) {
     }
     return map;
   } catch (_) {
-    return new Map();
+    return null;
   } finally {
     try { db.close(); } catch (_) { /* close on a failed open is best-effort */ }
   }
@@ -67,6 +70,7 @@ function rowsForDb(dbPath, sqliteMod, cache) {
   const cached = cache.get(dbPath);
   if (cached && cached.fingerprint === fingerprint) return cached.rows;
   const rows = readRows(dbPath, sqliteMod);
+  if (rows === null) return new Map();
   cache.set(dbPath, { fingerprint, rows });
   return rows;
 }

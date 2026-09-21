@@ -236,4 +236,47 @@ test('WSL discovery recognizes the Devin CLI database and Desktop event dir', ()
     homeHasData(home, (file) => file === `${home}\\.config\\Devin\\User\\acp-events`),
     ['devin']
   );
+  // The Windows-shaped root needs the database itself — an empty cli dir is
+  // not evidence Devin ever ran here.
+  assert.deepEqual(
+    homeHasData(home, (file) => file === `${home}\\AppData\\Roaming\\devin\\cli`),
+    []
+  );
+  assert.deepEqual(
+    homeHasData(home, (file) => file === `${home}\\AppData\\Roaming\\devin\\cli\\sessions.db`),
+    ['devin']
+  );
+});
+
+test('Devin paths keep a literal backslash in a POSIX home', () => {
+  // A backslash is a valid POSIX filename character; treating it as a
+  // separator boundary would resolve the wrong directory.
+  const roots = clientSourceRoots('devin', { homeDir: '/home/u\\', env: {}, platform: 'linux' }).devin;
+  const cliDirs = roots.filter((root) => root.id === 'devin-cli-db');
+  assert.equal(cliDirs[0].dir, '/home/u\\/.local/share/devin/cli');
+});
+
+test('Devin session metadata does not cache a transient sqlite failure', () => {
+  const home = tempHome('devin-meta-retry-');
+  const cliDir = path.join(home, '.local', 'share', 'devin', 'cli');
+  fs.mkdirSync(cliDir, { recursive: true });
+  fs.writeFileSync(path.join(cliDir, 'sessions.db'), 'x');
+  let opens = 0;
+  const flaky = {
+    DatabaseSync: class {
+      constructor() { opens += 1; if (opens === 1) throw new Error('locked'); }
+      prepare() {
+        return { all: () => [{ id: 's1', title: 'T', working_directory: '/p', created_at: 1, last_activity_at: 2 }] };
+      }
+      close() {}
+    }
+  };
+  const context = {
+    deps: { sqlite: flaky, env: {}, platform: process.platform },
+    home,
+    isoFromDate,
+    projectIdentity
+  };
+  assert.equal(devinSessionMetadata.resolveSessionMetadata(['s1'], context).has('s1'), false);
+  assert.equal(devinSessionMetadata.resolveSessionMetadata(['s1'], context).get('s1').title, 'T');
 });

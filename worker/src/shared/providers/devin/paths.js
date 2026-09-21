@@ -31,12 +31,16 @@ function nonEmpty(value) {
 
 function joinPath(platform, root, ...parts) {
   const separator = platform === 'win32' ? '\\' : '/';
+  // Only Windows treats '\' as a separator; on POSIX it is a valid filename
+  // character, so stripping it there would corrupt a HOME ending in one.
+  const trailing = platform === 'win32' ? /[\\/]+$/ : /\/+$/;
+  const leading = platform === 'win32' ? /^[\\/]+/ : /^\/+/;
   let current = nonEmpty(root);
   for (const part of parts) {
     const next = nonEmpty(part);
     if (!next) continue;
     current = current
-      ? `${current.replace(/[\\/]+$/, '')}${separator}${next.replace(/^[\\/]+/, '')}`
+      ? `${current.replace(trailing, '')}${separator}${next.replace(leading, '')}`
       : next;
   }
   return current;
