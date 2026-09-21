@@ -554,10 +554,13 @@ test('qoderCnDataPaths exposes the home-relative JSONL projects dir on every pla
   assert.equal(override.projectsDir, path.resolve('/custom/cn/projects'));
 });
 
-test('normalizeQoderCnJsonlRow maps Claude-format usage without re-splitting cached tokens', () => {
+test('normalizeQoderCnJsonlRow splits the cached prefix out of the total prompt', () => {
   const row = normalizeQoderCnJsonlRow(JSON.parse(jsonlAssistant()), 'src1');
   assert.equal(row.model, 'deepseek-v4.1-flash', 'the qoder-custom-<id>/ prefix is stripped for pricing');
-  assert.equal(row.input, 26540);
+  // CN writes input_tokens as the FULL prompt including the cached prefix
+  // (verified: input/context_usage_ratio == the model's context window on
+  // every real row), so the cached subset must not be counted twice.
+  assert.equal(row.input, 23852); // 26540 prompt - 2688 cached
   assert.equal(row.output, 223);
   assert.equal(row.cacheRead, 2688);
   assert.equal(row.cacheWrite, 0);
@@ -695,6 +698,6 @@ test('JSONL rows flow through buildQoderCnPeriods as qodercn entries', () => {
   const periods = buildQoderCnPeriods({ now: '2026-09-15T12:00:00.000Z', allTimeSince: '2026-01-01', rows });
   assert.equal(periods.allTime.entries.length, 2, 'one entry per session+model');
   assert.ok(periods.allTime.entries.every((entry) => entry.client === 'qodercn'));
-  assert.equal(periods.allTime.totalInput, 26540 * 2);
+  assert.equal(periods.allTime.totalInput, 23852 * 2);
   assert.equal(periods.allTime.totalMessages, 2);
 });

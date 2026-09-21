@@ -465,19 +465,22 @@ function qoderCnJsonlProjectLabel(cwd) {
 }
 
 // One JSONL line -> a normalized usage row, or null. Transcripts share the
-// Claude message format: assistant lines carry `usage` with *uncached*
-// `input_tokens` plus separate cache read/write counters — unlike the legacy
-// DB, whose `prompt_tokens` already includes the cached prefix.
+// Claude message envelope but NOT its token semantics: Qoder CN's
+// `input_tokens` is the full prompt INCLUDING the cached prefix (verified
+// against `context_usage_ratio`: input/ratio equals the model's context
+// window exactly on every real row), and `cache_read_input_tokens` is a
+// subset of it — the same shape the legacy DB's `prompt_tokens`/
+// `cached_tokens` pair has, so the cached split below mirrors
+// normalizeQoderCnDbRow rather than the Anthropic convention.
 function normalizeQoderCnJsonlRow(obj, source = 'local') {
   if (!obj || obj.type !== 'assistant') return null;
   const usage = obj.message && obj.message.usage;
   if (!usage) return null;
-  const input = numeric(usage.input_tokens);
+  const prompt = numeric(usage.input_tokens);
+  const cached = numeric(usage.cache_read_input_tokens ?? 0);
   const output = numeric(usage.output_tokens);
-  const cacheRead = numeric(usage.cache_read_input_tokens ?? 0);
-  const cacheWrite = numeric(usage.cache_creation_input_tokens ?? 0);
-  if (input === null || output === null || cacheRead === null || cacheWrite === null) return null;
-  if (input + output + cacheRead + cacheWrite === 0) return null;
+  if (prompt === null || cached === null || output === null) return null;
+  if (prompt + output === 0) return null;
   const session = String(obj.sessionId || 'unknown');
   const message = String((obj.message && obj.message.id) || obj.uuid || `${obj.timestamp || 0}`);
   return {
@@ -485,10 +488,10 @@ function normalizeQoderCnJsonlRow(obj, source = 'local') {
     messageId: `qodercn:jsonl:${source}:${session}:${message}`,
     model: qoderCnJsonlModelName(obj.message && obj.message.model) || 'qoder-agent',
     projectLabel: qoderCnJsonlProjectLabel(obj.cwd),
-    input,
+    input: Math.max(0, prompt - cached),
     output,
-    cacheRead,
-    cacheWrite,
+    cacheRead: Math.min(prompt, cached),
+    cacheWrite: 0,
     createdAt: timestampMs(obj.timestamp),
     messages: 1
   };
