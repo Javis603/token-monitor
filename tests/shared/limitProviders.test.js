@@ -10,12 +10,29 @@ const {
   LIMIT_PROVIDER_CATALOG,
   LIMIT_PROVIDER_IDS,
   LIMIT_PROVIDER_LABELS,
+  limitProviderForClient,
   limitProvidersForDetectedClients
 } = require('../../src/shared/limitProviders');
 const { parseLimitProviders, providerFetchers } = require('../../src/shared/limits/collector');
 
 const rootDir = path.join(__dirname, '..', '..');
 const read = (...parts) => fs.readFileSync(path.join(rootDir, ...parts), 'utf8');
+
+// Usage attribution asks this directly: given a client key out of a usage
+// period, whose quota do those tokens belong to. Both halves of the answer
+// matter — the identity case carries most clients, and a client with no Limits
+// side must come back as nothing rather than as itself, or every surface
+// resolving a provider this way would invent one.
+test('a client resolves to the provider its tokens belong to', () => {
+  assert.equal(limitProviderForClient('droid'), 'factory');
+  assert.equal(limitProviderForClient('dsh'), 'deepseek');
+  assert.equal(limitProviderForClient('CODEX'), 'codex');
+  assert.equal(limitProviderForClient(' zcode '), 'zai');
+  assert.equal(limitProviderForClient('qwen'), null);
+  assert.equal(limitProviderForClient('nonesuch'), null);
+  assert.equal(limitProviderForClient(''), null);
+  assert.equal(limitProviderForClient(undefined), null);
+});
 
 test('initial limit providers follow detected clients in stable provider order', () => {
   assert.deepEqual(

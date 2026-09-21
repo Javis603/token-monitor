@@ -30,11 +30,17 @@
 //   format*, limitFillPercent, …       the page's own number formatting
 //   tooltip                            { hasOpened(), markOpened(), release() },
 //                                      the host's render-hold bookkeeping
+//
+// The one exception to "everything arrives through deps" is the provider
+// catalog: which client a provider's tokens are recorded under is the same
+// answer on every host, so it is imported rather than passed. A dep would only
+// give three hosts three chances to supply a different one.
 (function exposeLimitWindowsView(root, factory) {
-  const api = factory();
-  if (typeof module === 'object' && module.exports) module.exports = api;
+  const node = typeof module === 'object' && module.exports;
+  const api = factory(node ? require('../../shared/limitProviders') : root?.TokenMonitorLimitProviders);
+  if (node) module.exports = api;
   if (root) root.TokenMonitorLimitWindowsView = api;
-})(typeof window !== 'undefined' ? window : globalThis, function createLimitWindowsViewApi() {
+})(typeof window !== 'undefined' ? window : globalThis, function createLimitWindowsViewApi(limitProviders) {
   function createLimitWindowsView(deps) {
     const {
       t,
@@ -1857,13 +1863,22 @@
     return accountIdentity.sameAccount(account, provider);
   }
 
-  // Usage cost is keyed by client, and every provider whose id names a tracked
-  // client can be compared against it. Providers with no same-named client
-  // (openrouter, deepseek, thirdparty, zai…) simply have no entry, which is the
-  // correct answer: their spend is either pay-as-you-go or spread across
+  // Usage cost is keyed by client, so the comparison is the sum of what this
+  // provider's clients cost this month — resolved through the catalog, because
+  // a provider is not always named after the client that produces its tokens
+  // and reading the provider id straight out of a client-keyed map compares
+  // Factory against nothing while Droid's tokens sit one key away. A provider
+  // with no client at all (openrouter, thirdparty…) sums to nothing, which is
+  // the correct answer: its spend is either pay-as-you-go or spread across
   // clients with no way to attribute it.
   function subscriptionUsageCostUsd(providerId) {
-    const cost = Number(monthClientCosts()?.[providerId] || 0);
+    const provider = String(providerId || '').trim().toLowerCase();
+    if (!provider) return null;
+    let cost = 0;
+    for (const [client, value] of Object.entries(monthClientCosts() || {})) {
+      if (limitProviders.limitProviderForClient(client) !== provider) continue;
+      cost += Number(value) || 0;
+    }
     return cost > 0 ? cost : null;
   }
 

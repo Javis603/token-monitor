@@ -513,6 +513,45 @@ test('a recorded subscription decorates the card plan cell with the page hover c
   assert.equal(bare.find('limit-plan').textContent, 'Plus');
 });
 
+// The usage figure is keyed by client, and a provider is not always named after
+// the client whose tokens it bills. Read as a same-named key, a Factory Droid
+// subscription found nothing at `factory` while the month's cost sat under
+// `droid`, so the card stopped at the price and never showed what those tokens
+// would have cost instead.
+test('a subscription is compared against usage recorded under a differently named client', () => {
+  const account = { provider: 'factory', accountKey: 'k1', accountName: 'demo@example.com' };
+  const row = dockView({
+    subscriptions: [{
+      id: 'sub-1',
+      provider: 'factory',
+      kind: 'subscription',
+      planName: 'Pro',
+      amountMinor: 2000,
+      currency: 'USD',
+      intervalCount: 1,
+      interval: 'month',
+      startDate: '2026-08-01',
+      autoRenew: true,
+      nextRenewalOverride: '',
+      endDate: null,
+      topUps: []
+    }],
+    accounts: [account],
+    monthClientCosts: { droid: 12, codex: 99 }
+  }).renderLimitProviderRow('factory', 'Factory Droid', {
+    ...account,
+    status: 'ok',
+    planLabel: 'Pro',
+    updatedAt: new Date().toISOString(),
+    windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }]
+  }, '#10A37F');
+
+  const card = row.find('subscription-tooltip');
+  assert.ok(card, 'the recorded plan still draws its card');
+  assert.match(card.text, /12\.00/, "Droid's tokens are Factory's usage");
+  assert.doesNotMatch(card.text, /99/, 'and another client\'s tokens stay out of it');
+});
+
 // The row is drawn from the aggregate's copy of an account, while the matcher
 // can resolve a record to this device's copy of the same account. Those are two
 // records, and what makes them one account is the key — not the display name,

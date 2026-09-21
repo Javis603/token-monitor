@@ -95,14 +95,8 @@
   // Which limits provider a tracked client's tokens belong to. Asked of the
   // shared catalog's own client→provider mapping rather than copied, so a client
   // folded under a differently named provider (droid → factory) stays aligned.
-  const providerForClientCache = new Map();
   function providerForClient(client) {
-    if (providerForClientCache.has(client)) return providerForClientCache.get(client);
-    const [provider = null] = limitProviders?.limitProvidersForDetectedClients?.({
-      clients: { [client]: { source: { state: 'detected' } } }
-    }) || [];
-    providerForClientCache.set(client, provider);
-    return provider;
+    return limitProviders?.limitProviderForClient?.(client) ?? null;
   }
 
   function periodUsageFor(period, provider) {
