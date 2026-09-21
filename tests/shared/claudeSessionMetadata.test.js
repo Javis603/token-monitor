@@ -9,7 +9,9 @@ const test = require('node:test');
 const {
   TITLE_MAX_CODE_POINTS,
   TITLE_READ_CHUNK_BYTES,
+  claudeContextWindow,
   cleanTitle,
+  readSessionContext,
   readSessionTitle
 } = require('../../src/shared/providers/claude/sessionMetadata');
 
@@ -220,6 +222,77 @@ test('readSessionTurnEnded follows the newest stop_reason, and tool_use is not a
   assert.equal(readSessionTurnEnded(both.file, { cache }), true);
   assert.equal(readSessionTitle(both.file, { cache }), 'Shared pass');
 });
+
+test('Claude session context uses the latest API input occupancy and model capacity', (t) => {
+  const assistant = ({ model, input, write, read, output = 0 }) => JSON.stringify({
+    type: 'assistant',
+    message: {
+      model,
+      stop_reason: 'end_turn',
+      usage: {
+        input_tokens: input,
+        cache_creation_input_tokens: write,
+        cache_read_input_tokens: read,
+        output_tokens: output
+      }
+    }
+  });
+  const { dir, file } = fixture([
+    assistant({ model: 'claude-sonnet-4-5-20250929', input: 500, write: 1_000, read: 48_000 }),
+    assistant({ model: 'claude-opus-5', input: 700, write: 2_000, read: 120_000, output: 9_999 })
+  ]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 122_700,
+    contextWindow: 1_000_000
+  });
+  assert.equal(claudeContextWindow('claude-sonnet-4-5-20250929'), 200_000);
+  assert.equal(claudeContextWindow('us.anthropic.claude-opus-4-8-v1:0'), 1_000_000);
+  assert.equal(claudeContextWindow('claude-ocx2-command-code--deepseek-v4.1-flash'), 0);
+});
+
+test('Claude session context clears on compaction and repopulates on the next response', (t) => {
+  const usage = (tokens) => JSON.stringify({
+    type: 'assistant',
+    message: {
+      model: 'claude-haiku-4-5-20251001',
+      stop_reason: 'end_turn',
+      usage: { input_tokens: tokens, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+    }
+  });
+  const { dir, file } = fixture([usage(80_000)]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cache = new Map();
+
+  assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 80_000, contextWindow: 200_000 });
+  fs.appendFileSync(file, `${JSON.stringify({ type: 'system', subtype: 'compact_boundary', compactMetadata: {} })}\n`);
+  assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 0, contextWindow: 0 });
+  fs.appendFileSync(file, `${usage(12_000)}\n`);
+  assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 12_000, contextWindow: 200_000 });
+});
+
+test('Claude session context survives an oversized assistant record', (t) => {
+  const { dir, file } = fixture([JSON.stringify({
+    type: 'assistant',
+    message: {
+      id: 'msg_big',
+      type: 'message',
+      role: 'assistant',
+      content: 'x'.repeat(300 * 1024),
+      model: 'claude-sonnet-5',
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 1_000, cache_creation_input_tokens: 2_000, cache_read_input_tokens: 300_000 }
+    }
+  })]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 303_000,
+    contextWindow: 1_000_000
+  });
+});
+
 test('Claude session metadata reads the persisted AI title without exposing prompts', (t) => {
   const { dir, file } = fixture([
     JSON.stringify({ type: 'user', message: { content: 'private prompt' } }),

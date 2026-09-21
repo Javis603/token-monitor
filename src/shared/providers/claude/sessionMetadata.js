@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const { claudeSessionRoots } = require('./paths');
 const { findSessionFiles } = require('../../sessionFiles');
+const { normalizeSessionContext, shouldReadSessionContext } = require('../../sessionContext');
 
 const TITLE_MAX_CODE_POINTS = 96;
 const TITLE_READ_CHUNK_BYTES = 256 * 1024;
@@ -17,6 +18,63 @@ const MAX_METADATA_LINE_BYTES = 64 * 1024;
 const LONG_LINE_HEAD_BYTES = 64 * 1024;
 const LONG_LINE_TAIL_BYTES = 8 * 1024;
 const titleCache = new Map();
+const MODEL_VERSION_END = '(?:$|[-@:\\[])';
+const CLAUDE_ONE_MILLION_MODEL = new RegExp(
+  `^claude-(?:opus-(?:5${MODEL_VERSION_END}|4-(?:6|7|8)${MODEL_VERSION_END})`
+  + `|sonnet-(?:5${MODEL_VERSION_END}|4-6${MODEL_VERSION_END})`
+  + `|fable-5(?:[.-]1)?${MODEL_VERSION_END}`
+  + `|mythos-(?:5(?:[.-]1)?${MODEL_VERSION_END}|preview${MODEL_VERSION_END}))`
+);
+
+function claudeContextWindow(model) {
+  const value = String(model || '').toLowerCase();
+  const start = value.indexOf('claude-');
+  if (start < 0) return 0;
+  const id = value.slice(start);
+  if (!/^claude-(?:opus|sonnet|haiku|fable|mythos)-/.test(id)) return 0;
+  // Claude Code persists the model id and API usage, but not the capacity it
+  // used to calculate its own status-line percentage. Current 4.6+/5 model
+  // families have a 1M window; the other supported Claude families have 200K.
+  // Provider prefixes (for example Bedrock's `anthropic.`) are deliberately
+  // accepted, while custom gateway ids that merely contain `claude-` but do not
+  // name a Claude family are left unknown rather than assigned a false gauge.
+  return CLAUDE_ONE_MILLION_MODEL.test(id) ? 1_000_000 : 200_000;
+}
+
+function tokenCount(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return 0;
+  if (typeof value === 'string' && value.trim() === '') return 0;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.round(number) : 0;
+}
+
+function applyContextUsage(state, model, usage) {
+  if (!usage || typeof usage !== 'object') return;
+  state.contextObserved = true;
+  state.contextTokens = tokenCount(usage.input_tokens)
+    + tokenCount(usage.cache_creation_input_tokens)
+    + tokenCount(usage.cache_read_input_tokens);
+  state.contextWindow = claudeContextWindow(model);
+}
+
+function contextUsageFromTail(tail) {
+  const model = /"model"\s*:\s*"([^"]+)"/.exec(tail)?.[1] || '';
+  const usageAt = tail.indexOf('"usage"');
+  if (usageAt < 0) return null;
+  const usageText = tail.slice(usageAt);
+  const number = (key) => {
+    const match = new RegExp(`"${key}"\\s*:\\s*(\\d+)`).exec(usageText);
+    return match ? Number(match[1]) : 0;
+  };
+  return {
+    model,
+    usage: {
+      input_tokens: number('input_tokens'),
+      cache_creation_input_tokens: number('cache_creation_input_tokens'),
+      cache_read_input_tokens: number('cache_read_input_tokens')
+    }
+  };
+}
 
 function cleanTitle(value) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -65,9 +123,17 @@ function applyMetadataLine(state, line) {
       // state costs no extra read.
       const stopReason = entry.message?.stop_reason;
       if (typeof stopReason === 'string' && stopReason) state.stopReason = stopReason;
+      applyContextUsage(state, entry.message?.model, entry.message?.usage);
       // The assistant answered, so any prompt the user sent before it belongs to
       // the turn this record closes.
       state.userSinceStop = false;
+    } else if (entry?.subtype === 'compact_boundary' || entry?.isCompactSummary === true) {
+      // Claude Code clears current_usage after compaction until the next API
+      // response. State the same absence so an old pre-compact gauge cannot
+      // survive while the compacted conversation is waiting for that response.
+      state.contextObserved = true;
+      state.contextTokens = 0;
+      state.contextWindow = 0;
     } else if (isUserPrompt(entry)) {
       // A prompt accepted after the last completion means that completion no
       // longer describes the current turn: the old `end_turn` would otherwise
@@ -167,7 +233,10 @@ function emptyIndex() {
     trailing: Buffer.alloc(0),
     droppingLongLine: false,
     longLineHead: Buffer.alloc(0),
-    longLineTail: Buffer.alloc(0)
+    longLineTail: Buffer.alloc(0),
+    contextObserved: false,
+    contextTokens: 0,
+    contextWindow: 0
   };
 }
 
@@ -205,6 +274,8 @@ function applyLongLineFragments(state) {
     if (!reason) return;
     state.stopReason = reason;
     state.userSinceStop = false;
+    const contextUsage = contextUsageFromTail(tail);
+    if (contextUsage) applyContextUsage(state, contextUsage.model, contextUsage.usage);
     return;
   }
   if (!/"type"\s*:\s*"user"/.test(head)) return;
@@ -261,7 +332,10 @@ function readSessionTitle(filePath, deps = {}) {
         // Carried across the append resume: a scan that stopped mid-record has
         // to finish reading that record's boundary from the fragments it kept.
         longLineHead: Buffer.isBuffer(cached.longLineHead) ? Buffer.from(cached.longLineHead) : Buffer.alloc(0),
-        longLineTail: Buffer.isBuffer(cached.longLineTail) ? Buffer.from(cached.longLineTail) : Buffer.alloc(0)
+        longLineTail: Buffer.isBuffer(cached.longLineTail) ? Buffer.from(cached.longLineTail) : Buffer.alloc(0),
+        contextObserved: cached.contextObserved === true,
+        contextTokens: tokenCount(cached.contextTokens),
+        contextWindow: tokenCount(cached.contextWindow)
       }
       : emptyIndex();
     const start = appendOnly ? cached.size : 0;
@@ -311,6 +385,16 @@ function readSessionTurnEnded(filePath, deps = {}) {
   return stopReason !== 'tool_use' && cached?.userSinceStop !== true;
 }
 
+function readSessionContext(filePath, deps = {}) {
+  const file = String(filePath || '');
+  if (!file) return undefined;
+  const cache = deps.cache || titleCache;
+  readSessionTitle(file, deps);
+  const cached = cache.get(file);
+  if (!cached?.contextObserved) return undefined;
+  return normalizeSessionContext(cached) || { contextTokens: 0, contextWindow: 0 };
+}
+
 function resolveSessionMetadata(sessionIds, context) {
   const { deps, home, metadata } = context;
   const result = new Map();
@@ -337,10 +421,14 @@ function resolveSessionMetadata(sessionIds, context) {
     // left the stale completion in place and the row read Finished while the
     // model was generating. `undefined` is reserved for "no evidence".
     const turnEnded = readSessionTurnEnded(filePath, deps.claudeMetadataDeps);
+    const sessionContext = shouldReadSessionContext(meta.lastUsedAt, context.now)
+      ? readSessionContext(filePath, deps.claudeMetadataDeps)
+      : undefined;
     result.set(sessionId, {
       ...meta,
       ...(title ? { title } : {}),
-      ...(turnEnded === undefined ? {} : { turnEnded })
+      ...(turnEnded === undefined ? {} : { turnEnded }),
+      ...(sessionContext || {})
     });
   };
   const projectFiles = findSessionFiles(roots.projects, sessionIds);
@@ -354,7 +442,9 @@ function resolveSessionMetadata(sessionIds, context) {
 module.exports = {
   TITLE_MAX_CODE_POINTS,
   TITLE_READ_CHUNK_BYTES,
+  claudeContextWindow,
   cleanTitle,
+  readSessionContext,
   readSessionTitle,
   readSessionTurnEnded,
   resolveSessionMetadata

@@ -291,3 +291,46 @@ test('applySessionMetadata stamps context only on a session recent enough to sti
   assert.equal(stale.contextTokens, undefined);
   assert.equal(stale.contextWindow, undefined);
 });
+
+test('applySessionMetadata stamps Claude context from its default transcript', () => {
+  const home = tmpDir('claude-context-home-');
+  const projectsDir = path.join(home, '.claude', 'projects', '-repo');
+  fs.mkdirSync(projectsDir, { recursive: true });
+  const sessionId = '01a0affa-4ffd-7653-a02c-785f96f419ce';
+  const now = Date.parse('2026-09-18T06:00:00.000Z');
+  fs.writeFileSync(path.join(projectsDir, `${sessionId}.jsonl`), `${JSON.stringify({
+    type: 'assistant',
+    sessionId,
+    timestamp: new Date(now - 60_000).toISOString(),
+    message: {
+      model: 'claude-opus-5',
+      stop_reason: 'end_turn',
+      usage: {
+        input_tokens: 456,
+        cache_creation_input_tokens: 7_000,
+        cache_read_input_tokens: 210_000,
+        output_tokens: 3_000
+      }
+    }
+  })}\n`);
+  const periods = {
+    today: {
+      sessions: {
+        [`claude:${sessionId}`]: {
+          client: 'claude',
+          sessionId,
+          totalTokens: 1,
+          models: {},
+          modelCosts: {},
+          providers: {}
+        }
+      }
+    }
+  };
+
+  applySessionMetadata(periods, home, { now, env: {}, resolveProjects: false });
+
+  const session = periods.today.sessions[`claude:${sessionId}`];
+  assert.equal(session.contextTokens, 217_456);
+  assert.equal(session.contextWindow, 1_000_000);
+});
