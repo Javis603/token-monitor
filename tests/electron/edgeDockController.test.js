@@ -119,6 +119,7 @@ function createFixture(options = {}) {
   const placements = [];
   const maskWindows = [];
   const haptics = [];
+  const hapticCalls = [];
   const controller = createEdgeDockController({
     BrowserWindow: FakeBrowserWindow,
     ipcMain,
@@ -133,7 +134,10 @@ function createFixture(options = {}) {
       maskWindows.push(win);
       return options.maskAvailable !== false;
     },
-    performHaptic: (pattern) => haptics.push(pattern),
+    performHaptic: (pattern, performanceTime) => {
+      haptics.push(pattern);
+      hapticCalls.push({ pattern, performanceTime });
+    },
     onPlacementChange: (placement) => {
       placements.push(placement);
       settings.edgeDockSide = placement.side;
@@ -149,7 +153,7 @@ function createFixture(options = {}) {
   controller.sync();
   for (const win of FakeBrowserWindow.instances) win.webContents.emit('did-finish-load');
   const windowFor = (surface) => FakeBrowserWindow.instances.filter((win) => !win.destroyed && win.surface === surface).at(-1);
-  return { controller, haptics, ipcMain, maskWindows, placements, screen, settings, windowFor };
+  return { controller, hapticCalls, haptics, ipcMain, maskWindows, placements, screen, settings, windowFor };
 }
 
 test('auto-hide haptics distinguish the handle reveal from the first hovered item', async (t) => {
@@ -168,6 +172,10 @@ test('auto-hide haptics distinguish the handle reveal from the first hovered ite
   };
   await new Promise((resolve) => setTimeout(resolve, 105));
   assert.deepEqual(fixture.haptics, ['generic', 'alignment']);
+  assert.deepEqual(fixture.hapticCalls, [
+    { pattern: 'generic', performanceTime: 'default' },
+    { pattern: 'alignment', performanceTime: 'now' }
+  ]);
 
   const disabled = createFixture({
     platform: 'darwin',
@@ -187,6 +195,7 @@ test('rail haptics once whenever the pointer enters an item', async (t) => {
   fixture.screen.point = { x: centerX, y: rail.bounds.y + 40 };
   await new Promise((resolve) => setTimeout(resolve, 105));
   assert.deepEqual(fixture.haptics, ['alignment']);
+  assert.deepEqual(fixture.hapticCalls, [{ pattern: 'alignment', performanceTime: 'now' }]);
 
   fixture.screen.point = { x: centerX, y: rail.bounds.y + 112 };
   await new Promise((resolve) => setTimeout(resolve, 55));

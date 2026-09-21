@@ -5438,7 +5438,7 @@ function ensureEdgeDockController() {
       return applyVibrancyMask(win, png, width, height);
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
-    performHaptic: (pattern) => performMacHaptic({ pattern }),
+    performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
     // The dock card's Switch button runs the same swap the Limits view does,
     // then repaints from the refreshed records. It is the dock's only write.
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),

@@ -114,9 +114,9 @@ function createEdgeDockController(deps) {
     return platform === 'darwin' && settings().edgeDockHaptic !== false;
   }
 
-  function hapticTick(pattern) {
+  function hapticTick(pattern, performanceTime = 'default') {
     if (!hapticsEnabled()) return;
-    try { performHaptic(pattern); } catch (error) { logger(`[edge-dock] haptic feedback failed: ${error.message}`); }
+    try { performHaptic(pattern, performanceTime); } catch (error) { logger(`[edge-dock] haptic feedback failed: ${error.message}`); }
   }
 
   function cellKinds() {
@@ -581,7 +581,7 @@ function createEdgeDockController(deps) {
         };
         const hoveredCellId = Number.isInteger(input.cellIndex) ? cells[input.cellIndex]?.id || null : null;
         if (hoveredCellId !== hapticCellId) {
-          if (hoveredCellId) hapticTick('alignment');
+          if (hoveredCellId) hapticTick('alignment', 'now');
           hapticCellId = hoveredCellId;
         }
         applyEffects(intent.tick(input, Date.now()), { hapticReveal: !alwaysVisible() });

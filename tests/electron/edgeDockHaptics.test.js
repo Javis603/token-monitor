@@ -13,7 +13,7 @@ test('Edge Dock haptics default on and survive the complete settings round trip'
   assert.match(main, /edgeDockMode: 'autoHide',\s+edgeDockHaptic: true,/);
   assert.match(main, /merged\.edgeDockHaptic = parseBoolean\(merged\.edgeDockHaptic, true\)/);
   assert.match(main, /edgeDockHaptic: parseBoolean\(patch\.edgeDockHaptic \?\? settings\.edgeDockHaptic, true\)/);
-  assert.match(main, /performHaptic: \(pattern\) => performMacHaptic\(\{ pattern \}\)/);
+  assert.match(main, /performHaptic: \(pattern, performanceTime\) => performMacHaptic\(\{ pattern, performanceTime \}\)/);
 });
 
 test('macOS Edge Dock settings expose a localized haptic toggle', () => {
