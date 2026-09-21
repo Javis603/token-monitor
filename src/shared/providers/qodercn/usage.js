@@ -29,6 +29,33 @@ const QODER_CN_JSONL_MAX_ROWS = 100_000;
 // could still be tens of megabytes, so a single line larger than this aborts
 // the read before JSON.parse instead of buffering it whole.
 const QODER_CN_JSONL_MAX_LINE_BYTES = 32 * 1024 * 1024;
+// Internal-model rows report `input_tokens: 0` and carry billing only in
+// `credits`, but every assistant row also carries `context_usage_ratio` — the
+// client's own context occupancy. On rows with real token counts the identity
+// `input_tokens / context_usage_ratio == context window` holds EXACTLY (100%
+// of observed rows), so for internal codes with a published window the ratio
+// reconstructs the true per-call prompt size rather than estimating it.
+// Windows come from the app's `chat_model_preferences.context_window`. Codes
+// absent here (routing tiers like `auto`, or models whose window the app does
+// not publish) are deliberately never reconstructed: their occupancy
+// denominator is unknown and a fabricated token count is worse than none.
+// Opt-in via TOKEN_MONITOR_QODER_CN_ESTIMATE_PROMPT_TOKENS=1.
+const QODER_CN_INTERNAL_MODEL_WINDOWS = Object.freeze({
+  dfmodel: 1_000_000,
+  dmodel: 1_000_000,
+  gfmodel: 1_000_000,
+  gm51model: 1_000_000,
+  gmodel: 1_000_000,
+  kmodel: 1_000_000,
+  kmodel_latest: 1_000_000,
+  q37fmodel: 1_000_000,
+  qfmodel: 1_000_000,
+  qmodel: 1_000_000,
+  qmodel_38max: 1_000_000,
+  qmodel_latest: 1_000_000
+});
+const QODER_CN_ESTIMATE_ENV = 'TOKEN_MONITOR_QODER_CN_ESTIMATE_PROMPT_TOKENS';
+const QODER_CN_MODEL_WINDOWS_ENV = 'TOKEN_MONITOR_QODER_CN_MODEL_WINDOWS';
 // Qoder CN stores internal model codes (model_info.model_key) instead of real
 // model names. Official display names come from the app's bundled i18n keys
 // `modelSelector.item.<code>` (Qoder CN.app, 2026-07 build); the codes change
@@ -201,6 +228,10 @@ function isQoderCnRoutingTier(value) {
 }
 
 function estimatedQoderCnRowCost(row, pricingByModel) {
+  // Reconstructed prompt-only rows mix cache reads into `input` (the ratio
+  // does not record the split), so any per-token price would inflate the
+  // estimate by the cache discount — keep them cost-unavailable.
+  if (row?.estimatedPrompt) return null;
   // Qoder CN stores routing tiers without the model selected behind them. Do
   // not let an unrelated catalog/custom-pricing entry supply a false price.
   const modelId = String(row?.model || '').trim().toLowerCase();
@@ -464,6 +495,45 @@ function qoderCnJsonlProjectLabel(cwd) {
   return normalizeQoderCnProjectLabel(label);
 }
 
+// `TOKEN_MONITOR_QODER_CN_MODEL_WINDOWS=code=tokens,code=tokens` extends the
+// built-in map (e.g. for a model whose window the local app never registered).
+function qoderCnModelWindows(options = {}) {
+  const env = options.env || process.env;
+  const map = { ...QODER_CN_INTERNAL_MODEL_WINDOWS };
+  for (const pair of String(env[QODER_CN_MODEL_WINDOWS_ENV] || '').split(',')) {
+    const [code, tokens] = pair.split('=').map((part) => part.trim());
+    const window = Number(tokens);
+    if (code && Number.isSafeInteger(window) && window > 0) map[code] = window;
+  }
+  return map;
+}
+
+// Reconstruct the prompt size of a zero-token internal-model row from the
+// client's own occupancy ratio. Returns null when reconstruction is disabled,
+// the row carries no usable ratio, or the model's window is not published.
+function qoderCnReconstructedPromptRow(obj, source, window) {
+  const ratio = Number(obj.message?.usage?.context_usage_ratio);
+  if (!(ratio > 0) || !window) return null;
+  const session = String(obj.sessionId || 'unknown');
+  const message = String(obj.message?.id || obj.uuid || `${obj.timestamp || 0}`);
+  return {
+    sessionId: `qodercn:jsonl:${source}:${session}`,
+    messageId: `qodercn:jsonl:${source}:${session}:${message}`,
+    model: qoderCnJsonlModelName(obj.message?.model) || 'qoder-agent',
+    projectLabel: qoderCnJsonlProjectLabel(obj.cwd),
+    // The ratio covers the whole prompt; how much of it was a cache read is
+    // not recorded on these rows, so the reconstructed count stays `input`
+    // and estimatedRowCost refuses to price it (see the estimated flag).
+    input: Math.round(ratio * window),
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    createdAt: timestampMs(obj.timestamp),
+    messages: 1,
+    estimatedPrompt: true
+  };
+}
+
 // One JSONL line -> a normalized usage row, or null. Transcripts share the
 // Claude message envelope but NOT its token semantics: Qoder CN's
 // `input_tokens` is the full prompt INCLUDING the cached prefix (verified
@@ -472,7 +542,7 @@ function qoderCnJsonlProjectLabel(cwd) {
 // subset of it — the same shape the legacy DB's `prompt_tokens`/
 // `cached_tokens` pair has, so the cached split below mirrors
 // normalizeQoderCnDbRow rather than the Anthropic convention.
-function normalizeQoderCnJsonlRow(obj, source = 'local') {
+function normalizeQoderCnJsonlRow(obj, source = 'local', options = {}) {
   if (!obj || obj.type !== 'assistant') return null;
   const usage = obj.message && obj.message.usage;
   if (!usage) return null;
@@ -480,7 +550,11 @@ function normalizeQoderCnJsonlRow(obj, source = 'local') {
   const cached = numeric(usage.cache_read_input_tokens ?? 0);
   const output = numeric(usage.output_tokens);
   if (prompt === null || cached === null || output === null) return null;
-  if (prompt + output === 0) return null;
+  if (prompt + output === 0) {
+    if (!options.estimatePromptTokens) return null;
+    const modelKey = String((obj.message && obj.message.model) || '').trim();
+    return qoderCnReconstructedPromptRow(obj, source, options.modelWindows?.[modelKey]);
+  }
   const session = String(obj.sessionId || 'unknown');
   const message = String((obj.message && obj.message.id) || obj.uuid || `${obj.timestamp || 0}`);
   return {
@@ -520,14 +594,14 @@ function listQoderCnJsonlFiles(dir, depth, found, maxFiles = QODER_CN_JSONL_MAX_
 // buffered whole (and copied again by trim) before being rejected; counting
 // raw chunk bytes and capping the pending line bounds memory before
 // JSON.parse. Real trees hold 65 MB session files.
-async function readQoderCnJsonlFileRows(filePath, source, budget) {
+async function readQoderCnJsonlFileRows(filePath, source, budget, options = {}) {
   const out = [];
   const handleLine = (rawLine) => {
     const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
     if (!line) return;
     let obj;
     try { obj = JSON.parse(line); } catch (_) { return; }
-    const row = normalizeQoderCnJsonlRow(obj, source);
+    const row = normalizeQoderCnJsonlRow(obj, source, options);
     if (!row) return;
     if (budget.sinceMs && (!row.createdAt || row.createdAt < budget.sinceMs)) return;
     out.push(row);
@@ -569,6 +643,9 @@ async function readQoderCnJsonlFileRows(filePath, source, budget) {
 async function collectQoderCnJsonlRows(options = {}) {
   const projectsDir = options.projectsDir || qoderCnDataPaths(options).projectsDir;
   const sinceMs = options.sinceMs;
+  const env = options.env || process.env;
+  const estimatePromptTokens = options.estimatePromptTokens ?? ['1', 'true'].includes(String(env[QODER_CN_ESTIMATE_ENV] || '').trim().toLowerCase());
+  const readOptions = { ...options, estimatePromptTokens, modelWindows: options.modelWindows || qoderCnModelWindows({ env }) };
   const files = [];
   listQoderCnJsonlFiles(projectsDir, 0, files, positiveInteger(options.maxFiles, QODER_CN_JSONL_MAX_FILES));
   files.sort();
@@ -589,7 +666,7 @@ async function collectQoderCnJsonlRows(options = {}) {
       if (sinceMs && fs.statSync(filePath).mtimeMs < sinceMs) continue;
     } catch (_) { continue; }
     try {
-      rows.push(...(await readQoderCnJsonlFileRows(filePath, sourceId(filePath), budget)));
+      rows.push(...(await readQoderCnJsonlFileRows(filePath, sourceId(filePath), budget, readOptions)));
     } catch (err) {
       // A budget breach means the totals would be silently incomplete; fail
       // the whole read so the collector keeps its last complete snapshot,

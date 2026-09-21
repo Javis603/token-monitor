@@ -701,3 +701,73 @@ test('JSONL rows flow through buildQoderCnPeriods as qodercn entries', () => {
   assert.equal(periods.allTime.totalInput, 23852 * 2);
   assert.equal(periods.allTime.totalMessages, 2);
 });
+
+// --- Zero-token internal rows: prompt reconstruction from context_usage_ratio ---
+
+function zeroTokenRow(overrides = {}) {
+  return jsonlAssistant({
+    model: overrides.model || 'qfmodel',
+    messageId: overrides.messageId || 'z1',
+    usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, context_usage_ratio: overrides.ratio ?? 0.02654, credits: 0.19 }
+  });
+}
+
+test('prompt reconstruction is opt-in and mirrors the ratio-window identity', () => {
+  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow()), 'src'), null, 'off by default keeps the token-only contract');
+  const row = normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow()), 'src', {
+    estimatePromptTokens: true,
+    modelWindows: { qfmodel: 1_000_000 }
+  });
+  assert.equal(row.input, 26_540, 'ratio 0.02654 of a 1M window');
+  assert.equal(row.output, 0);
+  assert.equal(row.cacheRead, 0, 'the ratio does not record the cache split');
+  assert.equal(row.estimatedPrompt, true);
+});
+
+test('prompt reconstruction refuses rows without a usable ratio or published window', () => {
+  const opts = { estimatePromptTokens: true, modelWindows: { qfmodel: 1_000_000 } };
+  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ model: 'auto' })), 'src', opts), null, 'routing tiers have an unknown denominator');
+  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: 0 })), 'src', opts), null);
+  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow()), 'src', { ...opts, modelWindows: {} }), null);
+});
+
+test('collectQoderCnJsonlRows gates reconstruction on the env flag and merges window overrides', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-estimate-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const project = path.join(home, '.qoder-cn', 'projects', '-Users-test-e');
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, 'a.jsonl'), [
+    zeroTokenRow({ messageId: 'z1' }),
+    zeroTokenRow({ messageId: 'z2', model: 'mymodel', ratio: 0.25 })
+  ].join('\n') + '\n');
+
+  const off = await collectQoderCnJsonlRows({ homeDir: home, env: {} });
+  assert.equal(off.length, 0, 'no fabricated tokens unless enabled');
+  const on = await collectQoderCnJsonlRows({ homeDir: home, env: { TOKEN_MONITOR_QODER_CN_ESTIMATE_PROMPT_TOKENS: '1' } });
+  assert.equal(on.length, 1, 'only the built-in-window model reconstructs');
+  assert.equal(on[0].input, 26_540);
+  const widened = await collectQoderCnJsonlRows({
+    homeDir: home,
+    env: {
+      TOKEN_MONITOR_QODER_CN_ESTIMATE_PROMPT_TOKENS: '1',
+      TOKEN_MONITOR_QODER_CN_MODEL_WINDOWS: 'mymodel=200000'
+    }
+  });
+  assert.equal(widened.length, 2);
+  assert.equal(widened.find((row) => row.model === 'mymodel').input, 50_000, '0.25 of the env-declared 200k window');
+});
+
+test('reconstructed prompt rows never receive a fabricated cost', () => {
+  const row = normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: 0.1 })), 'src', {
+    estimatePromptTokens: true,
+    modelWindows: { qfmodel: 1_000_000 }
+  });
+  const periods = buildQoderCnPeriods({
+    now: '2026-09-15T12:00:00.000Z',
+    allTimeSince: '2026-01-01',
+    rows: [row],
+    pricingByModel: { qfmodel: { inputCostPerToken: 1, outputCostPerToken: 1 } }
+  });
+  assert.equal(periods.allTime.totalInput, 100_000);
+  assert.equal(periods.allTime.totalCost, 0, 'reconstructed input mixes cache reads; pricing it would inflate');
+});
