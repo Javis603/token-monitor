@@ -280,3 +280,38 @@ test('Devin session metadata does not cache a transient sqlite failure', () => {
   assert.equal(devinSessionMetadata.resolveSessionMetadata(['s1'], context).has('s1'), false);
   assert.equal(devinSessionMetadata.resolveSessionMetadata(['s1'], context).get('s1').title, 'T');
 });
+
+test('a locked wide query does not downgrade to the title-less schema fallback', () => {
+  // Only a genuinely missing column may select the narrow query. A busy
+  // database usually fails the wide read and answers the narrow one, so
+  // falling back on any error would cache title-less, project-less rows for
+  // the whole fingerprint lifetime.
+  const home = tempHome('devin-meta-busy-');
+  const cliDir = path.join(home, '.local', 'share', 'devin', 'cli');
+  fs.mkdirSync(cliDir, { recursive: true });
+  fs.writeFileSync(path.join(cliDir, 'sessions.db'), 'x');
+  let wideAttempts = 0;
+  const busyOnce = {
+    DatabaseSync: class {
+      exec() {}
+      prepare(sql) {
+        if (sql.includes('title')) {
+          wideAttempts += 1;
+          if (wideAttempts === 1) throw new Error('database is locked');
+          return { all: () => [{ id: 's1', title: 'T', working_directory: '/p', created_at: 1, last_activity_at: 2 }] };
+        }
+        return { all: () => [{ id: 's1', created_at: 1, last_activity_at: 2 }] };
+      }
+      close() {}
+    }
+  };
+  const context = {
+    deps: { sqlite: busyOnce, env: {}, platform: process.platform },
+    home,
+    isoFromDate,
+    projectIdentity
+  };
+  // The locked read answers nothing rather than a row stripped of its title.
+  assert.equal(devinSessionMetadata.resolveSessionMetadata(['s1'], context).has('s1'), false);
+  assert.equal(devinSessionMetadata.resolveSessionMetadata(['s1'], context).get('s1').title, 'T');
+});

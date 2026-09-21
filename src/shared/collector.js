@@ -2254,9 +2254,12 @@ const ZED_DB_WATCH_PATTERN = /^threads\.db(?:-(?:wal|shm))?$/;
 const COPILOT_DB_WATCH_PATTERN = /^data\.db(?:-(?:wal|shm))?$/;
 const ZCODE_DB_WATCH_PATTERN = /^db\.sqlite(?:-(?:wal|shm))?$/;
 const UNSLOTH_DB_WATCH_PATTERN = /^studio\.db(?:-(?:wal|shm))?$/;
-// Tokscale opens only sessions.db directly under each Devin CLI root; the WAL
+// Bounded to sessions.db directly under each *default* Devin CLI root; the WAL
 // and SHM sidecars ride along as the live-write signal, as with every other
-// direct-database client. The acp-events roots stay recursive event trees.
+// direct-database client. Tokscale's own discovery walks those roots to any
+// depth, so a nested sessions.db still counts toward usage — it just does not
+// get a watcher or a health check, which matches where the product actually
+// installs. The acp-events roots stay recursive event trees.
 const DEVIN_CLI_DB_WATCH_PATTERN = /^sessions\.db(?:-(?:wal|shm))?$/;
 const GROK_UNIFIED_LOG_FILE = 'unified.jsonl';
 // Tokscale scans only these two CodeBuddy extension log subtrees. Keep their

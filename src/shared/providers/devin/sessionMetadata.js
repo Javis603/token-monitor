@@ -30,6 +30,15 @@ function dbFingerprint(dbPath) {
   return `${main}|${fileStamp(`${dbPath}-wal`)}`;
 }
 
+// Only a genuinely absent column may downgrade the query. Any other failure —
+// SQLITE_BUSY from a concurrent CLI write, an IO error mid-read — must stay a
+// failure: the narrow query would likely succeed where the wide one did not,
+// and caching its title-less rows would answer for the whole fingerprint
+// lifetime, hiding every title and project label until the file changes again.
+function isMissingColumnError(error) {
+  return /no such column/i.test(String(error?.message || ''));
+}
+
 // null = could not read (locked db, transient IO); only a successful read —
 // including an empty one — may be cached, or one failed open would serve as
 // the answer for the whole fingerprint lifetime.
@@ -41,14 +50,18 @@ function readRows(dbPath, sqliteMod) {
     return null;
   }
   try {
+    // Devin writes this database live under WAL. A short busy timeout lets a
+    // read wait out a concurrent write instead of giving up for the tick.
+    try { db.exec('PRAGMA busy_timeout = 250'); } catch (_) { /* older builds without the pragma */ }
     let rows;
     try {
       rows = db.prepare(
         'SELECT id, title, working_directory, created_at, last_activity_at FROM sessions'
       ).all();
-    } catch (_) {
+    } catch (error) {
       // Older databases predate the title / working_directory columns; fall
       // back to the columns every schema version has.
+      if (!isMissingColumnError(error)) return null;
       rows = db.prepare('SELECT id, created_at, last_activity_at FROM sessions').all();
     }
     const map = new Map();
