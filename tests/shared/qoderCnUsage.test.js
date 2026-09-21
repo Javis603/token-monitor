@@ -654,6 +654,9 @@ test('collectQoderCnJsonlRows fails loudly instead of publishing partial totals'
   await assert.rejects(() => collectQoderCnJsonlRows({ homeDir: home, maxFiles: 1 }), isBudgetError);
   await assert.rejects(() => collectQoderCnJsonlRows({ homeDir: home, maxReadBytes: 10 }), isBudgetError);
   await assert.rejects(() => collectQoderCnJsonlRows({ homeDir: home, maxReadRows: 1 }), isBudgetError);
+  // A single oversized line must abort before JSON.parse, not after being
+  // buffered whole.
+  await assert.rejects(() => collectQoderCnJsonlRows({ homeDir: home, maxLineBytes: 50 }), isBudgetError);
   const complete = await collectQoderCnJsonlRows({ homeDir: home });
   assert.equal(complete.length, 2, 'the same tree reads fully within the default budgets');
 });

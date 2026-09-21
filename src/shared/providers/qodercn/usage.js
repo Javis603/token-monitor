@@ -5,7 +5,6 @@ const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const readline = require('node:readline');
 const { promisify } = require('node:util');
 const execFileAsync = promisify(execFile);
 const { customPricingPath } = require('../../tokscaleConfig');
@@ -26,6 +25,10 @@ const QODER_CN_JSONL_MAX_FILES = 5000;
 // its last complete snapshot instead of publishing silently truncated totals.
 const QODER_CN_JSONL_MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
 const QODER_CN_JSONL_MAX_ROWS = 100_000;
+// One assistant line is one JSON message; a pathological tool-payload turn
+// could still be tens of megabytes, so a single line larger than this aborts
+// the read before JSON.parse instead of buffering it whole.
+const QODER_CN_JSONL_MAX_LINE_BYTES = 32 * 1024 * 1024;
 // Qoder CN stores internal model codes (model_info.model_key) instead of real
 // model names. Official display names come from the app's bundled i18n keys
 // `modelSelector.item.<code>` (Qoder CN.app, 2026-07 build); the codes change
@@ -509,31 +512,52 @@ function listQoderCnJsonlFiles(dir, depth, found, maxFiles = QODER_CN_JSONL_MAX_
   }
 }
 
-// Stream one transcript line by line. readFileSync would load a 65 MB session
-// whole and `split('\n')` would duplicate it as an array on every watch tick;
-// streaming bounds memory to one line at a time while the shared budget
-// accumulates across the whole scan.
+// Stream one transcript with a bounded line accumulator. readline assembles a
+// complete line before any budget can see it, so a single oversized line was
+// buffered whole (and copied again by trim) before being rejected; counting
+// raw chunk bytes and capping the pending line bounds memory before
+// JSON.parse. Real trees hold 65 MB session files.
 async function readQoderCnJsonlFileRows(filePath, source, budget) {
   const out = [];
+  const handleLine = (rawLine) => {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    if (!line) return;
+    let obj;
+    try { obj = JSON.parse(line); } catch (_) { return; }
+    const row = normalizeQoderCnJsonlRow(obj, source);
+    if (!row) return;
+    if (budget.sinceMs && (!row.createdAt || row.createdAt < budget.sinceMs)) return;
+    out.push(row);
+    budget.rows += 1;
+    if (budget.rows > budget.maxRows) throw readBudgetError('rows', budget.maxRows);
+  };
   const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  let pending = '';
   try {
-    for await (const line of rl) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      budget.bytes += Buffer.byteLength(trimmed, 'utf8') + 1;
+    for await (const chunk of stream) {
+      budget.bytes += Buffer.byteLength(chunk, 'utf8');
       if (budget.bytes > budget.maxBytes) throw readBudgetError('bytes', budget.maxBytes);
-      let obj;
-      try { obj = JSON.parse(trimmed); } catch (_) { continue; }
-      const row = normalizeQoderCnJsonlRow(obj, source);
-      if (!row) continue;
-      if (budget.sinceMs && (!row.createdAt || row.createdAt < budget.sinceMs)) continue;
-      out.push(row);
-      budget.rows += 1;
-      if (budget.rows > budget.maxRows) throw readBudgetError('rows', budget.maxRows);
+      let start = 0;
+      let nl = chunk.indexOf('\n');
+      while (nl !== -1) {
+        const segment = chunk.slice(start, nl);
+        const line = pending ? pending + segment : segment;
+        pending = '';
+        if (Buffer.byteLength(line, 'utf8') > budget.maxLineBytes) throw readBudgetError('line', budget.maxLineBytes);
+        handleLine(line);
+        start = nl + 1;
+        nl = chunk.indexOf('\n', start);
+      }
+      if (start < chunk.length) {
+        pending += chunk.slice(start);
+        if (Buffer.byteLength(pending, 'utf8') > budget.maxLineBytes) throw readBudgetError('line', budget.maxLineBytes);
+      }
+    }
+    if (pending) {
+      if (Buffer.byteLength(pending, 'utf8') > budget.maxLineBytes) throw readBudgetError('line', budget.maxLineBytes);
+      handleLine(pending);
     }
   } finally {
-    rl.close();
     stream.destroy();
   }
   return out;
@@ -550,7 +574,8 @@ async function collectQoderCnJsonlRows(options = {}) {
     rows: 0,
     sinceMs: sinceMs || 0,
     maxBytes: positiveInteger(options.maxReadBytes, QODER_CN_JSONL_MAX_TOTAL_BYTES),
-    maxRows: positiveInteger(options.maxReadRows, QODER_CN_JSONL_MAX_ROWS)
+    maxRows: positiveInteger(options.maxReadRows, QODER_CN_JSONL_MAX_ROWS),
+    maxLineBytes: positiveInteger(options.maxLineBytes, QODER_CN_JSONL_MAX_LINE_BYTES)
   };
   const rows = [];
   for (const filePath of files) {
