@@ -733,7 +733,10 @@ test('prompt reconstruction refuses rows without a usable ratio or published win
   // tokens than the context window holds (Infinity > 0 passes a naive guard).
   assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: 1.5 })), 'src', opts), null);
   assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: 'Infinity' })), 'src', opts), null);
-  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: null })), 'src', opts), null);
+  assert.equal(normalizeQoderCnJsonlRow({
+    type: 'assistant', uuid: 'n1', timestamp: '2026-09-15T03:07:23.628Z', sessionId: 's',
+    message: { id: 'z9', model: 'qfmodel', usage: { input_tokens: 0, output_tokens: 0, credits: 0.1 } }
+  }, 'src', opts), null, 'a missing ratio is NaN, never reconstructable');
   const full = normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: 1 })), 'src', opts);
   assert.equal(full.input, 1_000_000, 'a full window is the boundary, inclusive');
 });
