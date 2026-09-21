@@ -796,7 +796,6 @@ function createEdgeDockController(deps) {
       cells = next;
       if (!running) return;
       const structural = previous !== cells.map((cell) => cell.id).join(',');
-      if (structural) hapticCellId = null;
       if (placedId) {
         const before = previousCells.find((cell) => cell.id === placedId);
         const after = cells.find((cell) => cell.id === placedId);

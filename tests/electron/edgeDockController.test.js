@@ -202,6 +202,35 @@ test('rail haptics once whenever the pointer enters an item', async (t) => {
   assert.deepEqual(fixture.haptics, ['alignment', 'alignment', 'alignment']);
 });
 
+test('structural updates only haptic when the item under the pointer changes', async (t) => {
+  const fixture = createFixture({ platform: 'darwin' });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  fixture.screen.point = {
+    x: rail.bounds.x + rail.bounds.width / 2,
+    y: rail.bounds.y + 40
+  };
+
+  await new Promise((resolve) => setTimeout(resolve, 105));
+  assert.deepEqual(fixture.haptics, ['alignment']);
+
+  fixture.controller.setCells([
+    { id: 'claude', kind: 'provider', label: 'Claude' },
+    { id: 'codex', kind: 'provider', label: 'Codex', remainingPercent: 70 },
+    { id: 'windsurf', kind: 'provider', label: 'Windsurf' }
+  ]);
+  await new Promise((resolve) => setTimeout(resolve, 55));
+  assert.deepEqual(fixture.haptics, ['alignment']);
+
+  fixture.controller.setCells([
+    { id: 'gemini', kind: 'provider', label: 'Gemini' },
+    { id: 'codex', kind: 'provider', label: 'Codex', remainingPercent: 70 },
+    { id: 'windsurf', kind: 'provider', label: 'Windsurf' }
+  ]);
+  await new Promise((resolve) => setTimeout(resolve, 55));
+  assert.deepEqual(fixture.haptics, ['alignment', 'alignment']);
+});
+
 test('an open card follows its cell id across removal and reorder', (t) => {
   const fixture = createFixture();
   t.after(() => fixture.controller.stop());
