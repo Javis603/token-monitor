@@ -36,13 +36,28 @@ test('initial limit providers map only corresponding Collection client aliases',
   assert.deepEqual(
     limitProvidersForDetectedClients({
       clients: {
-        dsh: { source: { state: 'detected' } },
+        hermes: { source: { state: 'detected' } },
         qodercn: { source: { state: 'detected' } },
         zcode: { source: { state: 'detected' } },
-        micode: { source: { state: 'detected' } }
+        micode: { source: { state: 'detected' } },
+        dsh: { source: { state: 'detected' } }
       }
     }),
-    ['mimo', 'zai', 'qoder']
+    ['mimo', 'zai', 'qoder', 'deepseek']
+  );
+});
+
+// This table is read twice — for Edge Dock usage attribution and for the
+// seeding above — so mapping a client here also enables that provider on a
+// fresh install. Qwen is a tracked client whose Limits side is the Alibaba
+// Cloud Token Plan, but binding the two would make every new Qwen install
+// persist an Alibaba provider it has no credential for, which is a product
+// decision the attribution fix does not get to make on its own. Pinned so the
+// mapping is not added as an obvious-looking one-liner.
+test('a tracked client with no Limits support of its own seeds nothing', () => {
+  assert.deepEqual(
+    limitProvidersForDetectedClients({ clients: { qwen: { source: { state: 'detected' } } } }),
+    []
   );
 });
 

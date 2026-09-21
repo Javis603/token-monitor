@@ -71,7 +71,8 @@
     droid: 'factory',
     micode: 'mimo',
     zcode: 'zai',
-    qodercn: 'qoder'
+    qodercn: 'qoder',
+    dsh: 'deepseek'
   });
 
   // These are the only window metrics that cross the shared limits schema.
