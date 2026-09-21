@@ -182,6 +182,17 @@ test('Unsloth has a label and uses the standard mask-safe icon path', () => {
   assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'unsloth.png')));
 });
 
+test('Devin has a label and uses the standard mask-safe icon path', () => {
+  const source = rendererSource();
+  const styles = rendererStyles();
+  assert.ok(clientLabelIds().has('devin'));
+  assert.match(source, /clientsWithIcon = new Set\([\s\S]*'devin'/);
+  assert.match(styles, /\.row-icon-devin\s*\{[^}]*mask-image:\s*url\([^)]*assets\/icons\/devin\.svg\)/s);
+  assert.doesNotMatch(styles, /\.row-icon-devin\s*\{[^}]*background-image:/s);
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'devin.svg')));
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'devin.png')));
+});
+
 test('Amp carries its own brand colour and mask-safe icon assets', () => {
   const source = rendererSource();
   const styles = rendererStyles();

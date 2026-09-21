@@ -7,7 +7,9 @@ const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 const TOKSCALE_CLIENT_ALIASES = new Map([
   ['antigravity-cli', 'antigravity'],
   ['omp', 'pi'],
-  ['kilocode', 'kilo']
+  ['kilocode', 'kilo'],
+  ['devin-cli', 'devin'],
+  ['devin-desktop', 'devin']
 ]);
 
 // Canonical Token Monitor identity for client ids emitted by Tokscale. Keep

@@ -254,6 +254,7 @@ function normalizeClientName(value) {
   if (/lm[\s_-]*studio/.test(raw)) return 'lmstudio';
   if (/^unsloth(?:[\s_-]+(?:studio|api))?$/.test(raw)) return 'unsloth';
   if (raw.includes('dsh')) return 'dsh';
+  if (raw.includes('devin')) return 'devin';
   if (raw.includes('opencode')) return 'opencode';
   if (raw.includes('openclaw') || raw.includes('clawd') || raw.includes('moltbot') || raw.includes('moldbot')) return 'openclaw';
   return raw.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || null;

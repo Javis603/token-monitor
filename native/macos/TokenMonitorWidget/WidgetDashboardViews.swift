@@ -643,6 +643,7 @@ enum WidgetVendorIdentity {
         if value.contains("qwen") { return "qwen" }
         if value.contains("kimi") || value.contains("moonshot") { return "kimi" }
         if value.contains("glm") || value.contains("zai") { return "zai" }
+        if value.hasPrefix("swe-") || value.hasPrefix("swe_") || value.contains("devin") || value.contains("cognition") { return "devin" }
         return "default"
     }
 
@@ -673,7 +674,7 @@ enum WidgetVendorIdentity {
             "trae": "#32F08C", "alibaba": "#7771F4", "thirdparty": "#8090A6",
             "default": "#6AB4F0"
         ]
-        let adaptiveInk = ["grok", "xai", "copilot", "cursor", "opencode", "pi", "zai", "zaiteam", "zcode", "proma", "kimi", "moonshot", "ollama"]
+        let adaptiveInk = ["grok", "xai", "copilot", "cursor", "opencode", "pi", "zai", "zaiteam", "zcode", "proma", "kimi", "moonshot", "ollama", "devin"]
         if adaptiveInk.contains(vendorID.lowercased()) { return Color.white.opacity(0.86) }
         return Color(widgetHex: colors[vendorID.lowercased()] ?? colors["default"]!)
     }
