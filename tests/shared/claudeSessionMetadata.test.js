@@ -249,8 +249,12 @@ test('Claude session context uses the latest API input occupancy and model capac
     contextWindow: 1_000_000
   });
   assert.equal(claudeContextWindow('claude-sonnet-4-5-20250929'), 200_000);
-  assert.equal(claudeContextWindow('us.anthropic.claude-opus-4-8-v1:0'), 1_000_000);
-  assert.equal(claudeContextWindow('claude-ocx2-command-code--deepseek-v4.1-flash'), 0);
+  assert.equal(claudeContextWindow('claude-opus-4-6'), 200_000);
+  assert.equal(claudeContextWindow('us.anthropic.claude-opus-4-8-v1:0'), 200_000);
+  assert.equal(claudeContextWindow('deepseek-v4.1-flash'), 200_000);
+  assert.equal(claudeContextWindow('deepseek-v4.1-flash[1m]'), 1_000_000);
+  assert.equal(claudeContextWindow('claude-ocx2-command-code--deepseek-v4.1-flash'), 200_000);
+  assert.equal(claudeContextWindow(''), 0);
 });
 
 test('Claude session context clears on compaction and repopulates on the next response', (t) => {
@@ -298,6 +302,27 @@ test('Claude session context survives oversized assistant field ordering', (t) =
       usage: { input_tokens: 4_000, cache_creation_input_tokens: 5_000, cache_read_input_tokens: 600_000 }
     }
   });
+  const nestedUsage = JSON.stringify({
+    type: 'assistant',
+    message: {
+      id: 'msg_nested_usage',
+      type: 'message',
+      role: 'assistant',
+      content: [
+        { type: 'text', text: 'x'.repeat(300 * 1024) },
+        {
+          type: 'tool_use',
+          input: {
+            model: 'nested-model',
+            usage: { input_tokens: 7 }
+          }
+        }
+      ],
+      model: 'claude-sonnet-5',
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 4_000, cache_creation_input_tokens: 5_000, cache_read_input_tokens: 600_000 }
+    }
+  });
   const { dir, file } = fixture([contentFirst]);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
@@ -307,6 +332,12 @@ test('Claude session context survives oversized assistant field ordering', (t) =
   });
 
   fs.writeFileSync(file, `${modelFirst}\n`);
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 609_000,
+    contextWindow: 1_000_000
+  });
+
+  fs.writeFileSync(file, `${nestedUsage}\n`);
   assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
     contextTokens: 609_000,
     contextWindow: 1_000_000

@@ -19,26 +19,31 @@ const LONG_LINE_HEAD_BYTES = 64 * 1024;
 const LONG_LINE_TAIL_BYTES = 8 * 1024;
 const titleCache = new Map();
 const MODEL_VERSION_END = '(?:$|[-@:\\[])';
-const CLAUDE_ONE_MILLION_MODEL = new RegExp(
-  `^claude-(?:opus-(?:5${MODEL_VERSION_END}|4-(?:6|7|8)${MODEL_VERSION_END})`
-  + `|sonnet-(?:5${MODEL_VERSION_END}|4-6${MODEL_VERSION_END})`
+const CLAUDE_NATIVE_ONE_MILLION_MODEL = new RegExp(
+  `^claude-(?:opus-(?:5${MODEL_VERSION_END}|4-(?:7|8)${MODEL_VERSION_END})`
+  + `|sonnet-5${MODEL_VERSION_END}`
   + `|fable-5(?:[.-]1)?${MODEL_VERSION_END}`
   + `|mythos-(?:5(?:[.-]1)?${MODEL_VERSION_END}|preview${MODEL_VERSION_END}))`
 );
 
 function claudeContextWindow(model) {
   const value = String(model || '').toLowerCase();
-  const start = value.indexOf('claude-');
-  if (start < 0) return 0;
-  const id = value.slice(start);
-  if (!/^claude-(?:opus|sonnet|haiku|fable|mythos)-/.test(id)) return 0;
-  // Claude Code persists the model id and API usage, but not the capacity it
-  // used to calculate its own status-line percentage. Current 4.6+/5 model
-  // families have a 1M window; the other supported Claude families have 200K.
-  // Provider prefixes (for example Bedrock's `anthropic.`) are deliberately
-  // accepted, while custom gateway ids that merely contain `claude-` but do not
-  // name a Claude family are left unknown rather than assigned a false gauge.
-  return CLAUDE_ONE_MILLION_MODEL.test(id) ? 1_000_000 : 200_000;
+  if (!value) return 0;
+  // Claude Code treats an explicit [1m] model option as extended context even
+  // for a custom provider spelling. The suffix is normally stripped before the
+  // request reaches the provider, but preserve the exact answer when a bridge
+  // records it in the response model.
+  if (value.includes('[1m]')) return 1_000_000;
+  // Only the bare Anthropic API ids below have a native 1M window. Provider
+  // spellings and 4.6 models are deliberately excluded: those use 200K unless
+  // their launch configuration selected extended context, which the response
+  // model usually cannot prove after Claude Code strips the suffix.
+  if (CLAUDE_NATIVE_ONE_MILLION_MODEL.test(value)) return 1_000_000;
+  // Claude Code's default assumption for standard and unrecognized model ids is
+  // 200K. Keep a best-effort gauge for third-party bridges (for example a
+  // DeepSeek model) instead of dropping the reading solely because its model id
+  // is not a Claude family.
+  return 200_000;
 }
 
 function reportedTokenCount(value) {
@@ -68,7 +73,10 @@ function applyContextUsage(state, model, usage) {
 }
 
 function contextUsageFromFragments(head, tail) {
-  const usageAt = tail.indexOf('"usage"');
+  // Tool inputs are arbitrary JSON and may contain their own `model` and
+  // `usage` fields. Claude writes the message-level usage after content, so
+  // the final occurrence is the delimiter for the response measurement.
+  const usageAt = tail.lastIndexOf('"usage"');
   if (usageAt < 0) return null;
   const contentAt = head.indexOf('"content"');
   const headModelAt = head.indexOf('"model"');
