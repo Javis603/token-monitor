@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { createMacWidgetSnapshotController } = require('../../src/electron/macWidgetSnapshotController');
+const { createMacWidgetSnapshotController } = require('../../src/electron/macWidget/snapshotController');
 
 function deferred() {
   let resolve;

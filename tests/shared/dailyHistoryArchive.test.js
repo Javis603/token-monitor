@@ -689,6 +689,21 @@ test('durable archive canonicalizes OMP into Pi before identity and reconstructi
   assert.equal(Object.hasOwn(restored.daily[0].perClient, 'omp'), false);
 });
 
+test('durable archive canonicalizes antigravity-cli into antigravity before identity and reconstruction', () => {
+  const archive = captureDailyHistoryArchive({}, graph('2026-07-18', [
+    client('antigravity', 'gemini-3.8-flash', 10, 1, 1),
+    client('antigravity-cli', 'gemini-3.8-flash', 20, 2, 1)
+  ]), { todayKey: '2026-07-18' });
+  const observations = Object.values(archive.days['2026-07-18'].observations);
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].client, 'antigravity');
+  assert.equal(observations[0].tokens, 30);
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, { todayKey: '2026-07-18' }));
+  assert.equal(restored.daily[0].perClient.antigravity.tokens, 30);
+  assert.equal(Object.hasOwn(restored.daily[0].perClient, 'antigravity-cli'), false);
+});
+
 test('durable reconstruction preserves client-specific reasoning output without recounting it', () => {
   const archive = captureDailyHistoryArchive({}, graph('2026-07-18', [
     client('codex', 'gpt', 100, 1, 1, { reasoning: 30 }),
@@ -715,4 +730,195 @@ test('clearDailyHistoryArchive removes persisted data and accepts a missing file
     error.code = 'ENOENT';
     throw error;
   } }), false);
+});
+
+function cursorLivePeriod(totalTokens, costUsd) {
+  return {
+    capabilities: { tokenComponents: true },
+    totalTokens,
+    costUsd,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    outputTokens: 0,
+    clients: { cursor: totalTokens },
+    clientCosts: { cursor: costUsd },
+    models: { 'cursor-grok-4.6-high': totalTokens },
+    modelCosts: { 'cursor-grok-4.6-high': costUsd },
+    clientModels: { cursor: { 'cursor-grok-4.6-high': totalTokens } },
+    clientModelCosts: { cursor: { 'cursor-grok-4.6-high': costUsd } }
+  };
+}
+
+test('equal-token liveDays snapshot does not inflate cost over the graph archive', () => {
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 202_924_472, 141.5175, 91)
+  ]), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, cursorLivePeriod(202_924_472, 243.0328), {
+    todayKey: '2026-08-18'
+  });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  const day = restored.daily.find((row) => row.date === '2026-08-18');
+  assert.equal(day.tokens, 202_924_472);
+  assert.equal(day.cost, 141.5175);
+  assert.equal(day.perModel['cursor-grok-4.6-high'].cost, 141.5175);
+});
+
+test('equal-token liveDays may lower cost when the graph later corrects pricing', () => {
+  let archive = captureLiveDailyHistory({}, cursorLivePeriod(100, 2), { todayKey: '2026-08-18' });
+  archive = captureDailyHistoryArchive(archive, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 100, 1, 1)
+  ]), { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  const day = restored.daily.find((row) => row.date === '2026-08-18');
+  assert.equal(day.tokens, 100);
+  assert.equal(day.cost, 1);
+});
+
+test('live day with more tokens does not inflate an equal-token model price', () => {
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-28', [
+    client('cursor', 'cursor-grok-4.6-high', 83_478_257, 60.45, 10),
+    client('cursor', 'gpt-5.5', 95_000_000, 27.55, 5)
+  ]), { todayKey: '2026-08-28' });
+  archive = captureLiveDailyHistory(archive, {
+    capabilities: { tokenComponents: true },
+    totalTokens: 234_765_552,
+    costUsd: 141.62,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    outputTokens: 0,
+    clients: { cursor: 234_765_552 },
+    clientCosts: { cursor: 141.62 },
+    models: {
+      'cursor-grok-4.6-high': 83_478_257,
+      'gpt-5.5': 151_287_295
+    },
+    modelCosts: {
+      'cursor-grok-4.6-high': 109.99,
+      'gpt-5.5': 31.63
+    },
+    clientModels: {
+      cursor: {
+        'cursor-grok-4.6-high': 83_478_257,
+        'gpt-5.5': 151_287_295
+      }
+    },
+    clientModelCosts: {
+      cursor: {
+        'cursor-grok-4.6-high': 109.99,
+        'gpt-5.5': 31.63
+      }
+    }
+  }, { todayKey: '2026-08-28' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-29'
+  }), '2026-08-29');
+  const day = restored.daily.find((row) => row.date === '2026-08-28');
+  assert.equal(day.perModel['cursor-grok-4.6-high'].tokens, 83_478_257);
+  assert.equal(day.perModel['cursor-grok-4.6-high'].cost, 60.45);
+  assert.equal(day.tokens, 234_765_552);
+});
+
+test('equal-token liveDays fills in a missing price without requiring more tokens', () => {
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 100, 0, 1)
+  ]), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, cursorLivePeriod(100, 1.5), {
+    todayKey: '2026-08-18'
+  });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  const day = restored.daily.find((row) => row.date === '2026-08-18');
+  assert.equal(day.tokens, 100);
+  assert.equal(day.cost, 1.5);
+});
+
+test('a Cursor liveDay takes the graph cost after the graph reprices the same usage upward', () => {
+  let archive = captureLiveDailyHistory({}, cursorLivePeriod(100, 1), { todayKey: '2026-08-18' });
+  archive = captureDailyHistoryArchive(archive, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 100, 1.2, 1)
+  ]), { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  assert.equal(restored.daily.find((row) => row.date === '2026-08-18').cost, 1.2);
+});
+
+function claudeLivePeriod(totalTokens, costUsd) {
+  const period = cursorLivePeriod(totalTokens, costUsd);
+  return {
+    ...period,
+    clients: { claude: totalTokens },
+    clientCosts: { claude: costUsd },
+    models: { 'claude-sonnet-5': totalTokens },
+    modelCosts: { 'claude-sonnet-5': costUsd },
+    clientModels: { claude: { 'claude-sonnet-5': totalTokens } },
+    clientModelCosts: { claude: { 'claude-sonnet-5': costUsd } }
+  };
+}
+
+test('other clients keep repricing equal-token live days in either direction', () => {
+  let archive = captureLiveDailyHistory({}, claudeLivePeriod(100, 1), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, claudeLivePeriod(100, 1.2), { todayKey: '2026-08-18' });
+  archive = captureDailyHistoryArchive(archive, graph('2026-08-18', [
+    client('claude', 'claude-sonnet-5', 100, 0.9, 1)
+  ]), { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  assert.equal(restored.daily.find((row) => row.date === '2026-08-18').cost, 1.2);
+});
+
+test('a live day fills one model price while another model on that day is already priced', () => {
+  const liveDay = {
+    ...claudeLivePeriod(300, 3),
+    clients: { claude: 300 },
+    clientCosts: { claude: 3 },
+    models: { 'claude-sonnet-5': 100, 'claude-haiku-4-5': 200 },
+    modelCosts: { 'claude-sonnet-5': 1, 'claude-haiku-4-5': 2 },
+    clientModels: { claude: { 'claude-sonnet-5': 100, 'claude-haiku-4-5': 200 } },
+    clientModelCosts: { claude: { 'claude-sonnet-5': 1, 'claude-haiku-4-5': 2 } }
+  };
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-18', [
+    client('claude', 'claude-sonnet-5', 100, 1, 1),
+    client('claude', 'claude-haiku-4-5', 200, 0, 1)
+  ]), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, liveDay, { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  assert.equal(restored.daily.find((row) => row.date === '2026-08-18').cost, 3);
+});
+
+test('a Cursor graph day kept on a tied aggregate cost still fills a price only the liveDay has', () => {
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 100, 0, 1),
+    client('cursor', 'gpt-5.5', 200, 3, 1)
+  ]), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, {
+    ...cursorLivePeriod(300, 3),
+    models: { 'cursor-grok-4.6-high': 100, 'gpt-5.5': 200 },
+    modelCosts: { 'cursor-grok-4.6-high': 1, 'gpt-5.5': 2 },
+    clientModels: { cursor: { 'cursor-grok-4.6-high': 100, 'gpt-5.5': 200 } },
+    clientModelCosts: { cursor: { 'cursor-grok-4.6-high': 1, 'gpt-5.5': 2 } }
+  }, { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  const day = restored.daily.find((row) => row.date === '2026-08-18');
+  assert.equal(day.perModel['cursor-grok-4.6-high'].cost, 1);
+  assert.equal(day.perModel['gpt-5.5'].cost, 3);
+  assert.equal(day.cost, 4);
 });

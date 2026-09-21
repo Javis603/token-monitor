@@ -7,7 +7,7 @@ const { execFile } = require('node:child_process');
 const {
   readRegularFileNoFollow,
   writePrivateJsonAtomic
-} = require('../shared/credentialStore');
+} = require('../../shared/credentialStore');
 
 const MARKER_FILE_NAME = 'mac-widget-launchservices-registration.json';
 const REGISTER_HOST_ARGUMENTS = Object.freeze(['--mode', 'register-host']);
@@ -20,7 +20,6 @@ const MAX_CONFIG_VALUE_LENGTH = 256;
 const IDENTITY_FIELDS = Object.freeze([
   'schemaVersion',
   'appGroup',
-  'urlScheme',
   'widgetKind',
   'widgetUIVersion',
   'widgetSchemaVersion',

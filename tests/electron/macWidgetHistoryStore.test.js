@@ -15,7 +15,7 @@ const {
   projectMacWidgetHistory,
   readMacWidgetHistoryCache,
   writeMacWidgetHistoryCache
-} = require('../../src/electron/macWidgetHistoryStore');
+} = require('../../src/electron/macWidget/historyStore');
 
 function history(label = 'saved', daily = null) {
   return {
@@ -28,7 +28,13 @@ function history(label = 'saved', daily = null) {
       perModel: { sensitiveModel: { tokens: 123, cost: 0.25 } },
       label
     }],
-    monthly: [{ month: '2026-08', tokens: 123, perClient: { codex: { tokens: 123 } } }],
+    monthly: [{
+      month: '2026-08',
+      tokens: 123,
+      cost: 0.25,
+      perClient: { codex: { tokens: 123 } },
+      perModel: { sensitiveModel: { tokens: 123 } }
+    }],
     summary: { favoriteModel: 'sensitiveModel', label }
   };
 }
@@ -44,7 +50,7 @@ async function withTempRoot(callback) {
 
 test('production history cache storage uses only asynchronous filesystem I/O', () => {
   const source = fsSync.readFileSync(
-    path.join(__dirname, '..', '..', 'src', 'electron', 'macWidgetHistoryStore.js'),
+    path.join(__dirname, '..', '..', 'src', 'electron', 'macWidget', 'historyStore.js'),
     'utf8'
   );
   assert.match(source, /require\('node:fs\/promises'\)/);
@@ -68,7 +74,7 @@ test('history cache round-trips a private Widget-only projection atomically', as
     assert.equal(typeof readPromise?.then, 'function');
     assert.deepEqual(await readPromise, {
       daily: [{ date: '2026-08-09', tokens: 123, cost: 0.25 }],
-      monthly: [],
+      monthly: [{ month: '2026-08', tokens: 123, cost: 0.25 }],
       summary: {}
     });
     if (process.platform !== 'win32') {
@@ -78,7 +84,7 @@ test('history cache round-trips a private Widget-only projection atomically', as
     assert.deepEqual(await fs.readdir(path.dirname(cachePath)), [path.basename(cachePath)]);
 
     const raw = await fs.readFile(cachePath, 'utf8');
-    assert.doesNotMatch(raw, /sensitiveModel|perClient|perModel|monthly|summary|messages|label/);
+    assert.doesNotMatch(raw, /sensitiveModel|perClient|perModel|summary|messages|label/);
   });
 });
 
@@ -96,8 +102,27 @@ test('Widget history projection keeps only the latest Activity window', () => {
   assert.equal(projected.daily[0].date, daily[18].date);
   assert.deepEqual(Object.keys(projected.daily[0]), ['date', 'tokens', 'cost']);
   assert.equal(projected.daily[0].tokens, Math.round(daily[18].tokens));
-  assert.deepEqual(projected.monthly, []);
+  assert.deepEqual(projected.monthly, [{ month: '2026-08', tokens: 123, cost: 0.25 }]);
   assert.deepEqual(projected.summary, {});
+});
+
+test('Widget history projection preserves complete monthly totals without private dimensions', () => {
+  const projected = projectMacWidgetHistory({
+    daily: [],
+    monthly: [
+      { month: 'invalid', tokens: 900 },
+      { month: '2025-12', tokens: 10.4, cost: 1, perClient: { codex: { tokens: 10 } } },
+      { month: '2025-11', tokens: 3, cost: 0.5, perModel: { private: { tokens: 3 } } },
+      { month: '2025-12', tokens: 12.7, cost: 1.2, label: 'latest wins' }
+    ],
+    summary: { favoriteModel: 'private' }
+  });
+
+  assert.deepEqual(projected.monthly, [
+    { month: '2025-11', tokens: 3, cost: 0.5 },
+    { month: '2025-12', tokens: 13, cost: 1.2 }
+  ]);
+  assert.deepEqual(Object.keys(projected.monthly[0]), ['month', 'tokens', 'cost']);
 });
 
 test('history cache serializes once and writes the same serialized payload', async () => {
@@ -144,11 +169,20 @@ test('history cache ignores malformed or overlong projected documents', async ()
     await fs.writeFile(cachePath, JSON.stringify({
       version: MAC_WIDGET_HISTORY_CACHE_VERSION,
       source,
+      monthly: [],
       daily: Array.from({ length: MAC_WIDGET_ACTIVITY_DAYS + 1 }, (_value, index) => ({
         date: `2026-01-${String(index + 1).padStart(2, '0')}`,
         tokens: 1,
         cost: 0
       }))
+    }));
+    assert.equal(await readMacWidgetHistoryCache(cachePath, 'hub-a'), null);
+
+    await fs.writeFile(cachePath, JSON.stringify({
+      version: MAC_WIDGET_HISTORY_CACHE_VERSION,
+      source,
+      daily: [],
+      monthly: [{ month: '2026-13', tokens: 1, cost: 0 }]
     }));
     assert.equal(await readMacWidgetHistoryCache(cachePath, 'hub-a'), null);
   });

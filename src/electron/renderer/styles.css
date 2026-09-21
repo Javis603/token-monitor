@@ -675,6 +675,8 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   gap: 2px;
 }
 .settings-item-title { color: var(--text); }
+.model-alias-example { overflow-wrap: anywhere; }
+
 .settings-item-desc,
 p.settings-note.settings-item-desc,
 span.settings-note.settings-item-desc {
@@ -1300,15 +1302,15 @@ span.settings-note.settings-item-desc {
 .codex-login-details .codex-login-output { margin-top: 6px; }
 .settings-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .settings-note code { padding: 1px 5px; border-radius: 3px; background: rgba(var(--overlay-rgb), 0.06); font-size: 10px; }
-.kimi-cookie-steps { text-wrap: pretty; }
-.kimi-api-fallback {
+.kimi-web-steps { text-wrap: pretty; }
+.kimi-web-fallback {
   min-width: 0;
   padding-top: 10px;
   border-top: 1px solid rgba(var(--line-rgb), 0.075);
   color: var(--muted);
   font-size: 10px;
 }
-.kimi-api-fallback summary {
+.kimi-web-fallback summary {
   width: max-content;
   max-width: 100%;
   color: var(--text);
@@ -1318,13 +1320,13 @@ span.settings-note.settings-item-desc {
   line-height: 1.35;
   user-select: none;
 }
-.kimi-api-fallback summary::marker { color: var(--muted); }
-.kimi-api-fallback summary:focus-visible {
+.kimi-web-fallback summary::marker { color: var(--muted); }
+.kimi-web-fallback summary:focus-visible {
   border-radius: 3px;
   outline: 1px solid rgba(115, 189, 245, 0.72);
   outline-offset: 3px;
 }
-.kimi-api-fallback-body {
+.kimi-web-fallback-body {
   display: grid;
   gap: 8px;
   margin-top: 8px;
@@ -2008,6 +2010,57 @@ span.settings-note.settings-item-desc {
   font: inherit;
   font-weight: 500;
 }
+.tool-health-source-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.tool-health-source-control {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.tool-health-source-control:hover {
+  background: rgba(var(--line-rgb), 0.1);
+  color: var(--fg);
+}
+.tool-health-source-control:focus-visible {
+  outline: 1px solid rgba(var(--accent-rgb), 0.72);
+  outline-offset: 1px;
+}
+.tool-health-source-control svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.5;
+}
+.tool-health-source-add {
+  display: flex;
+  align-items: center;
+  width: auto;
+  height: 18px;
+  padding: 1px 5px 1px 4px;
+  border: 1px solid rgba(var(--line-rgb), 0.18);
+  gap: 2px;
+  font: inherit;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.tool-health-source-add svg {
+  width: 10px;
+  height: 10px;
+}
 .tool-health-group-body {
   display: grid;
   gap: 3px;
@@ -2094,6 +2147,13 @@ span.settings-note.settings-item-desc {
   justify-items: start;
   gap: 3px;
 }
+.tool-health-check-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+}
 .tool-health-check {
   max-width: 100%;
   padding: 1px 4px;
@@ -2104,17 +2164,20 @@ span.settings-note.settings-item-desc {
   line-height: 1.3;
   opacity: 0.72;
   overflow-wrap: anywhere;
-  text-decoration: line-through;
 }
 .tool-health-check.pending {
   opacity: 0.72;
-  text-decoration: none;
 }
 .tool-health-check.found {
   border-color: rgba(var(--success-rgb), 0.28);
   color: var(--success);
   opacity: 1;
-  text-decoration: none;
+}
+.tool-health-source-remove {
+  flex: 0 0 auto;
+}
+.tool-health-source-error {
+  color: var(--orange);
 }
 .tool-health-note-line {
   font-size: 10px;
@@ -2463,13 +2526,6 @@ span.settings-note.settings-item-desc {
 .preference-order-handle:disabled {
   opacity: 0.34;
   cursor: default;
-}
-.view-preference-row.is-dragging,
-.home-module-preference-row.is-dragging,
-.home-limit-provider-row.is-dragging {
-  background: rgba(var(--accent-rgb), 0.08);
-  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.28);
-  opacity: 0.9;
 }
 .reset-appearance-button {
   /* Glyph label, same reason as .tool-header-action. */
@@ -3439,13 +3495,68 @@ html.is-windows .settings-panel select option {
 }
 
 .row { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid rgba(var(--line-rgb), 0.12); }
-.breakdown.large-session-list .session-row {
-  contain-intrinsic-block-size: auto 72px;
+.session-pager-host {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
 }
-.breakdown.large-session-list.large-session-list-ready .session-row {
-  content-visibility: auto;
-  contain: layout paint style;
+.session-pager {
+  display: grid;
+  width: min(208px, 100%);
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  align-items: center;
+  min-height: 24px;
+  margin-inline: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
+.session-page-status {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  line-height: 1;
+  opacity: 0.78;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-page-button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.72;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+.session-page-button:hover:not(:disabled) {
+  color: var(--text);
+  opacity: 1;
+}
+.session-page-button:focus-visible {
+  box-shadow: inset 0 -1px 0 rgba(var(--accent-rgb), 0.58);
+  color: var(--text);
+  opacity: 1;
+}
+.session-page-button:disabled { cursor: default; opacity: 0.28; }
+.session-page-icon {
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+  mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+}
+.session-page-next .session-page-icon { transform: rotate(180deg); }
 .row-head { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
 .row-name { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 8px; color: var(--text); }
 .dot {
@@ -3472,6 +3583,9 @@ html.is-windows .settings-panel select option {
 .row-icon-cursor     { -webkit-mask-image: url(../../../assets/icons/cursor.svg);        mask-image: url(../../../assets/icons/cursor.svg); }
 .row-icon-antigravity { -webkit-mask-image: url(../../../assets/icons/antigravity.svg);   mask-image: url(../../../assets/icons/antigravity.svg); }
 .row-icon-cline      { -webkit-mask-image: url(../../../assets/icons/cline.svg);         mask-image: url(../../../assets/icons/cline.svg); }
+.row-icon-amp        { -webkit-mask-image: url(../../../assets/icons/amp.svg);           mask-image: url(../../../assets/icons/amp.svg); }
+.row-icon-droid      { -webkit-mask-image: url(../../../assets/icons/droid.svg);         mask-image: url(../../../assets/icons/droid.svg); }
+.row-icon-factory    { -webkit-mask-image: url(../../../assets/icons/droid.svg);         mask-image: url(../../../assets/icons/droid.svg); }
 .row-icon-kimi       { -webkit-mask-image: url(../../../assets/icons/kimi.svg);          mask-image: url(../../../assets/icons/kimi.svg); }
 .row-icon-grok       { -webkit-mask-image: url(../../../assets/icons/xai.svg);           mask-image: url(../../../assets/icons/xai.svg); }
 .row-icon-copilot    { -webkit-mask-image: url(../../../assets/icons/copilot.svg);       mask-image: url(../../../assets/icons/copilot.svg); }
@@ -3514,6 +3628,8 @@ html.is-windows .settings-panel select option {
 .row-icon-qodercn    { -webkit-mask-image: url(../../../assets/icons/qodercn.svg);      mask-image: url(../../../assets/icons/qodercn.svg); }
 .row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
 .row-icon-thirdparty { -webkit-mask-image: url(../../../assets/icons/thirdparty.svg);      mask-image: url(../../../assets/icons/thirdparty.svg); }
+.row-icon-nvidia    { -webkit-mask-image: url(../../../assets/icons/nvidia.svg);        mask-image: url(../../../assets/icons/nvidia.svg); }
+.row-icon-stepfun   { -webkit-mask-image: url(../../../assets/icons/stepfun.svg);       mask-image: url(../../../assets/icons/stepfun.svg); }
 .row-icon-newapi    { -webkit-mask-image: url(../../../assets/icons/newapi.svg);           mask-image: url(../../../assets/icons/newapi.svg); }
 .row-icon-sub2api   { -webkit-mask-image: url(../../../assets/icons/sub2api.svg);          mask-image: url(../../../assets/icons/sub2api.svg); }
 .row-icon-token-monitor { -webkit-mask-image: url(../../../assets/icons/token-monitor.svg); mask-image: url(../../../assets/icons/token-monitor.svg); }
@@ -3591,6 +3707,95 @@ html.is-windows .settings-panel select option {
   content: 'you';
 }
 .row.local.stale .row-name::after { display: none; }
+/* A session whose transcript is still being appended to. The dot sits on the
+   tool mark's corner - where presence belongs, and where it can be scanned down
+   the left edge of the list - rather than in the text, which is a single
+   ellipsizing line already carrying the title, the model and the timestamp.
+   Absolutely positioned so a running row never shifts against the rows around
+   it.
+
+   A dot, not a glyph: this row already leads with the client's own icon, and a
+   spinner or check drawn over it reads as part of that logo. The card surface
+   has no icon to compete with, so it carries the richer states instead; here the
+   old idiom stands - green means active right now - and every other state simply
+   draws nothing.
+
+   Painted with --success, never --accent: "this is alive" is a semantic state,
+   and --accent is the user's own colour (the obsidian preset sets it to a near
+   white, which would leave the dot indistinguishable from the mark it sits on).
+   --success is the variable this codebase keeps independent of the custom
+   accent for exactly this reason, and it darkens on light themes. */
+.row-name { position: relative; }
+.row-live { display: none; }
+/* Absolutely positioned so a running row never shifts against its neighbours. */
+ .row-live.is-active { display: block; position: absolute; top: 8px; left: 6px; }
+.row-live-dot {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--success);
+  /* The ring separates the dot from the mark it overlaps; --panel-rgb flips
+     with the theme, so it stays a separation rather than becoming a dark spot
+     on a light background. */
+  box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 4px rgba(var(--success-rgb), 0.55);
+}
+/* One-shot flare when that session's transcript actually grew, matching the
+   titlebar dot's rule: no `infinite`, so a list of open-but-idle sessions costs
+   the compositor nothing and a heartbeat means "generating right now" rather
+   than merely "not closed". */
+.row-live.is-active.pulse .row-live-dot { animation: row-live-pulse 1.2s ease-out; }
+@keyframes row-live-pulse {
+  0%   { box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 3px rgba(var(--success-rgb), 0.45); }
+  35%  { box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 10px rgba(var(--success-rgb), 0.95); }
+  100% { box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 4px rgba(var(--success-rgb), 0.55); }
+}
+/* How much of the running session's context window is left, as the third line
+   of the metrics column. A gauge rather than a sentence: headroom only matters
+   as it runs out, which a shrinking bar says at a glance and 10px grey text
+   does not. The metrics column is two lines tall inside a four-line row, so
+   this lands in existing empty space and clears the detail chevron pinned to
+   the row's bottom-right. */
+.row-context {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.1;
+}
+.row-context-meter {
+  width: 20px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(var(--sunken-rgb), 0.46);
+}
+.row-context-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  /* Neutral while healthy. Colour here is reserved for headroom that is running
+     out, so the green beside it keeps meaning exactly one thing ("this session
+     is alive") and a coloured gauge is always worth a look. Uses the
+     border/overlay system, which flips with the theme. */
+  background: rgba(var(--line-rgb), 0.55);
+  transform: scaleX(var(--bar-scale, 0));
+  transform-origin: left center;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* The heads-up, then the boundary where a client starts rewriting the
+   conversation to make room — the only moment the number is worth interrupting
+   for. Both are semantic colours, never the customisable accent. */
+.row-context[data-tone="caution"] { color: var(--yellow); }
+.row-context[data-tone="caution"] .row-context-fill { background: var(--yellow); }
+.row-context[data-tone="low"] { color: var(--orange); }
+.row-context[data-tone="low"] .row-context-fill { background: var(--orange); }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .row-context-fill { transition: none; }
+}
 .shell.session-mode .breakdown {
   gap: 7px;
 }
@@ -3941,7 +4146,7 @@ html.is-windows .settings-panel select option {
 }
 .codex-reset-forecast-info-wrap .limit-detail-tooltip {
   right: auto;
-  left: -1px;
+  left: calc(anchor(left) - 1px);
   width: max-content;
   max-width: min(230px, calc(100vw - 48px));
   grid-template-columns: max-content minmax(0, 1fr);
@@ -3957,18 +4162,6 @@ html.is-windows .settings-panel select option {
 .codex-reset-forecast-info-wrap .limit-detail-tooltip-row span:last-child {
   overflow-wrap: anywhere;
   white-space: normal;
-}
-.codex-reset-forecast-info-wrap .limit-detail-tooltip.is-below {
-  top: calc(100% + 5px);
-  bottom: auto;
-}
-.codex-reset-forecast-info-wrap .limit-detail-tooltip.is-below::after {
-  top: -4px;
-  bottom: auto;
-  border-top: 1px solid rgba(var(--line-rgb), 0.22);
-  border-right: none;
-  border-bottom: none;
-  border-left: 1px solid rgba(var(--line-rgb), 0.22);
 }
 .codex-reset-forecast.is-loading .codex-reset-forecast-value,
 .codex-reset-forecast.is-unavailable .codex-reset-forecast-value {
@@ -4134,14 +4327,24 @@ html.is-windows .limit-live-badge {
    this stylesheet's floor for a hairline that survives the light theme, so the
    weight can't go lower. Twice the within-account gap (.limit-row) carries the
    grouping on its own; the rule just pins it. `+` keeps it strictly between
-   accounts. */
+   accounts.
+
+   The reset forecast takes this same separator in every shape it is drawn in:
+   it is a block of its own below the quota rows, and whether the provider above
+   it holds one account or several is not something the reader should have to
+   notice. Scoping it to `.limit-row-group` is what made the rule appear in a
+   multi-account row and go missing in a single-account one — and since the dock
+   card is built on this same row, it showed only the missing half. The forecast
+   is only ever a child of one of those two shapes (limitWindowsView.js appends
+   it to a solo row and to a group, never to an account row), so an unscoped
+   selector reaches no third case. */
 .limit-account-row + .limit-account-row {
   position: relative;
   margin-top: 10px;
   padding-top: 10px;
 }
 .limit-account-row + .limit-account-row::before,
-.limit-row-group > .codex-reset-forecast::before {
+.codex-reset-forecast::before {
   position: absolute;
   top: 0;
   right: 0;
@@ -4333,18 +4536,33 @@ html.is-windows .limit-live-badge {
 .limit-detail-tooltip-wrap:hover .limit-detail-tooltip-trigger {
   opacity: 0.72;
 }
+/* Every tooltip on this surface is a popover, so it paints in the top layer.
+   Both surfaces that draw these rows scroll inside a clipping box — the limits
+   panel and the dock card's account list — and an absolutely positioned tooltip
+   was cut off by it and painted under whatever sat above. The top layer escapes
+   every ancestor's overflow and stacking context at once, which is why this is
+   one rule rather than a z-index hunt per caller.
+
+   The top layer is not the containing block, though: a popover has no ancestor
+   to be positioned against, so it is anchored instead. The anchor names have to
+   be unique per trigger, so they are minted in JS (attachLimitDetailTooltip)
+   and only consumed here. `inset: auto` undoes the UA popover rule that would
+   otherwise stretch it across the viewport. */
 .limit-detail-tooltip {
-  position: absolute;
-  right: -1px;
-  bottom: calc(100% + 5px);
+  position: fixed;
+  inset: auto;
+  right: calc(anchor(right) - 1px);
+  bottom: calc(anchor(top) + 5px);
   z-index: 20;
-  display: grid;
   width: max-content;
   min-width: 0;
+  max-height: none;
+  margin: 0;
   grid-template-columns: max-content max-content;
   column-gap: 12px;
   row-gap: 4px;
   padding: 6px 7px;
+  overflow: visible;
   border: 1px solid rgba(var(--line-rgb), 0.22);
   border-radius: 7px;
   background:
@@ -4355,10 +4573,39 @@ html.is-windows .limit-live-badge {
   opacity: 0;
   pointer-events: none;
   transform: translateY(2px);
-  transition: opacity 120ms ease, transform 120ms ease;
-  visibility: hidden;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    display 120ms allow-discrete,
+    overlay 120ms allow-discrete;
   -webkit-backdrop-filter: blur(28px) saturate(115%);
   backdrop-filter: blur(28px) saturate(115%);
+}
+.limit-detail-tooltip:popover-open {
+  display: grid;
+  opacity: 1;
+  transform: translateY(0);
+}
+@starting-style {
+  .limit-detail-tooltip:popover-open {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+/* Flipped below when the trigger sits too near the top of the window. The top
+   layer clears every clipping ancestor but not the window itself, and on a
+   280px dock card there is often nothing above the first row. */
+.limit-detail-tooltip.is-below {
+  top: calc(anchor(bottom) + 5px);
+  bottom: auto;
+}
+.limit-detail-tooltip.is-below::after {
+  top: -4px;
+  bottom: auto;
+  border-top: 1px solid rgba(var(--line-rgb), 0.22);
+  border-right: none;
+  border-bottom: none;
+  border-left: 1px solid rgba(var(--line-rgb), 0.22);
 }
 .limit-detail-tooltip-triple {
   grid-template-columns: max-content max-content max-content;
@@ -4374,12 +4621,6 @@ html.is-windows .limit-live-badge {
   background: rgba(var(--glass-rgb), 0.76);
   content: "";
   transform: rotate(45deg);
-}
-.limit-detail-tooltip-wrap:hover .limit-detail-tooltip,
-.limit-detail-tooltip-wrap:focus-within .limit-detail-tooltip {
-  opacity: 1;
-  transform: translateY(0);
-  visibility: visible;
 }
 .limit-detail-tooltip-wrap.has-opened .limit-detail-tooltip {
   transition: none;
@@ -4752,24 +4993,8 @@ html.is-windows .limit-live-badge {
    against right-aligned values. A key/value card reads as labels left, values
    right; the value cells set their own alignment already. */
 .subscription-tooltip {
-  right: 0;
+  right: anchor(right);
   text-align: left;
-}
-/* The card opens upward, and .limits-panel scrolls behind `overflow: hidden
-   auto` — so on the topmost provider the whole card landed above the panel's
-   edge and was clipped away. positionSubscriptionTooltip() flips it below when
-   the row has no room above it. */
-.subscription-tooltip.is-below {
-  top: calc(100% + 5px);
-  bottom: auto;
-}
-.subscription-tooltip.is-below::after {
-  top: -4px;
-  bottom: auto;
-  border-top: 1px solid rgba(var(--line-rgb), 0.22);
-  border-right: none;
-  border-bottom: none;
-  border-left: 1px solid rgba(var(--line-rgb), 0.22);
 }
 .subscription-tooltip-rule {
   height: 1px;
@@ -5316,47 +5541,69 @@ html.is-windows .limit-live-badge {
 }
 
 #claudeManualPanel,
-#cursorManualPanel,
 #opencodeManualPanel,
-#deepseekManualPanel,
-#minimaxManualPanel,
-#zaiManualPanel,
-#zaiteamManualPanel,
-#volcengineManualPanel,
-#qoderManualPanel,
-#traeManualPanel,
+#cursorManualPanel,
+#factoryManualPanel,
+#kimiManualPanel,
+#copilotManualPanel,
 #zedManualPanel,
 #commandcodeManualPanel,
-#ollamaManualPanel,
 #mimoManualPanel,
-#kimiManualPanel,
-#copilotManualPanel {
+#zaiManualPanel,
+#zaiteamManualPanel,
+#qoderManualPanel,
+#deepseekManualPanel,
+#minimaxManualPanel,
+#volcengineManualPanel,
+#ollamaManualPanel,
+#traeManualPanel {
   min-width: 0;
 }
 #claudeManualPanel > .accordion-animation-inner,
-#cursorManualPanel > .accordion-animation-inner,
 #opencodeManualPanel > .accordion-animation-inner,
-#deepseekManualPanel > .accordion-animation-inner,
-#minimaxManualPanel > .accordion-animation-inner,
-#zaiManualPanel > .accordion-animation-inner,
-#zaiteamManualPanel > .accordion-animation-inner,
-#volcengineManualPanel > .accordion-animation-inner,
-#qoderManualPanel > .accordion-animation-inner,
-#traeManualPanel > .accordion-animation-inner,
+#cursorManualPanel > .accordion-animation-inner,
+#factoryManualPanel > .accordion-animation-inner,
+#kimiManualPanel > .accordion-animation-inner,
 #zedManualPanel > .accordion-animation-inner,
 #commandcodeManualPanel > .accordion-animation-inner,
-#ollamaManualPanel > .accordion-animation-inner,
 #mimoManualPanel > .accordion-animation-inner,
-#kimiManualPanel > .accordion-animation-inner,
+#zaiManualPanel > .accordion-animation-inner,
+#zaiteamManualPanel > .accordion-animation-inner,
+#qoderManualPanel > .accordion-animation-inner,
+#deepseekManualPanel > .accordion-animation-inner,
+#minimaxManualPanel > .accordion-animation-inner,
+#volcengineManualPanel > .accordion-animation-inner,
+#ollamaManualPanel > .accordion-animation-inner,
+#traeManualPanel > .accordion-animation-inner,
 #alibabaManualPanel > .accordion-animation-inner {
   display: grid;
   min-width: 0;
   gap: 8px;
 }
 #claudeManualPanel textarea,
-#cursorManualPanel textarea,
 #opencodeManualPanel textarea,
+#cursorManualPanel textarea,
+#factoryManualPanel input,
+#kimiManualPanel input,
+#kimiManualPanel textarea,
+#copilotManualDetails input,
+#zedManualPanel textarea,
+#commandcodeManualPanel textarea,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
+#zaiManualPanel input,
+#zaiApiRegionInput,
+#zaiteamManualPanel input,
+#qoderManualPanel textarea,
+#qoderManualPanel select,
+#deepseekManualPanel input,
 #openrouterApiKeyInput,
+#minimaxManualPanel input,
+#volcengineManualPanel input,
+#ollamaManualPanel textarea,
+#traeManualPanel input,
+#alibabaManualPanel textarea,
+#alibabaManualPanel select,
 #thirdpartyPlatformInput,
 #thirdpartyModeInput,
 #thirdpartyAuthModeInput,
@@ -5369,33 +5616,30 @@ html.is-windows .limit-live-badge {
 #thirdpartyUsedPathInput,
 #thirdpartyTotalPathInput,
 #thirdpartyCurrencyInput,
-#thirdpartyDivisorInput,
-#deepseekManualPanel input,
-#minimaxManualPanel input,
-#zaiManualPanel input,
-#zaiteamManualPanel input,
-#zaiApiRegionInput,
-#volcengineManualPanel input,
-#qoderManualPanel textarea,
-#qoderManualPanel select,
-#traeManualPanel input,
-#zedManualPanel textarea,
-#commandcodeManualPanel textarea,
-#ollamaManualPanel textarea,
-#mimoManualPanel input,
-#mimoManualPanel textarea,
-#kimiManualPanel input,
-#kimiManualPanel textarea,
-#alibabaManualPanel textarea,
-#alibabaManualPanel select,
-#copilotManualDetails input {
+#thirdpartyDivisorInput {
   width: 100%;
   font-size: 12px;
 }
 #claudeManualPanel textarea,
-#cursorManualPanel textarea,
 #opencodeManualPanel textarea,
+#cursorManualPanel textarea,
+#factoryManualPanel input,
+#kimiManualPanel input,
+#kimiManualPanel textarea,
+#copilotManualDetails input,
+#zedManualPanel textarea,
+#commandcodeManualPanel textarea,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
+#zaiManualPanel input,
+#zaiteamManualPanel input,
+#qoderManualPanel textarea,
+#deepseekManualPanel input,
 #openrouterApiKeyInput,
+#minimaxManualPanel input,
+#volcengineManualPanel input,
+#ollamaManualPanel textarea,
+#traeManualPanel input,
 #thirdpartyBaseUrlInput,
 #thirdpartyAccessTokenInput,
 #thirdpartyUserIdInput,
@@ -5405,22 +5649,7 @@ html.is-windows .limit-live-badge {
 #thirdpartyUsedPathInput,
 #thirdpartyTotalPathInput,
 #thirdpartyCurrencyInput,
-#thirdpartyDivisorInput,
-#deepseekManualPanel input,
-#minimaxManualPanel input,
-#zaiManualPanel input,
-#zaiteamManualPanel input,
-#volcengineManualPanel input,
-#qoderManualPanel textarea,
-#traeManualPanel input,
-#zedManualPanel textarea,
-#commandcodeManualPanel textarea,
-#ollamaManualPanel textarea,
-#mimoManualPanel input,
-#mimoManualPanel textarea,
-#kimiManualPanel input,
-#kimiManualPanel textarea,
-#copilotManualDetails input {
+#thirdpartyDivisorInput {
   font-family: monospace;
 }
 .link-button {
@@ -5594,6 +5823,56 @@ html.is-windows .limit-live-badge {
   gap: 8px;
 }
 .status-provider-row.is-hidden .tool-preference-name { opacity: 0.45; }
+
+/* Main Screen starts pointer reordering from the six-dot handles, while the
+   rows use the same transform choreography as Collection and AI Tool Limits. */
+.view-preference-row,
+.home-module-preference-row,
+.home-limit-provider-row,
+.status-provider-row {
+  position: relative;
+  touch-action: pan-y;
+  transform: translateY(calc(var(--drag-y, 0px) + var(--drag-shift, 0px)));
+  transition:
+    transform 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+.view-preference-row.dragging,
+.home-module-preference-row.dragging,
+.home-limit-provider-row.dragging,
+.status-provider-row.dragging {
+  z-index: 2;
+  background: rgba(var(--panel-rgb), 0.96);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.62);
+  cursor: grabbing;
+  scale: 1.02;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+  will-change: transform;
+}
+.view-preference-row.dragging .preference-order-handle,
+.home-module-preference-row.dragging .preference-order-handle,
+.home-limit-provider-row.dragging .preference-order-handle,
+.status-provider-row.dragging .preference-order-handle { cursor: grabbing; }
+#viewDisplayList.is-landing > .view-preference-row,
+.home-settings-list.is-landing > .home-module-preference-row,
+.home-limit-provider-list.is-landing > .home-limit-provider-row,
+.status-provider-list.is-landing > .status-provider-row {
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+#viewDisplayList.drag-active > .view-preference-row:not(.dragging),
+.home-settings-list.drag-active > .home-module-preference-row:not(.dragging),
+.home-limit-provider-list.drag-active > .home-limit-provider-row:not(.dragging),
+.status-provider-list.drag-active > .status-provider-row:not(.dragging) { opacity: 0.78; }
+#viewDisplayList.is-reordering > .accordion-animated-container,
+.home-settings-list.is-reordering > .accordion-animated-container { transition: none; }
 .service-status-empty {
   padding: 12px 0;
   color: var(--muted);
@@ -5815,12 +6094,16 @@ html.is-windows .limit-live-badge {
   border-radius: 50%;
 }
 
-.custom-pricing-form {
+.custom-pricing-form,
+.model-alias-form {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-top: 8px;
 }
+
+.model-alias-form label { display: grid; gap: 4px; min-width: 0; }
+.model-alias-form input { width: 100%; min-width: 0; box-sizing: border-box; }
 
 
 
@@ -7003,6 +7286,10 @@ html.is-windows .limit-live-badge {
   .tray-composer-item { transition: none; }
   .settings-panel .limit-provider-row { transition: none; }
   .tool-preference-row { transition: none; }
+  .view-preference-row,
+  .home-module-preference-row,
+  .home-limit-provider-row,
+  .status-provider-row { transition: none; }
   .tool-preference-main .cursor-disclosure-icon { transition: none; }
 }
 

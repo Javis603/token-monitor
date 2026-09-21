@@ -1,0 +1,884 @@
+/* Edge dock surfaces (peek handle, rail, detail card). Built on the widget's own
+   theme variables from styles.css, so the dock follows the chosen palette,
+   glass opacity and fonts instead of shipping a fixed dark skin. Rail cell
+   geometry must match EDGE_DOCK_METRICS in edgeDockGeometry.js: the main
+   process resolves the hovered cell from those numbers. */
+
+html, body.edge-dock {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  background: transparent;
+  overflow: hidden;
+}
+
+/* The silhouette is drawn, not clipped: each surface's outline comes from
+   edgeDockShapes.js, the same commands that mask the native material on macOS,
+   so the tint and the glass behind it share one edge. */
+.edge-dock-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 0;
+  color: var(--text);
+  /* Body text follows the widget's interface font, as the Limits view does;
+     only headline figures use the display font (see below). */
+  font-family: var(--ui-font, ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace);
+  font-variant-numeric: tabular-nums;
+}
+.edge-dock-value,
+.edge-dock-stat-value,
+.edge-dock-stat-cost,
+.edge-dock-stat-label,
+.edge-dock-stat-headline strong,
+.edge-dock-usage-tokens,
+.edge-dock-rate-figure {
+  font-family: var(--display-font, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif);
+}
+
+.edge-dock-content {
+  position: absolute;
+  inset: 0;
+}
+
+.edge-dock-shape {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.edge-dock-shape-fill { fill: var(--glass); }
+.edge-dock-shape-line {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+/* Without native material behind it the tint alone carries the surface, so it
+   needs enough body to stay legible over whatever is on screen. */
+html.edge-dock-no-material .edge-dock-shape-fill {
+  fill: rgba(var(--glass-rgb), max(var(--glass-alpha), 0.9));
+}
+
+/* ---- Peek handle ------------------------------------------------------- */
+
+.edge-dock-root[data-surface="peek"] { cursor: pointer; }
+.edge-dock-grip {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 14px;
+  margin-top: -7px;
+  border-radius: 999px;
+  background: rgba(var(--accent-rgb), 0.75);
+  /* The return takes the window's own FADE_IN_MS, so the handle grows back out on
+     the beat the glass comes back. The retreat below overrides this with a shorter,
+     front-loaded curve, because the main process's fade-out outlasts the movement
+     and the window would otherwise dim past it before it had travelled. */
+  transition: opacity 150ms ease, transform 150ms cubic-bezier(0.33, 1, 0.68, 1);
+}
+.edge-dock-root[data-side="right"] .edge-dock-grip { right: 2px; }
+.edge-dock-root[data-side="left"] .edge-dock-grip { left: 2px; }
+.edge-dock-root[data-surface="peek"]:hover .edge-dock-grip { transform: scaleY(1.3); }
+/* Withdrawn: the handle retreats into the edge it hangs off, the way the rail slides
+   out of that same edge when it takes the handle's place. It shrinks along its own
+   length as it goes, because the window is only 7px wide - the grip has 4px of travel
+   before it is past the edge and clipped, which on its own is not a movement anyone
+   would see. The page holds this as a state rather than replaying an animation, so one
+   transition carries it both ways and a page that loads with the rail already open
+   starts here instead of animating into it. */
+.edge-dock-root[data-side="right"] { --edge-dock-grip-retreat: 4px; }
+.edge-dock-root[data-side="left"] { --edge-dock-grip-retreat: -4px; }
+.edge-dock-root[data-surface="peek"].is-handle-hidden .edge-dock-grip {
+  opacity: 0;
+  transform: translateX(var(--edge-dock-grip-retreat)) scaleY(0.2);
+  transition: opacity 110ms ease-out, transform 110ms ease-out;
+}
+
+/* ---- Rail --------------------------------------------------------------- */
+
+.edge-dock-rail {
+  position: absolute;
+  inset: 0;
+  cursor: default;
+}
+.edge-dock-rail.is-dragging { cursor: grabbing; }
+
+
+.edge-dock-cell {
+  /* Top and height come from the main process's layout (edgeDockCellLayout). */
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 70px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 12px;
+  transition: background-color 140ms ease;
+}
+/* Hover is carried by the mark itself rather than a selection box: the focused
+   ring thickens and glows in its own colour. */
+.edge-dock-cell.is-focused .edge-dock-ring-fill {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--ring-color, var(--accent)) 55%, transparent));
+}
+
+.edge-dock-ring {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+}
+.edge-dock-ring svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+.edge-dock-ring-track {
+  fill: none;
+  stroke: rgba(var(--overlay-rgb), 0.12);
+  stroke-width: 3.5;
+}
+.edge-dock-ring-fill {
+  fill: none;
+  stroke: var(--ring-color, var(--accent));
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 420ms cubic-bezier(0.2, 0.8, 0.2, 1), filter 180ms ease;
+}
+.edge-dock-cell[data-status="stale"] .edge-dock-ring-fill,
+.edge-dock-cell[data-status="error"] .edge-dock-ring-fill { opacity: 0.35; }
+
+/* Running: a halo behind the provider's mark while that tool has work in flight.
+   It sits on the mark and not on the arc because a running session does not prove
+   this quota is what is draining (the tokens may be billed elsewhere), so it is a
+   fact about the tool rather than about the reading - see providerCellNode for the
+   full reasoning.
+
+   Opacity and transform only: this is the one animation in the dock that runs
+   whenever work is in flight rather than only while a card is open, in an
+   always-on-top window, so it has to stay on the compositor. Animating the arc's
+   `drop-shadow` instead would repaint a blur every frame for the whole life of a
+   session.
+
+   The halo has to out-reach the glyph it sits behind, and only just: the mark is
+   17px across a 42px ring, so a glow that dies at the mark's own 8.5px half-width
+   is left with nothing to show beside the letterform but whatever comes through
+   its counters. The gradient carries no hold stop, so it is brightest at the
+   centre and spends itself from there out - and at 62% of the ring the last of
+   the colour lands at 9.4px, just clear of the glyph, with the band beside it
+   being the falloff's own tail. Holding colour out to a stop and spending the
+   falloff after it was what made an earlier cut read as a second, larger circle
+   behind the ring rather than as light around the mark. It stays sized against
+   the ring rather than the mark so the compact rail keeps the same proportion. */
+.edge-dock-ring-glow {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 62%;
+  height: 62%;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(closest-side, var(--ring-color, var(--accent)), transparent 72%);
+  transition: opacity 240ms ease;
+}
+/* The mark is an in-flow grid item and the halo is positioned, so without this the
+   halo paints over the glyph it is meant to sit behind - painting order puts a
+   positioned element above an in-flow sibling whatever the DOM order. Scoped to the
+   ring: the same class is drawn flat in the card's rows and its lists. */
+.edge-dock-ring .edge-dock-mark { position: relative; }
+/* The lit state is a still halo, and the keyframes only modulate it. Reduced
+   motion stops the animation but not the declaration, so it falls back to a
+   steady glow rather than to nothing - the same trade the session dot makes when
+   it swaps its spinner for a solid dot. The still value is the midpoint of the
+   breath, so the state that replaces the animation is the one the animation
+   spends most of its time near rather than either end of the swing. */
+.edge-dock-cell[data-running="yes"] .edge-dock-ring-glow {
+  opacity: 0.45;
+  animation: edge-dock-mark-breathe 2600ms ease-in-out infinite;
+}
+@keyframes edge-dock-mark-breathe {
+  0%, 100% { opacity: 0.24; transform: scale(0.93); }
+  50%      { opacity: 0.66; transform: scale(1.06); }
+}
+
+.edge-dock-mark {
+  width: 17px;
+  height: 17px;
+  background-color: var(--text);
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain;    mask-size: contain;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+}
+.edge-dock-mark.is-fallback {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--ring-color, var(--accent));
+  -webkit-mask: none;
+  mask: none;
+}
+
+.edge-dock-value {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap;
+}
+.edge-dock-value[data-severity="low"] { color: var(--orange); }
+.edge-dock-value[data-severity="critical"] { color: var(--red); }
+.edge-dock-value[data-severity="unknown"] { color: var(--muted); }
+
+/* Usage readouts: a caption over the figure, sized to sit inside the rail's
+   body rather than spanning it. */
+.edge-dock-cell-stat { gap: 3px; }
+.edge-dock-stat-label {
+  max-width: 54px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.edge-dock-stat-value {
+  max-width: 56px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: clip;
+  transition: color 180ms ease, text-shadow 180ms ease;
+}
+.edge-dock-stat-cost {
+  max-width: 56px;
+  font-size: 9.5px;
+  line-height: 1;
+  color: var(--muted);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: clip;
+}
+.edge-dock-cell-stat.is-idle .edge-dock-stat-value { color: var(--muted); }
+/* The tools with work in flight, drawn with their own marks. The cell is 56px
+   of a 64px rail, so the row is capped in the projection (runningClients) and
+   the remainder is stated as a count rather than shrunk below legibility. */
+.edge-dock-cell-marks {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 13px;
+  overflow: hidden;
+}
+.edge-dock-cell-marks .edge-dock-mark { width: 11px; height: 11px; }
+.edge-dock-cell-more {
+  color: var(--muted);
+  font-size: 8.5px;
+  font-weight: 600;
+  line-height: 1;
+}
+.edge-dock-rail.is-compact .edge-dock-cell-marks { height: 11px; }
+.edge-dock-rail.is-compact .edge-dock-cell-marks .edge-dock-mark { width: 9px; height: 9px; }
+.edge-dock-rail.is-compact .edge-dock-cell-more { font-size: 8px; }
+/* The other third line: the live token rate as ONE reading, "184 tok/s". Stacking
+   the figure over its unit made it read as two separate numbers in a 56px cell
+   that already has one above it - the caption line of this cell is the sessions
+   count, so the rate line has to be self-describing on a single line. Muted while
+   idle rather than hidden, so the cell keeps one height either way. */
+.edge-dock-cell-rate {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 3px;
+  max-width: 100%;
+  overflow: hidden;
+  font-family: var(--display-font, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif);
+  font-size: 9px;
+  line-height: 1;
+}
+/* One size for the whole line, taken from the live-rate cell's own unit style - the
+   9px semibold muted label it prints above its number. That cell can set its number
+   larger because the number IS that cell: the headline, alone under its caption.
+   Here the line sits under the running count, so an enlarged figure reads as a second
+   headline beside that count. The figure still leads through its ink and weight; the
+   size is what it shares. */
+.edge-dock-cell-rate-value {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+/* The live-rate cell's label treatment, verbatim: same size, weight and colour as the
+   `tok/s` it prints, since this is the same unit naming the same measurement. */
+.edge-dock-cell-rate-unit { color: var(--muted); font-weight: 600; }
+.edge-dock-cell-rate.is-idle .edge-dock-cell-rate-value { color: var(--muted); }
+.edge-dock-rail.is-compact .edge-dock-cell-rate { font-size: 8.5px; }
+.edge-dock-cell-stat.is-focused .edge-dock-stat-value {
+  color: var(--accent);
+  text-shadow: 0 0 6px rgba(var(--accent-rgb), 0.25);
+}
+
+/* Compressed density when the rail would otherwise overflow the screen. */
+.edge-dock-rail.is-compact .edge-dock-ring { width: 34px; height: 34px; }
+.edge-dock-rail.is-compact .edge-dock-mark { width: 14px; height: 14px; }
+.edge-dock-rail.is-compact .edge-dock-cell { gap: 2px; }
+.edge-dock-rail.is-compact .edge-dock-value { font-size: 11px; }
+.edge-dock-rail.is-compact .edge-dock-cell-stat { gap: 2px; }
+
+/* ---- Detail card --------------------------------------------------------- */
+
+.edge-dock-card {
+  position: relative;
+  width: 280px;
+  box-sizing: border-box;
+  padding: 12px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-size: 12px;
+}
+.edge-dock-root[data-surface="bubble"][data-side="left"] .edge-dock-card { margin-left: 12px; }
+.edge-dock-card > header,
+.edge-dock-card > footer { flex-shrink: 0; }
+
+.edge-dock-card-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.edge-dock-card-head .edge-dock-mark { width: 15px; height: 15px; flex: 0 0 auto; }
+/* The card's own status line ("2 running"), the same slot and weight as the
+   live-rate card's status so the two stat cards' headers read alike. */
+.edge-dock-card-status { color: var(--muted); font-size: 10.5px; flex: 0 0 auto; }
+
+.edge-dock-accounts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.edge-dock-accounts::-webkit-scrollbar { display: none; }
+/* A provider row carries the Limits page's own bottom rule and the space under
+   it, both of which are the *inter-card* separator there: the panel goes on below
+   the row, so the rule marks where the next card starts and the padding is the
+   room it gets. The card ends at the row, so both are spent on nothing — the rule
+   would be a line drawn under the last thing the card says, and the padding added
+   12px of dead space under it on top of the card's own section gap (307px → 319px
+   for the same Claude card). The card's sections already separate themselves with
+   the feathered hairline above (see `.edge-dock-sessions::before`), so nothing is
+   lost by dropping them at the edge. */
+.edge-dock-accounts > .limit-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+/* Separators are the Limits view's feathered hairline (fading out at both
+   ends), not a solid rule. */
+.edge-dock-sessions {
+  position: relative;
+  padding-top: 10px;
+}
+/* One separator, declared once: the rule above the reset forecast is the Limits
+   view's (styles.css `.codex-reset-forecast::before`), and this page loads that
+   stylesheet, so the card is covered by it in both shapes — a single account and
+   a group. The card used to compensate here for a page rule scoped to
+   `.limit-row-group`, which is exactly the kind of second copy that drifts. The
+   forecast keeps its own 8px of top padding rather than the 10px an
+   `.edge-dock-sessions` block sits under, so the gap below the line is the
+   page's either way. */
+.edge-dock-sessions::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    rgba(var(--line-rgb), 0) 0,
+    rgba(var(--line-rgb), 0.075) 22%,
+    rgba(var(--line-rgb), 0.075) 78%,
+    rgba(var(--line-rgb), 0) 100%
+  );
+  content: '';
+}
+/* A nested list (grouped by tool) already sits under its group's own header: the
+   rule and the space above the section are for a block following a quota row,
+   and drawing them per group would put a line under every header. */
+.edge-dock-sessions.is-plain {
+  padding-top: 0;
+}
+.edge-dock-sessions.is-plain::before { display: none; }
+/* A group header is a mark + a tool name + an optional count, and the mark is a
+   masked box with no text baseline. Centering is therefore the only alignment
+   that holds all three on one line: `align-items: baseline` (what the shared
+   `.edge-dock-section-head` uses for two text parts) pushed the mark above its
+   own label. The name takes the slack so a long one ellipsizes instead of
+   shoving the count off the row. */
+.edge-dock-session-group-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.edge-dock-session-group-head .edge-dock-mark {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+.edge-dock-session-group-head .edge-dock-section-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.edge-dock-session-group-head .edge-dock-section-count { flex: 0 0 auto; }
+
+/* Shrinkable, unlike the rest of the card: the card is clamped to the work
+   area, so a block that refuses to shrink is clipped rather than scrolled. The
+   accounts block keeps flex-grow, so it yields space first. */
+.edge-dock-sessions {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  flex: 0 1 auto;
+}
+.edge-dock-section-title { color: var(--muted); font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em; }
+.edge-dock-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* The one fact the rows cannot state for themselves; muted so it reads as a
+   caption rather than a headline beside the quota figures above it. */
+.edge-dock-section-count { color: var(--muted); font-size: 10px; }
+/* The list scrolls like the accounts block above it. Running sessions are not
+   capped, so a burst of them must scroll the card rather than push the quota
+   section out of a window the OS has already clamped to the work area. */
+.edge-dock-session-list {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.edge-dock-session-list::-webkit-scrollbar { display: none; }
+.edge-dock-session {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  row-gap: 2px;
+  column-gap: 10px;
+}
+.edge-dock-session-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The state mark, reserved on every row so all titles start at the same x.
+   Three states, matching the Sessions list: a spinner while the agent works, a
+   check once the transcript said the turn finished, and a faint dot for a
+   session that has simply gone quiet. Without the reserved slot a mark pushed
+   the row's name right of its neighbours'.
+
+   The glyphs are stacked and one is revealed, so a row changing state never
+   rebuilds a node (which would restart the spinner from zero). */
+.edge-dock-session-dot {
+  position: relative;
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+}
+.edge-dock-session-dot > * {
+  position: absolute;
+  inset: 0;
+  display: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.edge-dock-session-dot[data-state="running"] .edge-dock-session-spin,
+.edge-dock-session-dot[data-state="ended"] .edge-dock-session-check,
+.edge-dock-session-dot[data-state="idle"] .edge-dock-session-idle { display: block; }
+
+/* Running: the only perpetual animation in the dock, and it is bounded by real
+   work rather than by the card being open. The shape is the repo's own
+   actions/spinner.svg applied as a mask, the same asset the refresh button
+   masks. Its rotation comes from that file's own SMIL; adding a CSS rotation
+   here would spin it twice, and the 45-degree symmetry of the glyph makes a
+   rigid rotation alias to roughly eight times the intended rate.
+
+   Painted in the card's own ink rather than `--success`. The spokes fade in
+   sequence, so the glyph is never a still picture of a wheel and the motion
+   carries "working" by itself; a hue over the top of that says nothing the
+   motion has not already said, and the refresh button makes the same call — it
+   masks this asset in its own text colour too. Everything else in the column is
+   monochrome (the context gauge only leaves neutral for yellow or orange), so a
+   green wheel read as a different kind of thing set down among the text.
+
+   `--text` and not `--muted`: running is the state this column exists to report,
+   so it should not weigh the same as the ended check it replaces — bright and
+   moving, muted and still, faint and quiet, in that order.
+
+   The Sessions list keeps its green, which is not the same disagreement: there
+   the mark is a still 5px dot, where colour is all the "alive" it has. What the
+   two surfaces have to agree on is which state a session reads as. */
+.edge-dock-session-spin {
+  background: currentColor;
+  color: var(--text);
+  -webkit-mask: url("../icons/actions/spinner.svg") center / contain no-repeat;
+  mask: url("../icons/actions/spinner.svg") center / contain no-repeat;
+}
+
+/* Ended: a receipt, not a status light, so it stays muted rather than green.
+   Stroked rather than filled, matching the Sessions list. */
+ .edge-dock-session-check { color: var(--muted); }
+
+/* Idle: present so the column reads as a status, faint enough to disappear in
+   a scan. */
+.edge-dock-session-idle::before {
+  content: '';
+  position: absolute;
+  top: 2.5px;
+  left: 2.5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(var(--overlay-rgb), 0.22);
+}
+
+/* One-shot flare when the transcript actually grew, matching the Sessions list:
+   no `infinite` of its own, so the flare always means a write. The glow is the
+   overlay colour rather than `--success-rgb`, so it stays the spinner's own
+   neutral — a green halo around a grey wheel would be the one thing in the card
+   louder than the state it is announcing. */
+.edge-dock-session-dot.pulse .edge-dock-session-spin {
+  animation: edge-dock-session-pulse 1.2s ease-out;
+}
+@keyframes edge-dock-session-pulse {
+  0%   { filter: drop-shadow(0 0 2px rgba(var(--overlay-rgb), 0.30)); }
+  35%  { filter: drop-shadow(0 0 6px rgba(var(--overlay-rgb), 0.62)); }
+  100% { filter: drop-shadow(0 0 2px rgba(var(--overlay-rgb), 0.36)); }
+}
+.edge-dock-session-tokens { color: var(--text); font-size: 11.5px; text-align: right; }
+/* The row's own tool, in the mixed Sessions list. Sized between the state mark
+   beside it and the card's provider mark: it is an identity, not a status, so it
+   reads as the smallest of the three. The slot is only emitted on a mixed list,
+   which is why it does not shift provider-card rows. */
+.edge-dock-session-name .edge-dock-mark { width: 11px; height: 11px; flex: 0 0 auto; }
+/* One section per tool when the item is grouped. The nested list drops its own
+   head (sessionsContainer showCount:false) because the group header states the
+   same count one line above it. */
+.edge-dock-session-groups { gap: 12px; }
+.edge-dock-session-group { display: grid; gap: 6px; }
+.edge-dock-session-meta {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Headroom ADDS to the meta line rather than taking the token column: the total
+   is what the row was already for. A bar plus its percentage, coloured only as
+   it runs out, so a coloured reading always means the same thing here and in
+   the Sessions list. */
+.edge-dock-session-context {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: inherit;
+}
+.edge-dock-session-context-meter {
+  width: 16px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(var(--overlay-rgb), 0.18);
+}
+.edge-dock-session-context-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  background: rgba(var(--overlay-rgb), 0.5);
+  transform: scaleX(var(--bar-scale, 0));
+  transform-origin: left center;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.edge-dock-session-context[data-tone="caution"] { color: var(--yellow); }
+.edge-dock-session-context[data-tone="caution"] .edge-dock-session-context-fill { background: var(--yellow); }
+.edge-dock-session-context[data-tone="low"] { color: var(--orange); }
+.edge-dock-session-context[data-tone="low"] .edge-dock-session-context-fill { background: var(--orange); }
+html[data-reduce-motion="on"] .edge-dock-session-context-fill { transition: none; }
+html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none; }
+/* The quota rows are the Limits view's own DOM (.limit-*), styled by the
+   widget stylesheet this page also loads — including the two-column grid, so a
+   card pairs Session with Weekly exactly as the page does. What is left here is
+   what a 280px card needs that a resizable page does not. */
+.edge-dock-accounts .limit-windows {
+  gap: 9px 12px;
+}
+/* The tooltip is `width: max-content` and grows leftward from its trigger. On
+   the page that has the whole window to grow into; here the window is the card,
+   so a wide one would run off the edge instead of wrapping. */
+.edge-dock-accounts .limit-detail-tooltip {
+  max-width: 248px;
+}
+
+.edge-dock-note { font-size: 11px; color: var(--muted); }
+.edge-dock-note.is-warning { color: var(--orange); }
+
+/* Token usage for the provider: two equal tiles, each a caption, the token
+   figure and its cost, left-aligned on a shared baseline grid. */
+.edge-dock-usage {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.edge-dock-usage-tile {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: 9px;
+  background: rgba(var(--overlay-rgb), 0.05);
+}
+.edge-dock-usage-label { color: var(--muted); font-size: 10px; }
+.edge-dock-usage-tokens { font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
+.edge-dock-usage-cost {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.edge-dock-staging {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+/* Tools list: mark | name | tokens | share, then the bar under name→share.
+   Fixed trailing columns keep every figure right-aligned on the same edge. */
+.edge-dock-client {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto 34px;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 6px;
+  line-height: 1.2;
+}
+.edge-dock-clients { gap: 12px; }
+.edge-dock-client .edge-dock-mark {
+  display: block;
+  width: 13px;
+  height: 13px;
+  align-self: center;
+}
+.edge-dock-client .limit-meter { grid-column: 1 / -1; }
+.edge-dock-client-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.edge-dock-client-tokens { font-weight: 600; text-align: right; white-space: nowrap; }
+.edge-dock-client-share { color: var(--muted); text-align: right; white-space: nowrap; }
+
+/* Caption, figure and cost follow the widget's headline rhythm: a small muted
+   caption, room above the figure, the cost tucked just under it, then a clear
+   break before the per-tool list. */
+.edge-dock-stat-caption {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.edge-dock-stat-headline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 6px;
+  flex-shrink: 0;
+}
+.edge-dock-stat-headline strong {
+  font-size: 28px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.edge-dock-stat-headline span { color: var(--muted); font-size: 12px; line-height: 1.2; }
+
+.edge-dock-rate-figure {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: fit-content;
+  margin: -2px -6px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+.edge-dock-rate-figure:hover { background: rgba(var(--overlay-rgb), 0.07); }
+.edge-dock-rate-swap {
+  color: var(--muted);
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.edge-dock-rate-figure:hover .edge-dock-rate-swap { opacity: 1; }
+.edge-dock-rate-headline .edge-dock-rate-unit { color: var(--muted); font-size: 13px; font-weight: 600; }
+.edge-dock-card-head.is-inline {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.edge-dock-rate-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.edge-dock-rate-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(var(--overlay-rgb), 0.3);
+}
+.edge-dock-rate-status.is-live { color: var(--text); }
+.edge-dock-rate-status.is-live .edge-dock-rate-dot {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(var(--success-rgb), 0.18);
+}
+
+/* ---- Type scale ----------------------------------------------------------
+   Only the card's own blocks are sized here. Its Limits rows are the view's,
+   and the view states their sizes already (styles.css .limit-*), so a size
+   spelled out against one of its selectors is a second answer to a question
+   that has one — and it is the card's copy that goes wrong when the view's type
+   changes. */
+.edge-dock-card { font-size: 11px; }
+.edge-dock-note { font-size: 10px; }
+.edge-dock-section-title { font-size: 10px; }
+.edge-dock-session-name,
+.edge-dock-session-tokens { font-size: 11px; }
+.edge-dock-session-name .edge-dock-mark { width: 10px; height: 10px; }
+.edge-dock-session-meta { font-size: 9px; }
+.edge-dock-usage-label,
+.edge-dock-usage-cost { font-size: 9px; }
+.edge-dock-usage-tokens { font-size: 12px; }
+.edge-dock-client { font-size: 11px; }
+/* Headline rhythm copied from the widget's total panel (.label-row,
+   .total-number, .cost): caption, 8px to the figure at line-height 1.05 and
+   weight 500, 6px to the cost, then the list after the card's usual gap. */
+.edge-dock-stat-caption { font-size: 11px; font-weight: 400; letter-spacing: 0.02em; }
+.edge-dock-stat-headline { gap: 6px; margin: -2px 0 2px; }
+.edge-dock-stat-headline strong { font-size: 30px; font-weight: 500; line-height: 1.05; }
+.edge-dock-stat-headline span { font-size: 11px; line-height: 1.2; }
+.edge-dock-rate-status { font-size: 10px; }
+
+/* ---- Motion -------------------------------------------------------------- */
+
+/* The rail arrives by sliding out from under the screen edge, silhouette and
+   cells together, from the side that edge is on. `FADE_IN_MS` in the controller
+   is the same 150ms on the window's own fade, so both halves of the entrance —
+   the slide and the fade — run on one beat rather than reading as two stages. */
+@keyframes edge-dock-rail-in {
+  from { transform: translateX(var(--edge-dock-rail-shift, 14px)); }
+  to { transform: none; }
+}
+.edge-dock-root[data-side="left"] { --edge-dock-rail-shift: -14px; }
+.edge-dock-root.is-revealing { animation: edge-dock-rail-in 150ms cubic-bezier(0.33, 1, 0.68, 1) both; }
+
+@keyframes edge-dock-card-in {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: none; }
+}
+.edge-dock-root.is-card-changed .edge-dock-card { animation: edge-dock-card-in 160ms ease-out both; }
+
+/* The root is named beside its descendants because the rail's entrance animates
+   the root itself, and `*` does not match the element it hangs off — leaving the
+   one animation in this sheet that reduced motion would not stop. */
+html[data-reduce-motion="on"] .edge-dock-root,
+html[data-reduce-motion="on"] .edge-dock-root *,
+html.edge-dock-reduced-motion .edge-dock-root,
+html.edge-dock-reduced-motion .edge-dock-root * {
+  animation: none !important;
+  transition: none !important;
+}
+/* The blanket rule above stops CSS animations but not the spinner's own SMIL, so
+   reduced motion swaps the spinner for a still dot. Solid in the card's own ink
+   rather than `--success`: the weight is what carries the state here, a solid dot
+   against the idle dot's 22% one, which is the same trade the spinner makes with
+   motion and needs no hue to make. The Sessions list paints its still dot green
+   because there it is the only mark a session ever gets — every other state
+   draws nothing — so the hue is what stops it reading as a stray dot. Here the
+   quiet rows keep their faint one, and the contrast is the reading. */
+html[data-reduce-motion="on"] .edge-dock-session-dot[data-state="running"] .edge-dock-session-spin,
+html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge-dock-session-spin { display: none; }
+html[data-reduce-motion="on"] .edge-dock-session-dot[data-state="running"] .edge-dock-session-idle,
+html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge-dock-session-idle { display: block; }
+html[data-reduce-motion="on"] .edge-dock-session-dot[data-state="running"] .edge-dock-session-idle::before,
+html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge-dock-session-idle::before { background: var(--text); }
+
+/* Text for assistive technology only. The session glyphs are decorative and
+   their `title` reaches pointer users alone, so the translated state is
+   rendered as real text and taken out of the visual flow here. It cannot go on
+   the row: a plain div has the generic role, and Chromium ignores an accessible
+   name set on one. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

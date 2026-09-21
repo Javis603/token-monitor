@@ -250,10 +250,10 @@ function newExchange(promptPreview, timestamp) {
 }
 
 function finalizeExchange(ex) {
-  // Paid background usage such as a DSH compaction summary stays in `turns`
-  // for period filtering, token totals and cost allocation, but it is not an
-  // assistant reply and must not inflate the user-facing conversation count.
-  ex.turnCount = ex.turns.filter((turn) => turn.type !== 'compaction-summary').length;
+  // Paid non-reply usage such as a DSH compaction summary or failed/retried
+  // assistant attempt stays in `turns` for period filtering, token totals and
+  // cost allocation, but must not inflate the user-facing conversation count.
+  ex.turnCount = ex.turns.filter((turn) => turn.type !== 'compaction-summary' && turn.type !== 'assistant-attempt').length;
   ex.tools = uniqueTools(ex.turns.flatMap((t) => t.tools));
   ex.tokensAvailable = ex.turns.every((turn) => turn.tokensAvailable !== false);
   return ex;

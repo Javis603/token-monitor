@@ -4,31 +4,26 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Live token rate:** Adds an opt-in footer readout for generation speed (tok/s) or token burn (TPM); Hub modes can switch between all devices and this device. (#648)
-- **ZCode limits:** Automatically detects the locally signed-in ZCode account and shows its Coding Plan or Start/Weekend quota in the existing GLM row. (#630)
-- **Z.ai balance:** Shows the console-key cash balance with Today, Week, Month, and all-time spend. (#630)
-- **Kilo usage:** Tracks Kilo CLI and Kilo Code together under Kilo, including live refresh and WSL discovery; existing Kilo Code settings and history migrate automatically. (#635)
+- **Session activity:** Shows live running and finished states for Codex, DeepSeek Harness, OpenCode, and Claude Code, plus context used/remaining gauges for Codex and DeepSeek Harness. (#728)
+- **Edge Dock sessions:** Adds a Sessions item for every tracked tool, with a single timeline or groups by tool, running-only filtering, and configurable rail summaries. (#742)
 
 ### Improved
-- **Quota reset motion:** Animates a quota meter from its last value to the refilled state when a reset is detected, while respecting reduced motion. (#644)
+- **Edge Dock limits:** Shows the same quota, balance, freshness, and account details as the Limits view, including OpenCode Zen balances and Command Code monthly grants. (#737)
+- **Edge Dock motion:** Animates the rail reveal, handle retreat, and running marks. (#754)
 
 ### Fixed
-- **Limits view motion:** Restores meter entrance motion when returning to the cached Limits view. (#651)
-- **Claude CLI limits:** Prevents background probes from opening the login flow, supports Windows `.cmd` installs, and keeps session and weekly values paired with the correct reset times. (#612)
-- **WorkBuddy Personal balance:** Corrects the balance by using the same eligible package range as the desktop client. (#643)
-- **Kiro limits:** Restores quota details when the default v2 output contains only a plan summary. (#641)
-- **OpenClaw live tracking:** Avoids excessive memory use in large runtime and workspace trees by limiting live tracking to usage sources. (#632)
-- **Codex limits:** Restores quota collection with Codex CLI 0.149.0 and later when OAuth falls back to app-server. (#631)
-- **AI Tool Limits toggles:** Fixes provider toggles flickering back to their previous state while settings are being saved. (#589)
+- **ZCode accounts:** Keeps Coding Plan and Start/Weekend quota tied to live ZCode credentials on fresh installs and after account switches. (#725)
+- **Antigravity usage:** No longer splits Antigravity CLI usage into duplicate tool rows or chart series. (#723)
+- **Antigravity quota:** Improves CLI Hub detection for custom ports and avoids unauthenticated quota connections. (#723)
+- **Provider icons:** Adds icon presentation for Qmodel, Nemotron, and StepFun. (#755)
 <!-- app-update-notes:en:end -->
-
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.55.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.55.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.55.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-Setup-0.55.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.55.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.55.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.60.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.60.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.60.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-Setup-0.60.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.60.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.60.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -66,31 +61,27 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **实时 Token 速率：** 新增可选底栏读数，可在生成速度（tok/s）与 Token 消耗（TPM）之间切换；Hub 模式可选择所有设备或本机。（#648）
-- **ZCode 额度：** 自动检测本机已登录的 ZCode 账号，并在现有 GLM 行显示 Coding Plan 或 Start/Weekend 额度。（#630）
-- **Z.ai 余额：** 显示控制台密钥的现金余额及今天、本周、本月和累计支出。（#630）
-- **Kilo 用量：** 将 Kilo CLI 与 Kilo Code 统一归入 Kilo 追踪，支持实时更新与 WSL，并自动迁移现有 Kilo Code 设置和历史。（#635）
+- **会话活动：** 显示 Codex、DeepSeek Harness、OpenCode 与 Claude Code 会话的运行中及已完成状态；Codex 与 DeepSeek Harness 还可显示上下文已用或剩余比例。（#728）
+- **侧边栏会话：** 新增“会话”项目，可汇总所有追踪工具，按单一时间线或工具分组显示，并支持仅显示运行中会话及自定义侧边栏摘要。（#742）
 
 ### 改进
-- **额度重置动画：** 检测到重置时，从上次显示值平滑补满，并遵循减少动态效果设置。（#644）
+- **侧边栏额度：** 显示与“额度”视图一致的额度窗口、余额、更新时间与账号信息，包括 OpenCode Zen 余额和 Command Code 月度赠额。（#737）
+- **侧边栏动效：** 为侧边栏展开、拉手收起及运行中标记加入动效。（#754）
 
 ### 修复
-- **额度页面动画：** 修复返回已缓存的额度页面时，额度条入场动画不再播放的问题。（#651）
-- **Claude CLI 额度：** 修复后台探测可能打开登录流程、Windows `.cmd` 安装无法运行，以及会话、周额度与各自重置时间错配的问题。（#612）
-- **WorkBuddy Personal 余额：** 按桌面客户端相同的可用套餐范围修正余额。（#643）
-- **Kiro 额度：** 修复默认 v2 输出仅包含套餐摘要时无法显示额度详情的问题。（#641）
-- **OpenClaw 实时追踪：** 仅实时监控用量来源，避免大型运行目录与工作区造成过高内存占用。（#632）
-- **Codex 额度：** 修复 Codex CLI 0.149.0 及更高版本进入 app-server 后备路径时无法收集额度的问题。（#631）
-- **AI 工具额度开关：** 修复保存设置时，提供商开关因短暂恢复旧状态而闪烁的问题。（#589）
+- **ZCode 账号：** 全新安装或切换账号后，Coding Plan 与 Start/Weekend 额度会继续使用当前 ZCode 凭据。（#725）
+- **Antigravity 用量：** 不再把 Antigravity CLI 用量拆成重复的工具行或图表序列。（#723）
+- **Antigravity 额度：** 改进自定义端口下的 CLI Hub 检测，并避免连接未通过身份验证的额度服务。（#723）
+- **供应商图标：** 新增 Qmodel、Nemotron 与 StepFun 的图标显示。（#755）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.55.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.55.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.55.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-Setup-0.55.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.55.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.55.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.60.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.60.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.60.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-Setup-0.60.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.60.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.60.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -123,7 +114,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.54.0...v0.55.0">v0.54.0...v0.55.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.59.0...v0.60.0">v0.59.0...v0.60.0</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -141,31 +132,27 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **即時 Token 速率：** 新增可選的底欄讀數，可在生成速度（tok/s）與 Token 消耗（TPM）之間切換；Hub 模式可選擇所有裝置或此裝置。（#648）
-- **ZCode 額度：** 自動偵測本機已登入的 ZCode 帳號，並在現有 GLM 列顯示 Coding Plan 或 Start/Weekend 額度。（#630）
-- **Z.ai 餘額：** 顯示控制台金鑰的現金餘額，以及今日、本週、本月與累計支出。（#630）
-- **Kilo 用量：** 將 Kilo CLI 與 Kilo Code 統一歸入 Kilo 追蹤，支援即時更新與 WSL，並自動遷移現有 Kilo Code 設定與歷史。（#635）
+- **會話活動：** 顯示 Codex、DeepSeek Harness、OpenCode 與 Claude Code 會話的執行中及已完成狀態；Codex 與 DeepSeek Harness 亦可顯示上下文已用或剩餘比例。（#728）
+- **側邊欄會話：** 新增「會話」項目，可彙整所有追蹤工具，按單一時間軸或工具分組顯示，並支援只顯示執行中會話及自訂側邊欄摘要。（#742）
 
 ### 改進
-- **額度重置動畫：** 偵測到重置時，從上次顯示值平滑補滿，並遵循減少動態效果設定。（#644）
+- **側邊欄額度：** 顯示與「額度」視圖一致的額度窗口、餘額、更新時間與帳號資訊，包括 OpenCode Zen 餘額和 Command Code 每月贈額。（#737）
+- **側邊欄動效：** 為側邊欄展開、把手收起及執行中標記加入動效。（#754）
 
 ### 修復
-- **額度頁面動畫：** 修復返回已快取的額度頁面時，額度列入場動畫不再播放的問題。（#651）
-- **Claude CLI 額度：** 修復背景探測可能開啟登入流程、Windows `.cmd` 安裝無法執行，以及工作階段、每週額度與各自重置時間錯配的問題。（#612）
-- **WorkBuddy Personal 餘額：** 依照桌面應用程式相同的可用套件範圍修正餘額。（#643）
-- **Kiro 額度：** 修復預設 v2 輸出僅包含方案摘要時無法顯示額度詳情的問題。（#641）
-- **OpenClaw 即時追蹤：** 僅即時監控用量來源，避免大型執行目錄與工作區造成過高記憶體用量。（#632）
-- **Codex 額度：** 修復 Codex CLI 0.149.0 及更新版本進入 app-server 後備路徑時無法收集額度的問題。（#631）
-- **AI 工具額度開關：** 修復儲存設定時，提供者開關因短暫回復舊狀態而閃爍的問題。（#589）
+- **ZCode 帳號：** 全新安裝或切換帳號後，Coding Plan 與 Start/Weekend 額度會繼續使用目前的 ZCode 憑證。（#725）
+- **Antigravity 用量：** 不再把 Antigravity CLI 用量拆成重複的工具列或圖表序列。（#723）
+- **Antigravity 額度：** 改進自訂連接埠下的 CLI Hub 偵測，並避免連接未通過身分驗證的額度服務。（#723）
+- **供應商圖示：** 新增 Qmodel、Nemotron 與 StepFun 的圖示顯示。（#755）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.55.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.55.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.55.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-Setup-0.55.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.55.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.55.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.60.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.60.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.60.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-Setup-0.60.0.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.60.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.60.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0.AppImage)
 
 </details>
 
@@ -178,31 +165,27 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ko:start -->
 ### 추가
-- **실시간 토큰 속도:** 생성 속도(tok/s) 또는 토큰 소모량(TPM)을 바닥글에 표시하는 옵션을 추가했습니다. Hub 모드에서는 모든 기기와 이 기기 사이를 전환할 수 있습니다. (#648)
-- **ZCode 할당량:** 이 컴퓨터에 로그인된 ZCode 계정을 자동으로 감지하고 기존 GLM 행에 Coding Plan 또는 Start/Weekend 할당량을 표시합니다. (#630)
-- **Z.ai 잔액:** 콘솔 키의 현금 잔액과 오늘, 이번 주, 이번 달 및 누적 지출을 표시합니다. (#630)
-- **Kilo 사용량:** Kilo CLI와 Kilo Code를 Kilo로 통합해 추적하며 실시간 갱신과 WSL 검색을 지원합니다. 기존 Kilo Code 설정과 기록은 자동으로 이전됩니다. (#635)
+- **세션 활동:** Codex, DeepSeek Harness, OpenCode, Claude Code 세션의 실행 중 및 완료 상태를 표시하며, Codex와 DeepSeek Harness에는 컨텍스트 사용량 또는 남은 비율도 표시합니다. (#728)
+- **가장자리 도크 세션:** 추적 중인 모든 도구의 세션을 단일 타임라인이나 도구별 그룹으로 모아 보는 세션 항목을 추가합니다. 실행 중인 세션만 표시하거나 레일 요약을 구성할 수도 있습니다. (#742)
 
 ### 개선
-- **할당량 리셋 모션:** 리셋을 감지하면 마지막 표시 값에서 충전된 값까지 부드럽게 애니메이션하며 동작 줄이기 설정을 따릅니다. (#644)
+- **가장자리 도크 한도:** 한도 화면과 같은 할당량 창, 잔액, 업데이트 시각, 계정 정보를 표시하며 OpenCode Zen 잔액과 Command Code 월간 지급량도 포함합니다. (#737)
+- **가장자리 도크 모션:** 레일 표시, 핸들 숨김, 실행 중 표시를 애니메이션으로 표현합니다. (#754)
 
 ### 수정
-- **할당량 보기 모션:** 캐시된 할당량 보기로 돌아왔을 때 막대 진입 애니메이션이 재생되지 않던 문제를 수정했습니다. (#651)
-- **Claude CLI 할당량:** 백그라운드 확인이 로그인 절차를 열 수 있던 문제와 Windows `.cmd` 설치 실행 문제를 수정하고, 세션 및 주간 값이 올바른 리셋 시간과 연결되도록 했습니다. (#612)
-- **WorkBuddy Personal 잔액:** 데스크톱 클라이언트와 동일한 사용 가능 패키지 범위를 적용해 잔액을 수정했습니다. (#643)
-- **Kiro 할당량:** 기본 v2 출력에 플랜 요약만 포함될 때 할당량 상세 정보가 표시되지 않던 문제를 수정했습니다. (#641)
-- **OpenClaw 실시간 추적:** 실시간 추적을 사용량 소스로 제한해 대규모 런타임 및 작업 공간 트리에서 과도한 메모리 사용을 방지합니다. (#632)
-- **Codex 할당량:** Codex CLI 0.149.0 이상에서 OAuth가 app-server로 대체될 때 할당량 수집이 실패하던 문제를 수정했습니다. (#631)
-- **AI 도구 할당량 토글:** 설정을 저장하는 동안 제공자 토글이 이전 상태로 잠시 되돌아가며 깜박이던 문제를 수정했습니다. (#589)
+- **ZCode 계정:** 새로 설치하거나 계정을 전환한 뒤에도 Coding Plan과 Start/Weekend 할당량이 현재 ZCode 자격 증명을 사용합니다. (#725)
+- **Antigravity 사용량:** Antigravity CLI 사용량이 중복된 도구 행이나 차트 시리즈로 나뉘지 않습니다. (#723)
+- **Antigravity 할당량:** 사용자 지정 포트의 CLI Hub 감지를 개선하고 인증되지 않은 할당량 서비스 연결을 방지합니다. (#723)
+- **공급자 아이콘:** Qmodel, Nemotron, StepFun 아이콘 표시를 추가합니다. (#755)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.55.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.55.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.55.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-Setup-0.55.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.55.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.55.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.60.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.60.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.60.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-Setup-0.60.0.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.60.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.60.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0.AppImage)
 
 </details>
 
@@ -215,31 +198,27 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **ライブ Token レート：** 生成速度（tok/s）または Token 消費量（TPM）を表示するオプションのフッター表示を追加しました。Hub モードでは、すべてのデバイスとこのデバイスを切り替えられます。（#648）
-- **ZCodeのクォータ：** このコンピューターでログイン中の ZCode アカウントを自動検出し、既存の GLM 行に Coding Plan または Start/Weekend のクォータを表示します。（#630）
-- **Z.aiの残高：** コンソールキーの現金残高と、今日・今週・今月・累計の支出を表示します。（#630）
-- **Kiloの使用量：** Kilo CLI と Kilo Code を Kilo としてまとめて追跡し、ライブ更新と WSL 検出に対応しました。既存の Kilo Code 設定と履歴は自動的に移行されます。（#635）
+- **セッションのアクティビティ：** Codex、DeepSeek Harness、OpenCode、Claude Code のセッションに実行中／完了の状態を表示します。Codex と DeepSeek Harness ではコンテキストの使用済み／残りの割合も表示します。（#728）
+- **エッジドックのセッション：** 追跡中のすべてのツールを単一のタイムラインまたはツール別グループで表示するセッション項目を追加します。実行中のみの表示とレールの要約も設定できます。（#742）
 
 ### 改善
-- **クォータリセットのモーション：** リセットを検出すると、直前の表示値から補充後の値まで滑らかにアニメーションし、モーションを減らす設定にも対応します。（#644）
+- **エッジドックの上限：** 「上限」画面と同じクォータ枠、残高、更新時刻、アカウント情報を表示し、OpenCode Zen の残高と Command Code の月間付与分にも対応します。（#737）
+- **エッジドックのモーション：** レールの表示、ハンドルの退避、実行中マークをアニメーション化します。（#754）
 
 ### 修正
-- **クォータ画面のモーション：** キャッシュ済みのクォータ画面に戻った際、メーターの表示アニメーションが再生されない問題を修正しました。（#651）
-- **Claude CLIのクォータ：** バックグラウンド確認でログイン画面が開く場合がある問題、Windows の `.cmd` インストールを実行できない問題、セッションと週次の値が誤ったリセット時刻に結び付く問題を修正しました。（#612）
-- **WorkBuddy Personalの残高：** デスクトップクライアントと同じ利用可能パッケージ範囲を適用し、残高を修正しました。（#643）
-- **Kiroのクォータ：** 既定の v2 出力にプラン概要しか含まれない場合、クォータの詳細が表示されない問題を修正しました。（#641）
-- **OpenClawのライブ追跡：** ライブ追跡を使用量ソースに限定し、大規模なランタイムやワークスペースでの過剰なメモリ使用を防ぎます。（#632）
-- **Codexのクォータ：** Codex CLI 0.149.0 以降で OAuth が app-server にフォールバックした際、クォータを収集できない問題を修正しました。（#631）
-- **AI ツールのクォータ切り替え：** 設定の保存中にプロバイダーの切り替えが一時的に以前の状態へ戻ってちらつく問題を修正しました。（#589）
+- **ZCode アカウント：** 新規インストール時やアカウント切り替え後も、Coding Plan と Start/Weekend のクォータに現在の ZCode 認証情報を使用します。（#725）
+- **Antigravity の使用量：** Antigravity CLI の使用量が重複したツール行やグラフ系列に分かれなくなりました。（#723）
+- **Antigravity のクォータ：** カスタムポートでの CLI Hub 検出を改善し、認証されていないクォータサービスへの接続を防ぎます。（#723）
+- **プロバイダーアイコン：** Qmodel、Nemotron、StepFun のアイコン表示を追加します。（#755）
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.55.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.55.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.55.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-Setup-0.55.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.55.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.55.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.55.0/Token-Monitor-0.55.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.60.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.60.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.60.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-Setup-0.60.0.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.60.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.60.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.60.0/Token-Monitor-0.60.0.AppImage)
 
 </details>
 

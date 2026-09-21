@@ -4,10 +4,10 @@ const { constants: fsConstants } = require('node:fs');
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
 const path = require('node:path');
-const { MAC_WIDGET_ACTIVITY_DAYS } = require('../shared/macWidgetSnapshot');
-const { isHistoryDocument } = require('./macWidgetHistory');
+const { MAC_WIDGET_ACTIVITY_DAYS } = require('../../shared/macWidgetSnapshot');
+const { isHistoryDocument } = require('./history');
 
-const MAC_WIDGET_HISTORY_CACHE_VERSION = 2;
+const MAC_WIDGET_HISTORY_CACHE_VERSION = 3;
 const MAX_MAC_WIDGET_HISTORY_CACHE_BYTES = 256 * 1024;
 const MAX_MAC_WIDGET_HISTORY_CACHE_ENTRIES = 8;
 const MAC_WIDGET_HISTORY_CACHE_DESCRIPTION = 'macOS Widget history cache';
@@ -42,6 +42,11 @@ function normalizedDay(value) {
   return new Date(timestamp).toISOString().slice(0, 10) === day ? day : '';
 }
 
+function normalizedMonth(value) {
+  const month = String(value || '');
+  return /^\d{4}-(?:0[1-9]|1[0-2])$/.test(month) ? month : '';
+}
+
 function projectMacWidgetHistory(history) {
   const byDate = new Map();
   for (const entry of (Array.isArray(history?.daily) ? history.daily : [])) {
@@ -53,11 +58,25 @@ function projectMacWidgetHistory(history) {
       cost: nonNegativeNumber(entry?.cost)
     });
   }
+  const byMonth = new Map();
+  for (const entry of (Array.isArray(history?.monthly) ? history.monthly : [])) {
+    const month = normalizedMonth(entry?.month);
+    if (!month) continue;
+    byMonth.set(month, {
+      month,
+      tokens: Math.round(nonNegativeNumber(entry?.tokens)),
+      cost: nonNegativeNumber(entry?.cost)
+    });
+  }
   return {
     daily: Array.from(byDate.values())
       .sort((left, right) => left.date.localeCompare(right.date))
       .slice(-MAC_WIDGET_ACTIVITY_DAYS),
-    monthly: [],
+    // Monthly totals are already an aggregate and remain small even across the
+    // complete history. Keeping them lets TOTAL stay truly all-time after an
+    // App restart without exposing the per-client/model history dimensions.
+    monthly: Array.from(byMonth.values())
+      .sort((left, right) => left.month.localeCompare(right.month)),
     summary: {}
   };
 }
@@ -77,10 +96,12 @@ function macWidgetHistoryCachePath(userDataPath, sourceKey) {
 }
 
 function cacheDocument(sourceKey, history) {
+  const projected = projectMacWidgetHistory(history);
   return {
     version: MAC_WIDGET_HISTORY_CACHE_VERSION,
     source: macWidgetHistoryCacheFingerprint(sourceKey),
-    daily: projectMacWidgetHistory(history).daily
+    daily: projected.daily,
+    monthly: projected.monthly
   };
 }
 
@@ -89,6 +110,7 @@ function cacheHistory(document, sourceKey) {
     document?.version !== MAC_WIDGET_HISTORY_CACHE_VERSION
     || document.source !== macWidgetHistoryCacheFingerprint(sourceKey)
     || !Array.isArray(document.daily)
+    || !Array.isArray(document.monthly)
     || document.daily.length > MAC_WIDGET_ACTIVITY_DAYS
   ) return null;
 
@@ -105,11 +127,26 @@ function cacheHistory(document, sourceKey) {
     ) return null;
     seen.add(day.date);
   }
+  const seenMonths = new Set();
+  for (const month of document.monthly) {
+    if (
+      normalizedMonth(month?.month) !== month.month
+      || !Number.isInteger(month.tokens)
+      || month.tokens < 0
+      || typeof month.cost !== 'number'
+      || !Number.isFinite(month.cost)
+      || month.cost < 0
+      || seenMonths.has(month.month)
+    ) return null;
+    seenMonths.add(month.month);
+  }
   return {
     daily: document.daily
       .map((day) => ({ date: day.date, tokens: day.tokens, cost: day.cost }))
       .sort((left, right) => left.date.localeCompare(right.date)),
-    monthly: [],
+    monthly: document.monthly
+      .map((month) => ({ month: month.month, tokens: month.tokens, cost: month.cost }))
+      .sort((left, right) => left.month.localeCompare(right.month)),
     summary: {}
   };
 }

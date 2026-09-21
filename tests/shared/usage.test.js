@@ -417,6 +417,73 @@ test('mergeDeviceRecord allows the same runtime to clear Copilot limits', () => 
   assert.equal(merged.limits.providers[0].status, 'notConfigured');
 });
 
+test('mergeDeviceRecord keeps widget Factory limits when a headless agent reports no local API key', () => {
+  const existing = recordWithLimits({
+    agentRuntime: 'electron-widget',
+    limits: {
+      updatedAt: '2026-06-26T08:00:00.000Z',
+      refreshMs: 300000,
+      providers: [
+        {
+          provider: 'factory',
+          accountKey: 'sha256:factory-user',
+          accountLabel: 'Factory Pro',
+          status: 'ok',
+          source: 'api',
+          updatedAt: '2026-06-26T08:00:00.000Z',
+          windows: [{ kind: 'session', label: '5-hour', usedPercent: 20 }]
+        }
+      ]
+    }
+  });
+  const incoming = {
+    deviceId: 'macbook',
+    agentRuntime: 'headless-agent',
+    updatedAt: '2026-06-26T08:01:00.000Z',
+    receivedAt: '2026-06-26T08:01:00.000Z',
+    limits: {
+      updatedAt: '2026-06-26T08:01:00.000Z',
+      refreshMs: 300000,
+      providers: [{ provider: 'factory', status: 'notConfigured', source: '', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] }]
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.limits.providers.length, 1);
+  assert.equal(merged.limits.providers[0].provider, 'factory');
+  assert.equal(merged.limits.providers[0].status, 'ok');
+  assert.equal(merged.limits.providers[0].accountKey, 'sha256:factory-user');
+});
+
+test('mergeDeviceRecord allows the same runtime to clear Factory limits', () => {
+  const existing = recordWithLimits({
+    agentRuntime: 'electron-widget',
+    limits: {
+      updatedAt: '2026-06-26T08:00:00.000Z',
+      refreshMs: 300000,
+      providers: [
+        { provider: 'factory', accountKey: 'sha256:factory-user', status: 'ok', source: 'api', updatedAt: '2026-06-26T08:00:00.000Z', windows: [] }
+      ]
+    }
+  });
+  const incoming = {
+    deviceId: 'macbook',
+    agentRuntime: 'electron-widget',
+    updatedAt: '2026-06-26T08:01:00.000Z',
+    receivedAt: '2026-06-26T08:01:00.000Z',
+    limits: {
+      updatedAt: '2026-06-26T08:01:00.000Z',
+      refreshMs: 300000,
+      providers: [{ provider: 'factory', status: 'notConfigured', source: '', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] }]
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.limits.providers.length, 1);
+  assert.equal(merged.limits.providers[0].provider, 'factory');
+  assert.equal(merged.limits.providers[0].status, 'notConfigured');
+});
+
 test('mergeDeviceRecord preserves distinct Codex and OpenCode accounts from the same incoming limits payload', () => {
   const existing = recordWithLimits({
     limits: {
@@ -1292,4 +1359,82 @@ test('aggregateDevices falls back to UTC-day compare for old agents without peri
     today: { totalTokens: 7 }
   }], 10 * 60 * 1000, Date.parse('2026-06-26T06:00:00.000Z'));
   assert.equal(kept.periods.today.totalTokens, 7);
+});
+
+test('a session carries its context occupancy through the device record', () => {
+  const record = normalizeDeviceRecord({
+    deviceId: 'm1',
+    updatedAt: '2026-09-18T06:00:00.000Z',
+    today: {
+      totalTokens: 10,
+      sessions: {
+        'codex:live': {
+          client: 'codex',
+          sessionId: 'rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111',
+          totalTokens: 10,
+          contextTokens: 190_867,
+          contextWindow: 950_000
+        }
+      }
+    }
+  });
+  const session = record.periods.today.sessions['codex:rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111'];
+  assert.equal(session.contextTokens, 190_867);
+  assert.equal(session.contextWindow, 950_000);
+});
+
+test('merging a session keeps one source occupancy rather than summing two', () => {
+  const session = (contextTokens, contextWindow) => ({
+    client: 'codex',
+    sessionId: 'rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111',
+    totalTokens: 5,
+    ...(contextWindow ? { contextTokens, contextWindow } : {})
+  });
+  const merged = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: session(100, 200_000), b: session(140, 200_000) } }
+  });
+  const key = 'codex:rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111';
+  assert.equal(merged.periods.today.sessions[key].contextTokens, 140);
+  assert.equal(merged.periods.today.sessions[key].contextWindow, 200_000);
+
+  // A partition with no reading leaves the one that has it alone, instead of
+  // zeroing a live session every time it is merged with a period that only
+  // carries totals.
+  const partial = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: session(100, 200_000), b: session(0, 0) } }
+  });
+  assert.equal(partial.periods.today.sessions[key].contextTokens, 100);
+  assert.equal(partial.periods.today.sessions[key].contextWindow, 200_000);
+
+  // A snapshot is freshest-wins, not last-merge-wins. The same session arrives
+  // from several periods and synced devices; without this the older reading won
+  // whenever it happened to be merged last, which made the gauge depend on
+  // iteration order. Here the stale reading is merged after the fresh one and
+  // must still lose.
+  const timed = (contextTokens, contextWindow, lastUsedAt) => ({
+    client: 'codex',
+    sessionId: 'rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111',
+    totalTokens: 5,
+    contextTokens,
+    contextWindow,
+    lastUsedAt
+  });
+  const fresh = timed(140, 200_000, '2026-09-18T05:10:00.000Z');
+  const stale = timed(20, 200_000, '2026-09-18T05:00:00.000Z');
+  const ordered = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: fresh, b: stale } }
+  });
+  assert.equal(ordered.periods.today.sessions[key].contextTokens, 140, 'a stale snapshot merged last must not win');
+
+  // A device that never read a transcript has no reading at all, which is not
+  // the same as an empty one, so it must not block a real reading either way.
+  const unknown = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: session(0, 0), b: fresh } }
+  });
+  assert.equal(unknown.periods.today.sessions[key].contextTokens, 140);
+  assert.equal(unknown.periods.today.sessions[key].contextWindow, 200_000);
 });

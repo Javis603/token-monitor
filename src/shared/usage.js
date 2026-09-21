@@ -47,7 +47,7 @@ const SESSION_TEXT_KEYS = [
   'name', 'preview', 'firstUserMessage', 'first_user_message',
   'customTitle', 'custom_title', 'aiTitle', 'ai_title'
 ];
-const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'minimax']);
+const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'factory', 'minimax']);
 
 function asNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -232,9 +232,11 @@ function normalizeClientName(value) {
   if (raw.includes('gemini')) return 'gemini';
   if (raw.includes('cursor')) return 'cursor';
   if (raw.includes('antigravity')) return 'antigravity';
+  if (raw === 'amp') return 'amp';
   if (raw.includes('kimi')) return 'kimi';
   if (raw.includes('qwen')) return 'qwen';
   if (raw.includes('grok')) return 'grok';
+  if (raw === 'droid') return 'droid';
   if (raw.includes('copilot')) return 'copilot';
   if (/\bpi\b/.test(raw)) return 'pi';
   if (raw.includes('zed')) return 'zed';
@@ -486,6 +488,17 @@ function emptySession(client, id) {
     reasoningTokens: 0,
     startedAt: '',
     lastUsedAt: '',
+    // What the session's context window currently holds and how big it is.
+    // Both are read from the client's own transcript (tokscale reports
+    // neither) and only for a session recent enough to still be open, so 0/0
+    // is the normal value for everything else.
+    contextTokens: 0,
+    contextWindow: 0,
+    // `turnEnded` is deliberately absent here. True once the client's own
+    // transcript said the current turn finished, which is how a session stops
+    // reading as running without waiting out the time window — but a default of
+    // `false` would make "this reading carries no boundary" indistinguishable
+    // from "a turn is in progress", and the former must not clear the latter.
     projectId: '',
     projectLabel: '',
     title: '',
@@ -519,6 +532,41 @@ function mergeSession(target, source) {
     target.projectLabel = String(source.projectLabel || '');
   } else if (target.projectId === sourceProjectId && !target.projectLabel && source.projectLabel) {
     target.projectLabel = String(source.projectLabel);
+  }
+  // Occupancy is a snapshot, not a sum. The two halves move together and must
+  // never be mixed across sources, so a source carrying a window replaces both
+  // and one carrying none leaves both alone.
+  //
+  // A snapshot also has a time, so it is freshest-wins rather than
+  // last-merge-wins. The same session arrives from several periods and devices
+  // (in month and in today, from this device and from a synced one), and
+  // without this the older reading won whenever it happened to be merged last,
+  // which made the gauge depend on iteration order. The source's own
+  // `lastUsedAt` is that time, because the reading is taken from the transcript
+  // the timestamp describes. A tie accepts, since both describe the same bytes,
+  // and a target that has no reading at all takes the source's: absent means
+  // this device never read a transcript, not that the reading is empty.
+  const sourceContextWindow = Math.max(0, Math.round(asNumber(source.contextWindow)));
+  if (sourceContextWindow > 0) {
+    const targetContextWindow = Math.max(0, Math.round(asNumber(target.contextWindow)));
+    if (targetContextWindow <= 0 || sourceLastUsed >= targetLastUsed) {
+      target.contextWindow = sourceContextWindow;
+      target.contextTokens = Math.max(0, Math.round(asNumber(source.contextTokens)));
+    }
+  }
+  // A turn end is a transcript reading, not a sum, so it is freshest-wins: the
+  // same session can appear in several periods, and a turn that started after
+  // one of them was decorated has to be able to clear it. Absent means "this
+  // client reports no boundary", which never overwrites a real reading.
+  if (hasOwn(source, 'turnEnded')) {
+    const sourceEnded = source.turnEnded === true;
+    // Strictly newer wins. At the same timestamp a positive claim beats a
+    // negative one: both readings describe the same bytes, and one of them
+    // found a boundary the other did not have in its window. A negative
+    // reading is also what a client with no evidence sends, so letting it win
+    // on a tie would drop the only real answer available.
+    if (sourceLastUsed > targetLastUsed) target.turnEnded = sourceEnded;
+    else if (sourceEnded && sourceLastUsed === targetLastUsed) target.turnEnded = true;
   }
   if (!target.title && source.title) target.title = normalizeSessionTitle(source.title);
   if (!target.sessionKind && source.sessionKind) target.sessionKind = normalizeSessionKind(source.sessionKind);
@@ -593,6 +641,14 @@ function normalizeSession(input, fallbackKey) {
   session.messageCount = Math.max(0, Math.round(firstNumber(input, MESSAGE_COUNT_KEYS)));
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
+  session.contextTokens = Math.max(0, Math.round(asNumber(input.contextTokens ?? input.context_tokens ?? 0)));
+  session.contextWindow = Math.max(0, Math.round(asNumber(input.contextWindow ?? input.context_window ?? 0)));
+  // Carried rather than summed, and only when the source actually states it:
+  // `undefined` means "this reading carries no boundary", which is different
+  // from `false` ("a turn is in progress") and must not clear a real reading
+  // when the same session arrives from a source that had no evidence.
+  if (input.turnEnded === true) session.turnEnded = true;
+  else if (input.turnEnded === false) session.turnEnded = false;
   session.projectId = String(input.projectId || input.project_id || '').trim();
   session.projectLabel = String(input.projectLabel || input.project_label || '').trim();
   session.title = normalizeSessionTitle(input.title || input.sessionTitle || input.session_title);

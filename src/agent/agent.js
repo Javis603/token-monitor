@@ -13,15 +13,19 @@ const {
   parseLimitProviders
 } = require('../shared/limits/collector');
 const { postSyncPayload } = require('../shared/syncPayload');
+const { HUB_RESPONSE_HEADER, HUB_RESPONSE_MINIMAL } = require('../shared/hubProtocol');
 const { applyProjectRollups } = require('../shared/usage');
 const { runAgent, runAgentOnce } = require('./runtime');
 const {
   applySessionUsageArchive,
-  captureSessionUsageArchive,
-  readSessionUsageArchive,
   sessionUsageArchiveDate,
-  writeSessionUsageArchive
+  updateSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
+const {
+  createSessionUsageArchiveStore,
+  readSessionUsageArchiveSnapshot
+} = require('../shared/sessionUsageArchiveStore');
+const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 
 loadDotEnv();
 const args = parseArgs(process.argv.slice(2));
@@ -39,7 +43,7 @@ const limitProviders = parseLimitProviders(args.limitProviders ?? process.env.TO
 const limitsRefreshMs = normalizeLimitsRefreshMs(args.limitsRefreshMs || process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS);
 const limitsRefreshMode = normalizeLimitsRefreshMode(args.limitsRefreshMode || process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE);
 const historyEnabled = parseBoolean(args.history ?? args.historyEnabled ?? process.env.TOKEN_MONITOR_HISTORY_ENABLED, true);
-const projectsEnabled = parseBoolean(args.projects ?? args.projectsEnabled ?? process.env.TOKEN_MONITOR_PROJECTS_ENABLED, false);
+const projectsEnabled = parseBoolean(args.projects ?? args.projectsEnabled ?? process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true);
 const sessionUsageArchiveEnabled = parseBoolean(args.sessionArchive ?? args.sessionUsageArchiveEnabled ?? process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true);
 const wslScanEnabled = parseBoolean(args.wslScan ?? args.wslScanEnabled ?? process.env.TOKEN_MONITOR_WSL_SCAN, true);
 const opencodeLocalLimitsEnabled = parseBoolean(
@@ -95,31 +99,40 @@ const limitsOptions = {
   opencodeCookie
 };
 let sessionUsageArchive;
+const cursorUsageEvents = createCursorUsageEventIndex();
+const sessionUsageArchiveStore = dryRun ? null : createSessionUsageArchiveStore({ cursorUsageEvents });
 
 function summaryWithSessionUsageArchive(summary, now = new Date()) {
   let visibleSummary = summary;
   if (sessionUsageArchiveEnabled) {
     const archiveDate = sessionUsageArchiveDate(summary, now);
-    const previous = sessionUsageArchive || readSessionUsageArchive();
-    const next = captureSessionUsageArchive(previous, summary, archiveDate);
-    if (!dryRun && JSON.stringify(next) !== JSON.stringify(previous)) {
-      try {
-        writeSessionUsageArchive(next);
-        sessionUsageArchive = next;
-      } catch (error) {
-        console.error(`[session-archive] write failed: ${error.message}`);
-      }
-    } else if (!dryRun) {
-      sessionUsageArchive = next;
+    if (dryRun) {
+      sessionUsageArchive = updateSessionUsageArchive(
+        sessionUsageArchive || readSessionUsageArchiveSnapshot(),
+        summary,
+        archiveDate,
+        { cursorUsageEvents }
+      ).archive;
+    } else {
+      const result = sessionUsageArchiveStore.capture(summary, archiveDate);
+      sessionUsageArchive = result.archive;
+      if (result.error) console.error(`[session-archive] update failed: ${result.error.message}`);
     }
-    visibleSummary = applySessionUsageArchive(summary, next, { now: archiveDate });
+    visibleSummary = applySessionUsageArchive(summary, sessionUsageArchive, {
+      now: archiveDate,
+      canonical: !dryRun
+    });
   }
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
 }
 
 async function postUsage(summary) {
   const { response } = await postSyncPayload(fetch, `${hubUrl}/api/ingest`, {
-    headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+    headers: {
+      'content-type': 'application/json',
+      [HUB_RESPONSE_HEADER]: HUB_RESPONSE_MINIMAL,
+      ...(secret ? { authorization: `Bearer ${secret}` } : {})
+    },
     summary,
     logger: (message) => console.warn(`[sync] ${message}`)
   });
@@ -156,7 +169,10 @@ async function main() {
   // Claim archive ownership before either a one-shot or long-running scan so
   // Electron can yield before its history read-modify-write reaches disk.
   let runtimeHandle = null;
-  if (!dryRun) registerPidFile(() => runtimeHandle?.stop());
+  if (!dryRun) registerPidFile(() => {
+    runtimeHandle?.stop();
+    sessionUsageArchiveStore.close();
+  });
   const runtimeOptions = {
     envelope: { deviceId, agentVersion: appVersion(), agentRuntime: 'headless-agent' },
     usageOptions,
@@ -168,7 +184,11 @@ async function main() {
     onError: (error, reason) => console.error(`[${new Date().toISOString()}] (${reason}) ${error.message}`)
   };
   if (once) {
-    await runAgentOnce(runtimeOptions);
+    try {
+      await runAgentOnce(runtimeOptions);
+    } finally {
+      sessionUsageArchiveStore?.close();
+    }
     return;
   }
   runtimeHandle = runAgent(runtimeOptions);

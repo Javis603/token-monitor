@@ -266,7 +266,11 @@
     const localDevice = normalizedDeviceId
       ? devices.find((device) => String(device?.deviceId || '') === normalizedDeviceId)
       : null;
-    const localPeriod = localDevice?.periods?.today;
+    // Local mode owns the aggregate snapshot, so it remains a valid same-device
+    // source while startup anchors or a device-id change leave `devices` empty.
+    // Sync mode must stay strict: its aggregate may contain other machines.
+    const localPeriod = localDevice?.periods?.today
+      || (!syncMode ? stats?.periods?.today : null);
     if (localPeriod && typeof localPeriod === 'object') {
       return {
         entries: [{ id: `device:${normalizedDeviceId}`, period: localPeriod }],

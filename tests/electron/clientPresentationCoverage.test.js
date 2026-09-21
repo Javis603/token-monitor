@@ -27,12 +27,27 @@ const rendererPath = path.join(rootDir, 'src/electron/renderer/app.js');
 const stylesPath = path.join(rootDir, 'src/electron/renderer/styles.css');
 
 test('every catalog client has a usage chart colour', () => {
+  assert.deepEqual(
+    Object.keys(clientColors).filter((id) => CLIENT_IDS.includes(id)),
+    CLIENT_IDS,
+    'tracked clientColors entries should follow CLIENT_CATALOG display order'
+  );
   for (const id of CLIENT_IDS) {
     assert.ok(clientColors[id], `${id} needs a clientColors entry in usageCharts.js`);
   }
 });
 
 test('every catalog client has a vendor ordering slot and label', () => {
+  assert.deepEqual(
+    VENDOR_ORDER.filter((id) => CLIENT_IDS.includes(id)),
+    CLIENT_IDS,
+    'tracked VENDOR_ORDER entries should follow CLIENT_CATALOG display order'
+  );
+  assert.deepEqual(
+    Object.keys(VENDOR_LABELS).filter((id) => CLIENT_IDS.includes(id)),
+    CLIENT_IDS,
+    'tracked VENDOR_LABELS entries should follow CLIENT_CATALOG display order'
+  );
   for (const id of CLIENT_IDS) {
     assert.ok(VENDOR_ORDER.includes(id), `${id} needs a VENDOR_ORDER slot in themePresets.js`);
     assert.ok(VENDOR_LABELS[id], `${id} needs a VENDOR_LABELS entry in themePresets.js`);
@@ -52,7 +67,13 @@ test('clientsWithIcon covers every catalog client', () => {
   // Strip comments first: a commented-out id is absent from the runtime Set, so
   // counting it would report coverage the renderer does not have.
   const entries = block[1].replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-  const iconIds = new Set([...entries.matchAll(/'([a-z0-9-]+)'/g)].map((match) => match[1]));
+  const iconIdOrder = [...entries.matchAll(/'([a-z0-9-]+)'/g)].map((match) => match[1]);
+  const iconIds = new Set(iconIdOrder);
+  assert.deepEqual(
+    iconIdOrder.filter((id) => CLIENT_IDS.includes(id)),
+    CLIENT_IDS,
+    'tracked clientsWithIcon entries should follow CLIENT_CATALOG display order'
+  );
   for (const id of CLIENT_IDS) {
     assert.ok(iconIds.has(id), `${id} should resolve to an icon row`);
   }
@@ -85,27 +106,47 @@ test('every catalog client resolves to an icon asset through its CSS rule', () =
   }
 });
 
-test('the subscription usage comparison tests catalog membership, not label presence', () => {
+test('the subscription usage comparison reads the scan, never a display-label table', () => {
   // Same category of mistake as clientsWithIcon above, in the other direction:
   // CLIENT_LABELS is a display lookup, not a client list. It deliberately
   // carries ids that are not catalog clients, so a key in it answers "can we
   // render a name for this" rather than "does this provider name a client we
-  // count tokens for". subscriptionUsageCostUsd needs the second question — it
-  // decides whether a subscription's price is compared against usage cost — and
-  // the two only agree today because the label-only ids happen not to be limits
-  // providers. Read from source for the same reason as clientsWithIcon.
+  // count tokens for". The comparison needs the second question — it decides
+  // whether a subscription's price is set against a usage figure — and it now
+  // asks it of the map the scan itself produced: every key there is a client id
+  // by construction, so no label table can be consulted even by accident. Read
+  // from source because the answer is which accessor the function reads.
   const labelOnly = Object.keys(CLIENT_LABELS).filter((id) => !CLIENT_IDS.includes(id));
-  const source = fs.readFileSync(rendererPath, 'utf8');
-  const body = source.match(/function subscriptionUsageCostUsd\([\s\S]*?\n}/);
-  assert.ok(body, 'subscriptionUsageCostUsd should exist in app.js');
+  const view = fs.readFileSync(path.join(rootDir, 'src/electron/renderer/limitWindowsView.js'), 'utf8');
+  const body = view.match(/function subscriptionUsageCostUsd\([\s\S]*?\n {2}\}/);
+  assert.ok(body, 'subscriptionUsageCostUsd should exist in the shared view');
   assert.doesNotMatch(
     body[0],
-    /clientLabels/,
-    `subscriptionUsageCostUsd must not read clientLabels as a membership test; it carries ${labelOnly.length} non-catalog id(s) (${labelOnly.join(', ') || 'none right now'})`
+    /clientLabels|CLIENT_LABELS|catalogClientIds/,
+    `subscriptionUsageCostUsd must not read a label table as a membership test; CLIENT_LABELS alone carries ${labelOnly.length} non-catalog id(s) (${labelOnly.join(', ') || 'none right now'})`
   );
+  assert.match(body[0], /monthClientCosts\(\)/, 'the month costs are read through the dep the host supplies');
+
+  // And every key in it is resolved through the catalog rather than compared to
+  // the provider id, which is the same question one level down: a provider whose
+  // client is named otherwise (droid, micode, zcode, qodercn, dsh) has its cost
+  // under that client's key, so an id comparison answers "no usage" for it
+  // forever.
   assert.match(
     body[0],
-    /catalogClientIds\.has\(/,
-    'subscriptionUsageCostUsd should test membership against the catalog client ids'
+    /limitProviderForClient\(client\)/,
+    'the client key decides which provider a cost belongs to, not the id spelling'
   );
+
+  // And the hosts supply the scan's own figure. The dock reaches it through the
+  // cell it is rendering rather than the appearance: costs change on every stats
+  // push, while the appearance is only re-pushed when settings change.
+  const app = fs.readFileSync(rendererPath, 'utf8');
+  const dock = fs.readFileSync(path.join(rootDir, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const presentation = fs.readFileSync(
+    path.join(rootDir, 'src/electron/renderer/edgeDock/presentation.js'), 'utf8'
+  );
+  assert.match(app, /monthClientCosts: \(\) => state\.stats\?\.periods\?\.month\?\.clientCosts,/);
+  assert.match(dock, /monthClientCosts: \(\) => state\.payload\?\.cell\?\.monthClientCosts,/);
+  assert.match(presentation, /monthClientCosts: options\.stats\?\.periods\?\.month\?\.clientCosts \|\| \{\}/);
 });

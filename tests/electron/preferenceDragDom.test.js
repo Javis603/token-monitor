@@ -105,23 +105,25 @@ const settingsIconAssets = {
 };
 
 test('preference drag only selects sortable rows, not nested controls', () => {
-  const body = functionBody(readRendererFile('app.js'), 'preferenceRows', 'preferenceOrder');
+  const body = functionBody(readRendererFile('app.js'), 'preferenceRows', 'applyPreferenceOrder');
   assert.match(body, /\.tool-preference-row\[data-client\]/);
   assert.match(body, /\.limit-provider-row\[data-provider\]/);
   assert.match(body, /\.view-preference-row\[data-view\]/);
+  assert.match(body, /\.home-module-preference-row\[data-home-module\]/);
+  assert.match(body, /\.home-limit-provider-row\[data-home-limit-provider\]/);
+  assert.match(body, /\.status-provider-row\[data-status-provider\]/);
   assert.doesNotMatch(body, /querySelectorAll\(`\\\[data-\$\{attr\}\\\]`\)/);
 });
 
-// The handle-based lists still reorder by moving DOM nodes as the pointer
-// travels, with no transform animation. The two whole-row lists moved to the
-// transform model and carry their own guards in limitProviderDrag.test.js.
-test('handle-based preference drag does not animate row transforms during pointer movement', () => {
+test('main-screen rows use transform drag while retaining their handles', () => {
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
-  assert.doesNotMatch(app, /animatePreferenceOrderChange/);
-  assert.doesNotMatch(app, /translateY\(/);
-  assert.doesNotMatch(cssRule(css, '.view-preference-row'), /transform/);
+  assert.match(css, /\.view-preference-row,[\s\S]*?\.status-provider-row \{[\s\S]*?transform: translateY\(calc\(var\(--drag-y, 0px\) \+ var\(--drag-shift, 0px\)\)\)/);
   assert.doesNotMatch(cssRule(css, '.preference-order-handle'), /transition:\s*transform/);
+  const handle = functionBody(app, 'createPreferenceOrderHandle', 'expandedPreferenceSubgroups');
+  assert.match(handle, /addEventListener\('keydown'/);
+  assert.doesNotMatch(handle, /addEventListener\('pointerdown'/);
+  assert.doesNotMatch(app, /TokenMonitorPreferenceDragSort|startPreferenceDrag|preferenceDrag =/);
 });
 
 test('tool preference controls place compact actions beside the note without duplicate headers', () => {
@@ -190,6 +192,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
 
   const signature = functionBody(app, 'toolPreferenceRenderSignature', 'renderToolPreferencesNow');
   assert.match(signature, /\[\.\.\.enabledClientSet\(\)\]\.sort\(\)/);
+  assert.match(signature, /state\.settings\?\.customScanPaths/);
   assert.doesNotMatch(signature, /trackedClients/);
   assert.match(signature, /healthRows: KNOWN_CLIENTS\.map/);
   assert.match(signature, /health\?\.clients\?\.\[id\]\?\.overall/);
@@ -204,6 +207,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
 
   const body = functionBody(app, 'renderToolPreferencesNow', 'connectLimitProviderCheckboxName');
   const fill = functionBody(app, 'fillClientHealthPanel', 'clientHealthGroup');
+  const healthGroup = functionBody(app, 'clientHealthGroup', 'clientHealthPanel');
   assert.match(body, /state\.toolPreferenceRenderSignature === renderSignature/);
   assert.match(body, /state\.toolPreferenceDetailSignature !== detailSignature/);
   assert.match(body, /state\.settings\?\.currencyRatesEffective \|\| null/);
@@ -211,6 +215,9 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(body, /loadClientSources\(state\.clientHealthExpanded\);\s*refillOpenClientHealthPanel\(\);/);
   assert.match(body, /else \{\s*refillOpenClientHealthPanel\(\);\s*\}/);
   assert.match(body, /const detail = clientHealthDetailFor\(id\);/);
+  assert.match(healthGroup, /state\.appInfo\?\.customScanClientIds\?\.includes\(clientId\)/);
+  assert.match(healthGroup, /addCustomScanPath/);
+  assert.match(healthGroup, /tool-health-source-remove/);
   assert.match(body, /visibility\.id = `toolVisibility-\$\{id\}`/);
   assert.match(body, /pin\.id = `toolPin-\$\{id\}`/);
   assert.match(body, /const focusedId = document\.activeElement\?\.id \|\| ''/);
@@ -262,7 +269,47 @@ test('a press on the tool row own controls never arms a drag', () => {
   assert.match(wiring, /clientDisplayPreferencesApi\.clientDisplayOrderCommit\(order, KNOWN_CLIENTS, state\.settings\?\.clientDisplayOrder, state\.settings\?\.pinnedClients, id\)/);
   assert.match(wiring, /persistOrder: \(_order, _id, patch\) => void saveSettings\(patch\)/);
   assert.doesNotMatch(wiring, /onPreferenceOrderCommit\(/);
-  assert.doesNotMatch(functionBody(app, 'onPreferenceOrderCommit', 'onPreferenceOrderKeydown'), /clientDisplayOrder|pinnedClients/);
+});
+
+test('all four Main Screen lists use the shared controller from their handles', () => {
+  const app = readRendererFile('app.js');
+  const wiring = functionBody(app, 'createMainPreferenceRowDrag', 'deferMainPreferenceRender');
+  assert.match(wiring, /rowDragControllerApi\.createRowDragController/);
+  assert.match(wiring, /dragExcluded: MAIN_PREFERENCE_DRAG_EXCLUDED/);
+  assert.match(wiring, /dragStartSelector: '\.preference-order-handle'/);
+  assert.match(wiring, /mirrorOrder:[\s\S]*?state\.settings = \{ \.\.\.state\.settings, \[settingKey\]: value \}/);
+  assert.match(wiring, /persistOrder:[\s\S]*?saveSettings\(\{ \[settingKey\]: value \}\)/);
+
+  for (const [controller, renderer, id] of [
+    ['viewPreferenceRowDrag', 'renderViewPreferences', 'view'],
+    ['homeModulePreferenceRowDrag', 'renderHomeSettingsList', 'homeModule'],
+    ['homeLimitProviderRowDrag', 'renderHomeLimitProviderList', 'homeLimitProvider'],
+    ['statusProviderRowDrag', 'renderServiceProviderList', 'statusProvider']
+  ]) {
+    const start = app.indexOf(`function ${renderer}(`);
+    const next = app.indexOf('\nfunction ', start + 10);
+    const body = app.slice(start, next);
+    assert.match(body, new RegExp(`row\\.addEventListener\\('pointerdown',[\\s\\S]*?${controller}\\.startRowDrag\\(event, id\\)`));
+    assert.match(body, new RegExp(`createPreferenceOrderHandle\\(\\{ kind: '${id}'`));
+  }
+
+  assert.match(app, /const MAIN_PREFERENCE_DRAG_EXCLUDED = 'button:not\(\.preference-order-handle\), input, select, textarea, a, label, \.accordion-animated-container';/);
+  assert.match(app, /if \(deferMainPreferenceRender\(\)\) return;/);
+});
+
+test('Main Screen drag keeps expandable rows and their panels together', () => {
+  const app = readRendererFile('app.js');
+  const apply = functionBody(app, 'applyPreferenceOrder', 'createPreferenceOrderHandle');
+  assert.match(apply, /home: 'homeSettingsContainer'/);
+  assert.match(apply, /status: 'serviceProvidersContainer'/);
+  assert.match(apply, /limits: 'homeLimitProviderContainer'/);
+  assert.match(apply, /if \(companion\) list\.appendChild\(companion\)/);
+
+  const expand = functionBody(app, 'setPreferenceSubgroupsExpanded', 'togglePreferenceSubgroup');
+  assert.match(expand, /state\[stateKey\] = open/);
+  assert.match(expand, /classList\.toggle\('hidden', !open\)/);
+  assert.match(app, /getExpanded: \(\) => expandedPreferenceSubgroups\(VIEW_PREFERENCE_SUBGROUPS\)/);
+  assert.match(app, /getExpanded: \(\) => expandedPreferenceSubgroups\(HOME_MODULE_SUBGROUPS\)/);
 });
 
 test('view preferences place compact actions beside the note without duplicate headers', () => {
@@ -402,9 +449,14 @@ test('main section holds views; appearance is its own section; window holds beha
 
   const presenceGroup = windowSection.slice(presenceIndex);
   assert.match(presenceGroup, /id="floatingBubbleInput"/);
+  assert.match(presenceGroup, /id="edgeDockInput"/);
   assert.match(presenceGroup, /id="showTrayIconInput"/);
   assert.match(presenceGroup, /id="trayModeInput"/);
   assert.equal((presenceGroup.match(/value="limitsAllSessions"/g) || []).length, 2);
+
+  const edgeDockIndex = presenceGroup.indexOf('id="edgeDockInput"');
+  const floatingBubbleIndex = presenceGroup.indexOf('id="floatingBubbleInput"');
+  assert.ok(edgeDockIndex < floatingBubbleIndex, 'Edge Dock should lead the secondary surface settings');
 
   const showTrayIconIndex = presenceGroup.indexOf('id="showTrayIconInput"');
   const trayIconOptionsIndex = presenceGroup.indexOf('id="trayIconOptions"');
@@ -591,7 +643,6 @@ test('session archive retention has its own setting separate from Trends', () =>
   assert.doesNotMatch(app, /sessionUsageArchiveCount/);
   assert.match(app, /sessionRowsApi\.archivedSessionCount\(state\.stats\)/);
   assert.match(app, /sessionUsageArchiveEnabled === false[\s\S]{0,160}sessionArchivePaused/);
-  assert.doesNotMatch(app, /sessionSettingsExpanded|renderSessionSettingsList/);
   assert.match(css, /\.session-archive-clear\s*\{[\s\S]*?width:\s*auto;[\s\S]*?font-size:\s*10px;/);
   assert.match(main, /sessionUsageArchiveEnabled:\s*parseBoolean\(process\.env\.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED,\s*true\)/);
   assert.doesNotMatch(main, /sessionUsageArchiveCount:/);
@@ -677,4 +728,35 @@ test('renderer applies the first visible view on cold startup only', () => {
 
   const syncBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
   assert.match(syncBody, /applyInitialBreakdownPreference\(\)/);
+});
+
+test('the session context gauge has its own setting, separate from AI Tool Limits', () => {
+  const app = readRendererFile('app.js');
+  const main = readRendererFile('../main.js');
+  // The gauge is a session working budget, not a provider quota, so it must not
+  // ride on the limits preference — and its default is `used`, matching the
+  // readouts the clients themselves show.
+  assert.match(main, /sessionContextMetric: 'used'/);
+  assert.match(main, /function normalizeSessionContextMetric\(value, fallback = 'used'\)/);
+  assert.match(main, /normalizeSessionContextMetric\(patch\.sessionContextMetric \?\? settings\.sessionContextMetric\)/);
+  assert.match(app, /state\.settings\?\.sessionContextMetric !== 'remaining'/);
+  // The gauge's own decision must not consult the limits preference. Both keys
+  // legitimately share renderContext, so assert on the branch that reads it.
+  const gaugeBody = functionBody(app, 'updateRowContext', 'updateRowLive');
+  assert.doesNotMatch(gaugeBody, /showLimitUsed/);
+  assert.match(gaugeBody, /sessionContextMetric/);
+  // Sessions owns a Main-screen subgroup, following the project/trends pattern.
+  assert.match(app, /session: \['sessionSettingsExpanded', 'sessionSettingsContainer'\]/);
+  assert.match(app, /inner\.appendChild\(renderSessionSettingsList\(\)\)/);
+  assert.match(app, /id = 'sessionSettingsContainer'/);
+  assert.match(app, /name = 'sessionContextMetric'/);
+  assert.match(app, /settings\.views\.configureSession/);
+  // The row must be a plain .settings-item. `.home-activity-settings` carries
+  // its own indent rule for the Home modules list, so reusing it inside the
+  // nested list paints a second line beside the list's own.
+  const sessionList = functionBody(app, 'renderSessionSettingsList', 'renderServiceProviderList');
+  assert.match(sessionList, /row\.className = 'settings-item'/);
+  assert.doesNotMatch(sessionList, /className = 'home-activity-settings'/);
+  // The preference has to invalidate the painted rows, the way showLimitUsed does.
+  assert.match(app, /sessionContextMetric: state\.settings\?\.sessionContextMetric === 'remaining' \? 'remaining' : 'used'/);
 });

@@ -10,6 +10,10 @@ const root = path.resolve(__dirname, '../..');
 const main = fs.readFileSync(path.join(root, 'src/electron/main.js'), 'utf8');
 const preload = fs.readFileSync(path.join(root, 'src/electron/preload.js'), 'utf8');
 const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+// The Codex forecast row is one of the Limits rows, so the view builds it and
+// the page only holds the fetch/cache machinery behind it. Guards that slice a
+// builder read the view; the ones about state read the page.
+const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limitWindowsView.js'), 'utf8');
 const styles = fs.readFileSync(path.join(root, 'src/electron/renderer/styles.css'), 'utf8');
 
 test('Codex reset forecast is opt-in at both persistence and provider UI boundaries', () => {
@@ -23,28 +27,39 @@ test('Codex reset forecast is opt-in at both persistence and provider UI boundar
 test('Codex reset forecast stays local to the renderer and uses a narrow IPC bridge', () => {
   assert.match(preload, /getCodexResetForecast: \(options\) => ipcRenderer\.invoke\('codexResetForecast:get', options\)/);
   assert.match(app, /window\.tokenMonitor\.getCodexResetForecast/);
-  assert.match(app, /openExternal\?\.\('https:\/\/codex-resets\.com\/'\)/);
-  assert.doesNotMatch(app, /openExternal\?\.\(forecast\./);
+  assert.match(view, /openExternal\('https:\/\/codex-resets\.com\/'\)/);
+  assert.doesNotMatch(view, /openExternal\((?:forecast|info\.dataset)/);
   assert.match(main, /parsed\.hostname === 'codex-resets\.com' && \(parsed\.pathname === '' \|\| parsed\.pathname === '\/'\)/);
 });
 
 test('single and multi-account Codex rows render one forecast entry', () => {
-  assert.match(app, /if \(id === 'codex' && !options\.accountRow\) appendCodexResetForecast\(row\);/);
-  const group = app.slice(app.indexOf('function renderCodexAccountGroup'), app.indexOf('function renderClaudeAccountGroup'));
-  assert.equal((group.match(/appendCodexResetForecast\(row\)/g) || []).length, 1);
-  assert.ok(group.indexOf('row.append(head, accountList)') < group.indexOf('appendCodexResetForecast(row)'), 'multi-account forecast follows the accounts');
+  // One per row, and one per group — the group's policy says so, so the Edge
+  // Dock card's Codex group gets it without being handed an option. Both
+  // surfaces render these two functions, so the count cannot differ between them.
+  assert.match(view, /if \(id === 'codex' && !options\.accountRow\) appendCodexResetForecast\(row\);/);
+  assert.match(view, /LIMIT_GROUP_POLICIES = \{[\s\S]*?codex: \(\) => \(\{ forecastOnGroup: true \}\)/);
+  assert.equal((view.match(/appendCodexResetForecast\(/g) || []).length, 3, 'once per row, once per group, once as the declaration');
   assert.match(styles, /\.codex-reset-forecast \{/);
   assert.match(styles, /\.limit-row:has\(> \.codex-reset-forecast\)\s*\{[^}]*padding-bottom: 7px;/s);
   assert.doesNotMatch(styles, /\.codex-reset-forecast\s*\{[^}]*border-top:/s);
-  assert.match(styles, /\.limit-account-row \+ \.limit-account-row::before,\s*\.limit-row-group > \.codex-reset-forecast::before\s*\{[^}]*linear-gradient/s);
+  // Unscoped, because the forecast has exactly two parents — a solo row and a
+  // group — and it is appended to neither as an account row, so one selector
+  // reaches every shape it is drawn in. Scoping it to the group is what made the
+  // rule appear under several accounts and go missing under one; the dock card,
+  // which is built on this same row, then showed only the missing half. The
+  // card's half of that is asserted in edgeDock.test.js.
+  assert.match(styles, /\.limit-account-row \+ \.limit-account-row::before,\s*\.codex-reset-forecast::before\s*\{[^}]*linear-gradient/s);
+  assert.doesNotMatch(styles, /\.limit-row-group > \.codex-reset-forecast/);
 });
 
 test('forecast details use the shared accessible tooltip without repeating third-party copy in the row', () => {
-  const renderer = app.slice(app.indexOf('function codexResetForecastTooltip'), app.indexOf('function appendCodexResetForecast'));
+  const renderer = view.slice(view.indexOf('function codexResetForecastTooltip'), view.indexOf('function appendCodexResetForecast'));
   assert.match(renderer, /limitDetailInfoNode\([\s\S]*?'codex-reset-forecast-info-wrap'/);
   assert.match(renderer, /limits\.codexResetForecast\.lastReset/);
   assert.match(renderer, /limits\.codexResetForecast\.resetType/);
-  assert.match(renderer, /codexResetForecastType\(forecast\?\.latestResetType\)/);
+  assert.match(renderer, /forecast\?\.status === 'scheduled' \? forecast\?\.scheduledResetType : forecast\?\.latestResetType/);
+  assert.match(renderer, /limits\.codexResetForecast\.scheduledFor/);
+  assert.match(renderer, /limits\.codexResetForecast\.sourceAnnouncement/);
   assert.match(renderer, /limits\.codexResetForecast\.sourceSignal/);
   assert.match(renderer, /if \(forecast\?\.error\)[\s\S]*?limits\.codexResetForecast\.lastAttempt/);
   assert.doesNotMatch(renderer, /limits\.codexResetForecast\.checked/);
@@ -60,24 +75,30 @@ test('forecast details use the shared accessible tooltip without repeating third
   assert.doesNotMatch(renderer, /sourceText/);
   assert.match(renderer, /const chance = forecast\.chancePercent;/);
   assert.doesNotMatch(renderer, /Number\(forecast\.chancePercent\)/);
-  assert.match(renderer, /limits\.codexResetForecast\.expectedReset/);
+  assert.equal((renderer.match(/limits\.codexResetForecast\.expected/g) || []).length, 2);
+  assert.doesNotMatch(renderer, /limits\.codexResetForecast\.expectedReset/);
   assert.match(renderer, /: \(expiresAt \|\| ''\)/);
   assert.doesNotMatch(renderer, /limits\.codexResetForecast\.expires['"]/);
   assert.doesNotMatch(renderer, /forecast\.predictedAt \|\| forecast\.expiresAt/);
-  assert.match(styles, /\.codex-reset-forecast-info-wrap \.limit-detail-tooltip\s*\{[^}]*right: auto;[^}]*left: -1px;/s);
-  assert.match(renderer, /positionCodexResetForecastTooltip\(info\)/);
-  assert.match(renderer, /info\.addEventListener\('pointerenter', position\)/);
-  assert.match(renderer, /info\.addEventListener\('focusin', position\)/);
-  assert.match(styles, /\.codex-reset-forecast-info-wrap \.limit-detail-tooltip\.is-below\s*\{/);
+  // Positioning is the shared top-layer mechanism, not a per-row one: the row
+  // goes through limitDetailInfoNode, which anchors a popover to its own trigger
+  // and flips it when the window has no room below. A tooltip that positioned
+  // itself would be the one clipped by the panel it scrolls in.
+  assert.match(view, /function limitDetailInfoNode[\s\S]*?attachLimitDetailTooltip\(infoWrap, tooltip\);/);
+  assert.match(view, /tooltip\.classList\.toggle\('is-below', wrap\.getBoundingClientRect\(\)\.top < tooltip\.offsetHeight \+ 8\)/);
+  assert.match(styles, /\.limit-detail-tooltip\s*\{[^}]*position: fixed;/s);
+  assert.match(styles, /\.limit-detail-tooltip:\s*popover-open\s*\{/);
+  // What stays per-caller is which side it hangs from and how tightly it sets.
+  assert.match(styles, /\.codex-reset-forecast-info-wrap \.limit-detail-tooltip\s*\{[^}]*left: calc\(anchor\(left\) - 1px\);/s);
   assert.match(styles, /max-width: min\(230px, calc\(100vw - 48px\)\)/);
   assert.match(styles, /\.codex-reset-forecast-info-wrap \.limit-detail-tooltip\s*\{[^}]*font-size: 10px;[^}]*font-weight: 400;[^}]*line-height: 1\.2;/s);
   assert.match(styles, /\.codex-reset-forecast-disclaimer\s*\{[^}]*font-size: 8px;[^}]*white-space: normal;/s);
 });
 
 test('forecast date uses a compact relative calendar label for nearby dates', () => {
-  const start = app.indexOf('function codexResetForecastDate');
-  const end = app.indexOf('\nfunction codexResetForecastTimeUntil', start);
-  const formatDate = vm.runInNewContext(`(${app.slice(start, end)})`, {
+  const start = view.indexOf('function codexResetForecastDate');
+  const end = view.indexOf('\n  function codexResetForecastTimeUntil', start);
+  const formatDate = vm.runInNewContext(`(${view.slice(start, end)})`, {
     Date,
     Intl,
     Number,
@@ -93,9 +114,9 @@ test('forecast date uses a compact relative calendar label for nearby dates', ()
 });
 
 test('forecast tooltip supplements the exact expiry with an approximate countdown', () => {
-  const start = app.indexOf('function codexResetForecastTimeUntil');
-  const end = app.indexOf('\nfunction codexResetForecastAge', start);
-  const timeUntil = vm.runInNewContext(`(${app.slice(start, end)})`, {
+  const start = view.indexOf('function codexResetForecastTimeUntil');
+  const end = view.indexOf('\n  function codexResetForecastAge', start);
+  const timeUntil = vm.runInNewContext(`(${view.slice(start, end)})`, {
     Date,
     Intl,
     Math,
@@ -114,10 +135,10 @@ test('forecast tooltip supplements the exact expiry with an approximate countdow
 });
 
 test('forecast tooltip safely stays absent before the first response arrives', () => {
-  const start = app.indexOf('function codexResetForecastTooltip');
-  const end = app.indexOf('\nfunction renderCodexResetForecast', start);
+  const start = view.indexOf('function codexResetForecastTooltip');
+  const end = view.indexOf('\n  function renderCodexResetForecast', start);
   let detailHelperCalled = false;
-  const tooltip = vm.runInNewContext(`(${app.slice(start, end)})`, {
+  const tooltip = vm.runInNewContext(`(${view.slice(start, end)})`, {
     t: (key) => key,
     codexResetForecastDate: () => '',
     codexResetForecastTimeUntil: () => '',
@@ -129,33 +150,52 @@ test('forecast tooltip safely stays absent before the first response arrives', (
       return null;
     },
     document: {},
-    positionCodexResetForecastTooltip: () => {}
+    openExternal: () => {}
   });
   assert.equal(tooltip(null), null);
   assert.equal(detailHelperCalled, false);
-  const renderer = app.slice(app.indexOf('function renderCodexResetForecast'), app.indexOf('function appendCodexResetForecast'));
+  const renderer = view.slice(view.indexOf('function renderCodexResetForecast'), view.indexOf('function appendCodexResetForecast'));
   assert.match(renderer, /const forecastInfo = codexResetForecastTooltip\(forecast\);\s*if \(forecastInfo\) title\.append\(forecastInfo\);/);
 });
 
 test('renderer hides an active forecast at its expiry boundary', () => {
-  const start = app.indexOf('function codexResetForecastExpired');
-  const end = app.indexOf('\nfunction clearCodexResetForecastRetryTimer', start);
-  const expired = vm.runInNewContext(`(${app.slice(start, end)})`, { Date, Number });
+  const start = view.indexOf('function codexResetForecastExpired');
+  const end = view.indexOf('\n  function renderLimitProviderRow', start);
+  const expired = vm.runInNewContext(`(${view.slice(start, end)})`, { Date, Number });
   const forecast = { status: 'active', expiresAt: '2026-08-30T04:01:00.000Z' };
 
   assert.equal(expired(forecast, Date.parse('2026-08-30T04:00:59.999Z')), false);
   assert.equal(expired(forecast, Date.parse('2026-08-30T04:01:00.000Z')), true);
   assert.equal(expired({ status: 'inactive', expiresAt: forecast.expiresAt }, Date.parse('2026-08-30T04:01:00.000Z')), false);
 
-  const renderer = app.slice(app.indexOf('function renderCodexResetForecast'), app.indexOf('function appendCodexResetForecast'));
+  const renderer = view.slice(view.indexOf('function renderCodexResetForecast'), view.indexOf('function appendCodexResetForecast'));
   assert.match(renderer, /forecast\?\.status === 'active' && !expired/);
   assert.match(renderer, /forecast\?\.status === 'inactive' \|\| expired/);
+  assert.match(renderer, /forecast\?\.status === 'scheduled'/);
+  assert.match(renderer, /limits\.codexResetForecast\.scheduled/);
+  assert.match(renderer, /limits\.codexResetForecast\.expected/);
+  assert.match(renderer, /limits\.codexResetForecast\.schedulePending/);
+});
+
+test('scheduled reset labels exist in every locale', () => {
+  const i18n = fs.readFileSync(path.join(root, 'src/electron/renderer/i18n.js'), 'utf8');
+  for (const key of [
+    'limits.codexResetForecast.scheduled',
+    'limits.codexResetForecast.scheduledFor',
+    'limits.codexResetForecast.schedulePending',
+    'limits.codexResetForecast.expected',
+    'limits.codexResetForecast.sourceAnnouncement'
+  ]) {
+    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+  }
+  assert.match(i18n, /'limits\.codexResetForecast\.scheduled': '已排程'/);
+  assert.doesNotMatch(i18n, /'limits\.codexResetForecast\.scheduled': '重置已排程'/);
 });
 
 test('forecast source author is displayed as an X handle without duplicating @', () => {
-  const start = app.indexOf('function codexResetForecastSourceAuthor');
-  const end = app.indexOf('\nfunction codexResetForecastPercent', start);
-  const sourceAuthor = vm.runInNewContext(`(${app.slice(start, end)})`, { String });
+  const start = view.indexOf('function codexResetForecastSourceAuthor');
+  const end = view.indexOf('\n  function codexResetForecastPercent', start);
+  const sourceAuthor = vm.runInNewContext(`(${view.slice(start, end)})`, { String });
   assert.equal(sourceAuthor('thsottiaux'), '@thsottiaux');
   assert.equal(sourceAuthor('@thsottiaux'), '@thsottiaux');
   assert.equal(sourceAuthor('  @@thsottiaux  '), '@thsottiaux');
@@ -163,18 +203,18 @@ test('forecast source author is displayed as an X handle without duplicating @',
 });
 
 test('forecast percentage display preserves fractional percent semantics', () => {
-  const start = app.indexOf('function codexResetForecastPercent');
-  const end = app.indexOf('\nfunction positionCodexResetForecastTooltip', start);
-  const formatPercent = vm.runInNewContext(`(${app.slice(start, end)})`, { Intl });
+  const start = view.indexOf('function codexResetForecastPercent');
+  const end = view.indexOf('\n  function codexResetForecastType', start);
+  const formatPercent = vm.runInNewContext(`(${view.slice(start, end)})`, { Intl });
   assert.equal(formatPercent(0.5, 'en-US'), '0.5');
   assert.equal(formatPercent(75, 'en-US'), '75');
   assert.equal(formatPercent(75.125, 'en-US'), '75.13');
 });
 
 test('forecast reset type uses localized labels only for supported API values', () => {
-  const start = app.indexOf('function codexResetForecastType');
-  const end = app.indexOf('\nfunction codexResetForecastTooltip', start);
-  const typeLabel = vm.runInNewContext(`(${app.slice(start, end)})`, {
+  const start = view.indexOf('function codexResetForecastType');
+  const end = view.indexOf('\n  function codexResetForecastTooltip', start);
+  const typeLabel = vm.runInNewContext(`(${view.slice(start, end)})`, {
     String,
     t: (key) => key
   });
@@ -190,7 +230,7 @@ test('forecast requests use the widget outbound transport', () => {
 });
 
 test('forecast refresh cadence follows the cache policy returned by the main process', () => {
-  const renderer = app.slice(app.indexOf('function maybeFetchCodexResetForecast'), app.indexOf('\nfunction renderLimitProviderRow'));
+  const renderer = app.slice(app.indexOf('function clearCodexResetForecastRetryTimer'), app.indexOf('\nfunction captureLimitResetMotion'));
   assert.match(renderer, /const retryAfterMs = Number\(state\.codexResetForecast\?\.retryAfterMs\);/);
   assert.match(renderer, /state\.codexResetForecast\?\.error \? 30 \* 1000 : 15 \* 60 \* 1000/);
   assert.match(renderer, /const checkedAtMs = Date\.parse\(state\.codexResetForecast\?\.checkedAt \|\| ''\);/);
@@ -200,8 +240,8 @@ test('forecast refresh cadence follows the cache policy returned by the main pro
 });
 
 test('first forecast response follows the active surface and schedules only on main', async () => {
-  const start = app.indexOf('function codexResetForecastExpired');
-  const end = app.indexOf('\nfunction renderLimitProviderRow', start);
+  const start = app.indexOf('function clearCodexResetForecastRetryTimer');
+  const end = app.indexOf('\nfunction captureLimitResetMotion', start);
   const source = app.slice(start, end);
 
   async function settleForecast(result, surface = 'main') {
@@ -264,9 +304,12 @@ test('first forecast response follows the active surface and schedules only on m
 });
 
 test('forecast deadline stays anchored to response settlement across latency and an early cache hit', async () => {
-  const start = app.indexOf('function codexResetForecastExpired');
-  const end = app.indexOf('\nfunction renderLimitProviderRow', start);
-  const source = app.slice(start, end);
+  const start = app.indexOf('function clearCodexResetForecastRetryTimer');
+  const end = app.indexOf('\nfunction captureLimitResetMotion', start);
+  // The page's fetch machinery calls the view's expiry predicate, so the
+  // sandbox needs both.
+  const expiryBody = view.slice(view.indexOf('function codexResetForecastExpired'), view.indexOf('\n  function renderLimitProviderRow', view.indexOf('function codexResetForecastExpired')));
+  const source = `${expiryBody}\n${app.slice(start, end)}`;
   const scheduled = [];
   let nowMs = 1_000_000;
   let calls = 0;

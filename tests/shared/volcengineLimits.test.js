@@ -113,8 +113,8 @@ test('signVolcengineRequest signs host without sending it as a wire header', () 
   );
 });
 
-test('fetchVolcengineLimits returns notConfigured without AK/SK credentials', async () => {
-  const [provider] = await fetchVolcengineLimits({}, { env: {}, now: () => Date.parse('2026-07-06T00:00:00Z') });
+test('fetchVolcengineLimits returns notConfigured with CLI detection disabled', async () => {
+  const [provider] = await fetchVolcengineLimits({}, { env: { TOKEN_MONITOR_VOLCENGINE_ARKCLI: '0' }, now: () => Date.parse('2026-07-06T00:00:00Z') });
   assert.equal(provider.provider, 'volcengine');
   assert.equal(provider.source, 'api');
   assert.equal(provider.status, 'notConfigured');

@@ -240,7 +240,7 @@ iOS 小工具沒有省電的推送通道，所以執行環境會自行每隔幾�
 | GET    | `/api/health`              | 無     | 存活探針 + 裝置數                          |
 | GET    | `/api/public/stats`        | 無     | `PUBLIC_STATS_ENABLED=1` 時提供不含 devices/帳號 id 的公開聚合統計 |
 | GET    | `/api/stats`               | 密鑰   | 聚合統計（today / month / allTime）        |
-| GET    | `/api/stats/stream`        | 密鑰   | SSE 串流，每次 ingest 都推送               |
+| GET    | `/api/stats/stream`        | 密鑰   | SSE 快照與合併後的即時變更                 |
 | GET    | `/api/devices`             | 密鑰   | 原始的每裝置記錄                          |
 | POST   | `/api/ingest`              | 密鑰   | 更新某個裝置的用量摘要                    |
 | DELETE | `/api/devices/{deviceId}`  | 密鑰   | 刪除一筆裝置記錄                          |

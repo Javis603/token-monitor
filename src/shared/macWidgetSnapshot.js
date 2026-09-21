@@ -2,8 +2,9 @@
 
 const { KNOWN_CLIENTS } = require('./clientTracking');
 const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } = require('./limitProviders');
+const { limitWindowKindLabel } = require('./limitWindowLabels');
 
-const MAC_WIDGET_SCHEMA_VERSION = 6;
+const MAC_WIDGET_SCHEMA_VERSION = 10;
 const MAC_WIDGET_FRESHNESS_HEARTBEAT_MS = 5 * 60 * 1000;
 const KNOWN_TOOLS = new Set(KNOWN_CLIENTS.split(',').filter(Boolean));
 const KNOWN_LIMIT_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
@@ -94,6 +95,22 @@ function safeDisplayName(value, fallback = '') {
   return name;
 }
 
+// Widget snapshots live in an App Group container, so account identity must be
+// useful for disambiguation without copying the full email address across the
+// process boundary. Email identities are always masked; user-chosen profile
+// names pass through the same path/URL/control-character filter as row labels.
+function maskedWidgetEmail(value) {
+  const email = String(value || '').trim().toLowerCase();
+  const at = email.lastIndexOf('@');
+  if (at <= 0 || at === email.length - 1) return '';
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  if (!/^[^\s@]+\.[^\s@]+$/.test(domain)) return '';
+  const first = local[0] || '';
+  const last = local.length > 1 ? local.at(-1) : '';
+  return `${first}***${last}@${domain}`;
+}
+
 function isLikelySensitivePathOrUrl(value) {
   const raw = String(value || '').trim();
   if (!raw || raw.length > 80 || /[\u0000-\u001f\u007f]/.test(raw)) return true;
@@ -123,14 +140,33 @@ function buildTools(period) {
     if (totalTokens <= 0 && costUsd <= 0) continue;
     tools.push({ id: tool, totalTokens, costUsd });
   }
-  return tools.sort((left, right) => (
+  tools.sort((left, right) => (
     right.totalTokens - left.totalTokens
     || right.costUsd - left.costUsd
     || left.id.localeCompare(right.id)
   ));
+  const denominator = tools.reduce((sum, tool) => sum + tool.totalTokens, 0);
+  return tools.slice(0, 10).map((tool) => ({
+    id: tool.id,
+    totalTokens: tool.totalTokens,
+    costUsd: tool.costUsd,
+    sharePercent: denominator > 0 ? Math.max(0, Math.min(100, tool.totalTokens / denominator * 100)) : 0
+  }));
 }
 
-function buildLimitWindow(window) {
+function widgetWindowLabel(providerId, window, kind) {
+  const explicit = safeDisplayName(window?.label);
+  if (explicit) {
+    if (providerId === 'antigravity') {
+      if (kind === 'session' && /\s+5-hour$/i.test(explicit)) return '5-hour';
+      if (kind === 'weekly' && /\s+weekly$/i.test(explicit)) return 'Weekly';
+    }
+    return explicit;
+  }
+  return limitWindowKindLabel(providerId, kind);
+}
+
+function buildLimitWindow(window, providerId) {
   if (!window || typeof window !== 'object') return null;
   const kind = String(window.kind || '').trim().toLowerCase();
   if (!KNOWN_WINDOW_KINDS.has(kind)) return null;
@@ -141,14 +177,17 @@ function buildLimitWindow(window) {
   const metricValue = String(window.metric || '').trim().toLowerCase();
   const metric = VALID_LIMIT_WINDOW_METRICS.has(metricValue) ? metricValue : null;
   const remaining = optionalFiniteNumber(window.remaining);
+  const used = optionalFiniteNumber(window.used);
   const rawCurrency = String(window.currency || '').trim().toUpperCase();
   const currency = /^[A-Z]{3,8}$/.test(rawCurrency) ? rawCurrency : null;
   const rawDetail = String(window.detail || '').trim().toLowerCase();
   const detail = rawDetail === 'unlimited' ? rawDetail : null;
   const rawBoundaryKind = String(window.boundaryKind || '').trim().toLowerCase();
   const boundaryKind = KNOWN_LIMIT_BOUNDARY_KINDS.has(rawBoundaryKind) ? rawBoundaryKind : '';
+  const label = widgetWindowLabel(providerId, window, kind);
   return {
     kind,
+    ...(label ? { label } : {}),
     metric,
     showMeter: window.showMeter !== false,
     usedPercent,
@@ -159,6 +198,7 @@ function buildLimitWindow(window) {
       ? null
       : nonNegativeNumber(window.windowMinutes),
     ...(remaining === null ? {} : { remaining }),
+    ...(used === null ? {} : { used }),
     ...(currency ? { currency } : {}),
     ...(detail ? { detail } : {})
   };
@@ -170,7 +210,12 @@ function buildProviderBalance(provider) {
   const amount = optionalFiniteNumber(source.amount);
   const currency = String(source.currency || '').trim().toUpperCase();
   if (amount === null || (!Object.hasOwn(CURRENCIES, currency) && currency !== 'CREDITS')) return null;
-  return { amount, currency };
+  const allTimeSpend = optionalFiniteNumber(source.allTimeSpend);
+  return {
+    amount,
+    currency,
+    ...(allTimeSpend === null ? {} : { allTimeSpend })
+  };
 }
 
 function isCanonicalCodexWindow(providerId, window) {
@@ -178,22 +223,42 @@ function isCanonicalCodexWindow(providerId, window) {
   return window?.additional !== true;
 }
 
-function buildQuota(limits) {
+function codexAccountMatchesActive(provider, activeAccount) {
+  if (!activeAccount || String(provider?.provider || '').trim().toLowerCase() !== 'codex') return false;
+  const providerKey = String(provider?.accountKey || '').trim();
+  const activeKey = String(activeAccount?.accountKey || '').trim();
+  if (providerKey && activeKey) return providerKey === activeKey;
+  const providerEmail = String(provider?.accountEmail || '').trim().toLowerCase();
+  const activeEmail = String(activeAccount?.accountEmail || '').trim().toLowerCase();
+  return Boolean(providerEmail && activeEmail && providerEmail === activeEmail);
+}
+
+function buildQuota(limits, activeCodexAccount) {
   const providers = Array.isArray(limits?.providers) ? limits.providers : [];
   const candidates = [];
   for (const [inputIndex, provider] of providers.entries()) {
     if (!provider || typeof provider !== 'object') continue;
     const providerId = String(provider.provider || '').trim().toLowerCase();
     if (!KNOWN_LIMIT_PROVIDERS.has(providerId)) continue;
-    const windows = Array.isArray(provider.windows)
+    const rawWindows = Array.isArray(provider.windows)
       ? provider.windows
         .filter((window) => isCanonicalCodexWindow(providerId, window))
-        .map(buildLimitWindow)
+        .map((window) => buildLimitWindow(window, providerId))
         .filter(Boolean)
         .slice(0, 2)
       : [];
     const balance = buildProviderBalance(provider);
+    const windows = rawWindows.map((window) => (
+      !window.currency
+        && balance?.currency
+        && (window.metric === 'credits' || window.metric === 'spend')
+        ? { ...window, currency: balance.currency }
+        : window
+    ));
     const accountKey = String(provider.accountKey || '').trim();
+    const accountLabel = maskedWidgetEmail(provider.accountEmail)
+      || safeDisplayName(provider.accountName)
+      || safeDisplayName(provider.accountLabel);
     const source = String(provider.source || '').trim().toLowerCase();
     const sourceDetail = String(provider.sourceDetail || '').trim().toLowerCase();
     const stableRecord = {
@@ -212,6 +277,8 @@ function buildQuota(limits) {
       provider: providerId,
       status: stableRecord.status,
       updatedAt: normalizedIso(provider.updatedAt),
+      ...(codexAccountMatchesActive(provider, activeCodexAccount) ? { isCurrentAccount: true } : {}),
+      ...(accountLabel ? { accountLabel } : {}),
       ...(balance ? { balance } : {}),
       windows
       }
@@ -222,7 +289,6 @@ function buildQuota(limits) {
     || left.identitySortKey.localeCompare(right.identitySortKey)
     || left.inputIndex - right.inputIndex
   ));
-  const providerCounts = new Map();
   const providerTotals = new Map();
   for (const candidate of candidates) {
     providerTotals.set(candidate.record.provider, (providerTotals.get(candidate.record.provider) || 0) + 1);
@@ -232,7 +298,6 @@ function buildQuota(limits) {
   const identityCounts = new Map();
   const output = candidates.map((candidate) => {
     const providerId = candidate.record.provider;
-    providerCounts.set(providerId, (providerCounts.get(providerId) || 0) + 1);
     const providerOrdinal = (providerOrdinals.get(providerId) || 0) + 1;
     providerOrdinals.set(providerId, providerOrdinal);
     const identityKey = `${providerId}|${candidate.identitySortKey}`;
@@ -256,7 +321,7 @@ function buildQuota(limits) {
     };
   }).map((provider) => ({
     ...provider,
-    displayName: `${providerLabel(provider.provider)}${providerCounts.get(provider.provider) > 1 ? ` ${provider._providerOrdinal}` : ''}`
+    displayName: providerLabel(provider.provider)
   }));
   return output.sort((left, right) => {
     const leftReady = left.status === 'ok' && (left.balance || left.windows.length) ? 0 : 1;
@@ -265,7 +330,7 @@ function buildQuota(limits) {
       || left.provider.localeCompare(right.provider)
       || left._providerOrdinal - right._providerOrdinal
       || left.instanceId.localeCompare(right.instanceId);
-  }).map(({ _providerOrdinal, ...provider }) => provider).slice(0, 10);
+  }).map(({ _providerOrdinal, ...provider }) => provider);
 }
 
 // The name the widget actually shows: buildQuota stamps it onto every row as
@@ -327,6 +392,21 @@ function normalizedDaily(history) {
   return Array.from(byDate.values()).sort((left, right) => left.date.localeCompare(right.date));
 }
 
+function normalizedMonthly(history) {
+  const monthly = Array.isArray(history?.monthly) ? history.monthly : [];
+  const byMonth = new Map();
+  for (const entry of monthly) {
+    const month = String(entry?.month || '').trim();
+    if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(month)) continue;
+    byMonth.set(month, {
+      date: month,
+      totalTokens: Math.round(nonNegativeNumber(entry?.tokens)),
+      costUsd: nonNegativeNumber(entry?.cost)
+    });
+  }
+  return Array.from(byMonth.values()).sort((left, right) => left.date.localeCompare(right.date));
+}
+
 const MAC_WIDGET_ACTIVITY_DAYS = 182;
 const TREND_WINDOW_DAYS = 7;
 
@@ -342,26 +422,26 @@ function addCalendarDays(day, delta) {
   return new Date(timestamp + delta * 86_400_000).toISOString().slice(0, 10);
 }
 
-function buildActivity(history, period) {
+function buildActivity(history) {
   const daily = normalizedDaily(history).slice(-MAC_WIDGET_ACTIVITY_DAYS);
   const peak = daily.reduce((max, day) => Math.max(max, day.totalTokens), 0);
   return {
-    currentPeriod: period,
     activeDays: daily.filter((day) => day.totalTokens > 0).length,
     days: daily.map((day) => ({
       date: day.date,
       intensity: peak > 0 ? Math.max(0, Math.min(4, Math.ceil(day.totalTokens / peak * 4))) : 0,
-      totalTokens: day.totalTokens
+      totalTokens: day.totalTokens,
+      costUsd: day.costUsd
     }))
   };
 }
 
 function buildTrend(history, options = {}) {
   const daily = normalizedDaily(history);
-  let points = daily.slice(-28);
+  let points = [];
   if (options.period === 'today') {
     const today = localDayKey(options.now);
-    const livePeriod = options.livePeriod && typeof options.livePeriod === 'object' ? options.livePeriod : {};
+    const livePeriod = options.todayPeriod && typeof options.todayPeriod === 'object' ? options.todayPeriod : {};
     const liveTokens = Math.round(nonNegativeNumber(livePeriod.totalTokens));
     const liveCost = nonNegativeNumber(livePeriod.costUsd);
     if (today && (daily.length > 0 || liveTokens > 0 || liveCost > 0)) {
@@ -394,31 +474,84 @@ function buildTrend(history, options = {}) {
     } else {
       points = [];
     }
+  } else if (options.period === 'month') {
+    const today = localDayKey(options.now);
+    if (today) {
+      const start = `${today.slice(0, 7)}-01`;
+      const byDate = new Map(daily
+        .filter((point) => point.date >= start && point.date <= today)
+        .map((point) => [point.date, point]));
+      const liveToday = options.todayPeriod && typeof options.todayPeriod === 'object' ? options.todayPeriod : {};
+      for (let date = start; date && date <= today; date = addCalendarDays(date, 1)) {
+        const historical = byDate.get(date);
+        points.push({
+          date,
+          totalTokens: date === today
+            ? Math.max(historical?.totalTokens || 0, Math.round(nonNegativeNumber(liveToday.totalTokens)))
+            : historical?.totalTokens || 0,
+          costUsd: date === today
+            ? Math.max(historical?.costUsd || 0, nonNegativeNumber(liveToday.costUsd))
+            : historical?.costUsd || 0
+        });
+      }
+    }
+  } else if (options.period === 'allTime') {
+    const monthly = normalizedMonthly(history);
+    const byMonth = new Map();
+    for (const point of daily) {
+      const month = point.date.slice(0, 7);
+      const existing = byMonth.get(month) || { date: month, totalTokens: 0, costUsd: 0 };
+      existing.totalTokens += point.totalTokens;
+      existing.costUsd += point.costUsd;
+      byMonth.set(month, existing);
+    }
+    // The persisted Widget cache carries complete monthly aggregates and a
+    // bounded daily window. Merge the two so recent months can fill a missing
+    // aggregate without double-counting months already represented by both.
+    for (const point of monthly) {
+      const recent = byMonth.get(point.date);
+      byMonth.set(point.date, {
+        date: point.date,
+        totalTokens: Math.max(point.totalTokens, recent?.totalTokens || 0),
+        costUsd: Math.max(point.costUsd, recent?.costUsd || 0)
+      });
+    }
+    points = Array.from(byMonth.values())
+      .sort((left, right) => left.date.localeCompare(right.date));
+    const currentMonth = localDayKey(options.now).slice(0, 7);
+    const liveMonth = options.monthPeriod && typeof options.monthPeriod === 'object' ? options.monthPeriod : {};
+    if (currentMonth && (points.length > 0 || nonNegativeNumber(liveMonth.totalTokens) > 0)) {
+      const current = points.find((point) => point.date === currentMonth);
+      const replacement = {
+        date: currentMonth,
+        totalTokens: Math.max(current?.totalTokens || 0, Math.round(nonNegativeNumber(liveMonth.totalTokens))),
+        costUsd: Math.max(current?.costUsd || 0, nonNegativeNumber(liveMonth.costUsd))
+      };
+      points = [...points.filter((point) => point.date !== currentMonth), replacement]
+        .sort((left, right) => left.date.localeCompare(right.date));
+    }
   }
-  const peakTokens = points.reduce((max, point) => Math.max(max, point.totalTokens), 0);
   return {
-    startDate: points[0]?.date || null,
-    endDate: points.at(-1)?.date || null,
-    peakTokens,
-    currentTokens: points.at(-1)?.totalTokens || 0,
-    points
+    points: points.map(({ date, totalTokens, costUsd }) => ({ date, totalTokens, costUsd }))
   };
 }
 
-function buildPeriodSnapshot(stats, period, generatedAt, history, sourceUpdatedAt, now) {
+function buildPeriodSnapshot(stats, period, history, now) {
   const current = periodStats(stats, period);
   const tools = buildTools(current);
   const models = buildModels(current);
-  const activity = buildActivity(history, period);
-  const trend = buildTrend(history, { period, livePeriod: current, now });
+  const activity = buildActivity(history);
+  const trend = buildTrend(history, {
+    period,
+    todayPeriod: periodStats(stats, 'today'),
+    monthPeriod: periodStats(stats, 'month'),
+    now
+  });
   const overview = {
-    currentPeriod: period,
     totalTokens: Math.round(nonNegativeNumber(current.totalTokens)),
-    costUsd: nonNegativeNumber(current.costUsd),
-    primaryTool: tools[0]?.id || null,
-    updatedAt: sourceUpdatedAt || normalizedIso(stats?.updatedAt) || generatedAt
+    costUsd: nonNegativeNumber(current.costUsd)
   };
-  return { overview, models, activity, trend };
+  return { overview, tools, models, activity, trend };
 }
 
 function buildPresentation(source = {}) {
@@ -437,24 +570,13 @@ function buildPresentation(source = {}) {
   };
 }
 
-function buildStatus({ generatedAt, quota, periods, now, sourceFreshness }) {
+function buildStatus({ now, sourceFreshness }) {
   const sourceUpdatedAt = sourceFreshness.sourceUpdatedAt;
   const sourceTime = sourceUpdatedAt ? Date.parse(sourceUpdatedAt) : now.getTime();
   const dataAgeSeconds = Math.max(0, Math.round((now.getTime() - sourceTime) / 1000));
-  const statuses = quota.map((provider) => provider.status);
   return {
     isStale: sourceFreshness.sourceStale || dataAgeSeconds > 20 * 60,
-    sourceStale: sourceFreshness.sourceStale,
-    dataAgeSeconds,
-    providerConfigured: statuses.some((status) => !['notConfigured', 'disabled'].includes(status)),
-    providerNeedsLogin: statuses.some((status) => status === 'unauthorized'),
-    noData: Object.values(periods).every((period) => (
-      period.overview.totalTokens === 0
-      && period.models.length === 0
-      && period.activity.activeDays === 0
-    )),
-    sourceUpdatedAt,
-    snapshotGeneratedAt: generatedAt
+    sourceUpdatedAt
   };
 }
 
@@ -464,39 +586,28 @@ function buildMacWidgetSnapshot(stats, options = {}) {
   const generatedAt = safeNow.toISOString();
   const sourceFreshness = resolveWidgetSourceFreshness(stats, safeNow);
   const presentation = buildPresentation(options.presentation);
-  const quota = buildQuota(stats?.limits);
+  const quota = buildQuota(stats?.limits, options.activeCodexAccount);
   const history = options.history;
   const periods = {
-    day: buildPeriodSnapshot(stats, 'today', generatedAt, history, sourceFreshness.sourceUpdatedAt, safeNow),
-    month: buildPeriodSnapshot(stats, 'month', generatedAt, history, sourceFreshness.sourceUpdatedAt, safeNow),
-    total: buildPeriodSnapshot(stats, 'allTime', generatedAt, history, sourceFreshness.sourceUpdatedAt, safeNow)
+    day: buildPeriodSnapshot(stats, 'today', history, safeNow),
+    month: buildPeriodSnapshot(stats, 'month', history, safeNow),
+    total: buildPeriodSnapshot(stats, 'allTime', history, safeNow)
   };
-  // The top-level mirror is the schemaVersion 1 shape. Every reader from
-  // version 2 on takes `periods.day` and ignores it, so it is pinned to the same
-  // period rather than tracking anything: sourcing it from the app's own
-  // Today/Month/AllTime tab used to rewrite the snapshot and spend a
-  // `WidgetCenter.reloadTimelines()` on a change no widget could render, and
-  // WidgetKit reload budgets are finite. Each widget picks its own period
-  // through the AppIntent instead.
-  const selected = periods.day;
+  // This is a bounded, privacy-safe Widget contract rather than a copy of the
+  // full App stats. Preserve normalized source metrics that can support future
+  // Widget compositions even when today's views do not render every one.
   return {
     schemaVersion: MAC_WIDGET_SCHEMA_VERSION,
     generatedAt,
     periods,
-    overview: selected.overview,
     quota,
-    models: selected.models,
-    activity: selected.activity,
-    trend: selected.trend,
     presentation,
-    status: buildStatus({ generatedAt, quota, periods, now: safeNow, sourceFreshness })
+    status: buildStatus({ now: safeNow, sourceFreshness })
   };
 }
 
 const SNAPSHOT_VOLATILE_KEYS = new Set([
   'generatedAt',
-  'snapshotGeneratedAt',
-  'dataAgeSeconds',
   'updatedAt',
   'sourceUpdatedAt',
   'isStale'
@@ -551,15 +662,11 @@ function stableHash(value) {
 }
 
 function freshnessSignature(snapshot) {
-  return JSON.stringify({
-    isStale: Boolean(snapshot?.status?.isStale),
-    sourceStale: Boolean(snapshot?.status?.sourceStale)
-  });
+  return Boolean(snapshot?.status?.isStale);
 }
 
 function snapshotGeneratedTime(snapshot) {
-  const value = snapshot?.status?.snapshotGeneratedAt || snapshot?.generatedAt;
-  const timestamp = Date.parse(value || '');
+  const timestamp = Date.parse(snapshot?.generatedAt || '');
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 

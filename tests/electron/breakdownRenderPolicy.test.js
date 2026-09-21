@@ -7,9 +7,9 @@ const test = require('node:test');
 
 const {
   MAX_ANIMATED_BREAKDOWN_ROWS,
+  SESSION_BREAKDOWN_PAGE_SIZE,
   barScaleMax,
-  createAfterLayoutScheduler,
-  isLargeSessionBreakdown,
+  breakdownPage,
   rowRenderFingerprint,
   rowWidth,
   shouldAnimateBreakdownRows,
@@ -68,43 +68,28 @@ test('tool icon state uses the same strict normalization as row rendering', () =
   assert.equal(toolIconsEnabled(true), true);
 });
 
-test('off-screen containment waits for two frames and can be cancelled', () => {
-  let nextHandle = 1;
-  const callbacks = new Map();
-  const requestFrame = (callback) => {
-    const handle = nextHandle++;
-    callbacks.set(handle, callback);
-    return handle;
-  };
-  const cancelFrame = (handle) => callbacks.delete(handle);
-  const runNextFrame = () => {
-    const [handle, callback] = callbacks.entries().next().value;
-    callbacks.delete(handle);
-    callback();
-  };
-  const scheduler = createAfterLayoutScheduler(requestFrame, cancelFrame);
-  let ready = false;
+test('session pages keep the rendered row count bounded and clamp stale pages', () => {
+  const rows = Array.from({ length: SESSION_BREAKDOWN_PAGE_SIZE * 2 + 7 }, (_, index) => ({ key: `session:${index}` }));
+  const first = breakdownPage(rows, { breakdown: 'session', page: 0 });
+  assert.equal(first.rows.length, SESSION_BREAKDOWN_PAGE_SIZE);
+  assert.equal(first.start, 1);
+  assert.equal(first.end, SESSION_BREAKDOWN_PAGE_SIZE);
+  assert.equal(first.total, rows.length);
+  assert.equal(first.paginated, true);
 
-  scheduler.schedule(() => { ready = true; });
-  assert.equal(scheduler.pending(), true);
-  runNextFrame();
-  assert.equal(ready, false);
-  assert.equal(scheduler.pending(), true);
-  runNextFrame();
-  assert.equal(ready, true);
-  assert.equal(scheduler.pending(), false);
-
-  scheduler.schedule(() => { ready = false; });
-  scheduler.cancel();
-  assert.equal(scheduler.pending(), false);
-  assert.equal(callbacks.size, 0);
-  assert.equal(ready, true);
+  const clamped = breakdownPage(rows, { breakdown: 'session', page: 99 });
+  assert.equal(clamped.page, 2);
+  assert.equal(clamped.rows.length, 7);
+  assert.equal(clamped.start, SESSION_BREAKDOWN_PAGE_SIZE * 2 + 1);
+  assert.equal(clamped.end, rows.length);
 });
 
-test('only large session breakdowns opt into off-screen rendering containment', () => {
-  assert.equal(isLargeSessionBreakdown('session', MAX_ANIMATED_BREAKDOWN_ROWS + 1), true);
-  assert.equal(isLargeSessionBreakdown('session', MAX_ANIMATED_BREAKDOWN_ROWS), false);
-  assert.equal(isLargeSessionBreakdown('model', MAX_ANIMATED_BREAKDOWN_ROWS + 100), false);
+test('small session lists and other breakdowns remain unpaged', () => {
+  const small = Array.from({ length: 3 }, (_, index) => ({ key: String(index) }));
+  assert.equal(breakdownPage(small, { breakdown: 'session', page: 2 }).paginated, false);
+  assert.equal(breakdownPage(small, { breakdown: 'session', page: 2 }).rows, small);
+  const models = Array.from({ length: SESSION_BREAKDOWN_PAGE_SIZE + 1 }, (_, index) => ({ key: String(index) }));
+  assert.equal(breakdownPage(models, { breakdown: 'model' }).rows, models);
 });
 
 test('row fingerprints stay stable until visible row output changes', () => {
@@ -112,7 +97,7 @@ test('row fingerprints stay stable until visible row output changes', () => {
     key: 'session:codex:s1',
     kind: 'session',
     name: 'Codex · gpt-5.6-sol',
-    subtitle: '21:53 · 465 msgs',
+    subtitle: '21:53 · 465 calls',
     detail: 's1',
     value: 1234,
     cost: 0.42,
@@ -140,8 +125,25 @@ test('renderer applies the policy before touching breakdown rows', () => {
   assert.match(app, /cancelRowNumberAnimation\(row\.querySelector\('\.row-value'\)\)/);
   assert.match(app, /row\.dataset\.tokenDataUnavailable = 'true'/);
   assert.match(app, /showToolIcons:\s*toolIconsEnabled\(state\.settings\?\.showToolIcons\)/);
-  assert.match(app, /updateLargeSessionContainment\(largeSessionList, \{ remeasure: structureChanged \}\)/);
-  assert.match(app, /largeSessionContainmentScheduler\.schedule\(\(\) => \{/);
-  assert.match(css, /\.breakdown\.large-session-list \.session-row\s*\{[^}]*contain-intrinsic-block-size:\s*auto 72px;/s);
-  assert.match(css, /\.breakdown\.large-session-list\.large-session-list-ready \.session-row\s*\{[^}]*content-visibility:\s*auto;[^}]*contain:\s*layout paint style;/s);
+  assert.match(app, /const page = breakdownPage\(rows, \{ breakdown: state\.breakdown, page: state\.sessionPage \}\)/);
+  assert.match(app, /const visibleRows = page\.rows;/);
+  assert.match(app, /visibleRows\.map\(\(row\) => existing\.get\(row\.key\) \|\| rowTemplate\(row\)\)/);
+  assert.match(html, /<div id="sessionPagerHost" class="session-pager-host hidden"><\/div>/);
+  assert.ok(html.indexOf('id="trendsPanel"') < html.indexOf('id="sessionPagerHost"'));
+  assert.ok(html.indexOf('id="sessionPagerHost"') < html.indexOf('<footer class="footer">'));
+  assert.match(app, /sessionPagerHost: document\.getElementById\('sessionPagerHost'\)/);
+  assert.match(app, /renderSessionPager\(page\);/);
+  assert.doesNotMatch(app, /nodes\.(?:unshift|push)\(sessionPager\(page\)\)/);
+  assert.match(app, /let pager = els\.sessionPagerHost\.querySelector\('\.session-pager'\);/);
+  assert.match(app, /if \(!pager\) \{\s*pager = sessionPager\(\);\s*els\.sessionPagerHost\.append\(pager\);\s*\}/);
+  assert.match(app, /state\.sessionPage \+= direction === 'previous' \? -1 : 1;/);
+  assert.doesNotMatch(app, /replaceChildren\([^)]*sessionPager/);
+  assert.match(css, /\.session-pager-host\s*\{[^}]*display:\s*flex;[^}]*flex:\s*0 0 24px;[^}]*justify-content:\s*center;/s);
+  assert.match(css, /\.session-pager\s*\{[^}]*width:\s*min\(208px, 100%\);/s);
+  assert.match(css, /\.session-pager\s*\{[^}]*grid-template-columns:\s*24px minmax\(0, 1fr\) 24px;/s);
+  assert.match(css, /\.session-pager\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
+  assert.doesNotMatch(css, /\.session-pager\s*\{[^}]*(?:position:\s*sticky|border-radius|box-shadow|backdrop-filter|--panel-rgb|--control-alpha)/s);
+  assert.match(css, /\.session-page-button\s*\{[^}]*color:\s*var\(--muted\);/s);
+  assert.doesNotMatch(css, /\.session-page-(?:previous|next)\s*\{/);
+  assert.doesNotMatch(app, /largeSessionContainmentScheduler|updateLargeSessionContainment/);
 });

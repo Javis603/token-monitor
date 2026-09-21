@@ -36,7 +36,17 @@ function makeDb({ session, messages = [], parts = [] }) {
   const insM = db.prepare('INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?,?,?,?,?)');
   for (const m of messages) {
     const data = m.role === 'assistant'
-      ? JSON.stringify({ role: 'assistant', modelID: m.model || 'big-pickle', providerID: 'opencode', cost: m.cost, tokens: m.tokens, time: { created: m.createdMs } })
+      // `finish` is OpenCode's turn-end signal; omitted means "not recorded",
+      // which is the pre-v2 shape and must not read as a finished turn.
+      ? JSON.stringify({
+        role: 'assistant',
+        modelID: m.model || 'big-pickle',
+        providerID: 'opencode',
+        cost: m.cost,
+        tokens: m.tokens,
+        time: { created: m.createdMs, ...(m.completedMs === undefined ? {} : { completed: m.completedMs }) },
+        ...(m.finish === undefined ? {} : { finish: m.finish })
+      })
       : JSON.stringify({ role: 'user', time: { created: m.createdMs } });
     insM.run(m.id, session.id, m.createdMs, m.createdMs, data);
   }
@@ -58,6 +68,96 @@ function makeDb({ session, messages = [], parts = [] }) {
 // (16) on top of input+output+cache (9425). We total the tokscale way (9425, reasoning excluded)
 // so the detail matches the session card.
 const T0 = Date.UTC(2026, 5, 4, 10, 0, 0);
+
+maybe('readSessionMeta reports a finished turn only when the newest assistant message stopped', () => {
+  // `stop` is the model finishing its answer; `tool-calls` is a pause to run
+  // tools, which is still mid-turn. Getting this backwards would mark every
+  // working session as finished.
+  const file = makeDb({
+    session: { id: 'done', title: 'done', created: T0, updated: T0 + 1000 },
+    messages: [
+      { id: 'a1', role: 'assistant', createdMs: T0, finish: 'tool-calls', tokens: {}, cost: 0 },
+      { id: 'a2', role: 'assistant', createdMs: T0 + 1000, finish: 'stop', tokens: {}, cost: 0 }
+    ]
+  });
+  const meta = ocs.readSessionMeta(['done'], { dbPaths: [file], sqlite }).get('done');
+  assert.equal(meta.turnEnded, true);
+
+  const midTurn = makeDb({
+    session: { id: 'mid', title: 'mid', created: T0, updated: T0 + 1000 },
+    messages: [
+      { id: 'b1', role: 'assistant', createdMs: T0, finish: 'stop', tokens: {}, cost: 0 },
+      { id: 'b2', role: 'assistant', createdMs: T0 + 1000, finish: 'tool-calls', tokens: {}, cost: 0 }
+    ]
+  });
+  const mid = ocs.readSessionMeta(['mid'], { dbPaths: [midTurn], sqlite }).get('mid');
+  // The newer tool-calls message wins, so the turn is not over. Reported as an
+  // explicit false rather than omitted: an omitted boundary cannot clear a
+  // `true` that an earlier tick wrote.
+  assert.equal(mid.turnEnded, false);
+
+  // A transcript that never recorded a finish reports nothing, which leaves the
+  // caller on its own time window rather than guessing either way.
+  const silent = makeDb({
+    session: { id: 'silent', title: 'silent', created: T0, updated: T0 },
+    messages: [{ id: 'c1', role: 'assistant', createdMs: T0, tokens: {}, cost: 0 }]
+  });
+  assert.equal(ocs.readSessionMeta(['silent'], { dbPaths: [silent], sqlite }).get('silent').turnEnded, undefined);
+
+  // A prompt accepted after the last completion starts the next turn, so the
+  // previous `stop` no longer describes it. Reporting the stale completion here
+  // marked a session that had just been prompted as finished.
+  const trailing = makeDb({
+    session: { id: 'trail', title: 'trail', created: T0, updated: T0 + 2000 },
+    messages: [
+      { id: 'd1', role: 'assistant', createdMs: T0, finish: 'stop', tokens: {}, cost: 0 },
+      { id: 'd2', role: 'user', createdMs: T0 + 2000 }
+    ]
+  });
+  // The newest row is the user's, so the previous completion is not the current
+  // turn: an explicit false, which is what lets it clear an earlier true.
+  assert.equal(ocs.readSessionMeta(['trail'], { dbPaths: [trailing], sqlite }).get('trail').turnEnded, false);
+  // A tool-calls pause is still mid-turn, and only the newest row decides.
+  const paused = makeDb({
+    session: { id: 'pause', title: 'pause', created: T0, updated: T0 + 2000 },
+    messages: [
+      { id: 'e1', role: 'assistant', createdMs: T0, finish: 'tool-calls', tokens: {}, cost: 0 },
+      { id: 'e2', role: 'assistant', createdMs: T0 + 1000, finish: 'stop', tokens: {}, cost: 0 }
+    ]
+  });
+  assert.equal(ocs.readSessionMeta(['pause'], { dbPaths: [paused], sqlite }).get('pause').turnEnded, true);
+
+  // Every reason other than a tool pause ends the turn. `length` is the output
+  // budget running out and `content-filter` a refusal — OpenCode stops the loop
+  // on both and waits for the next prompt, so treating them as "still
+  // generating" held the running mark for the whole recency window.
+  for (const finish of ['length', 'content-filter', 'error']) {
+    const terminal = makeDb({
+      session: { id: 'term', title: 'term', created: T0, updated: T0 + 1000 },
+      messages: [{ id: 't1', role: 'assistant', createdMs: T0 + 1000, finish, tokens: {}, cost: 0 }]
+    });
+    assert.equal(
+      ocs.readSessionMeta(['term'], { dbPaths: [terminal], sqlite }).get('term').turnEnded,
+      true,
+      `finish: '${finish}' ends the turn`
+    );
+  }
+});
+
+maybe('the reader still answers for every session after the turn-end query', () => {
+  // A syntax error inside that one query is swallowed by the caller's catch and
+  // reads as "this session has no metadata", so a regression here silently
+  // blanks timestamps and titles for every OpenCode session rather than failing.
+  const file = makeDb({
+    session: { id: 's1', title: 'Keep me', created: T0, updated: T0 + 1000 },
+    messages: [{ id: 'a1', role: 'assistant', createdMs: T0 + 1000, finish: 'stop', tokens: {}, cost: 0 }]
+  });
+  const meta = ocs.readSessionMeta(['s1'], { dbPaths: [file], sqlite }).get('s1');
+  assert.equal(meta.title, 'Keep me');
+  assert.equal(meta.startedAt, new Date(T0).toISOString());
+  assert.equal(meta.lastUsedAt, new Date(T0 + 1000).toISOString());
+  assert.equal(meta.turnEnded, true);
+});
 const T1 = Date.UTC(2026, 5, 4, 10, 0, 5);
 const T2 = Date.UTC(2026, 5, 4, 10, 1, 0);
 const T3 = Date.UTC(2026, 5, 4, 10, 1, 5);

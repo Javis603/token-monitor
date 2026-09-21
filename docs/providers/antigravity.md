@@ -63,7 +63,7 @@ Local RPC probes prefer process kinds in this order:
 2. CLI
 3. IDE
 
-When managed OAuth accounts exist, Token Monitor fetches enabled OAuth accounts and the local RPC snapshot concurrently. If local RPC returns a trusted email matching an OAuth account, the live local result replaces the remote result for that account.
+When managed OAuth accounts exist, Token Monitor fetches enabled OAuth accounts and the local RPC snapshot concurrently. If local RPC returns a trusted email matching an OAuth account, the live local result replaces the remote result for that account, unless the local snapshot is empty or unavailable (`status !== 'ok'`), or a legacy 3-pool RPC fallback (`windowMinutes: null`) would overwrite richer grouped OAuth quota (`windowMinutes: 300` or `10080`).
 
 An account-scoped manual refresh fetches only the requested OAuth account. With no managed accounts, normal collection remains local-RPC-only.
 
@@ -88,7 +88,7 @@ OAuth client discovery prefers explicit environment overrides, then supported in
 
 The OAuth scopes intentionally cover Cloud Code quota access plus Google profile/email identity. Account identity currently uses the normalized email returned by Google userinfo rather than OpenID `sub`; keep the user-info request and identity derivation aligned if the scopes change.
 
-Remote quota collection uses the Cloud Code bootstrap, onboarding, grouped quota-summary, available-models, and legacy quota endpoints. Available-model discovery retains production, daily, and sandbox endpoint fallbacks. The legacy quota request is also used to verify suspicious all-100-percent grouped responses.
+Remote quota collection uses the Cloud Code bootstrap, onboarding, grouped quota-summary, available-models, and legacy quota endpoints. Grouped quota-summary requests prefer `daily-cloudcode-pa.googleapis.com`, matching the CLI's service: production can return a different Gemini quota window for the same credential and project, even when both requests succeed. Production remains a compatibility fallback when daily returns no usable windows or a non-terminal error; authentication, account-verification and rate-limit errors stop the attempt. Available-model discovery retains production, daily, and sandbox endpoint fallbacks. The legacy quota request is also used to verify suspicious all-100-percent available-model responses.
 
 A generic `403 PERMISSION_DENIED` may mean that one quota endpoint is unavailable and must continue through the existing fallbacks. Only a 403 that explicitly asks the user to verify the account at `accounts.google.com` becomes `actionRequired: accountVerification`; the UI then directs the user to open Antigravity, complete verification, and refresh. Never forward the provider-supplied verification URL because it may contain account-specific parameters.
 

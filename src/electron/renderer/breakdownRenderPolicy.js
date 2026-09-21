@@ -9,6 +9,7 @@
   // Animations and a number-counting rAF. Keep that polish for the compact views it was
   // designed for, but never fan it out across a Hub-sized session collection.
   const MAX_ANIMATED_BREAKDOWN_ROWS = 40;
+  const SESSION_BREAKDOWN_PAGE_SIZE = 100;
 
   function rowCount(value) {
     const count = Number(value);
@@ -19,41 +20,38 @@
     return options.reducedMotion !== true && rowCount(count) <= MAX_ANIMATED_BREAKDOWN_ROWS;
   }
 
-  function isLargeSessionBreakdown(breakdown, count) {
-    return breakdown === 'session' && rowCount(count) > MAX_ANIMATED_BREAKDOWN_ROWS;
-  }
-
   function toolIconsEnabled(value) {
     return value === true;
   }
 
-  function createAfterLayoutScheduler(requestFrame, cancelFrame) {
-    let handle = 0;
-
-    function cancel() {
-      if (!handle) return;
-      if (typeof cancelFrame === 'function') cancelFrame(handle);
-      handle = 0;
+  function breakdownPage(rows, options = {}) {
+    const allRows = Array.isArray(rows) ? rows : [];
+    const pageSize = Math.max(1, rowCount(options.pageSize) || SESSION_BREAKDOWN_PAGE_SIZE);
+    if (options.breakdown !== 'session' || allRows.length <= pageSize) {
+      return {
+        rows: allRows,
+        page: 0,
+        pageCount: 1,
+        pageSize,
+        start: allRows.length > 0 ? 1 : 0,
+        end: allRows.length,
+        total: allRows.length,
+        paginated: false
+      };
     }
-
-    function schedule(callback) {
-      cancel();
-      if (typeof requestFrame !== 'function') {
-        callback();
-        return;
-      }
-      handle = requestFrame(() => {
-        handle = requestFrame(() => {
-          handle = 0;
-          callback();
-        });
-      });
-    }
-
+    const pageCount = Math.ceil(allRows.length / pageSize);
+    const requestedPage = Number.isFinite(Number(options.page)) ? Math.floor(Number(options.page)) : 0;
+    const page = Math.max(0, Math.min(pageCount - 1, requestedPage));
+    const offset = page * pageSize;
     return {
-      cancel,
-      pending: () => handle !== 0,
-      schedule
+      rows: allRows.slice(offset, offset + pageSize),
+      page,
+      pageCount,
+      pageSize,
+      start: offset + 1,
+      end: Math.min(allRows.length, offset + pageSize),
+      total: allRows.length,
+      paginated: true
     };
   }
 
@@ -81,9 +79,9 @@
 
   return {
     MAX_ANIMATED_BREAKDOWN_ROWS,
+    SESSION_BREAKDOWN_PAGE_SIZE,
     barScaleMax,
-    createAfterLayoutScheduler,
-    isLargeSessionBreakdown,
+    breakdownPage,
     rowRenderFingerprint,
     rowWidth,
     shouldAnimateBreakdownRows,

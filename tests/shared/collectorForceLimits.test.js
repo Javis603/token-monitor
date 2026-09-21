@@ -286,7 +286,7 @@ test('collectUsageOnce includes the normalized tracked client list in summaries'
   }
 });
 
-test('collectUsageOnce requests session-level tokscale grouping', async () => {
+test('collectUsageOnce requests the workspace-joined session grouping', async () => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
@@ -322,7 +322,7 @@ test('collectUsageOnce requests session-level tokscale grouping', async () => {
     for (const args of calls) {
       const groupIndex = args.indexOf('--group-by');
       assert.notEqual(groupIndex, -1);
-      assert.equal(args[groupIndex + 1], 'client,session,model');
+      assert.equal(args[groupIndex + 1], 'client,workspace,session,model');
     }
   } finally {
     childProcess.spawn = originalSpawn;
@@ -388,5 +388,162 @@ test('collectUsageOnce enriches session rows with local last-used timestamps', a
     childProcess.spawn = originalSpawn;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('collectUsageOnce falls back to plain session grouping when the binary rejects the join', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    const groupBy = args[args.indexOf('--group-by') + 1];
+    setImmediate(() => {
+      if (groupBy === 'client,workspace,session,model') {
+        // What an upstream build actually prints for an unknown --group-by.
+        child.stderr.emit('data', Buffer.from("Error: Invalid group-by value: 'client,workspace,session,model'."));
+        child.emit('close', 1);
+        return;
+      }
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+
+  const collectorPath = require.resolve('../../src/shared/collector');
+  delete require.cache[collectorPath];
+
+  try {
+    const { collectUsageOnce } = require(collectorPath);
+    await collectUsageOnce({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false
+    });
+
+    const groupings = calls.map((args) => args[args.indexOf('--group-by') + 1]);
+    // One rejection teaches the whole tick: the retry and both later scans go
+    // straight to the grouping this binary knows.
+    assert.deepEqual(groupings, [
+      'client,workspace,session,model',
+      'client,session,model',
+      'client,session,model',
+      'client,session,model'
+    ]);
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});
+
+test('resetting the capability cache lets the workspace grouping be tried again', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    const groupBy = args[args.indexOf('--group-by') + 1];
+    setImmediate(() => {
+      if (groupBy === 'client,workspace,session,model') {
+        child.stderr.emit('data', Buffer.from("Error: Invalid group-by value: 'client,workspace,session,model'."));
+        child.emit('close', 1);
+        return;
+      }
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+
+  const collectorPath = require.resolve('../../src/shared/collector');
+  delete require.cache[collectorPath];
+
+  try {
+    const { collectUsageOnce, resetTokscaleCapabilityCache } = require(collectorPath);
+    const options = {
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false
+    };
+
+    await collectUsageOnce(options);
+    const afterFirst = calls.length;
+    // The rejection is remembered, so nothing retries the joined grouping...
+    assert.equal(calls[afterFirst - 1][calls[afterFirst - 1].indexOf('--group-by') + 1], 'client,session,model');
+
+    // ...until the binary's recorded capabilities are dropped, which is what a
+    // replaced binary at the same path needs.
+    resetTokscaleCapabilityCache();
+    await collectUsageOnce(options);
+
+    const firstAfterReset = calls[afterFirst];
+    assert.equal(firstAfterReset[firstAfterReset.indexOf('--group-by') + 1], 'client,workspace,session,model');
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+});
+
+test('turning Projects off stops asking the scan to resolve workspaces', async () => {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    setImmediate(() => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+
+  const collectorPath = require.resolve('../../src/shared/collector');
+  delete require.cache[collectorPath];
+
+  try {
+    const { collectUsageOnce } = require(collectorPath);
+    await collectUsageOnce({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false,
+      projectsEnabled: false
+    });
+
+    // Resolving and labelling workspaces is work the scan only does when asked,
+    // so the opt-out has to reach the argument list rather than discard the
+    // answer afterwards. Session titles and activity bounds ride this grouping
+    // too, so the opt-out costs no timestamps.
+    assert.equal(calls.length, 3);
+    for (const args of calls) {
+      assert.equal(args[args.indexOf('--group-by') + 1], 'client,session,model');
+    }
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
   }
 });

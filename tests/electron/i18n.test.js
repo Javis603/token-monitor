@@ -161,6 +161,8 @@ test('tool health copy stays compact and describes snapshots, not liveness', () 
     '正常 7 · 待查 5 · 未安裝 9'
   );
   assert.equal(translate('zh-TW', 'settings.tools.health.source'), '來源');
+  assert.equal(translate('zh-TW', 'settings.tools.health.addCustomSource'), '新增路徑');
+  assert.equal(translate('zh-TW', 'settings.tools.health.removeCustomSource'), '移除自訂來源');
   assert.equal(translate('zh-TW', 'settings.tools.health.sync'), '採集');
   assert.equal(translate('zh-TW', 'settings.tools.health.usage'), '用量');
   assert.equal(translate('en', 'settings.tools.health.sync.pending'), 'Sync pending');
@@ -195,6 +197,13 @@ test('tray limit labels describe remaining quota instead of ambiguous worst wind
   assert.equal(translate('ko', 'settings.tray.limitsAllSessions'), '한도: 처음 두 도구의 주요 한도 (12% · 34%)');
 });
 
+test('live rate tray labels are translated in every bundled locale', () => {
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+    assert.notEqual(translate(locale, 'settings.tray.liveTokenRate'), 'settings.tray.liveTokenRate');
+    assert.notEqual(translate(locale, 'trayMenu.content.liveTokenRate'), 'trayMenu.content.liveTokenRate');
+  }
+});
+
 test('window shortcut labels stay concise in Chinese', () => {
   assert.equal(translate('zh-TW', 'settings.display.windowShortcut'), '快捷鍵');
   assert.equal(translate('zh-TW', 'settings.shortcut.record'), '錄製');
@@ -222,8 +231,8 @@ test('AI limit capability labels stay compact in Chinese', () => {
   assert.equal(translate('zh-TW', 'settings.limits.capability.web'), 'Web');
   assert.equal(translate('zh-TW', 'settings.limits.capability.webApi'), 'Web/API');
   assert.equal(translate('zh-TW', 'settings.limits.capability.codingPlan'), 'Coding Plan');
-  assert.equal(translate('zh-TW', 'settings.kimi.step3'), '找到 kimi-auth，複製它的 Value。');
-  assert.equal(translate('zh-TW', 'settings.kimi.apiFallback'), '選用：Kimi Code API 備援');
+  assert.equal(translate('zh-TW', 'settings.kimi.webFallback'), '選用：Kimi Web 備援');
+  assert.equal(translate('zh-TW', 'settings.kimi.step3'), '找到 access_token，複製它的 Value。');
   assert.equal(translate('zh-CN', 'settings.limits.capability.appMustBeOpen'), '需打开 App 或 CLI');
   assert.equal(translate('zh-CN', 'settings.limits.capability.oauthAppCli'), 'OAuth/App/CLI');
   assert.equal(translate('zh-CN', 'settings.limits.capability.manualLogin'), '手动登录');

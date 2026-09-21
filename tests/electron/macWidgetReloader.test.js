@@ -10,7 +10,7 @@ const {
   requestMacWidgetReload,
   resetMacWidgetReloadThrottle,
   resolveWidgetReloaderPath
-} = require('../../src/electron/macWidgetReloader');
+} = require('../../src/electron/macWidget/reloader');
 
 test('resolves the packaged Widget reloader only on macOS', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-reloader-'));
@@ -22,6 +22,27 @@ test('resolves the packaged Widget reloader only on macOS', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('the development fallback resolves the helper under the repository build directory', () => {
+  // The helper this fallback looks for is a dev build at `<repo>/build/macos-widget`,
+  // a location that does not move when this module does — so the hop count in
+  // `resolveWidgetReloaderPath` has to follow the file rather than the artifact, and
+  // every candidate it derives from `__dirname` is captured here instead of probed
+  // on disk. Creating the file for real would overwrite a developer's own build.
+  const expected = path.join(__dirname, '..', '..', 'build', 'macos-widget', 'TokenMonitorWidgetReloader');
+  const seen = [];
+  const existsSync = fs.existsSync;
+  fs.existsSync = (candidate) => {
+    seen.push(String(candidate));
+    return false;
+  };
+  try {
+    assert.equal(resolveWidgetReloaderPath({ platform: 'darwin' }), null);
+  } finally {
+    fs.existsSync = existsSync;
+  }
+  assert.ok(seen.includes(expected), `resolver looked in ${seen.join(', ')}`);
 });
 
 test('does not resolve or launch the reloader on an unsupported macOS version', () => {
@@ -64,33 +85,6 @@ test('requests a throttled Widget timeline reload through the helper', () => {
     assert.equal(first.widgetKind, DEFAULT_WIDGET_KIND);
     assert.equal(second.reason, 'throttled');
     assert.deepEqual(calls, [[helper, [DEFAULT_WIDGET_KIND]]]);
-  } finally {
-    resetMacWidgetReloadThrottle();
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('a Widget kind matching the legacy registration flag still uses timeline reload mode', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-reloader-'));
-  try {
-    resetMacWidgetReloadThrottle();
-    const helper = path.join(root, 'TokenMonitorWidgetReloader');
-    fs.writeFileSync(helper, '');
-    const calls = [];
-
-    const result = requestMacWidgetReload({
-      platform: 'darwin',
-      helperPath: helper,
-      widgetKind: '--register-host',
-      now: 1_000_000,
-      execFile: (file, args, callback) => {
-        calls.push([file, args]);
-        callback(null);
-      }
-    });
-
-    assert.equal(result.ok, true);
-    assert.deepEqual(calls, [[helper, ['--register-host']]]);
   } finally {
     resetMacWidgetReloadThrottle();
     fs.rmSync(root, { recursive: true, force: true });

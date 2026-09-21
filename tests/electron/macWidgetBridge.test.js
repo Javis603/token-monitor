@@ -14,7 +14,7 @@ const {
   syncMacWidgetSnapshotDirectory,
   updateMacWidgetSnapshot,
   writeMacWidgetSnapshot
-} = require('../../src/electron/macWidgetBridge');
+} = require('../../src/electron/macWidget/bridge');
 const { aggregateDevices } = require('../../src/shared/usage');
 
 async function withTempDirectory(run) {
@@ -182,10 +182,11 @@ test('does not rewrite unchanged snapshots so reload callers can skip refreshes'
 });
 
 test('resolves only safe macOS App Group snapshot paths', () => {
+  const resolveContainerPath = (appGroup) => path.join('/Users/example/Library/Group Containers', appGroup);
   assert.equal(resolveMacWidgetSnapshotPath({
     platform: 'darwin',
     appGroup: 'group.com.example.tokenmonitor',
-    home: '/Users/example'
+    resolveContainerPath
   }), path.join(
     '/Users/example',
     'Library',
@@ -196,12 +197,12 @@ test('resolves only safe macOS App Group snapshot paths', () => {
   assert.equal(resolveMacWidgetSnapshotPath({
     platform: 'linux',
     appGroup: 'group.com.example.tokenmonitor',
-    home: '/home/example'
+    resolveContainerPath
   }), null);
   assert.equal(resolveMacWidgetSnapshotPath({
     platform: 'darwin',
     appGroup: 'ABCDEFGHIJ.dev.example.widgettest',
-    home: '/Users/example'
+    resolveContainerPath
   }), path.join(
     '/Users/example',
     'Library',
@@ -212,18 +213,23 @@ test('resolves only safe macOS App Group snapshot paths', () => {
   assert.equal(resolveMacWidgetSnapshotPath({
     platform: 'darwin',
     appGroup: 'SHORT.dev.example.widgettest',
-    home: '/Users/example'
+    resolveContainerPath
   }), null);
   assert.equal(resolveMacWidgetSnapshotPath({
     platform: 'darwin',
     appGroup: '../../credentials',
-    home: '/Users/example'
+    resolveContainerPath
   }), null);
   assert.equal(resolveMacWidgetSnapshotPath({
     platform: 'darwin',
     appGroup: 'group.com.example.tokenmonitor',
-    home: '/Users/example',
+    resolveContainerPath,
     snapshotFileName: '../credentials.json'
+  }), null);
+  assert.equal(resolveMacWidgetSnapshotPath({
+    platform: 'darwin',
+    appGroup: 'group.com.example.tokenmonitor',
+    resolveContainerPath: () => null
   }), null);
 });
 
@@ -240,15 +246,16 @@ test('serializes aggregate stats before writing the snapshot', async () => {
 
     assert.equal(result.ok, true);
     const snapshot = JSON.parse(await fs.readFile(snapshotPath, 'utf8'));
-    assert.equal(snapshot.schemaVersion, 6);
+    assert.equal(snapshot.schemaVersion, 10);
     assert.equal(snapshot.generatedAt, '2026-07-16T09:00:00.000Z');
-    assert.equal(snapshot.overview.totalTokens, 42);
-    assert.equal(snapshot.overview.costUsd, 0.5);
     assert.equal(snapshot.periods.day.overview.totalTokens, 42);
     assert.equal(snapshot.periods.month.overview.totalTokens, 0);
     assert.equal(snapshot.periods.total.overview.totalTokens, 0);
     assert.deepEqual(snapshot.quota, []);
-    assert.deepEqual(snapshot.models, []);
+    assert.deepEqual(snapshot.periods.day.models, []);
+    for (const legacyMirror of ['overview', 'tools', 'models', 'activity', 'trend']) {
+      assert.equal(Object.hasOwn(snapshot, legacyMirror), false);
+    }
   });
 });
 
@@ -490,7 +497,6 @@ test('compares an existing snapshot from before startup by stable content', asyn
 
     const oldSnapshot = JSON.parse(await fs.readFile(snapshotPath, 'utf8'));
     oldSnapshot.generatedAt = '2026-07-16T08:59:00.000Z';
-    oldSnapshot.status.snapshotGeneratedAt = oldSnapshot.generatedAt;
     await fs.writeFile(snapshotPath, `${JSON.stringify(oldSnapshot)}\n`, 'utf8');
 
     const second = await updateMacWidgetSnapshot(stats, {

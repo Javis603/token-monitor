@@ -118,7 +118,12 @@
       const pending = source?.pending === true;
       if (!groups.has(id)) groups.set(id, { id, exists, paths: [] });
       else if (!canonicalIds.has(id)) groups.get(id).exists ||= exists;
-      if (dir) groups.get(id).paths.push({ dir, exists, pending });
+      if (dir) groups.get(id).paths.push({
+        dir,
+        exists,
+        pending,
+        ...(source?.custom === true ? { custom: true } : {})
+      });
     }
     return [...groups.values()];
   }
