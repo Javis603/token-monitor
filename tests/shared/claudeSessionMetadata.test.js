@@ -244,6 +244,7 @@ test('Claude session context uses the latest API input occupancy and model capac
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
   assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    // Claude Code's official used_percentage excludes output_tokens.
     contextTokens: 122_700,
     contextWindow: 1_000_000
   });
@@ -272,8 +273,8 @@ test('Claude session context clears on compaction and repopulates on the next re
   assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 12_000, contextWindow: 200_000 });
 });
 
-test('Claude session context survives an oversized assistant record', (t) => {
-  const { dir, file } = fixture([JSON.stringify({
+test('Claude session context survives oversized assistant field ordering', (t) => {
+  const contentFirst = JSON.stringify({
     type: 'assistant',
     message: {
       id: 'msg_big',
@@ -284,12 +285,57 @@ test('Claude session context survives an oversized assistant record', (t) => {
       stop_reason: 'end_turn',
       usage: { input_tokens: 1_000, cache_creation_input_tokens: 2_000, cache_read_input_tokens: 300_000 }
     }
-  })]);
+  });
+  const modelFirst = JSON.stringify({
+    type: 'assistant',
+    message: {
+      id: 'msg_bigger',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-opus-5',
+      content: 'x'.repeat(300 * 1024),
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 4_000, cache_creation_input_tokens: 5_000, cache_read_input_tokens: 600_000 }
+    }
+  });
+  const { dir, file } = fixture([contentFirst]);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
   assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
     contextTokens: 303_000,
     contextWindow: 1_000_000
+  });
+
+  fs.writeFileSync(file, `${modelFirst}\n`);
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 609_000,
+    contextWindow: 1_000_000
+  });
+});
+
+test('Claude session context ignores malformed usage instead of clearing a valid reading', (t) => {
+  const valid = JSON.stringify({
+    type: 'assistant',
+    message: {
+      model: 'claude-sonnet-4-5-20250929',
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 20_000, cache_creation_input_tokens: 1_000, cache_read_input_tokens: 50_000 }
+    }
+  });
+  const malformed = JSON.stringify({
+    type: 'assistant',
+    message: {
+      model: 'claude-sonnet-5',
+      stop_reason: 'end_turn',
+      usage: { cache_creation_input_tokens: 2_000, cache_read_input_tokens: 100_000 }
+    }
+  });
+  const { dir, file } = fixture([valid, malformed]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 71_000,
+    contextWindow: 200_000
   });
 });
 

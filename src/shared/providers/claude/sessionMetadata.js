@@ -41,30 +41,54 @@ function claudeContextWindow(model) {
   return CLAUDE_ONE_MILLION_MODEL.test(id) ? 1_000_000 : 200_000;
 }
 
-function tokenCount(value) {
-  if (typeof value !== 'number' && typeof value !== 'string') return 0;
-  if (typeof value === 'string' && value.trim() === '') return 0;
+function reportedTokenCount(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
   const number = Number(value);
-  return Number.isFinite(number) && number >= 0 ? Math.round(number) : 0;
+  return Number.isFinite(number) && number >= 0 ? Math.round(number) : null;
+}
+
+function tokenCount(value) {
+  return reportedTokenCount(value) ?? 0;
 }
 
 function applyContextUsage(state, model, usage) {
   if (!usage || typeof usage !== 'object') return;
+  const inputTokens = reportedTokenCount(usage.input_tokens);
+  // `input_tokens` is required by Claude's usage shape. Treat a record without
+  // it as incomplete rather than replacing the last valid reading with zero.
+  if (inputTokens === null) return;
   state.contextObserved = true;
-  state.contextTokens = tokenCount(usage.input_tokens)
+  // Match Claude Code's status-line `used_percentage`: it is the current API
+  // input occupancy and deliberately excludes this response's output_tokens.
+  state.contextTokens = inputTokens
     + tokenCount(usage.cache_creation_input_tokens)
     + tokenCount(usage.cache_read_input_tokens);
   state.contextWindow = claudeContextWindow(model);
 }
 
-function contextUsageFromTail(tail) {
-  const model = /"model"\s*:\s*"([^"]+)"/.exec(tail)?.[1] || '';
+function contextUsageFromFragments(head, tail) {
   const usageAt = tail.indexOf('"usage"');
   if (usageAt < 0) return null;
+  const contentAt = head.indexOf('"content"');
+  const headModelAt = head.indexOf('"model"');
+  let model = '';
+  // Trust a model in the head only when it precedes top-level message content.
+  // Otherwise a huge content value could contain an unrelated nested field.
+  if (headModelAt >= 0 && (contentAt < 0 || headModelAt < contentAt)) {
+    model = /"model"\s*:\s*"([^"]+)"/.exec(head.slice(headModelAt))?.[1] || '';
+  }
+  if (!model) {
+    // In Claude Code's usual ordering the top-level model follows content and
+    // is the last model field before usage. This also avoids a nested model in
+    // an earlier content block winning over the assistant message's model.
+    const matches = [...tail.slice(0, usageAt).matchAll(/"model"\s*:\s*"([^"]+)"/g)];
+    model = matches.length ? matches[matches.length - 1][1] : '';
+  }
   const usageText = tail.slice(usageAt);
   const number = (key) => {
     const match = new RegExp(`"${key}"\\s*:\\s*(\\d+)`).exec(usageText);
-    return match ? Number(match[1]) : 0;
+    return match ? Number(match[1]) : undefined;
   };
   return {
     model,
@@ -274,7 +298,7 @@ function applyLongLineFragments(state) {
     if (!reason) return;
     state.stopReason = reason;
     state.userSinceStop = false;
-    const contextUsage = contextUsageFromTail(tail);
+    const contextUsage = contextUsageFromFragments(head, tail);
     if (contextUsage) applyContextUsage(state, contextUsage.model, contextUsage.usage);
     return;
   }
