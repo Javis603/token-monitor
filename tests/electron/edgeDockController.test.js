@@ -118,6 +118,7 @@ function createFixture(options = {}) {
   const ipcMain = new FakeIpcMain();
   const placements = [];
   const maskWindows = [];
+  const haptics = [];
   const controller = createEdgeDockController({
     BrowserWindow: FakeBrowserWindow,
     ipcMain,
@@ -132,6 +133,7 @@ function createFixture(options = {}) {
       maskWindows.push(win);
       return options.maskAvailable !== false;
     },
+    performHaptic: (pattern) => haptics.push(pattern),
     onPlacementChange: (placement) => {
       placements.push(placement);
       settings.edgeDockSide = placement.side;
@@ -147,8 +149,58 @@ function createFixture(options = {}) {
   controller.sync();
   for (const win of FakeBrowserWindow.instances) win.webContents.emit('did-finish-load');
   const windowFor = (surface) => FakeBrowserWindow.instances.filter((win) => !win.destroyed && win.surface === surface).at(-1);
-  return { controller, ipcMain, maskWindows, placements, screen, settings, windowFor };
+  return { controller, haptics, ipcMain, maskWindows, placements, screen, settings, windowFor };
 }
+
+test('auto-hide haptics distinguish the handle reveal from the first hovered item', async (t) => {
+  const fixture = createFixture({ platform: 'darwin', settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+  const rail = fixture.windowFor('rail');
+
+  fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents });
+  fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents });
+  assert.deepEqual(fixture.haptics, ['generic']);
+
+  fixture.screen.point = {
+    x: rail.bounds.x + rail.bounds.width / 2,
+    y: rail.bounds.y + 40
+  };
+  await new Promise((resolve) => setTimeout(resolve, 105));
+  assert.deepEqual(fixture.haptics, ['generic', 'alignment']);
+
+  const disabled = createFixture({
+    platform: 'darwin',
+    settings: { edgeDockMode: 'autoHide', edgeDockHaptic: false }
+  });
+  t.after(() => disabled.controller.stop());
+  disabled.ipcMain.emit('edgeDock:click', { sender: disabled.windowFor('peek').webContents });
+  assert.deepEqual(disabled.haptics, []);
+});
+
+test('rail haptics once whenever the pointer enters an item', async (t) => {
+  const fixture = createFixture({ platform: 'darwin' });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const centerX = rail.bounds.x + rail.bounds.width / 2;
+
+  fixture.screen.point = { x: centerX, y: rail.bounds.y + 40 };
+  await new Promise((resolve) => setTimeout(resolve, 105));
+  assert.deepEqual(fixture.haptics, ['alignment']);
+
+  fixture.screen.point = { x: centerX, y: rail.bounds.y + 112 };
+  await new Promise((resolve) => setTimeout(resolve, 55));
+  assert.deepEqual(fixture.haptics, ['alignment', 'alignment']);
+
+  await new Promise((resolve) => setTimeout(resolve, 55));
+  assert.deepEqual(fixture.haptics, ['alignment', 'alignment']);
+
+  fixture.screen.point = { x: rail.bounds.x - 20, y: rail.bounds.y + 40 };
+  await new Promise((resolve) => setTimeout(resolve, 55));
+  fixture.screen.point = { x: centerX, y: rail.bounds.y + 40 };
+  await new Promise((resolve) => setTimeout(resolve, 55));
+  assert.deepEqual(fixture.haptics, ['alignment', 'alignment', 'alignment']);
+});
 
 test('an open card follows its cell id across removal and reorder', (t) => {
   const fixture = createFixture();

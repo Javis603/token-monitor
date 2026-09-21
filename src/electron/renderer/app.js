@@ -386,6 +386,8 @@ Object.assign(els, {
   edgeDockOptions: document.getElementById('edgeDockOptions'),
   edgeDockSideInputs: Array.from(document.querySelectorAll('input[name="edgeDockSide"]')),
   edgeDockModeInputs: Array.from(document.querySelectorAll('input[name="edgeDockMode"]')),
+  edgeDockHapticRow: document.getElementById('edgeDockHapticRow'),
+  edgeDockHapticInput: document.getElementById('edgeDockHapticInput'),
   edgeDockWarnColorsInput: document.getElementById('edgeDockWarnColorsInput'),
   edgeDockComposer: document.getElementById('edgeDockComposer'),
   trayIconOptions: document.getElementById('trayIconOptions'),
@@ -11335,6 +11337,8 @@ function syncEdgeDockControls() {
   for (const input of els.edgeDockSideInputs || []) input.checked = input.value === side;
   const mode = state.settings?.edgeDockMode === 'always' ? 'always' : 'autoHide';
   for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
+  els.edgeDockHapticRow?.classList.toggle('hidden', state.appInfo?.platform !== 'darwin');
+  if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
   if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
   if (enabled) edgeDockComposer?.render();
 }
@@ -11375,6 +11379,9 @@ for (const input of els.edgeDockSideInputs || []) {
 }
 els.edgeDockWarnColorsInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockWarnColors: els.edgeDockWarnColorsInput.checked });
+});
+els.edgeDockHapticInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockHaptic: els.edgeDockHapticInput.checked });
 });
 for (const input of els.edgeDockModeInputs || []) {
   input.addEventListener('change', () => {

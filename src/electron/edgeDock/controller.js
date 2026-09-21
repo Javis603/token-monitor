@@ -63,6 +63,7 @@ function createEdgeDockController(deps) {
     onToggleRateMode,
     onSwitchCodexAccount,
     onOpenResetForecastSource,
+    performHaptic = () => false,
     logger = () => {}
   } = deps;
 
@@ -84,6 +85,7 @@ function createEdgeDockController(deps) {
   let bubblePlaced = null;
   let bubbleVisible = false;
   let railVisible = false;
+  let hapticCellId = null;
   // How many times the rail has been revealed, as an event the page can key the
   // entrance on. See revealRail: the page cannot derive this from `railVisible`,
   // because the retract that takes the rail away never re-renders it.
@@ -106,6 +108,15 @@ function createEdgeDockController(deps) {
 
   function alwaysVisible() {
     return settings().edgeDockMode === 'always';
+  }
+
+  function hapticsEnabled() {
+    return platform === 'darwin' && settings().edgeDockHaptic !== false;
+  }
+
+  function hapticTick(pattern) {
+    if (!hapticsEnabled()) return;
+    try { performHaptic(pattern); } catch (error) { logger(`[edge-dock] haptic feedback failed: ${error.message}`); }
   }
 
   function cellKinds() {
@@ -438,7 +449,7 @@ function createEdgeDockController(deps) {
     if (bubbleCell !== null) placeBubble();
   }
 
-  function revealRail() {
+  function revealRail(withHaptic = false) {
     const rail = windows.rail;
     if (!alive(rail)) return;
     // The flag flips before the render so this payload is the one that carries
@@ -451,10 +462,16 @@ function createEdgeDockController(deps) {
     // next reveal as no change at all - which is what left the entrance playing once
     // per page load. The count only moves on a real transition, so a hover that
     // re-reveals an already-visible rail does not replay the slide.
-    if (entering) railReveal += 1;
+    if (entering) {
+      railReveal += 1;
+      hapticCellId = null;
+    }
     render('rail');
     positionRail();
-    if (entering) setVisible('rail', true, FADE_IN_MS);
+    if (entering) {
+      setVisible('rail', true, FADE_IN_MS);
+      if (withHaptic) hapticTick('generic');
+    }
     setPeekVisible(false, FADE_OUT_MS);
   }
 
@@ -466,6 +483,7 @@ function createEdgeDockController(deps) {
       return;
     }
     railVisible = false;
+    hapticCellId = null;
     setVisible('rail', false, FADE_OUT_MS);
     showPeek();
   }
@@ -518,9 +536,9 @@ function createEdgeDockController(deps) {
     }
   }
 
-  function applyEffects(effects) {
+  function applyEffects(effects, options = {}) {
     for (const effect of effects || []) {
-      if (effect.type === 'reveal') revealRail();
+      if (effect.type === 'reveal') revealRail(options.hapticReveal === true);
       else if (effect.type === 'retract') retractRail();
       else if (effect.type === 'bubble') {
         if (effect.cell === null) hideBubble();
@@ -561,7 +579,12 @@ function createEdgeDockController(deps) {
           inCorridor: Boolean(bubbleRect && rectContains(edgeDockCorridorBounds(current.rail, bubbleRect), point)),
           cellIndex: revealed ? edgeDockCellAt(point, current.rail, cells.length) : null
         };
-        applyEffects(intent.tick(input, Date.now()));
+        const hoveredCellId = Number.isInteger(input.cellIndex) ? cells[input.cellIndex]?.id || null : null;
+        if (hoveredCellId !== hapticCellId) {
+          if (hoveredCellId) hapticTick('alignment');
+          hapticCellId = hoveredCellId;
+        }
+        applyEffects(intent.tick(input, Date.now()), { hapticReveal: !alwaysVisible() });
       }
     } catch (error) {
       logger(`[edge-dock] poll failed: ${error.message}`);
@@ -626,7 +649,7 @@ function createEdgeDockController(deps) {
     ipcMain.on('edgeDock:click', (event, payload) => {
       const surface = surfaceFor(event.sender);
       if (surface === 'peek') {
-        applyEffects(intent.reveal());
+        applyEffects(intent.reveal(), { hapticReveal: !alwaysVisible() });
         return;
       }
       if (surface !== 'rail') return;
@@ -773,6 +796,7 @@ function createEdgeDockController(deps) {
       cells = next;
       if (!running) return;
       const structural = previous !== cells.map((cell) => cell.id).join(',');
+      if (structural) hapticCellId = null;
       if (placedId) {
         const before = previousCells.find((cell) => cell.id === placedId);
         const after = cells.find((cell) => cell.id === placedId);
