@@ -2147,9 +2147,9 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
       tool.models.map((model) => [model.key, model.value])
       ])
   ]);
+  if (accordionInner.dataset.signature === signature) return;
   const previousDelete = accordionInner.querySelector?.('.device-delete-button');
   if (previousDelete) resetDeviceDeleteConfirmation(previousDelete);
-  if (accordionInner.dataset.signature === signature) return;
 
   const content = document.createElement('div');
   content.className = 'accordion-content device-breakdown';

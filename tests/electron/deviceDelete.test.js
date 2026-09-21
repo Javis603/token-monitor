@@ -136,7 +136,7 @@ function deviceDetail(deviceId = 'remote-a', tools = []) {
   };
 }
 
-test('device deletion confirmation cancels on blur, outside interaction, timeout, and redraw', async () => {
+test('device deletion confirmation cancels on blur, outside interaction, timeout, and changed redraw', async () => {
   const harness = createHarness();
   const accordion = harness.createNode('div');
   harness.render(accordion, deviceDetail());
@@ -160,9 +160,10 @@ test('device deletion confirmation cancels on blur, outside interaction, timeout
 
   await remove.dispatch('click');
   harness.render(accordion, deviceDetail());
-  assert.equal(remove.dataset.confirm, '');
+  assert.equal(remove.dataset.confirm, 'true');
+  assert.equal(remove.textContent, 'Click again');
+  assert.equal(harness.timers.size, 1);
 
-  await remove.dispatch('click');
   harness.render(accordion, deviceDetail('remote-b', [{
     key: 'codex', client: 'codex', value: 1, percent: 100, color: '#fff', models: []
   }]));

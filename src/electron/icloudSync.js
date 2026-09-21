@@ -848,7 +848,7 @@ function createIcloudSyncStore(options = {}) {
       && (existingDocument || prior)
       && deviceHeartbeatMs(wire) > elapsedMs
     ) {
-      return { ...(existingDocument || prior).document, skipped: true };
+      return { ...(existingDocument || prior?.document), skipped: true };
     }
 
     const revision = await nextDeviceRevision(deviceId, observedRevision);

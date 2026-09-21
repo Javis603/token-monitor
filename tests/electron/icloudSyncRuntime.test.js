@@ -192,6 +192,39 @@ test('runtime waits for the sync directory to initialize before opening a watche
   await runtime.stop();
 });
 
+test('runtime does not recreate a failed watcher until it restarts', async () => {
+  let watchCalls = 0;
+  let failWatcher;
+  const store = {
+    paths: () => ({ syncRoot: '/tmp/icloud-test-root' }),
+    status: () => ({ supported: true, available: true, state: 'available', root: '[redacted]/Token Monitor/sync-v1' }),
+    discoverDevices: async () => ({ records: [], errors: [] }),
+    discoverSubscriptions: async () => ({ winner: null, revisionToken: '', errors: [] })
+  };
+  const runtime = createIcloudSyncRuntime({
+    store,
+    debounceMs: 60_000,
+    reconcileMs: 0,
+    watchFactory: (_root, _onChange, onError) => {
+      watchCalls += 1;
+      failWatcher = onError;
+      return { close() {} };
+    }
+  });
+
+  await runtime.start();
+  assert.equal(watchCalls, 1);
+  assert.equal(typeof failWatcher, 'function');
+  failWatcher(Object.assign(new Error('watch budget exhausted'), { code: 'ENOSPC' }));
+  await runtime.reconcile('after-watcher-error');
+  assert.equal(watchCalls, 1);
+
+  await runtime.stop();
+  await runtime.start();
+  assert.equal(watchCalls, 2);
+  await runtime.stop();
+});
+
 test('runtime retains the last-good aggregate when iCloud Drive disappears', async () => {
   const fixture = rootFixture();
   try {

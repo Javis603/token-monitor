@@ -59,6 +59,7 @@ function createIcloudSyncRuntime(options = {}) {
   let generation = 0;
   let watcher = null;
   let watcherState = 'inactive';
+  let watcherFailed = false;
   let reconcileTimer = null;
   let debounceTimer = null;
   let reconcilePromise = null;
@@ -173,6 +174,7 @@ function createIcloudSyncRuntime(options = {}) {
     // failed, keep the process on reconciliation polling instead of repeatedly
     // rediscovering the same exhausted budget.
     watcherState = 'unavailable';
+    watcherFailed = true;
     closeWatcher();
     reportError(error, /ENOSPC|EMFILE|ENFILE/.test(String(error?.code || ''))
       ? 'watcher-descriptor-exhausted'
@@ -225,7 +227,7 @@ function createIcloudSyncRuntime(options = {}) {
         ? await store.discoverSubscriptions()
         : null;
       if (!active || expectedGeneration !== generation) return;
-      if (!watcher && store.status?.()?.available === true) {
+      if (!watcher && !watcherFailed && store.status?.()?.available === true) {
         startWatcher(expectedGeneration);
       }
       lastSubscriptionReconcileErrorCategory = subscriptions?.errors?.[0]?.category || '';
@@ -308,6 +310,7 @@ function createIcloudSyncRuntime(options = {}) {
     const expectedGeneration = generation;
     reconcileState = 'idle';
     lastErrorCategory = '';
+    watcherFailed = false;
     const source = storeStatus();
     watcherState = source.available ? 'starting' : 'unavailable';
     startWatcher(expectedGeneration);

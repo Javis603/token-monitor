@@ -666,6 +666,10 @@ test('identical semantic device snapshots skip writes while meaningful changes a
     const skippedRaw = JSON.parse(await fs.promises.readFile(target, 'utf8'));
     assert.equal(first.revision, 1);
     assert.equal(skipped.skipped, true);
+    assert.equal(skipped.deviceId, 'mac-a');
+    assert.equal(skipped.revision, first.revision);
+    assert.equal(skipped.record.deviceId, 'mac-a');
+    assert.equal(skipped.record.periods.today.totalTokens, 1);
     assert.equal(skippedRaw.revision, firstRaw.revision);
 
     clock += 100;
