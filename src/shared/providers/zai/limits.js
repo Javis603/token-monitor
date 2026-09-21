@@ -465,6 +465,11 @@ async function fetchZaiLimits(options = {}, deps = {}) {
     if (discovery.kind === 'coding-quota' && discovery.reason === 'coding_plan_key_missing') {
       return discovery.billing ? fetchZcodeBilling(discovery.billing.credential.token) : emptyLane(true);
     }
+    // The same refusal on the billing leg: nothing to query with, reported as an
+    // attempt so the row stays unavailable instead of "not configured".
+    if (discovery.kind === 'start-billing' && discovery.reason === 'billing_jwt_unavailable') {
+      return emptyLane(true);
+    }
     if (discovery.kind !== 'start-billing' || !discovery.credential) {
       return emptyLane();
     }
