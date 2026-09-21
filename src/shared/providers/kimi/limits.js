@@ -660,7 +660,9 @@ async function fetchKimiLimits(options = {}, deps = {}) {
   const updatedAt = new Date(now).toISOString();
   const key = kimiToken(env, options.kimiApiKey);
   const pastedWebToken = kimiWebToken(env, options.kimiWebAccessToken);
-  const pastedRefreshToken = cleanSecret(env.KIMI_REFRESH_TOKEN || '') || cleanSecret(options.kimiWebRefreshToken || '');
+  // An explicit option outranks the env default so per-call probes can target
+  // a specific credential.
+  const pastedRefreshToken = cleanSecret(options.kimiWebRefreshToken || '') || cleanSecret(env.KIMI_REFRESH_TOKEN || '');
   // Manual credentials win; a pasted refresh token outranks a pasted access
   // token because it self-renews. A legacy access-token paste that is actually
   // long-lived is treated as the refresh token it evidently is.
@@ -672,9 +674,25 @@ async function fetchKimiLimits(options = {}, deps = {}) {
   if (manualRefreshSeed) {
     manualSession = await resolveKimiManualWebSession(manualRefreshSeed, deps, errors);
   }
+  // A stale manual session must not shadow the lane: its expired access token
+  // would 401 for sure. Drop it (the seed stays for the next tick) and report
+  // the gap the same way a stale desktop session is reported.
+  let manualSessionStale = false;
+  if (manualSession?.accessIsStale) {
+    const stale = new Error('Kimi manual session token is stale; the next refresh will renew it');
+    stale.status = 'unavailable';
+    errors.push(stale);
+    manualSession = null;
+    manualSessionStale = true;
+  }
   // A dead refresh token means the account itself is logged out, so treat that
-  // as no session at all rather than reporting a permanent failure.
-  let desktopSession = manualSession || manualWebToken ? null : await resolveKimiDesktopSession(deps);
+  // as no session at all rather than reporting a permanent failure. With a
+  // manual seed in play the desktop store is skipped even when the session went
+  // stale: both hold tokens from the same rotating chain, so silently falling
+  // over would read as an account switch.
+  let desktopSession = manualSession || manualWebToken || manualSessionStale
+    ? null
+    : await resolveKimiDesktopSession(deps);
   if (desktopSession && desktopSession.refreshIsDead) desktopSession = null;
   // The desktop app rotates its access token on activity, not on a schedule;
   // once stale, every request would 401. When the app is closed we refresh the
