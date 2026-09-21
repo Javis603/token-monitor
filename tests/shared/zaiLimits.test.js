@@ -1052,6 +1052,43 @@ test('fetchZaiLimits refuses the start-plan mirror once the identity is known an
   assert.deepEqual(urls, []);
 });
 
+test('fetchZaiLimits reports the refused billing attempt with no mirror to fall back on either', async () => {
+  // The identity decides it on its own: the entry carries no mirror at all, so
+  // what the lane needs is the same attempted-but-empty answer rather than the
+  // "not configured" a missing credential would otherwise produce.
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'start-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-start-plan': { enabled: true, options: { apiKey: '' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: 'known-account-id' }))
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  const urls = [];
+  const provider = await fetchZaiLimits({}, {
+    env: { ZCODE_CREDENTIAL_SECRET: FIXTURE_CREDENTIAL_SECRET },
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url) => {
+      urls.push(String(url));
+      throw new Error('there is no credential to query with');
+    }
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'oauth');
+  assert.deepEqual(provider.windows, []);
+  assert.deepEqual(urls, []);
+});
+
 test('fetchZaiLimits keeps the quota half when the billing mirror is refused', async () => {
   // A coding-plan selection: the account's own key still resolves, so the same
   // refusal drops only the billing leg, and no request carries the start mirror.

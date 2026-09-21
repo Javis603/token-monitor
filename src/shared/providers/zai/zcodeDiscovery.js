@@ -93,8 +93,9 @@ function isCodingPlanProviderId(providerId) {
 // back to is not guaranteed to track the current login (the store layout, entry
 // naming and secret derivation are verified against 3.12.3 and 3.14.0), so the
 // billing credential is decrypted from the store on every call:
-// in memory only, never logged, persisted, or handed to the renderer, and any
-// failure falls back to the mirror a 3.11.x install still carries.
+// in memory only, never logged, persisted, or handed to the renderer. The mirror
+// stands in where the store cannot name the account, and where the account's own
+// entry exists but will not decrypt — the lane comments below carry each arm.
 const ZCODE_CREDENTIAL_ENVELOPE = 'enc:v1:';
 
 // Same derivation as ZCode's own defaultCredentialSecret: an explicit
@@ -305,11 +306,14 @@ function discoverZcodeConnection(options = {}, deps = {}) {
     if (kind === 'start-billing') {
       const live = liveBillingCredential();
       const mirror = billingCredential(provider);
-      if (!live && mirror && storedProfileIdentity(readStore(), env, family)) {
-        // The live JWT is unreadable while the store names the account, so this
-        // entry's mirror cannot be shown to belong to it either. Reported rather
-        // than resolved: the lane runs and finds nothing it can vouch for, which
-        // reads as unavailable instead of "not configured" beside a stored login.
+      // The identity alone decides this branch: a mirror's presence changes
+      // nothing, because neither it nor its absence can supply a credential the
+      // account can be shown to own.
+      if (!live && storedProfileIdentity(readStore(), env, family)) {
+        // The live JWT is unreadable while the store names the account. Reported
+        // rather than resolved: the lane runs and finds nothing it can vouch for,
+        // which reads as unavailable instead of "not configured" beside a stored
+        // login.
         return { kind, family, providerId, entitled: false, reason: 'billing_jwt_unavailable' };
       }
       credential = live || mirror;

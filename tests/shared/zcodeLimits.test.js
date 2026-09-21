@@ -664,6 +664,22 @@ test('a known account refuses the entry mirror once the live billing JWT cannot 
   }));
   assert.equal(brokenJwt.reason, 'billing_jwt_unavailable');
 
+  // The mirror's presence is not part of the rule: with the identity established
+  // and no mirror to fall back on either, the same refusal is what lets the lane
+  // report an attempt instead of "not configured".
+  const noMirror = discoverZcodeConnection({}, {
+    readFileSync: fileSystem({
+      ...files(profile),
+      'config.json': JSON.stringify({ provider: {
+        'builtin:zai-start-plan': { enabled: true, options: { apiKey: '' } }
+      } })
+    }),
+    homeDir: '/home/test',
+    env: { ZCODE_CREDENTIAL_SECRET: TEST_CREDENTIAL_SECRET }
+  });
+  assert.equal(noMirror.reason, 'billing_jwt_unavailable');
+  assert.equal(noMirror.credential, undefined);
+
   // A readable JWT still wins outright, and an unknown identity keeps the
   // #718 mirror fallback.
   assert.equal(discoverZcodeConnection({}, deps({
