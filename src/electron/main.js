@@ -5064,7 +5064,7 @@ function settingsForRenderer() {
     kimiApiKeySource,
     kimiWebAccessTokenConfigured: Boolean(currentKimiWebAccessToken()),
     kimiWebAccessTokenSource,
-    kimiCredentialConfigured: Boolean(currentKimiWebAccessToken() || currentKimiApiKey() || kimiDesktopSessionAvailable),
+    kimiCredentialConfigured: Boolean(currentKimiWebAccessToken() || settings?.kimiWebRefreshToken || currentKimiApiKey() || kimiDesktopSessionAvailable),
     kimiCredentialSource: kimiWebAccessTokenSource || kimiApiKeySource,
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,

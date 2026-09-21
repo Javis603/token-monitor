@@ -174,12 +174,26 @@ function encryptSafeStorageV10(plain, key) {
   return Buffer.concat([Buffer.from('v10', 'latin1'), nonce, ciphertext, cipher.getAuthTag()]);
 }
 
+// Writes via a sibling temporary file and an atomic rename, so a crash or a
+// full disk can never leave the target holding a half-written store — the Kimi
+// app and the manual-session loader both read these files without a schema
+// recovery path.
+function writeFileAtomic(targetPath, content, writeFile) {
+  const tempPath = `${targetPath}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+  try {
+    writeFile(tempPath, content);
+    try { fs.chmodSync(tempPath, 0o600); } catch (_) { /* Windows ACLs own this */ }
+    fs.renameSync(tempPath, targetPath);
+  } catch (error) {
+    try { fs.unlinkSync(tempPath); } catch (_) { /* already gone */ }
+    throw error;
+  }
+}
+
 function writeTokenStore(appDataDir, parsed, key, deps = {}) {
   const storePath = path.join(appDataDir, TOKEN_STORE_RELATIVE_PATH);
-  const writeFile = deps.writeFile || fs.writeFileSync;
   const blob = encryptSafeStorageV10(JSON.stringify(parsed), key).toString('base64');
-  writeFile(storePath, JSON.stringify({ encryption: 'safeStorage.v1', data: blob }));
-  try { fs.chmodSync(storePath, 0o600); } catch (_) { /* Windows ACLs own this */ }
+  writeFileAtomic(storePath, JSON.stringify({ encryption: 'safeStorage.v1', data: blob }), deps.writeFile || fs.writeFileSync);
 }
 
 function parseTokenStore(plain, nowMs) {
@@ -290,18 +304,10 @@ async function requestKimiTokenRefresh(refreshToken, deps) {
     },
     body: JSON.stringify({ refreshToken })
   };
-  let response;
-  for (let attempt = 0; ; attempt += 1) {
-    const startedAt = Date.now();
-    try {
-      response = await runKimiTokenRefreshFetch(KIMI_AUTH_REFRESH_URL, init, deps);
-      break;
-    } catch (error) {
-      const transient = !error?.status && Date.now() - startedAt < 5_000;
-      if (!transient || attempt >= 1) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
-    }
-  }
+  // No retry here: the exchange rotates the refresh token server-side, so a
+  // lost response cannot be safely replayed — the cooldown on the caller side
+  // is the recovery path for a transient failure.
+  const response = await runKimiTokenRefreshFetch(KIMI_AUTH_REFRESH_URL, init, deps);
   if (response.status === 401 || response.status === 403) {
     const error = new Error('Kimi refresh token rejected');
     error.status = 'unauthorized';
@@ -487,12 +493,11 @@ async function resolveKimiManualSession(seedRefreshToken, deps = {}) {
   const next = sessionFromTokenPair(refreshed.accessToken, refreshed.refreshToken, nowMs);
   if (!next) return null;
   try {
-    writeFile(cachePath, JSON.stringify({
+    writeFileAtomic(cachePath, JSON.stringify({
       seed: seedFingerprint,
       accessToken: next.accessToken,
       refreshToken: next.refreshToken
-    }));
-    try { fs.chmodSync(cachePath, 0o600); } catch (_) { /* Windows ACLs own this */ }
+    }), writeFile);
   } catch (_) {
     // Server-side rotation already happened; without persistence the next start
     // falls back to a stale seed, which will surface as a paste-again prompt.

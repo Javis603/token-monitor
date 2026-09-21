@@ -1133,3 +1133,54 @@ test('#700 x desktop session: Code API stays primary and the session fills the m
   assert.ok(webCall, 'the web membership source is consulted for the missing kind');
   assert.match(webCall.auth, /desktop-access/);
 });
+
+const APP_NOW = Date.parse('2026-09-20T00:00:00Z');
+
+function appSession(overrides = {}) {
+  return Object.assign({
+    accessToken: 'desktop-access.body.sig',
+    refreshToken: 'desktop-refresh.body.sig',
+    userId: 'user-1',
+    accessExpiresAtMs: APP_NOW + 15 * 60 * 1000,
+    accessIsStale: false,
+    refreshExpiresAtMs: APP_NOW + 90 * 24 * 60 * 60 * 1000,
+    refreshIsDead: false
+  }, overrides);
+}
+
+function webUsageOk() {
+  return { ok: true, status: 200, json: async () => ({ usages: [{ scope: 'FEATURE_CODING', detail: { limit: '100', remaining: '60' }, limits: [] }] }) };
+}
+
+test('fetchKimiLimits treats a stale manual session as unavailable and skips the desktop fallback', async () => {
+  let desktopReads = 0;
+  let fetched = 0;
+  const provider = await fetchKimiLimits(
+    { kimiWebRefreshToken: 'seed.body.sig' },
+    {
+      env: {},
+      now: () => APP_NOW,
+      kimiManualSession: async () => appSession({ accessToken: 'stale-access.body.sig', userId: 'u', accessIsStale: true }),
+      kimiDesktopSession: async () => { desktopReads += 1; return appSession(); },
+      fetch: async () => { fetched += 1; return webUsageOk(); }
+    }
+  );
+
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(fetched, 0, 'a stale manual token must not be spent on the quota API');
+  assert.equal(desktopReads, 0, 'the desktop store stays untouched while a manual seed owns the chain');
+});
+
+test('fetchKimiLimits prefers the explicit refresh-token option over the env seed', async () => {
+  const seeds = [];
+  await fetchKimiLimits(
+    { kimiWebRefreshToken: 'option-seed.body.sig' },
+    {
+      env: { KIMI_REFRESH_TOKEN: 'env-seed.body.sig' },
+      now: () => APP_NOW,
+      kimiManualSession: async (seed) => { seeds.push(seed); return appSession({ accessToken: 'a.body.sig', userId: 'u' }); },
+      fetch: async () => webUsageOk()
+    }
+  );
+  assert.deepEqual(seeds, ['option-seed.body.sig']);
+});
