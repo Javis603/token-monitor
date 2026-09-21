@@ -150,17 +150,35 @@ function expandedFloatingBubbleBounds(collapsedBounds, workArea, previousExpande
   return clampBounds({ x, y, width, height }, workArea, margin);
 }
 
-function restoreFloatingBubbleWindow(win, bounds, limits = {}) {
-  if (!win || !bounds || typeof win.setBounds !== 'function') return false;
-  // GTK may ignore the larger bounds while the collapsed window is still
-  // non-resizable, so unlock it before restoring either size hint.
-  if (typeof win.setResizable === 'function') win.setResizable(true);
+function liveWindow(win) {
+  if (!win) return null;
+  if (typeof win.isDestroyed === 'function' && win.isDestroyed()) return null;
+  return win;
+}
+
+function applyWindowSizeLimits(win, limits) {
+  if (!liveWindow(win) || !limits) return false;
   if (typeof win.setMinimumSize === 'function') {
     win.setMinimumSize(limits.minWidth, limits.minHeight);
   }
   if (typeof win.setMaximumSize === 'function') {
     win.setMaximumSize(limits.maxWidth, limits.maxHeight);
   }
+  return true;
+}
+
+function restoreFloatingBubbleWindow(win, bounds, limits) {
+  if (!liveWindow(win) || !bounds || !limits || typeof win.setBounds !== 'function') return false;
+  // The order is the fix, and it is not only a window-manager hint: collapsing
+  // pins the window to the handle size and only then marks it non-resizable, so
+  // Electron's Linux window remembers those handle-sized constraints as the
+  // pair it restores the next time anything makes the window resizable again.
+  // Unlocking first lets that restore happen while it is still harmless, and
+  // the real limits and bounds below overwrite it. Restoring the limits first
+  // instead leaves the remembered pair to land after the bounds -- which is
+  // what clamped the window straight back to the handle on Linux.
+  if (typeof win.setResizable === 'function') win.setResizable(true);
+  applyWindowSizeLimits(win, limits);
   win.setBounds(bounds);
   return true;
 }
@@ -229,5 +247,6 @@ module.exports = {
   floatingBubbleWindowChrome,
   normalizeInitialRendererViewState,
   moveFloatingBubbleBounds,
+  applyWindowSizeLimits,
   restoreFloatingBubbleWindow
 };

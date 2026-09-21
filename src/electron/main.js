@@ -351,6 +351,7 @@ const {
   floatingBubbleWindowChrome,
   normalizeInitialRendererViewState,
   moveFloatingBubbleBounds,
+  applyWindowSizeLimits,
   restoreFloatingBubbleWindow
 } = require('./floatingBubble');
 const { applyWindowsChrome } = require('./windowsChrome');
@@ -2201,13 +2202,7 @@ function stopFloatingBubbleAutoCollapseTimer() {
 }
 
 function restoreWindowSizeLimits() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (typeof mainWindow.setMinimumSize === 'function') {
-    mainWindow.setMinimumSize(WINDOW_LIMITS.minWidth, WINDOW_LIMITS.minHeight);
-  }
-  if (typeof mainWindow.setMaximumSize === 'function') {
-    mainWindow.setMaximumSize(WINDOW_LIMITS.maxWidth, WINDOW_LIMITS.maxHeight);
-  }
+  applyWindowSizeLimits(mainWindow, WINDOW_LIMITS);
 }
 
 function applyCollapsedFloatingBubbleLimits(bounds) {
@@ -2340,6 +2335,9 @@ function expandFloatingBubble(options = {}) {
       sendFloatingBubbleState();
       return true;
     }
+    // Unlock, re-limit and resize in one helper rather than inline: the order
+    // is what fixes the collapsed window refusing to grow again on Linux, and
+    // an inline `restoreWindowSizeLimits(); setBounds()` reads like it works.
     restoreFloatingBubbleWindow(mainWindow, target, WINDOW_LIMITS);
     persistWindowBounds(target);
     setTimeout(() => { floatingBubbleState.suppressNextCollapse = false; }, 300);
