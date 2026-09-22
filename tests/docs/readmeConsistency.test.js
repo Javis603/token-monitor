@@ -69,7 +69,7 @@ const supportedToolOrder = [
   'Zed',
   'Kilo',
   'Command Code',
-  'MiMo Code',
+  'MiMo Code / MiMo Desktop',
   'ZCode / GLM',
   'Kiro',
   'CodeBuddy',
@@ -110,7 +110,7 @@ const supportedToolIdOrder = [
   'zed',
   'kilo',
   'commandcode',
-  'mimo-code',
+  'mimo',
   'zcode',
   'kiro',
   'codebuddy',
@@ -222,7 +222,6 @@ test('localized READMEs disclose the LM Studio server-log tracking boundary', ()
 const README_ICON_TO_LIMIT_PROVIDERS = {
   droid: ['factory'],
   xai: ['grok'],
-  'mimo-code': ['mimo'],
   zcode: ['zai', 'zaiteam']
 };
 

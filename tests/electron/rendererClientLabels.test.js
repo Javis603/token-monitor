@@ -54,7 +54,7 @@ test('renderer distinguishes Grok model and Grok Build tool icons', () => {
   assert.match(styles, /^\.row-icon-copilot\s*\{[^}]*assets\/icons\/copilot\.svg/m);
 });
 
-test('renderer reuses vendor icons for MiMo Code and ZCode tool rows', () => {
+test('renderer reuses vendor icons for MiMo and ZCode tool rows', () => {
   const styles = rendererStyles();
   assert.match(styles, /\.row-icon-micode\s*\{[^}]*assets\/icons\/xiaomi\.svg/s);
   assert.match(styles, /\.row-icon-zcode\s*\{[^}]*assets\/icons\/zai\.svg/s);

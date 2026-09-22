@@ -870,7 +870,7 @@ test('extractUsageFromTokscale normalizes Pi, Zed, and Kilo, keeping Copilot dis
   assert.equal(period.clients.kilo, 19);
 });
 
-test('extractUsageFromTokscale normalizes MiMo Code and ZCode client ids', () => {
+test('extractUsageFromTokscale normalizes MiMo and ZCode client ids', () => {
   const period = extractUsageFromTokscale([
     { client: 'micode', model: 'mimo-v2.5-pro', totalTokens: 23 },
     { client: 'ZCode', model: 'glm-4.7', totalTokens: 29 }

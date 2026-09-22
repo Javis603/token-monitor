@@ -154,7 +154,7 @@ const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 
 function limitProviderColor(providerId) {
   if (providerId === 'factory') return clientColors.droid;
-  if (providerId === 'mimo') return clientColors.xiaomi;
+  if (providerId === 'mimo') return clientColors.micode;
   return clientColors[providerId] || clientColors.default;
 }
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;

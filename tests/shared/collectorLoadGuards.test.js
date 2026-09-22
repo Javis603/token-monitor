@@ -87,7 +87,7 @@ test('watchPathsForClients excludes the tokscale cache dirs our own syncs write'
   }
 });
 
-test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
+test('watchPathsForClients watches both MiMo roots tokscale scans', () => {
   // Tokscale unions the XDG data dir with orca's hook-sandbox copy, and
   // that copy can hold sessions the XDG one is missing. Watching only XDG would
   // leave an orca-driven install without the seconds-level refresh.
@@ -1766,6 +1766,12 @@ test('watchIgnoreMatcher bounds Copilot data, Grok unified, ZCode, and exporter 
     assert.equal(ignored(path.join(copilotRoot, 'data.db')), false);
     assert.equal(ignored(path.join(copilotRoot, 'data.db-wal')), false);
     assert.equal(ignored(path.join(copilotRoot, 'data.db-shm')), false);
+    // The CLI database sits beside the desktop one under the same watch root.
+    // Pruning it here would leave tokscale parsing session-store.db while the
+    // widget only noticed on a full tick.
+    assert.equal(ignored(path.join(copilotRoot, 'session-store.db')), false);
+    assert.equal(ignored(path.join(copilotRoot, 'session-store.db-wal')), false);
+    assert.equal(ignored(path.join(copilotRoot, 'session-store.db-shm')), false);
     assert.equal(ignored(path.join(copilotRoot, 'otel', 'trace.jsonl')), false);
     assert.equal(ignored(path.join(copilotRoot, 'cache')), true);
 

@@ -1859,6 +1859,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const copilotRoots = [
     ['copilot-otel', copilotOtelRoot],
     ['copilot-data', path.join(home, '.copilot'), path.join(home, '.copilot', 'data.db')],
+    ['copilot-session-store', path.join(home, '.copilot'), path.join(home, '.copilot', 'session-store.db')],
     ...[...new Set(copilotWorkspaceRoots)].map((dir) => ['vscode-workspace-storage', dir])
   ];
   // The parent is the watch root because the exporter file may not exist yet;
@@ -1891,7 +1892,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['kilocode-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')]
   );
   add('commandcode', ['commandcode-projects', path.join(home, '.commandcode', 'projects')]);
-  // MiMo Code: tokscale 4.8.0 unions the XDG data dir with orca's hook-sandbox
+  // MiMo: tokscale 4.8.0 unions the XDG data dir with orca's hook-sandbox
   // copy (scanner.rs `discover_micode_dbs_in_dirs`), and that copy can hold
   // sessions the XDG one is missing. Watch both so an orca-driven install still
   // refreshes in seconds; the orca root only exists on macOS in practice and a
@@ -2236,7 +2237,7 @@ const OPENCLAW_CODEX_HOME_DIRS = new Set(['sessions', 'archived_sessions']);
 // signals that must remain watched so a transaction committed before a
 // checkpoint refreshes the usage view.
 const OPENCODE_DB_WATCH_PATTERN = /^opencode(?:-[A-Za-z0-9._-]+)?\.db(?:-(?:wal|shm))?$/;
-// MiMo Code keeps a multi-gigabyte log/ tree alongside its SQLite state files.
+// MiMo keeps a multi-gigabyte log/ tree alongside its SQLite state files.
 // A plain recursive watch of ~/.local/share/mimocode storms the watcher (every
 // SQLite WAL/SHM transaction is a chokidar event, the log dir holds thousands
 // of rotated files). Tokscale discovers mimocode.db and
@@ -2251,7 +2252,13 @@ const MICODE_DB_WATCH_PATTERN = /^mimocode(?:-[A-Za-z0-9._-]+)?\.db(?:-(?:wal|sh
 // recurse through the application data trees around them.
 const KIRO_DB_WATCH_PATTERN = /^data\.sqlite3(?:-(?:wal|shm))?$/;
 const ZED_DB_WATCH_PATTERN = /^threads\.db(?:-(?:wal|shm))?$/;
-const COPILOT_DB_WATCH_PATTERN = /^data\.db(?:-(?:wal|shm))?$/;
+// Copilot is two exact databases directly under ~/.copilot, not one: `data.db`
+// (desktop) and `session-store.db` (CLI, tokscale's copilot_session_store
+// parser). Both are `path.is_file()` reads upstream, so the directory stays the
+// watch root and each file rides along with its WAL/SHM sidecars. Leaving
+// session-store.db out of this pattern prunes it from the watcher, so CLI usage
+// would only appear on the next full tick instead of within the refresh window.
+const COPILOT_DB_WATCH_PATTERN = /^(?:data|session-store)\.db(?:-(?:wal|shm))?$/;
 const ZCODE_DB_WATCH_PATTERN = /^db\.sqlite(?:-(?:wal|shm))?$/;
 const UNSLOTH_DB_WATCH_PATTERN = /^studio\.db(?:-(?:wal|shm))?$/;
 // Bounded to sessions.db directly under each *default* Devin CLI root; the WAL

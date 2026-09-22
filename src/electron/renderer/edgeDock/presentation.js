@@ -511,10 +511,8 @@
       available: Boolean(period),
       totalTokens: period ? finite(period.totalTokens) || 0 : null,
       costUsd: period ? finite(period.costUsd) || 0 : null,
-      clients: clients.slice(0, 6),
-      clientCount: clients.length,
-      models: models.slice(0, 6),
-      modelCount: models.length
+      clients,
+      models
     };
   }
 

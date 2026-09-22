@@ -88,7 +88,7 @@
     zed: 'Zed',
     kilo: 'Kilo',
     commandcode: 'Command Code',
-    micode: 'MiMo Code',
+    micode: 'Xiaomi MiMo',
     zcode: 'ZCode',
     kiro: 'Kiro',
     codebuddy: 'CodeBuddy',

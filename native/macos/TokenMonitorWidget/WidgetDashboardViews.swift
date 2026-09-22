@@ -631,19 +631,38 @@ struct ModuleTitle: View {
 }
 
 enum WidgetVendorIdentity {
+    // Mirrors `modelVendorFor()` in src/electron/renderer/usageCharts.js: the same patterns,
+    // in the same order, run as the same regexes. The widget colours its own breakdown rows,
+    // so a branch that exists on only one side makes those models fall through to "default"
+    // there — and a pattern rewritten as substring tests rather than copied drifts, because
+    // substrings cannot express `\b`, `^`/`$` or an unanchored group. That is how `qwq`/`qvq`
+    // and the unanchored `o[134]-(mini|pro|preview)` alternative went missing here. Keep the
+    // two lists identical, pattern for pattern.
     static func modelVendor(for model: String) -> String {
         let value = model.lowercased()
-        if value.contains("claude") || value.contains("anthropic") || value.contains("sonnet") || value.contains("opus") || value.contains("haiku") { return "claude" }
-        if value.contains("gpt") || value.contains("openai") || value.contains("codex") || value.hasPrefix("o1-") || value.hasPrefix("o3-") || value.hasPrefix("o4-") { return "codex" }
-        if value.contains("gemini") || value.contains("gemma") || value.contains("google") { return "gemini" }
-        if value.contains("deepseek") { return "deepseek" }
-        if value.contains("grok") || value.contains("xai") { return "xai" }
-        if value.contains("llama") || value.contains("meta") { return "meta" }
-        if value.contains("mistral") || value.contains("mixtral") || value.contains("codestral") { return "mistral" }
-        if value.contains("qwen") { return "qwen" }
-        if value.contains("kimi") || value.contains("moonshot") { return "kimi" }
-        if value.contains("glm") || value.contains("zai") { return "zai" }
-        if value.hasPrefix("swe-") || value.hasPrefix("swe_") || value.contains("devin") || value.contains("cognition") { return "devin" }
+        func matches(_ pattern: String) -> Bool {
+            value.range(of: pattern, options: .regularExpression) != nil
+        }
+        if matches("^(cursor-)?auto$") { return "cursor" }
+        if matches("claude|anthropic|sonnet|opus|haiku") { return "claude" }
+        if matches("gpt|openai|codex|^o[134](?:-|$)|o[134]-(mini|pro|preview)|chatgpt") { return "codex" }
+        if matches("gemini|gemma|google") { return "gemini" }
+        if matches("grok|xai") { return "xai" }
+        if matches("deepseek") { return "deepseek" }
+        if matches("nemotron|nvidia") { return "nvidia" }
+        if matches("llama|meta|muse-spark(?:-|$)") { return "meta" }
+        if matches("mistral|mixtral|codestral") { return "mistral" }
+        if matches("qwen|qwq|qvq|qmodel") { return "qwen" }
+        if matches("kimi|moonshot|k2d6-agent|k3-agent") { return "kimi" }
+        if matches("chatglm|\\bglm-|\\bzai\\b|z\\.ai|zhipu") { return "zai" }
+        if matches("cohere|command-r") { return "cohere" }
+        if matches("mimo|xiaomi") { return "xiaomi" }
+        if matches("minimax|\\babab") { return "minimax" }
+        if matches("doubao|\\bseed(?:-|$)") { return "doubao" }
+        if matches("stepfun|step-") { return "stepfun" }
+        if matches("hy\\d|hunyuan") { return "hunyuan" }
+        if matches("^swe[-_]|devin|cognition") { return "devin" }
+        if matches("^big-pickle$") { return "opencode" }
         return "default"
     }
 
@@ -668,13 +687,16 @@ enum WidgetVendorIdentity {
             "kiro": "#A66AFF", "codebuddy": "#8064FF", "workbuddy": "#0DC8A5",
             "qodercn": "#2ADB5C", "qoder": "#2ADB5C", "reasonix": "#4D6BFE",
             "dsh": "#4D6BFE", "cherrystudio": "#EA5E5D", "lmstudio": "#8074E8",
-            "unsloth": "#40B85A", "cohere": "#66937D", "xiaomi": "#FF6700",
-            "mimo": "#FF6700", "micode": "#FF6700", "minimax": "#F23F5D",
+            "unsloth": "#40B85A", "cohere": "#66937D", "xiaomi": "#000000",
+            "mimo": "#000000", "micode": "#000000", "minimax": "#F23F5D",
             "doubao": "#5064FF", "hunyuan": "#277DE3", "volcengine": "#2A88FF",
+            "nvidia": "#74B71B",
             "trae": "#32F08C", "alibaba": "#7771F4", "thirdparty": "#8090A6",
             "default": "#6AB4F0"
         ]
-        let adaptiveInk = ["grok", "xai", "copilot", "cursor", "opencode", "pi", "zai", "zaiteam", "zcode", "proma", "kimi", "moonshot", "ollama", "devin"]
+        // Vendor marks whose app colour is too dark to read against the widget's dark
+        // background render as light ink instead.
+        let adaptiveInk = ["grok", "xai", "copilot", "cursor", "opencode", "pi", "zai", "zaiteam", "zcode", "proma", "kimi", "moonshot", "ollama", "devin", "droid", "micode", "mimo", "xiaomi", "stepfun"]
         if adaptiveInk.contains(vendorID.lowercased()) { return Color.white.opacity(0.86) }
         return Color(widgetHex: colors[vendorID.lowercased()] ?? colors["default"]!)
     }
