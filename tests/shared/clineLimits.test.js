@@ -840,7 +840,7 @@ test('the monthly spend is reported beside the credit, in its own unit', async (
   });
   assert.equal(result.status, 'ok');
   // The balance is credits and the usage report is money, so they stay in two
-  // windows rather than being mixed into one number.
+  // wire windows even though the renderer presents spend in the credit tooltip.
   assert.deepEqual(result.windows.map((w) => w.metric), ['credits', 'spend']);
   const spend = result.windows.find((w) => w.metric === 'spend');
   // The two paid calls only: the free one cost nothing (the balance never moved for

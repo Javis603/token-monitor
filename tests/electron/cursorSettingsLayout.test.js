@@ -1660,6 +1660,16 @@ test('Cline names the credential lane that went bad, not always the key field', 
     ko: 'Cline 열기',
     ja: 'Cline を開く'
   });
+  assert.deepEqual(Object.fromEntries(Object.entries(MESSAGES).map(([locale, messages]) => [
+    locale,
+    messages['settings.cline.statusSignin']
+  ])), {
+    en: 'Connected',
+    'zh-TW': '已連線',
+    'zh-CN': '已连接',
+    ko: '연결됨',
+    ja: '接続済み'
+  });
 });
 
 test('Factory keeps a saved-key Clear action available after validation fails', () => {

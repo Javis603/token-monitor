@@ -1906,9 +1906,8 @@ test('Cline exposes its API key through the settings and credential-store patter
   assert.match(windowsView, /const clineMonthly = clineBilling\.find\(\(window\) => !isCreditsWindow\(window\) && window\.metric !== 'spend'\)/);
   assert.match(windowsView, /const clineCredits = clineBilling\.find\(\(window\) => isCreditsWindow\(window\)\)/);
   assert.match(windowsView, /const clineSpend = clineBilling\.find\(\(window\) => window\.metric === 'spend'\)/);
-  assert.match(windowsView, /clineCredits[\s\S]{0,400}creditsBalanceValue\(provider, clineCredits\)/);
-  // The spend line under the credit, the shape Claude and WorkBuddy both draw.
-  assert.match(windowsView, /clineSpend[\s\S]{0,500}providerWindowText\(provider, clineSpend\)\.value/);
+  assert.match(windowsView, /clineCredits[\s\S]{0,200}clineCreditsNode\(provider, clineCredits, clineSpend\)/);
+  assert.match(windowsView, /function clineCreditsNode[\s\S]{0,500}\[\['Month spent', spendValue\]\]/);
   assert.match(windowsView, /clineMonthly[\s\S]{0,200}limit-window-wide/);
 });
 

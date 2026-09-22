@@ -560,6 +560,19 @@
       : '';
   }
 
+  function clineCreditsNode(provider, credits, spend) {
+    const value = creditsBalanceValue(provider, credits);
+    if (!value) return null;
+    const monthSpend = optionalFiniteNumber(spend?.used);
+    const spendValue = monthSpend === null ? '' : formatBalanceSpendAmount(monthSpend, spend);
+    return limitNoteRowNode({
+      label: credits.label || 'Credits',
+      summary: value,
+      detailEntries: spendValue ? [['Month spent', spendValue]] : null,
+      ariaParts: [value, ...(spendValue ? [`Month spent ${spendValue}`] : [])]
+    });
+  }
+
   function mimoTokenPlanWindowFromBalance(balance) {
     if (!balance) return null;
     if (balance.planStatus === 'expired') return null;
@@ -1230,28 +1243,8 @@
         windows.append(node);
       }
       if (clineCredits) {
-        const value = creditsBalanceValue(provider, clineCredits);
-        if (value) {
-          const node = limitWindowNode(clineCredits.label || 'Credits', clineCredits, color, 0.95, value);
-          node.classList.add('limit-window-wide');
-          if (!clineCredits.resetsAt && !clineCredits.resetDescription) {
-            node.classList.add('limit-window-no-reset');
-          }
-          windows.append(node);
-        }
-      }
-      // The spend line under the credit, the shape Claude's "Usage credits" row and
-      // WorkBuddy's Spend line both use: money already consumed, in its own unit.
-      if (clineSpend) {
-        const node = limitWindowNode(
-          providerWindowLabel(provider, clineSpend, 'Usage credits'),
-          clineSpend,
-          color,
-          0.5,
-          providerWindowText(provider, clineSpend).value
-        );
-        node.classList.add('limit-window-wide', 'limit-window-no-reset');
-        windows.append(node);
+        const node = clineCreditsNode(provider, clineCredits, clineSpend);
+        if (node) windows.append(node);
       }
     } else {
       // Default: render only the windows the provider actually has. Providers

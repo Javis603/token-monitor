@@ -240,6 +240,26 @@ test('an OpenRouter card carries the balance meter and its detail tooltip', () =
   assert.match(tooltip.text, /All time/);
 });
 
+test('a Cline card folds month spend into the credit detail tooltip', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'cline',
+    windows: [
+      { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 0.5, currency: 'CREDITS', showMeter: false },
+      { kind: 'billing', metric: 'spend', label: 'Usage credits', used: 0.13, limit: null, currency: 'USD', showMeter: false }
+    ]
+  }, '#9D4EDD');
+
+  const rows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.equal(rows.length, 1, 'credits and month spend should share one presentation row');
+  assert.match(card.text, /Credits/);
+  assert.match(card.text, /0\.50/);
+  assert.ok(tooltip, 'the month spend should remain available from the credit row');
+  assert.match(tooltip.text, /Month spent/);
+  assert.match(tooltip.text, /\$0\.13/);
+  assert.match(rows[0].attributes['aria-label'], /Month spent \$0\.13/);
+});
+
 test('a Codex card keeps the page ordering and the banked resets', () => {
   const card = dockView().renderProviderWindows({
     provider: 'codex',
