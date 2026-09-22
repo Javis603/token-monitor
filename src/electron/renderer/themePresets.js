@@ -62,7 +62,7 @@
   // synthetic "default" fallback is shown last.
   const VENDOR_ORDER = [
     'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline',
-    'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth', 'devin',
+    'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'mimo', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth', 'devin',
     'openrouter', 'gemini', 'qoder', 'deepseek', 'xai', 'meta', 'mistral', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'minimax', 'doubao', 'hunyuan', 'volcengine', 'ollama', 'trae', 'alibaba', 'nvidia', 'stepfun', 'thirdparty'
   ];
 
@@ -88,7 +88,7 @@
     zed: 'Zed',
     kilo: 'Kilo',
     commandcode: 'Command Code',
-    micode: 'Xiaomi MiMo',
+    mimo: 'Xiaomi MiMo',
     zcode: 'ZCode',
     kiro: 'Kiro',
     codebuddy: 'CodeBuddy',

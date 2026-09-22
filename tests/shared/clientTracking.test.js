@@ -18,7 +18,6 @@ function readmeTrackedClientIds() {
     deepseek: 'dsh',
     'hermes-agent': 'hermes',
     xai: 'grok',
-    mimo: 'micode',
     qoder: 'qodercn'
   };
   return fs.readFileSync(path.join(rootDir, 'README.md'), 'utf8')
@@ -45,13 +44,13 @@ test('default tracked clients include current tokscale-supported tools', () => {
   }
 });
 
-test('micode is deliberately default-tracked despite the claude-import overlap', () => {
+test('mimo is deliberately default-tracked despite the claude-import overlap', () => {
   // mimocode.db auto-imports Claude Code sessions and tokscale does not mark
-  // them, so a fresh install counts that work under both `claude` and `micode`.
+  // them, so a fresh install counts that work under both `claude` and `mimo`.
   // Shipping it on anyway is a deliberate product call (see clientCatalog.js) —
   // pinned here so flipping it back is also deliberate rather than incidental.
-  assert.ok(DEFAULT_CLIENTS.split(',').includes('micode'),
-    'micode is expected to be default-tracked');
+  assert.ok(DEFAULT_CLIENTS.split(',').includes('mimo'),
+    'mimo is expected to be default-tracked');
 });
 
 test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in qodercn', () => {
@@ -59,7 +58,7 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in q
   // the default-tracked list — so an opt-in client like qodercn must stay here or its
   // prefs get silently dropped on save/read.
   const known = KNOWN_CLIENTS.split(',');
-  assert.ok(known.includes('micode'), 'micode must remain a known client');
+  assert.ok(known.includes('mimo'), 'mimo must remain a known client');
   assert.ok(known.includes('qodercn'), 'qodercn must remain a known client');
   for (const client of DEFAULT_CLIENTS.split(',')) {
     assert.ok(known.includes(client), `${client} (default-tracked) must also be known`);
@@ -103,4 +102,14 @@ test('clientsCsvForSetting preserves explicit empty tracked-tool selection', () 
 test('clientsCsvForSetting normalizes saved client csv values', () => {
   assert.equal(clientsCsvForSetting(' Claude , Codex,,hermes '), 'claude,codex,hermes');
   assert.equal(clientsCsvForSetting('kilocode,kilo'), 'kilo');
+});
+
+test('a saved micode selection migrates to the mimo client id', () => {
+  // The tracked-client id was renamed off tokscale's `micode`, which is a
+  // fossil of the path typo upstream fixed in its PR #784. Saved settings
+  // written before the rename must not silently lose the tool: this one alias
+  // covers `clients`, `clientDisplayOrder`, `hiddenClients` and
+  // `pinnedClients`, since main.js routes all four through normalizeClientsCsv.
+  assert.equal(clientsCsvForSetting('claude,micode'), 'claude,mimo');
+  assert.equal(clientsCsvForSetting('micode,mimo'), 'mimo');
 });

@@ -6,7 +6,12 @@ const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 
 const TOKSCALE_CLIENT_ALIASES = new Map([
   ['antigravity-cli', 'antigravity'],
-  ['micode-desktop', 'micode'],
+  // `micode` is tokscale's id for MiMo Code, a fossil of the path typo its PR
+  // #784 fixed. Token Monitor's id is `mimo`, so both upstream spellings fold
+  // onto it — including plain `micode`, which is what every device and stored
+  // history record written before the rename still says.
+  ['micode', 'mimo'],
+  ['micode-desktop', 'mimo'],
   ['omp', 'pi'],
   ['kilocode', 'kilo'],
   ['devin-cli', 'devin'],

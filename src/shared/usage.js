@@ -242,7 +242,7 @@ function normalizeClientName(value) {
   if (raw.includes('zed')) return 'zed';
   if (/^kilo[\s_-]*code$/.test(raw)) return 'kilo';
   if (/command[\s_-]*code/.test(raw)) return 'commandcode';
-  if (raw.includes('micode')) return 'micode';
+  if (raw.includes('micode') || raw.includes('mimo')) return 'mimo';
   if (raw.includes('zcode')) return 'zcode';
   if (raw.includes('kiro')) return 'kiro';
   if (raw.includes('codebuddy')) return 'codebuddy';

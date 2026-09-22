@@ -57,7 +57,7 @@ function verifyVendoredTokscaleClients({
   const { key, entry } = resolveEntry(manifest);
   const binPath = resolveTarget(entry);
 
-  // KNOWN_CLIENTS, not DEFAULT_CLIENTS: an opt-in client (micode) sends the
+  // KNOWN_CLIENTS, not DEFAULT_CLIENTS: an opt-in client (qodercn) sends the
   // same --client value the moment a user enables it, and tokscale exits 2 on
   // an id it does not recognize, so a binary missing one breaks that client's
   // scans outright. Scoping this to the default-on list would leave every

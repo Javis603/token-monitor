@@ -69,7 +69,6 @@
   // exceptions explicit here.
   const LIMIT_PROVIDER_BY_CLIENT = Object.freeze({
     droid: 'factory',
-    micode: 'mimo',
     zcode: 'zai',
     qodercn: 'qoder',
     dsh: 'deepseek'

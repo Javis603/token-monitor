@@ -2065,6 +2065,11 @@ function migrateVendorColors(value) {
   const colors = { ...value };
   if (colors.kilo === undefined && colors.kilocode !== undefined) colors.kilo = colors.kilocode;
   delete colors.kilocode;
+  // `micode` was the tracked-client id for MiMo before it was unified with the
+  // limits-provider id. The `xiaomi` key beside it is a different axis (the
+  // model vendor) and deliberately keeps its own override.
+  if (colors.mimo === undefined && colors.micode !== undefined) colors.mimo = colors.micode;
+  delete colors.micode;
   return colors;
 }
 

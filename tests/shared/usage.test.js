@@ -871,12 +871,18 @@ test('extractUsageFromTokscale normalizes Pi, Zed, and Kilo, keeping Copilot dis
 });
 
 test('extractUsageFromTokscale normalizes MiMo and ZCode client ids', () => {
+  // `micode` is tokscale's id for MiMo — a fossil of the path typo upstream
+  // fixed in its PR #784, which left the id behind. Token Monitor's id is
+  // `mimo`, shared with the limits provider for the same product, so both
+  // upstream spellings have to land there.
   const period = extractUsageFromTokscale([
     { client: 'micode', model: 'mimo-v2.5-pro', totalTokens: 23 },
+    { client: 'micode-desktop', model: 'mimo-v2.5-pro', totalTokens: 5 },
     { client: 'ZCode', model: 'glm-4.7', totalTokens: 29 }
   ]);
 
-  assert.equal(period.clients.micode, 23);
+  assert.equal(period.clients.mimo, 28);
+  assert.equal(period.clients.micode, undefined);
   assert.equal(period.clients.zcode, 29);
 });
 
@@ -1437,4 +1443,31 @@ test('merging a session keeps one source occupancy rather than summing two', () 
   });
   assert.equal(unknown.periods.today.sessions[key].contextTokens, 140);
   assert.equal(unknown.periods.today.sessions[key].contextWindow, 200_000);
+});
+
+test('aggregateDevices folds a pre-rename micode device into the mimo row', () => {
+  // The tracked-client id was renamed from tokscale's `micode` to `mimo`. A hub
+  // outlives any single device update, so it holds records posted by agents on
+  // both sides of that rename — and aggregateDevices normalizes on *read*, not
+  // only on ingest, so a record already sitting in data/devices.json folds too.
+  // Without that the same tool would show as two rows until every device
+  // upgraded.
+  const now = Date.parse('2026-09-23T00:00:00.000Z');
+  const deviceAt = (deviceId, client, tokens, cost) => ({
+    deviceId,
+    hostname: deviceId,
+    updatedAt: '2026-09-23T00:00:00.000Z',
+    receivedAt: '2026-09-23T00:00:00.000Z',
+    today: { totalTokens: tokens, costUsd: cost, clients: { [client]: tokens }, clientCosts: { [client]: cost } }
+  });
+
+  const aggregate = aggregateDevices(
+    [deviceAt('old-agent', 'micode', 100, 1.5), deviceAt('new-agent', 'mimo', 40, 0.5)],
+    0,
+    now
+  );
+
+  assert.equal(aggregate.periods.today.clients.mimo, 140);
+  assert.equal(aggregate.periods.today.clients.micode, undefined);
+  assert.equal(aggregate.periods.today.clientCosts.mimo, 2);
 });

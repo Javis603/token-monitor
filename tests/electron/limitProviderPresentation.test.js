@@ -2724,8 +2724,11 @@ test('Kimi credential statuses are localized in settings', () => {
 test('Kimi, Droid and MiMo limits reuse their tracked-client colors', () => {
   const app = readRendererFile('app.js');
   assert.equal(LIMIT_PROVIDER_LABELS.kimi, 'Kimi');
+  // `factory` is the last remaining bridge: its tracked client is named
+  // `droid`. MiMo needs none — the client and the provider are both `mimo`, so
+  // the generic lookup below already finds clientColors.mimo.
   assert.match(app, /if \(providerId === 'factory'\) return clientColors\.droid;/);
-  assert.match(app, /if \(providerId === 'mimo'\) return clientColors\.micode;/);
+  assert.doesNotMatch(app, /providerId === 'mimo'/);
   assert.match(app, /const color = limitProviderColor\(id\);/);
 });
 

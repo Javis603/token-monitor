@@ -98,7 +98,7 @@ const MARKER_CLIENTS = {
   '.commandcode/projects': 'commandcode',
   '.dsh/sessions': 'dsh',
   '.factory/sessions': 'droid',
-  '.local/share/mimocode/mimocode.db': 'micode',
+  '.local/share/mimocode/mimocode.db': 'mimo',
   '.zcode/projects': 'zcode',
   '.zcode/cli/db': 'zcode',
   '.kiro/sessions': 'kiro',

@@ -9,11 +9,19 @@ const TOKSCALE_CLIENT_GROUPS = Object.freeze({
   // Xiaomi MiMo Desktop and the MiMo Code CLI share one `mimocode` SQLite
   // store; tokscale re-stamps a row as `micode-desktop` when its
   // `session.version` starts with `desktop-`. Both surfaces are one Token
-  // Monitor row, and the split lives inside a root we already watch, so this is
-  // aliases-only: unlike `devin`, a bare `micode` --client value is still
-  // valid, so the filter stays `micode` plus the alias rather than a scanIds
-  // override. Dropping the alias would silently stop counting desktop usage.
-  micode: Object.freeze({ aliases: Object.freeze(['micode-desktop']) }),
+  // Monitor row.
+  //
+  // `mimo` is an umbrella id like `devin`, for a different reason: upstream's
+  // client id is a fossil of a path typo. Tokscale originally scanned
+  // `~/.local/share/micode/` and named the client after that directory;
+  // upstream PR #784 fixed the path to `~/.local/share/mimocode/` but left the
+  // id alone, and upstream still has no `mimo` id. So a bare `mimo` --client
+  // value is rejected with exit 2 and the scan list is the aliases themselves.
+  // Dropping either alias would silently stop counting that surface.
+  mimo: Object.freeze({
+    aliases: Object.freeze(['micode', 'micode-desktop']),
+    scanIds: Object.freeze(['micode', 'micode-desktop'])
+  }),
   // OMP delegates to Pi's parser because both products write the same JSONL
   // format. Keep both ids in normal scans so their distinct default roots are
   // discovered, but assign an explicit custom root to Pi only; forwarding the

@@ -670,6 +670,8 @@ enum WidgetVendorIdentity {
         switch vendorID.lowercased() {
         case "chatgpt": "codex"
         case "hermes": "hermes-agent"
+        // `micode` is the pre-rename tracked-client id, kept so a snapshot
+        // written by an older app build still resolves to a mark.
         case "mimo", "micode": "xiaomi"
         case "zcode", "zaiteam": "zai"
         default: vendorID.lowercased()

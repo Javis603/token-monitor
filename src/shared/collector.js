@@ -1898,7 +1898,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // refreshes in seconds; the orca root only exists on macOS in practice and a
   // missing dir is dropped by watchClientRootsForClients.
   add(
-    'micode',
+    'mimo',
     ['mimocode-data', path.join(xdgHome, 'mimocode')],
     ['mimocode-orca-data', path.join(home, 'Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data')]
   );
@@ -2246,7 +2246,7 @@ const OPENCODE_DB_WATCH_PATTERN = /^opencode(?:-[A-Za-z0-9._-]+)?\.db(?:-(?:wal|
 // Keep the home dir watched but ignore everything except that direct db family.
 // The home root itself stays watched so a freshly created database or sidecar
 // still surfaces on the next top-level readdir.
-const MICODE_DB_WATCH_PATTERN = /^mimocode(?:-[A-Za-z0-9._-]+)?\.db(?:-(?:wal|shm))?$/;
+const MIMO_DB_WATCH_PATTERN = /^mimocode(?:-[A-Za-z0-9._-]+)?\.db(?:-(?:wal|shm))?$/;
 // Kiro CLI and Zed expose one SQLite database at a known path. Keep their
 // parent dirs watched so the database can appear after startup, but do not
 // recurse through the application data trees around them.
@@ -2476,7 +2476,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
 
   // Tokscale reads only direct children of each MiMo root, so log/* and every
   // other recursive subtree is pruned before chokidar descends into it.
-  bound('micode', candidates.micode || [], directChildOnly((name) => MICODE_DB_WATCH_PATTERN.test(name)));
+  bound('mimo', candidates.mimo || [], directChildOnly((name) => MIMO_DB_WATCH_PATTERN.test(name)));
   bound('unsloth', candidates.unsloth || [], directChildOnly((name) => UNSLOTH_DB_WATCH_PATTERN.test(name)));
   bound('devin', withBasename('devin', 'cli'), directChildOnly((name) => DEVIN_CLI_DB_WATCH_PATTERN.test(name)));
   // The dual-source Grok scanner derives exactly logs/unified.jsonl from each
@@ -2976,7 +2976,7 @@ function watcherOptions(usePolling, ignored) {
 //
 // Only the sidecar is dropped. The real data signal lives in the database and
 // its -wal, so a genuine change still produces an event; a client whose scan was
-// measured NOT to rewrite its sidecar (micode) is deliberately absent here, and
+// measured NOT to rewrite its sidecar (mimo) is deliberately absent here, and
 // adding a client to this list asserts a measurement rather than a hunch.
 const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['qodercn', 'zcode']);
 

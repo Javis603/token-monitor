@@ -10,7 +10,7 @@ const { tokscaleClientFilter } = require('../../src/shared/collector');
 // KNOWN_CLIENTS entry except the parse-local ones (proma, qodercn), plus
 // their TOKSCALE_CLIENT_ALIASES expansion (e.g. antigravity -> antigravity,
 // antigravity-cli) — since that's the exact CSV runTokscale/runTokscaleGraph
-// send, not just the logical client entries. Opt-in clients (micode) are in
+// send, not just the logical client entries. Opt-in clients (qodercn) are in
 // scope too: enabling one sends its id to the same binary, which exits 2 on an
 // id it does not recognize.
 const LOCALLY_PARSED = new Set(PARSE_LOCAL_CLIENTS);

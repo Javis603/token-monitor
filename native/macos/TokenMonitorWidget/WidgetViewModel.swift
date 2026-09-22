@@ -494,6 +494,11 @@ enum WidgetFormat {
         case "zed": "Zed"
         case "commandcode": "Command Code"
         case "mimo": "Xiaomi MiMo"
+        // Legacy snapshot id. Breakdown rows carry tracked-client ids, which
+        // the app renamed from `micode` to `mimo`; a snapshot written by an
+        // older build can still be on disk when the widget renders, so the old
+        // spelling has to keep resolving. Same reason for the `micode` entries
+        // in WidgetDashboardViews' icon and colour tables.
         case "micode": "Xiaomi MiMo"
         case "zai": "GLM"
         case "zaiteam": "GLM Team"
