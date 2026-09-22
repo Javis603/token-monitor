@@ -22,7 +22,7 @@ Profile names are user labels, not stable account identity. API keys and Web res
 
 Within an explicitly associated account, source order is API, then Web, then local. Each component remains authoritative only for the windows it actually answers. Supplemental windows fill only kinds not already answered by the selected Go source; merge order must not duplicate quota.
 
-An expired explicit cookie or stale explicit key surfaces its error instead of disappearing into an unrelated ambient/local success. A missing Go subscription is not an authorization failure and may fall through quietly. Cancellation discards the scoped result rather than publishing an error row or papering it over with local estimates.
+An explicit credential is never replaced by an unrelated ambient credential. Remote credential errors surface when no higher-priority source or explicitly enabled local estimate produced windows; in single-account mode, that local estimate may therefore mask an API or Web error. A missing Go subscription is not an authorization failure and may fall through quietly. Cancellation discards the scoped result rather than publishing an error row or papering it over with local estimates.
 
 Do not label a merged row `Web` when any local-only window remains in it. Source presentation follows the components that survived aggregation.
 

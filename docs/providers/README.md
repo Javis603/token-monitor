@@ -60,7 +60,7 @@ Limits-provider identity lives in `LIMIT_PROVIDER_CATALOG` in `src/shared/limitP
 |---|---|
 | Identity | Add id, order, label and optional `settingsLabel`; do not maintain derived id or label lists separately. |
 | Collection | Register `providerFetchers()` and implement `src/shared/providers/<id>/limits.js`. |
-| Settings and secrets | Add runtime setting keys and fixed GUI credentials to `CREDENTIAL_SETTING_PATHS`; automatic providers that persist nothing belong in neither list. |
+| Settings and secrets | Register runtime setting keys in `LIMIT_PROVIDER_SETTING_KEYS`; add fixed GUI credentials to `CREDENTIAL_SETTING_PATHS`. Automatic providers that persist nothing belong in neither list. |
 | Account UI | Register account/status ids or a connection-detail key and add matching DOM nodes. |
 | Manual panel | Use either the shared plain-panel animation path or an add-form child with `accordion-animated-container`; do not mix the two shapes. |
 | Presentation | Add capability tags, source-label overrides only when needed, CSS marks and tray artwork. |
