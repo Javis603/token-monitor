@@ -14,6 +14,7 @@ const CREDENTIAL_SETTING_PATHS = Object.freeze({
   claudeWebCookie: ['providers', 'claude', 'webCookie'],
   opencodeCookie: ['providers', 'opencode', 'cookie'],
   opencodeProfiles: ['providers', 'opencode', 'profiles'],
+  clineApiKey: ['providers', 'cline', 'apiKey'],
   factoryApiKey: ['providers', 'factory', 'apiKey'],
   kimiApiKey: ['providers', 'kimi', 'apiKey'],
   kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],

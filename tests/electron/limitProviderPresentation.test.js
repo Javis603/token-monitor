@@ -7,6 +7,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 const compactTokenApi = require('../../src/shared/compactTokens');
+const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
 const limitProviderOrderApi = require('../../src/electron/renderer/limitProviderOrder');
 const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
@@ -1814,32 +1815,62 @@ test('Grok is automatic provider UI, while env token remains documented for head
   assert.match(i18n, /'settings\.limits\.status\.runGrokLogin': '运行 grok login'/);
 });
 
-// Cline is automatic for the same reason Grok is — its credential belongs to
-// Cline, not to Token Monitor — but its env key exists too, because a machine
-// without Cline installed has no sign-in to read. The two must not drift into a
-// credential UI: the renderer never sees the key, and the settings page only
-// explains the connection.
-test('Cline is an automatic provider whose env key stays out of the renderer', () => {
+// Cline's credential belongs to Cline, and this provider reads it without ever
+// writing — but a machine with no Cline installed has nothing to read, so the API
+// key is configurable here too. It goes through the same settings + credential
+// store pattern every key-configured provider uses; factory is the one with the
+// same shape (a settings key beside a discovered sign-in).
+test('Cline exposes its API key through the settings and credential-store pattern', () => {
   const html = readRendererFile('index.html');
   const app = readRendererFile('app.js');
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
+  const runtimeConfig = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'runtimeConfig.js'), 'utf8');
   const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
   const clineLimits = fs.readFileSync(
     path.join(__dirname, '..', '..', 'src', 'shared', 'providers', 'cline', 'limits.js'),
     'utf8'
   );
 
-  assert.doesNotMatch(html, /clineAccountGroup|clineManualPanel|settings\.cline\./);
-  assert.doesNotMatch(app, /clineAccountExpanded|renderClineStatus|clineAccountLinked|clineApiKeyConfigured/);
-  assert.doesNotMatch(main.slice(main.indexOf('function settingsForRenderer'), main.indexOf('function pushSettingsToRenderer')), /clineApiKey/);
+  // The panel: every id the shared renderer requires before it draws the row.
+  for (const id of [
+    'clineAccountGroup', 'clineAccountStatus', 'clineSettingsToggle', 'clineSettingsDetails',
+    'clineOpenBrowser', 'clineLogoutButton', 'clineRefreshButton', 'clineManualPanel',
+    'clineApiKeyInput', 'clineApiKeySubmit', 'clineErrorMessage'
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`), `${id} is missing from index.html`);
+  }
+  // The renderer's side of it: the row, its platform link, and the probe the save
+  // button awaits.
+  assert.match(app, /clineAccountExpanded/);
+  assert.match(app, /clineCredentialConfigured/);
+  assert.match(app, /function clinePlatformUrl/);
+  assert.match(app, /window\.tokenMonitor\.cline\.validateApiKey/);
+  assert.match(preload, /cline: \{\n {4}validateApiKey: \(apiKey\) => ipcRenderer\.invoke\('cline:validateApiKey'/);
+  // The key itself never crosses to the renderer: the projection carries the
+  // boolean and the source label only, never a `clineApiKey` field.
+  const projection = main.slice(
+    main.indexOf('function settingsForRenderer'),
+    main.indexOf('function pushSettingsToRenderer')
+  );
+  assert.doesNotMatch(projection, /clineApiKey:/);
+  assert.match(projection, /clineCredentialConfigured/);
+  assert.match(projection, /clineCredentialSource/);
+  // Settings + credential store + IPC, the pattern the pattern-bound test above
+  // asserts for the catalog; the path is what keeps the key out of settings.json.
+  assert.match(runtimeConfig, /cline: \['clineApiKey'\]/);
+  assert.deepEqual(CREDENTIAL_SETTING_PATHS.clineApiKey, ['providers', 'cline', 'apiKey']);
+  assert.match(main, /ipcMain\.handle\('cline:validateApiKey'/);
+  assert.match(main, /clineApiKey: patch\.clineApiKey !== undefined \? normalizeClineApiKey\(patch\.clineApiKey\) : \(settings\.clineApiKey \|\| ''\)/);
   assert.match(envExample, /CLINE_API_KEY=/);
   assert.match(clineLimits, /CLINE_API_KEY/);
   assert.match(clineLimits, /CLINEPASS_API_KEY/);
-  // A sign-in that went stale is fixed by opening Cline, not by signing in again,
-  // and the pill must not tell an API-key user to open an app they do not have.
+  // A refused sign-in is Cline's own to fix: it refreshes the stored token when it
+  // runs, and only it can persist a rotated one, so the pill names that action. A
+  // rejected API key is the other cause the one `unauthorized` status covers.
   assert.deepEqual(
     limitProviderStatusLabel({ provider: 'cline', status: 'unauthorized' }),
-    { label: 'Update credential', tone: 'setup' }
+    { label: 'Open Cline', tone: 'setup' }
   );
   // Both tags are strings other providers already use, so no new chip text is
   // introduced for a provider whose surfaces are the same class as workbuddy's

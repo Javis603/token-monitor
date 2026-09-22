@@ -421,10 +421,14 @@
     if (status === 'unauthorized') {
       if (providerName === 'kimi') return { label: 'Update credential', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Update credential', tone: 'setup' };
-      // Cline refreshes its own access token every time the app or CLI runs, so
-      // a stored token that went stale means the front-end has not been opened —
-      // not that the sign-in itself is gone.
-      if (providerName === 'cline') return { label: 'Update credential', tone: 'setup' };
+      // Cline owns its credential lifecycle — it refreshes the stored token
+      // whenever the app or the CLI runs, and only it persists a rotated one — so
+      // this provider reads that sign-in read-only. A refusal is therefore usually
+      // the sign-in having gone stale, which only opening Cline fixes; a rejected
+      // API key is the other cause, and the shared vocabulary carries one
+      // `unauthorized` for both, so the pill names the common one. Grok and kiro
+      // name the vendor's own action here for the same reason.
+      if (providerName === 'cline') return { label: 'Open Cline', tone: 'setup' };
       return providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
         ? { label: 'Update API key', tone: 'setup' }
         : providerName === 'qoder' || providerName === 'trae'
