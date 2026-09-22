@@ -498,8 +498,12 @@ async function fetchClineLimits(options = {}, deps = {}) {
   // The account id both nested reads are keyed by, resolved once: the stored sign-in
   // carries it, and a key-only install learns it from the profile endpoint (which is
   // why that install costs one more request than this one).
-  // The plan read takes as long as it takes; a signal that has fired by now ends the
-  // scan here rather than letting the two account reads start behind it.
+  // The plan read takes as long as it takes, and every read below is checked the same
+  // way: a cancellation does not survive a read — the caller's signal reaches the
+  // network through the injected fetch, but the shared transport hands the resulting
+  // AbortError back as its own `unavailable` timeout (limits/providerHelpers.js) — so a
+  // cancelled best-effort read arrives as a read that answered nothing, and without this
+  // check it would be published as a row for a scan that was called off.
   throwIfAborted(deps.signal, 'Cline limits aborted');
   let accountId = credential.accountId || '';
   let email = credential.email || '';
@@ -515,8 +519,11 @@ async function fetchClineLimits(options = {}, deps = {}) {
       accountId = '';
     }
   }
+  throwIfAborted(deps.signal, 'Cline limits aborted');
   const credits = accountId ? await readClineCredits(accountId, credential, deps) : null;
+  throwIfAborted(deps.signal, 'Cline limits aborted');
   const spend = accountId ? await readClineSpend(accountId, credential, nowMs, deps) : null;
+  throwIfAborted(deps.signal, 'Cline limits aborted');
   // The identity is the lane's own seed, except where the stored sign-in carried none:
   // the profile read the balance needed has just named the account, and a row that
   // stayed anonymous would be merged with every other anonymous Cline account during

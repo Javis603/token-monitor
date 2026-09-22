@@ -569,6 +569,102 @@ test('an aborted probe propagates instead of reporting a status', async (t) => {
   );
 });
 
+test('a cancellation mid-scan rejects instead of publishing a row', async (t) => {
+  const dataDir = tempDir(t);
+  // No account id in the file, so the profile read runs and the cancel can land there.
+  writeProviders(dataDir, { cline: clineAuth({ accountId: '' }) });
+  const calls = [];
+  const cancelOn = (path) => {
+    const controller = new AbortController();
+    const fetch = async (url) => {
+      const requestPath = String(url).replace(CLINE_API_BASE, '').split('?')[0];
+      calls.push(requestPath);
+      if (requestPath === path) {
+        controller.abort();
+        const error = new Error('aborted mid-scan');
+        error.name = 'AbortError';
+        throw error;
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        json: async () => ({
+          success: true,
+          data: { limits: [{ type: 'five_hour', percentUsed: 4 }], items: [], userId: 'usr-resolved', id: 'usr-resolved', balance: 500000 }
+        })
+      };
+    };
+    return { controller, fetch };
+  };
+  // Each best-effort read swallows its own failure, so the scan has to notice the
+  // cancellation itself — and it must not start the reads that follow it either.
+  const duringProfile = cancelOn(USERS_ME_PATH);
+  await assert.rejects(
+    () => fetchClineLimits({}, {
+      env: { CLINE_DATA_DIR: dataDir },
+      now: () => NOW,
+      signal: duringProfile.controller.signal,
+      fetch: duringProfile.fetch
+    }),
+    (error) => error.name === 'AbortError'
+  );
+  assert.deepEqual(calls.slice(calls.indexOf(USERS_ME_PATH) + 1), [], 'nothing is read after the cancel');
+
+  // Cancelled during the credit read. The id this balance is keyed by is the one the
+  // profile read just answered, not the one the stored sign-in carries — the file
+  // above carries none — so the path is asserted before the signal is trusted.
+  const duringCredit = cancelOn(balancePath('usr-resolved'));
+  await assert.rejects(
+    () => fetchClineLimits({}, {
+      env: { CLINE_DATA_DIR: dataDir },
+      now: () => NOW,
+      signal: duringCredit.controller.signal,
+      fetch: duringCredit.fetch
+    }),
+    (error) => error.name === 'AbortError'
+  );
+  assert.equal(calls.at(-1), balancePath('usr-resolved'), 'the balance read is where the cancel landed');
+  assert.equal(calls.some((path) => path.includes('/usages/daily')), false, 'the spend read is not started after the cancel');
+
+  // Cancelled during the plan read itself, the lane that is not best effort: its own
+  // catch turns the aborted request into a status, so the scan has to read the signal
+  // back before it acts on that — and the account reads that follow must not start.
+  const mark = calls.length;
+  const duringPlan = cancelOn(USAGE_LIMITS_PATH);
+  await assert.rejects(
+    () => fetchClineLimits({}, {
+      env: { CLINE_DATA_DIR: dataDir },
+      now: () => NOW,
+      signal: duringPlan.controller.signal,
+      fetch: duringPlan.fetch
+    }),
+    (error) => error.name === 'AbortError'
+  );
+  assert.deepEqual(calls.slice(mark), [USAGE_LIMITS_PATH], 'the plan read is the last request of a cancelled scan');
+
+  // Cancelled during the month-to-date report, the second best-effort read. The
+  // stored sign-in carries the id this time, so neither account read needs the
+  // profile and the cancel lands on the last request the scan makes.
+  writeProviders(dataDir, { cline: clineAuth() });
+  const spendMark = calls.length;
+  const duringSpend = cancelOn(usagesDailyPath('usr-1'));
+  await assert.rejects(
+    () => fetchClineLimits({}, {
+      env: { CLINE_DATA_DIR: dataDir },
+      now: () => NOW,
+      signal: duringSpend.controller.signal,
+      fetch: duringSpend.fetch
+    }),
+    (error) => error.name === 'AbortError'
+  );
+  assert.deepEqual(
+    calls.slice(spendMark),
+    [USAGE_LIMITS_PATH, balancePath('usr-1'), usagesDailyPath('usr-1')],
+    'the spend read is the last request of a cancelled scan'
+  );
+});
+
 test('no credential reaches the reading', async (t) => {
   const dataDir = tempDir(t);
   writeProviders(dataDir, { cline: clineAuth() });

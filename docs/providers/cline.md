@@ -195,10 +195,10 @@ Five deliberate choices, recorded so they are not "corrected" later:
 An account without a subscription answers `limits: []`, reported as no data rather than as a live zero.
 One line runs through the table: **present but wrong voids the reading, absent is tolerated**. What
 absent means differs per field — a window with no percentage is left out, one with no `resetsAt` is kept
-without a reset time — and an **unrecognized window type** skips only its own row, so one Cline adds
-later cannot take the reading down. Both spellings of both fields (`percentUsed`/`percent_used`,
-`resetsAt`/`resets_at`) are read, and the guards validate the value actually read rather than one
-spelling of it.
+without a reset time — and an **unrecognized window type** skips only its own row, so a window type
+Cline adds later cannot invalidate the readings around it. Both spellings of both fields
+(`percentUsed`/`percent_used`, `resetsAt`/`resets_at`) are read, and the guards validate the value
+actually read rather than one spelling of it.
 
 ## Token totals under-count cache-heavy rows
 
@@ -217,9 +217,13 @@ Run focused tests while iterating, then finish with `npm run sync:worker` when s
 changed, `npm run update:hub-build`, `npm run verify`, and `git diff --check`.
 
 A cancelled probe is **propagated, not reported as a status**: the caller's `deps.signal` is checked
-before any request, so a superseded or shutting-down scan rejects with an `AbortError` instead of
-describing an outage that never happened — the shape `providers/zed` (which rethrows an abort from both
-of its catch blocks) and `providers/alibaba` share.
+before any request and after each read, so a superseded or shutting-down scan rejects with an
+`AbortError` instead of describing an outage that never happened, and stops rather than spending the
+requests that follow. The check after a read is the one that carries it, because a cancellation does not
+survive one: the shared transport hands an aborted request back as its own `unavailable` timeout
+(`limits/providerHelpers.js`), so it reaches the caller as an ordinary failed read. That is also why
+this provider asks the signal there instead of rethrowing by name the way `providers/zed` and
+`providers/alibaba` do inside their best-effort catches — by the time the catch runs, the name is gone.
 
 A live check needs a credential, not necessarily Cline: `CLINE_API_KEY` or `CLINEPASS_API_KEY` in the
 environment is enough on any machine, while the stored sign-in needs Cline to have been signed in at
