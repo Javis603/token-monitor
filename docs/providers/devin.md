@@ -19,7 +19,7 @@ Devin Desktop builds that write per-session databases under `acp-messages/` inst
 
 ## Desktop coverage
 
-Desktop usage is only as complete as the connected ACP agent. Tokens come from the `usage_update` events an agent writes into the NDJSON stream, which agents such as Cascade/Windsurf, claude-code and opencode do. Devin Desktop's own default `devin-cloud` agent does not: that usage is metered server-side and leaves no local record, and there is no account-level API to read it back. A default Devin Desktop install therefore has a discoverable `acp-events` directory and still reports zero Desktop tokens. Treat that as the source's limit rather than a detection failure — Devin CLI usage is unaffected.
+Desktop usage is only as complete as the connected ACP agent. Tokens come from the `usage_update` events an agent writes into the NDJSON stream, which agents such as Cascade/Windsurf, claude-code and opencode do. Devin Desktop's own default `devin-cloud` agent does not: that usage is metered server-side and leaves no local record, and Tokscale has no account-level API source for it. A default Devin Desktop install therefore has a discoverable `acp-events` directory and still reports zero Desktop tokens. Treat that as the source's limit rather than a detection failure — Devin CLI usage is unaffected.
 
 ## Session metadata
 
