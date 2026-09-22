@@ -50,6 +50,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { throwIfAborted } = require('../../abortSignal');
 const { normalizeLimitProvider } = require('../../limits/core');
 const { hashKey } = require('../../hashKey');
 const {
@@ -442,6 +443,11 @@ async function readClineSpend(id, credential, nowMs, deps) {
 async function fetchClineLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const nowMs = (deps.now || Date.now)();
+  // A superseded or shutting-down probe hands its signal in with the deps, and a
+  // cancelled scan is the caller's to see: reported as a status it would read as an
+  // outage that never happened. providers/alibaba and providers/thirdparty pin the
+  // same contract, and the shared helper is what they check it with.
+  throwIfAborted(deps.signal, 'Cline limits aborted');
   let credential;
   try {
     credential = resolveClineCredential(options, env);
@@ -492,6 +498,9 @@ async function fetchClineLimits(options = {}, deps = {}) {
   // The account id both nested reads are keyed by, resolved once: the stored sign-in
   // carries it, and a key-only install learns it from the profile endpoint (which is
   // why that install costs one more request than this one).
+  // The plan read takes as long as it takes; a signal that has fired by now ends the
+  // scan here rather than letting the two account reads start behind it.
+  throwIfAborted(deps.signal, 'Cline limits aborted');
   let accountId = credential.accountId || '';
   let email = credential.email || '';
   if (!accountId) {
