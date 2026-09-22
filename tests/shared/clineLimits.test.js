@@ -227,6 +227,30 @@ test('an expired stored sign-in is sent as-is: no refresh request, file untouche
   assert.equal(fs.readFileSync(providersFile, 'utf8'), before);
 });
 
+test('a stored token goes out in the form the API accepts', async (t) => {
+  const dataDir = tempDir(t);
+  const calls = [];
+  const run = async (accessToken) => {
+    writeProviders(dataDir, { cline: clineAuth({ accessToken }) });
+    calls.length = 0;
+    await fetchClineLimits({}, {
+      env: { CLINE_DATA_DIR: dataDir },
+      now: () => NOW,
+      fetch: okFetch(okBody([{ type: 'five_hour', percentUsed: 1 }]), calls)
+    });
+  };
+  // Live A/B against the API: `Bearer <bare jwt>` answers 401 while the prefixed
+  // form authenticates, so a store holding the bare token must not send it bare —
+  // and one that already carries the prefix must not be prefixed twice.
+  await run('jwt-bare');
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer workos:jwt-bare');
+  await run('workos:jwt-stored');
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer workos:jwt-stored');
+  // The form is recognised regardless of case; it is passed through as stored.
+  await run('WorkOS:jwt-mixed');
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer WorkOS:jwt-mixed');
+});
+
 test('a failure names the source it failed on and nothing else', async (t) => {
   const dataDir = tempDir(t);
   writeProviders(dataDir, { cline: clineAuth() });
