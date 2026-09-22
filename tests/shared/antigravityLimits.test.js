@@ -653,3 +653,4 @@ test('fetchAntigravityLimits returns unauthorized when probe throws unauthorized
   assert.equal(result.status, 'unauthorized');
   assert.equal(result.windows.length, 0);
 });
+
