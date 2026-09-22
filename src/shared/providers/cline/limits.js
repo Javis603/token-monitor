@@ -312,7 +312,7 @@ function parseClineLimits(payload) {
 // `no plan history found for user` that fetchJson maps to `unavailable` before
 // reaching here (verified live) — and neither is the same as a live zero-usage
 // window: report no data rather than 0%.
-function providerResult(windows, { nowMs, credential, status = '', accountSeed = '' }) {
+function providerResult(windows, { nowMs, credential, status = '', accountSeed = '', accountEmail = '' }) {
   // `accountSeed` is decided per lane in resolveClineCredential; with no stable
   // identifier there is no accountKey, rather than one invented here.
   const seed = accountSeed || credential?.accountSeed || '';
@@ -320,7 +320,7 @@ function providerResult(windows, { nowMs, credential, status = '', accountSeed =
     provider: 'cline',
     accountKey: seed ? hashKey('cline', seed) : '',
     accountLabel: '',
-    accountEmail: String(credential?.email || '').trim().toLowerCase(),
+    accountEmail: String(accountEmail || credential?.email || '').trim().toLowerCase(),
     source: credential?.source || 'api',
     updatedAt: nowIso(nowMs ?? Date.now()),
     status: status || (windows.length > 0 ? 'ok' : 'unavailable'),
@@ -341,18 +341,23 @@ function failingProvider(status, nowMs, source = '') {
   });
 }
 
-// The id `/api/v1/users/{id}/balance` is keyed by, for a credential that does not
-// carry one: a key on a machine with no Cline install. It is read with the same
-// credential, so it always names the account actually being queried — the endpoint
-// answers `403 can only access own resources` for anyone else's id, and a key and
-// a local sign-in can belong to different accounts.
-async function fetchClineAccountId(credential, deps) {
+// The profile answer for a credential that carries no account id — a key on a machine
+// with no Cline install, or a sign-in file written before Cline recorded one. Two
+// fields are used and both come from this one read: the id `/api/v1/users/{id}/balance`
+// is keyed by, and the email the row shows when the stored file had none. It is read
+// with the same credential, so it always names the account actually being queried —
+// the endpoint answers `403 can only access own resources` for anyone else's id, and a
+// key and a local sign-in can belong to different accounts.
+async function fetchClineAccountProfile(credential, deps) {
   const payload = await fetchJson(
     `${CLINE_API_BASE}${USERS_ME_PATH}`,
     { Authorization: `Bearer ${credential.accessToken}`, Accept: 'application/json' },
     deps
   );
-  return cleanSecret(payload?.data?.id);
+  return {
+    accountId: cleanSecret(payload?.data?.id),
+    email: cleanSecret(payload?.data?.email)
+  };
 }
 
 // The credit the account holds, as a credits window, or null when it cannot be
@@ -488,9 +493,15 @@ async function fetchClineLimits(options = {}, deps = {}) {
   // carries it, and a key-only install learns it from the profile endpoint (which is
   // why that install costs one more request than this one).
   let accountId = credential.accountId || '';
+  let email = credential.email || '';
   if (!accountId) {
+    // One read, both facts: the id is the reason it is made, and the email rides
+    // along when the stored file did not carry one. A file that has the id but no
+    // email is left alone rather than costing a request for the display field.
     try {
-      accountId = await fetchClineAccountId(credential, deps);
+      const profile = await fetchClineAccountProfile(credential, deps);
+      accountId = profile.accountId;
+      email = email || profile.email;
     } catch (_) {
       accountId = '';
     }
@@ -512,7 +523,7 @@ async function fetchClineLimits(options = {}, deps = {}) {
   // without a subscription whose console still answers a balance).
   const status = planStatus || (readings.length > 0 ? 'ok' : 'unavailable');
   if (readings.length === 0 && !planStatus) return failingProvider(status, nowMs, credential.source);
-  return providerResult(readings, { nowMs, credential, status, accountSeed });
+  return providerResult(readings, { nowMs, credential, status, accountSeed, accountEmail: email });
 }
 
 module.exports = {

@@ -462,12 +462,14 @@ test('identity is the account id, and nothing is invented without one', async (t
 
 test('a sign-in recorded without an account id takes the one the profile read answers', async (t) => {
   const dataDir = tempDir(t);
-  writeProviders(dataDir, { cline: clineAuth({ accountId: '' }) });
+  // The file holds neither an account id nor an email, so both have to come from the
+  // profile read the balance is keyed by.
+  writeProviders(dataDir, { cline: clineAuth({ accountId: '', metadata: {} }) });
   const calls = [];
   const route = {
     sink: calls,
     limits: [{ type: 'five_hour', percentUsed: 3 }],
-    me: { success: true, data: { id: 'usr-resolved' } },
+    me: { success: true, data: { id: 'usr-resolved', email: 'From@Profile.example' } },
     balance: { success: true, data: { userId: 'usr-resolved', balance: 500000 } }
   };
   const result = await fetchClineLimits({}, {
@@ -481,6 +483,8 @@ test('a sign-in recorded without an account id takes the one the profile read an
   // would be merged with every other anonymous Cline account during normalization.
   assert.equal(calls.some((call) => call.path === USERS_ME_PATH), true, 'the profile read supplies the id');
   assert.match(result.accountKey, /^sha256:[0-9a-f]{64}$/);
+  // The same read answers the row's display email, which the file here did not carry.
+  assert.equal(result.accountEmail, 'from@profile.example');
   // A configured key still stands for itself, so the same account reached that way
   // hashes differently and the resolved read does not rewrite the lane's identity.
   const keyed = await fetchClineLimits({ clineApiKey: 'sk-key' }, {
