@@ -489,6 +489,9 @@ async function fetchClineLimits(options = {}, deps = {}) {
     planStatus = parsed === null ? 'unavailable' : '';
     planWindows = parsed || [];
   } catch (error) {
+    // Read the signal here too: the refusal below returns from inside this catch,
+    // past the checks that follow it.
+    throwIfAborted(deps.signal, 'Cline limits aborted');
     planStatus = providerStatusFromError(error);
     // A rejected credential is the whole answer — the balance endpoint would be
     // refused the same way — so it is the one failure that ends the scan.

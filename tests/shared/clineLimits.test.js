@@ -61,6 +61,16 @@ function okFetch(payload, sink = []) {
   };
 }
 
+function jsonReply(status, body) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => null },
+    json: async () => body,
+    text: async () => JSON.stringify(body)
+  };
+}
+
 // The plan read and the credit read are different endpoints, so they are routed
 // apart: a fixture that answers one payload for every URL cannot tell which call
 // carried the account id.
@@ -75,23 +85,16 @@ function routedFetch({
   me,
   sink = []
 } = {}) {
-  const reply = (status, body) => ({
-    ok: status >= 200 && status < 300,
-    status,
-    headers: { get: () => null },
-    json: async () => body,
-    text: async () => JSON.stringify(body)
-  });
   return async (url, init = {}) => {
     const path = String(url).replace(CLINE_API_BASE, '');
     sink.push({ path, auth: (init.headers || {}).Authorization || '' });
     if (path.includes('/usages/daily')) {
       if (usagesQuery) usagesQuery.push(path.slice(path.indexOf('?')));
-      return reply(usagesStatus, usages);
+      return jsonReply(usagesStatus, usages);
     }
-    if (path.endsWith('/balance')) return reply(balanceStatus, balance);
-    if (path === USERS_ME_PATH) return reply(200, me);
-    return reply(
+    if (path.endsWith('/balance')) return jsonReply(balanceStatus, balance);
+    if (path === USERS_ME_PATH) return jsonReply(200, me);
+    return jsonReply(
       usageStatus,
       usageStatus === 200 ? okBody(limits) : { success: false, data: null, error: 'no plan history found for user' }
     );
@@ -574,13 +577,16 @@ test('a cancellation mid-scan rejects instead of publishing a row', async (t) =>
   // No account id in the file, so the profile read runs and the cancel can land there.
   writeProviders(dataDir, { cline: clineAuth({ accountId: '' }) });
   const calls = [];
-  const cancelOn = (path) => {
+  // `status` answers that request instead of failing it as an abort, which is how a
+  // response and its cancellation arrive together.
+  const cancelOn = (path, status = 0) => {
     const controller = new AbortController();
     const fetch = async (url) => {
       const requestPath = String(url).replace(CLINE_API_BASE, '').split('?')[0];
       calls.push(requestPath);
       if (requestPath === path) {
         controller.abort();
+        if (status) return jsonReply(status, { success: false, data: null, error: 'no' });
         const error = new Error('aborted mid-scan');
         error.name = 'AbortError';
         throw error;
@@ -642,6 +648,21 @@ test('a cancellation mid-scan rejects instead of publishing a row', async (t) =>
     (error) => error.name === 'AbortError'
   );
   assert.deepEqual(calls.slice(mark), [USAGE_LIMITS_PATH], 'the plan read is the last request of a cancelled scan');
+
+  // The same cancel with the plan request answering 401: that refusal returns from
+  // inside the catch, past the checks below it.
+  const refusalMark = calls.length;
+  const duringRefusal = cancelOn(USAGE_LIMITS_PATH, 401);
+  await assert.rejects(
+    () => fetchClineLimits({}, {
+      env: { CLINE_DATA_DIR: dataDir },
+      now: () => NOW,
+      signal: duringRefusal.controller.signal,
+      fetch: duringRefusal.fetch
+    }),
+    (error) => error.name === 'AbortError'
+  );
+  assert.deepEqual(calls.slice(refusalMark), [USAGE_LIMITS_PATH], 'a cancelled refusal ends the scan too');
 
   // Cancelled during the month-to-date report, the second best-effort read. The
   // stored sign-in carries the id this time, so neither account read needs the
