@@ -47,7 +47,7 @@ Manually recorded subscriptions are Hub-scoped account data, not device data. Re
 
 ## Configuration and credentials
 
-Every entry point loads the project `.env` without overriding an existing process variable. Widget settings merge persisted GUI values over env-seeded defaults; agent and standalone Hub use `CLI flag -> process env or .env -> built-in default` and never read widget credential storage.
+Node and Electron entry points load the project `.env` without overriding an existing process variable. Widget settings merge persisted GUI values over env-seeded defaults; agent and standalone Hub use `CLI flag -> process env or .env -> built-in default` and never read widget credential storage. The Cloudflare Worker does not load the project `.env`; its configuration arrives through deployment bindings.
 
 - `.env.example` is the supported operator-facing env surface.
 - Widget preferences and account metadata live in `settings.json`; raw GUI-managed credentials live in the permission-restricted shared credential store.

@@ -20,7 +20,7 @@ Profile names are user labels, not stable account identity. API keys and Web res
 
 ## Source authority
 
-Within an explicitly associated account, source order is API, then Web, then local. Each component remains authoritative only for the windows it actually answers. Supplemental windows must be dropped when the API or local source already answered the same kind; merge order must not duplicate quota.
+Within an explicitly associated account, source order is API, then Web, then local. Each component remains authoritative only for the windows it actually answers. Supplemental windows fill only kinds not already answered by the selected Go source; merge order must not duplicate quota.
 
 An expired explicit cookie or stale explicit key surfaces its error instead of disappearing into an unrelated ambient/local success. A missing Go subscription is not an authorization failure and may fall through quietly. Cancellation discards the scoped result rather than publishing an error row or papering it over with local estimates.
 

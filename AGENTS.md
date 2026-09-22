@@ -24,14 +24,7 @@ Update the provider note in the same change when its contract moves. Do not copy
 
 ## Architecture contracts
 
-Four runtime entry points share `src/shared/`:
-
-- `src/electron/main.js` — desktop widget, IPC and local/client/host mode orchestration.
-- `src/hub/server.js` — Node HTTP Hub and persisted device records.
-- `src/agent/agent.js` — headless collector that posts the same device shape.
-- `worker/src/index.js` — Cloudflare Worker implementation of the Hub protocol.
-
-Preserve these boundaries:
+Read `docs/architecture.md` before changing a boundary shared by the widget, agent, Hub or Worker. Preserve these repository-wide guardrails:
 
 - `src/shared/` is the source of truth for portable logic. The Worker cannot import above `worker/`; `npm run sync:worker` vendors the closure declared by `WORKER_SHARED_MODULES` into `worker/src/shared/`. Edit the source, never generated copies, and sync after a relevant change.
 - Usage and limits are independent runtimes composed by `DeviceState`. Provider credentials stay at the collector edge; Hub and Worker receive normalized records only.
@@ -41,7 +34,7 @@ Preserve these boundaries:
 - Public compatibility surfaces include settings keys, environment variables, CLI flags, Hub endpoints and the device wire shape. Plan migrations before changing them.
 - Renderer settings are default-deny for secrets. Raw provider credentials stay in the main process and may cross that boundary only through an explicit allowlist.
 
-`docs/architecture.md` records the longer cross-runtime rationale. Keep it concise and update it only when one of those boundaries changes.
+Keep `docs/architecture.md` concise and update it only when one of those boundaries changes.
 
 ## Generated and registered state
 
