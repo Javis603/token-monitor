@@ -84,7 +84,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 - Devin은 로컬 `sessions.db`에서 Devin CLI 세션을, `acp-events` ACP 로그에서 Devin Desktop 에이전트 세션을 추적합니다. 같은 세션이 양쪽에 있으면 CLI 데이터베이스가 우선입니다. Desktop 적용 범위는 연결된 ACP 에이전트에 따라 달라집니다. 로컬에 `usage_update` 이벤트를 기록하는 에이전트만 집계되며, Devin Desktop의 기본 `devin-cloud` 에이전트는 서버 측에서 계측되므로 기본 Desktop 구성에서는 Desktop 토큰이 보고되지 않습니다. 세션 제목과 프로젝트 귀속은 CLI 데이터베이스에서 가져옵니다. [Devin 데이터 소스 설명](docs/providers/devin.md)을 참고하세요.
 
 - Command Code transcript에는 실제 토큰 수나 메시지별 모델 정보가 포함되지 않습니다. 토큰 사용량은 transcript 텍스트에서 추정되며, 모델 귀속과 추정 비용에는 각 요청에서 과거에 사용한 모델이 아니라 현재 설정된 모델이 반영될 수 있습니다.
-- Cursor 캐시는 Cursor의 계정 수준 사용량 내보내기에서 가져오므로 Cursor IDE와 Cursor CLI를 모두 포함합니다. Token Monitor는 Cursor 데스크톱 앱에 로그인된 계정을 자동으로 감지하며 설정에서 계정을 수동으로 추가할 수도 있습니다. 오래된 캐시는 자동으로 다시 동기화되지만 방금 끝난 세션이 Cursor 대시보드에 도달하기까지 몇 분이 걸릴 수 있으므로 사용량은 즉시가 아니라 동기화 후 업데이트됩니다.
+- Cursor 캐시는 Cursor의 계정 수준 사용량 내보내기에서 가져오므로 Cursor IDE와 Cursor CLI를 모두 포함합니다. Token Monitor는 Cursor 데스크톱 앱에 로그인된 계정을 자동으로 감지하며 설정에서 계정을 수동으로 추가할 수도 있습니다. 오래된 캐시는 자동으로 다시 동기화되지만 방금 끝난 세션이 Cursor 대시보드에 도달하기까지 몇 분이 걸릴 수 있으므로 사용량은 즉시가 아니라 동기화 후 업데이트됩니다. 선택적 기기 단위 모드(`TOKEN_MONITOR_CURSOR_USAGE_SOURCE=device`, 또는 설정 → Cursor)는 Agent `stop` / `subagentStop` hook을 기기 로컬 로그에 기록해 Hub가 같은 계정 CSV를 기기마다 합산하지 않게 합니다. 한도는 계속 계정 단위입니다. Cloud Agent 사용량은 기록되지 않습니다. [Cursor 소스 노트](docs/providers/cursor.md)를 참고하세요.
 
 - Custom은 하나의 GET 잔액 엔드포인트에서 숫자 JSON 필드를 매핑합니다. OpenAI 또는 Anthropic API 호환만으로는 충분하지 않습니다.
 

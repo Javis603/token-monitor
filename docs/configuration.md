@@ -39,6 +39,7 @@ TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to the hostname
 TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # optional — 0/live, 600000/10min, 1200000/20min, 1800000/30min
 TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported tools; empty disables tracking
 TOKEN_MONITOR_PROJECTS_ENABLED=      # optional — defaults on; 0 stops collecting project metadata
+TOKEN_MONITOR_CURSOR_USAGE_SOURCE=   # optional — account (default) or device
 TOKEN_MONITOR_HISTORY_ENABLED=       # optional — defaults on; 0 skips trend history
 TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # optional — defaults on; 0 stops archiving deleted-session usage
 TOKEN_MONITOR_LIMITS_ENABLED=        # optional — defaults on; 0 skips CLI probing

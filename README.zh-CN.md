@@ -84,7 +84,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 - Devin 从本地 `sessions.db` 追踪 Devin CLI 会话，并从 `acp-events` ACP 日志追踪 Devin Desktop 代理会话；同一 session 两边都有数据时以 CLI 数据库为准。Desktop 的覆盖范围取决于连接的 ACP 代理：只有会在本地写入 `usage_update` 事件的代理才会计入，而 Devin Desktop 默认的 `devin-cloud` 代理在服务端计量，因此默认的 Desktop 配置不会报告 Desktop token。session 标题与项目归属取自 CLI 数据库。详见 [Devin 数据来源说明](docs/providers/devin.md)。
 
 - Command Code transcript 不包含实际 Token 数或每条消息的模型信息。Token 用量根据 transcript 文本估算；模型归属与推算成本可能反映当前配置的模型，而不是每次请求当时实际使用的模型。
-- Cursor 缓存来自 Cursor 的账号层级用量导出，因此同时涵盖 Cursor IDE 和 Cursor CLI。Token Monitor 会自动检测 Cursor 桌面版已登录的账号，也可在设置中手动新增。缓存过期时会自动重新同步，但刚完成的 session 可能需要几分钟才会出现在 Cursor 控制台，因此用量会在同步后更新，而非即时显示。
+- Cursor 缓存来自 Cursor 的账号层级用量导出，因此同时涵盖 Cursor IDE 和 Cursor CLI。Token Monitor 会自动检测 Cursor 桌面版已登录的账号，也可在设置中手动新增。缓存过期时会自动重新同步，但刚完成的 session 可能需要几分钟才会出现在 Cursor 控制台，因此用量会在同步后更新，而非即时显示。可选的按设备模式（`TOKEN_MONITOR_CURSOR_USAGE_SOURCE=device`，或设置 → Cursor）通过 Agent `stop` / `subagentStop` hook 写入本机日志，Hub 就不会在每台设备上累加同一份账号 CSV。额度仍按账号统计。不记录 Cloud Agent 用量。详见 [Cursor 来源说明](docs/providers/cursor.md)。
 
 - Custom 会从一个 GET 余额端点映射数值 JSON 字段；仅兼容 OpenAI 或 Anthropic API 并不足够。
 

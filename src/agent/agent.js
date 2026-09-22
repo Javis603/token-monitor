@@ -6,6 +6,7 @@ const { defaultDeviceId, loadDotEnv, parseArgs, pidFilePath } = require('../shar
 const { appVersion } = require('../shared/appVersion');
 const { clientsCsvForSetting } = require('../shared/clientTracking');
 const { normalizeHistoryIntervalMs } = require('../shared/collector');
+const { normalizeCursorUsageSource } = require('../shared/providers/cursor/deviceUsage');
 const {
   normalizeLimitsRefreshMode,
   normalizeLimitsRefreshMs,
@@ -46,6 +47,11 @@ const historyEnabled = parseBoolean(args.history ?? args.historyEnabled ?? proce
 const projectsEnabled = parseBoolean(args.projects ?? args.projectsEnabled ?? process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true);
 const sessionUsageArchiveEnabled = parseBoolean(args.sessionArchive ?? args.sessionUsageArchiveEnabled ?? process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true);
 const wslScanEnabled = parseBoolean(args.wslScan ?? args.wslScanEnabled ?? process.env.TOKEN_MONITOR_WSL_SCAN, true);
+const cursorUsageSource = normalizeCursorUsageSource(
+  args.cursorUsageSource
+    ?? args['cursor-usage-source']
+    ?? process.env.TOKEN_MONITOR_CURSOR_USAGE_SOURCE
+);
 const opencodeLocalLimitsEnabled = parseBoolean(
   args['opencode-local-limits']
     ?? args.opencodeLocalLimits
@@ -85,6 +91,8 @@ const usageOptions = {
   watchEnabled,
   watchDebounceMs,
   wslScanEnabled,
+  cursorUsageSource,
+  manageCursorDeviceHook: true,
   onError: (error, reason) => console.error(`[${new Date().toISOString()}] (${reason}) ${error.message}`),
   logger: (message) => (dryRun ? console.error(message) : console.log(message))
 };

@@ -192,6 +192,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'copilot-data',
   'copilot-otel',
   'copilot-otel-exporter',
+  'cursor-device-log',
   DEVIN_CLI_SOURCE_CHECK_ID,
   DEVIN_DESKTOP_SOURCE_CHECK_ID,
   'droid-sessions',

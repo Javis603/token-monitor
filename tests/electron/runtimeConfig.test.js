@@ -28,7 +28,8 @@ const BASE_USAGE_SETTINGS = Object.freeze({
   historyIntervalMs: 15 * 60 * 1000,
   sessionUsageArchiveEnabled: true,
   projectsEnabled: true,
-  wslScanEnabled: true
+  wslScanEnabled: true,
+  cursorUsageSource: 'account'
 });
 
 test('Cursor account metadata ids are trimmed, deduplicated, and bounded', () => {
@@ -135,7 +136,8 @@ test('every usage structural setting maps to an effective fingerprint change', (
     historyIntervalMs: { historyIntervalMs: 30 * 60 * 1000 },
     sessionUsageArchiveEnabled: { sessionUsageArchiveEnabled: false },
     projectsEnabled: { projectsEnabled: false },
-    wslScanEnabled: { wslScanEnabled: false }
+    wslScanEnabled: { wslScanEnabled: false },
+    cursorUsageSource: { cursorUsageSource: 'device' }
   };
 
   assert.deepEqual(Object.keys(cases).sort(), [...USAGE_STRUCTURAL_KEYS].sort());

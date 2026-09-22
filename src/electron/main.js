@@ -301,6 +301,7 @@ const {
 } = require('./syncDisplayStats');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
+const { normalizeCursorUsageSource } = require('../shared/providers/cursor/deviceUsage');
 const {
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
@@ -560,6 +561,7 @@ function defaultSettings() {
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
     sessionUsageArchiveEnabled: parseBoolean(process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true),
     wslScanEnabled: parseBoolean(process.env.TOKEN_MONITOR_WSL_SCAN, true),
+    cursorUsageSource: normalizeCursorUsageSource(process.env.TOKEN_MONITOR_CURSOR_USAGE_SOURCE),
     exportAutoEnabled: false,
     exportDir: '',
     exportIntervalMs: 60 * 1000,
@@ -762,6 +764,8 @@ function electronUsageConfig(errorPrefix) {
     watchTriggersCollection: collectorWatchTriggersCollection(),
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
+    manageCursorDeviceHook: true,
+    isElectron: true,
     dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
     logger: (message) => console.log(`[${errorPrefix}] ${message}`)
@@ -2602,6 +2606,9 @@ function readSettings() {
     }
     if (saved.wslScanEnabled !== undefined) {
       merged.wslScanEnabled = parseBoolean(saved.wslScanEnabled, true);
+    }
+    if (saved.cursorUsageSource !== undefined) {
+      merged.cursorUsageSource = normalizeCursorUsageSource(saved.cursorUsageSource);
     }
     merged.collectionMode = normalizeCollectionMode(merged.collectionMode);
     merged.collectionIntervalMs = normalizeCollectionIntervalMs(merged.collectionIntervalMs);
@@ -4504,6 +4511,7 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
       clients: usageOptions.clients,
       allTimeSince: usageOptions.allTimeSince,
       projectsEnabled: usageOptions.projectsEnabled,
+      cursorUsageSource: usageOptions.cursorUsageSource,
       wslScanEnabled: usageOptions.wslScanEnabled,
       wslSupported: process.platform === 'win32',
       hostname: os.hostname(),
@@ -7316,6 +7324,7 @@ app.whenReady().then(() => {
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
       sessionUsageArchiveEnabled: parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true),
       wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, true),
+      cursorUsageSource: normalizeCursorUsageSource(patch.cursorUsageSource ?? settings.cursorUsageSource),
       collectionMode: normalizeCollectionMode(patch.collectionMode ?? settings.collectionMode),
       collectionIntervalMs: normalizeCollectionIntervalMs(patch.collectionIntervalMs ?? settings.collectionIntervalMs),
       syncUploadIntervalMs: normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs ?? settings.syncUploadIntervalMs),

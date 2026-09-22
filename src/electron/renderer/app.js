@@ -373,6 +373,7 @@ Object.assign(els, {
   monthPeriodMenu: document.getElementById('monthPeriodMenu'),
   monthPeriodTab: document.getElementById('monthPeriodTab'),
   periodMonthModeInput: document.getElementById('periodMonthModeInput'),
+  cursorDeviceUsageInput: document.getElementById('cursorDeviceUsageInput'),
   modelRankingMetricInputs: Array.from(document.querySelectorAll('input[name="modelRankingMetric"]'))
 });
 Object.assign(els, {
@@ -7910,6 +7911,7 @@ function syncSettingsForm() {
     }
   }
   if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled !== false;
+  if (els.cursorDeviceUsageInput) els.cursorDeviceUsageInput.checked = state.settings.cursorUsageSource === 'device';
   if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
   renderAutomaticAppUpdateControl();
   renderSessionUsageArchiveStatus();
@@ -11147,6 +11149,9 @@ els.clearSessionUsageArchiveButton?.addEventListener('click', async () => {
 });
 els.wslScanInput?.addEventListener('change', async () => {
   await saveSettings({ wslScanEnabled: els.wslScanInput.checked });
+});
+els.cursorDeviceUsageInput?.addEventListener('change', async () => {
+  await saveSettings({ cursorUsageSource: els.cursorDeviceUsageInput.checked ? 'device' : 'account' });
 });
 els.exportAutoInput?.addEventListener('change', async () => {
   await saveSettings({ exportAutoEnabled: els.exportAutoInput.checked });
