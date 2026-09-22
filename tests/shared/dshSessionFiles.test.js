@@ -16,7 +16,7 @@ const {
   indexDshSessionHeaders,
   isDshSessionLogName,
   readDshSessionHeader,
-  readDshSessionTitle,
+  readDshSessionState,
   resolveDshSessionsRoot,
   scanZstdFrames,
   zstdAvailable
@@ -242,7 +242,40 @@ test('decodeSessionText reads raw .jsonl without decompression', () => {
   assert.equal(text, '{"type":"session"}\n');
 });
 
-test('readDshSessionTitle folds and preserves the latest persisted title', () => {
+test('readDshSessionState reports the newest turn boundary, not just the last one seen', () => {
+  // DSH brackets every turn with `turn/start` and `turn/end`, so the newest of
+  // the two is the answer. A `turn/end` that carries a reason is still an end:
+  // completed, aborted and errored all mean nothing is generating.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-turn-'));
+  const file = path.join(root, 'session.jsonl');
+  try {
+    const ev = (type, data = {}) => JSON.stringify({ type, seq: 1, time: 1, data });
+    fs.writeFileSync(file, [
+      ev('turn/start', { turn: 1 }),
+      ev('turn/end', { turn: 1, reason: { kind: 'completed' } }),
+      ''
+    ].join('\n'));
+    assert.equal(readDshSessionState(file, {}).turnEnded, true);
+
+    // A later turn/start means it is working again, so the flag must clear.
+    fs.appendFileSync(file, `${ev('turn/start', { turn: 2 })}\n`);
+    assert.equal(readDshSessionState(file, {}).turnEnded, false);
+
+    // An interrupted turn still ends it.
+    fs.appendFileSync(file, `${ev('turn/end', { turn: 2, reason: { kind: 'aborted', reason: { kind: 'user' } } })}\n`);
+    assert.equal(readDshSessionState(file, {}).turnEnded, true);
+
+    // A log with no boundary at all reports no reading rather than guessing,
+    // so it cannot clear a boundary that an earlier tick did record.
+    const bare = path.join(root, 'bare.jsonl');
+    fs.writeFileSync(bare, `${JSON.stringify({ type: 'session/title', seq: 1, data: { title: 'x' } })}\n`);
+    assert.equal(readDshSessionState(bare, {}).turnEnded, undefined);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('readDshSessionState folds and preserves the latest persisted title', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-'));
   const file = path.join(root, 'session.jsonl');
   try {
@@ -255,7 +288,7 @@ test('readDshSessionTitle folds and preserves the latest persisted title', () =>
       ''
     ].join('\n'));
 
-    const state = readDshSessionTitle(file);
+    const state = readDshSessionState(file);
     assert.equal(state.title, persistedTitle);
     assert.equal(state.offset, state.size);
   } finally {
@@ -263,7 +296,7 @@ test('readDshSessionTitle folds and preserves the latest persisted title', () =>
   }
 });
 
-test('readDshSessionTitle never derives a title from conversation text', () => {
+test('readDshSessionState never derives a title from conversation text', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-private-'));
   const file = path.join(root, 'session.jsonl');
   try {
@@ -274,19 +307,19 @@ test('readDshSessionTitle never derives a title from conversation text', () => {
       ''
     ].join('\n'));
 
-    assert.equal(readDshSessionTitle(file).title, '');
+    assert.equal(readDshSessionState(file).title, '');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('readDshSessionTitle reuses the append boundary after checking content continuity', () => {
+test('readDshSessionState reuses the append boundary after checking content continuity', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-append-'));
   const file = path.join(root, 'session.jsonl');
   const realReadSync = fs.readSync;
   try {
     fs.writeFileSync(file, `${JSON.stringify({ type: 'session/title', seq: 1, data: { title: 'Initial' } })}\n`);
-    const first = readDshSessionTitle(file);
+    const first = readDshSessionState(file);
     const appended = `${JSON.stringify({ type: 'session/title', seq: 2, data: { title: 'Updated' } })}\n`;
     fs.appendFileSync(file, appended);
 
@@ -295,7 +328,7 @@ test('readDshSessionTitle reuses the append boundary after checking content cont
       reads.push({ length, position });
       return realReadSync(fd, buffer, offset, length, position);
     };
-    const second = readDshSessionTitle(file, first);
+    const second = readDshSessionState(file, first);
 
     assert.equal(second.title, 'Updated');
     assert.equal(reads.filter(({ length, position }) => (
@@ -307,7 +340,7 @@ test('readDshSessionTitle reuses the append boundary after checking content cont
   }
 });
 
-test('readDshSessionTitle folds appended zstd frames without re-decoding the prefix', { skip: !hasZstd }, () => {
+test('readDshSessionState folds appended zstd frames without re-decoding the prefix', { skip: !hasZstd }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-zstd-'));
   const file = path.join(root, 'session.jsonl.zstd');
   try {
@@ -316,7 +349,7 @@ test('readDshSessionTitle folds appended zstd frames without re-decoding the pre
       'utf8'
     ));
     fs.writeFileSync(file, firstFrame);
-    const first = readDshSessionTitle(file);
+    const first = readDshSessionState(file);
     assert.equal(first.title, 'Initial');
     assert.equal(first.offset, firstFrame.length);
 
@@ -325,7 +358,7 @@ test('readDshSessionTitle folds appended zstd frames without re-decoding the pre
       'utf8'
     ));
     fs.appendFileSync(file, secondFrame);
-    const second = readDshSessionTitle(file, first);
+    const second = readDshSessionState(file, first);
     assert.equal(second.title, 'Updated');
     assert.equal(second.offset, firstFrame.length + secondFrame.length);
   } finally {
@@ -333,18 +366,18 @@ test('readDshSessionTitle folds appended zstd frames without re-decoding the pre
   }
 });
 
-test('readDshSessionTitle resets latest-wins state after a same-size rewrite', () => {
+test('readDshSessionState resets latest-wins state after a same-size rewrite', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-rewrite-'));
   const file = path.join(root, 'session.jsonl');
   try {
     const event = (title) => `${JSON.stringify({ type: 'session/title', data: { title } })}\n`;
     fs.writeFileSync(file, event('First title'));
-    const first = readDshSessionTitle(file);
+    const first = readDshSessionState(file);
     fs.writeFileSync(file, event('Other title'));
     const nextMtime = new Date(first.mtimeMs + 1000);
     fs.utimesSync(file, nextMtime, nextMtime);
 
-    const second = readDshSessionTitle(file, first);
+    const second = readDshSessionState(file, first);
     assert.equal(second.title, 'Other title');
     assert.equal(second.offset, second.size);
   } finally {
@@ -352,7 +385,7 @@ test('readDshSessionTitle resets latest-wins state after a same-size rewrite', (
   }
 });
 
-test('readDshSessionTitle refolds a larger in-place rewrite instead of treating it as an append', () => {
+test('readDshSessionState refolds a larger in-place rewrite instead of treating it as an append', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-title-larger-rewrite-'));
   const file = path.join(root, 'session.jsonl');
   try {
@@ -364,7 +397,7 @@ test('readDshSessionTitle refolds a larger in-place rewrite instead of treating 
       's'.repeat(64 * 1024)
     ].join('\n');
     fs.writeFileSync(file, event('Title A', 160 * 1024));
-    const first = readDshSessionTitle(file);
+    const first = readDshSessionState(file);
     // Keep the old file's final 64 KiB identical: a tail-only check would still
     // misclassify this as an append and skip the new title near the front.
     fs.writeFileSync(file, event('Title B', 192 * 1024));
@@ -372,7 +405,7 @@ test('readDshSessionTitle refolds a larger in-place rewrite instead of treating 
     fs.utimesSync(file, nextMtime, nextMtime);
     assert.ok(fs.statSync(file).size > first.size);
 
-    const second = readDshSessionTitle(file, first);
+    const second = readDshSessionState(file, first);
     assert.equal(second.title, 'Title B');
     assert.equal(second.offset, second.size - (64 * 1024));
   } finally {
@@ -467,4 +500,51 @@ test('indexDshSessionHeaders prefers the versioned transcript of a session', { s
   const index = indexDshSessionHeaders({ sessionsRoot: root });
   assert.equal(index.get('session-1').filePath, versioned, 'the live transcript must win over the stale copy');
   assert.equal(index.get('session-1').createdAt, 1750000000000);
+});
+
+// A stat failure is not evidence about the turn. Answering `false` there (which
+// is what this used to do) means "a turn is under way", and that is the only
+// value that can clear a `true` recorded by an earlier tick — so a transcript
+// that was renamed, re-encoded or transiently unlinked between ticks turned a
+// finished session back into a running one.
+test('readDshSessionState reports no boundary when the file cannot be read', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-stat-fail-'));
+  try {
+    const missing = path.join(root, 'gone.jsonl');
+
+    // A cold read has nothing to carry forward, so it must report unknown.
+    assert.equal(readDshSessionState(missing, {}).turnEnded, undefined);
+
+    // A read that fails after an earlier tick recorded a completion keeps that
+    // reading rather than overwriting it with a guess.
+    assert.equal(readDshSessionState(missing, { turnEnded: true, offset: 0, size: 0, mtimeMs: 0 }).turnEnded, true);
+    assert.equal(readDshSessionState(missing, { turnEnded: false, offset: 0, size: 0, mtimeMs: 0 }).turnEnded, false);
+
+    // The reachable sequence is discovered-then-vanished: the resolver only
+    // answers for a session whose file it has already indexed, so the second
+    // call is the one that used to report an active turn for a file it could
+    // no longer read.
+    const sessionMetadata = require('../../src/shared/providers/dsh/sessionMetadata');
+    const liveDir = path.join(root, '.dsh', 'sessions', 'proj', 'session-vanish');
+    fs.mkdirSync(liveDir, { recursive: true });
+    const live = path.join(liveDir, 'session.jsonl');
+    fs.writeFileSync(live, [
+      JSON.stringify({ type: 'session', id: 'session-vanish', createdAt: 1750000000000 }),
+      JSON.stringify({ type: 'turn/start', seq: 1, time: 1, data: { turn: 1 } }),
+      JSON.stringify({ type: 'turn/end', seq: 2, time: 1, data: { turn: 1, reason: { kind: 'completed' } } }),
+      ''
+    ].join('\n'));
+    const resolve = () => sessionMetadata.resolveSessionMetadata(new Set(['session-vanish']), {
+      deps: {}, home: root, metadata: new Map(), now: Date.now(), resolveProjects: false,
+      projectIdentity: () => ({}),
+      isoFromDate: (d) => (Number.isFinite(Number(d)) && Number(d) > 0 ? new Date(Number(d)).toISOString() : '')
+    });
+    assert.equal(resolve().get('session-vanish').turnEnded, true, 'the completion is read from the file');
+    // The transcript is renamed or re-encoded between ticks.
+    fs.rmSync(live);
+    const after = resolve();
+    assert.notEqual(after.get('session-vanish')?.turnEnded, false, 'a file that vanished must not report an active turn');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

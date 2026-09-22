@@ -26,6 +26,7 @@ const {
   createSessionUsageArchiveStore,
   readSessionUsageArchiveSnapshot
 } = require('../shared/sessionUsageArchiveStore');
+const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 
 loadDotEnv();
 const args = parseArgs(process.argv.slice(2));
@@ -106,7 +107,8 @@ const limitsOptions = {
   opencodeCookie
 };
 let sessionUsageArchive;
-const sessionUsageArchiveStore = dryRun ? null : createSessionUsageArchiveStore();
+const cursorUsageEvents = createCursorUsageEventIndex();
+const sessionUsageArchiveStore = dryRun ? null : createSessionUsageArchiveStore({ cursorUsageEvents });
 
 function summaryWithSessionUsageArchive(summary, now = new Date()) {
   let visibleSummary = summary;
@@ -116,7 +118,8 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
       sessionUsageArchive = updateSessionUsageArchive(
         sessionUsageArchive || readSessionUsageArchiveSnapshot(),
         summary,
-        archiveDate
+        archiveDate,
+        { cursorUsageEvents }
       ).archive;
     } else {
       const result = sessionUsageArchiveStore.capture(summary, archiveDate);

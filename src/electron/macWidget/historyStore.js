@@ -4,8 +4,8 @@ const { constants: fsConstants } = require('node:fs');
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
 const path = require('node:path');
-const { MAC_WIDGET_ACTIVITY_DAYS } = require('../shared/macWidgetSnapshot');
-const { isHistoryDocument } = require('./macWidgetHistory');
+const { MAC_WIDGET_ACTIVITY_DAYS } = require('../../shared/macWidgetSnapshot');
+const { isHistoryDocument } = require('./history');
 
 const MAC_WIDGET_HISTORY_CACHE_VERSION = 3;
 const MAX_MAC_WIDGET_HISTORY_CACHE_BYTES = 256 * 1024;

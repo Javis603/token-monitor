@@ -392,7 +392,12 @@ function renderBreakdown() {
   let grandTotal = 0;
   
   for (const d of daily) {
-    if (d.perClient) Object.entries(d.perClient).forEach(([k, v]) => clientTotals[k] = (clientTotals[k] || 0) + Number(v.tokens || 0));
+    if (d.perClient) {
+      Object.entries(d.perClient).forEach(([k, v]) => {
+        const client = k === 'antigravity-cli' ? 'antigravity' : k;
+        clientTotals[client] = (clientTotals[client] || 0) + Number(v.tokens || 0);
+      });
+    }
     if (d.perModel) Object.entries(d.perModel).forEach(([k, v]) => modelTotals[k] = (modelTotals[k] || 0) + Number(v.tokens || 0));
     grandTotal += Number(d.tokens || 0);
   }

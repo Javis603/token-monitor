@@ -26,7 +26,7 @@
 
 ## Token Monitor란?
 
-Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 37개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 위젯입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다.
+Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 38개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 위젯입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다.
 
 ## 지원 도구
 
@@ -64,6 +64,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/` (`Data/Agents/.claude/projects/` V2, `.claude/projects/` legacy) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/lmstudio.png" width="28" alt="LM Studio" /> | LM Studio | `~/.lmstudio/server-logs/**/*.log` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/unsloth.png" width="28" alt="Unsloth" /> | Unsloth Studio | `~/.unsloth/studio/studio.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/devin.png" width="28" alt="Devin" /> | Devin CLI / Devin Desktop | `~/.local/share/devin/cli/sessions.db`, `<platform-app-data>/Devin/User/acp-events/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API 키 (사용량/키 한도, credits 접근 승인 시 잔액 표시; 공식 문서는 Management 키 지정) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" /> | Minimax | Minimax API 키 (Minimax API로 Token Plan 할당량 조회) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key 또는 Volcengine AK/SK (Volcengine API로 Ark Coding Plan / Agent Plan 할당량 조회) | — | ✅ | — |
@@ -80,6 +81,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 - 위 경로는 기본값입니다. Token Monitor는 Tokscale과 동일한 환경 변수 재정의를 따릅니다 — `~/.local/share/` 아래 경로는 `$XDG_DATA_HOME`, 도구별로는 `$CODEX_HOME`, `$GROK_HOME`, `$HERMES_HOME`, `$KIMI_CODE_HOME`, `$UNSLOTH_STUDIO_HOME`, `$LM_STUDIO_HOME`, `$DSH_HOME`, `$REASONIX_STATE_HOME`, `$REASONIX_HOME`, `$CLINE_*` 계열입니다.
 - 현재 LM Studio 추적은 서버 로그에 기록된 OpenAI 호환 `/v1/chat/completions` 및 `/v1/responses` 요청만 포함합니다. LM Studio 내장 Chat UI에서 시작한 대화와 네이티브 `/api/v1/chat` 요청은 포함하지 않습니다.
 - Unsloth Studio는 `studio.db`에서 Studio 채팅과 로컬 API의 추론 사용량을 추적합니다. 로컬 추론의 API 비용은 0이며, 식별 가능한 종량제 제공업체에는 Tokscale의 추정 가격을 사용합니다. 학습 토큰은 포함하지 않습니다. [Unsloth 데이터 소스 설명](docs/providers/unsloth.md)을 참고하세요.
+- Devin은 로컬 `sessions.db`에서 Devin CLI 세션을, `acp-events` ACP 로그에서 Devin Desktop 에이전트 세션을 추적합니다. 같은 세션이 양쪽에 있으면 CLI 데이터베이스가 우선입니다. Desktop 적용 범위는 연결된 ACP 에이전트에 따라 달라집니다. 로컬에 `usage_update` 이벤트를 기록하는 에이전트만 집계되며, Devin Desktop의 기본 `devin-cloud` 에이전트는 서버 측에서 계측되므로 기본 Desktop 구성에서는 Desktop 토큰이 보고되지 않습니다. 세션 제목과 프로젝트 귀속은 CLI 데이터베이스에서 가져옵니다. [Devin 데이터 소스 설명](docs/providers/devin.md)을 참고하세요.
 
 - Command Code transcript에는 실제 토큰 수나 메시지별 모델 정보가 포함되지 않습니다. 토큰 사용량은 transcript 텍스트에서 추정되며, 모델 귀속과 추정 비용에는 각 요청에서 과거에 사용한 모델이 아니라 현재 설정된 모델이 반영될 수 있습니다.
 - Cursor 캐시는 Cursor의 계정 수준 사용량 내보내기에서 가져오므로 Cursor IDE와 Cursor CLI를 모두 포함합니다. Token Monitor는 Cursor 데스크톱 앱에 로그인된 계정을 자동으로 감지하며 설정에서 계정을 수동으로 추가할 수도 있습니다. 오래된 캐시는 자동으로 다시 동기화되지만 방금 끝난 세션이 Cursor 대시보드에 도달하기까지 몇 분이 걸릴 수 있으므로 사용량은 즉시가 아니라 동기화 후 업데이트됩니다. 선택적 기기 단위 모드(`TOKEN_MONITOR_CURSOR_USAGE_SOURCE=device`, 또는 설정 → Cursor)는 Agent `stop` / `subagentStop` hook을 기기 로컬 로그에 기록해 Hub가 같은 계정 CSV를 기기마다 합산하지 않게 합니다. 한도는 계속 계정 단위입니다. Cloud Agent 사용량은 기록되지 않습니다. [Cursor 소스 노트](docs/providers/cursor.md)를 참고하세요.
@@ -123,7 +125,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 
 ### 사용량 추적
 
-- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 30개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
+- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 31개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
 - **실시간 토큰 속도** — 생성 속도를 `tok/s`로, 총 소모를 `tok/min`으로 보여주는 선택형 실시간 표시
 - **세션별 상세** — 세션을 열면 프롬프트별 토큰, 응답별 토큰 분할·사용 도구까지 확장 (로컬 transcript/DB를 필요할 때만 읽으며 동기화하지 않음)
 - **캐시 히트 통계** — 도구·모델 클릭 시 입력 토큰(캐시 hit/miss), 출력 토큰, 히트율 상세
@@ -156,6 +158,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 - **분류 보기** — 도구, 기기, 모델, 세션, 프로젝트, 계정 한도별
 - **메뉴 막대(macOS) / 시스템 트레이(Windows)** — 비용, 토큰, 또는 소진에 가장 가까운 공급자 한도 %를 아이콘 옆에 표시
 - **플로팅 버블** — 드래그 가능한 미니 창, 클릭/호버 미리보기
+- **가장자리 도크 (macOS·Windows)** — 화면 가장자리에서 한도와 사용량을 확인할 수 있으며 자동 숨김 또는 항상 표시를 선택할 수 있습니다. 항목에 마우스를 올리면 계정별 한도, 최근 세션, 토큰 사용량을 카드로 보여 줍니다. 설정에서 항목을 선택하고 정렬·구성할 수 있으며 메뉴 막대나 시스템 트레이에서도 켜고 끌 수 있습니다
 - **메뉴 막대 레이아웃 편집** — 메뉴 막대와 플로팅 버블은 내장 프리셋을 쓰거나 '사용자 지정…'으로 직접 배치. AI 도구 아이콘, 한도 바, 백분율, 초기화 시간, 비용, 토큰 속도, 사용자 텍스트를 추가하고 실시간 미리보기와 함께 드래그로 정렬, 항목마다 AI 도구·계정·한도 기간·글꼴 지정
 - **외관** — 테마(라이트 포함), 도구별 색, 글래스 투명도·블러, 투명 창, 글꼴 사용자 지정
 - **네이티브 macOS 위젯** — macOS 14 이상에서 소형·중형·대형 레이아웃으로 토큰 사용량과 비용, 추세, AI 도구별 잔여 할당량과 재설정 시간, 활동 히트맵, 도구·모델별 분석을 확인할 수 있습니다

@@ -44,6 +44,32 @@ function functionBody(source, name, nextName) {
   return source.slice(start, end);
 }
 
+
+// The Limits rows are built by the shared view: the page and the Edge Dock card
+// both render from it, so a guard that slices a builder out of the page reads
+// the view for the ones that moved there.
+function viewBody(name, nextName = '') {
+  const source = readRendererFile('limitWindowsView.js');
+  // Without a follower, slice to the factory's own closing brace — some of these
+  // are the last function before `return {`.
+  return nextName
+    ? functionBody(source, name, nextName)
+    : functionBody(`${source}\nfunction __endOfView__() {`, name, '__endOfView__');
+}
+
+// Which mark, colour and plan text each provider's accounts take is the view's
+// per-provider policy — a factory-scope table rather than a page-side wrapper
+// per provider, so both surfaces get the same one.
+function viewTable(name) {
+  const source = readRendererFile('limitWindowsView.js');
+  const start = source.indexOf(`const ${name} = {`);
+  assert.notEqual(start, -1, `${name} table should exist`);
+  const rest = source.slice(start);
+  const end = rest.indexOf('\n  };');
+  assert.notEqual(end, -1, `${name} table should close`);
+  return rest.slice(0, end + '\n  };'.length);
+}
+
 function functionBodyBeforeMarker(source, name, marker) {
   const start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} function should exist`);
@@ -278,7 +304,10 @@ test('OpenCode account panel provides multi-profile management', () => {
   const app = readRendererFile('app.js');
   assert.match(app, /function renderOpenCodeProfiles\(\)/);
   assert.match(app, /function updateOpenCodeProfilesStatus\(\)/);
-  assert.match(app, /function renderOpenCodeAccountGroup\(/);
+  // The account rows are the shared view's; OpenCode's own choice — a legacy
+  // profile name in accountLabel replaces the plan text rather than repeating
+  // it as an account identity — is one entry in the view's policy table.
+  assert.match(viewTable('LIMIT_ACCOUNT_ROW_POLICIES'), /opencode: \(provider, color, \{ grouped \}\) => \(\{/);
   assert.match(app, /function setOpencodeCookieExpanded\(/);
 
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
@@ -332,16 +361,19 @@ test('OpenCode account panel provides multi-profile management', () => {
 
 test('OpenCode multi-account rows separate profile identity from plan label', () => {
   const app = readRendererFile('app.js');
-  const titleBody = functionBody(app, 'opencodeAccountTitle', 'renderOpenCodeAccountGroup');
-  const groupBody = functionBody(app, 'renderOpenCodeAccountGroup', 'renderLimits');
+  const titleBody = viewBody('opencodeAccountTitle', 'namedApiAccountTitle');
+  const policy = viewTable('LIMIT_ACCOUNT_ROW_POLICIES');
 
   assert.match(titleBody, /provider\?\.accountName/);
   assert.match(titleBody, /legacyName !== 'Go' && legacyName !== 'Zen'/);
-  assert.match(groupBody, /limitAccountTitle\('opencode', provider, index, providers\)/);
-  assert.match(groupBody, /legacyProfileLabel/);
-  assert.match(groupBody, /planText: ''/);
-  assert.match(app, /provider\?\.planLabel \|\| provider\?\.accountLabel/);
-  assert.doesNotMatch(groupBody, /renderLimitProviderRow\('opencode', provider\.accountLabel/);
+  // One place decides this now: the view's policy table, applied by the group
+  // builder the page and the Edge Dock card both call.
+  assert.match(policy, /opencode: \(provider, color, \{ grouped \}\) => \(\{[\s\S]*?grouped && legacyOpencodeProfileLabel\(provider\) \? \{ planText: '' \} : \{\}/);
+  assert.match(policy, /opencode: \(provider, color, \{ grouped \}\) => \(\{[\s\S]*?grouped \? \{ showIcon: false/);
+  assert.doesNotMatch(app, /legacyProfileLabel/);
+  // The plan/account fallback is the shared view's limitProviderPlan.
+  assert.match(readRendererFile('limitWindowsView.js'), /provider\?\.planLabel \|\| provider\?\.accountLabel/);
+  assert.doesNotMatch(app, /renderLimitProviderRow\('opencode', provider\.accountLabel/);
 });
 
 test('OpenCode disabled profiles still count in the account summary', () => {
@@ -534,51 +566,49 @@ test('Codex account email masking is an opt-in display-only setting', () => {
 
 test('Codex system account switching is exposed from limits account rows', () => {
   const app = readRendererFile('app.js');
-  const renderHead = functionBody(app, 'renderLimitProviderHead', 'renderProviderWindows');
-  assert.match(renderHead, /if \(activeCodexAccount\)/);
+  const accountControl = fs.readFileSync(path.join(rendererDir, '..', 'providers', 'codex', 'accountControl.js'), 'utf8');
+  const renderHead = viewBody('renderLimitProviderHead', 'codexResetForecastDate');
   assert.doesNotMatch(renderHead, /showActiveAccount/);
-  assert.match(renderHead, /activeZone\.className = 'limit-account-active-zone'/);
-  assert.match(renderHead, /activePopover\.className = 'limit-account-active-popover'/);
-  assert.match(renderHead, /const activeHint = t\('limits\.codex\.activeAccountHint'\)/);
-  assert.match(renderHead, /activePopover\.textContent = activeHint/);
-  assert.match(renderHead, /activeZone\.addEventListener\('pointerenter', markCodexActiveHintOpened\)/);
-  assert.match(renderHead, /activeZone\.addEventListener\('focusin', markCodexActiveHintOpened\)/);
-  assert.match(renderHead, /activeZone\.addEventListener\('pointerleave', releaseCodexActiveHint\)/);
-  assert.match(renderHead, /activeZone\.addEventListener\('focusout', releaseCodexActiveHint\)/);
-  assert.match(renderHead, /activeZone\.matches\(':hover, :focus-within'\)/);
-  assert.match(renderHead, /activeZone\.append\(title, badge, activePopover\)/);
-  assert.match(renderHead, /badge\.textContent = '\\u2713';/);
-  assert.doesNotMatch(renderHead, /badge\.textContent = 'Active'/);
+  // The account control and the active-account/live derivation are the host's,
+  // injected as `accountControl` and `codexAccounts`; the view never reads them
+  // off the renderer's own state.
+  assert.match(renderHead, /accountControl\.render\(\{/);
   // The ✓ tracks state.codexActiveAccount only (the account THIS device's Codex
   // is signed into). It must NOT re-derive "live" from the row being rendered:
   // in sync mode that row can be a remote device's record for a different account.
-  assert.match(renderHead, /options\.showActiveBadge && codexActiveAccountMatchesProvider\(provider\)/);
+  assert.match(renderHead, /options\.showActiveBadge && codexAccounts\.matchesActive\(provider\)/);
   assert.doesNotMatch(renderHead, /!state\.codexActiveAccount && liveCodexAccount/);
   assert.doesNotMatch(renderHead, /const liveCodexAccount =/);
-  assert.match(renderHead, /codexSwitchAccountForProvider\(provider\)/);
-  assert.match(renderHead, /switchZone\.className = 'limit-account-switch-zone'/);
-  assert.match(renderHead, /switchPopover\.className = 'limit-account-switch-popover'/);
-  assert.match(renderHead, /switchButton\.className = 'limit-account-switch-button'/);
-  assert.match(renderHead, /switchZone\.classList\.toggle\('has-opened', state\.codexSwitchPopoverHasOpened\)/);
-  assert.match(renderHead, /state\.codexSwitchPopoverHasOpened = true;/);
-  assert.match(renderHead, /state\.codexSwitchPopoverActive = true;/);
-  assert.match(renderHead, /switchZone\.addEventListener\('pointerenter', markCodexSwitchPopoverOpened\)/);
-  assert.match(renderHead, /switchZone\.addEventListener\('focusin', markCodexSwitchPopoverOpened\)/);
-  assert.match(renderHead, /switchZone\.addEventListener\('pointerleave', releaseCodexSwitchPopover\)/);
-  assert.match(renderHead, /switchZone\.addEventListener\('focusout', releaseCodexSwitchPopover\)/);
-  assert.match(renderHead, /switchZone\.matches\(':hover, :focus-within'\)/);
-  assert.match(renderHead, /state\.codexSwitchPopoverActive = false;/);
-  assert.match(renderHead, /switchZone\.append\(title, switchPopover\)/);
-  assert.match(renderHead, /window\.tokenMonitor\.codex\.switchSystemAccount\(switchAccount\.id\)/);
-  assert.match(renderHead, /state\.codexActiveAccount = result\.activeAccount/);
-  assert.match(renderHead, /window\.tokenMonitor\.codex\.refreshAccountLimits\(switchAccount\.id\)/);
-  assert.match(renderHead, /applyCodexAccountLimitsRefresh\(refreshResult\.providers \|\| \[\]\)/);
+  assert.match(renderHead, /codexAccounts\.switchTarget\(provider\)/);
+  assert.doesNotMatch(renderHead, /limit-account-switch-zone|limit-account-active-zone/);
   assert.doesNotMatch(renderHead, /refreshStats\(\{ force: true \}/);
   assert.doesNotMatch(renderHead, /titleButton\.className = 'limit-account-title-button'/);
 
-  const group = functionBody(app, 'renderCodexAccountGroup', 'renderOpenCodeAccountGroup');
-  assert.match(group, /allowSystemSwitch: true/);
-  assert.match(group, /showActiveBadge: true/);
+  const control = functionBodyBeforeMarker(
+    accountControl,
+    'createCodexAccountControl',
+    '\n  return { createCodexAccountControl };'
+  );
+  assert.match(control, /zone\.className = 'limit-account-active-zone'/);
+  assert.match(control, /popover\.className = 'limit-account-active-popover'/);
+  assert.match(control, /badge\.textContent = '\\u2713';/);
+  assert.match(control, /zone\.className = 'limit-account-switch-zone'/);
+  assert.match(control, /popover\.className = 'limit-account-switch-popover'/);
+  assert.match(control, /button\.className = 'limit-account-switch-button'/);
+  assert.match(control, /zone\.addEventListener\('pointerenter', markOpened\)/);
+  assert.match(control, /zone\.addEventListener\('focusin', markOpened\)/);
+  assert.match(control, /zone\.addEventListener\('pointerleave', release\)/);
+  assert.match(control, /zone\.addEventListener\('focusout', release\)/);
+  assert.match(control, /controlState\.switchingAccountId/);
+  assert.match(control, /controlState\.errorAccountId/);
+  assert.match(control, /controlState\.renderPending/);
+
+  // Codex's own choices — the switch affordance on every row, the ✓ only when
+  // grouped — are the view's policy, so the card gets them without asking.
+  const policy = viewTable('LIMIT_ACCOUNT_ROW_POLICIES');
+  assert.match(policy, /codex: \(provider, color, \{ grouped \}\) => \(\{[\s\S]*?allowSystemSwitch: true/);
+  assert.match(policy, /codex: \(provider, color, \{ grouped \}\) => \(\{[\s\S]*?grouped \? \{ showActiveBadge: true, showIcon: false \}/);
+  assert.doesNotMatch(app, /renderCodexAccountGroup/);
 
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
   assert.match(css, /\.limit-account-switch-zone/);
@@ -623,16 +653,17 @@ test('Codex system account switching is exposed from limits account rows', () =>
 
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
   assert.match(preload, /switchSystemAccount: \(id\) => ipcRenderer\.invoke\('codex:switchSystemAccount', id\)/);
+  assert.match(preload, /ipcRenderer\.on\('codex:activeAccount', handler\)/);
   assert.match(preload, /refreshAccountLimits: \(id\) => ipcRenderer\.invoke\('codex:refreshAccountLimits', id\)/);
 
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   assert.match(main, /ipcMain\.handle\('codex:switchSystemAccount'/);
-  assert.match(main, /switchCodexSystemAccount\(id\)/);
+  assert.match(main, /ipcMain\.handle\('codex:switchSystemAccount',[\s\S]*?switchCodexSystemAccount\(id\)/);
   assert.match(main, /ipcMain\.handle\('codex:refreshAccountLimits'/);
   assert.match(main, /refreshCodexManagedAccountLimits\(id\)/);
-  assert.match(app, /codexSwitchPopoverHasOpened: false/);
-  assert.match(app, /codexSwitchPopoverActive: false/);
-  assert.match(app, /codexSwitchPopoverRenderPending: false/);
+  assert.match(accountControl, /createCodexAccountControl/);
+  assert.match(readRendererFile('index.html'), /<script src="\.\.\/providers\/codex\/accountControl\.js"><\/script>/);
+  assert.match(readRendererFile(path.join('edgeDock', 'index.html')), /<script src="\.\.\/\.\.\/providers\/codex\/accountControl\.js"><\/script>/);
   assert.match(app, /const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;/);
   assert.match(app, /codexPendingActiveAccount: null/);
   assert.match(app, /codexPendingActiveAccountUntil: 0/);
@@ -646,25 +677,21 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(pendingExpiryBody, /setTimeout\(\(\) =>/);
   assert.match(pendingExpiryBody, /applyCodexActiveAccountFromStats\(\);/);
   assert.match(pendingExpiryBody, /renderLimits\(\);/);
+  assert.match(pendingExpiryBody, /maybeUpdateBarsIcon\(\);/);
   const pendingSetBody = functionBody(app, 'setCodexPendingActiveAccount', 'applyCodexActiveAccountFromStats');
   assert.match(pendingSetBody, /state\.codexPendingActiveAccountUntil = Date\.now\(\) \+ CODEX_PENDING_ACTIVE_GRACE_MS;/);
   assert.match(pendingSetBody, /scheduleCodexPendingActiveAccountExpiry\(\);/);
-  const activeStatsBody = functionBody(app, 'applyCodexActiveAccountFromStats', 'applyCodexAccountLimitsRefresh');
+  const activeStatsBody = functionBody(app, 'applyCodexActiveAccountFromStats', 'clearCodexResetForecastRetryTimer');
   assert.match(activeStatsBody, /Date\.now\(\) < state\.codexPendingActiveAccountUntil/);
   assert.match(activeStatsBody, /state\.codexActiveAccount = pendingAccount;/);
   assert.match(activeStatsBody, /clearCodexPendingActiveAccount\(\);/);
   assert.match(activeStatsBody, /state\.codexActiveAccount = activeAccount;/);
-  const limitsRefreshBody = functionBody(app, 'applyCodexAccountLimitsRefresh', 'renderLimitProviderHead');
-  assert.match(limitsRefreshBody, /applyCodexActiveAccountFromStats\(\);/);
-  assert.match(renderHead, /setCodexPendingActiveAccount\(result\.activeAccount \|\| null\);/);
-  const switchHold = functionBody(app, 'codexSwitchPopoverShouldHoldRender', 'flushPendingCodexSwitchPopoverRender');
-  const switchFlush = functionBody(app, 'flushPendingCodexSwitchPopoverRender', 'codexResetCreditsNode');
-  assert.match(switchHold, /state\.codexSwitchPopoverActive/);
-  assert.match(switchHold, /\.limit-account-switch-zone:hover, \.limit-account-switch-zone:focus-within, \.limit-account-active-zone:hover, \.limit-account-active-zone:focus-within/);
-  assert.match(switchFlush, /state\.codexSwitchPopoverRenderPending/);
-  assert.match(switchFlush, /state\.breakdown !== 'limits'/);
-  assert.match(switchFlush, /renderLimits\(\)/);
-  const switchBody = functionBody(main, 'switchCodexSystemAccount', 'refreshCodexManagedAccountLimits');
+  assert.match(app, /applyCodexOptimisticActiveAccount\(result\.activeAccount\);/);
+  assert.match(app, /window\.tokenMonitor\.codex\.onActiveAccount\?\.\(\(account\) => \{/);
+  assert.doesNotMatch(app, /window\.tokenMonitor\.codex\.refreshAccountLimits\(accountId\)\.then/);
+  assert.match(control, /\.limit-account-switch-zone:hover/);
+  assert.match(control, /\.limit-account-active-zone:focus-within/);
+  const switchBody = functionBody(main, 'performCodexSystemAccountSwitch', 'switchCodexSystemAccount');
   assert.match(switchBody, /const previousAccounts = normalizeCodexManagedAccounts\(settings\.codexManagedAccounts\)/);
   assert.match(switchBody, /liveAuthSnapshot = await snapshotCodexAuthFile\(liveAuthPath\)/);
   assert.match(switchBody, /preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount/);
@@ -696,17 +723,25 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.match(refreshBody, /result\?\.snapshot \|\| deviceRuntimeHandle\.getSnapshot\(\)\?\.limits/);
   assert.doesNotMatch(refreshBody, /codexManagedAccountsForCollector\(\)/);
   assert.doesNotMatch(refreshBody, /collectLimitsOnce/);
+  const switchGuard = functionBody(main, 'switchCodexSystemAccount', 'switchCodexAccountFromEdgeDock');
+  assert.match(switchGuard, /if \(codexSystemSwitchInFlight\)/);
+  assert.match(switchGuard, /await performCodexSystemAccountSwitch\(id\)/);
+  assert.match(switchGuard, /refreshCodexManagedAccountLimits\(id, 'system-account-switch'\)/);
+  assert.match(switchGuard, /pushCodexActiveAccountToRenderer\(result\.activeAccount\);/);
+  assert.match(switchGuard, /codexPresentationPendingAccountId = codexPresentationActiveAccountId;/);
+  assert.match(switchGuard, /finally \{/);
+  const dockSwitch = functionBody(main, 'switchCodexAccountFromEdgeDock', 'refreshCodexManagedAccountLimits');
+  assert.match(dockSwitch, /await switchCodexSystemAccount\(accountId\)/);
+  assert.doesNotMatch(dockSwitch, /refreshCodexManagedAccountLimits/);
+  assert.doesNotMatch(dockSwitch, /await refreshCodexManagedAccountLimits/);
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  assert.match(renderLimits, /const rowOptions = id === 'codex'\s*\? \{ accountTitle: true, allowSystemSwitch: true \}/s);
-  assert.match(renderLimits, /renderLimitProviderRow\(id, label, provider, thirdPartyVisual\?\.color \|\| color, rowOptions\)/);
-  assert.doesNotMatch(
-    renderLimits,
-    /renderLimitProviderRow\(id, label, provider, color, id === 'codex' \? \{[\s\S]*?showActiveBadge: true/
-  );
-  assert.match(renderLimits, /const holdCodexSwitchPopoverRender = codexSwitchPopoverShouldHoldRender\(\);/);
+  // The page no longer picks row options: Codex's switch affordance rides in the
+  // view's policy, so it reaches the Edge Dock card too.
+  assert.doesNotMatch(renderLimits, /rowOptions/);
+  assert.match(renderLimits, /nodes\.push\(renderLimitProviderSolo\(id, label, provider, color\)\)/);
+  assert.match(renderLimits, /const holdCodexSwitchPopoverRender = codexAccountControl\.deferRender\(els\.limitsPanel\);/);
   assert.match(renderLimits, /holdLimitDetailTooltipRender \|\| holdCodexSwitchPopoverRender/);
-  assert.match(renderLimits, /if \(holdCodexSwitchPopoverRender\) state\.codexSwitchPopoverRenderPending = true;/);
-  assert.match(renderLimits, /state\.codexSwitchPopoverRenderPending = false;/);
+  assert.doesNotMatch(renderLimits, /codexSwitchPopoverRenderPending/);
 });
 
 test('DeepSeek account panel provides a first-class API key entry', () => {
@@ -1252,7 +1287,7 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(main, /ipcMain\.handle\('mimo:openConsole'/);
   assert.match(main, /ipcMain\.handle\('mimo:addAccount', \(_event, cookieHeader\) => addMimoManagedAccount\(cookieHeader\)\)/);
   // Limits rows mask through the shared resolver; the settings list stays readable.
-  assert.match(app, /maskEmail: limitAccountEmailsMasked\(\)/);
+  assert.match(readRendererFile('limitWindowsView.js'), /maskEmail: limitAccountEmailsMasked\(\)/);
   assert.match(app, /function mimoSettingsAccountTitle\(account, index\) \{[\s\S]*account\?\.accountEmail[\s\S]*`Account \$\{index \+ 1\}`/);
   assert.match(app, /const accountName = mimoSettingsAccountTitle\(account, index\);/);
   const addBody = functionBody(main, 'addMimoManagedAccount', 'removeMimoManagedAccount');
@@ -2508,42 +2543,49 @@ test('main settings migrateLimitProviders normalizes without expanding old defau
 
 test('Home limits groups multiple MiMo accounts like Codex', () => {
   const app = readRendererFile('app.js');
-  const groupBody = functionBody(app, 'renderMimoAccountGroup', 'renderOpenCodeAccountGroup');
+  const groupBody = viewBody('renderLimitProviderGroup');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   // accountGroup marks the synthetic header provider, so a subscription card on
-  // it summarises the group instead of adopting one member's record.
-  assert.match(groupBody, /const groupProvider = \{ provider: 'mimo', status: 'ok', windows: \[\], accountGroup: true \};/);
-  assert.match(groupBody, /planText: t\('settings\.mimo\.nAccounts', \{ count: providers\.length \}\)/);
-  assert.match(groupBody, /renderLimitProviderRow\('mimo', limitAccountTitle\('mimo', provider, index, providers\), provider, color/);
-  assert.match(renderLimitsBody, /if \(id === 'mimo' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
-  assert.match(renderLimitsBody, /nodes\.push\(renderMimoAccountGroup\(label, visibleProviders, color\)\);/);
+  // it summarises the group instead of adopting one member's record — and
+  // groupAccounts is the set that summary is drawn from, since the header stands
+  // for its own rows and not for every account the provider has. The count
+  // phrase is the catalog's own, keyed by provider id.
+  assert.match(
+    groupBody,
+    /const groupProvider = \{\s*provider: providerId,\s*status: 'ok',\s*windows: \[\],\s*accountGroup: true,\s*groupAccounts: providers\s*\};/
+  );
+  assert.match(groupBody, /planText: limitGroupCountText\(providerId, providers\.length\)/);
+  assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
+  assert.match(readRendererFile('limitWindowsView.js'), /mimo: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
+  // The page's dispatch is by account count with no provider branch left.
+  assert.match(renderLimitsBody, /if \(Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
+  assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
+  assert.doesNotMatch(app, /renderMimoAccountGroup/);
 });
 
 test('Limits groups multiple Cursor accounts with separate identity and plan rows', () => {
   const app = readRendererFile('app.js');
-  const groupBody = functionBody(app, 'renderCursorAccountGroup', 'renderOpenCodeAccountGroup');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  assert.match(groupBody, /const groupProvider = \{ provider: 'cursor', status: 'ok', windows: \[\], accountGroup: true \};/);
-  assert.match(groupBody, /planText: t\('settings\.cursor\.nAccounts', \{ count: providers\.length \}\)/);
-  assert.match(groupBody, /renderLimitProviderRow\('cursor', limitAccountTitle\('cursor', provider, index, providers\), provider, color/);
-  assert.match(renderLimitsBody, /if \(id === 'cursor' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
-  assert.match(renderLimitsBody, /nodes\.push\(renderCursorAccountGroup\(label, visibleProviders, color\)\);/);
+  assert.match(readRendererFile('limitWindowsView.js'), /cursor: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
+  assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
+  assert.doesNotMatch(app, /renderCursorAccountGroup/);
 });
 
 test('Limits groups the Volcengine Coding and Agent plans as rows of one card', () => {
   const app = readRendererFile('app.js');
-  const groupBody = functionBody(app, 'renderVolcengineAccountGroup', 'renderLimits');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+  const view = readRendererFile('limitWindowsView.js');
   // Both plans are subscriptions on one account, so the rows are titled by the
-  // plan rather than by an account identity the record does not carry.
-  assert.match(groupBody, /renderNamedApiAccountGroup\('volcengine', label, providers, color/);
-  assert.match(groupBody, /groupPlanText: t\('settings\.volcengine\.nPlans', \{ count: providers\.length \}\)/);
-  assert.match(renderLimitsBody, /if \(id === 'volcengine' && Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
-  assert.match(renderLimitsBody, /nodes\.push\(renderVolcengineAccountGroup\(label, visibleProviders, color\)\);/);
+  // plan — the plan cell hands back to the status label once the account is not
+  // healthy — and the header counts plans rather than accounts.
+  assert.match(view, /volcengine: \(provider, color, \{ grouped \}\) => \(\{\s*options: grouped \? \{ planText: provider\?\.status === 'ok' \? '' : undefined, showIcon: false \} : \{\}/);
+  assert.match(view, /GROUP_COUNT_KEYS = \{ volcengine: 'settings\.volcengine\.nPlans' \}/);
+  assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
+  assert.doesNotMatch(app, /renderVolcengineAccountGroup/);
   // Without an entry here the rows fall back to "Account 1"/"Account 2", since
   // accountTitleLabel reads accountName/accountEmail and these rows carry
   // neither — only accountLabel, which holds the plan name.
-  assert.match(app, /volcengine: \(provider, index, providers\) => volcenginePlanAccountTitle\(provider, index, providers\)/);
+  assert.match(view, /volcengine: \(provider, index, providers\) => volcenginePlanAccountTitle\(provider, index, providers\)/);
 });
 
 // Re-saving with the Agent fields empty deliberately preserves the stored

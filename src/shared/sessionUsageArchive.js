@@ -16,6 +16,11 @@ const {
 } = require('./archiveHelpers');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
+const {
+  isLegacyCursorEntry,
+  legacyCursorLookup,
+  supersedingCursorSessionId
+} = require('./providers/cursor/sessionGuard');
 
 function sessionUsageArchiveDate(deviceRecord, fallback = new Date()) {
   const collectedAt = new Date(deviceRecord?.updatedAt || '');
@@ -84,6 +89,8 @@ function normalizeSessionUsageArchive(value) {
     }
 
     if (!entry.client || !entry.sessionId || Object.keys(entry.periods).length === 0) continue;
+    const supersededBy = sessionKey('cursor', String(rawEntry.supersededBy || '').replace(/^cursor:/, ''));
+    if (rawEntry.supersededBy && supersededBy && isLegacyCursorEntry(entry)) entry.supersededBy = supersededBy;
     normalized.sessions[`${entry.client}:${entry.sessionId}`] = entry;
   }
 
@@ -188,7 +195,35 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
     }
   }
 
+  if (options.cursorUsageEvents) linkLegacyCursorEvents(archive, changedKeys, options.cursorUsageEvents);
   return { archive, changedKeys };
+}
+
+// Every capture asks the Cursor JSON cache about the legacy rows that still
+// have no link, and a link, once written, is never revisited. A legacy row is
+// one CSV event, keyed on that event's full timestamp, so its tokens can only
+// change if tokscale folds a second event carrying the very same timestamp into
+// it: that event is either in the conversation the link already names, or in a
+// second one, in which case no single event ever matched the row and there was
+// no link to invalidate. Deriving the work from the archive on each pass is
+// also what makes a row another writer added arrive on its own.
+function linkLegacyCursorEvents(archive, changedKeys, readCursorUsageEvents) {
+  const pending = [];
+  for (const [key, entry] of Object.entries(archive.sessions)) {
+    if (entry.supersededBy || !isLegacyCursorEntry(entry)) continue;
+    const lookup = legacyCursorLookup(entry);
+    if (lookup) pending.push([key, entry, lookup]);
+  }
+  if (pending.length === 0) return;
+
+  const usageEvents = readCursorUsageEvents();
+  if (!usageEvents) return;
+  for (const [key, entry, lookup] of pending) {
+    const sessionId = supersedingCursorSessionId(lookup, usageEvents);
+    if (!sessionId) continue;
+    entry.supersededBy = sessionKey('cursor', sessionId);
+    changedKeys.add(key);
+  }
 }
 
 function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = new Date()) {
@@ -310,6 +345,7 @@ function applySessionUsageArchive(summary, archive, options = {}) {
     return targetPeriods.get(periodName);
   };
 
+  const supersededRows = [];
   for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
     for (const periodName of PERIODS) {
       const session = entry.periods?.[periodName];
@@ -321,8 +357,19 @@ function applySessionUsageArchive(summary, archive, options = {}) {
       if (!hasSummaryPeriod(next, periodName)) continue;
       const period = targetFor(periodName);
       if (period.sessions[archiveKey]) continue;
+      if (entry.supersededBy) {
+        supersededRows.push([period, archiveKey, session, entry.supersededBy]);
+        continue;
+      }
       addArchivedSession(period, session, archiveKey);
     }
+  }
+
+  // A legacy Cursor row whose event now belongs to another session is judged
+  // after every other row has replayed, so that session counts whether it is
+  // live or only archived. Without it the row is still the only record.
+  for (const [period, archiveKey, session, supersededBy] of supersededRows) {
+    if (!period.sessions[supersededBy]) addArchivedSession(period, session, archiveKey);
   }
 
   return next;

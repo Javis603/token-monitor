@@ -55,7 +55,13 @@ const WSL_DATA_MARKERS = [
   '.workbuddy-ai',
   '.proma/agent-sessions',
   '.lmstudio/server-logs',
-  '.unsloth/studio/studio.db'
+  '.unsloth/studio/studio.db',
+  '.local/share/devin/cli/sessions.db',
+  'AppData/Roaming/devin/cli/sessions.db',
+  '.config/Devin/User/acp-events',
+  '.config/devin/User/acp-events',
+  'AppData/Roaming/Devin/User/acp-events',
+  'Library/Application Support/Devin/User/acp-events'
 ];
 
 // Maps every WSL_DATA_MARKERS entry to the tracked-client id that owns it, so a
@@ -104,7 +110,13 @@ const MARKER_CLIENTS = {
   '.workbuddy-ai': 'workbuddy',
   '.proma/agent-sessions': 'proma',
   '.lmstudio/server-logs': 'lmstudio',
-  '.unsloth/studio/studio.db': 'unsloth'
+  '.unsloth/studio/studio.db': 'unsloth',
+  '.local/share/devin/cli/sessions.db': 'devin',
+  'AppData/Roaming/devin/cli/sessions.db': 'devin',
+  '.config/Devin/User/acp-events': 'devin',
+  '.config/devin/User/acp-events': 'devin',
+  'AppData/Roaming/Devin/User/acp-events': 'devin',
+  'Library/Application Support/Devin/User/acp-events': 'devin'
 };
 
 // Default command runner. reg output is ANSI/utf8; wsl.exe output is UTF-16LE.

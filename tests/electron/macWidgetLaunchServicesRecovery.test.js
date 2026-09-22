@@ -9,7 +9,7 @@ const test = require('node:test');
 const {
   MARKER_FILE_NAME,
   createMacWidgetLaunchServicesRecovery
-} = require('../../src/electron/macWidgetLaunchServicesRecovery');
+} = require('../../src/electron/macWidget/launchServicesRecovery');
 
 const CONFIG = Object.freeze({
   schemaVersion: 1,

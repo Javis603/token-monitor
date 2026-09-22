@@ -75,6 +75,12 @@ const {
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 const {
+  DEVIN_CLI_SOURCE_CHECK_ID,
+  DEVIN_DESKTOP_SOURCE_CHECK_ID,
+  devinCliDbDirs,
+  devinDesktopAcpDirs
+} = require('./providers/devin/paths');
+const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
   isReasonixNativeSessionSidecar,
@@ -951,6 +957,27 @@ function propagateTodayProjects(today, periods) {
       }
       if (session.title && !target.title) target.title = session.title;
       if (session.sessionKind && !target.sessionKind) target.sessionKind = session.sessionKind;
+      // Context occupancy is replaced rather than gap-filled: the derived
+      // periods carry the last full scan's reading, which is older than this
+      // tick's by construction. The copy is unconditional, including a cleared
+      // pair — the fresh scan is the authority, and a tick that read no valid
+      // pair (a DSH model switch drops the occupancy until the next usage chunk
+      // measures against the new window) must clear the stale one rather than
+      // leave the derived period showing a gauge the fresh scan dropped. The
+      // dock card reads month first, so it was the surface that displayed it.
+      target.contextWindow = Number(session.contextWindow) || 0;
+      target.contextTokens = Number(session.contextTokens) || 0;
+      // The turn boundary is copied in all three states, matching what the
+      // fresh scan said: `true` finished, `false` open, absent unknown. Copying
+      // only `true` left a stale `true` in a derived period after its session
+      // picked the next turn back up, and collapsing `false` into "delete" lost the
+      // one value that can clear it — the dock card reads month first, so it kept
+      // showing a finished session while today showed it running.
+      if (session.turnEnded === true || session.turnEnded === false) {
+        target.turnEnded = session.turnEnded;
+      } else {
+        delete target.turnEnded;
+      }
       if (session.startedAt && (!target.startedAt || Date.parse(session.startedAt) < Date.parse(target.startedAt))) {
         target.startedAt = session.startedAt;
       }
@@ -2079,6 +2106,25 @@ function clientSourceRoots(clientsCsv, options = {}) {
   add('lmstudio', ['lmstudio-server-logs', path.join(lmStudioHome, 'server-logs')]);
   const unslothHome = nonBlankEnvPath('UNSLOTH_STUDIO_HOME', path.join(home, '.unsloth', 'studio'), env);
   add('unsloth', ['unsloth-db', unslothHome, path.join(unslothHome, 'studio.db')]);
+  // Devin (Cognition): tokscale splits the product into two scanners, both
+  // mirrored here — devin-cli reads `devin/cli/sessions.db` under the XDG data
+  // root on every platform plus %APPDATA%/devin/cli on Windows and the
+  // unconditional home-relative AppData/Roaming spelling
+  // (scanner.rs devin_cli_additional_roots); devin-desktop reads the ACP
+  // `acp-events` NDJSON dirs across the macOS Application Support root, both
+  // .config casings, and the Windows Roaming roots
+  // (devin_desktop_additional_roots). The bare `devin` id is ours alone —
+  // tokscaleClientMapping expands it to the two tokscale ids, and the db root
+  // pins sessions.db as the source since the scanner resolves that exact file.
+  const devinRoots = {
+    cli: devinCliDbDirs({ homeDir: tokscaleHome, platform, env }),
+    desktop: devinDesktopAcpDirs({ homeDir: tokscaleHome, platform, env })
+  };
+  add(
+    'devin',
+    ...devinRoots.cli.map((dir) => [DEVIN_CLI_SOURCE_CHECK_ID, dir, path.join(dir, 'sessions.db')]),
+    ...devinRoots.desktop.map((dir) => [DEVIN_DESKTOP_SOURCE_CHECK_ID, dir])
+  );
   const customScanPaths = normalizeCustomScanPaths(options.customScanPaths, { platform });
   for (const [client, dirs] of Object.entries(customScanPaths)) {
     if (!enabled.has(client)) continue;
@@ -2286,6 +2332,13 @@ const ZED_DB_WATCH_PATTERN = /^threads\.db(?:-(?:wal|shm))?$/;
 const COPILOT_DB_WATCH_PATTERN = /^data\.db(?:-(?:wal|shm))?$/;
 const ZCODE_DB_WATCH_PATTERN = /^db\.sqlite(?:-(?:wal|shm))?$/;
 const UNSLOTH_DB_WATCH_PATTERN = /^studio\.db(?:-(?:wal|shm))?$/;
+// Bounded to sessions.db directly under each *default* Devin CLI root; the WAL
+// and SHM sidecars ride along as the live-write signal, as with every other
+// direct-database client. Tokscale's own discovery walks those roots to any
+// depth, so a nested sessions.db still counts toward usage — it just does not
+// get a watcher or a health check, which matches where the product actually
+// installs. The acp-events roots stay recursive event trees.
+const DEVIN_CLI_DB_WATCH_PATTERN = /^sessions\.db(?:-(?:wal|shm))?$/;
 const GROK_UNIFIED_LOG_FILE = 'unified.jsonl';
 // Tokscale scans only these two CodeBuddy extension log subtrees. Keep their
 // recursive layout intact, but prune unrelated siblings under Logs before
@@ -2496,6 +2549,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // other recursive subtree is pruned before chokidar descends into it.
   bound('micode', candidates.micode || [], directChildOnly((name) => MICODE_DB_WATCH_PATTERN.test(name)));
   bound('unsloth', candidates.unsloth || [], directChildOnly((name) => UNSLOTH_DB_WATCH_PATTERN.test(name)));
+  bound('devin', withBasename('devin', 'cli'), directChildOnly((name) => DEVIN_CLI_DB_WATCH_PATTERN.test(name)));
   // The dual-source Grok scanner derives exactly logs/unified.jsonl from each
   // Grok home.
   bound('grok', withBasename('grok', 'logs'), directChildOnly((name) => name === GROK_UNIFIED_LOG_FILE));

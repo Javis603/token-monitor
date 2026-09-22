@@ -640,3 +640,17 @@ test('fetchAntigravityLimits replaces OAuth quota when both local RPC and OAuth 
   assert.equal(result[0].source, 'rpc');
   assert.equal(result[0].windows[0].remainingPercent, 80);
 });
+
+test('fetchAntigravityLimits returns unauthorized when probe throws unauthorized status', async () => {
+  const result = await fetchAntigravityLimits({}, {
+    antigravityProbe: async () => {
+      const err = new Error('missing CSRF token');
+      err.status = 'unauthorized';
+      throw err;
+    }
+  });
+  assert.equal(result.provider, 'antigravity');
+  assert.equal(result.status, 'unauthorized');
+  assert.equal(result.windows.length, 0);
+});
+

@@ -449,9 +449,14 @@ test('main section holds views; appearance is its own section; window holds beha
 
   const presenceGroup = windowSection.slice(presenceIndex);
   assert.match(presenceGroup, /id="floatingBubbleInput"/);
+  assert.match(presenceGroup, /id="edgeDockInput"/);
   assert.match(presenceGroup, /id="showTrayIconInput"/);
   assert.match(presenceGroup, /id="trayModeInput"/);
   assert.equal((presenceGroup.match(/value="limitsAllSessions"/g) || []).length, 2);
+
+  const edgeDockIndex = presenceGroup.indexOf('id="edgeDockInput"');
+  const floatingBubbleIndex = presenceGroup.indexOf('id="floatingBubbleInput"');
+  assert.ok(edgeDockIndex < floatingBubbleIndex, 'Edge Dock should lead the secondary surface settings');
 
   const showTrayIconIndex = presenceGroup.indexOf('id="showTrayIconInput"');
   const trayIconOptionsIndex = presenceGroup.indexOf('id="trayIconOptions"');
@@ -638,7 +643,6 @@ test('session archive retention has its own setting separate from Trends', () =>
   assert.doesNotMatch(app, /sessionUsageArchiveCount/);
   assert.match(app, /sessionRowsApi\.archivedSessionCount\(state\.stats\)/);
   assert.match(app, /sessionUsageArchiveEnabled === false[\s\S]{0,160}sessionArchivePaused/);
-  assert.doesNotMatch(app, /sessionSettingsExpanded|renderSessionSettingsList/);
   assert.match(css, /\.session-archive-clear\s*\{[\s\S]*?width:\s*auto;[\s\S]*?font-size:\s*10px;/);
   assert.match(main, /sessionUsageArchiveEnabled:\s*parseBoolean\(process\.env\.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED,\s*true\)/);
   assert.doesNotMatch(main, /sessionUsageArchiveCount:/);
@@ -724,4 +728,35 @@ test('renderer applies the first visible view on cold startup only', () => {
 
   const syncBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
   assert.match(syncBody, /applyInitialBreakdownPreference\(\)/);
+});
+
+test('the session context gauge has its own setting, separate from AI Tool Limits', () => {
+  const app = readRendererFile('app.js');
+  const main = readRendererFile('../main.js');
+  // The gauge is a session working budget, not a provider quota, so it must not
+  // ride on the limits preference — and its default is `used`, matching the
+  // readouts the clients themselves show.
+  assert.match(main, /sessionContextMetric: 'used'/);
+  assert.match(main, /function normalizeSessionContextMetric\(value, fallback = 'used'\)/);
+  assert.match(main, /normalizeSessionContextMetric\(patch\.sessionContextMetric \?\? settings\.sessionContextMetric\)/);
+  assert.match(app, /state\.settings\?\.sessionContextMetric !== 'remaining'/);
+  // The gauge's own decision must not consult the limits preference. Both keys
+  // legitimately share renderContext, so assert on the branch that reads it.
+  const gaugeBody = functionBody(app, 'updateRowContext', 'updateRowLive');
+  assert.doesNotMatch(gaugeBody, /showLimitUsed/);
+  assert.match(gaugeBody, /sessionContextMetric/);
+  // Sessions owns a Main-screen subgroup, following the project/trends pattern.
+  assert.match(app, /session: \['sessionSettingsExpanded', 'sessionSettingsContainer'\]/);
+  assert.match(app, /inner\.appendChild\(renderSessionSettingsList\(\)\)/);
+  assert.match(app, /id = 'sessionSettingsContainer'/);
+  assert.match(app, /name = 'sessionContextMetric'/);
+  assert.match(app, /settings\.views\.configureSession/);
+  // The row must be a plain .settings-item. `.home-activity-settings` carries
+  // its own indent rule for the Home modules list, so reusing it inside the
+  // nested list paints a second line beside the list's own.
+  const sessionList = functionBody(app, 'renderSessionSettingsList', 'renderServiceProviderList');
+  assert.match(sessionList, /row\.className = 'settings-item'/);
+  assert.doesNotMatch(sessionList, /className = 'home-activity-settings'/);
+  // The preference has to invalidate the painted rows, the way showLimitUsed does.
+  assert.match(app, /sessionContextMetric: state\.settings\?\.sessionContextMetric === 'remaining' \? 'remaining' : 'used'/);
 });

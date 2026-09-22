@@ -24,7 +24,9 @@ const DEFAULT_CLIENTS = DEFAULT_CLIENT_IDS.join(',');
 const KNOWN_CLIENTS = CLIENT_IDS.join(',');
 
 const LEGACY_CLIENT_ID_ALIASES = Object.freeze({
-  kilocode: 'kilo'
+  kilocode: 'kilo',
+  'devin-cli': 'devin',
+  'devin-desktop': 'devin'
 });
 
 function normalizeTrackedClientId(value) {

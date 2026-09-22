@@ -19,6 +19,14 @@ const TOKSCALE_CLIENT_GROUPS = Object.freeze({
   kilo: Object.freeze({
     aliases: Object.freeze(['kilocode']),
     customScanIds: Object.freeze(['kilocode'])
+  }),
+  // `devin` is an umbrella id only: tokscale splits the product into the CLI
+  // database scanner (devin-cli) and the Desktop ACP-event scanner
+  // (devin-desktop), and rejects a bare `devin` --client value. The scan list
+  // is therefore the aliases themselves, not `devin` plus the aliases.
+  devin: Object.freeze({
+    aliases: Object.freeze(['devin-cli', 'devin-desktop']),
+    scanIds: Object.freeze(['devin-cli', 'devin-desktop'])
   })
 });
 
@@ -27,7 +35,7 @@ const TOKSCALE_CLIENT_ALIASES = Object.freeze(Object.fromEntries(
 ));
 
 function tokscaleScanClientIds(client) {
-  return [client, ...(TOKSCALE_CLIENT_GROUPS[client]?.aliases || [])];
+  return TOKSCALE_CLIENT_GROUPS[client]?.scanIds || [client, ...(TOKSCALE_CLIENT_GROUPS[client]?.aliases || [])];
 }
 
 function tokscaleCustomScanClientIds(client) {
