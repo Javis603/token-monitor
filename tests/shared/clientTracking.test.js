@@ -18,7 +18,7 @@ function readmeTrackedClientIds() {
     deepseek: 'dsh',
     'hermes-agent': 'hermes',
     xai: 'grok',
-    'mimo-code': 'micode',
+    mimo: 'micode',
     qoder: 'qodercn'
   };
   return fs.readFileSync(path.join(rootDir, 'README.md'), 'utf8')
