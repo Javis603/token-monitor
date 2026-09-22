@@ -1886,9 +1886,12 @@ test('Cline exposes its API key through the settings and credential-store patter
   // The account credit shares the `billing` kind with the monthly quota, so the
   // branch tells them apart by metric and renders the credit through the panel's own
   // balance path, the way WorkBuddy's and Trae's balance is rendered.
-  assert.match(windowsView, /const clineMonthly = clineBilling\.find\(\(window\) => !isCreditsWindow\(window\)\)/);
+  assert.match(windowsView, /const clineMonthly = clineBilling\.find\(\(window\) => !isCreditsWindow\(window\) && window\.metric !== 'spend'\)/);
   assert.match(windowsView, /const clineCredits = clineBilling\.find\(\(window\) => isCreditsWindow\(window\)\)/);
+  assert.match(windowsView, /const clineSpend = clineBilling\.find\(\(window\) => window\.metric === 'spend'\)/);
   assert.match(windowsView, /clineCredits[\s\S]{0,400}creditsBalanceValue\(provider, clineCredits\)/);
+  // The spend line under the credit, the shape Claude and WorkBuddy both draw.
+  assert.match(windowsView, /clineSpend[\s\S]{0,500}providerWindowText\(provider, clineSpend\)\.value/);
   assert.match(windowsView, /clineMonthly[\s\S]{0,200}limit-window-wide/);
 });
 

@@ -13,7 +13,7 @@ Cline appears in Token Monitor in two independent data planes. Keep them separat
 | Data plane | What it measures | Primary runtime | Inputs |
 | --- | --- | --- | --- |
 | Token/session activity | Model-token activity attributed to Cline | Shared usage collector through `tokscale` | `~/.cline/data/sessions/`, plus the VS Code extension's `tasks/` globalStorage |
-| Limits/quota | ClinePass five-hour, weekly, and monthly subscription windows | Shared limits runtime | `GET https://api.cline.bot/api/v1/users/me/plan/usage-limits` |
+| Limits/quota | ClinePass five-hour, weekly, and monthly subscription windows, the account credit, and the month spend | Shared limits runtime | `GET https://api.cline.bot/api/v1/users/me/plan/usage-limits`, `/api/v1/users/{id}/balance`, `/api/v1/users/{id}/usages/daily` |
 
 ## One data tree, two front-ends
 
@@ -135,11 +135,25 @@ beside the label, the same convention WorkBuddy's credit balance uses. The endpo
 user id and ownership-checked — another user's id answers `403 can only access own resources` — so it
 is queried with the id belonging to the credential in use: the stored sign-in carries `accountId`,
 while a key-only install reads `/api/v1/users/me` first, which is the one extra request a scan costs
-there (two requests with a local sign-in, three without). The credit read is **best effort**: a
+there. The credit read is **best effort**: a
 balance endpoint that is down or answers nonsense leaves the plan windows alone, and a rejected
 balance call never turns the row into a credential problem. It is also what keeps a planless account
 from reading as `unavailable` — with a credit in hand the row is `ok`, the rule
 `docs/providers/zai.md` states for a key without a subscription.
+
+What the account has **spent** is a second read: `GET
+/api/v1/users/{id}/usages/daily?startdate=YYYY-MM-DD&enddate=YYYY-MM-DD` (the range is the local month
+to date) answers `{"data":{"items":[{"date","aiModelName","promptTokens","completionTokens","costUsd",
+"operation"}]},"success":true}`, and its `costUsd` values sum to the month's spend. That is reported as
+a `spend` window — `{metric: 'spend', label: 'Usage credits', used, limit: null, showMeter: false}` —
+deliberately separate from the credit rather than folded into it as a percentage, because the balance is
+credits and this report is dollars: the meter derivation would otherwise mix two units into a number
+that means nothing. The window shape is Claude's ("money already consumed"), the line it draws is the
+one WorkBuddy's `Spend` row shows, and the meter stays off because no monthly cap is reported — the same
+rule commandcode's purchased top-up and Claude's credit pool follow. It is best effort like the balance
+read and **absent when the month recorded nothing**, so an account with no usage keeps the shorter scan:
+the plan, the balance and the usage report with a local sign-in, plus the profile read that yields the
+account id on a key-only install.
 
 ### Parsing rules
 

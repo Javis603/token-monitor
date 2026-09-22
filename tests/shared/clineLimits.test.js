@@ -11,6 +11,7 @@ const {
   USAGE_LIMITS_PATH,
   USERS_ME_PATH,
   balancePath,
+  usagesDailyPath,
   clineApiKey,
   clineProvidersPath,
   fetchClineLimits,
@@ -67,6 +68,9 @@ function routedFetch({
   usageStatus = 200,
   balance,
   balanceStatus = 200,
+  usages,
+  usagesStatus = 200,
+  usagesQuery = null,
   me,
   sink = []
 } = {}) {
@@ -80,6 +84,10 @@ function routedFetch({
   return async (url, init = {}) => {
     const path = String(url).replace(CLINE_API_BASE, '');
     sink.push({ path, auth: (init.headers || {}).Authorization || '' });
+    if (path.includes('/usages/daily')) {
+      if (usagesQuery) usagesQuery.push(path.slice(path.indexOf('?')));
+      return reply(usagesStatus, usages);
+    }
     if (path.endsWith('/balance')) return reply(balanceStatus, balance);
     if (path === USERS_ME_PATH) return reply(200, me);
     return reply(
@@ -264,9 +272,12 @@ test('fetchClineLimits maps the three ClinePass windows onto the shared kinds', 
 
   // Two reads: the plan windows, then the account's credit, which is keyed by the
   // user id the stored sign-in carries (`usr-1` in this fixture).
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   assert.equal(calls[0].url, `${CLINE_API_BASE}${USAGE_LIMITS_PATH}`);
   assert.equal(calls[1].url, `${CLINE_API_BASE}${balancePath('usr-1')}`);
+  // The third read is the month-to-date usage report, which is what carries the
+  // spend line when the account has one.
+  assert.ok(calls[2].url.startsWith(`${CLINE_API_BASE}${usagesDailyPath('usr-1')}?`));
   // The stored form goes out verbatim: the API rejects the bare JWT (verified
   // live: bare -> 401, `workos:<jwt>` -> authenticated).
   assert.equal(calls[0].init.headers.Authorization, 'Bearer workos:token-1');
@@ -491,7 +502,8 @@ test('the account credit is read beside the plan and reported as a credits windo
   // dashboard divides by 1e6 before printing it.
   assert.equal(credits.remaining, 0.5);
   assert.equal(credits.showMeter, false);
-  assert.deepEqual(calls.map((c) => c.path), [USAGE_LIMITS_PATH, balancePath('usr-1')]);
+  assert.deepEqual(calls.map((c) => c.path).slice(0, 2), [USAGE_LIMITS_PATH, balancePath('usr-1')]);
+  assert.match(calls[2].path, /^\/api\/v1\/users\/usr-1\/usages\/daily\?startdate=/);
 });
 
 test('a key with no local sign-in learns the account id from the profile endpoint', async (t) => {
@@ -509,7 +521,10 @@ test('a key with no local sign-in learns the account id from the profile endpoin
   assert.equal(result.source, 'api');
   // A key carries no id, so the balance is reached through the profile read — and
   // the id comes from the credential in use, never from another lane's file.
-  assert.deepEqual(calls.map((c) => c.path), [USAGE_LIMITS_PATH, USERS_ME_PATH, balancePath('usr-key')]);
+  // Four reads: the plan, the id lookup (a key carries none), the balance for that
+  // id, then the same month-to-date usage report — the id is resolved once.
+  assert.deepEqual(calls.map((c) => c.path).slice(0, 3), [USAGE_LIMITS_PATH, USERS_ME_PATH, balancePath('usr-key')]);
+  assert.match(calls[3].path, /^\/api\/v1\/users\/usr-key\/usages\/daily\?startdate=/);
   assert.equal(calls[1].auth, 'Bearer sk-only');
   assert.equal(result.windows.find((w) => w.metric === 'credits').remaining, 0.25);
 });
@@ -529,7 +544,7 @@ test('a key supplied as an option works without any local sign-in', async (t) =>
   // this is the lane the settings page saves into, and it needs nothing installed.
   assert.equal(result.status, 'ok');
   assert.equal(result.source, 'api');
-  assert.deepEqual(calls.map((c) => c.auth), ['Bearer sk-settings', 'Bearer sk-settings', 'Bearer sk-settings']);
+  assert.deepEqual(calls.map((c) => c.auth), ['Bearer sk-settings', 'Bearer sk-settings', 'Bearer sk-settings', 'Bearer sk-settings']);
   assert.equal(result.windows.find((w) => w.metric === 'credits').remaining, 1);
 });
 
@@ -547,6 +562,79 @@ test('a planless account that has credit reads as live, not as unavailable', asy
   assert.equal(result.status, 'ok');
   assert.deepEqual(result.windows.map((w) => w.metric), ['credits']);
   assert.equal(result.windows[0].remaining, 0.5);
+});
+
+test('the monthly spend is reported beside the credit, in its own unit', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth() });
+  const calls = [];
+  const queries = [];
+  const result = await fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    fetch: routedFetch({
+      sink: calls,
+      limits: [],
+      usagesQuery: queries,
+      balance: { success: true, data: { userId: 'usr-1', balance: 500000 } },
+      usages: {
+        success: true,
+        data: {
+          items: [
+            { date: '2026-09-20', aiModelName: 'a', promptTokens: 10, completionTokens: 2, costUsd: 0.25, operation: 'chat' },
+            { date: '2026-09-21', aiModelName: 'b', promptTokens: 5, completionTokens: 1, costUsd: 0.125, operation: 'chat' },
+            { date: '2026-09-21', aiModelName: 'c', costUsd: 'not-a-number' }
+          ]
+        }
+      }
+    })
+  });
+  assert.equal(result.status, 'ok');
+  // The balance is credits and the usage report is dollars, so they stay in two
+  // windows rather than being mixed into one number.
+  assert.deepEqual(result.windows.map((w) => w.metric), ['credits', 'spend']);
+  const spend = result.windows.find((w) => w.metric === 'spend');
+  assert.equal(spend.used, 0.375);
+  assert.equal(spend.limit, null);
+  assert.equal(spend.currency, 'USD');
+  assert.equal(spend.showMeter, false);
+  // The range is the local month to date, the window the API expects.
+  assert.deepEqual(queries, ['?startdate=2026-09-01&enddate=2026-09-21']);
+});
+
+test('a month with no recorded spend adds no spend line', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth() });
+  const result = await fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    fetch: routedFetch({
+      limits: [],
+      balance: { success: true, data: { userId: 'usr-1', balance: 500000 } },
+      // Verified live: this account answers an empty items list.
+      usages: { success: true, data: { items: [] } }
+    })
+  });
+  assert.deepEqual(result.windows.map((w) => w.metric), ['credits']);
+});
+
+test('an unreadable usage report leaves the credit reading alone', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth() });
+  for (const route of [
+    { usagesStatus: 500 },
+    { usagesStatus: 401 },
+    { usages: { success: false, data: null } },
+    { usages: { success: true, data: { items: null } } }
+  ]) {
+    const result = await fetchClineLimits({}, {
+      env: { CLINE_DATA_DIR: dataDir },
+      now: () => NOW,
+      fetch: routedFetch({ limits: [], ...route, balance: { success: true, data: { userId: 'usr-1', balance: 500000 } } })
+    });
+    assert.equal(result.status, 'ok');
+    assert.deepEqual(result.windows.map((w) => w.metric), ['credits']);
+  }
 });
 
 test('no plan and no readable credit keeps the plan request status', async (t) => {

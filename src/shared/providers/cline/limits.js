@@ -71,6 +71,9 @@ const USERS_ME_PATH = '/api/v1/users/me';
 // a request for someone else's id answers 403 — so it has to be queried with the
 // id belonging to the credential in use; there is no `me` spelling of it.
 const balancePath = (id) => `/api/v1/users/${encodeURIComponent(id)}/balance`;
+// The daily usage report, priced in USD — the only spend Cline exposes, and the
+// source of the `spend` window this provider reports beside the credit.
+const usagesDailyPath = (id) => `/api/v1/users/${encodeURIComponent(id)}/usages/daily`;
 // Cline keeps credits in micro-credits: its own dashboard divides by 1e6 before
 // printing them, so `balance: 500000` is the "Credits: 0.5000" the account page
 // shows.
@@ -336,10 +339,8 @@ async function fetchClineAccountId(credential, deps) {
 // balance endpoint that is down, unreadable or answers about another account must
 // not take that answer down with it (the same rule docs/providers/zai.md fixes for
 // its billing lane).
-async function readClineCredits(credential, deps) {
+async function readClineCredits(id, credential, deps) {
   try {
-    const id = credential.accountId || await fetchClineAccountId(credential, deps);
-    if (!id) return null;
     const payload = await fetchJson(
       `${CLINE_API_BASE}${balancePath(id)}`,
       { Authorization: `Bearer ${credential.accessToken}`, Accept: 'application/json' },
@@ -358,6 +359,50 @@ async function readClineCredits(credential, deps) {
       remaining: amount / CREDIT_SCALE,
       // A balance has no denominator, so there is nothing to meter (workbuddy
       // files its unlimited package the same way).
+      showMeter: false
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+// The month's spend in USD, as a `spend` window — the role Claude's "Usage
+// credits" line plays: money already consumed, kept beside the credit rather than
+// inside it, because the two units are different (the balance is credits, this API
+// prices usage in dollars). Best effort like the balance read, and absent when the
+// month recorded nothing, so a fresh account shows no empty line.
+function localDateParts(nowMs) {
+  const date = new Date(nowMs);
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return { month: `${date.getFullYear()}-${month}-01`, day: `${date.getFullYear()}-${month}-${day}` };
+}
+
+async function readClineSpend(id, credential, nowMs, deps) {
+  try {
+    const { month, day } = localDateParts(nowMs);
+    const payload = await fetchJson(
+      `${CLINE_API_BASE}${usagesDailyPath(id)}?startdate=${month}&enddate=${day}`,
+      { Authorization: `Bearer ${credential.accessToken}`, Accept: 'application/json' },
+      deps
+    );
+    const items = payload?.data?.items;
+    if (payload?.success !== true || !Array.isArray(items)) return null;
+    let used = 0;
+    for (const item of items) {
+      const cost = numberOrNull(item?.costUsd);
+      if (cost !== null && cost > 0) used += cost;
+    }
+    if (!(used > 0)) return null;
+    return {
+      kind: 'billing',
+      metric: 'spend',
+      label: 'Usage credits',
+      used,
+      // No monthly cap is reported, so there is no denominator: no meter, the same
+      // rule commandcode and claude follow for a balance without one.
+      limit: null,
+      currency: 'USD',
       showMeter: false
     };
   } catch (_) {
@@ -399,15 +444,26 @@ async function fetchClineLimits(options = {}, deps = {}) {
     // sign-in still costs exactly one request.
     if (planStatus === 'unauthorized') return failingProvider(planStatus, nowMs, credential.source);
   }
-  const credits = await readClineCredits(credential, deps);
+  // The account id both nested reads are keyed by, resolved once: the stored sign-in
+  // carries it, and a key-only install learns it from the profile endpoint (which is
+  // why that install costs one more request than this one).
+  let accountId = credential.accountId || '';
+  if (!accountId) {
+    try {
+      accountId = await fetchClineAccountId(credential, deps);
+    } catch (_) {
+      accountId = '';
+    }
+  }
+  const credits = accountId ? await readClineCredits(accountId, credential, deps) : null;
+  const spend = accountId ? await readClineSpend(accountId, credential, nowMs, deps) : null;
+  const readings = [...planWindows, ...(credits ? [credits] : []), ...(spend ? [spend] : [])];
   // No plan is a state, not a failure, when the account's credit was readable:
   // `docs/providers/zai.md` states the same rule for a key without a subscription
   // whose console still answers a balance. With neither reading there is nothing
   // to report, and the plan request's own status is the one to report.
-  if (planWindows.length === 0 && !credits) {
-    return failingProvider(planStatus, nowMs, credential.source);
-  }
-  return providerResult(credits ? [...planWindows, credits] : planWindows, { nowMs, credential });
+  if (readings.length === 0) return failingProvider(planStatus, nowMs, credential.source);
+  return providerResult(readings, { nowMs, credential });
 }
 
 module.exports = {
@@ -415,6 +471,7 @@ module.exports = {
   USAGE_LIMITS_PATH,
   USERS_ME_PATH,
   balancePath,
+  usagesDailyPath,
   clineApiKey,
   clineProvidersPath,
   fetchClineLimits,

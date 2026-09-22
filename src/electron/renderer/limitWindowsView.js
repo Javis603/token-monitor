@@ -1215,8 +1215,9 @@
       const clineSession = windowForKind(provider, 'session');
       const clineWeekly = windowForKind(provider, 'weekly');
       const clineBilling = windowsForKind(provider, 'billing');
-      const clineMonthly = clineBilling.find((window) => !isCreditsWindow(window)) || null;
+      const clineMonthly = clineBilling.find((window) => !isCreditsWindow(window) && window.metric !== 'spend') || null;
       const clineCredits = clineBilling.find((window) => isCreditsWindow(window)) || null;
+      const clineSpend = clineBilling.find((window) => window.metric === 'spend') || null;
       if (clineSession) {
         windows.append(limitWindowNode(providerWindowLabel(provider, clineSession), clineSession, color, 0.95));
       }
@@ -1238,6 +1239,19 @@
           }
           windows.append(node);
         }
+      }
+      // The spend line under the credit, the shape Claude's "Usage credits" row and
+      // WorkBuddy's Spend line both use: money already consumed, in its own unit.
+      if (clineSpend) {
+        const node = limitWindowNode(
+          providerWindowLabel(provider, clineSpend, 'Usage credits'),
+          clineSpend,
+          color,
+          0.5,
+          providerWindowText(provider, clineSpend).value
+        );
+        node.classList.add('limit-window-wide', 'limit-window-no-reset');
+        windows.append(node);
       }
     } else {
       // Default: render only the windows the provider actually has. Providers
