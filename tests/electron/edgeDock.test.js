@@ -1246,7 +1246,7 @@ test('explicit items keep their order, their empty providers, and add usage read
   assert.equal(claude.usage, null);
 });
 
-test('period cells carry capped model rows without dropping unattributed usage', () => {
+test('period cells carry model rows without dropping unattributed usage', () => {
   const stats = {
     periods: {
       today: {
@@ -1260,7 +1260,6 @@ test('period cells carry capped model rows without dropping unattributed usage',
     limits: { providers: [] }
   };
   const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: 'today' }] });
-  assert.equal(cell.modelCount, 3);
   assert.deepEqual(cell.models, [
     { model: 'gpt-5', tokens: 60, costUsd: 0.6, unattributed: false },
     { model: 'claude-sonnet-4', tokens: 20, costUsd: 0.2, unattributed: false },
@@ -1268,6 +1267,22 @@ test('period cells carry capped model rows without dropping unattributed usage',
   ]);
   assert.deepEqual(cell.clients, [
     { client: 'codex', tokens: 100, costUsd: 0, unattributed: false }
+  ]);
+});
+
+test('period cells keep rows beyond the six-row card viewport', () => {
+  const clients = Object.fromEntries(Array.from({ length: 8 }, (_, index) => [`tool-${index + 1}`, index + 1]));
+  const models = Object.fromEntries(Array.from({ length: 8 }, (_, index) => [`model-${index + 1}`, index + 1]));
+  const stats = {
+    periods: { today: { totalTokens: 36, costUsd: 0, clients, models } },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: 'today' }] });
+  assert.deepEqual(cell.clients.map((row) => row.client), [
+    'tool-8', 'tool-7', 'tool-6', 'tool-5', 'tool-4', 'tool-3', 'tool-2', 'tool-1'
+  ]);
+  assert.deepEqual(cell.models.map((row) => row.model), [
+    'model-8', 'model-7', 'model-6', 'model-5', 'model-4', 'model-3', 'model-2', 'model-1'
   ]);
 });
 
@@ -1282,8 +1297,13 @@ test('period cards expose an accessible tools and models switch', () => {
   assert.match(card, /activateOnPress\(button, \(\) => \{/);
   assert.doesNotMatch(card, /button\.addEventListener\('click'/);
   assert.match(card, /state\.breakdownMode = mode;\s+renderBubble\(state\.payload\);/);
-  assert.match(card, /modelVendorFor\(model\.model\)/);
+  assert.match(card, /modelVendorFor\(model\.model\) \|\| 'token-monitor'/);
   assert.match(card, /t\('dashboard\.tooltip\.unclassified'\)/);
+  assert.doesNotMatch(card, /edgeDock\.more(?:Models|Clients)/);
+  const bubble = dock.slice(dock.indexOf('function clampBreakdownList('), dock.indexOf('// ---- Wiring'));
+  assert.match(bubble, /rows\[BREAKDOWN_VISIBLE_ROWS - 1\]\.getBoundingClientRect\(\)/);
+  assert.match(bubble, /list\.style\.maxHeight = `\$\{height\}px`/);
+  assert.match(bubble, /stagingLayer\.replaceChildren\(card\);\s+clampBreakdownList\(card\);/);
 });
 
 test('provider cards list the newest sessions of their own clients this month', () => {

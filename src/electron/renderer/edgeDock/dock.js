@@ -48,6 +48,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const RING_RADIUS = 19;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 const DRAG_THRESHOLD_PX = 4;
+const BREAKDOWN_VISIBLE_ROWS = 6;
 // The period of `edge-dock-mark-breathe` in dock.css, which the running halo's phase
 // is taken modulo (see ringNode). A test holds the two numbers together.
 const BREATH_MS = 2600;
@@ -1060,7 +1061,9 @@ function statCard(cell) {
   // and fallback colours so one model never changes identity between surfaces.
   const rows = breakdownMode === 'models'
     ? (cell.models || []).map((model) => ({
-      id: model.unattributed ? 'token-monitor' : modelVendorFor(model.model),
+      // Match the main widget: an unknown model uses the Token Monitor mark.
+      // Passing null to markNode would instead select its generic dot fallback.
+      id: modelVendorFor(model.model) || 'token-monitor',
       name: model.model === UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : model.model,
       tokens: model.tokens,
       color: readableColor(model.unattributed ? clientColors.default : modelColor(model.model))
@@ -1094,10 +1097,6 @@ function statCard(cell) {
     list.append(row);
   }
   card.append(list);
-  const rowCount = breakdownMode === 'models' ? cell.modelCount : cell.clientCount;
-  if (rowCount > rows.length) {
-    card.append(el('div', 'edge-dock-note', t(breakdownMode === 'models' ? 'edgeDock.moreModels' : 'edgeDock.moreClients', { count: rowCount - rows.length })));
-  }
   return card;
 }
 
@@ -1171,12 +1170,11 @@ function sessionsCard(cell, card, head) {
 // sized and shaped for exactly that card, so a new card never paints into a
 // window still at the previous card's size (which read as a flash).
 //
-// Both scroll containers, because which one scrolls depends on the card. A provider
-// card and the grouped Sessions card scroll `.edge-dock-accounts`; the ungrouped
-// Sessions card's list is `.edge-dock-session-list`, and that is the one which overflows
-// there, since running rows are never capped. A repaint rebuilds the card, so a
-// selector that missed the container actually in use reset that card's scroll on every
-// clock tick - yanking the reader back to the top while they were reading it.
+// Both scroll containers, because which one scrolls depends on the card. Provider,
+// grouped Sessions, and period-breakdown cards scroll `.edge-dock-accounts`; the
+// ungrouped Sessions card's list is `.edge-dock-session-list`. A repaint rebuilds the
+// card, so a selector that missed the container actually in use reset that card's
+// scroll on every clock tick - yanking the reader back to the top while they read it.
 const CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list';
 
 const stagingLayer = document.createElement('div');
@@ -1193,6 +1191,21 @@ function commitCard(card, cellId) {
   if (list) list.scrollTop = scrollTop;
 }
 
+// The period card is a summary even when the period contains dozens of tools or
+// models. Keep its natural height at six rows, but leave every row in the list so
+// the existing overflow container can reveal the rest. Measuring the rendered
+// rows avoids baking the current font metrics and meter spacing into a second
+// magic pixel height.
+function clampBreakdownList(card) {
+  const list = card.querySelector('.edge-dock-clients');
+  const rows = Array.from(list?.children || []);
+  if (rows.length <= BREAKDOWN_VISIBLE_ROWS) return;
+  const first = rows[0].getBoundingClientRect();
+  const last = rows[BREAKDOWN_VISIBLE_ROWS - 1].getBoundingClientRect();
+  const height = Math.ceil(last.bottom - first.top);
+  if (height > 0) list.style.maxHeight = `${height}px`;
+}
+
 function renderBubble(payload) {
   root.dataset.side = payload.side;
   const cell = payload.cell;
@@ -1204,6 +1217,7 @@ function renderBubble(payload) {
   card.dataset.cellId = cell.id;
   if (payload.maxCardHeight) card.style.maxHeight = `${payload.maxCardHeight}px`;
   stagingLayer.replaceChildren(card);
+  clampBreakdownList(card);
   const height = Math.ceil(card.getBoundingClientRect().height);
   if (payload.placed?.cellId === cell.id && payload.placed.height === height) {
     commitCard(card, cell.id);
