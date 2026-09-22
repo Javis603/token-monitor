@@ -310,8 +310,24 @@ function keepLongLineTail(state, remainder) {
     : Buffer.from(combined);
 }
 
+// Which record an oversized line is cannot be read from the head alone. Claude
+// writes a record's `message` before its root `type`, so an oversized `content`
+// pushes `"type":"assistant"` past the head budget and leaves the root
+// discriminator in the tail. The message-level `role` is the reliable in-head
+// signal, because `message` precedes its own `content` and the first `"role"`
+// is therefore the message's own rather than text quoted inside it. The root
+// discriminator stays as a fallback for a record whose message carries no role,
+// accepted from either retained fragment.
+function oversizedRecordKind(head, tail) {
+  const role = /"role"\s*:\s*"(user|assistant)"/.exec(head);
+  if (role) return role[1];
+  if (/"type"\s*:\s*"assistant"/.test(head) || /"type"\s*:\s*"assistant"/.test(tail)) return 'assistant';
+  if (/"type"\s*:\s*"user"/.test(head) || /"type"\s*:\s*"user"/.test(tail)) return 'user';
+  return '';
+}
+
 // The boundary inside a record too large to parse. The fragments are partial
-// JSON by construction, so the two fields are matched on the raw text: a user
+// JSON by construction, so the fields are matched on the raw text: a user
 // record is a real prompt when its content opens with text or an image rather
 // than a tool_result, and an assistant record reports the stop_reason it ends
 // with. Anything else leaves the state untouched, exactly as a full parse of an
@@ -321,7 +337,8 @@ function applyLongLineFragments(state) {
   const tail = (state.longLineTail || Buffer.alloc(0)).toString('utf8');
   state.longLineHead = Buffer.alloc(0);
   state.longLineTail = Buffer.alloc(0);
-  if (/"type"\s*:\s*"assistant"/.test(head)) {
+  const kind = oversizedRecordKind(head, tail);
+  if (kind === 'assistant') {
     // stop_reason is the last occurrence, and it trails the assistant text.
     const matches = [...tail.matchAll(/"stop_reason"\s*:\s*"([^"]*)"/g)];
     const reason = matches.length ? matches[matches.length - 1][1] : '';
@@ -337,9 +354,13 @@ function applyLongLineFragments(state) {
     if (contextUsage) applyContextUsage(state, contextUsage.model, contextUsage.usage);
     return;
   }
-  if (!/"type"\s*:\s*"user"/.test(head)) return;
-  if (/"isMeta"\s*:\s*true/.test(head)) return;
-  if (/"isCompactSummary"\s*:\s*true/.test(head)) {
+  if (kind !== 'user') return;
+  // The bookkeeping flags also trail `message` on disk, so they can land in the
+  // tail of an oversized record. Both fragments are searched for the same
+  // reason the record type is: the field order puts them after the content.
+  const flags = `${head}\n${tail}`;
+  if (/"isMeta"\s*:\s*true/.test(flags)) return;
+  if (/"isCompactSummary"\s*:\s*true/.test(flags)) {
     clearContextUsage(state);
     return;
   }

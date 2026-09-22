@@ -412,6 +412,88 @@ test('Claude session context keeps its reading through zero-occupancy client not
   assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 52_500, contextWindow: 1_000_000 });
 });
 
+test('oversized records are recognized when the root discriminator lands past the head', (t) => {
+  // Claude serializes a record's `message` before its root `type`. An oversized
+  // `content` therefore pushes the root discriminator past the 64 KiB head, so
+  // reading the head alone classified the record as neither assistant nor user:
+  // the context reading stayed at the previous turn, and an oversized prompt did
+  // not start a new one. Every oversized assistant record on one real machine
+  // put `"type":"assistant"` at byte 68k-93k, never inside the head.
+  const huge = 'x'.repeat(300 * 1024);
+  const { readSessionTurnEnded } = require('../../src/shared/providers/claude/sessionMetadata');
+  const realAssistant = JSON.stringify({
+    parentUuid: 'p1',
+    isSidechain: false,
+    message: {
+      id: 'msg_big',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-opus-5',
+      content: [{ type: 'text', text: huge }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 2_000, cache_creation_input_tokens: 1_000, cache_read_input_tokens: 254_936, output_tokens: 40 }
+    },
+    apiBlockIndex: 0,
+    type: 'assistant',
+    uuid: 'u1',
+    timestamp: '2026-01-01T00:00:00.000Z'
+  });
+  const prior = JSON.stringify({
+    type: 'assistant',
+    message: { id: 'msg_prior', model: 'claude-opus-5', stop_reason: 'end_turn', usage: { input_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 51_000 } }
+  });
+  const realPrompt = JSON.stringify({
+    parentUuid: 'p2',
+    isSidechain: false,
+    message: { role: 'user', content: [{ type: 'text', text: huge }] },
+    apiBlockIndex: 0,
+    type: 'user',
+    uuid: 'u2',
+    timestamp: '2026-01-01T00:00:01.000Z'
+  });
+  const finished = JSON.stringify({
+    type: 'assistant',
+    message: { id: 'msg_done', model: 'claude-opus-5', stop_reason: 'end_turn', usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 100 } }
+  });
+
+  const { dir, file } = fixture([prior, realAssistant]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 257_936,
+    contextWindow: 1_000_000
+  });
+
+  fs.writeFileSync(file, `${finished}\n${realPrompt}\n`);
+  assert.equal(readSessionTurnEnded(file, { cache: new Map() }), false, 'an oversized prompt still starts a turn');
+
+  // The in-head role is the reliable signal, so a tool input naming another
+  // record type must not change how the record is read.
+  const nestedType = JSON.stringify({
+    parentUuid: 'p3',
+    isSidechain: false,
+    message: {
+      id: 'msg_nested',
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'tool_use', input: { type: 'user', text: huge } }],
+      model: 'claude-opus-5',
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 3_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 40_000 }
+    },
+    apiBlockIndex: 0,
+    type: 'assistant',
+    uuid: 'u3',
+    timestamp: '2026-01-01T00:00:02.000Z'
+  });
+  fs.writeFileSync(file, `${nestedType}\n`);
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 43_000,
+    contextWindow: 1_000_000
+  });
+  assert.equal(readSessionTurnEnded(file, { cache: new Map() }), false, 'a tool_use pause is not an end');
+});
+
 test('Claude session context distinguishes absent from malformed optional cache counters', (t) => {
   const assistant = (usage) => JSON.stringify({
     type: 'assistant',
