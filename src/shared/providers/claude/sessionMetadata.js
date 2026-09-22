@@ -97,12 +97,48 @@ function applyContextUsage(state, model, usage) {
   state.contextWindow = claudeContextWindow(model);
 }
 
+// Whether the message-level `usage` object has been written to completion.
+// `usage` is the last field of `message`, so a tail that stops inside it is a
+// record still being appended. Reading it then would publish a partial
+// occupancy, because a cache counter the writer has not reached yet is
+// indistinguishable from the optional one a complete response may legitimately
+// omit. Counting brace depth from the opening brace proves closure on the
+// bytes alone, so a complete final record is still read when the writer never
+// emitted its trailing newline.
+function usageObjectClosed(text) {
+  const header = /"usage"\s*:\s*\{/.exec(text);
+  if (!header) return false;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = header.index + header[0].length - 1; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === '{') depth += 1;
+    else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return true;
+    }
+  }
+  return false;
+}
+
 function contextUsageFromFragments(head, tail) {
   // Tool inputs are arbitrary JSON and may contain their own `model` and
   // `usage` fields. Claude writes the message-level usage after content, so
   // the final occurrence is the delimiter for the response measurement.
   const usageAt = tail.lastIndexOf('"usage"');
   if (usageAt < 0) return null;
+  const usageText = tail.slice(usageAt);
+  // A record still being written has not closed its usage object yet, so the
+  // counters that are present measure only part of the next request.
+  if (!usageObjectClosed(usageText)) return null;
   const contentAt = head.indexOf('"content"');
   const headModelAt = head.indexOf('"model"');
   let model = '';
@@ -118,7 +154,6 @@ function contextUsageFromFragments(head, tail) {
     const matches = [...tail.slice(0, usageAt).matchAll(/"model"\s*:\s*"([^"]+)"/g)];
     model = matches.length ? matches[matches.length - 1][1] : '';
   }
-  const usageText = tail.slice(usageAt);
   const number = (key) => {
     const field = new RegExp(`"${key}"\\s*:`).exec(usageText);
     if (!field) return { present: false };
@@ -183,11 +218,16 @@ function applyMetadataLine(state, line) {
       // being generated. Titles and this boundary ride one pass, so the turn
       // state costs no extra read.
       const stopReason = entry.message?.stop_reason;
-      if (typeof stopReason === 'string' && stopReason) state.stopReason = stopReason;
+      if (typeof stopReason === 'string' && stopReason) {
+        state.stopReason = stopReason;
+        // Only a record that states why it stopped retires the prompt it
+        // answered. A null or missing reason is a streamed or aborted record
+        // whose turn state is unknown, and the oversized path already reads it
+        // that way; clearing the flag regardless would report the same record
+        // as finished at normal size and active past the head budget.
+        state.userSinceStop = false;
+      }
       applyContextUsage(state, entry.message?.model, entry.message?.usage);
-      // The assistant answered, so any prompt the user sent before it belongs to
-      // the turn this record closes.
-      state.userSinceStop = false;
     } else if (entry?.subtype === 'compact_boundary' || entry?.isCompactSummary === true) {
       // Claude Code clears current_usage after compaction until the next API
       // response. State the same absence so an old pre-compact gauge cannot

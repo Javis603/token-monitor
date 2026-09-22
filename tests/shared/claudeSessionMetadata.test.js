@@ -537,6 +537,77 @@ test('an oversized assistant record applies usage even when stop_reason is null'
   assert.equal(readSessionTurnEnded(file, { cache: new Map() }), true, 'a null stop_reason is not evidence of an active turn');
 });
 
+test('an oversized record written halfway through usage keeps the previous reading', (t) => {
+  // The reader runs on a transcript being appended to, so it can catch a record
+  // whose `usage` object has only begun. `input_tokens` is written first, and a
+  // cache counter the writer has not reached yet looks exactly like the optional
+  // one a complete response may omit, so a partial object would publish a
+  // fraction of the next request and keep it if the writer never finished.
+  const huge = 'w'.repeat(300 * 1024);
+  const prior = JSON.stringify({
+    type: 'assistant',
+    message: { id: 'msg_prior', model: 'claude-opus-5', stop_reason: 'end_turn', usage: { input_tokens: 5_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 46_005 } }
+  });
+  const halfway = '{"parentUuid":"p1","isSidechain":false,"message":{"id":"msg_big","type":"message","role":"assistant","model":"claude-opus-5","content":[{"type":"thinking","thinking":"'
+    + huge
+    + '"}],"stop_reason":"end_turn","usage":{"input_tokens":4000,';
+  const rest = '"cache_creation_input_tokens":1000,"cache_read_input_tokens":194000,"output_tokens":5}}\n';
+  const { dir, file } = fixture([prior]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cache = new Map();
+
+  // The oversized record is mid-write at EOF with no newline yet.
+  fs.appendFileSync(file, halfway);
+  assert.deepEqual(readSessionContext(file, { cache }), {
+    contextTokens: 51_005,
+    contextWindow: 1_000_000
+  });
+
+  // Only once the usage object closes does the measurement replace it.
+  fs.appendFileSync(file, rest);
+  assert.deepEqual(readSessionContext(file, { cache }), {
+    contextTokens: 199_000,
+    contextWindow: 1_000_000
+  });
+});
+
+test('a null stop_reason leaves the turn state unchanged at either record size', (t) => {
+  // A null or missing stop_reason is a streamed or aborted record whose turn
+  // state is unknown, so it must not retire the prompt it answered. The ordinary
+  // path used to clear that flag regardless of the reason while the oversized
+  // path already held it, making the same record read as finished at normal size
+  // and active once it passed the head budget.
+  const huge = 'v'.repeat(300 * 1024);
+  const { readSessionTurnEnded } = require('../../src/shared/providers/claude/sessionMetadata');
+  const finished = JSON.stringify({
+    type: 'assistant',
+    message: { id: 'msg_done', model: 'claude-opus-5', stop_reason: 'end_turn', usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 100 } }
+  });
+  const prompt = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'keep going' }] } });
+  const usage = { input_tokens: 4_000, cache_creation_input_tokens: 1_000, cache_read_input_tokens: 194_000 };
+  const smallNull = JSON.stringify({
+    type: 'assistant',
+    message: { id: 'msg_null_small', model: 'claude-opus-5', stop_reason: null, usage }
+  });
+  const bigNull = '{"parentUuid":"p2","isSidechain":false,"message":{"id":"msg_null_big","type":"message","role":"assistant","model":"claude-opus-5","content":[{"type":"thinking","thinking":"'
+    + huge
+    + '"}],"stop_reason":null,"usage":' + JSON.stringify(usage) + '},"type":"assistant","uuid":"u2","timestamp":"2026-01-01T00:00:00.000Z"}';
+
+  const small = fixture([finished, prompt, smallNull]);
+  t.after(() => fs.rmSync(small.dir, { recursive: true, force: true }));
+  const big = fixture([finished, prompt, bigNull]);
+  t.after(() => fs.rmSync(big.dir, { recursive: true, force: true }));
+
+  const smallEnded = readSessionTurnEnded(small.file, { cache: new Map() });
+  const bigEnded = readSessionTurnEnded(big.file, { cache: new Map() });
+  assert.equal(smallEnded, false, 'a null stop_reason does not retire the prompt it answered');
+  assert.equal(bigEnded, smallEnded, 'the same record reads the same at either size');
+  assert.deepEqual(readSessionContext(big.file, { cache: new Map() }), {
+    contextTokens: 199_000,
+    contextWindow: 1_000_000
+  });
+});
+
 test('Claude session context distinguishes absent from malformed optional cache counters', (t) => {
   const assistant = (usage) => JSON.stringify({
     type: 'assistant',
