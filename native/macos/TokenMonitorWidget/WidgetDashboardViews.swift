@@ -688,6 +688,7 @@ enum WidgetVendorIdentity {
             "zed": "#5C8BFF", "kilo": "#F8F676", "commandcode": "#9D66E7",
             "kiro": "#A66AFF", "codebuddy": "#8064FF", "workbuddy": "#0DC8A5",
             "qodercn": "#2ADB5C", "qoder": "#2ADB5C", "reasonix": "#4D6BFE",
+            "gcmp": "#3B82F6",
             "dsh": "#4D6BFE", "cherrystudio": "#EA5E5D", "lmstudio": "#8074E8",
             "unsloth": "#40B85A", "cohere": "#66937D", "xiaomi": "#000000",
             "mimo": "#000000", "micode": "#000000", "minimax": "#F23F5D",

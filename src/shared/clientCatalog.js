@@ -60,6 +60,7 @@
     { id: 'qwen', label: 'Qwen' },
     { id: 'grok', label: 'Grok Build' },
     { id: 'copilot', label: 'GitHub Copilot' },
+    { id: 'gcmp', label: 'AI Chat Models', defaultTracked: false, locallyParsed: true },
     { id: 'pi', label: 'Pi' },
     { id: 'zed', label: 'Zed' },
     { id: 'kilo', label: 'Kilo' },
