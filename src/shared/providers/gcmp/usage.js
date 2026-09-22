@@ -172,6 +172,7 @@ function collectGcmpRows(options = {}) {
       for (const line of content.split(/\r?\n/)) {
         const row = normalizeUsageLine(line.trim(), sourceId);
         if (!row) continue;
+        if (sinceMs && (!row.createdAt || row.createdAt < sinceMs)) continue;
         if (rowsById.size >= GCMP_MAX_ROWS) {
           truncated = true;
           break;
