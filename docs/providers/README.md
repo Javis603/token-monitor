@@ -39,7 +39,7 @@ Tracked-client identity lives in `CLIENT_CATALOG` in `src/shared/clientCatalog.j
 
 | Touch point | Contract |
 |---|---|
-| Identity | Add one catalog entry with id, label, position, `defaultTracked` and `locallyParsed`; do not maintain derived client lists by hand. |
+| Identity | Insert one catalog entry at the intended display position with id, label and applicable `defaultTracked` / `locallyParsed` flags; do not maintain derived client lists by hand. |
 | Provider code | Put transcript readers, path resolvers and self-sync code under `src/shared/providers/<id>/`. Most tokscale-native clients need none. |
 | Session metadata | Register only data tokscale cannot supply in `src/shared/sessionMetadata.js`; keep storage discovery, parsing and caches provider-local. |
 | Roots and health | Add the authoritative root to `clientSourceRoots()`, register each `checkId` in alphabetical `CLIENT_SOURCE_CHECK_IDS`, then sync the Worker copy. |
@@ -58,7 +58,7 @@ Limits-provider identity lives in `LIMIT_PROVIDER_CATALOG` in `src/shared/limitP
 
 | Touch point | Contract |
 |---|---|
-| Identity | Add id, order, label and optional `settingsLabel`; do not maintain derived id or label lists separately. |
+| Identity | Insert one catalog entry at the intended fresh-install position with id, label and optional `settingsLabel`; do not maintain derived id or label lists separately. |
 | Collection | Register `providerFetchers()` and implement `src/shared/providers/<id>/limits.js`. |
 | Settings and secrets | Register runtime setting keys in `LIMIT_PROVIDER_SETTING_KEYS`; add fixed GUI credentials to `CREDENTIAL_SETTING_PATHS`. Automatic providers that persist nothing belong in neither list. |
 | Account UI | Register account/status ids or a connection-detail key and add matching DOM nodes. |

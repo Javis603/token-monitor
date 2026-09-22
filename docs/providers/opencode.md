@@ -20,7 +20,7 @@ Profile names are user labels, not stable account identity. API keys and Web res
 
 ## Source authority
 
-Within an explicitly associated account, source order is API, then Web, then local. Each component remains authoritative only for the windows it actually answers. Supplemental windows fill only kinds not already answered by the selected Go source; merge order must not duplicate quota.
+Single-account mode resolves Go quota in API, then Web, then local order when local estimates are enabled. Multi-account profiles use API then Web only: the device-wide local ledger cannot be safely attributed to an individual profile. Each component remains authoritative only for the windows it actually answers. Supplemental windows fill only kinds not already answered by the selected Go source; merge order must not duplicate quota.
 
 An explicit credential is never replaced by an unrelated ambient credential. Remote credential errors surface when no higher-priority source or explicitly enabled local estimate produced windows; in single-account mode, that local estimate may therefore mask an API or Web error. A missing Go subscription is not an authorization failure and may fall through quietly. Cancellation discards the scoped result rather than publishing an error row or papering it over with local estimates.
 
