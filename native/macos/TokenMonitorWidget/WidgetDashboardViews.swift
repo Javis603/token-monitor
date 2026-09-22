@@ -668,13 +668,15 @@ enum WidgetVendorIdentity {
             "kiro": "#A66AFF", "codebuddy": "#8064FF", "workbuddy": "#0DC8A5",
             "qodercn": "#2ADB5C", "qoder": "#2ADB5C", "reasonix": "#4D6BFE",
             "dsh": "#4D6BFE", "cherrystudio": "#EA5E5D", "lmstudio": "#8074E8",
-            "unsloth": "#40B85A", "cohere": "#66937D", "xiaomi": "#FF6700",
-            "mimo": "#FF6700", "micode": "#FF6700", "minimax": "#F23F5D",
+            "unsloth": "#40B85A", "cohere": "#66937D", "xiaomi": "#000000",
+            "mimo": "#000000", "micode": "#000000", "minimax": "#F23F5D",
             "doubao": "#5064FF", "hunyuan": "#277DE3", "volcengine": "#2A88FF",
             "trae": "#32F08C", "alibaba": "#7771F4", "thirdparty": "#8090A6",
             "default": "#6AB4F0"
         ]
-        let adaptiveInk = ["grok", "xai", "copilot", "cursor", "opencode", "pi", "zai", "zaiteam", "zcode", "proma", "kimi", "moonshot", "ollama", "devin"]
+        // Vendor marks whose app colour is too dark to read against the widget's dark
+        // background render as light ink instead.
+        let adaptiveInk = ["grok", "xai", "copilot", "cursor", "opencode", "pi", "zai", "zaiteam", "zcode", "proma", "kimi", "moonshot", "ollama", "devin", "micode", "mimo", "xiaomi"]
         if adaptiveInk.contains(vendorID.lowercased()) { return Color.white.opacity(0.86) }
         return Color(widgetHex: colors[vendorID.lowercased()] ?? colors["default"]!)
     }
