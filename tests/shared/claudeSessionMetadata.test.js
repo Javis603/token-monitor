@@ -251,6 +251,10 @@ test('Claude session context uses the latest API input occupancy and model capac
   assert.equal(claudeContextWindow('claude-sonnet-4-5-20250929'), 200_000);
   assert.equal(claudeContextWindow('claude-opus-4-6'), 200_000);
   assert.equal(claudeContextWindow('us.anthropic.claude-opus-4-8-v1:0'), 200_000);
+  assert.equal(claudeContextWindow('us.anthropic.claude-sonnet-5-v1:0'), 1_000_000);
+  assert.equal(claudeContextWindow('global.anthropic.claude-sonnet-5-v1:0'), 1_000_000);
+  assert.equal(claudeContextWindow('anthropic.claude-sonnet-5'), 1_000_000);
+  assert.equal(claudeContextWindow('gateway/anthropic.claude-sonnet-5'), 200_000);
   assert.equal(claudeContextWindow('deepseek-v4.1-flash'), 200_000);
   assert.equal(claudeContextWindow('deepseek-v4.1-flash[1m]'), 1_000_000);
   assert.equal(claudeContextWindow('claude-ocx2-command-code--deepseek-v4.1-flash'), 200_000);
@@ -366,6 +370,52 @@ test('Claude session context ignores malformed usage instead of clearing a valid
 
   assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
     contextTokens: 71_000,
+    contextWindow: 200_000
+  });
+});
+
+test('Claude session context distinguishes absent from malformed optional cache counters', (t) => {
+  const assistant = (usage) => JSON.stringify({
+    type: 'assistant',
+    message: {
+      model: 'claude-sonnet-4-5-20250929',
+      stop_reason: 'end_turn',
+      usage
+    }
+  });
+  const { dir, file } = fixture([
+    assistant({ input_tokens: 100_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 20_000 }),
+    assistant({ input_tokens: 1_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 'broken' })
+  ]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 120_000,
+    contextWindow: 200_000
+  });
+
+  const oversizedMalformed = JSON.stringify({
+    type: 'assistant',
+    message: {
+      content: 'x'.repeat(300 * 1024),
+      model: 'claude-sonnet-4-5-20250929',
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 1_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 'broken' }
+    }
+  });
+  fs.writeFileSync(file, `${assistant({
+    input_tokens: 100_000,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 20_000
+  })}\n${oversizedMalformed}\n`);
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 120_000,
+    contextWindow: 200_000
+  });
+
+  fs.writeFileSync(file, `${assistant({ input_tokens: 50_000 })}\n`);
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 50_000,
     contextWindow: 200_000
   });
 });

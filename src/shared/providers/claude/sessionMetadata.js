@@ -25,6 +25,9 @@ const CLAUDE_NATIVE_ONE_MILLION_MODEL = new RegExp(
   + `|fable-5(?:[.-]1)?${MODEL_VERSION_END}`
   + `|mythos-(?:5(?:[.-]1)?${MODEL_VERSION_END}|preview${MODEL_VERSION_END}))`
 );
+const CLAUDE_PROVIDER_SONNET_FIVE_MODEL = new RegExp(
+  `^(?:(?:global|us|eu|apac|au|jp)\\.)?anthropic\\.claude-sonnet-5${MODEL_VERSION_END}`
+);
 
 function claudeContextWindow(model) {
   const value = String(model || '').toLowerCase();
@@ -34,11 +37,13 @@ function claudeContextWindow(model) {
   // request reaches the provider, but preserve the exact answer when a bridge
   // records it in the response model.
   if (value.includes('[1m]')) return 1_000_000;
-  // Only the bare Anthropic API ids below have a native 1M window. Provider
-  // spellings and 4.6 models are deliberately excluded: those use 200K unless
-  // their launch configuration selected extended context, which the response
-  // model usually cannot prove after Claude Code strips the suffix.
-  if (CLAUDE_NATIVE_ONE_MILLION_MODEL.test(value)) return 1_000_000;
+  // The bare Anthropic API ids below have a native 1M window. Provider
+  // spellings stay excluded except for Claude Code's recognized Sonnet 5 ids;
+  // other provider models use 200K unless launch configuration selected
+  // extended context, which the response model usually cannot prove after
+  // Claude Code strips the suffix.
+  if (CLAUDE_NATIVE_ONE_MILLION_MODEL.test(value)
+    || CLAUDE_PROVIDER_SONNET_FIVE_MODEL.test(value)) return 1_000_000;
   // Claude Code's default assumption for standard and unrecognized model ids is
   // 200K. Keep a best-effort gauge for third-party bridges (for example a
   // DeepSeek model) instead of dropping the reading solely because its model id
@@ -63,12 +68,21 @@ function applyContextUsage(state, model, usage) {
   // `input_tokens` is required by Claude's usage shape. Treat a record without
   // it as incomplete rather than replacing the last valid reading with zero.
   if (inputTokens === null) return;
+  const optionalTokenCount = (key) => {
+    if (!Object.prototype.hasOwnProperty.call(usage, key)) return 0;
+    return reportedTokenCount(usage[key]);
+  };
+  const cacheCreationTokens = optionalTokenCount('cache_creation_input_tokens');
+  const cacheReadTokens = optionalTokenCount('cache_read_input_tokens');
+  // Cache counters are optional, but a counter that is present and malformed
+  // makes the whole measurement incomplete. Preserve the last valid reading.
+  if (cacheCreationTokens === null || cacheReadTokens === null) return;
   state.contextObserved = true;
   // Match Claude Code's status-line `used_percentage`: it is the current API
   // input occupancy and deliberately excludes this response's output_tokens.
   state.contextTokens = inputTokens
-    + tokenCount(usage.cache_creation_input_tokens)
-    + tokenCount(usage.cache_read_input_tokens);
+    + cacheCreationTokens
+    + cacheReadTokens;
   state.contextWindow = claudeContextWindow(model);
 }
 
@@ -95,16 +109,20 @@ function contextUsageFromFragments(head, tail) {
   }
   const usageText = tail.slice(usageAt);
   const number = (key) => {
-    const match = new RegExp(`"${key}"\\s*:\\s*(\\d+)`).exec(usageText);
-    return match ? Number(match[1]) : undefined;
+    const field = new RegExp(`"${key}"\\s*:`).exec(usageText);
+    if (!field) return { present: false };
+    const valueText = usageText.slice(field.index + field[0].length);
+    const match = /^\s*(?:"(\d+)"|(\d+))(?=\s*[,}])/.exec(valueText);
+    return { present: true, value: match ? Number(match[1] || match[2]) : null };
   };
+  const usage = {};
+  for (const key of ['input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens']) {
+    const field = number(key);
+    if (field.present) usage[key] = field.value;
+  }
   return {
     model,
-    usage: {
-      input_tokens: number('input_tokens'),
-      cache_creation_input_tokens: number('cache_creation_input_tokens'),
-      cache_read_input_tokens: number('cache_read_input_tokens')
-    }
+    usage
   };
 }
 
