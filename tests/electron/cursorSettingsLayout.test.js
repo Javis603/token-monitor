@@ -1462,6 +1462,139 @@ test('Factory identifies environment and Droid .env credentials separately', () 
   assert.equal((i18n.match(/'settings\.factory\.statusDroidEnv'/g) || []).length, 5);
 });
 
+test('Cline account panel validates an API key before saving and opens the allowlisted account page', () => {
+  const html = readRendererFile('index.html');
+  assert.match(html, /<div id="clineAccountGroup"[\s\S]*?<input id="clineApiKeyInput" type="password"[\s\S]*?<button id="clineApiKeySubmit"/);
+  assert.match(html, /reads the Cline sign-in that Cline Desktop and the CLI already store[\s\S]*the key is used ahead of that sign-in/);
+
+  const app = readRendererFile('app.js');
+  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
+  assert.match(setupBody, /const validation = await window\.tokenMonitor\.cline\.validateApiKey\(input\.value\);([\s\S]*?)if \(!validation\?\.ok\) \{([\s\S]*?)clineApiKeyValidationError\(validation\);([\s\S]*?)return;([\s\S]*?)await saveSettings\(\{ clineApiKey: input\.value \}\)/);
+  assert.match(setupBody, /submit\.disabled = true;[\s\S]*?submit\.textContent = t\('settings\.common\.checking'\);[\s\S]*?finally \{[\s\S]*?submit\.disabled = false;[\s\S]*?submit\.textContent = t\('settings\.cline\.saveApiKey'\)/);
+  assert.match(setupBody, /saveSettings\(\{ clineApiKey: '' \}\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(clinePlatformUrl\(\)\)/);
+  assert.match(functionBody(app, 'clinePlatformUrl', 'factoryPlatformUrl'), /return 'https:\/\/app\.cline\.bot\/dashboard\/account';/);
+
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
+  assert.match(preload, /validateApiKey: \(apiKey\) => ipcRenderer\.invoke\('cline:validateApiKey', apiKey\)/);
+  assert.match(main, /ipcMain\.handle\('cline:validateApiKey', \(_event, raw\) => validateClineApiKey\(raw\)\)/);
+  // The panel's one outbound link has to survive the same allowlist as every other
+  // provider console, which is what no assertion was checking when Cline shipped and
+  // the button silently did nothing. Asserted by running the predicate rather than by
+  // reading the list it lives in: the mechanism was never in doubt, only the entry.
+  const allowed = runMainFunction(
+    main,
+    'isAllowedExternalUrl',
+    'revealWindow',
+    `[
+      isAllowedExternalUrl('https://app.cline.bot/dashboard/account'),
+      isAllowedExternalUrl('https://app.cline.bot/'),
+      isAllowedExternalUrl('https://app.cline.bot.evil.example/dashboard/account'),
+      isAllowedExternalUrl('http://app.cline.bot/dashboard/account')
+    ]`,
+    {
+      // A fresh vm context has the language builtins but not the runtime's `URL`,
+      // which the predicate parses with; without it every URL would look forbidden.
+      URL,
+      settings: {},
+      process: { env: {} },
+      isAllowedVerificationUrl: () => false,
+      isAllowedCodexLoginUrl: () => false,
+      STATUS_PAGE_HOSTS: new Set()
+    }
+  );
+  assert.deepEqual(Array.from(allowed), [true, false, false, false]);
+  // The normalizer cleans the pasted value only; reading the environment is the
+  // resolver's job, so an empty field never falls back to an env key on save.
+  assert.doesNotMatch(functionBody(main, 'normalizeClineApiKey', 'currentClineApiKey'), /clineApiKey\(/);
+  assert.equal(runMainFunction(
+    main,
+    'currentClineApiKey',
+    'normalizeSecretSetting',
+    'currentClineApiKey()',
+    {
+      settings: { clineApiKey: '' },
+      clineApiKey: () => 'auto-detected-key',
+      process: { env: {} }
+    }
+  ), 'auto-detected-key');
+});
+
+test('Cline API key validation accepts only a successful provider probe', async () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const valid = await runMainFunction(
+    main,
+    'validateClineApiKey',
+    'normalizeSecretSetting',
+    `validateClineApiKey(' sk-live ', {
+      normalizeApiKey: value => value.trim(),
+      providerDeps: { transport: 'electron' },
+      fetchLimits: async (options, deps) => ({
+        status: options.clineApiKey === 'sk-live' && deps.transport === 'electron' ? 'ok' : 'unavailable'
+      })
+    })`
+  );
+  assert.equal(valid.ok, true);
+  assert.equal(valid.status, 'ok');
+
+  const invalid = await runMainFunction(
+    main,
+    'validateClineApiKey',
+    'normalizeSecretSetting',
+    `validateClineApiKey('1', {
+      normalizeApiKey: value => value.trim(),
+      providerDeps: {},
+      fetchLimits: async () => {
+        const error = new Error('rejected');
+        error.status = 'unauthorized';
+        throw error;
+      }
+    })`
+  );
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.status, 'unauthorized');
+  // An empty field is not a probe: nothing is asked, and nothing is claimed.
+  const empty = await runMainFunction(
+    main,
+    'validateClineApiKey',
+    'normalizeSecretSetting',
+    `validateClineApiKey('   ', { normalizeApiKey: value => value.trim(), fetchLimits: async () => { throw new Error('should not be called'); } })`
+  );
+  assert.equal(empty.ok, false);
+  assert.equal(empty.status, 'notConfigured');
+});
+
+test('Cline API key validation errors distinguish invalid, limited, and unavailable checks', () => {
+  const app = readRendererFile('app.js');
+  const messages = runRendererFunctions(
+    app,
+    ['clineApiKeyValidationError'],
+    `[
+      clineApiKeyValidationError({ status: 'unauthorized' }),
+      clineApiKeyValidationError({ status: 'sourceRateLimited' }),
+      clineApiKeyValidationError({ status: 'unavailable' })
+    ]`,
+    { t: key => key }
+  );
+  assert.deepEqual(Array.from(messages), [
+    'settings.cline.validationInvalid',
+    'settings.cline.validationRateLimited',
+    'settings.cline.validationUnavailable'
+  ]);
+
+  // Every cline string the UI can render exists in all five locales — the same
+  // completeness Antigravity copy is held to, derived here from the source of truth
+  // rather than hand-listed so a key added later cannot skip a locale.
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  const clineKeys = Object.keys(MESSAGES.en).filter((key) => key.startsWith('settings.cline.'));
+  assert.ok(clineKeys.length >= 16, `expected the Cline copy, found ${clineKeys.length} keys`);
+  for (const [locale, messages] of Object.entries(MESSAGES)) {
+    const missing = clineKeys.filter((key) => typeof messages[key] !== 'string');
+    assert.deepEqual(missing, [], `${locale} is missing Cline copy`);
+  }
+});
+
 test('Cline names the credential lane that went bad, not always the key field', () => {
   // One `unauthorized` status covers two lanes here, and this row is where a stale
   // sign-in and a rejected key have to read differently: Cline refreshes the stored
