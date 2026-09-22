@@ -643,8 +643,15 @@ test('the monthly spend is reported beside the credit, in its own unit', async (
   assert.equal(spend.limit, null);
   assert.equal(spend.currency, 'USD');
   assert.equal(spend.showMeter, false);
-  // The range is the local month to date, the window the API expects.
-  assert.deepEqual(queries, ['?startdate=2026-09-01&enddate=2026-09-21']);
+  // The range is the local month to date, the window the API expects. Asserted
+  // through the test's own local clock rather than a pinned UTC instant: a fixed
+  // string would be green on a UTC runner by construction and red at +14, which is
+  // what the CI offset matrix exists to catch.
+  const local = new Date(NOW);
+  const pad = (value) => String(value).padStart(2, '0');
+  const localMonth = `${local.getFullYear()}-${pad(local.getMonth() + 1)}-01`;
+  const localToday = `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())}`;
+  assert.deepEqual(queries, [`?startdate=${localMonth}&enddate=${localToday}`]);
 });
 
 test('a free-tier model is usage, not spend', async (t) => {
