@@ -32,6 +32,18 @@ const TOKEN_COMPONENT_KEYS = [
 const COST_KEYS = ['costUsd', 'cost_usd', 'costUSD', 'cost', 'totalCost', 'total_cost'];
 const MESSAGE_COUNT_KEYS = ['messageCount', 'message_count', 'messages', 'totalMessages', 'total_messages'];
 const SESSION_ID_KEYS = ['sessionId', 'session_id', 'session', 'conversationId', 'conversation_id', 'threadId', 'thread_id'];
+const GROK_IDENTITY_KEYS = [
+  'turnId', 'turn_id', 'eventId', 'event_id', 'messageId', 'message_id',
+  'requestId', 'request_id', 'completionId', 'completion_id', 'usageId', 'usage_id'
+];
+const GROK_IDENTITY_TYPES = new Map([
+  ['turnid', 'turn'],
+  ['eventid', 'event'],
+  ['messageid', 'message'],
+  ['requestid', 'request'],
+  ['completionid', 'completion'],
+  ['usageid', 'usage']
+]);
 const INPUT_TOKEN_KEYS = ['input', 'inputTokens', 'input_tokens', 'promptTokens', 'prompt_tokens', 'totalInput'];
 const OUTPUT_TOKEN_KEYS = ['output', 'outputTokens', 'output_tokens', 'completionTokens', 'completion_tokens', 'totalOutput'];
 const CACHE_READ_TOKEN_KEYS = ['cacheRead', 'cacheReadTokens', 'cache_read_tokens', 'cachedTokens', 'cached_tokens', 'cacheReadInputTokens', 'totalCacheRead'];
@@ -440,6 +452,127 @@ function detectModel(obj, client = detectClient(obj)) {
 
 function detectSessionId(obj) {
   return normalizeSessionId(firstString(obj, SESSION_ID_KEYS));
+}
+
+function explicitGrokIdentity(row) {
+  if (!row || typeof row !== 'object') return '';
+  for (const key of GROK_IDENTITY_KEYS) {
+    const value = firstString(row, [key]);
+    if (value) {
+      const type = GROK_IDENTITY_TYPES.get(key.replace(/_/g, '').toLowerCase()) || key;
+      return `${type}:${value}`;
+    }
+  }
+  return '';
+}
+
+// Grok 4.15 can expose one completed turn twice when a session's configured
+// model alias differs from the routed model in `usage.modelUsage`: the legacy
+// session scan carries the alias while the unified scan carries the routed
+// model. Tokscale's grouped JSON does not preserve source provenance, but the
+// two rows retain the same session, token buckets, and message count. A matching
+// pair is only removable when the local route config or an explicit turn/event
+// identity proves that both rows describe the same usage.
+function grokRowDuplicateKey(row) {
+  if (detectClient(row) !== 'grok') return null;
+  const session = detectSessionId(row);
+  const model = detectModel(row, 'grok');
+  if (!session || !model) return null;
+  const components = [
+    tokenValueForClient(row, 'grok'),
+    firstNumber(row, INPUT_TOKEN_KEYS),
+    firstNumber(row, OUTPUT_TOKEN_KEYS),
+    firstNumber(row, CACHE_READ_TOKEN_KEYS),
+    firstNumber(row, CACHE_WRITE_TOKEN_KEYS),
+    firstNumber(row, REASONING_TOKEN_KEYS),
+    firstNumber(row, MESSAGE_COUNT_KEYS)
+  ];
+  return `${session}|${components.join('|')}`;
+}
+
+function configuredGrokTarget(model, aliases) {
+  const source = normalizeModelName(model);
+  if (!source || !aliases || typeof aliases !== 'object') return null;
+  const entries = aliases instanceof Map ? aliases.entries() : Object.entries(aliases);
+  for (const [alias, routed] of entries) {
+    if (normalizeModelName(alias) !== source) continue;
+    const target = normalizeModelName(routed);
+    return target && target !== source ? target : null;
+  }
+  return null;
+}
+
+function sameExplicitGrokIdentity(left, right) {
+  const leftIdentity = explicitGrokIdentity(left.row);
+  const rightIdentity = explicitGrokIdentity(right.row);
+  return Boolean(leftIdentity && leftIdentity === rightIdentity);
+}
+
+function uniquelyRoutedGrokRow(first, second) {
+  const firstRouted = normalizeModelName(first.model).includes('/');
+  const secondRouted = normalizeModelName(second.model).includes('/');
+  if (firstRouted === secondRouted) return null;
+  return firstRouted ? first : second;
+}
+
+function mergeGrokDuplicateRows(alias, routed) {
+  const aliasCost = costValue(alias.row);
+  const routedCost = costValue(routed.row);
+  return {
+    ...alias.row,
+    ...routed.row,
+    // Keep the routed model identity, but retain cost metadata when only the
+    // legacy alias row carried it. Prefer the routed row when both are set so
+    // a duplicated cost is never added twice.
+    costUsd: routedCost > 0 ? routedCost : aliasCost
+  };
+}
+
+function deduplicateGrokUsageRows(rows, options = {}) {
+  const groups = new Map();
+  rows.forEach((row, index) => {
+    const key = grokRowDuplicateKey(row);
+    if (!key) {
+      return;
+    }
+    const group = groups.get(key) || [];
+    group.push({ index, row, model: detectModel(row, 'grok') });
+    groups.set(key, group);
+  });
+
+  const replacements = new Map();
+  const skipped = new Set();
+  for (const group of groups.values()) {
+    // More than two rows, or two rows for the same model, remain additive. The
+    // remaining checks below require independent evidence before dropping one.
+    if (group.length !== 2) continue;
+    const [first, second] = group;
+    if (normalizeModelName(first.model) === normalizeModelName(second.model)) continue;
+    const firstTarget = configuredGrokTarget(first.model, options.grokModelAliases);
+    const secondTarget = configuredGrokTarget(second.model, options.grokModelAliases);
+    const alias = firstTarget === normalizeModelName(second.model)
+      ? first
+      : secondTarget === normalizeModelName(first.model) ? second : null;
+    const configuredRouted = alias === first ? second : alias === second ? first : null;
+    const hasExplicitIdentity = sameExplicitGrokIdentity(first, second);
+    const explicitRouted = !alias && hasExplicitIdentity ? uniquelyRoutedGrokRow(first, second) : null;
+    if (!configuredRouted && !explicitRouted) continue;
+    const keptAlias = alias || (explicitRouted === first ? second : first);
+    const keptRouted = configuredRouted || explicitRouted;
+    replacements.set(keptAlias.index, mergeGrokDuplicateRows(keptAlias, keptRouted));
+    skipped.add(keptRouted.index);
+  }
+
+  const result = [];
+  rows.forEach((row, index) => {
+    if (skipped.has(index)) return;
+    if (replacements.has(index)) {
+      result.push(replacements.get(index));
+      return;
+    }
+    result.push(row);
+  });
+  return result;
 }
 
 function sessionKey(client, sessionId) {
@@ -921,10 +1054,11 @@ function fallbackUsagePeriod(json) {
 // pass. The partitions stay collector-internal; they let a watch tick replace
 // only the client whose files changed without reconstructing model/cache/project
 // attribution from the already-aggregated public period.
-function extractUsageBundleFromTokscale(json) {
+function extractUsageBundleFromTokscale(json, options = {}) {
   const rows = [];
   collectUsageRows(json, rows);
-  if (rows.length === 0 && json && typeof json === 'object') {
+  const deduplicatedRows = deduplicateGrokUsageRows(rows, options);
+  if (deduplicatedRows.length === 0 && json && typeof json === 'object') {
     const period = fallbackUsagePeriod(json);
     return {
       period,
@@ -933,7 +1067,7 @@ function extractUsageBundleFromTokscale(json) {
   }
   const period = emptyPeriod();
   const byClient = Object.create(null);
-  for (const row of rows) {
+  for (const row of deduplicatedRows) {
     const client = detectClient(row);
     const partitionKey = client || UNATTRIBUTED_USAGE_CLIENT;
     if (!byClient[partitionKey]) byClient[partitionKey] = emptyPeriod();
@@ -943,12 +1077,13 @@ function extractUsageBundleFromTokscale(json) {
   return { period, byClient };
 }
 
-function extractUsageFromTokscale(json) {
+function extractUsageFromTokscale(json, options = {}) {
   const rows = [];
   collectUsageRows(json, rows);
-  if (rows.length === 0 && json && typeof json === 'object') return fallbackUsagePeriod(json);
+  const deduplicatedRows = deduplicateGrokUsageRows(rows, options);
+  if (deduplicatedRows.length === 0 && json && typeof json === 'object') return fallbackUsagePeriod(json);
   const period = emptyPeriod();
-  for (const row of rows) addUsageRowToPeriod(period, row);
+  for (const row of deduplicatedRows) addUsageRowToPeriod(period, row);
   return period;
 }
 

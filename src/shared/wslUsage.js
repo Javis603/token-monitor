@@ -2,10 +2,12 @@
 
 const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
+const path = require('node:path');
 const { throwIfAborted } = require('./abortSignal');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 const { buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
+const { readGrokModelAliases } = require('./providers/grok/modelAliases');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 
@@ -244,6 +246,8 @@ async function collectWslUsage(options = {}, deps = {}) {
     .join(',');
   for (const home of wslUsageHomes(deps)) {
     throwIfAborted(options.signal, 'WSL usage scan aborted');
+    const grokModelAliases = options.grokModelAliasesByHome?.[home]
+      || readGrokModelAliases({ grokHome: path.join(home, '.grok') }, deps);
     // Attribution is marker-based, independent of whether a parser returns data.
     const homeDataClients = homeHasData(home, existsSync, readdirSync);
     for (const id of homeDataClients) {
@@ -268,9 +272,9 @@ async function collectWslUsage(options = {}, deps = {}) {
           promaOptions.pricingByModel = options.promaPricingByModel;
         }
         const proma = buildProma(promaOptions);
-        bundle.today = mergePeriods(bundle.today, extractUsageFromTokscale(proma.today));
-        bundle.month = mergePeriods(bundle.month, extractUsageFromTokscale(proma.month));
-        bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(proma.allTime));
+        bundle.today = mergePeriods(bundle.today, extractUsageFromTokscale(proma.today, { grokModelAliases }));
+        bundle.month = mergePeriods(bundle.month, extractUsageFromTokscale(proma.month, { grokModelAliases }));
+        bundle.allTime = mergePeriods(bundle.allTime, extractUsageFromTokscale(proma.allTime, { grokModelAliases }));
       } catch (error) {
         if (typeof logger === 'function') logger(`wsl Proma usage parse failed for ${home}: ${error.message}`);
       }
@@ -288,9 +292,9 @@ async function collectWslUsage(options = {}, deps = {}) {
       const allTimeJson = await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal, 'WSL usage scan aborted');
       const periods = {
-        today: extractUsageFromTokscale(todayJson),
-        month: extractUsageFromTokscale(monthJson),
-        allTime: extractUsageFromTokscale(allTimeJson)
+        today: extractUsageFromTokscale(todayJson, { grokModelAliases }),
+        month: extractUsageFromTokscale(monthJson, { grokModelAliases }),
+        allTime: extractUsageFromTokscale(allTimeJson, { grokModelAliases })
       };
       if (typeof decoratePeriods === 'function') decoratePeriods(periods, home);
       bundle.today = mergePeriods(bundle.today, periods.today);

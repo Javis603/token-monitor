@@ -57,6 +57,7 @@ const {
   kimiWorkSessionsRoots
 } = require('./providers/kimi/sessionMetadata');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
+const { readGrokModelAliases } = require('./providers/grok/modelAliases');
 const {
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
@@ -1089,6 +1090,10 @@ function shouldIncludeHistory(nowMs, lastHistoryAtMs, historyIntervalMs, force, 
 async function collectUsageOnce(options) {
   throwIfAborted(options.signal);
   const { clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion = appVersion(), agentRuntime = '' } = options;
+  const grokModelAliases = options.grokModelAliases ?? readGrokModelAliases({
+    env: options.env || process.env,
+    grokHome: options.grokHome
+  });
   // One snapshot, one instant: capture the clock before any tokscale scan and
   // reuse it for the today-window key and updatedAt, so a collection that
   // straddles local midnight cannot pair a day-N today scan with a day-N+1
@@ -1226,9 +1231,9 @@ async function collectUsageOnce(options) {
         });
         const promaJson = buildPromaPeriods({ now: collectedAt, allTimeSince, rows: promaRows, pricingByModel: promaPricing });
         promaPeriods = {
-          today: extractUsageFromTokscale(promaJson.today),
-          month: extractUsageFromTokscale(promaJson.month),
-          allTime: extractUsageFromTokscale(promaJson.allTime)
+          today: extractUsageFromTokscale(promaJson.today, { grokModelAliases }),
+          month: extractUsageFromTokscale(promaJson.month, { grokModelAliases }),
+          allTime: extractUsageFromTokscale(promaJson.allTime, { grokModelAliases })
         };
       } catch (err) {
         if (typeof options.logger === 'function') options.logger(`proma parse failed: ${err.message}`);
@@ -1270,7 +1275,7 @@ async function collectUsageOnce(options) {
       if (scanClients) {
         const todayJson = await runTokscaleFn({ clients: scanClients, flags: ['--today'], commandTimeoutMs, signal: options.signal });
         throwIfAborted(options.signal);
-        const bundle = extractUsageBundleFromTokscale(todayJson);
+        const bundle = extractUsageBundleFromTokscale(todayJson, { grokModelAliases });
         freshPartitions = bundle.byClient;
         const unattributed = freshPartitions[UNATTRIBUTED_USAGE_CLIENT];
         const attributedClients = Object.keys(freshPartitions).filter((client) => client !== UNATTRIBUTED_USAGE_CLIENT);
@@ -1295,7 +1300,7 @@ async function collectUsageOnce(options) {
           // anchor partition. Rebuild the complete today snapshot instead.
           const fullTodayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs, signal: options.signal });
           throwIfAborted(options.signal);
-          freshPartitions = extractUsageBundleFromTokscale(fullTodayJson).byClient;
+          freshPartitions = extractUsageBundleFromTokscale(fullTodayJson, { grokModelAliases }).byClient;
           useTargetedPartitions = false;
         } else if (targetRequested) {
           // Empty tokscale output uses the unattributed fallback shape. Keep the
@@ -1335,19 +1340,19 @@ async function collectUsageOnce(options) {
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
       const todayJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--today'], commandTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal);
-      const todayBundle = extractUsageBundleFromTokscale(todayJson);
+      const todayBundle = extractUsageBundleFromTokscale(todayJson, { grokModelAliases });
       today = todayBundle.period;
       todayPartitions = todayBundle.byClient;
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today });
       emitProgress({ today });
       const monthJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--month'], commandTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal);
-      month = extractUsageFromTokscale(monthJson);
+      month = extractUsageFromTokscale(monthJson, { grokModelAliases });
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
       emitProgress({ today, month });
       const allTimeJson = await runTokscaleFn({ clients: tokscaleClients, flags: ['--since', allTimeSince], commandTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal);
-      allTime = extractUsageFromTokscale(allTimeJson);
+      allTime = extractUsageFromTokscale(allTimeJson, { grokModelAliases });
     }
     // Always decorate: session timestamps drive the recency sort regardless of the
     // Projects opt-out (issue #182). decorateLocalPeriods gates only project identity

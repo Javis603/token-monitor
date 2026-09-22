@@ -978,6 +978,123 @@ test('extractUsageFromTokscale keeps model usage grouped by client', () => {
   assert.equal(period.clientModels.codex['gpt-5'], 50);
 });
 
+test('extractUsageFromTokscale deduplicates Grok alias and routed model rows', () => {
+  const input = {
+    groupBy: 'client,session,model',
+    entries: [
+      {
+        client: 'grok', sessionId: 'session-alias', model: 'grok-4.5', provider: 'xai',
+        input: 100, output: 20, messageCount: 1, cost: 56
+      },
+      {
+        client: 'grok', sessionId: 'session-alias', model: 'stealth/ox-alpha', provider: 'xai',
+        input: 100, output: 20, messageCount: 1, cost: 0
+      }
+    ]
+  };
+  const options = { grokModelAliases: { 'grok-4.5': 'stealth/ox-alpha' } };
+  const period = extractUsageFromTokscale(input, options);
+
+  assert.equal(period.totalTokens, 120);
+  assert.equal(period.costUsd, 56);
+  assert.deepEqual(period.models, { 'stealth/ox-alpha': 120 });
+  assert.deepEqual(period.clientModels.grok, { 'stealth/ox-alpha': 120 });
+  assert.deepEqual(period.clientModelCosts.grok, { 'stealth/ox-alpha': 56 });
+  assert.equal(period.sessions['grok:session-alias'].totalTokens, 120);
+  assert.deepEqual(period.sessions['grok:session-alias'].models, { 'stealth/ox-alpha': 120 });
+
+  const bundle = extractUsageBundleFromTokscale(input, options);
+  assert.equal(bundle.period.totalTokens, 120);
+  assert.equal(bundle.byClient.grok.totalTokens, 120);
+  assert.deepEqual(bundle.byClient.grok.models, { 'stealth/ox-alpha': 120 });
+});
+
+test('extractUsageFromTokscale preserves additive Grok rows beyond an alias/routed pair', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'grok', sessionId: 'session-many', model: 'grok-4.5', input: 10, output: 2, cost: 5 },
+    { client: 'grok', sessionId: 'session-many', model: 'stealth/ox-alpha', input: 10, output: 2 },
+    { client: 'grok', sessionId: 'session-many', model: 'openrouter/other', input: 10, output: 2 }
+  ]);
+
+  assert.equal(period.totalTokens, 36);
+  assert.equal(period.costUsd, 5);
+  assert.deepEqual(period.models, {
+    'grok-4.5': 12,
+    'stealth/ox-alpha': 12,
+    'openrouter/other': 12
+  });
+});
+
+test('extractUsageFromTokscale preserves an ambiguous Grok alias/routed pair without config evidence', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'grok', sessionId: 'session-ambiguous', model: 'grok-4.5', input: 10, output: 2, cost: 5 },
+    { client: 'grok', sessionId: 'session-ambiguous', model: 'stealth/ox-alpha', input: 10, output: 2 }
+  ]);
+
+  assert.equal(period.totalTokens, 24);
+  assert.equal(period.costUsd, 5);
+  assert.deepEqual(period.models, { 'grok-4.5': 12, 'stealth/ox-alpha': 12 });
+});
+
+test('extractUsageFromTokscale deduplicates Grok rows with an explicit turn identity', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'grok', sessionId: 'session-turn', model: 'grok-4.5', turnId: 'turn-1', input: 10, output: 2, cost: 5 },
+    { client: 'grok', sessionId: 'session-turn', model: 'stealth/ox-alpha', turn_id: 'turn-1', input: 10, output: 2 }
+  ]);
+
+  assert.equal(period.totalTokens, 12);
+  assert.deepEqual(period.models, { 'stealth/ox-alpha': 12 });
+  assert.equal(period.costUsd, 5);
+});
+
+test('extractUsageFromTokscale identifies a reversed explicit-identity alias/routed pair', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'grok', sessionId: 'session-reversed', model: 'stealth/ox-alpha', event_id: 'event-1', input: 10, output: 2 },
+    { client: 'grok', sessionId: 'session-reversed', model: 'grok-4.5', eventId: 'event-1', input: 10, output: 2, cost: 5 }
+  ]);
+
+  assert.equal(period.totalTokens, 12);
+  assert.deepEqual(period.models, { 'stealth/ox-alpha': 12 });
+  assert.equal(period.costUsd, 5);
+});
+
+test('extractUsageFromTokscale preserves explicit-identity pairs when both models are routed', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'grok', sessionId: 'session-routed', model: 'openrouter/model-a', turnId: 'turn-2', input: 10, output: 2 },
+    { client: 'grok', sessionId: 'session-routed', model: 'stealth/model-b', turn_id: 'turn-2', input: 10, output: 2 }
+  ]);
+
+  assert.equal(period.totalTokens, 24);
+  assert.deepEqual(period.models, {
+    'openrouter/model-a': 12,
+    'stealth/model-b': 12
+  });
+});
+
+test('extractUsageFromTokscale preserves same-model Grok rows and rows without sessions', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'grok', sessionId: 'session-same', model: 'grok-4.5', input: 10, output: 2 },
+    { client: 'grok', sessionId: 'session-same', model: 'grok-4.5', input: 10, output: 2 },
+    { client: 'grok', model: 'grok-4.5', input: 10, output: 2 },
+    { client: 'grok', model: 'stealth/ox-alpha', input: 10, output: 2 }
+  ]);
+
+  assert.equal(period.totalTokens, 48);
+  assert.equal(period.models['grok-4.5'], 36);
+  assert.equal(period.models['stealth/ox-alpha'], 12);
+});
+
+test('extractUsageFromTokscale preserves distinct routed Grok models with matching buckets', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'grok', sessionId: 'session-switch', model: 'openrouter/model-a', input: 10, output: 2 },
+    { client: 'grok', sessionId: 'session-switch', model: 'stealth/model-b', input: 10, output: 2 }
+  ]);
+
+  assert.equal(period.totalTokens, 24);
+  assert.equal(period.models['openrouter/model-a'], 12);
+  assert.equal(period.models['stealth/model-b'], 12);
+});
+
 test('extractUsageBundleFromTokscale partitions every aggregate field exactly by client', () => {
   const bundle = extractUsageBundleFromTokscale({
     entries: [
