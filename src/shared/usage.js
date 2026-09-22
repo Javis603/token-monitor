@@ -29,6 +29,10 @@ const TOKEN_COMPONENT_KEYS = [
 const COST_KEYS = ['costUsd', 'cost_usd', 'costUSD', 'cost', 'totalCost', 'total_cost'];
 const MESSAGE_COUNT_KEYS = ['messageCount', 'message_count', 'messages', 'totalMessages', 'total_messages'];
 const SESSION_ID_KEYS = ['sessionId', 'session_id', 'session', 'conversationId', 'conversation_id', 'threadId', 'thread_id'];
+const GROK_IDENTITY_KEYS = [
+  'turnId', 'turn_id', 'eventId', 'event_id', 'messageId', 'message_id',
+  'requestId', 'request_id', 'completionId', 'completion_id', 'usageId', 'usage_id'
+];
 const INPUT_TOKEN_KEYS = ['input', 'inputTokens', 'input_tokens', 'promptTokens', 'prompt_tokens', 'totalInput'];
 const OUTPUT_TOKEN_KEYS = ['output', 'outputTokens', 'output_tokens', 'completionTokens', 'completion_tokens', 'totalOutput'];
 const CACHE_READ_TOKEN_KEYS = ['cacheRead', 'cacheReadTokens', 'cache_read_tokens', 'cachedTokens', 'cached_tokens', 'cacheReadInputTokens', 'totalCacheRead'];
@@ -438,12 +442,22 @@ function detectSessionId(obj) {
   return normalizeSessionId(firstString(obj, SESSION_ID_KEYS));
 }
 
+function explicitGrokIdentity(row) {
+  if (!row || typeof row !== 'object') return '';
+  for (const key of GROK_IDENTITY_KEYS) {
+    const value = firstString(row, [key]);
+    if (value) return `${key}:${value}`;
+  }
+  return '';
+}
+
 // Grok 4.15 can expose one completed turn twice when a session's configured
 // model alias differs from the routed model in `usage.modelUsage`: the legacy
 // session scan carries the alias while the unified scan carries the routed
 // model. Tokscale's grouped JSON does not preserve source provenance, but the
-// two rows retain the same session, token buckets, and message count. Keep the
-// routed (provider/model) row and discard only that exact cross-model duplicate.
+// two rows retain the same session, token buckets, and message count. A matching
+// pair is only removable when the local route config or an explicit turn/event
+// identity proves that both rows describe the same usage.
 function grokRowDuplicateKey(row) {
   if (detectClient(row) !== 'grok') return null;
   const session = detectSessionId(row);
@@ -461,12 +475,22 @@ function grokRowDuplicateKey(row) {
   return `${session}|${components.join('|')}`;
 }
 
-function isGrokConfiguredAlias(model) {
-  return /^grok(?:[-_.]|$)/i.test(String(model || '')) && !String(model).includes('/');
+function configuredGrokTarget(model, aliases) {
+  const source = normalizeModelName(model);
+  if (!source || !aliases || typeof aliases !== 'object') return null;
+  const entries = aliases instanceof Map ? aliases.entries() : Object.entries(aliases);
+  for (const [alias, routed] of entries) {
+    if (normalizeModelName(alias) !== source) continue;
+    const target = normalizeModelName(routed);
+    return target && target !== source ? target : null;
+  }
+  return null;
 }
 
-function isGrokRoutedModel(model) {
-  return String(model || '').includes('/');
+function sameExplicitGrokIdentity(left, right) {
+  const leftIdentity = explicitGrokIdentity(left.row);
+  const rightIdentity = explicitGrokIdentity(right.row);
+  return Boolean(leftIdentity && leftIdentity === rightIdentity);
 }
 
 function mergeGrokDuplicateRows(alias, routed) {
@@ -482,7 +506,7 @@ function mergeGrokDuplicateRows(alias, routed) {
   };
 }
 
-function deduplicateGrokUsageRows(rows) {
+function deduplicateGrokUsageRows(rows, options = {}) {
   const groups = new Map();
   rows.forEach((row, index) => {
     const key = grokRowDuplicateKey(row);
@@ -497,15 +521,24 @@ function deduplicateGrokUsageRows(rows) {
   const replacements = new Map();
   const skipped = new Set();
   for (const group of groups.values()) {
-    // A grouped report has no source identifier, so require the exact shape
-    // of Tokscale's known alias/routed pair before dropping anything. A pair
-    // of arbitrary models, or more than two rows, remains additive.
+    // More than two rows, or two rows for the same model, remain additive. The
+    // remaining checks below require independent evidence before dropping one.
     if (group.length !== 2) continue;
-    const alias = group.find((entry) => isGrokConfiguredAlias(entry.model));
-    const routed = group.find((entry) => isGrokRoutedModel(entry.model));
-    if (!alias || !routed) continue;
-    replacements.set(alias.index, mergeGrokDuplicateRows(alias, routed));
-    skipped.add(routed.index);
+    const [first, second] = group;
+    if (normalizeModelName(first.model) === normalizeModelName(second.model)) continue;
+    const firstTarget = configuredGrokTarget(first.model, options.grokModelAliases);
+    const secondTarget = configuredGrokTarget(second.model, options.grokModelAliases);
+    const alias = firstTarget === normalizeModelName(second.model)
+      ? first
+      : secondTarget === normalizeModelName(first.model) ? second : null;
+    const routed = alias === first ? second : alias === second ? first : null;
+    const hasConfiguredRoute = Boolean(alias && routed);
+    const hasExplicitIdentity = sameExplicitGrokIdentity(first, second);
+    if (!hasConfiguredRoute && !hasExplicitIdentity) continue;
+    const keptAlias = alias || first;
+    const keptRouted = routed || second;
+    replacements.set(keptAlias.index, mergeGrokDuplicateRows(keptAlias, keptRouted));
+    skipped.add(keptRouted.index);
   }
 
   const result = [];
@@ -945,10 +978,10 @@ function fallbackUsagePeriod(json) {
 // pass. The partitions stay collector-internal; they let a watch tick replace
 // only the client whose files changed without reconstructing model/cache/project
 // attribution from the already-aggregated public period.
-function extractUsageBundleFromTokscale(json) {
+function extractUsageBundleFromTokscale(json, options = {}) {
   const rows = [];
   collectUsageRows(json, rows);
-  const deduplicatedRows = deduplicateGrokUsageRows(rows);
+  const deduplicatedRows = deduplicateGrokUsageRows(rows, options);
   if (deduplicatedRows.length === 0 && json && typeof json === 'object') {
     const period = fallbackUsagePeriod(json);
     return {
@@ -968,10 +1001,10 @@ function extractUsageBundleFromTokscale(json) {
   return { period, byClient };
 }
 
-function extractUsageFromTokscale(json) {
+function extractUsageFromTokscale(json, options = {}) {
   const rows = [];
   collectUsageRows(json, rows);
-  const deduplicatedRows = deduplicateGrokUsageRows(rows);
+  const deduplicatedRows = deduplicateGrokUsageRows(rows, options);
   if (deduplicatedRows.length === 0 && json && typeof json === 'object') return fallbackUsagePeriod(json);
   const period = emptyPeriod();
   for (const row of deduplicatedRows) addUsageRowToPeriod(period, row);
