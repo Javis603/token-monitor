@@ -10,6 +10,10 @@ const { claudeSessionRoots } = require('./providers/claude/paths');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { qoderCnDataPaths } = require('./providers/qodercn/usage');
+const {
+  GCMP_SOURCE_CHECK_ID,
+  gcmpUsagesRoots
+} = require('./providers/gcmp/usage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 const {
@@ -356,6 +360,12 @@ function clientSourceRoots(clientsCsv, options = {}) {
   );
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
+  // AI Chat Models (vicanent.gcmp) — per-hour usage JSONL under each VS Code
+  // variant's globalStorage. Watch the usages dir directly; its parent holds
+  // only state this extension rewrites itself (inter-instance events), and the
+  // per-hour tree is what a tick actually reads.
+  add('gcmp', ...gcmpUsagesRoots({ homeDir: home, platform, env })
+    .map((dir) => [GCMP_SOURCE_CHECK_ID, dir]));
   // Qoder CN — legacy SQLite DB under the platform Application Support dir,
   // or the JSONL transcript tree used by current builds.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform, env });

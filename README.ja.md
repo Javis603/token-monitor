@@ -48,6 +48,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/`（`sessions/`、`logs/unified.jsonl`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`、`~/.copilot/`（`otel/`、`data.db`、`session-store.db`） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/gcmp.png" width="28" alt="AI Chat Models" /> | AI Chat Models | VS Code `globalStorage/vicanent.gcmp/usages/` の 1 時間ごとの JSONL（AI Chat Models 拡張経由の Copilot Chat 利用、オプトイン） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
@@ -96,6 +97,12 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 Qoder CN のトークン使用量は API ではなくアプリのローカルデータから読み取ります。Settings → tools で有効化します（オプトイン、デフォルト無効）。現行版は Qoder 設定ディレクトリの `projects` JSONL（通常 `~/.qoder-cn/projects`）、旧版は SQLite を使用し、アダプターは両方を読み取ります。JSONL パスの優先順位は `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`、既定値です。旧データベースは `TOKEN_MONITOR_QODER_CN_DB_PATH` で上書きできます。[Qoder のデータソース](docs/providers/qodercn.md)も参照してください。
 
 これは高度なローカル統合です。JSONL に追加ランタイムは不要ですが、旧 SQLite の読み取りには PATH 上の `sqlite3` CLI、またはフラグ不要の `node:sqlite` を備えた Node ランタイム（Node ≥ 22.15、Electron では CLI が必要な場合あり）が必要です。読み取り失敗時は最後の完全なスナップショットを保持します。実測トークン欄がある JSONL 行だけを集計します。現行のファーストパーティープラン行は credits と context 比率だけの場合があり、信頼できるセッション単位の context window がないためトークンを推測しません。Credits は AI Tool Limits に表示され、実測トークンを持つ BYOK／カスタムモデルは通常どおり集計されます。
+
+#### AI Chat Models（ローカルアダプター）
+
+AI Chat Models（`vicanent.gcmp`）のトークン使用量は、VS Code globalStorage 下に 1 時間ごとに書き込まれる usage JSONL から読み取ります。Settings → tools で有効化します（オプトイン、デフォルト無効）。最終ステータスが `completed` の記録のみを集計し、estimated のプレースホルダー行は無視します。記録済みのキャッシュトークンとコスト推定値はそのまま使用します。
+
+この拡張が記録した各リクエストは、GitHub Copilot 行のデータソースである VS Code 自身の `workspaceStorage/*/chatSessions/` にも現れます。両方を同時に有効化すると同じリクエストが二重に集計されるため、どちらか一方のみを有効にしてください。
 </details>
 
 ## ショーケース

@@ -85,7 +85,7 @@ struct MediumUsageWidgetView: View {
         snapshot.tools.map {
             WidgetBreakdownRow(
                 id: $0.id,
-                label: $0.displayName ?? WidgetFormat.provider($0.id),
+                label: WidgetFormat.provider($0.id),
                 vendorID: $0.id,
                 tokens: $0.totalTokens,
                 share: $0.sharePercent
@@ -196,7 +196,7 @@ struct LargeDashboardWidgetView: View {
     private var breakdownRows: [WidgetBreakdownRow] {
         if usesTools {
             return snapshot.tools.map {
-                WidgetBreakdownRow(id: $0.id, label: $0.displayName ?? WidgetFormat.provider($0.id), vendorID: $0.id, tokens: $0.totalTokens, share: $0.sharePercent)
+                WidgetBreakdownRow(id: $0.id, label: WidgetFormat.provider($0.id), vendorID: $0.id, tokens: $0.totalTokens, share: $0.sharePercent)
             }
         }
         return snapshot.models.map {
@@ -276,7 +276,6 @@ struct MediumBreakdownModule: View {
 }
 
 struct BreakdownRow: View {
-    @Environment(\.widgetVendorPalette) private var vendorPalette
     let row: WidgetBreakdownRow
     let presentation: WidgetPresentation
 
@@ -298,13 +297,12 @@ struct BreakdownRow: View {
                     .foregroundStyle(.tertiary)
                     .frame(width: 30, alignment: .trailing)
             }
-            PercentageBar(value: row.share, color: vendorPalette.color(for: row.vendorID))
+            PercentageBar(value: row.share, color: WidgetVendorIdentity.color(for: row.vendorID))
         }
     }
 }
 
 struct DashboardBreakdownModule: View {
-    @Environment(\.widgetVendorPalette) private var vendorPalette
     let title: String
     let rows: [WidgetBreakdownRow]
     let presentation: WidgetPresentation
@@ -334,7 +332,7 @@ struct DashboardBreakdownModule: View {
                                         .monospacedDigit()
                                         .foregroundStyle(.secondary)
                                 }
-                                PercentageBar(value: row.share, color: vendorPalette.color(for: row.vendorID))
+                                PercentageBar(value: row.share, color: WidgetVendorIdentity.color(for: row.vendorID))
                             }
                         }
                     }
@@ -428,7 +426,6 @@ struct DashboardQuotaModule: View {
 
 private struct DashboardQuotaProviderRow: View {
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
-    @Environment(\.widgetVendorPalette) private var vendorPalette
     let provider: WidgetQuotaProvider
     let showAccountLabel: Bool
     let isStale: Bool
@@ -469,7 +466,7 @@ private struct DashboardQuotaProviderRow: View {
                     ForEach(visibleWindows) { window in
                         DashboardQuotaWindowCell(
                             window: window,
-                            color: vendorPalette.color(for: provider.provider),
+                            color: WidgetVendorIdentity.color(for: provider.provider),
                             isStale: isStale
                         )
                     }
@@ -528,7 +525,6 @@ private struct DashboardQuotaWindowCell: View {
 
 struct QuotaProviderRow: View {
     @Environment(\.accessibilityDifferentiateWithoutColor) private var differentiateWithoutColor
-    @Environment(\.widgetVendorPalette) private var vendorPalette
     let provider: WidgetQuotaProvider
     let showAccountLabel: Bool
     let isStale: Bool
@@ -568,7 +564,7 @@ struct QuotaProviderRow: View {
                     ForEach(visibleWindows) { window in
                         QuotaWindowCell(
                             window: window,
-                            color: vendorPalette.color(for: provider.provider),
+                            color: WidgetVendorIdentity.color(for: provider.provider),
                             isStale: isStale
                         )
                     }
@@ -669,30 +665,47 @@ enum WidgetVendorIdentity {
         if matches("^big-pickle$") { return "opencode" }
         return "default"
     }
-}
 
-extension WidgetVendorPalette {
-    func color(for vendorID: String) -> Color {
-        switch ink(for: vendorID) {
-        case .adaptive: Color.white.opacity(0.86)
-        case .hex(let hex): Color(widgetHex: hex)
+    static func iconName(for vendorID: String) -> String {
+        switch vendorID.lowercased() {
+        case "chatgpt": "codex"
+        case "hermes": "hermes-agent"
+        // `micode` is the pre-rename tracked-client id, kept so a snapshot
+        // written by an older app build still resolves to a mark.
+        case "mimo", "micode": "xiaomi"
+        case "zcode", "zaiteam": "zai"
+        default: vendorID.lowercased()
         }
     }
-}
 
-private struct WidgetVendorPaletteKey: EnvironmentKey {
-    static let defaultValue = WidgetVendorPalette(styles: [:])
-}
-
-extension EnvironmentValues {
-    var widgetVendorPalette: WidgetVendorPalette {
-        get { self[WidgetVendorPaletteKey.self] }
-        set { self[WidgetVendorPaletteKey.self] = newValue }
+    static func color(for vendorID: String) -> Color {
+        let colors: [String: String] = [
+            "claude": "#CC7C5E", "codex": "#49A3B0", "hermes": "#D4AF37",
+            "gemini": "#4285F4", "antigravity": "#4285F4", "cline": "#53616D",
+            "amp": "#F34E3F",
+            "deepseek": "#4D6BFE", "openrouter": "#6566F1", "openclaw": "#FF4D4D",
+            "meta": "#4385DB", "mistral": "#FA520F", "qwen": "#7771F4",
+            "zed": "#5C8BFF", "kilo": "#F8F676", "commandcode": "#9D66E7",
+            "kiro": "#A66AFF", "codebuddy": "#8064FF", "workbuddy": "#0DC8A5",
+            "qodercn": "#2ADB5C", "qoder": "#2ADB5C", "reasonix": "#4D6BFE",
+            "gcmp": "#3B82F6",
+            "dsh": "#4D6BFE", "cherrystudio": "#EA5E5D", "lmstudio": "#8074E8",
+            "unsloth": "#40B85A", "cohere": "#66937D", "xiaomi": "#000000",
+            "mimo": "#000000", "micode": "#000000", "minimax": "#F23F5D",
+            "doubao": "#5064FF", "hunyuan": "#277DE3", "volcengine": "#2A88FF",
+            "nvidia": "#74B71B",
+            "trae": "#32F08C", "alibaba": "#7771F4", "thirdparty": "#8090A6",
+            "default": "#6AB4F0"
+        ]
+        // Vendor marks whose app colour is too dark to read against the widget's dark
+        // background render as light ink instead.
+        let adaptiveInk = ["grok", "xai", "copilot", "cursor", "opencode", "pi", "zai", "zaiteam", "zcode", "proma", "kimi", "moonshot", "ollama", "devin", "droid", "micode", "mimo", "xiaomi", "stepfun"]
+        if adaptiveInk.contains(vendorID.lowercased()) { return Color.white.opacity(0.86) }
+        return Color(widgetHex: colors[vendorID.lowercased()] ?? colors["default"]!)
     }
 }
 
 struct WidgetVendorMark: View {
-    @Environment(\.widgetVendorPalette) private var vendorPalette
     let vendorID: String
     let size: CGFloat
     var isMuted = false
@@ -714,7 +727,7 @@ struct WidgetVendorMark: View {
     }
 
     private var image: NSImage? {
-        let name = vendorPalette.iconName(for: vendorID)
+        let name = WidgetVendorIdentity.iconName(for: vendorID)
         guard let url = Bundle.main.url(forResource: name, withExtension: "svg", subdirectory: "icons") else { return nil }
         guard
             let data = try? Data(contentsOf: url),
