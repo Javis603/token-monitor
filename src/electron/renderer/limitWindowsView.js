@@ -1207,12 +1207,16 @@
       const balanceNode = claudeBalanceNode(provider);
       if (balanceNode) windows.append(balanceNode);
     } else if (provider.provider === 'cline') {
-      // ClinePass measures three windows and all three are quotas, so the monthly
-      // one gets its own full-width row. The default branch below renders session
-      // and weekly only, which would silently drop a third of the subscription.
+      // ClinePass measures three quota windows, and the account's credit arrives as
+      // a fourth "billing" window — told apart by its metric rather than by its
+      // kind, and rendered the way WorkBuddy's and Trae's balance is. The default
+      // branch below renders session and weekly only, which would silently drop a
+      // third of the subscription.
       const clineSession = windowForKind(provider, 'session');
       const clineWeekly = windowForKind(provider, 'weekly');
-      const clineMonthly = windowForKind(provider, 'billing');
+      const clineBilling = windowsForKind(provider, 'billing');
+      const clineMonthly = clineBilling.find((window) => !isCreditsWindow(window)) || null;
+      const clineCredits = clineBilling.find((window) => isCreditsWindow(window)) || null;
       if (clineSession) {
         windows.append(limitWindowNode(providerWindowLabel(provider, clineSession), clineSession, color, 0.95));
       }
@@ -1223,6 +1227,17 @@
         const node = limitWindowNode(providerWindowLabel(provider, clineMonthly), clineMonthly, color, 0.5);
         node.classList.add('limit-window-wide');
         windows.append(node);
+      }
+      if (clineCredits) {
+        const value = creditsBalanceValue(provider, clineCredits);
+        if (value) {
+          const node = limitWindowNode(clineCredits.label || 'Credits', clineCredits, color, 0.95, value);
+          node.classList.add('limit-window-wide');
+          if (!clineCredits.resetsAt && !clineCredits.resetDescription) {
+            node.classList.add('limit-window-no-reset');
+          }
+          windows.append(node);
+        }
       }
     } else {
       // Default: render only the windows the provider actually has. Providers

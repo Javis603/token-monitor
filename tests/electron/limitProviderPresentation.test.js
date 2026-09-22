@@ -1883,7 +1883,12 @@ test('Cline exposes its API key through the settings and credential-store patter
   // running widget (a mocked row renders Session, Weekly and a full-width Monthly).
   const windowsView = readRendererFile('limitWindowsView.js');
   assert.match(windowsView, /provider\.provider === 'cline'/);
-  assert.match(windowsView, /const clineMonthly = windowForKind\(provider, 'billing'\)/);
+  // The account credit shares the `billing` kind with the monthly quota, so the
+  // branch tells them apart by metric and renders the credit through the panel's own
+  // balance path, the way WorkBuddy's and Trae's balance is rendered.
+  assert.match(windowsView, /const clineMonthly = clineBilling\.find\(\(window\) => !isCreditsWindow\(window\)\)/);
+  assert.match(windowsView, /const clineCredits = clineBilling\.find\(\(window\) => isCreditsWindow\(window\)\)/);
+  assert.match(windowsView, /clineCredits[\s\S]{0,400}creditsBalanceValue\(provider, clineCredits\)/);
   assert.match(windowsView, /clineMonthly[\s\S]{0,200}limit-window-wide/);
 });
 
