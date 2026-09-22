@@ -6,6 +6,7 @@ const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 
 const TOKSCALE_CLIENT_ALIASES = new Map([
   ['antigravity-cli', 'antigravity'],
+  ['micode-desktop', 'micode'],
   ['omp', 'pi'],
   ['kilocode', 'kilo'],
   ['devin-cli', 'devin'],

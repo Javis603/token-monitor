@@ -6,6 +6,14 @@
 // directory scan.
 const TOKSCALE_CLIENT_GROUPS = Object.freeze({
   antigravity: Object.freeze({ aliases: Object.freeze(['antigravity-cli']) }),
+  // Xiaomi MiMo AI desktop and the MiMo Code CLI share one `mimocode` SQLite
+  // store; tokscale re-stamps a row as `micode-desktop` when its
+  // `session.version` starts with `desktop-`. Both surfaces are one Token
+  // Monitor row, and the split lives inside a root we already watch, so this is
+  // aliases-only: unlike `devin`, a bare `micode` --client value is still
+  // valid, so the filter stays `micode` plus the alias rather than a scanIds
+  // override. Dropping the alias would silently stop counting desktop usage.
+  micode: Object.freeze({ aliases: Object.freeze(['micode-desktop']) }),
   // OMP delegates to Pi's parser because both products write the same JSONL
   // format. Keep both ids in normal scans so their distinct default roots are
   // discovered, but assign an explicit custom root to Pi only; forwarding the
