@@ -68,15 +68,32 @@ function clearContextUsage(state) {
   state.contextWindow = 0;
 }
 
+function currentContextUsage(usage) {
+  if (!usage || typeof usage !== 'object') return null;
+  // Claude Code rolls the top-level counters up across every message iteration
+  // in one request. Each iteration carries the context again, so that total is
+  // cost/accounting data rather than the context held after the response. The
+  // final message iteration is the request's current state. Some real records
+  // even zero the rollup while retaining the only usable reading here.
+  if (Array.isArray(usage.iterations)) {
+    for (let index = usage.iterations.length - 1; index >= 0; index -= 1) {
+      const iteration = usage.iterations[index];
+      if (iteration?.type === 'message') return iteration;
+    }
+  }
+  return usage;
+}
+
 function applyContextUsage(state, model, usage) {
-  if (!usage || typeof usage !== 'object') return;
-  const inputTokens = reportedTokenCount(usage.input_tokens);
+  const measurement = currentContextUsage(usage);
+  if (!measurement) return;
+  const inputTokens = reportedTokenCount(measurement.input_tokens);
   // `input_tokens` is required by Claude's usage shape. Treat a record without
   // it as incomplete rather than replacing the last valid reading with zero.
   if (inputTokens === null) return;
   const optionalTokenCount = (key) => {
-    if (!Object.prototype.hasOwnProperty.call(usage, key)) return 0;
-    return reportedTokenCount(usage[key]);
+    if (!Object.prototype.hasOwnProperty.call(measurement, key)) return 0;
+    return reportedTokenCount(measurement[key]);
   };
   const cacheCreationTokens = optionalTokenCount('cache_creation_input_tokens');
   const cacheReadTokens = optionalTokenCount('cache_read_input_tokens');
@@ -97,7 +114,7 @@ function applyContextUsage(state, model, usage) {
   state.contextWindow = claudeContextWindow(model);
 }
 
-// Whether the message-level `usage` object has been written to completion.
+// Return the complete message-level `usage` object once it has been written.
 // `usage` is the last field of `message`, so a tail that stops inside it is a
 // record still being appended. Reading it then would publish a partial
 // occupancy, because a cache counter the writer has not reached yet is
@@ -105,13 +122,14 @@ function applyContextUsage(state, model, usage) {
 // omit. Counting brace depth from the opening brace proves closure on the
 // bytes alone, so a complete final record is still read when the writer never
 // emitted its trailing newline.
-function usageObjectClosed(text) {
+function closedUsageObject(text) {
   const header = /"usage"\s*:\s*\{/.exec(text);
-  if (!header) return false;
+  if (!header) return '';
+  const start = header.index + header[0].length - 1;
   let depth = 0;
   let inString = false;
   let escaped = false;
-  for (let index = header.index + header[0].length - 1; index < text.length; index += 1) {
+  for (let index = start; index < text.length; index += 1) {
     const char = text[index];
     if (inString) {
       if (escaped) escaped = false;
@@ -123,10 +141,10 @@ function usageObjectClosed(text) {
     else if (char === '{') depth += 1;
     else if (char === '}') {
       depth -= 1;
-      if (depth === 0) return true;
+      if (depth === 0) return text.slice(start, index + 1);
     }
   }
-  return false;
+  return '';
 }
 
 function contextUsageFromFragments(head, tail) {
@@ -138,7 +156,14 @@ function contextUsageFromFragments(head, tail) {
   const usageText = tail.slice(usageAt);
   // A record still being written has not closed its usage object yet, so the
   // counters that are present measure only part of the next request.
-  if (!usageObjectClosed(usageText)) return null;
+  const usageJson = closedUsageObject(usageText);
+  if (!usageJson) return null;
+  let usage;
+  try {
+    usage = JSON.parse(usageJson);
+  } catch (_) {
+    return null;
+  }
   const contentAt = head.indexOf('"content"');
   const headModelAt = head.indexOf('"model"');
   let model = '';
@@ -153,18 +178,6 @@ function contextUsageFromFragments(head, tail) {
     // an earlier content block winning over the assistant message's model.
     const matches = [...tail.slice(0, usageAt).matchAll(/"model"\s*:\s*"([^"]+)"/g)];
     model = matches.length ? matches[matches.length - 1][1] : '';
-  }
-  const number = (key) => {
-    const field = new RegExp(`"${key}"\\s*:`).exec(usageText);
-    if (!field) return { present: false };
-    const valueText = usageText.slice(field.index + field[0].length);
-    const match = /^\s*(?:"(\d+)"|(\d+))(?=\s*[,}])/.exec(valueText);
-    return { present: true, value: match ? Number(match[1] || match[2]) : null };
-  };
-  const usage = {};
-  for (const key of ['input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens']) {
-    const field = number(key);
-    if (field.present) usage[key] = field.value;
   }
   return {
     model,

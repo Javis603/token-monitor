@@ -261,6 +261,77 @@ test('Claude session context uses the latest API input occupancy and model capac
   assert.equal(claudeContextWindow(''), 0);
 });
 
+test('Claude session context uses the final message iteration instead of the usage rollup', (t) => {
+  const assistant = (usage, content = 'done') => JSON.stringify({
+    type: 'assistant',
+    message: {
+      model: 'claude-opus-5',
+      role: 'assistant',
+      content,
+      stop_reason: 'end_turn',
+      usage
+    }
+  });
+  const rollup = {
+    input_tokens: 248,
+    cache_creation_input_tokens: 88,
+    cache_read_input_tokens: 802_062,
+    iterations: [
+      { type: 'message', input_tokens: 2, cache_creation_input_tokens: 88, cache_read_input_tokens: 400_987 },
+      { type: 'message', input_tokens: 246, cache_creation_input_tokens: 0, cache_read_input_tokens: 401_075 }
+    ]
+  };
+  const advisorRollup = {
+    input_tokens: 4,
+    cache_creation_input_tokens: 3_249,
+    cache_read_input_tokens: 1_031_027,
+    iterations: [
+      { type: 'message', input_tokens: 2, cache_creation_input_tokens: 783, cache_read_input_tokens: 515_122 },
+      { type: 'advisor_message', input_tokens: 516_328, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      { type: 'message', input_tokens: 2, cache_creation_input_tokens: 2_466, cache_read_input_tokens: 515_905 }
+    ]
+  };
+  const topLevelZero = {
+    input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+    iterations: [
+      { type: 'message', input_tokens: 2, cache_creation_input_tokens: 534, cache_read_input_tokens: 231_281 }
+    ]
+  };
+
+  const ordinary = fixture([assistant(rollup)]);
+  t.after(() => fs.rmSync(ordinary.dir, { recursive: true, force: true }));
+  assert.deepEqual(readSessionContext(ordinary.file, { cache: new Map() }), {
+    contextTokens: 401_321,
+    contextWindow: 1_000_000
+  });
+
+  fs.writeFileSync(ordinary.file, `${assistant(advisorRollup)}\n`);
+  assert.deepEqual(readSessionContext(ordinary.file, { cache: new Map() }), {
+    contextTokens: 518_373,
+    contextWindow: 1_000_000
+  });
+
+  // Real Claude transcripts can zero the top-level counters while retaining
+  // the actual request measurement in a single message iteration. The rollup
+  // is not a fallback in that shape: it would preserve a stale older gauge.
+  fs.writeFileSync(ordinary.file, `${assistant(topLevelZero)}\n`);
+  assert.deepEqual(readSessionContext(ordinary.file, { cache: new Map() }), {
+    contextTokens: 231_817,
+    contextWindow: 1_000_000
+  });
+
+  // The bounded fragment reader must use exactly the same iteration semantics.
+  // Otherwise crossing the 64 KiB record limit changes the displayed gauge.
+  const oversized = fixture([assistant(advisorRollup, 'x'.repeat(300 * 1024))]);
+  t.after(() => fs.rmSync(oversized.dir, { recursive: true, force: true }));
+  assert.deepEqual(readSessionContext(oversized.file, { cache: new Map() }), {
+    contextTokens: 518_373,
+    contextWindow: 1_000_000
+  });
+});
+
 test('Claude session context clears on compaction and repopulates on the next response', (t) => {
   const usage = (tokens) => JSON.stringify({
     type: 'assistant',
