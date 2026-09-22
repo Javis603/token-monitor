@@ -771,7 +771,7 @@ test('API key account entries share styling and Copilot uses the folded token en
   const css = readRendererFile('styles.css');
 
   const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
-  assert.match(animationBody, /'#factoryManualPanel',\n\s*'#kimiManualPanel',\n\s*'#zedManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#qoderManualPanel',\n\s*'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#ollamaManualPanel',\n\s*'#traeManualPanel',\n\s*'#alibabaManualPanel'/);
+  assert.match(animationBody, /'#factoryManualPanel',\n\s*'#kimiManualPanel',\n\s*'#zedManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#qoderManualPanel',\n\s*'#devinManualPanel',\n\s*'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#ollamaManualPanel',\n\s*'#traeManualPanel',\n\s*'#alibabaManualPanel'/);
   assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
 
@@ -779,11 +779,11 @@ test('API key account entries share styling and Copilot uses the folded token en
   // one blanket rule, so what is worth asserting here is that every provider has
   // such a line and that none of them ship visible.
   const html = readRendererFile('index.html');
-  for (const provider of ['deepseek', 'minimax', 'factory', 'zai', 'zaiteam', 'volcengine', 'qoder', 'trae', 'zed', 'commandcode', 'ollama', 'kimi', 'copilot']) {
+  for (const provider of ['deepseek', 'devin', 'minimax', 'factory', 'zai', 'zaiteam', 'volcengine', 'qoder', 'trae', 'zed', 'commandcode', 'ollama', 'kimi', 'copilot']) {
     assert.match(html, new RegExp(`id="${provider}ErrorMessage"[^>]*class="[^"]*hidden"`), provider);
   }
-  assert.match(css, /#factoryManualPanel,\n#kimiManualPanel,\n#copilotManualPanel,\n#zedManualPanel,\n#commandcodeManualPanel,\n#mimoManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#qoderManualPanel,\n#deepseekManualPanel,\n#minimaxManualPanel,\n#volcengineManualPanel,\n#ollamaManualPanel,\n#traeManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#factoryManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner,\n#zedManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#alibabaManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#factoryManualPanel,\n#kimiManualPanel,\n#copilotManualPanel,\n#zedManualPanel,\n#commandcodeManualPanel,\n#mimoManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#qoderManualPanel,\n#devinManualPanel,\n#deepseekManualPanel,\n#minimaxManualPanel,\n#volcengineManualPanel,\n#ollamaManualPanel,\n#traeManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#factoryManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner,\n#zedManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#devinManualPanel > \.accordion-animation-inner,\n#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#alibabaManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
   {
     const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes("#factoryManualPanel input") && match[2].includes("font-size: 12px;"));
@@ -1314,6 +1314,33 @@ test('DeepSeek account copy says browser and external URL is allowlisted', () =>
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/platform\.deepseek\.com\/api_keys'\)/);
+});
+
+test('Devin account panel uses the shared status label and opens the allowlisted usage page', () => {
+  const html = readRendererFile('index.html');
+  const details = html.match(
+    /<div id="devinSettingsDetails"[\s\S]*?<div id="devinErrorMessage" class="settings-note error hidden" role="alert"><\/div>/
+  )?.[0] || '';
+  assert.match(details, /<button id="devinOpenBrowser"[\s\S]*data-i18n="settings\.devin\.openBrowser">/);
+  assert.doesNotMatch(details, /settings\.devin\.note|Credentials stay on this device/);
+
+  const i18n = readRendererFile('i18n.js');
+  assert.match(i18n, /'settings\.devin\.statusNotSet': 'Not configured'/);
+  assert.match(i18n, /'settings\.devin\.statusNotSet': '尚未設定'/);
+  for (const key of ['settings.devin.statusNotSet', 'settings.devin.credentialsRequired']) {
+    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+  }
+
+  const app = readRendererFile('app.js');
+  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(devinPlatformUrl\(\)\)/);
+  assert.match(setupBody, /errorEl\.textContent = t\('settings\.devin\.credentialsRequired'\)/);
+  const urlBody = functionBody(app, 'devinPlatformUrl', 'updateQoderUsagePageHint');
+  assert.match(urlBody, /return 'https:\/\/app\.devin\.ai\/settings\/usage';/);
+
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
+  assert.match(allowlist, /parsed\.hostname === 'app\.devin\.ai' && parsed\.pathname\.startsWith\('\/settings\/usage'\)/);
 });
 
 test('Z.ai global and BigModel CN browser links are allowlisted', () => {

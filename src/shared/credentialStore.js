@@ -25,6 +25,7 @@ const CREDENTIAL_SETTING_PATHS = Object.freeze({
   zaiTeamOrganizationId: ['providers', 'zaiTeam', 'organizationId'],
   zaiTeamProjectId: ['providers', 'zaiTeam', 'projectId'],
   qoderCookie: ['providers', 'qoder', 'cookie'],
+  devinBearerToken: ['providers', 'devin', 'bearerToken'],
   deepseekApiKey: ['providers', 'deepseek', 'apiKey'],
   openrouterProfiles: ['providers', 'openrouter', 'profiles'],
   minimaxApiKey: ['providers', 'minimax', 'apiKey'],

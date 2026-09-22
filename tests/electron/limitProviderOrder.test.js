@@ -47,6 +47,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'workbuddy',
     'qoder',
     'deepseek',
+    'devin',
     'openrouter',
     'minimax',
     'volcengine',

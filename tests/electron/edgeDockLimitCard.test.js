@@ -240,6 +240,27 @@ test('an OpenRouter card carries the balance meter and its detail tooltip', () =
   assert.match(tooltip.text, /All time/);
 });
 
+test('a Devin card keeps Daily, Weekly, and the extra usage balance', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'devin',
+    windows: [
+      { kind: 'daily', label: 'Daily', remainingPercent: 100, resetsAt: '2026-09-24T00:00:00.000Z' },
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 100, resetsAt: '2026-09-28T00:00:00.000Z' },
+      { kind: 'billing', metric: 'credits', label: 'Extra usage balance', remaining: 10, currency: 'USD', showMeter: false }
+    ],
+    balance: { amount: 10, currency: 'USD' }
+  }, '#46B482');
+
+  const windows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.deepEqual(
+    windows.map((node) => node.children[0].children[0].textContent),
+    ['Daily', 'Weekly', 'Extra usage balance']
+  );
+  assert.match(windows[2].text, /\$10\.00/);
+  assert.equal(windows[2].classNames.has('limit-window-wide'), true);
+  assert.equal(windows[2].classNames.has('limit-window-no-reset'), true);
+});
+
 test('a Codex card keeps the page ordering and the banked resets', () => {
   const card = dockView().renderProviderWindows({
     provider: 'codex',

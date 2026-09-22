@@ -29,6 +29,8 @@ const alibabaLimits = require('../providers/alibaba/limits');
 const { volcengineCredentials, fetchVolcengineLimits } = volcengineLimits;
 const qoderLimits = require('../providers/qoder/limits');
 const { qoderCookie, fetchQoderLimits } = qoderLimits;
+const devinLimits = require('../providers/devin/limits');
+const { devinBearerToken, fetchDevinLimits } = devinLimits;
 const commandcodeLimits = require('../providers/commandcode/limits');
 const { commandcodeCookie, fetchCommandcodeLimits } = commandcodeLimits;
 const ollamaLimits = require('../providers/ollama/limits');
@@ -141,6 +143,7 @@ function providerFetchers(deps = {}) {
     workbuddy: (providerOptions, probeDeps) => workbuddyLimits.fetchWorkbuddyLimits(providerOptions, probeDeps),
     qoder: (providerOptions, probeDeps) => qoderLimits.fetchQoderLimits(providerOptions, probeDeps),
     deepseek: (providerOptions, probeDeps) => fetchDeepSeekLimits(providerOptions, probeDeps),
+    devin: (providerOptions, probeDeps) => devinLimits.fetchDevinLimits(providerOptions, probeDeps),
     openrouter: (providerOptions, probeDeps) => openrouterLimits.fetchOpenRouterLimits(providerOptions, probeDeps),
     minimax: (providerOptions, probeDeps) => minimaxLimits.fetchMinimaxLimits(providerOptions, probeDeps),
     volcengine: (providerOptions, probeDeps) => volcengineLimits.fetchVolcengineLimits(providerOptions, probeDeps),
@@ -335,6 +338,8 @@ module.exports = {
   fetchAlibabaLimits: alibabaLimits.fetchAlibabaLimits,
   qoderCookie,
   fetchQoderLimits,
+  devinBearerToken,
+  fetchDevinLimits,
   traeAccessToken: traeLimits.traeAccessToken,
   traeDeviceId: traeLimits.traeDeviceId,
   fetchTraeLimits: traeLimits.fetchTraeLimits,

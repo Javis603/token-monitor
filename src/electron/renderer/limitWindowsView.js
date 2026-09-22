@@ -1026,6 +1026,30 @@
       ].filter(Boolean);
       if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
       windows.append(...nodes);
+    } else if (provider.provider === 'devin') {
+      const daily = windowForKind(provider, 'daily');
+      const weekly = windowForKind(provider, 'weekly');
+      const balanceWindow = (provider.windows || []).find(isCreditsWindow) || null;
+      const quotaNodes = [
+        daily && limitWindowNode(providerWindowLabel(provider, daily), daily, color, 0.95),
+        weekly && limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68)
+      ].filter(Boolean);
+      if (quotaNodes.length === 1) quotaNodes[0].classList.add('limit-window-wide');
+      windows.append(...quotaNodes);
+      if (balanceWindow) {
+        const amount = creditsAmount(provider, balanceWindow);
+        if (amount !== null) {
+          const balanceNode = limitWindowNode(
+            providerWindowLabel(provider, balanceWindow, 'Extra usage balance'),
+            { ...balanceWindow, showMeter: false },
+            color,
+            0.68,
+            formatMoney(amount, balanceWindow.currency || provider.balance?.currency)
+          );
+          balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
+          windows.append(balanceNode);
+        }
+      }
     } else if (provider.provider === 'kiro') {
       // Kiro exposes monthly credits (plus an optional bonus pool), both billing
       // windows. Render them full-width like Copilot's quota windows.
