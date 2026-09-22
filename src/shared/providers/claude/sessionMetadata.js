@@ -83,12 +83,17 @@ function applyContextUsage(state, model, usage) {
   // Cache counters are optional, but a counter that is present and malformed
   // makes the whole measurement incomplete. Preserve the last valid reading.
   if (cacheCreationTokens === null || cacheReadTokens === null) return;
+  const total = inputTokens + cacheCreationTokens + cacheReadTokens;
+  // A present `usage` object does not guarantee a measurement. Claude writes
+  // its own turns as assistant records too, with every counter zeroed: the
+  // session-limit notice, an API error, and the "No response requested."
+  // acknowledgement. Accepting one as a reading blanks a gauge whose window
+  // still holds the previous turn, so treat zero occupancy as unreported.
+  if (total === 0) return;
   state.contextObserved = true;
   // Match Claude Code's status-line `used_percentage`: it is the current API
   // input occupancy and deliberately excludes this response's output_tokens.
-  state.contextTokens = inputTokens
-    + cacheCreationTokens
-    + cacheReadTokens;
+  state.contextTokens = total;
   state.contextWindow = claudeContextWindow(model);
 }
 

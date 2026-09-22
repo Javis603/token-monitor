@@ -380,6 +380,38 @@ test('Claude session context ignores malformed usage instead of clearing a valid
   });
 });
 
+test('Claude session context keeps its reading through zero-occupancy client notices', (t) => {
+  // Claude writes its own turns as assistant records with a full `usage`
+  // object whose counters are all zero: the session-limit notice, an API
+  // error, and the "No response requested." acknowledgement. Each is a valid
+  // record but not a measurement, and treating it as one blanked a gauge whose
+  // window still held the previous turn. On one real machine 38 transcripts
+  // ended on one of these, 27 of them the session-limit notice.
+  const assistant = (usage, model = 'claude-opus-5') => JSON.stringify({
+    type: 'assistant',
+    message: { model, stop_reason: 'stop_sequence', usage }
+  });
+  const zeroed = { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 };
+  const { dir, file } = fixture([
+    assistant({ input_tokens: 2_000, cache_creation_input_tokens: 1_000, cache_read_input_tokens: 254_936 })
+  ]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cache = new Map();
+
+  assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 257_936, contextWindow: 1_000_000 });
+
+  fs.appendFileSync(file, `${assistant(zeroed, '<synthetic>')}\n`);
+  assert.deepEqual(readSessionContext(file, { cache }), {
+    contextTokens: 257_936,
+    contextWindow: 1_000_000
+  });
+
+  // Still measured against the model that actually answered, so a later turn
+  // replaces it rather than the notice pinning the old reading.
+  fs.appendFileSync(file, `${assistant({ input_tokens: 1_500, cache_creation_input_tokens: 0, cache_read_input_tokens: 51_000 })}\n`);
+  assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 52_500, contextWindow: 1_000_000 });
+});
+
 test('Claude session context distinguishes absent from malformed optional cache counters', (t) => {
   const assistant = (usage) => JSON.stringify({
     type: 'assistant',
