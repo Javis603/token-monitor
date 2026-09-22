@@ -27,8 +27,7 @@ function parseTomlString(value) {
   if (!raw) return '';
   const quote = raw[0];
   if (quote !== '"' && quote !== "'") {
-    if (quote === '[' || quote === '{') return '';
-    return raw.split('#', 1)[0].trim();
+    return '';
   }
   for (let index = 1; index < raw.length; index += 1) {
     if (raw[index] !== quote || (quote === '"' && raw[index - 1] === '\\')) continue;

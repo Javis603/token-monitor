@@ -29,4 +29,5 @@ test('readGrokModelAliases returns empty mappings for missing or malformed confi
     readFileSync() { throw new Error('missing'); }
   }), {});
   assert.deepEqual(parseGrokModelAliases('[model."grok-4.5"]\nmodel = ["not", "a", "route"]'), {});
+  assert.deepEqual(parseGrokModelAliases('[model."grok-4.5"]\nmodel = stealth/ox-alpha'), {});
 });

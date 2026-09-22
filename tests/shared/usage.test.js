@@ -1039,12 +1039,36 @@ test('extractUsageFromTokscale preserves an ambiguous Grok alias/routed pair wit
 test('extractUsageFromTokscale deduplicates Grok rows with an explicit turn identity', () => {
   const period = extractUsageFromTokscale([
     { client: 'grok', sessionId: 'session-turn', model: 'grok-4.5', turnId: 'turn-1', input: 10, output: 2, cost: 5 },
-    { client: 'grok', sessionId: 'session-turn', model: 'stealth/ox-alpha', turnId: 'turn-1', input: 10, output: 2 }
+    { client: 'grok', sessionId: 'session-turn', model: 'stealth/ox-alpha', turn_id: 'turn-1', input: 10, output: 2 }
   ]);
 
   assert.equal(period.totalTokens, 12);
   assert.deepEqual(period.models, { 'stealth/ox-alpha': 12 });
   assert.equal(period.costUsd, 5);
+});
+
+test('extractUsageFromTokscale identifies a reversed explicit-identity alias/routed pair', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'grok', sessionId: 'session-reversed', model: 'stealth/ox-alpha', event_id: 'event-1', input: 10, output: 2 },
+    { client: 'grok', sessionId: 'session-reversed', model: 'grok-4.5', eventId: 'event-1', input: 10, output: 2, cost: 5 }
+  ]);
+
+  assert.equal(period.totalTokens, 12);
+  assert.deepEqual(period.models, { 'stealth/ox-alpha': 12 });
+  assert.equal(period.costUsd, 5);
+});
+
+test('extractUsageFromTokscale preserves explicit-identity pairs when both models are routed', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'grok', sessionId: 'session-routed', model: 'openrouter/model-a', turnId: 'turn-2', input: 10, output: 2 },
+    { client: 'grok', sessionId: 'session-routed', model: 'stealth/model-b', turn_id: 'turn-2', input: 10, output: 2 }
+  ]);
+
+  assert.equal(period.totalTokens, 24);
+  assert.deepEqual(period.models, {
+    'openrouter/model-a': 12,
+    'stealth/model-b': 12
+  });
 });
 
 test('extractUsageFromTokscale preserves same-model Grok rows and rows without sessions', () => {

@@ -36,6 +36,14 @@ const GROK_IDENTITY_KEYS = [
   'turnId', 'turn_id', 'eventId', 'event_id', 'messageId', 'message_id',
   'requestId', 'request_id', 'completionId', 'completion_id', 'usageId', 'usage_id'
 ];
+const GROK_IDENTITY_TYPES = new Map([
+  ['turnid', 'turn'],
+  ['eventid', 'event'],
+  ['messageid', 'message'],
+  ['requestid', 'request'],
+  ['completionid', 'completion'],
+  ['usageid', 'usage']
+]);
 const INPUT_TOKEN_KEYS = ['input', 'inputTokens', 'input_tokens', 'promptTokens', 'prompt_tokens', 'totalInput'];
 const OUTPUT_TOKEN_KEYS = ['output', 'outputTokens', 'output_tokens', 'completionTokens', 'completion_tokens', 'totalOutput'];
 const CACHE_READ_TOKEN_KEYS = ['cacheRead', 'cacheReadTokens', 'cache_read_tokens', 'cachedTokens', 'cached_tokens', 'cacheReadInputTokens', 'totalCacheRead'];
@@ -450,7 +458,10 @@ function explicitGrokIdentity(row) {
   if (!row || typeof row !== 'object') return '';
   for (const key of GROK_IDENTITY_KEYS) {
     const value = firstString(row, [key]);
-    if (value) return `${key}:${value}`;
+    if (value) {
+      const type = GROK_IDENTITY_TYPES.get(key.replace(/_/g, '').toLowerCase()) || key;
+      return `${type}:${value}`;
+    }
   }
   return '';
 }
@@ -497,6 +508,13 @@ function sameExplicitGrokIdentity(left, right) {
   return Boolean(leftIdentity && leftIdentity === rightIdentity);
 }
 
+function uniquelyRoutedGrokRow(first, second) {
+  const firstRouted = normalizeModelName(first.model).includes('/');
+  const secondRouted = normalizeModelName(second.model).includes('/');
+  if (firstRouted === secondRouted) return null;
+  return firstRouted ? first : second;
+}
+
 function mergeGrokDuplicateRows(alias, routed) {
   const aliasCost = costValue(alias.row);
   const routedCost = costValue(routed.row);
@@ -535,12 +553,12 @@ function deduplicateGrokUsageRows(rows, options = {}) {
     const alias = firstTarget === normalizeModelName(second.model)
       ? first
       : secondTarget === normalizeModelName(first.model) ? second : null;
-    const routed = alias === first ? second : alias === second ? first : null;
-    const hasConfiguredRoute = Boolean(alias && routed);
+    const configuredRouted = alias === first ? second : alias === second ? first : null;
     const hasExplicitIdentity = sameExplicitGrokIdentity(first, second);
-    if (!hasConfiguredRoute && !hasExplicitIdentity) continue;
-    const keptAlias = alias || first;
-    const keptRouted = routed || second;
+    const explicitRouted = !alias && hasExplicitIdentity ? uniquelyRoutedGrokRow(first, second) : null;
+    if (!configuredRouted && !explicitRouted) continue;
+    const keptAlias = alias || (explicitRouted === first ? second : first);
+    const keptRouted = configuredRouted || explicitRouted;
     replacements.set(keptAlias.index, mergeGrokDuplicateRows(keptAlias, keptRouted));
     skipped.add(keptRouted.index);
   }
