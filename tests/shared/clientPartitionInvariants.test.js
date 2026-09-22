@@ -19,6 +19,7 @@ const {
   tokscaleClientFilter,
   TOKSCALE_CLIENT_ALIASES
 } = require('../../src/shared/collector');
+const { TOKSCALE_CLIENT_GROUPS } = require('../../src/shared/tokscaleClientMapping');
 const { normalizeClientName } = require('../../src/shared/usage');
 
 const trackedClients = DEFAULT_CLIENTS.split(',').map((value) => value.trim()).filter(Boolean);
@@ -63,7 +64,12 @@ test('every tokscale alias normalizes back to the client that owns it', () => {
 test('tokscaleClientFilter expands a targeted client to all of its aliases', () => {
   for (const [client, aliases] of Object.entries(TOKSCALE_CLIENT_ALIASES)) {
     const filter = tokscaleClientFilter(client).split(',');
-    assert.ok(filter.includes(client), `targeting "${client}" dropped the client itself`);
+    // Umbrella-only ids (scanIds groups) have no tokscale client of their own —
+    // a bare `devin` --client value is rejected with exit 2 — so the filter is
+    // exactly the scan ids rather than the client plus its aliases.
+    if (!TOKSCALE_CLIENT_GROUPS[client]?.scanIds) {
+      assert.ok(filter.includes(client), `targeting "${client}" dropped the client itself`);
+    }
     for (const alias of aliases) {
       assert.ok(
         filter.includes(alias),

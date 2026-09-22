@@ -111,8 +111,10 @@ test('every catalog provider resolves to a mark asset through its CSS rule', () 
   // .limit-icon-<id> copy of every rule; it now sizes the mark and asks for the
   // same .row-icon-<id> mask a breakdown row does. That class name is built by
   // template literal, so nothing fails if it stops matching the table — which is
-  // why the call site is asserted here, next to the table it depends on.
-  const source = fs.readFileSync(rendererPath, 'utf8');
+  // why the call site is asserted here, next to the table it depends on. The
+  // builder lives in the shared limits view, which both limits surfaces render
+  // their rows from.
+  const source = fs.readFileSync(path.join(rendererDir, 'limitWindowsView.js'), 'utf8');
   assert.match(
     source,
     /mark\.className = `limit-icon row-icon-\$\{id\}`;/,

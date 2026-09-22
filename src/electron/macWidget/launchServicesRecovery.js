@@ -7,7 +7,7 @@ const { execFile } = require('node:child_process');
 const {
   readRegularFileNoFollow,
   writePrivateJsonAtomic
-} = require('../shared/credentialStore');
+} = require('../../shared/credentialStore');
 
 const MARKER_FILE_NAME = 'mac-widget-launchservices-registration.json';
 const REGISTER_HOST_ARGUMENTS = Object.freeze(['--mode', 'register-host']);

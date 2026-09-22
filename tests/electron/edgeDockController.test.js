@@ -118,6 +118,8 @@ function createFixture(options = {}) {
   const ipcMain = new FakeIpcMain();
   const placements = [];
   const maskWindows = [];
+  const haptics = [];
+  const hapticCalls = [];
   const controller = createEdgeDockController({
     BrowserWindow: FakeBrowserWindow,
     ipcMain,
@@ -131,6 +133,10 @@ function createFixture(options = {}) {
     applyShapeMask: (win) => {
       maskWindows.push(win);
       return options.maskAvailable !== false;
+    },
+    performHaptic: (pattern, performanceTime) => {
+      haptics.push(pattern);
+      hapticCalls.push({ pattern, performanceTime });
     },
     onPlacementChange: (placement) => {
       placements.push(placement);
@@ -147,8 +153,92 @@ function createFixture(options = {}) {
   controller.sync();
   for (const win of FakeBrowserWindow.instances) win.webContents.emit('did-finish-load');
   const windowFor = (surface) => FakeBrowserWindow.instances.filter((win) => !win.destroyed && win.surface === surface).at(-1);
-  return { controller, ipcMain, maskWindows, placements, screen, settings, windowFor };
+  return { controller, hapticCalls, haptics, ipcMain, maskWindows, placements, screen, settings, windowFor };
 }
+
+test('auto-hide haptics distinguish the handle reveal from the first hovered item', async (t) => {
+  const fixture = createFixture({ platform: 'darwin', settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+  const rail = fixture.windowFor('rail');
+
+  fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents });
+  fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents });
+  assert.deepEqual(fixture.haptics, ['generic']);
+
+  fixture.screen.point = {
+    x: rail.bounds.x + rail.bounds.width / 2,
+    y: rail.bounds.y + 40
+  };
+  await new Promise((resolve) => setTimeout(resolve, 105));
+  assert.deepEqual(fixture.haptics, ['generic', 'alignment']);
+  assert.deepEqual(fixture.hapticCalls, [
+    { pattern: 'generic', performanceTime: 'default' },
+    { pattern: 'alignment', performanceTime: 'now' }
+  ]);
+
+  const disabled = createFixture({
+    platform: 'darwin',
+    settings: { edgeDockMode: 'autoHide', edgeDockHaptic: false }
+  });
+  t.after(() => disabled.controller.stop());
+  disabled.ipcMain.emit('edgeDock:click', { sender: disabled.windowFor('peek').webContents });
+  assert.deepEqual(disabled.haptics, []);
+});
+
+test('rail haptics once whenever the pointer enters an item', async (t) => {
+  const fixture = createFixture({ platform: 'darwin' });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const centerX = rail.bounds.x + rail.bounds.width / 2;
+
+  fixture.screen.point = { x: centerX, y: rail.bounds.y + 40 };
+  await new Promise((resolve) => setTimeout(resolve, 105));
+  assert.deepEqual(fixture.haptics, ['alignment']);
+  assert.deepEqual(fixture.hapticCalls, [{ pattern: 'alignment', performanceTime: 'now' }]);
+
+  fixture.screen.point = { x: centerX, y: rail.bounds.y + 112 };
+  await new Promise((resolve) => setTimeout(resolve, 55));
+  assert.deepEqual(fixture.haptics, ['alignment', 'alignment']);
+
+  await new Promise((resolve) => setTimeout(resolve, 55));
+  assert.deepEqual(fixture.haptics, ['alignment', 'alignment']);
+
+  fixture.screen.point = { x: rail.bounds.x - 20, y: rail.bounds.y + 40 };
+  await new Promise((resolve) => setTimeout(resolve, 55));
+  fixture.screen.point = { x: centerX, y: rail.bounds.y + 40 };
+  await new Promise((resolve) => setTimeout(resolve, 55));
+  assert.deepEqual(fixture.haptics, ['alignment', 'alignment', 'alignment']);
+});
+
+test('structural updates only haptic when the item under the pointer changes', async (t) => {
+  const fixture = createFixture({ platform: 'darwin' });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  fixture.screen.point = {
+    x: rail.bounds.x + rail.bounds.width / 2,
+    y: rail.bounds.y + 40
+  };
+
+  await new Promise((resolve) => setTimeout(resolve, 105));
+  assert.deepEqual(fixture.haptics, ['alignment']);
+
+  fixture.controller.setCells([
+    { id: 'claude', kind: 'provider', label: 'Claude' },
+    { id: 'codex', kind: 'provider', label: 'Codex', remainingPercent: 70 },
+    { id: 'windsurf', kind: 'provider', label: 'Windsurf' }
+  ]);
+  await new Promise((resolve) => setTimeout(resolve, 55));
+  assert.deepEqual(fixture.haptics, ['alignment']);
+
+  fixture.controller.setCells([
+    { id: 'gemini', kind: 'provider', label: 'Gemini' },
+    { id: 'codex', kind: 'provider', label: 'Codex', remainingPercent: 70 },
+    { id: 'windsurf', kind: 'provider', label: 'Windsurf' }
+  ]);
+  await new Promise((resolve) => setTimeout(resolve, 55));
+  assert.deepEqual(fixture.haptics, ['alignment', 'alignment']);
+});
 
 test('an open card follows its cell id across removal and reorder', (t) => {
   const fixture = createFixture();
@@ -274,6 +364,82 @@ test('macOS drops rectangular vibrancy when a surface mask cannot be applied', (
 
   fixture.controller.sync();
   assert.equal(fixture.maskWindows.length, attemptedMasks, 'the no-material fallback remains stable for this window');
+});
+
+// The rail's entrance is keyed to the reveal rather than to the push, so the page
+// has to be able to tell which payload is the reveal: without that it has neither
+// a transition to fire on nor a way to keep a stats update from replaying the
+// slide. It is a count rather than a flag because only the reveal renders - the
+// retract fades the window out with no payload at all, so a page told the state
+// alone keeps believing the rail is up and reads the next reveal as no change,
+// which is what left the entrance playing once per page load.
+test('a rail payload carries the reveal that keys the entrance', (t) => {
+  const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const peek = fixture.windowFor('peek');
+
+  assert.equal(sentPayload(rail, 'rail').reveal, 0);
+  assert.equal(rail.opacity, 0);
+
+  fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents }, {});
+  assert.equal(sentPayload(rail, 'rail').reveal, 1);
+  assert.equal(rail.opacity, 1);
+
+  // Every push after it repaints the same surface and keeps saying the same count -
+  // the edge is the renderer's to hold, and this is what it must not re-fire on.
+  fixture.controller.setCells([{ id: 'cursor', kind: 'provider', label: 'Cursor' }]);
+  assert.equal(sentPayload(rail, 'rail').reveal, 1);
+
+  // Leaving always-visible mode retracts the rail, and a retract renders nothing:
+  // the window goes dark while the page is still holding the payload that said 1 -
+  // as do the pushes the mode flip itself triggers, which repaint the rail without
+  // ever reporting that it went away.
+  fixture.settings.edgeDockMode = 'always';
+  fixture.controller.sync();
+  fixture.settings.edgeDockMode = 'autoHide';
+  fixture.controller.sync();
+  assert.equal(rail.opacity, 0, 'the retract takes the rail away');
+  assert.equal(sentPayload(rail, 'rail').reveal, 1, 'nothing tells the page the rail went away');
+
+  // So the count is the only thing that can tell the page this is a new entrance.
+  fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents }, {});
+  assert.equal(sentPayload(rail, 'rail').reveal, 2);
+  assert.equal(rail.opacity, 1);
+});
+
+// The handle's exit is played by the page, so the peek payload has to carry the
+// handle's own visibility the way the rail's carries its reveal. It is also what
+// used to put the handle back on top of an open rail: a settings push ran showPeek
+// whatever the rail was doing, and the handle faded in over the cells.
+test('a peek payload carries the handle, and an open rail keeps it away', (t) => {
+  const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek');
+
+  assert.equal(sentPayload(peek, 'peek').peeking, true);
+  assert.equal(peek.ignoreMouse, false);
+
+  fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents }, {});
+  assert.equal(sentPayload(peek, 'peek').peeking, false);
+  assert.equal(peek.ignoreMouse, true);
+
+  // Every push after it repaints the same surface and keeps saying the handle is
+  // away - the page plays the exit on the transition alone.
+  fixture.controller.sync();
+  assert.equal(sentPayload(peek, 'peek').peeking, false);
+  assert.equal(peek.ignoreMouse, true);
+
+  // Always-visible mode has nothing to hide behind a handle, and leaving it again
+  // is what brings the handle back.
+  fixture.settings.edgeDockMode = 'always';
+  fixture.controller.sync();
+  assert.equal(sentPayload(peek, 'peek').peeking, false);
+
+  fixture.settings.edgeDockMode = 'autoHide';
+  fixture.controller.sync();
+  assert.equal(sentPayload(peek, 'peek').peeking, true);
+  assert.equal(peek.ignoreMouse, false);
 });
 
 test('display metric changes hide and remeasure an open card against the new work area', (t) => {

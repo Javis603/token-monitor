@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -166,6 +167,18 @@ function keyLaneResponses({ balance, subscription }) {
     }
     return { ok: true, status: 200, json: async () => ({ data: [{ product_name: subscription }] }) };
   };
+}
+
+// Encrypts one store value the way ZCode's own credential service writes it,
+// so a provider-level test can build a store-backed install (the
+// discovery-level store cases live in zcodeLimits.test.js).
+const FIXTURE_CREDENTIAL_SECRET = 'fixture-credential-secret';
+function encryptStoreValue(value, secret = FIXTURE_CREDENTIAL_SECRET) {
+  const key = crypto.createHash('sha256').update(secret).digest();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  return `enc:v1:${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${ciphertext.toString('base64url')}`;
 }
 
 // ZCode on-disk fixture for the plan-lane tests: an entitled provider
@@ -926,4 +939,199 @@ test('a 3.12.3-shaped install with a subscription renders the quota windows', as
   assert.equal(provider.windows[0].usedPercent, 12.5);
   assert.equal(provider.windows[1].usedPercent, 25);
   assert.equal(provider.windows[2].usedPercent, 40);
+});
+
+// The refused quota half: the profile names the logged-in account, no entry
+// exists for it, and config.json still carries the previous account's mirror.
+// The live JWT is what decides whether an independent billing leg exists.
+function missingQuotaKeyFiles({ withBillingJwt }) {
+  return {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'previous-account-mirror' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      ...(withBillingJwt ? { zcodejwttoken: encryptStoreValue('live-billing-jwt') } : {}),
+      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: 'known-account-id' }))
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+}
+
+function missingQuotaKeyDeps(files, fetchMock) {
+  return {
+    env: { ZCODE_CREDENTIAL_SECRET: FIXTURE_CREDENTIAL_SECRET },
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: fetchMock
+  };
+}
+
+test('fetchZaiLimits never queries the quota lane with the mirror once the identity is known without its key', async () => {
+  // That mirror cannot be shown to belong to the account the profile just
+  // named, so the quota half refuses it — and with no live JWT and no start
+  // entry there is no billing leg either, so no request goes out at all.
+  const urls = [];
+  const provider = await fetchZaiLimits({}, missingQuotaKeyDeps(
+    missingQuotaKeyFiles({ withBillingJwt: false }),
+    async (url) => {
+      urls.push(String(url));
+      throw new Error('the mirror must not be queried');
+    }
+  ));
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'oauth');
+  assert.deepEqual(provider.windows, []);
+  assert.deepEqual(urls, []);
+});
+
+test('fetchZaiLimits keeps the live billing leg when the account\'s own key is missing', async () => {
+  // The billing credential is a different one — the account-level JWT ZCode
+  // maintains on login — so refusing the quota half must not take Start/Weekend
+  // down with it: exactly one request, to billing, and the previous account's
+  // mirror is never carried to any endpoint.
+  const calls = [];
+  const provider = await fetchZaiLimits({}, missingQuotaKeyDeps(
+    missingQuotaKeyFiles({ withBillingJwt: true }),
+    async (url, options) => {
+      calls.push({ url: String(url), authorization: String(options?.headers?.Authorization || '') });
+      if (String(url).includes('zcode-plan/billing/balance')) return BILLING_OK;
+      throw new Error(`unexpected url ${url}`);
+    }
+  ));
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'oauth');
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].url.includes('zcode-plan/billing/balance'), 'the live billing leg queried');
+  assert.ok(calls.every((call) => !call.url.includes('/quota/limit')), 'no quota request');
+  assert.ok(calls.every((call) => !call.authorization.includes('previous-account-mirror')), 'the mirror is never carried');
+  assert.ok(provider.windows.some((window) => window.limitId), 'the Start/Weekend bucket is rendered');
+});
+
+test('fetchZaiLimits refuses the start-plan mirror once the identity is known and the JWT is gone', async () => {
+  // The live JWT is the only credential that can be attributed to the account,
+  // so the mirror cannot carry the lane: the attempt is reported and the row
+  // reads unavailable rather than notConfigured beside a stored login.
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'start-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-start-plan': { enabled: true, options: { apiKey: 'previous-account-mirror' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: 'known-account-id' }))
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  const urls = [];
+  const provider = await fetchZaiLimits({}, {
+    env: { ZCODE_CREDENTIAL_SECRET: FIXTURE_CREDENTIAL_SECRET },
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url) => {
+      urls.push(String(url));
+      throw new Error('the mirror must not be queried');
+    }
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'oauth');
+  assert.deepEqual(provider.windows, []);
+  assert.deepEqual(urls, []);
+});
+
+test('fetchZaiLimits reports the refused billing attempt with no mirror to fall back on either', async () => {
+  // The identity decides it on its own: the entry carries no mirror at all, so
+  // what the lane needs is the same attempted-but-empty answer rather than the
+  // "not configured" a missing credential would otherwise produce.
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'start-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-start-plan': { enabled: true, options: { apiKey: '' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: 'known-account-id' }))
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  const urls = [];
+  const provider = await fetchZaiLimits({}, {
+    env: { ZCODE_CREDENTIAL_SECRET: FIXTURE_CREDENTIAL_SECRET },
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url) => {
+      urls.push(String(url));
+      throw new Error('there is no credential to query with');
+    }
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'oauth');
+  assert.deepEqual(provider.windows, []);
+  assert.deepEqual(urls, []);
+});
+
+test('fetchZaiLimits keeps the quota half when the billing mirror is refused', async () => {
+  // A coding-plan selection: the account's own key still resolves, so the same
+  // refusal drops only the billing leg, and no request carries the start mirror.
+  const identity = 'known-account-id';
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'coding-mirror' } },
+      'builtin:zai-start-plan': { enabled: false, systemDisabledReason: 'coding_plan_not_entitled', options: { apiKey: 'previous-account-mirror' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: identity })),
+      [`account-provider:coding-plan:account:zai-individual-coding-plan:account:${identity}:api-key`]:
+        encryptStoreValue('account-key')
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  const calls = [];
+  const provider = await fetchZaiLimits({}, {
+    env: { ZCODE_CREDENTIAL_SECRET: FIXTURE_CREDENTIAL_SECRET },
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url, options) => {
+      const target = String(url);
+      calls.push({ url: target, authorization: String(options?.headers?.Authorization || '').replace(/^Bearer /, '') });
+      if (target.includes('/quota/limit')) {
+        return { ok: true, status: 200, json: async () => ({ data: { planName: 'GLM Coding Pro', limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }] } }) };
+      }
+      if (target.includes('subscription/list')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ product_name: 'GLM Coding Pro' }] }) };
+      }
+      throw new Error(`unexpected url ${url}`);
+    }
+  });
+  assert.equal(provider.status, 'ok');
+  assert.ok(provider.windows.some((window) => window.kind === 'session'), 'the quota half rendered');
+  assert.ok(calls.every((call) => !call.url.includes('billing')), 'no billing request');
+  assert.ok(calls.every((call) => call.authorization === 'account-key'), 'only the account key was carried');
 });

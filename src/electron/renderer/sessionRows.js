@@ -9,6 +9,14 @@
     ? require('../../shared/providers/reasonix/sessionGuard')
     : root?.TokenMonitorReasonixSessionGuard;
   const isReasonixSyntheticSession = reasonixSessionGuard?.isReasonixSyntheticSession || (() => false);
+  // Running/archived and the context pair are shared with the Edge Dock's
+  // session rows: both render the same session record, so the predicate cannot
+  // live in only one of the two renderers.
+  const sessionLive = typeof module === 'object' && module.exports
+    ? require('../../shared/sessionLive')
+    : root?.TokenMonitorSessionLive;
+  const sessionActivityState = sessionLive.sessionActivityState;
+  const sessionContextForRow = sessionLive.sessionContextForRow;
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
 
   function finiteNumber(value) {
@@ -136,7 +144,19 @@
 
   function messageLabel(session) {
     const count = finiteNumber(session?.messageCount);
-    return count > 0 ? `${formatNumber(count)} msg${count === 1 ? '' : 's'}` : '';
+    if (count <= 0) return '';
+    // A session's "message count" is tokscale's count of usage-bearing replies,
+    // not conversation messages: Claude writes one API response as several
+    // content-block lines de-duplicated by message id, and Codex counts
+    // token_count events. `calls` is what the number actually is (a request
+    // count) and keeps this row a spending readout rather than a transcript
+    // readout; Session Detail resolves the same records into "turns" and
+    // Reply #N instead, because it has the boundaries to group them by.
+    // Deliberately NOT localized, matching the Limits view's fixed English
+    // wording: this is a billing unit, and a translated counter reads as a
+    // different measure in each locale (the Chinese candidates all read as
+    // something closer to "invocations" than to billable calls).
+    return `${formatNumber(count)} ${count === 1 ? 'call' : 'calls'}`;
   }
 
   function isBackgroundReviewSession(session) {
@@ -167,11 +187,23 @@
       sessionActivityLabel(session, now),
       messageLabel(session)
     ].filter(Boolean);
+    // One derivation, not two: the boolean is a projection of the three-state
+    // value, so a row can never be marked running by one reading and idle by the
+    // other. `isRunningSession` itself delegates to `sessionActivityState` for the
+    // same reason.
+    const activityState = sessionActivityState(session, now);
+    const running = activityState === 'running';
     return {
       key: `session:${key}`,
       kind: 'session',
       name: titleParts.join(' · '),
       subtitle: subtitleParts.join(' · '),
+      running: running || undefined,
+      activityState,
+      // Decided by the shared gate, not by `running`: it follows the recency
+      // window so the reading survives the turn ending, and the dock's card
+      // calls the same function so the two cannot disagree.
+      context: sessionContextForRow(session, now),
       detail: sessionIdLabel(session?.sessionId || key),
       value,
       tokenDataUnavailable,
@@ -206,6 +238,12 @@
         const sessionId = session?.sessionId || key;
         const archived = session?.archived === true || session?.deleted === true || session?.sourceDeleted === true;
         const sessionTitle = textValue(session?.title);
+        // One derivation, as above. An archived session is idle whatever its
+        // timestamp says: the source it was read from is gone, so nothing can
+        // still be appending, which is what `sessionActivityState` already
+        // enforces through `isArchivedSession`.
+        const activityState = sessionActivityState(session, now);
+        const running = activityState === 'running';
         const activityParts = [
           archived ? archivedLabel : '',
           sessionActivityLabel(session, now),
@@ -223,6 +261,9 @@
           color: colors[client] || (modelLabel && colorForModel ? colorForModel(modelLabel) : stable(key, palette)),
           stale: false,
           archived: archived || undefined,
+          running: running || undefined,
+          activityState,
+          context: sessionContextForRow(session, now),
           client,
           backgroundReview: isBackgroundReviewSession(session) || undefined,
           sortTime: sessionTimestampValue(session),

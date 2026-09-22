@@ -151,6 +151,31 @@ test('parseGraphResult folds Kilo extension and CLI rows into one history identi
   assert.equal(Object.hasOwn(contributions[0].perClient, 'kilocode'), false);
 });
 
+test('parseGraphResult folds antigravity-cli graph rows into the existing antigravity history identity', () => {
+  const { contributions } = parseGraphResult({
+    contributions: [{
+      date: '2026-09-18',
+      clients: [
+        {
+          client: 'antigravity', modelId: 'gemini-3.8-flash',
+          tokens: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+          cost: 1, messages: 1
+        },
+        {
+          client: 'antigravity-cli', modelId: 'gemini-3.8-flash',
+          tokens: { input: 20, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+          cost: 2, messages: 1
+        }
+      ]
+    }]
+  });
+
+  assert.deepEqual(contributions[0].perClient, {
+    antigravity: { tokens: 30, cost: 3, messages: 2, unclassifiedTokens: 0 }
+  });
+  assert.equal(Object.hasOwn(contributions[0].perClient, 'antigravity-cli'), false);
+});
+
 test('parseGraphResult is defensive about missing/garbage input', () => {
   assert.deepEqual(parseGraphResult(null), { contributions: [] });
   assert.deepEqual(parseGraphResult({}), { contributions: [] });

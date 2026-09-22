@@ -87,6 +87,7 @@ const {
 } = require('../shared/providers/antigravity/selfSync');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
+const { actionWindowForEvent, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
 const { createDeviceRuntime } = require('../shared/deviceRuntime');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
@@ -251,18 +252,18 @@ const {
   prepareMacWidgetSnapshotUpdate,
   resolveMacWidgetSnapshotPath,
   syncMacWidgetSnapshotDirectory
-} = require('./macWidgetBridge');
-const { createMacWidgetSnapshotController } = require('./macWidgetSnapshotController');
-const { macWidgetHistorySourceKey, resolveMacWidgetHistory } = require('./macWidgetHistory');
+} = require('./macWidget/bridge');
+const { createMacWidgetSnapshotController } = require('./macWidget/snapshotController');
+const { macWidgetHistorySourceKey, resolveMacWidgetHistory } = require('./macWidget/history');
 const {
   macWidgetHistoryCachePath,
   readMacWidgetHistoryCache,
   writeMacWidgetHistoryCache
-} = require('./macWidgetHistoryStore');
-const { createMacWidgetLaunchServicesRecovery } = require('./macWidgetLaunchServicesRecovery');
+} = require('./macWidget/historyStore');
+const { createMacWidgetLaunchServicesRecovery } = require('./macWidget/launchServicesRecovery');
 const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
-const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidgetReloader');
-const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidgetDemand');
+const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidget/reloader');
+const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidget/demand');
 const linuxAutostart = require('./linuxAutostart');
 const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
 const {
@@ -350,7 +351,9 @@ const {
   floatingBubbleSide,
   floatingBubbleWindowChrome,
   normalizeInitialRendererViewState,
-  moveFloatingBubbleBounds
+  moveFloatingBubbleBounds,
+  applyWindowSizeLimits,
+  restoreFloatingBubbleWindow
 } = require('./floatingBubble');
 const { applyWindowsChrome } = require('./windowsChrome');
 const { canUseEdgeDock, createEdgeDockController, edgeDockSupported } = require('./edgeDock/controller');
@@ -366,6 +369,7 @@ const tokenRateApi = require('./renderer/tokenRatePresentation');
 const { toPolygons } = require('./renderer/edgeDock/shapes');
 const { rasterizeMask } = require('./edgeDock/mask');
 const { applyVibrancyMask } = require('./edgeDock/macVibrancyMask');
+const { performMacHaptic } = require('./edgeDock/macHaptics');
 const { primaryButtonDown } = require('./edgeDock/pointerButtons');
 const { setMoveToActiveSpace } = require('./macosSpaceBehavior');
 const {
@@ -513,6 +517,11 @@ function defaultSettings() {
     heatmapMetric: 'cost',
     modelRankingMetric: 'tokens',
     homeActiveDaysWindow: 'all',
+    // How a live session's context gauge reads. That direction is a choice the
+    // gauge cannot make on its own, so it is stated here rather than assumed:
+    // `used` is what the Sessions view and this app's own readouts show, while
+    // the clients' default footers tend to lead with what is left.
+    sessionContextMetric: 'used',
     periodMonthMode: 'month',
     themeColors: {},
     vendorColors: {},
@@ -525,6 +534,7 @@ function defaultSettings() {
     floatingBubbleBounds: null,
     edgeDockEnabled: false,
     edgeDockMode: 'autoHide',
+    edgeDockHaptic: true,
     edgeDockWarnColors: false,
     edgeDockSide: 'right',
     edgeDockOffset: null,
@@ -688,6 +698,17 @@ function normalizeHomeActiveDaysWindow(value, fallback = 'all') {
   if (next === 'year') return 'year';
   if (next === 'all') return 'all';
   return fallback === 'year' ? 'year' : 'all';
+}
+
+// The context gauge's own preference, deliberately separate from
+// showLimitUsed (AI Tool Limits): that one describes provider quota meters,
+// where 'remaining' is the headline number a plan is sold on. A session's
+// context window is a working budget the model is spending down, and the
+// clients themselves lead with used, so the two do not have to agree.
+function normalizeSessionContextMetric(value, fallback = 'used') {
+  const next = String(value || '').trim();
+  if (next === 'used' || next === 'remaining') return next;
+  return fallback === 'remaining' ? 'remaining' : 'used';
 }
 
 function normalizeCollectionIntervalMs(value, fallback = DEFAULT_COLLECTION_INTERVAL_MS) {
@@ -893,9 +914,10 @@ function currentZaiApiKey() {
 }
 
 // A locally logged-in ZCode install is a credential source for the GLM lane
-// even when no console key was entered. Reads two small JSON files
-// synchronously; settingsForRenderer renders at human interaction speed, so
-// the cost is bounded by how often that runs, not by any refresh loop.
+// even when no console key was entered. Reads the ZCode data files
+// synchronously (setting.json, config.json, and the credential store where it
+// exists); settingsForRenderer renders at human interaction speed, so the cost
+// is bounded by how often that runs, not by any refresh loop.
 function currentZcodeAutoCredential() {
   const discovery = discoverZcodeConnection();
   return discovery.entitled && discovery.credential ? discovery : null;
@@ -2183,13 +2205,7 @@ function stopFloatingBubbleAutoCollapseTimer() {
 }
 
 function restoreWindowSizeLimits() {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  if (typeof mainWindow.setMinimumSize === 'function') {
-    mainWindow.setMinimumSize(WINDOW_LIMITS.minWidth, WINDOW_LIMITS.minHeight);
-  }
-  if (typeof mainWindow.setMaximumSize === 'function') {
-    mainWindow.setMaximumSize(WINDOW_LIMITS.maxWidth, WINDOW_LIMITS.maxHeight);
-  }
+  applyWindowSizeLimits(mainWindow, WINDOW_LIMITS);
 }
 
 function applyCollapsedFloatingBubbleLimits(bounds) {
@@ -2322,8 +2338,10 @@ function expandFloatingBubble(options = {}) {
       sendFloatingBubbleState();
       return true;
     }
-    restoreWindowSizeLimits();
-    mainWindow.setBounds(target);
+    // Unlock, re-limit and resize in one helper rather than inline: the order
+    // is what fixes the collapsed window refusing to grow again on Linux, and
+    // an inline `restoreWindowSizeLimits(); setBounds()` reads like it works.
+    restoreFloatingBubbleWindow(mainWindow, target, WINDOW_LIMITS);
     persistWindowBounds(target);
     setTimeout(() => { floatingBubbleState.suppressNextCollapse = false; }, 300);
   }
@@ -2591,6 +2609,7 @@ function readSettings() {
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
+    merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
@@ -2642,6 +2661,7 @@ function readSettings() {
     merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
     merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
     merged.edgeDockMode = merged.edgeDockMode === 'always' ? 'always' : 'autoHide';
+    merged.edgeDockHaptic = parseBoolean(merged.edgeDockHaptic, true);
     merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
     merged.trayCustomLayout = normalizeTrayLayout(merged.trayCustomLayout);
@@ -3008,10 +3028,17 @@ let trayRefreshInFlight = false;
 let codexPresentationActiveAccountId = '';
 let codexPresentationPendingAccountId = '';
 
+// One answer, because two of them is how a row ends up naming the device it
+// came from on one surface and not on the other: the presentation projection
+// and the edge dock's cells both need it.
+function syncProvenanceActive() {
+  return mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim());
+}
+
 function electronPresentationStats(stats) {
   return projectModelAliasStats(projectLimitStatsForDisplay(stats, {
     localDeviceId: settings?.deviceId,
-    syncActive: mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim()),
+    syncActive: syncProvenanceActive(),
     opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
   }), settings?.modelAliases, { grouping: settings?.modelAliasGrouping });
 }
@@ -5130,8 +5157,25 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     interfaceFontFamily: source.interfaceFontFamily,
     displayFontFamily: source.displayFontFamily,
     showLimitUsed: source.showLimitUsed,
+    // The card's quota rows are built by the same view as the Limits page, so
+    // every preference that view reads has to reach this renderer as well —
+    // otherwise the card silently renders a different page's answer.
+    showCodexAdditionalLimits: source.showCodexAdditionalLimits,
+    showLimitSource: source.showLimitSource,
+    codexResetForecastEnabled: source.codexResetForecastEnabled,
+    claudePrepaidBalanceEnabled: source.claudePrepaidBalanceEnabled,
+    // The dock's session rows carry the same context gauge as the Sessions
+    // list, so its Remaining/Used preference has to reach this renderer too.
+    sessionContextMetric: source.sessionContextMetric,
     maskLimitAccountEmails: source.maskLimitAccountEmails,
-    edgeDockWarnColors: source.edgeDockWarnColors === true
+    edgeDockWarnColors: source.edgeDockWarnColors === true,
+    // The user's own subscription records, so the card's plan cell can decorate
+    // itself exactly as the page's does. They belong here rather than on a cell
+    // because a record is not a property of a provider: it binds to one account
+    // of one, and the card also shows the provider-wide rollup that spans them.
+    // The same list the widget renders — in client mode that is the hub's copy,
+    // not this device's cache.
+    subscriptions: source.subscriptions || []
   };
 }
 
@@ -5144,8 +5188,14 @@ let edgeDockRateContext = '';
 let edgeDockRateTimer = null;
 
 function edgeDockShowsLiveRate() {
-  return Array.isArray(settings?.edgeDockItems)
-    && settings.edgeDockItems.some((item) => item.type === 'stat' && item.metric === 'liveRate');
+  const items = Array.isArray(settings?.edgeDockItems) ? settings.edgeDockItems : [];
+  // A live-rate item needs the sample for its own headline; a sessions item needs
+  // it only when its rail cell was set to show the rate instead of tool marks. The
+  // tracker is the same either way, so this is the one gate that has to know both.
+  return items.some((item) => item.type === 'stat' && (
+    item.metric === 'liveRate'
+    || (item.metric === 'sessions' && item.cellDetail === 'rate')
+  ));
 }
 
 function edgeDockLiveRateSample(visibleStats) {
@@ -5163,6 +5213,15 @@ function edgeDockLiveRateSample(visibleStats) {
   const context = [mode, hubMode || '', settings?.hubUrl || '', settings?.deviceId || '', scope, selection.source].join('|');
   if (!edgeDockRateTracker) {
     edgeDockRateTracker = tokenRateApi.createLiveTokenRateGroupTracker({
+      // Epoch time, not the module's default monotonic clock. This tracker is the
+      // only one whose expiry is compared against a timer scheduled here
+      // (`expiresAt - Date.now()`), and the two scales are not interchangeable:
+      // `performance.now()` on this process starts near zero, so the difference is a
+      // huge negative number that clamps to the 20ms floor and re-projects the dock
+      // about fifty times a second for as long as a sample is retained. The renderer's
+      // own tracker keeps the default, since it only ever compares its clock with
+      // itself.
+      now: Date.now,
       activeMs: EDGE_DOCK_RATE_ACTIVE_MS,
       clearMs: EDGE_DOCK_RATE_CLEAR_MS
     });
@@ -5279,13 +5338,15 @@ function edgeDockCellsFor(visibleStats) {
     derivedPeriods: edgeDockDerivedPeriods,
     codexResetForecast: edgeDockForecastWanted() ? edgeDockForecast : null,
     localDeviceId: settings?.deviceId,
+    // What the card's rows need to name the device a reading came from. The
+    // dock window is handed cells and nothing else, so both ride the cell.
+    syncActive: syncProvenanceActive(),
     items: settings?.edgeDockItems,
     codexManagedAccounts: codexAccountsForRenderer(),
     activeCodexAccountId: codexPresentationPendingAccountId || codexPresentationActiveAccountId,
     limitsEnabled: settings?.limitsEnabled !== false,
     limitProviders: settings?.limitProviders,
     limitProviderOrder: settings?.limitProviderOrder,
-    showCodexAdditionalLimits: settings?.showCodexAdditionalLimits !== false,
     liveRate: edgeDockLiveRateSample(visibleStats),
     tokenRateMode: settings?.tokenRateMode
   });
@@ -5293,7 +5354,61 @@ function edgeDockCellsFor(visibleStats) {
 
 function updateEdgeDockCells(visibleStats) {
   if (!edgeDockController?.isRunning() || !visibleStats) return;
-  edgeDockController.setCells(edgeDockCellsFor(visibleStats));
+  const cells = edgeDockCellsFor(visibleStats);
+  pushEdgeDockCells(cells);
+}
+
+// Hand cells to the controller and arm the expiry timer from them. Split out from
+// the guard above because the settings path calls it before the controller is
+// running: `setCells` stores the list regardless, and `sync()` starts the windows
+// afterwards, so the timer is armed there once the surface actually exists.
+function pushEdgeDockCells(cells) {
+  edgeDockLastCells = cells;
+  edgeDockController?.setCells(cells);
+  scheduleEdgeDockSessionExpiry();
+}
+
+// Running is a function of time: a session crosses the ten-minute window with no
+// new data at all, so the cells pushed at the last tick go stale on their own. The
+// renderer re-derives what it draws from the rows it already holds, but the cells
+// themselves (and the rail's height, which depends on the cell list) only change
+// when the main process re-projects. This wakes exactly when the soonest running
+// row in the current cells expires, instead of polling on a fixed period.
+let edgeDockSessionExpiryTimer = null;
+const EDGE_DOCK_EXPIRY_FLOOR_MS = 1_000;
+
+// The cells most recently handed to the controller, so the expiry timer can be
+// armed from what is actually on screen rather than re-projecting to find out.
+let edgeDockLastCells = [];
+
+// The soonest moment any sessions cell stops reading as running, or 0 when none
+// of them does. A quiet cell never becomes running on its own, so 0 means there
+// is nothing to wake for and the timer must not be armed.
+function edgeDockNextSessionExpiry(cells) {
+  let soonest = 0;
+  // A stale expiry is not a wake-up: taking one would clamp the delay to the floor
+  // and re-project on every pass. Only a moment still ahead can schedule anything,
+  // and the re-projection that follows a real expiry drops the row's expiry to 0.
+  const now = Date.now();
+  for (const cell of Array.isArray(cells) ? cells : []) {
+    if (cell?.metric !== 'sessions') continue;
+    const expiresAt = Number(cell.runningExpiresAt) || 0;
+    if (expiresAt > now && (!soonest || expiresAt < soonest)) soonest = expiresAt;
+  }
+  return soonest;
+}
+
+function scheduleEdgeDockSessionExpiry() {
+  if (edgeDockSessionExpiryTimer) clearTimeout(edgeDockSessionExpiryTimer);
+  edgeDockSessionExpiryTimer = null;
+  if (!edgeDockController?.isRunning()) return;
+  const expiresAt = edgeDockNextSessionExpiry(edgeDockLastCells);
+  if (!expiresAt) return;
+  const delay = Math.max(EDGE_DOCK_EXPIRY_FLOOR_MS, expiresAt - Date.now() + 50);
+  edgeDockSessionExpiryTimer = setTimeout(() => {
+    edgeDockSessionExpiryTimer = null;
+    if (latestStats) updateEdgeDockCells(electronPresentationStats(latestStats));
+  }, delay);
 }
 
 function ensureEdgeDockController() {
@@ -5307,9 +5422,13 @@ function ensureEdgeDockController() {
     preloadPath: path.join(__dirname, 'edgeDock', 'preload.js'),
     getSettings: () => settings,
     nativeGlass: () => nativeBlurEnabled(),
+    // The renderer reads this preference through a media query, which works on both
+    // platforms, but the dock's window fade is this process's own animation and can only
+    // see it through Electron. Windows reports the same OS-level setting here as macOS, so
+    // the gate is where the dock runs rather than where the API was first wired up.
     prefersReducedMotion: () => motionPreferenceApi.shouldReduceMotion(
       settings?.reduceMotion,
-      process.platform === 'darwin' && systemPreferences?.getAnimationSettings?.().prefersReducedMotion === true
+      edgeDockSupported(process.platform) && systemPreferences?.getAnimationSettings?.().prefersReducedMotion === true
     ),
     applyShapeMask: (win, commands, width, height, currentDisplay) => {
       const scale = currentDisplay?.scaleFactor || screen.getDisplayMatching?.(win.getBounds())?.scaleFactor || 2;
@@ -5318,9 +5437,13 @@ function ensureEdgeDockController() {
       return applyVibrancyMask(win, png, width, height);
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
+    performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
     // The dock card's Switch button runs the same swap the Limits view does,
     // then repaints from the refreshed records. It is the dock's only write.
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
+    onOpenResetForecastSource: () => {
+      if (isAllowedExternalUrl(CODEX_RESET_FORECAST_SOURCE_URL)) void shell.openExternal(CODEX_RESET_FORECAST_SOURCE_URL);
+    },
     // The same setting the widget's rate readout toggles, so both stay in step.
     onToggleRateMode: () => {
       settings.tokenRateMode = settings.tokenRateMode === 'burn' ? 'speed' : 'burn';
@@ -5351,8 +5474,14 @@ function syncEdgeDock(rendererSettings) {
   controller.setAppearance(edgeDockAppearance(rendererSettings));
   // Provider selection and order are settings too, so re-project on every sync
   // rather than waiting for the next stats push to reorder the rail.
-  if (latestStats) controller.setCells(edgeDockCellsFor(electronPresentationStats(latestStats)));
+  // Through the same path as a stats push, so the session-expiry timer is armed
+  // from these cells too: a settings change replaces what is on screen just as a
+  // push does, and skipping the reschedule here left the rail on a stale reading.
+  if (latestStats) pushEdgeDockCells(edgeDockCellsFor(electronPresentationStats(latestStats)));
   controller.sync();
+  // Now that the controller is running (sync() starts it when enabled), arm the
+  // timer against the cells that were just handed over.
+  scheduleEdgeDockSessionExpiry();
 }
 
 function refreshLimitStatsPresentation() {
@@ -6465,6 +6594,10 @@ async function installDownloadedAppUpdate() {
   return deriveAppUpdateState();
 }
 
+// The one URL the edge dock can ask for: the Codex reset forecast row is the
+// Limits page's row, and that row is a link to its source.
+const CODEX_RESET_FORECAST_SOURCE_URL = 'https://codex-resets.com/';
+
 function isAllowedExternalUrl(value) {
   let parsed;
   try { parsed = new URL(String(value || '')); }
@@ -6508,13 +6641,8 @@ function isAllowedExternalUrl(value) {
 }
 
 function revealWindow(target = mainWindow, options = {}) {
-  if (!target || target.isDestroyed() || target.isVisible()) return;
   const inactive = options.inactive === true || (target === mainWindow && floatingBubbleState.collapsed);
-  if (inactive && typeof target.showInactive === 'function') {
-    target.showInactive();
-    return;
-  }
-  target.show();
+  showWindow(target, inactive);
 }
 
 function loadWindowFile(target, options = {}) {
@@ -6745,11 +6873,8 @@ function replaceMainWindow(bounds, options = {}) {
     inactive: options.inactive === true
   });
   const next = mainWindow;
-  next.once('show', () => {
-    if (old && !old.isDestroyed()) old.destroy();
-    if ((options.focus === true || (options.focus !== false && wasFocused)) && !next.isDestroyed()) {
-      next.focus();
-    }
+  handoffWindow(old, next, {
+    focus: options.focus === true || (options.focus !== false && wasFocused)
   });
 }
 
@@ -6959,19 +7084,34 @@ app.whenReady().then(() => {
   setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
 
+  // The dock card decorates its plan cell from the subscription records the
+  // appearance carries, and only a settings push re-sends that appearance — while
+  // a subscription write is not a settings save, so it went out unseen and the
+  // card kept the list as it stood before the edit until something else pushed.
+  // The dock alone is re-synced rather than pushing the settings: the renderer
+  // already holds what it wrote back, and a push would re-render the form the
+  // user is editing.
   ipcMain.handle('subscriptions:adoptOrphans', async () => {
     try {
-      return await adoptOrphanedSubscriptions();
+      const next = await adoptOrphanedSubscriptions();
+      syncEdgeDock();
+      return next;
     } catch (error) {
       throw new Error(subscriptionWriteFailureCode(error), { cause: error });
     }
   });
 
-  ipcMain.handle('subscriptions:discardOrphans', () => discardOrphanedSubscriptions());
+  ipcMain.handle('subscriptions:discardOrphans', () => {
+    const next = discardOrphanedSubscriptions();
+    syncEdgeDock();
+    return next;
+  });
 
   ipcMain.handle('subscriptions:save', async (_event, subscriptions, base) => {
     try {
-      return await saveSubscriptions(subscriptions, base);
+      const next = await saveSubscriptions(subscriptions, base);
+      syncEdgeDock();
+      return next;
     } catch (error) {
       // The renderer has to tell "another device won" apart from "the hub is
       // down": one means re-read and redo, the other means try again later. Only
@@ -7093,6 +7233,7 @@ app.whenReady().then(() => {
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
     if (patch.heatmapMetric !== undefined) normalizedPatch.heatmapMetric = normalizeHeatmapMetric(patch.heatmapMetric, settings.heatmapMetric);
     if (patch.homeActiveDaysWindow !== undefined) normalizedPatch.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(patch.homeActiveDaysWindow, settings.homeActiveDaysWindow);
+    if (patch.sessionContextMetric !== undefined) normalizedPatch.sessionContextMetric = normalizeSessionContextMetric(patch.sessionContextMetric, settings.sessionContextMetric);
     settings = normalizeWindowBehaviorSettings({
       ...settings,
       ...normalizedPatch,
@@ -7130,6 +7271,7 @@ app.whenReady().then(() => {
       edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
       edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),
       edgeDockMode: (patch.edgeDockMode ?? settings.edgeDockMode) === 'always' ? 'always' : 'autoHide',
+      edgeDockHaptic: parseBoolean(patch.edgeDockHaptic ?? settings.edgeDockHaptic, true),
       edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
       // `null` is a real value here (back to the automatic default), so the
       // patch is checked for presence rather than coalesced.
@@ -7168,6 +7310,7 @@ app.whenReady().then(() => {
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
+      sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
@@ -8612,13 +8755,19 @@ app.whenReady().then(() => {
     }
     return { ok: true };
   });
-  ipcMain.on('window:minimize', () => {
-    if (settings?.trayMode) hidePopover();
-    else mainWindow?.minimize();
+  ipcMain.on('window:minimize', (event) => {
+    if (settings?.trayMode) {
+      hidePopover();
+      return;
+    }
+    actionWindowForEvent(BrowserWindow, event, mainWindow)?.minimize();
   });
-  ipcMain.on('window:close', () => {
-    if (settings?.trayMode) hidePopover();
-    else mainWindow?.close();
+  ipcMain.on('window:close', (event) => {
+    if (settings?.trayMode) {
+      hidePopover();
+      return;
+    }
+    actionWindowForEvent(BrowserWindow, event, mainWindow)?.close();
   });
   ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));

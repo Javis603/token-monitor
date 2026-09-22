@@ -26,7 +26,7 @@
 
 ## 什麼是 Token Monitor？
 
-一款桌面小工具，即時顯示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 37+ 種 AI 編程工具的 Token 用量與 AI 工具額度，具備即時多裝置同步與歷史使用趨勢功能，並支援依工具、裝置、模型、session 或專案分項顯示。
+一款桌面小工具，即時顯示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 38+ 種 AI 編程工具的 Token 用量與 AI 工具額度，具備即時多裝置同步與歷史使用趨勢功能，並支援依工具、裝置、模型、session 或專案分項顯示。
 
 ## 支援的工具
 
@@ -64,6 +64,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/`（`Data/Agents/.claude/projects/` V2、`.claude/projects/` legacy） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/lmstudio.png" width="28" alt="LM Studio" /> | LM Studio | `~/.lmstudio/server-logs/**/*.log` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/unsloth.png" width="28" alt="Unsloth" /> | Unsloth Studio | `~/.unsloth/studio/studio.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/devin.png" width="28" alt="Devin" /> | Devin CLI / Devin Desktop | `~/.local/share/devin/cli/sessions.db`, `<platform-app-data>/Devin/User/acp-events/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API 金鑰（查詢用量／金鑰上限；獲授權存取 credits 時顯示餘額，官方文件指定 Management 金鑰） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" /> | Minimax | Minimax API 金鑰（透過 Minimax API 查詢 Token Plan 額度） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key 或火山引擎 AK/SK（透過火山引擎 API 查詢火山方舟 Coding Plan / Agent Plan 額度） | — | ✅ | — |
@@ -80,6 +81,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 - 上表為預設路徑。Token Monitor 與 Tokscale 遵循相同的環境變數覆寫：`~/.local/share/` 下的路徑跟隨 `$XDG_DATA_HOME`，各工具另有 `$CODEX_HOME`、`$GROK_HOME`、`$HERMES_HOME`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME` 以及 `$CLINE_*` 系列。
 - LM Studio 追蹤目前僅涵蓋伺服器日誌中記錄的 OpenAI 相容 `/v1/chat/completions` 與 `/v1/responses` 請求。透過 LM Studio 內建 Chat 介面發起的對話，以及原生 `/api/v1/chat` 請求均不包含在內。
 - Unsloth Studio 從 `studio.db` 追蹤 Studio 對話與本機 API 的推論用量。本機推論的 API 費用為零；可識別的按量計費供應商使用 Tokscale 的價格估算。不包含訓練 Token。詳見 [Unsloth 資料來源說明](docs/providers/unsloth.md)。
+- Devin 從本機 `sessions.db` 追蹤 Devin CLI 會話，並從 `acp-events` ACP 日誌追蹤 Devin Desktop 代理會話；同一 session 兩邊都有資料時以 CLI 資料庫為準。Desktop 的涵蓋範圍取決於連接的 ACP 代理：只有會在本機寫入 `usage_update` 事件的代理才會計入，而 Devin Desktop 預設的 `devin-cloud` 代理在伺服器端計量，因此預設的 Desktop 設定不會回報 Desktop token。session 標題與專案歸屬取自 CLI 資料庫。詳見 [Devin 資料來源說明](docs/providers/devin.md)。
 
 - Command Code transcript 不包含實際 Token 數或每則訊息的模型資料。Token 用量依 transcript 文字估算；模型歸屬與推算成本則可能反映目前設定的模型，而非每次請求當時實際使用的模型。
 - Cursor 快取來自 Cursor 的帳號層級用量匯出，因此同時涵蓋 Cursor IDE 與 Cursor CLI。Token Monitor 會自動偵測 Cursor 桌面版已登入的帳號，也可在設定中手動新增。快取過期時會自動重新同步，但剛完成的 session 可能要幾分鐘才會出現在 Cursor 控制台，因此用量會在同步後更新，而非即時顯示。
@@ -123,7 +125,7 @@ Qoder CN 的 Token 用量來自應用程式本機 SQLite 資料庫，而非 API 
 
 ### 用量追蹤
 
-- **即時 Token 追蹤**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 30+ 種 AI 工具，每輪對話後 UI 在數秒內更新（完整清單見上方表格）
+- **即時 Token 追蹤**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 31+ 種 AI 工具，每輪對話後 UI 在數秒內更新（完整清單見上方表格）
 - **即時 Token 速率**：可選顯示的即時讀數，以 `tok/s` 顯示生成速度或以 `tok/min` 顯示總消耗
 - **單一 session 明細**：點進某個 session，可看每則提問的 Token 消耗，並展開查看每次回覆的 Token 拆分與用到的工具（開啟時才即時讀取本機 transcript 或資料庫，絕不同步）
 - **快取命中統計**：點擊任何工具或模型，展開查看輸入 Token（快取命中與未命中）、輸出 Token 的詳細分類及命中率百分比

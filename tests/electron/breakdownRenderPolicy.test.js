@@ -97,7 +97,7 @@ test('row fingerprints stay stable until visible row output changes', () => {
     key: 'session:codex:s1',
     kind: 'session',
     name: 'Codex · gpt-5.6-sol',
-    subtitle: '21:53 · 465 msgs',
+    subtitle: '21:53 · 465 calls',
     detail: 's1',
     value: 1234,
     cost: 0.42,
