@@ -1875,6 +1875,12 @@ test('Cline exposes its API key through the settings and credential-store patter
   // Both tags are strings other providers already use, so no new chip text is
   // introduced for a provider whose surfaces are the same class as workbuddy's
   // desktop app and kiro's CLI.
+  // With neither a key nor a stored sign-in, the one thing this application can be
+  // told is a key — the same label the other key-configured providers use.
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'notConfigured' }),
+    { label: 'Add API key', tone: 'setup' }
+  );
   assert.deepEqual(limitProviderCapabilityTags({ provider: 'cline' }), ['Auto', 'Desktop app', 'CLI']);
   // The list renders per provider, and its default branch draws session and weekly
   // only — a three-window provider needs its own branch or the monthly window never
