@@ -28,6 +28,7 @@ const subscriptionDisplayApi = window.TokenMonitorSubscriptionDisplay;
 const subscriptionTextApi = window.TokenMonitorSubscriptionText;
 const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMode;
 const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
+const { activateOnPress } = window.TokenMonitorPressActivation;
 const { clientColors, modelColor, modelVendorFor } = window.TokenMonitorUsageCharts;
 const { UNATTRIBUTED_KEY } = window.TokenMonitorUsageAttributionRows;
 const { LIMIT_PROVIDER_LABELS } = window.TokenMonitorLimitProviders;
@@ -992,11 +993,9 @@ function appendLiveRate(card, head, cell) {
   figure.title = t('edgeDock.rate.switch');
   const unit = el('span', 'edge-dock-rate-unit', t(burnMode ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit'));
   figure.append(el('strong', '', hasSample ? formatRate(cell.rate) : '—'), unit, el('span', 'edge-dock-rate-swap', '⇄'));
-  // pointerdown, not click: the card is rebuilt whenever the rate moves, and a
-  // rebuild between press and release silently swallows the click.
-  figure.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return;
-    event.preventDefault();
+  // Press-activated, not click: the card is rebuilt whenever the rate moves, and
+  // a rebuild between press and release silently swallows the click.
+  activateOnPress(figure, () => {
     unit.textContent = t(burnMode ? 'edgeDock.rate.speedUnit' : 'edgeDock.rate.burnUnit');
     bridge.toggleRateMode();
   });
@@ -1045,7 +1044,9 @@ function statCard(cell) {
     button.type = 'button';
     button.classList.toggle('is-active', breakdownMode === mode);
     button.setAttribute('aria-pressed', String(breakdownMode === mode));
-    button.addEventListener('click', () => {
+    // Press-activated for the same reason as the live-rate figure: a repaint
+    // between press and release replaces the button and would swallow the click.
+    activateOnPress(button, () => {
       if (state.breakdownMode === mode) return;
       state.breakdownMode = mode;
       renderBubble(state.payload);

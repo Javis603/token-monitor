@@ -1276,6 +1276,11 @@ test('period cards expose an accessible tools and models switch', () => {
   const card = dock.slice(dock.indexOf('function statCard('), dock.indexOf('function sessionsCard('));
   assert.match(card, /for \(const mode of \['tools', 'models'\]\)/);
   assert.match(card, /button\.setAttribute\('aria-pressed', String\(breakdownMode === mode\)\)/);
+  // The card is rebuilt on every repaint, so a click-only listener loses the
+  // activation when a rebuild lands between press and release. The switch goes
+  // through the shared press-activation helper instead.
+  assert.match(card, /activateOnPress\(button, \(\) => \{/);
+  assert.doesNotMatch(card, /button\.addEventListener\('click'/);
   assert.match(card, /state\.breakdownMode = mode;\s+renderBubble\(state\.payload\);/);
   assert.match(card, /modelVendorFor\(model\.model\)/);
   assert.match(card, /t\('dashboard\.tooltip\.unclassified'\)/);
