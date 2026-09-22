@@ -771,14 +771,33 @@ test('API key account entries share styling and Copilot uses the folded token en
   const css = readRendererFile('styles.css');
 
   const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
-  assert.match(animationBody, /'#factoryManualPanel',\n\s*'#kimiManualPanel',\n\s*'#zedManualPanel',\n\s*'#commandcodeManualPanel',\n\s*'#zaiManualPanel',\n\s*'#zaiteamManualPanel',\n\s*'#qoderManualPanel',\n\s*'#deepseekManualPanel',\n\s*'#minimaxManualPanel',\n\s*'#volcengineManualPanel',\n\s*'#ollamaManualPanel',\n\s*'#traeManualPanel',\n\s*'#alibabaManualPanel'/);
+
+  // Membership, not a contiguous run. This used to assert a literal match on the
+  // list's tail, so a panel inserted anywhere else passed it by construction — cline
+  // did, and shipped with no wrapper while the stylesheet rules naming its inner
+  // element sat there matching nothing. The rule asserted here is the one with a
+  // mechanical justification: a bare panel has no `accordion-animated-container`
+  // anywhere in its own markup, so if it is not listed here it never animates at
+  // all. An `opencode-add-form` panel is a per-panel choice and stays out of this
+  // assertion — cursor is wrapped (its button and details animate as one unit) while
+  // copilot and mimo declare their own container, which the assertions below pin.
+  const html = readRendererFile('index.html');
+  const barePanels = [...html.matchAll(/<div id="([a-zA-Z]+ManualPanel)"([^>]*)>/g)]
+    .filter(([, , attributes]) => !/opencode-add-form/.test(attributes))
+    .map(([, id]) => id);
+  assert.ok(barePanels.length > 10, 'the manual panels should be found in index.html');
+  for (const id of barePanels) {
+    assert.ok(
+      animationBody.includes(`'#${id}'`),
+      `${id} is a plain panel and must be animated by initSettingsAnimationWrappers`
+    );
+  }
   assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
 
   // Each provider's error line starts hidden. Hiding itself is the stylesheet's
   // one blanket rule, so what is worth asserting here is that every provider has
   // such a line and that none of them ship visible.
-  const html = readRendererFile('index.html');
   for (const provider of ['deepseek', 'minimax', 'factory', 'zai', 'zaiteam', 'volcengine', 'qoder', 'trae', 'zed', 'commandcode', 'ollama', 'kimi', 'copilot']) {
     assert.match(html, new RegExp(`id="${provider}ErrorMessage"[^>]*class="[^"]*hidden"`), provider);
   }

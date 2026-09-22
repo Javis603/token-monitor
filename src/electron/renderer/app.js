@@ -17054,6 +17054,7 @@ function initSettingsAnimationWrappers() {
     '#claudeManualPanel',
     '#opencodeManualPanel',
     '#cursorManualPanel',
+    '#clineManualPanel',
     '#factoryManualPanel',
     '#kimiManualPanel',
     '#zedManualPanel',
