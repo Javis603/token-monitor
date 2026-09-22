@@ -301,7 +301,6 @@ module.exports = {
   fetchCursorLimits,
   fetchClineLimits,
   clineApiKey: clineLimits.clineApiKey,
-  clineProvidersPath: clineLimits.clineProvidersPath,
   resolveClineAutomaticCredential: clineLimits.resolveClineAutomaticCredential,
   fetchDeepSeekLimits,
   fetchMimoLimits,

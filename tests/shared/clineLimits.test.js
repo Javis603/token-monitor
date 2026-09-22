@@ -20,6 +20,7 @@ const {
   resolveClineCredential
 } = require('../../src/shared/providers/cline/limits');
 const { parseLimitProviders, providerFetchers } = require('../../src/shared/limits/collector');
+const { TRANSIENT_STATUSES } = require('../../src/shared/limits/runtime');
 
 const NOW = Date.UTC(2026, 8, 21, 12, 0, 0);
 
@@ -455,6 +456,12 @@ test('transport failures map onto the shared provider statuses', async (t) => {
   assert.equal((await fetchClineLimits({}, failing(401))).status, 'unauthorized');
   assert.equal((await fetchClineLimits({}, failing(429))).status, 'sourceRateLimited');
   assert.equal((await fetchClineLimits({}, failing(500))).status, 'unavailable');
+  // A 403 keeps the shared default rather than becoming a credential problem: this
+  // API has only ever answered 401 for a rejected credential, so a forbidden status
+  // reads as an outage and the last reading survives, the way it does for every
+  // provider that does not ask for the 401/403 collapse (providers/claude,
+  // providers/codex) — and a challenge on the way in is `unavailable` either way.
+  assert.equal((await fetchClineLimits({}, failing(403))).status, 'unavailable');
 });
 
 test('a 200 that is not the API payload is unavailable, never a reading', async (t) => {
@@ -647,6 +654,49 @@ test('no plan and no readable credit keeps the plan request status', async (t) =
   });
   assert.equal(result.status, 'unavailable');
   assert.deepEqual(result.windows, []);
+});
+
+test('a failed plan read keeps its own status when the credit answers', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth() });
+  const calls = [];
+  const run = (route) => fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    fetch: routedFetch({ sink: calls, balance: { success: true, data: { userId: 'usr-1', balance: 500000 } }, ...route })
+  });
+  // Every plan failure except the planless 404 is an outage, and the credit read
+  // beside it may not turn that into a healthy row: a green row would hide the
+  // outage and, because the runtime only keeps the last good reading while the
+  // status is transient, replace the windows it was holding.
+  for (const [usageStatus, expected] of [[403, 'unavailable'], [429, 'sourceRateLimited'], [500, 'unavailable']]) {
+    const result = await run({ usageStatus });
+    assert.equal(result.status, expected, `plan ${usageStatus} should report ${expected}`);
+    assert.ok(TRANSIENT_STATUSES.has(expected), `${expected} must be transient for the last good reading to survive`);
+    // A failure row carries no windows, like every other failure here: the runtime
+    // composes the display from the last good reading for a transient status, and an
+    // account with nothing behind it yet shows nothing.
+    assert.deepEqual(result.windows, []);
+    assert.equal(result.source, 'oauth');
+    // The lanes after the plan read are not asked on an outage, the same saving the
+    // credential refusal makes — a credit read could not reach the screen anyway.
+    assert.equal(calls.length, 1, `plan ${usageStatus} should stop at the plan request`);
+    calls.length = 0;
+  }
+  // A transport failure is the same shape, and carries no HTTP status to read.
+  const offline = await fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    fetch: async (url) => {
+      if (String(url).includes('/plan/usage-limits')) throw new TypeError('fetch failed');
+      if (String(url).includes('/balance')) {
+        return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ success: true, data: { userId: 'usr-1', balance: 500000 } }) };
+      }
+      return { ok: true, status: 200, headers: { get: () => null }, json: async () => ({ success: true, data: { items: [] } }) };
+    }
+  });
+  assert.equal(offline.status, 'unavailable');
+  assert.deepEqual(offline.windows, []);
 });
 
 test('a credit that cannot be read leaves the plan reading alone', async (t) => {

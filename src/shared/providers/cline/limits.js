@@ -443,6 +443,21 @@ async function fetchClineLimits(options = {}, deps = {}) {
     // refused the same way, so it is not asked — which is also why an expired
     // sign-in still costs exactly one request.
     if (planStatus === 'unauthorized') return failingProvider(planStatus, nowMs, credential.source);
+    // Every other failure is an outage, and it ends the read here rather than being
+    // papered over by the credit beside it: a green row would hide the outage and,
+    // because the runtime keeps the last good reading only while the status is
+    // transient, replace the windows it was holding. Nothing is lost by stopping —
+    // the credit read cannot reach the screen on a failed row anyway — and the lanes
+    // after this one are not asked, the same saving the refusal above makes.
+    //
+    // The one refusal that is still an answer is the planless 404 (verified live —
+    // `no plan history found for user`): that account's credit may be the row, and
+    // the credit read is what decides it. `httpStatus` carries exactly this split,
+    // because the shared vocabulary collapses 404 and 5xx into `unavailable`
+    // (limits/providerHelpers.js); the providers that need it read it the same way
+    // (providers/claude with 403/404, providers/volcengine with 401/403/404,
+    // providers/codex with 408/5xx).
+    if (Number(error?.httpStatus) !== 404) return failingProvider(planStatus, nowMs, credential.source);
   }
   // The account id both nested reads are keyed by, resolved once: the stored sign-in
   // carries it, and a key-only install learns it from the profile endpoint (which is

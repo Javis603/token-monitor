@@ -141,6 +141,16 @@ balance call never turns the row into a credential problem. It is also what keep
 from reading as `unavailable` — with a credit in hand the row is `ok`, the rule
 `docs/providers/zai.md` states for a key without a subscription.
 
+That "credit in hand" rule covers the planless answers only — an empty `limits` list, or the `404`
+above. A plan read that fails any other way keeps its own status and ends the scan there: the credit is
+the best-effort lane (the rule `providers/claude` gives its prepaid read) and may not do the reverse
+either and turn an outage into a healthy row. A green row would hide the outage and, since the shared
+runtime keeps the last good reading only while the status is transient, replace the windows it was
+holding; the credit read could not reach the screen on a failed row anyway. What the row shows instead is
+that retained last full reading — credit included — beside the failure status, which is what the
+`lastGood` / `lastAttempt` retention in `src/shared/limits/runtime.js` is for. An account with nothing
+behind it yet shows nothing, as with any provider here.
+
 What the account has **spent** is a second read: `GET
 /api/v1/users/{id}/usages/daily?startdate=YYYY-MM-DD&enddate=YYYY-MM-DD` (the range is the local month
 to date) answers `{"data":{"items":[{"date","aiModelName","promptTokens","completionTokens","costUsd",
@@ -173,8 +183,22 @@ by field against payloads other ClinePass clients captured rather than observed 
 | 401 → credential problem, 429 → rate limited, anything else (403 and 5xx included) → unavailable | `unauthorized`, `sourceRateLimited`, `unavailable` |
 | percentages clamp to 0–100 | clamped, deliberately **not rounded**: the shared burn-rate math reads the raw value |
 
-Three deliberate choices, recorded so they are not "corrected" later:
+Five deliberate choices, recorded so they are not "corrected" later:
 
+- **A failed plan read is not rescued by the credit read.** Only the planless answers — an empty
+  `limits` list, or the `404` — let a credit-bearing row be `ok`; a `403`, `429` or `5xx` keeps the
+  status that says so. Telling those apart takes the HTTP status, which `limits/providerHelpers.js`
+  keeps for exactly this reason and `providers/claude`, `providers/codex` and `providers/volcengine`
+  read the same way; the shared status vocabulary alone collapses `404` and `5xx` into `unavailable`.
+  The failure row carries no windows, so the display for a transient status is the retained last good
+  reading (`lastGood` / `lastAttempt` retention, `src/shared/limits/runtime.js`) rather than a partial
+  fresh one.
+- **A `403` is not read as a credential problem.** The shared helper collapses 401 and 403 into
+  `unauthorized` only where a provider asks for it (`providers/claude` and `providers/codex` pass
+  `forbiddenIsUnauthorized`); this provider keeps the default, so a forbidden status is an outage that
+  retains the last reading. That stays until this API is seen answering 403 for a credential — only
+  401 and the plan-less 404 have been observed, and CodexBar and CodeBurn reading 403 as an expired
+  session is not an observation of this endpoint.
 - **The monthly window is labelled, not timed.** A `billing` window is this repository's catch-all kind
   and carries `label: 'Monthly'` (Kimi's and Command Code's monthly windows, Claude's credit windows),
   while `windowMinutes` belongs to the two fixed-duration kinds.
