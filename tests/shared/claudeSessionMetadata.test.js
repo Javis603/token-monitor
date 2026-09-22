@@ -332,6 +332,55 @@ test('Claude session context uses the final message iteration instead of the usa
   });
 });
 
+test('Claude session context uses the fallback iteration that served the response', (t) => {
+  const usage = {
+    input_tokens: 252,
+    cache_creation_input_tokens: 1_300,
+    cache_read_input_tokens: 220_000,
+    iterations: [
+      {
+        type: 'message',
+        model: 'claude-fable-5',
+        input_tokens: 2,
+        cache_creation_input_tokens: 300,
+        cache_read_input_tokens: 100_000
+      },
+      {
+        type: 'fallback_message',
+        model: 'claude-opus-4-8',
+        input_tokens: 250,
+        cache_creation_input_tokens: 1_000,
+        cache_read_input_tokens: 120_000
+      }
+    ]
+  };
+  const assistant = (content) => JSON.stringify({
+    type: 'assistant',
+    message: {
+      model: 'claude-opus-4-8',
+      role: 'assistant',
+      content,
+      stop_reason: 'end_turn',
+      usage
+    }
+  });
+  const ordinary = fixture([assistant('served by the fallback')]);
+  t.after(() => fs.rmSync(ordinary.dir, { recursive: true, force: true }));
+  assert.deepEqual(readSessionContext(ordinary.file, { cache: new Map() }), {
+    contextTokens: 121_250,
+    contextWindow: 1_000_000
+  });
+
+  // Crossing the bounded-record threshold must not fall back to the declined
+  // primary attempt just because the usage object is read from tail fragments.
+  const oversized = fixture([assistant('x'.repeat(300 * 1024))]);
+  t.after(() => fs.rmSync(oversized.dir, { recursive: true, force: true }));
+  assert.deepEqual(readSessionContext(oversized.file, { cache: new Map() }), {
+    contextTokens: 121_250,
+    contextWindow: 1_000_000
+  });
+});
+
 test('Claude session context clears on compaction and repopulates on the next response', (t) => {
   const usage = (tokens) => JSON.stringify({
     type: 'assistant',

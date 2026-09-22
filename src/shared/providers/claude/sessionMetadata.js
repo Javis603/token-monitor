@@ -73,12 +73,15 @@ function currentContextUsage(usage) {
   // Claude Code rolls the top-level counters up across every message iteration
   // in one request. Each iteration carries the context again, so that total is
   // cost/accounting data rather than the context held after the response. The
-  // final message iteration is the request's current state. Some real records
-  // even zero the rollup while retaining the only usable reading here.
+  // final serving iteration is the request's current state. A server-side
+  // fallback labels the terminal iteration `fallback_message` instead of
+  // `message`; the preceding `message` is the primary attempt that declined.
+  // Some real records also zero the rollup while retaining the only usable
+  // reading here.
   if (Array.isArray(usage.iterations)) {
     for (let index = usage.iterations.length - 1; index >= 0; index -= 1) {
       const iteration = usage.iterations[index];
-      if (iteration?.type === 'message') return iteration;
+      if (iteration?.type === 'message' || iteration?.type === 'fallback_message') return iteration;
     }
   }
   return usage;
