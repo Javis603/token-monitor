@@ -235,6 +235,18 @@ test('localized READMEs disclose the Unsloth database and inference scope', () =
   }
 });
 
+// Devin's ✅ means a local source exists, not that a default install produces
+// numbers: Desktop only counts agents that write `usage_update` locally, and the
+// stock `devin-cloud` agent meters server-side. Without this note a reader sees
+// the ✅ and a discovered acp-events directory reporting zero tokens.
+test('localized READMEs disclose the Devin Desktop agent boundary', () => {
+  for (const file of localizedReadmes) {
+    const text = read(file);
+    assert.ok(text.includes('`devin-cloud`'), file);
+    assert.ok(text.includes('(docs/providers/devin.md)'), file);
+  }
+});
+
 test('limit provider order follows the supported-tools table', () => {
   const text = read('README.md');
   const fromReadme = text

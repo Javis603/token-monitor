@@ -17,6 +17,10 @@ Devin is a regular Tokscale-backed client, enabled by default on new installs. T
 
 Devin Desktop builds that write per-session databases under `acp-messages/` instead are not a Tokscale source; only `acp-events` is scanned.
 
+## Desktop coverage
+
+Desktop usage is only as complete as the connected ACP agent. Tokens come from the `usage_update` events an agent writes into the NDJSON stream, which agents such as Cascade/Windsurf, claude-code and opencode do. Devin Desktop's own default `devin-cloud` agent does not: that usage is metered server-side and leaves no local record, and there is no account-level API to read it back. A default Devin Desktop install therefore has a discoverable `acp-events` directory and still reports zero Desktop tokens. Treat that as the source's limit rather than a detection failure — Devin CLI usage is unaffected.
+
 ## Session metadata
 
 Session titles, activity timestamps, and project attribution come from the CLI `sessions` table via `src/shared/providers/devin/sessionMetadata.js`. Devin's opaque session ids (e.g. `lavender-flock`) carry no timestamp of their own, so without the database a session falls back to the scan's own activity bounds.
