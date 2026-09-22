@@ -65,6 +65,12 @@ credentials would show a different account's quota than the one the user configu
 reports its own provenance: `api` for a configured key, `oauth` for a discovered sign-in — the split
 `docs/providers/zai.md` states for its console key versus its discovered credential.
 
+Both refusals report the same shared `unauthorized` status, so the status pill reads that provenance to
+name the credential to fix: `api` renders "Update API key" (the field this application owns) and
+`oauth` renders "Open Cline". This is the only provider whose pill branches on `source`, and it does so
+because neither cause is the rarer one — the file lane is the discovery default while its access token
+expires hourly — so any single label would be wrong for the state a fresh install is in.
+
 The order here is deliberately not Cline's. Inside one of its own provider settings Cline prefers the
 stored access token and treats the API key as the fallback; this provider puts the environment key
 first because that value is Token Monitor's own operator instruction, while the file is another

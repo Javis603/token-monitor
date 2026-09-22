@@ -1865,12 +1865,23 @@ test('Cline exposes its API key through the settings and credential-store patter
   assert.match(envExample, /CLINE_API_KEY=/);
   assert.match(clineLimits, /CLINE_API_KEY/);
   assert.match(clineLimits, /CLINEPASS_API_KEY/);
-  // A refused sign-in is Cline's own to fix: it refreshes the stored token when it
-  // runs, and only it can persist a rotated one, so the pill names that action. A
-  // rejected API key is the other cause the one `unauthorized` status covers.
+  // A refused credential recovers where that credential lives, and this provider is
+  // the only one whose status reads `source` to tell its two lanes apart: a rejected
+  // key is replaced in Token Monitor's own field, while the discovered sign-in is
+  // Cline's to fix — it refreshes the stored token when it runs, and only it can
+  // persist a rotated one — so that lane points back at Cline. A row with no source
+  // is the sign-in lane, the one a local install is in by default.
   assert.deepEqual(
     limitProviderStatusLabel({ provider: 'cline', status: 'unauthorized' }),
     { label: 'Open Cline', tone: 'setup' }
+  );
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'unauthorized', source: 'oauth' }),
+    { label: 'Open Cline', tone: 'setup' }
+  );
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'unauthorized', source: 'api' }),
+    { label: 'Update API key', tone: 'setup' }
   );
   // Both tags are strings other providers already use, so no new chip text is
   // introduced for a provider whose surfaces are the same class as workbuddy's

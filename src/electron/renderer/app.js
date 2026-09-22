@@ -240,6 +240,7 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   'Sign in again': 'settings.limits.status.signInAgain',
   'Run grok login': 'settings.limits.status.runGrokLogin',
   'Run kiro-cli login': 'settings.limits.status.runKiroLogin',
+  'Open Cline': 'settings.limits.status.openCline',
   'Re-login': 'settings.limits.status.relogin',
   Limited: 'settings.limits.status.limited',
   'Usage API limited': 'settings.limits.status.usageApiLimited',
@@ -13787,7 +13788,16 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
           : null;
     return t(linkedKey || (source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`));
   }
-  if (accountStatus === 'invalid') return t(`settings.${providerName}.statusInvalid`);
+  if (accountStatus === 'invalid') {
+    // Cline's two lanes refuse in different places, and this row names the lane the
+    // credential came from rather than always the key field: the discovered sign-in
+    // expires hourly and only Cline refreshes it, so a stale one is not an API key
+    // problem. Every other provider here keeps the one statusInvalid string.
+    const invalidKey = providerName === 'cline' && source === 'cline-signin'
+      ? 'settings.cline.statusSigninInvalid'
+      : `settings.${providerName}.statusInvalid`;
+    return t(invalidKey);
+  }
   if (accountStatus === 'notConfigured') return t(`settings.${providerName}.statusNotSet`);
   const statusKeys = {
     checking: 'settings.common.checking',

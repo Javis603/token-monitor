@@ -423,12 +423,21 @@
       if (providerName === 'thirdparty') return { label: 'Update credential', tone: 'setup' };
       // Cline owns its credential lifecycle — it refreshes the stored token
       // whenever the app or the CLI runs, and only it persists a rotated one — so
-      // this provider reads that sign-in read-only. A refusal is therefore usually
-      // the sign-in having gone stale, which only opening Cline fixes; a rejected
-      // API key is the other cause, and the shared vocabulary carries one
-      // `unauthorized` for both, so the pill names the common one. Grok and kiro
-      // name the vendor's own action here for the same reason.
-      if (providerName === 'cline') return { label: 'Open Cline', tone: 'setup' };
+      // this provider reads that sign-in read-only. The two lanes it accepts refuse
+      // in different places: a rejected key is replaced in Token Monitor's own
+      // settings field, while a stale sign-in only opening Cline fixes. The shared
+      // vocabulary carries one `unauthorized` for both, so the label reads the lane
+      // off the row: providers/cline/limits.js reports `api` for a configured key
+      // and `oauth` for the discovered sign-in. This is the one provider whose
+      // status branches on source, and it does so because both causes are reachable
+      // with neither of them rarer than the other — the file lane is the discovery
+      // default and its access token expires hourly. Grok and kiro name the vendor's
+      // own action here for the same reason, without needing the split.
+      if (providerName === 'cline') {
+        return sourceId(provider) === 'api'
+          ? { label: 'Update API key', tone: 'setup' }
+          : { label: 'Open Cline', tone: 'setup' };
+      }
       return providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
         ? { label: 'Update API key', tone: 'setup' }
         : providerName === 'qoder' || providerName === 'trae'

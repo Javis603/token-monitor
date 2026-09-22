@@ -230,14 +230,20 @@ test('an expired stored sign-in is sent as-is: no refresh request, file untouche
 test('a failure names the source it failed on and nothing else', async (t) => {
   const dataDir = tempDir(t);
   writeProviders(dataDir, { cline: clineAuth() });
-  const result = await fetchClineLimits({}, {
+  const refused = {
     env: { CLINE_DATA_DIR: dataDir },
     now: () => NOW,
     fetch: async () => ({ ok: false, status: 401, headers: { get: () => null }, json: async () => ({}) })
-  });
+  };
+  const result = await fetchClineLimits({}, refused);
   assert.equal(result.status, 'unauthorized');
+  // The rejected credential is the one thing a failure keeps saying, and the status
+  // pill is picked from it: a refused sign-in and a refused key are recovered in
+  // different places, so both lanes have to name themselves here.
+  assert.equal(result.source, 'oauth');
   assert.equal(result.accountKey, '');
   assert.equal(result.accountEmail, '');
+  assert.equal((await fetchClineLimits({ clineApiKey: 'sk-refused' }, refused)).source, 'api');
 });
 
 test('fetchClineLimits maps the three ClinePass windows onto the shared kinds', async (t) => {

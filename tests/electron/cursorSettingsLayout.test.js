@@ -1443,6 +1443,62 @@ test('Factory identifies environment and Droid .env credentials separately', () 
   assert.equal((i18n.match(/'settings\.factory\.statusDroidEnv'/g) || []).length, 5);
 });
 
+test('Cline names the credential lane that went bad, not always the key field', () => {
+  // One `unauthorized` status covers two lanes here, and this row is where a stale
+  // sign-in and a rejected key have to read differently: Cline refreshes the stored
+  // token when it runs, so an expired sign-in is not an API key problem. The last
+  // assertion is the control — zai also surfaces an auto-discovered login on a key
+  // panel and keeps the single statusInvalid string, which is what this branch
+  // deliberately does not change for every other provider.
+  const app = readRendererFile('app.js');
+  const labels = runRendererFunctions(
+    app,
+    ['apiKeyAccountStatusText'],
+    `[
+      apiKeyAccountStatusText('cline', { status: 'unauthorized' }, true, 'cline-signin'),
+      apiKeyAccountStatusText('cline', { status: 'unauthorized' }, true, 'settings'),
+      apiKeyAccountStatusText('cline', { status: 'unauthorized' }, true, 'env'),
+      apiKeyAccountStatusText('zai', { status: 'unauthorized' }, true, 'zcode-auto')
+    ]`,
+    {
+      limitProviderPresentationApi: { apiKeyAccountStatus: () => 'invalid' },
+      t: key => key
+    }
+  );
+  assert.deepEqual(Array.from(labels), [
+    'settings.cline.statusSigninInvalid',
+    'settings.cline.statusInvalid',
+    'settings.cline.statusInvalid',
+    'settings.zai.statusInvalid'
+  ]);
+
+  // The same lane split on the way in: a working sign-in reads as the discovered
+  // credential it is, the way Zed's linked session does, rather than as a stored key.
+  const linked = runRendererFunctions(
+    app,
+    ['apiKeyAccountStatusText'],
+    `[
+      apiKeyAccountStatusText('cline', { status: 'ok' }, true, 'cline-signin'),
+      apiKeyAccountStatusText('cline', { status: 'ok' }, true, 'settings'),
+      apiKeyAccountStatusText('zai', { status: 'ok' }, true, 'zcode-auto')
+    ]`,
+    {
+      limitProviderPresentationApi: { apiKeyAccountStatus: () => 'linked' },
+      t: key => key
+    }
+  );
+  assert.deepEqual(Array.from(linked), [
+    'settings.cline.statusSignin',
+    'settings.cline.statusSet',
+    'settings.zai.statusLinked'
+  ]);
+
+  const i18n = readRendererFile('i18n.js');
+  for (const key of ['settings.cline.statusSignin', 'settings.cline.statusSigninInvalid']) {
+    assert.equal((i18n.match(new RegExp(`'${key.replaceAll('.', '\\.')}'`, 'g')) || []).length, 5);
+  }
+});
+
 test('Factory keeps a saved-key Clear action available after validation fails', () => {
   const app = readRendererFile('app.js');
   const elements = new Map();
