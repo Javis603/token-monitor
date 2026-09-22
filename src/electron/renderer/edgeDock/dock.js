@@ -28,7 +28,8 @@ const subscriptionDisplayApi = window.TokenMonitorSubscriptionDisplay;
 const subscriptionTextApi = window.TokenMonitorSubscriptionText;
 const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMode;
 const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
-const { clientColors } = window.TokenMonitorUsageCharts;
+const { clientColors, modelColor, modelVendorFor } = window.TokenMonitorUsageCharts;
+const { UNATTRIBUTED_KEY } = window.TokenMonitorUsageAttributionRows;
 const { LIMIT_PROVIDER_LABELS } = window.TokenMonitorLimitProviders;
 const { CLIENT_LABELS } = window.TokenMonitorClientCatalog;
 // The same predicate the Sessions list uses. The card repaints from its last
@@ -58,7 +59,8 @@ const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)
 const state = {
   payload: null,
   locale: 'en',
-  appearanceKey: ''
+  appearanceKey: '',
+  breakdownMode: 'tools'
 };
 const maskSupport = new Map();
 
@@ -1028,38 +1030,72 @@ function statCard(cell) {
   const total = el('div', 'edge-dock-stat-headline');
   total.append(el('strong', '', formatTokens(cell.totalTokens)), el('span', '', formatCost(cell.costUsd)));
   card.append(total);
-  if (!cell.clients.length) {
+  if (!cell.clients.length && !(cell.models || []).length) {
     card.append(el('div', 'edge-dock-note', t('edgeDock.noUsagePeriod')));
     return card;
   }
-  // Tools read like the widget's Tools list: tokens and share of the period,
-  // in fixed columns, with a bar matching the limit meters above.
+  const breakdownMode = state.breakdownMode === 'models' ? 'models' : 'tools';
+  card.dataset.breakdownMode = breakdownMode;
+  head.classList.add('is-breakdown');
+  const switcher = el('div', 'edge-dock-breakdown-switch');
+  switcher.setAttribute('role', 'group');
+  switcher.setAttribute('aria-label', `${t('home.tools')} / ${t('home.models')}`);
+  for (const mode of ['tools', 'models']) {
+    const button = el('button', 'edge-dock-breakdown-option', t(`home.${mode}`));
+    button.type = 'button';
+    button.classList.toggle('is-active', breakdownMode === mode);
+    button.setAttribute('aria-pressed', String(breakdownMode === mode));
+    button.addEventListener('click', () => {
+      if (state.breakdownMode === mode) return;
+      state.breakdownMode = mode;
+      renderBubble(state.payload);
+    });
+    switcher.append(button);
+  }
+  head.append(switcher);
+
+  // Both breakdowns keep the widget's list rhythm: mark, name, tokens and share,
+  // followed by the same meter. The model view borrows the main renderer's vendor
+  // and fallback colours so one model never changes identity between surfaces.
+  const rows = breakdownMode === 'models'
+    ? (cell.models || []).map((model) => ({
+      id: model.unattributed ? 'token-monitor' : modelVendorFor(model.model),
+      name: model.model === UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : model.model,
+      tokens: model.tokens,
+      color: readableColor(model.unattributed ? clientColors.default : modelColor(model.model))
+    }))
+    : cell.clients.map((client) => ({
+      id: client.unattributed ? 'token-monitor' : client.client,
+      name: client.client === UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabel(client.client),
+      tokens: client.tokens,
+      color: readableColor(clientColors[client.client] || clientColors.default)
+    }));
   const list = el('div', 'edge-dock-accounts edge-dock-clients');
-  const top = cell.clients[0].tokens || 1;
-  const sum = cell.totalTokens || cell.clients.reduce((value, client) => value + client.tokens, 0) || 1;
-  for (const client of cell.clients) {
-    const color = readableColor(clientColors[client.client] || clientColors.default);
+  const top = rows[0]?.tokens || 1;
+  const sum = cell.totalTokens || rows.reduce((value, row) => value + row.tokens, 0) || 1;
+  for (const entry of rows) {
     const row = el('div', 'edge-dock-client');
     // The same bar as the quota meters above it, built by the same helper.
     const meter = el('div', 'limit-meter');
-    meter.style.background = colorWithAlpha(color, 0.16);
+    meter.style.background = colorWithAlpha(entry.color, 0.16);
     const fill = el('div', 'limit-meter-fill');
-    fill.style.background = color;
+    fill.style.background = entry.color;
     fill.style.opacity = '0.95';
-    applyBarScale(fill, Math.max(0.02, client.tokens / top));
+    applyBarScale(fill, Math.max(0.02, entry.tokens / top));
     meter.append(fill);
     row.append(
-      markNode(client.client, color),
-      el('span', 'edge-dock-client-name', clientLabel(client.client)),
-      el('span', 'edge-dock-client-tokens', formatTokens(client.tokens)),
-      el('span', 'edge-dock-client-share', `${Math.round((client.tokens / sum) * 100)}%`),
+      markNode(entry.id, entry.color),
+      el('span', 'edge-dock-client-name', entry.name),
+      el('span', 'edge-dock-client-tokens', formatTokens(entry.tokens)),
+      el('span', 'edge-dock-client-share', `${Math.round((entry.tokens / sum) * 100)}%`),
       meter
     );
     list.append(row);
   }
   card.append(list);
-  if (cell.clientCount > cell.clients.length) {
-    card.append(el('div', 'edge-dock-note', t('edgeDock.moreClients', { count: cell.clientCount - cell.clients.length })));
+  const rowCount = breakdownMode === 'models' ? cell.modelCount : cell.clientCount;
+  if (rowCount > rows.length) {
+    card.append(el('div', 'edge-dock-note', t(breakdownMode === 'models' ? 'edgeDock.moreModels' : 'edgeDock.moreClients', { count: rowCount - rows.length })));
   }
   return card;
 }
@@ -1148,7 +1184,8 @@ if (surface === 'bubble') root.append(stagingLayer);
 
 function commitCard(card, cellId) {
   const previous = contentLayer.querySelector('.edge-dock-card');
-  const sameCard = previous?.dataset.cellId === cellId;
+  const sameCard = previous?.dataset.cellId === cellId
+    && previous?.dataset.breakdownMode === card.dataset.breakdownMode;
   const scrollTop = sameCard ? previous.querySelector(CARD_SCROLL_SELECTOR)?.scrollTop || 0 : 0;
   contentLayer.replaceChildren(card);
   const list = card.querySelector(CARD_SCROLL_SELECTOR);

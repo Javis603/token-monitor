@@ -1246,6 +1246,41 @@ test('explicit items keep their order, their empty providers, and add usage read
   assert.equal(claude.usage, null);
 });
 
+test('period cells carry capped model rows without dropping unattributed usage', () => {
+  const stats = {
+    periods: {
+      today: {
+        totalTokens: 100,
+        costUsd: 1,
+        clients: { codex: 100 },
+        models: { 'gpt-5': 60, 'claude-sonnet-4': 20 },
+        modelCosts: { 'gpt-5': 0.6, 'claude-sonnet-4': 0.2 }
+      }
+    },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: 'today' }] });
+  assert.equal(cell.modelCount, 3);
+  assert.deepEqual(cell.models, [
+    { model: 'gpt-5', tokens: 60, costUsd: 0.6, unattributed: false },
+    { model: 'claude-sonnet-4', tokens: 20, costUsd: 0.2, unattributed: false },
+    { model: '__unattributed', tokens: 20, costUsd: 0.2, unattributed: true }
+  ]);
+  assert.deepEqual(cell.clients, [
+    { client: 'codex', tokens: 100, costUsd: 0, unattributed: false }
+  ]);
+});
+
+test('period cards expose an accessible tools and models switch', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const card = dock.slice(dock.indexOf('function statCard('), dock.indexOf('function sessionsCard('));
+  assert.match(card, /for \(const mode of \['tools', 'models'\]\)/);
+  assert.match(card, /button\.setAttribute\('aria-pressed', String\(breakdownMode === mode\)\)/);
+  assert.match(card, /state\.breakdownMode = mode;\s+renderBubble\(state\.payload\);/);
+  assert.match(card, /modelVendorFor\(model\.model\)/);
+  assert.match(card, /t\('dashboard\.tooltip\.unclassified'\)/);
+});
+
 test('provider cards list the newest sessions of their own clients this month', () => {
   const session = (client, id, lastUsedAt, extra = {}) => ({ client, sessionId: id, lastUsedAt, totalTokens: 10, models: { 'gpt-5': 10 }, ...extra });
   const stats = {
