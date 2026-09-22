@@ -107,12 +107,12 @@ The endpoint answers one `five_hour`, `weekly` and `monthly` entry per account, 
 and an optional `resetsAt`, mapped to the shared `session`, `weekly` and `billing` windows. The rolling
 window is shown as **5-hour**, the vendor's own name for it (its ClinePass page lists "5-hour rolling
 window", "Weekly", "Monthly"), which is the rule `src/shared/limitWindowLabels.js` applies to a vendor
-that publishes its names. That mapping rests on the public ClinePass clients, which name the request and
-the three window types; the path itself is verified live as far as an account with no subscription
-allows, which is the 404 `no plan history found for user`. That answer means there are no ClinePass
-windows to show, exactly like an empty `limits: []` — and with credit in hand, the credit is the reading.
-Cline's own UI points at its dashboard for usage rather than reading it in-product, so that client is not
-a source the mapping could be checked against.
+that publishes its names. That mapping rests on two sources that agree: the public ClinePass clients,
+which name the request and the three window types, and the generated API client inside Cline's own
+dashboard bundle, whose limit entry carries exactly `percentUsed`, `resetsAt` and `type`. The path itself
+is verified live as far as an account with no subscription allows, which is the 404 `no plan history
+found for user`. That answer means there are no ClinePass windows to show, exactly like an empty
+`limits: []` — and with credit in hand, the credit is the reading.
 
 **The free-model allowance is not readable.** `cline-free/*` models carry a daily per-model cap that no
 endpoint reports: Cline's own clients read it out of the 429's message text (`isClineFreeModelLimitMessage`
@@ -141,13 +141,16 @@ every request carries the same token, so a refusal ends the scan, which is also 
 costs one request. What a transient status shows is the retained last reading (`lastGood` /
 `lastAttempt`, `src/shared/limits/runtime.js`); an account with nothing behind it yet shows nothing.
 
-The **spend** is a second read, from `/api/v1/users/{id}/usages/daily?startdate=…&enddate=…` (the range
+The **spend** is a second read, from `/api/v1/users/{id}/usages/daily?startDate=…&endDate=…` (the range
 is the local month to date), summing `costUsd` into a `spend` window —
 `{metric: 'spend', label: 'Usage credits', used, limit: null, showMeter: false}`. It stays separate from
 the credit because the balance is credits and this report is money; folding them would mix two units. The
 shape is Claude's, the line is WorkBuddy's `Spend` row, and the meter stays off because no cap is reported
 — the rule commandcode's purchased top-up and Claude's credit pool follow. It is best effort like the
 balance read, and absent when the month recorded nothing, so an account with no usage shows no line.
+Both parameter names are the vendor client's, down to their casing: the generated client in Cline's
+dashboard bundle sends `startDate` and `endDate` and marks both required, no artifact Cline ships carries
+another spelling, and a range the server does not recognize is a range it answers from its own default.
 
 `costUsd` is hundred-millionths of a dollar. The ledger pins it: one row carries `creditsUsed` 23649 and
 `costUsd` 2364975 for the same charge, so a µ-credit is a micro-dollar and 1e8 units make a dollar.
@@ -162,17 +165,19 @@ money nobody paid. Either spelling the report carries marks the tier — the `cl
 
 **The report is not in the vendor's public API reference and carries no pagination fields**, so a heavy
 month could be cut short without anything here noticing; the cross-check above is all this provider has
-for it. The endpoint the reference does document, `/users/{id}/usages`, pages with `nextToken` — the
-ledger rather than the aggregate, at one request per page.
+for it. The vendor's own client agrees on the second half — the `/users/{id}/usages/daily` method takes
+`startDate` and `endDate` and nothing else, and maps a response of `{items}` with no cursor — while the
+endpoint the public reference does document, `/users/{id}/usages`, takes a `cursor` and a `limit` and
+answers `nextToken` and `total`: that is the ledger rather than the aggregate, at one request per page.
 
 ### Parsing rules
 
 No live windows payload has been observed here, so the mapping below was matched field by field against
-the fixtures the public ClinePass clients carry: CodexBar's `ClinePassPluginTests` and CodeBurn's
-`quota-clinepass.test.ts`. Those are two readings of one contract rather than one lineage — CodeBurn
-credits CodexBar as prior art for the endpoints and response shapes while calling its own adapters an
-independent implementation — and both name the same endpoint, the same three window types and the same
-`percentUsed` / `resetsAt` fields.
+two sources that agree: the fixtures the public ClinePass clients carry — CodexBar's
+`ClinePassPluginTests` and CodeBurn's `quota-clinepass.test.ts`, which are two readings of one contract
+rather than one lineage, since CodeBurn credits CodexBar as prior art for the endpoints and response
+shapes while calling its own adapters an independent implementation — and the generated client Cline's own
+dashboard bundle ships, whose limit entry is exactly `{percentUsed, resetsAt, type}`.
 
 | Rule | Here |
 | --- | --- |

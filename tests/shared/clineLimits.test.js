@@ -727,7 +727,7 @@ test('the account credit is read beside the plan and reported as a credits windo
   assert.equal(credits.remaining, 0.5);
   assert.equal(credits.showMeter, false);
   assert.deepEqual(calls.map((c) => c.path).slice(0, 2), [USAGE_LIMITS_PATH, balancePath('usr-1')]);
-  assert.match(calls[2].path, /^\/api\/v1\/users\/usr-1\/usages\/daily\?startdate=/);
+  assert.match(calls[2].path, /^\/api\/v1\/users\/usr-1\/usages\/daily\?startDate=/);
 });
 
 test('a key with no local sign-in learns the account id from the profile endpoint', async (t) => {
@@ -748,7 +748,7 @@ test('a key with no local sign-in learns the account id from the profile endpoin
   // Four reads: the plan, the id lookup (a key carries none), the balance for that
   // id, then the same month-to-date usage report — the id is resolved once.
   assert.deepEqual(calls.map((c) => c.path).slice(0, 3), [USAGE_LIMITS_PATH, USERS_ME_PATH, balancePath('usr-key')]);
-  assert.match(calls[3].path, /^\/api\/v1\/users\/usr-key\/usages\/daily\?startdate=/);
+  assert.match(calls[3].path, /^\/api\/v1\/users\/usr-key\/usages\/daily\?startDate=/);
   assert.equal(calls[1].auth, 'Bearer sk-only');
   assert.equal(result.windows.find((w) => w.metric === 'credits').remaining, 0.25);
 });
@@ -832,12 +832,16 @@ test('the monthly spend is reported beside the credit, in its own unit', async (
   // The range is the local month to date, the window the API expects. Asserted
   // through the test's own local clock rather than a pinned UTC instant: a fixed
   // string would be green on a UTC runner by construction and red at +14, which is
-  // what the CI offset matrix exists to catch.
+  // what the CI offset matrix exists to catch. The parameter names are pinned
+  // exactly, casing included: `startDate` / `endDate` are what the generated client
+  // in Cline's own dashboard bundle sends, and neither that bundle nor the CLI
+  // binary carries another spelling — a query the server does not recognize reads
+  // as a range it chose itself, which is the failure this pins shut.
   const local = new Date(NOW);
   const pad = (value) => String(value).padStart(2, '0');
   const localMonth = `${local.getFullYear()}-${pad(local.getMonth() + 1)}-01`;
   const localToday = `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())}`;
-  assert.deepEqual(queries, [`?startdate=${localMonth}&enddate=${localToday}`]);
+  assert.deepEqual(queries, [`?startDate=${localMonth}&endDate=${localToday}`]);
 });
 
 test('a free-tier model is usage, not spend', async (t) => {

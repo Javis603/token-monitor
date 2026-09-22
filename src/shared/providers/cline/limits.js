@@ -5,13 +5,15 @@
 // src/shared/limits/collector.js.
 //
 // The endpoint, the field names and the credential variable names are the ones the
-// public ClinePass clients already use — CodexBar, CodeBurn and OpenClaude — so a
-// key configured for one of those tools works here unchanged. CodexBar's ClinePass
-// guide names the request and the three window types verbatim (`GET
-// /api/v1/users/me/plan/usage-limits`, one `five_hour` / `weekly` / `monthly` entry
-// each), and the endpoint itself answers this credential live. The guards below are
-// this provider's own reading of that contract, and every choice they make where it
-// is unclear is recorded in docs/providers/cline.md.
+// public ClinePass clients already use — CodexBar, CodeBurn and OpenClaude — and the
+// ones Cline itself ships: the bundle its dashboard serves carries a generated API
+// client for this API, `/users/me/plan/usage-limits`, `/users/{id}/balance`,
+// `/users/{id}/usages/daily` and `/users/{id}/usages` among its paths, with a limit
+// entry mapping to exactly `{percentUsed, resetsAt, type}`. CodexBar's ClinePass guide
+// names the request and the three window types verbatim, so a key configured for one
+// of those tools works here unchanged. The guards below are this provider's own
+// reading of that contract, and every choice they make where it is unclear is
+// recorded in docs/providers/cline.md.
 //
 // Credentials come from two places, in this order:
 //
@@ -408,8 +410,12 @@ function localDateParts(nowMs) {
 async function readClineSpend(id, credential, nowMs, deps) {
   try {
     const { month, day } = localDateParts(nowMs);
+    // `startDate` / `endDate`, spelled as the generated client inside Cline's own
+    // dashboard bundle sends them — both required, and the only query this endpoint
+    // takes. No vendor artifact carries another spelling, and a range the server does
+    // not recognize is a range it answers from its own default.
     const payload = await fetchJson(
-      `${CLINE_API_BASE}${usagesDailyPath(id)}?startdate=${month}&enddate=${day}`,
+      `${CLINE_API_BASE}${usagesDailyPath(id)}?startDate=${month}&endDate=${day}`,
       { Authorization: `Bearer ${credential.accessToken}`, Accept: 'application/json' },
       deps
     );
