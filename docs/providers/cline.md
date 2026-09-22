@@ -119,8 +119,11 @@ collector scans WSL distros for token usage.
 
 The endpoint answers with one `five_hour`, `weekly`, and `monthly` entry per account, each carrying
 `percentUsed` and an optional `resetsAt`; those map to the shared `session`, `weekly`, and `billing`
-windows. The shape is confirmed by Cline's own dashboard client and by the three implementations
-above; the request path itself is verified live as far as an account without a subscription allows —
+windows. The rolling window is shown as **5-hour** rather than the repository's default "Session",
+because that is the vendor's own name for it: Cline's ClinePass page lists "5-hour rolling window",
+"Weekly" and "Monthly", which is the rule `src/shared/limitWindowLabels.js` applies to a vendor that
+publishes its own names. The shape is confirmed by Cline's own dashboard client and by the public ClinePass
+clients named in `providers/cline/limits.js`; the request path itself is verified live as far as an account without a subscription allows —
 the development account authenticates and is answered `404 {"error":"no plan history found for
 user","success":false}`. That answer means there are no ClinePass windows to show, exactly like the
 `limits: []` an empty plan returns — and when the account holds credit, that credit is the reading the
