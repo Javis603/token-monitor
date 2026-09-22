@@ -79,6 +79,27 @@ const usagesDailyPath = (id) => `/api/v1/users/${encodeURIComponent(id)}/usages/
 // printing them, so `balance: 500000` is the "Credits: 0.5000" the account page
 // shows.
 const CREDIT_SCALE = 1_000_000;
+// The usage report's `costUsd` is not dollars either: it is hundred-millionths of
+// one. The ledger the same calls appear in pins it, without an assumption about any
+// conversion rate — one row carries `creditsUsed` 23649 and `costUsd` 2364975 for
+// the same charge, so a µ-credit is a micro-dollar and 1e8 units make a dollar.
+// Reporting the raw sum as USD is off by eight orders of magnitude.
+const SPEND_SCALE = 100_000_000;
+// A free-tier row is real usage with a would-be price: live, a `cline-free/kimi-k3`
+// call answered `costUsd` 2179200 with `creditsUsed` 0, so counting it would report
+// money nobody paid. The vendor marks the tier by model id
+// (`CLINE_FREE_MODEL_PREFIX` in apps/vscode/src/services/error/ClineError.ts), and
+// the daily report spells it twice — a `cline-free/…` id and `aiModelTypeName:
+// 'cline-free'` — so either field decides it: one of them surviving a rename is
+// cheaper than reporting money nobody spent.
+const FREE_MODEL_PREFIX = 'cline-free/';
+// The same tier as the report spells it in `aiModelTypeName`, derived so the two
+// cannot drift apart.
+const FREE_MODEL_TYPE = FREE_MODEL_PREFIX.replace(/\/$/, '');
+const isFreeTierRow = (item) => [item?.aiModelName, item?.aiModelTypeName].some((value) => {
+  const field = String(value || '').trim().toLowerCase();
+  return field === FREE_MODEL_TYPE || field.startsWith(FREE_MODEL_PREFIX);
+});
 
 // The section order is Cline's own, not a choice made here: the ClinePass
 // selection writes its credentials into the `cline` entry too ("cline-pass stores
@@ -390,9 +411,12 @@ async function readClineSpend(id, credential, nowMs, deps) {
     if (payload?.success !== true || !Array.isArray(items)) return null;
     let used = 0;
     for (const item of items) {
+      if (isFreeTierRow(item)) continue;
       const cost = numberOrNull(item?.costUsd);
       if (cost !== null && cost > 0) used += cost;
     }
+    // Converted once, from the unit the API reports to the one the panel prints.
+    if (used > 0) used /= SPEND_SCALE;
     if (!(used > 0)) return null;
     return {
       kind: 'billing',

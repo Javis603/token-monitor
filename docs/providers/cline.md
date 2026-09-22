@@ -176,8 +176,27 @@ to date) answers `{"data":{"items":[{"date","aiModelName","promptTokens","comple
 "operation"}]},"success":true}`, and its `costUsd` values sum to the month's spend. That is reported as
 a `spend` window — `{metric: 'spend', label: 'Usage credits', used, limit: null, showMeter: false}` —
 deliberately separate from the credit rather than folded into it as a percentage, because the balance is
-credits and this report is dollars: the meter derivation would otherwise mix two units into a number
-that means nothing. The window shape is Claude's ("money already consumed"), the line it draws is the
+credits and this report is money: the meter derivation would otherwise mix two units into a number
+that means nothing.
+
+`costUsd` is not dollars either: it is hundred-millionths of one. The ledger the same calls appear in
+pins it without any assumption about a conversion rate — one row carries `creditsUsed` 23649 and
+`costUsd` 2364975 for the same charge, so a µ-credit is a micro-dollar (one credit is one dollar) and
+1e8 units make a dollar. **Verified live**: three paid calls and two free ones left the day's paid rows
+at $0.03246637 while the dashboard's balance moved 0.5 → 0.4675 — the balance books whole µ-credits per
+call, while `costUsd` keeps the exact amount. Free-tier rows are skipped for the same reason the balance never moves for
+them: a `cline-free/kimi-k3` call answers a would-be price (`costUsd` 2179200) with nothing charged, and
+**The report is not in the vendor's public API reference and carries no pagination fields**, so a heavy
+month could be cut short without anything here noticing: what this provider has is the cross-check above,
+where the rows summed to the balance movement to the µ-credit. The endpoint the vendor's reference does
+document, `/users/{id}/usages`, pages with `nextToken` instead — that is the ledger, not the aggregate, and
+reading it here would cost a request per page.
+counting it would report money nobody paid. The row is recognised by either spelling the report carries
+— the `cline-free/…` model id and `aiModelTypeName: 'cline-free'` — because the vendor's own rule is the
+id prefix (`CLINE_FREE_MODEL_PREFIX`) and a renamed id would otherwise quietly start counting free usage
+as spend.
+
+The window shape is Claude's ("money already consumed"), the line it draws is the
 one WorkBuddy's `Spend` row shows, and the meter stays off because no monthly cap is reported — the same
 rule commandcode's purchased top-up and Claude's credit pool follow. It is best effort like the balance
 read and **absent when the month recorded nothing**, so an account with no usage keeps the shorter scan:

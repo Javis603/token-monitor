@@ -594,26 +594,61 @@ test('the monthly spend is reported beside the credit, in its own unit', async (
       usages: {
         success: true,
         data: {
+          // Captured live, including the units: `costUsd` is hundred-millionths of a
+          // dollar, so the two paid calls are $0.0236 and $0.0021 — the same money the
+          // balance moved by, 0.025777 credits.
           items: [
-            { date: '2026-09-20', aiModelName: 'a', promptTokens: 10, completionTokens: 2, costUsd: 0.25, operation: 'chat' },
-            { date: '2026-09-21', aiModelName: 'b', promptTokens: 5, completionTokens: 1, costUsd: 0.125, operation: 'chat' },
-            { date: '2026-09-21', aiModelName: 'c', costUsd: 'not-a-number' }
+            { date: '2026-09-22', operation: 'chat_completion', aiModelTypeName: 'moonshotai', aiModelName: 'kimi-k3', costUsd: 2364975, promptTokens: 6028, completionTokens: 70 },
+            { date: '2026-09-22', operation: 'chat_completion', aiModelTypeName: 'deepseek', aiModelName: 'deepseek-v4.1-flash', costUsd: 212819, promptTokens: 7006, completionTokens: 22 },
+            { date: '2026-09-22', operation: 'chat_completion', aiModelTypeName: 'cline-free', aiModelName: 'cline-free/kimi-k3', costUsd: 2179200, promptTokens: 12460, completionTokens: 298 },
+            { date: '2026-09-22', operation: 'chat_completion', aiModelName: 'broken-cost', costUsd: 'not-a-number' }
           ]
         }
       }
     })
   });
   assert.equal(result.status, 'ok');
-  // The balance is credits and the usage report is dollars, so they stay in two
+  // The balance is credits and the usage report is money, so they stay in two
   // windows rather than being mixed into one number.
   assert.deepEqual(result.windows.map((w) => w.metric), ['credits', 'spend']);
   const spend = result.windows.find((w) => w.metric === 'spend');
-  assert.equal(spend.used, 0.375);
+  // The two paid calls only: the free one cost nothing (the balance never moved for
+  // it, and the ledger books it as 0 credits) and a cost that is not a number is
+  // skipped rather than counted as zero.
+  assert.equal(spend.used, 0.02577794);
   assert.equal(spend.limit, null);
   assert.equal(spend.currency, 'USD');
   assert.equal(spend.showMeter, false);
   // The range is the local month to date, the window the API expects.
   assert.deepEqual(queries, ['?startdate=2026-09-01&enddate=2026-09-21']);
+});
+
+test('a free-tier model is usage, not spend', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth() });
+  const read = async (items) => {
+    const result = await fetchClineLimits({}, {
+      env: { CLINE_DATA_DIR: dataDir },
+      now: () => NOW,
+      fetch: routedFetch({
+        limits: [],
+        balance: { success: true, data: { userId: 'usr-1', balance: 500000 } },
+        usages: { success: true, data: { items } }
+      })
+    });
+    return result.windows.find((w) => w.metric === 'spend') || null;
+  };
+  // Live, a free-tier call answers a would-be price with nothing charged for it:
+  // counting that price would report money nobody paid.
+  assert.equal(await read([{ date: '2026-09-22', aiModelName: 'cline-free/kimi-k3', costUsd: 2179200 }]), null);
+  // The tier is spelled twice in that report and either spelling has to be enough.
+  assert.equal(await read([{ date: '2026-09-22', aiModelTypeName: 'cline-free', aiModelName: 'kimi-k3', costUsd: 2179200 }]), null);
+  assert.equal(await read([{ date: '2026-09-22', aiModelTypeName: 'CLINE-FREE', aiModelName: 'kimi-k3', costUsd: 2179200 }]), null);
+  const paid = await read([
+    { date: '2026-09-22', aiModelName: 'cline-free/kimi-k3', costUsd: 2179200 },
+    { date: '2026-09-22', aiModelName: 'kimi-k3', costUsd: 2364975 }
+  ]);
+  assert.equal(paid.used, 0.02364975);
 });
 
 test('a month with no recorded spend adds no spend line', async (t) => {
