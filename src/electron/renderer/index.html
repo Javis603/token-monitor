@@ -926,7 +926,9 @@
                 </div>
                 <div id="clineManualPanel">
                   <p class="settings-note" data-i18n="settings.cline.note">Token Monitor reads the Cline sign-in that Cline Desktop and the CLI already store, so limits usually work with no setup. To use an API key instead, paste it here: the key is used ahead of that sign-in and stays on this device.</p>
-                  <input id="clineApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.cline.apiKeyPlaceholder" />
+                  <!-- Named after the credential it holds, the way opencodeApiKeyInput is:
+                       a password box with a placeholder has no accessible name of its own. -->
+                  <input id="clineApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.cline.apiKeyPlaceholder" aria-label="Cline API key" data-i18n-aria-label="settings.cline.apiKeyLabel" />
                   <div class="settings-actions">
                     <button id="clineApiKeySubmit" data-i18n="settings.cline.saveApiKey">Save API key</button>
                   </div>

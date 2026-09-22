@@ -1465,6 +1465,10 @@ test('Factory identifies environment and Droid .env credentials separately', () 
 test('Cline account panel validates an API key before saving and opens the allowlisted account page', () => {
   const html = readRendererFile('index.html');
   assert.match(html, /<div id="clineAccountGroup"[\s\S]*?<input id="clineApiKeyInput" type="password"[\s\S]*?<button id="clineApiKeySubmit"/);
+  // A password box with only a placeholder has no accessible name, so it is named
+  // the way opencodeApiKeyInput is — and the completeness check below holds the key
+  // to all five locales.
+  assert.match(html, /<input id="clineApiKeyInput"[^>]*aria-label="Cline API key"[^>]*data-i18n-aria-label="settings\.cline\.apiKeyLabel"/);
   assert.match(html, /reads the Cline sign-in that Cline Desktop and the CLI already store[\s\S]*the key is used ahead of that sign-in/);
 
   const app = readRendererFile('app.js');
