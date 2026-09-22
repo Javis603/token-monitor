@@ -80,8 +80,9 @@ into the vendor's order: it would silently ignore a key the user configured for 
 Reading another application's credential file follows the existing local-discovery boundary: a
 readable provider-owned configuration file may supply an in-memory credential
 (`docs/providers/droid.md`, issue #586 precedent). Nothing is decrypted here — the file is plaintext
-JSON — and Token Monitor persists no Cline credential of its own, so a manually supplied key exists
-only for the process that read it.
+JSON — and nothing read from it is written back: the discovered sign-in lives in memory for the scan.
+A key **configured** in Token Monitor is a different thing, and it goes to Token Monitor's own
+credential store (`providers.cline.apiKey`, never `settings.json`), not into Cline's file.
 
 The stored sign-in is read **only**, which is where Cline's own implementation draws the line: its
 token response may carry a replacement refresh token (`toClineCredentials` takes
@@ -157,7 +158,8 @@ displaying, so the value is micro-credits. It is reported as a `credits` window 
 beside the label, the same convention WorkBuddy's credit balance uses. The endpoint is keyed by the
 user id and ownership-checked — another user's id answers `403 can only access own resources` — so it
 is queried with the id belonging to the credential in use: the stored sign-in carries `accountId`,
-while a key-only install reads `/api/v1/users/me` first, which is the one extra request a scan costs
+while a key-only install asks `/api/v1/users/me` for the id the balance and the usage report after it
+are keyed by — the plan call is first in both lanes, and this is the one extra request a scan costs
 there. The credit read is **best effort**: a
 balance endpoint that is down or answers nonsense leaves the plan windows alone, and a rejected
 balance call never turns the row into a credential problem. It is also what keeps a planless account
