@@ -17,16 +17,14 @@ Cline appears in Token Monitor in two independent data planes. Keep them separat
 
 ## One data tree, two front-ends
 
-Cline Desktop and the Cline CLI write the same `~/.cline/data` tree. Each session document records
-`source` as `cli` or `desktop`, but nothing downstream branches on it: tokscale's Cline CLI parser
-reports both as the client id `cline`, and Token Monitor tracks one Cline row for the two. Do not
-split them into separate ids. The client id is also a watch-attribution key, so a second id over the
-same files would clear one partition and write another on every targeted scan.
+Cline Desktop and the CLI write the same `~/.cline/data` tree. Sessions record `source: cli|desktop`
+and nothing branches on it: tokscale reports both as the client id `cline`, and Token Monitor tracks one
+row. Do not split them — that id is a watch-attribution key, so a second one over the same files would
+clear one partition and write another on every targeted scan.
 
-`settings/providers.json` in that tree is the account's sign-in file, and it is what the limits
-provider reads. Finding sessions does not authenticate the account API: a session directory can
-exist with the sign-in removed or expired, which is the state this provider reports as
-`unauthorized` rather than as missing data.
+`settings/providers.json` in that tree holds the account sign-in, which is what the limits read uses.
+Finding sessions does not authenticate the account API: a directory can sit there with the sign-in
+removed or expired, which is reported as `unauthorized` rather than as missing data.
 
 ## Credentials resolve in one order
 
@@ -40,30 +38,20 @@ exist with the sign-in removed or expired, which is the state this provider repo
    `cline-pass` only as a fallback for a file an older version wrote. Reading them the other way round
    would let a stale entry mask the current credential.
 
-Neither covers everyone, which is why both exist: a machine without Cline installed has no sign-in to
-read, and the file is what makes the provider work with no setup at all for anyone actually running
-Cline. A key is created on the account dashboard at `app.cline.bot/dashboard/account`. The public
-documentation's "Settings → API Keys" does not resolve for a personal account — `/dashboard/settings`
-and `/dashboard/settings/api-keys` both answer 404, and the dashboard's own `api-keys` section is an
-organization page behind the `dashboard_api_keys_enterprise` feature flag — which is why the key lane
-was reached by URL rather than through navigation. **Verified live**: a key authenticates this
-endpoint and is rejected when prefixed, the exact opposite of the stored sign-in. Cline's own CLI
-hands `ClineAccountService` the `cline` provider's persisted credential — the access token when one
-exists, the API key otherwise (`getPersistedProviderApiKey()` →
-`ClineProviderAuthHandler.getApiKey()`) — and its authentication reference documents API key and
-account auth token as the two methods for the same `Authorization: Bearer` header.
+A machine without Cline has no sign-in to read, which is why the key lane exists. Keys are created at
+`app.cline.bot/dashboard/account`; the documented "Settings → API Keys" path 404s for a personal account,
+so this URL rather than navigation. **Verified live**: a key authenticates here and is rejected when
+prefixed, the mirror image of the stored sign-in.
 
 A missing store and a signed-out one are reported differently, the distinction `readCodexOAuthAuth`
 draws in `providers/codex`: no `providers.json` (or one that cannot be parsed) is `notConfigured`,
 while a file that reads and holds no access token is `unauthorized`. Both name the `oauth` lane as the
 source they failed on.
 
-The two are **exclusive**, in the sense `docs/providers/volcengine.md` fixes for the same situation:
-a configured key owns the lane, and a rejected key is reported instead of falling back to the stored
-sign-in. Even an unusable explicit credential blocks the fallback, because quietly switching
-credentials would show a different account's quota than the one the user configured. Each lane also
-reports its own provenance: `api` for a configured key, `oauth` for a discovered sign-in — the split
-`docs/providers/zai.md` states for its console key versus its discovered credential.
+The lanes are **exclusive**, the rule `docs/providers/volcengine.md` fixes for the same situation: a
+configured key owns the lane and a rejected key is reported rather than falling back, since quietly
+switching would show a different account's quota. Each names its provenance — `api` for a key, `oauth`
+for a sign-in, the split `docs/providers/zai.md` states.
 
 Both refusals report the same shared `unauthorized` status, so the status pill reads that provenance to
 name the credential to fix: `api` renders "Update API key" (the field this application owns) and
@@ -71,11 +59,10 @@ name the credential to fix: `api` renders "Update API key" (the field this appli
 because neither cause is the rarer one — the file lane is the discovery default while its access token
 expires hourly — so any single label would be wrong for the state a fresh install is in.
 
-The order here is deliberately not Cline's. Inside one of its own provider settings Cline prefers the
-stored access token and treats the API key as the fallback; this provider puts the environment key
-first because that value is Token Monitor's own operator instruction, while the file is another
-application's store, and the repository resolves credentials that way everywhere. Do not "fix" this
-into the vendor's order: it would silently ignore a key the user configured for this machine.
+The order is deliberately not Cline's, which prefers the stored token: the key comes first because it is
+Token Monitor's own operator instruction while the file is another application's store, and the
+repository resolves credentials that way everywhere. Do not "fix" this into the vendor's order — it
+would silently ignore a key the user configured for this machine.
 
 Reading another application's credential file follows the existing local-discovery boundary: a
 readable provider-owned configuration file may supply an in-memory credential
@@ -84,16 +71,11 @@ JSON — and nothing read from it is written back: the discovered sign-in lives 
 A key **configured** in Token Monitor is a different thing, and it goes to Token Monitor's own
 credential store (`providers.cline.apiKey`, never `settings.json`), not into Cline's file.
 
-The stored sign-in is read **only**, which is where Cline's own implementation draws the line: its
-token response may carry a replacement refresh token (`toClineCredentials` takes
-`responseData.refreshToken` when present) and its auth service writes the rotated access token, refresh
-token, expiry and account id back to `providers.json` itself (`writeClineCredentials`, on any credential
-change). Refreshing from here would mean discarding a replacement token and leaving Cline holding one
-the server has retired — breaking a sign-in in another application to save a step Cline performs by
-itself. So the stored token is sent as it stands: Cline refreshes it the next time it runs, a token that
-has expired is refused by the account API and reported as `unauthorized` rather than healed here, and
-nothing in this provider writes to that file. An expired sign-in therefore costs exactly one request —
-the usage call, never a refresh.
+The sign-in is read **only**. Cline's token response may carry a replacement refresh token and its auth
+service persists the rotated credential itself (`toClineCredentials`, `writeClineCredentials`), so
+refreshing here would leave Cline holding a token the server has retired. The stored token is sent as it
+stands instead: Cline refreshes it next time it runs, and an expired one is refused as `unauthorized`. An
+expired sign-in costs exactly one request, never a refresh.
 
 The token goes out in the stored form, `workos:<jwt>`. Verified live against the endpoint:
 `Bearer <bare jwt>` is rejected with 401 while `Bearer workos:<jwt>` authenticates. A user-supplied API
@@ -105,191 +87,139 @@ collector's session roots use: `CLINE_SESSION_DATA_DIR`, `CLINE_DATA_DIR`, then 
 winning outright. There is deliberately no fallback to `~/.cline` past a relocation, which would
 report whichever account happens to be signed in at the default location.
 
-The account identity is hashed from Cline's server-issued account id. A configured key stands for
-itself. The access token is never used for this — it is replaced hourly, and an identity that rotates
-would reach the hub as a new account on every ingest. A sign-in whose file carries no account id
-takes the one the profile read answers — the read the balance needs anyway, and it brings the row's
-display email with it — and only when neither names an account does the row keep no `accountKey`
-instead of inventing one.
+The identity is hashed from Cline's server-issued account id, or from the key itself. The access token
+is never it: that one is replaced hourly, and a rotating identity would reach the hub as a new account on
+every ingest. A sign-in whose file carries no id takes the one the profile read answers, which is also
+where the row's display email comes from; only when neither names an account is there no `accountKey`,
+rather than an invented one.
 
-Being per lane has one consequence worth stating: the same account reached through a key on one machine
-and through the stored sign-in on another lists as two accounts, because the seed differs. That is the
-shape `providers/zai` has too — its quota lane seeds on the console key and its billing lane on the
-ZCode login, and its own merge rule only stops *one scan* from minting two identities. Merging across
-lanes is possible in principle (opencode's `accountKeyAliases`, which the key lane could emit once
-`/users/me` proves both credentials name one account) but that field is gated to opencode in
-`limits/core.js`, so adopting it here would mean widening the shared Hub core for one provider.
+That makes identity per lane, so one account reached by key on one machine and by sign-in on another
+lists as two. `providers/zai` has the same shape. Merging them would need `accountKeyAliases`, which
+`limits/core.js` gates to opencode — widening the shared Hub core for one provider.
 
-A Cline installation that lives only inside WSL is not read: `providers/claude/limits.js` has a
-`wslClaudeCredentialPaths()` for the same situation, and the equivalent for Cline — a
-`\\wsl$\\<distro>\\home\\<user>\\.cline\\data\\settings\\providers.json` candidate behind the same
-Windows gate — is not implemented. The usage side still counts those sessions, because the Windows
-collector scans WSL distros for token usage.
+A Cline that lives only inside WSL is not read: `providers/claude/limits.js` has
+`wslClaudeCredentialPaths()` for the same case, and the Cline equivalent is not implemented. Usage is
+unaffected — the Windows collector scans WSL distros for tokens.
 
 ## What the quota read can show
 
-The endpoint answers with one `five_hour`, `weekly`, and `monthly` entry per account, each carrying
-`percentUsed` and an optional `resetsAt`; those map to the shared `session`, `weekly`, and `billing`
-windows. The rolling window is shown as **5-hour** rather than the repository's default "Session",
-because that is the vendor's own name for it: Cline's ClinePass page lists "5-hour rolling window",
-"Weekly" and "Monthly", which is the rule `src/shared/limitWindowLabels.js` applies to a vendor that
-publishes its own names. The shape is confirmed by Cline's own dashboard client and by the public ClinePass
-clients named in `providers/cline/limits.js`; the request path itself is verified live as far as an account without a subscription allows —
-the development account authenticates and is answered `404 {"error":"no plan history found for
-user","success":false}`. That answer means there are no ClinePass windows to show, exactly like the
-`limits: []` an empty plan returns — and when the account holds credit, that credit is the reading the
-row shows instead of no data at all.
+The endpoint answers one `five_hour`, `weekly` and `monthly` entry per account, each with `percentUsed`
+and an optional `resetsAt`, mapped to the shared `session`, `weekly` and `billing` windows. The rolling
+window is shown as **5-hour**, the vendor's own name for it (its ClinePass page lists "5-hour rolling
+window", "Weekly", "Monthly"), which is the rule `src/shared/limitWindowLabels.js` applies to a vendor
+that publishes its names. The shape rests on Cline's dashboard client and the public ClinePass clients;
+the path is verified live as far as an account with no subscription allows, which is the 404
+`no plan history found for user`. That answer means there are no ClinePass windows to show, exactly like
+an empty `limits: []` — and with credit in hand, the credit is the reading.
 
-One limit is deliberate and is not a defect to be fixed here:
+**The free-model allowance is not readable.** `cline-free/*` models carry a daily per-model cap that no
+endpoint reports: Cline's own clients read it out of the 429's message text (`isClineFreeModelLimitMessage`
+in `@cline/core`), and the user API reference lists no counter. Nothing can be shown until Cline exposes
+one.
 
-- **The free-model allowance is not readable.** `cline-free/*` models carry a daily per-model cap that
-  the account API reports nowhere: Cline's own clients learn about it by matching the text of the 429
-  that refuses the call (`isClineFreeModelLimitMessage` and `extractClineFreeModelLimitResetTime` in
-  `@cline/core`, used by `apps/cli/src/utils/cline-pass-errors.ts`, whose fixtures carry "Daily free
-  limit reached on model … Try again in 23h 59m"), and the user API reference
-  (`docs/enterprise-solutions/api-reference.mdx`) lists balance, usages, payment-method setup and
-  promotions with nothing for it — checked live, `/promotions` answers a list of credit grants
-  (`credits`, `status`, `campaign_id`) rather than a per-model counter. So no window is shown, and none
-  can be until Cline exposes a counter.
+The account's credit is readable, and read: `/api/v1/users/{id}/balance` answers micro-credits, so
+`balance: 500000` is the `Credits: 0.5000` the account page prints. It is reported as a `credits` window
+(`label: 'Credits'`, `currency: 'CREDITS'`, no meter), printed as a bare amount beside the label, the
+convention WorkBuddy's balance uses. The endpoint is keyed by user id and ownership-checked, so it is
+queried with the id belonging to the credential in use: the stored sign-in carries it, while a key-only
+install asks `/api/v1/users/me` first — the plan call is first in both lanes, and this is the one extra
+request that lane costs. The read is **best effort**: a balance endpoint that is down or answers nonsense
+leaves the plan windows alone, and a rejected balance call is never a credential problem. It is also what
+keeps a planless account from reading as `unavailable` — with credit in hand the row is `ok`, the rule
+`docs/providers/zai.md` states.
 
-What the account holds instead of a subscription is readable, and is read: `GET
-/api/v1/users/{id}/balance` answers `{"data":{"userId":"…","balance":500000},"success":true}`, and
-500000 is the `Credits: 0.5000` Cline's own account page prints — its dashboard divides by 1e6 before
-displaying, so the value is micro-credits. It is reported as a `credits` window (`label: 'Credits'`,
-`currency: 'CREDITS'`, `remaining`, no meter), which `limitBalanceDisplay` prints as a bare amount
-beside the label, the same convention WorkBuddy's credit balance uses. The endpoint is keyed by the
-user id and ownership-checked — another user's id answers `403 can only access own resources` — so it
-is queried with the id belonging to the credential in use: the stored sign-in carries `accountId`,
-while a key-only install asks `/api/v1/users/me` for the id the balance and the usage report after it
-are keyed by — the plan call is first in both lanes, and this is the one extra request a scan costs
-there. The credit read is **best effort**: a
-balance endpoint that is down or answers nonsense leaves the plan windows alone, and a rejected
-balance call never turns the row into a credential problem. It is also what keeps a planless account
-from reading as `unavailable` — with a credit in hand the row is `ok`, the rule
-`docs/providers/zai.md` states for a key without a subscription.
+The grants behind a balance are readable at `/promotions` and are deliberately **not** a window: a ledger
+answers where the money came from, not what is left.
 
-Where a balance came from is readable as well — `/promotions` lists the credit grants with their
-campaign, amount and status — and it is deliberately **not** a window: a grant ledger answers where the
-money came from, not what is left, and the balance already includes every grant it lists.
+That rule covers the planless answers only. A plan read that fails otherwise keeps its own status while
+the credit is read either way: the lanes are independent the way `providers/zai` builds its quota and
+balance lanes, where an error decides the status and never the data a healthy request returned. An outage
+is therefore visible without costing the account its balance line. The one exception is the credential —
+every request carries the same token, so a refusal ends the scan, which is also why an expired sign-in
+costs one request. What a transient status shows is the retained last reading (`lastGood` /
+`lastAttempt`, `src/shared/limits/runtime.js`); an account with nothing behind it yet shows nothing.
 
-That "credit in hand" rule covers the planless answers only — an empty `limits` list, or the `404`
-above. A plan read that fails any other way keeps its own status, and the credit is read either way: the
-lanes here are independent the way `providers/zai` builds its quota and balance lanes, where an error
-decides the status and never the data a healthy request returned. So an outage is visible — the pill and
-the retained last reading both say so — without costing the account its balance line, and a contract
-break reports itself rather than either hiding the credit or being hidden by it. The one exception is the
-credential: every request here carries the same token, so a refusal ends the scan, which is also why an
-expired sign-in costs exactly one request. What the panel shows for a transient status is still the
-retained last good reading (`lastGood` / `lastAttempt` in `src/shared/limits/runtime.js`); an account with
-nothing behind it yet shows nothing, as with any provider here.
+The **spend** is a second read, from `/api/v1/users/{id}/usages/daily?startdate=…&enddate=…` (the range
+is the local month to date), summing `costUsd` into a `spend` window —
+`{metric: 'spend', label: 'Usage credits', used, limit: null, showMeter: false}`. It stays separate from
+the credit because the balance is credits and this report is money; folding them would mix two units. The
+shape is Claude's, the line is WorkBuddy's `Spend` row, and the meter stays off because no cap is reported
+— the rule commandcode's purchased top-up and Claude's credit pool follow. It is best effort like the
+balance read, and absent when the month recorded nothing, so an account with no usage shows no line.
 
-What the account has **spent** is a second read: `GET
-/api/v1/users/{id}/usages/daily?startdate=YYYY-MM-DD&enddate=YYYY-MM-DD` (the range is the local month
-to date) answers `{"data":{"items":[{"date","aiModelName","promptTokens","completionTokens","costUsd",
-"operation"}]},"success":true}`, and its `costUsd` values sum to the month's spend. That is reported as
-a `spend` window — `{metric: 'spend', label: 'Usage credits', used, limit: null, showMeter: false}` —
-deliberately separate from the credit rather than folded into it as a percentage, because the balance is
-credits and this report is money: the meter derivation would otherwise mix two units into a number
-that means nothing.
+`costUsd` is hundred-millionths of a dollar. The ledger pins it: one row carries `creditsUsed` 23649 and
+`costUsd` 2364975 for the same charge, so a µ-credit is a micro-dollar and 1e8 units make a dollar.
+**Verified live**: three paid calls and two free ones left the day's paid rows at `$0.03246637` while the
+balance moved `0.5 → 0.4675`, the difference being whole µ-credits per call.
 
-`costUsd` is not dollars either: it is hundred-millionths of one. The ledger the same calls appear in
-pins it without any assumption about a conversion rate — one row carries `creditsUsed` 23649 and
-`costUsd` 2364975 for the same charge, so a µ-credit is a micro-dollar (one credit is one dollar) and
-1e8 units make a dollar. **Verified live**: three paid calls and two free ones left the day's paid rows
-at $0.03246637 while the dashboard's balance moved 0.5 → 0.4675 — the balance books whole µ-credits per
-call, while `costUsd` keeps the exact amount. Free-tier rows are skipped for the same reason the balance never moves for
-them: a `cline-free/kimi-k3` call answers a would-be price (`costUsd` 2179200) with nothing charged, and
+Free-tier rows are skipped for the same reason the balance never moves for them: a `cline-free/kimi-k3`
+call answers a would-be price (`costUsd` 2179200) with nothing charged, and counting it would report
+money nobody paid. Either spelling the report carries marks the tier — the `cline-free/…` model id and
+`aiModelTypeName: 'cline-free'` — because the vendor's own rule is the id prefix
+(`CLINE_FREE_MODEL_PREFIX`), and a renamed id would otherwise quietly start counting free usage as spend.
+
 **The report is not in the vendor's public API reference and carries no pagination fields**, so a heavy
-month could be cut short without anything here noticing: what this provider has is the cross-check above,
-where the rows summed to the balance movement to the µ-credit. The endpoint the vendor's reference does
-document, `/users/{id}/usages`, pages with `nextToken` instead — that is the ledger, not the aggregate, and
-reading it here would cost a request per page.
-counting it would report money nobody paid. The row is recognised by either spelling the report carries
-— the `cline-free/…` model id and `aiModelTypeName: 'cline-free'` — because the vendor's own rule is the
-id prefix (`CLINE_FREE_MODEL_PREFIX`) and a renamed id would otherwise quietly start counting free usage
-as spend.
-
-The window shape is Claude's ("money already consumed"), the line it draws is the
-one WorkBuddy's `Spend` row shows, and the meter stays off because no monthly cap is reported — the same
-rule commandcode's purchased top-up and Claude's credit pool follow. It is best effort like the balance
-read and **absent when the month recorded nothing**, so an account with no usage shows no spend line
-at all rather than a zero.
+month could be cut short without anything here noticing; the cross-check above is all this provider has
+for it. The endpoint the reference does document, `/users/{id}/usages`, pages with `nextToken` — the
+ledger rather than the aggregate, at one request per page.
 
 ### Parsing rules
 
-No live windows payload has been observed from this repository — the development account has no
-subscription — so the mapping below was matched field by field against the fixtures the public ClinePass
-clients carry (CodexBar's `ClinePassPluginTests`, CodeBurn's `quota-clinepass.test.ts`) rather than
-observed here. Those two are one lineage, not two samples: CodeBurn's own header calls itself ported from
-CodexBar's `ClinePassSubscriptionService`.
+No live windows payload has been observed here, so the mapping below was matched field by field against
+the fixtures the public ClinePass clients carry — CodexBar's `ClinePassPluginTests` and CodeBurn's
+`quota-clinepass.test.ts`, one lineage rather than two samples: CodeBurn calls itself a port of CodexBar's.
 
 | Rule | Here |
 | --- | --- |
-| `data.limits[]` with `five_hour` / `weekly` / `monthly`, reported in that order | fixed `WINDOW_ORDER` |
-| an unknown window type is skipped; the known ones survive it | skipped — this repository's window vocabulary is closed, so an unknown type has no representable kind anyway |
-| a `type` that is present but is not a string voids the reading | voided; an absent or blank one is skipped instead |
-| a `type` that is a string is normalized before it is matched | trimmed and lowercased |
-| `resetsAt: null` keeps the window | kept |
-| a `resetsAt` that is present but is not a parseable timestamp voids the reading | voided; an absent or blank one keeps the window without a reset time |
-| a percentage that is present but not numeric voids the reading | voided |
-| a window with no `percentUsed` at all is left out | dropped, and the windows that carry one are still reported |
-| 401 → credential problem, 429 → rate limited, anything else (403 and 5xx included) → unavailable | `unauthorized`, `sourceRateLimited`, `unavailable` |
+| `data.limits[]` with `five_hour` / `weekly` / `monthly` | fixed `WINDOW_ORDER`; a repeated type keeps the last |
+| an unknown window type | skipped — the repository's window vocabulary is closed, so it has no representable kind |
+| a `type` that is present but not a string | voided; an absent or blank one is skipped |
+| a `type` that is a string | trimmed and lowercased before it is matched |
+| a `resetsAt`/`percentUsed` present but unparseable | voided; an absent or blank one is tolerated |
 | percentages clamp to 0–100 | clamped, deliberately **not rounded**: the shared burn-rate math reads the raw value |
+| 401 → credential problem, 429 → rate limited, anything else (403 and 5xx included) → unavailable | `unauthorized`, `sourceRateLimited`, `unavailable` |
 
 Five deliberate choices, recorded so they are not "corrected" later:
 
-- **A lane error decides the status and nothing else.** Only the planless answers — an empty `limits`
-  list, or the `404` — let a credit-bearing row be `ok`; a `403`, `429` or `5xx` keeps the status that
-  says so, while the credit and spend reads still run and ride along on that row. Telling the planless
-  answer apart from an outage takes the HTTP status, which `limits/providerHelpers.js` keeps for exactly
-  this reason and `providers/claude`, `providers/codex` and `providers/volcengine` read the same way;
-  the shared status vocabulary alone collapses `404` and `5xx` into `unavailable`.
-- **A `403` is not read as a credential problem.** The shared helper collapses 401 and 403 into
-  `unauthorized` only where a provider asks for it (`providers/claude` and `providers/codex` pass
-  `forbiddenIsUnauthorized`); this provider keeps the default, so a forbidden status is an outage that
-  retains the last reading. That stays until this API is seen answering 403 for a credential — only
-  401 and the plan-less 404 have been observed, and CodexBar and CodeBurn reading 403 as an expired
-  session is not an observation of this endpoint.
-- **The monthly window is labelled, not timed.** A `billing` window is this repository's catch-all kind
-  and carries `label: 'Monthly'` (Kimi's and Command Code's monthly windows, Claude's credit windows),
-  while `windowMinutes` belongs to the two fixed-duration kinds.
-- **`CLINE_API_KEY` is read before `CLINEPASS_API_KEY`.** They are aliases of one key, the vendor-named
-  one is read first, and the order only matters when both are set to different values.
-- **A `resetsAt` that is a number is read as an epoch.** The acceptance comes from
-  `providerHelpers.toIso`, a reader shared by every provider in this repository and asserted in
-  `tests/shared/limitsProviderHelpers.test.js`. It reads `1` as 1970 — a real date rather than a
-  rejection, which is the cost of sharing that reader instead of adding a stricter one here.
+- **A lane error decides the status and nothing else**, told apart from the planless answers by the
+  HTTP status `limits/providerHelpers.js` keeps for exactly that reason.
+- **A `403` is not read as a credential problem** until this API is seen answering one: only 401 and the
+  plan-less 404 have been observed, and another ClinePass client reading 403 as an expired session is
+  not an observation of this endpoint.
+- **The monthly window is labelled, not timed**: a `billing` window is this repository's catch-all kind.
+- **`CLINE_API_KEY` is read before `CLINEPASS_API_KEY`**, two aliases of one key, where the order only
+  matters when both are set to different values.
+- **A numeric `resetsAt` is read as an epoch** by the shared `providerHelpers.toIso`, which reads `1` as
+  1970 — the cost of sharing that reader instead of adding a stricter one here.
 
-An account without a subscription answers `limits: []`, which is reported as no data rather than as a
-live zero. One line runs through every field: a value that is **present but wrong** is a broken contract
-and voids the whole reading, because reporting the rest would show a quota that silently lost a window,
-while a value that is **absent** is tolerated. So a percentage that is present but not numeric voids the
-reading, a `resetsAt` that is present but not a parseable timestamp does the same, a `type` that is
-present but not a string does too, and an **unrecognized window type** skips only that row — the last is
-not a broken field but a window this repository cannot name, so a window Cline adds later cannot take the
-reading down. What "absent" then means differs per field: a window with no percentage is **left out of
-the report**, while a window with no `resetsAt` is kept without a reset time. Both spellings (`resetsAt`,
-`resets_at`) are read, and the guards validate the value that was actually read rather than one spelling
-of it.
+An account without a subscription answers `limits: []`, reported as no data rather than as a live zero.
+One line runs through the table: **present but wrong voids the reading, absent is tolerated**. What
+absent means differs per field — a window with no percentage is left out, one with no `resetsAt` is kept
+without a reset time — and an **unrecognized window type** skips only its own row, so one Cline adds
+later cannot take the reading down. Both spellings of both fields (`percentUsed`/`percent_used`,
+`resetsAt`/`resets_at`) are read, and the guards validate the value actually read rather than one
+spelling of it.
 
 ## Token totals under-count cache-heavy rows
 
 Cline stores the upstream provider's own usage convention in `metrics.inputTokens`, and the two
-conventions disagree: OpenAI-style rows include cached tokens in `inputTokens`, Anthropic-style rows
-exclude them. tokscale normalizes for the first and subtracts cache reads unconditionally, so rows
-where `cacheReadTokens > inputTokens` lose those cache reads from the total and can drive the input
-column negative. On the machine this provider was written against, that is 401 of 15,668 Cline
-messages and about 3.6% of the reported Cline volume, concentrated in the free and ClinePass model
-families.
+conventions disagree: OpenAI-style rows count cached tokens there, Anthropic-style rows do not. tokscale
+normalizes for the first and subtracts cache reads unconditionally, so a row with
+`cacheReadTokens > inputTokens` loses them and can drive the input column negative. On the machine this
+was written against that is 401 of 15,668 Cline messages, about 3.6% of the volume, concentrated in the
+free and ClinePass families.
 
-This is upstream tokscale's arithmetic, not Token Monitor's. It lives in `sessions/cline.rs` in the
-pinned release (`scripts/vendor/tokscale.json`), it reproduces identically on upstream's own published
-4.17.0 binary and on this fork's vendored build, and nothing here adjusts Cline token totals: the
-shared extractors read the report that parser produces. A fix therefore belongs to the pinned source
-upstream, not to this folder.
+This is tokscale's arithmetic, not this repository's: it lives in `sessions/cline.rs` of the pinned
+release (`scripts/vendor/tokscale.json`), reproduces on both the published 4.17.0 binary and this fork's
+build, and nothing here adjusts token totals. A fix belongs upstream.
 
 Run focused tests while iterating, then finish with `npm run sync:worker` when shared Worker files
 changed, `npm run update:hub-build`, `npm run verify`, and `git diff --check`.
+
+A cancelled probe is **propagated, not reported as a status**: the caller's `deps.signal` is checked
+before any request, so a superseded or shutting-down scan rejects with an `AbortError` instead of
+describing an outage that never happened — the shape `providers/zed` (which rethrows an abort from both
+of its catch blocks) and `providers/alibaba` share.
 
 A live check needs a credential, not necessarily Cline: `CLINE_API_KEY` or `CLINEPASS_API_KEY` in the
 environment is enough on any machine, while the stored sign-in needs Cline to have been signed in at
