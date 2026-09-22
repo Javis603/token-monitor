@@ -292,8 +292,6 @@ async function runKimiTokenRefreshFetch(url, init, deps) {
   }
 }
 
-// Kimi's auth endpoint occasionally hangs or drops a connection outright; one
-// quick retry keeps a transient network blip from costing a whole limits tick.
 async function requestKimiTokenRefresh(refreshToken, deps) {
   const init = {
     method: 'POST',
