@@ -4,11 +4,14 @@
 // Cline itself uses. Reached through providerFetchers() in
 // src/shared/limits/collector.js.
 //
-// The endpoint and its response contract are the ones CodexBar, CodeBurn and
-// OpenClaude already implement (`GET /api/v1/users/me/plan/usage-limits`, one
-// `five_hour` / `weekly` / `monthly` window per entry), and the credential
-// variable names are theirs too, so a key configured for one of those tools
-// works here unchanged.
+// The endpoint, the field names and the credential variable names are the ones
+// CodexBar, CodeBurn and OpenClaude already use
+// (`GET /api/v1/users/me/plan/usage-limits`, one `five_hour` / `weekly` /
+// `monthly` window per entry), so a key configured for one of those tools works
+// here unchanged. They are not uniform: the envelope check, unknown window
+// types, an absent percentage and a non-string `resetsAt` are each handled
+// differently by at least one of them, so where they disagree, the choice made
+// here is the one recorded in docs/providers/cline.md.
 //
 // Credentials come from two places, in this order:
 //
@@ -202,17 +205,20 @@ async function failureText(response) {
 
 // The endpoint answers a bad token with `{"error":"failed to refresh token:
 // invalid_grant"}` and a malformed request with `{"error":"Validation failed"}`,
-// so the decision reads the `error` field when the body parses and falls back to
-// the raw text when it does not. Deliberately narrower than a scan of the whole
-// body: `unauthorized_client` and `invalid_request` are not an expired sign-in,
-// and telling the user to authenticate again for one would be wrong. (Cline's own
-// `isLikelyInvalidGrant` keys on the same signal; this matcher is stricter.)
+// so the decision reads the `error` field — and only when the body parses at all.
+// A body that is not JSON did not come from Cline's classifier (a CDN or proxy
+// error page is the likely author), and matching words inside one would report a
+// working sign-in as expired. Deliberately narrower than a scan of the whole body
+// even when it does parse: `unauthorized_client` and `invalid_request` are not an
+// expired sign-in either, and telling the user to authenticate again for one would
+// be wrong. (Cline's own `isLikelyInvalidGrant` keys on the same signal; this
+// matcher is stricter.)
 function reportsInvalidGrant(body) {
   let message;
   try {
     message = String(JSON.parse(body)?.error || '');
   } catch (_) {
-    message = String(body || '');
+    return false;
   }
   return /(invalid_grant|invalid_token|invalid refresh|revoked|expired)/i.test(message);
 }
@@ -244,9 +250,14 @@ async function refreshClineSession(refreshToken, deps = {}) {
       // `{"error":"failed to refresh token: invalid_grant"}`. Only the second is
       // the sign-in being gone, so only it is reported as such; Cline's own
       // classifier (`isLikelyInvalidGrant`) draws the same line from the same
-      // signal. A bare 401/403 is a rejection outright.
+      // signal. A bare 401 is a rejection outright; a 403 is not — the shared
+      // `fetchJson` reads one that way only where a provider passes
+      // `forbiddenIsUnauthorized`, and `providers/claude`'s refresh maps 400/401 to
+      // `unauthorized` and everything else, 403 included, to `unavailable`. A 403
+      // reported as `unauthorized` would also drop the retained reading, since that
+      // status is not transient.
       const invalidGrant = reportsInvalidGrant(await failureText(response));
-      const status = response.status === 401 || response.status === 403
+      const status = response.status === 401
         ? 'unauthorized'
         : response.status === 400 && invalidGrant
           ? 'unauthorized'
@@ -315,20 +326,31 @@ function parseClineLimits(payload) {
   const byType = new Map();
   for (const raw of limits) {
     if (!raw || typeof raw !== 'object') return null;
-    const type = String(raw.type || '').trim().toLowerCase();
+    // A type that is present but is not a string is a broken contract, the rule
+    // this file already applies to a present-but-non-numeric percentage: the row
+    // cannot be placed at all, and stepping over it would report a quota that
+    // silently lost a window. CodexBar and CodeBurn both fail the reading here.
+    // An absent or blank type is skipped instead — the same present-versus-absent
+    // line the percentage and the timestamp use.
+    if (raw.type !== undefined && raw.type !== null && typeof raw.type !== 'string') return null;
+    const type = String(raw.type ?? '').trim().toLowerCase();
     if (!WINDOW_KINDS[type]) continue;
-    // A window the account has not touched yet can arrive with no percentage at
-    // all. Cline's own dashboard reads that as 0, but a fabricated 0 renders here
-    // as a real reading, so the window is kept without one —
-    // `compactWindowRemaining()` already treats an absent percentage as unknown.
-    // A value that is present and is not a number is a broken contract instead,
-    // and drops the whole reading rather than silently one of its windows.
+    // Two situations that look alike and are not. A percentage that is present
+    // and is not a number is a broken contract, and drops the whole reading rather
+    // than silently one of its windows. A window that carries no percentage at all
+    // — one the account has not touched yet — is left out of the report instead:
+    // Cline's own dashboard reads that case as 0%, which would render here as a
+    // real quota, while dropping one window keeps the reading true for the windows
+    // that do carry a percentage.
     const rawPercent = raw.percentUsed ?? raw.percent_used;
     const usedPercent = numberOrNull(rawPercent);
     const percentAbsent = rawPercent === null
       || rawPercent === undefined
       || String(rawPercent).trim() === '';
-    if (usedPercent === null && !percentAbsent) return null;
+    if (usedPercent === null) {
+      if (!percentAbsent) return null;
+      continue;
+    }
     // Validate the value that was actually read, not one spelling of it: a guard
     // on `raw.resetsAt` alone let `{"resets_at": "soon"}` through as "no reset"
     // while the camelCase spelling voided the reading.
@@ -339,7 +361,7 @@ function parseClineLimits(payload) {
       || String(rawResetsAt).trim() === '';
     if (resetsAt === null && !resetsAtAbsent) return null;
     byType.set(type, {
-      usedPercent: usedPercent === null ? null : clampPercent(usedPercent),
+      usedPercent: clampPercent(usedPercent),
       resetsAt
     });
   }

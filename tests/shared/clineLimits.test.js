@@ -217,19 +217,42 @@ test('an unknown window type is skipped and a broken known one voids the reading
   // past: reporting the rest would show a quota that silently lost a window.
   assert.equal(parseClineLimits({ success: true, data: { limits: [{ type: 'weekly', percentUsed: 'lots' }] } }), null);
   assert.equal(parseClineLimits({ success: true, data: { limits: [{ type: 'weekly', percentUsed: 1, resetsAt: 'soon' }] } }), null);
+  // The type field sits on the same line: a wrong JSON type is that broken
+  // contract — CodexBar and CodeBurn both fail the reading there — while an
+  // absent or blank one is only a window this repository cannot name, and is
+  // skipped with the reading intact.
+  assert.equal(
+    parseClineLimits({ success: true, data: { limits: [{ type: 7, percentUsed: 1 }, { type: 'weekly', percentUsed: 1 }] } }),
+    null
+  );
+  assert.equal(parseClineLimits({ success: true, data: { limits: [{ type: {}, percentUsed: 1 }] } }), null);
+  assert.deepEqual(
+    parseClineLimits({ success: true, data: { limits: [{ type: '  ', percentUsed: 1 }, { type: 'weekly', percentUsed: 2 }] } })
+      ?.map((window) => window.kind),
+    ['weekly']
+  );
   assert.equal(parseClineLimits({ success: false, data: { limits: [] } }), null);
   assert.equal(parseClineLimits({ data: {} }), null);
 });
 
-test('a window with no percentage is kept without inventing a reading', () => {
-  // Cline's own dashboard shows 0 here, but a fabricated 0 would render as a
-  // real quota; the window is reported with no percentage instead.
+test('a window with no percentage is left out, and the rest of the reading survives', () => {
+  // Cline's own dashboard shows 0% for a window the account has not touched; a
+  // fabricated 0 would render here as a real quota, so that window is left out of
+  // the report instead. It is dropped rather than voiding the reading: the windows
+  // that do carry a percentage are still true.
+  assert.deepEqual(
+    parseClineLimits({
+      success: true,
+      data: { limits: [{ type: 'five_hour' }, { type: 'weekly', percentUsed: null }, { type: 'monthly', percentUsed: '  ' }] }
+    }),
+    []
+  );
   const windows = parseClineLimits({
     success: true,
-    data: { limits: [{ type: 'five_hour' }, { type: 'weekly', percentUsed: null }, { type: 'monthly', percentUsed: '  ' }] }
+    data: { limits: [{ type: 'five_hour', percentUsed: 12 }, { type: 'weekly', percentUsed: null }] }
   });
-  assert.deepEqual(windows.map((w) => w.kind), ['session', 'weekly', 'billing']);
-  assert.deepEqual(windows.map((w) => w.usedPercent), [null, null, null]);
+  assert.deepEqual(windows.map((w) => w.kind), ['session']);
+  assert.deepEqual(windows.map((w) => w.usedPercent), [12]);
 });
 
 test('a repeated window replaces the earlier one and the order is fixed', () => {
@@ -398,6 +421,20 @@ test('every refresh failure mode maps to a status, not to a silent reading', asy
     fetch: async () => ({ ok: false, status: 400, text: async () => '{"error":"unauthorized_client"}' })
   });
   assert.equal(unauthorizedClient.status, 'unavailable');
+  // A body that is not JSON did not come from Cline's classifier, so words inside
+  // it must not decide that question either.
+  const plainTextFailure = await fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    fetch: async () => ({ ok: false, status: 400, text: async () => '<html>your session expired</html>' })
+  });
+  assert.equal(plainTextFailure.status, 'unavailable');
+  // A 403 is not a credential verdict here: the shared `fetchJson` reads one that
+  // way only where a provider opts in, and providers/claude's refresh maps 400/401
+  // to unauthorized and 403 to unavailable. Only a 401 is reported as the sign-in
+  // being gone.
+  assert.equal((await failingRefresh({ ok: false, status: 403, text: async () => '' }, 'h')).status, 'unavailable');
+  assert.equal((await failingRefresh({ ok: false, status: 401, text: async () => '' }, 'i')).status, 'unauthorized');
   assert.equal((await failingRefresh({ ok: false, status: 500, json: async () => ({}) }, 'b')).status, 'unavailable');
   // A 200 whose envelope carries no token is not a usable refresh.
   assert.equal((await failingRefresh({ ok: true, status: 200, json: async () => ({ success: true, data: {} }) }, 'c')).status, 'unavailable');

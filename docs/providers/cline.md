@@ -125,41 +125,47 @@ Two limits are deliberate and are not defects to be fixed here:
 - **Pay-as-you-go credits are not read.** `/api/v1/users/{id}/balance` is keyed by a user id
   `providers.json` does not carry, so reading it costs a second request per refresh.
 
-### The success path is aligned to precedent, field by field
+### Parsing rules
 
-No live windows payload has been observed from this repository, so the mapping is
-anchored on the three implementations that carry captured payloads rather than chosen
-here:
+No live windows payload has been observed from this repository, so the mapping below was matched field
+by field against payloads other ClinePass clients captured rather than observed here.
 
-| Rule | Pinned by | Here |
-| --- | --- | --- |
-| `data.limits[]` with `five_hour` / `weekly` / `monthly`, reported in that order | CodexBar's golden test asserts exactly those three; CodeBurn's fixture maps them in that order | fixed `WINDOW_ORDER` |
-| an unknown window type is skipped; the known ones survive it | CodexBar's `unknown limits are ignored without dropping known windows` (also stated as the intent in its PR), CodeBurn's `skips an unknown window type` | skipped — and this repository's window vocabulary is closed, so an unknown type has no representable kind anyway |
-| `resetsAt: null` keeps the window | both fixtures | kept |
-| a percentage that is present but not numeric voids the reading | CodexBar's `malformed payload is a classified parse failure` | voided |
-| 401/403 → credential problem, 429 → rate limited, 5xx → unavailable | CodexBar's parameterised HTTP expectations | `unauthorized`, `sourceRateLimited`, `unavailable` |
-| percentages clamp to 0–100 | all three | clamped, deliberately **not rounded**: the shared burn-rate math reads the raw value |
+| Rule | Here |
+| --- | --- |
+| `data.limits[]` with `five_hour` / `weekly` / `monthly`, reported in that order | fixed `WINDOW_ORDER` |
+| an unknown window type is skipped; the known ones survive it | skipped — this repository's window vocabulary is closed, so an unknown type has no representable kind anyway |
+| a `type` that is present but is not a string voids the reading | voided; an absent or blank one is skipped instead |
+| a `type` that is a string is normalized before it is matched | trimmed and lowercased |
+| `resetsAt: null` keeps the window | kept |
+| a `resetsAt` that is present but is not a parseable timestamp voids the reading | voided; an absent or blank one keeps the window without a reset time |
+| a percentage that is present but not numeric voids the reading | voided |
+| a window with no `percentUsed` at all is left out | dropped, and the windows that carry one are still reported |
+| 401 → credential problem, 429 → rate limited, anything else (403 and 5xx included) → unavailable | `unauthorized`, `sourceRateLimited`, `unavailable` |
+| percentages clamp to 0–100 | clamped, deliberately **not rounded**: the shared burn-rate math reads the raw value |
 
-Two deliberate divergences, recorded so they are not "corrected" later:
+Three deliberate choices, recorded so they are not "corrected" later:
 
-- **The monthly window is labelled, not timed.** CodexBar's golden gives it `windowMinutes: 43200`;
-  in this repository a `billing` window is the catch-all kind and carries `label: 'Monthly'` instead
-  (Kimi's and Command Code's monthly windows, Claude's credit windows), while `windowMinutes` belongs
-  to the two fixed-duration kinds.
-- **`CLINE_API_KEY` is read before `CLINEPASS_API_KEY`.** CodeBurn orders them the other way round;
-  CodexBar and OpenClaude document `CLINE_API_KEY` first, which is what this provider follows. It only
-  matters when both are set to different keys.
+- **The monthly window is labelled, not timed.** A `billing` window is this repository's catch-all kind
+  and carries `label: 'Monthly'` (Kimi's and Command Code's monthly windows, Claude's credit windows),
+  while `windowMinutes` belongs to the two fixed-duration kinds.
+- **`CLINE_API_KEY` is read before `CLINEPASS_API_KEY`.** They are aliases of one key, the vendor-named
+  one is read first, and the order only matters when both are set to different values.
+- **A `resetsAt` that is a number is read as an epoch.** The acceptance comes from
+  `providerHelpers.toIso`, a reader shared by every provider in this repository and asserted in
+  `tests/shared/limitsProviderHelpers.test.js`. It reads `1` as 1970 — a real date rather than a
+  rejection, which is the cost of sharing that reader instead of adding a stricter one here.
 
 An account without a subscription answers `limits: []`, which is reported as no data rather than as a
-live zero. Two parsing rules follow from what the vendors do with the same payload, and they differ
-per field: an **unrecognized window type is skipped** (a window Cline adds later must not take the
-reading down), and a **value that is present but is not a number voids the whole reading** — that is a
-broken contract, and reporting the rest would show a quota that silently lost a window. A window with
-**no `percentUsed` at all stays, without a percentage**: Cline's own dashboard renders that case as
-0%, but a fabricated zero would read as a real quota here, and `compactWindowRemaining()` already
-treats an absent percentage as unknown. The same present-versus-absent distinction governs `resetsAt`,
-and it is applied to the value that was read: both spellings (`resetsAt`, `resets_at`) void the
-reading when they carry something unparseable and keep the window when they are absent or empty.
+live zero. One line runs through every field: a value that is **present but wrong** is a broken contract
+and voids the whole reading, because reporting the rest would show a quota that silently lost a window,
+while a value that is **absent** is tolerated. So a percentage that is present but not numeric voids the
+reading, a `resetsAt` that is present but not a parseable timestamp does the same, a `type` that is
+present but not a string does too, and an **unrecognized window type** skips only that row — the last is
+not a broken field but a window this repository cannot name, so a window Cline adds later cannot take the
+reading down. What "absent" then means differs per field: a window with no percentage is **left out of
+the report**, while a window with no `resetsAt` is kept without a reset time. Both spellings (`resetsAt`,
+`resets_at`) are read, and the guards validate the value that was actually read rather than one spelling
+of it.
 
 ## Token totals under-count cache-heavy rows
 
@@ -189,8 +195,10 @@ upstream, not to this folder.
 Run focused tests while iterating, then finish with `npm run sync:worker` when shared Worker files
 changed, `npm run update:hub-build`, `npm run verify`, and `git diff --check`.
 
-A live check needs a machine signed in to Cline; it is one call, and it needs the credential, so run
-it where Cline itself is installed:
+A live check needs a credential, not necessarily Cline: `CLINE_API_KEY` or `CLINEPASS_API_KEY` in the
+environment is enough on any machine, while the stored sign-in needs Cline to have been signed in at
+some point. It is one request, or two when that stored access token has expired — the refresh runs
+first and its result is what the usage call sends:
 
 ```bash
 node -e "require('./src/shared/providers/cline/limits').fetchClineLimits().then(r => console.log(r.status, JSON.stringify(r.windows)))"
