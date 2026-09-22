@@ -277,8 +277,9 @@ test('fetchClineLimits maps the three ClinePass windows onto the shared kinds', 
   assert.equal(result.windows[2].resetsAt, null);
   assert.equal(result.accountEmail, 'user@example.com');
 
-  // Two reads: the plan windows, then the account's credit, which is keyed by the
-  // user id the stored sign-in carries (`usr-1` in this fixture).
+  // The plan windows first, then the account's credit, keyed by the user id the
+  // stored sign-in carries (`usr-1` in this fixture), then that id's month-to-date
+  // usage report.
   assert.equal(calls.length, 3);
   assert.equal(calls[0].url, `${CLINE_API_BASE}${USAGE_LIMITS_PATH}`);
   assert.equal(calls[1].url, `${CLINE_API_BASE}${balancePath('usr-1')}`);

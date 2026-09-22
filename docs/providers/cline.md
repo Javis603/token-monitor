@@ -131,9 +131,15 @@ row shows instead of no data at all.
 
 One limit is deliberate and is not a defect to be fixed here:
 
-- **The free-model allowance is not readable.** `cline-free/*` models enforce a daily per-model cap
-  that appears only in the body of the 429 refusing the call. No endpoint reports it, so no window is
-  shown for it.
+- **The free-model allowance is not readable.** `cline-free/*` models carry a daily per-model cap that
+  the account API reports nowhere: Cline's own clients learn about it by matching the text of the 429
+  that refuses the call (`isClineFreeModelLimitMessage` and `extractClineFreeModelLimitResetTime` in
+  `@cline/core`, used by `apps/cli/src/utils/cline-pass-errors.ts`, whose fixtures carry "Daily free
+  limit reached on model … Try again in 23h 59m"), and the user API reference
+  (`docs/enterprise-solutions/api-reference.mdx`) lists balance, usages, payment-method setup and
+  promotions with nothing for it — checked live, `/promotions` answers a list of credit grants
+  (`credits`, `status`, `campaign_id`) rather than a per-model counter. So no window is shown, and none
+  can be until Cline exposes a counter.
 
 What the account holds instead of a subscription is readable, and is read: `GET
 /api/v1/users/{id}/balance` answers `{"data":{"userId":"…","balance":500000},"success":true}`, and
@@ -149,6 +155,10 @@ balance endpoint that is down or answers nonsense leaves the plan windows alone,
 balance call never turns the row into a credential problem. It is also what keeps a planless account
 from reading as `unavailable` — with a credit in hand the row is `ok`, the rule
 `docs/providers/zai.md` states for a key without a subscription.
+
+Where a balance came from is readable as well — `/promotions` lists the credit grants with their
+campaign, amount and status — and it is deliberately **not** a window: a grant ledger answers where the
+money came from, not what is left, and the balance already includes every grant it lists.
 
 That "credit in hand" rule covers the planless answers only — an empty `limits` list, or the `404`
 above. A plan read that fails any other way keeps its own status and ends the scan there: the credit is
@@ -176,8 +186,11 @@ account id on a key-only install.
 
 ### Parsing rules
 
-No live windows payload has been observed from this repository, so the mapping below was matched field
-by field against payloads other ClinePass clients captured rather than observed here.
+No live windows payload has been observed from this repository — the development account has no
+subscription — so the mapping below was matched field by field against the fixtures the public ClinePass
+clients carry (CodexBar's `ClinePassPluginTests`, CodeBurn's `quota-clinepass.test.ts`) rather than
+observed here. Those two are one lineage, not two samples: CodeBurn's own header calls itself ported from
+CodexBar's `ClinePassSubscriptionService`.
 
 | Rule | Here |
 | --- | --- |
@@ -246,22 +259,15 @@ pinned release (`scripts/vendor/tokscale.json`), it reproduces identically on up
 shared extractors read the report that parser produces. A fix therefore belongs to the pinned source
 upstream, not to this folder.
 
-## Source map
-
-| Concern | Files |
-| --- | --- |
-| Tracked client, source roots, watch | `src/shared/clientCatalog.js`, `clientSourceRoots()` in `src/shared/collector.js` |
-| Limits provider and its credential read | `src/shared/providers/cline/limits.js` |
-| Provider registration | `src/shared/limitProviders.js`, `providerFetchers()` in `src/shared/limits/collector.js` |
-| Settings surface | account group + key field in `src/electron/renderer/index.html` and `app.js`; `settings.cline.*` in `i18n.js`; `clineApiKey` in `LIMIT_PROVIDER_SETTING_KEYS` and `CREDENTIAL_SETTING_PATHS` |
-
 Run focused tests while iterating, then finish with `npm run sync:worker` when shared Worker files
 changed, `npm run update:hub-build`, `npm run verify`, and `git diff --check`.
 
 A live check needs a credential, not necessarily Cline: `CLINE_API_KEY` or `CLINEPASS_API_KEY` in the
 environment is enough on any machine, while the stored sign-in needs Cline to have been signed in at
-some point. It is always one request — the usage call — whether a key or a stored sign-in supplied the
-credential:
+some point. The first request is always the plan usage call, and a credential that call refuses is the
+whole answer — an expired sign-in costs exactly that one request. A credential it accepts is followed by
+the balance and then the month-to-date usage report: three requests in all from a stored sign-in, four
+from a key, which has to learn its account id first:
 
 ```bash
 node -e "require('./src/shared/providers/cline/limits').fetchClineLimits().then(r => console.log(r.status, JSON.stringify(r.windows)))"

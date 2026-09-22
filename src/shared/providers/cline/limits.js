@@ -4,14 +4,15 @@
 // Cline itself uses. Reached through providerFetchers() in
 // src/shared/limits/collector.js.
 //
-// The endpoint, the field names and the credential variable names are the ones
-// CodexBar, CodeBurn and OpenClaude already use
+// The endpoint, the field names and the credential variable names are the ones the
+// public ClinePass clients already use — CodexBar, CodeBurn and OpenClaude — and
+// the ones Cline's own dashboard client calls
 // (`GET /api/v1/users/me/plan/usage-limits`, one `five_hour` / `weekly` /
-// `monthly` window per entry), so a key configured for one of those tools works
-// here unchanged. They are not uniform: the envelope check, unknown window
-// types, an absent percentage and a non-string `resetsAt` are each handled
-// differently by at least one of them, so where they disagree, the choice made
-// here is the one recorded in docs/providers/cline.md.
+// `monthly` window per entry; CodexBar's ClinePass guide names that endpoint and
+// those three windows verbatim), so a key configured for one of those tools works
+// here unchanged. The guards below are this provider's own reading of that
+// contract, and every choice they make where it is unclear is recorded in
+// docs/providers/cline.md.
 //
 // Credentials come from two places, in this order:
 //
@@ -98,9 +99,7 @@ const WINDOW_KINDS = Object.freeze({
 const WINDOW_MINUTES = Object.freeze({ session: 300, weekly: 10_080 });
 // A `billing` window is a catch-all kind, so this repository labels it rather
 // than giving it a duration: Kimi's and Command Code's monthly windows carry
-// `label: 'Monthly'` and no `windowMinutes`. CodexBar's golden fixture calls the
-// same window 43200 minutes, but that is a field of its own window model — the
-// label is how the period is named here.
+// `label: 'Monthly'` and no `windowMinutes`.
 const WINDOW_LABELS = Object.freeze({ billing: 'Monthly' });
 
 // The `settings/providers.json` Cline keeps its account sign-in in.
@@ -237,9 +236,8 @@ function parseClineLimits(payload) {
     // A type that is present but is not a string is a broken contract, the rule
     // this file already applies to a present-but-non-numeric percentage: the row
     // cannot be placed at all, and stepping over it would report a quota that
-    // silently lost a window. CodexBar and CodeBurn both fail the reading here.
-    // An absent or blank type is skipped instead — the same present-versus-absent
-    // line the percentage and the timestamp use.
+    // silently lost a window. An absent or blank type is skipped instead — the same
+    // present-versus-absent line the percentage and the timestamp use.
     if (raw.type !== undefined && raw.type !== null && typeof raw.type !== 'string') return null;
     const type = String(raw.type ?? '').trim().toLowerCase();
     if (!WINDOW_KINDS[type]) continue;
@@ -247,9 +245,11 @@ function parseClineLimits(payload) {
     // and is not a number is a broken contract, and drops the whole reading rather
     // than silently one of its windows. A window that carries no percentage at all
     // — one the account has not touched yet — is left out of the report instead:
-    // Cline's own dashboard reads that case as 0%, which would render here as a
-    // real quota, while dropping one window keeps the reading true for the windows
-    // that do carry a percentage.
+    // this repository never turns an absent percentage into a fabricated 0
+    // (`numberOrNull` in limits/providerHelpers.js, and `compactWindowRemaining`
+    // reports the remainder as unknown), so reporting the window here would render
+    // as a real quota; dropping it keeps the reading true for the windows that do
+    // carry a percentage.
     const rawPercent = raw.percentUsed ?? raw.percent_used;
     const usedPercent = numberOrNull(rawPercent);
     const percentAbsent = rawPercent === null
