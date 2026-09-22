@@ -166,8 +166,11 @@ ledger rather than the aggregate, at one request per page.
 ### Parsing rules
 
 No live windows payload has been observed here, so the mapping below was matched field by field against
-the fixtures the public ClinePass clients carry — CodexBar's `ClinePassPluginTests` and CodeBurn's
-`quota-clinepass.test.ts`, one lineage rather than two samples: CodeBurn calls itself a port of CodexBar's.
+the fixtures the public ClinePass clients carry: CodexBar's `ClinePassPluginTests` and CodeBurn's
+`quota-clinepass.test.ts`. Those are two readings of one contract rather than one lineage — CodeBurn
+credits CodexBar as prior art for the endpoints and response shapes while calling its own adapters an
+independent implementation — and both name the same endpoint, the same three window types and the same
+`percentUsed` / `resetsAt` fields.
 
 | Rule | Here |
 | --- | --- |
@@ -184,8 +187,8 @@ Five deliberate choices, recorded so they are not "corrected" later:
 - **A lane error decides the status and nothing else**, told apart from the planless answers by the
   HTTP status `limits/providerHelpers.js` keeps for exactly that reason.
 - **A `403` is not read as a credential problem** until this API is seen answering one: only 401 and the
-  plan-less 404 have been observed, and another ClinePass client reading 403 as an expired session is
-  not an observation of this endpoint.
+  plan-less 404 have been observed here. CodexBar (`authenticationExpired`) and CodeBurn (a terminal
+  credential failure) do read 403 as one, but that is their reading of this endpoint, not an observation.
 - **The monthly window is labelled, not timed**: a `billing` window is this repository's catch-all kind.
 - **`CLINE_API_KEY` is read before `CLINEPASS_API_KEY`**, two aliases of one key, where the order only
   matters when both are set to different values.

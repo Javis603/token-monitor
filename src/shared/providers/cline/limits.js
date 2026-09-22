@@ -89,7 +89,7 @@ const SPEND_SCALE = 100_000_000;
 // A free-tier row is real usage with a would-be price: live, a `cline-free/kimi-k3`
 // call answered `costUsd` 2179200 with `creditsUsed` 0, so counting it would report
 // money nobody paid. The vendor marks the tier by model id
-// (`CLINE_FREE_MODEL_PREFIX` in apps/vscode/src/services/error/ClineError.ts), and
+// (`CLINE_FREE_MODEL_PREFIX` in apps/cli/src/utils/cline-pass-errors.ts), and
 // the daily report spells it twice — a `cline-free/…` id and `aiModelTypeName:
 // 'cline-free'` — so either field decides it: one of them surviving a rename is
 // cheaper than reporting money nobody spent.
@@ -249,9 +249,10 @@ function parseClineLimits(payload) {
   const limits = payload.data?.limits;
   if (!Array.isArray(limits)) return null;
   // Keyed by the reported type, so a repeated window replaces the earlier one
-  // instead of rendering twice. CodexBar, CodeBurn and OpenClaude all collapse
-  // it the same way (`windows[type] = …`), and only the last one is the
-  // account's current reading.
+  // instead of rendering twice: CodexBar (`windows[limit.type] = …`) and CodeBurn
+  // (`windows.set(type, …)`) both collapse it, and only the last one is the
+  // account's current reading. OpenClaude's reader keeps every entry instead, so a
+  // repeat renders twice there — the two that collapse are the ones followed here.
   const byType = new Map();
   for (const raw of limits) {
     if (!raw || typeof raw !== 'object') return null;
