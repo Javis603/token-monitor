@@ -45,9 +45,13 @@ test('default tracked clients include current tokscale-supported tools', () => {
   }
 });
 
-test('micode is intentionally NOT default-tracked (mimocode.db double-counts Claude imports)', () => {
-  assert.ok(!DEFAULT_CLIENTS.split(',').includes('micode'),
-    'micode must stay opt-in until tokscale dedups claude-import sessions');
+test('micode is deliberately default-tracked despite the claude-import overlap', () => {
+  // mimocode.db auto-imports Claude Code sessions and tokscale does not mark
+  // them, so a fresh install counts that work under both `claude` and `micode`.
+  // Shipping it on anyway is a deliberate product call (see clientCatalog.js) —
+  // pinned here so flipping it back is also deliberate rather than incidental.
+  assert.ok(DEFAULT_CLIENTS.split(',').includes('micode'),
+    'micode is expected to be default-tracked');
 });
 
 test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in micode', () => {
@@ -70,7 +74,7 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in m
 test('tracked client defaults and README share one display order', () => {
   const known = KNOWN_CLIENTS.split(',');
   assert.deepEqual(readmeTrackedClientIds(), known);
-  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => !['micode', 'qodercn'].includes(client)));
+  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => client !== 'qodercn'));
 });
 
 test('documented client CSV follows the canonical catalog order', () => {

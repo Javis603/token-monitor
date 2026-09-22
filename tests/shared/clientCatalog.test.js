@@ -59,7 +59,7 @@ test('derived DEFAULT_CLIENTS keeps the existing default-tracked CSV', () => {
   assert.equal(DEFAULT_CLIENTS, DEFAULT_CLIENT_IDS.join(','));
   assert.equal(
     DEFAULT_CLIENTS,
-    'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,amp,droid,kimi,qwen,grok,copilot,pi,zed,kilo,commandcode,zcode,kiro,codebuddy,workbuddy,proma,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin'
+    'claude,codex,opencode,hermes,openclaw,cursor,antigravity,cline,amp,droid,kimi,qwen,grok,copilot,pi,zed,kilo,commandcode,micode,zcode,kiro,codebuddy,workbuddy,proma,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin'
   );
 });
 
