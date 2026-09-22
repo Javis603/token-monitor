@@ -59,7 +59,8 @@ test('a completed record becomes a row with cached, reasoning and cost values', 
   assert.ok(row);
   assert.equal(row.requestId, 'req-1');
   assert.equal(row.model, 'GLM-5.3-Flash (Go)');
-  assert.equal(row.input, 1000);
+  // prompt_tokens includes cached_tokens; uncached input is the remainder.
+  assert.equal(row.input, 200);
   assert.equal(row.output, 200);
   assert.equal(row.cacheRead, 800);
   assert.equal(row.reasoning, 50);
@@ -97,9 +98,18 @@ test('collectGcmpRows dedupes repeated requestIds within a root', () => {
   // The rows carry Sep 22 01:27 UTC, whose local date depends on the machine's
   // timezone, so compare against the allTime window which includes both.
   const allTime = extractUsageFromTokscale(json.allTime);
-  assert.equal(allTime.totalTokens, 2015);
-  assert.equal(allTime.clients.gcmp, 2015);
+  assert.equal(allTime.totalTokens, 1215);
+  assert.equal(allTime.clients.gcmp, 1215);
   assert.equal(allTime.costUsd, 0.005526);
+});
+
+test('collectGcmpRows dedupes the same requestId across roots', () => {
+  const rootA = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'gcmp-dedupe-')), 'Code', 'User', 'globalStorage', 'vicanent.gcmp', 'usages');
+  const rootB = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'gcmp-dedupe-')), 'Code - Insiders', 'User', 'globalStorage', 'vicanent.gcmp', 'usages');
+  writeHourFile(rootA, '2026-09-22', '09', [JSON.stringify(COMPLETED)]);
+  writeHourFile(rootB, '2026-09-22', '09', [JSON.stringify(COMPLETED)]);
+  const rows = collectGcmpRows({ roots: [rootA, rootB] });
+  assert.equal(rows.length, 1);
 });
 
 test('buildGcmpPeriods cuts today and month at local boundaries', () => {
@@ -138,30 +148,48 @@ test('history graph attributes rows to their local date and model', () => {
   assert.ok(Math.abs(client.cost - 0.3) < 1e-9);
 });
 
+// Local date key mirroring the adapter's own derivation; the tests below
+// derive their timestamps from the anchor instead of fixing UTC wall times,
+// so the same record does not fall on a different local day per timezone.
+function localDateKeyOf(timestamp) {
+  const date = new Date(timestamp);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 test('a sinceMs anchored to local midnight skips earlier date directories', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gcmp-since-'));
   const usages = path.join(root, 'usages');
-  writeHourFile(usages, '2026-09-21', '23', [JSON.stringify({ ...COMPLETED, requestId: 'old' })]);
-  writeHourFile(usages, '2026-09-22', '00', [JSON.stringify({ ...COMPLETED, requestId: 'new' })]);
   const midnight = new Date(2026, 8, 22, 0, 0, 0).getTime();
+  writeHourFile(usages, localDateKeyOf(midnight - 86_400_000), '23', [JSON.stringify({ ...COMPLETED, requestId: 'old', timestamp: midnight - 3_600_000 })]);
+  writeHourFile(usages, localDateKeyOf(midnight), '00', [JSON.stringify({ ...COMPLETED, requestId: 'new', timestamp: midnight + 3_600_000 })]);
   const rows = collectGcmpRows({ roots: [usages], sinceMs: midnight });
   assert.equal(rows.length, 1);
   assert.equal(rows[0].requestId, 'new');
 });
 
+test('a non-midnight sinceMs drops earlier same-day records', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gcmp-hours-'));
+  const usages = path.join(root, 'usages');
+  const sinceMs = Date.parse('2026-09-22T09:00:00.000Z');
+  writeHourFile(usages, '2026-09-22', '08', [JSON.stringify({ ...COMPLETED, requestId: 'early', timestamp: Date.parse('2026-09-22T08:59:00.000Z') })]);
+  writeHourFile(usages, '2026-09-22', '09', [JSON.stringify({ ...COMPLETED, requestId: 'late', timestamp: Date.parse('2026-09-22T09:01:00.000Z') })]);
+  const rows = collectGcmpRows({ roots: [usages], sinceMs });
+  assert.deepEqual(rows.map((row) => row.requestId), ['late']);
+});
+
 test('roots resolve per platform with remote-server variants included', () => {
   const env = { APPDATA: 'C:\\Users\\u\\AppData\\Roaming', XDG_CONFIG_HOME: '' };
+  // Expected paths are built with path.join (not string literals) so the
+  // assertion holds on Windows CI, where path.join emits backslashes.
   assert.deepEqual(gcmpUsagesRoots({ homeDir: '/h', platform: 'darwin', env }), [
-    '/h/Library/Application Support/Code/User/globalStorage/vicanent.gcmp/usages',
-    '/h/Library/Application Support/Code - Insiders/User/globalStorage/vicanent.gcmp/usages',
-    '/h/.vscode-server/data/User/globalStorage/vicanent.gcmp/usages',
-    '/h/.vscode-server-insiders/data/User/globalStorage/vicanent.gcmp/usages'
+    path.join('/h', 'Library', 'Application Support', 'Code', 'User', 'globalStorage', 'vicanent.gcmp', 'usages'),
+    path.join('/h', 'Library', 'Application Support', 'Code - Insiders', 'User', 'globalStorage', 'vicanent.gcmp', 'usages'),
+    path.join('/h', '.vscode-server', 'data', 'User', 'globalStorage', 'vicanent.gcmp', 'usages'),
+    path.join('/h', '.vscode-server-insiders', 'data', 'User', 'globalStorage', 'vicanent.gcmp', 'usages')
   ]);
   const linuxRoots = gcmpUsagesRoots({ homeDir: '/h', platform: 'linux', env });
-  assert.ok(linuxRoots.some((dir) => dir === '/h/.config/Code/User/globalStorage/vicanent.gcmp/usages'));
+  assert.ok(linuxRoots.some((dir) => dir === path.join('/h', '.config', 'Code', 'User', 'globalStorage', 'vicanent.gcmp', 'usages')));
   const winRoots = gcmpUsagesRoots({ homeDir: 'C:\\Users\\u', platform: 'win32', env });
-  // path.join follows the host platform, so on POSIX the APPDATA prefix keeps
-  // its backslashes while the appended segments use forward slashes.
   assert.ok(winRoots.some((dir) => dir.startsWith('C:\\Users\\u\\AppData\\Roaming') && dir.includes('vicanent.gcmp')));
   assert.equal(GCMP_SOURCE_CHECK_ID, 'gcmp-usages');
 });

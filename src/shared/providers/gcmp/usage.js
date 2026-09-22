@@ -119,8 +119,9 @@ function normalizeUsageLine(line, sourceId) {
 }
 
 // Hour files are named YYYY-MM-DD/HH.jsonl, so a sinceMs anchored to local
-// midnight can skip every earlier date directory outright. A non-midnight
-// sinceMs still filters per record afterwards.
+// midnight can skip every earlier date directory outright. Directories are
+// returned newest-first: when the row cap truncates the scan, the newest
+// usage survives instead of the oldest.
 function usagesFiles(root, sinceMs) {
   let dateDirs;
   try {
@@ -134,7 +135,7 @@ function usagesFiles(root, sinceMs) {
     if (sinceKey) dateDirs = dateDirs.filter((name) => name >= sinceKey);
   }
   const files = [];
-  for (const dateDir of dateDirs.sort()) {
+  for (const dateDir of dateDirs.sort().reverse()) {
     const dirPath = path.join(root, dateDir);
     let hourFiles;
     try {
@@ -142,7 +143,7 @@ function usagesFiles(root, sinceMs) {
     } catch (_) {
       continue;
     }
-    for (const hourFile of hourFiles) {
+    for (const hourFile of hourFiles.sort().reverse()) {
       if (hourFile.endsWith('.jsonl')) files.push(path.join(dirPath, hourFile));
     }
   }
