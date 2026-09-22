@@ -81,7 +81,7 @@ const supportedToolOrder = [
   'Cherry Studio',
   'LM Studio',
   'Unsloth Studio',
-  'Devin',
+  'Devin CLI / Devin Desktop',
   'OpenRouter',
   'Minimax',
   'Volcengine',
