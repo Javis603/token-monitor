@@ -28,7 +28,3 @@ Session titles, activity timestamps, and project attribution come from the CLI `
 ## Cost
 
 Usage is priced by Tokscale's model table like any other client. Devin subscription seats and ACU credit accounting are not an API meter, so displayed cost is an estimate, not an invoice.
-
-## Artwork
-
-The Devin SVG is an original rendering of the square-spiral mark in mask-safe `currentColor` form. The README PNG is rendered from the same mark. Discord Rich Presence uses the `devin` asset name.
