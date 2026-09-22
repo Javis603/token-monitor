@@ -30,8 +30,15 @@ exist with the sign-in removed or expired, which is the state this provider repo
 
 ## Credentials resolve in one order
 
-1. `CLINE_API_KEY`, then `CLINEPASS_API_KEY`, then the provider options a manual field would supply.
-2. The stored Cline sign-in in `settings/providers.json`.
+1. A `clineApiKey` provider option outranks the environment, then `CLINE_API_KEY`, then
+   `CLINEPASS_API_KEY`. The settings field is what supplies that option, and the key it saves goes to
+   the credential store (`providers.cline.apiKey`) rather than to `settings.json`; the two
+   variables remain the surface for deployments with no UI.
+2. The stored Cline sign-in in `settings/providers.json`. Cline keeps two provider sections there,
+   and the ClinePass selection writes its credentials into the `cline` entry as well ("cline-pass
+   stores under \"cline\"", `apps/vscode/src/sdk/auth-service.ts`), so `cline` is read first and
+   `cline-pass` only as a fallback for a file an older version wrote. Reading them the other way round
+   would let a stale entry mask the current credential.
 
 Neither covers everyone, which is why both exist: a machine without Cline installed has no sign-in to
 read, and the file is what makes the provider work with no setup at all for anyone actually running
@@ -45,6 +52,11 @@ hands `ClineAccountService` the `cline` provider's persisted credential — the 
 exists, the API key otherwise (`getPersistedProviderApiKey()` →
 `ClineProviderAuthHandler.getApiKey()`) — and its authentication reference documents API key and
 account auth token as the two methods for the same `Authorization: Bearer` header.
+
+A missing store and a signed-out one are reported differently, the distinction `readCodexOAuthAuth`
+draws in `providers/codex`: no `providers.json` (or one that cannot be parsed) is `notConfigured`,
+while a file that reads and holds no access token is `unauthorized`. Both name the `oauth` lane as the
+source they failed on.
 
 The two are **exclusive**, in the sense `docs/providers/volcengine.md` fixes for the same situation:
 a configured key owns the lane, and a rejected key is reported instead of falling back to the stored
@@ -65,29 +77,20 @@ readable provider-owned configuration file may supply an in-memory credential
 JSON — and Token Monitor persists no Cline credential of its own, so a manually supplied key exists
 only for the process that read it.
 
-A stored sign-in that has expired is **refreshed in memory** rather than left stale: the scan that
-finds it calls `POST /api/v1/auth/refresh` with the stored refresh token and uses the result, so a
-sign-in that went old while Cline was closed heals on the next refresh cycle. The refresh is
-per-process cached and keyed by the refresh token, so a stale sign-in costs one refresh rather than
-one per scan, and a different sign-in (a new refresh token) is refreshed again. It is never written
-back: Cline's refresh endpoint returns the same refresh token it was given — verified live — so a
-refresh here cannot invalidate Cline's own copy, and persisting into another application's
-credential file would buy nothing the next scan does not redo.
+The stored sign-in is read **only**, which is where Cline's own implementation draws the line: its
+token response may carry a replacement refresh token (`toClineCredentials` takes
+`responseData.refreshToken` when present) and its auth service writes the rotated access token, refresh
+token, expiry and account id back to `providers.json` itself (`writeClineCredentials`, on any credential
+change). Refreshing from here would mean discarding a replacement token and leaving Cline holding one
+the server has retired — breaking a sign-in in another application to save a step Cline performs by
+itself. So the stored token is sent as it stands: Cline refreshes it the next time it runs, a token that
+has expired is refused by the account API and reported as `unauthorized` rather than healed here, and
+nothing in this provider writes to that file. An expired sign-in therefore costs exactly one request —
+the usage call, never a refresh.
 
-Only a refresh the endpoint answers with an invalid grant is reported as `unauthorized` (the sign-in
-itself is gone): that is a `401`/`403`, or a `400` whose body says so — the live endpoint answers
-`{"error":"failed to refresh token: invalid_grant"}` for a bad token while an empty body is answered
-`{"error":"Validation failed",...}`. The decision reads the `error` field when the body parses and
-only the invalid-grant family within it — deliberately narrower than Cline's own
-`isLikelyInvalidGrant`, which also matches a bare `unauthorized`, because `unauthorized_client` is not
-an expired sign-in and prompting for re-authentication over it would be wrong. A validation failure
-and a transport failure are `unavailable`, so a transient problem never tells the user to sign in
-again.
-
-The token goes out in the stored form, `workos:<jwt>`. Cline's refresh endpoint answers with the bare
-JWT, so the prefix is *added* for the wire rather than stripped: verified live against the endpoint,
-`Bearer <bare jwt>` is rejected with 401 while `Bearer workos:<jwt>` authenticates. A user-supplied
-API key is a different credential and is sent exactly as configured, since the mirror image holds —
+The token goes out in the stored form, `workos:<jwt>`. Verified live against the endpoint:
+`Bearer <bare jwt>` is rejected with 401 while `Bearer workos:<jwt>` authenticates. A user-supplied API
+key is a different credential and is sent exactly as configured, since the mirror image holds —
 `Bearer <key>` authenticates and `Bearer workos:<key>` is rejected.
 
 Path resolution mirrors `cline_cli_session_roots` in tokscale's `scanner.rs`, the same precedence the
@@ -95,11 +98,10 @@ collector's session roots use: `CLINE_SESSION_DATA_DIR`, `CLINE_DATA_DIR`, then 
 winning outright. There is deliberately no fallback to `~/.cline` past a relocation, which would
 report whichever account happens to be signed in at the default location.
 
-The account identity is hashed from an identifier that survives a refresh: Cline's server-issued
-account id, or the refresh token, which its endpoint returns unchanged. A configured key stands for
+The account identity is hashed from Cline's server-issued account id. A configured key stands for
 itself. The access token is never used for this — it is replaced hourly, and an identity that rotates
-would reach the hub as a new account on every ingest. A sign-in with none of those identifiers keeps
-no `accountKey` instead of inventing one.
+would reach the hub as a new account on every ingest. A sign-in with no account id keeps no
+`accountKey` instead of inventing one.
 
 A Cline installation that lives only inside WSL is not read: `providers/claude/limits.js` has a
 `wslClaudeCredentialPaths()` for the same situation, and the equivalent for Cline — a
@@ -114,16 +116,30 @@ The endpoint answers with one `five_hour`, `weekly`, and `monthly` entry per acc
 windows. The shape is confirmed by Cline's own dashboard client and by the three implementations
 above; the request path itself is verified live as far as an account without a subscription allows —
 the development account authenticates and is answered `404 {"error":"no plan history found for
-user","success":false}`. That answer is reported as no data, exactly like the `limits: []` an empty
-plan returns, because both mean the same thing: this account has no ClinePass windows to show.
+user","success":false}`. That answer means there are no ClinePass windows to show, exactly like the
+`limits: []` an empty plan returns — and when the account holds credit, that credit is the reading the
+row shows instead of no data at all.
 
-Two limits are deliberate and are not defects to be fixed here:
+One limit is deliberate and is not a defect to be fixed here:
 
 - **The free-model allowance is not readable.** `cline-free/*` models enforce a daily per-model cap
   that appears only in the body of the 429 refusing the call. No endpoint reports it, so no window is
   shown for it.
-- **Pay-as-you-go credits are not read.** `/api/v1/users/{id}/balance` is keyed by a user id
-  `providers.json` does not carry, so reading it costs a second request per refresh.
+
+What the account holds instead of a subscription is readable, and is read: `GET
+/api/v1/users/{id}/balance` answers `{"data":{"userId":"…","balance":500000},"success":true}`, and
+500000 is the `Credits: 0.5000` Cline's own account page prints — its dashboard divides by 1e6 before
+displaying, so the value is micro-credits. It is reported as a `credits` window (`label: 'Credits'`,
+`currency: 'CREDITS'`, `remaining`, no meter), which `limitBalanceDisplay` prints as a bare amount
+beside the label, the same convention WorkBuddy's credit balance uses. The endpoint is keyed by the
+user id and ownership-checked — another user's id answers `403 can only access own resources` — so it
+is queried with the id belonging to the credential in use: the stored sign-in carries `accountId`,
+while a key-only install reads `/api/v1/users/me` first, which is the one extra request a scan costs
+there (two requests with a local sign-in, three without). The credit read is **best effort**: a
+balance endpoint that is down or answers nonsense leaves the plan windows alone, and a rejected
+balance call never turns the row into a credential problem. It is also what keeps a planless account
+from reading as `unavailable` — with a credit in hand the row is `ok`, the rule
+`docs/providers/zai.md` states for a key without a subscription.
 
 ### Parsing rules
 
@@ -190,15 +206,15 @@ upstream, not to this folder.
 | Tracked client, source roots, watch | `src/shared/clientCatalog.js`, `clientSourceRoots()` in `src/shared/collector.js` |
 | Limits provider and its credential read | `src/shared/providers/cline/limits.js` |
 | Provider registration | `src/shared/limitProviders.js`, `providerFetchers()` in `src/shared/limits/collector.js` |
-| Settings surface | `LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS` in `src/electron/renderer/app.js`, `settings.limits.connection.cline` in `i18n.js` |
+| Settings surface | account group + key field in `src/electron/renderer/index.html` and `app.js`; `settings.cline.*` in `i18n.js`; `clineApiKey` in `LIMIT_PROVIDER_SETTING_KEYS` and `CREDENTIAL_SETTING_PATHS` |
 
 Run focused tests while iterating, then finish with `npm run sync:worker` when shared Worker files
 changed, `npm run update:hub-build`, `npm run verify`, and `git diff --check`.
 
 A live check needs a credential, not necessarily Cline: `CLINE_API_KEY` or `CLINEPASS_API_KEY` in the
 environment is enough on any machine, while the stored sign-in needs Cline to have been signed in at
-some point. It is one request, or two when that stored access token has expired — the refresh runs
-first and its result is what the usage call sends:
+some point. It is always one request — the usage call — whether a key or a stored sign-in supplied the
+credential:
 
 ```bash
 node -e "require('./src/shared/providers/cline/limits').fetchClineLimits().then(r => console.log(r.status, JSON.stringify(r.windows)))"

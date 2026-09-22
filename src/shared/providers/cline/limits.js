@@ -15,30 +15,36 @@
 //
 // Credentials come from two places, in this order:
 //
-//   1. `CLINE_API_KEY`, then `CLINEPASS_API_KEY` (or the provider options a
-//      manual field would supply). Every implementation named above stops here,
-//      which is why they all document ClinePass as key-only.
+//   1. `CLINE_API_KEY`, then `CLINEPASS_API_KEY` — behind a `clineApiKey`
+//      provider option, which outranks both and is what the settings field
+//      supplies. Every implementation named above
+//      stops here, which is why they all document ClinePass as key-only.
 //   2. The sign-in Cline Desktop and the Cline CLI already persist in
 //      `settings/providers.json` under the `~/.cline/data` tree whose
 //      `sessions/` directory also supplies this client's token usage. That is
 //      the zero-setup path for anyone actually running Cline, and it is the
 //      reason this provider can work without the user pasting anything.
 //
-// Path 2 is refreshed in memory and never written back. Its token is a WorkOS
-// access token with a one-hour lifetime, which goes stale whenever Cline has not
-// been run recently, so a scan that finds it expired calls Cline's own refresh
-// endpoint and uses the result. That endpoint returns the refresh token it was
-// given — verified live — so refreshing here cannot invalidate Cline's copy, and
-// writing into another application's credential file would buy nothing the next
-// scan does not redo. Only a refused refresh, meaning the sign-in itself is gone,
-// is reported as needing an update.
+// Path 2 is read only, which is where Cline's own implementation draws the line:
+// its token response may carry a replacement refresh token (`toClineCredentials`
+// takes `responseData.refreshToken` when present) and its auth service writes the
+// rotated access token, refresh token, expiry and account id back to
+// `providers.json` itself (`writeClineCredentials`, on any credential change).
+// Refreshing here would mean discarding a replacement token, leaving Cline
+// holding one the server has retired. So the stored token is used as-is: Cline
+// refreshes it the next time it runs, a token that has expired is refused by the
+// account API and reported as `unauthorized` rather than healed here, and nothing
+// in this file writes to that credential file.
 //
 // Cline's per-model free allowance (`cline-free/*`) has no read surface at all:
-// its daily cap appears only in the body of the 429 that refuses the call. So
-// the windows here are the ClinePass subscription's, not the free tier's. The
-// account's pay-as-you-go credit balance is a different endpoint
-// (`/api/v1/users/{id}/balance`) keyed by a user id this file does not carry,
-// so it is not read either.
+// its daily cap appears only in the body of the 429 that refuses the call. So the
+// plan windows here are the ClinePass subscription's, not the free tier's. What
+// the account holds instead of a plan — its pay-as-you-go credit, the "Credits:
+// 0.5000" on the account page — is read from `/api/v1/users/{id}/balance` and
+// reported as a credits window. That endpoint is keyed by the user id and
+// ownership-checked, so it is queried with the id belonging to the credential in
+// use: the stored sign-in carries it, while a key-only install learns it from
+// `/api/v1/users/me` first, which is one extra request per scan there.
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -46,7 +52,6 @@ const path = require('node:path');
 const { normalizeLimitProvider } = require('../../limits/core');
 const { hashKey } = require('../../hashKey');
 const {
-  TOKEN_MONITOR_USER_AGENT,
   cleanSecret,
   envValue,
   errorWithStatus,
@@ -61,12 +66,23 @@ const CLINE_API_BASE = 'https://api.cline.bot';
 // Cline's API takes its WorkOS token in the stored form, prefix included.
 const WORKOS_TOKEN_PREFIX = 'workos:';
 const USAGE_LIMITS_PATH = '/api/v1/users/me/plan/usage-limits';
-const REFRESH_PATH = '/api/v1/auth/refresh';
+const USERS_ME_PATH = '/api/v1/users/me';
+// The per-user credit balance. Keyed by the user id and ownership-checked —
+// a request for someone else's id answers 403 — so it has to be queried with the
+// id belonging to the credential in use; there is no `me` spelling of it.
+const balancePath = (id) => `/api/v1/users/${encodeURIComponent(id)}/balance`;
+// Cline keeps credits in micro-credits: its own dashboard divides by 1e6 before
+// printing them, so `balance: 500000` is the "Credits: 0.5000" the account page
+// shows.
+const CREDIT_SCALE = 1_000_000;
 
-// Both point at the same account — Cline stores one token under `cline` (usage
-// billing) and `cline-pass` (the subscription) — so this is a fallback chain for
-// a file where only one section was written, not a preference between accounts.
-const SESSION_PROVIDER_IDS = ['cline-pass', 'cline'];
+// The section order is Cline's own, not a choice made here: the ClinePass
+// selection writes its credentials into the `cline` entry too ("cline-pass stores
+// under \"cline\"", apps/vscode/src/sdk/auth-service.ts), so `cline` is the
+// authoritative section and `cline-pass` is read only as a fallback for a file an
+// older version wrote. Reading `cline-pass` first would let a stale entry mask the
+// current credential.
+const SESSION_PROVIDER_IDS = ['cline', 'cline-pass'];
 
 // The window kinds Cline reports, mapped onto the shared vocabulary in
 // src/shared/limits/core.js: its `five_hour` is the same rolling window Claude
@@ -83,10 +99,6 @@ const WINDOW_MINUTES = Object.freeze({ session: 300, weekly: 10_080 });
 // same window 43200 minutes, but that is a field of its own window model — the
 // label is how the period is named here.
 const WINDOW_LABELS = Object.freeze({ billing: 'Monthly' });
-
-// A token expiring within the next minute is not worth a request: the answer
-// would arrive after it stopped being valid.
-const EXPIRY_MARGIN_MS = 60_000;
 
 // The `settings/providers.json` Cline keeps its account sign-in in.
 //
@@ -107,68 +119,46 @@ function clineProvidersPath(env = process.env) {
   return path.join(os.homedir(), '.cline', 'data', 'settings', 'providers.json');
 }
 
-// The OAuth access token goes out in its stored form, `workos:<jwt>`, while
-// Cline's refresh endpoint hands back the bare JWT, so the prefix is ensured
-// rather than stripped. Both directions are verified live against the endpoint,
-// and they are opposites: `Bearer <bare jwt>` is rejected with 401 while
-// `Bearer workos:<jwt>` authenticates. A user-supplied API key is the mirror
-// image — `Bearer <key>` authenticates and `Bearer workos:<key>` is rejected —
-// so it is sent exactly as configured and never touches this formatter.
+// The OAuth access token goes out in its stored form, `workos:<jwt>`. That form
+// is the one the account API accepts: verified live, `Bearer <bare jwt>` answers
+// 401 while `Bearer workos:<jwt>` authenticates. A user-supplied API key is the
+// mirror image — `Bearer <key>` authenticates and `Bearer workos:<key>` is
+// rejected — so it is sent exactly as configured and never touches this
+// formatter.
 function formatAccessToken(value) {
   const raw = cleanSecret(value);
   if (!raw) return '';
   return raw.toLowerCase().startsWith(WORKOS_TOKEN_PREFIX) ? raw : `${WORKOS_TOKEN_PREFIX}${raw}`;
 }
 
-// Epoch milliseconds from whichever spelling Cline wrote. The CLI stores a
-// number; an ISO string and a numeric string are both accepted because more than
-// one front-end writes this field.
-function tokenExpiryMs(auth) {
-  const raw = auth?.expiresAt ?? auth?.expires_at;
-  if (typeof raw === 'number' && Number.isFinite(raw)) {
-    return raw > 20_000_000_000 ? raw : raw * 1000;
-  }
-  const text = cleanSecret(raw);
-  if (!text) return null;
-  if (/^\d+$/.test(text)) {
-    const value = Number(text);
-    return value > 20_000_000_000 ? value : value * 1000;
-  }
-  const parsed = Date.parse(text);
-  return Number.isNaN(parsed) ? null : parsed;
-}
-
-function readClineProvidersDocument(filePath) {
+// The stored Cline sign-in, or a refusal that says which of the two situations it
+// is. Shaped like `readCodexOAuthAuth` in providers/codex: a store that cannot be
+// read is `notConfigured`, while a store that read and holds no access token is
+// `unauthorized` — "Cline is not installed here" and "Cline is installed and
+// signed out" call for different answers, and only the file can tell them apart.
+// A section written half-way is the second case, not a failed request.
+function readClineSession(env = process.env) {
+  let document;
   try {
-    const document = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    return document && typeof document === 'object' ? document : null;
+    document = JSON.parse(fs.readFileSync(clineProvidersPath(env), 'utf8'));
   } catch (_) {
-    return null;
+    throw errorWithStatus('notConfigured', 'Cline providers.json not found');
   }
-}
-
-// The stored Cline sign-in, or null when there is none. A section without an
-// access token is skipped rather than reported, so a half-written file reads as
-// "not signed in" instead of as a failed request.
-function readClineSession(env = process.env, deps = {}) {
-  const readFile = deps.readFile || readClineProvidersDocument;
-  const document = readFile(clineProvidersPath(env));
-  const providers = document?.providers;
-  if (!providers || typeof providers !== 'object') return null;
+  if (!document || typeof document !== 'object') {
+    throw errorWithStatus('unauthorized', 'Cline access token not found');
+  }
   for (const providerId of SESSION_PROVIDER_IDS) {
-    const auth = providers[providerId]?.settings?.auth;
+    const auth = document.providers?.[providerId]?.settings?.auth;
     const accessToken = cleanSecret(auth?.accessToken);
     if (!accessToken) continue;
     const userInfo = auth?.metadata?.userInfo || {};
     return {
       accessToken,
-      refreshToken: cleanSecret(auth?.refreshToken),
       accountId: cleanSecret(auth?.accountId) || cleanSecret(userInfo.clineUserId),
-      email: cleanSecret(userInfo.email),
-      expiresAt: tokenExpiryMs(auth)
+      email: cleanSecret(userInfo.email)
     };
   }
-  return null;
+  throw errorWithStatus('unauthorized', 'Cline access token not found');
 }
 
 function clineApiKey(env = process.env, options = {}) {
@@ -181,124 +171,39 @@ function clineApiKey(env = process.env, options = {}) {
   return '';
 }
 
-// The most recent in-memory refresh, kept so a stored token that stays expired
-// costs one refresh per process rather than one per scan. Keyed by the refresh
-// token, which is what a different sign-in changes.
-let sessionRefresh = null;
-
-function cachedRefresh(refreshToken, nowMs) {
-  if (!sessionRefresh || sessionRefresh.refreshToken !== refreshToken) return null;
-  if (sessionRefresh.expiresAt !== null && sessionRefresh.expiresAt <= nowMs + EXPIRY_MARGIN_MS) return null;
-  return sessionRefresh;
-}
-
-// Best-effort error text from a failed response, for the one decision that needs
-// it: whether a 400 means a rejected grant or a malformed request.
-async function failureText(response) {
+// Where the credential would come from when no key is configured, shaped like
+// resolveFactoryAutomaticApiKey: the settings row reports this instead of a
+// generic "configured", so a discovered sign-in reads as its own lane.
+function resolveClineAutomaticCredential(env = process.env) {
+  if (clineApiKey(env, {})) return { source: "env" };
   try {
-    const body = await response.text();
-    return String(body || '');
+    readClineSession(env);
+    return { source: "cline-signin" };
   } catch (_) {
-    return '';
-  }
-}
-
-// The endpoint answers a bad token with `{"error":"failed to refresh token:
-// invalid_grant"}` and a malformed request with `{"error":"Validation failed"}`,
-// so the decision reads the `error` field — and only when the body parses at all.
-// A body that is not JSON did not come from Cline's classifier (a CDN or proxy
-// error page is the likely author), and matching words inside one would report a
-// working sign-in as expired. Deliberately narrower than a scan of the whole body
-// even when it does parse: `unauthorized_client` and `invalid_request` are not an
-// expired sign-in either, and telling the user to authenticate again for one would
-// be wrong. (Cline's own `isLikelyInvalidGrant` keys on the same signal; this
-// matcher is stricter.)
-function reportsInvalidGrant(body) {
-  let message;
-  try {
-    message = String(JSON.parse(body)?.error || '');
-  } catch (_) {
-    return false;
-  }
-  return /(invalid_grant|invalid_token|invalid refresh|revoked|expired)/i.test(message);
-}
-
-// Mirrors `refreshClineAccessToken`'s shape in providers/claude: its own timeout
-// and its own status mapping, because fetchJson does not carry a method or body.
-async function refreshClineSession(refreshToken, deps = {}) {
-  const fetchFn = deps.fetch || fetch;
-  const timeoutMs = Number(deps.fetchTimeoutMs || 12000);
-  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
-  try {
-    const response = await fetchFn(`${CLINE_API_BASE}${REFRESH_PATH}`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        accept: 'application/json',
-        'user-agent': TOKEN_MONITOR_USER_AGENT
-      },
-      // The body Cline's own refresh sends. `grantType` is spelled that way in
-      // its request, not as the OAuth `grant_type`.
-      body: JSON.stringify({ refreshToken, grantType: 'refresh_token' }),
-      ...(controller ? { signal: controller.signal } : {})
-    });
-    if (!response.ok) {
-      // A rejected refresh is a credential problem, not an outage — but a 400 is
-      // ambiguous, and both meanings were observed live: an empty body answers
-      // `{"error":"Validation failed",...}`, while a bad token answers
-      // `{"error":"failed to refresh token: invalid_grant"}`. Only the second is
-      // the sign-in being gone, so only it is reported as such; Cline's own
-      // classifier (`isLikelyInvalidGrant`) draws the same line from the same
-      // signal. A bare 401 is a rejection outright; a 403 is not — the shared
-      // `fetchJson` reads one that way only where a provider passes
-      // `forbiddenIsUnauthorized`, and `providers/claude`'s refresh maps 400/401 to
-      // `unauthorized` and everything else, 403 included, to `unavailable`. A 403
-      // reported as `unauthorized` would also drop the retained reading, since that
-      // status is not transient.
-      const invalidGrant = reportsInvalidGrant(await failureText(response));
-      const status = response.status === 401
-        ? 'unauthorized'
-        : response.status === 400 && invalidGrant
-          ? 'unauthorized'
-          : response.status === 429
-            ? 'sourceRateLimited'
-            : 'unavailable';
-      throw errorWithStatus(status, `Cline token refresh returned ${response.status}`);
-    }
-    const payload = await response.json();
-    const accessToken = formatAccessToken(payload?.data?.accessToken);
-    if (!accessToken) throw errorWithStatus('unavailable', 'Cline token refresh returned no access token');
-    return { accessToken, expiresAt: tokenExpiryMs({ expiresAt: payload?.data?.expiresAt }) };
-  } catch (error) {
-    if (error?.name === 'AbortError') throw errorWithStatus('unavailable', 'Cline token refresh timed out');
-    throw error;
-  } finally {
-    if (timer) clearTimeout(timer);
+    return { source: "" };
   }
 }
 
 // A key the user configured beats the sign-in Cline happens to have on this
-// machine, matching how every other provider here resolves credentials.
-function resolveClineCredential(options = {}, env = process.env, deps = {}) {
+// machine, matching how every other provider here resolves credentials. The file
+// lane refuses by throwing, so the caller reports which refusal it was.
+function resolveClineCredential(options = {}, env = process.env) {
   const apiKey = clineApiKey(env, options);
   if (apiKey) {
     // `api` for a configured key and `oauth` for a discovered sign-in, the split
     // docs/providers/zai.md states for its console key versus its discovered
     // credential. The key is also this lane's account identity.
-    return { accessToken: apiKey, accountSeed: apiKey, expiresAt: null, accountId: '', email: '', source: 'api' };
+    return { accessToken: apiKey, accountSeed: apiKey, accountId: '', email: '', source: 'api' };
   }
-  const session = readClineSession(env, deps);
-  if (!session) return null;
+  const session = readClineSession(env);
   return {
     ...session,
     accessToken: formatAccessToken(session.accessToken),
-    // Only what survives a refresh: the server-issued id, or the refresh token
-    // Cline's endpoint returns unchanged. Never the access token, which is
-    // replaced hourly — an identity that rotates reads as a new account on every
-    // hub ingest, the collapse antigravity's note warns about from the other side
+    // The server-issued account id, never the access token: Cline replaces that
+    // one hourly, and an identity that rotates reads as a new account on every
+    // hub ingest — the collapse antigravity's note warns about from the other side
     // (docs/providers/antigravity.md, anonymous rows).
-    accountSeed: session.accountId || session.refreshToken || '',
+    accountSeed: session.accountId || '',
     source: 'oauth'
   };
 }
@@ -412,60 +317,110 @@ function failingProvider(status, nowMs, source = '') {
   });
 }
 
-async function fetchClineLimits(options = {}, deps = {}) {
-  const env = deps.env || process.env;
-  const nowMs = (deps.now || Date.now)();
-  let credential = resolveClineCredential(options, env, deps);
-  if (!credential) return failingProvider('notConfigured', nowMs);
-  if (credential.expiresAt !== null && credential.expiresAt <= nowMs + EXPIRY_MARGIN_MS) {
-    // Self-heal on the next scan: a stored sign-in goes stale whenever Cline has
-    // not been run for an hour, and Cline's refresh token outlives it.
-    if (!credential.refreshToken) return failingProvider('unauthorized', nowMs, credential.source);
-    try {
-      const refreshed = cachedRefresh(credential.refreshToken, nowMs)
-        || await refreshSession(credential.refreshToken, deps);
-      credential = { ...credential, accessToken: refreshed.accessToken, expiresAt: refreshed.expiresAt };
-    } catch (error) {
-      return failingProvider(providerStatusFromError(error), nowMs, credential.source);
-    }
-  }
+// The id `/api/v1/users/{id}/balance` is keyed by, for a credential that does not
+// carry one: a key on a machine with no Cline install. It is read with the same
+// credential, so it always names the account actually being queried — the endpoint
+// answers `403 can only access own resources` for anyone else's id, and a key and
+// a local sign-in can belong to different accounts.
+async function fetchClineAccountId(credential, deps) {
+  const payload = await fetchJson(
+    `${CLINE_API_BASE}${USERS_ME_PATH}`,
+    { Authorization: `Bearer ${credential.accessToken}`, Accept: 'application/json' },
+    deps
+  );
+  return cleanSecret(payload?.data?.id);
+}
+
+// The credit the account holds, as a credits window, or null when it cannot be
+// read. Best effort on purpose: the plan windows are this provider's answer, and a
+// balance endpoint that is down, unreadable or answers about another account must
+// not take that answer down with it (the same rule docs/providers/zai.md fixes for
+// its billing lane).
+async function readClineCredits(credential, deps) {
   try {
-    // fetchJson owns the timeout and maps 401/403, 429 and everything else onto
-    // the shared status vocabulary this module reports.
+    const id = credential.accountId || await fetchClineAccountId(credential, deps);
+    if (!id) return null;
     const payload = await fetchJson(
-      `${CLINE_API_BASE}${USAGE_LIMITS_PATH}`,
+      `${CLINE_API_BASE}${balancePath(id)}`,
       { Authorization: `Bearer ${credential.accessToken}`, Accept: 'application/json' },
       deps
     );
-    const windows = parseClineLimits(payload);
-    if (!windows) return failingProvider('unavailable', nowMs);
-    return providerResult(windows, { nowMs, credential });
-  } catch (error) {
-    return failingProvider(providerStatusFromError(error), nowMs, credential.source);
+    const amount = numberOrNull(payload?.data?.balance);
+    if (payload?.success !== true || amount === null || amount < 0) return null;
+    return {
+      kind: 'billing',
+      metric: 'credits',
+      // The label names the unit, which is why the value is not prefixed with it:
+      // `limitBalanceDisplay` prints a `CREDITS` window as a bare amount beside
+      // this label, exactly as Cline's own account page does.
+      label: 'Credits',
+      currency: 'CREDITS',
+      remaining: amount / CREDIT_SCALE,
+      // A balance has no denominator, so there is nothing to meter (workbuddy
+      // files its unlimited package the same way).
+      showMeter: false
+    };
+  } catch (_) {
+    return null;
   }
 }
 
-async function refreshSession(refreshToken, deps) {
-  const refreshed = await refreshClineSession(refreshToken, deps);
-  // An expiry we cannot read is treated as "refresh again next scan" rather than
-  // cached, which is what Cline's own rotation guard does with an unknown one.
-  sessionRefresh = refreshed.expiresAt === null
-    ? null
-    : { refreshToken, accessToken: refreshed.accessToken, expiresAt: refreshed.expiresAt };
-  return { refreshToken, accessToken: refreshed.accessToken, expiresAt: refreshed.expiresAt };
+async function fetchClineLimits(options = {}, deps = {}) {
+  const env = deps.env || process.env;
+  const nowMs = (deps.now || Date.now)();
+  let credential;
+  try {
+    credential = resolveClineCredential(options, env);
+  } catch (error) {
+    // The file lane's refusal, reported as the credential problem it is — and it
+    // still names the lane it came from.
+    return failingProvider(providerStatusFromError(error), nowMs, 'oauth');
+  }
+  const headers = { Authorization: `Bearer ${credential.accessToken}`, Accept: 'application/json' };
+  let planWindows = [];
+  let planStatus = 'unavailable';
+  try {
+    // fetchJson owns the timeout and maps the response onto the shared status
+    // vocabulary: 401 to `unauthorized`, 429 to `sourceRateLimited`, everything
+    // else — 403 and 5xx included — to `unavailable`. A stored token that has
+    // expired arrives as that 401, which is the whole of this provider's answer
+    // to a stale sign-in; refreshing it belongs to Cline, for the reason the
+    // header gives.
+    const payload = await fetchJson(`${CLINE_API_BASE}${USAGE_LIMITS_PATH}`, headers, deps);
+    const parsed = parseClineLimits(payload);
+    // A contract break is not "no plan": it is reported as no data, and a credit
+    // reading must not paper over it.
+    if (parsed === null) return failingProvider('unavailable', nowMs, credential.source);
+    planWindows = parsed;
+  } catch (error) {
+    planStatus = providerStatusFromError(error);
+    // A rejected credential is the whole answer: the balance endpoint would be
+    // refused the same way, so it is not asked — which is also why an expired
+    // sign-in still costs exactly one request.
+    if (planStatus === 'unauthorized') return failingProvider(planStatus, nowMs, credential.source);
+  }
+  const credits = await readClineCredits(credential, deps);
+  // No plan is a state, not a failure, when the account's credit was readable:
+  // `docs/providers/zai.md` states the same rule for a key without a subscription
+  // whose console still answers a balance. With neither reading there is nothing
+  // to report, and the plan request's own status is the one to report.
+  if (planWindows.length === 0 && !credits) {
+    return failingProvider(planStatus, nowMs, credential.source);
+  }
+  return providerResult(credits ? [...planWindows, credits] : planWindows, { nowMs, credential });
 }
 
 module.exports = {
   CLINE_API_BASE,
-  REFRESH_PATH,
   USAGE_LIMITS_PATH,
+  USERS_ME_PATH,
+  balancePath,
   clineApiKey,
   clineProvidersPath,
   fetchClineLimits,
   parseClineLimits,
   readClineSession,
   resolveClineCredential,
-  formatAccessToken,
-  refreshClineSession,
-  tokenExpiryMs
+  resolveClineAutomaticCredential,
+  formatAccessToken
 };

@@ -7,13 +7,16 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  CLINE_API_BASE,
+  USAGE_LIMITS_PATH,
+  USERS_ME_PATH,
+  balancePath,
   clineApiKey,
   clineProvidersPath,
   fetchClineLimits,
   parseClineLimits,
   readClineSession,
-  resolveClineCredential,
-  tokenExpiryMs
+  resolveClineCredential
 } = require('../../src/shared/providers/cline/limits');
 const { parseLimitProviders, providerFetchers } = require('../../src/shared/limits/collector');
 
@@ -56,6 +59,36 @@ function okFetch(payload, sink = []) {
   };
 }
 
+// The plan read and the credit read are different endpoints, so they are routed
+// apart: a fixture that answers one payload for every URL cannot tell which call
+// carried the account id.
+function routedFetch({
+  limits = [{ type: 'weekly', percentUsed: 7 }],
+  usageStatus = 200,
+  balance,
+  balanceStatus = 200,
+  me,
+  sink = []
+} = {}) {
+  const reply = (status, body) => ({
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: () => null },
+    json: async () => body,
+    text: async () => JSON.stringify(body)
+  });
+  return async (url, init = {}) => {
+    const path = String(url).replace(CLINE_API_BASE, '');
+    sink.push({ path, auth: (init.headers || {}).Authorization || '' });
+    if (path.endsWith('/balance')) return reply(balanceStatus, balance);
+    if (path === USERS_ME_PATH) return reply(200, me);
+    return reply(
+      usageStatus,
+      usageStatus === 200 ? okBody(limits) : { success: false, data: null, error: 'no plan history found for user' }
+    );
+  };
+}
+
 test('collector wires Cline and includes it in the default provider set', () => {
   assert.equal(typeof providerFetchers().cline, 'function');
   assert.ok(parseLimitProviders().includes('cline'));
@@ -75,40 +108,56 @@ test('clineProvidersPath follows the CLINE_* precedence the session roots use', 
   assert.equal(clineProvidersPath({}), path.join(os.homedir(), '.cline', 'data', 'settings', 'providers.json'));
 });
 
-test('tokenExpiryMs reads milliseconds, seconds, numeric and ISO strings', () => {
-  assert.equal(tokenExpiryMs({ expiresAt: NOW }), NOW);
-  assert.equal(tokenExpiryMs({ expiresAt: Math.floor(NOW / 1000) }), Math.floor(NOW / 1000) * 1000);
-  assert.equal(tokenExpiryMs({ expiresAt: String(Math.floor(NOW / 1000)) }), Math.floor(NOW / 1000) * 1000);
-  assert.equal(tokenExpiryMs({ expiresAt: '2026-09-21T13:00:00.000Z' }), Date.UTC(2026, 8, 21, 13));
-  assert.equal(tokenExpiryMs({}), null);
-  assert.equal(tokenExpiryMs({ expiresAt: 'not-a-date' }), null);
-});
-
-test('readClineSession prefers cline-pass, falls back to cline, skips tokenless sections', (t) => {
+test('readClineSession reads cline first and falls back to cline-pass', (t) => {
   const dataDir = tempDir(t);
   const env = { CLINE_DATA_DIR: dataDir };
+  // Cline stores the ClinePass selection's credentials under `cline` as well, so
+  // `cline` is authoritative and an older `cline-pass` entry must not mask it.
   writeProviders(dataDir, {
-    cline: clineAuth({ accessToken: 'workos:base' }),
-    'cline-pass': clineAuth({ accessToken: 'workos:pass' })
+    cline: clineAuth({ accessToken: 'workos:current' }),
+    'cline-pass': clineAuth({ accessToken: 'workos:stale' })
   });
-  assert.equal(readClineSession(env).accessToken, 'workos:pass');
+  assert.equal(readClineSession(env).accessToken, 'workos:current');
 
-  writeProviders(dataDir, { cline: clineAuth({ accessToken: 'workos:base' }), 'cline-pass': { settings: { auth: {} } } });
-  assert.equal(readClineSession(env).accessToken, 'workos:base');
+  // A file an older version wrote still reads through the legacy section.
+  writeProviders(dataDir, { 'cline-pass': clineAuth({ accessToken: 'workos:legacy' }) });
+  assert.equal(readClineSession(env).accessToken, 'workos:legacy');
   // The reader reports what the file holds; the wire record normalizes the case.
   assert.equal(readClineSession(env).email, 'User@Example.com');
 });
 
-test('readClineSession reports nothing for a missing or unreadable file', (t) => {
+test('a request uses the cline entry when both sections exist', async (t) => {
   const dataDir = tempDir(t);
-  assert.equal(readClineSession({ CLINE_DATA_DIR: dataDir }), null);
+  writeProviders(dataDir, {
+    cline: clineAuth({ accessToken: 'workos:current' }),
+    'cline-pass': clineAuth({ accessToken: 'workos:stale' })
+  });
+  const calls = [];
+  const result = await fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    fetch: okFetch(okBody([{ type: 'weekly', percentUsed: 5 }]), calls)
+  });
+  assert.equal(result.status, 'ok');
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer workos:current');
+});
+
+test('a store missing, unreadable or signed out is refused with the right status', (t) => {
+  const dataDir = tempDir(t);
+  // No file at all: nothing is configured on this machine.
+  assert.throws(() => readClineSession({ CLINE_DATA_DIR: dataDir }), (error) => error.status === 'notConfigured');
+  // A file that cannot be parsed is the same answer.
   fs.mkdirSync(path.join(dataDir, 'settings'), { recursive: true });
   fs.writeFileSync(path.join(dataDir, 'settings', 'providers.json'), '{ not json');
-  assert.equal(readClineSession({ CLINE_DATA_DIR: dataDir }), null);
-  // A readable file whose sections carry no token is equally "not signed in",
-  // rather than a failed request.
+  assert.throws(() => readClineSession({ CLINE_DATA_DIR: dataDir }), (error) => error.status === 'notConfigured');
+  // A readable file whose sections carry no token is Cline being signed out, not
+  // an unconfigured provider — the distinction `readCodexOAuthAuth` draws too.
   writeProviders(dataDir, { cline: { settings: { auth: {} } }, 'cline-pass': { settings: {} } });
-  assert.equal(readClineSession({ CLINE_DATA_DIR: dataDir }), null);
+  assert.throws(() => readClineSession({ CLINE_DATA_DIR: dataDir }), (error) => error.status === 'unauthorized');
+  // A file that parses to something other than an object holds no token either,
+  // and is refused rather than throwing a TypeError out of the provider.
+  fs.writeFileSync(path.join(dataDir, 'settings', 'providers.json'), 'null');
+  assert.throws(() => readClineSession({ CLINE_DATA_DIR: dataDir }), (error) => error.status === 'unauthorized');
 });
 
 test('clineApiKey takes the explicit option, then CLINE_API_KEY, then CLINEPASS_API_KEY', () => {
@@ -124,34 +173,62 @@ test('a configured key wins over a stale stored sign-in', (t) => {
   const env = { CLINE_DATA_DIR: dataDir, CLINE_API_KEY: 'cline-key' };
   const credential = resolveClineCredential({}, env);
   assert.equal(credential.accessToken, 'cline-key');
-  // An API key has no expiry to check, so the stale stored token cannot veto it.
-  assert.equal(credential.expiresAt, null);
+  assert.equal(credential.source, 'api');
+  assert.equal(credential.accountSeed, 'cline-key');
 });
 
-test('fetchClineLimits reports notConfigured without a stored sign-in', async (t) => {
-  const result = await fetchClineLimits({}, { env: { CLINE_DATA_DIR: tempDir(t) }, now: () => NOW });
-  assert.equal(result.provider, 'cline');
-  assert.equal(result.status, 'notConfigured');
-  assert.deepEqual(result.windows, []);
-});
+test('a missing store is notConfigured and a signed-out one is unauthorized', async (t) => {
+  const missing = await fetchClineLimits({}, { env: { CLINE_DATA_DIR: tempDir(t) }, now: () => NOW });
+  assert.equal(missing.provider, 'cline');
+  assert.equal(missing.status, 'notConfigured');
+  assert.equal(missing.source, 'oauth');
+  assert.deepEqual(missing.windows, []);
 
-test('a stale stored token is refused locally instead of costing a request', async (t) => {
   const dataDir = tempDir(t);
-  writeProviders(dataDir, { 'cline-pass': clineAuth({ expiresAt: NOW - 1000 }) });
+  writeProviders(dataDir, { cline: { settings: { auth: {} } } });
+  const signedOut = await fetchClineLimits({}, { env: { CLINE_DATA_DIR: dataDir }, now: () => NOW });
+  assert.equal(signedOut.status, 'unauthorized');
+  assert.equal(signedOut.source, 'oauth');
+  assert.deepEqual(signedOut.windows, []);
+});
+
+test('an expired stored sign-in is sent as-is: no refresh request, file untouched', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth({ expiresAt: NOW - 1000, refreshToken: 'refresh-should-stay' }) });
+  const providersFile = path.join(dataDir, 'settings', 'providers.json');
+  const before = fs.readFileSync(providersFile, 'utf8');
   const calls = [];
   const result = await fetchClineLimits({}, {
     env: { CLINE_DATA_DIR: dataDir },
     now: () => NOW,
-    fetch: okFetch(okBody([]), calls)
+    fetch: async (url, init) => {
+      calls.push({ url, init });
+      return { ok: false, status: 401, headers: { get: () => null }, json: async () => ({}) };
+    }
   });
   assert.equal(result.status, 'unauthorized');
-  // A discovered sign-in is the `oauth` lane, and a failure still names it.
   assert.equal(result.source, 'oauth');
-  // A failure names the source it failed on and nothing else — the account is
-  // not read out of a credential file to decorate an error.
+  // The credential lifecycle is Cline's: its token response may carry a
+  // replacement refresh token and its auth service writes the rotated credentials
+  // back itself, so refreshing from here could only strand Cline with a token the
+  // server has retired. Exactly one request goes out, and it is the usage call.
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, `${CLINE_API_BASE}${USAGE_LIMITS_PATH}`);
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer workos:token-1');
+  assert.equal(fs.readFileSync(providersFile, 'utf8'), before);
+});
+
+test('a failure names the source it failed on and nothing else', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth() });
+  const result = await fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    fetch: async () => ({ ok: false, status: 401, headers: { get: () => null }, json: async () => ({}) })
+  });
+  assert.equal(result.status, 'unauthorized');
   assert.equal(result.accountKey, '');
   assert.equal(result.accountEmail, '');
-  assert.deepEqual(calls, []);
 });
 
 test('fetchClineLimits maps the three ClinePass windows onto the shared kinds', async (t) => {
@@ -185,8 +262,11 @@ test('fetchClineLimits maps the three ClinePass windows onto the shared kinds', 
   assert.equal(result.windows[2].resetsAt, null);
   assert.equal(result.accountEmail, 'user@example.com');
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, 'https://api.cline.bot/api/v1/users/me/plan/usage-limits');
+  // Two reads: the plan windows, then the account's credit, which is keyed by the
+  // user id the stored sign-in carries (`usr-1` in this fixture).
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].url, `${CLINE_API_BASE}${USAGE_LIMITS_PATH}`);
+  assert.equal(calls[1].url, `${CLINE_API_BASE}${balancePath('usr-1')}`);
   // The stored form goes out verbatim: the API rejects the bare JWT (verified
   // live: bare -> 401, `workos:<jwt>` -> authenticated).
   assert.equal(calls[0].init.headers.Authorization, 'Bearer workos:token-1');
@@ -271,210 +351,6 @@ test('a repeated window replaces the earlier one and the order is fixed', () => 
   assert.deepEqual(windows.map((w) => w.usedPercent), [3, 2, 9]);
 });
 
-
-function routedFetch({ refreshToken, refreshed, sink = [] }) {
-  return async (url, init = {}) => {
-    sink.push({ url, method: init.method || 'GET', init });
-    if (String(url).endsWith('/api/v1/auth/refresh')) {
-      if (refreshed.status && refreshed.status !== 200) {
-        return { ok: false, status: refreshed.status, json: async () => ({}) };
-      }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          success: true,
-          data: {
-            accessToken: refreshed.accessToken,
-            expiresAt: refreshed.expiresAt,
-            refreshToken,
-            userInfo: {}
-          }
-        })
-      };
-    }
-    return { ok: true, status: 200, json: async () => okBody([{ type: 'weekly', percentUsed: 7 }]) };
-  };
-}
-
-test('an expired stored sign-in is refreshed in memory and never written back', async (t) => {
-  const dataDir = tempDir(t);
-  writeProviders(dataDir, {
-    'cline-pass': clineAuth({ refreshToken: 'refresh-expired-1', expiresAt: NOW - 1000 })
-  });
-  const providersFile = path.join(dataDir, 'settings', 'providers.json');
-  const before = fs.readFileSync(providersFile, 'utf8');
-  const calls = [];
-  const result = await fetchClineLimits({}, {
-    env: { CLINE_DATA_DIR: dataDir },
-    now: () => NOW,
-    fetch: routedFetch({
-      refreshToken: 'refresh-expired-1',
-      // The endpoint hands back the bare JWT; the wire form adds the prefix.
-      refreshed: { accessToken: 'fresh', expiresAt: NOW + 3_600_000 },
-      sink: calls
-    })
-  });
-
-  assert.equal(result.status, 'ok');
-  assert.equal(result.windows[0].usedPercent, 7);
-  assert.equal(calls.length, 2);
-  assert.equal(calls[0].method, 'POST');
-  assert.equal(calls[0].url, 'https://api.cline.bot/api/v1/auth/refresh');
-  // Cline's own refresh body spells the grant this way, not as OAuth grant_type.
-  assert.deepEqual(JSON.parse(calls[0].init.body), { refreshToken: 'refresh-expired-1', grantType: 'refresh_token' });
-  assert.equal(calls[1].init.headers.Authorization, 'Bearer workos:fresh');
-  assert.match(calls[0].init.headers['user-agent'], /^token-monitor\//);
-  // The credential file belongs to Cline: a refresh must not rewrite it.
-  assert.equal(fs.readFileSync(providersFile, 'utf8'), before);
-});
-
-test('a refused refresh is a credential problem and costs no usage request', async (t) => {
-  const dataDir = tempDir(t);
-  writeProviders(dataDir, {
-    'cline-pass': clineAuth({ refreshToken: 'refresh-refused-1', expiresAt: NOW - 1000 })
-  });
-  const calls = [];
-  const result = await fetchClineLimits({}, {
-    env: { CLINE_DATA_DIR: dataDir },
-    now: () => NOW,
-    fetch: routedFetch({
-      refreshToken: 'refresh-refused-1',
-      refreshed: { status: 401 },
-      sink: calls
-    })
-  });
-  assert.equal(result.status, 'unauthorized');
-  assert.equal(calls.length, 1);
-});
-
-test('a refresh with no readable expiry is used once and not cached', async (t) => {
-  const dataDir = tempDir(t);
-  const calls = [];
-  const deps = () => {
-    writeProviders(dataDir, {
-      'cline-pass': clineAuth({ refreshToken: 'refresh-no-expiry', expiresAt: NOW - 1000 })
-    });
-    return {
-      env: { CLINE_DATA_DIR: dataDir },
-      now: () => NOW,
-      fetch: async (url, init = {}) => {
-        calls.push({ url, method: init.method || 'GET' });
-        if (String(url).endsWith('/api/v1/auth/refresh')) {
-          // No expiresAt in the envelope.
-          return { ok: true, status: 200, json: async () => ({ success: true, data: { accessToken: 'workos:noexp' } }) };
-        }
-        return { ok: true, status: 200, json: async () => okBody([{ type: 'weekly', percentUsed: 2 }]) };
-      }
-    };
-  };
-  assert.equal((await fetchClineLimits({}, deps())).status, 'ok');
-  assert.equal((await fetchClineLimits({}, deps())).status, 'ok');
-  // Unknown expiry is treated as "refresh again", which is what Cline's own
-  // rotation guard does with an unknown one, so the second scan refreshes too.
-  assert.equal(calls.filter((call) => call.method === 'POST').length, 2);
-});
-
-test('every refresh failure mode maps to a status, not to a silent reading', async (t) => {
-  const dataDir = tempDir(t);
-  const stale = (suffix) => {
-    writeProviders(dataDir, {
-      'cline-pass': clineAuth({ refreshToken: `refresh-fail-${suffix}`, expiresAt: NOW - 1000 })
-    });
-  };
-  const failingRefresh = (response, suffix) => {
-    stale(suffix);
-    return fetchClineLimits({}, {
-      env: { CLINE_DATA_DIR: dataDir },
-      now: () => NOW,
-      fetch: async () => response
-    });
-  };
-
-  assert.equal((await failingRefresh({ ok: false, status: 429, json: async () => ({}) }, 'a')).status, 'sourceRateLimited');
-  // A 400 is ambiguous and the body decides: an invalid grant is the sign-in
-  // being gone, a validation failure is not (both observed live).
-  const invalidGrant = (suffix) => {
-    stale(suffix);
-    return fetchClineLimits({}, {
-      env: { CLINE_DATA_DIR: dataDir },
-      now: () => NOW,
-      fetch: async () => ({ ok: false, status: 400, text: async () => '{"error":"failed to refresh token: invalid_grant"}' })
-    });
-  };
-  const validationFailure = (suffix) => {
-    stale(suffix);
-    return fetchClineLimits({}, {
-      env: { CLINE_DATA_DIR: dataDir },
-      now: () => NOW,
-      fetch: async () => ({ ok: false, status: 400, text: async () => '{"error":"Validation failed"}' })
-    });
-  };
-  assert.equal((await invalidGrant('e')).status, 'unauthorized');
-  assert.equal((await validationFailure('f')).status, 'unavailable');
-  // A 400 whose error is not the invalid-grant family must not be reported as an
-  // expired sign-in — this is why the decision reads the `error` field narrowly.
-  stale('g');
-  const unauthorizedClient = await fetchClineLimits({}, {
-    env: { CLINE_DATA_DIR: dataDir },
-    now: () => NOW,
-    fetch: async () => ({ ok: false, status: 400, text: async () => '{"error":"unauthorized_client"}' })
-  });
-  assert.equal(unauthorizedClient.status, 'unavailable');
-  // A body that is not JSON did not come from Cline's classifier, so words inside
-  // it must not decide that question either.
-  const plainTextFailure = await fetchClineLimits({}, {
-    env: { CLINE_DATA_DIR: dataDir },
-    now: () => NOW,
-    fetch: async () => ({ ok: false, status: 400, text: async () => '<html>your session expired</html>' })
-  });
-  assert.equal(plainTextFailure.status, 'unavailable');
-  // A 403 is not a credential verdict here: the shared `fetchJson` reads one that
-  // way only where a provider opts in, and providers/claude's refresh maps 400/401
-  // to unauthorized and 403 to unavailable. Only a 401 is reported as the sign-in
-  // being gone.
-  assert.equal((await failingRefresh({ ok: false, status: 403, text: async () => '' }, 'h')).status, 'unavailable');
-  assert.equal((await failingRefresh({ ok: false, status: 401, text: async () => '' }, 'i')).status, 'unauthorized');
-  assert.equal((await failingRefresh({ ok: false, status: 500, json: async () => ({}) }, 'b')).status, 'unavailable');
-  // A 200 whose envelope carries no token is not a usable refresh.
-  assert.equal((await failingRefresh({ ok: true, status: 200, json: async () => ({ success: true, data: {} }) }, 'c')).status, 'unavailable');
-  // A refresh that never answers (timeout / collector abort) is an outage, not a
-  // credential problem: the user must not be told to sign in again for it.
-  stale('d');
-  const aborted = await fetchClineLimits({}, {
-    env: { CLINE_DATA_DIR: dataDir },
-    now: () => NOW,
-    fetch: async () => { throw Object.assign(new Error('aborted'), { name: 'AbortError' }); }
-  });
-  assert.equal(aborted.status, 'unavailable');
-});
-
-test('one refresh serves the scans until it expires, and a new sign-in refreshes again', async (t) => {
-  const dataDir = tempDir(t);
-  const run = (refreshToken) => {
-    writeProviders(dataDir, { 'cline-pass': clineAuth({ refreshToken, expiresAt: NOW - 1000 }) });
-    const calls = [];
-    return fetchClineLimits({}, {
-      env: { CLINE_DATA_DIR: dataDir },
-      now: () => NOW,
-      fetch: routedFetch({ refreshToken, refreshed: { accessToken: `workos:${refreshToken}`, expiresAt: NOW + 3_600_000 }, sink: calls })
-    }).then((result) => ({ result, calls }));
-  };
-
-  const first = await run('refresh-reuse-1');
-  const second = await run('refresh-reuse-1');
-  assert.equal(first.result.status, 'ok');
-  assert.equal(second.result.status, 'ok');
-  assert.equal(first.calls.filter((c) => c.method === 'POST').length, 1);
-  // The second scan reused the first scan's token instead of refreshing again.
-  assert.equal(second.calls.filter((c) => c.method === 'POST').length, 0);
-  assert.equal(second.calls[0].init.headers.Authorization, 'Bearer workos:refresh-reuse-1');
-
-  // A different refresh token means a different sign-in: no reuse.
-  const third = await run('refresh-reuse-2');
-  assert.equal(third.calls.filter((c) => c.method === 'POST').length, 1);
-});
-
 test('an account without a plan reads as no data, not as a failure to authenticate', async (t) => {
   const dataDir = tempDir(t);
   writeProviders(dataDir, { 'cline-pass': clineAuth() });
@@ -516,10 +392,10 @@ test('accountKey identifies the account, not the token that was stored', async (
   assert.equal(first.accountKey, second.accountKey);
 });
 
-test('identity survives a token refresh and is never invented from one', async (t) => {
+test('identity is the account id, and nothing is invented without one', async (t) => {
   const dataDir = tempDir(t);
   const run = async (auth) => {
-    writeProviders(dataDir, { 'cline-pass': clineAuth(auth) });
+    writeProviders(dataDir, { cline: clineAuth(auth) });
     return fetchClineLimits({}, {
       env: { CLINE_DATA_DIR: dataDir },
       now: () => NOW,
@@ -527,16 +403,16 @@ test('identity survives a token refresh and is never invented from one', async (
     });
   };
 
-  // No account id, but the refresh token survives refreshes, so it identifies
-  // the sign-in while the access token churns.
-  const first = await run({ accountId: '', refreshToken: 'refresh-identity-1', accessToken: 'workos:a1' });
-  const second = await run({ accountId: '', refreshToken: 'refresh-identity-1', accessToken: 'workos:a2' });
+  // Cline replaces the access token hourly, so it is never the identity: two
+  // scans that differ only by the token hash to the same account.
+  const first = await run({ accountId: 'usr-identity', accessToken: 'workos:a1' });
+  const second = await run({ accountId: 'usr-identity', accessToken: 'workos:a2' });
   assert.match(first.accountKey, /^sha256:[0-9a-f]{64}$/);
   assert.equal(first.accountKey, second.accountKey);
 
-  // Nothing stable left: report no identity rather than keying off a value that
-  // is replaced hourly, which the hub would read as a new account each scan.
-  const anonymous = await run({ accountId: '', refreshToken: '', accessToken: 'workos:a3' });
+  // Nothing stable left: report no identity rather than keying off a value the
+  // hub would read as a new account on every scan.
+  const anonymous = await run({ accountId: '', accessToken: 'workos:a3' });
   assert.equal(anonymous.status, 'ok');
   assert.equal(anonymous.accountKey, '');
 });
@@ -594,4 +470,117 @@ test('a 200 that is not the API payload is unavailable, never a reading', async 
   assert.equal(strings.windows[0].usedPercent, 4.5);
   const envelope = await fetchClineLimits({}, body({ success: false, error: 'nope' }));
   assert.equal(envelope.status, 'unavailable');
+});
+
+test('the account credit is read beside the plan and reported as a credits window', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth() });
+  const calls = [];
+  const result = await fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    fetch: routedFetch({ sink: calls, balance: { success: true, data: { userId: 'usr-1', balance: 500000 } } })
+  });
+  assert.equal(result.status, 'ok');
+  // The plan window survives beside the credit: an account can hold both.
+  assert.deepEqual(result.windows.map((w) => w.kind), ['weekly', 'billing']);
+  const credits = result.windows.find((w) => w.metric === 'credits');
+  assert.equal(credits.label, 'Credits');
+  assert.equal(credits.currency, 'CREDITS');
+  // 500000 is the "Credits: 0.5000" Cline's own account page prints, and its
+  // dashboard divides by 1e6 before printing it.
+  assert.equal(credits.remaining, 0.5);
+  assert.equal(credits.showMeter, false);
+  assert.deepEqual(calls.map((c) => c.path), [USAGE_LIMITS_PATH, balancePath('usr-1')]);
+});
+
+test('a key with no local sign-in learns the account id from the profile endpoint', async (t) => {
+  const calls = [];
+  const result = await fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: tempDir(t), CLINE_API_KEY: 'sk-only' },
+    now: () => NOW,
+    fetch: routedFetch({
+      sink: calls,
+      me: { success: true, data: { id: 'usr-key', email: 'Key@Example.com' } },
+      balance: { success: true, data: { userId: 'usr-key', balance: 250000 } }
+    })
+  });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.source, 'api');
+  // A key carries no id, so the balance is reached through the profile read — and
+  // the id comes from the credential in use, never from another lane's file.
+  assert.deepEqual(calls.map((c) => c.path), [USAGE_LIMITS_PATH, USERS_ME_PATH, balancePath('usr-key')]);
+  assert.equal(calls[1].auth, 'Bearer sk-only');
+  assert.equal(result.windows.find((w) => w.metric === 'credits').remaining, 0.25);
+});
+
+test('a key supplied as an option works without any local sign-in', async (t) => {
+  const calls = [];
+  const result = await fetchClineLimits({ clineApiKey: 'sk-settings' }, {
+    env: { CLINE_DATA_DIR: tempDir(t) },
+    now: () => NOW,
+    fetch: routedFetch({
+      sink: calls,
+      me: { success: true, data: { id: 'usr-settings' } },
+      balance: { success: true, data: { userId: 'usr-settings', balance: 1000000 } }
+    })
+  });
+  // The settings field reaches the provider as the option, ahead of the env vars —
+  // this is the lane the settings page saves into, and it needs nothing installed.
+  assert.equal(result.status, 'ok');
+  assert.equal(result.source, 'api');
+  assert.deepEqual(calls.map((c) => c.auth), ['Bearer sk-settings', 'Bearer sk-settings', 'Bearer sk-settings']);
+  assert.equal(result.windows.find((w) => w.metric === 'credits').remaining, 1);
+});
+
+test('a planless account that has credit reads as live, not as unavailable', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth() });
+  const result = await fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    // Verified live: a signed-in account with no subscription answers 404.
+    fetch: routedFetch({ usageStatus: 404, balance: { success: true, data: { userId: 'usr-1', balance: 500000 } } })
+  });
+  // docs/providers/zai.md fixes the same rule: a successful no-plan answer beside a
+  // valid balance is `ok`, because there is a reading to show.
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.windows.map((w) => w.metric), ['credits']);
+  assert.equal(result.windows[0].remaining, 0.5);
+});
+
+test('no plan and no readable credit keeps the plan request status', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth() });
+  const result = await fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    fetch: routedFetch({ usageStatus: 404, balanceStatus: 500 })
+  });
+  assert.equal(result.status, 'unavailable');
+  assert.deepEqual(result.windows, []);
+});
+
+test('a credit that cannot be read leaves the plan reading alone', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth() });
+  const broken = [
+    { balanceStatus: 500 },
+    { balanceStatus: 401 },
+    { balance: { success: false, data: null } },
+    { balance: { success: true, data: { userId: 'usr-1', balance: 'lots' } } },
+    { balance: { success: true, data: { userId: 'usr-1', balance: -1 } } }
+  ];
+  for (const route of broken) {
+    const result = await fetchClineLimits({}, {
+      env: { CLINE_DATA_DIR: dataDir },
+      now: () => NOW,
+      fetch: routedFetch(route)
+    });
+    // Best effort: a balance endpoint that is down or answers nonsense must not
+    // take the plan reading down with it, and a rejected balance call must not
+    // turn the row into a credential problem.
+    assert.equal(result.status, 'ok');
+    assert.deepEqual(result.windows.map((w) => w.kind), ['weekly']);
+  }
 });
