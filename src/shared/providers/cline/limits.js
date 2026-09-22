@@ -200,6 +200,23 @@ async function failureText(response) {
   }
 }
 
+// The endpoint answers a bad token with `{"error":"failed to refresh token:
+// invalid_grant"}` and a malformed request with `{"error":"Validation failed"}`,
+// so the decision reads the `error` field when the body parses and falls back to
+// the raw text when it does not. Deliberately narrower than a scan of the whole
+// body: `unauthorized_client` and `invalid_request` are not an expired sign-in,
+// and telling the user to authenticate again for one would be wrong. (Cline's own
+// `isLikelyInvalidGrant` keys on the same signal; this matcher is stricter.)
+function reportsInvalidGrant(body) {
+  let message;
+  try {
+    message = String(JSON.parse(body)?.error || '');
+  } catch (_) {
+    message = String(body || '');
+  }
+  return /(invalid_grant|invalid_token|invalid refresh|revoked|expired)/i.test(message);
+}
+
 // Mirrors `refreshClineAccessToken`'s shape in providers/claude: its own timeout
 // and its own status mapping, because fetchJson does not carry a method or body.
 async function refreshClineSession(refreshToken, deps = {}) {
@@ -228,8 +245,7 @@ async function refreshClineSession(refreshToken, deps = {}) {
       // the sign-in being gone, so only it is reported as such; Cline's own
       // classifier (`isLikelyInvalidGrant`) draws the same line from the same
       // signal. A bare 401/403 is a rejection outright.
-      const invalidGrant = /invalid_grant|invalid_token|unauthorized|expired|revoked/i
-        .test(await failureText(response));
+      const invalidGrant = reportsInvalidGrant(await failureText(response));
       const status = response.status === 401 || response.status === 403
         ? 'unauthorized'
         : response.status === 400 && invalidGrant
@@ -313,8 +329,15 @@ function parseClineLimits(payload) {
       || rawPercent === undefined
       || String(rawPercent).trim() === '';
     if (usedPercent === null && !percentAbsent) return null;
-    const resetsAt = toIso(raw.resetsAt ?? raw.resets_at);
-    if (resetsAt === null && raw.resetsAt != null) return null;
+    // Validate the value that was actually read, not one spelling of it: a guard
+    // on `raw.resetsAt` alone let `{"resets_at": "soon"}` through as "no reset"
+    // while the camelCase spelling voided the reading.
+    const rawResetsAt = raw.resetsAt ?? raw.resets_at;
+    const resetsAt = toIso(rawResetsAt);
+    const resetsAtAbsent = rawResetsAt === null
+      || rawResetsAt === undefined
+      || String(rawResetsAt).trim() === '';
+    if (resetsAt === null && !resetsAtAbsent) return null;
     byType.set(type, {
       usedPercent: usedPercent === null ? null : clampPercent(usedPercent),
       resetsAt

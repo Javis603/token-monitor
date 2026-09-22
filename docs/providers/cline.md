@@ -77,9 +77,12 @@ credential file would buy nothing the next scan does not redo.
 Only a refresh the endpoint answers with an invalid grant is reported as `unauthorized` (the sign-in
 itself is gone): that is a `401`/`403`, or a `400` whose body says so — the live endpoint answers
 `{"error":"failed to refresh token: invalid_grant"}` for a bad token while an empty body is answered
-`{"error":"Validation failed",...}`. Cline's own classifier (`isLikelyInvalidGrant`) draws the line
-from the same signal. A validation failure and a transport failure are `unavailable`, so a transient
-problem never tells the user to sign in again.
+`{"error":"Validation failed",...}`. The decision reads the `error` field when the body parses and
+only the invalid-grant family within it — deliberately narrower than Cline's own
+`isLikelyInvalidGrant`, which also matches a bare `unauthorized`, because `unauthorized_client` is not
+an expired sign-in and prompting for re-authentication over it would be wrong. A validation failure
+and a transport failure are `unavailable`, so a transient problem never tells the user to sign in
+again.
 
 The token goes out in the stored form, `workos:<jwt>`. Cline's refresh endpoint answers with the bare
 JWT, so the prefix is *added* for the wire rather than stripped: verified live against the endpoint,
@@ -154,7 +157,9 @@ reading down), and a **value that is present but is not a number voids the whole
 broken contract, and reporting the rest would show a quota that silently lost a window. A window with
 **no `percentUsed` at all stays, without a percentage**: Cline's own dashboard renders that case as
 0%, but a fabricated zero would read as a real quota here, and `compactWindowRemaining()` already
-treats an absent percentage as unknown.
+treats an absent percentage as unknown. The same present-versus-absent distinction governs `resetsAt`,
+and it is applied to the value that was read: both spellings (`resetsAt`, `resets_at`) void the
+reading when they carry something unparseable and keep the window when they are absent or empty.
 
 ## Token totals under-count cache-heavy rows
 

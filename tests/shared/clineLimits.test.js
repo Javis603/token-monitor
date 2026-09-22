@@ -192,6 +192,22 @@ test('fetchClineLimits maps the three ClinePass windows onto the shared kinds', 
   assert.equal(calls[0].init.headers.Authorization, 'Bearer workos:token-1');
 });
 
+test('a reset that is present but invalid voids the reading in either spelling', () => {
+  // The guard has to look at the value that was read, not at one of its spellings.
+  const withReset = (value) => parseClineLimits({
+    success: true,
+    data: { limits: [{ type: 'weekly', percentUsed: 1, ...value }] }
+  });
+  assert.equal(withReset({ resetsAt: 'soon' }), null);
+  assert.equal(withReset({ resets_at: 'soon' }), null);
+  // Absent stays absent, in every spelling, and does not void the window.
+  for (const value of [{}, { resetsAt: null }, { resets_at: null }, { resetsAt: '' }, { resets_at: '  ' }]) {
+    const windows = withReset(value);
+    assert.equal(windows.length, 1);
+    assert.equal(windows[0].resetsAt, null);
+  }
+});
+
 test('an unknown window type is skipped and a broken known one voids the reading', () => {
   assert.deepEqual(
     parseClineLimits({ success: true, data: { limits: [{ type: 'yearly', percentUsed: 5 }] } }),
@@ -373,6 +389,15 @@ test('every refresh failure mode maps to a status, not to a silent reading', asy
   };
   assert.equal((await invalidGrant('e')).status, 'unauthorized');
   assert.equal((await validationFailure('f')).status, 'unavailable');
+  // A 400 whose error is not the invalid-grant family must not be reported as an
+  // expired sign-in — this is why the decision reads the `error` field narrowly.
+  stale('g');
+  const unauthorizedClient = await fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    fetch: async () => ({ ok: false, status: 400, text: async () => '{"error":"unauthorized_client"}' })
+  });
+  assert.equal(unauthorizedClient.status, 'unavailable');
   assert.equal((await failingRefresh({ ok: false, status: 500, json: async () => ({}) }, 'b')).status, 'unavailable');
   // A 200 whose envelope carries no token is not a usable refresh.
   assert.equal((await failingRefresh({ ok: true, status: 200, json: async () => ({ success: true, data: {} }) }, 'c')).status, 'unavailable');
