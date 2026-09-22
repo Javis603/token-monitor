@@ -27,6 +27,7 @@ const {
   limitProviderCompactWindows,
   limitProviderMainDeviceLabel,
   limitProviderPlanDisplayLabel,
+  limitProviderStatusLabel,
   namedApiProfileStatus,
   limitProviderProvenance,
   limitResetRemainingMs,
@@ -1811,6 +1812,39 @@ test('Grok is automatic provider UI, while env token remains documented for head
   assert.match(i18n, /'settings\.limits\.status\.runGrokLogin': 'Run grok login'/);
   assert.match(i18n, /'settings\.limits\.status\.runGrokLogin': '執行 grok login'/);
   assert.match(i18n, /'settings\.limits\.status\.runGrokLogin': '运行 grok login'/);
+});
+
+// Cline is automatic for the same reason Grok is — its credential belongs to
+// Cline, not to Token Monitor — but its env key exists too, because a machine
+// without Cline installed has no sign-in to read. The two must not drift into a
+// credential UI: the renderer never sees the key, and the settings page only
+// explains the connection.
+test('Cline is an automatic provider whose env key stays out of the renderer', () => {
+  const html = readRendererFile('index.html');
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
+  const clineLimits = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'src', 'shared', 'providers', 'cline', 'limits.js'),
+    'utf8'
+  );
+
+  assert.doesNotMatch(html, /clineAccountGroup|clineManualPanel|settings\.cline\./);
+  assert.doesNotMatch(app, /clineAccountExpanded|renderClineStatus|clineAccountLinked|clineApiKeyConfigured/);
+  assert.doesNotMatch(main.slice(main.indexOf('function settingsForRenderer'), main.indexOf('function pushSettingsToRenderer')), /clineApiKey/);
+  assert.match(envExample, /CLINE_API_KEY=/);
+  assert.match(clineLimits, /CLINE_API_KEY/);
+  assert.match(clineLimits, /CLINEPASS_API_KEY/);
+  // A sign-in that went stale is fixed by opening Cline, not by signing in again,
+  // and the pill must not tell an API-key user to open an app they do not have.
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'unauthorized' }),
+    { label: 'Update credential', tone: 'setup' }
+  );
+  // Both tags are strings other providers already use, so no new chip text is
+  // introduced for a provider whose surfaces are the same class as workbuddy's
+  // desktop app and kiro's CLI.
+  assert.deepEqual(limitProviderCapabilityTags({ provider: 'cline' }), ['Auto', 'Desktop app', 'CLI']);
 });
 
 test('Copilot env token is documented in env example, not the README overview', () => {

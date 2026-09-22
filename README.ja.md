@@ -41,7 +41,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor IDE / Cursor CLI | `~/.config/tokscale/cursor-cache/`（アカウント単位の使用量エクスポート） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.gemini/`（`antigravity/`、`antigravity-ide/`、`antigravity-backup/`、`antigravity-cli/conversations/`） | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks (`.../saoudrizwan.claude-dev/tasks/`)、`~/.cline/data/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks (`.../saoudrizwan.claude-dev/tasks/`)、`~/.cline/data/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/amp.png" width="28" alt="Amp" /> | Amp | `~/.local/share/amp/threads/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/droid.png" width="28" alt="Factory Droid" /> | Factory Droid | `~/.factory/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" /> | Kimi CLI / Kimi Code / Kimi Work | `~/.kimi/sessions/`, `~/.kimi-code/sessions/`, `<platform-app-data>/kimi-desktop/` | ✅ | ✅ | — |
@@ -135,7 +135,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 
 ### 制限・トレンド・エクスポート
 
-- **AI ツール制限検出** — Claude Code、Codex、Cursor、OpenRouter、サードパーティAPI、GLM、Kimi など 24+ プロバイダーの session/daily/weekly/billing/credits、複数の OpenRouter／サードパーティプロファイル、残高型アカウント（Claude クレジット、DeepSeek のプリペイド残高と使用履歴、サードパーティ残高）
+- **AI ツール制限検出** — Claude Code、Codex、Cursor、OpenRouter、サードパーティAPI、GLM、Kimi など 25+ プロバイダーの session/daily/weekly/billing/credits、複数の OpenRouter／サードパーティプロファイル、残高型アカウント（Claude クレジット、DeepSeek のプリペイド残高と使用履歴、サードパーティ残高）
 - **複数アカウントと Codex 切り替え** — 1 つのプロバイダーで複数アカウントを追跡し、それぞれの制限を表示。追跡済みの Codex アカウントは、再認証なしでローカルアカウントとしてワンクリック切り替え可能
 - **Codex リセット予測** — 任意で有効にできるサードパーティのリセット予測。予測されるリセット時刻、リセットタイプ（Regular / Banked）、前回のリセット時刻を表示
 - **削除されたセッション使用量を保持** — 多くのツールは古いセッションを削除します（Claude Code はデフォルトで 30 日後にトランスクリプトを削除）。有効にすると、Token Monitor は観測済みの日別ツール/モデル使用量をローカルにアーカイブし、元ファイルが消えてもヒートマップとトレンドを維持します（下記 [セッションデータの保持期間](#セッションデータの保持期間) を参照）

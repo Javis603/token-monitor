@@ -58,6 +58,7 @@
     opencode: ['Auto', 'API/Web'],
     cursor: ['Auto', 'Web'],
     antigravity: ['Auto', 'OAuth/App/CLI'],
+    cline: ['Auto', 'Desktop app', 'CLI'],
     factory: ['Auto', 'API key'],
     kimi: ['Coding Plan', 'Web/API'],
     grok: ['Auto', 'CLI/Web'],
@@ -420,6 +421,10 @@
     if (status === 'unauthorized') {
       if (providerName === 'kimi') return { label: 'Update credential', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Update credential', tone: 'setup' };
+      // Cline refreshes its own access token every time the app or CLI runs, so
+      // a stored token that went stale means the front-end has not been opened —
+      // not that the sign-in itself is gone.
+      if (providerName === 'cline') return { label: 'Update credential', tone: 'setup' };
       return providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
         ? { label: 'Update API key', tone: 'setup' }
         : providerName === 'qoder' || providerName === 'trae'

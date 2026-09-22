@@ -116,6 +116,7 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
 };
 const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
+  cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
   kiro: 'settings.limits.connection.kiro',
   workbuddy: 'settings.limits.connection.workbuddy'
