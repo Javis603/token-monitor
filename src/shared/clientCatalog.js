@@ -64,7 +64,7 @@
     { id: 'zed', label: 'Zed' },
     { id: 'kilo', label: 'Kilo' },
     { id: 'commandcode', label: 'Command Code' },
-    { id: 'micode', label: 'MiMo' },
+    { id: 'micode', label: 'Xiaomi MiMo' },
     { id: 'zcode', label: 'ZCode' },
     { id: 'kiro', label: 'Kiro' },
     { id: 'codebuddy', label: 'CodeBuddy' },

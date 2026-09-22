@@ -120,7 +120,7 @@ Provider identity lives in **one** place: `LIMIT_PROVIDER_CATALOG` in `src/share
 
 Most of that table is now asserted from the catalog, so a provider that misses one of those points fails CI rather than shipping — `grep LIMIT_PROVIDER_IDS tests/` shows which. What it does not cover fails silently: the manual-panel shapes, where a missing registration and a correct omission look identical from the id lists alone, and the i18n keys. The source-label overrides are deliberately left out, because falling back to the generic label is usually the right answer.
 
-`limitProviders.js` is in the portable Hub core, so renaming a provider stales the Hub build marker even though nothing the Hub runs changed — the exception to "a desktop-only release does not ask users to redeploy" above. Accepted rather than worked around: adding or reordering a provider moves the marker wherever the labels live, and a label has been renamed on its own exactly once.
+`limitProviders.js` is in the portable Hub core, so renaming a provider stales the Hub build marker even though nothing the Hub runs changed — the exception to "a desktop-only release does not ask users to redeploy" above. Accepted rather than worked around: adding or reordering a provider moves the marker wherever the labels live, and so does a rename that touches only the label.
 
 ### Data flow contract
 

@@ -329,9 +329,9 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         )
     }
 
-    func testWidgetToolLabelsMatchTheDesktopCatalogForMiMoCode() {
-        XCTAssertEqual(WidgetFormat.provider("mimo"), "MiMo")
-        XCTAssertEqual(WidgetFormat.provider("micode"), "MiMo")
+    func testWidgetToolLabelsMatchTheDesktopCatalogForXiaomiMiMo() {
+        XCTAssertEqual(WidgetFormat.provider("mimo"), "Xiaomi MiMo")
+        XCTAssertEqual(WidgetFormat.provider("micode"), "Xiaomi MiMo")
     }
 
     func testStatusMappingNeverExposesInternalEnums() {

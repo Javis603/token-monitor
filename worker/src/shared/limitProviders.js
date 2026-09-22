@@ -47,7 +47,7 @@
     { id: 'copilot', label: 'GitHub Copilot' },
     { id: 'zed', label: 'Zed' },
     { id: 'commandcode', label: 'Command Code' },
-    { id: 'mimo', label: 'MiMo' },
+    { id: 'mimo', label: 'Xiaomi MiMo' },
     { id: 'zai', label: 'GLM', settingsLabel: 'Z.ai / GLM' },
     { id: 'zaiteam', label: 'GLM Team' },
     { id: 'kiro', label: 'Kiro' },
