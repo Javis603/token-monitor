@@ -312,7 +312,7 @@ function parseClineLimits(payload) {
 // `no plan history found for user` that fetchJson maps to `unavailable` before
 // reaching here (verified live) — and neither is the same as a live zero-usage
 // window: report no data rather than 0%.
-function providerResult(windows, { nowMs, credential }) {
+function providerResult(windows, { nowMs, credential, status = '' }) {
   // `accountSeed` is decided per lane in resolveClineCredential; with no stable
   // identifier there is no accountKey, rather than one invented here.
   const seed = credential?.accountSeed || '';
@@ -323,7 +323,7 @@ function providerResult(windows, { nowMs, credential }) {
     accountEmail: String(credential?.email || '').trim().toLowerCase(),
     source: credential?.source || 'api',
     updatedAt: nowIso(nowMs ?? Date.now()),
-    status: windows.length > 0 ? 'ok' : 'unavailable',
+    status: status || (windows.length > 0 ? 'ok' : 'unavailable'),
     windows: windows
   });
 }
@@ -446,8 +446,17 @@ async function fetchClineLimits(options = {}, deps = {}) {
     return failingProvider(providerStatusFromError(error), nowMs, 'oauth');
   }
   const headers = { Authorization: `Bearer ${credential.accessToken}`, Accept: 'application/json' };
+
+  // The lanes below are independent, the shape providers/zai gives its quota and
+  // balance lanes: an error decides the status and nothing else, so a lane that
+  // answered is kept beside one that failed rather than being dropped with it. The
+  // one shared fate is the credential itself — every request here carries the same
+  // token, so a refusal ends the scan instead of asking two more endpoints for the
+  // same 401, which is also why an expired sign-in costs exactly one request.
   let planWindows = [];
-  let planStatus = 'unavailable';
+  // `''` means the lane answered (including a planless 404); anything else is the
+  // shared status its failure maps to. Both paths below assign it.
+  let planStatus;
   try {
     // fetchJson owns the timeout and maps the response onto the shared status
     // vocabulary: 401 to `unauthorized`, 429 to `sourceRateLimited`, everything
@@ -457,31 +466,23 @@ async function fetchClineLimits(options = {}, deps = {}) {
     // header gives.
     const payload = await fetchJson(`${CLINE_API_BASE}${USAGE_LIMITS_PATH}`, headers, deps);
     const parsed = parseClineLimits(payload);
-    // A contract break is not "no plan": it is reported as no data, and a credit
-    // reading must not paper over it.
-    if (parsed === null) return failingProvider('unavailable', nowMs, credential.source);
-    planWindows = parsed;
+    // A contract break is a failed lane like any other: the status reports it and
+    // the credit beside it is still read, rather than either hiding the other.
+    planStatus = parsed === null ? 'unavailable' : '';
+    planWindows = parsed || [];
   } catch (error) {
     planStatus = providerStatusFromError(error);
-    // A rejected credential is the whole answer: the balance endpoint would be
-    // refused the same way, so it is not asked — which is also why an expired
-    // sign-in still costs exactly one request.
+    // A rejected credential is the whole answer — the balance endpoint would be
+    // refused the same way — so it is the one failure that ends the scan.
     if (planStatus === 'unauthorized') return failingProvider(planStatus, nowMs, credential.source);
-    // Every other failure is an outage, and it ends the read here rather than being
-    // papered over by the credit beside it: a green row would hide the outage and,
-    // because the runtime keeps the last good reading only while the status is
-    // transient, replace the windows it was holding. Nothing is lost by stopping —
-    // the credit read cannot reach the screen on a failed row anyway — and the lanes
-    // after this one are not asked, the same saving the refusal above makes.
-    //
     // The one refusal that is still an answer is the planless 404 (verified live —
-    // `no plan history found for user`): that account's credit may be the row, and
-    // the credit read is what decides it. `httpStatus` carries exactly this split,
+    // `no plan history found for user`): no plan is a state, not a failure, and the
+    // credit read is what decides the row. `httpStatus` carries exactly this split,
     // because the shared vocabulary collapses 404 and 5xx into `unavailable`
     // (limits/providerHelpers.js); the providers that need it read it the same way
     // (providers/claude with 403/404, providers/volcengine with 401/403/404,
     // providers/codex with 408/5xx).
-    if (Number(error?.httpStatus) !== 404) return failingProvider(planStatus, nowMs, credential.source);
+    if (Number(error?.httpStatus) === 404) planStatus = '';
   }
   // The account id both nested reads are keyed by, resolved once: the stored sign-in
   // carries it, and a key-only install learns it from the profile endpoint (which is
@@ -497,12 +498,15 @@ async function fetchClineLimits(options = {}, deps = {}) {
   const credits = accountId ? await readClineCredits(accountId, credential, deps) : null;
   const spend = accountId ? await readClineSpend(accountId, credential, nowMs, deps) : null;
   const readings = [...planWindows, ...(credits ? [credits] : []), ...(spend ? [spend] : [])];
-  // No plan is a state, not a failure, when the account's credit was readable:
-  // `docs/providers/zai.md` states the same rule for a key without a subscription
-  // whose console still answers a balance. With neither reading there is nothing
-  // to report, and the plan request's own status is the one to report.
-  if (readings.length === 0) return failingProvider(planStatus, nowMs, credential.source);
-  return providerResult(readings, { nowMs, credential });
+  // The status takes the lane priority providers/zai uses — the failure that matters
+  // first, then anything readable as `ok`, then a bare `unavailable` — while the
+  // windows stay the union of what the lanes answered. A failed plan read therefore
+  // keeps its status without cost to the credit line, and a planless account reads
+  // `ok` off the credit alone (`docs/providers/zai.md` states the same rule for a key
+  // without a subscription whose console still answers a balance).
+  const status = planStatus || (readings.length > 0 ? 'ok' : 'unavailable');
+  if (readings.length === 0 && !planStatus) return failingProvider(status, nowMs, credential.source);
+  return providerResult(readings, { nowMs, credential, status });
 }
 
 module.exports = {

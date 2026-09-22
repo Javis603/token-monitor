@@ -109,6 +109,14 @@ itself. The access token is never used for this — it is replaced hourly, and a
 would reach the hub as a new account on every ingest. A sign-in with no account id keeps no
 `accountKey` instead of inventing one.
 
+Being per lane has one consequence worth stating: the same account reached through a key on one machine
+and through the stored sign-in on another lists as two accounts, because the seed differs. That is the
+shape `providers/zai` has too — its quota lane seeds on the console key and its billing lane on the
+ZCode login, and its own merge rule only stops *one scan* from minting two identities. Merging across
+lanes is possible in principle (opencode's `accountKeyAliases`, which the key lane could emit once
+`/users/me` proves both credentials name one account) but that field is gated to opencode in
+`limits/core.js`, so adopting it here would mean widening the shared Hub core for one provider.
+
 A Cline installation that lives only inside WSL is not read: `providers/claude/limits.js` has a
 `wslClaudeCredentialPaths()` for the same situation, and the equivalent for Cline — a
 `\\wsl$\\<distro>\\home\\<user>\\.cline\\data\\settings\\providers.json` candidate behind the same
@@ -161,14 +169,15 @@ campaign, amount and status — and it is deliberately **not** a window: a grant
 money came from, not what is left, and the balance already includes every grant it lists.
 
 That "credit in hand" rule covers the planless answers only — an empty `limits` list, or the `404`
-above. A plan read that fails any other way keeps its own status and ends the scan there: the credit is
-the best-effort lane (the rule `providers/claude` gives its prepaid read) and may not do the reverse
-either and turn an outage into a healthy row. A green row would hide the outage and, since the shared
-runtime keeps the last good reading only while the status is transient, replace the windows it was
-holding; the credit read could not reach the screen on a failed row anyway. What the row shows instead is
-that retained last full reading — credit included — beside the failure status, which is what the
-`lastGood` / `lastAttempt` retention in `src/shared/limits/runtime.js` is for. An account with nothing
-behind it yet shows nothing, as with any provider here.
+above. A plan read that fails any other way keeps its own status, and the credit is read either way: the
+lanes here are independent the way `providers/zai` builds its quota and balance lanes, where an error
+decides the status and never the data a healthy request returned. So an outage is visible — the pill and
+the retained last reading both say so — without costing the account its balance line, and a contract
+break reports itself rather than either hiding the credit or being hidden by it. The one exception is the
+credential: every request here carries the same token, so a refusal ends the scan, which is also why an
+expired sign-in costs exactly one request. What the panel shows for a transient status is still the
+retained last good reading (`lastGood` / `lastAttempt` in `src/shared/limits/runtime.js`); an account with
+nothing behind it yet shows nothing, as with any provider here.
 
 What the account has **spent** is a second read: `GET
 /api/v1/users/{id}/usages/daily?startdate=YYYY-MM-DD&enddate=YYYY-MM-DD` (the range is the local month
@@ -226,14 +235,12 @@ CodexBar's `ClinePassSubscriptionService`.
 
 Five deliberate choices, recorded so they are not "corrected" later:
 
-- **A failed plan read is not rescued by the credit read.** Only the planless answers — an empty
-  `limits` list, or the `404` — let a credit-bearing row be `ok`; a `403`, `429` or `5xx` keeps the
-  status that says so. Telling those apart takes the HTTP status, which `limits/providerHelpers.js`
-  keeps for exactly this reason and `providers/claude`, `providers/codex` and `providers/volcengine`
-  read the same way; the shared status vocabulary alone collapses `404` and `5xx` into `unavailable`.
-  The failure row carries no windows, so the display for a transient status is the retained last good
-  reading (`lastGood` / `lastAttempt` retention, `src/shared/limits/runtime.js`) rather than a partial
-  fresh one.
+- **A lane error decides the status and nothing else.** Only the planless answers — an empty `limits`
+  list, or the `404` — let a credit-bearing row be `ok`; a `403`, `429` or `5xx` keeps the status that
+  says so, while the credit and spend reads still run and ride along on that row. Telling the planless
+  answer apart from an outage takes the HTTP status, which `limits/providerHelpers.js` keeps for exactly
+  this reason and `providers/claude`, `providers/codex` and `providers/volcengine` read the same way;
+  the shared status vocabulary alone collapses `404` and `5xx` into `unavailable`.
 - **A `403` is not read as a credential problem.** The shared helper collapses 401 and 403 into
   `unauthorized` only where a provider asks for it (`providers/claude` and `providers/codex` pass
   `forbiddenIsUnauthorized`); this provider keeps the default, so a forbidden status is an outage that

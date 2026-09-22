@@ -722,7 +722,7 @@ test('no plan and no readable credit keeps the plan request status', async (t) =
   assert.deepEqual(result.windows, []);
 });
 
-test('a failed plan read keeps its own status when the credit answers', async (t) => {
+test('a failed plan read keeps its status without costing the credit lane', async (t) => {
   const dataDir = tempDir(t);
   writeProviders(dataDir, { cline: clineAuth() });
   const calls = [];
@@ -731,22 +731,21 @@ test('a failed plan read keeps its own status when the credit answers', async (t
     now: () => NOW,
     fetch: routedFetch({ sink: calls, balance: { success: true, data: { userId: 'usr-1', balance: 500000 } }, ...route })
   });
-  // Every plan failure except the planless 404 is an outage, and the credit read
-  // beside it may not turn that into a healthy row: a green row would hide the
-  // outage and, because the runtime only keeps the last good reading while the
-  // status is transient, replace the windows it was holding.
+  // The lanes are independent, the shape providers/zai gives its quota and balance
+  // lanes: an error decides the status and nothing else. The credit line is read
+  // either way and rides along on the failed row, so a green pill can never hide an
+  // outage and an outage can never cost the account its balance reading.
   for (const [usageStatus, expected] of [[403, 'unavailable'], [429, 'sourceRateLimited'], [500, 'unavailable']]) {
     const result = await run({ usageStatus });
     assert.equal(result.status, expected, `plan ${usageStatus} should report ${expected}`);
     assert.ok(TRANSIENT_STATUSES.has(expected), `${expected} must be transient for the last good reading to survive`);
-    // A failure row carries no windows, like every other failure here: the runtime
-    // composes the display from the last good reading for a transient status, and an
-    // account with nothing behind it yet shows nothing.
-    assert.deepEqual(result.windows, []);
+    assert.deepEqual(result.windows.map((w) => w.metric), ['credits'], `plan ${usageStatus} should keep the credit`);
     assert.equal(result.source, 'oauth');
-    // The lanes after the plan read are not asked on an outage, the same saving the
-    // credential refusal makes — a credit read could not reach the screen anyway.
-    assert.equal(calls.length, 1, `plan ${usageStatus} should stop at the plan request`);
+    // The credit lane is still asked: the plan request, then the balance for the id
+    // the stored sign-in carries and the month-to-date usage report beside it.
+    assert.equal(calls.length, 3, `plan ${usageStatus} should not stop the credit lane`);
+    assert.equal(calls[0].path, USAGE_LIMITS_PATH);
+    assert.equal(calls[1].path, balancePath('usr-1'));
     calls.length = 0;
   }
   // A transport failure is the same shape, and carries no HTTP status to read.
@@ -762,7 +761,7 @@ test('a failed plan read keeps its own status when the credit answers', async (t
     }
   });
   assert.equal(offline.status, 'unavailable');
-  assert.deepEqual(offline.windows, []);
+  assert.deepEqual(offline.windows.map((w) => w.metric), ['credits']);
 });
 
 test('a credit that cannot be read leaves the plan reading alone', async (t) => {
