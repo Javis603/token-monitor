@@ -1206,6 +1206,24 @@
       }
       const balanceNode = claudeBalanceNode(provider);
       if (balanceNode) windows.append(balanceNode);
+    } else if (provider.provider === 'cline') {
+      // ClinePass measures three windows and all three are quotas, so the monthly
+      // one gets its own full-width row. The default branch below renders session
+      // and weekly only, which would silently drop a third of the subscription.
+      const clineSession = windowForKind(provider, 'session');
+      const clineWeekly = windowForKind(provider, 'weekly');
+      const clineMonthly = windowForKind(provider, 'billing');
+      if (clineSession) {
+        windows.append(limitWindowNode(providerWindowLabel(provider, clineSession), clineSession, color, 0.95));
+      }
+      if (clineWeekly) {
+        windows.append(limitWindowNode(providerWindowLabel(provider, clineWeekly), clineWeekly, color, 0.68));
+      }
+      if (clineMonthly) {
+        const node = limitWindowNode(providerWindowLabel(provider, clineMonthly), clineMonthly, color, 0.5);
+        node.classList.add('limit-window-wide');
+        windows.append(node);
+      }
     } else {
       // Default: render only the windows the provider actually has. Providers
       // that only expose a single window shouldn't leave a half-empty bar next to

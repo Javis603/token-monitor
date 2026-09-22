@@ -1845,6 +1845,15 @@ test('Cline is an automatic provider whose env key stays out of the renderer', (
   // introduced for a provider whose surfaces are the same class as workbuddy's
   // desktop app and kiro's CLI.
   assert.deepEqual(limitProviderCapabilityTags({ provider: 'cline' }), ['Auto', 'Desktop app', 'CLI']);
+  // The list renders per provider, and its default branch draws session and weekly
+  // only — a three-window provider needs its own branch or the monthly window never
+  // appears. Guarded by source patterns because the view module builds DOM and this
+  // repository has no DOM harness; the branch was also confirmed by driving the
+  // running widget (a mocked row renders Session, Weekly and a full-width Monthly).
+  const windowsView = readRendererFile('limitWindowsView.js');
+  assert.match(windowsView, /provider\.provider === 'cline'/);
+  assert.match(windowsView, /const clineMonthly = windowForKind\(provider, 'billing'\)/);
+  assert.match(windowsView, /clineMonthly[\s\S]{0,200}limit-window-wide/);
 });
 
 test('Copilot env token is documented in env example, not the README overview', () => {
