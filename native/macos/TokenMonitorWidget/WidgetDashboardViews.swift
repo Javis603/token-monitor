@@ -631,19 +631,32 @@ struct ModuleTitle: View {
 }
 
 enum WidgetVendorIdentity {
+    // Mirrors `modelVendorFor()` in src/electron/renderer/usageCharts.js: same branches
+    // in the same order, expressed as substring tests rather than regexes. The widget
+    // colours its own breakdown rows, so a branch that exists on only one side makes
+    // those models fall through to "default" there — keep the two in step.
     static func modelVendor(for model: String) -> String {
         let value = model.lowercased()
+        if value == "auto" || value == "cursor-auto" { return "cursor" }
         if value.contains("claude") || value.contains("anthropic") || value.contains("sonnet") || value.contains("opus") || value.contains("haiku") { return "claude" }
-        if value.contains("gpt") || value.contains("openai") || value.contains("codex") || value.hasPrefix("o1-") || value.hasPrefix("o3-") || value.hasPrefix("o4-") { return "codex" }
+        if value.contains("gpt") || value.contains("openai") || value.contains("codex") || value == "o1" || value == "o3" || value == "o4" || value.hasPrefix("o1-") || value.hasPrefix("o3-") || value.hasPrefix("o4-") { return "codex" }
         if value.contains("gemini") || value.contains("gemma") || value.contains("google") { return "gemini" }
-        if value.contains("deepseek") { return "deepseek" }
         if value.contains("grok") || value.contains("xai") { return "xai" }
-        if value.contains("llama") || value.contains("meta") { return "meta" }
+        if value.contains("deepseek") { return "deepseek" }
+        if value.contains("nemotron") || value.contains("nvidia") { return "nvidia" }
+        if value.contains("llama") || value.contains("meta") || value.contains("muse-spark") { return "meta" }
         if value.contains("mistral") || value.contains("mixtral") || value.contains("codestral") { return "mistral" }
-        if value.contains("qwen") { return "qwen" }
-        if value.contains("kimi") || value.contains("moonshot") { return "kimi" }
-        if value.contains("glm") || value.contains("zai") { return "zai" }
+        if value.contains("qwen") || value.contains("qmodel") { return "qwen" }
+        if value.contains("kimi") || value.contains("moonshot") || value.contains("k2d6-agent") || value.contains("k3-agent") { return "kimi" }
+        if value.contains("glm") || value.contains("z.ai") || value.contains("zhipu") || value == "zai" || value.hasPrefix("zai-") { return "zai" }
+        if value.contains("cohere") || value.contains("command-r") { return "cohere" }
+        if value.contains("mimo") || value.contains("xiaomi") { return "xiaomi" }
+        if value.contains("minimax") || value.contains("abab") { return "minimax" }
+        if value.contains("doubao") || value.contains("seed-") || value.hasSuffix("seed") { return "doubao" }
+        if value.contains("stepfun") || value.contains("step-") { return "stepfun" }
+        if value.contains("hunyuan") || value.range(of: "hy[0-9]", options: .regularExpression) != nil { return "hunyuan" }
         if value.hasPrefix("swe-") || value.hasPrefix("swe_") || value.contains("devin") || value.contains("cognition") { return "devin" }
+        if value == "big-pickle" { return "opencode" }
         return "default"
     }
 
@@ -671,12 +684,13 @@ enum WidgetVendorIdentity {
             "unsloth": "#40B85A", "cohere": "#66937D", "xiaomi": "#000000",
             "mimo": "#000000", "micode": "#000000", "minimax": "#F23F5D",
             "doubao": "#5064FF", "hunyuan": "#277DE3", "volcengine": "#2A88FF",
+            "nvidia": "#74B71B",
             "trae": "#32F08C", "alibaba": "#7771F4", "thirdparty": "#8090A6",
             "default": "#6AB4F0"
         ]
         // Vendor marks whose app colour is too dark to read against the widget's dark
         // background render as light ink instead.
-        let adaptiveInk = ["grok", "xai", "copilot", "cursor", "opencode", "pi", "zai", "zaiteam", "zcode", "proma", "kimi", "moonshot", "ollama", "devin", "micode", "mimo", "xiaomi"]
+        let adaptiveInk = ["grok", "xai", "copilot", "cursor", "opencode", "pi", "zai", "zaiteam", "zcode", "proma", "kimi", "moonshot", "ollama", "devin", "micode", "mimo", "xiaomi", "stepfun"]
         if adaptiveInk.contains(vendorID.lowercased()) { return Color.white.opacity(0.86) }
         return Color(widgetHex: colors[vendorID.lowercased()] ?? colors["default"]!)
     }
