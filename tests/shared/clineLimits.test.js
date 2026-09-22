@@ -530,6 +530,61 @@ test('transport failures map onto the shared provider statuses', async (t) => {
   assert.equal((await fetchClineLimits({}, failing(403))).status, 'unavailable');
 });
 
+test('both spellings of a window field are read', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth() });
+  // The report spells `percentUsed` and `resetsAt` in camelCase, and the guards read
+  // whichever spelling is present rather than assuming one.
+  const result = await fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    fetch: okFetch(okBody([
+      { type: 'five_hour', percent_used: 12.5, resets_at: '2026-09-21T15:00:00Z' },
+      { type: 'weekly', percentUsed: 40, resetsAt: null }
+    ]))
+  });
+  const session = result.windows.find((w) => w.kind === 'session');
+  const weekly = result.windows.find((w) => w.kind === 'weekly');
+  assert.equal(session.usedPercent, 12.5);
+  assert.equal(session.resetsAt, '2026-09-21T15:00:00.000Z');
+  assert.equal(weekly.usedPercent, 40);
+  assert.equal(weekly.resetsAt, null);
+});
+
+test('an aborted probe propagates instead of reporting a status', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth() });
+  const controller = new AbortController();
+  controller.abort();
+  // The caller owns the cancellation: it reaches the network for nothing, and the
+  // scan ends as an abort rather than as the outage a status would describe.
+  await assert.rejects(
+    () => fetchClineLimits({}, {
+      env: { CLINE_DATA_DIR: dataDir },
+      now: () => NOW,
+      signal: controller.signal,
+      fetch: async () => { throw new Error('must not reach the network'); }
+    }),
+    (error) => error.name === 'AbortError'
+  );
+});
+
+test('no credential reaches the reading', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth() });
+  const route = (options) => fetchClineLimits(options, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    fetch: routedFetch({ limits: [{ type: 'five_hour', percentUsed: 3 }], balance: { success: true, data: { userId: 'usr-1', balance: 500000 } } })
+  });
+  // The identity is a hash and nothing else in the row is the credential: neither
+  // lane's secret may survive into what the hub and the renderer receive.
+  const keyed = JSON.stringify(await route({ clineApiKey: 'sk-SECRET-MARKER' }));
+  assert.equal(keyed.includes('sk-SECRET-MARKER'), false);
+  const signedIn = JSON.stringify(await route({}));
+  assert.equal(signedIn.includes('workos:token-1'), false);
+});
+
 test('a 200 that is not the API payload is unavailable, never a reading', async (t) => {
   const dataDir = tempDir(t);
   writeProviders(dataDir, { 'cline-pass': clineAuth() });
@@ -804,6 +859,29 @@ test('a failed plan read keeps its status without costing the credit lane', asyn
   });
   assert.equal(offline.status, 'unavailable');
   assert.deepEqual(offline.windows.map((w) => w.metric), ['credits']);
+});
+
+test('a zero balance is a reading and a null one is not', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth() });
+  const run = (balance) => fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    fetch: routedFetch({ limits: [], balance: { success: true, data: { userId: 'usr-1', balance } } })
+  });
+  // An account that has spent its credit holds zero, which is a reading — the same
+  // rule providers/opencode states for a genuine $0.00 balance. A null or negative
+  // one says nothing, so the window is absent rather than a fabricated zero.
+  const zero = await run(0);
+  assert.equal(zero.status, 'ok');
+  assert.deepEqual(zero.windows.map((w) => w.metric), ['credits']);
+  assert.equal(zero.windows[0].remaining, 0);
+  const nothing = await run(null);
+  assert.equal(nothing.status, 'unavailable');
+  assert.deepEqual(nothing.windows, []);
+  const negative = await run(-1);
+  assert.equal(negative.status, 'unavailable');
+  assert.deepEqual(negative.windows, []);
 });
 
 test('a credit that cannot be read leaves the plan reading alone', async (t) => {
