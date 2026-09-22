@@ -2721,11 +2721,12 @@ test('Kimi credential statuses are localized in settings', () => {
   assert.match(i18n, /'settings\.limits\.status\.updateCredential': '更新憑證'/);
 });
 
-test('Kimi and Droid limits reuse their tracked-client colors', () => {
+test('Kimi, Droid and MiMo limits reuse their tracked-client colors', () => {
   const app = readRendererFile('app.js');
   assert.equal(LIMIT_PROVIDER_LABELS.kimi, 'Kimi');
   assert.match(app, /if \(providerId === 'factory'\) return clientColors\.droid;/);
-  assert.match(app, /if \(providerId === 'mimo'\) return clientColors\.xiaomi;/);
+  // MiMo takes the product's own black, not Xiaomi's vendor orange.
+  assert.match(app, /if \(providerId === 'mimo'\) return clientColors\.micode;/);
   assert.match(app, /const color = limitProviderColor\(id\);/);
 });
 

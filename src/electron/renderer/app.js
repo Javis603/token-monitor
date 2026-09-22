@@ -151,7 +151,9 @@ const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 
 function limitProviderColor(providerId) {
   if (providerId === 'factory') return clientColors.droid;
-  if (providerId === 'mimo') return clientColors.xiaomi;
+  // Xiaomi's brand orange belongs to the vendor, not to this product: the MiMo
+  // mark is black, and clientColors.micode already carries it.
+  if (providerId === 'mimo') return clientColors.micode;
   return clientColors[providerId] || clientColors.default;
 }
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
