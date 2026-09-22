@@ -13790,9 +13790,9 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
   }
   if (accountStatus === 'invalid') {
     // Cline's two lanes refuse in different places, and this row names the lane the
-    // credential came from rather than always the key field: the discovered sign-in
-    // expires hourly and only Cline refreshes it, so a stale one is not an API key
-    // problem. Every other provider here keeps the one statusInvalid string.
+    // credential came from rather than always the key field: Cline owns recovery for
+    // the discovered sign-in, while Token Monitor owns the configured API key. Every
+    // other provider here keeps the one statusInvalid string.
     const invalidKey = providerName === 'cline' && source === 'cline-signin'
       ? 'settings.cline.statusSigninInvalid'
       : `settings.${providerName}.statusInvalid`;

@@ -1601,9 +1601,9 @@ test('Cline API key validation errors distinguish invalid, limited, and unavaila
 
 test('Cline names the credential lane that went bad, not always the key field', () => {
   // One `unauthorized` status covers two lanes here, and this row is where a stale
-  // sign-in and a rejected key have to read differently: Cline refreshes the stored
-  // token when it runs, so an expired sign-in is not an API key problem. The last
-  // assertion is the control — zai also surfaces an auto-discovered login on a key
+  // sign-in and a rejected key have to read differently: Cline owns recovery for the
+  // discovered sign-in, so it is not an API key problem. The last assertion is the
+  // control — zai also surfaces an auto-discovered login on a key
   // panel and keeps the single statusInvalid string, which is what this branch
   // deliberately does not change for every other provider.
   const app = readRendererFile('app.js');
@@ -1649,10 +1649,17 @@ test('Cline names the credential lane that went bad, not always the key field', 
     'settings.zai.statusLinked'
   ]);
 
-  const i18n = readRendererFile('i18n.js');
-  for (const key of ['settings.cline.statusSignin', 'settings.cline.statusSigninInvalid']) {
-    assert.equal((i18n.match(new RegExp(`'${key.replaceAll('.', '\\.')}'`, 'g')) || []).length, 5);
-  }
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  assert.deepEqual(Object.fromEntries(Object.entries(MESSAGES).map(([locale, messages]) => [
+    locale,
+    messages['settings.cline.statusSigninInvalid']
+  ])), {
+    en: 'Open Cline',
+    'zh-TW': '開啟 Cline',
+    'zh-CN': '打开 Cline',
+    ko: 'Cline 열기',
+    ja: 'Cline を開く'
+  });
 });
 
 test('Factory keeps a saved-key Clear action available after validation fails', () => {
