@@ -460,6 +460,37 @@ test('identity is the account id, and nothing is invented without one', async (t
   assert.equal(anonymous.accountKey, '');
 });
 
+test('a sign-in recorded without an account id takes the one the profile read answers', async (t) => {
+  const dataDir = tempDir(t);
+  writeProviders(dataDir, { cline: clineAuth({ accountId: '' }) });
+  const calls = [];
+  const route = {
+    sink: calls,
+    limits: [{ type: 'five_hour', percentUsed: 3 }],
+    me: { success: true, data: { id: 'usr-resolved' } },
+    balance: { success: true, data: { userId: 'usr-resolved', balance: 500000 } }
+  };
+  const result = await fetchClineLimits({}, {
+    env: { CLINE_DATA_DIR: dataDir },
+    now: () => NOW,
+    fetch: routedFetch(route)
+  });
+  assert.equal(result.status, 'ok');
+  // The file named no account, so the profile read the balance needed is what
+  // identified it — and that answer becomes the row's identity: an anonymous row
+  // would be merged with every other anonymous Cline account during normalization.
+  assert.equal(calls.some((call) => call.path === USERS_ME_PATH), true, 'the profile read supplies the id');
+  assert.match(result.accountKey, /^sha256:[0-9a-f]{64}$/);
+  // A configured key still stands for itself, so the same account reached that way
+  // hashes differently and the resolved read does not rewrite the lane's identity.
+  const keyed = await fetchClineLimits({ clineApiKey: 'sk-key' }, {
+    env: { CLINE_DATA_DIR: tempDir(t) },
+    now: () => NOW,
+    fetch: routedFetch(route)
+  });
+  assert.notEqual(keyed.accountKey, result.accountKey);
+});
+
 test('an API key identifies the account without any local sign-in', async (t) => {
   const calls = [];
   const result = await fetchClineLimits({}, {

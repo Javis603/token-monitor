@@ -312,10 +312,10 @@ function parseClineLimits(payload) {
 // `no plan history found for user` that fetchJson maps to `unavailable` before
 // reaching here (verified live) — and neither is the same as a live zero-usage
 // window: report no data rather than 0%.
-function providerResult(windows, { nowMs, credential, status = '' }) {
+function providerResult(windows, { nowMs, credential, status = '', accountSeed = '' }) {
   // `accountSeed` is decided per lane in resolveClineCredential; with no stable
   // identifier there is no accountKey, rather than one invented here.
-  const seed = credential?.accountSeed || '';
+  const seed = accountSeed || credential?.accountSeed || '';
   return normalizeLimitProvider({
     provider: 'cline',
     accountKey: seed ? hashKey('cline', seed) : '',
@@ -497,6 +497,12 @@ async function fetchClineLimits(options = {}, deps = {}) {
   }
   const credits = accountId ? await readClineCredits(accountId, credential, deps) : null;
   const spend = accountId ? await readClineSpend(accountId, credential, nowMs, deps) : null;
+  // The identity is the lane's own seed, except where the stored sign-in carried none:
+  // the profile read the balance needed has just named the account, and a row that
+  // stayed anonymous would be merged with every other anonymous Cline account during
+  // normalization. A configured key keeps the key as its identity for the reason
+  // resolveClineCredential gives — a rejected key is a rejected account, not a fallback.
+  const accountSeed = credential.accountSeed || accountId || '';
   const readings = [...planWindows, ...(credits ? [credits] : []), ...(spend ? [spend] : [])];
   // The status takes the lane priority providers/zai uses — the failure that matters
   // first, then anything readable as `ok`, then a bare `unavailable` — while the
@@ -506,7 +512,7 @@ async function fetchClineLimits(options = {}, deps = {}) {
   // without a subscription whose console still answers a balance).
   const status = planStatus || (readings.length > 0 ? 'ok' : 'unavailable');
   if (readings.length === 0 && !planStatus) return failingProvider(status, nowMs, credential.source);
-  return providerResult(readings, { nowMs, credential, status });
+  return providerResult(readings, { nowMs, credential, status, accountSeed });
 }
 
 module.exports = {
