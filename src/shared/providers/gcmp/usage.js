@@ -91,13 +91,14 @@ function normalizeUsageLine(line, sourceId) {
   if (record.status !== 'completed' || !record.rawUsage || typeof record.rawUsage !== 'object') return null;
 
   const usage = record.rawUsage;
-  const input = numberValue(usage.prompt_tokens ?? usage.promptTokens);
+  const promptTokens = numberValue(usage.prompt_tokens ?? usage.promptTokens);
   const output = numberValue(usage.completion_tokens ?? usage.completionTokens);
   const cacheRead = numberValue(
     usage.prompt_tokens_details?.cached_tokens
     ?? usage.prompt_tokens_details?.cachedTokens
     ?? usage.cache_read_input_tokens
   );
+  const input = Math.max(0, promptTokens - cacheRead);
   const reasoning = numberValue(usage.completion_tokens_details?.reasoning_tokens);
   if (input === 0 && output === 0 && cacheRead === 0 && reasoning === 0) return null;
 
