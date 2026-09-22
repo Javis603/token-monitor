@@ -834,9 +834,9 @@ test('the monthly spend is reported beside the credit, in its own unit', async (
   // string would be green on a UTC runner by construction and red at +14, which is
   // what the CI offset matrix exists to catch. The parameter names are pinned
   // exactly, casing included: `startDate` / `endDate` are what the generated client
-  // in Cline's own dashboard bundle sends, and neither that bundle nor the CLI
-  // binary carries another spelling — a query the server does not recognize reads
-  // as a range it chose itself, which is the failure this pins shut.
+  // in Cline's own dashboard bundle sends. The lowercase spelling answers the same
+  // range live — this API ignores case — so this pins the contract's own spelling
+  // rather than a failure it repairs.
   const local = new Date(NOW);
   const pad = (value) => String(value).padStart(2, '0');
   const localMonth = `${local.getFullYear()}-${pad(local.getMonth() + 1)}-01`;

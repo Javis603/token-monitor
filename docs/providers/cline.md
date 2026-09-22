@@ -149,13 +149,16 @@ shape is Claude's, the line is WorkBuddy's `Spend` row, and the meter stays off 
 — the rule commandcode's purchased top-up and Claude's credit pool follow. It is best effort like the
 balance read, and absent when the month recorded nothing, so an account with no usage shows no line.
 Both parameter names are the vendor client's, down to their casing: the generated client in Cline's
-dashboard bundle sends `startDate` and `endDate` and marks both required, no artifact Cline ships carries
-another spelling, and a range the server does not recognize is a range it answers from its own default.
+dashboard bundle sends `startDate` and `endDate` and marks both required. The lowercase spelling answers
+the same range live — this API ignores case — so the vendor's form is kept as the contract's own rather
+than because the other one fails.
 
 `costUsd` is hundred-millionths of a dollar. The ledger pins it: one row carries `creditsUsed` 23649 and
 `costUsd` 2364975 for the same charge, so a µ-credit is a micro-dollar and 1e8 units make a dollar.
 **Verified live**: three paid calls and two free ones left the day's paid rows at `$0.03246637` while the
-balance moved `0.5 → 0.4675`, the difference being whole µ-credits per call.
+balance moved `0.5 → 0.4675`, the difference being whole µ-credits per call — each ledger row rounds its
+`costUsd` down to the µ-credit (`2364975 → 23649`, `668843 → 6688`, `212819 → 2128`), which is why the
+balance and the summed report differ in the last digits.
 
 Free-tier rows are skipped for the same reason the balance never moves for them: a `cline-free/kimi-k3`
 call answers a would-be price (`costUsd` 2179200) with nothing charged, and counting it would report

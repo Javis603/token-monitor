@@ -412,8 +412,9 @@ async function readClineSpend(id, credential, nowMs, deps) {
     const { month, day } = localDateParts(nowMs);
     // `startDate` / `endDate`, spelled as the generated client inside Cline's own
     // dashboard bundle sends them — both required, and the only query this endpoint
-    // takes. No vendor artifact carries another spelling, and a range the server does
-    // not recognize is a range it answers from its own default.
+    // takes. Measured live, the lowercase spelling answers the same range, so the
+    // server ignores case; the vendor's spelling is kept because it is the contract's
+    // own and the one its dashboard sends, not because the other one fails.
     const payload = await fetchJson(
       `${CLINE_API_BASE}${usagesDailyPath(id)}?startDate=${month}&endDate=${day}`,
       { Authorization: `Bearer ${credential.accessToken}`, Accept: 'application/json' },
