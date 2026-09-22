@@ -279,6 +279,12 @@ test('Claude session context clears on compaction and repopulates on the next re
   assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 0, contextWindow: 0 });
   fs.appendFileSync(file, `${usage(12_000)}\n`);
   assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 12_000, contextWindow: 200_000 });
+  fs.appendFileSync(file, `${JSON.stringify({
+    type: 'user',
+    isCompactSummary: true,
+    message: { content: 'x'.repeat(300 * 1024) }
+  })}\n`);
+  assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 0, contextWindow: 0 });
 });
 
 test('Claude session context survives oversized assistant field ordering', (t) => {
@@ -389,6 +395,34 @@ test('Claude session context distinguishes absent from malformed optional cache 
   ]);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 120_000,
+    contextWindow: 200_000
+  });
+
+  fs.writeFileSync(file, `${assistant({
+    input_tokens: 100_000,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 20_000
+  })}\n${assistant({
+    input_tokens: 1_000,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 1.5
+  })}\n`);
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 120_000,
+    contextWindow: 200_000
+  });
+
+  fs.writeFileSync(file, `${assistant({
+    input_tokens: 100_000,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 20_000
+  })}\n${assistant({
+    input_tokens: '1.5',
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0
+  })}\n`);
   assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
     contextTokens: 120_000,
     contextWindow: 200_000

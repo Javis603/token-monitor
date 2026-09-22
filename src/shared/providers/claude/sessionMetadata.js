@@ -55,11 +55,17 @@ function reportedTokenCount(value) {
   if (typeof value !== 'number' && typeof value !== 'string') return null;
   if (typeof value === 'string' && value.trim() === '') return null;
   const number = Number(value);
-  return Number.isFinite(number) && number >= 0 ? Math.round(number) : null;
+  return Number.isInteger(number) && number >= 0 ? number : null;
 }
 
 function tokenCount(value) {
   return reportedTokenCount(value) ?? 0;
+}
+
+function clearContextUsage(state) {
+  state.contextObserved = true;
+  state.contextTokens = 0;
+  state.contextWindow = 0;
 }
 
 function applyContextUsage(state, model, usage) {
@@ -181,9 +187,7 @@ function applyMetadataLine(state, line) {
       // Claude Code clears current_usage after compaction until the next API
       // response. State the same absence so an old pre-compact gauge cannot
       // survive while the compacted conversation is waiting for that response.
-      state.contextObserved = true;
-      state.contextTokens = 0;
-      state.contextWindow = 0;
+      clearContextUsage(state);
     } else if (isUserPrompt(entry)) {
       // A prompt accepted after the last completion means that completion no
       // longer describes the current turn: the old `end_turn` would otherwise
@@ -329,7 +333,11 @@ function applyLongLineFragments(state) {
     return;
   }
   if (!/"type"\s*:\s*"user"/.test(head)) return;
-  if (/"isMeta"\s*:\s*true/.test(head) || /"isCompactSummary"\s*:\s*true/.test(head)) return;
+  if (/"isMeta"\s*:\s*true/.test(head)) return;
+  if (/"isCompactSummary"\s*:\s*true/.test(head)) {
+    clearContextUsage(state);
+    return;
+  }
   // This has to agree with what isUserPrompt() accepts, or the same record is a
   // prompt when it fits in one line and not one when it does not. That function
   // takes a plain string content as a real prompt, so this path does too; the
