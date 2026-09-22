@@ -6,7 +6,7 @@
 // directory scan.
 const TOKSCALE_CLIENT_GROUPS = Object.freeze({
   antigravity: Object.freeze({ aliases: Object.freeze(['antigravity-cli']) }),
-  // Xiaomi MiMo AI desktop and the MiMo Code CLI share one `mimocode` SQLite
+  // Xiaomi MiMo Desktop and the MiMo Code CLI share one `mimocode` SQLite
   // store; tokscale re-stamps a row as `micode-desktop` when its
   // `session.version` starts with `desktop-`. Both surfaces are one Token
   // Monitor row, and the split lives inside a root we already watch, so this is

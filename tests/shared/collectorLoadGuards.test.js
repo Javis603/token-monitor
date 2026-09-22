@@ -87,7 +87,7 @@ test('watchPathsForClients excludes the tokscale cache dirs our own syncs write'
   }
 });
 
-test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
+test('watchPathsForClients watches both MiMo roots tokscale scans', () => {
   // Tokscale unions the XDG data dir with orca's hook-sandbox copy, and
   // that copy can hold sessions the XDG one is missing. Watching only XDG would
   // leave an orca-driven install without the seconds-level refresh.

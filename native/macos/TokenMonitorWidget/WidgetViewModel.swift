@@ -494,7 +494,7 @@ enum WidgetFormat {
         case "zed": "Zed"
         case "commandcode": "Command Code"
         case "mimo": "MiMo"
-        case "micode": "MiMo Code"
+        case "micode": "MiMo"
         case "zai": "GLM"
         case "zaiteam": "GLM Team"
         case "kiro": "Kiro"

@@ -30,7 +30,7 @@
   // fresh install. qodercn is opt-in per the upstream tool-support boundary — a
   // local adapter that may break when Qoder changes its DB schema.
   //
-  // micode (MiMo Code) ships default-tracked even though mimocode.db auto-imports
+  // micode (MiMo) ships default-tracked even though mimocode.db auto-imports
   // Claude Code sessions (its claude-import service): tokscale parses the store
   // but does not dedup those imports, and the imported rows aren't cleanly
   // separable (MiMo is multi-model), so a MiMo user's Claude work is counted
@@ -64,7 +64,7 @@
     { id: 'zed', label: 'Zed' },
     { id: 'kilo', label: 'Kilo' },
     { id: 'commandcode', label: 'Command Code' },
-    { id: 'micode', label: 'MiMo Code' },
+    { id: 'micode', label: 'MiMo' },
     { id: 'zcode', label: 'ZCode' },
     { id: 'kiro', label: 'Kiro' },
     { id: 'codebuddy', label: 'CodeBuddy' },

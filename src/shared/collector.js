@@ -1892,7 +1892,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['kilocode-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')]
   );
   add('commandcode', ['commandcode-projects', path.join(home, '.commandcode', 'projects')]);
-  // MiMo Code: tokscale 4.8.0 unions the XDG data dir with orca's hook-sandbox
+  // MiMo: tokscale 4.8.0 unions the XDG data dir with orca's hook-sandbox
   // copy (scanner.rs `discover_micode_dbs_in_dirs`), and that copy can hold
   // sessions the XDG one is missing. Watch both so an orca-driven install still
   // refreshes in seconds; the orca root only exists on macOS in practice and a
@@ -2237,7 +2237,7 @@ const OPENCLAW_CODEX_HOME_DIRS = new Set(['sessions', 'archived_sessions']);
 // signals that must remain watched so a transaction committed before a
 // checkpoint refreshes the usage view.
 const OPENCODE_DB_WATCH_PATTERN = /^opencode(?:-[A-Za-z0-9._-]+)?\.db(?:-(?:wal|shm))?$/;
-// MiMo Code keeps a multi-gigabyte log/ tree alongside its SQLite state files.
+// MiMo keeps a multi-gigabyte log/ tree alongside its SQLite state files.
 // A plain recursive watch of ~/.local/share/mimocode storms the watcher (every
 // SQLite WAL/SHM transaction is a chokidar event, the log dir holds thousands
 // of rotated files). Tokscale discovers mimocode.db and

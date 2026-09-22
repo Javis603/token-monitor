@@ -69,7 +69,7 @@ const supportedToolOrder = [
   'Zed',
   'Kilo',
   'Command Code',
-  'MiMo Code',
+  'MiMo Code / MiMo Desktop',
   'ZCode / GLM',
   'Kiro',
   'CodeBuddy',
