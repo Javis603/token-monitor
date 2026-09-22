@@ -176,7 +176,8 @@ function collectGcmpRows(options = {}) {
           truncated = true;
           break;
         }
-        const key = `${row.requestId}\u0000${sourceId}`;
+        if (!row.requestId) continue;
+        const key = row.requestId;
         const existing = rowsById.get(key);
         rowsById.set(key, existing || row);
       }
