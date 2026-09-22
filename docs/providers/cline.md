@@ -107,8 +107,10 @@ report whichever account happens to be signed in at the default location.
 
 The account identity is hashed from Cline's server-issued account id. A configured key stands for
 itself. The access token is never used for this — it is replaced hourly, and an identity that rotates
-would reach the hub as a new account on every ingest. A sign-in with no account id keeps no
-`accountKey` instead of inventing one.
+would reach the hub as a new account on every ingest. A sign-in whose file carries no account id
+takes the one the profile read answers — the read the balance needs anyway, and it brings the row's
+display email with it — and only when neither names an account does the row keep no `accountKey`
+instead of inventing one.
 
 Being per lane has one consequence worth stating: the same account reached through a key on one machine
 and through the stored sign-in on another lists as two accounts, because the seed differs. That is the
@@ -210,9 +212,8 @@ as spend.
 The window shape is Claude's ("money already consumed"), the line it draws is the
 one WorkBuddy's `Spend` row shows, and the meter stays off because no monthly cap is reported — the same
 rule commandcode's purchased top-up and Claude's credit pool follow. It is best effort like the balance
-read and **absent when the month recorded nothing**, so an account with no usage keeps the shorter scan:
-the plan, the balance and the usage report with a local sign-in, plus the profile read that yields the
-account id on a key-only install.
+read and **absent when the month recorded nothing**, so an account with no usage shows no spend line
+at all rather than a zero.
 
 ### Parsing rules
 
