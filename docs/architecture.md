@@ -16,8 +16,8 @@ This document records cross-runtime constraints that are easy to violate from on
 
 - Widget `local` mode runs the local collector. `client` consumes Hub SSE and posts this device through a sync collector. `host` adds the embedded Hub.
 - A widget sync collector yields to a live headless-agent PID. That PID file is their only coordination.
-- `DeviceState` composes independent usage and limits runtimes into the device record. Limits-only updates preserve usage `updatedAt`; cold-start previews wait for a complete usage baseline.
-- `collectUsageOnce()` is the source of truth for the device shape. Node Hub and Worker normalize and aggregate that same shape; provider credentials and collector-only state never enter it.
+- `DeviceState` composes the final device wire record from usage, the normalized runtime envelope and limits. Limits-only updates preserve usage `updatedAt`; cold-start previews wait for a complete usage baseline.
+- `collectUsageOnce()` owns only the usage portion of that record. Node Hub and Worker normalize and aggregate the final composed shape; provider credentials and collector-only state never enter it.
 - Public compatibility surfaces include settings keys, environment variables, CLI flags, Hub endpoints and the device wire shape. Plan migrations before changing them.
 
 Manually recorded subscriptions are Hub-scoped account data, not device data. Remote writes use versioned conflict detection and must not fork state when the Hub is unavailable. Keep private subscription stamps out of unauthenticated public stats.
@@ -47,7 +47,9 @@ Manually recorded subscriptions are Hub-scoped account data, not device data. Re
 
 ## Configuration and credentials
 
-Node and Electron entry points load the project `.env` without overriding an existing process variable. Widget settings merge persisted GUI values over env-seeded defaults; agent and standalone Hub use `CLI flag -> process env or .env -> built-in default` and never read widget credential storage. The Cloudflare Worker does not load the project `.env`; its configuration arrives through deployment bindings.
+Node entry points load the project `.env` without overriding an existing process variable. Electron does so only when unpackaged; packaged builds use the process environment and persisted widget settings. The Cloudflare Worker does not load the project `.env`; its configuration arrives through deployment bindings.
+
+Widget settings merge persisted GUI values over process-environment-seeded defaults. For agent and standalone Hub options that expose a CLI flag, precedence is `CLI flag -> process env or .env -> built-in default`; env-only settings have no CLI layer. Neither runtime reads widget credential storage.
 
 - `.env.example` is the supported operator-facing env surface.
 - Widget preferences and account metadata live in `settings.json`; raw GUI-managed credentials live in the permission-restricted shared credential store.
