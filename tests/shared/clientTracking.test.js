@@ -54,9 +54,9 @@ test('micode is deliberately default-tracked despite the claude-import overlap',
     'micode is expected to be default-tracked');
 });
 
-test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in micode', () => {
+test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in qodercn', () => {
   // Display-preference normalization (hide/pin/reorder) keys off the KNOWN list, not
-  // the default-tracked list — so an opt-in client like micode must stay here or its
+  // the default-tracked list — so an opt-in client like qodercn must stay here or its
   // prefs get silently dropped on save/read.
   const known = KNOWN_CLIENTS.split(',');
   assert.ok(known.includes('micode'), 'micode must remain a known client');

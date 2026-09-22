@@ -24,8 +24,8 @@ const { normalizeClientName } = require('../../src/shared/usage');
 
 const trackedClients = DEFAULT_CLIENTS.split(',').map((value) => value.trim()).filter(Boolean);
 // Alias groups are about client identity, not about default-on status. An
-// opt-in client (micode, qodercn) that a user enables gets the same targeted
-// watch ticks as a default-tracked one, so its aliases have to satisfy the same
+// opt-in client (qodercn) that a user enables gets the same targeted watch
+// ticks as a default-tracked one, so its aliases have to satisfy the same
 // partition invariants — checking alias owners against DEFAULT_CLIENTS would
 // silently stop guarding a group the moment its owner is opt-in.
 const knownClients = KNOWN_CLIENTS.split(',').map((value) => value.trim()).filter(Boolean);
