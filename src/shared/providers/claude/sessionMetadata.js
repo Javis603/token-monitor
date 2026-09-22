@@ -339,6 +339,17 @@ function applyLongLineFragments(state) {
   state.longLineTail = Buffer.alloc(0);
   const kind = oversizedRecordKind(head, tail);
   if (kind === 'assistant') {
+    // The usage reading is taken before the stop_reason guard below, matching
+    // the ordinary path, which applies usage whether or not stop_reason states
+    // anything. Claude persists `stop_reason: null` on some assistant records
+    // while still writing valid counters, and the quoted-value match below
+    // cannot see an unquoted null, so guarding first skipped a real reading on
+    // an oversized record that the same response would have updated at normal
+    // size. It cannot apply a half-written record instead: `stop_reason`
+    // precedes `usage` in `message`, so a tail carrying usage has already
+    // written the statement, and a record still being written yields no usage.
+    const contextUsage = contextUsageFromFragments(head, tail);
+    if (contextUsage) applyContextUsage(state, contextUsage.model, contextUsage.usage);
     // stop_reason is the last occurrence, and it trails the assistant text.
     const matches = [...tail.matchAll(/"stop_reason"\s*:\s*"([^"]*)"/g)];
     const reason = matches.length ? matches[matches.length - 1][1] : '';
@@ -350,8 +361,6 @@ function applyLongLineFragments(state) {
     if (!reason) return;
     state.stopReason = reason;
     state.userSinceStop = false;
-    const contextUsage = contextUsageFromFragments(head, tail);
-    if (contextUsage) applyContextUsage(state, contextUsage.model, contextUsage.usage);
     return;
   }
   if (kind !== 'user') return;

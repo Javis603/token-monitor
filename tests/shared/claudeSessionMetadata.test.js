@@ -494,6 +494,49 @@ test('oversized records are recognized when the root discriminator lands past th
   assert.equal(readSessionTurnEnded(file, { cache: new Map() }), false, 'a tool_use pause is not an end');
 });
 
+test('an oversized assistant record applies usage even when stop_reason is null', (t) => {
+  // The ordinary path applies usage whether or not stop_reason states anything,
+  // because both live on the same assistant record. Claude persists
+  // `stop_reason: null` on real transcripts while still writing valid counters,
+  // and the quoted-value match cannot see an unquoted null. Guarding the usage
+  // read behind that match therefore skipped a real reading on an oversized
+  // record that the same response would have updated at normal size.
+  const huge = 'y'.repeat(300 * 1024);
+  const { readSessionTurnEnded } = require('../../src/shared/providers/claude/sessionMetadata');
+  const nullStop = JSON.stringify({
+    parentUuid: 'p1',
+    isSidechain: false,
+    message: {
+      id: 'msg_null',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-opus-5',
+      content: [{ type: 'thinking', thinking: huge }],
+      stop_reason: null,
+      usage: { input_tokens: 4_000, cache_creation_input_tokens: 1_000, cache_read_input_tokens: 194_000 }
+    },
+    apiBlockIndex: 0,
+    type: 'assistant',
+    uuid: 'u1',
+    timestamp: '2026-01-01T00:00:00.000Z'
+  });
+  const prior = JSON.stringify({
+    type: 'assistant',
+    message: { id: 'msg_prior', model: 'claude-opus-5', stop_reason: 'end_turn', usage: { input_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 51_000 } }
+  });
+  const { dir, file } = fixture([prior, nullStop]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 199_000,
+    contextWindow: 1_000_000
+  });
+
+  // A null stop_reason states nothing about the turn, so the boundary keeps the
+  // previous reading rather than being retired by an absent reason.
+  assert.equal(readSessionTurnEnded(file, { cache: new Map() }), true, 'a null stop_reason is not evidence of an active turn');
+});
+
 test('Claude session context distinguishes absent from malformed optional cache counters', (t) => {
   const assistant = (usage) => JSON.stringify({
     type: 'assistant',
