@@ -5,14 +5,13 @@
 // src/shared/limits/collector.js.
 //
 // The endpoint, the field names and the credential variable names are the ones the
-// public ClinePass clients already use — CodexBar, CodeBurn and OpenClaude — and
-// the ones Cline's own dashboard client calls
-// (`GET /api/v1/users/me/plan/usage-limits`, one `five_hour` / `weekly` /
-// `monthly` window per entry; CodexBar's ClinePass guide names that endpoint and
-// those three windows verbatim), so a key configured for one of those tools works
-// here unchanged. The guards below are this provider's own reading of that
-// contract, and every choice they make where it is unclear is recorded in
-// docs/providers/cline.md.
+// public ClinePass clients already use — CodexBar, CodeBurn and OpenClaude — so a
+// key configured for one of those tools works here unchanged. CodexBar's ClinePass
+// guide names the request and the three window types verbatim (`GET
+// /api/v1/users/me/plan/usage-limits`, one `five_hour` / `weekly` / `monthly` entry
+// each), and the endpoint itself answers this credential live. The guards below are
+// this provider's own reading of that contract, and every choice they make where it
+// is unclear is recorded in docs/providers/cline.md.
 //
 // Credentials come from two places, in this order:
 //

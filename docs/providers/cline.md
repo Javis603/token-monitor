@@ -107,10 +107,12 @@ The endpoint answers one `five_hour`, `weekly` and `monthly` entry per account, 
 and an optional `resetsAt`, mapped to the shared `session`, `weekly` and `billing` windows. The rolling
 window is shown as **5-hour**, the vendor's own name for it (its ClinePass page lists "5-hour rolling
 window", "Weekly", "Monthly"), which is the rule `src/shared/limitWindowLabels.js` applies to a vendor
-that publishes its names. The shape rests on Cline's dashboard client and the public ClinePass clients;
-the path is verified live as far as an account with no subscription allows, which is the 404
-`no plan history found for user`. That answer means there are no ClinePass windows to show, exactly like
-an empty `limits: []` — and with credit in hand, the credit is the reading.
+that publishes its names. That mapping rests on the public ClinePass clients, which name the request and
+the three window types; the path itself is verified live as far as an account with no subscription
+allows, which is the 404 `no plan history found for user`. That answer means there are no ClinePass
+windows to show, exactly like an empty `limits: []` — and with credit in hand, the credit is the reading.
+Cline's own UI points at its dashboard for usage rather than reading it in-product, so that client is not
+a source the mapping could be checked against.
 
 **The free-model allowance is not readable.** `cline-free/*` models carry a daily per-model cap that no
 endpoint reports: Cline's own clients read it out of the 429's message text (`isClineFreeModelLimitMessage`
