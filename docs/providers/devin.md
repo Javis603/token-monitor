@@ -3,11 +3,18 @@ summary: "Devin (Cognition) usage: CLI sessions.db plus Desktop acp-events ACP l
 read_when:
   - Changing Devin source detection or watch behavior
   - Debugging missing Devin usage or session titles
+  - Changing Devin account quota collection
 ---
 
 # Devin
 
-Devin is a regular Tokscale-backed client, enabled by default on new installs. The logical client id is `devin`; Tokscale splits it into two scanners — `devin-cli` and `devin-desktop` — and Token Monitor expands `devin` to both (`tokscaleClientMapping.js`) and folds their rows back into one client. Existing saved client selections are preserved; enable Devin in the tracked-tools settings if it is not selected. No Devin credentials or API connection are needed.
+Devin is both a Tokscale-backed usage client and an optional AI Tool Limits provider. The logical client id is `devin`; Tokscale splits it into two scanners — `devin-cli` and `devin-desktop` — and Token Monitor expands `devin` to both (`tokscaleClientMapping.js`) and folds their rows back into one client. Existing saved client selections are preserved; enable Devin in the tracked-tools settings if it is not selected. Local token tracking needs no Devin credentials. Daily/weekly quota and extra usage balance need the separate web session setup below.
+
+## Account limits
+
+Token Monitor requests `GET https://app.devin.ai/api/<organization>/billing/quota/usage` with the browser session's Bearer token. In Settings → AI Tool Limits → Devin, open Devin Usage & Limits, inspect the successful `billing/quota/usage` request in DevTools, then paste its `Authorization` value and `x-cog-org-id`. The token is stored in the local credential store; it is never exposed to the renderer after saving and is sent only to `app.devin.ai`.
+
+The response supplies Daily and Weekly percentages and reset timestamps. When Devin sets `hide_daily_quota` to `true`, Token Monitor omits Daily while retaining Weekly. `overage_balance` (or `overage_balance_cents`) is shown as the USD Extra usage balance. Headless installs can set `DEVIN_BEARER_TOKEN` and `DEVIN_ORGANIZATION`; `TOKEN_MONITOR_DEVIN_BEARER_TOKEN` and `TOKEN_MONITOR_DEVIN_ORGANIZATION` are also accepted.
 
 ## Sources
 

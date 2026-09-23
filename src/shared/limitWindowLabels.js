@@ -24,6 +24,7 @@
   const FIVE_HOUR_WINDOW_PROVIDERS = new Set([
     'alibaba',
     'antigravity',
+    'cline',
     'commandcode',
     'kimi',
     'volcengine',

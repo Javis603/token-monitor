@@ -151,6 +151,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   ollama: {
     validateCookie: (cookie) => ipcRenderer.invoke('ollama:validateCookie', cookie)
   },
+  cline: {
+    validateApiKey: (apiKey) => ipcRenderer.invoke('cline:validateApiKey', apiKey)
+  },
   factory: {
     validateApiKey: (apiKey) => ipcRenderer.invoke('factory:validateApiKey', apiKey)
   },
