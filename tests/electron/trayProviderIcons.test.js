@@ -14,7 +14,7 @@ const {
   trayProviderOpticalRatio
 } = require('../../src/electron/renderer/trayProviderIcons');
 
-const CURRENT_TOOLS = ['claude', 'codex', 'hermes', 'opencode', 'openclaw', 'cursor', 'antigravity', 'cline', 'amp', 'grok', 'commandcode', 'reasonix', 'dsh', 'lmstudio', 'unsloth'];
+const CURRENT_TOOLS = ['claude', 'codex', 'hermes', 'opencode', 'openclaw', 'cursor', 'antigravity', 'cline', 'amp', 'grok', 'commandcode', 'reasonix', 'dsh', 'lmstudio', 'unsloth', 'devin'];
 
 function assetPathFromRendererSource(source) {
   return path.resolve(__dirname, '..', '..', 'src', 'electron', 'renderer', source);
@@ -37,7 +37,6 @@ test('tray provider icon sources keep optimized menubar icons where available', 
   assert.equal(sources.hermes, '../../../assets/icons/hermes-agent.svg');
   assert.equal(sources.grok, '../../../assets/icons/grok.svg');
   assert.equal(trayProviderIconSources(['kimi']).kimi, '../../../assets/icons/kimi.svg');
-  assert.equal(trayProviderIconSources(['micode']).micode, '../../../assets/icons/xiaomi.svg');
   assert.equal(trayProviderIconSources(['mimo']).mimo, '../../../assets/icons/xiaomi.svg');
   assert.equal(trayProviderIconSources(['zcode']).zcode, '../../../assets/icons/zai.svg');
   assert.equal(trayProviderIconSources(['zaiteam']).zaiteam, '../../../assets/icons/zai.svg');

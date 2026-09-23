@@ -26,7 +26,7 @@
 
 ## Token Monitor 是什么？
 
-一款桌面小部件，实时显示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 37+ 种 AI 编程工具的 Token 用量与 AI 工具额度，具备实时多设备同步与历史使用趋势功能，并支持按工具、设备、模型、session 或项目分项显示。
+一款桌面小部件，实时显示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 38+ 种 AI 编程工具的 Token 用量与 AI 工具额度，具备实时多设备同步与历史使用趋势功能，并支持按工具、设备、模型、session 或项目分项显示。
 
 ## 支持的工具
 
@@ -41,18 +41,18 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor IDE / Cursor CLI | `~/.config/tokscale/cursor-cache/`（账号层级用量导出） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.gemini/`（`antigravity/`、`antigravity-ide/`、`antigravity-backup/`、`antigravity-cli/conversations/`） | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks（`.../saoudrizwan.claude-dev/tasks/`）、`~/.cline/data/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks（`.../saoudrizwan.claude-dev/tasks/`）、`~/.cline/data/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/amp.png" width="28" alt="Amp" /> | Amp | `~/.local/share/amp/threads/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/droid.png" width="28" alt="Factory Droid" /> | Factory Droid | `~/.factory/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" /> | Kimi CLI / Kimi Code / Kimi Work | `~/.kimi/sessions/`、`~/.kimi-code/sessions/`、`<platform-app-data>/kimi-desktop/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/`（`sessions/`、`logs/unified.jsonl`） | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`、`~/.copilot/`（`otel/`、`data.db`） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`、`~/.copilot/`（`otel/`、`data.db`、`session-store.db`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi / Oh My Pi | `~/.pi/agent/sessions/`、`~/.omp/agent/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`；VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`）—— 扩展记录仅限 Linux 与远程/WSL | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/mimo-code.png" width="28" alt="MiMo Code" /> | MiMo Code | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/`（`projects/`、`cli/db/db.sqlite`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`、Kiro IDE globalStorage 与 `kiro-cli` 数据库 | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 与 IDE / VS Code 扩展日志 | ✅ | — | — |
@@ -64,6 +64,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/`（`Data/Agents/.claude/projects/` V2、`.claude/projects/` legacy） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/lmstudio.png" width="28" alt="LM Studio" /> | LM Studio | `~/.lmstudio/server-logs/**/*.log` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/unsloth.png" width="28" alt="Unsloth" /> | Unsloth Studio | `~/.unsloth/studio/studio.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/devin.png" width="28" alt="Devin" /> | Devin CLI / Devin Desktop | `~/.local/share/devin/cli/sessions.db`, `<platform-app-data>/Devin/User/acp-events/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API 密钥（查询用量／密钥上限；获授权访问 credits 时显示余额，官方文档指定 Management 密钥） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" /> | Minimax | Minimax API 密钥（通过 Minimax API 查询 Token Plan 额度） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key 或火山引擎 AK/SK（通过火山引擎 API 查询火山方舟 Coding Plan / Agent Plan 额度） | — | ✅ | — |
@@ -80,6 +81,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 - 上表为默认路径。Token Monitor 与 Tokscale 遵循相同的环境变量覆盖：`~/.local/share/` 下的路径跟随 `$XDG_DATA_HOME`，各工具另有 `$CODEX_HOME`、`$GROK_HOME`、`$HERMES_HOME`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME` 以及 `$CLINE_*` 系列。
 - LM Studio 追踪目前仅涵盖服务器日志中记录的 OpenAI 兼容 `/v1/chat/completions` 和 `/v1/responses` 请求。通过 LM Studio 内置 Chat 界面发起的对话，以及原生 `/api/v1/chat` 请求均不包括在内。
 - Unsloth Studio 从 `studio.db` 追踪 Studio 对话与本地 API 的推理用量。本地推理的 API 费用为零；可识别的按量计费供应商使用 Tokscale 的价格估算。不包括训练 Token。详见 [Unsloth 数据来源说明](docs/providers/unsloth.md)。
+- Devin 从本地 `sessions.db` 追踪 Devin CLI 会话，并从 `acp-events` ACP 日志追踪 Devin Desktop 代理会话；同一 session 两边都有数据时以 CLI 数据库为准。Desktop 的覆盖范围取决于连接的 ACP 代理：只有会在本地写入 `usage_update` 事件的代理才会计入，而 Devin Desktop 默认的 `devin-cloud` 代理在服务端计量，因此默认的 Desktop 配置不会报告 Desktop token。session 标题与项目归属取自 CLI 数据库。详见 [Devin 数据来源说明](docs/providers/devin.md)。
 
 - Command Code transcript 不包含实际 Token 数或每条消息的模型信息。Token 用量根据 transcript 文本估算；模型归属与推算成本可能反映当前配置的模型，而不是每次请求当时实际使用的模型。
 - Cursor 缓存来自 Cursor 的账号层级用量导出，因此同时涵盖 Cursor IDE 和 Cursor CLI。Token Monitor 会自动检测 Cursor 桌面版已登录的账号，也可在设置中手动新增。缓存过期时会自动重新同步，但刚完成的 session 可能需要几分钟才会出现在 Cursor 控制台，因此用量会在同步后更新，而非即时显示。
@@ -123,7 +125,7 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 
 ### 用量追踪
 
-- **实时 Token 追踪**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 30+ 种 AI 工具，每轮对话后 UI 在数秒内刷新（完整列表见上方表格）
+- **实时 Token 追踪**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 31+ 种 AI 工具，每轮对话后 UI 在数秒内刷新（完整列表见上方表格）
 - **实时 Token 速率**：可选显示的实时读数，以 `tok/s` 显示生成速度或以 `tok/min` 显示总消耗
 - **单个 session 明细**：点进某个 session，可看每条提问的 Token 消耗，并展开查看每次回复的 Token 拆分与用到的工具（打开时才实时读取本机 transcript 或数据库，绝不同步）
 - **缓存命中统计**：点击任何工具或模型，展开查看输入 Token（缓存命中与未命中）、输出 Token 的详细分类及命中率百分比
@@ -133,7 +135,7 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 
 ### 额度、趋势与导出
 
-- **AI 工具额度检测**：涵盖 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 24+ 家提供方的 session、每日、每周、账单与 credits 窗口，支持多个 OpenRouter／第三方 profile，以及余额型账户（Claude credits、DeepSeek 预付余额与消费历史、第三方余额）
+- **AI 工具额度检测**：涵盖 Claude Code、Codex、Cursor、OpenRouter、第三方 API、GLM、Kimi 等 26+ 家提供方的 session、每日、每周、账单与 credits 窗口，支持多个 OpenRouter／第三方 profile，以及余额型账户（Claude credits、DeepSeek 预付余额与消费历史、第三方余额）
 - **多账号与 Codex 账号切换**：同一提供方可追踪多个账号、各自显示额度；已加入追踪的 Codex 账号还能一键切换为本机使用账号，免重新登录授权
 - **Codex 重置预测**：可选开启的第三方重置预测，显示预计重置时间、重置类型（Regular 或 Banked）与上次重置时间
 - **保留已删除会话用量**：许多工具会定期清除旧 session（Claude Code 默认清 30 天前的 transcript），一删就再也算不到。开启后，Token Monitor 会在本地不设期限地归档已观测到的每日工具／模型用量，让热力图与趋势即使在来源文件被清掉后仍然完整（详见下方[〈会话数据保留期〉](#会话数据保留期)）
@@ -156,6 +158,7 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 - **分组视图**：可按工具、设备、模型、session、项目或账户额度分组查看用量
 - **菜单栏（macOS）与系统托盘（Windows）弹出窗口**：图标旁可显示成本、token 数，或最接近用完的提供方剩余额度百分比
 - **悬浮小窗模式**：可将组件收成可拖动的紧凑小窗，支持点击或悬停预览展开，并可显示托盘同款内容
+- **侧边栏（macOS 与 Windows）**：在屏幕边缘显示额度与用量；可自动隐藏或始终显示，并通过悬停卡片查看各账号额度、最近会话及 token 用量。可在设置中选择、排序及配置项目，也可从菜单栏或系统托盘开关
 - **菜单栏排版自定义**：菜单栏与悬浮小窗的显示内容可以直接挑内置版式，也可以选“自定义…”自己排——加入 AI 工具图标、额度条、百分比、重置时间、成本、Token 速率或自定义文字等项目，拖动排序并实时预览，每个项目还能各自指定 AI 工具、账号、额度周期与字体
 - **外观控制**：界面主题切换（含浅色模式）、各工具厂商色、玻璃透明度、模糊度、完全透明窗口、自定义字体
 - **原生 macOS 小部件**：在 macOS 14+ 上通过小号、中号和大号布局查看 Token 用量与成本、趋势、各 AI 工具的剩余额度与重置时间、活动热力图，以及按工具或模型分类的明细

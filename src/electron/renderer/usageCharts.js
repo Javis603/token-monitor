@@ -16,6 +16,54 @@
     return total;
   }
 
+  // Fold Tokscale's per-client alias into the canonical identity, so a legacy
+  // row that still carries `antigravity-cli` cannot render as a second tool
+  // beside `antigravity`. This runs where the chart reads `perClient`, which is
+  // also where the legend's keys and segments come from, so both stay in sync
+  // without a second folding site.
+  //
+  // Deliberately the same single alias the other renderer paths fold
+  // (`dashboard.js` breakdown, `fixedPeriodRanges.js`): `coerceHistory()` does
+  // not canonicalize a wire payload, so folding a wider set here would make the
+  // chart and the breakdown under it disagree about the very same day. Other
+  // raw ids (`omp`, `kilocode`) are left unfolded on every renderer path alike;
+  // widening that belongs to one shared canonicalizer, not to this chart.
+  const CLIENT_ALIASES = Object.freeze({
+    'antigravity-cli': 'antigravity'
+  });
+
+  function canonicalClientKey(key) {
+    const raw = String(key == null ? '' : key);
+    return CLIENT_ALIASES[raw] || raw;
+  }
+
+  // Sum a `perClient` map by canonical key. Returns undefined for a non-object so
+  // callers can keep treating a missing map as "no data".
+  function foldClientMap(map) {
+    if (!map || typeof map !== 'object') return undefined;
+    const folded = {};
+    for (const [key, value] of Object.entries(map)) {
+      const client = canonicalClientKey(key);
+      const existing = Object.prototype.hasOwnProperty.call(folded, client);
+      if (!existing) {
+        folded[client] = { ...value };
+      } else {
+        const target = folded[client];
+        for (const [metric, metricValue] of Object.entries(value || {})) {
+          target[metric] = n(target[metric]) + n(metricValue);
+        }
+      }
+    }
+    return folded;
+  }
+
+  // The `perClient` map a chart stacks, folded when it is the client axis. The
+  // model axis keeps its own key space, so it is returned as-is.
+  function stackedClientField(entry, field) {
+    if (field !== 'perClient') return entry[field];
+    return foldClientMap(entry[field]);
+  }
+
   // Wall-clock "today" as a LOCAL day key. Day cells and the live period totals
   // patched into them are both local-day scoped (the collector keys periods with
   // localTodayKey), so reading today off toISOString() — which is UTC — pasted the
@@ -82,23 +130,32 @@
       { width: 600, height: 180, padTop: 8, padRight: 8, padBottom: 20, padLeft: 40, gap: 0.2, stackBy: 'client', metric: 'tokens', labelKey: 'date' },
       options || {}
     );
-    const field = o.stackBy === 'model' ? 'perModel' : 'perClient';
-    const entries = Array.isArray(series) ? series : [];
+  const field = o.stackBy === 'model' ? 'perModel' : 'perClient';
+  const entries = Array.isArray(series) ? series : [];
 
-    const keyTotals = {};
-    for (const e of entries) {
-      for (const [k, v] of Object.entries(e[field] || {})) keyTotals[k] = (keyTotals[k] || 0) + n(v && v[o.metric]);
-    }
-    const keys = Object.keys(keyTotals).sort((a, b) => keyTotals[b] - keyTotals[a] || a.localeCompare(b));
+  // Read the stacked map through the alias fold so a legacy key cannot become a
+  // second series. `keys` and each bar's `segments` are both derived from the
+  // folded map, which is why folding here covers the chart and the legend at
+  // once; the legend is built from `model.keys` / `bar.segments` downstream.
+  const foldedEntries = entries.map((entry) => {
+    const stacked = stackedClientField(entry || {}, field);
+    return stacked === entry?.[field] ? entry : { ...entry, [field]: stacked };
+  });
 
-    const totals = entries.map((e) => sumMetric(e[field], o.metric));
-    const maxTotal = Math.max(1, ...totals);
-    const innerW = o.width - o.padLeft - o.padRight;
-    const innerH = o.height - o.padTop - o.padBottom;
-    const slot = entries.length ? innerW / entries.length : innerW;
-    const barWidth = slot * (1 - o.gap);
+  const keyTotals = {};
+  for (const e of foldedEntries) {
+    for (const [k, v] of Object.entries(e[field] || {})) keyTotals[k] = (keyTotals[k] || 0) + n(v && v[o.metric]);
+  }
+  const keys = Object.keys(keyTotals).sort((a, b) => keyTotals[b] - keyTotals[a] || a.localeCompare(b));
 
-    const bars = entries.map((e, i) => {
+  const totals = foldedEntries.map((e) => sumMetric(e[field], o.metric));
+  const maxTotal = Math.max(1, ...totals);
+  const innerW = o.width - o.padLeft - o.padRight;
+  const innerH = o.height - o.padTop - o.padBottom;
+  const slot = foldedEntries.length ? innerW / foldedEntries.length : innerW;
+  const barWidth = slot * (1 - o.gap);
+
+  const bars = foldedEntries.map((e, i) => {
       const x = o.padLeft + i * slot + (slot - barWidth) / 2;
       const source = e[field] || {};
       let cum = 0;
@@ -362,10 +419,11 @@
     return result;
   }
 
+  // A vendor shares the colour of the client it names (moonshot/kimi, zai/zaiteam, xai/grok).
   const clientColors = {
-    claude: '#cc7c5e', codex: '#49a3b0', opencode: '#000000', hermes: '#d4af37', openclaw: '#ff4d4d', cursor: '#000000', antigravity: '#4285f4', cline: '#323B43',
-    amp: '#F34E3F', droid: '#000000', kimi: '#16191e', qwen: '#615ced', grok: '#000000', copilot: '#000000', pi: '#000', zed: '#4173e7', kilo: '#F8F676', commandcode: '#8C4EDD', micode: '#000000', zcode: '#000000', kiro: '#9046FF', codebuddy: '#6C4DFF', workbuddy: '#0DC8A5', proma: '#000000', qodercn: '#2ADB5C', reasonix: '#4d6bfe', dsh: '#4d6bfe', cherrystudio: '#EA5E5D', lmstudio: '#6C5CE7', unsloth: '#40B85A',
-    openrouter: '#6566F1', gemini: '#4285f4', qoder: '#2ADB5C', deepseek: '#4d6bfe', xai: '#000000', meta: '#1d65c1', mistral: '#fa520f', moonshot: '#16191e', zai: '#000000', zaiteam: '#000000', cohere: '#39594d', xiaomi: '#ff6700', minimax: '#f23f5d', doubao: '#1E37FC', hunyuan: '#0053E0', volcengine: '#006EFF', trae: '#32F08C', ollama: '#888888', alibaba: '#615CED', thirdparty: '#8090A6',
+    claude: '#cc7c5e', codex: '#49a3b0', opencode: '#000000', hermes: '#d4af37', openclaw: '#ff4d4d', cursor: '#000000', antigravity: '#4285f4', cline: '#9D4EDD',
+    amp: '#F34E3F', droid: '#000000', kimi: '#16191e', qwen: '#615ced', grok: '#000000', copilot: '#000000', pi: '#000', zed: '#4173e7', kilo: '#F8F676', commandcode: '#8C4EDD', mimo: '#000000', zcode: '#000000', kiro: '#9046FF', codebuddy: '#6C4DFF', workbuddy: '#0DC8A5', proma: '#000000', qodercn: '#2ADB5C', reasonix: '#4d6bfe', dsh: '#4d6bfe', cherrystudio: '#EA5E5D', lmstudio: '#6C5CE7', unsloth: '#40B85A', devin: '#000000',
+    openrouter: '#6566F1', gemini: '#4285f4', qoder: '#2ADB5C', deepseek: '#4d6bfe', xai: '#000000', meta: '#1d65c1', mistral: '#fa520f', moonshot: '#16191e', zai: '#000000', zaiteam: '#000000', cohere: '#39594d', xiaomi: '#000000', minimax: '#f23f5d', doubao: '#1E37FC', hunyuan: '#0053E0', volcengine: '#006EFF', trae: '#32F08C', ollama: '#888888', alibaba: '#615CED', nvidia: '#74B71B', stepfun: '#000000', thirdparty: '#8090A6',
     default: '#6ab4f0'
   };
   // Kept distinct from every named provider color above — sharing a hex with a real
@@ -381,16 +439,26 @@
     if (/gemini|gemma|google/.test(name)) return 'gemini';
     if (/grok|xai/.test(name)) return 'xai';
     if (/deepseek/.test(name)) return 'deepseek';
+    if (/nemotron|nvidia/.test(name)) return 'nvidia';
     if (/llama|meta|muse-spark(?:-|$)/.test(name)) return 'meta';
     if (/mistral|mixtral|codestral/.test(name)) return 'mistral';
-    if (/qwen|qwq|qvq/.test(name)) return 'qwen';
-    if (/kimi|moonshot|k2d6-agent|k3-agent/.test(name)) return 'kimi';
+    if (/qwen|qwq|qvq|qmodel/.test(name)) return 'qwen';
+    // Kimi's coding-plan catalog also serves bare `k2`/`k3` ids with no `kimi`
+    // prefix (`k3`, `k3-256k`), which the name alternatives cannot see. The
+    // delimited-token alternative mirrors Tokscale's provider identity, and the
+    // two `-agent` ids stay explicit because their suffix is alphanumeric.
+    // Kept inside the same pattern — the widget copies these regexes verbatim
+    // (tests/electron/widgetVendorParity.test.js), so a `||` second test would
+    // drift the two resolvers apart.
+    if (/kimi|moonshot|k2d6-agent|k3-agent|(?:^|[^a-z0-9])k[23](?:[^a-z0-9]|$)/.test(name)) return 'kimi';
     if (/chatglm|\bglm-|\bzai\b|z\.ai|zhipu/.test(name)) return 'zai';
     if (/cohere|command-r/.test(name)) return 'cohere';
     if (/mimo|xiaomi/.test(name)) return 'xiaomi';
     if (/minimax|\babab/.test(name)) return 'minimax';
     if (/doubao|\bseed(?:-|$)/.test(name)) return 'doubao';
+    if (/stepfun|step-/.test(name)) return 'stepfun';
     if (/hy\d|hunyuan/.test(name)) return 'hunyuan';
+    if (/^swe[-_]|devin|cognition/.test(name)) return 'devin';
     if (/^big-pickle$/.test(name)) return 'opencode'; // OpenCode Zen stealth model — no vendor hint in the name
     return null;
   }

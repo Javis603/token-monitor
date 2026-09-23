@@ -169,7 +169,7 @@ test('mixed local and Web OpenCode quota fails closed through a pre-provenance H
   );
   const collected = summary.providers[0];
   assert.equal(collected.source, 'local');
-  assert.deepEqual(collected.windows.map((window) => window.source), ['local', 'web']);
+  assert.deepEqual(collected.windows.map((window) => window.source), ['local', 'web', 'web']);
 
   const legacyLimits = roundTripThroughLegacyHub(summary);
   assert.equal(legacyLimits.providers[0].source, 'local');

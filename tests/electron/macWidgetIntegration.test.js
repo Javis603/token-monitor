@@ -173,7 +173,7 @@ function executeMacWidgetDemandWiring() {
   const {
     WIDGET_DEMAND_MARKER,
     WIDGET_DEMAND_PROVISIONAL_MARKER
-  } = require('../../src/electron/macWidgetDemand');
+  } = require('../../src/electron/macWidget/demand');
   const context = vm.createContext({
     process: { platform: 'darwin' },
     path: path.posix,
@@ -394,7 +394,7 @@ test('Widget demand lease marker contract stays aligned between Swift and Electr
   const {
     WIDGET_DEMAND_MARKER,
     WIDGET_DEMAND_PROVISIONAL_MARKER
-  } = require('../../src/electron/macWidgetDemand');
+  } = require('../../src/electron/macWidget/demand');
 
   // The marker filenames are the one cross-process contract: Electron lstat's
   // them from the app group container and the extension writes them. They may
@@ -430,7 +430,7 @@ test('Widget demand lease marker contract stays aligned between Swift and Electr
 
 test('LaunchServices recovery delegates current-host registration to the public native API', () => {
   const recoverySource = fs.readFileSync(
-    path.join(root, 'src', 'electron', 'macWidgetLaunchServicesRecovery.js'),
+    path.join(root, 'src', 'electron', 'macWidget', 'launchServicesRecovery.js'),
     'utf8'
   );
   assert.match(recoverySource, /const REGISTER_HOST_ARGUMENTS = Object\.freeze\(\['--mode', 'register-host'\]\);/);
@@ -783,6 +783,20 @@ test('each Widget family has a purpose-built composition', () => {
   assert.match(widgetActivitySource, /fallback: WidgetL10n\.format\("%lld active days", snapshot\.activity\.activeDays\)/);
   assert.doesNotMatch(widgetDashboardSource, /WidgetFormat\.reset\(/);
   assert.match(widgetDashboardSource, /\(width\|height\)=\["'\]1em\["'\]/);
+});
+
+test('macOS Widget model vendor marks cover the Kimi coding-plan ids', () => {
+  // The widget classifies raw model names itself (the snapshot ships display
+  // names), so its Kimi rule has to stay in step with the renderer's
+  // modelVendorFor — the `k2d6-agent`/`k3-agent` forms whose suffix is
+  // alphanumeric, plus the bare `k2`/`k3` coding-plan ids behind a delimited
+  // token alternative. widgetVendorParity.test.js already locks the pattern to
+  // the renderer's verbatim; this pins that the delimited rule is in it.
+  assert.ok(
+    widgetDashboardSource.includes(
+      'if matches("kimi|moonshot|k2d6-agent|k3-agent|(?:^|[^a-z0-9])k[23](?:[^a-z0-9]|$)") { return "kimi" }'
+    )
+  );
 });
 
 test('macOS Widget packaging keeps the canonical Token Monitor app identity', () => {

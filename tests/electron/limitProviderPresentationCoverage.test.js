@@ -16,6 +16,11 @@
 // that list is invisible to it. Starting from the catalog is what catches the
 // entry that reached none of these surfaces.
 //
+// The row's status pill is the same contract one layer up: a label the list can
+// draw has to resolve to copy, and a label missing from the renderer's translation
+// map renders as raw English in every non-English locale without failing anything.
+// That is asserted here too, from the catalog.
+//
 // The catalog's other hand-wired presentation surfaces are already guarded from
 // the catalog elsewhere and are deliberately not repeated here: the Swift
 // WidgetFormat.provider mirror in macWidgetProviderLabels.test.js, the README
@@ -30,7 +35,11 @@ const vm = require('node:vm');
 
 const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
 const { trayProviderIconSources } = require('../../src/electron/renderer/trayProviderIcons');
-const { limitProviderCapabilityTags } = require('../../src/electron/renderer/limitProviderPresentation');
+const { MESSAGES } = require('../../src/electron/renderer/i18n');
+const {
+  limitProviderCapabilityTags,
+  limitProviderStatusLabel
+} = require('../../src/electron/renderer/limitProviderPresentation');
 
 const rootDir = path.join(__dirname, '..', '..');
 const rendererDir = path.join(rootDir, 'src/electron/renderer');
@@ -111,8 +120,10 @@ test('every catalog provider resolves to a mark asset through its CSS rule', () 
   // .limit-icon-<id> copy of every rule; it now sizes the mark and asks for the
   // same .row-icon-<id> mask a breakdown row does. That class name is built by
   // template literal, so nothing fails if it stops matching the table — which is
-  // why the call site is asserted here, next to the table it depends on.
-  const source = fs.readFileSync(rendererPath, 'utf8');
+  // why the call site is asserted here, next to the table it depends on. The
+  // builder lives in the shared limits view, which both limits surfaces render
+  // their rows from.
+  const source = fs.readFileSync(path.join(rendererDir, 'limitWindowsView.js'), 'utf8');
   assert.match(
     source,
     /mark\.className = `limit-icon row-icon-\$\{id\}`;/,
@@ -167,5 +178,65 @@ test('every catalog provider has capability tags', () => {
       Array.isArray(tags) && tags.length > 0,
       `${id} needs a CAPABILITY_TAGS entry in limitProviderPresentation.js`
     );
+  }
+});
+
+// The renderer's label → copy table, read the way rendererIconSets reads its Sets:
+// evaluated out of app.js instead of pattern-matched, so a comment or a differently
+// quoted entry cannot make the guard pass on a table it did not read.
+function rendererStatusTagKeys() {
+  const source = fs.readFileSync(rendererPath, 'utf8');
+  const start = source.indexOf('const LIMIT_CAPABILITY_TAG_KEYS = {');
+  assert.notEqual(start, -1, 'LIMIT_CAPABILITY_TAG_KEYS should be declared in app.js');
+  const end = source.indexOf('};', start);
+  assert.notEqual(end, -1, 'LIMIT_CAPABILITY_TAG_KEYS should be a closed literal');
+  return vm.runInNewContext(`${source.slice(start, end + 2)}\nLIMIT_CAPABILITY_TAG_KEYS`, {});
+}
+
+test('every status label the Limits list can draw is translated in every locale', () => {
+  // The silent failure the capability tags above have, one step further out: a
+  // label with no LIMIT_CAPABILITY_TAG_KEYS entry is not an error —
+  // translatedLimitCapabilityTag returns the label itself — so a provider-specific
+  // pill renders as raw English in all five locales while the labels beside it are
+  // translated. The table is read only by app.js and its keys are checked against
+  // no locale anywhere, so both halves are asserted here: every label this accessor
+  // can return resolves to a key, and every key resolves to copy in every locale.
+  // A tag carrying its own `key` is exempt — Antigravity's verification label, whose
+  // copy is asserted where it is defined.
+  //
+  // The status vocabulary is written out rather than derived from the branches the
+  // accessor reads, because a status missing from this list is exactly the one that
+  // would escape the sweep.
+  const tagKeys = rendererStatusTagKeys();
+  const statuses = [
+    'ok',
+    'disabled',
+    'noSyncedData',
+    'unauthorized',
+    'rateLimited',
+    'sourceRateLimited',
+    'unavailable',
+    'notConfigured',
+    'error'
+  ];
+  const labels = new Set();
+  for (const id of LIMIT_PROVIDER_IDS) {
+    for (const status of statuses) {
+      const tag = limitProviderStatusLabel({ provider: id, status });
+      if (tag && !tag.key) labels.add(tag.label);
+    }
+  }
+  // One label comes from state rather than a status, and every provider can show it.
+  labels.add(limitProviderStatusLabel({ provider: LIMIT_PROVIDER_IDS[0], status: 'ok', stale: true }).label);
+  for (const label of labels) {
+    const key = tagKeys[label];
+    assert.ok(key, `${JSON.stringify(label)} needs a LIMIT_CAPABILITY_TAG_KEYS entry in app.js`);
+    for (const [locale, messages] of Object.entries(MESSAGES)) {
+      assert.equal(
+        typeof messages[key],
+        'string',
+        `${JSON.stringify(label)} maps to ${key}, which ${locale} does not define`
+      );
+    }
   }
 });

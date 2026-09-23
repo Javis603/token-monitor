@@ -68,6 +68,44 @@ test('dailyBarsChart tolerates empty series', () => {
   assert.equal(c.maxTotal, 1); // never divides by zero
 });
 
+// A legacy or older-Hub history payload can still carry the raw Tokscale alias
+// beside its canonical id (coerceHistory() does not canonicalize). The chart is
+// the only place the Trends legend reads its keys and segments from, so folding
+// here is what keeps the chart and the breakdown agreeing on one Antigravity row.
+test('dailyBarsChart folds a legacy client alias into one canonical series', () => {
+  const series = [{
+    date: '2026-09-18',
+    tokens: 30,
+    perClient: { antigravity: { tokens: 10, cost: 1 }, 'antigravity-cli': { tokens: 20, cost: 2 } },
+    perModel: { 'gemini-3.8-flash': { tokens: 30 } }
+  }];
+
+  const c = dailyBarsChart(series, { ...BAR_OPTS, stackBy: 'client', metric: 'tokens' });
+  assert.deepEqual(c.keys, ['antigravity']);
+  assert.deepEqual(c.bars[0].segments.map((s) => ({ key: s.key, value: s.value })), [{ key: 'antigravity', value: 30 }]);
+  assert.equal(c.bars[0].total, 30);
+
+  // The model axis has its own key space and must be left alone.
+  const byModel = dailyBarsChart(series, { ...BAR_OPTS, stackBy: 'model', metric: 'tokens' });
+  assert.deepEqual(byModel.keys, ['gemini-3.8-flash']);
+});
+
+// The chart must fold exactly what the breakdown beside it folds. A wider fold
+// here would make the two disagree about the same day: the chart would show one
+// series while the breakdown kept the raw id as a second row.
+test('dailyBarsChart leaves raw ids the breakdown does not fold as separate series', () => {
+  const series = [{
+    date: '2026-09-18',
+    tokens: 30,
+    perClient: { pi: { tokens: 10 }, omp: { tokens: 20 } },
+    perModel: {}
+  }];
+
+  const c = dailyBarsChart(series, { ...BAR_OPTS, stackBy: 'client', metric: 'tokens' });
+  assert.deepEqual(c.keys.slice().sort(), ['omp', 'pi']);
+  assert.equal(c.bars[0].total, 30);
+});
+
 test('candleChart groups days into bucketDays-wide OHLC candles anchored to the latest day', () => {
   // 9 consecutive days, values 1..9, bucketed 3-at-a-time anchored to 06-09:
   //   [06-01,02,03] [06-04,05,06] [06-07,08,09]

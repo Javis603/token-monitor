@@ -1,5 +1,6 @@
 ---
 summary: "Alibaba Token Plan provider notes: the four console variants, cookie scope, sec_token resolution, and which variants are verified."
+ids: [alibaba]
 read_when:
   - Adding or modifying the Alibaba Token Plan provider
   - Debugging an Alibaba cookie that saves but reports unauthorized or unavailable
@@ -14,8 +15,8 @@ Reads Token Plan quota from the Alibaba Cloud console. One provider id (`alibaba
 |---|---|---|---|---|
 | `cn` | `bailian.console.aliyun.com` | Team | `GetSubscriptionSummary` | account-level `billing` total |
 | `intl` | `modelstudio.console.alibabacloud.com` | Team | `GetSubscriptionSummary` | account-level `billing` total |
-| `cn-personal` | `bailian.console.aliyun.com` | Personal/Solo | `bailian-cs.console.aliyun.com` rolling-window API | `weekly`, plus `session` (5h) when reported |
-| `intl-personal` | `modelstudio.console.alibabacloud.com` | Personal/Solo | `bailian-singapore-cs.alibabacloud.com` rolling-window API | `weekly`, plus `session` (5h) when reported |
+| `cn-personal` | `bailian.console.aliyun.com` | Personal/Solo | `bailian-cs.console.aliyun.com` rolling-window API | `billing` (monthly), plus `session`/`weekly` when still reported |
+| `intl-personal` | `modelstudio.console.alibabacloud.com` | Personal/Solo | `bailian-singapore-cs.alibabacloud.com` rolling-window API | `billing` (monthly), plus `session`/`weekly` when still reported |
 
 The variant is one enum rather than separate site and plan settings because host, product code, gateway action and window shape all move together — two settings would let a user pick a combination that does not exist.
 
@@ -60,7 +61,7 @@ Team quota is allocated **per seat**, not as one shared pool. This provider show
 
 ## Personal windows
 
-Alibaba defines a 5-hour and a 7-day window, but states that "the 5-hour limit is currently lifted for a limited time and is not enforced". The parser reflects whatever the gateway reports rather than assuming both exist — a response carrying only the weekly window produces only a weekly row, and no placeholder 5-hour row is synthesized.
+Alibaba's window set is not fixed. It originally defined 5-hour and 7-day windows, lifted the 5-hour cap "for a limited time", and later retired the weekly cap so that a current response carries only a monthly window (`per1MonthPercentage` / `per1MonthResetTime`, total from `quota-config[plan].monthly`). The parser reflects whatever the gateway reports rather than assuming a set — a monthly-only response produces a single `billing` window labelled "Monthly", and no placeholder rows are synthesized for windows that are absent.
 
 ## Known gaps
 

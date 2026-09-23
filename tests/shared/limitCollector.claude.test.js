@@ -106,7 +106,7 @@ test('Claude Web source takes precedence and carries stable account metadata', a
             json: async () => [{ uuid: 'organization-web', name: 'Example Workspace' }]
           };
         }
-        if (url.endsWith('/api/organizations/organization-web/usage')) {
+        if (url.endsWith('/api/organizations/organization-web/usage?cedar_ember=1')) {
           return {
             ok: true,
             json: async () => ({
@@ -174,7 +174,7 @@ test('Claude Web source takes precedence and carries stable account metadata', a
     'every Claude Web request should carry the browser user-agent'
   );
   assert.equal(first.requests[0].url.endsWith('/api/organizations'), true);
-  assert.equal(first.requests[1].url.endsWith('/api/organizations/organization-web/usage'), true);
+  assert.equal(first.requests[1].url.endsWith('/api/organizations/organization-web/usage?cedar_ember=1'), true);
   assert.equal(first.requests[2].url.endsWith('/api/account'), true);
 });
 
@@ -229,7 +229,7 @@ test('Claude Web follows a renewed sessionKey across sequential requests and rep
           json: async () => [{ uuid: 'organization-web', name: 'Workspace' }]
         };
       }
-      if (url.endsWith('/usage')) {
+      if (url.endsWith('/usage?cedar_ember=1')) {
         return {
           ok: true,
           json: async () => ({
@@ -283,7 +283,7 @@ test('Claude Web reports a renewed sessionKey even when a later request fails', 
             json: async () => [{ uuid: 'organization-web', name: 'Workspace' }]
           };
         }
-        if (url.endsWith('/usage')) {
+        if (url.endsWith('/usage?cedar_ember=1')) {
           return {
             ok: true,
             json: async () => ({
@@ -331,7 +331,7 @@ test('Claude Web retries later rotation from the last persisted sessionKey after
           json: async () => [{ uuid: 'organization-web', name: 'Workspace' }]
         };
       }
-      if (url.endsWith('/usage')) {
+      if (url.endsWith('/usage?cedar_ember=1')) {
         assert.equal(options.headers.cookie, 'sessionKey=sk-ant-first-renewal');
         return {
           ok: true,
@@ -388,7 +388,7 @@ test('Claude Web prefers chat-capable organizations, then non-API-only organizat
             })
           };
         }
-        const match = url.match(/\/api\/organizations\/([^/]+)\/usage$/);
+        const match = url.match(/\/api\/organizations\/([^/]+)\/usage\?cedar_ember=1$/);
         assert.ok(match);
         usageOrganizationId = decodeURIComponent(match[1]);
         return {
@@ -463,7 +463,7 @@ test('Claude Web caches stable identity and reuses it when account lookup is tra
   assert.equal(cached.accountKey, first.accountKey);
   assert.equal(cached.windows[0].usedPercent, 23);
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].endsWith('/usage'), true);
+  assert.equal(requests[0].endsWith('/usage?cedar_ember=1'), true);
 
   requests.length = 0;
   nowMs += 2000;
@@ -474,7 +474,7 @@ test('Claude Web caches stable identity and reuses it when account lookup is tra
   assert.equal(second.accountKey, first.accountKey);
   assert.equal(second.windows[0].usedPercent, 37);
   assert.equal(requests.some((url) => url.endsWith('/api/account')), true);
-  assert.equal(requests.some((url) => url.endsWith('/usage')), true);
+  assert.equal(requests.some((url) => url.endsWith('/usage?cedar_ember=1')), true);
 });
 
 test('Claude Web requires the account endpoint on a cold identity cache', async () => {
@@ -485,7 +485,7 @@ test('Claude Web requires the account endpoint on a cold identity cache', async 
         if (url.endsWith('/api/organizations')) {
           return { ok: true, json: async () => [{ uuid: 'organization-web' }] };
         }
-        if (url.endsWith('/usage')) {
+        if (url.endsWith('/usage?cedar_ember=1')) {
           return {
             ok: true,
             json: async () => ({
@@ -1515,6 +1515,142 @@ test('Claude usage credits honour a non-cent decimal_places', () => {
   assert.equal(window.used, 235);
   assert.equal(window.limit, 2000);
   assert.equal(window.currency, 'JPY');
+});
+
+test('Claude OAuth usage maps cedar_ember reset grants into resetCredits', () => {
+  const provider = mapClaudeUsageToProvider(claudeUsagePayload({
+    cedar_ember: {
+      grants: [
+        {
+          id: 'later-promo',
+          label: 'Later promo reset',
+          resets_left: 2,
+          resets_total: 2,
+          starts_at: '2030-01-01T00:00:00Z',
+          ends_at: '2030-02-01T00:00:00Z',
+          clears: ['seven_day'],
+          usable_now: true,
+          use_requires_limit: false,
+          paused: false
+        },
+        {
+          id: 'launch-promo',
+          label: 'Launch promo reset',
+          resets_left: 1,
+          resets_total: 1,
+          starts_at: '2030-01-01T00:00:00Z',
+          ends_at: '2030-01-15T00:00:00Z',
+          clears: ['five_hour', 'seven_day', 'seven_day_overage_included'],
+          usable_now: true,
+          use_requires_limit: false,
+          paused: false
+        }
+      ]
+    }
+  }));
+
+  const resetCredits = provider.resetCredits;
+  assert.equal(resetCredits.availableCount, 3);
+  assert.equal(resetCredits.nextExpiresAt, '2030-01-15T00:00:00.000Z');
+  assert.deepEqual(resetCredits.expirations, ['2030-01-15T00:00:00.000Z', '2030-02-01T00:00:00.000Z']);
+  assert.equal(resetCredits.grants.length, 2);
+  const launch = resetCredits.grants[1];
+  assert.equal(launch.id, 'launch-promo');
+  assert.equal(launch.label, 'Launch promo reset');
+  assert.equal(launch.resetsLeft, 1);
+  assert.equal(launch.resetsTotal, 1);
+  assert.equal(launch.endsAt, '2030-01-15T00:00:00.000Z');
+  assert.deepEqual(launch.clears, ['five_hour', 'seven_day', 'seven_day_overage_included']);
+  assert.equal(launch.usableNow, true);
+  assert.equal(launch.useRequiresLimit, false);
+  assert.equal(launch.paused, false);
+});
+
+test('Claude OAuth usage drops spent and lapsed reset grants', () => {
+  const provider = mapClaudeUsageToProvider(claudeUsagePayload({
+    cedar_ember: {
+      grants: [
+        {
+          id: 'spent',
+          label: 'Spent reset',
+          resets_left: 0,
+          resets_total: 1,
+          ends_at: '2030-01-15T00:00:00Z',
+          clears: ['five_hour'],
+          usable_now: false
+        },
+        {
+          id: 'lapsed',
+          label: 'Lapsed reset',
+          resets_left: 1,
+          resets_total: 1,
+          ends_at: '2020-01-15T00:00:00Z',
+          clears: ['five_hour'],
+          usable_now: false
+        }
+      ]
+    }
+  }));
+
+  assert.equal(provider.resetCredits, null);
+});
+
+test('Claude OAuth usage without cedar_ember grants carries no resetCredits', () => {
+  for (const cedar_ember of [null, {}, { grants: [] }]) {
+    const provider = mapClaudeUsageToProvider(claudeUsagePayload({ cedar_ember }));
+    assert.equal(provider.resetCredits, null);
+  }
+});
+
+test('Claude OAuth usage asks the usage endpoint for reset grants', async () => {
+  const requested = [];
+  let usageHeaders = null;
+  const provider = await fetchClaudeLimits({}, {
+    platform: 'linux',
+    now: () => Date.parse('2026-07-25T00:00:00Z'),
+    claudeCredentialPath: '/same/path/.credentials.json',
+    stat: async () => ({ mtimeMs: 1 }),
+    readFile: async () => JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'stable-access',
+        refreshToken: 'stable-refresh',
+        expiresAt: Date.parse('2026-07-26T00:00:00Z')
+      }
+    }),
+    fetch: async (url, options) => {
+      requested.push(url);
+      if (url.includes('/api/oauth/usage')) usageHeaders = options?.headers || null;
+      if (url.endsWith('/api/oauth/profile')) {
+        return { ok: true, json: async () => DEFAULT_CLAUDE_PROFILE };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          five_hour: { utilization: 12, resets_at: '2026-07-25T05:00:00Z' },
+          cedar_ember: {
+            grants: [{
+              id: 'launch-promo',
+              label: 'Launch promo reset',
+              resets_left: 1,
+              resets_total: 1,
+              ends_at: '2030-01-15T00:00:00Z',
+              clears: ['five_hour', 'seven_day'],
+              usable_now: true
+            }]
+          }
+        })
+      };
+    }
+  });
+
+  const usageRequest = requested.find((url) => url.includes('/api/oauth/usage'));
+  assert.equal(new URL(usageRequest).searchParams.get('cedar_ember'), '1');
+  // Anthropic gates cedar_ember on the client surface: any user-agent that
+  // is not Claude Code gets `eligible: false` with no grants, so the OAuth
+  // usage call must present as the CLI.
+  assert.match(usageHeaders?.['user-agent'], /^claude-cli\/\d+\.\d+\.\d+ \(external, cli\)$/);
+  assert.equal(provider.resetCredits.availableCount, 1);
+  assert.equal(provider.resetCredits.grants[0].label, 'Launch promo reset');
 });
 
 const PREPAID_CREDITS = {

@@ -3,12 +3,14 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const { hashKey } = require('./hashKey');
+const { normalizeSessionContext } = require('./sessionContext');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
 const codexSession = require('./providers/codex/sessionMetadata');
 const droidSessionMetadata = require('./providers/droid/sessionMetadata');
 const opencodeSession = require('./providers/opencode/session');
 const kimiSessionMetadata = require('./providers/kimi/sessionMetadata');
 const dshSessionMetadata = require('./providers/dsh/sessionMetadata');
+const devinSessionMetadata = require('./providers/devin/sessionMetadata');
 
 function isoFromDate(value) {
   const date = value instanceof Date ? value : new Date(value || '');
@@ -224,7 +226,8 @@ const SESSION_METADATA_RESOLVERS = new Map([
   ['opencode', { resolve: opencodeSession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['droid', { resolve: droidSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['kimi', { resolve: kimiSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: false }],
-  ['dsh', { resolve: dshSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }]
+  ['dsh', { resolve: dshSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
+  ['devin', { resolve: devinSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }]
 ]);
 
 function resolverDefinition(entry) {
@@ -276,10 +279,14 @@ function sessionMetadataMap(periods, home = os.homedir(), deps = {}) {
 
   const resolvers = deps.sessionMetadataResolvers || SESSION_METADATA_RESOLVERS;
   const attributed = sessionsWithProject(periods);
+  // One clock for the whole pass, so two providers resolved in the same tick
+  // cannot disagree about whether a session is recent enough to read.
+  const now = Number.isFinite(deps.now) ? deps.now : Date.now();
   const contextFor = (client) => ({
     deps,
     home,
     metadata,
+    now,
     resolveProjects,
     projectIdentity,
     isoFromDate,
@@ -331,6 +338,31 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
       if (meta.title) session.title = meta.title;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
+      // The three states mean different things and are copied as they are:
+      // `true` is a finished turn, `false` is one that is open, and absent is a
+      // client that reports no boundary at all. Only the last may leave an
+      // earlier reading in place — a `false` has to reach the record so that
+      // the merge can clear a `true` from a previous tick.
+      if (meta.turnEnded === true || meta.turnEnded === false) {
+        session.turnEnded = meta.turnEnded;
+      } else {
+        delete session.turnEnded;
+      }
+      // Occupancy is cleared rather than merely left alone when this tick read
+      // no valid pair, but only when the provider actually stated one. The two
+      // halves describe the transcript right now, so a pair the collector just
+      // watched go stale must not keep drawing a gauge: a DSH model switch
+      // zeroes the occupancy until the next usage chunk measures against the
+      // new window. A session the collector did not read at all (outside the
+      // read window) states nothing, and that must leave the record as it is —
+      // it is not a reading of zero.
+      const sessionContext = normalizeSessionContext(meta);
+      if (sessionContext) {
+        Object.assign(session, sessionContext);
+      } else if (Object.prototype.hasOwnProperty.call(meta, 'contextWindow')) {
+        session.contextTokens = 0;
+        session.contextWindow = 0;
+      }
     }
   }
 }

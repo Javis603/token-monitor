@@ -870,13 +870,19 @@ test('extractUsageFromTokscale normalizes Pi, Zed, and Kilo, keeping Copilot dis
   assert.equal(period.clients.kilo, 19);
 });
 
-test('extractUsageFromTokscale normalizes MiMo Code and ZCode client ids', () => {
+test('extractUsageFromTokscale normalizes MiMo and ZCode client ids', () => {
+  // `micode` is tokscale's id for MiMo — a fossil of the path typo upstream
+  // fixed in its PR #784, which left the id behind. Token Monitor's id is
+  // `mimo`, shared with the limits provider for the same product, so both
+  // upstream spellings have to land there.
   const period = extractUsageFromTokscale([
     { client: 'micode', model: 'mimo-v2.5-pro', totalTokens: 23 },
+    { client: 'micode-desktop', model: 'mimo-v2.5-pro', totalTokens: 5 },
     { client: 'ZCode', model: 'glm-4.7', totalTokens: 29 }
   ]);
 
-  assert.equal(period.clients.micode, 23);
+  assert.equal(period.clients.mimo, 28);
+  assert.equal(period.clients.micode, undefined);
   assert.equal(period.clients.zcode, 29);
 });
 
@@ -1359,4 +1365,109 @@ test('aggregateDevices falls back to UTC-day compare for old agents without peri
     today: { totalTokens: 7 }
   }], 10 * 60 * 1000, Date.parse('2026-06-26T06:00:00.000Z'));
   assert.equal(kept.periods.today.totalTokens, 7);
+});
+
+test('a session carries its context occupancy through the device record', () => {
+  const record = normalizeDeviceRecord({
+    deviceId: 'm1',
+    updatedAt: '2026-09-18T06:00:00.000Z',
+    today: {
+      totalTokens: 10,
+      sessions: {
+        'codex:live': {
+          client: 'codex',
+          sessionId: 'rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111',
+          totalTokens: 10,
+          contextTokens: 190_867,
+          contextWindow: 950_000
+        }
+      }
+    }
+  });
+  const session = record.periods.today.sessions['codex:rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111'];
+  assert.equal(session.contextTokens, 190_867);
+  assert.equal(session.contextWindow, 950_000);
+});
+
+test('merging a session keeps one source occupancy rather than summing two', () => {
+  const session = (contextTokens, contextWindow) => ({
+    client: 'codex',
+    sessionId: 'rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111',
+    totalTokens: 5,
+    ...(contextWindow ? { contextTokens, contextWindow } : {})
+  });
+  const merged = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: session(100, 200_000), b: session(140, 200_000) } }
+  });
+  const key = 'codex:rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111';
+  assert.equal(merged.periods.today.sessions[key].contextTokens, 140);
+  assert.equal(merged.periods.today.sessions[key].contextWindow, 200_000);
+
+  // A partition with no reading leaves the one that has it alone, instead of
+  // zeroing a live session every time it is merged with a period that only
+  // carries totals.
+  const partial = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: session(100, 200_000), b: session(0, 0) } }
+  });
+  assert.equal(partial.periods.today.sessions[key].contextTokens, 100);
+  assert.equal(partial.periods.today.sessions[key].contextWindow, 200_000);
+
+  // A snapshot is freshest-wins, not last-merge-wins. The same session arrives
+  // from several periods and synced devices; without this the older reading won
+  // whenever it happened to be merged last, which made the gauge depend on
+  // iteration order. Here the stale reading is merged after the fresh one and
+  // must still lose.
+  const timed = (contextTokens, contextWindow, lastUsedAt) => ({
+    client: 'codex',
+    sessionId: 'rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111',
+    totalTokens: 5,
+    contextTokens,
+    contextWindow,
+    lastUsedAt
+  });
+  const fresh = timed(140, 200_000, '2026-09-18T05:10:00.000Z');
+  const stale = timed(20, 200_000, '2026-09-18T05:00:00.000Z');
+  const ordered = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: fresh, b: stale } }
+  });
+  assert.equal(ordered.periods.today.sessions[key].contextTokens, 140, 'a stale snapshot merged last must not win');
+
+  // A device that never read a transcript has no reading at all, which is not
+  // the same as an empty one, so it must not block a real reading either way.
+  const unknown = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: session(0, 0), b: fresh } }
+  });
+  assert.equal(unknown.periods.today.sessions[key].contextTokens, 140);
+  assert.equal(unknown.periods.today.sessions[key].contextWindow, 200_000);
+});
+
+test('aggregateDevices folds a pre-rename micode device into the mimo row', () => {
+  // The tracked-client id was renamed from tokscale's `micode` to `mimo`. A hub
+  // outlives any single device update, so it holds records posted by agents on
+  // both sides of that rename — and aggregateDevices normalizes on *read*, not
+  // only on ingest, so a record already sitting in data/devices.json folds too.
+  // Without that the same tool would show as two rows until every device
+  // upgraded.
+  const now = Date.parse('2026-09-23T00:00:00.000Z');
+  const deviceAt = (deviceId, client, tokens, cost) => ({
+    deviceId,
+    hostname: deviceId,
+    updatedAt: '2026-09-23T00:00:00.000Z',
+    receivedAt: '2026-09-23T00:00:00.000Z',
+    today: { totalTokens: tokens, costUsd: cost, clients: { [client]: tokens }, clientCosts: { [client]: cost } }
+  });
+
+  const aggregate = aggregateDevices(
+    [deviceAt('old-agent', 'micode', 100, 1.5), deviceAt('new-agent', 'mimo', 40, 0.5)],
+    0,
+    now
+  );
+
+  assert.equal(aggregate.periods.today.clients.mimo, 140);
+  assert.equal(aggregate.periods.today.clients.micode, undefined);
+  assert.equal(aggregate.periods.today.clientCosts.mimo, 2);
 });
