@@ -1,5 +1,6 @@
 ---
 summary: "OpenCode provider notes: profile ownership, API/Web/local quota authority, ambient credentials and session detail."
+ids: [opencode]
 read_when:
   - Changing OpenCode profiles, credential moves/merges or ambient auth discovery
   - Changing OpenCode Go API, Web cookie or local usage fallback precedence
@@ -33,3 +34,11 @@ Session metadata and detail read OpenCode's local storage on demand. Keep profil
 ## Transport
 
 Every Web probe must receive the runtime-injected transport. Do not bypass proxy and Electron behavior by constructing provider-local fetch implicitly.
+
+## Verification
+
+Run the OpenCode profile, source-precedence and session tests when changing this note's scope:
+
+```bash
+node --test tests/shared/opencode*.test.js tests/shared/limitCollector.opencode.test.js tests/shared/sessionDetail.opencode.test.js
+```

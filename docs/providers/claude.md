@@ -1,5 +1,6 @@
 ---
 summary: "Claude provider notes: transcript metadata, turn boundaries, OAuth/Web/CLI quota sources, identity and transport."
+ids: [claude]
 read_when:
   - Changing Claude session roots, titles, turn state or live context parsing
   - Changing Claude OAuth, Web session or CLI limits collection

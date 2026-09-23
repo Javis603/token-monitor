@@ -1,24 +1,28 @@
 ---
-summary: "Provider-note routing and registration checklists for tracked clients and limits providers."
+summary: "Provider-note routing, note conventions, and the registration checklists for tracked clients and limits providers."
 read_when:
   - Changing code under src/shared/providers or src/electron/providers
   - Adding or renaming a tracked client or limits provider
-  - Deciding whether provider behavior needs a durable note
+  - Writing or restructuring a provider note
 ---
 
 # Provider notes
 
-This directory is the exception manual and authoring guide for providers. Before changing a provider, look for `<id>.md` beside this file and update it when the documented contract moves.
+This directory holds focused notes for providers with non-obvious data sources, identity rules, fallbacks, or security boundaries, plus the registration checklists every new integration follows. The notes supplement the code; they do not replace it.
 
-Most ids route directly to the same filename. Product families may share one note when splitting it would hide a coupled contract. The current alias is:
+## Finding the note for an id
 
-| Code id | Read |
-|---|---|
-| `factory` | `droid.md` |
+Every note declares the catalog ids it covers in its front matter, so routing never depends on the filename:
 
-If neither a direct note nor an alias exists, this README and the code/tests are authoritative. Do not create an empty placeholder.
+```bash
+grep -lE '^ids:.*[[, ]<id>[],]' docs/providers/*.md
+```
 
-## When a provider needs a note
+A product family shares one note when splitting it would hide a coupled contract — `droid.md` covers both the `droid` tracked client and the `factory` limits provider. If no note claims an id, this README and the code/tests are authoritative; do not create an empty placeholder. `tests/docs/providerGuidance.test.js` fails when a note claims an id that is in neither catalog (so a rename cannot leave a note pointing at nothing), when two notes claim the same id, or when a filename is not one of its own ids.
+
+Read the matching note before changing that provider, and update it in the same change when its documented contract moves.
+
+## Writing a note
 
 A note is warranted when a provider has one or more of these properties:
 
@@ -26,47 +30,79 @@ A note is warranted when a provider has one or more of these properties:
 - non-trivial account identity or cross-device aggregation;
 - ordered credential, endpoint or process fallbacks;
 - local file parsing with bounded reads, caches or privacy constraints;
-- a transport or security boundary that differs from shared limits behavior;
+- a transport or security boundary that differs from the shared limits behaviour;
 - multiple provider/client ids representing one product family.
 
-Do not create a page that merely lists an endpoint or repeats a small `limits.js`. Code and tests remain the authority. State every non-obvious id relationship inside the family note and in the alias table above.
+Do not create a page that merely lists an endpoint or repeats a small `limits.js`. Keep cross-provider runtime rules in `docs/architecture.md`; do not repeat them in each note.
 
-Keep cross-provider runtime rules in `AGENTS.md` and `docs/architecture.md`; do not duplicate them in each provider note.
+Front matter carries `summary`, `ids` (an inline list of catalog ids) and `read_when` (situations, not file lists). Sections are written only where they apply, in this order, so notes read the same way:
+
+1. **Identity and ids** — which ids exist, which is the tracked client and which the limits provider, and why.
+2. **Data sources** — where usage, session metadata and limits each come from, and which one is authoritative for what.
+3. **Source precedence** — ordered fallbacks, and which failures may or may not fall through.
+4. **Credentials and transport** — storage, renderer exposure, and any transport that does not inherit the shared one.
+5. **Invariants and known gaps** — what must not be "fixed", and what is deliberately unsupported.
+6. **Verification** — the focused `node --test …` command for the provider's own tests, and any manual checks that tests cannot cover.
 
 ## Adding a tracked client
 
-Tracked-client identity lives in `CLIENT_CATALOG` in `src/shared/clientCatalog.js`. It measures local token activity and is not automatically a limits provider.
+Tracked-client identity lives in **one** place: `CLIENT_CATALOG` in `src/shared/clientCatalog.js`. `src/shared/clientTracking.js` projects it into the CSV shapes settings and the collector already speak (`src/electron/main.js` and `src/agent/agent.js` derive from those). But adding a *new* client means touching several spots that must all agree on the id:
 
-| Touch point | Contract |
+| Touch point | Where |
 |---|---|
-| Identity | Insert one catalog entry at the intended display position with id, label and applicable `defaultTracked` / `locallyParsed` flags; do not maintain derived client lists by hand. |
-| Provider code | Put transcript readers, path resolvers and self-sync code under `src/shared/providers/<id>/`. Most tokscale-native clients need none. |
-| Session metadata | Register only data tokscale cannot supply in `src/shared/sessionMetadata.js`; keep storage discovery, parsing and caches provider-local. |
-| Roots and health | Add the authoritative root to `clientSourceRoots()`, register each `checkId` in alphabetical `CLIENT_SOURCE_CHECK_IDS`, then sync the Worker copy. |
-| Path semantics | Mirror tokscale's source implementation. Do not infer XDG behavior from binary strings or `tokscale clients`. |
-| Normalization | Keep canonical ids, tokscale aliases and filters aligned; run the client partition-invariant tests. |
-| Product surfaces | Update renderer/tray/chart maps, Discord, CSS, artwork and WSL marker attribution where applicable. |
-| Docs and guards | Update every README locale, `.env.example` and pinned client-list/settings tests deliberately. |
+| Client identity | one entry in `CLIENT_CATALOG` (`src/shared/clientCatalog.js`), inserted at its display position (array order is the display order): id, label, `defaultTracked`, `locallyParsed`. `DEFAULT_CLIENTS` / `KNOWN_CLIENTS` / `PARSE_LOCAL_CLIENTS` in `clientTracking.js` and the renderer's `clientLabels` / `KNOWN_CLIENTS` are all derived from it, so the tracked-client id, label and display order used by tracking and the widget renderer are declared once — Discord's `CLIENT_LABELS` and `themePresets`'s `VENDOR_LABELS` still carry their own |
+| Client-specific code | only when the client parses or syncs something itself (transcript readers, path resolvers, the self-sync a cache-backed client needs): `src/shared/providers/<id>/`, the same folder the limits provider of that id would use. Most tracked clients need none — tokscale parses them end to end, so they are catalog, roots, icon and README only |
+| Session metadata | only when Session Detail rows need local metadata tokscale does not report. Timestamps and project attribution arrive with the scan for every client, so a resolver is for what the scan cannot answer (titles for most clients, Codex's background-review `sessionKind`): add one entry in `src/shared/sessionMetadata.js`. Every resolver receives the requested session-id set plus shared context and returns `Map<sessionId, { startedAt, lastUsedAt, projectId, projectLabel, title, sessionKind, contextTokens, contextWindow }>`; keep storage-specific discovery, parsing, cache, and refresh policy in `src/shared/providers/<id>/` rather than inventing one cross-provider cache abstraction. The context pair is the live-session reading: no tokscale struct carries a window size, so it comes from the client's own transcript (Codex and DSH state theirs; a client that does not is left without one rather than having it guessed from a model name), gated by `shouldReadSessionContext()` so the read only happens for a session that could still be open — that gate, and what counts as a valid pair, stay in `src/shared/sessionContext.js` so two providers cannot disagree |
+| Source roots | the `add(...)` call in `clientSourceRoots()` (`src/shared/collector.js`) — one `[checkId, dir]`, or `[checkId, watchDir, sourcePath]` when tokscale reads one exact file. `clientWatchCandidates()` is only a projection of this table; nothing is declared there |
+| Source check ids | every `checkId` above must be in `CLIENT_SOURCE_CHECK_IDS` (`src/shared/clientHealth.js`), kept alphabetical, then `npm run sync:worker` for the Worker copy. An id missing from that allowlist makes `normalizeClientHealth` drop the client's whole `checks` array, not just the unknown entry |
+| XDG vs home-relative | mirror tokscale, do not guess: a root is XDG-derived only if `clients.rs` declares it `PathRoot::XdgData` or `scanner.rs` resolves it through the `dirs` crate. Those `dirs` lookups are invisible to `strings` on the binary and to `tokscale clients`, so read the Rust at the version tag (`tmp/tokscale`). Roots spelled as home-relative literals upstream must stay home-relative here |
+| Name normalization | the `normalizeClientName()` branch in `src/shared/usage.js` |
+| Renderer maps | `clientsWithIcon` in `src/electron/renderer/app.js` — deliberately not catalog-derived: it also holds model-vendor ids and (via `limitMarksWithIcon`) limits marks, so it is an icon table, not a client list; provider artwork in `src/electron/renderer/trayProviderIcons.js`; `VENDOR_ORDER` / `VENDOR_LABELS` in `themePresets.js`; `clientColors` in `usageCharts.js` |
+| Discord RPC | `KNOWN_CLIENT_ASSETS` / `CLIENT_LABELS` in `src/electron/discordRpc.js` |
+| Row icon CSS | the `.row-icon-<id>` rule in `src/electron/renderer/styles.css` |
+| Icon assets | `assets/icons/<id>.svg` + `.github/assets/tools-icon/<id>.png` by convention. A client that reuses a vendor mark has no file of its own (hermes, mimo, zcode); the `.row-icon-<id>` rule is the mapping |
+| WSL discovery | marker(s) in `WSL_DATA_MARKERS` **and** the marker→id mapping in `MARKER_CLIENTS` (`src/shared/wslUsage.js`) — use the exact roots tokscale reads, including alternate roots. A marker without a `MARKER_CLIENTS` entry attributes to nothing, so a WSL home holding only that client's data would be skipped |
+| Docs & env examples | the supported-tools table in `README.md` and its translations (`README.*.md`) + the client CSV in `.env.example`. Every locale's prose tool/provider counts must match its own table — `tests/docs/readmeConsistency.test.js` fails on a stale count or a table that drifts between locales |
+| Guard tests | the expected-client lists in `tests/shared/clientTracking.test.js`, plus the pinned CSVs in `tests/shared/clientCatalog.test.js` (they guard a persisted-settings surface, so update them deliberately) |
 
-Session resolvers return a `Map` keyed by bare session id. `contextTokens` and `contextWindow` form one live pair: read it only through `shouldReadSessionContext()` and normalize through `src/shared/sessionContext.js`. Use an explicitly reported capacity or a tightly bounded provider mapping; unknown values stay absent. Put model mappings and transcript edge cases in the provider note.
+Self-synced clients (cursor/antigravity) additionally go in `SELF_SYNCED_CLIENTS`; parse-local clients must NOT. Explain source roots versus generated cache roots in the provider note so watch behaviour stays loop-free.
 
-Self-synced clients also register in `SELF_SYNCED_CLIENTS`; parse-local clients must not. Explain source roots versus generated cache roots in the provider note so watch behavior remains loop-free.
+### Partition invariants
+
+Targeted watch ticks make the client id a correctness surface, because the scan is keyed on it from two independent directions: `clientWatchCandidates()` decides which id a changed path maps to, and `normalizeClientName()` decides which id tokscale's rows land under. Three invariants keep them aligned:
+
+1. the id must be a fixed point of `normalizeClientName()` (so the partition a targeted scan writes is the one it cleared);
+2. every tokscale alias in `TOKSCALE_CLIENT_ALIASES` must normalize back to its parent id and be expanded by `tokscaleClientFilter()` (so targeting the parent still scans the alias, as with `antigravity` / `antigravity-cli`);
+3. the filter must never emit `synthetic`.
+
+The first two are correctness: break either and a watch tick zeroes a client's partition, feeding a negative delta into month/allTime until the next full scan. The third is performance — `synthetic` makes tokscale enable *every* client, so the targeted scan silently degrades into a full one with correct numbers and none of the saving. Don't diagnose one as the other. `tests/shared/clientPartitionInvariants.test.js` enforces all three.
 
 ## Adding a limits provider
 
-Limits-provider identity lives in `LIMIT_PROVIDER_CATALOG` in `src/shared/limitProviders.js`. Catalog order is the fresh-install default and must not overwrite a saved custom order.
+Provider identity lives in **one** place: `LIMIT_PROVIDER_CATALOG` in `src/shared/limitProviders.js`. The catalog order is the new-install order; a changed default must not overwrite a saved custom order. A tracked client is something tokscale counts tokens for, a limits provider is an account whose quota we read, and only some ids are both — the two catalogs and checklists are separate. Everything below is either a hand-wired registration point that must agree with that id, or a provider-specific surface to add only where it applies.
 
-| Touch point | Contract |
+| Touch point | Where |
 |---|---|
-| Identity | Insert one catalog entry at the intended fresh-install position with id, label and optional `settingsLabel`; do not maintain derived id or label lists separately. |
-| Collection | Register `providerFetchers()` and implement `src/shared/providers/<id>/limits.js`. |
-| Settings and secrets | Register runtime setting keys in `LIMIT_PROVIDER_SETTING_KEYS`; add fixed GUI credentials to `CREDENTIAL_SETTING_PATHS`. Automatic providers that persist nothing belong in neither list. |
-| Account UI | Register account/status ids or a connection-detail key and add matching DOM nodes. |
-| Manual panel | Use either the shared plain-panel animation path or an add-form child with `accordion-animated-container`; do not mix the two shapes. |
-| Presentation | Add capability tags, source-label overrides only when needed, CSS marks and tray artwork. |
-| Other surfaces | Add the explicit macOS widget provider case and all locale strings. |
-| Docs and env | Update README locales and `.env.example` when credentials are configurable; add a note for non-obvious identity, fallback or security rules. |
+| Provider identity | one entry in `LIMIT_PROVIDER_CATALOG` (`src/shared/limitProviders.js`), inserted at its fresh-install position (array order): id, label, and `settingsLabel` only when it differs. `LIMIT_PROVIDER_IDS` / `LIMIT_PROVIDER_LABELS` derive from it |
+| Collection | an entry in `providerFetchers()` (`src/shared/limits/collector.js`) plus the implementation in `src/shared/providers/<id>/limits.js` |
+| Settings & credentials | `LIMIT_PROVIDER_SETTING_KEYS` (`src/electron/runtimeConfig.js`) and, for a fixed GUI credential, `CREDENTIAL_SETTING_PATHS` (`src/shared/credentialStore.js`). Automatic providers that store nothing (antigravity, grok, kiro) are in neither |
+| Account UI | `LIMIT_PROVIDER_ACCOUNT_GROUP_IDS`, `LIMIT_PROVIDER_ACCOUNT_STATUS_IDS`, `LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS` and — only for display toggles — `LIMIT_PROVIDER_SETTINGS`, all in `src/electron/renderer/app.js`, with the `#<id>AccountGroup` / `#<id>AccountStatus` nodes they name in `index.html`. Every provider needs an account group **or** a connection-detail key |
+| Manual panel | `#<id>ManualPanel` in `index.html`, in one of two shapes that must not be mixed: a **plain** panel animates through `initSettingsAnimationWrappers()` (`app.js`) and must also be in the two `#…ManualPanel` selector lists in `styles.css`; an **add-form** panel (`class="opencode-add-form"`) instead declares `accordion-animated-container` on its own `#<id>ManualDetails` / `#<id>AddDetails` child and must stay out of the JS list, which is why `cursorSettingsLayout.test.js` asserts some ids are absent |
+| Capability tags & source labels | `CAPABILITY_TAGS` in `src/electron/renderer/limitProviderPresentation.js` is required, and does not error when missing — the settings row simply renders without the tags that say how the provider is collected. `PROVIDER_SOURCE_LABELS` in the same file is an override, worth adding only where the generic source label is wrong for that provider, since `limitProviderSourceLabel` falls back to it |
+| Marks | one `.row-icon-<id>` rule in `styles.css`, shared by both call sites: `renderLimitProviderMark` sizes the Limits list mark with `.limit-icon` and takes the mask from that rule, `iconKindFor` builds a breakdown row from it directly. A provider whose mark must differ between the two needs an explicit `.limit-icon.row-icon-<id>` override — Grok is the only one, because the tracked client reuses the vendor mask. The rule paints `currentColor` through a mask, so an id without one renders a solid square |
+| Icon assets | a mark reachable through the `.row-icon-<id>` rule and the tray resolver. `assets/icons/<id>.svg` + `.github/assets/tools-icon/<id>.png` is the convention, not a requirement: shared and vendor artwork is normal (mimo and zaiteam have no file of their own) and one README icon can stand for several provider ids. `SPECIAL_ICON_SOURCES` (`trayProviderIcons.js`) is only for menubar-optimized or shared tray artwork |
+| macOS widget | an explicit `case` in `WidgetFormat.provider` (`native/macos/TokenMonitorWidget/WidgetViewModel.swift`) — kept complete rather than leaning on `default` |
+| i18n | `settings.<id>.*` keys in every locale in `i18n.js`; automatic providers use `settings.limits.connection.<id>` instead |
+| Docs & env examples | the supported-tools table in `README.md` and its translations, plus `.env.example` when the provider takes a credential; a note here for non-obvious identity, fallback or security rules |
 
-Normalize results through the shared limits core, keep display-only derivations out of the wire shape, use the injected transport unless a documented custom transport is required, and never expose raw credentials to the renderer.
+Most of that table is asserted from the catalog, so a provider that misses one of those points fails CI rather than shipping — `grep LIMIT_PROVIDER_IDS tests/` shows which. What it does not cover fails silently: the manual-panel shapes, where a missing registration and a correct omission look identical from the id lists alone, and the i18n keys. The source-label overrides are deliberately left out, because falling back to the generic label is usually the right answer.
 
-`limitProviders.js` is part of the portable Hub core. Adding, reordering or renaming a provider changes the registered Hub build even when collection is desktop-only; update the build registry after the final shared change.
+Normalize results through the shared limits core, keep display-only derivations out of the wire shape, use the injected transport unless the note documents a custom one (`docs/architecture.md` → Outbound transport), and never expose raw credentials to the renderer.
+
+`limitProviders.js` is in the portable Hub core, so renaming a provider stales the Hub build marker even though nothing the Hub runs changed — the exception to "a desktop-only release does not ask users to redeploy". Accepted rather than worked around: adding or reordering a provider moves the marker wherever the labels live, and so does a rename that touches only the label. Run `npm run update:hub-build` once the shared change is final.
+
+## Where provider code lives
+
+Provider-specific code belongs under `src/shared/providers/<id>/`, with its app-layer counterpart under `src/electron/providers/<id>/` — one folder per integration rather than one folder per technical role, so everything that changes together lives together. `providers/<id>/` names the vendor, not the limits provider: an id that is both a tracked client and a limits provider keeps its usage-side and limits-side files in the same folder, which is why the usage collector reads `providers/claude/paths.js`. Cross-provider infrastructure does not go there — helpers used by more than one provider implementation live in `src/shared/limits/providerHelpers.js`, and anything global (`credentialStore.js`, `outboundFetch.js`) stays where it is. `ls src/shared/providers/` is the list.
+
+Some of those files (such as `providers/reasonix/paths.js` and `providers/dsh/paths.js`; `grep providers/ scripts/hub-build-manifest.js` has the list) are in the portable Hub core, so `WORKER_SHARED_MODULES` in `scripts/hub-build-manifest.js` holds paths relative to `src/shared/` rather than bare filenames, and the Worker copies mirror the same directories.

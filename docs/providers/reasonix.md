@@ -1,5 +1,6 @@
 ---
 summary: "Reasonix provider notes: Tokscale aggregate authority, local-only native sessions, bounded sidecar replay and privacy guards."
+ids: [reasonix]
 read_when:
   - Changing Reasonix source paths, tokscale normalization or watcher roots
   - Changing Reasonix native session/project views or Session Detail replay
@@ -36,3 +37,11 @@ Metadata reads are regular-file and size bounded. A large telemetry sidecar is p
 Official event replay accepts only supported schemas and event transitions. It keeps the last trusted state across a torn tail, but fails closed on unsupported schemas, illegal appends, unknown event types or resource-limit breaches. Legacy typed events remain compatibility input, not authority for new schema behavior.
 
 Session Detail uses the same bounded replay and positive allowlist as compact rows. Missing/corrupt identity, telemetry or transcript files produce no detail rather than a partially trusted reconstruction.
+
+## Verification
+
+Run the Reasonix path, aggregate, native-session and replay tests when changing this note's scope:
+
+```bash
+node --test tests/shared/reasonix*.test.js
+```

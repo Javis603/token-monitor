@@ -1,5 +1,6 @@
 ---
 summary: "Codex provider notes: rollout metadata/context, OAuth and RPC quota sources, managed workspaces and system-account switching."
+ids: [codex]
 read_when:
   - Changing Codex session metadata, T3 title lookup, context occupancy or turn state
   - Changing Codex OAuth/RPC limits, managed accounts or workspace identity
@@ -37,3 +38,11 @@ Switching the system account rewrites the live auth material for the selected wo
 ## Reset forecast
 
 The optional reset forecast is display enrichment from `codex-resets.com`, not quota authority. It has independent success/error cache durations and bounded fetch time. A forecast failure must not alter the provider's real windows.
+
+## Verification
+
+Run the Codex session, limits, login and account-switching tests when changing this note's scope:
+
+```bash
+node --test tests/shared/codex*.test.js tests/shared/limitCollector.codex*.test.js tests/shared/sessionContext.test.js tests/electron/codex*.test.js
+```

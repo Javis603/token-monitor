@@ -1,5 +1,6 @@
 ---
 summary: "Devin (Cognition) usage: CLI sessions.db plus Desktop acp-events ACP logs."
+ids: [devin]
 read_when:
   - Changing Devin source detection or watch behavior
   - Debugging missing Devin usage or session titles

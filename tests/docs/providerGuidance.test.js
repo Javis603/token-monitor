@@ -45,14 +45,31 @@ test('provider notes expose routing metadata', () => {
   }
 });
 
-test('provider aliases resolve without shadowing direct notes', () => {
-  const index = read('docs/providers/README.md');
-  const aliases = [...index.matchAll(/^\| `([^`]+)` \| `([^`]+\.md)` \|$/gm)];
-  assert.ok(aliases.length > 0, 'provider alias table is empty or malformed');
+test('provider notes route by catalog ids', () => {
+  const { CLIENT_IDS } = require('../../src/shared/clientCatalog.js');
+  const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders.js');
+  const catalogIds = new Set([...CLIENT_IDS, ...LIMIT_PROVIDER_IDS]);
+  const owners = new Map();
 
-  for (const [, id, target] of aliases) {
-    assert.ok(fs.existsSync(path.join(providerDocsDir, target)), `${id}: alias target ${target} does not exist`);
-    assert.ok(!fs.existsSync(path.join(providerDocsDir, `${id}.md`)), `${id}: direct note conflicts with alias target ${target}`);
+  const notes = fs.readdirSync(providerDocsDir)
+    .filter((name) => name.endsWith('.md') && name !== 'README.md')
+    .sort();
+  for (const file of notes) {
+    const text = read(path.join('docs', 'providers', file));
+    const lines = text.match(/^---\n([\s\S]*?)\n---/)[1].split('\n');
+    const idLines = lines.filter((line) => /^ids:/.test(line));
+    assert.equal(idLines.length, 1, `${file}: expected one ids field`);
+    const match = idLines[0].match(/^ids:\s*\[([^\]]*)\]\s*$/);
+    assert.ok(match, `${file}: ids must be an inline list such as [droid, factory]`);
+    const ids = match[1].split(',').map((id) => id.trim()).filter(Boolean);
+    assert.ok(ids.length > 0, `${file}: ids must not be empty`);
+    assert.ok(ids.includes(path.basename(file, '.md')), `${file}: filename must be one of its own ids`);
+
+    for (const id of ids) {
+      assert.ok(catalogIds.has(id), `${file}: ${id} is in neither CLIENT_CATALOG nor LIMIT_PROVIDER_CATALOG`);
+      assert.ok(!owners.has(id), `${id}: claimed by both ${owners.get(id)} and ${file}`);
+      owners.set(id, file);
+    }
   }
 });
 

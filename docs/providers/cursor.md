@@ -1,5 +1,6 @@
 ---
 summary: "Cursor provider notes: managed accounts, tokscale self-sync, cache-backed session repair and dashboard limits."
+ids: [cursor]
 read_when:
   - Changing Cursor account discovery, login/logout/sync or local credential storage
   - Changing Cursor tokscale self-sync, cache events or legacy-session replacement
@@ -31,3 +32,11 @@ Every enabled saved account is probed independently. Stable identity prefers the
 The dashboard mapping preserves separate official model pools, legacy request plans, enterprise/team pooled usage, optional Grok Bot allowance and on-demand spend. Never synthesize an overall total by summing model pools. Grok Bot is best effort and must not fail the main account row. A zero uncapped spend is hidden; positive uncapped spend remains visible.
 
 Account-scoped enable/disable affects limits collection only. The active tokscale account and self-synced history are managed by the explicit Cursor lifecycle operations.
+
+## Verification
+
+Run the Cursor account, self-sync, cache-event and limits tests when changing this note's scope:
+
+```bash
+node --test tests/shared/cursor*.test.js tests/electron/cursorSettingsLayout.test.js
+```

@@ -1,5 +1,6 @@
 ---
 summary: "Z.ai/GLM provider notes: the two-key system, the three quota pools that merge into one row, the ZCode billing gateway's device-id gate, and the local spend store."
+ids: [zai]
 read_when:
   - Adding or changing Z.ai quota, balance, or subscription windows
   - Changing ZCode local discovery, the selection fields, or the credential path

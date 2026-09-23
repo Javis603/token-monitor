@@ -1,5 +1,6 @@
 ---
 summary: "Unsloth Studio inference usage: SQLite source, bounded watches, and pricing boundaries."
+ids: [unsloth]
 read_when:
   - Changing Unsloth source detection or watch behavior
   - Debugging missing Unsloth usage or cost estimates

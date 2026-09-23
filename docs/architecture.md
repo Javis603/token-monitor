@@ -1,66 +1,127 @@
 ---
-summary: "Cross-runtime architecture contracts for collection, limits, Hub/Worker portability, configuration and credentials."
+summary: "Cross-runtime architecture contracts: entry points, the collector pipeline, limits runtime, mode switching, configuration and credentials, the wire contract, Hub subscriptions and generated state."
 read_when:
   - Changing boundaries shared by the widget, agent, Hub or Worker
-  - Changing collector scheduling, limits scheduling or the device wire record
+  - Changing collector scanning, watching, self-sync, WSL or subprocess lifecycle
+  - Changing limits scheduling, outbound transport or balance display
+  - Changing the device wire record, Hub subscriptions or stale-device handling
   - Changing shared configuration, credential storage or renderer redaction
 ---
 
 # Architecture
 
-This document records cross-runtime constraints that are easy to violate from one subsystem. Provider-specific behavior belongs in `docs/providers/`.
+This document records cross-runtime constraints that are easy to violate from one subsystem. Provider-specific behaviour belongs in `docs/providers/`; the one-line tripwires in `AGENTS.md` point back into the sections below.
 
-## Runtime and wire boundaries
+## Entry points and the Worker boundary
 
-`src/electron/main.js`, `src/agent/agent.js` and `src/hub/server.js` share `src/shared/`; `worker/src/index.js` implements the same Hub protocol from an isolated deployment tree.
+Three runtime entry points share a single `src/shared/` library:
 
-- Widget `local` mode runs the local collector. `client` consumes Hub SSE and posts this device through a sync collector. `host` adds the embedded Hub.
-- A widget sync collector yields to a live headless-agent PID. That PID file is their only coordination.
-- `DeviceState` composes the final device wire record from usage, the normalized runtime envelope and limits. Limits-only updates preserve usage `updatedAt`; cold-start previews wait for a complete usage baseline.
-- `collectUsageOnce()` owns only the usage portion of that record. Node Hub and Worker normalize and aggregate the final composed shape; provider credentials and collector-only state never enter it.
-- Public compatibility surfaces include settings keys, environment variables, CLI flags, Hub endpoints and the device wire shape. Plan migrations before changing them.
+- **`src/electron/main.js`** — widget process. Owns the BrowserWindow, IPC, and chooses between *local* and *sync* mode based on whether `settings.hubUrl` is set.
+- **`src/hub/server.js`** — Node HTTP hub. Stores device records in `data/devices.json`, exposes `/api/ingest`, `/api/stats`, `/api/stats/stream` (SSE).
+- **`src/agent/agent.js`** — headless collector for machines without a widget. Same data path as the widget's sync-mode collector.
+- **`worker/src/index.js`** — Cloudflare Worker hub that speaks the same protocol; the aggregation rules must stay portable (no Node built-ins in `usage.js`). The "Deploy to Cloudflare" button isolates `worker/` into a fresh repo, so the Worker may **not** import files above its own dir — its shared closure (listed as `WORKER_SHARED_MODULES` in `scripts/hub-build-manifest.js`) is vendored into `worker/src/shared/` by `npm run sync:worker` (`scripts/sync-worker-shared.js`), mirroring whatever directory a module sits in under `src/shared/` so the copies' own relative requires resolve in both trees. `src/shared/` stays the single source of truth; those copies are `@generated` (a CommonJS `package.json` marker at the root of the vendored tree scopes them back to CJS inside the ESM worker, nested folders included) and CI fails on drift. Edit `src/shared/`, never the copies, then re-run the sync.
 
-Manually recorded subscriptions are Hub-scoped account data, not device data. Remote writes use versioned conflict detection and must not fork state when the Hub is unavailable. Keep private subscription stamps out of unauthenticated public stats.
+## Generated and registered state
 
-## Usage collection
+Remote Hub update checks use `src/shared/hubBuildRegistry.json`, not the product version. The registry hashes the portable Hub core plus separate Node/Worker adapters, so a desktop-only release does not ask users to redeploy and a Node-only change does not stale the Worker. The emitted identity is a registered build marker, not runtime attestation of arbitrary downstream edits; UI and docs must describe malformed or divergent metadata as unrecognized rather than claiming every custom fork is detectable. After the final Hub/shared implementation is stable, run `npm run update:hub-build` once; the focused Hub-build test fails when the registered source closure is stale. Do not hand-edit generated Worker metadata.
 
-`src/shared/collector.js` owns tokscale resolution and every usage scan for the widget and agent.
+The app, headless-agent, and packaging scripts explicitly run `ensure:tokscale` before execution: every native target published by the upstream npm package gets the pinned binary from `scripts/vendor/tokscale.json`; source platforms without an upstream native package keep the npm fallback and cache a capability filter for unsupported clients. `npm install`/`ci`/`hub`/lint/test/verify never download it. The manifest's `mode` (`override`/`upstream`) only ever gates binary provenance — `upstream` stops `ensure:tokscale` from downloading/replacing (it still fails closed on a missing packaging-target npm package), while both `verify-vendored-tokscale*.js` gates keep running against whichever binary is authoritative, so CI still catches a client-coverage or DSH-parsing regression either way. Flipping mode back is a manifest edit, not new wiring.
 
-- Full ticks scan today, month and all time serially. Watch ticks scan today and apply an exact delta to fresh full-scan anchors; stale-date anchors force a full scan.
-- Prefer workspace/session/model grouping, but retain the cached fallback for binaries without workspace grouping. Local metadata resolvers remain per session because one scan can attribute some clients but not others.
-- Project identity comes from a decoded path, never an opaque workspace key. `src/shared/usage.js` owns defensive extraction and normalization.
-- Targeted watch scans depend on canonical ids normalizing to themselves, aliases filtering back to their parent and filters never emitting `synthetic`. The partition-invariant tests guard this contract.
-- Generated self-sync caches are not watch roots. Provider-native source roots may be watched when tokscale only reads them. Self-syncs share the collector's resolver and throttle; collector replacement cancels their in-flight attempt without recording a provider failure.
-- Watcher exhaustion falls back to process-sticky polling. The watcher normally lives in a worker thread; roots, attribution, debounce and tick selection remain on the owning thread.
-- Windows scans running WSL distros on full ticks only, never starts a stopped distro and freezes the WSL result between full scans.
-- Subprocess termination is not complete until `close`. Abort and timeout paths escalate after the shared grace period and fence late output; an unconfirmed forced termination eventually releases the logical barrier instead of deadlocking collection.
+## Collector pipeline (shared by widget and agent)
 
-## Limits collection
+`src/shared/collector.js` owns every `tokscale` usage scan and the binary resolution behind it; the self-sync spawns (`providers/cursor/auth.js`, `providers/antigravity/selfSync.js`) take that resolver rather than repeating it. The collector:
 
-`LimitsRuntime` owns refresh scheduling, bounded cross-provider concurrency, per-provider latest-wins lanes, deadlines, retry/backoff and last-good retention. Credential changes refresh only their provider lane unless a provider note names a usage-side sync requirement.
+1. resolves the platform binary from `@tokscale/cli-<platform>-<arch>` and falls back to the JS shim under Electron via `ELECTRON_RUN_AS_NODE=1`;
+2. runs three `tokscale --json --client <csv> --group-by client,workspace,session,model` calls (today / month / since `allTimeSince`) on full ticks (startup / interval / manual) — serially on purpose: concurrent scans triple peak CPU/IO. Watch-triggered ticks instead scan only `--today` and derive month/allTime **exactly** via `applyPeriodDelta()` anchored to the last full scan (every tokscale period scan costs the same full-load+filter, so the win is 3 spawns→1; the delta is an identity for append-only logs, NOT an estimate; stale-date anchors force a full scan). The grouping is the vendored fork's: it returns each session's workspace on the row and two arrays beside the entries (`sessions` with per-session titles and activity bounds, `workspaces` with each key's decoded filesystem path). `applyTokscaleSessionMetadata()` folds those onto the rows so the shared extractor reads them through aliases it already understands, which is what lets session timestamps and project attribution cover every client tokscale parses instead of only the ones with a resolver. A binary without that grouping rejects it outright; the scan then retries with `client,session,model`, caches that per binary identity (dropped by `resetTokscaleCapabilityCache()` with the rest of what a binary was observed to support), and the file-reading resolvers answer as before. Those resolvers stay enabled either way: only the clients whose tokscale parser records a workspace come back attributed, so the skip is decided per session (`applySessionMetadata` reads what the scan already filled in) rather than per tick — one client answering must not switch off another client's resolver. Project identity stays ours — the decoded path is hashed by `projectIdentity()`, never taken as an id — so the same directory keeps one id across clients, platforms and devices. Only a decoded path counts as an answer: tokscale reports none for an opaque key or a directory that is gone, and hashing the raw key there would mint a second identity for a directory other clients still name correctly while marking the session attributed, so those keys are left for the resolvers (whose transcripts usually still record the `cwd`). `projectsEnabled: false` drops the join from the argument list rather than discarding its answer, since resolving and labelling workspaces is work the scan only does when asked; the `sessions` array rides the plain session grouping too, so opting out of Projects costs no session timestamps;
+3. funnels output through the shared extractors in `src/shared/usage.js`, which defensively deep-walk tokscale's JSON shape (they never assume a fixed layout — that's why `tokenValue`/`detectClient` accept many key spellings);
+4. watches the per-client data directories (see [Watching](#watching) below) and debounces refreshes by `watchDebounceMs`;
+5. on Windows, also scans usage from running WSL distros (see [WSL](#wsl) below).
 
-- Provider dispatch starts in `src/shared/limits/collector.js`; shared normalization belongs in `src/shared/limits/core.js`.
-- Fixed and adaptive refresh mode remain separate settings. Local token usage is not a subscription-quota trigger, and rate limiting uses the existing backoff rather than a second circuit breaker.
-- Transport is selected at the runtime boundary and injected into collection and account probes. A provider using a custom transport does not inherit shared proxy or Electron-fetch behavior and must document that exception.
-- Electron fetch must not receive a manual `Host` header and must use `credentials: 'omit'` for provider-managed cookies.
-- Balance quotas use `windows[].metric === 'credits'`. Formatting and display-only percentage derivation belong in `src/shared/limitBalanceDisplay.js`, not provider wire data.
+### Watching
 
-## Configuration and credentials
+The per-client data directories come from `watchClientRootsForClients()` and are watched with chokidar (native events on every platform and in every mode; `resolveWatchUsePolling()` owns that default so entry points can't drift, and `TOKEN_MONITOR_WATCH_POLLING` overrides it in both directions).
 
-Node entry points load the project `.env` without overriding an existing process variable. Electron does so only when unpackaged; packaged builds use the process environment and persisted widget settings. The Cloudflare Worker does not load the project `.env`; its configuration arrives through deployment bindings.
+- There is deliberately **no cooldown** — the product promises 3–5 s updates, so a mid-tick watch event re-arms the debounce timer instead of coalescing.
+- A watch tick maps the changed paths back to their clients and scans only those partitions, unioned into a single `--today` scan rather than one per client; unknown or unattributed paths fall back to an all-client `--today` scan. That makes the client id a correctness surface — see the partition invariants in `docs/providers/README.md`.
+- The cursor/antigravity tokscale cache dirs are deliberately *not* watched — only our own `maybeSync*` calls write them, so watching them re-triggers forever — while antigravity's *source* roots (`selfSyncSourceRootsForClients()`) are the exception and are watched, because tokscale only reads them and an event there cannot close the loop.
+- Kernel watch-descriptor exhaustion (`ENOSPC`/`EMFILE`/`ENFILE`, a per-user budget shared with editors and hit first on Linux) arrives as an async watcher error that would otherwise stop event delivery silently, so it rebuilds the watcher on polling — deliberately sticky for the process, because a later rebuild would only rediscover the same exhausted budget.
 
-Widget settings merge persisted GUI values over process-environment-seeded defaults. For agent and standalone Hub options that expose a CLI flag, precedence is `CLI flag -> process env or .env -> built-in default`; env-only settings have no CLI layer. Neither runtime reads widget credential storage.
+The watcher itself does not run on the thread that owns the collector: `src/shared/watcherHost.js` puts it in a worker, because chokidar's `close()` is synchronous and superlinear in watched-directory count (~1s at 548 dirs, ~12s at 1820) and every tracked-client change rebuilds the roots, which froze the widget for about a second per toggle. Only the watcher moves — roots, attribution, debouncing and every tick decision stay on the owning thread. Usage-structural settings are reconciled latest-wins after a short settle window, and a real root change recycles the worker: the replacement starts only after the old thread exits, which bounds both descriptor overlap and native allocator high-water in the Electron process. `unwatch()` is not a cheaper substitute: it stops event delivery but keeps the descriptors, so incremental root edits would leak toward the exhaustion path above. The in-process host is a real fallback (worker spawn failure) and is what the collector's watch-behaviour tests run on, pinned by `TOKEN_MONITOR_WATCH_IN_PROCESS` through `tests/helpers/watchHost.js`; worker transport is covered separately in `tests/shared/watcherHost.test.js`.
 
-- `.env.example` is the supported operator-facing env surface.
-- Widget preferences and account metadata live in `settings.json`; raw GUI-managed credentials live in the permission-restricted shared credential store.
-- Fixed credential fields register in `CREDENTIAL_SETTING_PATHS`. Dynamic account credentials use a nested path in the same store rather than a provider-specific secret store.
-- Renderer settings are default-deny. Raw credentials cross into the renderer only through an explicit allowlist.
-- Legacy migration writes and verifies the new store before stripping the old source. Corrupt, unknown-version or symlinked stores must not be replaced with an empty document.
+### Self-sync
 
-## Worker and generated state
+Self-sync throttling lives in `src/shared/selfSyncThrottle.js`, while the sync itself lives with the client that needs it (`providers/cursor/selfSync.js`, `providers/antigravity/selfSync.js`); both are handed the collector's one throttle instance instead of building their own. Its rate-limit state is per client — one self-sync never shortens or extends the other's floor — so what injection preserves is that object's lifetime: a provider-local throttle would outlive the collector rebuild it is meant to follow.
 
-The Worker cannot import above `worker/`. `WORKER_SHARED_MODULES` declares the portable closure and `npm run sync:worker` mirrors it under `worker/src/shared/`; edit source files, never generated copies. Shared modules in that closure cannot depend on Node-only built-ins.
+Its three tick selections are **not** interchangeable: `forceSelfSync` waits for nothing, `sourceSelfSync` only shortens the floor for the client whose source moved, and a tick's `todayOnly` decides scan scope on its own, so forcing a sync cannot downgrade a manual full scan into a warm one. A collector replacement physically aborts an in-flight self-sync but cancels its process-wide attempt rather than completing it as a failure: cancellation restores the allowance consumed by `claim()`, preserves the last real health outcome, and fences late subprocess completion. The rest is commented where it happens; the invariant worth preserving from outside is that the floor and the catch-up deadline each stay a single function, since every divergence between copies of them has been a bug.
 
-Remote Hub update checks use `src/shared/hubBuildRegistry.json`, not the product version. Run `npm run update:hub-build` once after the final Hub/shared implementation is stable and do not hand-edit generated Worker metadata.
+### WSL
 
-The tokscale manifest controls binary provenance. App, agent and packaging entry points may ensure the binary; install, Hub, lint, test and verify must not download it.
+On Windows the collector also scans usage from **running** WSL distros (`src/shared/wslUsage.js`). It registry-gates on `HKCU\…\Lxss` (so `wsl.exe` is never spawned without WSL — the inbox stub otherwise shows an interactive install prompt), lists running distros via `wsl.exe --list --running` (never auto-starts a stopped one), keeps homes containing tracked-client data, and runs `tokscale --home \\wsl$\<distro>\home\<user>` per home (serial, same CPU/IO reason as above). The bundle is merged into the Windows periods in `collectUsageOnce` **before** `deriveClientStatus` (so a WSL-only client still shows active); `mergePeriods`/`addPeriodInto` (in `usage.js`) do the additive sum. It refreshes on full ticks only and is frozen between them (`wslAnchor` in `startCollector`), so the Windows-only delta anchor stays exact and the chokidar watcher is **not** extended to WSL. Non-`win32` is a no-op. Default on, no setting.
+
+### Subprocess lifecycle
+
+Sending `SIGTERM` only requests termination. Aborts, command timeouts, pipe failures, and the process-wide capability probe keep their operation pending until the child emits `close`, so a replacement tick stays behind the old runtime's quiescence barrier; a child that ignores the request is escalated to `SIGKILL` after the shared grace period. If even forced termination never reports `close`, a second bounded grace emits `subprocess-termination-unconfirmed` and releases the logical barrier rather than deadlocking usage forever; a late `close` is cleanup only, and the generation fence still rejects stale output. The capability probe itself remains process-wide and continues filling its shared cache, but a superseded collector abandons only its own wait for that Promise so a replacement that no longer needs the probed client is not held behind it.
+
+Usage reconciliation tracks desired and active fingerprints separately: a failed replacement rolls back to the last-known-good runtime, then retries the unchanged latest desired fingerprint on a bounded backoff; exhausting that retry budget emits `usage-reconfigure-exhausted`, while a newer setting supersedes the failed desired fingerprint with a fresh budget.
+
+## Limits collector
+
+Usage and limits have independent lifecycles under `src/shared/deviceRuntime.js`: `UsageRuntime` owns the tokscale collector, while `LimitsRuntime` owns its refresh timer, bounded cross-provider concurrency, per-provider latest-wins serial lanes, scoped account refreshes, finite probe deadlines, retry/backoff, and `lastGood` / `lastAttempt` retention. Credential changes refresh or clear only the affected limits lane and never restart usage; a provider note names any provider that additionally forces a targeted usage sync (Cursor does, because its tokscale cache is self-synced).
+
+`limitsRefreshMode` (`fixed` | `adaptive`) is deliberately a separate setting from `limitsRefreshMs`, so the fixed intervals keep their exact previous meaning, a chosen interval survives a round trip through adaptive, and nothing doing arithmetic on `limitsRefreshMs` has to handle a sentinel. Adaptive shortens the interval from a window's measured burn rate; `limits/burnRate.js` documents the control law and what it is not, and the scheduling constraints are commented where they are enforced. Two decisions there are worth stating once so they are not quietly reversed:
+
+- `burn-rate` stays out of `COOLDOWN_BYPASS_REASONS` and carries no circuit breaker on top of the existing backoff, because a 429 is transient traffic control rather than proof that a provider is unsuited to adaptive polling.
+- Local token usage is deliberately **not** a trigger, because a client's tokens may be billed to a third-party API key or endpoint rather than the subscription being metered, and quota can equally be consumed from another device or the web, so the correlation breaks in both directions.
+
+Provider dispatch starts in `src/shared/limits/collector.js`; shared normalization remains in `src/shared/limits/core.js`. The limits infrastructure lives in `src/shared/limits/` and is reached by explicit filename — there is deliberately no directory `index.js`, since the Worker imports `core.js` as ESM and ESM does not resolve a directory. `limitProviders.js` and `limitBalanceDisplay.js` stay at the top level because the renderer loads them by `<script src>`, not `require`.
+
+### Outbound transport
+
+Outbound transport is chosen at the runtime boundary, not per provider: `src/electron/limitsFetch.js` gives the widget `src/shared/outboundFetch.js` when a proxy env is configured and Electron's `net.fetch` otherwise, so the OS proxy applies with no setup. Every widget provider call takes it — the collector's `deps.fetch` and the account-settings probes alike, since those gate whether a credential can be saved at all. Two things about that are easy to get wrong:
+
+- `probeLimitProvider` injects a resolved `fetch` into every provider and `createOutboundFetch` returns an injected one untouched, so a provider's own env-proxy call is dead unless that lane builds its own deps; and a probe carrying its own transport (`node:https`, `claudeWebFetch`, a spawned CLI) inherits none of this.
+- Chromium is not a drop-in for undici — never give it a `Host` header (it rejects the request; sign the canonical host and let the transport derive the wire value), keep `credentials: 'omit'` so the default session's cookie jar cannot shadow a provider-managed `Cookie`, and know that an explicit cross-origin `Referer` carrying a path is cancelled unless that provider asks for a looser `referrerPolicy` itself.
+
+### Balance quotas
+
+Balance-style quotas are marked with `windows[].metric === 'credits'`: their headline value is money (`remaining` + `currency`), not a percentage. `src/shared/limitBalanceDisplay.js` is the single formatting/derivation entry point shared by Home, the tray and the limits page — key off that marker, never a provider whitelist. The meter percentage for a top-up balance (`amount / (amount + monthSpend)`) is a **display-layer derivation** and is deliberately kept out of the wire shape; don't push it back into a collector.
+
+## Widget mode switching
+
+`main.js` chooses the data path from `settings.hubMode` (`local` / `client` / `host`, set in the GUI's Multi-device Sync section). In `client` mode (a `hubUrl` is set) it stops the local collector, opens an SSE stream to `/api/stats/stream`, and *also* runs a sync-collector to post this device's own usage. In `host` mode it additionally runs an embedded hub (`startEmbeddedHub()`) so other devices can connect. In `local` mode it runs only the local collector and emits stats over IPC to the renderer.
+
+When both a widget and the headless agent run on the same machine, the widget's sync-collector backs off — it checks `data/agent.pid` (`pidFilePath()`) and skips posting if that PID is alive. This is the only coordination between them.
+
+## Settings and credentials
+
+Configuration has two sources, and the widget splits its persisted GUI state by sensitivity:
+
+1. **`.env` at project root** — read by `loadDotEnv()` in `src/shared/config.js`. Node entry points load it at startup; the Electron widget loads it only when unpackaged, so packaged builds use the process environment and persisted widget settings. It only assigns keys that aren't already in `process.env`, so real env vars (systemd / launchd / Docker) still win. The Cloudflare Worker does not load it; its configuration arrives through deployment bindings. `.env.example` documents the operator-facing settings intended for direct configuration, including connection/device settings, feature toggles, and provider credentials. Lower-level runtime knobs may still be accepted without being listed there; treat additions or removals from the documented env surface as compatibility changes and keep `.env.example` aligned with the code.
+2. **Widget GUI** — Electron `userData/settings.json` stores preferences and account metadata; plaintext `userData/credentials.json` stores GUI-managed raw credentials with restrictive filesystem permissions (POSIX `0600`; Windows relies on the containing `userData` ACL). `readSettings()` merges both over `defaultSettings()` (which is seeded from the process environment), while the main process sends a default-deny redacted view to the renderer. The only explicit renderer exceptions are the two Hub secrets required by the existing sync UI. The headless agent and standalone hub never read `credentials.json`; their credential flow remains CLI/env-based.
+
+`CREDENTIAL_SETTING_PATHS` in `src/shared/credentialStore.js` maps fixed GUI credential settings. Add new fixed credentials there instead of creating provider-specific stores; dynamic account credentials such as MiMo cookies belong under a dedicated nested path in the same unified store and must remain metadata-only in the renderer. Expose any raw credential to the renderer only through an explicit allowlist. Legacy migration must write and verify the new store before stripping/deleting the old source; corrupt, unknown-version, or symlinked stores must never be replaced with an empty document. This store is deliberately local plaintext protected by filesystem permissions, not OS-backed encryption: it avoids Keychain/credential-manager prompts but does not protect against processes already running as the same OS user.
+
+For agent and standalone Hub options that expose a CLI flag, precedence is `CLI flag → env var (real or .env) → built-in default`; env-only settings have no CLI layer. There is no JSON config file anymore — `config.local.json` was removed.
+
+## Data flow contract
+
+The hub stores normalized device records (`normalizeDeviceRecord` in `usage.js`) and aggregates on read (`aggregateDevices`). `DeviceState` composes the wire record from usage, the normalized runtime envelope and limits: limits-only updates preserve the usage `updatedAt`, and cold-start previews wait for a complete usage baseline. `collectUsageOnce()` is the source of truth for the usage portion of that record; `docs/API.md` documents the full contract. The core is `{deviceId, hostname, platform, updatedAt, agentVersion, today, month, allTime}` (each period has `{totalTokens, costUsd, clients, clientCosts, models, modelCosts}`), plus attribution fields (`trackedClients`, `clientStatus`, `wslStatus`, `periodWindows`, `projectsEnabled`) and optional `osName` / `osVersion` / `agentRuntime` / `history` / `limits`. The Worker hub uses the exact same shapes, and neither hub ever needs provider credentials.
+
+Public compatibility surfaces include settings keys, env vars, CLI flags, Hub endpoints and this wire shape. Treat changes to them as breaking and plan the migration.
+
+### Stale devices
+
+A device is "stale" if `Date.now() - receivedAt > staleAfterMs` (default 10 min). Stale devices still appear in `/api/stats` with `stale: true`, and the renderer greys them out — this is intentional, not a bug.
+
+## Subscriptions are hub-scoped, not device-scoped
+
+Manually recorded subscriptions (`src/shared/subscriptionDisplay.js`) are the one thing a hub stores that is **not** part of a device record. A subscription describes an account, and `accountKey` is not stable across platforms — the collapse pass in `limits/core.js` exists precisely because the same OAuth login hashes differently on macOS and Windows — so per-device copies could not be deduped and a two-machine setup would double its own monthly total. `GET`/`PUT /api/subscriptions` therefore read and write one shared list per hub; a delete is a delete, with no tombstone needed.
+
+`PUT` carries `baseUpdatedAt` and answers `409` when it does not match the stored document: this data exists nowhere else, so a device writing from a stale copy must not silently erase records added elsewhere. In the widget that token belongs to whoever built the list — the renderer sends back the version its edit was made on — and is never re-derived at write time. Hub reads and writes run in a per-hub lane, but ordering is not re-basing: a write queued behind a refresh that pulled in another device's records is refused, not quietly retargeted at the version that refresh left. In `local` mode the list lives in the widget's `settings.json`; in `client`/`host` mode that key is only the last-known cache, and writes attempted while the hub is unreachable are refused rather than applied locally (a local write would fork the shared list). The list is never part of `publicStats`.
+
+Propagation is by version stamp, not by shipping the list: an accepted `PUT` broadcasts stats the way an ingest does, and every stats frame carries `subscriptionsUpdatedAt`. A device re-reads only when that disagrees with the copy it holds, so an edit lands on the other devices in seconds and the steady state costs nothing — there is deliberately **no periodic subscription read** behind it. Both stats paths feed the comparison: the stream while it is up, and the widget's own `/api/stats` read when it is not (that one is five minutes apart precisely while the stream is up, `restartTimer()`). Four traps:
+
+- The Worker's `/api/public/stats` spreads the rest of `getStats()`, which is why the stamp is added by a separate `statsWithSubscriptionVersion()` that only the authenticated paths call — fold it back into `getStats()` and the one unauthenticated route both reads the money document and publishes whatever it found.
+- A missing stamp must read as "no news", since that is also what a local collector's own stats look like.
+- The version is compared *inside* the subscription lane rather than before it: only what an in-flight operation leaves behind can tell this device's own write (which lands the broadcast version itself, so nothing needs fetching) from another device's (where a read already in flight answers with the older document).
+- A failed catch-up must not be retried on every frame, since frames arrive on every ingest from every device — the same version is retried at most once a minute, while a version that moves is tried at once.
