@@ -33,7 +33,7 @@ const { KNOWN_CLIENTS, PARSE_LOCAL_CLIENTS } = require(path.join(__dirname, '..'
 const { tokscaleClientFilter } = require(path.join(__dirname, '..', 'src', 'shared', 'collector'));
 
 // Clients Token Monitor parses itself rather than through tokscale — see the
-// "Adding a tracked client" table in AGENTS.md (parse_local clients). These
+// "Adding a tracked client" table in docs/providers/README.md (parse_local clients). These
 // are expected to be absent from tokscale's own --client list; everything
 // else in DEFAULT_CLIENTS must be a client tokscale genuinely recognizes.
 const LOCALLY_PARSED_CLIENTS = new Set(PARSE_LOCAL_CLIENTS);

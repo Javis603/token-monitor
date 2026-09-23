@@ -159,8 +159,8 @@ test('wslUsageHomes returns [] when no distro is running', () => {
 
 // A WSL home that only holds a new A-class client's data (pi, Oh My Pi, zed,
 // Kilo, Command Code, DSH, mimo, zcode, kiro, LM Studio) must still be discovered — mirroring the sync
-// point each new tracked client adds (see AGENTS.md "Tracked-client list must
-// stay in sync"). Zed's marker is the threads.db file, not the directory
+// point each new tracked client adds (see docs/providers/README.md "Adding a tracked
+// client"). Zed's marker is the threads.db file, not the directory
 // (tokscale checks is_file()).
 test('wslUsageHomes keeps a home whose only tracked-client data is pi, zed, Kilo, Command Code, DSH, mimo, zcode, kiro, or LM Studio', () => {
   function homesFor(markerRel) {

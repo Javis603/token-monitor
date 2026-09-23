@@ -6,7 +6,7 @@ The hub exposes a small JSON HTTP API.
 
 All endpoints except `/api/health` require the configured shared secret.
 
-Use either:
+Prefer a header (first-party clients already do this):
 
 ```http
 Authorization: Bearer <secret>
@@ -17,6 +17,8 @@ or:
 ```http
 X-Token-Monitor-Secret: <secret>
 ```
+
+The Node hub is header-only. The Cloudflare Worker still accepts `?secret=` as a limited compatibility / migration path for iOS widget runtimes that cannot set `Authorization`. A secret in the URL can appear in proxy, platform, and history logs; new clients should send a header.
 
 ## `GET /api/health`
 

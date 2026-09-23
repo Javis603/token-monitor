@@ -1,5 +1,6 @@
 ---
 summary: "Cline notes: the shared ~/.cline data tree, the ClinePass quota read and its credential boundary, and the cache convention that under-counts token totals."
+ids: [cline]
 read_when:
   - Changing Cline token tracking, session metadata, or source roots
   - Changing the ClinePass usage-limits request or its credential resolution

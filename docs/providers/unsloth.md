@@ -1,5 +1,6 @@
 ---
 summary: "Unsloth Studio inference usage: SQLite source, bounded watches, and pricing boundaries."
+ids: [unsloth]
 read_when:
   - Changing Unsloth source detection or watch behavior
   - Debugging missing Unsloth usage or cost estimates
@@ -22,9 +23,3 @@ WSL discovery recognizes the default database path. As with other SQLite clients
 ## Cost
 
 Local inference has zero API cost; this is not an estimate of hardware or electricity costs. Studio chats routed to recognized metered providers use Tokscale's model pricing. Unknown, custom, and subscription-backed routes remain unpriced unless an exact custom-pricing override is supplied. A displayed zero is therefore not proof that every route was free, and estimates are not an invoice or a historical price ledger.
-
-## Artwork
-
-The Unsloth SVG is adapted from [LobeHub's Unsloth icon](https://github.com/lobehub/lobe-icons/tree/master/src/Unsloth), under the MIT license retained in the SVG. The README PNG is rendered from that asset.
-
-Discord Rich Presence uses the Unsloth text label. Its small image can be enabled in `KNOWN_CLIENT_ASSETS` after the app owner uploads an `unsloth` asset to Discord.

@@ -1,5 +1,6 @@
 ---
 summary: "Zed provider notes: local token tracking, dashboard quotas, browser-cookie credentials, and platform boundaries."
+ids: [zed]
 read_when:
   - Adding or changing Zed token or session tracking
   - Changing Zed dashboard billing endpoints or Cookie setup

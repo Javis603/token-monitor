@@ -1,5 +1,6 @@
 ---
 summary: "Antigravity provider notes: token/session tracking, local RPC quota probing, standalone OAuth, identity, and aggregation."
+ids: [antigravity]
 read_when:
   - Adding or changing Antigravity token or session tracking
   - Changing Antigravity local RPC or standalone OAuth quota collection

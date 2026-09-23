@@ -411,7 +411,14 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
   // inserts an earlier, provider-scoped probe for a quota whose burn rate says
   // it is close to running out, never faster than the floor in burnRate.js.
   // 'burn-rate' is deliberately absent from COOLDOWN_BYPASS_REASONS, so
-  // queueScope defers it whenever the lane is already backing off.
+  // queueScope defers it whenever the lane is already backing off, and it has
+  // no circuit breaker of its own: a 429 is transient traffic control, not
+  // proof that a provider is unsuited to adaptive polling.
+  //
+  // Local token usage is deliberately not a trigger either. A client's tokens
+  // may be billed to a third-party key or endpoint rather than the metered
+  // subscription, and quota can be consumed from another device or the web,
+  // so the correlation breaks in both directions.
   function scheduleUrgencyTimer() {
     clearUrgencyTimer();
     if (!started || stopped || !enabled || refreshMode !== 'adaptive') return;
