@@ -4640,6 +4640,27 @@ html.is-windows .limit-live-badge {
   text-align: right;
   white-space: nowrap;
 }
+/* A full-row entry spans the whole grid and wraps in place — a long sentence
+   in a nowrap cell would push the popover past the window edge. Same bound
+   the forecast disclaimer uses. */
+.limit-detail-tooltip-full {
+  grid-column: 1 / -1;
+  max-width: 210px;
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: normal;
+}
+.limit-detail-tooltip-full.is-separated {
+  margin-top: 3px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.16);
+}
+/* A caption full-row is context, not data — smaller and dimmer so it reads
+   as a footnote instead of another line competing with the rows. */
+.limit-detail-tooltip-full.is-caption {
+  font-size: 8px;
+  opacity: 0.66;
+}
 .codex-reset-forecast-disclaimer {
   grid-column: 1 / -1;
   max-width: 210px;

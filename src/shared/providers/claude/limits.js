@@ -31,6 +31,11 @@ const {
 
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile';
+// `cedar_ember` is Anthropic's codename for usage-limit reset grants — the
+// "reset coupon" issued for promos such as a model launch. Both usage
+// endpoints carry the block only when asked, so every usage request takes the
+// same flag; without it the key is present but null.
+const CLAUDE_RESET_GRANTS_QUERY = 'cedar_ember=1';
 const CLAUDE_WEB_BASE_URL = 'https://claude.ai';
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
@@ -499,6 +504,48 @@ function claudeUsageCreditsWindow(usage) {
   };
 }
 
+// Usage-limit reset grants live in the `cedar_ember` block (see
+// CLAUDE_RESET_GRANTS_QUERY). Each grant is one coupon: a label saying why it
+// was issued, how many resets it still holds, the windows it clears, and when
+// it lapses. Grants with nothing left or already past `ends_at` are spent —
+// counting them would promise a reset the account can no longer use.
+function claudeResetCredits(usage) {
+  const block = usage?.cedar_ember;
+  if (!block || typeof block !== 'object') return null;
+  const nowMs = Date.now();
+  const grants = (Array.isArray(block.grants) ? block.grants : [])
+    .filter((grant) => grant && Number(grant.resets_left) > 0)
+    .filter((grant) => {
+      const endsAt = Date.parse(grant.ends_at || '');
+      return !Number.isFinite(endsAt) || endsAt > nowMs;
+    });
+  if (grants.length === 0) return null;
+  const expirations = grants
+    .map((grant) => grant.ends_at)
+    .filter((value) => value && Number.isFinite(Date.parse(value)))
+    .sort((a, b) => Date.parse(a) - Date.parse(b));
+  return {
+    availableCount: grants.reduce((sum, grant) => sum + Math.floor(Number(grant.resets_left)), 0),
+    nextExpiresAt: expirations[0] || null,
+    expirations,
+    // Per-grant detail rides inside the same field so the renderer can show why
+    // each reset exists and what it covers — Codex credits are anonymous, these
+    // are not.
+    grants: grants.map((grant) => ({
+      id: grant.id,
+      label: grant.label,
+      resetsLeft: grant.resets_left,
+      resetsTotal: grant.resets_total,
+      startsAt: grant.starts_at,
+      endsAt: grant.ends_at,
+      clears: grant.clears,
+      usableNow: grant.usable_now,
+      useRequiresLimit: grant.use_requires_limit,
+      paused: grant.paused
+    }))
+  };
+}
+
 function mapClaudeUsageToProvider(usage, meta = {}) {
   const windows = [];
   const session = valueFromAliases(usage, ['five_hour', 'fiveHour']);
@@ -530,7 +577,8 @@ function mapClaudeUsageToProvider(usage, meta = {}) {
     source: meta.source || 'oauth',
     status: 'ok',
     updatedAt: meta.updatedAt,
-    windows
+    windows,
+    resetCredits: claudeResetCredits(usage)
   });
 }
 
@@ -609,7 +657,7 @@ async function persistClaudeRefresh(credentials, refreshed, deps = {}) {
 }
 
 function callClaudeUsage(accessToken, deps = {}) {
-  return fetchJson(CLAUDE_USAGE_URL, {
+  return fetchJson(`${CLAUDE_USAGE_URL}?${CLAUDE_RESET_GRANTS_QUERY}`, {
     accept: 'application/json',
     authorization: `Bearer ${accessToken}`,
     'anthropic-beta': 'oauth-2025-04-20',
@@ -1063,7 +1111,7 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
     const organizationId = claudeWebOrganizationId(organization);
     if (!organizationId) throw errorWithStatus('unavailable', 'Claude Web organization not found');
     usage = await fetchWebJson(
-      `${baseUrl}/api/organizations/${encodeURIComponent(organizationId)}/usage`
+      `${baseUrl}/api/organizations/${encodeURIComponent(organizationId)}/usage?${CLAUDE_RESET_GRANTS_QUERY}`
     );
     try {
       const accountBody = await fetchWebJson(`${baseUrl}/api/account`);
@@ -1083,7 +1131,7 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
     }
   } else {
     usage = await fetchWebJson(
-      `${baseUrl}/api/organizations/${encodeURIComponent(context.organizationId)}/usage`
+      `${baseUrl}/api/organizations/${encodeURIComponent(context.organizationId)}/usage?${CLAUDE_RESET_GRANTS_QUERY}`
     );
   }
   const renewedCookie = session.cookie();

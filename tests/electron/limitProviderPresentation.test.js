@@ -1381,8 +1381,12 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(codexResetCreditsNode, /summaryParts\.push\(`\+\$\{hiddenExpirationCount\}`\)/);
   // The expiry tooltip is the shared builder, not a second copy of its
   // hover/focus wiring that has to be kept in step by hand. It is useful for a
-  // single reset too, not only when several dates are present.
-  assert.match(codexResetCreditsNode, /expiryGroup\.append\(timeline\);\s*if \(expirationDates\.length > 0\) \{/);
+  // single reset too, not only when several dates are present — and Claude's
+  // grants can supply the tooltip rows when plain expiry dates cannot.
+  assert.match(codexResetCreditsNode, /if \(expirationDates\.length > 0 \|\| detailEntries\) \{/);
+  assert.match(codexResetCreditsNode, /if \(expirationDates\.length > 0\) \{\s*const timeline/);
+  assert.match(codexResetCreditsNode, /expiryGroup\.append\(timeline\);/);
+  assert.match(codexResetCreditsNode, /limitDetailInfoNode\(detailEntries, '', detail\?\.ariaLabel \|\| ''\)/);
   assert.match(
     codexResetCreditsNode,
     /expirationDates\.map\(\(date\) => \[expiryDateLabel\(date\), codexResetCreditExpiryLabel\(date\)\]\)/
@@ -1499,17 +1503,90 @@ test('The detail tooltip widens its grid and pads short rows for three-column en
   const grantRows = viewBody('claudePrepaidGrantRows', 'claudeBalanceNode');
   const balanceNode = viewBody('claudeBalanceNode', 'providerWindowText');
 
-  assert.match(infoNode, /const columns = entries\.reduce\(\(widest, entry\) => Math\.max\(widest, entry\.length\), 0\);/);
+  assert.match(infoNode, /Math\.max\(widest, Array\.isArray\(entry\) \? entry\.length : 0\)/);
   assert.match(infoNode, /columns > 2 \? 'limit-detail-tooltip-triple' : ''/);
   assert.match(infoNode, /for \(let column = 0; column < columns; column \+= 1\)/);
   assert.match(infoNode, /cell\.textContent = entry\[column\] \?\? '';/);
-  assert.match(infoNode, /entries\.map\(\(\[entryLabel, \.\.\.rest\]\) => `\$\{entryLabel\}: \$\{rest\.filter\(Boolean\)\.join\(' '\)\}`\)/);
+  assert.match(infoNode, /entries\s*\.filter\(Array\.isArray\)\s*\.map\(\(\[entryLabel, \.\.\.rest\]\) => `\$\{entryLabel\}: \$\{rest\.filter\(Boolean\)\.join\(' '\)\}`\)/);
   assert.match(balanceNode, /const grants = claudePrepaidGrantRows\(tranches, currency\);/);
   assert.match(balanceNode, /\.\.\.grants\.map\(\(grant\) => grant\.aria\)/);
   // The wording belongs to the spoken label now, never to a rendered cell.
   assert.doesNotMatch(grantRows, /cells: \[[^\]]*Expires in/);
   assert.match(styles, /\.limit-detail-tooltip-triple\s*\{[^}]*grid-template-columns: max-content max-content max-content;/s);
   assert.match(styles, /\.limit-detail-tooltip-row span:nth-child\(2\):not\(:last-child\)\s*\{[^}]*text-align: right;/s);
+});
+
+function runClaudeResetGrantRows(app, grants, now) {
+  const dateLabel = viewBody('expiryDateLabel', 'codexResetCreditsNode');
+  const clearLabel = viewBody('claudeResetClearLabel', 'claudeResetGrantRows');
+  const grantRows = viewBody('claudeResetGrantRows', 'claudeResetCreditsNode');
+  const context = {
+    Date: class FrozenDate extends Date {
+      constructor(...args) {
+        super(...(args.length === 0 ? [now] : args));
+      }
+
+      static now() {
+        return now;
+      }
+    },
+    Intl,
+    currentLocale: () => 'en-US',
+    formatDuration: limitDurationText
+  };
+  vm.runInNewContext(
+    `${dateLabel}\n${clearLabel}\n${grantRows}\n`
+      + `result = claudeResetGrantRows(${JSON.stringify(grants)});`,
+    context
+  );
+  return JSON.parse(JSON.stringify(context.result));
+}
+
+test('Claude reset grants wrap their label and clears as full-width lines', () => {
+  const app = readRendererFile('app.js');
+  const styles = readRendererFile('styles.css');
+  const renderProviderWindows = viewBody('renderProviderWindows');
+  const claudeNode = viewBody('claudeResetCreditsNode', 'providerSpendEntries');
+  const infoNode = viewBody('limitDetailInfoNode', 'providerSpendNode');
+  const now = new Date(2026, 6, 28, 0, 0, 0, 0).getTime();
+  const rows = runClaudeResetGrantRows(app, [
+    {
+      label: 'Launch promo reset',
+      resetsLeft: 1,
+      endsAt: localIso(2026, 8, 20, 17),
+      clears: ['five_hour', 'seven_day', 'seven_day_overage_included'],
+      usableNow: true
+    },
+    {
+      label: 'Second promo',
+      resetsLeft: 1,
+      endsAt: localIso(2026, 9, 1, 12),
+      clears: ['seven_day_opus'],
+      useRequiresLimit: true
+    }
+  ], now);
+
+  // Anthropic labels arrive as full sentences — they wrap on their own line
+  // instead of widening the popover past a narrow card edge.
+  assert.deepEqual(rows, [
+    { full: 'Launch promo reset', caption: true, separated: false },
+    ['Expires', '8/20, 5:00 PM · 23d 17h'],
+    ['Clears', 'Session · Weekly incl. overage'],
+    { full: 'Second promo', caption: true, separated: true },
+    ['Expires', '9/1, 12:00 PM · 35d 12h'],
+    ['Clears', 'Opus weekly'],
+    ['Usable', 'at a limit only']
+  ]);
+
+  assert.match(renderProviderWindows, /claudeResetCreditsNode\(provider\.resetCredits\)/);
+  assert.match(claudeNode, /if \(grants\.length === 0\) return codexResetCreditsNode\(resetCredits\);/);
+  assert.match(infoNode, /!Array\.isArray\(entry\)/);
+  assert.match(infoNode, /entry\?\.caption === true \? 'is-caption' : ''/);
+  assert.match(infoNode, /entry\?\.separated === true \? 'is-separated' : ''/);
+  assert.match(styles, /\.limit-detail-tooltip-full\s*\{[^}]*grid-column: 1 \/ -1;/s);
+  assert.match(styles, /\.limit-detail-tooltip-full\s*\{[^}]*white-space: normal;/s);
+  assert.match(styles, /\.limit-detail-tooltip-full\.is-separated\s*\{[^}]*border-top:/s);
+  assert.match(styles, /\.limit-detail-tooltip-full\.is-caption\s*\{[^}]*font-size: 8px;/s);
 });
 
 test('Home uses explicit billing labels so Copilot Premium and Chat stay distinct', () => {
