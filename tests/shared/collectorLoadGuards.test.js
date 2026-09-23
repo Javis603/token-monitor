@@ -87,7 +87,7 @@ test('watchPathsForClients excludes the tokscale cache dirs our own syncs write'
   }
 });
 
-test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
+test('watchPathsForClients watches both MiMo roots tokscale scans', () => {
   // Tokscale unions the XDG data dir with orca's hook-sandbox copy, and
   // that copy can hold sessions the XDG one is missing. Watching only XDG would
   // leave an orca-driven install without the seconds-level refresh.
@@ -97,7 +97,7 @@ test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
   os.homedir = () => tmp;
   try {
     const { watchPathsForClients } = freshCollector();
-    const dirs = watchPathsForClients('micode');
+    const dirs = watchPathsForClients('mimo');
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'mimocode')));
     assert.ok(dirs.includes(path.join(tmp, orcaRoot)));
   } finally {
@@ -145,7 +145,7 @@ test('watchIgnoreMatcher keeps every direct Tokscale MiMo database variant but p
   os.homedir = () => tmp;
   try {
     const { watchIgnoreMatcher } = freshCollector();
-    const ignored = watchIgnoreMatcher('micode');
+    const ignored = watchIgnoreMatcher('mimo');
     const roots = [
       path.join(tmp, '.local', 'share', 'mimocode'),
       path.join(tmp, orcaRoot)
@@ -1766,6 +1766,12 @@ test('watchIgnoreMatcher bounds Copilot data, Grok unified, ZCode, and exporter 
     assert.equal(ignored(path.join(copilotRoot, 'data.db')), false);
     assert.equal(ignored(path.join(copilotRoot, 'data.db-wal')), false);
     assert.equal(ignored(path.join(copilotRoot, 'data.db-shm')), false);
+    // The CLI database sits beside the desktop one under the same watch root.
+    // Pruning it here would leave tokscale parsing session-store.db while the
+    // widget only noticed on a full tick.
+    assert.equal(ignored(path.join(copilotRoot, 'session-store.db')), false);
+    assert.equal(ignored(path.join(copilotRoot, 'session-store.db-wal')), false);
+    assert.equal(ignored(path.join(copilotRoot, 'session-store.db-shm')), false);
     assert.equal(ignored(path.join(copilotRoot, 'otel', 'trace.jsonl')), false);
     assert.equal(ignored(path.join(copilotRoot, 'cache')), true);
 
@@ -1990,13 +1996,13 @@ test('watchPathsForClients follows XDG_DATA_HOME for OpenCode, MiMo, and Zed', (
   try {
     process.env.XDG_DATA_HOME = path.join(tmp, xdgRoot);
     const { clientDataDirPresence, watchPathsForClients } = freshCollector();
-    const dirs = watchPathsForClients('opencode,micode,zed');
+    const dirs = watchPathsForClients('opencode,mimo,zed');
     assert.ok(dirs.includes(path.join(tmp, xdgRoot, 'opencode')));
     assert.ok(dirs.includes(path.join(tmp, xdgRoot, 'mimocode')));
     assert.ok(dirs.includes(path.join(tmp, xdgRoot, 'zed', 'threads')));
     assert.ok(!dirs.includes(path.join(tmp, '.local', 'share', 'opencode')));
-    assert.deepEqual(clientDataDirPresence('opencode,micode,zed'), {
-      opencode: true, micode: true, zed: true
+    assert.deepEqual(clientDataDirPresence('opencode,mimo,zed'), {
+      opencode: true, mimo: true, zed: true
     });
   } finally {
     os.homedir = originalHomedir;
@@ -2073,7 +2079,7 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
   os.homedir = () => tmp;
   try {
     const { clientDataDirPresence, watchPathsForClients } = freshCollector();
-    const dirs = watchPathsForClients('pi,zed,kilo,micode,zcode,kiro,codebuddy,workbuddy');
+    const dirs = watchPathsForClients('pi,zed,kilo,mimo,zcode,kiro,codebuddy,workbuddy');
     assert.ok(dirs.includes(path.join(tmp, '.pi', 'agent', 'sessions')));
     assert.ok(dirs.includes(path.join(tmp, '.omp', 'agent', 'sessions')));
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'zed', 'threads')));
@@ -2098,8 +2104,8 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     assert.ok(dirs.includes(path.join(tmp, '.codebuddy', 'projects')));
     assert.ok(dirs.includes(path.join(tmp, '.workbuddy', 'projects')));
     assert.ok(dirs.includes(path.join(tmp, '.workbuddy-ai', 'projects')));
-    assert.deepEqual(clientDataDirPresence('pi,zed,kilo,micode,zcode,kiro,codebuddy,workbuddy'), {
-      pi: true, zed: true, kilo: true, micode: true, zcode: true, kiro: true, codebuddy: true, workbuddy: true
+    assert.deepEqual(clientDataDirPresence('pi,zed,kilo,mimo,zcode,kiro,codebuddy,workbuddy'), {
+      pi: true, zed: true, kilo: true, mimo: true, zcode: true, kiro: true, codebuddy: true, workbuddy: true
     });
   } finally {
     os.homedir = originalHomedir;
@@ -3005,10 +3011,10 @@ test('self-watch db-shm events are ignored for every client whose scan recreates
 // not rewrite its sidecar must keep waking the collector on shm events.
 test('a SQLite client whose scan does not recreate its sidecar still watches db-shm', () => {
   const { isSelfWatchSqliteSidecarEvent } = freshCollector();
-  const micodeRoot = path.join(os.tmpdir(), 'mimocode');
-  const roots = { micode: [micodeRoot] };
+  const mimoRoot = path.join(os.tmpdir(), 'mimocode');
+  const roots = { mimo: [mimoRoot] };
 
-  assert.equal(isSelfWatchSqliteSidecarEvent(path.join(micodeRoot, 'mimocode.db-shm'), roots), false);
+  assert.equal(isSelfWatchSqliteSidecarEvent(path.join(mimoRoot, 'mimocode.db-shm'), roots), false);
 });
 
 // The unit test above proves the predicate; this proves the consequence the bug
@@ -4481,7 +4487,7 @@ test('XDG_DATA_HOME moves exactly the roots tokscale resolves through it', () =>
   process.env.XDG_DATA_HOME = xdg;
   try {
     const { watchPathsForClients } = freshCollector();
-    const roots = watchPathsForClients('opencode,zed,micode,amp,codebuddy,kiro');
+    const roots = watchPathsForClients('opencode,zed,mimo,amp,codebuddy,kiro');
     assert.ok(roots.includes(path.join(xdg, 'opencode')));
     assert.ok(roots.includes(path.join(xdg, 'zed', 'threads')));
     assert.ok(roots.includes(path.join(xdg, 'mimocode')));
@@ -4514,7 +4520,7 @@ test('an unset XDG_DATA_HOME falls back to the .local/share roots', () => {
   os.homedir = () => tmp;
   try {
     const { watchPathsForClients } = freshCollector();
-    const roots = watchPathsForClients('opencode,zed,micode,amp');
+    const roots = watchPathsForClients('opencode,zed,mimo,amp');
     assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'opencode')));
     assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'zed', 'threads')));
     assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'mimocode')));

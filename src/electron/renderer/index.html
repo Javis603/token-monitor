@@ -910,6 +910,32 @@
                 <div id="antigravityAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
+            <div id="clineAccountGroup" class="settings-group cursor-account-group">
+              <button id="clineSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="clineSettingsDetails">
+                <span data-i18n="settings.cline.title">Cline Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="clineAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="clineSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="clineOpenBrowser" data-i18n="settings.cline.openBrowser">Open Cline API keys</button>
+                  <button id="clineLogoutButton" class="hidden" data-i18n="settings.cline.clearApiKey">Clear key</button>
+                  <button id="clineRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="clineManualPanel">
+                  <p class="settings-note" data-i18n="settings.cline.note">Token Monitor reads the Cline sign-in that Cline Desktop and the CLI already store, so limits usually work with no setup. To use an API key instead, paste it here: the key is used ahead of that sign-in and stays on this device.</p>
+                  <!-- Named after the credential it holds, the way opencodeApiKeyInput is:
+                       a password box with a placeholder has no accessible name of its own. -->
+                  <input id="clineApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.cline.apiKeyPlaceholder" aria-label="Cline API key" data-i18n-aria-label="settings.cline.apiKeyLabel" />
+                  <div class="settings-actions">
+                    <button id="clineApiKeySubmit" data-i18n="settings.cline.saveApiKey">Save API key</button>
+                  </div>
+                </div>
+                <div id="clineErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
             <div id="factoryAccountGroup" class="settings-group cursor-account-group">
               <button id="factorySettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="factorySettingsDetails">
                 <span data-i18n="settings.factory.title">Factory Droid Account</span>
@@ -1070,7 +1096,7 @@
             </div>
             <div id="mimoAccountGroup" class="settings-group cursor-account-group">
               <button id="mimoSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="mimoSettingsDetails">
-                <span data-i18n="settings.mimo.title">MiMo Account</span>
+                <span data-i18n="settings.mimo.title">Xiaomi MiMo Account</span>
                 <span class="cursor-settings-summary">
                   <span id="mimoAccountStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
@@ -1089,10 +1115,10 @@
                   <div id="mimoAddDetails" class="opencode-add-details accordion-animated-container hidden">
                     <div class="accordion-animation-inner opencode-add-body">
                       <div class="settings-actions">
-                        <button id="mimoOpenConsoleButton" type="button" data-i18n="settings.mimo.openConsole">Open MiMo console in browser</button>
+                        <button id="mimoOpenConsoleButton" type="button" data-i18n="settings.mimo.openConsole">Open Xiaomi MiMo console in browser</button>
                       </div>
                       <p class="settings-note">
-                        <strong>1.</strong> <span data-i18n="settings.mimo.step1">Open the MiMo console in your browser (button above) and sign in.</span><br>
+                        <strong>1.</strong> <span data-i18n="settings.mimo.step1">Open the Xiaomi MiMo console in your browser (button above) and sign in.</span><br>
                         <strong>2.</strong> <span data-i18n="settings.mimo.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, then reload the page.</span><br>
                         <strong>3.</strong> <span data-i18n="settings.mimo.step3Before">In Network, select</span> <code>balance</code><span data-i18n="settings.mimo.step3After">, then copy the full Cookie value from Headers -> Request Headers.</span><br>
                         <strong>4.</strong> <span data-i18n="settings.mimo.step4">Paste it below, then click Save account.</span>
@@ -1238,6 +1264,42 @@
                   </div>
                 </div>
                 <div id="deepseekErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
+            <div id="devinAccountGroup" class="settings-group cursor-account-group">
+              <button id="devinSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="devinSettingsDetails">
+                <span data-i18n="settings.devin.title">Devin Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="devinAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="devinSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="devinOpenBrowser" data-i18n="settings.devin.openBrowser">Open Devin usage</button>
+                  <button id="devinLogoutButton" class="hidden" data-i18n="settings.devin.clearCredentials">Clear credentials</button>
+                  <button id="devinRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="devinManualPanel">
+                  <p class="settings-note">
+                    <strong>1.</strong> <span data-i18n="settings.devin.step1">Open Devin Usage &amp; Limits in your browser (button above) and sign in.</span><br>
+                    <strong>2.</strong> <span data-i18n="settings.devin.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the billing/quota/usage request.</span><br>
+                    <strong>3.</strong> <span data-i18n="settings.devin.step3">Copy the Authorization value and x-cog-org-id from Request Headers.</span><br>
+                    <strong>4.</strong> <span data-i18n="settings.devin.step4">Paste both values below and click Save credentials.</span>
+                  </p>
+                  <div class="settings-row">
+                    <label for="devinBearerTokenInput" data-i18n="settings.devin.bearerToken">Authorization</label>
+                    <input id="devinBearerTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="Bearer auth1_..." data-i18n-placeholder="settings.devin.bearerTokenPlaceholder" />
+                  </div>
+                  <div class="settings-row">
+                    <label for="devinOrganizationInput" data-i18n="settings.devin.organization">Organization</label>
+                    <input id="devinOrganizationInput" type="text" autocomplete="off" spellcheck="false" placeholder="org_..." data-i18n-placeholder="settings.devin.organizationPlaceholder" />
+                  </div>
+                  <div class="settings-actions">
+                    <button id="devinCredentialSubmit" data-i18n="settings.devin.saveCredentials">Save credentials</button>
+                  </div>
+                </div>
+                <div id="devinErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="openrouterAccountGroup" class="settings-group cursor-account-group">

@@ -853,7 +853,7 @@ test('fingerprints business content while ignoring snapshot clock fields', () =>
 // The snapshot re-declares the supported UI locales as a literal instead of
 // importing them, and an unrecognized one silently degrades to 'auto' — so a
 // newly added language would reach the widget with the wrong number and unit
-// formatting and nothing would fail. AGENTS.md's "Adding a UI locale" checklist
+// formatting and nothing would fail. Adding a UI locale
 // is guard-test enforced everywhere else; this keeps the widget on that list.
 test('the Widget presentation accepts exactly the shipped UI locales', () => {
   const { LANGUAGE_OPTIONS } = require('../../src/electron/renderer/i18n');

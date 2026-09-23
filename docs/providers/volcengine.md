@@ -1,6 +1,8 @@
 ---
-summary: Volcengine explicit credentials and local arkcli Agent Plan discovery.
-read_when: Changing Volcengine credentials, CLI detection, or quota mapping.
+summary: "Volcengine explicit credentials and local arkcli Agent Plan discovery."
+ids: [volcengine]
+read_when:
+  - Changing Volcengine credentials, CLI detection or quota mapping
 ---
 
 # Volcengine

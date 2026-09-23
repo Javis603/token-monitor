@@ -240,6 +240,47 @@ test('an OpenRouter card carries the balance meter and its detail tooltip', () =
   assert.match(tooltip.text, /All time/);
 });
 
+test('a Devin card keeps Daily, Weekly, and the extra usage balance', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'devin',
+    windows: [
+      { kind: 'daily', label: 'Daily', remainingPercent: 100, resetsAt: '2026-09-24T00:00:00.000Z' },
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 100, resetsAt: '2026-09-28T00:00:00.000Z' },
+      { kind: 'billing', metric: 'credits', label: 'Extra usage balance', remaining: 10, currency: 'USD', showMeter: false }
+    ],
+    balance: { amount: 10, currency: 'USD' }
+  }, '#46B482');
+
+  const windows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.deepEqual(
+    windows.map((node) => node.children[0].children[0].textContent),
+    ['Daily', 'Weekly', 'Extra usage balance']
+  );
+  assert.match(windows[2].text, /\$10\.00/);
+  assert.equal(windows[2].classNames.has('limit-window-wide'), true);
+  assert.equal(windows[2].classNames.has('limit-window-no-reset'), true);
+});
+
+test('a Cline card folds month spend into the credit detail tooltip', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'cline',
+    windows: [
+      { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 0.5, currency: 'CREDITS', showMeter: false },
+      { kind: 'billing', metric: 'spend', label: 'Usage credits', used: 0.13, limit: null, currency: 'USD', showMeter: false }
+    ]
+  }, '#9D4EDD');
+
+  const rows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.equal(rows.length, 1, 'credits and month spend should share one presentation row');
+  assert.match(card.text, /Credits/);
+  assert.match(card.text, /0\.50/);
+  assert.ok(tooltip, 'the month spend should remain available from the credit row');
+  assert.match(tooltip.text, /Month spent/);
+  assert.match(tooltip.text, /\$0\.13/);
+  assert.match(rows[0].attributes['aria-label'], /Month spent \$0\.13/);
+});
+
 test('a Codex card keeps the page ordering and the banked resets', () => {
   const card = dockView().renderProviderWindows({
     provider: 'codex',

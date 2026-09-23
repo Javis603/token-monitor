@@ -7,6 +7,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 const compactTokenApi = require('../../src/shared/compactTokens');
+const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
 const limitProviderOrderApi = require('../../src/electron/renderer/limitProviderOrder');
 const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
@@ -27,6 +28,7 @@ const {
   limitProviderCompactWindows,
   limitProviderMainDeviceLabel,
   limitProviderPlanDisplayLabel,
+  limitProviderStatusLabel,
   namedApiProfileStatus,
   limitProviderProvenance,
   limitResetRemainingMs,
@@ -1379,8 +1381,12 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(codexResetCreditsNode, /summaryParts\.push\(`\+\$\{hiddenExpirationCount\}`\)/);
   // The expiry tooltip is the shared builder, not a second copy of its
   // hover/focus wiring that has to be kept in step by hand. It is useful for a
-  // single reset too, not only when several dates are present.
-  assert.match(codexResetCreditsNode, /expiryGroup\.append\(timeline\);\s*if \(expirationDates\.length > 0\) \{/);
+  // single reset too, not only when several dates are present — and Claude's
+  // grants can supply the tooltip rows when plain expiry dates cannot.
+  assert.match(codexResetCreditsNode, /if \(expirationDates\.length > 0 \|\| detailEntries\) \{/);
+  assert.match(codexResetCreditsNode, /if \(expirationDates\.length > 0\) \{\s*const timeline/);
+  assert.match(codexResetCreditsNode, /expiryGroup\.append\(timeline\);/);
+  assert.match(codexResetCreditsNode, /limitDetailInfoNode\(detailEntries, '', detail\?\.ariaLabel \|\| ''\)/);
   assert.match(
     codexResetCreditsNode,
     /expirationDates\.map\(\(date\) => \[expiryDateLabel\(date\), codexResetCreditExpiryLabel\(date\)\]\)/
@@ -1497,17 +1503,93 @@ test('The detail tooltip widens its grid and pads short rows for three-column en
   const grantRows = viewBody('claudePrepaidGrantRows', 'claudeBalanceNode');
   const balanceNode = viewBody('claudeBalanceNode', 'providerWindowText');
 
-  assert.match(infoNode, /const columns = entries\.reduce\(\(widest, entry\) => Math\.max\(widest, entry\.length\), 0\);/);
+  assert.match(infoNode, /Math\.max\(widest, Array\.isArray\(entry\) \? entry\.length : 0\)/);
   assert.match(infoNode, /columns > 2 \? 'limit-detail-tooltip-triple' : ''/);
   assert.match(infoNode, /for \(let column = 0; column < columns; column \+= 1\)/);
   assert.match(infoNode, /cell\.textContent = entry\[column\] \?\? '';/);
-  assert.match(infoNode, /entries\.map\(\(\[entryLabel, \.\.\.rest\]\) => `\$\{entryLabel\}: \$\{rest\.filter\(Boolean\)\.join\(' '\)\}`\)/);
+  assert.match(infoNode, /entries\s*\.filter\(Array\.isArray\)\s*\.map\(\(\[entryLabel, \.\.\.rest\]\) => `\$\{entryLabel\}: \$\{rest\.filter\(Boolean\)\.join\(' '\)\}`\)/);
   assert.match(balanceNode, /const grants = claudePrepaidGrantRows\(tranches, currency\);/);
   assert.match(balanceNode, /\.\.\.grants\.map\(\(grant\) => grant\.aria\)/);
   // The wording belongs to the spoken label now, never to a rendered cell.
   assert.doesNotMatch(grantRows, /cells: \[[^\]]*Expires in/);
   assert.match(styles, /\.limit-detail-tooltip-triple\s*\{[^}]*grid-template-columns: max-content max-content max-content;/s);
   assert.match(styles, /\.limit-detail-tooltip-row span:nth-child\(2\):not\(:last-child\)\s*\{[^}]*text-align: right;/s);
+});
+
+function runClaudeResetGrantRows(app, grants, now) {
+  const dateLabel = viewBody('expiryDateLabel', 'codexResetCreditsNode');
+  const clearLabel = viewBody('claudeResetClearLabel', 'claudeResetGrantRows');
+  const grantRows = viewBody('claudeResetGrantRows', 'claudeResetCreditsNode');
+  const context = {
+    Date: class FrozenDate extends Date {
+      constructor(...args) {
+        super(...(args.length === 0 ? [now] : args));
+      }
+
+      static now() {
+        return now;
+      }
+    },
+    Intl,
+    currentLocale: () => 'en-US',
+    formatDuration: limitDurationText
+  };
+  vm.runInNewContext(
+    `${dateLabel}\n${clearLabel}\n${grantRows}\n`
+      + `result = claudeResetGrantRows(${JSON.stringify(grants)});`,
+    context
+  );
+  return JSON.parse(JSON.stringify(context.result));
+}
+
+test('Claude reset grants wrap their label and clears as full-width lines', () => {
+  const app = readRendererFile('app.js');
+  const styles = readRendererFile('styles.css');
+  const renderProviderWindows = viewBody('renderProviderWindows');
+  const claudeNode = viewBody('claudeResetCreditsNode', 'providerSpendEntries');
+  const infoNode = viewBody('limitDetailInfoNode', 'providerSpendNode');
+  const now = new Date(2026, 6, 28, 0, 0, 0, 0).getTime();
+  const rows = runClaudeResetGrantRows(app, [
+    {
+      label: 'Launch promo reset',
+      resetsLeft: 1,
+      endsAt: localIso(2026, 8, 20, 17),
+      clears: ['five_hour', 'seven_day', 'seven_day_overage_included'],
+      usableNow: true
+    },
+    {
+      label: 'Second promo',
+      resetsLeft: 1,
+      endsAt: localIso(2026, 9, 1, 12),
+      clears: ['seven_day_opus'],
+      useRequiresLimit: true
+    }
+  ], now);
+
+  // Anthropic labels arrive as full sentences — they wrap on their own line
+  // instead of widening the popover past a narrow card edge.
+  assert.deepEqual(rows, [
+    { full: 'Launch promo reset', caption: true, separated: false },
+    ['Expires', '8/20, 5:00 PM · 23d 17h'],
+    ['Clears', 'Session · Weekly · Fable weekly'],
+    { full: 'Second promo', caption: true, separated: true },
+    ['Expires', '9/1, 12:00 PM · 35d 12h'],
+    ['Clears', 'Opus weekly'],
+    ['Usable', 'at a limit only']
+  ]);
+
+  assert.match(renderProviderWindows, /claudeResetCreditsNode\(provider\.resetCredits\)/);
+  assert.match(claudeNode, /if \(grants\.length === 0\) return codexResetCreditsNode\(resetCredits\);/);
+  // The spoken label must carry the same rows the tooltip shows — expiry,
+  // cleared windows, usability — so grant restrictions are not silent.
+  assert.match(claudeNode, /claudeResetGrantRows\(\[grant\]\)/);
+  assert.match(infoNode, /!Array\.isArray\(entry\)/);
+  assert.match(infoNode, /entry\?\.caption === true \? 'is-caption' : ''/);
+  assert.match(infoNode, /entry\?\.separated === true \? 'is-separated' : ''/);
+  assert.match(styles, /\.limit-detail-tooltip-full\s*\{[^}]*grid-column: 1 \/ -1;/s);
+  assert.match(styles, /\.limit-detail-tooltip-full\s*\{[^}]*white-space: normal;/s);
+  assert.match(styles, /\.limit-detail-tooltip-full\.is-separated\s*\{[^}]*border-top:/s);
+  assert.match(styles, /\.limit-detail-tooltip-full\.is-caption\s*\{[^}]*font-size: 8px;/s);
 });
 
 test('Home uses explicit billing labels so Copilot Premium and Chat stay distinct', () => {
@@ -1811,6 +1893,102 @@ test('Grok is automatic provider UI, while env token remains documented for head
   assert.match(i18n, /'settings\.limits\.status\.runGrokLogin': 'Run grok login'/);
   assert.match(i18n, /'settings\.limits\.status\.runGrokLogin': '執行 grok login'/);
   assert.match(i18n, /'settings\.limits\.status\.runGrokLogin': '运行 grok login'/);
+});
+
+// Cline's credential belongs to Cline, and this provider reads it without ever
+// writing — but a machine with no Cline installed has nothing to read, so the API
+// key is configurable here too. It goes through the same settings + credential
+// store pattern every key-configured provider uses; factory is the one with the
+// same shape (a settings key beside a discovered sign-in).
+test('Cline exposes its API key through the settings and credential-store pattern', () => {
+  const html = readRendererFile('index.html');
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
+  const runtimeConfig = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'runtimeConfig.js'), 'utf8');
+  const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
+  const clineLimits = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'src', 'shared', 'providers', 'cline', 'limits.js'),
+    'utf8'
+  );
+
+  // The panel: every id the shared renderer requires before it draws the row.
+  for (const id of [
+    'clineAccountGroup', 'clineAccountStatus', 'clineSettingsToggle', 'clineSettingsDetails',
+    'clineOpenBrowser', 'clineLogoutButton', 'clineRefreshButton', 'clineManualPanel',
+    'clineApiKeyInput', 'clineApiKeySubmit', 'clineErrorMessage'
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`), `${id} is missing from index.html`);
+  }
+  // The renderer's side of it: the row, its platform link, and the probe the save
+  // button awaits.
+  assert.match(app, /clineAccountExpanded/);
+  assert.match(app, /clineCredentialConfigured/);
+  assert.match(app, /function clinePlatformUrl/);
+  assert.match(app, /window\.tokenMonitor\.cline\.validateApiKey/);
+  assert.match(preload, /cline: \{\n {4}validateApiKey: \(apiKey\) => ipcRenderer\.invoke\('cline:validateApiKey'/);
+  // The key itself never crosses to the renderer: the projection carries the
+  // boolean and the source label only, never a `clineApiKey` field.
+  const projection = main.slice(
+    main.indexOf('function settingsForRenderer'),
+    main.indexOf('function pushSettingsToRenderer')
+  );
+  assert.doesNotMatch(projection, /clineApiKey:/);
+  assert.match(projection, /clineCredentialConfigured/);
+  assert.match(projection, /clineCredentialSource/);
+  // Settings + credential store + IPC, the pattern the pattern-bound test above
+  // asserts for the catalog; the path is what keeps the key out of settings.json.
+  assert.match(runtimeConfig, /cline: \['clineApiKey'\]/);
+  assert.deepEqual(CREDENTIAL_SETTING_PATHS.clineApiKey, ['providers', 'cline', 'apiKey']);
+  assert.match(main, /ipcMain\.handle\('cline:validateApiKey'/);
+  assert.match(main, /clineApiKey: patch\.clineApiKey !== undefined \? normalizeClineApiKey\(patch\.clineApiKey\) : \(settings\.clineApiKey \|\| ''\)/);
+  assert.match(envExample, /CLINE_API_KEY=/);
+  assert.match(clineLimits, /CLINE_API_KEY/);
+  assert.match(clineLimits, /CLINEPASS_API_KEY/);
+  // A refused credential recovers where that credential lives, and this provider is
+  // the only one whose status reads `source` to tell its two lanes apart: a rejected
+  // key is replaced in Token Monitor's own field, while the discovered sign-in is
+  // Cline's to fix — it refreshes the stored token when it runs, and only it can
+  // persist a rotated one — so that lane points back at Cline. A row with no source
+  // is the sign-in lane, the one a local install is in by default.
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'unauthorized' }),
+    { label: 'Open Cline', tone: 'setup' }
+  );
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'unauthorized', source: 'oauth' }),
+    { label: 'Open Cline', tone: 'setup' }
+  );
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'unauthorized', source: 'api' }),
+    { label: 'Update API key', tone: 'setup' }
+  );
+  // Both tags are strings other providers already use, so no new chip text is
+  // introduced for a provider whose surfaces are the same class as workbuddy's
+  // desktop app and kiro's CLI.
+  // With neither a key nor a stored sign-in, the one thing this application can be
+  // told is a key — the same label the other key-configured providers use.
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'notConfigured' }),
+    { label: 'Add API key', tone: 'setup' }
+  );
+  assert.deepEqual(limitProviderCapabilityTags({ provider: 'cline' }), ['Auto', 'Desktop app', 'CLI']);
+  // The list renders per provider, and its default branch draws session and weekly
+  // only — a three-window provider needs its own branch or the monthly window never
+  // appears. Guarded by source patterns because the view module builds DOM and this
+  // repository has no DOM harness; the branch was also confirmed by driving the
+  // running widget (a mocked row renders Session, Weekly and a full-width Monthly).
+  const windowsView = readRendererFile('limitWindowsView.js');
+  assert.match(windowsView, /provider\.provider === 'cline'/);
+  // The account credit shares the `billing` kind with the monthly quota, so the
+  // branch tells them apart by metric and renders the credit through the panel's own
+  // balance path, the way WorkBuddy's and Trae's balance is rendered.
+  assert.match(windowsView, /const clineMonthly = clineBilling\.find\(\(window\) => !isCreditsWindow\(window\) && window\.metric !== 'spend'\)/);
+  assert.match(windowsView, /const clineCredits = clineBilling\.find\(\(window\) => isCreditsWindow\(window\)\)/);
+  assert.match(windowsView, /const clineSpend = clineBilling\.find\(\(window\) => window\.metric === 'spend'\)/);
+  assert.match(windowsView, /clineCredits[\s\S]{0,200}clineCreditsNode\(provider, clineCredits, clineSpend\)/);
+  assert.match(windowsView, /function clineCreditsNode[\s\S]{0,500}\[\['Month spent', spendValue\]\]/);
+  assert.match(windowsView, /clineMonthly[\s\S]{0,200}limit-window-wide/);
 });
 
 test('Copilot env token is documented in env example, not the README overview', () => {
@@ -2556,6 +2734,26 @@ test('Antigravity account verification is shown as an actionable status', () => 
   );
 });
 
+test('WorkBuddy sealed app credentials are shown as an actionable status', () => {
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({
+      provider: 'workbuddy',
+      status: 'notConfigured',
+      actionRequired: 'appSessionEncrypted'
+    }),
+    {
+      label: 'Encrypted by app',
+      key: 'settings.limits.status.appSessionEncrypted',
+      tone: 'warn'
+    }
+  );
+  // Without the hint the row keeps the existing sign-in prompt.
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'workbuddy', status: 'notConfigured' }),
+    { label: 'Sign in', tone: 'setup' }
+  );
+});
+
 test('deepseek source label and capability tags', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'deepseek', source: 'api' }), 'API');
   assert.deepEqual(presentation.limitProviderCapabilityTags('deepseek'), ['Pay-as-you-go', 'API key']);
@@ -2721,11 +2919,14 @@ test('Kimi credential statuses are localized in settings', () => {
   assert.match(i18n, /'settings\.limits\.status\.updateCredential': '更新憑證'/);
 });
 
-test('Kimi and Droid limits reuse their tracked-client colors', () => {
+test('Kimi, Droid and MiMo limits reuse their tracked-client colors', () => {
   const app = readRendererFile('app.js');
   assert.equal(LIMIT_PROVIDER_LABELS.kimi, 'Kimi');
+  // `factory` is the last remaining bridge: its tracked client is named
+  // `droid`. MiMo needs none — the client and the provider are both `mimo`, so
+  // the generic lookup below already finds clientColors.mimo.
   assert.match(app, /if \(providerId === 'factory'\) return clientColors\.droid;/);
-  assert.match(app, /if \(providerId === 'mimo'\) return clientColors\.xiaomi;/);
+  assert.doesNotMatch(app, /providerId === 'mimo'/);
   assert.match(app, /const color = limitProviderColor\(id\);/);
 });
 

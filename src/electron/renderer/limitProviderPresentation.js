@@ -36,6 +36,7 @@
     workbuddy: { local: 'Local', api: 'API' },
     qoder: { web: 'Web' },
     deepseek: { api: 'API' },
+    devin: { web: 'Web' },
     openrouter: { api: 'API' },
     minimax: { api: 'API' },
     volcengine: { api: 'API', cli: 'arkcli' },
@@ -58,6 +59,7 @@
     opencode: ['Auto', 'API/Web'],
     cursor: ['Auto', 'Web'],
     antigravity: ['Auto', 'OAuth/App/CLI'],
+    cline: ['Auto', 'Desktop app', 'CLI'],
     factory: ['Auto', 'API key'],
     kimi: ['Coding Plan', 'Web/API'],
     grok: ['Auto', 'CLI/Web'],
@@ -71,6 +73,7 @@
     workbuddy: ['Auto', 'Desktop app'],
     qoder: ['Manual login', 'Web'],
     deepseek: ['Pay-as-you-go', 'API key'],
+    devin: ['Manual login', 'Web'],
     openrouter: ['Pay-as-you-go', 'API key'],
     minimax: ['Token Plan', 'API key'],
     volcengine: ['Auto', 'API key', 'CLI'],
@@ -414,12 +417,36 @@
         tone: 'setup'
       };
     }
+    if (providerName === 'workbuddy' && provider?.actionRequired === 'appSessionEncrypted') {
+      return {
+        label: 'Encrypted by app',
+        key: 'settings.limits.status.appSessionEncrypted',
+        tone: 'warn'
+      };
+    }
     if (status === 'ok') return { label: isLinkedStatus(provider) ? 'Linked' : 'Live', tone: 'ok' };
     if (status === 'disabled') return { label: 'Disabled', tone: 'muted' };
     if (status === 'noSyncedData') return { label: 'No synced data', tone: 'sync' };
     if (status === 'unauthorized') {
       if (providerName === 'kimi') return { label: 'Update credential', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Update credential', tone: 'setup' };
+      // Cline owns its credential lifecycle — it refreshes the stored token
+      // whenever the app or the CLI runs, and only it persists a rotated one — so
+      // this provider reads that sign-in read-only. The two lanes it accepts refuse
+      // in different places: a rejected key is replaced in Token Monitor's own
+      // settings field, while a stale sign-in only opening Cline fixes. The shared
+      // vocabulary carries one `unauthorized` for both, so the label reads the lane
+      // off the row: providers/cline/limits.js reports `api` for a configured key
+      // and `oauth` for the discovered sign-in. This is the one provider whose
+      // status branches on source, and it does so because both causes are reachable
+      // with neither of them rarer than the other — the file lane is the discovery
+      // default and its access token expires hourly. Grok and kiro name the vendor's
+      // own action here for the same reason, without needing the split.
+      if (providerName === 'cline') {
+        return sourceId(provider) === 'api'
+          ? { label: 'Update API key', tone: 'setup' }
+          : { label: 'Open Cline', tone: 'setup' };
+      }
       return providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
         ? { label: 'Update API key', tone: 'setup' }
         : providerName === 'qoder' || providerName === 'trae'
@@ -437,7 +464,10 @@
       if (providerName === 'antigravity') return { label: 'Not set up', tone: 'setup' };
       if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama' || providerName === 'alibaba') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
-      if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi') return { label: 'Add API key', tone: 'setup' };
+      // Cline joins the key-configured family: with neither a key nor a stored
+      // sign-in, the one thing this application can be told is a key (the sign-in
+      // belongs to Cline, and its own row explains that).
+      if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi' || providerName === 'cline') return { label: 'Add API key', tone: 'setup' };
       if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };
       if (providerName === 'kiro') return { label: 'Run kiro-cli login', tone: 'setup' };
       return { label: 'Not set up', tone: 'setup' };

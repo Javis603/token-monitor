@@ -334,6 +334,27 @@ test('desktop WorkBuddy Local App monitoring resolves session metadata when its 
   assert.equal(limits.workbuddyAccessToken, '');
 });
 
+test('desktop WorkBuddy Local App monitoring carries the session read reason', () => {
+  const sealed = limitsConfigFromSettings({}, {
+    env: {},
+    workbuddyDesktopSessionOnly: true,
+    workbuddyDesktopSessionEnabled: true,
+    workbuddyLocalSession: { authenticated: false, reason: 'encrypted' }
+  });
+  assert.equal(sealed.workbuddyLocalSessionReason, 'encrypted');
+
+  const readable = limitsConfigFromSettings({}, {
+    env: {},
+    workbuddyDesktopSessionOnly: true,
+    workbuddyDesktopSessionEnabled: true,
+    workbuddyLocalSession: { userId: 'local-user', accountType: 'personal' }
+  });
+  assert.equal(readable.workbuddyLocalSessionReason, '');
+
+  const inactive = limitsConfigFromSettings({}, { env: {}, workbuddyDesktopSessionOnly: true });
+  assert.equal(inactive.workbuddyLocalSessionReason, '');
+});
+
 test('desktop WorkBuddy auth reads can be disabled without enabling fallback credentials', () => {
   const limits = limitsConfigFromSettings({
     workbuddyAccessToken: 'legacy-settings-token',

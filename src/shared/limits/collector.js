@@ -29,6 +29,8 @@ const alibabaLimits = require('../providers/alibaba/limits');
 const { volcengineCredentials, fetchVolcengineLimits } = volcengineLimits;
 const qoderLimits = require('../providers/qoder/limits');
 const { qoderCookie, fetchQoderLimits } = qoderLimits;
+const devinLimits = require('../providers/devin/limits');
+const { devinBearerToken, fetchDevinLimits } = devinLimits;
 const commandcodeLimits = require('../providers/commandcode/limits');
 const { commandcodeCookie, fetchCommandcodeLimits } = commandcodeLimits;
 const ollamaLimits = require('../providers/ollama/limits');
@@ -84,6 +86,8 @@ const { fetchAntigravityLimits } = require('../providers/antigravity/limits');
 const { fetchOpenCodeLimits, fetchOpenCodeProfile } = require('../providers/opencode/limits');
 const { deepseekToken, fetchDeepSeekLimits, selectFundedRow } = require('../providers/deepseek/limits');
 const { fetchCursorLimits } = require('../providers/cursor/limits');
+const clineLimits = require('../providers/cline/limits');
+const { fetchClineLimits } = clineLimits;
 
 const DEFAULT_PROVIDER_PHYSICAL_BOUND_MS = 120_000;
 const PROVIDER_CLEANUP_GRACE_MS = 5_000;
@@ -128,6 +132,7 @@ function providerFetchers(deps = {}) {
     opencode: (providerOptions, probeDeps) => fetchOpenCodeLimits(providerOptions, probeDeps),
     cursor: (providerOptions, probeDeps) => fetchCursorLimits(providerOptions, probeDeps),
     antigravity: (providerOptions, probeDeps) => fetchAntigravityLimits(providerOptions, probeDeps),
+    cline: (providerOptions, probeDeps) => fetchClineLimits(providerOptions, probeDeps),
     factory: (providerOptions, probeDeps) => fetchFactoryLimits(providerOptions, probeDeps),
     kimi: (providerOptions, probeDeps) => kimiLimits.fetchKimiLimits(providerOptions, probeDeps),
     grok: (providerOptions, probeDeps) => grokLimits.fetchGrokLimits(providerOptions, probeDeps),
@@ -141,6 +146,7 @@ function providerFetchers(deps = {}) {
     workbuddy: (providerOptions, probeDeps) => workbuddyLimits.fetchWorkbuddyLimits(providerOptions, probeDeps),
     qoder: (providerOptions, probeDeps) => qoderLimits.fetchQoderLimits(providerOptions, probeDeps),
     deepseek: (providerOptions, probeDeps) => fetchDeepSeekLimits(providerOptions, probeDeps),
+    devin: (providerOptions, probeDeps) => devinLimits.fetchDevinLimits(providerOptions, probeDeps),
     openrouter: (providerOptions, probeDeps) => openrouterLimits.fetchOpenRouterLimits(providerOptions, probeDeps),
     minimax: (providerOptions, probeDeps) => minimaxLimits.fetchMinimaxLimits(providerOptions, probeDeps),
     volcengine: (providerOptions, probeDeps) => volcengineLimits.fetchVolcengineLimits(providerOptions, probeDeps),
@@ -296,6 +302,9 @@ module.exports = {
   fetchClaudeLimits,
   fetchCodexLimits,
   fetchCursorLimits,
+  fetchClineLimits,
+  clineApiKey: clineLimits.clineApiKey,
+  resolveClineAutomaticCredential: clineLimits.resolveClineAutomaticCredential,
   fetchDeepSeekLimits,
   fetchMimoLimits,
   readCodexRpcWithCommand,
@@ -335,6 +344,8 @@ module.exports = {
   fetchAlibabaLimits: alibabaLimits.fetchAlibabaLimits,
   qoderCookie,
   fetchQoderLimits,
+  devinBearerToken,
+  fetchDevinLimits,
   traeAccessToken: traeLimits.traeAccessToken,
   traeDeviceId: traeLimits.traeDeviceId,
   fetchTraeLimits: traeLimits.fetchTraeLimits,
