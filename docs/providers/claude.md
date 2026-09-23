@@ -37,6 +37,14 @@ An identity-resolution failure after successful OAuth quota is not allowed to fa
 
 OAuth usage refreshes reactively after unauthorized responses. Non-macOS platforms may also refresh shortly before expiry; macOS avoids proactive delegated refresh because it spawns Claude Code. Windows credential-file discovery includes running WSL homes when no explicit config root overrides it.
 
+## Usage-limit reset grants
+
+Both usage responses carry Anthropic's reset coupons in a `cedar_ember` block only when the request asks for it, so every OAuth and Web usage call sends `cedar_ember=1` — the same request, not an extra fetch. Grants that still hold resets and have not reached `ends_at` map onto `provider.resetCredits` with per-grant detail (label, cleared windows, usability flags); spent and lapsed grants are dropped so the count never promises a reset the account cannot use.
+
+The OAuth endpoint also gates the block on client surface: a user-agent that is not Claude Code gets `eligible: false` with `ineligible_reason: "surface"` and no grants, so the OAuth usage call presents as `claude-cli/<version> (external, cli)` — the credential is a Claude Code token. Web usage calls are unaffected because they already present as the browser.
+
+`seven_day_overage_included` in a grant's `clears` reads like a modifier on the weekly clear, but Claude Code's own label map calls it "Fable limit" — the credits-backed model's weekly bucket — so it is listed as its own window. The display is read-only: the claim endpoint is deliberately not wired, so nothing in the app can spend a grant. A second reset program (`juniper_tide`) exists but is not collected.
+
 ## Claude Web
 
 The stored value must be one bare `sk-ant-…` session key or canonical `sessionKey=…`; arbitrary Cookie headers are rejected. Web collection has priority when configured and uses Electron's dedicated native request adapter. That adapter preserves raw `Set-Cookie` headers and aborts the underlying request, which ordinary fetch handling cannot guarantee here.
