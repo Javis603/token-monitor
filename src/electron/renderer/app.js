@@ -4032,7 +4032,9 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   },
   formatCompact,
   formatMoney,
-  formatCompactMoney,
+  formatCompactMoney: (value, currency) => formatCompactMoney(
+    value, currency, state.settings?.compactTokenUnits, currentLocale()
+  ),
   formatPercent,
   formatDuration,
   formatLimitBoundary,
@@ -4097,7 +4099,7 @@ function formatHomeLimitWindowValue(window, showUsed) {
         ? t('settings.thirdparty.unlimited')
         : (window.detail || '--');
     }
-    return formatCompactMoney(window.remaining, window.currency);
+    return formatCompactMoney(window.remaining, window.currency, state.settings?.compactTokenUnits, currentLocale());
   }
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
   return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
@@ -14742,7 +14744,7 @@ function thirdPartyProfileStatusText(provider, options = {}) {
   if (status === 'invalid') return t('settings.thirdparty.invalidKey');
   if (status !== 'linked') return t('settings.thirdparty.unavailable');
   const balance = optionalFiniteNumber(provider.balance?.amount);
-  if (balance !== null) return `✓ ${formatCompactMoney(balance, provider.balance?.currency || 'USD')}`;
+  if (balance !== null) return `✓ ${formatCompactMoney(balance, provider.balance?.currency || 'USD', state.settings?.compactTokenUnits, currentLocale())}`;
   const unlimited = (provider.windows || []).some((window) => (
     window?.showMeter === false && String(window?.detail || '').toLowerCase() === 'unlimited'
   ));

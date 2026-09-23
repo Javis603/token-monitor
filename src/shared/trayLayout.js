@@ -835,7 +835,9 @@
           moneyText: credits
             ? balanceDisplay.formatCompactMoney(
                 balanceDisplay.creditsAmount(provider, window),
-                balanceDisplay.creditsCurrency(provider, window)
+                balanceDisplay.creditsCurrency(provider, window),
+                options.compactTokenUnits,
+                options.locale || options.language || 'en'
               )
             : '',
           source: normalized

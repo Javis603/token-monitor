@@ -35,6 +35,35 @@ test('detail cards keep exact totals while the rail and breakdown rows stay comp
   assert.match(dock, /edge-dock-session-tokens', formatCardTokens\(session\.totalTokens\)/);
 });
 
+test('rail money compacts through the shared helper so it follows the token units', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  assert.match(dock, /const compactMoneyApi = window\.TokenMonitorCompactMoney;/);
+  const source = dock.slice(
+    dock.indexOf('function formatRailCost('),
+    dock.indexOf('function statShortLabel(')
+  ).trim();
+  const build = () => Function(
+    'appearance', 'state', 'currencyApi', 'compactMoneyApi', 'return (' + source + ')'
+  );
+  const currency = require('../../src/shared/currency');
+  const compactMoney = require('../../src/shared/compactMoney');
+  const localized = build()(
+    () => ({ currency: 'HKD', compactTokenUnits: 'localized' }),
+    { locale: 'zh-TW' },
+    currency,
+    compactMoney
+  );
+  assert.equal(localized(15_846), 'HK$12.4萬');
+  const western = build()(
+    () => ({ currency: 'HKD', compactTokenUnits: 'western' }),
+    { locale: 'zh-TW' },
+    currency,
+    compactMoney
+  );
+  assert.equal(western(15_846), 'HK$123.6K');
+  assert.equal(western(72.697), 'HK$567'); // sub-10k keeps the fixed-digit path
+});
+
 test('the detail total follows the main app compact toggle and unit threshold', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');

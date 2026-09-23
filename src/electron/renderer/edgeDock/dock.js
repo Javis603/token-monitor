@@ -16,6 +16,7 @@ const fontSettingsApi = window.TokenMonitorFontSettings;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const currencyApi = window.TokenMonitorCurrency;
 const compactTokenApi = window.TokenMonitorCompactTokens;
+const compactMoneyApi = window.TokenMonitorCompactMoney;
 const balanceDisplay = window.TokenMonitorLimitBalanceDisplay;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
@@ -363,7 +364,9 @@ const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
   },
   formatCompact: formatTokens,
   formatMoney: balanceDisplay.formatMoney,
-  formatCompactMoney: balanceDisplay.formatCompactMoney,
+  formatCompactMoney: (value, currency) => balanceDisplay.formatCompactMoney(
+    value, currency, appearance().compactTokenUnits, state.locale
+  ),
   formatPercent: (value) => (Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'),
   formatDuration: presentation.formatResetDuration,
   formatLimitBoundary: limitPresentationApi.limitBoundaryText,
@@ -513,7 +516,9 @@ function providerCellNode(cell) {
   const color = providerColor(cell.provider);
   const value = el('span', 'edge-dock-value');
   if (cell.credits && cell.credits.amount !== null && cell.credits.amount !== undefined) {
-    value.textContent = balanceDisplay.formatCompactMoney(cell.credits.amount, cell.credits.currency);
+    value.textContent = balanceDisplay.formatCompactMoney(
+      cell.credits.amount, cell.credits.currency, appearance().compactTokenUnits, state.locale
+    );
   } else {
     value.textContent = percentText(cell.remainingPercent);
   }
@@ -542,15 +547,19 @@ function statLabel(metric) {
 
 // Rail-width money: whole units past 100 and compact notation past 10k, so a
 // figure like HK$569.82 does not overflow a 56px readout. The card keeps the
-// full-precision figure.
+// full-precision figure. The compact form goes through the same shared helper
+// as the tray and dashboard, so it follows the token unit system — a localized
+// user sees 萬/億 here too, never 億 beside K.
 function formatRailCost(value) {
   const code = appearance().currency || 'USD';
-  const full = currencyApi.formatCurrencyFromUsd(value, code);
-  const symbol = full.replace(/[\d.,\s-]+$/, '');
   const amount = Math.abs(currencyApi.convertUsd(value, code));
   if (amount >= 10_000) {
-    return `${symbol}${new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(amount)}`;
+    return compactMoneyApi.formatCompactCurrencyFromUsd(
+      Math.abs(value), code, appearance().compactTokenUnits, state.locale
+    );
   }
+  const full = currencyApi.formatCurrencyFromUsd(value, code);
+  const symbol = full.replace(/[\d.,\s-]+$/, '');
   const digits = amount >= 100 ? 0 : amount >= 10 ? 1 : 2;
   return `${symbol}${amount.toFixed(digits)}`;
 }

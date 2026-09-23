@@ -267,7 +267,7 @@ test('third-party profile rows keep metadata on line two and rename on line one'
   assert.match(app, /new URL\(String\(profile\?\.baseUrl \|\| ''\)\)\.host/);
   assert.match(app, /settings\.thirdparty\.detailCustom/);
   assert.match(app, /formatCompactMoney,?[\s\S]{0,120}?\} = window\.TokenMonitorLimitBalanceDisplay/);
-  assert.match(app, /formatCompactMoney\(balance, provider\.balance\?\.currency \|\| 'USD'\)/);
+  assert.match(app, /formatCompactMoney\(balance, provider\.balance\?\.currency \|\| 'USD', state\.settings\?\.compactTokenUnits, currentLocale\(\)\)/);
 });
 
 test('third-party status settles after refresh and pushed stats', () => {

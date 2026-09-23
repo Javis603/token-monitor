@@ -1627,7 +1627,7 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   assert.match(homeModule, /limitProviderCompactWindowPeriodLabel\(row\.providerId, window, row\.windows\)/);
   assert.match(homeModule, /`\$\{periodLabel\} · \$\{resetLabel\}`/);
   assert.match(valueFormatter, /if \(isCreditsWindow\(window\)\) \{/);
-  assert.match(valueFormatter, /formatCompactMoney\(window\.remaining, window\.currency\)/);
+  assert.match(valueFormatter, /formatCompactMoney\(window\.remaining, window\.currency, state\.settings\?\.compactTokenUnits, currentLocale\(\)\)/);
   assert.match(valueFormatter, /`\$\{formatPercent\(percent\)\} \$\{limitModeSuffix\(showUsed\)\}`/);
   assert.doesNotMatch(i18n, /home\.limit\.(balance|leftPercent|leftAmount)/);
 });
