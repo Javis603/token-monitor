@@ -589,6 +589,36 @@ test('a Pi session is unaffected by the Oh My Pi split', () => {
   assert.equal(visible.allTime.totalTokens, 700);
 });
 
+// The archived split-id copy of a session must suppress its merged-era row even
+// though the merged row sits earlier in the archive: insertion order is capture
+// order, and the merged `pi` row is always the older one. Replaying in that
+// order would count the same session once under each id.
+test('an archived split-id session suppresses its merged-era row whatever the archive order', () => {
+  const session = (client, id, tokens) => ({
+    client, sessionId: id, totalTokens: tokens, costUsd: 0, models: { gpt: tokens }
+  });
+  const record = (sessions) => ({
+    updatedAt: '2026-09-05T10:00:00.000Z',
+    periods: { today: { sessions }, month: { sessions }, allTime: { sessions } }
+  });
+
+  // Merged-era capture: both products under `pi`.
+  let archive = captureSessionUsageArchive({}, record({
+    'pi:piSes1': session('pi', 'piSes1', 60),
+    'pi:ompSes1': session('pi', 'ompSes1', 40)
+  }), new Date('2026-09-05T10:00:00.000Z'));
+  // Post-split capture while Oh My Pi was untracked: the same session, split id.
+  archive = captureSessionUsageArchive(archive, record({
+    'omp:ompSes1': session('omp', 'ompSes1', 40)
+  }), new Date('2026-09-05T11:00:00.000Z'));
+  assert.deepEqual(Object.keys(archive.sessions), ['pi:piSes1', 'pi:ompSes1', 'omp:ompSes1']);
+
+  const empty = { today: { totalTokens: 0, sessions: {} }, month: { totalTokens: 0, sessions: {} }, allTime: { totalTokens: 0, sessions: {} } };
+  const visible = applySessionUsageArchive(empty, archive, { now: new Date('2026-09-06T12:00:00.000Z') });
+  assert.equal(visible.allTime.totalTokens, 100, '60 Pi + 40 Oh My Pi, once');
+  assert.deepEqual(Object.keys(visible.allTime.sessions).sort(), ['omp:ompSes1', 'pi:piSes1']);
+});
+
 const CURSOR_MODEL = 'cursor-grok-4.6-high';
 const CURSOR_UUID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const NOW = new Date('2026-09-12T12:00:00.000Z');

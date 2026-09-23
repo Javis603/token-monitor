@@ -72,6 +72,15 @@ function clientUsageFromPeriod(period, client) {
   });
 }
 
+// The session id half of a `client:sessionId` key, preferring the session's own
+// field. The id is written by the client that produced the session, so the bare
+// id is what lets a merged `pi` row and a split `omp` row name the same session.
+function sessionIdFromKey(key, session) {
+  const raw = String(key || '');
+  const separator = raw.indexOf(':');
+  return String(session?.sessionId || (separator >= 0 ? raw.slice(separator + 1) : raw)).trim();
+}
+
 function normalizeArchivedClientUsage(value) {
   const source = value?.clients && typeof value.clients === 'object' ? value.clients : value;
   const normalized = { version: 1, clients: {} };
@@ -121,7 +130,8 @@ function captureArchivedClientUsage(existingArchive, deviceRecord, clients, capt
       includesUsage = includesUsage || hasUsage(usage);
     }
     if (!includesUsage) continue;
-    archive.clients[client] = {
+    const previous = archive.clients[client];
+    const entry = {
       client,
       capturedAt: captureDate.toISOString(),
       day: localDay(captureDate),
@@ -130,9 +140,98 @@ function captureArchivedClientUsage(existingArchive, deviceRecord, clients, capt
       clientIdentityGeneration: CLIENT_IDENTITY_GENERATION,
       periods
     };
+    // Recapturing a merged id must not discard the half of the snapshot the new
+    // capture does not contain: an untracked split client's residue exists only
+    // in this entry. Sessions the capture reports again are replaced; the rest
+    // carry forward, and an entry still holding two products stays unmarked so
+    // net-out keeps reconciling it against the split id on every apply.
+    if (previous && mergedSnapshotFor(client, previous)) {
+      let carriesResidue = false;
+      for (const periodName of PERIODS) {
+        const oldPeriod = previous.periods?.[periodName];
+        if (!hasUsage(oldPeriod) || !samePeriodWindow(periodName, previous, entry)) continue;
+        const merged = mergeResidueIntoPeriod(oldPeriod, periods[periodName]);
+        if (!merged) continue;
+        periods[periodName] = merged;
+        carriesResidue = true;
+      }
+      if (carriesResidue) delete entry.clientIdentityGeneration;
+    }
+    archive.clients[client] = entry;
   }
 
   return archive;
+}
+
+// A rolling-window period only carries residue inside the window it was captured
+// for: yesterday's `today` residue is not today's. `allTime` never expires.
+function samePeriodWindow(periodName, oldEntry, newEntry) {
+  if (periodName === 'today') return oldEntry.day === newEntry.day;
+  if (periodName === 'month') return oldEntry.month === newEntry.month;
+  return true;
+}
+
+// The residue of a merged snapshot is what the new capture does not contain:
+// the sessions the live scan no longer reports under this id, which are the
+// split client's only copy. Sessions the capture reports again are replaced
+// rather than summed, or the same usage would count twice.
+function mergeResidueIntoPeriod(oldPeriod, newPeriod) {
+  const oldSessions = Object.entries(oldPeriod?.sessions || {});
+  // An aggregate-only snapshot cannot be decomposed at all: no session id says
+  // which part the new capture replaces. The old period stands whole and the
+  // aggregate fallback in netOutLiveUsage reconciles it at apply time.
+  if (oldSessions.length === 0) return oldPeriod;
+  const newSessionIds = new Set();
+  for (const [key, session] of Object.entries(newPeriod?.sessions || {})) {
+    const id = sessionIdFromKey(key, session);
+    if (id) newSessionIds.add(id);
+  }
+  const sessions = { ...(newPeriod?.sessions || {}) };
+  const matchedModels = {};
+  const matchedModelCosts = {};
+  let matchedTokens = 0;
+  let matchedCost = 0;
+  let residue = false;
+  for (const [key, session] of oldSessions) {
+    const id = sessionIdFromKey(key, session);
+    if (id && newSessionIds.has(id)) {
+      matchedTokens += Math.max(0, Math.round(numberValue(session?.totalTokens)));
+      matchedCost += numberValue(session?.costUsd);
+      for (const [model, tokens] of Object.entries(session?.models || {})) {
+        matchedModels[model] = (matchedModels[model] || 0) + numberValue(tokens);
+      }
+      for (const [model, cost] of Object.entries(session?.modelCosts || {})) {
+        matchedModelCosts[model] = (matchedModelCosts[model] || 0) + numberValue(cost);
+      }
+      continue;
+    }
+    sessions[key] = session;
+    residue = true;
+  }
+  if (!residue) return null;
+  // The matched sessions' share of the old totals is replaced by the new
+  // capture; everything else — residue sessions plus any unattributed remainder
+  // — carries. Model rows shrink by the same rule so the breakdown cannot count
+  // what the totals no longer do.
+  const models = { ...(newPeriod?.models || {}) };
+  for (const [model, tokens] of Object.entries(oldPeriod?.models || {})) {
+    const carried = Math.max(0, Math.round(numberValue(tokens) - numberValue(matchedModels[model])));
+    if (carried > 0) models[model] = (models[model] || 0) + carried;
+  }
+  const modelCosts = { ...(newPeriod?.modelCosts || {}) };
+  for (const [model, cost] of Object.entries(oldPeriod?.modelCosts || {})) {
+    const carried = Math.max(0, numberValue(cost) - numberValue(matchedModelCosts[model]));
+    if (carried > 0) modelCosts[model] = (modelCosts[model] || 0) + carried;
+  }
+  return {
+    totalTokens: Math.max(0, Math.round(numberValue(newPeriod?.totalTokens)))
+      + Math.max(0, Math.round(numberValue(oldPeriod?.totalTokens)) - matchedTokens),
+    costUsd: numberValue(newPeriod?.costUsd)
+      + Math.max(0, numberValue(oldPeriod?.costUsd) - matchedCost),
+    models,
+    modelCosts,
+    sessions
+  };
 }
 
 function addClientUsage(period, client, usage) {
@@ -275,7 +374,7 @@ function netOutLiveUsage(usage, livePeriod, splitDef) {
     const separator = key.indexOf(':');
     const client = normalizeClientId(session?.client || (separator >= 0 ? key.slice(0, separator) : ''));
     if (!pairIds.has(client)) continue;
-    const sessionId = String(session?.sessionId || (separator >= 0 ? key.slice(separator + 1) : key)).trim();
+    const sessionId = sessionIdFromKey(key, session);
     if (sessionId) liveSessionIds.add(sessionId);
   }
 
@@ -324,8 +423,7 @@ function netOutLiveUsage(usage, livePeriod, splitDef) {
   let removedTokens = 0;
   let removedCost = 0;
   for (const [key, session] of archivedSessions) {
-    const separator = key.indexOf(':');
-    const sessionId = String(session?.sessionId || (separator >= 0 ? key.slice(separator + 1) : key)).trim();
+    const sessionId = sessionIdFromKey(key, session);
     if (sessionId && liveSessionIds.has(sessionId)) {
       removedTokens += Math.max(0, Math.round(numberValue(session?.totalTokens)));
       removedCost += numberValue(session?.costUsd);
@@ -363,8 +461,14 @@ function applyArchivedClientUsage(summary, archive, options = {}) {
   const now = toDate(options.now);
   const next = cloneJson(summary);
 
-  for (const [client, entry] of Object.entries(normalizedArchive.clients)) {
-    const splitDef = mergedSnapshotFor(client, entry);
+  // Merged snapshots replay after every ordinary entry. An archived split-id
+  // entry and a merged snapshot can hold the same session under two ids, and
+  // the snapshot recognises that overlap only once the split id's rows are in
+  // the period — insertion order puts the older merged entry first.
+  const orderedEntries = Object.entries(normalizedArchive.clients)
+    .map(([client, entry]) => [client, entry, mergedSnapshotFor(client, entry)])
+    .sort((left, right) => Number(Boolean(left[2])) - Number(Boolean(right[2])));
+  for (const [client, entry, splitDef] of orderedEntries) {
     // An ordinary entry is skipped once its client is tracked: the live scan now
     // reports it, so adding the archived copy back would double count. A merged
     // snapshot cannot be skipped that way, because becoming tracked covers only

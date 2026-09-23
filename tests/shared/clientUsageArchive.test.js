@@ -611,3 +611,53 @@ test('an unrelated client sharing a session id does not eat the merged snapshot'
   assert.equal(applied.periods.allTime.totalTokens, 140, 'archived 100 + unrelated live 40');
   assert.ok(applied.periods.allTime.sessions['pi:omp1'], 'the archived session must survive');
 });
+
+// A merged snapshot and a separately-archived Oh My Pi entry hold the same
+// session under two ids. The archive lists `pi` first — it is the older entry —
+// so unless merged entries replay last the overlap is counted twice, and
+// `allTime` never expires, so the inflation would be permanent.
+test('a merged Pi snapshot nets out an Oh My Pi entry archived after it', () => {
+  const now = localNoon(2026, 9, 1);
+  const archive = legacyMergedArchive(now);
+  const ompPeriod = {
+    totalTokens: 40,
+    costUsd: 0,
+    models: { gpt: 40 },
+    modelCosts: {},
+    sessions: { 'omp:omp1': session('omp', 'omp1', 40) }
+  };
+  archive.clients.omp = {
+    client: 'omp',
+    capturedAt: now.toISOString(),
+    day: localDayKey(now),
+    month: localDayKey(now).slice(0, 7),
+    clientIdentityGeneration: 2,
+    periods: { today: ompPeriod, month: ompPeriod, allTime: ompPeriod }
+  };
+  const applied = applyArchivedClientUsage(liveSummary(now, {}), archive, { activeClients: '', now });
+  assert.equal(applied.periods.allTime.totalTokens, 100, '60 archived Pi + 40 archived Oh My Pi, once');
+});
+
+// Untracking Pi again must not overwrite the merged snapshot with a Pi-only
+// one: the Oh My Pi residue exists nowhere else once the session archive is
+// off, so the recapture carries forward whatever the new Pi rows do not cover.
+test('recapturing Pi carries the merged snapshot residue forward', () => {
+  const now = localNoon(2026, 9, 1);
+  const record = {
+    updatedAt: now.toISOString(),
+    periods: Object.fromEntries(['today', 'month', 'allTime'].map((periodName) => [periodName, {
+      clients: { pi: 60 },
+      clientModels: { pi: { gpt: 60 } },
+      sessions: { 'pi:pi1': session('pi', 'pi1', 60) }
+    }]))
+  };
+  const recaptured = captureArchivedClientUsage(legacyMergedArchive(now), record, 'pi', now);
+  const entry = recaptured.clients.pi;
+  assert.equal(entry.clientIdentityGeneration, undefined, 'still a merged snapshot');
+  assert.equal(entry.periods.allTime.totalTokens, 100, '60 recaptured Pi + 40 carried Oh My Pi');
+  assert.deepEqual(Object.keys(entry.periods.allTime.sessions).sort(), ['pi:omp1', 'pi:pi1']);
+
+  // End to end: with nothing tracked, the recaptured archive still totals 100.
+  const applied = applyArchivedClientUsage(liveSummary(now, {}), recaptured, { activeClients: '', now });
+  assert.equal(applied.periods.allTime.totalTokens, 100);
+});

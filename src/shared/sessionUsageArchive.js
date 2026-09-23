@@ -358,6 +358,7 @@ function applySessionUsageArchive(summary, archive, options = {}) {
   };
 
   const supersededRows = [];
+  const mergedRows = [];
   for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
     for (const periodName of PERIODS) {
       const session = entry.periods?.[periodName];
@@ -369,18 +370,37 @@ function applySessionUsageArchive(summary, archive, options = {}) {
       if (!hasSummaryPeriod(next, periodName)) continue;
       const period = targetFor(periodName);
       if (period.sessions[archiveKey]) continue;
-      // An archived session captured while two clients shared one row is keyed
-      // under the merged id, so the live split-id copy of the same session is a
-      // different key. The split id's own scan is the authoritative source now —
-      // it reports the same bytes the merged row was built from — so skip the
-      // archived copy rather than adding it on top.
-      if (isLiveUnderSplitId(period, entry, session)) continue;
+      // A row keyed under a merged id replays only after every other row: an
+      // archived split-id copy of the same session is the same usage twice, and
+      // the merged row can only see that overlap once the split row is already
+      // in the period. Insertion order puts the older merged row first, so
+      // deferring by identity is what makes the replay order-independent.
+      if (splitClientIdFor(session.client || entry.client)) {
+        mergedRows.push([period, archiveKey, entry, session]);
+        continue;
+      }
       if (entry.supersededBy) {
         supersededRows.push([period, archiveKey, session, entry.supersededBy]);
         continue;
       }
       addArchivedSession(period, session, archiveKey);
     }
+  }
+
+  for (const [period, archiveKey, entry, session] of mergedRows) {
+    if (period.sessions[archiveKey]) continue;
+    // An archived session captured while two clients shared one row is keyed
+    // under the merged id, so the live split-id copy of the same session is a
+    // different key. The split id's own scan is the authoritative source now —
+    // it reports the same bytes the merged row was built from — so skip the
+    // archived copy rather than adding it on top. The check runs late enough to
+    // also see the split id's *archived* rows, which the first pass applied.
+    if (isLiveUnderSplitId(period, entry, session)) continue;
+    if (entry.supersededBy) {
+      supersededRows.push([period, archiveKey, session, entry.supersededBy]);
+      continue;
+    }
+    addArchivedSession(period, session, archiveKey);
   }
 
   // A legacy Cursor row whose event now belongs to another session is judged
