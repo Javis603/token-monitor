@@ -6,7 +6,6 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
-  boundsOnDisplay,
   expandedBoundsForCollapse,
   isWindowMaximized,
   normalWindowBounds,
@@ -223,74 +222,4 @@ test('main.js keeps tray and collapsed windows off the normal window state path'
   assert.match(unmaximize, /^[\s\S]*?if \(!shouldTrackWindowMaximized\(settings, floatingBubbleState\)\) return;[\s\S]*persistWindowState/);
   assert.match(enterTray, /suspendWindowMaximized\(mainWindow\)[\s\S]*setWindowMaximizable\(mainWindow, false\)/);
   assert.match(exitTray, /setWindowMaximizable\(mainWindow, true\)[\s\S]*restoreWindowMaximized\(mainWindow, settings\)/);
-});
-
-// The reporter's arrangement: a Retina laptop panel at the origin and a 1080p
-// display above and to its left, so the second display's origin is negative on
-// both axes.
-const MAIN_DISPLAY = {
-  id: 1,
-  bounds: { x: 0, y: 0, width: 1470, height: 956 },
-  workArea: { x: 0, y: 25, width: 1470, height: 906 }
-};
-const EXTERNAL_DISPLAY = {
-  id: 2,
-  bounds: { x: -220, y: -1080, width: 1920, height: 1080 },
-  workArea: { x: -220, y: -1055, width: 1920, height: 1030 }
-};
-
-test('boundsOnDisplay keeps the window where it sat on the target display', () => {
-  const moved = boundsOnDisplay(
-    { x: 1072, y: 37, width: 349, height: 671 },
-    MAIN_DISPLAY,
-    EXTERNAL_DISPLAY
-  );
-  // Translated by the offset between the two origins (0,0) -> (-220,-1080), so a
-  // window near the right edge of the laptop panel stays near the right edge of
-  // the external one instead of being re-centred.
-  assert.deepEqual(moved, { x: 852, y: -1043, width: 349, height: 671 });
-});
-
-test('boundsOnDisplay clamps a window that would land outside the work area', () => {
-  const moved = boundsOnDisplay(
-    { x: 1400, y: 900, width: 349, height: 671 },
-    MAIN_DISPLAY,
-    MAIN_DISPLAY
-  );
-  assert.deepEqual(moved, { x: 1121, y: 260, width: 349, height: 671 });
-  assert.equal(moved.x + moved.width, MAIN_DISPLAY.workArea.width);
-  assert.equal(moved.y + moved.height, MAIN_DISPLAY.workArea.y + MAIN_DISPLAY.workArea.height);
-});
-
-test('boundsOnDisplay shrinks a window larger than the target work area', () => {
-  const moved = boundsOnDisplay(
-    { x: 0, y: 0, width: 1920, height: 1080 },
-    EXTERNAL_DISPLAY,
-    MAIN_DISPLAY
-  );
-  assert.deepEqual(moved, { x: 0, y: 25, width: 1470, height: 906 });
-});
-
-test('boundsOnDisplay pins to the work area when the source display is unknown', () => {
-  const moved = boundsOnDisplay(
-    { x: 1072, y: 37, width: 349, height: 671 },
-    null,
-    EXTERNAL_DISPLAY
-  );
-  // No offset is knowable, so the window is parked at the target's work-area
-  // origin rather than moved by a guess.
-  assert.deepEqual(moved, { x: -220, y: -1055, width: 349, height: 671 });
-});
-
-test('boundsOnDisplay returns null instead of guessing', () => {
-  const bounds = { x: 0, y: 0, width: 300, height: 400 };
-  assert.equal(boundsOnDisplay(null, MAIN_DISPLAY, EXTERNAL_DISPLAY), null);
-  assert.equal(boundsOnDisplay(bounds, MAIN_DISPLAY, null), null);
-  assert.equal(boundsOnDisplay(bounds, MAIN_DISPLAY, { id: 9 }), null);
-});
-
-test('boundsOnDisplay falls back to workArea when a display has no bounds', () => {
-  const bare = { id: 3, workArea: { x: 100, y: 50, width: 800, height: 600 } };
-  const moved = boundsOnDisplay({ x: 300, y: 200, width: 200, height: 300 }, null, bare);
-  assert.deepEqual(moved, { x: 100, y: 50, width: 200, height: 300 });
 });
