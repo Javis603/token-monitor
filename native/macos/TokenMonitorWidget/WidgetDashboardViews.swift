@@ -653,7 +653,7 @@ enum WidgetVendorIdentity {
         if matches("llama|meta|muse-spark(?:-|$)") { return "meta" }
         if matches("mistral|mixtral|codestral") { return "mistral" }
         if matches("qwen|qwq|qvq|qmodel") { return "qwen" }
-        if matches("kimi|moonshot|k2d6-agent|k3-agent") { return "kimi" }
+        if matches("kimi|moonshot|k2d6-agent|k3-agent|(?:^|[^a-z0-9])k[23](?:[^a-z0-9]|$)") { return "kimi" }
         if matches("chatglm|\\bglm-|\\bzai\\b|z\\.ai|zhipu") { return "zai" }
         if matches("cohere|command-r") { return "cohere" }
         if matches("mimo|xiaomi") { return "xiaomi" }
