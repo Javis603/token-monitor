@@ -56,6 +56,7 @@ module.exports = {
   DEFAULT_CLIENTS,
   PARSE_LOCAL_CLIENTS,
   KNOWN_CLIENTS,
+  LEGACY_CLIENT_ID_ALIASES,
   clientsCsvForSetting,
   normalizeClientsCsv,
   normalizeTrackedClientId
