@@ -285,7 +285,9 @@
     switch (key) {
       case 'five_hour': return 'Session';
       case 'seven_day': return 'Weekly';
-      case 'seven_day_overage_included': return 'Weekly overage';
+      // The CLI's own label map calls this 'Fable limit' — the
+      // credits-backed model's weekly bucket, not a modifier on seven_day.
+      case 'seven_day_overage_included': return 'Fable weekly';
       case 'seven_day_opus': return 'Opus weekly';
       case 'seven_day_sonnet': return 'Sonnet weekly';
       case 'seven_day_oauth_apps': return 'OAuth apps weekly';
@@ -315,9 +317,6 @@
         : remaining || 'No expiry']);
       const clearKeys = Array.isArray(grant?.clears) ? grant.clears : [];
       const clears = clearKeys
-        // `seven_day_overage_included` only says the weekly clear also covers
-        // accrued overage — implied by 'Weekly', so it is not listed.
-        .filter((key) => key !== 'seven_day_overage_included')
         .map(claudeResetClearLabel)
         .filter(Boolean);
       const clearsText = clears.join(' · ');
