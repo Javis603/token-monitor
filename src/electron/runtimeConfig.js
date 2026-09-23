@@ -240,6 +240,12 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     workbuddyAccountType: context.workbuddyDesktopSessionEnabled === true
       ? workbuddyLocalSession.accountType || ''
       : '',
+    // Why the app-owned session is unusable, when it is. An encrypted or
+    // otherwise unreadable credential is not a signed-out app, and the limits
+    // layer needs that difference to stop asking the user to sign in again.
+    workbuddyLocalSessionReason: context.workbuddyDesktopSessionEnabled === true
+      ? String(workbuddyLocalSession.reason || '').trim()
+      : '',
     workbuddyLocale: workbuddySettings.workbuddyLocale
       || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_LOCALE
       || workbuddyEnv.WORKBUDDY_LOCALE
