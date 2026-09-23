@@ -487,20 +487,27 @@ enum WidgetFormat {
         case "hermes": "Hermes Agent"
         case "cursor": "Cursor"
         case "antigravity": "Antigravity"
+        case "cline": "Cline"
         case "factory": "Factory Droid"
         case "kimi": "Kimi"
         case "grok": "Grok"
         case "copilot": "GitHub Copilot"
         case "zed": "Zed"
         case "commandcode": "Command Code"
-        case "mimo": "MiMo"
-        case "micode": "MiMo Code"
+        case "mimo": "Xiaomi MiMo"
+        // Legacy snapshot id. Breakdown rows carry tracked-client ids, which
+        // the app renamed from `micode` to `mimo`; a snapshot written by an
+        // older build can still be on disk when the widget renders, so the old
+        // spelling has to keep resolving. Same reason for the `micode` entries
+        // in WidgetDashboardViews' icon and colour tables.
+        case "micode": "Xiaomi MiMo"
         case "zai": "GLM"
         case "zaiteam": "GLM Team"
         case "kiro": "Kiro"
         case "workbuddy": "WorkBuddy"
         case "qoder": "Qoder"
         case "deepseek": "DeepSeek"
+        case "devin": "Devin"
         case "lmstudio": "LM Studio"
         case "openrouter": "OpenRouter"
         case "minimax": "Minimax"

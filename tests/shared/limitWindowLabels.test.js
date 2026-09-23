@@ -23,7 +23,7 @@ test('the collector label always wins over the kind default', () => {
 });
 
 test('rolling windows are named the way their vendor names them', () => {
-  for (const id of ['alibaba', 'antigravity', 'commandcode', 'kimi', 'volcengine', 'zai', 'zaiteam']) {
+  for (const id of ['alibaba', 'antigravity', 'cline', 'commandcode', 'kimi', 'volcengine', 'zai', 'zaiteam']) {
     assert.equal(limitWindowKindLabel(id, 'session'), '5-hour', `${id} publishes a 5-hour window`);
   }
   for (const id of ['codex', 'claude', 'opencode', 'ollama', 'minimax']) {

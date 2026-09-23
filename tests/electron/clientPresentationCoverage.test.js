@@ -82,7 +82,7 @@ test('clientsWithIcon covers every catalog client', () => {
 test('every catalog client resolves to an icon asset through its CSS rule', () => {
   // The invariant is that a client resolves to an icon, not that the file is
   // named after the client. Several clients deliberately reuse a vendor mark
-  // (hermes → hermes-agent.svg, grok → xai.svg, micode → xiaomi.svg,
+  // (hermes → hermes-agent.svg, grok → xai.svg, mimo → xiaomi.svg,
   // zcode → zai.svg), so the CSS rule is the mapping and the asset is checked
   // through it rather than assumed from the id.
   const styles = fs.readFileSync(stylesPath, 'utf8');
@@ -129,7 +129,7 @@ test('the subscription usage comparison reads the scan, never a display-label ta
 
   // And every key in it is resolved through the catalog rather than compared to
   // the provider id, which is the same question one level down: a provider whose
-  // client is named otherwise (droid, micode, zcode, qodercn, dsh) has its cost
+  // client is named otherwise (droid, zcode, qodercn, dsh) has its cost
   // under that client's key, so an id comparison answers "no usage" for it
   // forever.
   assert.match(

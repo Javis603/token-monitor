@@ -47,15 +47,32 @@ function requestSecret(request) {
   if (auth.toLowerCase().startsWith('bearer ')) return auth.slice(7).trim();
   const headerSecret = String(request.headers.get('x-token-monitor-secret') || '').trim();
   if (headerSecret) return headerSecret;
+  // Compatibility path for iOS widget runtimes that cannot set Authorization.
+  // Prefer a header; do not add this fallback to new first-party clients.
   try {
     const url = new URL(request.url);
     return String(url.searchParams.get('secret') || '').trim();
   } catch (_) { return ''; }
 }
 
-function isAuthorized(request, expectedSecret) {
+// Compare SHA-256 digests rather than the raw strings, so the compare always
+// runs over 32 bytes and never leaks the secret's length. Web Crypto's standard
+// surface has no timing-safe compare (Cloudflare's crypto.subtle.timingSafeEqual
+// is a non-standard extension the Node test runner lacks), hence the XOR loop.
+async function timingSafeEqualText(actual, expected) {
+  const encoder = new TextEncoder();
+  const digest = async (value) => new Uint8Array(
+    await crypto.subtle.digest('SHA-256', encoder.encode(String(value ?? '')))
+  );
+  const [left, right] = await Promise.all([digest(actual), digest(expected)]);
+  let mismatch = 0;
+  for (let i = 0; i < left.length; i += 1) mismatch |= left[i] ^ right[i];
+  return mismatch === 0;
+}
+
+async function isAuthorized(request, expectedSecret) {
   if (!expectedSecret) return true;
-  return requestSecret(request) === expectedSecret;
+  return timingSafeEqualText(requestSecret(request), expectedSecret);
 }
 
 const SUBSCRIPTIONS_KEY = 'subscriptions';
@@ -248,7 +265,7 @@ export class HubDO {
     if (!this.secret) {
       return jsonResponse(503, { error: 'secret_required', message: 'TOKEN_MONITOR_SECRET must be set on the worker; unauthenticated access is refused.' });
     }
-    if (!isAuthorized(request, this.secret)) return jsonResponse(401, { error: 'unauthorized' });
+    if (!(await isAuthorized(request, this.secret))) return jsonResponse(401, { error: 'unauthorized' });
 
     if ((request.method === 'GET' || request.method === 'HEAD') && url.pathname === '/api/stats') {
       return jsonResponse(200, await this.statsWithSubscriptionVersion(), {}, request);

@@ -367,6 +367,41 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   min-width: 0;
 }
 .edge-dock-card-head .edge-dock-mark { width: 15px; height: 15px; flex: 0 0 auto; }
+.edge-dock-card-head.is-breakdown {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.edge-dock-breakdown-switch {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 1px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(var(--overlay-rgb), 0.07);
+}
+.edge-dock-breakdown-option {
+  min-height: 20px;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 9.5px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.edge-dock-breakdown-option:hover { color: var(--text); }
+.edge-dock-breakdown-option.is-active {
+  background: rgba(var(--overlay-rgb), 0.13);
+  color: var(--text);
+}
+.edge-dock-breakdown-option:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 /* The card's own status line ("2 running"), the same slot and weight as the
    live-rate card's status so the two stat cards' headers read alike. */
 .edge-dock-card-status { color: var(--muted); font-size: 10.5px; flex: 0 0 auto; }

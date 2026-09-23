@@ -10,7 +10,7 @@ const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
 const VALID_LIMIT_WINDOW_SOURCES = new Set(['web', 'local']);
 const VALID_LIMIT_BOUNDARY_KINDS = new Set(['reset', 'expiry', 'mixed']);
 const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'ide', 'managed', 'unknown']);
-const VALID_ACTION_REQUIREMENTS = new Set(['accountVerification']);
+const VALID_ACTION_REQUIREMENTS = new Set(['accountVerification', 'appSessionEncrypted']);
 const WINDOW_ORDER = ['session', 'daily', 'weekly', 'billing'];
 const CODEX_TRANSIENT_WINDOW_RETENTION_MS = 10 * 60 * 1000;
 const CODEX_TRANSIENT_PROVIDER_STATUSES = new Set(['unavailable', 'error', 'rateLimited', 'sourceRateLimited']);
@@ -357,12 +357,49 @@ function normalizeProviderResetCredits(input) {
   const effectiveNextExpiresAt = [nextExpiresAt, firstExpiration]
     .filter(Boolean)
     .sort((a, b) => Date.parse(a) - Date.parse(b))[0] || null;
-  if (available === null && !effectiveNextExpiresAt && expirations.length === 0) return null;
+  const grants = normalizeResetCreditGrants(input.grants);
+  if (available === null && !effectiveNextExpiresAt && expirations.length === 0 && grants.length === 0) return null;
   return {
     availableCount: available === null ? null : Math.max(0, Math.floor(available)),
     nextExpiresAt: effectiveNextExpiresAt,
-    ...(expirations.length > 0 ? { expirations } : {})
+    ...(expirations.length > 0 ? { expirations } : {}),
+    ...(grants.length > 0 ? { grants } : {})
   };
+}
+
+// Optional per-grant detail riders on resetCredits. Claude's reset coupons are
+// labelled grants (why it was issued, what it clears, whether it is spendable
+// right now); Codex's are anonymous, so nothing but Claude sets this today.
+function normalizeResetCreditGrants(input) {
+  if (!Array.isArray(input)) return [];
+  const grants = [];
+  for (const entry of input) {
+    if (!entry || typeof entry !== 'object') continue;
+    const resetsLeft = numberOrNull(entry.resetsLeft ?? entry.resets_left);
+    const resetsTotal = numberOrNull(entry.resetsTotal ?? entry.resets_total);
+    const startsAt = normalizeIsoTimestamp(entry.startsAt ?? entry.starts_at);
+    const endsAt = normalizeIsoTimestamp(entry.endsAt ?? entry.ends_at);
+    const clears = Array.isArray(entry.clears)
+      ? [...new Set(entry.clears.map((value) => String(value || '').trim()).filter(Boolean))]
+      : [];
+    grants.push({
+      ...(entry.id ? { id: String(entry.id) } : {}),
+      ...(entry.label ? { label: String(entry.label) } : {}),
+      ...(resetsLeft !== null ? { resetsLeft: Math.max(0, Math.floor(resetsLeft)) } : {}),
+      ...(resetsTotal !== null ? { resetsTotal: Math.max(0, Math.floor(resetsTotal)) } : {}),
+      ...(startsAt ? { startsAt } : {}),
+      ...(endsAt ? { endsAt } : {}),
+      ...(clears.length > 0 ? { clears } : {}),
+      ...((entry.usableNow ?? entry.usable_now) !== undefined
+        ? { usableNow: Boolean(entry.usableNow ?? entry.usable_now) }
+        : {}),
+      ...((entry.useRequiresLimit ?? entry.use_requires_limit) !== undefined
+        ? { useRequiresLimit: Boolean(entry.useRequiresLimit ?? entry.use_requires_limit) }
+        : {}),
+      ...(entry.paused !== undefined ? { paused: Boolean(entry.paused) } : {})
+    });
+  }
+  return grants;
 }
 
 function normalizeRegion(value) {

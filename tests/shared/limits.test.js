@@ -1484,6 +1484,17 @@ test('normalizeLimitProvider preserves only the bounded account action hint', ()
   assert.equal(Object.hasOwn(unknown, 'actionRequired'), false);
 });
 
+test('normalizeLimitProvider keeps the WorkBuddy app-session action hint', () => {
+  const sealed = normalizeLimitProvider({
+    provider: 'workbuddy',
+    status: 'notConfigured',
+    actionRequired: 'appSessionEncrypted',
+    windows: []
+  });
+
+  assert.equal(sealed.actionRequired, 'appSessionEncrypted');
+});
+
 test('normalizeLimitProvider keeps canonical Codex lanes ahead of named additional windows', () => {
   const provider = normalizeLimitProvider({
     provider: 'codex',

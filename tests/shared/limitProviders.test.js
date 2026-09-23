@@ -56,7 +56,7 @@ test('initial limit providers map only corresponding Collection client aliases',
         hermes: { source: { state: 'detected' } },
         qodercn: { source: { state: 'detected' } },
         zcode: { source: { state: 'detected' } },
-        micode: { source: { state: 'detected' } },
+        mimo: { source: { state: 'detected' } },
         dsh: { source: { state: 'detected' } }
       }
     }),

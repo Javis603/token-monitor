@@ -3585,7 +3585,6 @@ html.is-windows .settings-panel select option {
 .row-icon-zed        { -webkit-mask-image: url(../../../assets/icons/zed.svg);           mask-image: url(../../../assets/icons/zed.svg); }
 .row-icon-kilo       { -webkit-mask-image: url(../../../assets/icons/kilo.svg);          mask-image: url(../../../assets/icons/kilo.svg); }
 .row-icon-commandcode { -webkit-mask-image: url(../../../assets/icons/commandcode.svg);   mask-image: url(../../../assets/icons/commandcode.svg); }
-.row-icon-micode     { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);       mask-image: url(../../../assets/icons/xiaomi.svg); }
 .row-icon-zcode      { -webkit-mask-image: url(../../../assets/icons/zai.svg);          mask-image: url(../../../assets/icons/zai.svg); }
 .row-icon-kiro       { -webkit-mask-image: url(../../../assets/icons/kiro.svg);          mask-image: url(../../../assets/icons/kiro.svg); }
 .row-icon-codebuddy  { -webkit-mask-image: url(../../../assets/icons/codebuddy.svg);     mask-image: url(../../../assets/icons/codebuddy.svg); }
@@ -3596,6 +3595,7 @@ html.is-windows .settings-panel select option {
 .row-icon-cherrystudio { -webkit-mask-image: url(../../../assets/icons/cherrystudio.svg); mask-image: url(../../../assets/icons/cherrystudio.svg); }
 .row-icon-lmstudio  { -webkit-mask-image: url(../../../assets/icons/lmstudio.svg);      mask-image: url(../../../assets/icons/lmstudio.svg); }
 .row-icon-unsloth   { -webkit-mask-image: url(../../../assets/icons/unsloth.svg);       mask-image: url(../../../assets/icons/unsloth.svg); }
+.row-icon-devin     { -webkit-mask-image: url(../../../assets/icons/devin.svg);         mask-image: url(../../../assets/icons/devin.svg); }
 .row-icon-opencode   { -webkit-mask-image: url(../../../assets/icons/opencode.svg);      mask-image: url(../../../assets/icons/opencode.svg); }
 .row-icon-openrouter { -webkit-mask-image: url(../../../assets/icons/openrouter.svg);    mask-image: url(../../../assets/icons/openrouter.svg); }
 .row-icon-openclaw   { -webkit-mask-image: url(../../../assets/icons/openclaw.svg);      mask-image: url(../../../assets/icons/openclaw.svg); }
@@ -4640,6 +4640,27 @@ html.is-windows .limit-live-badge {
   text-align: right;
   white-space: nowrap;
 }
+/* A full-row entry spans the whole grid and wraps in place — a long sentence
+   in a nowrap cell would push the popover past the window edge. Same bound
+   the forecast disclaimer uses. */
+.limit-detail-tooltip-full {
+  grid-column: 1 / -1;
+  max-width: 210px;
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: normal;
+}
+.limit-detail-tooltip-full.is-separated {
+  margin-top: 3px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.16);
+}
+/* A caption full-row is context, not data — smaller and dimmer so it reads
+   as a footnote instead of another line competing with the rows. */
+.limit-detail-tooltip-full.is-caption {
+  font-size: 8px;
+  opacity: 0.66;
+}
 .codex-reset-forecast-disclaimer {
   grid-column: 1 / -1;
   max-width: 210px;
@@ -5535,6 +5556,7 @@ html.is-windows .limit-live-badge {
 #claudeManualPanel,
 #opencodeManualPanel,
 #cursorManualPanel,
+#clineManualPanel,
 #factoryManualPanel,
 #kimiManualPanel,
 #copilotManualPanel,
@@ -5544,6 +5566,7 @@ html.is-windows .limit-live-badge {
 #zaiManualPanel,
 #zaiteamManualPanel,
 #qoderManualPanel,
+#devinManualPanel,
 #deepseekManualPanel,
 #minimaxManualPanel,
 #volcengineManualPanel,
@@ -5554,6 +5577,7 @@ html.is-windows .limit-live-badge {
 #claudeManualPanel > .accordion-animation-inner,
 #opencodeManualPanel > .accordion-animation-inner,
 #cursorManualPanel > .accordion-animation-inner,
+#clineManualPanel > .accordion-animation-inner,
 #factoryManualPanel > .accordion-animation-inner,
 #kimiManualPanel > .accordion-animation-inner,
 #zedManualPanel > .accordion-animation-inner,
@@ -5562,6 +5586,7 @@ html.is-windows .limit-live-badge {
 #zaiManualPanel > .accordion-animation-inner,
 #zaiteamManualPanel > .accordion-animation-inner,
 #qoderManualPanel > .accordion-animation-inner,
+#devinManualPanel > .accordion-animation-inner,
 #deepseekManualPanel > .accordion-animation-inner,
 #minimaxManualPanel > .accordion-animation-inner,
 #volcengineManualPanel > .accordion-animation-inner,
@@ -5575,6 +5600,7 @@ html.is-windows .limit-live-badge {
 #claudeManualPanel textarea,
 #opencodeManualPanel textarea,
 #cursorManualPanel textarea,
+#clineManualPanel input,
 #factoryManualPanel input,
 #kimiManualPanel input,
 #kimiManualPanel textarea,
@@ -5588,6 +5614,7 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel input,
 #qoderManualPanel textarea,
 #qoderManualPanel select,
+#devinManualPanel input,
 #deepseekManualPanel input,
 #openrouterApiKeyInput,
 #minimaxManualPanel input,
@@ -5614,6 +5641,7 @@ html.is-windows .limit-live-badge {
 }
 #claudeManualPanel textarea,
 #opencodeManualPanel textarea,
+#clineManualPanel input,
 #cursorManualPanel textarea,
 #factoryManualPanel input,
 #kimiManualPanel input,
@@ -5626,6 +5654,7 @@ html.is-windows .limit-live-badge {
 #zaiManualPanel input,
 #zaiteamManualPanel input,
 #qoderManualPanel textarea,
+#devinManualPanel input,
 #deepseekManualPanel input,
 #openrouterApiKeyInput,
 #minimaxManualPanel input,
