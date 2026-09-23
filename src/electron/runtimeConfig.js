@@ -74,6 +74,7 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   codex: ['codexManagedAccounts'],
   opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
   cursor: ['cursorDisabledAccountIds'],
+  cline: ['clineApiKey'],
   factory: ['factoryApiKey'],
   kimi: ['kimiApiKey', 'kimiWebAccessToken'],
   copilot: ['copilotApiToken', 'copilotEnterpriseHost'],

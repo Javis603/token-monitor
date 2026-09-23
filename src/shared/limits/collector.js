@@ -86,6 +86,8 @@ const { fetchAntigravityLimits } = require('../providers/antigravity/limits');
 const { fetchOpenCodeLimits, fetchOpenCodeProfile } = require('../providers/opencode/limits');
 const { deepseekToken, fetchDeepSeekLimits, selectFundedRow } = require('../providers/deepseek/limits');
 const { fetchCursorLimits } = require('../providers/cursor/limits');
+const clineLimits = require('../providers/cline/limits');
+const { fetchClineLimits } = clineLimits;
 
 const DEFAULT_PROVIDER_PHYSICAL_BOUND_MS = 120_000;
 const PROVIDER_CLEANUP_GRACE_MS = 5_000;
@@ -130,6 +132,7 @@ function providerFetchers(deps = {}) {
     opencode: (providerOptions, probeDeps) => fetchOpenCodeLimits(providerOptions, probeDeps),
     cursor: (providerOptions, probeDeps) => fetchCursorLimits(providerOptions, probeDeps),
     antigravity: (providerOptions, probeDeps) => fetchAntigravityLimits(providerOptions, probeDeps),
+    cline: (providerOptions, probeDeps) => fetchClineLimits(providerOptions, probeDeps),
     factory: (providerOptions, probeDeps) => fetchFactoryLimits(providerOptions, probeDeps),
     kimi: (providerOptions, probeDeps) => kimiLimits.fetchKimiLimits(providerOptions, probeDeps),
     grok: (providerOptions, probeDeps) => grokLimits.fetchGrokLimits(providerOptions, probeDeps),
@@ -299,6 +302,9 @@ module.exports = {
   fetchClaudeLimits,
   fetchCodexLimits,
   fetchCursorLimits,
+  fetchClineLimits,
+  clineApiKey: clineLimits.clineApiKey,
+  resolveClineAutomaticCredential: clineLimits.resolveClineAutomaticCredential,
   fetchDeepSeekLimits,
   fetchMimoLimits,
   readCodexRpcWithCommand,

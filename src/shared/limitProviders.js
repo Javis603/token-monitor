@@ -38,6 +38,7 @@
     { id: 'opencode', label: 'OpenCode' },
     { id: 'cursor', label: 'Cursor' },
     { id: 'antigravity', label: 'Antigravity' },
+    { id: 'cline', label: 'Cline' },
     { id: 'factory', label: 'Factory Droid' },
     { id: 'kimi', label: 'Kimi' },
     { id: 'grok', label: 'Grok' },

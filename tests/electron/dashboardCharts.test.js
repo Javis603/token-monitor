@@ -26,7 +26,7 @@ test('usageCharts exports every symbol app.js destructures from it', () => {
 test('clientColors carries the known palette and a default', () => {
   assert.equal(clientColors.claude, '#cc7c5e');
   assert.equal(clientColors.codex, '#49a3b0');
-  assert.equal(clientColors.cline, '#323B43');
+  assert.equal(clientColors.cline, '#9D4EDD');
   assert.equal(clientColors.cherrystudio, '#EA5E5D');
   assert.equal(clientColors.commandcode, '#8C4EDD');
   assert.equal(clientColors.volcengine, '#006EFF');

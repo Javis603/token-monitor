@@ -487,6 +487,7 @@ enum WidgetFormat {
         case "hermes": "Hermes Agent"
         case "cursor": "Cursor"
         case "antigravity": "Antigravity"
+        case "cline": "Cline"
         case "factory": "Factory Droid"
         case "kimi": "Kimi"
         case "grok": "Grok"

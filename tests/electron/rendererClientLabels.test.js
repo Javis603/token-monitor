@@ -193,6 +193,13 @@ test('Devin has a label and uses the standard mask-safe icon path', () => {
   assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'devin.png')));
 });
 
+test('Cline carries the Cline brand purple', () => {
+  const { clientColors } = require('../../src/electron/renderer/usageCharts');
+  // Cline's own docs theme declares it (docs/docs.json: colors.primary #9D4EDD), and
+  // it is the purple its dashboard paints its accents with.
+  assert.equal(clientColors.cline, '#9D4EDD', 'Cline chart colour is the Cline brand purple');
+});
+
 test('Amp carries its own brand colour and mask-safe icon assets', () => {
   const source = rendererSource();
   const styles = rendererStyles();

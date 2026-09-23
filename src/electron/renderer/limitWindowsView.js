@@ -560,6 +560,19 @@
       : '';
   }
 
+  function clineCreditsNode(provider, credits, spend) {
+    const value = creditsBalanceValue(provider, credits);
+    if (!value) return null;
+    const monthSpend = optionalFiniteNumber(spend?.used);
+    const spendValue = monthSpend === null ? '' : formatBalanceSpendAmount(monthSpend, spend);
+    return limitNoteRowNode({
+      label: credits.label || 'Credits',
+      summary: value,
+      detailEntries: spendValue ? [['Month spent', spendValue]] : null,
+      ariaParts: [value, ...(spendValue ? [`Month spent ${spendValue}`] : [])]
+    });
+  }
+
   function mimoTokenPlanWindowFromBalance(balance) {
     if (!balance) return null;
     if (balance.planStatus === 'expired') return null;
@@ -1230,6 +1243,33 @@
       }
       const balanceNode = claudeBalanceNode(provider);
       if (balanceNode) windows.append(balanceNode);
+    } else if (provider.provider === 'cline') {
+      // ClinePass measures three quota windows, and the account's credit arrives as
+      // a fourth "billing" window — told apart by its metric rather than by its
+      // kind, and rendered the way WorkBuddy's and Trae's balance is. The default
+      // branch below renders session and weekly only, which would silently drop a
+      // third of the subscription.
+      const clineSession = windowForKind(provider, 'session');
+      const clineWeekly = windowForKind(provider, 'weekly');
+      const clineBilling = windowsForKind(provider, 'billing');
+      const clineMonthly = clineBilling.find((window) => !isCreditsWindow(window) && window.metric !== 'spend') || null;
+      const clineCredits = clineBilling.find((window) => isCreditsWindow(window)) || null;
+      const clineSpend = clineBilling.find((window) => window.metric === 'spend') || null;
+      if (clineSession) {
+        windows.append(limitWindowNode(providerWindowLabel(provider, clineSession), clineSession, color, 0.95));
+      }
+      if (clineWeekly) {
+        windows.append(limitWindowNode(providerWindowLabel(provider, clineWeekly), clineWeekly, color, 0.68));
+      }
+      if (clineMonthly) {
+        const node = limitWindowNode(providerWindowLabel(provider, clineMonthly), clineMonthly, color, 0.5);
+        node.classList.add('limit-window-wide');
+        windows.append(node);
+      }
+      if (clineCredits) {
+        const node = clineCreditsNode(provider, clineCredits, clineSpend);
+        if (node) windows.append(node);
+      }
     } else {
       // Default: render only the windows the provider actually has. Providers
       // that only expose a single window shouldn't leave a half-empty bar next to
