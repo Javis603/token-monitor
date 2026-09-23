@@ -6,6 +6,22 @@
 // directory scan.
 const TOKSCALE_CLIENT_GROUPS = Object.freeze({
   antigravity: Object.freeze({ aliases: Object.freeze(['antigravity-cli']) }),
+  // Xiaomi MiMo Desktop and the MiMo Code CLI share one `mimocode` SQLite
+  // store; tokscale re-stamps a row as `micode-desktop` when its
+  // `session.version` starts with `desktop-`. Both surfaces are one Token
+  // Monitor row.
+  //
+  // `mimo` is an umbrella id like `devin`, for a different reason: upstream's
+  // client id is a fossil of a path typo. Tokscale originally scanned
+  // `~/.local/share/micode/` and named the client after that directory;
+  // upstream PR #784 fixed the path to `~/.local/share/mimocode/` but left the
+  // id alone, and upstream still has no `mimo` id. So a bare `mimo` --client
+  // value is rejected with exit 2 and the scan list is the aliases themselves.
+  // Dropping either alias would silently stop counting that surface.
+  mimo: Object.freeze({
+    aliases: Object.freeze(['micode', 'micode-desktop']),
+    scanIds: Object.freeze(['micode', 'micode-desktop'])
+  }),
   // Oh My Pi wrote Pi's JSONL format and was folded into the `pi` row here
   // until the two products were split back apart in clientIdentitySplits.js, so
   // this table no longer groups them. Their default roots stay distinct, and
@@ -16,6 +32,14 @@ const TOKSCALE_CLIENT_GROUPS = Object.freeze({
   kilo: Object.freeze({
     aliases: Object.freeze(['kilocode']),
     customScanIds: Object.freeze(['kilocode'])
+  }),
+  // `devin` is an umbrella id only: tokscale splits the product into the CLI
+  // database scanner (devin-cli) and the Desktop ACP-event scanner
+  // (devin-desktop), and rejects a bare `devin` --client value. The scan list
+  // is therefore the aliases themselves, not `devin` plus the aliases.
+  devin: Object.freeze({
+    aliases: Object.freeze(['devin-cli', 'devin-desktop']),
+    scanIds: Object.freeze(['devin-cli', 'devin-desktop'])
   })
 });
 
@@ -24,7 +48,7 @@ const TOKSCALE_CLIENT_ALIASES = Object.freeze(Object.fromEntries(
 ));
 
 function tokscaleScanClientIds(client) {
-  return [client, ...(TOKSCALE_CLIENT_GROUPS[client]?.aliases || [])];
+  return TOKSCALE_CLIENT_GROUPS[client]?.scanIds || [client, ...(TOKSCALE_CLIENT_GROUPS[client]?.aliases || [])];
 }
 
 function tokscaleCustomScanClientIds(client) {

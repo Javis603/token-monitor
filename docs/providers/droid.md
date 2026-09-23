@@ -1,5 +1,6 @@
 ---
 summary: "Factory Droid provider notes: one kernel behind the CLI and desktop app, its session metadata sources, token collection, and API-key-backed Factory limits."
+ids: [droid, factory]
 read_when:
   - Changing or debugging Droid session discovery, titles, timestamps or project attribution
   - Investigating Droid usage that is missing from, or zero in, the widget

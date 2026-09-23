@@ -291,7 +291,7 @@ function createSessionUsageArchiveStore(options = {}) {
         const entry = parseRow(row);
         if (entry) archive.sessions[row.session_key] = entry;
         else delete archive.sessions[row.session_key];
-      }
+        }
       revision = storedRevision;
     }
     return archive;
@@ -355,7 +355,10 @@ function createSessionUsageArchiveStore(options = {}) {
     try {
       mutateArchive((latest) => {
         pruned = updateSessionUsageArchive(latest, null, capturedAt);
-        result = updateSessionUsageArchive(latest, deviceRecord, capturedAt, { canonicalSummary: true });
+        result = updateSessionUsageArchive(latest, deviceRecord, capturedAt, {
+          canonicalSummary: true,
+          cursorUsageEvents: options.cursorUsageEvents
+        });
         return {
           archive: result.archive,
           changedKeys: new Set([...pruned.changedKeys, ...result.changedKeys])

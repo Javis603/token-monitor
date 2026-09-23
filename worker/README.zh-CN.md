@@ -102,7 +102,7 @@ npx wrangler secret put PUBLIC_STATS_ENABLED   # enter 1
 
 ### Widgy
 
-选 **async / no main()** 模板。使用 `?secret=` 查询字符串鉴权：Widgy 那个隐藏的 WKWebView 可能会卡在 `Authorization: Bearer` 触发的 CORS 预检上，而 URL 会留在设备本地的 Widgy 配置里，所以密钥不会进入外部日志。
+选 **async / no main()** 模板。使用 `?secret=` 查询字符串鉴权：Widgy 那个隐藏的 WKWebView 可能会卡在 `Authorization: Bearer` 触发的 CORS 预检上。这是有限兼容路径：URL 里的密钥可能进入代理、平台或历史日志。能设 Header 的客户端请走 Header。
 
 最简版本，只要一个数字：
 
@@ -245,11 +245,11 @@ iOS 小部件没有省电的推送通道，所以运行时会自行每隔几分�
 | POST   | `/api/ingest`              | 密钥   | 更新某个设备的用量摘要                    |
 | DELETE | `/api/devices/{deviceId}`  | 密钥   | 删除一条设备记录                          |
 
-密钥有三种接受方式（任一即可）：
+密钥有三种接受方式（任一即可）。请优先使用 Header；`?secret=` 仅作为有限兼容 / 迁移路径保留：
 
 1. `Authorization: Bearer <secret>`：agent、小部件，以及任何服务器 / 桌面客户端首选。
 2. `x-token-monitor-secret: <secret>`：无法设置 `Authorization` 的客户端的后备方案。
-3. `?secret=<secret>` 查询字符串：针对 iOS 小部件运行时（Widgy、Scriptable）的变通方案，它们的 WKWebView 难以处理 `Authorization` 头的 CORS 预检。只在 URL 留在设备本地的客户端上使用。
+3. `?secret=<secret>` 查询字符串：iOS 小部件运行时（Widgy、Scriptable）的有限兼容 / 迁移路径，它们的 WKWebView 难以处理 `Authorization` 头的 CORS 预检。URL 里的密钥可能进入代理、平台或历史日志。新客户端应改走 Header。
 
 密钥是必需的。当 `TOKEN_MONITOR_SECRET` 未设置时，所有数据路由都返回 `503 secret_required`，只有 `/api/health` 和可选开启的 `/api/public/stats` 会响应。请在部署前（或部署时）设置它。
 

@@ -74,6 +74,7 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   codex: ['codexManagedAccounts'],
   opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
   cursor: ['cursorDisabledAccountIds'],
+  cline: ['clineApiKey'],
   factory: ['factoryApiKey'],
   kimi: ['kimiApiKey', 'kimiWebAccessToken'],
   copilot: ['copilotApiToken', 'copilotEnterpriseHost'],
@@ -87,6 +88,7 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   workbuddy: ['workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo'],
   qoder: ['qoderCookie', 'qoderSite'],
   deepseek: ['deepseekApiKey'],
+  devin: ['devinBearerToken', 'devinOrganization'],
   openrouter: ['openrouterProfiles'],
   minimax: ['minimaxApiKey'],
   volcengine: [
@@ -196,6 +198,8 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     alibabaVariant: settings.alibabaVariant || '',
     qoderCookie: settings.qoderCookie || '',
     qoderSite: settings.qoderSite || 'global',
+    devinBearerToken: settings.devinBearerToken || '',
+    devinOrganization: settings.devinOrganization || '',
     traeAccessToken: settings.traeAccessToken
       || env.TOKEN_MONITOR_TRAE_ACCESS_TOKEN
       || env.TRAE_ACCESS_TOKEN

@@ -87,7 +87,7 @@ test('watchPathsForClients excludes the tokscale cache dirs our own syncs write'
   }
 });
 
-test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
+test('watchPathsForClients watches both MiMo roots tokscale scans', () => {
   // Tokscale unions the XDG data dir with orca's hook-sandbox copy, and
   // that copy can hold sessions the XDG one is missing. Watching only XDG would
   // leave an orca-driven install without the seconds-level refresh.
@@ -97,7 +97,7 @@ test('watchPathsForClients watches both MiMo Code roots tokscale scans', () => {
   os.homedir = () => tmp;
   try {
     const { watchPathsForClients } = freshCollector();
-    const dirs = watchPathsForClients('micode');
+    const dirs = watchPathsForClients('mimo');
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'mimocode')));
     assert.ok(dirs.includes(path.join(tmp, orcaRoot)));
   } finally {
@@ -145,7 +145,7 @@ test('watchIgnoreMatcher keeps every direct Tokscale MiMo database variant but p
   os.homedir = () => tmp;
   try {
     const { watchIgnoreMatcher } = freshCollector();
-    const ignored = watchIgnoreMatcher('micode');
+    const ignored = watchIgnoreMatcher('mimo');
     const roots = [
       path.join(tmp, '.local', 'share', 'mimocode'),
       path.join(tmp, orcaRoot)
@@ -1766,6 +1766,12 @@ test('watchIgnoreMatcher bounds Copilot data, Grok unified, ZCode, and exporter 
     assert.equal(ignored(path.join(copilotRoot, 'data.db')), false);
     assert.equal(ignored(path.join(copilotRoot, 'data.db-wal')), false);
     assert.equal(ignored(path.join(copilotRoot, 'data.db-shm')), false);
+    // The CLI database sits beside the desktop one under the same watch root.
+    // Pruning it here would leave tokscale parsing session-store.db while the
+    // widget only noticed on a full tick.
+    assert.equal(ignored(path.join(copilotRoot, 'session-store.db')), false);
+    assert.equal(ignored(path.join(copilotRoot, 'session-store.db-wal')), false);
+    assert.equal(ignored(path.join(copilotRoot, 'session-store.db-shm')), false);
     assert.equal(ignored(path.join(copilotRoot, 'otel', 'trace.jsonl')), false);
     assert.equal(ignored(path.join(copilotRoot, 'cache')), true);
 
@@ -1990,13 +1996,13 @@ test('watchPathsForClients follows XDG_DATA_HOME for OpenCode, MiMo, and Zed', (
   try {
     process.env.XDG_DATA_HOME = path.join(tmp, xdgRoot);
     const { clientDataDirPresence, watchPathsForClients } = freshCollector();
-    const dirs = watchPathsForClients('opencode,micode,zed');
+    const dirs = watchPathsForClients('opencode,mimo,zed');
     assert.ok(dirs.includes(path.join(tmp, xdgRoot, 'opencode')));
     assert.ok(dirs.includes(path.join(tmp, xdgRoot, 'mimocode')));
     assert.ok(dirs.includes(path.join(tmp, xdgRoot, 'zed', 'threads')));
     assert.ok(!dirs.includes(path.join(tmp, '.local', 'share', 'opencode')));
-    assert.deepEqual(clientDataDirPresence('opencode,micode,zed'), {
-      opencode: true, micode: true, zed: true
+    assert.deepEqual(clientDataDirPresence('opencode,mimo,zed'), {
+      opencode: true, mimo: true, zed: true
     });
   } finally {
     os.homedir = originalHomedir;
@@ -2073,12 +2079,7 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
   os.homedir = () => tmp;
   try {
     const { clientDataDirPresence, watchPathsForClients } = freshCollector();
-    // `omp` is tracked explicitly: Oh My Pi is its own client, so its root is
-    // watched for the client that owns it rather than through `pi`. The two
-    // roots are asserted together because a split that stopped watching one of
-    // them would still pass every other check in this file.
-    const tracked = 'pi,omp,zed,kilo,micode,zcode,kiro,codebuddy,workbuddy';
-    const dirs = watchPathsForClients(tracked);
+    const dirs = watchPathsForClients('pi,omp,zed,kilo,mimo,zcode,kiro,codebuddy,workbuddy');
     assert.ok(dirs.includes(path.join(tmp, '.pi', 'agent', 'sessions')));
     assert.ok(dirs.includes(path.join(tmp, '.omp', 'agent', 'sessions')));
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'zed', 'threads')));
@@ -2103,8 +2104,8 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     assert.ok(dirs.includes(path.join(tmp, '.codebuddy', 'projects')));
     assert.ok(dirs.includes(path.join(tmp, '.workbuddy', 'projects')));
     assert.ok(dirs.includes(path.join(tmp, '.workbuddy-ai', 'projects')));
-    assert.deepEqual(clientDataDirPresence('pi,omp,zed,kilo,micode,zcode,kiro,codebuddy,workbuddy'), {
-      pi: true, omp: true, zed: true, kilo: true, micode: true, zcode: true, kiro: true, codebuddy: true, workbuddy: true
+    assert.deepEqual(clientDataDirPresence('pi,omp,zed,kilo,mimo,zcode,kiro,codebuddy,workbuddy'), {
+      pi: true, omp: true, zed: true, kilo: true, mimo: true, zcode: true, kiro: true, codebuddy: true, workbuddy: true
     });
   } finally {
     os.homedir = originalHomedir;
@@ -2973,14 +2974,124 @@ test('smart collection uses native watching and skips idle intervals after start
   }
 });
 
-test('Qoder CN db-shm events are ignored without suppressing real database changes', () => {
-  const { isQoderCnSelfWatchEvent } = freshCollector();
-  const root = path.join(os.tmpdir(), 'QoderCN', 'db');
-  const roots = { qodercn: [root] };
+// Our own read-only SQLite scan recreates the wal-index, and that write reaches
+// the watcher as a normal change. If the sidecar is watched, the collector
+// re-triggers itself: measured 20/20 scans rewrote zcode's db.sqlite-shm while
+// idle time rewrote it 0 times in 40s.
+test('self-watch db-shm events are ignored for every client whose scan recreates the sidecar', () => {
+  const { isSelfWatchSqliteSidecarEvent } = freshCollector();
+  const qoderRoot = path.join(os.tmpdir(), 'QoderCN', 'db');
+  const zcodeRoot = path.join(os.tmpdir(), 'zcode', 'cli', 'db');
+  const roots = { qodercn: [qoderRoot], zcode: [zcodeRoot] };
 
-  assert.equal(isQoderCnSelfWatchEvent(path.join(root, 'local.db-shm'), roots), true);
-  assert.equal(isQoderCnSelfWatchEvent(path.join(root, 'local.db-wal'), roots), false);
-  assert.equal(isQoderCnSelfWatchEvent(path.join(os.tmpdir(), 'Other', 'local.db-shm'), roots), false);
+  // Each client keeps its own database basename: Qoder CN names it local.db,
+  // ZCode names it db.sqlite.
+  for (const [root, base] of [[qoderRoot, 'local.db'], [zcodeRoot, 'db.sqlite']]) {
+    assert.equal(isSelfWatchSqliteSidecarEvent(path.join(root, base + '-shm'), roots), true);
+    assert.equal(isSelfWatchSqliteSidecarEvent(path.join(root, base + '-wal'), roots), false,
+      'the -wal carries real data and must still trigger a scan');
+    assert.equal(isSelfWatchSqliteSidecarEvent(path.join(root, base), roots), false,
+      'the database itself must still trigger a scan');
+  }
+  assert.equal(isSelfWatchSqliteSidecarEvent(path.join(os.tmpdir(), 'Other', 'db.sqlite-shm'), roots), false);
+
+  // The wal-index suffix has to be recognised by its SQLite shape rather than
+  // one client's database basename (ZCode's db.sqlite-shm contains no '.db-'),
+  // and matching it must not widen into unrelated sidecars.
+  const zcodeOnly = { zcode: [zcodeRoot] };
+  for (const name of ['db.sqlite-shm', 'local.db-shm', 'state.db-shm', 'data.sqlite3-shm']) {
+    assert.equal(isSelfWatchSqliteSidecarEvent(path.join(zcodeRoot, name), zcodeOnly), true, name);
+  }
+  for (const name of ['db.sqlite-shm-journal', 'db.sqlite-wal', 'db.sqlite', 'notes-shm', 'db.sqlite-shm.bak']) {
+    assert.equal(isSelfWatchSqliteSidecarEvent(path.join(zcodeRoot, name), zcodeOnly), false, name);
+  }
+});
+
+// A client is added to that list only on measured evidence, so a scan that does
+// not rewrite its sidecar must keep waking the collector on shm events.
+test('a SQLite client whose scan does not recreate its sidecar still watches db-shm', () => {
+  const { isSelfWatchSqliteSidecarEvent } = freshCollector();
+  const mimoRoot = path.join(os.tmpdir(), 'mimocode');
+  const roots = { mimo: [mimoRoot] };
+
+  assert.equal(isSelfWatchSqliteSidecarEvent(path.join(mimoRoot, 'mimocode.db-shm'), roots), false);
+});
+
+// The unit test above proves the predicate; this proves the consequence the bug
+// was actually about. A suppressed shm event must not spawn a scan, while a real
+// -wal change from the same directory still must — otherwise the fix would have
+// traded a runaway loop for silent staleness.
+test('a zcode shm event does not spawn a scan while a -wal change still does', async () => {
+  const tmp = withTmpHome([path.join('.zcode', 'cli', 'db')]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => {
+    const watcher = {
+      on(event, handler) {
+        if (event === 'all') watchHandler = handler;
+        return watcher;
+      },
+      close() {}
+    };
+    return watcher;
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  const dbDir = path.join(tmp, '.zcode', 'cli', 'db');
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'zcode',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 5000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchUsePolling: false,
+      watchTriggersCollection: true,
+      watchDebounceMs: 10,
+      limitsEnabled: false,
+      historyEnabled: false,
+      anchorPersistenceEnabled: false,
+      onUpdate: (summary, reason) => updates.push({ summary, reason })
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    const afterInitialTick = calls.length;
+
+    // Our own scan recreates this sidecar, so it must not schedule another scan.
+    watchHandler('change', path.join(dbDir, 'db.sqlite-shm'));
+    await new Promise((resolve) => { setTimeout(resolve, 120); });
+    assert.equal(calls.length, afterInitialTick,
+      'a self-watch shm event must not spawn another scan');
+
+    // The same directory, but the write that carries real data.
+    watchHandler('change', path.join(dbDir, 'db.sqlite-wal'));
+    await waitForCondition(() => calls.length > afterInitialTick, 4000);
+    assert.ok(calls.length > afterInitialTick, 'a -wal change must still spawn a scan');
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test('collector preserves Qoder CN while publishing other clients after a bounded SQLite read fails', async () => {
@@ -4376,7 +4487,7 @@ test('XDG_DATA_HOME moves exactly the roots tokscale resolves through it', () =>
   process.env.XDG_DATA_HOME = xdg;
   try {
     const { watchPathsForClients } = freshCollector();
-    const roots = watchPathsForClients('opencode,zed,micode,amp,codebuddy,kiro');
+    const roots = watchPathsForClients('opencode,zed,mimo,amp,codebuddy,kiro');
     assert.ok(roots.includes(path.join(xdg, 'opencode')));
     assert.ok(roots.includes(path.join(xdg, 'zed', 'threads')));
     assert.ok(roots.includes(path.join(xdg, 'mimocode')));
@@ -4409,7 +4520,7 @@ test('an unset XDG_DATA_HOME falls back to the .local/share roots', () => {
   os.homedir = () => tmp;
   try {
     const { watchPathsForClients } = freshCollector();
-    const roots = watchPathsForClients('opencode,zed,micode,amp');
+    const roots = watchPathsForClients('opencode,zed,mimo,amp');
     assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'opencode')));
     assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'zed', 'threads')));
     assert.ok(roots.includes(path.join(tmp, '.local', 'share', 'mimocode')));

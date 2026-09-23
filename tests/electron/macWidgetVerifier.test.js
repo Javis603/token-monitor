@@ -71,17 +71,24 @@ function makeBundle({ appGroup, configAppGroup = appGroup, widgetInfoAppGroup = 
   };
 }
 
-function entitlementXml(appGroup, { app = false, includeGroup = true } = {}) {
+function entitlementXml(appGroup, {
+  app = false,
+  includeGroup = true,
+  applicationIdentifier,
+  teamIdentifier
+} = {}) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <plist><dict>
+  ${applicationIdentifier ? `<key>com.apple.application-identifier</key><string>${applicationIdentifier}</string>` : ''}
+  ${teamIdentifier ? `<key>com.apple.developer.team-identifier</key><string>${teamIdentifier}</string>` : ''}
   ${app ? '<key>com.apple.security.cs.allow-jit</key><true/>' : '<key>com.apple.security.app-sandbox</key><true/>'}
   ${includeGroup ? `<key>com.apple.security.application-groups</key><array><string>${appGroup}</string></array>` : ''}
 </dict></plist>`;
 }
 
-function signatureText(teamIdentifier, authority = true, includeTeamIdentifier = true) {
+function signatureText(teamIdentifier, authority = true, includeTeamIdentifier = true, identifier = APP_ID) {
   return [
-    'Identifier=com.javis.tokenmonitor',
+    `Identifier=${identifier}`,
     includeTeamIdentifier ? `TeamIdentifier=${teamIdentifier}` : '',
     authority ? 'Authority=Developer ID Application: Example (ABCDE12345)' : ''
   ].filter(Boolean).join('\n');
@@ -105,7 +112,8 @@ function verifyFixture(bundle, {
   widgetEntitlementGroup = appGroup,
   helperLibraryValidation = true,
   authority = true,
-  includeTeamIdentifier = true
+  includeTeamIdentifier = true,
+  includeProvisionedIdentity = true
 } = {}) {
   const execFileSyncImpl = (command, args) => {
     if (command === 'plutil') {
@@ -118,7 +126,7 @@ function verifyFixture(bundle, {
       return {
         stdout: '',
         stderr: args.at(-1) === bundle.extension
-          ? signatureText(widgetTeam, authority, includeTeamIdentifier)
+          ? signatureText(widgetTeam, authority, includeTeamIdentifier, WIDGET_BUNDLE_ID)
           : signatureText(appTeam, authority, includeTeamIdentifier)
       };
     }
@@ -130,10 +138,18 @@ function verifyFixture(bundle, {
     if (command === 'codesign') {
       const filePath = args.at(-1);
       if (filePath === bundle.extension) {
-        return { status: 0, stdout: '', stderr: entitlementXml(widgetEntitlementGroup, { app: false }) };
+        return { status: 0, stdout: '', stderr: entitlementXml(widgetEntitlementGroup, {
+          app: false,
+          applicationIdentifier: distributionBuild && includeProvisionedIdentity ? `${widgetTeam}.${WIDGET_BUNDLE_ID}` : null,
+          teamIdentifier: distributionBuild && includeProvisionedIdentity ? widgetTeam : null
+        }) };
       }
       if (filePath === bundle.appPath) {
-        return { status: 0, stdout: '', stderr: entitlementXml(appEntitlementGroup, { app: true }) };
+        return { status: 0, stdout: '', stderr: entitlementXml(appEntitlementGroup, {
+          app: true,
+          applicationIdentifier: distributionBuild && includeProvisionedIdentity ? `${appTeam}.${APP_ID}` : null,
+          teamIdentifier: distributionBuild && includeProvisionedIdentity ? appTeam : null
+        }) };
       }
       if (bundle.helpers.includes(filePath)) {
         return { status: 0, stdout: '', stderr: helperEntitlementXml(helperLibraryValidation) };
@@ -289,4 +305,17 @@ test('formal verification rejects a signed Team that differs from DEVELOPMENT_TE
     appTeam: 'ABCDE12345',
     widgetTeam: 'ABCDE12345'
   }), /main app TeamIdentifier ABCDE12345 does not match DEVELOPMENT_TEAM ZZZZZ99999/);
+});
+
+test('formal group.* verification rejects signatures without their provisioned Apple identities', (t) => {
+  const appGroup = 'group.com.example.tokenmonitor';
+  const bundle = makeBundle({ appGroup });
+  t.after(() => fs.rmSync(bundle.root, { recursive: true, force: true }));
+  assert.throws(() => verifyFixture(bundle, {
+    appGroup,
+    distributionBuild: true,
+    localDevelopmentSigning: false,
+    developmentTeam: 'ABCDE12345',
+    includeProvisionedIdentity: false
+  }), /main app entitlement com\.apple\.application-identifier/);
 });

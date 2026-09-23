@@ -59,6 +59,7 @@ const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 
 const {
   DEFAULT_APP_GROUP,
   DEFAULT_WIDGET_BUNDLE_ID,
+  entitlementPlist,
   packageVersion,
   widgetBundleVersion,
   widgetVersions,
@@ -172,7 +173,7 @@ function executeMacWidgetDemandWiring() {
   const {
     WIDGET_DEMAND_MARKER,
     WIDGET_DEMAND_PROVISIONAL_MARKER
-  } = require('../../src/electron/macWidgetDemand');
+  } = require('../../src/electron/macWidget/demand');
   const context = vm.createContext({
     process: { platform: 'darwin' },
     path: path.posix,
@@ -393,7 +394,7 @@ test('Widget demand lease marker contract stays aligned between Swift and Electr
   const {
     WIDGET_DEMAND_MARKER,
     WIDGET_DEMAND_PROVISIONAL_MARKER
-  } = require('../../src/electron/macWidgetDemand');
+  } = require('../../src/electron/macWidget/demand');
 
   // The marker filenames are the one cross-process contract: Electron lstat's
   // them from the app group container and the extension writes them. They may
@@ -429,7 +430,7 @@ test('Widget demand lease marker contract stays aligned between Swift and Electr
 
 test('LaunchServices recovery delegates current-host registration to the public native API', () => {
   const recoverySource = fs.readFileSync(
-    path.join(root, 'src', 'electron', 'macWidgetLaunchServicesRecovery.js'),
+    path.join(root, 'src', 'electron', 'macWidget', 'launchServicesRecovery.js'),
     'utf8'
   );
   assert.match(recoverySource, /const REGISTER_HOST_ARGUMENTS = Object\.freeze\(\['--mode', 'register-host'\]\);/);
@@ -836,6 +837,35 @@ test('keeps marketing and bundle versions numeric across release channels', () =
   }
 });
 
+test('production entitlement plists bind each provisioned executable to its Apple identity', () => {
+  const appGroup = 'group.com.example.tokenmonitor';
+  const appEntitlements = entitlementPlist(appGroup, {
+    profile: {
+      applicationIdentifier: 'ABCDE12345.com.example.tokenmonitor',
+      teamIdentifier: 'ABCDE12345'
+    }
+  });
+  const widgetEntitlements = entitlementPlist(appGroup, {
+    extension: true,
+    profile: {
+      applicationIdentifier: 'ABCDE12345.com.example.tokenmonitor.widget',
+      teamIdentifier: 'ABCDE12345'
+    }
+  });
+
+  for (const entitlements of [appEntitlements, widgetEntitlements]) {
+    assert.match(entitlements, /<key>com\.apple\.developer\.team-identifier<\/key>\s*<string>ABCDE12345<\/string>/);
+    assert.match(entitlements, /<key>com\.apple\.security\.application-groups<\/key>\s*<array>\s*<string>group\.com\.example\.tokenmonitor<\/string>/);
+  }
+  assert.match(appEntitlements, /<key>com\.apple\.application-identifier<\/key>\s*<string>ABCDE12345\.com\.example\.tokenmonitor<\/string>/);
+  assert.match(widgetEntitlements, /<key>com\.apple\.application-identifier<\/key>\s*<string>ABCDE12345\.com\.example\.tokenmonitor\.widget<\/string>/);
+  assert.match(widgetEntitlements, /<key>com\.apple\.security\.app-sandbox<\/key>\s*<true\/>/);
+
+  const localEntitlements = entitlementPlist(appGroup);
+  assert.doesNotMatch(localEntitlements, /com\.apple\.application-identifier/);
+  assert.doesNotMatch(localEntitlements, /com\.apple\.developer\.team-identifier/);
+});
+
 test('uses the Widget UI revision as the local build number so WidgetKit reindexes descriptors', () => {
   assert.equal(widgetBundleVersion({
     distributionBuild: false,
@@ -933,8 +963,12 @@ test('Widget user-facing strings are localized in five languages', () => {
   ]) {
     assert.ok(widgetLocalization.strings[key], `missing Widget configuration localization for ${key}`);
   }
-  assert.match(widgetSource, /configurationDisplayName\(LocalizedStringResource\("Token Monitor Dashboard"\)\)/);
-  assert.match(widgetSource, /description\(LocalizedStringResource\("Usage, quota, breakdown, and activity in one dashboard\."\)\)/);
+  assert.match(widgetSource, /configurationDisplayName\("Token Monitor Dashboard"\)/);
+  assert.match(widgetSource, /description\("Usage, quota, breakdown, and activity in one dashboard\."\)/);
+  // A `LocalizedStringResource` argument only resolves on newer SDKs; keep the
+  // literal form so the Widget compiles at the macOS 14 deployment target.
+  assert.doesNotMatch(widgetSource, /configurationDisplayName\(LocalizedStringResource/);
+  assert.doesNotMatch(widgetSource, /\.description\(LocalizedStringResource/);
 });
 
 test('Widget layout uses system margins without retaining the superseded scaffold', () => {

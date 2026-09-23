@@ -5,6 +5,7 @@ const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 const packageJson = require('../package.json');
 const {
+  classifyAppGroup,
   isTeamPrefixedAppGroup,
   normalizeMacDistributionChannel,
   validateAppGroupForDistribution,
@@ -85,6 +86,13 @@ function entitlementValues(xml, key) {
   return Array.from(match[1].matchAll(/<string>([\s\S]*?)<\/string>/g), (entry) => entry[1]);
 }
 
+function entitlementString(xml, key) {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(xml || '').match(new RegExp(
+    `<key>${escapedKey}</key>\\s*<string>([\\s\\S]*?)</string>`
+  ))?.[1] || null;
+}
+
 function verifyCodesign(filePath, execFileSyncImpl = execFileSync) {
   try {
     execFileSyncImpl('codesign', ['--verify', '--deep', '--strict', '--verbose=2', filePath], {
@@ -138,7 +146,18 @@ function verifyAppGroupSources({ appGroup, config, extensionInfo, appEntitlement
   }
 }
 
-function verifyFormalCodeSignature({ appPath, extensionPath, appGroup, developmentTeam, execFileSyncImpl, spawnSyncImpl }) {
+function verifyFormalCodeSignature({
+  appPath,
+  extensionPath,
+  appGroup,
+  appId,
+  widgetBundleId,
+  developmentTeam,
+  appEntitlements,
+  extensionEntitlements,
+  execFileSyncImpl,
+  spawnSyncImpl
+}) {
   const appSignature = readCodesignMetadata(appPath, execFileSyncImpl, spawnSyncImpl);
   const widgetSignature = readCodesignMetadata(extensionPath, execFileSyncImpl, spawnSyncImpl);
   if (isTeamPrefixedAppGroup(appGroup) && appGroup.slice(0, 10) !== appSignature.teamIdentifier) {
@@ -158,6 +177,23 @@ function verifyFormalCodeSignature({ appPath, extensionPath, appGroup, developme
   }
   if (!widgetSignature.authorities.some((authority) => authority.includes('Developer ID Application'))) {
     fail('Widget extension code signature is missing a Developer ID Application authority');
+  }
+  if (appSignature.identifier !== appId) fail(`main app code signature identifier does not match ${appId}`);
+  if (widgetSignature.identifier !== widgetBundleId) fail(`Widget extension code signature identifier does not match ${widgetBundleId}`);
+  if (classifyAppGroup(appGroup) === 'group-profile') {
+    for (const [label, entitlements, bundleId] of [
+      ['main app', appEntitlements, appId],
+      ['Widget extension', extensionEntitlements, widgetBundleId]
+    ]) {
+      const applicationIdentifier = entitlementString(entitlements, 'com.apple.application-identifier');
+      const teamIdentifier = entitlementString(entitlements, 'com.apple.developer.team-identifier');
+      if (applicationIdentifier !== `${developmentTeam}.${bundleId}`) {
+        fail(`${label} entitlement com.apple.application-identifier does not match its provisioned bundle identifier`);
+      }
+      if (teamIdentifier !== developmentTeam) {
+        fail(`${label} entitlement com.apple.developer.team-identifier does not match DEVELOPMENT_TEAM`);
+      }
+    }
   }
   return { appSignature, widgetSignature };
 }
@@ -273,7 +309,11 @@ function verifyMacWidgetApp({
         appPath: resolvedApp,
         extensionPath: paths.extension,
         appGroup,
+        appId,
+        widgetBundleId,
         developmentTeam,
+        appEntitlements,
+        extensionEntitlements,
         execFileSyncImpl,
         spawnSyncImpl
       });

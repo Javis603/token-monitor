@@ -135,12 +135,15 @@ function xmlEscape(value) {
     .replaceAll("'", '&apos;');
 }
 
-function entitlementPlist(appGroup, extension = false) {
+function entitlementPlist(appGroup, { extension = false, profile = null } = {}) {
+  const provisionedIdentity = profile
+    ? `  <key>com.apple.application-identifier</key>\n  <string>${xmlEscape(profile.applicationIdentifier)}</string>\n  <key>com.apple.developer.team-identifier</key>\n  <string>${xmlEscape(profile.teamIdentifier)}</string>\n`
+    : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-${extension ? '  <key>com.apple.security.app-sandbox</key>\n  <true/>\n' : `  <key>com.apple.security.cs.allow-jit</key>
+${provisionedIdentity}${extension ? '  <key>com.apple.security.app-sandbox</key>\n  <true/>\n' : `  <key>com.apple.security.cs.allow-jit</key>
   <true/>
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
   <true/>
@@ -203,8 +206,9 @@ function main() {
     : null;
   const appProfilePath = profilePath(process.env, 'TOKEN_MONITOR_APP_PROVISIONING_PROFILE');
   const widgetProfilePath = profilePath(process.env, 'TOKEN_MONITOR_WIDGET_PROVISIONING_PROFILE');
+  let provisioningProfiles = null;
   if (profileIsRequired({ distributionBuild, localDevelopmentSigning, appGroup })) {
-    validateProvisioningProfiles({
+    provisioningProfiles = validateProvisioningProfiles({
       appProfilePath,
       widgetProfilePath,
       appBundleId: appId,
@@ -285,8 +289,13 @@ function main() {
     fs.chmodSync(stagedAppProfile, 0o600);
     fs.chmodSync(stagedWidgetProfile, 0o600);
   }
-  fs.writeFileSync(path.join(OUTPUT, 'TokenMonitor.entitlements'), entitlementPlist(appGroup));
-  fs.writeFileSync(path.join(OUTPUT, 'TokenMonitorWidget.entitlements'), entitlementPlist(appGroup, true));
+  fs.writeFileSync(path.join(OUTPUT, 'TokenMonitor.entitlements'), entitlementPlist(appGroup, {
+    profile: provisioningProfiles?.appProfile
+  }));
+  fs.writeFileSync(path.join(OUTPUT, 'TokenMonitorWidget.entitlements'), entitlementPlist(appGroup, {
+    extension: true,
+    profile: provisioningProfiles?.widgetProfile
+  }));
   fs.writeFileSync(path.join(OUTPUT, 'TokenMonitorWidgetReloader.entitlements'), emptyEntitlementPlist());
   fs.writeFileSync(path.join(OUTPUT, 'widget-config.json'), `${JSON.stringify({
     schemaVersion: 1,
@@ -317,6 +326,7 @@ module.exports = {
   WIDGET_ARCHITECTURES,
   assertWidgetArchitecture,
   buildTimestamp,
+  entitlementPlist,
   gitRevision,
   packageVersion,
   widgetBundleVersion,

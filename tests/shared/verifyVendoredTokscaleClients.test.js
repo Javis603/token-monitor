@@ -3,16 +3,18 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { verifyVendoredTokscaleClients } = require('../../scripts/verify-vendored-tokscale-clients');
-const { DEFAULT_CLIENTS, PARSE_LOCAL_CLIENTS } = require('../../src/shared/clientTracking');
+const { KNOWN_CLIENTS, PARSE_LOCAL_CLIENTS } = require('../../src/shared/clientTracking');
 const { tokscaleClientFilter } = require('../../src/shared/collector');
 
 // Every effective client id tokscale itself is expected to recognize — every
-// DEFAULT_CLIENTS entry except the parse-local ones (proma, qodercn), plus
+// KNOWN_CLIENTS entry except the parse-local ones (proma, qodercn), plus
 // their TOKSCALE_CLIENT_ALIASES expansion (e.g. antigravity -> antigravity,
 // antigravity-cli) — since that's the exact CSV runTokscale/runTokscaleGraph
-// send, not just the logical DEFAULT_CLIENTS entries.
+// send, not just the logical client entries. Opt-in clients (qodercn) are in
+// scope too: enabling one sends its id to the same binary, which exits 2 on an
+// id it does not recognize.
 const LOCALLY_PARSED = new Set(PARSE_LOCAL_CLIENTS);
-const TOKSCALE_ONLY_CLIENTS = DEFAULT_CLIENTS.split(',').filter((client) => !LOCALLY_PARSED.has(client));
+const TOKSCALE_ONLY_CLIENTS = KNOWN_CLIENTS.split(',').filter((client) => !LOCALLY_PARSED.has(client));
 const ALL_TOKSCALE_SUPPORTED = tokscaleClientFilter(TOKSCALE_ONLY_CLIENTS.join(',')).split(',');
 
 function helpTextFor(clients) {

@@ -59,6 +59,16 @@ function readSessionMeta(sessionIds, deps = {}) {
       const directory = columns.has('directory') ? "COALESCE(directory,'')" : "''";
       const messageColumns = new Set(db.prepare('PRAGMA table_info(message)').all().map((column) => String(column.name)));
       const lastMessageBySession = new Map();
+      // The newest assistant row's `finish` is OpenCode's turn-end signal, the
+      // same fact Claude states as `stop_reason`: `stop` means the model
+      // finished its answer, `tool-calls` means it paused to run tools and is
+      // still mid-turn. Read beside the last-message timestamp so one query
+      // answers both, and only `stop` counts as finished.
+      // Tri-state per session: true = the newest word was a completed answer,
+      // false = a prompt is waiting on one, absent = no evidence. A boolean
+      // pair could not express the third case, and collapsing it into "omit"
+      // is what let a stale completion survive.
+      const turnEndedBySession = new Map();
       if (messageColumns.has('session_id') && (messageColumns.has('data') || messageColumns.has('time_created'))) {
         const jsonCreated = messageColumns.has('data')
           ? "CASE WHEN json_valid(data) THEN CAST(json_extract(data,'$.time.created') AS INTEGER) END"
@@ -71,6 +81,60 @@ function readSessionMeta(sessionIds, deps = {}) {
                             GROUP BY session_id`;
         for (const row of db.prepare(messageSql).all(...ids)) {
           lastMessageBySession.set(String(row.sessionId), row.lastMessageMs);
+        }
+        if (messageColumns.has('data')) {
+          // One row per session: the newest assistant message. Windowed rather
+          // than grouped, because the finish value belongs to that single row
+          // and SQLite's bare-column grouping would pick an arbitrary one.
+          // (A correlated subquery is the obvious alternative, but `inner` is a
+          // reserved word and the resulting syntax error is swallowed by the
+          // caller's catch, which reads as "this session has no metadata".)
+          // The boundary belongs to the newest message, not to the newest
+          // assistant message: a prompt accepted after a completion has already
+          // started the next turn, so that completion no longer describes the
+          // current one. Taking the newest assistant row unconditionally latched
+          // the previous `stop` and marked a freshly prompted session finished.
+          // Order by the same effective timestamp the query above used rather
+          // than an unconditional `time_created, id`: the guard only requires
+          // `session_id` plus `data` or `time_created`, so a schema without
+          // `id` (or without `time_created`) would make SQLite reject this
+          // query, and the caller's catch would read that as "this session has
+          // no metadata" and blank its title and timestamps.
+          const orderId = messageColumns.has('id') ? 'id' : 'rowid';
+          const finishSql = `SELECT sessionId, role, finish FROM (
+                               SELECT session_id AS sessionId,
+                                      json_extract(data,'$.role') AS role,
+                                      json_extract(data,'$.finish') AS finish,
+                                      ROW_NUMBER() OVER (
+                                        PARTITION BY session_id
+                                        ORDER BY CAST(COALESCE(${jsonCreated}, ${storedCreated}) AS INTEGER) DESC,
+                                                 ${orderId} DESC
+                                      ) AS rank
+                               FROM message
+                               WHERE session_id IN (${placeholders})
+                                 AND json_valid(data)
+                             ) WHERE rank = 1`;
+          for (const row of db.prepare(finishSql).all(...ids)) {
+            const sessionId = String(row.sessionId);
+            const role = String(row.role || '');
+            const finish = String(row.finish || '');
+            if (role === 'assistant') {
+              // A row with no `finish` is the pre-v2 shape, which recorded no
+              // boundary at all and therefore is not evidence of one.
+              if (!finish) continue;
+              // Only a pause to run tools leaves the turn open. Every other
+              // reason OpenCode can record is terminal — it stops the loop and
+              // waits for the next prompt — including `length` (the output
+              // budget ran out) and `content-filter`. Treating those as
+              // "still generating" held the running mark for the whole recency
+              // window after the model had already stopped.
+              turnEndedBySession.set(sessionId, finish !== 'tool-calls');
+            } else if (role === 'user') {
+              // The newest message is the user's, so a prompt is waiting on an
+              // answer and the previous completion no longer describes this turn.
+              turnEndedBySession.set(sessionId, false);
+            }
+          }
         }
       }
       const sql = `SELECT id, COALESCE(title,'') AS title, ${directory} AS directory, time_created AS created
@@ -85,6 +149,12 @@ function readSessionMeta(sessionIds, deps = {}) {
         const lastUsedAt = isoFromMs(lastMessageBySession.get(id)) || startedAt;
         const meta = { startedAt, lastUsedAt, title: String(r.title || '') };
         if (r.directory) meta.projectPath = String(r.directory);
+        // A completion ends the turn and a waiting prompt clears one; a
+        // `tool-calls` pause is still work in progress (a `false`), and a session
+        // whose newest row states nothing is left without evidence rather than
+        // guessed at.
+        const ended = turnEndedBySession.get(id);
+        if (ended !== undefined) meta.turnEnded = ended;
         out.set(id, meta);
       }
     } catch (_) { /* skip unreadable db */ } finally {
@@ -118,7 +188,15 @@ function resolveSessionMetadata(sessionIds, context) {
     const identity = resolveProjects ? projectIdentity(meta.projectPath) : {};
     const title = String(meta.title || '').trim();
     if (startedAt || lastUsedAt || identity.projectId || title) {
-      result.set(sessionId, { startedAt, lastUsedAt, ...identity, title });
+      result.set(sessionId, {
+        startedAt,
+        lastUsedAt,
+        ...identity,
+        title,
+        // Forwarded in both directions: `false` is evidence of an active turn
+        // and has to reach the merge to clear a `true` from an earlier tick.
+        ...(meta.turnEnded === undefined ? {} : { turnEnded: meta.turnEnded === true })
+      });
     }
   }
   return result;

@@ -22,6 +22,69 @@ function fixtureOAuthClient(id, marker) {
   };
 }
 
+async function quotaEndpointSnapshot(fetchQuota) {
+  return antigravityOAuth.fetchRemoteSnapshot({
+    accountEmail: 'user@example.com',
+    credentials: { accessToken: 'fixture-access', expiresAt: Date.now() + 3600_000, projectId: 'fixture-project' }
+  }, {
+    quotaSummaryWindows: antigravityProbe._quotaSummaryWindows,
+    collapsePools: antigravityProbe._collapsePools,
+    fetch: async (url, init) => {
+      if (url.endsWith(':loadCodeAssist')) return response(200, {});
+      assert.ok(url.endsWith(':retrieveUserQuotaSummary'));
+      assert.deepEqual(JSON.parse(init.body), { project: 'fixture-project' });
+      return fetchQuota(url);
+    }
+  });
+}
+
+function quotaEndpointFixture(remainingFraction) {
+  return { groups: [{ displayName: 'Gemini Models', buckets: [{
+    window: '5h', remainingFraction, resetTime: '2026-09-16T15:00:00Z'
+  }] }] };
+}
+
+test('daily quota wins over a successful but different production Gemini quota', async () => {
+  const urls = [];
+  const snapshot = await quotaEndpointSnapshot(async (url) => {
+    urls.push(url);
+    return response(200, quotaEndpointFixture(url.includes('daily-cloudcode') ? 0.81 : 1));
+  });
+  assert.equal(snapshot.windows[0].remainingFraction, 0.81);
+  assert.equal(snapshot.windows[0].resetTime, '2026-09-16T15:00:00.000Z');
+  assert.deepEqual(urls, ['https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary']);
+});
+
+for (const [name, status, payload] of [
+  ['missing endpoint', 404, {}],
+  ['permission denied', 403, {}],
+  ['empty summary', 200, { groups: [] }]
+]) {
+  test(`daily quota falls back to production on ${name}`, async () => {
+    const urls = [];
+    const snapshot = await quotaEndpointSnapshot(async (url) => {
+      urls.push(url);
+      return url.includes('daily-cloudcode') ? response(status, payload) : response(200, quotaEndpointFixture(0.6));
+    });
+    assert.equal(snapshot.windows[0].remainingFraction, 0.6);
+    assert.deepEqual(urls, [
+      'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary',
+      'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary'
+    ]);
+  });
+}
+
+for (const [status, expected] of [[401, 'unauthorized'], [429, 'rateLimited']]) {
+  test(`daily quota does not hide ${expected} with a production fallback`, async () => {
+    const urls = [];
+    await assert.rejects(quotaEndpointSnapshot(async (url) => {
+      urls.push(url);
+      return response(status, {});
+    }), (error) => error.status === expected);
+    assert.deepEqual(urls, ['https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary']);
+  });
+}
+
 test('generatePkce creates an RFC 7636 S256 verifier and challenge', () => {
   const { codeVerifier, codeChallenge } = antigravityOAuth.generatePkce();
   assert.match(codeVerifier, /^[A-Za-z0-9_-]{43}$/);
@@ -172,7 +235,7 @@ test('fetchRemoteSnapshot follows the Antigravity Hub daily onboarding protocol'
           response: { cloudaicompanionProject: { value: 'project-1' } }
         });
       }
-      if (url === 'https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary') {
+      if (url === 'https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary') {
         return response(200, {
           groups: [{
             displayName: 'Gemini Models',

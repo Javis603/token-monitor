@@ -6,6 +6,7 @@
     <title>Token Monitor</title>
     <script src="floatingBubbleBoot.js"></script>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="edgeDock/composer.css" />
   </head>
   <body>
     <main class="shell">
@@ -269,6 +270,29 @@
             </div>
             <div class="settings-subgroup settings-presence-group">
               <div class="settings-group-header"><span data-i18n="settings.display.presenceTitle">Floating & Tray</span></div>
+              <div id="edgeDockFeature" class="presence-feature">
+                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.edgeDock">Edge Dock</span></span><input id="edgeDockInput" type="checkbox" /></label>
+                <div id="edgeDockOptions" class="presence-feature-body hidden">
+                  <p class="settings-note" data-i18n="settings.display.edgeDockNote">A slim quota rail hidden at the screen edge. Push the pointer to the edge to reveal it, click to pin, drag to move or switch sides.</p>
+                  <div class="settings-item">
+                    <span id="edgeDockModeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.mode">Visibility</span></span>
+                    <div class="inline-options" role="radiogroup" aria-labelledby="edgeDockModeLabel">
+                      <label class="inline-option"><input type="radio" name="edgeDockMode" value="autoHide" /><span data-i18n="settings.edgeDock.mode.autoHide">Auto-hide</span></label>
+                      <label class="inline-option"><input type="radio" name="edgeDockMode" value="always" /><span data-i18n="settings.edgeDock.mode.always">Always visible</span></label>
+                    </div>
+                  </div>
+                  <div class="settings-item">
+                    <span id="edgeDockSideLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.edgeDockSide">Screen edge</span></span>
+                    <div class="inline-options" role="radiogroup" aria-labelledby="edgeDockSideLabel">
+                      <label class="inline-option"><input type="radio" name="edgeDockSide" value="left" /><span data-i18n="settings.edgeDockSide.left">Left</span></label>
+                      <label class="inline-option"><input type="radio" name="edgeDockSide" value="right" /><span data-i18n="settings.edgeDockSide.right">Right</span></label>
+                    </div>
+                  </div>
+                  <label id="edgeDockHapticRow" class="checkbox-label settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.haptic">Trackpad haptic feedback</span></span><input id="edgeDockHapticInput" type="checkbox" /></label>
+                  <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.warnColors">Highlight low limits in colour</span></span><input id="edgeDockWarnColorsInput" type="checkbox" /></label>
+                  <div id="edgeDockComposer" class="edge-dock-composer"></div>
+                </div>
+              </div>
               <div class="presence-feature">
                 <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.floatingBubble">Floating Bubble</span></span><input id="floatingBubbleInput" type="checkbox" /></label>
                 <div id="floatingBubbleOptions" class="presence-feature-body hidden">
@@ -886,6 +910,32 @@
                 <div id="antigravityAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
+            <div id="clineAccountGroup" class="settings-group cursor-account-group">
+              <button id="clineSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="clineSettingsDetails">
+                <span data-i18n="settings.cline.title">Cline Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="clineAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="clineSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="clineOpenBrowser" data-i18n="settings.cline.openBrowser">Open Cline API keys</button>
+                  <button id="clineLogoutButton" class="hidden" data-i18n="settings.cline.clearApiKey">Clear key</button>
+                  <button id="clineRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="clineManualPanel">
+                  <p class="settings-note" data-i18n="settings.cline.note">Token Monitor reads the Cline sign-in that Cline Desktop and the CLI already store, so limits usually work with no setup. To use an API key instead, paste it here: the key is used ahead of that sign-in and stays on this device.</p>
+                  <!-- Named after the credential it holds, the way opencodeApiKeyInput is:
+                       a password box with a placeholder has no accessible name of its own. -->
+                  <input id="clineApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.cline.apiKeyPlaceholder" aria-label="Cline API key" data-i18n-aria-label="settings.cline.apiKeyLabel" />
+                  <div class="settings-actions">
+                    <button id="clineApiKeySubmit" data-i18n="settings.cline.saveApiKey">Save API key</button>
+                  </div>
+                </div>
+                <div id="clineErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
             <div id="factoryAccountGroup" class="settings-group cursor-account-group">
               <button id="factorySettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="factorySettingsDetails">
                 <span data-i18n="settings.factory.title">Factory Droid Account</span>
@@ -925,27 +975,24 @@
                   <button id="kimiRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
                 </div>
                 <div id="kimiManualPanel">
-                  <p class="settings-note" data-i18n="settings.kimi.cookieIntro">Connect your Kimi website session to show 5-hour, weekly, and monthly limits. The cookie stays on this device.</p>
-                  <p class="settings-note kimi-cookie-steps">
-                    <strong>1.</strong> <span data-i18n="settings.kimi.step1">Open Kimi Code Console in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.kimi.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -> https://www.kimi.com.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.kimi.step3">Find kimi-auth and copy its Value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.kimi.step4">Paste the value below and click Save cookie.</span>
-                  </p>
-                  <textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off" spellcheck="false" placeholder="kimi-auth=..." data-i18n-placeholder="settings.kimi.webTokenPlaceholder"></textarea>
+                  <p class="settings-note" data-i18n="settings.kimi.apiKeyNote">Paste your Kimi Code API key. It stays on this device and is used only for the Kimi Code quota API.</p>
+                  <input id="kimiApiKeyInput" type="password" spellcheck="false" aria-label="Kimi Code API key" data-i18n-aria-label="settings.kimi.apiKeyLabel" placeholder="sk-..." data-i18n-placeholder="settings.kimi.apiKeyPlaceholder" />
                   <div class="settings-actions">
-                    <button id="kimiWebAccessTokenSubmit" data-i18n="settings.kimi.saveWebToken">Save cookie</button>
+                    <button id="kimiApiKeySubmit" data-i18n="settings.kimi.saveApiKey">Save API key</button>
                   </div>
-                  <details class="kimi-api-fallback">
-                    <summary data-i18n="settings.kimi.apiFallback">Optional: Kimi Code API fallback</summary>
-                    <div class="kimi-api-fallback-body">
-                      <p class="settings-note" data-i18n="settings.kimi.apiKeyNote">Use this only when Kimi web access is unavailable. It can restore 5-hour and weekly limits, but not Monthly.</p>
-                      <label for="kimiApiKeyInput">
-                        <span data-i18n="settings.kimi.apiKeyLabel">Kimi Code API key</span>
-                        <input id="kimiApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.kimi.apiKeyPlaceholder" />
-                      </label>
+                  <details class="kimi-web-fallback">
+                    <summary data-i18n="settings.kimi.webFallback">Optional: Kimi Web fallback</summary>
+                    <div class="kimi-web-fallback-body">
+                      <p class="settings-note" data-i18n="settings.kimi.webTokenNote">Use a Kimi Web access token only to fill quota windows missing from the Code API. The token stays on this device and expires quickly.</p>
+                      <p class="settings-note kimi-web-steps">
+                        <strong>1.</strong> <span data-i18n="settings.kimi.step1">Open Kimi Code Console in your browser (button above) and sign in.</span><br>
+                        <strong>2.</strong> <span data-i18n="settings.kimi.step2">Open DevTools (F12 or Cmd+Opt+I) -&gt; Application/Storage -&gt; Local Storage -&gt; https://www.kimi.com.</span><br>
+                        <strong>3.</strong> <span data-i18n="settings.kimi.step3">Find access_token and copy its Value.</span><br>
+                        <strong>4.</strong> <span data-i18n="settings.kimi.step4">Paste the value below and click Save Web token.</span>
+                      </p>
+                      <textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off" spellcheck="false" aria-label="Kimi Web access token" data-i18n-aria-label="settings.kimi.webTokenLabel" placeholder="access_token=..." data-i18n-placeholder="settings.kimi.webTokenPlaceholder"></textarea>
                       <div class="settings-actions">
-                        <button id="kimiApiKeySubmit" data-i18n="settings.kimi.saveApiKey">Save API key</button>
+                        <button id="kimiWebAccessTokenSubmit" data-i18n="settings.kimi.saveWebToken">Save Web token</button>
                       </div>
                     </div>
                   </details>
@@ -1049,7 +1096,7 @@
             </div>
             <div id="mimoAccountGroup" class="settings-group cursor-account-group">
               <button id="mimoSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="mimoSettingsDetails">
-                <span data-i18n="settings.mimo.title">MiMo Account</span>
+                <span data-i18n="settings.mimo.title">Xiaomi MiMo Account</span>
                 <span class="cursor-settings-summary">
                   <span id="mimoAccountStatus" class="cursor-status-pill">Not configured</span>
                   <span class="cursor-disclosure-icon" aria-hidden="true"></span>
@@ -1068,10 +1115,10 @@
                   <div id="mimoAddDetails" class="opencode-add-details accordion-animated-container hidden">
                     <div class="accordion-animation-inner opencode-add-body">
                       <div class="settings-actions">
-                        <button id="mimoOpenConsoleButton" type="button" data-i18n="settings.mimo.openConsole">Open MiMo console in browser</button>
+                        <button id="mimoOpenConsoleButton" type="button" data-i18n="settings.mimo.openConsole">Open Xiaomi MiMo console in browser</button>
                       </div>
                       <p class="settings-note">
-                        <strong>1.</strong> <span data-i18n="settings.mimo.step1">Open the MiMo console in your browser (button above) and sign in.</span><br>
+                        <strong>1.</strong> <span data-i18n="settings.mimo.step1">Open the Xiaomi MiMo console in your browser (button above) and sign in.</span><br>
                         <strong>2.</strong> <span data-i18n="settings.mimo.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, then reload the page.</span><br>
                         <strong>3.</strong> <span data-i18n="settings.mimo.step3Before">In Network, select</span> <code>balance</code><span data-i18n="settings.mimo.step3After">, then copy the full Cookie value from Headers -> Request Headers.</span><br>
                         <strong>4.</strong> <span data-i18n="settings.mimo.step4">Paste it below, then click Save account.</span>
@@ -1217,6 +1264,42 @@
                   </div>
                 </div>
                 <div id="deepseekErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
+            <div id="devinAccountGroup" class="settings-group cursor-account-group">
+              <button id="devinSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="devinSettingsDetails">
+                <span data-i18n="settings.devin.title">Devin Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="devinAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="devinSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="devinOpenBrowser" data-i18n="settings.devin.openBrowser">Open Devin usage</button>
+                  <button id="devinLogoutButton" class="hidden" data-i18n="settings.devin.clearCredentials">Clear credentials</button>
+                  <button id="devinRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="devinManualPanel">
+                  <p class="settings-note">
+                    <strong>1.</strong> <span data-i18n="settings.devin.step1">Open Devin Usage &amp; Limits in your browser (button above) and sign in.</span><br>
+                    <strong>2.</strong> <span data-i18n="settings.devin.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the billing/quota/usage request.</span><br>
+                    <strong>3.</strong> <span data-i18n="settings.devin.step3">Copy the Authorization value and x-cog-org-id from Request Headers.</span><br>
+                    <strong>4.</strong> <span data-i18n="settings.devin.step4">Paste both values below and click Save credentials.</span>
+                  </p>
+                  <div class="settings-row">
+                    <label for="devinBearerTokenInput" data-i18n="settings.devin.bearerToken">Authorization</label>
+                    <input id="devinBearerTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="Bearer auth1_..." data-i18n-placeholder="settings.devin.bearerTokenPlaceholder" />
+                  </div>
+                  <div class="settings-row">
+                    <label for="devinOrganizationInput" data-i18n="settings.devin.organization">Organization</label>
+                    <input id="devinOrganizationInput" type="text" autocomplete="off" spellcheck="false" placeholder="org_..." data-i18n-placeholder="settings.devin.organizationPlaceholder" />
+                  </div>
+                  <div class="settings-actions">
+                    <button id="devinCredentialSubmit" data-i18n="settings.devin.saveCredentials">Save credentials</button>
+                  </div>
+                </div>
+                <div id="devinErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="openrouterAccountGroup" class="settings-group cursor-account-group">
@@ -1825,6 +1908,9 @@
     <script src="../../shared/clientCatalog.js"></script>
     <script src="../../shared/limitProviders.js"></script>
     <script src="../../shared/limitBalanceDisplay.js"></script>
+    <script src="../../shared/limitWindowLabels.js"></script>
+    <script src="../../shared/limitWindowText.js"></script>
+    <script src="limitWindowsView.js"></script>
     <script src="trayBars.js"></script>
     <script src="usageCharts.js"></script>
     <script src="homeOverview.js"></script>
@@ -1834,6 +1920,7 @@
     <script src="accountIdentity.js"></script>
     <script src="appUpdatePresentation.js"></script>
     <script src="limitProviderPresentation.js"></script>
+    <script src="../providers/codex/accountControl.js"></script>
     <script src="limitDisplayMode.js"></script>
     <script src="limitResetMotion.js"></script>
     <script src="clientStatusPresentation.js"></script>
@@ -1852,6 +1939,7 @@
     <script src="rowDragController.js"></script>
     <script src="i18n.js"></script>
     <script src="../../shared/providers/reasonix/sessionGuard.js"></script>
+    <script src="../../shared/sessionLive.js"></script>
     <script src="sessionRows.js"></script>
     <script src="breakdownRenderPolicy.js"></script>
     <script src="statsRenderScheduler.js"></script>
@@ -1868,10 +1956,14 @@
     <script src="../windowShortcut.js"></script>
     <script src="../../shared/currency.js"></script>
     <script src="../../shared/subscriptionDisplay.js"></script>
+    <script src="../../shared/subscriptionText.js"></script>
     <script src="../../shared/compactTokens.js"></script>
     <script src="../../shared/compactMoney.js"></script>
     <script src="../../shared/fontSettings.js"></script>
     <script src="../../shared/trayText.js"></script>
+    <script src="edgeDock/items.js"></script>
+    <script src="edgeDock/presentation.js"></script>
+    <script src="edgeDock/composer.js"></script>
     <script src="../../shared/trayLayout.js"></script>
     <script src="tokenRatePresentation.js"></script>
     <script src="../motionPreference.js"></script>
