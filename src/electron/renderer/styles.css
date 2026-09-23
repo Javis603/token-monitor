@@ -3612,7 +3612,6 @@ html.is-windows .settings-panel select option {
 .row-icon-kimi       { -webkit-mask-image: url(../../../assets/icons/kimi.svg);          mask-image: url(../../../assets/icons/kimi.svg); }
 .row-icon-grok       { -webkit-mask-image: url(../../../assets/icons/xai.svg);           mask-image: url(../../../assets/icons/xai.svg); }
 .row-icon-copilot    { -webkit-mask-image: url(../../../assets/icons/copilot.svg);       mask-image: url(../../../assets/icons/copilot.svg); }
-/* gcmp routes Copilot Chat, so its artwork reuses the Copilot mark */
 .row-icon-gcmp       { -webkit-mask-image: url(../../../assets/icons/gcmp.svg);          mask-image: url(../../../assets/icons/gcmp.svg); }
 .row-icon-pi         { -webkit-mask-image: url(../../../assets/icons/pi.svg);            mask-image: url(../../../assets/icons/pi.svg); }
 .row-icon-zed        { -webkit-mask-image: url(../../../assets/icons/zed.svg);           mask-image: url(../../../assets/icons/zed.svg); }
