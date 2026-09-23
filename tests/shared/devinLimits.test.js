@@ -7,8 +7,10 @@ const {
   devinBearerToken,
   devinOrganization,
   devinQuotaUrls,
+  devinSubscriptionUrls,
   fetchDevinLimits,
   normalizeDevinOrganization,
+  parseDevinSubscriptionPlan,
   parseDevinUsage
 } = require('../../src/shared/providers/devin/limits');
 
@@ -180,6 +182,81 @@ test('fetchDevinLimits sends scoped auth and maps all quota surfaces', async () 
   assert.equal(provider.windows[2].metric, 'credits');
   assert.equal(provider.windows[2].remaining, 10);
   assert.equal(provider.balance.amount, 10);
+});
+
+test('parses the Devin subscription plan slug', () => {
+  assert.equal(parseDevinSubscriptionPlan({ slug: 'teams-v2', status: 'active' }), 'Teams');
+  assert.equal(parseDevinSubscriptionPlan({ slug: 'pro' }), 'Pro');
+  assert.equal(parseDevinSubscriptionPlan({ plan_name: 'enterprise' }), 'Enterprise');
+  assert.equal(parseDevinSubscriptionPlan({ plan: { slug: 'custom_plan' } }), 'Custom Plan');
+  assert.equal(parseDevinSubscriptionPlan({ status: 'active' }), '');
+  assert.equal(parseDevinSubscriptionPlan(null), '');
+});
+
+test('devinSubscriptionUrls scopes the subscription endpoint to the organization', () => {
+  assert.deepEqual(devinSubscriptionUrls('org_GQ6LhcfkW1TSinM6'), [
+    'https://app.devin.ai/api/billing/subscription',
+    'https://app.devin.ai/api/organizations/org_GQ6LhcfkW1TSinM6/billing/subscription',
+    'https://app.devin.ai/api/org_GQ6LhcfkW1TSinM6/billing/subscription'
+  ]);
+  assert.deepEqual(devinSubscriptionUrls('org/example-org'), [
+    'https://app.devin.ai/api/billing/subscription',
+    'https://app.devin.ai/api/org/example-org/billing/subscription',
+    'https://app.devin.ai/api/example-org/billing/subscription'
+  ]);
+});
+
+test('fetchDevinLimits falls back to the subscription endpoint for the plan label', async () => {
+  const calls = [];
+  const provider = await fetchDevinLimits({
+    devinBearerToken: 'Bearer secret-token',
+    devinOrganization: 'org_GQ6LhcfkW1TSinM6'
+  }, {
+    env: {},
+    now: () => Date.parse('2026-09-23T12:00:00Z'),
+    fetch: async (url) => {
+      calls.push(url);
+      if (url.endsWith('/billing/subscription')) {
+        return { ok: true, status: 200, json: async () => ({ slug: 'teams-v2', status: 'active' }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          daily_percentage: 0,
+          weekly_percentage: 25,
+          overage_balance: 10
+        })
+      };
+    }
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.planLabel, 'Teams');
+  assert.equal(provider.accountLabel, 'Teams');
+  assert.ok(calls.some((url) => url === 'https://app.devin.ai/api/billing/subscription'));
+});
+
+test('fetchDevinLimits keeps working when the subscription lookup fails', async () => {
+  const provider = await fetchDevinLimits({
+    devinBearerToken: 'Bearer secret-token',
+    devinOrganization: 'org_example'
+  }, {
+    env: {},
+    now: () => 0,
+    fetch: async (url) => {
+      if (url.includes('/billing/subscription')) {
+        return { ok: false, status: 404, json: async () => ({ detail: 'Not found' }) };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ daily_percentage: 10, weekly_percentage: 20 })
+      };
+    }
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.planLabel, '');
+  assert.equal(provider.windows.length, 2);
 });
 
 test('fetchDevinLimits distinguishes missing setup and rejected credentials', async () => {

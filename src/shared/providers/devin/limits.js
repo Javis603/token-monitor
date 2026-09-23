@@ -76,6 +76,68 @@ function devinQuotaUrls(organization) {
   return [...new Set(paths)].map((path) => `${DEVIN_ORIGIN}/api/${path}/billing/quota/usage`);
 }
 
+// The quota/usage payload carries no plan field for most accounts; the web app
+// reads the current subscription's slug from GET /api/billing/subscription
+// (org scoped through the x-cog-org-id header) instead.
+function devinSubscriptionUrls(organization) {
+  const normalized = normalizeDevinOrganization(organization);
+  const paths = ['billing/subscription'];
+  if (normalized) {
+    paths.push(`${normalized}/billing/subscription`);
+    const internalId = internalOrganizationId(normalized);
+    if (internalId) paths.push(`${internalId}/billing/subscription`, `organizations/${internalId}/billing/subscription`);
+    if (normalized.startsWith('org/')) paths.push(`${normalized.slice(4)}/billing/subscription`);
+  }
+  return [...new Set(paths)].map((path) => `${DEVIN_ORIGIN}/api/${path}`);
+}
+
+const DEVIN_PLAN_SLUGS = {
+  free: 'Free',
+  trial: 'Trial',
+  core: 'Core',
+  pro: 'Pro',
+  'pro-trial': 'Pro Trial',
+  team: 'Team',
+  'teams-v2': 'Teams',
+  enterprise: 'Enterprise'
+};
+
+function parseDevinSubscriptionPlan(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return '';
+  const candidates = [
+    body.plan_name,
+    body.planName,
+    body.slug,
+    body.plan_slug,
+    body.plan?.slug,
+    body.plan?.name,
+    body.subscription?.slug,
+    body.subscription?.name,
+    body.name
+  ];
+  for (const candidate of candidates) {
+    const raw = typeof candidate === 'string' ? candidate.trim() : '';
+    if (!raw) continue;
+    const known = DEVIN_PLAN_SLUGS[raw.toLowerCase()];
+    if (known) return known;
+    const cleaned = cleanPlanName(raw);
+    if (cleaned) return cleaned;
+  }
+  return '';
+}
+
+async function fetchDevinPlanName(headers, organization, deps = {}) {
+  for (const url of devinSubscriptionUrls(organization)) {
+    try {
+      const { response, body } = await fetchJson(url, headers, deps);
+      if (!response.ok) continue;
+      const plan = parseDevinSubscriptionPlan(body);
+      if (plan) return plan;
+    } catch (_) {}
+  }
+  return '';
+}
+
 function finiteNumber(value) {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null;
   if (typeof value !== 'string' || !value.trim()) return null;
@@ -260,6 +322,7 @@ async function fetchDevinLimits(options = {}, deps = {}) {
       const { response, body } = await fetchJson(url, headers, deps);
       if (response.ok) {
         const usage = parseDevinUsage(body, organization);
+        const planName = usage.planName || await fetchDevinPlanName(headers, organization, deps);
         const windows = [
           quotaWindow('daily', 'Daily', usage.daily, 24 * 60),
           quotaWindow('weekly', 'Weekly', usage.weekly, 7 * 24 * 60)
@@ -277,7 +340,8 @@ async function fetchDevinLimits(options = {}, deps = {}) {
         return normalizeLimitProvider({
           provider: 'devin',
           accountKey: hashKey('devin', token, organization),
-          accountLabel: usage.planName,
+          accountLabel: planName,
+          planLabel: planName,
           accountName: usage.organization,
           source: 'web',
           status: 'ok',
@@ -312,7 +376,9 @@ module.exports = {
   devinBearerToken,
   devinOrganization,
   devinQuotaUrls,
+  devinSubscriptionUrls,
   fetchDevinLimits,
   normalizeDevinOrganization,
+  parseDevinSubscriptionPlan,
   parseDevinUsage
 };
