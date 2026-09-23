@@ -38,7 +38,7 @@ test('parses current Devin daily, weekly, plan and balance fields', () => {
     weekly_reset_at: 1790467200,
     overage_balance: 10
   }, 'organizations/org_GQ6LhcfkW1TSinM6');
-  assert.equal(usage.daily.usedPercent, 12);
+  assert.equal(usage.daily.usedPercent, 0.12);
   assert.equal(usage.weekly.usedPercent, 42);
   assert.equal(usage.daily.resetsAt, '2026-09-24T00:00:00.000Z');
   assert.equal(usage.weekly.resetsAt, '2026-09-27T00:00:00.000Z');
@@ -65,7 +65,8 @@ test('hides daily quota while keeping nested weekly quota and cents balance', ()
 test('keeps Devin current and fallback percentage boundaries distinct', () => {
   const current = parseDevinUsage({ daily_percentage: 1, weekly_percentage: 0.5 });
   assert.equal(current.daily.usedPercent, 1);
-  assert.equal(current.weekly.usedPercent, 50);
+  assert.equal(current.weekly.usedPercent, 0.5);
+  assert.equal(parseDevinUsage({ daily_percentage: 0.99 }).daily.usedPercent, 0.99);
 
   const fallback = parseDevinUsage({
     quota_usage: {
@@ -77,8 +78,51 @@ test('keeps Devin current and fallback percentage boundaries distinct', () => {
   assert.equal(fallback.weekly.usedPercent, 0);
 });
 
-test('rejects a payload with no quota windows', () => {
-  assert.throws(() => parseDevinUsage({ overage_balance: 10 }), /missing Devin quota windows/);
+test('suppresses unallocated quotas and accepts a zero extra usage balance', () => {
+  const usage = parseDevinUsage({
+    has_quota_allocation: false,
+    is_quota_plan: false,
+    daily_percentage: 0,
+    weekly_percentage: 0,
+    quota_usage: { daily_quota: { used_percent: 25 } },
+    overage_balance: 0
+  });
+  assert.equal(usage.daily, null);
+  assert.equal(usage.weekly, null);
+  assert.equal(usage.overageBalance, 0);
+});
+
+test('honors hidden weekly quota and keeps a balance-only response', () => {
+  const hidden = parseDevinUsage({
+    daily_percentage: 3,
+    weekly_percentage: 7,
+    hide_weekly_quota: true,
+    overage_balance: 10
+  });
+  assert.equal(hidden.daily.usedPercent, 3);
+  assert.equal(hidden.weekly, null);
+  const balanceOnly = parseDevinUsage({ overage_balance: 10 });
+  assert.equal(balanceOnly.daily, null);
+  assert.equal(balanceOnly.weekly, null);
+  assert.equal(balanceOnly.overageBalance, 10);
+});
+
+test('ignores numeric reset metadata when finding fallback quota windows', () => {
+  const usage = parseDevinUsage({
+    daily_reset_at: 1790467200,
+    weekly_reset_at: 1790467200,
+    quota_usage: {
+      daily_quota: { used_percent: 25 },
+      weekly_quota: { used_percent: 40 }
+    }
+  });
+  assert.equal(usage.daily.usedPercent, 25);
+  assert.equal(usage.weekly.usedPercent, 40);
+  assert.throws(() => parseDevinUsage({ daily_reset_at: 1790467200 }), /missing Devin quota windows/);
+});
+
+test('rejects a payload with no quota or balance data', () => {
+  assert.throws(() => parseDevinUsage({}), /missing Devin quota windows/);
 });
 
 test('fetchDevinLimits sends scoped auth and maps all quota surfaces', async () => {
@@ -132,4 +176,28 @@ test('fetchDevinLimits distinguishes missing setup and rejected credentials', as
     fetch: async () => ({ ok: false, status: 401, json: async () => ({ detail: 'Unauthorized' }) })
   });
   assert.equal(rejected.status, 'unauthorized');
+});
+
+test('fetchDevinLimits returns only a balance window for an account without quota allocation', async () => {
+  const provider = await fetchDevinLimits({
+    devinBearerToken: 'token',
+    devinOrganization: 'org_example'
+  }, {
+    env: {},
+    now: () => 0,
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        has_quota_allocation: false,
+        daily_percentage: 0,
+        weekly_percentage: 0,
+        overage_balance: 0
+      })
+    })
+  });
+  assert.equal(provider.status, 'ok');
+  assert.deepEqual(provider.windows.map((window) => window.kind), ['billing']);
+  assert.equal(provider.windows[0].remaining, 0);
+  assert.equal(provider.balance.amount, 0);
 });

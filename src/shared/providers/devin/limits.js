@@ -92,7 +92,7 @@ function percent(value) {
 function currentPercent(value) {
   const parsed = finiteNumber(value);
   if (parsed === null) return null;
-  return Math.max(0, Math.min(100, parsed < 1 ? parsed * 100 : parsed));
+  return Math.max(0, Math.min(100, parsed));
 }
 
 function quotaPercent(value) {
@@ -181,21 +181,24 @@ function displayOrganization(value) {
 
 function parseDevinUsage(body, organization = '') {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('unexpected Devin usage response');
-  const currentWindow = (kind) => {
-    const usedPercent = currentPercent(body[`${kind}_percentage`]);
-    return usedPercent === null ? null : { usedPercent, resetsAt: toIso(body[`${kind}_reset_at`]) };
-  };
-  const daily = body.hide_daily_quota === true
-    ? null
-    : currentWindow('daily') || findQuotaWindow(body, (key) => !key.toLowerCase().includes('hide') && /daily|day/iu.test(key));
-  const weekly = currentWindow('weekly')
-    || findQuotaWindow(body, (key) => !key.toLowerCase().includes('hide') && /weekly|week/iu.test(key));
-  if (!daily && !weekly) throw new Error('missing Devin quota windows');
   const balanceValue = finiteNumber(body.overage_balance);
   const balanceCents = finiteNumber(body.overage_balance_cents);
   const overageBalance = balanceValue !== null && balanceValue >= 0
     ? balanceValue
     : balanceCents !== null && balanceCents >= 0 ? balanceCents / 100 : null;
+  const currentWindow = (kind) => {
+    const usedPercent = currentPercent(body[`${kind}_percentage`]);
+    return usedPercent === null ? null : { usedPercent, resetsAt: toIso(body[`${kind}_reset_at`]) };
+  };
+  const hasQuota = body.has_quota_allocation !== false;
+  const quotaKey = (kind) => (key) => !/(?:hide|reset|time|date)/iu.test(key) && kind.test(key);
+  const daily = !hasQuota || body.hide_daily_quota === true
+    ? null
+    : currentWindow('daily') || findQuotaWindow(body, quotaKey(/daily|day/iu));
+  const weekly = !hasQuota || body.hide_weekly_quota === true
+    ? null
+    : currentWindow('weekly') || findQuotaWindow(body, quotaKey(/weekly|week/iu));
+  if (!daily && !weekly && hasQuota && overageBalance === null) throw new Error('missing Devin quota windows');
   return {
     daily,
     weekly,
