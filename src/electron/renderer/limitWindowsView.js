@@ -314,19 +314,12 @@
         ? [expiryDateLabel(endsAt), remaining].filter(Boolean).join(' · ')
         : remaining || 'No expiry']);
       const clearKeys = Array.isArray(grant?.clears) ? grant.clears : [];
-      // `seven_day_overage_included` is not a third window — it says the
-      // weekly reset also covers accrued overage, so it folds into the
-      // Weekly entry rather than listing beside it.
-      const includesOverage = clearKeys.includes('seven_day_overage_included');
       const clears = clearKeys
+        // `seven_day_overage_included` only says the weekly clear also covers
+        // accrued overage — implied by 'Weekly', so it is not listed.
         .filter((key) => key !== 'seven_day_overage_included')
         .map(claudeResetClearLabel)
         .filter(Boolean);
-      if (includesOverage) {
-        const weeklyIndex = clears.indexOf('Weekly');
-        if (weeklyIndex >= 0) clears[weeklyIndex] = 'Weekly incl. overage';
-        else clears.push('Weekly overage');
-      }
       const clearsText = clears.join(' · ');
       if (clearsText) rows.push(['Clears', clearsText]);
       if (grant?.useRequiresLimit === true) rows.push(['Usable', 'at a limit only']);

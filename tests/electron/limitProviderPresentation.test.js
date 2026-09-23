@@ -1571,7 +1571,7 @@ test('Claude reset grants wrap their label and clears as full-width lines', () =
   assert.deepEqual(rows, [
     { full: 'Launch promo reset', caption: true, separated: false },
     ['Expires', '8/20, 5:00 PM · 23d 17h'],
-    ['Clears', 'Session · Weekly incl. overage'],
+    ['Clears', 'Session · Weekly'],
     { full: 'Second promo', caption: true, separated: true },
     ['Expires', '9/1, 12:00 PM · 35d 12h'],
     ['Clears', 'Opus weekly'],

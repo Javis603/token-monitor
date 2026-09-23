@@ -43,7 +43,7 @@ Both usage responses carry Anthropic's reset coupons in a `cedar_ember` block on
 
 The OAuth endpoint also gates the block on client surface: a user-agent that is not Claude Code gets `eligible: false` with `ineligible_reason: "surface"` and no grants, so the OAuth usage call presents as `claude-cli/<version> (external, cli)` — the credential is a Claude Code token. Web usage calls are unaffected because they already present as the browser.
 
-`seven_day_overage_included` in a grant's `clears` is a modifier on the weekly clear — the reset also covers accrued overage — not a third window. The display is read-only: the claim endpoint is deliberately not wired, so nothing in the app can spend a grant. A second reset program (`juniper_tide`) exists but is not collected.
+`seven_day_overage_included` in a grant's `clears` is a modifier on the weekly clear — the reset also covers accrued overage — not a third window, so the display drops it as implied by Weekly. The display is read-only: the claim endpoint is deliberately not wired, so nothing in the app can spend a grant. A second reset program (`juniper_tide`) exists but is not collected.
 
 ## Claude Web
 
