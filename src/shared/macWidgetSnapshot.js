@@ -2,6 +2,7 @@
 
 const { KNOWN_CLIENTS } = require('./clientTracking');
 const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } = require('./limitProviders');
+const { limitWindowKindLabel } = require('./limitWindowLabels');
 
 const MAC_WIDGET_SCHEMA_VERSION = 10;
 const MAC_WIDGET_FRESHNESS_HEARTBEAT_MS = 5 * 60 * 1000;
@@ -13,9 +14,6 @@ const KNOWN_LIMIT_STATUSES = new Set([
 ]);
 const KNOWN_WINDOW_KINDS = new Set(['session', 'daily', 'weekly', 'billing']);
 const KNOWN_LIMIT_BOUNDARY_KINDS = new Set(['reset', 'expiry', 'mixed']);
-const FIVE_HOUR_WINDOW_PROVIDERS = new Set([
-  'alibaba', 'antigravity', 'commandcode', 'kimi', 'volcengine', 'zai', 'zaiteam'
-]);
 const CURRENCIES = Object.freeze({ USD: '$', TWD: 'NT$', HKD: 'HK$', CNY: '¥' });
 
 function finiteNumber(value, fallback = 0) {
@@ -165,11 +163,7 @@ function widgetWindowLabel(providerId, window, kind) {
     }
     return explicit;
   }
-  if (kind === 'session') return FIVE_HOUR_WINDOW_PROVIDERS.has(providerId) ? '5-hour' : 'Session';
-  if (kind === 'daily') return 'Daily';
-  if (kind === 'weekly') return 'Weekly';
-  if (kind === 'billing') return 'Monthly';
-  return '';
+  return limitWindowKindLabel(providerId, kind);
 }
 
 function buildLimitWindow(window, providerId) {

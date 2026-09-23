@@ -17,7 +17,9 @@ const {
   floatingBubbleNativeGlassEnabled,
   floatingBubbleWindowChrome,
   moveFloatingBubbleBounds,
-  normalizeInitialRendererViewState
+  normalizeInitialRendererViewState,
+  applyWindowSizeLimits,
+  restoreFloatingBubbleWindow
 } = require('../../src/electron/floatingBubble');
 
 const workArea = { x: 0, y: 24, width: 1440, height: 876 };
@@ -290,6 +292,62 @@ test('expandedFloatingBubbleBounds opens near the mini-window and stays inside t
     width: 360,
     height: 520
   });
+});
+
+test('restoreFloatingBubbleWindow unlocks the collapsed window before resizing it', () => {
+  const calls = [];
+  const bounds = { x: 8, y: 32, width: 360, height: 520 };
+  const limits = { minWidth: 280, minHeight: 360, maxWidth: 720, maxHeight: 900 };
+  const win = {
+    setResizable(value) { calls.push(['resizable', value]); },
+    setMinimumSize(width, height) { calls.push(['minimum', width, height]); },
+    setMaximumSize(width, height) { calls.push(['maximum', width, height]); },
+    setBounds(value) { calls.push(['bounds', value]); }
+  };
+
+  assert.equal(restoreFloatingBubbleWindow(win, bounds, limits), true);
+  assert.deepEqual(calls, [
+    ['resizable', true],
+    ['minimum', 280, 360],
+    ['maximum', 720, 900],
+    ['bounds', bounds]
+  ]);
+});
+
+test('restoreFloatingBubbleWindow touches nothing without a live window or real limits', () => {
+  const calls = [];
+  const bounds = { x: 8, y: 32, width: 360, height: 520 };
+  const limits = { minWidth: 280, minHeight: 360, maxWidth: 720, maxHeight: 900 };
+  const win = (destroyed) => ({
+    isDestroyed() { return destroyed; },
+    setResizable(value) { calls.push(['resizable', value]); },
+    setMinimumSize(width, height) { calls.push(['minimum', width, height]); },
+    setMaximumSize(width, height) { calls.push(['maximum', width, height]); },
+    setBounds(value) { calls.push(['bounds', value]); }
+  });
+
+  assert.equal(restoreFloatingBubbleWindow(win(true), bounds, limits), false);
+  // Half-applied limits are worse than none: an omitted pair would otherwise
+  // reach setMinimumSize(undefined, undefined).
+  assert.equal(restoreFloatingBubbleWindow(win(false), bounds, undefined), false);
+  assert.equal(restoreFloatingBubbleWindow(null, bounds, limits), false);
+  assert.deepEqual(calls, []);
+});
+
+test('applyWindowSizeLimits restores the normal hints without unlocking the window', () => {
+  const calls = [];
+  const win = {
+    isDestroyed() { return false; },
+    setResizable(value) { calls.push(['resizable', value]); },
+    setMinimumSize(width, height) { calls.push(['minimum', width, height]); },
+    setMaximumSize(width, height) { calls.push(['maximum', width, height]); }
+  };
+
+  assert.equal(applyWindowSizeLimits(win, { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 }), true);
+  assert.deepEqual(calls, [
+    ['minimum', 240, 140],
+    ['maximum', 1200, 1400]
+  ]);
 });
 
 test('moveFloatingBubbleBounds drags the mini-window while clamping it inside the work area', () => {

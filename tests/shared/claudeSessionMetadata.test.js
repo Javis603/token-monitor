@@ -9,7 +9,9 @@ const test = require('node:test');
 const {
   TITLE_MAX_CODE_POINTS,
   TITLE_READ_CHUNK_BYTES,
+  claudeContextWindow,
   cleanTitle,
+  readSessionContext,
   readSessionTitle
 } = require('../../src/shared/providers/claude/sessionMetadata');
 
@@ -220,6 +222,586 @@ test('readSessionTurnEnded follows the newest stop_reason, and tool_use is not a
   assert.equal(readSessionTurnEnded(both.file, { cache }), true);
   assert.equal(readSessionTitle(both.file, { cache }), 'Shared pass');
 });
+
+test('Claude session context uses the latest API input occupancy and model capacity', (t) => {
+  const assistant = ({ model, input, write, read, output = 0 }) => JSON.stringify({
+    type: 'assistant',
+    message: {
+      model,
+      stop_reason: 'end_turn',
+      usage: {
+        input_tokens: input,
+        cache_creation_input_tokens: write,
+        cache_read_input_tokens: read,
+        output_tokens: output
+      }
+    }
+  });
+  const { dir, file } = fixture([
+    assistant({ model: 'claude-sonnet-4-5-20250929', input: 500, write: 1_000, read: 48_000 }),
+    assistant({ model: 'claude-opus-5', input: 700, write: 2_000, read: 120_000, output: 9_999 })
+  ]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    // Claude Code's official used_percentage excludes output_tokens.
+    contextTokens: 122_700,
+    contextWindow: 1_000_000
+  });
+  assert.equal(claudeContextWindow('claude-sonnet-4-5-20250929'), 200_000);
+  assert.equal(claudeContextWindow('claude-opus-4-6'), 200_000);
+  assert.equal(claudeContextWindow('us.anthropic.claude-opus-4-8-v1:0'), 200_000);
+  assert.equal(claudeContextWindow('us.anthropic.claude-sonnet-5-v1:0'), 1_000_000);
+  assert.equal(claudeContextWindow('global.anthropic.claude-sonnet-5-v1:0'), 1_000_000);
+  assert.equal(claudeContextWindow('anthropic.claude-sonnet-5'), 1_000_000);
+  assert.equal(claudeContextWindow('gateway/anthropic.claude-sonnet-5'), 200_000);
+  assert.equal(claudeContextWindow('deepseek-v4.1-flash'), 200_000);
+  assert.equal(claudeContextWindow('deepseek-v4.1-flash[1m]'), 1_000_000);
+  assert.equal(claudeContextWindow('claude-ocx2-command-code--deepseek-v4.1-flash'), 200_000);
+  assert.equal(claudeContextWindow(''), 0);
+});
+
+test('Claude session context uses the final message iteration instead of the usage rollup', (t) => {
+  const assistant = (usage, content = 'done') => JSON.stringify({
+    type: 'assistant',
+    message: {
+      model: 'claude-opus-5',
+      role: 'assistant',
+      content,
+      stop_reason: 'end_turn',
+      usage
+    }
+  });
+  const rollup = {
+    input_tokens: 248,
+    cache_creation_input_tokens: 88,
+    cache_read_input_tokens: 802_062,
+    iterations: [
+      { type: 'message', input_tokens: 2, cache_creation_input_tokens: 88, cache_read_input_tokens: 400_987 },
+      { type: 'message', input_tokens: 246, cache_creation_input_tokens: 0, cache_read_input_tokens: 401_075 }
+    ]
+  };
+  const advisorRollup = {
+    input_tokens: 4,
+    cache_creation_input_tokens: 3_249,
+    cache_read_input_tokens: 1_031_027,
+    iterations: [
+      { type: 'message', input_tokens: 2, cache_creation_input_tokens: 783, cache_read_input_tokens: 515_122 },
+      { type: 'advisor_message', input_tokens: 516_328, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+      { type: 'message', input_tokens: 2, cache_creation_input_tokens: 2_466, cache_read_input_tokens: 515_905 }
+    ]
+  };
+  const topLevelZero = {
+    input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+    iterations: [
+      { type: 'message', input_tokens: 2, cache_creation_input_tokens: 534, cache_read_input_tokens: 231_281 }
+    ]
+  };
+
+  const ordinary = fixture([assistant(rollup)]);
+  t.after(() => fs.rmSync(ordinary.dir, { recursive: true, force: true }));
+  assert.deepEqual(readSessionContext(ordinary.file, { cache: new Map() }), {
+    contextTokens: 401_321,
+    contextWindow: 1_000_000
+  });
+
+  fs.writeFileSync(ordinary.file, `${assistant(advisorRollup)}\n`);
+  assert.deepEqual(readSessionContext(ordinary.file, { cache: new Map() }), {
+    contextTokens: 518_373,
+    contextWindow: 1_000_000
+  });
+
+  // Real Claude transcripts can zero the top-level counters while retaining
+  // the actual request measurement in a single message iteration. The rollup
+  // is not a fallback in that shape: it would preserve a stale older gauge.
+  fs.writeFileSync(ordinary.file, `${assistant(topLevelZero)}\n`);
+  assert.deepEqual(readSessionContext(ordinary.file, { cache: new Map() }), {
+    contextTokens: 231_817,
+    contextWindow: 1_000_000
+  });
+
+  // The bounded fragment reader must use exactly the same iteration semantics.
+  // Otherwise crossing the 64 KiB record limit changes the displayed gauge.
+  const oversized = fixture([assistant(advisorRollup, 'x'.repeat(300 * 1024))]);
+  t.after(() => fs.rmSync(oversized.dir, { recursive: true, force: true }));
+  assert.deepEqual(readSessionContext(oversized.file, { cache: new Map() }), {
+    contextTokens: 518_373,
+    contextWindow: 1_000_000
+  });
+});
+
+test('Claude session context uses the fallback iteration that served the response', (t) => {
+  const usage = {
+    input_tokens: 252,
+    cache_creation_input_tokens: 1_300,
+    cache_read_input_tokens: 220_000,
+    iterations: [
+      {
+        type: 'message',
+        model: 'claude-fable-5',
+        input_tokens: 2,
+        cache_creation_input_tokens: 300,
+        cache_read_input_tokens: 100_000
+      },
+      {
+        type: 'fallback_message',
+        model: 'claude-opus-4-8',
+        input_tokens: 250,
+        cache_creation_input_tokens: 1_000,
+        cache_read_input_tokens: 120_000
+      }
+    ]
+  };
+  const assistant = (content) => JSON.stringify({
+    type: 'assistant',
+    message: {
+      model: 'claude-opus-4-8',
+      role: 'assistant',
+      content,
+      stop_reason: 'end_turn',
+      usage
+    }
+  });
+  const ordinary = fixture([assistant('served by the fallback')]);
+  t.after(() => fs.rmSync(ordinary.dir, { recursive: true, force: true }));
+  assert.deepEqual(readSessionContext(ordinary.file, { cache: new Map() }), {
+    contextTokens: 121_250,
+    contextWindow: 1_000_000
+  });
+
+  // Crossing the bounded-record threshold must not fall back to the declined
+  // primary attempt just because the usage object is read from tail fragments.
+  const oversized = fixture([assistant('x'.repeat(300 * 1024))]);
+  t.after(() => fs.rmSync(oversized.dir, { recursive: true, force: true }));
+  assert.deepEqual(readSessionContext(oversized.file, { cache: new Map() }), {
+    contextTokens: 121_250,
+    contextWindow: 1_000_000
+  });
+});
+
+test('Claude session context clears on compaction and repopulates on the next response', (t) => {
+  const usage = (tokens) => JSON.stringify({
+    type: 'assistant',
+    message: {
+      model: 'claude-haiku-4-5-20251001',
+      stop_reason: 'end_turn',
+      usage: { input_tokens: tokens, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+    }
+  });
+  const { dir, file } = fixture([usage(80_000)]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cache = new Map();
+
+  assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 80_000, contextWindow: 200_000 });
+  fs.appendFileSync(file, `${JSON.stringify({ type: 'system', subtype: 'compact_boundary', compactMetadata: {} })}\n`);
+  assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 0, contextWindow: 0 });
+  fs.appendFileSync(file, `${usage(12_000)}\n`);
+  assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 12_000, contextWindow: 200_000 });
+  fs.appendFileSync(file, `${JSON.stringify({
+    type: 'user',
+    isCompactSummary: true,
+    message: { content: 'x'.repeat(300 * 1024) }
+  })}\n`);
+  assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 0, contextWindow: 0 });
+});
+
+test('Claude session context survives oversized assistant field ordering', (t) => {
+  const contentFirst = JSON.stringify({
+    type: 'assistant',
+    message: {
+      id: 'msg_big',
+      type: 'message',
+      role: 'assistant',
+      content: 'x'.repeat(300 * 1024),
+      model: 'claude-sonnet-5',
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 1_000, cache_creation_input_tokens: 2_000, cache_read_input_tokens: 300_000 }
+    }
+  });
+  const modelFirst = JSON.stringify({
+    type: 'assistant',
+    message: {
+      id: 'msg_bigger',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-opus-5',
+      content: 'x'.repeat(300 * 1024),
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 4_000, cache_creation_input_tokens: 5_000, cache_read_input_tokens: 600_000 }
+    }
+  });
+  const nestedUsage = JSON.stringify({
+    type: 'assistant',
+    message: {
+      id: 'msg_nested_usage',
+      type: 'message',
+      role: 'assistant',
+      content: [
+        { type: 'text', text: 'x'.repeat(300 * 1024) },
+        {
+          type: 'tool_use',
+          input: {
+            model: 'nested-model',
+            usage: { input_tokens: 7 }
+          }
+        }
+      ],
+      model: 'claude-sonnet-5',
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 4_000, cache_creation_input_tokens: 5_000, cache_read_input_tokens: 600_000 }
+    }
+  });
+  const { dir, file } = fixture([contentFirst]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 303_000,
+    contextWindow: 1_000_000
+  });
+
+  fs.writeFileSync(file, `${modelFirst}\n`);
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 609_000,
+    contextWindow: 1_000_000
+  });
+
+  fs.writeFileSync(file, `${nestedUsage}\n`);
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 609_000,
+    contextWindow: 1_000_000
+  });
+});
+
+test('Claude session context ignores malformed usage instead of clearing a valid reading', (t) => {
+  const valid = JSON.stringify({
+    type: 'assistant',
+    message: {
+      model: 'claude-sonnet-4-5-20250929',
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 20_000, cache_creation_input_tokens: 1_000, cache_read_input_tokens: 50_000 }
+    }
+  });
+  const malformed = JSON.stringify({
+    type: 'assistant',
+    message: {
+      model: 'claude-sonnet-5',
+      stop_reason: 'end_turn',
+      usage: { cache_creation_input_tokens: 2_000, cache_read_input_tokens: 100_000 }
+    }
+  });
+  const { dir, file } = fixture([valid, malformed]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 71_000,
+    contextWindow: 200_000
+  });
+});
+
+test('Claude session context keeps its reading through zero-occupancy client notices', (t) => {
+  // Claude writes its own turns as assistant records with a full `usage`
+  // object whose counters are all zero: the session-limit notice, an API
+  // error, and the "No response requested." acknowledgement. Each is a valid
+  // record but not a measurement, and treating it as one blanked a gauge whose
+  // window still held the previous turn. On one real machine 38 transcripts
+  // ended on one of these, 27 of them the session-limit notice.
+  const assistant = (usage, model = 'claude-opus-5') => JSON.stringify({
+    type: 'assistant',
+    message: { model, stop_reason: 'stop_sequence', usage }
+  });
+  const zeroed = { input_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 };
+  const { dir, file } = fixture([
+    assistant({ input_tokens: 2_000, cache_creation_input_tokens: 1_000, cache_read_input_tokens: 254_936 })
+  ]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cache = new Map();
+
+  assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 257_936, contextWindow: 1_000_000 });
+
+  fs.appendFileSync(file, `${assistant(zeroed, '<synthetic>')}\n`);
+  assert.deepEqual(readSessionContext(file, { cache }), {
+    contextTokens: 257_936,
+    contextWindow: 1_000_000
+  });
+
+  // Still measured against the model that actually answered, so a later turn
+  // replaces it rather than the notice pinning the old reading.
+  fs.appendFileSync(file, `${assistant({ input_tokens: 1_500, cache_creation_input_tokens: 0, cache_read_input_tokens: 51_000 })}\n`);
+  assert.deepEqual(readSessionContext(file, { cache }), { contextTokens: 52_500, contextWindow: 1_000_000 });
+});
+
+test('oversized records are recognized when the root discriminator lands past the head', (t) => {
+  // Claude serializes a record's `message` before its root `type`. An oversized
+  // `content` therefore pushes the root discriminator past the 64 KiB head, so
+  // reading the head alone classified the record as neither assistant nor user:
+  // the context reading stayed at the previous turn, and an oversized prompt did
+  // not start a new one. Every oversized assistant record on one real machine
+  // put `"type":"assistant"` at byte 68k-93k, never inside the head.
+  const huge = 'x'.repeat(300 * 1024);
+  const { readSessionTurnEnded } = require('../../src/shared/providers/claude/sessionMetadata');
+  const realAssistant = JSON.stringify({
+    parentUuid: 'p1',
+    isSidechain: false,
+    message: {
+      id: 'msg_big',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-opus-5',
+      content: [{ type: 'text', text: huge }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 2_000, cache_creation_input_tokens: 1_000, cache_read_input_tokens: 254_936, output_tokens: 40 }
+    },
+    apiBlockIndex: 0,
+    type: 'assistant',
+    uuid: 'u1',
+    timestamp: '2026-01-01T00:00:00.000Z'
+  });
+  const prior = JSON.stringify({
+    type: 'assistant',
+    message: { id: 'msg_prior', model: 'claude-opus-5', stop_reason: 'end_turn', usage: { input_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 51_000 } }
+  });
+  const realPrompt = JSON.stringify({
+    parentUuid: 'p2',
+    isSidechain: false,
+    message: { role: 'user', content: [{ type: 'text', text: huge }] },
+    apiBlockIndex: 0,
+    type: 'user',
+    uuid: 'u2',
+    timestamp: '2026-01-01T00:00:01.000Z'
+  });
+  const finished = JSON.stringify({
+    type: 'assistant',
+    message: { id: 'msg_done', model: 'claude-opus-5', stop_reason: 'end_turn', usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 100 } }
+  });
+
+  const { dir, file } = fixture([prior, realAssistant]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 257_936,
+    contextWindow: 1_000_000
+  });
+
+  fs.writeFileSync(file, `${finished}\n${realPrompt}\n`);
+  assert.equal(readSessionTurnEnded(file, { cache: new Map() }), false, 'an oversized prompt still starts a turn');
+
+  // The in-head role is the reliable signal, so a tool input naming another
+  // record type must not change how the record is read.
+  const nestedType = JSON.stringify({
+    parentUuid: 'p3',
+    isSidechain: false,
+    message: {
+      id: 'msg_nested',
+      type: 'message',
+      role: 'assistant',
+      content: [{ type: 'tool_use', input: { type: 'user', text: huge } }],
+      model: 'claude-opus-5',
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 3_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 40_000 }
+    },
+    apiBlockIndex: 0,
+    type: 'assistant',
+    uuid: 'u3',
+    timestamp: '2026-01-01T00:00:02.000Z'
+  });
+  fs.writeFileSync(file, `${nestedType}\n`);
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 43_000,
+    contextWindow: 1_000_000
+  });
+  assert.equal(readSessionTurnEnded(file, { cache: new Map() }), false, 'a tool_use pause is not an end');
+});
+
+test('an oversized assistant record applies usage even when stop_reason is null', (t) => {
+  // The ordinary path applies usage whether or not stop_reason states anything,
+  // because both live on the same assistant record. Claude persists
+  // `stop_reason: null` on real transcripts while still writing valid counters,
+  // and the quoted-value match cannot see an unquoted null. Guarding the usage
+  // read behind that match therefore skipped a real reading on an oversized
+  // record that the same response would have updated at normal size.
+  const huge = 'y'.repeat(300 * 1024);
+  const { readSessionTurnEnded } = require('../../src/shared/providers/claude/sessionMetadata');
+  const nullStop = JSON.stringify({
+    parentUuid: 'p1',
+    isSidechain: false,
+    message: {
+      id: 'msg_null',
+      type: 'message',
+      role: 'assistant',
+      model: 'claude-opus-5',
+      content: [{ type: 'thinking', thinking: huge }],
+      stop_reason: null,
+      usage: { input_tokens: 4_000, cache_creation_input_tokens: 1_000, cache_read_input_tokens: 194_000 }
+    },
+    apiBlockIndex: 0,
+    type: 'assistant',
+    uuid: 'u1',
+    timestamp: '2026-01-01T00:00:00.000Z'
+  });
+  const prior = JSON.stringify({
+    type: 'assistant',
+    message: { id: 'msg_prior', model: 'claude-opus-5', stop_reason: 'end_turn', usage: { input_tokens: 5, cache_creation_input_tokens: 0, cache_read_input_tokens: 51_000 } }
+  });
+  const { dir, file } = fixture([prior, nullStop]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 199_000,
+    contextWindow: 1_000_000
+  });
+
+  // A null stop_reason states nothing about the turn, so the boundary keeps the
+  // previous reading rather than being retired by an absent reason.
+  assert.equal(readSessionTurnEnded(file, { cache: new Map() }), true, 'a null stop_reason is not evidence of an active turn');
+});
+
+test('an oversized record written halfway through usage keeps the previous reading', (t) => {
+  // The reader runs on a transcript being appended to, so it can catch a record
+  // whose `usage` object has only begun. `input_tokens` is written first, and a
+  // cache counter the writer has not reached yet looks exactly like the optional
+  // one a complete response may omit, so a partial object would publish a
+  // fraction of the next request and keep it if the writer never finished.
+  const huge = 'w'.repeat(300 * 1024);
+  const prior = JSON.stringify({
+    type: 'assistant',
+    message: { id: 'msg_prior', model: 'claude-opus-5', stop_reason: 'end_turn', usage: { input_tokens: 5_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 46_005 } }
+  });
+  const halfway = '{"parentUuid":"p1","isSidechain":false,"message":{"id":"msg_big","type":"message","role":"assistant","model":"claude-opus-5","content":[{"type":"thinking","thinking":"'
+    + huge
+    + '"}],"stop_reason":"end_turn","usage":{"input_tokens":4000,';
+  const rest = '"cache_creation_input_tokens":1000,"cache_read_input_tokens":194000,"output_tokens":5}}\n';
+  const { dir, file } = fixture([prior]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cache = new Map();
+
+  // The oversized record is mid-write at EOF with no newline yet.
+  fs.appendFileSync(file, halfway);
+  assert.deepEqual(readSessionContext(file, { cache }), {
+    contextTokens: 51_005,
+    contextWindow: 1_000_000
+  });
+
+  // Only once the usage object closes does the measurement replace it.
+  fs.appendFileSync(file, rest);
+  assert.deepEqual(readSessionContext(file, { cache }), {
+    contextTokens: 199_000,
+    contextWindow: 1_000_000
+  });
+});
+
+test('a null stop_reason leaves the turn state unchanged at either record size', (t) => {
+  // A null or missing stop_reason is a streamed or aborted record whose turn
+  // state is unknown, so it must not retire the prompt it answered. The ordinary
+  // path used to clear that flag regardless of the reason while the oversized
+  // path already held it, making the same record read as finished at normal size
+  // and active once it passed the head budget.
+  const huge = 'v'.repeat(300 * 1024);
+  const { readSessionTurnEnded } = require('../../src/shared/providers/claude/sessionMetadata');
+  const finished = JSON.stringify({
+    type: 'assistant',
+    message: { id: 'msg_done', model: 'claude-opus-5', stop_reason: 'end_turn', usage: { input_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 100 } }
+  });
+  const prompt = JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'keep going' }] } });
+  const usage = { input_tokens: 4_000, cache_creation_input_tokens: 1_000, cache_read_input_tokens: 194_000 };
+  const smallNull = JSON.stringify({
+    type: 'assistant',
+    message: { id: 'msg_null_small', model: 'claude-opus-5', stop_reason: null, usage }
+  });
+  const bigNull = '{"parentUuid":"p2","isSidechain":false,"message":{"id":"msg_null_big","type":"message","role":"assistant","model":"claude-opus-5","content":[{"type":"thinking","thinking":"'
+    + huge
+    + '"}],"stop_reason":null,"usage":' + JSON.stringify(usage) + '},"type":"assistant","uuid":"u2","timestamp":"2026-01-01T00:00:00.000Z"}';
+
+  const small = fixture([finished, prompt, smallNull]);
+  t.after(() => fs.rmSync(small.dir, { recursive: true, force: true }));
+  const big = fixture([finished, prompt, bigNull]);
+  t.after(() => fs.rmSync(big.dir, { recursive: true, force: true }));
+
+  const smallEnded = readSessionTurnEnded(small.file, { cache: new Map() });
+  const bigEnded = readSessionTurnEnded(big.file, { cache: new Map() });
+  assert.equal(smallEnded, false, 'a null stop_reason does not retire the prompt it answered');
+  assert.equal(bigEnded, smallEnded, 'the same record reads the same at either size');
+  assert.deepEqual(readSessionContext(big.file, { cache: new Map() }), {
+    contextTokens: 199_000,
+    contextWindow: 1_000_000
+  });
+});
+
+test('Claude session context distinguishes absent from malformed optional cache counters', (t) => {
+  const assistant = (usage) => JSON.stringify({
+    type: 'assistant',
+    message: {
+      model: 'claude-sonnet-4-5-20250929',
+      stop_reason: 'end_turn',
+      usage
+    }
+  });
+  const { dir, file } = fixture([
+    assistant({ input_tokens: 100_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 20_000 }),
+    assistant({ input_tokens: 1_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 'broken' })
+  ]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 120_000,
+    contextWindow: 200_000
+  });
+
+  fs.writeFileSync(file, `${assistant({
+    input_tokens: 100_000,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 20_000
+  })}\n${assistant({
+    input_tokens: 1_000,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 1.5
+  })}\n`);
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 120_000,
+    contextWindow: 200_000
+  });
+
+  fs.writeFileSync(file, `${assistant({
+    input_tokens: 100_000,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 20_000
+  })}\n${assistant({
+    input_tokens: '1.5',
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0
+  })}\n`);
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 120_000,
+    contextWindow: 200_000
+  });
+
+  const oversizedMalformed = JSON.stringify({
+    type: 'assistant',
+    message: {
+      content: 'x'.repeat(300 * 1024),
+      model: 'claude-sonnet-4-5-20250929',
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 1_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 'broken' }
+    }
+  });
+  fs.writeFileSync(file, `${assistant({
+    input_tokens: 100_000,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 20_000
+  })}\n${oversizedMalformed}\n`);
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 120_000,
+    contextWindow: 200_000
+  });
+
+  fs.writeFileSync(file, `${assistant({ input_tokens: 50_000 })}\n`);
+  assert.deepEqual(readSessionContext(file, { cache: new Map() }), {
+    contextTokens: 50_000,
+    contextWindow: 200_000
+  });
+});
+
 test('Claude session metadata reads the persisted AI title without exposing prompts', (t) => {
   const { dir, file } = fixture([
     JSON.stringify({ type: 'user', message: { content: 'private prompt' } }),

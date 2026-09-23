@@ -38,19 +38,21 @@
     { id: 'opencode', label: 'OpenCode' },
     { id: 'cursor', label: 'Cursor' },
     { id: 'antigravity', label: 'Antigravity' },
+    { id: 'cline', label: 'Cline' },
     { id: 'factory', label: 'Factory Droid' },
     { id: 'kimi', label: 'Kimi' },
     { id: 'grok', label: 'Grok' },
     { id: 'copilot', label: 'GitHub Copilot' },
     { id: 'zed', label: 'Zed' },
     { id: 'commandcode', label: 'Command Code' },
-    { id: 'mimo', label: 'MiMo' },
+    { id: 'mimo', label: 'Xiaomi MiMo' },
     { id: 'zai', label: 'GLM', settingsLabel: 'Z.ai / GLM' },
     { id: 'zaiteam', label: 'GLM Team' },
     { id: 'kiro', label: 'Kiro' },
     { id: 'workbuddy', label: 'WorkBuddy' },
     { id: 'qoder', label: 'Qoder' },
     { id: 'deepseek', label: 'DeepSeek' },
+    { id: 'devin', label: 'Devin' },
     { id: 'openrouter', label: 'OpenRouter' },
     { id: 'minimax', label: 'Minimax' },
     { id: 'volcengine', label: 'Volcengine' },
@@ -69,10 +71,30 @@
   // exceptions explicit here.
   const LIMIT_PROVIDER_BY_CLIENT = Object.freeze({
     droid: 'factory',
-    micode: 'mimo',
     zcode: 'zai',
-    qodercn: 'qoder'
+    qodercn: 'qoder',
+    dsh: 'deepseek'
   });
+
+  const LIMIT_PROVIDER_ID_SET = new Set(LIMIT_PROVIDER_IDS);
+
+  // Which provider a tracked client's tokens belong to, or null when the client
+  // has no Limits side at all. The identity case is part of the answer: most
+  // clients resolve to their own id, and the table above only names the ones
+  // that do not.
+  //
+  // Exported because this question has more than one caller and every caller
+  // that answered it locally got a different answer: the Edge Dock reconstructed
+  // it by calling the seeding function below with a one-client health record,
+  // while the subscription card's usage comparison looked the provider id up in
+  // a client-keyed cost map directly, which silently found nothing for every
+  // provider whose client is named otherwise.
+  function limitProviderForClient(client) {
+    const clientId = String(client || '').trim().toLowerCase();
+    if (!clientId) return null;
+    const provider = LIMIT_PROVIDER_BY_CLIENT[clientId] || clientId;
+    return LIMIT_PROVIDER_ID_SET.has(provider) ? provider : null;
+  }
 
   // These are the only window metrics that cross the shared limits schema.
   const LIMIT_WINDOW_METRICS = Object.freeze(['credits', 'spend']);
@@ -88,8 +110,8 @@
     const detectedProviders = new Set();
     for (const [client, health] of Object.entries(clients)) {
       if (health?.source?.state !== 'detected') continue;
-      const clientId = String(client).trim().toLowerCase();
-      detectedProviders.add(LIMIT_PROVIDER_BY_CLIENT[clientId] || clientId);
+      const provider = limitProviderForClient(client);
+      if (provider) detectedProviders.add(provider);
     }
     return LIMIT_PROVIDER_IDS.filter((provider) => detectedProviders.has(provider));
   }
@@ -100,6 +122,7 @@
     LIMIT_PROVIDER_LABELS,
     LIMIT_WINDOW_METRICS,
     VALID_LIMIT_WINDOW_METRICS,
+    limitProviderForClient,
     limitProvidersForDetectedClients
   };
 });

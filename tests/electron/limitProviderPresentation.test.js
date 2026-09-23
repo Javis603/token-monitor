@@ -7,15 +7,20 @@ const test = require('node:test');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 const compactTokenApi = require('../../src/shared/compactTokens');
+const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
 const limitProviderOrderApi = require('../../src/electron/renderer/limitProviderOrder');
 const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
+const { limitWindowLabel } = require('../../src/shared/limitWindowLabels');
+const { limitWindowText } = require('../../src/shared/limitWindowText');
 
 const {
   antigravityQuotaWindow,
   apiKeyAccountStatus,
   codexAdditionalQuotaDisplayName,
   isCodexLiveAccount,
+  limitBoundaryText,
+  limitDurationText,
   limitProviderDisplayLabel,
   limitProviderCapabilityTags,
   limitProviderCompactWindowLabel,
@@ -23,6 +28,7 @@ const {
   limitProviderCompactWindows,
   limitProviderMainDeviceLabel,
   limitProviderPlanDisplayLabel,
+  limitProviderStatusLabel,
   namedApiProfileStatus,
   limitProviderProvenance,
   limitResetRemainingMs,
@@ -220,6 +226,42 @@ function functionBody(source, name, nextName) {
   return source.slice(start, endLineStart);
 }
 
+// The Limits rows moved to limitWindowsView.js, which the edge dock renders
+// from too, so a provider's markup is built once rather than twice. These read
+// whichever file now holds the function.
+function limitsViewSource() {
+  return readRendererFile('limitWindowsView.js');
+}
+
+function viewBody(name, nextName = '') {
+  const source = limitsViewSource();
+  if (nextName) return functionBody(source, name, nextName);
+  // Without a named terminator the body runs to the next line at the factory's
+  // own indent: the brace that closes it, or the declaration that follows.
+  // Slicing to the export block instead sweeps in whatever factory-scope tables
+  // sit further down, and a test that evals the slice a second time into the same
+  // context then redeclares them.
+  const start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `${name} function should exist`);
+  const rest = source.slice(start);
+  const end = rest.search(/\n {0,2}(?:\}|(?:async )?function |const |let |var )/);
+  assert.notEqual(end, -1, `${name} function should end`);
+  const closing = rest.slice(end).match(/^\n {0,2}\}/);
+  return rest.slice(0, closing ? end + closing[0].length : end);
+}
+
+// A factory-scope table — `const NAME = { … };` — which is where the per-provider
+// policies live now that both surfaces read them.
+function viewTable(name) {
+  const source = limitsViewSource();
+  const start = source.indexOf(`const ${name} = `);
+  assert.notEqual(start, -1, `${name} table should exist`);
+  const rest = source.slice(start);
+  const end = rest.indexOf('\n  };');
+  assert.notEqual(end, -1, `${name} table should close`);
+  return rest.slice(0, end + '\n  };'.length);
+}
+
 function runLocalProviderStatus(source, state, providerName) {
   const localDeviceHelper = functionBody(source, 'localDeviceLimitsProviders', 'localProviderStatus');
   const localProviderHelper = functionBody(source, 'localProviderStatus', 'deepseekAccountLinked');
@@ -238,9 +280,9 @@ function runLocalLiveCodexProvider(source, state) {
 }
 
 function runProviderSpendNode(source, balance) {
-  const optionalNumber = functionBody(source, 'optionalFiniteNumber', 'formatLimitWindowValue');
-  const spendEntries = functionBody(source, 'providerSpendEntries', 'limitNoteRowNode');
-  const spendNode = functionBody(source, 'providerSpendNode', 'thirdPartySpendNode');
+  const optionalNumber = functionBody(source, 'optionalFiniteNumber', 'formatHomeLimitWindowValue');
+  const spendEntries = viewBody('providerSpendEntries', 'limitNoteRowNode');
+  const spendNode = viewBody('providerSpendNode', 'thirdPartySpendNode');
   const context = {
     formatMoney: (value, currency) => `${currency} ${Number(value).toFixed(2)}`,
     formatBalanceSpendAmount: (value, balance) => `${balance?.currency || ''} ${Number(value).toFixed(2)}`.trim(),
@@ -254,26 +296,44 @@ function runProviderSpendNode(source, balance) {
   return JSON.parse(JSON.stringify(context.result));
 }
 
+// Window wording now lives in src/shared/limitWindowText.js, painted by both
+// the Limits view and the edge dock, so these assert the module's output rather
+// than the shape of the renderer's source.
+function windowText(providerId, window, options = {}) {
+  return limitWindowText({ provider: providerId }, window, {
+    showLimitUsed: options.showLimitUsed === true,
+    formatCompact: (value) => compactTokenApi.formatCompactTokens(
+      value,
+      options.unitSystem || 'western',
+      options.locale || 'en'
+    )
+  });
+}
+
 function runCodexAdditionalWindowLabel(window, siblingWindows) {
-  const app = readRendererFile('app.js');
-  const formatter = functionBody(app, 'codexAdditionalWindowLabel', 'antigravityQuotaGroups');
+  const formatter = viewBody('codexAdditionalWindowLabel', 'antigravityQuotaGroups');
   return vm.runInNewContext(
     `${formatter}\ncodexAdditionalWindowLabel(${JSON.stringify(window)}, ${JSON.stringify(siblingWindows)});`,
-    { limitProviderPresentationApi: { codexAdditionalQuotaDisplayName } }
+    { presentationApi: { codexAdditionalQuotaDisplayName } }
   );
 }
 
 test('Cursor limits render every normalized quota and format on-demand spend explicitly', () => {
-  const app = readRendererFile('app.js');
-  const spendValue = functionBody(app, 'formatCursorSpendValue', 'formatBalanceAmount');
-  const windows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const windows = viewBody('renderProviderWindows');
 
-  assert.match(spendValue, /formatMoney\(used, window\?\.currency \|\| 'USD'\)/);
-  assert.match(spendValue, /limit !== null && limit > 0/);
   assert.match(windows, /for \(const quotaWindow of provider\.windows \|\| \[\]\)/);
-  assert.match(windows, /quotaWindow\.metric === 'spend'/);
-  assert.match(windows, /formatCursorSpendValue\(quotaWindow\)/);
   assert.doesNotMatch(windows, /visibleWindows = billingWindows\.length > 0 \? billingWindows : \[null\]/);
+
+  // A spend meter's headline is the money, keyed on the wire metric rather than
+  // on the provider id, so it reads the same wherever the window is painted.
+  const capped = { kind: 'billing', metric: 'spend', used: 12.4, limit: 20, currency: 'USD' };
+  const uncapped = { kind: 'billing', metric: 'spend', used: 12.4, currency: 'USD' };
+  assert.equal(windowText('cursor', capped).value, '$12.40 / $20.00');
+  assert.equal(windowText('cursor', uncapped).value, '$12.40 spent');
+  // Same window, same words, whichever provider reported it.
+  assert.deepEqual(windowText('claude', uncapped), windowText('cursor', uncapped));
+  // A quota window without the marker keeps the percentage headline.
+  assert.equal(windowText('cursor', { kind: 'billing', label: 'Requests', usedPercent: 40 }).value, null);
 });
 
 function runHomeLimitModule(rows, boundaryLabels = {}) {
@@ -310,21 +370,26 @@ function runHomeLimitModule(rows, boundaryLabels = {}) {
 
 test('Limits and Home distinguish resets, expiries, and simultaneous boundaries', () => {
   const app = readRendererFile('app.js');
-  const formatBoundary = functionBody(app, 'formatLimitBoundary', 'formatDuration');
-  const formatDuration = functionBody(app, 'formatDuration', 'formatActiveDuration');
-  const limitWindow = functionBody(app, 'limitWindowNode', 'providersByLimitProviderId');
+  const limitWindow = viewBody('limitWindowNode', 'renderProviderWindows');
   const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
 
-  const labels = vm.runInNewContext(
-    `${formatBoundary}\n${formatDuration}\n[\n`
-      + `formatLimitBoundary({ resetsAt: 'future' }),\n`
-      + `formatLimitBoundary({ resetsAt: 'future', boundaryKind: 'expiry' }),\n`
-      + `formatLimitBoundary({ resetsAt: 'future', boundaryKind: 'mixed' }),\n`
-      + `formatLimitBoundary({ resetsAt: 'now', boundaryKind: 'expiry' }),\n`
-      + `formatLimitBoundary({ resetsAt: 'now', boundaryKind: 'mixed' })\n]`,
-    { limitProviderPresentationApi: { limitResetRemainingMs: (value) => value === 'now' ? 0 : 60 * 60 * 1000 } }
+  // The wording lives beside the reset arithmetic it reads, so the Limits page
+  // and the edge dock render the same line from the same function.
+  const at = (ms) => new Date(Date.now() + ms).toISOString();
+  const future = at(60 * 60 * 1000 + 2000);
+  const now = at(-1000);
+  assert.deepEqual(
+    [
+      limitBoundaryText({ resetsAt: future }),
+      limitBoundaryText({ resetsAt: future, boundaryKind: 'expiry' }),
+      limitBoundaryText({ resetsAt: future, boundaryKind: 'mixed' }),
+      limitBoundaryText({ resetsAt: now, boundaryKind: 'expiry' }),
+      limitBoundaryText({ resetsAt: now, boundaryKind: 'mixed' })
+    ],
+    ['Reset 1h 0m', 'Expires 1h 0m', 'Changes in 1h 0m', 'Expires now', 'Changes now']
   );
-  assert.deepEqual(Array.from(labels), ['Reset 1h 0m', 'Expires 1h 0m', 'Changes in 1h 0m', 'Expires now', 'Changes now']);
+  assert.equal(limitBoundaryText({ resetsAt: '' }), '');
+  assert.match(app, /const formatLimitBoundary = limitProviderPresentationApi\.limitBoundaryText;/);
   assert.match(limitWindow, /window\?\.resetsAt\s*\? formatLimitBoundary\(window\)/);
   assert.match(homeLimits, /window\.resetsAt\s*\?\s*formatLimitBoundary\(window\)/);
   assert.doesNotMatch(app, /noActiveLimitWindow|formatResetDuration/);
@@ -685,19 +750,31 @@ test('capability tags are settings-only and do not alter the main Limits panel',
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  const renderHead = functionBody(app, 'renderLimitProviderHead', 'renderProviderWindows');
-  const renderMeta = functionBody(app, 'limitProviderMeta', 'limitProviderPlan');
+  const renderHead = viewBody('renderLimitProviderHead', 'codexResetForecastDate');
+  const renderMeta = viewBody('limitProviderMeta', 'limitProviderPlan');
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'onToolTrackingToggle');
 
   assert.doesNotMatch(renderLimits, /limitProviderCapabilityTags|limit-status|limitProviderStatus/);
-  assert.match(renderHead, /const provenance = limitProviderProvenance\(provider\);/);
+  // The device context is the host's to supply, and the view asks for it every
+  // time it paints a row: calling the module context-free is how the page lost
+  // the "· imac-m1" half of this line when the row moved in here, and a dep the
+  // host may omit is how the dock card never had it at all.
+  assert.match(
+    renderHead,
+    /const provenance = presentationApi\.limitProviderProvenance\(provider, provenanceContext\(\)\);/
+  );
+  assert.doesNotMatch(renderHead, /limitProviderProvenance\(provider\)/);
   assert.match(renderHead, /limitProviderMeta\(provider, provenance\)/);
-  assert.match(renderMeta, /limitProviderMainDeviceLabel\(provenance, \{ showSource: Boolean\(state\.settings\?\.showLimitSource\) \}\)/);
+  assert.match(renderMeta, /presentationApi\.limitProviderMainDeviceLabel\(provenance, \{ showSource: Boolean\(settings\(\)\?\.showLimitSource\) \}\)/);
   assert.doesNotMatch(renderLimits, /limitProviderSettingsTags/);
   // The head still carries exactly the title block and the plan label. The plan
   // is wrapped so hovering it can reveal manual subscription details, which adds
-  // no tag and no status of its own.
-  assert.match(renderHead, /head\.append\(titleBlock, decoratePlanWithSubscription\(plan, provider\)\);/);
+  // no tag and no status of its own — and the wrapping is the view's own now, so
+  // both surfaces get it and neither can supply a different answer.
+  assert.match(
+    renderHead,
+    /head\.append\(titleBlock, decoratePlanWithSubscription\(plan, provider, !options\.accountRow\)\);/
+  );
   assert.match(renderSettings, /limitProviderSettingsTags\(provider, provenance/);
   assert.doesNotMatch(styles, /\.limit-status\b/);
 });
@@ -706,12 +783,23 @@ test('Codex limits render as one provider group with account subrows', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  const renderGroup = functionBody(app, 'renderCodexAccountGroup', 'renderClaudeAccountGroup');
+  const renderGroup = viewBody('renderLimitProviderGroup');
+  const policy = viewTable('LIMIT_ACCOUNT_ROW_POLICIES');
+  const groupPolicy = viewTable('LIMIT_GROUP_POLICIES');
 
   assert.match(renderLimits, /providersByLimitProviderId\(state\.stats\?\.limits\?\.providers \|\| \[\]\)/);
-  assert.match(renderLimits, /renderCodexAccountGroup\(/);
-  assert.match(renderGroup, /planText: t\('settings\.codex\.nAccounts', \{ count: providers\.length \}\)/);
+  // The dispatch is by account count, not by provider: which providers have a
+  // group is now the view's policy, so the page cannot forget one and the dock
+  // card cannot render a bare row for the same provider.
+  assert.match(renderLimits, /renderLimitProviderGroup\(id, label, visibleProviders, color\)/);
+  assert.doesNotMatch(renderLimits, /renderCodexAccountGroup|renderClaudeAccountGroup/);
   assert.doesNotMatch(renderLimits, /new Map\(\(state\.stats\?\.limits\?\.providers \|\| \[\]\)\.map\(\(provider\) => \[provider\.provider, provider\]\)\)/);
+  assert.match(policy, /codex: \(provider, color, \{ grouped \}\) => \(\{/);
+  assert.match(policy, /accountTitle: true,\s*allowSystemSwitch: true,\s*\.\.\.\(grouped \? \{ showActiveBadge: true, showIcon: false \} : \{\}\)/);
+  // The forecast describes the account set, so it is appended once below the
+  // rows rather than on each of them.
+  assert.match(groupPolicy, /codex: \(\) => \(\{ forecastOnGroup: true \}\)/);
+  assert.match(renderGroup, /if \(forecastOnGroup\) appendCodexResetForecast\(row\);/);
   assert.match(styles, /\.limit-account-list\s*\{/);
   assert.match(styles, /\.limit-account-row\s*\{/);
 });
@@ -719,24 +807,33 @@ test('Codex limits render as one provider group with account subrows', () => {
 test('Claude limits render as one provider group with account subrows', () => {
   const app = readRendererFile('app.js');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  const renderGroup = functionBody(app, 'renderClaudeAccountGroup', 'mimoSettingsAccountTitle');
+  const renderGroup = viewBody('renderLimitProviderGroup');
+  const policy = viewTable('LIMIT_ACCOUNT_ROW_POLICIES');
 
-  assert.match(renderLimits, /renderClaudeAccountGroup\(/);
-  assert.match(renderGroup, /limitAccountTitle\('claude', provider, index, providers\)/);
-  assert.match(renderGroup, /planText: t\('settings\.claude\.nAccounts', \{ count: providers\.length \}\)/);
-  assert.match(renderGroup, /accountRow: true/);
-  assert.match(renderGroup, /showIcon: false/);
+  assert.match(renderLimits, /renderLimitProviderGroup\(id, label, visibleProviders, color\)/);
+  // The row's title is also the name its switch control offers, so an account is
+  // named one way whichever surface renders the row — the card's projection has
+  // no settings behind it and cannot resolve a name of its own.
+  assert.match(renderGroup, /const title = limitAccountTitle\(providerId, provider, index, providers\);/);
+  // The mark is dropped only for a group row. Standing alone the row is the card's
+  // whole identity, and that is the shape the Edge Dock card renders.
+  assert.match(policy, /claude: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
+  assert.match(renderGroup, /\{ accountRow: true, accountLabel: title, \.\.\.account\.options \}/);
 });
 
 test('every multi-account Limits group uses its provider-localized account count', () => {
-  const app = readRendererFile('app.js');
+  const view = readRendererFile('limitWindowsView.js');
+  const i18n = readRendererFile('i18n.js');
+  // One derivation instead of one string per wrapper: a provider that has a key
+  // gets its own phrase, and one that does not renders no count rather than the
+  // key itself.
+  assert.match(view, /const key = GROUP_COUNT_KEYS\[providerId\] \|\| `settings\.\$\{providerId\}\.nAccounts`;/);
+  assert.match(view, /return text === key \? '' : text;/);
+  assert.match(view, /planText: limitGroupCountText\(providerId, providers\.length\)/);
+  assert.doesNotMatch(view, /settings\.(claude|codex|mimo|opencode|openrouter|thirdparty)\.nAccounts/);
   for (const provider of ['claude', 'codex', 'mimo', 'opencode', 'openrouter', 'thirdparty']) {
-    assert.match(
-      app,
-      new RegExp(`settings\\.${provider}\\.nAccounts`)
-    );
+    assert.match(i18n, new RegExp(`'settings\\.${provider}\\.nAccounts'`));
   }
-  assert.doesNotMatch(app, /settings\.limits\.nAccounts|accountCountText/);
 });
 
 test('tray primary-limit modes use the shared provider-aware resolver', () => {
@@ -901,18 +998,16 @@ test('Grok renders its single Monthly billing window full-width instead of an em
   // Grok only exposes a billing window. The default render branch draws
   // session+weekly, which would leave Grok with no visible bar. A dedicated
   // grok branch must surface the billing window as a wide row.
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'grok'/);
   assert.match(renderProviderWindows, /windowForKind\(provider, 'billing'\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\(monthly\.label \|\| 'Monthly', monthly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, monthly\), monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /limit-window-wide/);
 });
 
 test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with a Limits icon', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
   const css = readRendererFile('styles.css');
 
   assert.match(renderProviderWindows, /provider\.provider === 'zed'/);
@@ -923,7 +1018,7 @@ test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with
   // value: a valueOverride also disables the showLimitUsed flip for the row.
   assert.match(
     renderProviderWindows,
-    /limitWindowNode\(\s*billing\?\.label \|\| 'Token Spend',\s*billing,\s*color,\s*0\.95,\s*null,\s*formatZedBillingDetail\(billing\)\s*\)/
+    /limitWindowNode\(\s*billing\?\.label \|\| 'Token Spend',\s*billing,\s*color,\s*0\.95,\s*null,\s*providerWindowText\(provider, billing\)\.detail\s*\)/
   );
   assert.doesNotMatch(renderProviderWindows, /settings\.subscriptions\.renewsOn|renewalDetail/);
   assert.doesNotMatch(renderProviderWindows, /zed\.billing-cycle|zed\.overdue-invoices/);
@@ -931,20 +1026,10 @@ test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with
 });
 
 test('Zed details follow showLimitUsed: counts for Edit Predictions, money for Token Spend', () => {
-  const app = readRendererFile('app.js');
-  const formatter = functionBody(app, 'formatZedBillingDetail', 'formatBalanceAmount');
-  const limitCount = functionBody(app, 'formatLimitCount', 'formatCommandcodeCreditsDetail');
-  const renderDetail = (window, showLimitUsed = false) => vm.runInNewContext(
-    `${formatter}\n${limitCount}\nformatZedBillingDetail(${JSON.stringify(window)});`,
-    {
-      state: { settings: { showLimitUsed } },
-      optionalFiniteNumber: (value) => Number.isFinite(Number(value)) ? Number(value) : null,
-      formatMoney: (value, currency) => `${currency === 'USD' ? '$' : `${currency} `}${Number(value).toFixed(2)}`
-    }
-  );
+  const renderDetail = (window, showLimitUsed = false) => windowText('zed', window, { showLimitUsed }).detail;
 
-  const editPredictions = { limitId: 'zed.edit-predictions', used: 500, limit: 2000 };
-  const tokenSpend = { limitId: 'zed.token-spend', used: 2.5, limit: 10, currency: 'USD' };
+  const editPredictions = { kind: 'billing', limitId: 'zed.edit-predictions', used: 500, limit: 2000 };
+  const tokenSpend = { kind: 'billing', limitId: 'zed.token-spend', used: 2.5, limit: 10, currency: 'USD' };
 
   // Quota mode: the detail mirrors the bar, which fills with what is left.
   assert.equal(renderDetail(editPredictions), '1500/2000');
@@ -952,7 +1037,7 @@ test('Zed details follow showLimitUsed: counts for Edit Predictions, money for T
   assert.equal(renderDetail(editPredictions, true), '500/2000');
   assert.equal(renderDetail(tokenSpend, true), '$2.50 / $10.00');
   // Unlimited Edit Predictions carry no numbers; the headline says it instead.
-  assert.equal(renderDetail({ limitId: 'zed.edit-predictions', detail: 'Unlimited' }), '');
+  assert.equal(renderDetail({ kind: 'billing', limitId: 'zed.edit-predictions', detail: 'Unlimited' }), '');
 });
 
 test('Zed compact windows label unlimited Edit Predictions without a fake reset', () => {
@@ -978,9 +1063,8 @@ test('Zed compact windows label unlimited Edit Predictions without a fake reset'
 });
 
 test('WorkBuddy renders unlimited enterprise credits without requiring a numeric balance', () => {
-  const app = readRendererFile('app.js');
-  const valueFunction = functionBody(app, 'creditsBalanceValue', 'mimoTokenPlanWindowFromBalance');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const valueFunction = viewBody('creditsBalanceValue', 'mimoTokenPlanWindowFromBalance');
+  const renderProviderWindows = viewBody('renderProviderWindows');
   const value = vm.runInNewContext(
     `${valueFunction}\ncreditsBalanceValue({ balance: { amount: null, currency: 'CREDITS' } }, { detail: 'unlimited', remaining: null });`,
     {
@@ -1005,12 +1089,11 @@ test('WorkBuddy renders unlimited enterprise credits without requiring a numeric
 });
 
 test('Antigravity groups returned quota windows under dynamic model-family headings', () => {
-  const app = readRendererFile('app.js');
-  const quotaGroups = functionBody(app, 'antigravityQuotaGroups', 'formatLimitAmount');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const quotaGroups = viewBody('antigravityQuotaGroups', 'formatLimitAmount');
+  const renderProviderWindows = viewBody('renderProviderWindows');
   const css = readRendererFile('styles.css');
 
-  const context = { limitProviderPresentationApi: { antigravityQuotaWindow } };
+  const context = { presentationApi: { antigravityQuotaWindow } };
   const grouped = vm.runInNewContext(`${quotaGroups}\nantigravityQuotaGroups({ windows: [
     { kind: 'session', label: 'Gemini 5-hour' },
     { kind: 'weekly', label: 'Gemini weekly' },
@@ -1037,7 +1120,7 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
   ] });`, context);
   assert.deepEqual(JSON.parse(JSON.stringify(legacy)), []);
 
-  assert.match(quotaGroups, /limitProviderPresentationApi\.antigravityQuotaWindow\(window\)/);
+  assert.match(quotaGroups, /presentationApi\.antigravityQuotaWindow\(window\)/);
   assert.match(quotaGroups, /groups\.set\(entry\.groupLabel, \[\]\)/);
   assert.match(quotaGroups, /entries\.some\(\(entry\) => entry === null\)/);
   assert.match(renderProviderWindows, /provider\.provider === 'antigravity'/);
@@ -1051,30 +1134,36 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
 });
 
 test('Qoder renders its single Credits billing window full-width', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'qoder'/);
   assert.match(renderProviderWindows, /const credits = windowForKind\(provider, 'billing'\);/);
-  assert.match(renderProviderWindows, /formatLimitCount\(credits, Boolean\(state\.settings\?\.showLimitUsed\)\)/);
+  assert.match(renderProviderWindows, /providerWindowText\(provider, credits\)\.detail/);
   assert.match(renderProviderWindows, /limit-window-wide/);
+
+  // Raw units under the bar, following the display mode.
+  const credits = { kind: 'billing', label: 'Credits', used: 120, limit: 500 };
+  assert.equal(windowText('qoder', credits).detail, '380/500');
+  assert.equal(windowText('qoder', credits, { showLimitUsed: true }).detail, '120/500');
 });
 
 test('Kimi renders 5-hour and Weekly above one full-width Monthly window', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'kimi'/);
   assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
   assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
   assert.match(renderProviderWindows, /const monthly = windowForKind\(provider, 'billing'\);/);
-  assert.match(renderProviderWindows, /monthly\.detail \|\| ''/);
+  assert.match(renderProviderWindows, /providerWindowText\(provider, monthly\)\.detail/);
+  // Kimi is one of only two providers whose window `detail` is shown under the
+  // bar; for everyone else the field serves another purpose and stays hidden.
+  assert.equal(windowText('kimi', { kind: 'billing', detail: 'Kimi 40% · Code 60%' }).detail, 'Kimi 40% · Code 60%');
+  assert.equal(windowText('copilot', { kind: 'billing', detail: 'Unlimited' }).detail, '');
   assert.match(renderProviderWindows, /node\.classList\.add\('limit-window-wide'\);/);
 });
 
 test('Command Code renders 5-hour and Weekly above full-width credit windows', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'commandcode'/);
   assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
@@ -1082,46 +1171,46 @@ test('Command Code renders 5-hour and Weekly above full-width credit windows', (
   // The monthly grant and any rollover top-up are both billing windows, so the
   // branch loops rather than picking one.
   assert.match(renderProviderWindows, /for \(const credits of windowsForKind\(provider, 'billing'\)\)/);
-  assert.match(renderProviderWindows, /formatCommandcodeCreditsDetail\(credits\)/);
+  assert.match(renderProviderWindows, /providerWindowText\(provider, credits\)\.detail/);
   assert.match(renderProviderWindows, /if \(credits\.showMeter === false\) node\.classList\.add\('limit-window-no-reset'\);/);
 
-  // Money, not raw credit counts: the detail under the bar is currency-formatted.
-  const detail = functionBody(app, 'formatCommandcodeCreditsDetail', 'formatKiroOverageValue');
-  assert.match(detail, /formatMoney\(value, window\?\.currency\)/);
-  assert.match(detail, /formatMoney\(limit, window\?\.currency\)/);
-  assert.match(detail, /state\.settings\?\.showLimitUsed/);
+  // Money, not raw credit counts, and the percentage keeps the headline: the
+  // grant's bar is a percentage, so replacing the headline with the amount
+  // would leave the bar and its own label disagreeing.
+  const grant = { kind: 'billing', metric: 'credits', label: 'Monthly', remaining: 47.42, limit: 70, currency: 'USD' };
+  assert.deepEqual(windowText('commandcode', grant), { value: null, detail: '$47.42 / $70.00', percentLeads: true });
+  assert.equal(windowText('commandcode', grant, { showLimitUsed: true }).detail, '$22.58 / $70.00');
+  // A top-up with no published allowance has no denominator and so no detail.
+  assert.equal(windowText('commandcode', { kind: 'billing', metric: 'credits', label: 'Top-up', remaining: 5, currency: 'USD' }).detail, '');
 });
 
 test('Ollama renders Session and Weekly usage windows', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
   assert.match(renderProviderWindows, /provider\.provider === 'ollama'/);
   assert.match(renderProviderWindows, /windowForKind\(provider, 'session'\)/);
   assert.match(renderProviderWindows, /windowForKind\(provider, 'weekly'\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\('Session', session/);
-  assert.match(renderProviderWindows, /limitWindowNode\('Weekly', weekly/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, session\), session/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, weekly\), weekly/);
 });
 
 test('Volcengine renders quota windows as paired rows with an odd final window full-width', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'volcengine'/);
   assert.match(renderProviderWindows, /const session = windowForKind\(provider, 'session'\);/);
   assert.match(renderProviderWindows, /const daily = windowForKind\(provider, 'daily'\);/);
   assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
   assert.match(renderProviderWindows, /const monthly = windowForKind\(provider, 'billing'\);/);
-  assert.match(renderProviderWindows, /limitWindowNode\(session\.label \|\| '5-hour', session, color, 0\.95\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\('Daily', daily, color, 0\.78\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\('Weekly', weekly, color, 0\.68\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\('Monthly', monthly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, session\), session, color, 0\.95\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, daily\), daily, color, 0\.78\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, weekly\), weekly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, monthly\), monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /if \(nodes\.length % 2 === 1\) nodes\.at\(-1\)\.classList\.add\('limit-window-wide'\)/);
   assert.match(renderProviderWindows, /windows\.append\(\.\.\.nodes\)/);
 });
 
 test('Z.ai and Team keep all billing windows and render MCP full width after paired quotas', () => {
-  const app = readRendererFile('app.js');
-  const render = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const render = viewBody('renderProviderWindows');
   const node = () => ({ children: [], classes: new Set(),
     classList: { add(...values) { values.forEach(value => this.owner.classes.add(value)); } },
     append(...children) { this.children.push(...children); } });
@@ -1132,6 +1221,8 @@ test('Z.ai and Team keep all billing windows and render MCP full width after pai
       windowForKind: (p, kind) => p.windows.find(w => w.kind === kind),
       windowsForKind: (p, kind) => p.windows.filter(w => w.kind === kind),
       limitWindowNode: (label, window, _color, _tone, _value, detail) => Object.assign(makeNode(), { label, window, detail }),
+      providerWindowLabel: (p, window, fallback = '') => limitWindowLabel(p?.provider, window, fallback),
+      providerWindowText: (p, window) => limitWindowText(p, window, { showLimitUsed: false }),
       provider: { provider, windows: [
         { kind: 'weekly', label: 'Weekly' },
         { kind: 'billing', label: 'MCP' },
@@ -1156,31 +1247,88 @@ test('Z.ai and Team keep all billing windows and render MCP full width after pai
   }
 });
 
+// The Zen balance now ships as a `credits` window as well as the provider-level
+// `balanceUsd`, so every surface can find it. On a Zen-only account that window
+// is the only billing-kind window there is, which is exactly where picking "the
+// billing window" by kind would meter prepaid money as a monthly grant.
+test('OpenCode reads the Zen balance from its credits window without metering it as Monthly', () => {
+  const render = viewBody('renderProviderWindows');
+  const makeNode = () => {
+    const node = {
+      children: [],
+      classes: new Set(),
+      classList: { add(...values) { values.forEach((value) => node.classes.add(value)); } },
+      append(...children) { node.children.push(...children); }
+    };
+    return node;
+  };
+  const context = {
+    document: { createElement: makeNode },
+    windowForKind: (p, kind) => p.windows.find((w) => w.kind === kind) || null,
+    windowsForKind: (p, kind) => p.windows.filter((w) => w.kind === kind),
+    isCreditsWindow: (w) => w?.metric === 'credits',
+    creditsAmount: (_p, w) => (typeof w?.remaining === 'number' ? w.remaining : null),
+    optionalFiniteNumber: (value) => (Number.isFinite(Number(value)) && value !== null && value !== '' ? Number(value) : null),
+    formatLimitAmount: (value) => `$${Number(value).toFixed(2)}`,
+    providerWindowLabel: (p, window, fallback = '') => limitWindowLabel(p?.provider, window, fallback),
+    limitWindowNode: (label, window, _color, _tone, value) => Object.assign(makeNode(), { label, window, value })
+  };
+  const balanceWindow = { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 8.5, currency: 'USD', showMeter: false };
+
+  // Zen only: the balance must be the Balance row, and nothing may claim Monthly.
+  context.provider = { provider: 'opencode', windows: [balanceWindow] };
+  const zenOnly = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  assert.deepEqual(Array.from(zenOnly.children, (n) => n.label), ['Balance']);
+  assert.equal(zenOnly.children[0].value, '$8.50');
+  assert.equal(zenOnly.children[0].window.showMeter, false);
+
+  // Go + Zen: the grant keeps Monthly, the balance still reads off its window.
+  context.provider = { provider: 'opencode', windows: [
+    { kind: 'session', usedPercent: 25 },
+    { kind: 'billing', used: 21, limit: 60 },
+    balanceWindow
+  ] };
+  const both = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  assert.deepEqual(Array.from(both.children, (n) => n.label), ['Session', 'Monthly', 'Balance']);
+  assert.equal(both.children[1].window.limit, 60, 'Monthly is the Go grant, not the balance');
+  assert.equal(both.children[2].value, '$8.50');
+
+  // A record synced from a device on an older build carries only balanceUsd.
+  context.provider = { provider: 'opencode', windows: [{ kind: 'session', usedPercent: 25 }], balanceUsd: 3.25 };
+  const legacy = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  assert.deepEqual(Array.from(legacy.children, (n) => n.label), ['Session', 'Balance']);
+  assert.equal(legacy.children[1].value, '$3.25');
+
+  // A pure-Go account has no balance at all and must not grow a phantom row.
+  context.provider = { provider: 'opencode', windows: [{ kind: 'session', usedPercent: 25 }] };
+  const goOnly = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  assert.deepEqual(Array.from(goOnly.children, (n) => n.label), ['Session']);
+});
+
 test('Copilot renders monthly Premium and Chat quotas as billing windows', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'copilot'/);
   assert.match(renderProviderWindows, /const billingWindows = windowsForKind\(provider, 'billing'\);/);
   assert.match(renderProviderWindows, /for \(const billing of billingWindows\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\(billing\?\.label \|\| 'Monthly', billing, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, billing\), billing, color, 0\.68\)/);
 });
 
 test('Codex renders Monthly quota and manual reset credits below rolling windows', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
-  const codexAdditionalWindowLabel = functionBody(app, 'codexAdditionalWindowLabel', 'antigravityQuotaGroups');
-  const resetCreditsValue = functionBody(app, 'formatCodexResetCreditsValue', 'codexResetCreditExpirationDates');
-  const resetCreditExpirationDates = functionBody(app, 'codexResetCreditExpirationDates', 'codexResetCreditExpiryLabel');
-  const resetCreditExpiryLabel = functionBody(app, 'codexResetCreditExpiryLabel', 'codexResetCreditExpiryDetailLabel');
-  const resetCreditExpiryDetailLabel = functionBody(app, 'codexResetCreditExpiryDetailLabel', 'expiryDateLabel');
-  const resetCreditExpiryDateLabel = functionBody(app, 'expiryDateLabel', 'limitDetailTooltipShouldHoldRender');
+  const renderProviderWindows = viewBody('renderProviderWindows');
+  const codexAdditionalWindowLabel = viewBody('codexAdditionalWindowLabel', 'antigravityQuotaGroups');
+  const resetCreditsValue = viewBody('formatCodexResetCreditsValue', 'codexResetCreditExpirationDates');
+  const resetCreditExpirationDates = viewBody('codexResetCreditExpirationDates', 'codexResetCreditExpiryLabel');
+  const resetCreditExpiryLabel = viewBody('codexResetCreditExpiryLabel', 'codexResetCreditExpiryDetailLabel');
+  const resetCreditExpiryDetailLabel = viewBody('codexResetCreditExpiryDetailLabel', 'expiryDateLabel');
+  const resetCreditExpiryDateLabel = viewBody('expiryDateLabel', 'codexResetCreditsNode');
   // Sliced to the next function, not to `renderLimitProviderHead`: the wider slice
   // swept in the shared tooltip builder, so these assertions passed on code that
   // isn't Codex's.
-  const codexResetCreditsNode = functionBody(app, 'codexResetCreditsNode', 'providerSpendEntries');
+  const codexResetCreditsNode = viewBody('codexResetCreditsNode', 'providerSpendEntries');
   const limitDetailTooltipShouldHoldRender = functionBody(app, 'limitDetailTooltipShouldHoldRender', 'flushPendingLimitDetailTooltipRender');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
 
@@ -1190,14 +1338,16 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(renderProviderWindows, /const monthly = codexCanonicalWindow\(provider, 'billing'\);/);
   assert.match(renderProviderWindows, /if \(!weekly && !monthly\) sessionNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(renderProviderWindows, /if \(!session && !monthly\) weeklyNode\.classList\.add\('limit-window-wide'\);/);
-  assert.match(renderProviderWindows, /limitWindowNode\(monthly\.label \|\| 'Monthly', monthly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, monthly\), monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /monthlyNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(main, /showCodexAdditionalLimits: true/);
   assert.match(main, /showCodexAdditionalLimits = parseBoolean\(merged\.showCodexAdditionalLimits, true\)/);
   assert.match(main, /showCodexAdditionalLimits: parseBoolean\(patch\.showCodexAdditionalLimits \?\? settings\.showCodexAdditionalLimits, true\)/);
-  assert.match(main, /showCodexAdditionalLimits: settings\?\.showCodexAdditionalLimits !== false/);
+  // The edge dock builds the same rows from the same view, so the preference
+  // reaches that renderer through its appearance projection.
+  assert.match(main, /showCodexAdditionalLimits: source\.showCodexAdditionalLimits,/);
   assert.match(app, /key: 'showCodexAdditionalLimits',[\s\S]*?defaultValue: true/);
-  assert.match(renderProviderWindows, /state\.settings\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
+  assert.match(renderProviderWindows, /settings\(\)\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
   assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);
   assert.match(renderProviderWindows, /additionalNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(codexAdditionalWindowLabel, /if \(!name\) return period \|\| 'Additional limit';/);
@@ -1251,7 +1401,10 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(styles, /\.limit-reset-credits-timeline\s*\{[^}]*opacity: 0\.66;/s);
   assert.match(styles, /\.limit-reset-credits-time\s*\{[^}]*gap: 3px;/s);
   assert.match(styles, /\.limit-detail-tooltip-wrap\s*\{[^}]*position: relative;/s);
-  assert.match(styles, /\.limit-detail-tooltip\s*\{[^}]*position: absolute;[^}]*width: max-content;[^}]*grid-template-columns: max-content max-content;/s);
+  // A popover, not an absolutely positioned box: the top layer is what lets the
+  // tooltip escape the panel it is drawn inside, and `inset: auto` is what keeps
+  // the UA's viewport stretch from coming with it.
+  assert.match(styles, /\.limit-detail-tooltip\s*\{[^}]*position: fixed;[^}]*inset: auto;[^}]*width: max-content;[^}]*grid-template-columns: max-content max-content;/s);
   assert.match(styles, /\.limit-detail-tooltip-row\s*\{[^}]*display: contents;/s);
   assert.match(styles, /\.limit-detail-tooltip-row span:last-child\s*\{[^}]*text-align: right;/s);
   assert.doesNotMatch(styles, /\.limit-reset-credits-clock/);
@@ -1271,10 +1424,9 @@ test('Codex additional quota labels omit a redundant period unless one name has 
 });
 
 function runClaudePrepaidGrantRows(app, tranches, currency, now) {
-  const optionalNumber = functionBody(app, 'optionalFiniteNumber', 'formatLimitWindowValue');
-  const duration = functionBody(app, 'formatDuration', 'formatActiveDuration');
-  const dateLabel = functionBody(app, 'expiryDateLabel', 'limitDetailTooltipShouldHoldRender');
-  const grantRows = functionBody(app, 'claudePrepaidGrantRows', 'claudeBalanceNode');
+  const optionalNumber = functionBody(app, 'optionalFiniteNumber', 'formatHomeLimitWindowValue');
+  const dateLabel = viewBody('expiryDateLabel', 'codexResetCreditsNode');
+  const grantRows = viewBody('claudePrepaidGrantRows', 'claudeBalanceNode');
   const context = {
     Date: class FrozenDate extends Date {
       constructor(...args) {
@@ -1287,10 +1439,11 @@ function runClaudePrepaidGrantRows(app, tranches, currency, now) {
     },
     Intl,
     currentLocale: () => 'en-US',
-    formatMoney: (value, code) => `${code === 'USD' ? '$' : `${code} `}${Number(value).toFixed(2)}`
+    formatMoney: (value, code) => `${code === 'USD' ? '$' : `${code} `}${Number(value).toFixed(2)}`,
+    formatDuration: limitDurationText
   };
   vm.runInNewContext(
-    `${optionalNumber}\n${duration}\n${dateLabel}\n${grantRows}\n`
+    `${optionalNumber}\n${dateLabel}\n${grantRows}\n`
       + `result = claudePrepaidGrantRows(${JSON.stringify(tranches)}, ${JSON.stringify(currency)});`,
     context
   );
@@ -1341,11 +1494,10 @@ test('Claude prepaid grants keep three cells when a grant has no usable expiry',
 });
 
 test('The detail tooltip widens its grid and pads short rows for three-column entries', () => {
-  const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  const infoNode = functionBody(app, 'limitDetailInfoNode', 'providerSpendNode');
-  const grantRows = functionBody(app, 'claudePrepaidGrantRows', 'claudeBalanceNode');
-  const balanceNode = functionBody(app, 'claudeBalanceNode', 'optionalFiniteNumber');
+  const infoNode = viewBody('limitDetailInfoNode', 'providerSpendNode');
+  const grantRows = viewBody('claudePrepaidGrantRows', 'claudeBalanceNode');
+  const balanceNode = viewBody('claudeBalanceNode', 'providerWindowText');
 
   assert.match(infoNode, /const columns = entries\.reduce\(\(widest, entry\) => Math\.max\(widest, entry\.length\), 0\);/);
   assert.match(infoNode, /columns > 2 \? 'limit-detail-tooltip-triple' : ''/);
@@ -1366,7 +1518,7 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   const homeLabel = functionBody(app, 'homeLimitWindowLabel', 'renderHomeLimitModule');
   const homeRows = functionBody(app, 'homeLimitRows', 'homeLimitWindowLabel');
   const homeModule = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
-  const valueFormatter = functionBody(app, 'formatHomeLimitWindowValue', 'mimoTokenPlanWindowFromBalance');
+  const valueFormatter = functionBody(app, 'formatHomeLimitWindowValue', 'providersByLimitProviderId');
 
   assert.match(homeLabel, /if \(window\?\.kind === 'billing'\) \{/);
   assert.match(homeLabel, /limitProviderCompactWindowLabel\(providerId, window, visibleWindows\)/);
@@ -1402,16 +1554,15 @@ test('tray bars draw the resolved primary window on top and preserve an empty lo
 });
 
 test('DeepSeek main Limits row preserves the intentional month-spend balance meter', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
   const balanceWindow = readSharedFile('limitBalanceDisplay.js');
   const styles = readRendererFile('styles.css');
 
   assert.match(renderProviderWindows, /\{ remainingPercent: creditsMeterPercent\(provider, null\) \},/);
   assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide', 'limit-window-no-reset'\);/);
   assert.match(renderProviderWindows, /const spendNode = providerSpendNode\(balance\);/);
-  assert.match(app, /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
-  assert.match(app, /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
+  assert.match(limitsViewSource(), /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
+  assert.match(limitsViewSource(), /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
   assert.doesNotMatch(renderProviderWindows, /Month \(since tracking\)/);
   assert.doesNotMatch(renderProviderWindows, /monthSinceTracking \? 'Month \(since tracking\)' : 'Month'/);
   // The month-spend denominator now lives in the shared balance module.
@@ -1460,8 +1611,7 @@ test('shared spend presentation preserves zeroes and omits missing periods', () 
 });
 
 test('Balance and token quota values omit the redundant left suffix', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
+  const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /'Balance',\s*\{ \.\.\.balanceWindow, label: 'Balance' \},\s*color,\s*0\.95,\s*formatMoney\(balanceAmount, currency\)/);
   assert.match(renderProviderWindows, /const meterPercent = creditsMeterPercent\(provider, quotaWindow\);/);
@@ -1473,9 +1623,8 @@ test('Balance and token quota values omit the redundant left suffix', () => {
 });
 
 test('MiMo main Limits row falls back to balance plan fields for Token Plan', () => {
-  const app = readRendererFile('app.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
-  const tokenPlanFallback = functionBody(app, 'mimoTokenPlanWindowFromBalance', 'limitWindowNode');
+  const renderProviderWindows = viewBody('renderProviderWindows');
+  const tokenPlanFallback = viewBody('mimoTokenPlanWindowFromBalance', 'limitWindowNode');
 
   assert.match(renderProviderWindows, /const balance = provider\.balance \|\| null;/);
   assert.match(renderProviderWindows, /const tokenPlan = windowForKind\(provider, 'billing'\) \|\| mimoTokenPlanWindowFromBalance\(balance\);/);
@@ -1494,8 +1643,8 @@ test('MiMo main Limits row falls back to balance plan fields for Token Plan', ()
 
 test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', () => {
   const app = readRendererFile('app.js');
-  const optionalNumber = functionBody(app, 'optionalFiniteNumber', 'formatLimitWindowValue');
-  const tokenPlanFallback = functionBody(app, 'mimoTokenPlanWindowFromBalance', 'limitWindowNode');
+  const optionalNumber = functionBody(app, 'optionalFiniteNumber', 'formatHomeLimitWindowValue');
+  const tokenPlanFallback = viewBody('mimoTokenPlanWindowFromBalance', 'limitWindowNode');
   const context = {};
   vm.runInNewContext(`${optionalNumber}\n${tokenPlanFallback}\nresult = mimoTokenPlanWindowFromBalance({
     planUsed: null,
@@ -1507,10 +1656,9 @@ test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', (
 });
 
 test('MiMo expired Token Plan renders a localized status without a meter', () => {
-  const app = readRendererFile('app.js');
   const i18n = readRendererFile('i18n.js');
-  const renderProviderWindows = functionBody(app, 'renderProviderWindows', 'renderLimitProviderRow');
-  const tokenPlanFallback = functionBody(app, 'mimoTokenPlanWindowFromBalance', 'limitWindowNode');
+  const renderProviderWindows = viewBody('renderProviderWindows');
+  const tokenPlanFallback = viewBody('mimoTokenPlanWindowFromBalance', 'limitWindowNode');
 
   assert.match(renderProviderWindows, /balance\?\.planStatus === 'expired'/);
   assert.match(renderProviderWindows, /\{ showMeter: false \}, color, 0\.68, t\('limits\.mimo\.planExpired'\)/);
@@ -1522,8 +1670,7 @@ test('MiMo expired Token Plan renders a localized status without a meter', () =>
 });
 
 test('main Limits plan text shows failure status before account labels', () => {
-  const app = readRendererFile('app.js');
-  const planBody = functionBody(app, 'limitProviderPlan', 'configuredLimitProviderOrder');
+  const planBody = viewBody('limitProviderPlan');
 
   assert.match(planBody, /if \(provider\?\.status && provider\.status !== 'ok' && !provider\.stale\) return limitStatusLabel\(provider\.status, false\);/);
   assert.match(planBody, /const label = String\(provider\?\.planLabel \|\| provider\?\.accountLabel \|\| ''\)\.trim\(\);/);
@@ -1666,6 +1813,102 @@ test('Grok is automatic provider UI, while env token remains documented for head
   assert.match(i18n, /'settings\.limits\.status\.runGrokLogin': 'Run grok login'/);
   assert.match(i18n, /'settings\.limits\.status\.runGrokLogin': '執行 grok login'/);
   assert.match(i18n, /'settings\.limits\.status\.runGrokLogin': '运行 grok login'/);
+});
+
+// Cline's credential belongs to Cline, and this provider reads it without ever
+// writing — but a machine with no Cline installed has nothing to read, so the API
+// key is configurable here too. It goes through the same settings + credential
+// store pattern every key-configured provider uses; factory is the one with the
+// same shape (a settings key beside a discovered sign-in).
+test('Cline exposes its API key through the settings and credential-store pattern', () => {
+  const html = readRendererFile('index.html');
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
+  const runtimeConfig = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'runtimeConfig.js'), 'utf8');
+  const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
+  const clineLimits = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'src', 'shared', 'providers', 'cline', 'limits.js'),
+    'utf8'
+  );
+
+  // The panel: every id the shared renderer requires before it draws the row.
+  for (const id of [
+    'clineAccountGroup', 'clineAccountStatus', 'clineSettingsToggle', 'clineSettingsDetails',
+    'clineOpenBrowser', 'clineLogoutButton', 'clineRefreshButton', 'clineManualPanel',
+    'clineApiKeyInput', 'clineApiKeySubmit', 'clineErrorMessage'
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`), `${id} is missing from index.html`);
+  }
+  // The renderer's side of it: the row, its platform link, and the probe the save
+  // button awaits.
+  assert.match(app, /clineAccountExpanded/);
+  assert.match(app, /clineCredentialConfigured/);
+  assert.match(app, /function clinePlatformUrl/);
+  assert.match(app, /window\.tokenMonitor\.cline\.validateApiKey/);
+  assert.match(preload, /cline: \{\n {4}validateApiKey: \(apiKey\) => ipcRenderer\.invoke\('cline:validateApiKey'/);
+  // The key itself never crosses to the renderer: the projection carries the
+  // boolean and the source label only, never a `clineApiKey` field.
+  const projection = main.slice(
+    main.indexOf('function settingsForRenderer'),
+    main.indexOf('function pushSettingsToRenderer')
+  );
+  assert.doesNotMatch(projection, /clineApiKey:/);
+  assert.match(projection, /clineCredentialConfigured/);
+  assert.match(projection, /clineCredentialSource/);
+  // Settings + credential store + IPC, the pattern the pattern-bound test above
+  // asserts for the catalog; the path is what keeps the key out of settings.json.
+  assert.match(runtimeConfig, /cline: \['clineApiKey'\]/);
+  assert.deepEqual(CREDENTIAL_SETTING_PATHS.clineApiKey, ['providers', 'cline', 'apiKey']);
+  assert.match(main, /ipcMain\.handle\('cline:validateApiKey'/);
+  assert.match(main, /clineApiKey: patch\.clineApiKey !== undefined \? normalizeClineApiKey\(patch\.clineApiKey\) : \(settings\.clineApiKey \|\| ''\)/);
+  assert.match(envExample, /CLINE_API_KEY=/);
+  assert.match(clineLimits, /CLINE_API_KEY/);
+  assert.match(clineLimits, /CLINEPASS_API_KEY/);
+  // A refused credential recovers where that credential lives, and this provider is
+  // the only one whose status reads `source` to tell its two lanes apart: a rejected
+  // key is replaced in Token Monitor's own field, while the discovered sign-in is
+  // Cline's to fix — it refreshes the stored token when it runs, and only it can
+  // persist a rotated one — so that lane points back at Cline. A row with no source
+  // is the sign-in lane, the one a local install is in by default.
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'unauthorized' }),
+    { label: 'Open Cline', tone: 'setup' }
+  );
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'unauthorized', source: 'oauth' }),
+    { label: 'Open Cline', tone: 'setup' }
+  );
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'unauthorized', source: 'api' }),
+    { label: 'Update API key', tone: 'setup' }
+  );
+  // Both tags are strings other providers already use, so no new chip text is
+  // introduced for a provider whose surfaces are the same class as workbuddy's
+  // desktop app and kiro's CLI.
+  // With neither a key nor a stored sign-in, the one thing this application can be
+  // told is a key — the same label the other key-configured providers use.
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'notConfigured' }),
+    { label: 'Add API key', tone: 'setup' }
+  );
+  assert.deepEqual(limitProviderCapabilityTags({ provider: 'cline' }), ['Auto', 'Desktop app', 'CLI']);
+  // The list renders per provider, and its default branch draws session and weekly
+  // only — a three-window provider needs its own branch or the monthly window never
+  // appears. Guarded by source patterns because the view module builds DOM and this
+  // repository has no DOM harness; the branch was also confirmed by driving the
+  // running widget (a mocked row renders Session, Weekly and a full-width Monthly).
+  const windowsView = readRendererFile('limitWindowsView.js');
+  assert.match(windowsView, /provider\.provider === 'cline'/);
+  // The account credit shares the `billing` kind with the monthly quota, so the
+  // branch tells them apart by metric and renders the credit through the panel's own
+  // balance path, the way WorkBuddy's and Trae's balance is rendered.
+  assert.match(windowsView, /const clineMonthly = clineBilling\.find\(\(window\) => !isCreditsWindow\(window\) && window\.metric !== 'spend'\)/);
+  assert.match(windowsView, /const clineCredits = clineBilling\.find\(\(window\) => isCreditsWindow\(window\)\)/);
+  assert.match(windowsView, /const clineSpend = clineBilling\.find\(\(window\) => window\.metric === 'spend'\)/);
+  assert.match(windowsView, /clineCredits[\s\S]{0,200}clineCreditsNode\(provider, clineCredits, clineSpend\)/);
+  assert.match(windowsView, /function clineCreditsNode[\s\S]{0,500}\[\['Month spent', spendValue\]\]/);
+  assert.match(windowsView, /clineMonthly[\s\S]{0,200}limit-window-wide/);
 });
 
 test('Copilot env token is documented in env example, not the README overview', () => {
@@ -2576,11 +2819,14 @@ test('Kimi credential statuses are localized in settings', () => {
   assert.match(i18n, /'settings\.limits\.status\.updateCredential': '更新憑證'/);
 });
 
-test('Kimi and Droid limits reuse their tracked-client colors', () => {
+test('Kimi, Droid and MiMo limits reuse their tracked-client colors', () => {
   const app = readRendererFile('app.js');
   assert.equal(LIMIT_PROVIDER_LABELS.kimi, 'Kimi');
+  // `factory` is the last remaining bridge: its tracked client is named
+  // `droid`. MiMo needs none — the client and the provider are both `mimo`, so
+  // the generic lookup below already finds clientColors.mimo.
   assert.match(app, /if \(providerId === 'factory'\) return clientColors\.droid;/);
-  assert.match(app, /if \(providerId === 'mimo'\) return clientColors\.xiaomi;/);
+  assert.doesNotMatch(app, /providerId === 'mimo'/);
   assert.match(app, /const color = limitProviderColor\(id\);/);
 });
 
@@ -2599,20 +2845,35 @@ function cssBlock(styles, selector) {
 }
 
 test('the subscription tooltip escapes both the plan label and the scrolling panel', () => {
-  const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  const decorate = functionBody(app, 'decoratePlanWithSubscription', 'subscriptionRowTitle');
-  const position = functionBody(app, 'positionSubscriptionTooltip', 'decoratePlanWithSubscription');
+  const decorate = viewBody('decoratePlanWithSubscription');
 
-  // The wrap also carries .limit-plan, whose overflow:hidden clips the card away
-  // entirely — the card sits above the label, outside that 10px-tall box.
+  // The subscription card is a tooltip like every other on this surface, so it
+  // goes through the shared attacher rather than a second copy of the
+  // anchor/flip/top-layer wiring that has to be kept in step by hand. That is
+  // also what frees it from `.limits-panel`'s clipping: whichever element draws
+  // it, the popover paints in the top layer.
+  assert.match(decorate, /wrap\.className = 'limit-plan limit-detail-tooltip-wrap subscription-plan-wrap';/);
+  assert.match(decorate, /attachLimitDetailTooltip\(wrap, card\);/);
+  assert.doesNotMatch(decorate, /positionSubscriptionTooltip/);
+  // The wrap also carries .limit-plan, whose overflow:hidden would clip the card
+  // away entirely — the card sits above the label, outside that 10px-tall box.
   assert.match(cssBlock(styles, '.subscription-plan-wrap'), /overflow: visible;/);
-  // And .limits-panel clips its own overflow, so on the topmost row the upward
-  // card lands outside the panel. It flips below when there is no room above.
-  assert.match(decorate, /positionSubscriptionTooltip\(wrap, card\);/);
-  assert.match(position, /closest\('\.limits-panel'\)/);
-  assert.match(position, /classList\.toggle\('is-below'/);
-  assert.match(styles, /\.subscription-tooltip\.is-below \{/);
+  // The trigger is still the plan label, so the card has to keep clearing the
+  // inherited right-alignment and anchoring to it.
+  assert.match(cssBlock(styles, '.subscription-tooltip'), /right: anchor\(right\);/);
+});
+
+test('every limits tooltip flips below when the row has no room above it', () => {
+  const styles = readRendererFile('styles.css');
+  const attach = viewBody('attachLimitDetailTooltip');
+
+  assert.match(attach, /classList\.toggle\('is-below'/);
+  assert.match(styles, /\.limit-detail-tooltip\.is-below \{/);
+  // One flip rule for the whole surface: the dock card is 280px tall, so the
+  // first row usually has nothing above it, and that is the same problem the
+  // limits panel has on its own topmost row.
+  assert.doesNotMatch(styles, /\.subscription-tooltip\.is-below \{/);
 });
 
 test('an attached subscription adds no resting decoration to the plan label', () => {
@@ -3030,7 +3291,7 @@ test('a successful subscription save defers the full render until close complete
     subscriptionFormIsTopUp: () => false,
     subscriptionAccountChoices: () => [{ value: 'acct-1', provider: account }],
     subscriptionList: () => list,
-    subscriptionForAccountValue: () => false,
+    subscriptionForAccount: () => null,
     saveCompleted: false,
     saveOptions: null,
     closeOptions: null,
@@ -3276,7 +3537,7 @@ test('the record kind swaps whole field groups, and the user has the last word',
 test('a top-up record keeps a ledger, and the tooltip reads from it', () => {
   const app = readRendererFile('app.js');
   const subscriptionApi = require('../../src/shared/subscriptionDisplay');
-  const rows = functionBody(app, 'topUpTooltipRows', 'topUpRollupRows');
+  const rows = viewBody('topUpTooltipRows', 'topUpRollupRows');
   const meta = functionBody(app, 'subscriptionRowMeta', 'renderSubscriptionRows');
   const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
 
@@ -3297,9 +3558,13 @@ test('a top-up record keeps a ledger, and the tooltip reads from it', () => {
       today: '2026-08-11',
       subscriptionApi,
       t: (key) => key,
-      topUpMinorText: (record, minor) => `$${(minor / 100).toFixed(2)}`,
-      subscriptionDateText: (date) => date,
-      subscriptionDaysText: (days) => `${days}d`,
+      currentLocale: () => 'en-US',
+      // The wording module, stubbed at the same seam the view calls it through.
+      subscriptionText: {
+        dateText: (_locale, date) => date,
+        daysText: (_t, days) => `${days}d`,
+        topUpMinorText: (_currencyApi, _subscription, minor) => `$${(minor / 100).toFixed(2)}`
+      },
       isCreditsWindow: (window) => window?.metric === 'credits',
       creditsAmount: (_provider, window) => window?.amount ?? null,
       formatMoney: (value) => `${value}`,
@@ -3352,7 +3617,7 @@ test('the settings row is titled by account and carries the plan name in its met
       subscription,
       account,
       state: { settings: {} },
-      subscriptionProviderLabel: (id) => id,
+      subscriptionText: { providerLabel: (id) => id },
       accountIdentityApi: {
         accountTitleLabel: (entry) => entry?.accountName || entry?.accountEmail || ''
       }
@@ -3375,15 +3640,19 @@ test('the settings row is titled by account and carries the plan name in its met
       subscription,
       account,
       state: { settings: {} },
-      subscriptionProviderLabel: (id) => id,
+      subscriptionText: {
+        providerLabel: (id) => id,
+        priceText: () => '$20.00 / mo',
+        shortDateText: (_locale, date) => date,
+        topUpMinorText: (_currencyApi, _subscription, minor) => `$${minor / 100}`
+      },
       accountIdentityApi: {
         accountTitleLabel: (entry) => entry?.accountName || entry?.accountEmail || ''
       },
       subscriptionApi: require('../../src/shared/subscriptionDisplay'),
       t: (key, vars) => `${key}(${vars?.date || ''})`,
-      subscriptionPriceText: () => '$20.00 / mo',
-      subscriptionShortDateText: (date) => date,
-      topUpMinorText: (_record, minor) => `$${minor / 100}`
+      currentLocale: () => 'en-US',
+      currencyApi: require('../../src/shared/currency')
     }
   );
   const named = { provider: 'codex', planName: 'Plus', startDate: '2026-06-08', autoRenew: true, binding: { accountEmail: 'b@example.com' } };
@@ -3392,17 +3661,38 @@ test('the settings row is titled by account and carries the plan name in its met
 });
 
 test('a subscription card belongs to one account, and a group header summarises', () => {
-  const app = readRendererFile('app.js');
-  const forProvider = functionBody(app, 'subscriptionForProvider', 'subscriptionsForProviderGroup');
-  const cardFor = functionBody(app, 'subscriptionCardForRow', 'positionSubscriptionTooltip');
+  const forProvider = viewBody('subscriptionForProvider', 'subscriptionsForProviderGroup');
+  const cardFor = viewBody('subscriptionCardForRow', 'decoratePlanWithSubscription');
 
   // matchProviderAccount falls back to "the provider has exactly one account",
   // so it must see every account, not just the row being rendered.
-  assert.match(forProvider, /const accounts = limitProvidersForSubscriptions\(\);/);
-  assert.match(forProvider, /subscriptionAccountValue\(account\) === identity/);
+  assert.match(forProvider, /const accounts = subscriptionAccounts\(\);/);
+  assert.match(forProvider, /subscriptionAccountMatches\(account, provider\)/);
   assert.doesNotMatch(forProvider, /matchProviderAccount\(subscription, \[provider\]\)/);
   assert.match(cardFor, /provider\?\.accountGroup === true/);
-  assert.match(cardFor, /subscriptionGroupTooltipRows\(provider\.provider/);
+  // The header cards the accounts it draws — the entries are narrowed to them,
+  // so a record bound to an account the composer hid is not carded on a header
+  // that does not cover it — and both of its shapes read the same provider
+  // total. The total is deliberately not narrowed with the cards: it is the
+  // denominator of a ratio whose numerator (this month's usage) cannot be split
+  // per account at all, so narrowing it would compare two different scopes.
+  assert.match(cardFor, /subscriptionsForProviderGroup\(provider\.provider, provider\.groupAccounts\)/);
+  assert.match(
+    cardFor,
+    /subscriptionGroupTooltipRows\(provider\.provider, subscriptionApi\.todayString\(\)\)/
+  );
+  assert.doesNotMatch(cardFor, /subscriptionGroupTooltipRows\([\s\S]{0,80}entries\.map/);
+  const groupResolver = viewBody('subscriptionsForProviderGroup', 'subscriptionTooltipRows');
+  assert.match(groupResolver, /const accounts = subscriptionAccounts\(\);/);
+  assert.match(
+    groupResolver,
+    /drawnAccounts\.some\(\(account\) => subscriptionAccountMatches\(entry\.account, account\)\)/
+  );
+  assert.match(
+    viewBody('subscriptionPlanTooltipRows', 'topUpTooltipRows'),
+    /providerRollup\(subscriptionList\(\), subscription\.provider, currencyApi, today\)/,
+    'the per-account card rolls up the provider, like the header does'
+  );
 });
 
 test('the seeded plan name is a real plan, never a status label', () => {
@@ -3414,16 +3704,18 @@ test('the seeded plan name is a real plan, never a status label', () => {
 });
 
 test("one account's subscription never appears on its siblings", () => {
-  const app = readRendererFile('app.js');
   const subscriptionApi = require('../../src/shared/subscriptionDisplay');
-  const accountValue = functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName');
-  const forProvider = functionBody(app, 'subscriptionForProvider', 'subscriptionsForProviderGroup');
+  const accountMatch = viewBody('subscriptionAccountMatches', 'subscriptionUsageCostUsd');
+  const forProvider = viewBody('subscriptionForProvider', 'subscriptionsForProviderGroup');
 
   const resolve = (accounts, subscriptions, provider) => vm.runInNewContext(
-    `${accountValue}\n${forProvider}\nsubscriptionForProvider(provider)?.id || null;`,
+    `${accountMatch}\n${forProvider}\nsubscriptionForProvider(provider)?.id || null;`,
     {
       subscriptionApi,
-      limitProvidersForSubscriptions: () => accounts,
+      // The identity rule is the shared one, so the sandbox gets it from where
+      // the view does.
+      accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+      subscriptionAccounts: () => accounts,
       subscriptionList: () => subscriptions,
       provider
     }
@@ -3452,11 +3744,9 @@ test("one account's subscription never appears on its siblings", () => {
 });
 
 test('the provider rollup appears once, on the row that stands for the provider', () => {
-  const app = readRendererFile('app.js');
   const subscriptionApi = require('../../src/shared/subscriptionDisplay');
-  const planRows = functionBody(app, 'subscriptionPlanTooltipRows', 'subscriptionGroupTooltipRows');
-  const hasHeader = functionBody(app, 'subscriptionProviderHasGroupHeader', 'subscriptionCardForRow');
-  const cardFor = functionBody(app, 'subscriptionCardForRow', 'positionSubscriptionTooltip');
+  const planRows = viewBody('subscriptionPlanTooltipRows', 'topUpTooltipRows');
+  const cardFor = viewBody('subscriptionCardForRow', 'decoratePlanWithSubscription');
 
   const subscription = subscriptionApi.normalizeSubscription({
     provider: 'codex', startDate: '2026-06-08', amountMinor: 2000, currency: 'USD'
@@ -3469,13 +3759,16 @@ test('the provider rollup appears once, on the row that stands for the provider'
       includeRollup,
       subscriptionApi,
       t: (key) => key,
-      subscriptionPriceText: () => '$20.00 / mo',
-      subscriptionDateText: (date) => date,
-      subscriptionDaysText: (days) => `${days}d`,
-      subscriptionElapsedText: () => '2 mo',
+      subscriptionText: {
+        priceText: () => '$20.00 / mo',
+        dateText: (_locale, date) => date,
+        daysText: (_t, days) => `${days}d`,
+        elapsedText: () => '2 mo',
+        providerLabel: (id) => id
+      },
+      currentLocale: () => 'en-US',
       subscriptionUsageCostUsd: () => 125,
       subscriptionList: () => [subscription],
-      subscriptionProviderLabel: (id) => id,
       currencyApi: { normalizeCurrency: () => 'USD', CURRENCY_RATES: { USD: { symbol: '$' } } },
       formatCost: (value) => `$${value}`
     }
@@ -3492,25 +3785,25 @@ test('the provider rollup appears once, on the row that stands for the provider'
     'subscription.tooltip.valueMultiple'
   ]);
 
-  // A group header exists exactly when the provider has more than one account,
-  // and that is what moves the rollup off the member rows. Counted from the list
-  // renderLimits() groups on, not the device-narrowed matching list.
-  assert.match(hasHeader, /state\.stats\?\.limits\?\.providers/);
-  assert.doesNotMatch(hasHeader, /limitProvidersForSubscriptions/);
-  const headerFor = (accounts) => vm.runInNewContext(
-    `${hasHeader}\nsubscriptionProviderHasGroupHeader('codex');`,
-    { state: { stats: { limits: { providers: accounts } } } }
-  );
-  assert.equal(headerFor([{ provider: 'codex' }]), false);
-  assert.equal(headerFor([{ provider: 'codex' }, { provider: 'codex' }]), true);
-  assert.equal(headerFor([{ provider: 'codex' }, { provider: 'claude' }]), false);
-  assert.match(cardFor, /!subscriptionProviderHasGroupHeader\(provider\.provider\)/);
+  // Which row carries it is read off the row itself — the head is told whether
+  // it is drawing an account inside a group — rather than counted a second time
+  // from the stats list. A count would have to agree with the grouping
+  // renderLimits() already did, and the two could drift apart on the surface
+  // that did not do the grouping.
+  const head = viewBody('renderLimitProviderHead', 'codexResetForecastDate');
+  const group = viewBody('renderLimitProviderGroup');
+  assert.match(head, /decoratePlanWithSubscription\(plan, provider, !options\.accountRow\)/);
+  assert.doesNotMatch(head, /state\.stats/);
+  // The group's own head is drawn without the flag, and each member passes it —
+  // so the summary lands once, on the header.
+  assert.match(group, /renderLimitProviderHead\(providerId, label, groupProvider, color, \{/);
+  assert.match(group, /accountRow: true/);
+  assert.match(cardFor, /provider\?\.accountGroup === true/);
 });
 
 test('the subscription card carries no heading of its own', () => {
-  const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  const card = functionBody(app, 'subscriptionCardNode', 'subscriptionProviderHasGroupHeader');
+  const card = viewBody('subscriptionCardNode', 'subscriptionCardForRow');
   // Hovering the plan label is what names the card; a "Subscription" line above
   // the rows only repeats the gesture.
   assert.doesNotMatch(card, /subscription-tooltip-title/);
@@ -3519,12 +3812,15 @@ test('the subscription card carries no heading of its own', () => {
 });
 
 test('elapsed subscription time never reads as zero months', () => {
-  const app = readRendererFile('app.js');
   const subscriptionApi = require('../../src/shared/subscriptionDisplay');
-  const elapsed = functionBody(app, 'subscriptionElapsedText', 'subscriptionPlanTooltipRows');
+  // The wording lives in src/shared/subscriptionText.js now, so the settings
+  // rows and the tooltip read one implementation rather than two that agree.
+  const text = readSharedFile('subscriptionText.js');
+  const symbol = functionBody(text, 'symbolFor', 'amountText');
+  const elapsed = functionBody(text, 'elapsedText', 'topUpMinorText');
 
   const run = (startDate, today) => vm.runInNewContext(
-    `${elapsed}\nsubscriptionElapsedText(subscription, today);`,
+    `${symbol}\n${elapsed}\nelapsedText(t, currencyApi, subscription, today);`,
     {
       subscription: subscriptionApi.normalizeSubscription({
         provider: 'codex', startDate, amountMinor: 16000, currency: 'USD'
@@ -3579,8 +3875,7 @@ test('a date bound is only written when it actually changes', () => {
 test('one account holds one subscription record', () => {
   const app = readRendererFile('app.js');
   const subscriptionApi = require('../../src/shared/subscriptionDisplay');
-  const accountValue = functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName');
-  const forAccount = functionBody(app, 'subscriptionForAccountValue', 'subscriptionTooltipRows');
+  const forAccount = functionBody(app, 'subscriptionForAccount', 'subscriptionRowTitle');
   const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
 
   const accounts = [
@@ -3589,9 +3884,10 @@ test('one account holds one subscription record', () => {
   ];
   const existing = [{ id: 's1', provider: 'codex', binding: { accountEmail: 'b@example.com' } }];
   const clash = (target, excludeId) => vm.runInNewContext(
-    `${accountValue}\n${forAccount}\nsubscriptionForAccountValue(list, 'codex', subscriptionAccountValue(target), excludeId)?.id || null;`,
+    `${forAccount}\nsubscriptionForAccount(list, 'codex', target, excludeId)?.id || null;`,
     {
       subscriptionApi,
+      accountIdentityApi: require('../../src/electron/renderer/accountIdentity'),
       limitProvidersForSubscriptions: () => accounts,
       list: existing,
       target,
@@ -3603,6 +3899,10 @@ test('one account holds one subscription record', () => {
   // A sibling account is free, and editing the record does not clash with itself.
   assert.equal(clash(accounts[0]), null);
   assert.equal(clash(accounts[1], 's1'), null);
+  // The account a record resolved to and the choice the user picked are two
+  // records of one account, and the aggregate's copy can read under another
+  // display name — the duplicate this check exists to refuse.
+  assert.equal(clash({ ...accounts[1], accountName: 'work' }), 's1');
   assert.match(submit, /settings\.subscriptions\.errorDuplicate/);
   assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.errorDuplicate':").length - 1, 5);
 });
@@ -3621,9 +3921,8 @@ test('the subscription card is revealed by having a record, not by a preference'
   // A second switch on top of "did you enter the data" only made it possible to
   // fill the form in and see nothing happen. An account with no record still
   // decorates nothing, so the record itself is the switch.
-  const app = readRendererFile('app.js');
-  const decorate = functionBody(app, 'decoratePlanWithSubscription', 'subscriptionRowTitle');
-  assert.match(decorate, /subscriptionCardForRow\(provider\)/);
+  const decorate = viewBody('decoratePlanWithSubscription');
+  assert.match(decorate, /subscriptionCardForRow\(provider, includeRollup\)/);
   assert.doesNotMatch(decorate, /state\.settings\?\.show/);
 
   for (const file of ['app.js', 'index.html', 'i18n.js']) {
@@ -3676,9 +3975,8 @@ test('a plan that does not auto-renew asks when it ends, and stores it there', (
 });
 
 test('a lapsed plan reads as ended rather than counting days backwards', () => {
-  const app = readRendererFile('app.js');
-  const rows = functionBody(app, 'subscriptionPlanTooltipRows', 'subscriptionGroupTooltipRows');
-  const elapsed = functionBody(app, 'subscriptionElapsedText', 'subscriptionPlanTooltipRows');
+  const rows = viewBody('subscriptionPlanTooltipRows', 'topUpTooltipRows');
+  const elapsed = functionBody(readSharedFile('subscriptionText.js'), 'elapsedText', 'topUpMinorText');
   assert.match(rows, /daysLeft < 0 \? t\('subscription\.tooltip\.expired'\)/);
   assert.equal(readRendererFile('i18n.js').split("'subscription.tooltip.expired':").length - 1, 5);
   // Time on the plan stops at the day coverage ran out; it does not keep ageing
@@ -3724,17 +4022,18 @@ test('every provider a subscription can name has a mark to identify it by', () =
 test('the settings rows date themselves in short form, the tooltip in full', () => {
   const app = readRendererFile('app.js');
   const meta = functionBody(app, 'subscriptionRowMeta', 'renderSubscriptionRows');
-  const short = functionBody(app, 'subscriptionShortDateText', 'subscriptionLocalDate');
-  const full = functionBody(app, 'subscriptionDateText', 'subscriptionShortDateText');
-  const planRows = functionBody(app, 'subscriptionPlanTooltipRows', 'subscriptionGroupTooltipRows');
+  const text = readSharedFile('subscriptionText.js');
+  const short = functionBody(text, 'shortDateText', 'elapsedText');
+  const full = functionBody(text, 'dateText', 'shortDateText');
+  const planRows = viewBody('subscriptionPlanTooltipRows', 'topUpTooltipRows');
 
   // Two dense lines in a ~300px panel: the date is the longest thing on the
   // second one, and the locale already defines a numeric short form for it.
   assert.match(short, /dateStyle: 'short'/);
   assert.match(full, /month: 'short'/);
-  assert.doesNotMatch(meta, /subscriptionDateText\(/);
+  assert.doesNotMatch(meta, /subscriptionText\.dateText\(/);
   // The tooltip has the room, so it keeps spelling the date out.
-  assert.match(planRows, /subscriptionDateText\(/);
+  assert.match(planRows, /subscriptionText\.dateText\(/);
 });
 
 test('the section says where the recorded data shows up', () => {
@@ -4041,13 +4340,14 @@ test('a refused write says which problem it was', () => {
 
 test('a device with no limits of its own can still name the accounts on the hub', () => {
   const app = readRendererFile('app.js');
-  const source = [
-    functionBody(app, 'limitProvidersForSubscriptions', 'subscriptionAccountValue'),
-    functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName')
-  ].join('\n');
+  const source = functionBody(app, 'limitProvidersForSubscriptions', 'subscriptionAccountValue');
   const run = (local, aggregate) => plain(vm.runInNewContext(
     `${source}\nlimitProvidersForSubscriptions();`,
-    { localDeviceLimitsProviders: () => local, state: { stats: { limits: { providers: aggregate } } } }
+    {
+      accountIdentityApi: require('../../src/electron/renderer/accountIdentity'),
+      localDeviceLimitsProviders: () => local,
+      state: { stats: { limits: { providers: aggregate } } }
+    }
   ));
   const remote = [{ provider: 'codex', accountKey: 'remote', accountEmail: 'a@example.com' }];
 
@@ -4068,6 +4368,85 @@ test('a device with no limits of its own can still name the accounts on the hub'
   assert.deepEqual(run(sameProvider, remote).map((entry) => entry.accountKey), ['local', 'remote']);
   // The aggregate normally carries this device's accounts too; they appear once.
   assert.deepEqual(run(mine, [...mine, ...remote]).map((entry) => entry.accountKey), ['local', 'remote']);
+
+  // One account, two records: this device's copy and the aggregate's. They name
+  // the same key, so they are one account whatever either copy calls it — a list
+  // that kept both handed the matcher two candidates for one account, and its
+  // sole-account fallback is what stops healing a re-pasted credential.
+  const localCopy = [{ provider: 'codex', accountKey: 'remote', accountName: 'work' }];
+  assert.deepEqual(
+    run(localCopy, [{ ...remote[0], accountName: 'Work' }]).map((entry) => entry.accountName),
+    ['work']
+  );
+
+  // A provider nobody is signed into here reports a bare `notConfigured` row,
+  // and this device's own records are the first thing the list is built from. It
+  // names nothing, so it cannot stand in for the accounts the hub does name:
+  // deduping it against them dropped them, and subscriptionAccountChoices() then
+  // filters `notConfigured` out, leaving the picker empty for a provider with
+  // two accounts on the hub.
+  const signedOut = [{ provider: 'codex', status: 'notConfigured', windows: [] }];
+  const twoRemote = [
+    { provider: 'codex', accountKey: 'a', accountEmail: 'a@example.com' },
+    { provider: 'codex', accountKey: 'b', accountEmail: 'b@example.com' }
+  ];
+  assert.deepEqual(
+    run(signedOut, twoRemote).map((entry) => entry.accountKey || '(no key)'),
+    ['(no key)', 'a', 'b']
+  );
+
+  // A keyless copy of an account is a copy, and both workspaces on one address
+  // are still two accounts. The copy names an address and no key, so pairwise it
+  // reads as the same account as each of them — and deduping the list that way
+  // let it displace both, which left the picker (and the matcher universe behind
+  // it) offering the copy instead of either workspace, whatever the user was
+  // actually signed in to. sortedKeys() is the assertion because the surviving
+  // accounts must not depend on the order the two lists arrive in.
+  const copyAccount = { provider: 'codex', accountEmail: 'member@example.com', windows: [] };
+  const copy = [copyAccount];
+  const personal = { provider: 'codex', accountKey: 'personal', accountEmail: 'member@example.com', accountName: 'Personal' };
+  const team = { provider: 'codex', accountKey: 'team', accountEmail: 'member@example.com', accountName: 'Team' };
+  const sortedKeys = (records) => records.map((entry) => entry.accountKey).sort();
+  assert.deepEqual(sortedKeys(run(copy, [personal, team])), ['personal', 'team']);
+  assert.deepEqual(sortedKeys(run(copy, [team, personal])), ['personal', 'team']);
+  assert.deepEqual(sortedKeys(run([personal], [copyAccount, team])), ['personal', 'team']);
+  assert.deepEqual(sortedKeys(run([team], [personal, copyAccount])), ['personal', 'team']);
+
+  // With one account on that address the copy really is its second copy, and the
+  // keyed record is the one that survives — it is the one a binding can be
+  // matched to by key.
+  assert.deepEqual(run(copy, [personal]).map((entry) => entry.accountKey), ['personal']);
+  assert.deepEqual(run([personal], [copyAccount]).map((entry) => entry.accountKey), ['personal']);
+});
+
+test('the account picker tells two address-only accounts apart', () => {
+  const app = readRendererFile('app.js');
+  const source = functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName');
+  const value = (provider) => vm.runInNewContext(`${source}\nsubscriptionAccountValue(__provider)`, {
+    __provider: provider
+  });
+
+  // The select compares these strings, so two accounts a provider reports by
+  // address alone have to differ here or the user is offered one entry for two
+  // accounts — and picking it records the wrong one.
+  assert.notEqual(
+    value({ provider: 'codex', accountEmail: 'a@example.com' }),
+    value({ provider: 'codex', accountEmail: 'b@example.com' })
+  );
+  // One record keeps one value, so reopening the form lands back on the choice
+  // the record was saved against rather than on the first account in the list.
+  assert.equal(value({ provider: 'codex', accountKey: 'k' }), value({ provider: 'codex', accountKey: 'k' }));
+  // Keys are only unique within a provider, and the same address signed into two
+  // providers is two accounts.
+  assert.notEqual(
+    value({ provider: 'codex', accountEmail: 'a@example.com' }),
+    value({ provider: 'claude', accountEmail: 'a@example.com' })
+  );
+  // `email` is the field the matcher reads, so it has to count here too.
+  assert.notEqual(
+    value({ provider: 'codex', email: 'a@example.com' }),
+    value({ provider: 'codex', accountEmail: 'b@example.com' })
+  );
 });
 
 test('a hub timestamp that cannot be parsed does not turn a save into a crash', () => {
@@ -4927,17 +5306,11 @@ test('GLM Home daily windows retain returned model names instead of the generic 
 });
 
 test('Z.ai token-pool windows print an absolute token pair through the detail slot', () => {
-  const app = readRendererFile('app.js');
-  const body = functionBody(app, 'formatZcodeTokensDetail', 'formatKiroOverageValue');
-  const detail = (window, showLimitUsed, unitSystem = 'western', locale = 'en') => vm.runInNewContext(
-    `${body}\nformatZcodeTokensDetail(window)`,
-    {
-      window,
-      optionalFiniteNumber: (value) => { const n = Number(value); return Number.isFinite(n) ? n : null; },
-      formatCompact: (value) => compactTokenApi.formatCompactTokens(value, unitSystem, locale),
-      state: { settings: { showLimitUsed } }
-    }
-  );
+  const detail = (window, showLimitUsed, unitSystem = 'western', locale = 'en') => windowText(
+    'zai',
+    { kind: 'daily', ...window },
+    { showLimitUsed, unitSystem, locale }
+  ).detail;
   const pool = { limit: 305_000_000, remaining: 195_850_553 };
   assert.equal(detail(pool, false), '195.9M / 305M');
   assert.equal(detail(pool, true), '109.1M / 305M');

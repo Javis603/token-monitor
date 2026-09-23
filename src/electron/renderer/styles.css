@@ -3585,7 +3585,6 @@ html.is-windows .settings-panel select option {
 .row-icon-zed        { -webkit-mask-image: url(../../../assets/icons/zed.svg);           mask-image: url(../../../assets/icons/zed.svg); }
 .row-icon-kilo       { -webkit-mask-image: url(../../../assets/icons/kilo.svg);          mask-image: url(../../../assets/icons/kilo.svg); }
 .row-icon-commandcode { -webkit-mask-image: url(../../../assets/icons/commandcode.svg);   mask-image: url(../../../assets/icons/commandcode.svg); }
-.row-icon-micode     { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);       mask-image: url(../../../assets/icons/xiaomi.svg); }
 .row-icon-zcode      { -webkit-mask-image: url(../../../assets/icons/zai.svg);          mask-image: url(../../../assets/icons/zai.svg); }
 .row-icon-kiro       { -webkit-mask-image: url(../../../assets/icons/kiro.svg);          mask-image: url(../../../assets/icons/kiro.svg); }
 .row-icon-codebuddy  { -webkit-mask-image: url(../../../assets/icons/codebuddy.svg);     mask-image: url(../../../assets/icons/codebuddy.svg); }
@@ -3596,6 +3595,7 @@ html.is-windows .settings-panel select option {
 .row-icon-cherrystudio { -webkit-mask-image: url(../../../assets/icons/cherrystudio.svg); mask-image: url(../../../assets/icons/cherrystudio.svg); }
 .row-icon-lmstudio  { -webkit-mask-image: url(../../../assets/icons/lmstudio.svg);      mask-image: url(../../../assets/icons/lmstudio.svg); }
 .row-icon-unsloth   { -webkit-mask-image: url(../../../assets/icons/unsloth.svg);       mask-image: url(../../../assets/icons/unsloth.svg); }
+.row-icon-devin     { -webkit-mask-image: url(../../../assets/icons/devin.svg);         mask-image: url(../../../assets/icons/devin.svg); }
 .row-icon-opencode   { -webkit-mask-image: url(../../../assets/icons/opencode.svg);      mask-image: url(../../../assets/icons/opencode.svg); }
 .row-icon-openrouter { -webkit-mask-image: url(../../../assets/icons/openrouter.svg);    mask-image: url(../../../assets/icons/openrouter.svg); }
 .row-icon-openclaw   { -webkit-mask-image: url(../../../assets/icons/openclaw.svg);      mask-image: url(../../../assets/icons/openclaw.svg); }
@@ -3621,6 +3621,8 @@ html.is-windows .settings-panel select option {
 .row-icon-liveagent   { -webkit-mask-image: url(../../../assets/icons/liveagent.svg);     mask-image: url(../../../assets/icons/liveagent.svg); }
 .row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
 .row-icon-thirdparty { -webkit-mask-image: url(../../../assets/icons/thirdparty.svg);      mask-image: url(../../../assets/icons/thirdparty.svg); }
+.row-icon-nvidia    { -webkit-mask-image: url(../../../assets/icons/nvidia.svg);        mask-image: url(../../../assets/icons/nvidia.svg); }
+.row-icon-stepfun   { -webkit-mask-image: url(../../../assets/icons/stepfun.svg);       mask-image: url(../../../assets/icons/stepfun.svg); }
 .row-icon-newapi    { -webkit-mask-image: url(../../../assets/icons/newapi.svg);           mask-image: url(../../../assets/icons/newapi.svg); }
 .row-icon-sub2api   { -webkit-mask-image: url(../../../assets/icons/sub2api.svg);          mask-image: url(../../../assets/icons/sub2api.svg); }
 .row-icon-token-monitor { -webkit-mask-image: url(../../../assets/icons/token-monitor.svg); mask-image: url(../../../assets/icons/token-monitor.svg); }
@@ -4137,7 +4139,7 @@ html.is-windows .settings-panel select option {
 }
 .codex-reset-forecast-info-wrap .limit-detail-tooltip {
   right: auto;
-  left: -1px;
+  left: calc(anchor(left) - 1px);
   width: max-content;
   max-width: min(230px, calc(100vw - 48px));
   grid-template-columns: max-content minmax(0, 1fr);
@@ -4153,18 +4155,6 @@ html.is-windows .settings-panel select option {
 .codex-reset-forecast-info-wrap .limit-detail-tooltip-row span:last-child {
   overflow-wrap: anywhere;
   white-space: normal;
-}
-.codex-reset-forecast-info-wrap .limit-detail-tooltip.is-below {
-  top: calc(100% + 5px);
-  bottom: auto;
-}
-.codex-reset-forecast-info-wrap .limit-detail-tooltip.is-below::after {
-  top: -4px;
-  bottom: auto;
-  border-top: 1px solid rgba(var(--line-rgb), 0.22);
-  border-right: none;
-  border-bottom: none;
-  border-left: 1px solid rgba(var(--line-rgb), 0.22);
 }
 .codex-reset-forecast.is-loading .codex-reset-forecast-value,
 .codex-reset-forecast.is-unavailable .codex-reset-forecast-value {
@@ -4330,14 +4320,24 @@ html.is-windows .limit-live-badge {
    this stylesheet's floor for a hairline that survives the light theme, so the
    weight can't go lower. Twice the within-account gap (.limit-row) carries the
    grouping on its own; the rule just pins it. `+` keeps it strictly between
-   accounts. */
+   accounts.
+
+   The reset forecast takes this same separator in every shape it is drawn in:
+   it is a block of its own below the quota rows, and whether the provider above
+   it holds one account or several is not something the reader should have to
+   notice. Scoping it to `.limit-row-group` is what made the rule appear in a
+   multi-account row and go missing in a single-account one — and since the dock
+   card is built on this same row, it showed only the missing half. The forecast
+   is only ever a child of one of those two shapes (limitWindowsView.js appends
+   it to a solo row and to a group, never to an account row), so an unscoped
+   selector reaches no third case. */
 .limit-account-row + .limit-account-row {
   position: relative;
   margin-top: 10px;
   padding-top: 10px;
 }
 .limit-account-row + .limit-account-row::before,
-.limit-row-group > .codex-reset-forecast::before {
+.codex-reset-forecast::before {
   position: absolute;
   top: 0;
   right: 0;
@@ -4529,18 +4529,33 @@ html.is-windows .limit-live-badge {
 .limit-detail-tooltip-wrap:hover .limit-detail-tooltip-trigger {
   opacity: 0.72;
 }
+/* Every tooltip on this surface is a popover, so it paints in the top layer.
+   Both surfaces that draw these rows scroll inside a clipping box — the limits
+   panel and the dock card's account list — and an absolutely positioned tooltip
+   was cut off by it and painted under whatever sat above. The top layer escapes
+   every ancestor's overflow and stacking context at once, which is why this is
+   one rule rather than a z-index hunt per caller.
+
+   The top layer is not the containing block, though: a popover has no ancestor
+   to be positioned against, so it is anchored instead. The anchor names have to
+   be unique per trigger, so they are minted in JS (attachLimitDetailTooltip)
+   and only consumed here. `inset: auto` undoes the UA popover rule that would
+   otherwise stretch it across the viewport. */
 .limit-detail-tooltip {
-  position: absolute;
-  right: -1px;
-  bottom: calc(100% + 5px);
+  position: fixed;
+  inset: auto;
+  right: calc(anchor(right) - 1px);
+  bottom: calc(anchor(top) + 5px);
   z-index: 20;
-  display: grid;
   width: max-content;
   min-width: 0;
+  max-height: none;
+  margin: 0;
   grid-template-columns: max-content max-content;
   column-gap: 12px;
   row-gap: 4px;
   padding: 6px 7px;
+  overflow: visible;
   border: 1px solid rgba(var(--line-rgb), 0.22);
   border-radius: 7px;
   background:
@@ -4551,10 +4566,39 @@ html.is-windows .limit-live-badge {
   opacity: 0;
   pointer-events: none;
   transform: translateY(2px);
-  transition: opacity 120ms ease, transform 120ms ease;
-  visibility: hidden;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    display 120ms allow-discrete,
+    overlay 120ms allow-discrete;
   -webkit-backdrop-filter: blur(28px) saturate(115%);
   backdrop-filter: blur(28px) saturate(115%);
+}
+.limit-detail-tooltip:popover-open {
+  display: grid;
+  opacity: 1;
+  transform: translateY(0);
+}
+@starting-style {
+  .limit-detail-tooltip:popover-open {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+/* Flipped below when the trigger sits too near the top of the window. The top
+   layer clears every clipping ancestor but not the window itself, and on a
+   280px dock card there is often nothing above the first row. */
+.limit-detail-tooltip.is-below {
+  top: calc(anchor(bottom) + 5px);
+  bottom: auto;
+}
+.limit-detail-tooltip.is-below::after {
+  top: -4px;
+  bottom: auto;
+  border-top: 1px solid rgba(var(--line-rgb), 0.22);
+  border-right: none;
+  border-bottom: none;
+  border-left: 1px solid rgba(var(--line-rgb), 0.22);
 }
 .limit-detail-tooltip-triple {
   grid-template-columns: max-content max-content max-content;
@@ -4570,12 +4614,6 @@ html.is-windows .limit-live-badge {
   background: rgba(var(--glass-rgb), 0.76);
   content: "";
   transform: rotate(45deg);
-}
-.limit-detail-tooltip-wrap:hover .limit-detail-tooltip,
-.limit-detail-tooltip-wrap:focus-within .limit-detail-tooltip {
-  opacity: 1;
-  transform: translateY(0);
-  visibility: visible;
 }
 .limit-detail-tooltip-wrap.has-opened .limit-detail-tooltip {
   transition: none;
@@ -4948,24 +4986,8 @@ html.is-windows .limit-live-badge {
    against right-aligned values. A key/value card reads as labels left, values
    right; the value cells set their own alignment already. */
 .subscription-tooltip {
-  right: 0;
+  right: anchor(right);
   text-align: left;
-}
-/* The card opens upward, and .limits-panel scrolls behind `overflow: hidden
-   auto` — so on the topmost provider the whole card landed above the panel's
-   edge and was clipped away. positionSubscriptionTooltip() flips it below when
-   the row has no room above it. */
-.subscription-tooltip.is-below {
-  top: calc(100% + 5px);
-  bottom: auto;
-}
-.subscription-tooltip.is-below::after {
-  top: -4px;
-  bottom: auto;
-  border-top: 1px solid rgba(var(--line-rgb), 0.22);
-  border-right: none;
-  border-bottom: none;
-  border-left: 1px solid rgba(var(--line-rgb), 0.22);
 }
 .subscription-tooltip-rule {
   height: 1px;
@@ -5514,6 +5536,7 @@ html.is-windows .limit-live-badge {
 #claudeManualPanel,
 #opencodeManualPanel,
 #cursorManualPanel,
+#clineManualPanel,
 #factoryManualPanel,
 #kimiManualPanel,
 #copilotManualPanel,
@@ -5523,6 +5546,7 @@ html.is-windows .limit-live-badge {
 #zaiManualPanel,
 #zaiteamManualPanel,
 #qoderManualPanel,
+#devinManualPanel,
 #deepseekManualPanel,
 #minimaxManualPanel,
 #volcengineManualPanel,
@@ -5533,6 +5557,7 @@ html.is-windows .limit-live-badge {
 #claudeManualPanel > .accordion-animation-inner,
 #opencodeManualPanel > .accordion-animation-inner,
 #cursorManualPanel > .accordion-animation-inner,
+#clineManualPanel > .accordion-animation-inner,
 #factoryManualPanel > .accordion-animation-inner,
 #kimiManualPanel > .accordion-animation-inner,
 #zedManualPanel > .accordion-animation-inner,
@@ -5541,6 +5566,7 @@ html.is-windows .limit-live-badge {
 #zaiManualPanel > .accordion-animation-inner,
 #zaiteamManualPanel > .accordion-animation-inner,
 #qoderManualPanel > .accordion-animation-inner,
+#devinManualPanel > .accordion-animation-inner,
 #deepseekManualPanel > .accordion-animation-inner,
 #minimaxManualPanel > .accordion-animation-inner,
 #volcengineManualPanel > .accordion-animation-inner,
@@ -5554,6 +5580,7 @@ html.is-windows .limit-live-badge {
 #claudeManualPanel textarea,
 #opencodeManualPanel textarea,
 #cursorManualPanel textarea,
+#clineManualPanel input,
 #factoryManualPanel input,
 #kimiManualPanel input,
 #kimiManualPanel textarea,
@@ -5567,6 +5594,7 @@ html.is-windows .limit-live-badge {
 #zaiteamManualPanel input,
 #qoderManualPanel textarea,
 #qoderManualPanel select,
+#devinManualPanel input,
 #deepseekManualPanel input,
 #openrouterApiKeyInput,
 #minimaxManualPanel input,
@@ -5593,6 +5621,7 @@ html.is-windows .limit-live-badge {
 }
 #claudeManualPanel textarea,
 #opencodeManualPanel textarea,
+#clineManualPanel input,
 #cursorManualPanel textarea,
 #factoryManualPanel input,
 #kimiManualPanel input,
@@ -5605,6 +5634,7 @@ html.is-windows .limit-live-badge {
 #zaiManualPanel input,
 #zaiteamManualPanel input,
 #qoderManualPanel textarea,
+#devinManualPanel input,
 #deepseekManualPanel input,
 #openrouterApiKeyInput,
 #minimaxManualPanel input,

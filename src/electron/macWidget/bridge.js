@@ -9,8 +9,8 @@ const {
   macWidgetSnapshotFingerprint,
   macWidgetSnapshotFingerprintFromSerialized,
   macWidgetSnapshotNeedsWrite
-} = require('../shared/macWidgetSnapshot');
-const { validateAppGroupSyntax } = require('../shared/macWidgetConfig');
+} = require('../../shared/macWidgetSnapshot');
+const { validateAppGroupSyntax } = require('../../shared/macWidgetConfig');
 const { resolveMacAppGroupContainerPath } = require('./macAppGroupContainer');
 
 function resolveMacWidgetSnapshotPath(options = {}) {

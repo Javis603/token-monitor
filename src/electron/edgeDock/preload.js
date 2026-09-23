@@ -17,6 +17,10 @@ contextBridge.exposeInMainWorld('tokenMonitorEdgeDock', {
   // is the same call the Limits view's Switch button makes, and the main
   // process re-projects the cards once it lands.
   switchCodexAccount: (accountId) => ipcRenderer.invoke('edgeDock:switchCodexAccount', { accountId }),
+  // The Codex reset forecast row is a link on the Limits page, and the card is
+  // that row. The renderer names the intent rather than a URL, so widening this
+  // bridge did not hand a floating surface a general "open anything" verb.
+  openResetForecastSource: () => ipcRenderer.send('edgeDock:openResetForecastSource'),
   onRender: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };
     ipcRenderer.on('edgeDock:render', listener);

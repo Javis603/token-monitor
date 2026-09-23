@@ -82,7 +82,7 @@ function preferredPlanInfoName(planInfo) {
 }
 
 function isLanguageServerCommand(lowerCommand) {
-  return /(^|[/\\])language(?:_|-)server(?:[_-][a-z0-9]+)*(?:\.exe)?(\s|$)/.test(lowerCommand);
+  return /(?:^|[\s/\\])language(?:_|-)server(?:[_-][a-z0-9]+)*(?:\.exe)?(\s|$)/.test(lowerCommand);
 }
 
 function isAntigravityCommand(lowerCommand) {
@@ -96,9 +96,18 @@ function isAntigravityCommand(lowerCommand) {
 // server as the IDE, but launches it without a `--csrf_token` flag and under a
 // different process name. Path-anchor the match so unrelated binaries/arguments
 // (e.g. `/opt/imagytool/...`, `legacy-agent`) do not match.
+// `--hub` turns the CLI into a network-facing RPC service that does require a
+// CSRF token, so the flag is matched once here and reused by the "we saw it but
+// it had no token" diagnostic.
+function isHubModeCommand(command) {
+  return /(?:^|\s)--hub(?:\s|=|$)/.test(command);
+}
+
 function isAntigravityCliCommand(lowerCommand) {
   if (/(^|[/\\])(antigravity-cli|antigravity_cli)([\s/\\]|$)/.test(lowerCommand)) return true;
-  if (/(^|[/\\])agy(\.exe)?(\s|$)/.test(lowerCommand)) return true;
+  if (/(^|[/\\])agy(\.exe)?(\s|$)/.test(lowerCommand)) {
+    return isLanguageServerCommand(lowerCommand) || isHubModeCommand(lowerCommand);
+  }
   return false;
 }
 
@@ -171,16 +180,21 @@ function parseProcessLine(line) {
   const kind = antigravityProcessKind(lower);
   if (!kind) return null;
   const csrfToken = extractFlag('--csrf_token', command);
+  const isHubMode = isHubModeCommand(command);
+  const hubPort = extractPortFlag('--hub-port', command);
   // Desktop app/IDE language servers authenticate local requests with
   // `--csrf_token`; tokenless matches are skipped so a later valid process can
-  // still be used. The CLI language server exposes no token flag and needs none.
-  if (kind !== 'cli' && !csrfToken) return null;
+  // still be used. The CLI language server exposes no token flag and needs none,
+  // EXCEPT when running in hub mode (--hub flag), which acts as a network-facing
+  // RPC service and requires CSRF protection like app/IDE.
+  if ((kind !== 'cli' || isHubMode) && !csrfToken) return null;
   return {
     pid,
     kind,
     csrfToken: csrfToken || '',
     extensionPort: extractPortFlag('--extension_server_port', command),
     extensionCsrfToken: extractFlag('--extension_server_csrf_token', command),
+    hubPort: hubPort,
     commandLine: command
   };
 }
@@ -224,7 +238,7 @@ function runProcessText(cmd, args, { timeoutMs = 10000, deps = {} } = {}) {
 
 function processInfosFromText(stdout) {
   const infos = [];
-  let sawDesktopWithoutCsrf = false;
+  let sawTokenlessCsrfClient = false;
   for (const line of String(stdout || '').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -236,17 +250,20 @@ function processInfosFromText(stdout) {
     const split = trimmed.indexOf(' ');
     const lower = split === -1 ? '' : commandForMatching(trimmed.slice(split + 1).trim());
     const kind = antigravityProcessKind(lower);
-    if ((kind === 'app' || kind === 'ide') && !extractFlag('--csrf_token', trimmed)) {
-      sawDesktopWithoutCsrf = true;
-    }
+    if (!kind || extractFlag('--csrf_token', trimmed)) continue;
+    // Desktop/IDE language servers and hub-mode CLI services both authenticate
+    // with `--csrf_token`, so a tokenless one of either is a real
+    // misconfiguration worth naming instead of reporting "not running". A plain
+    // tokenless CLI is legitimately skippable and does not count here.
+    if (kind !== 'cli' || isHubModeCommand(lower)) sawTokenlessCsrfClient = true;
   }
-  return { infos: sortProcessInfos(infos), sawDesktopWithoutCsrf };
+  return { infos: sortProcessInfos(infos), sawTokenlessCsrfClient };
 }
 
 function requireDetectedProcessInfos(stdout) {
-  const { infos, sawDesktopWithoutCsrf } = processInfosFromText(stdout);
+  const { infos, sawTokenlessCsrfClient } = processInfosFromText(stdout);
   if (infos.length > 0) return infos;
-  if (sawDesktopWithoutCsrf) throw errorWithStatus('unavailable', 'Antigravity LS missing --csrf_token');
+  if (sawTokenlessCsrfClient) throw errorWithStatus('unavailable', 'Antigravity LS missing --csrf_token');
   throw errorWithStatus('notConfigured', 'Antigravity language server not running');
 }
 
@@ -371,7 +388,20 @@ function callLs({
           catch (err) { reject(errorWithStatus('unavailable', `parse error: ${err.message}`)); }
           return;
         }
-        const error = errorWithStatus(statusFromHttpCode(res.statusCode), `${method} returned ${res.statusCode}`);
+        let status = statusFromHttpCode(res.statusCode);
+        // Check if the error response body mentions CSRF (e.g., Connect-RPC style
+        // "invalid_argument" for "missing CSRF token"). If so, classify as
+        // unauthorized regardless of HTTP status code.
+        try {
+          const parsed = JSON.parse(text);
+          const message = String(parsed?.message || parsed?.error || '').toLowerCase();
+          if (message.includes('csrf')) {
+            status = 'unauthorized';
+          }
+        } catch (_) {
+          // If body is not JSON or parse fails, fall back to status from HTTP code.
+        }
+        const error = errorWithStatus(status, `${method} returned ${res.statusCode}`);
         error.httpStatus = res.statusCode;
         reject(error);
       });
@@ -511,6 +541,19 @@ function collapsePools(models) {
 
 function endpointCandidates(processInfo, listenPorts) {
   const candidates = [];
+  // Try explicit hub port first if available (most authoritative and fastest).
+  if (processInfo.hubPort) {
+    candidates.push({
+      scheme: 'https',
+      port: processInfo.hubPort,
+      csrfToken: processInfo.csrfToken
+    });
+    candidates.push({
+      scheme: 'http',
+      port: processInfo.hubPort,
+      csrfToken: processInfo.csrfToken
+    });
+  }
   for (const port of listenPorts) {
     candidates.push({ scheme: 'https', port, csrfToken: processInfo.csrfToken });
     candidates.push({ scheme: 'http',  port, csrfToken: processInfo.csrfToken });
@@ -554,6 +597,47 @@ function prioritizeCandidate(resolved, candidates) {
     || candidate.port !== resolved.port
     || candidate.csrfToken !== resolved.csrfToken
   ))];
+}
+
+function sameEndpoint(left, right) {
+  return left.scheme === right.scheme
+    && left.port === right.port
+    && left.csrfToken === right.csrfToken;
+}
+
+function dedupeCandidates(candidates) {
+  return candidates.filter((candidate, index) => (
+    !candidates.slice(0, index).some((existing) => sameEndpoint(existing, candidate))
+  ));
+}
+
+function firstSnapshotOrAll(tasks) {
+  if (tasks.length === 0) return Promise.resolve({ snapshot: null, results: [] });
+  return new Promise((resolve, reject) => {
+    const results = new Array(tasks.length);
+    let remaining = tasks.length;
+    let settled = false;
+    tasks.forEach((task, index) => {
+      Promise.resolve(task).then((result) => {
+        results[index] = result;
+        if (settled) return;
+        if (result.snapshot) {
+          settled = true;
+          resolve({ snapshot: result.snapshot, results });
+          return;
+        }
+        remaining -= 1;
+        if (remaining === 0) {
+          settled = true;
+          resolve({ snapshot: null, results });
+        }
+      }, (error) => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      });
+    });
+  });
 }
 
 async function resolveWorkingEndpoint(candidates, call, deadlineMs, signal) {
@@ -722,50 +806,155 @@ async function probe(deps = {}) {
       signal
     );
 
-    // Source priority is deliberate and independent of ps/PID order. Processes
-    // within one source are probed concurrently under the same provider-wide
-    // deadline, and grouped quota still wins before any legacy response.
+    // Probe scheduling contract:
+    // - source priority is independent of ps/PID order;
+    // - same-source processes run concurrently, with grouped quota before legacy;
+    // - each endpoint is preflighted at most once;
+    // - a reachable explicit hub starts quota without awaiting discovery;
+    // - preflight failure lowers priority but never drops a quota candidate; and
+    // - discovery keeps the full provider deadline when no explicit hub competes.
     for (const kind of PROCESS_KIND_ORDER) {
       const sourceInfos = infos.filter((info) => info.kind === kind);
-      const prepared = await Promise.all(sourceInfos.map(async (info) => {
+      const halfDeadlineMs = () => (
+        Date.now() + Math.max(1, Math.floor(remainingMs(probeDeadlineMs) / 2))
+      );
+      const candidateStates = sourceInfos.map(async (info) => {
         try {
-          const ports = await promiseBeforeDeadline(
-            (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs }),
-            probeDeadlineMs,
-            DEFAULT_RPC_TIMEOUT_MS,
-            signal
-          );
-          const initialCandidates = endpointCandidates(info, ports);
-          const resolved = await resolveWorkingEndpoint(
-            initialCandidates,
-            call,
-            probeDeadlineMs,
-            signal
-          );
-          return { info, candidates: resolved.candidates, error: resolved.lastError };
+          // An explicit `--hub-port` is authoritative, and discovery must not be
+          // able to starve it. Start discovery concurrently, but expose it as a
+          // lazy fallback so a reachable hub can begin quota retrieval without
+          // waiting for lsof/Get-NetTCPConnection to settle.
+          const explicitHub = info.hubPort ? endpointCandidates(info, []) : [];
+          const discoveryBudgetMs = explicitHub.length > 0 ? halfDeadlineMs() : probeDeadlineMs;
+          const discovery = (async () => {
+            try {
+              const ports = await promiseBeforeDeadline(
+                (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs }),
+                discoveryBudgetMs,
+                DEFAULT_RPC_TIMEOUT_MS,
+                signal
+              );
+              return { ports, error: null };
+            } catch (error) {
+              return { ports: [], error };
+            }
+          })();
+
+          const resolveDiscoveredCandidates = async (failedHub = []) => {
+            const { ports, error: discoveryError } = await discovery;
+            if (discoveryError && explicitHub.length === 0) throw discoveryError;
+            // `endpointCandidates()` always re-prepends the hub port, so remove
+            // it here. A hub already failed or passed preflight and must not be
+            // resolved a second time through the discovered set.
+            const discovered = endpointCandidates(info, ports).filter((candidate) => (
+              candidate.port !== info.hubPort
+            ));
+            let resolved;
+            try {
+              resolved = await resolveWorkingEndpoint(
+                discovered,
+                call,
+                probeDeadlineMs,
+                signal
+              );
+            } catch (error) {
+              if (signal?.aborted) throw error;
+              resolved = { candidates: discovered, lastError: error };
+            }
+            return {
+              info,
+              candidates: dedupeCandidates([...resolved.candidates, ...failedHub]),
+              error: resolved.lastError || discoveryError
+            };
+          };
+
+          if (explicitHub.length > 0) {
+            let resolvedHub;
+            try {
+              resolvedHub = await resolveWorkingEndpoint(
+                explicitHub,
+                call,
+                halfDeadlineMs(),
+                signal
+              );
+            } catch (error) {
+              if (signal?.aborted) throw error;
+              resolvedHub = { candidates: explicitHub, lastError: error };
+            }
+            // `GetUnleashData` only proves the endpoint responds (an HTTP error is
+            // deliberately accepted for servers that do not implement it). Once
+            // the hub is reachable, hand it to the quota stage immediately and
+            // await discovery only if those quota calls fail.
+            if (resolvedHub.lastError === null) {
+              return {
+                info,
+                candidates: resolvedHub.candidates,
+                fallbackCandidates: resolveDiscoveredCandidates,
+                error: null
+              };
+            }
+            // A failed lightweight preflight lowers the hub's priority but does
+            // not remove it: older servers can still implement the quota RPCs.
+            return resolveDiscoveredCandidates(explicitHub);
+          }
+
+          return resolveDiscoveredCandidates();
         } catch (error) {
           return { info, candidates: [], error };
         }
-      }));
-      throwIfAborted(signal);
-      const candidatesByProcess = prepared.filter((entry) => entry.candidates.length > 0);
-      for (const entry of prepared) {
-        if (entry.error) lastError = entry.error;
-      }
-      if (candidatesByProcess.length === 0) continue;
+      });
 
-      const summaryDeadlineMs = Date.now() + Math.max(1, Math.floor(remainingMs(probeDeadlineMs) / 2));
-      const groupedResults = await Promise.all(candidatesByProcess.map((entry) => (
-        groupedQuotaFromCandidates(entry.candidates, call, {
-          summaryDeadlineMs,
+      const groupedTasks = candidateStates.map(async (state) => {
+        const entry = await state;
+        if (entry.candidates.length === 0) {
+          return { ...entry, snapshot: null, lastError: entry.error };
+        }
+
+        let candidates = entry.candidates;
+        let grouped = await groupedQuotaFromCandidates(candidates, call, {
+          summaryDeadlineMs: halfDeadlineMs(),
           probeDeadlineMs,
           signal
-        })
-      )));
+        });
+        let groupedError = grouped.lastError || entry.error;
+
+        if (!grouped.snapshot && entry.fallbackCandidates) {
+          let fallback;
+          try {
+            fallback = await entry.fallbackCandidates();
+          } catch (error) {
+            fallback = { candidates: [], error };
+          }
+          groupedError = fallback.error || groupedError;
+          if (fallback.candidates.length > 0) {
+            candidates = dedupeCandidates([...candidates, ...fallback.candidates]);
+            grouped = await groupedQuotaFromCandidates(fallback.candidates, call, {
+              summaryDeadlineMs: halfDeadlineMs(),
+              probeDeadlineMs,
+              signal
+            });
+            groupedError = grouped.lastError || groupedError;
+          }
+        }
+
+        return {
+          info: entry.info,
+          candidates,
+          snapshot: grouped.snapshot,
+          lastError: groupedError
+        };
+      });
+      // Kind ordering is semantic; PID ordering within one kind is only stable
+      // enumeration. A valid grouped snapshot can therefore finish the kind
+      // immediately, while every grouped task must fail before legacy begins.
+      const groupedOutcome = await firstSnapshotOrAll(groupedTasks);
       throwIfAborted(signal);
-      const grouped = groupedResults.find((result) => result.snapshot);
-      if (grouped?.snapshot) return { ...grouped.snapshot, sourceDetail: kind };
+      if (groupedOutcome.snapshot) return { ...groupedOutcome.snapshot, sourceDetail: kind };
+      const groupedResults = groupedOutcome.results;
       for (const result of groupedResults) lastError = result.lastError || lastError;
+
+      const candidatesByProcess = groupedResults.filter((entry) => entry.candidates.length > 0);
+      if (candidatesByProcess.length === 0) continue;
 
       const legacyResults = await Promise.all(candidatesByProcess.map((entry) => (
         legacyQuotaFromCandidates(entry.candidates, call, {

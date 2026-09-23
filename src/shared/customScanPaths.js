@@ -2,6 +2,7 @@
 
 const path = require('node:path');
 const { CLIENT_IDS, LOCALLY_PARSED_CLIENT_IDS } = require('./clientCatalog');
+const { LEGACY_CLIENT_ID_ALIASES } = require('./clientTracking');
 const { tokscaleCustomScanClientIds } = require('./tokscaleClientMapping');
 
 const MAX_CUSTOM_SCAN_PATHS = 64;
@@ -42,6 +43,14 @@ const CUSTOM_SCAN_CLIENT_IDS = Object.freeze(
   CLIENT_IDS.filter((id) => !UNSUPPORTED_CUSTOM_SCAN_CLIENTS.has(id))
 );
 const TOKSCALE_CLIENTS = new Set(CUSTOM_SCAN_CLIENT_IDS);
+// Paths are keyed by tracked-client id, so a persisted object written before an
+// id was renamed still carries the old key. The same aliases that migrate the
+// saved client selection fold those keys onto their current id here; without
+// them a renamed client's roots would be dropped silently on the next read.
+const LEGACY_KEYS_BY_CLIENT = Object.entries(LEGACY_CLIENT_ID_ALIASES).reduce((keys, [legacy, id]) => {
+  (keys[id] ||= []).push(legacy);
+  return keys;
+}, {});
 
 function isAbsolutePath(value, platform = process.platform) {
   if (platform === 'win32') {
@@ -56,8 +65,9 @@ function validCustomScanPaths(value, options = {}) {
   const allowedClients = options.allowedClients || TOKSCALE_CLIENTS;
   const result = {};
   for (const client of CLIENT_IDS) {
-    const rawPaths = value[client];
-    if (!allowedClients.has(client) || !Array.isArray(rawPaths)) continue;
+    if (!allowedClients.has(client)) continue;
+    const rawPaths = [client, ...(LEGACY_KEYS_BY_CLIENT[client] || [])]
+      .flatMap((key) => (Array.isArray(value[key]) ? value[key] : []));
     const paths = [];
     const seen = new Set();
     for (const rawPath of rawPaths) {

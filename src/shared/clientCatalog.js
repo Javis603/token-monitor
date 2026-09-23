@@ -27,12 +27,18 @@
   // and the README table (tests/shared/clientTracking.test.js enforces that).
   //
   // `defaultTracked: false` keeps a client wired and selectable but off on a
-  // fresh install. micode (MiMo Code) is opt-in because mimocode.db auto-imports
-  // Claude Code sessions (its claude-import service), so scanning it
-  // double-counts the `claude` client: tokscale fixed the scan path but does not
-  // dedup imports, and the imported rows aren't cleanly separable (MiMo is
-  // multi-model). qodercn is opt-in per the upstream tool-support boundary — a
+  // fresh install. qodercn is opt-in per the upstream tool-support boundary — a
   // local adapter that may break when Qoder changes its DB schema.
+  //
+  // mimo (MiMo) ships default-tracked even though mimocode.db auto-imports
+  // Claude Code sessions (its claude-import service): tokscale parses the store
+  // but does not dedup those imports, and the imported rows aren't cleanly
+  // separable (MiMo is multi-model), so a MiMo user's Claude work is counted
+  // under both `claude` and `mimo`. That overlap is accepted rather than fixed
+  // here — discovering the tool at all was judged to matter more than the
+  // inflation, and anyone affected can untick it in Settings → tools. Only a
+  // fresh install is affected; saved selections are untouched. Revisit if
+  // tokscale ever marks claude-import sessions.
   //
   // `locallyParsed: true` means the client is excluded from the tokscale client
   // filter and read by a local adapter instead (collector.js). This is an axis
@@ -58,7 +64,7 @@
     { id: 'zed', label: 'Zed' },
     { id: 'kilo', label: 'Kilo' },
     { id: 'commandcode', label: 'Command Code' },
-    { id: 'micode', label: 'MiMo Code', defaultTracked: false },
+    { id: 'mimo', label: 'Xiaomi MiMo' },
     { id: 'zcode', label: 'ZCode' },
     { id: 'kiro', label: 'Kiro' },
     { id: 'codebuddy', label: 'CodeBuddy' },
@@ -70,7 +76,8 @@
     { id: 'dsh', label: 'DeepSeek Harness' },
     { id: 'cherrystudio', label: 'Cherry Studio' },
     { id: 'lmstudio', label: 'LM Studio' },
-    { id: 'unsloth', label: 'Unsloth' }
+    { id: 'unsloth', label: 'Unsloth' },
+    { id: 'devin', label: 'Devin' }
   ].map((client) => Object.freeze({
     defaultTracked: true,
     locallyParsed: false,

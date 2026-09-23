@@ -45,6 +45,7 @@ test('stores credential settings in a versioned provider document', (t) => {
     zaiTeamOrganizationId: 'organization-id',
     traeAccessToken: 'trae-token',
     traeDeviceId: 'trae-device',
+    devinBearerToken: 'devin-token',
     qoderCookie: ''
   });
 
@@ -63,6 +64,7 @@ test('stores credential settings in a versioned provider document', (t) => {
   assert.equal(document.credentials.providers.zaiTeam.organizationId, 'organization-id');
   assert.equal(document.credentials.providers.trae.accessToken, 'trae-token');
   assert.equal(document.credentials.providers.trae.deviceId, 'trae-device');
+  assert.equal(document.credentials.providers.devin.bearerToken, 'devin-token');
   assert.equal(document.credentials.providers.qoder, undefined);
   assert.equal(document.migrations.settings, 1);
 
@@ -85,7 +87,8 @@ test('stores credential settings in a versioned provider document', (t) => {
     kimiWebAccessToken: 'kimi-web-token',
     zaiTeamOrganizationId: 'organization-id',
     traeAccessToken: 'trae-token',
-    traeDeviceId: 'trae-device'
+    traeDeviceId: 'trae-device',
+    devinBearerToken: 'devin-token'
   });
 });
 

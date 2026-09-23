@@ -689,6 +689,21 @@ test('durable archive canonicalizes OMP into Pi before identity and reconstructi
   assert.equal(Object.hasOwn(restored.daily[0].perClient, 'omp'), false);
 });
 
+test('durable archive canonicalizes antigravity-cli into antigravity before identity and reconstruction', () => {
+  const archive = captureDailyHistoryArchive({}, graph('2026-07-18', [
+    client('antigravity', 'gemini-3.8-flash', 10, 1, 1),
+    client('antigravity-cli', 'gemini-3.8-flash', 20, 2, 1)
+  ]), { todayKey: '2026-07-18' });
+  const observations = Object.values(archive.days['2026-07-18'].observations);
+  assert.equal(observations.length, 1);
+  assert.equal(observations[0].client, 'antigravity');
+  assert.equal(observations[0].tokens, 30);
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, { todayKey: '2026-07-18' }));
+  assert.equal(restored.daily[0].perClient.antigravity.tokens, 30);
+  assert.equal(Object.hasOwn(restored.daily[0].perClient, 'antigravity-cli'), false);
+});
+
 test('durable reconstruction preserves client-specific reasoning output without recounting it', () => {
   const archive = captureDailyHistoryArchive({}, graph('2026-07-18', [
     client('codex', 'gpt', 100, 1, 1, { reasoning: 30 }),

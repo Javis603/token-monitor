@@ -89,7 +89,7 @@ Tracked-client identity lives in **one** place: `CLIENT_CATALOG` in `src/shared/
 | Renderer maps | `clientsWithIcon` in `src/electron/renderer/app.js` — deliberately not catalog-derived: it also holds model-vendor ids and (via `limitMarksWithIcon`) limits marks, so it is an icon table, not a client list; provider artwork in `src/electron/renderer/trayProviderIcons.js`; `VENDOR_ORDER` / `VENDOR_LABELS` in `themePresets.js`; `clientColors` in `usageCharts.js` |
 | Discord RPC | `KNOWN_CLIENT_ASSETS` / `CLIENT_LABELS` in `src/electron/discordRpc.js` |
 | Row icon CSS | the `.row-icon-<id>` rule in `src/electron/renderer/styles.css` |
-| Icon assets | `assets/icons/<id>.svg` + `.github/assets/tools-icon/<id>.png` by convention. A client that reuses a vendor mark has no file of its own (hermes, micode, zcode); the `.row-icon-<id>` rule is the mapping |
+| Icon assets | `assets/icons/<id>.svg` + `.github/assets/tools-icon/<id>.png` by convention. A client that reuses a vendor mark has no file of its own (hermes, mimo, zcode); the `.row-icon-<id>` rule is the mapping |
 | WSL discovery | marker(s) in `WSL_DATA_MARKERS` **and** the marker→id mapping in `MARKER_CLIENTS` (`src/shared/wslUsage.js`) — use the exact roots tokscale reads, including alternate roots. A marker without a `MARKER_CLIENTS` entry attributes to nothing, so a WSL home holding only that client's data would be skipped |
 | Docs & env examples | the supported-tools table in `README.md` and its translations (`README.*.md`) + the client CSV in `.env.example`. Every locale's prose tool/provider counts must match its own table — `tests/docs/readmeConsistency.test.js` fails on a stale count or a table that drifts between locales |
 | Guard tests | the expected-client lists in `tests/shared/clientTracking.test.js`, plus the pinned CSVs in `tests/shared/clientCatalog.test.js` (they guard a persisted-settings surface, so update them deliberately) |
@@ -120,7 +120,7 @@ Provider identity lives in **one** place: `LIMIT_PROVIDER_CATALOG` in `src/share
 
 Most of that table is now asserted from the catalog, so a provider that misses one of those points fails CI rather than shipping — `grep LIMIT_PROVIDER_IDS tests/` shows which. What it does not cover fails silently: the manual-panel shapes, where a missing registration and a correct omission look identical from the id lists alone, and the i18n keys. The source-label overrides are deliberately left out, because falling back to the generic label is usually the right answer.
 
-`limitProviders.js` is in the portable Hub core, so renaming a provider stales the Hub build marker even though nothing the Hub runs changed — the exception to "a desktop-only release does not ask users to redeploy" above. Accepted rather than worked around: adding or reordering a provider moves the marker wherever the labels live, and a label has been renamed on its own exactly once.
+`limitProviders.js` is in the portable Hub core, so renaming a provider stales the Hub build marker even though nothing the Hub runs changed — the exception to "a desktop-only release does not ask users to redeploy" above. Accepted rather than worked around: adding or reordering a provider moves the marker wherever the labels live, and so does a rename that touches only the label.
 
 ### Data flow contract
 

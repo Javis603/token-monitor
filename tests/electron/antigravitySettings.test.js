@@ -32,7 +32,11 @@ test('Antigravity settings manage quota accounts without exposing a local accoun
   assert.match(app, /connectionDetailKey && !accountGroup/);
   assert.match(app, /window\.tokenMonitor\.antigravity\.setAccountEnabled/);
   assert.match(app, /window\.tokenMonitor\.antigravity\.removeAccount/);
-  assert.match(app, /renderAntigravityAccountGroup/);
+  // Several Antigravity accounts render as the shared group, by account count
+  // rather than by a wrapper of their own — the page has no per-provider group
+  // builders left, so the count phrase is the catalog's own.
+  assert.match(app, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\)/);
+  assert.match(read('src/electron/renderer/limitWindowsView.js'), /GROUP_COUNT_KEYS = \{ volcengine: 'settings\.volcengine\.nPlans' \}/);
   assert.match(antigravityRenderer, /const planLabel = limitProviderPresentationApi\.limitProviderDisplayLabel\(provider\?\.accountLabel\)/);
   assert.match(antigravityRenderer, /if \(accounts\.length === 0\)[\s\S]*empty\.textContent = t\('settings\.antigravity\.empty'\)/);
   assert.match(antigravityRenderer, /remove\.className = 'managed-account-remove'/);
