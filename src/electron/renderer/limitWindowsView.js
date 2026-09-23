@@ -344,7 +344,13 @@
     const ariaLabel = grants.map((grant, index) => {
       const left = Number(grant?.resetsLeft);
       const count = Number.isFinite(left) ? `${Math.max(0, Math.floor(left))} left` : '';
-      return [`Reset ${index + 1}`, grant?.label, count, grant?.paused === true ? 'paused' : '']
+      // Speak the same rows the tooltip shows — expiry, cleared windows,
+      // usability — so a restriction like 'not right now' is not silent.
+      const details = claudeResetGrantRows([grant])
+        .map((row) => (Array.isArray(row) ? `${row[0]}: ${row[1]}` : row.full))
+        .filter(Boolean)
+        .join(', ');
+      return [`Reset ${index + 1}`, count, details]
         .filter(Boolean)
         .join(', ');
     }).join('; ');

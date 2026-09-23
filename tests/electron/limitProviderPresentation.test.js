@@ -1580,6 +1580,9 @@ test('Claude reset grants wrap their label and clears as full-width lines', () =
 
   assert.match(renderProviderWindows, /claudeResetCreditsNode\(provider\.resetCredits\)/);
   assert.match(claudeNode, /if \(grants\.length === 0\) return codexResetCreditsNode\(resetCredits\);/);
+  // The spoken label must carry the same rows the tooltip shows — expiry,
+  // cleared windows, usability — so grant restrictions are not silent.
+  assert.match(claudeNode, /claudeResetGrantRows\(\[grant\]\)/);
   assert.match(infoNode, /!Array\.isArray\(entry\)/);
   assert.match(infoNode, /entry\?\.caption === true \? 'is-caption' : ''/);
   assert.match(infoNode, /entry\?\.separated === true \? 'is-separated' : ''/);
