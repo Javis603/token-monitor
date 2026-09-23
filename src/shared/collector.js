@@ -2993,6 +2993,33 @@ function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
     .some((root) => resolved.startsWith(path.resolve(root) + path.sep)));
 }
 
+// Live watch ticks stay debounce-only when scans are cheaper than the debounce
+// — there is still no settings cooldown, and a mid-tick event still re-arms
+// rather than coalescing. What this caps is occupancy: if the last tick's wall
+// time already exceeded watchDebounceMs, re-arming at debounce would start the
+// next scan as soon as the last one ended (scan 5s, wait 1.5s, repeat). The
+// extra idle is derived from that duration, not a knob. 50% duty means idle at
+// least as long as the scan just ran; fast ticks keep the 3–5s product cadence.
+const LIVE_TICK_MAX_DUTY_CYCLE = 0.5;
+
+function liveTickMinIdleMs(lastDurationMs, debounceMs) {
+  const debounce = clampTimerDelayMs(debounceMs, 1500);
+  const duration = Number(lastDurationMs);
+  if (!Number.isFinite(duration) || duration <= 0) return debounce;
+  const minIdle = Math.ceil(duration * ((1 / LIVE_TICK_MAX_DUTY_CYCLE) - 1));
+  return clampTimerDelayMs(Math.max(debounce, minIdle), debounce);
+}
+
+function liveWatchDelayMs(lastDurationMs, debounceMs, sinceFinishMs) {
+  const debounce = clampTimerDelayMs(debounceMs, 1500);
+  const minIdle = liveTickMinIdleMs(lastDurationMs, debounce);
+  const elapsed = Number(sinceFinishMs);
+  const leftover = Number.isFinite(elapsed) && elapsed >= 0
+    ? Math.max(0, minIdle - elapsed)
+    : 0;
+  return clampTimerDelayMs(Math.max(debounce, leftover), debounce);
+}
+
 function startCollector(options) {
   const {
     clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion, agentRuntime,
@@ -3090,6 +3117,7 @@ function startCollector(options) {
   let lastTickAttemptAt = 0;
   let lastTickSuccessAt = 0;
   let lastTickFailureAt = 0;
+  let lastTickFinishedAt = 0;
   let lastTickDurationMs = null;
   let lastTickScope = 'full';
   let lastTickReasonCode = null;
@@ -3460,6 +3488,7 @@ function startCollector(options) {
       }
       const tickFinishedAt = Date.now();
       lastTickSuccessAt = tickFinishedAt;
+      lastTickFinishedAt = tickFinishedAt;
       lastTickDurationMs = Math.max(0, tickFinishedAt - tickStartedAt);
       lastTickFailureCode = null;
       tickHadFailure = false;
@@ -3483,6 +3512,7 @@ function startCollector(options) {
       }
       const tickFinishedAt = Date.now();
       lastTickFailureAt = tickFinishedAt;
+      lastTickFinishedAt = tickFinishedAt;
       lastTickDurationMs = Math.max(0, tickFinishedAt - tickStartedAt);
       lastTickFailureCode = 'tick-failed';
       tickHadFailure = true;
@@ -3618,25 +3648,56 @@ function startCollector(options) {
     return targetClients;
   }
 
-  function scheduleTick(reason, eventClients) {
+  function remainingDutyIdleMs() {
+    if (lastTickFinishedAt <= 0) return 0;
+    const minIdle = liveTickMinIdleMs(lastTickDurationMs, watchDebounceMs);
+    const elapsed = Date.now() - lastTickFinishedAt;
+    if (!Number.isFinite(elapsed) || elapsed < 0) return minIdle;
+    return elapsed >= minIdle ? 0 : clampTimerDelayMs(minIdle - elapsed, 1);
+  }
+
+  function startWatchTick(reason) {
+    // A raw source event means that client's synced cache may now be stale, so
+    // its sync drops to the short floor instead of waiting out the idle
+    // cadence. Its cache is deliberately outside the watcher, so a sync here
+    // cannot create the issue #15 self-trigger loop.
+    runTick(reason, {
+      todayOnly: true,
+      targetClients: takeWatchClients(),
+      sourceSelfSync: sourceSyncQueue.takeDue()
+    });
+  }
+
+  function armWatchTick(reason, delayMs) {
     if (stopped) return;
-    recordWatchClients(eventClients);
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
+      if (stopped) return;
       // Re-arm instead of queueing onto the in-flight tick: the coalesce path
       // would re-run immediately on completion, stacking scans back-to-back.
-      if (tickInFlight) { scheduleTick(reason); return; }
-      // A raw source event means that client's synced cache may now be stale, so
-      // its sync drops to the short floor instead of waiting out the idle
-      // cadence. Its cache is deliberately outside the watcher, so a sync here
-      // cannot create the issue #15 self-trigger loop.
-      runTick(reason, {
-        todayOnly: true,
-        targetClients: takeWatchClients(),
-        sourceSelfSync: sourceSyncQueue.takeDue()
-      });
-    }, watchDebounceMs);
+      if (tickInFlight) {
+        armWatchTick(reason, watchDebounceMs);
+        return;
+      }
+      // The debounce already elapsed. Only wait leftover duty idle here — adding
+      // another debounce after a long tick would overshoot the 50% cap into a
+      // hidden settings cooldown.
+      const leftover = remainingDutyIdleMs();
+      if (leftover > 0) {
+        armWatchTick(reason, leftover);
+        return;
+      }
+      startWatchTick(reason);
+    }, delayMs);
+  }
+
+  function scheduleTick(reason, eventClients) {
+    if (stopped) return;
+    recordWatchClients(eventClients);
+    // From a watch event: debounce always, plus any leftover duty-cycle idle
+    // derived from the last tick's wall time. Fast ticks stay debounce-only.
+    armWatchTick(reason, Math.max(watchDebounceMs, remainingDutyIdleMs()));
   }
 
   // chokidar's close() walks every watched entry and closes every fs.watch
@@ -3953,6 +4014,9 @@ module.exports = {
   resetTokscaleCapabilityCache,
   tokscalePricingCatalog,
   kimiWorkSessionsRoots,
+  LIVE_TICK_MAX_DUTY_CYCLE,
+  liveTickMinIdleMs,
+  liveWatchDelayMs,
   resolveWatchUsePolling,
   selfSyncSourceRootsForClients,
   // The process-wide sync throttle this module drives. Exported so a test can
