@@ -92,7 +92,7 @@ function percent(value) {
 function currentPercent(value) {
   const parsed = finiteNumber(value);
   if (parsed === null) return null;
-  return Math.max(0, Math.min(100, parsed));
+  return Math.max(0, Math.min(100, parsed < 1 ? parsed * 100 : parsed));
 }
 
 function quotaPercent(value) {
@@ -137,7 +137,7 @@ function findQuotaWindow(value, keyMatches) {
     return null;
   }
   for (const [key, candidate] of Object.entries(value)) {
-    if (!keyMatches(key)) continue;
+    if (!keyMatches(key, candidate)) continue;
     const usedPercent = quotaPercent(candidate);
     if (usedPercent !== null) return { usedPercent, resetsAt: resetAt(candidate) };
   }
@@ -191,7 +191,14 @@ function parseDevinUsage(body, organization = '') {
     return usedPercent === null ? null : { usedPercent, resetsAt: toIso(body[`${kind}_reset_at`]) };
   };
   const hasQuota = body.has_quota_allocation !== false;
-  const quotaKey = (kind) => (key) => !/(?:hide|reset|time|date)/iu.test(key) && kind.test(key);
+  const quotaKey = (kind) => (key, candidate) => {
+    if (/(?:hide|reset|time|date)/iu.test(key) || !kind.test(key)) return false;
+    // A scalar daily_limit/weekly_total is capacity, not percentage used.
+    // Structured quota objects can still carry both usage and capacity.
+    return (candidate !== null && typeof candidate === 'object')
+      || !/(?:limit|total|max|capacity|allocation)/iu.test(key)
+      || /(?:used|usage|consumed|remaining|percent)/iu.test(key);
+  };
   const daily = !hasQuota || body.hide_daily_quota === true
     ? null
     : currentWindow('daily') || findQuotaWindow(body, quotaKey(/daily|day/iu));

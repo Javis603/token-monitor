@@ -38,7 +38,7 @@ test('parses current Devin daily, weekly, plan and balance fields', () => {
     weekly_reset_at: 1790467200,
     overage_balance: 10
   }, 'organizations/org_GQ6LhcfkW1TSinM6');
-  assert.equal(usage.daily.usedPercent, 0.12);
+  assert.equal(usage.daily.usedPercent, 12);
   assert.equal(usage.weekly.usedPercent, 42);
   assert.equal(usage.daily.resetsAt, '2026-09-24T00:00:00.000Z');
   assert.equal(usage.weekly.resetsAt, '2026-09-27T00:00:00.000Z');
@@ -65,8 +65,9 @@ test('hides daily quota while keeping nested weekly quota and cents balance', ()
 test('keeps Devin current and fallback percentage boundaries distinct', () => {
   const current = parseDevinUsage({ daily_percentage: 1, weekly_percentage: 0.5 });
   assert.equal(current.daily.usedPercent, 1);
-  assert.equal(current.weekly.usedPercent, 0.5);
-  assert.equal(parseDevinUsage({ daily_percentage: 0.99 }).daily.usedPercent, 0.99);
+  assert.equal(current.weekly.usedPercent, 50);
+  assert.equal(parseDevinUsage({ daily_percentage: 0.99 }).daily.usedPercent, 99);
+  assert.equal(parseDevinUsage({ daily_percentage: 1.5 }).daily.usedPercent, 1.5);
 
   const fallback = parseDevinUsage({
     quota_usage: {
@@ -119,6 +120,24 @@ test('ignores numeric reset metadata when finding fallback quota windows', () =>
   assert.equal(usage.daily.usedPercent, 25);
   assert.equal(usage.weekly.usedPercent, 40);
   assert.throws(() => parseDevinUsage({ daily_reset_at: 1790467200 }), /missing Devin quota windows/);
+});
+
+test('does not turn scalar capacity metadata into used quota', () => {
+  assert.throws(() => parseDevinUsage({ daily_limit: 100, weekly_total: 200 }), /missing Devin quota windows/);
+
+  const withUsage = parseDevinUsage({
+    daily_limit: 100,
+    weekly_max: 200,
+    quota_usage: {
+      daily_quota: { used_percent: 25 },
+      weekly_quota: { used_percent: 40 }
+    }
+  });
+  assert.equal(withUsage.daily.usedPercent, 25);
+  assert.equal(withUsage.weekly.usedPercent, 40);
+
+  const structured = parseDevinUsage({ daily_limit: { used: 25, limit: 100 } });
+  assert.equal(structured.daily.usedPercent, 25);
 });
 
 test('rejects a payload with no quota or balance data', () => {
