@@ -1,5 +1,6 @@
 ---
 summary: "WorkBuddy provider notes: the app-owned local session, its credential-encryption boundary, the headless token lane, and the billing contract."
+ids: [workbuddy]
 read_when:
   - Adding or changing WorkBuddy limits collection
   - Changing how the WorkBuddy desktop session is read, validated, or reported
@@ -39,7 +40,7 @@ Non-obvious constraints that must survive refactors:
 - **The first directory with canonical state decides.** Once the preferred location holds the file or a `.logged-out` marker, the reader does not fall back to a legacy directory, so a stale roaming copy cannot revive a session the user ended.
 - **Only the canonical filename is trusted.** A sibling file is never read, even when it looks like a session.
 - **Symlinks and oversized files are refused** through `readRegularFileNoFollow` and the 1 MB cap.
-- **No credential is stored by Token Monitor.** The access token lives in memory for the duration of one billing request and is never written to settings, logs, or the wire.
+- **No credential is stored by Token Monitor.** The access token lives in memory for the duration of one billing request: it is never written to settings, logs, or Token Monitor's own wire, and it leaves the machine only inside the allowlisted HTTPS billing request described under [Request contract](#request-contract).
 
 ### Credential encryption
 

@@ -166,7 +166,10 @@ function inspectStoredSession(value, now = Date.now()) {
   }
   const auth = value.auth && typeof value.auth === 'object' ? value.auth : {};
   const account = value.account && typeof value.account === 'object' ? value.account : {};
-  if (isEncryptedCredentialField(auth.accessToken) || isEncryptedCredentialField(auth.refreshToken)) {
+  // Only the access token gates the read: it is the one field the billing
+  // request consumes, so a sealed refresh token must not mark an otherwise
+  // usable session as unreadable.
+  if (isEncryptedCredentialField(auth.accessToken)) {
     return { session: null, reason: WORKBUDDY_SESSION_READ_REASONS.encrypted };
   }
   const accessToken = cleanText(auth.accessToken);

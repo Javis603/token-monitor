@@ -430,7 +430,9 @@ test('WorkBuddy sealed credential fields are reported as unreadable instead of s
   }
 });
 
-test('WorkBuddy local auth treats a sealed refresh token as unreadable as well', () => {
+// Token Monitor only ever consumes the access token, so a sealed refresh
+// token must not condemn a session whose billing credential still reads.
+test('WorkBuddy local auth still reads a session whose refresh token alone is sealed', () => {
   const fixture = createFixture();
   try {
     fs.writeFileSync(fixture.authPath, JSON.stringify(sessionDocument({
@@ -438,7 +440,9 @@ test('WorkBuddy local auth treats a sealed refresh token as unreadable as well',
     })), 'utf8');
     const auth = createWorkbuddyLocalAuth({ authDirectory: fixture.root, platform: 'darwin' });
 
-    assert.equal(auth.getSessionInfo().reason, WORKBUDDY_SESSION_READ_REASONS.encrypted);
+    const sessionInfo = auth.getSessionInfo();
+    assert.equal(sessionInfo.authenticated, true);
+    assert.equal(Object.hasOwn(sessionInfo, 'reason'), false);
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true });
   }
