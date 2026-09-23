@@ -2731,6 +2731,26 @@ test('Antigravity account verification is shown as an actionable status', () => 
   );
 });
 
+test('WorkBuddy sealed app credentials are shown as an actionable status', () => {
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({
+      provider: 'workbuddy',
+      status: 'notConfigured',
+      actionRequired: 'appSessionEncrypted'
+    }),
+    {
+      label: 'Encrypted by app',
+      key: 'settings.limits.status.appSessionEncrypted',
+      tone: 'warn'
+    }
+  );
+  // Without the hint the row keeps the existing sign-in prompt.
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'workbuddy', status: 'notConfigured' }),
+    { label: 'Sign in', tone: 'setup' }
+  );
+});
+
 test('deepseek source label and capability tags', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'deepseek', source: 'api' }), 'API');
   assert.deepEqual(presentation.limitProviderCapabilityTags('deepseek'), ['Pay-as-you-go', 'API key']);
