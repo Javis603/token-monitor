@@ -3626,6 +3626,8 @@ function startCollector(options) {
       debounceTimer = null;
       // Re-arm instead of queueing onto the in-flight tick: the coalesce path
       // would re-run immediately on completion, stacking scans back-to-back.
+      // There is deliberately no cooldown on top of the debounce: the product
+      // promises 3–5 s updates, and a cooldown would break that promise.
       if (tickInFlight) { scheduleTick(reason); return; }
       // A raw source event means that client's synced cache may now be stale, so
       // its sync drops to the short floor instead of waiting out the idle
