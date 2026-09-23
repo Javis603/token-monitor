@@ -21,6 +21,8 @@ test('a real launch seeds the split client once and records it', () => {
   assert.equal(seedAgentClients('claude,pi', { env }), 'claude,pi,omp');
   const marker = JSON.parse(fs.readFileSync(markerPath(dir), 'utf8'));
   assert.deepEqual(marker.applied, ['omp']);
+  assert.equal(marker.sourceCsv, 'claude,pi');
+  assert.equal(marker.clients, 'claude,pi,omp');
 });
 
 // A --dry-run preview must not consume the one-shot migration: recording it on
@@ -36,10 +38,24 @@ test('a dry run resolves the split client without recording the migration', () =
   assert.deepEqual(JSON.parse(fs.readFileSync(markerPath(dir), 'utf8')).applied, ['omp']);
 });
 
-// The marker is what lets an operator remove the split client afterwards
-// without it being re-added on every launch.
-test('a recorded migration is not re-applied', () => {
+// The env CSV is redeclared on every launch, so the seeded result is what must
+// persist: a marker that only says the migration ran would read the unchanged
+// pre-split CSV next launch and silently stop collecting Oh My Pi.
+test('an unchanged CSV keeps the seeded client on every later launch', () => {
   const { env } = tempSharedDir();
   seedAgentClients('claude,pi', { env });
+  assert.equal(seedAgentClients('claude,pi', { env }), 'claude,pi,omp');
+  assert.equal(seedAgentClients('claude,pi', { env }), 'claude,pi,omp');
+});
+
+// Editing the CSV is a new declaration and is taken literally. That is also the
+// operator's way to drop the split client: once the recorded source no longer
+// matches, the new CSV is seeded on its own terms — and the recorded migration
+// stops it being re-added.
+test('an edited CSV is honored, including removing the split client', () => {
+  const { env } = tempSharedDir();
+  seedAgentClients('claude,pi', { env });
+  assert.equal(seedAgentClients('claude,pi,omp', { env }), 'claude,pi,omp');
   assert.equal(seedAgentClients('claude,pi', { env }), 'claude,pi');
+  assert.equal(seedAgentClients('claude,pi', { env }), 'claude,pi', 'the removal sticks');
 });
