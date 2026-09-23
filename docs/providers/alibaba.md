@@ -1,5 +1,6 @@
 ---
 summary: "Alibaba Token Plan provider notes: the four console variants, cookie scope, sec_token resolution, and which variants are verified."
+ids: [alibaba]
 read_when:
   - Adding or modifying the Alibaba Token Plan provider
   - Debugging an Alibaba cookie that saves but reports unauthorized or unavailable

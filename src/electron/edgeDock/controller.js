@@ -62,6 +62,8 @@ function createEdgeDockController(deps) {
     primaryButtonDown = () => null,
     onToggleRateMode,
     onSwitchCodexAccount,
+    onOpenResetForecastSource,
+    performHaptic = () => false,
     logger = () => {}
   } = deps;
 
@@ -83,6 +85,15 @@ function createEdgeDockController(deps) {
   let bubblePlaced = null;
   let bubbleVisible = false;
   let railVisible = false;
+  let hapticCellId = null;
+  // How many times the rail has been revealed, as an event the page can key the
+  // entrance on. See revealRail: the page cannot derive this from `railVisible`,
+  // because the retract that takes the rail away never re-renders it.
+  let railReveal = 0;
+  // Whether the edge is offering its handle. Tracked for the same reason
+  // `railVisible` is: the handle's exit is an effect the page plays, so the
+  // payload has to be able to say which push is the one that takes it away.
+  let peeking = false;
   let drag = null;
   let placementOverride = null;
   let ipcRegistered = false;
@@ -97,6 +108,15 @@ function createEdgeDockController(deps) {
 
   function alwaysVisible() {
     return settings().edgeDockMode === 'always';
+  }
+
+  function hapticsEnabled() {
+    return platform === 'darwin' && settings().edgeDockHaptic !== false;
+  }
+
+  function hapticTick(pattern, performanceTime = 'default') {
+    if (!hapticsEnabled()) return;
+    try { performHaptic(pattern, performanceTime); } catch (error) { logger(`[edge-dock] haptic feedback failed: ${error.message}`); }
   }
 
   function cellKinds() {
@@ -197,6 +217,16 @@ function createEdgeDockController(deps) {
     fade(win, visible ? 1 : 0, duration);
   }
 
+  // The handle's own visibility, kept beside the fade it drives: the page plays the
+  // handle's exit on the transition, so the render has to run with the flag already
+  // flipped - and before the fade, while the window is still bright enough to show
+  // the motion it is playing.
+  function setPeekVisible(visible, duration) {
+    peeking = visible;
+    render('peek');
+    setVisible('peek', visible, duration);
+  }
+
   function renderPayload(surface) {
     const { side } = placement();
     const base = { surface, side, platform, osRelease: os.release(), appearance, glass: nativeMaterial[surface] === true, shape: shapes[surface] };
@@ -206,6 +236,11 @@ function createEdgeDockController(deps) {
         cells,
         focusCellId: bubbleCell !== null ? cells[bubbleCell]?.id || null : null,
         always: alwaysVisible(),
+        // The renderer plays the entrance when this count moves on, so a push that
+        // only repaints an already-visible rail does not replay it. It is a count
+        // rather than `railVisible` because only the reveal renders: the page would
+        // never be told about the retract, and would read the next reveal as no change.
+        reveal: railReveal,
         cellLayout: layout()?.rail?.cells || null
       };
     }
@@ -218,7 +253,7 @@ function createEdgeDockController(deps) {
         maxCardHeight: workArea ? workArea.height - EDGE_DOCK_METRICS.screenMargin * 2 : null
       };
     }
-    return base;
+    return { ...base, peeking };
   }
 
   // Stats arrive every few seconds and mostly change nothing a surface shows;
@@ -310,6 +345,7 @@ function createEdgeDockController(deps) {
       }
     }
     railVisible = false;
+    peeking = false;
     bubbleVisible = false;
     bubbleCell = null;
     bubblePlaced = null;
@@ -400,8 +436,10 @@ function createEdgeDockController(deps) {
     const peek = windows.peek;
     if (!current || !alive(peek)) return;
     placeSurface('peek', current.peek);
-    // An always-visible rail has nothing to hide behind a handle.
-    setVisible('peek', !alwaysVisible(), FADE_IN_MS);
+    // An always-visible rail has nothing to hide behind a handle, and a revealed
+    // rail is what the handle was hiding behind: a settings push that landed while
+    // the rail was open put the handle back on top of the cells.
+    setPeekVisible(!alwaysVisible() && !railVisible, FADE_IN_MS);
   }
 
   function positionRail(current = layout()) {
@@ -411,16 +449,30 @@ function createEdgeDockController(deps) {
     if (bubbleCell !== null) placeBubble();
   }
 
-  function revealRail() {
+  function revealRail(withHaptic = false) {
     const rail = windows.rail;
     if (!alive(rail)) return;
+    // The flag flips before the render so this payload is the one that carries
+    // the entrance; `entering` keeps the fade itself to the reveal.
+    const entering = !railVisible;
+    railVisible = true;
+    // Counted rather than reported as state, because the state has two edges and only
+    // one of them renders: `retractRail` fades the window out without re-rendering the
+    // page, so a page told the state alone still believes the rail is up and reads the
+    // next reveal as no change at all - which is what left the entrance playing once
+    // per page load. The count only moves on a real transition, so a hover that
+    // re-reveals an already-visible rail does not replay the slide.
+    if (entering) {
+      railReveal += 1;
+      hapticCellId = null;
+    }
     render('rail');
     positionRail();
-    if (!railVisible) {
-      railVisible = true;
+    if (entering) {
       setVisible('rail', true, FADE_IN_MS);
+      if (withHaptic) hapticTick('generic');
     }
-    setVisible('peek', false, FADE_OUT_MS);
+    setPeekVisible(false, FADE_OUT_MS);
   }
 
   function retractRail() {
@@ -431,6 +483,7 @@ function createEdgeDockController(deps) {
       return;
     }
     railVisible = false;
+    hapticCellId = null;
     setVisible('rail', false, FADE_OUT_MS);
     showPeek();
   }
@@ -483,9 +536,9 @@ function createEdgeDockController(deps) {
     }
   }
 
-  function applyEffects(effects) {
+  function applyEffects(effects, options = {}) {
     for (const effect of effects || []) {
-      if (effect.type === 'reveal') revealRail();
+      if (effect.type === 'reveal') revealRail(options.hapticReveal === true);
       else if (effect.type === 'retract') retractRail();
       else if (effect.type === 'bubble') {
         if (effect.cell === null) hideBubble();
@@ -526,7 +579,12 @@ function createEdgeDockController(deps) {
           inCorridor: Boolean(bubbleRect && rectContains(edgeDockCorridorBounds(current.rail, bubbleRect), point)),
           cellIndex: revealed ? edgeDockCellAt(point, current.rail, cells.length) : null
         };
-        applyEffects(intent.tick(input, Date.now()));
+        const hoveredCellId = Number.isInteger(input.cellIndex) ? cells[input.cellIndex]?.id || null : null;
+        if (hoveredCellId !== hapticCellId) {
+          if (hoveredCellId) hapticTick('alignment', 'now');
+          hapticCellId = hoveredCellId;
+        }
+        applyEffects(intent.tick(input, Date.now()), { hapticReveal: !alwaysVisible() });
       }
     } catch (error) {
       logger(`[edge-dock] poll failed: ${error.message}`);
@@ -591,7 +649,7 @@ function createEdgeDockController(deps) {
     ipcMain.on('edgeDock:click', (event, payload) => {
       const surface = surfaceFor(event.sender);
       if (surface === 'peek') {
-        applyEffects(intent.reveal());
+        applyEffects(intent.reveal(), { hapticReveal: !alwaysVisible() });
         return;
       }
       if (surface !== 'rail') return;
@@ -653,6 +711,15 @@ function createEdgeDockController(deps) {
       } catch (error) {
         logger(`[edge-dock] codex account switch failed: ${error.message}`);
         return { ok: false, error: error?.message || 'Switch failed' };
+      }
+    });
+    // The forecast row on the card is the Limits page's row, link and all. The
+    // renderer reports the intent rather than a URL, so the dock's bridge stays
+    // a list of named actions instead of gaining a general "open anything" verb.
+    ipcMain.on('edgeDock:openResetForecastSource', (event) => {
+      if (surfaceFor(event.sender) !== 'bubble') return;
+      try { onOpenResetForecastSource?.(); } catch (error) {
+        logger(`[edge-dock] opening the reset forecast source failed: ${error.message}`);
       }
     });
     ipcMain.on('edgeDock:dismiss', (event) => {

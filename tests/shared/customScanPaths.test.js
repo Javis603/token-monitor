@@ -38,6 +38,24 @@ test('custom scan paths keep supported Tokscale clients in catalog order', () =>
   assert.equal(CUSTOM_SCAN_CLIENT_IDS.includes('proma'), false);
 });
 
+test('custom scan paths saved under a renamed client id fold onto its current id', () => {
+  // `micode` was MiMo's tracked-client id before it became `mimo`; a settings
+  // file written by an older build must keep scanning the roots it names.
+  assert.deepEqual(normalizeCustomScanPaths({
+    micode: ['/var/data/mimo-old', '/var/data/mimo-shared']
+  }, { platform: 'linux' }), {
+    mimo: ['/var/data/mimo-old', '/var/data/mimo-shared']
+  });
+  // Both keys present: the current id's paths lead and the overlap is kept once.
+  assert.deepEqual(normalizeCustomScanPaths({
+    micode: ['/var/data/mimo-old', '/var/data/mimo-shared'],
+    mimo: ['/var/data/mimo-shared', '/var/data/mimo-new']
+  }, { platform: 'linux' }), {
+    mimo: ['/var/data/mimo-shared', '/var/data/mimo-new', '/var/data/mimo-old']
+  });
+  assert.match(tokscaleExtraDirsEnv({ micode: ['/var/data/mimo-old'] }, '', { platform: 'linux' }), /^micode:\/var\/data\/mimo-old,micode-desktop:\/var\/data\/mimo-old$/);
+});
+
 test('custom scan paths reject values the Tokscale environment format cannot represent', () => {
   assert.deepEqual(normalizeCustomScanPaths({
     codex: [

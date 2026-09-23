@@ -20,7 +20,13 @@ function mainFunction(name, dependencies) {
 test('Electron presentation applies aliases after limit projection without changing cached stats', () => {
   const raw = { periods: { today: { models: { 'anthropic/claude-opus-5': 20, 'claude-opus-5': 30 }, modelCosts: { 'anthropic/claude-opus-5': 8, 'claude-opus-5': 1 }, totalTokens: 50, costUsd: 9 } } };
   const settings = { modelAliases: aliases, modelAliasGrouping: 'off' };
-  const project = mainFunction('electronPresentationStats', { settings, mode: 'local', projectLimitStatsForDisplay: (stats) => stats });
+  const project = mainFunction('electronPresentationStats', {
+    settings,
+    // The projection reads its own sync state now rather than the `mode`
+    // variable, so the sandbox stands in for the helper instead.
+    syncProvenanceActive: () => false,
+    projectLimitStatsForDisplay: (stats) => stats
+  });
   assert.deepEqual(project(raw).periods.today.models, { 'claude-opus-5': 50 });
   assert.equal(project(raw).periods.today.costUsd, 9);
   settings.modelAliases = {};

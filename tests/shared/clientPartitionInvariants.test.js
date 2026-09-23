@@ -13,15 +13,22 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { DEFAULT_CLIENTS } = require('../../src/shared/clientTracking');
+const { DEFAULT_CLIENTS, KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
 const {
   clientWatchCandidates,
   tokscaleClientFilter,
   TOKSCALE_CLIENT_ALIASES
 } = require('../../src/shared/collector');
+const { TOKSCALE_CLIENT_GROUPS } = require('../../src/shared/tokscaleClientMapping');
 const { normalizeClientName } = require('../../src/shared/usage');
 
 const trackedClients = DEFAULT_CLIENTS.split(',').map((value) => value.trim()).filter(Boolean);
+// Alias groups are about client identity, not about default-on status. An
+// opt-in client (qodercn) that a user enables gets the same targeted watch
+// ticks as a default-tracked one, so its aliases have to satisfy the same
+// partition invariants — checking alias owners against DEFAULT_CLIENTS would
+// silently stop guarding a group the moment its owner is opt-in.
+const knownClients = KNOWN_CLIENTS.split(',').map((value) => value.trim()).filter(Boolean);
 
 test('every tracked client id is a fixed point of normalizeClientName', () => {
   for (const client of trackedClients) {
@@ -49,7 +56,7 @@ test('every watch-mapped client id is a tracked client id', () => {
 
 test('every tokscale alias normalizes back to the client that owns it', () => {
   for (const [client, aliases] of Object.entries(TOKSCALE_CLIENT_ALIASES)) {
-    assert.ok(trackedClients.includes(client), `alias owner "${client}" is not a tracked client`);
+    assert.ok(knownClients.includes(client), `alias owner "${client}" is not a known client`);
     for (const alias of aliases) {
       assert.equal(
         normalizeClientName(alias),
@@ -63,7 +70,12 @@ test('every tokscale alias normalizes back to the client that owns it', () => {
 test('tokscaleClientFilter expands a targeted client to all of its aliases', () => {
   for (const [client, aliases] of Object.entries(TOKSCALE_CLIENT_ALIASES)) {
     const filter = tokscaleClientFilter(client).split(',');
-    assert.ok(filter.includes(client), `targeting "${client}" dropped the client itself`);
+    // Umbrella-only ids (scanIds groups) have no tokscale client of their own —
+    // a bare `devin` --client value is rejected with exit 2 — so the filter is
+    // exactly the scan ids rather than the client plus its aliases.
+    if (!TOKSCALE_CLIENT_GROUPS[client]?.scanIds) {
+      assert.ok(filter.includes(client), `targeting "${client}" dropped the client itself`);
+    }
     for (const alias of aliases) {
       assert.ok(
         filter.includes(alias),
