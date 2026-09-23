@@ -329,9 +329,11 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         )
     }
 
-    func testWidgetToolLabelsMatchTheDesktopCatalogForMiMoCode() {
-        XCTAssertEqual(WidgetFormat.provider("mimo"), "MiMo")
-        XCTAssertEqual(WidgetFormat.provider("micode"), "MiMo Code")
+    func testWidgetToolLabelsMatchTheDesktopCatalogForXiaomiMiMo() {
+        XCTAssertEqual(WidgetFormat.provider("mimo"), "Xiaomi MiMo")
+        // Pre-rename tracked-client id: pinned so the legacy case is not tidied
+        // away while snapshots written by older builds can still be rendered.
+        XCTAssertEqual(WidgetFormat.provider("micode"), "Xiaomi MiMo")
     }
 
     func testStatusMappingNeverExposesInternalEnums() {

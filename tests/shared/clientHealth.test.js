@@ -431,7 +431,9 @@ test('labelling roots keeps diagnostics separate from watcher roots', () => {
 test('clientSourceChecks collapses same-kind roots into one entry', () => {
   const checks = clientSourceChecks('copilot,zed,cline,antigravity');
   const ids = (client) => checks[client].map((check) => check.id);
-  assert.deepEqual(ids('copilot'), ['copilot-otel', 'copilot-data', 'vscode-workspace-storage']);
+  // The desktop and CLI databases are distinct sources, not same-kind variants:
+  // both can exist at once, so each reports its own check.
+  assert.deepEqual(ids('copilot'), ['copilot-otel', 'copilot-data', 'copilot-session-store', 'vscode-workspace-storage']);
   assert.deepEqual(ids('zed'), ['zed-threads']);
   assert.deepEqual(ids('cline'), ['cline-tasks', 'cline-cli-sessions']);
   // antigravity's watch candidate is only the tokscale cache; its two real

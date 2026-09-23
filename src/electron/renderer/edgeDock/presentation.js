@@ -12,11 +12,12 @@
     node ? require('../../../shared/limitProviders') : root?.TokenMonitorLimitProviders,
     node ? require('./items') : root?.TokenMonitorEdgeDockItems,
     node ? require('../accountIdentity') : root?.TokenMonitorAccountIdentity,
-    node ? require('../../../shared/sessionLive') : root?.TokenMonitorSessionLive
+    node ? require('../../../shared/sessionLive') : root?.TokenMonitorSessionLive,
+    node ? require('../usageAttributionRows') : root?.TokenMonitorUsageAttributionRows
   );
   if (node) module.exports = api;
   if (root) root.TokenMonitorEdgeDockPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive) {
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive, usageAttributionRows) {
   // Every account is listed; the card scrolls when they outgrow the screen.
   const MAX_BUBBLE_ACCOUNTS = 50;
 
@@ -405,14 +406,36 @@
   }
 
   function clientBreakdown(period, metric) {
-    return Object.entries(period?.clients || {})
-      .map(([client, tokens]) => ({
-        client: normalizedId(client),
-        tokens: finite(tokens) || 0,
-        costUsd: finite(period?.clientCosts?.[client]) || 0
+    return usageAttributionRows.attributionRows(period?.clients, period?.clientCosts, {
+      totalValue: period?.totalTokens,
+      totalCost: period?.costUsd
+    })
+      .map((entry) => ({
+        client: normalizedId(entry.key),
+        tokens: finite(entry.value) || 0,
+        costUsd: finite(entry.cost) || 0,
+        unattributed: entry.unattributed === true
       }))
       .filter((entry) => entry.client && (metric === 'cost' ? entry.costUsd > 0 : entry.tokens > 0))
       .sort((a, b) => (metric === 'cost' ? b.costUsd - a.costUsd : b.tokens - a.tokens));
+  }
+
+  function modelBreakdown(period) {
+    return usageAttributionRows.attributionRows(period?.models, period?.modelCosts, {
+      totalValue: period?.totalTokens,
+      totalCost: period?.costUsd
+    })
+      .map((entry) => ({
+        model: entry.key,
+        tokens: finite(entry.value) || 0,
+        costUsd: finite(entry.cost) || 0,
+        unattributed: entry.unattributed === true
+      }))
+      .filter((entry) => entry.tokens > 0)
+      .sort((a, b) => b.tokens - a.tokens
+        || b.costUsd - a.costUsd
+        || Number(a.unattributed) - Number(b.unattributed)
+        || a.model.localeCompare(b.model));
   }
 
   function statCell(stats, metric, options = {}) {
@@ -479,6 +502,7 @@
     const derived = dockItems.DERIVED_PERIODS.includes(metric);
     const period = derived ? options.derivedPeriods?.[metric] || null : stats?.periods?.[metric] || null;
     const clients = period ? clientBreakdown(period, 'tokens') : [];
+    const models = period ? modelBreakdown(period) : [];
     return {
       id: `stat:${metric}`,
       kind: 'stat',
@@ -487,8 +511,8 @@
       available: Boolean(period),
       totalTokens: period ? finite(period.totalTokens) || 0 : null,
       costUsd: period ? finite(period.costUsd) || 0 : null,
-      clients: clients.slice(0, 6),
-      clientCount: clients.length
+      clients,
+      models
     };
   }
 

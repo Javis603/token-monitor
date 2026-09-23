@@ -20,7 +20,9 @@ Turn state comes from the newest assistant `stop_reason` plus any genuine user p
 
 ### Live context occupancy
 
-On current `main`, Claude does not emit `contextTokens`/`contextWindow`; only providers whose transcripts state a valid pair do. Any Claude model-to-window mapping, occupancy formula, compaction handling, malformed-record policy or oversized-record scan added later belongs in this section and in focused tests—not in root `AGENTS.md`. Unknown or third-party model ids must remain best effort and must not receive a broad guessed window.
+Claude emits `contextTokens`/`contextWindow` from its transcript for sessions that pass `shouldReadSessionContext()`. Use the last serving `message` or `fallback_message` iteration when present, not the request's cumulative usage rollup. Occupancy is `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`; `output_tokens` is not part of the current input context. `input_tokens` is required, while missing cache counters mean zero. A malformed present counter, zeroed assistant notice or incomplete usage record must not erase the last valid reading.
+
+An explicit `[1m]` model marker, supported native Claude 1M model ids and recognized provider Sonnet 5 ids map to 1M. Other nonempty model ids map to Claude Code's 200K default, including third-party bridges as a best-effort estimate; do not present that fallback as an authoritative bridge window. A compact boundary or compact summary clears the pair to `0/0` until the next valid assistant response. Oversized JSONL records use bounded head/tail fragments; accept context only from a complete message-level `usage` object and do not mistake nested `model` or `usage` fields in tool content for the response.
 
 ## Limits source order
 
