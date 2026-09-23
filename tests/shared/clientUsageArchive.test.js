@@ -361,17 +361,37 @@ function legacyMergedArchive(now) {
 
 function liveSummary(now, sessionsByClient) {
   const clients = {};
+  const clientCosts = {};
+  const clientModels = {};
+  const clientModelCosts = {};
+  const models = {};
+  const modelCosts = {};
   const sessions = {};
   for (const [client, entries] of Object.entries(sessionsByClient)) {
     let tokens = 0;
+    let cost = 0;
     for (const [id, value] of entries) {
-      sessions[`${client}:${id}`] = session(client, id, value);
+      const entry = session(client, id, value);
+      sessions[`${client}:${id}`] = entry;
       tokens += value;
+      cost += entry.costUsd;
+      for (const [model, modelTokens] of Object.entries(entry.models)) {
+        models[model] = (models[model] || 0) + modelTokens;
+        if (!clientModels[client]) clientModels[client] = {};
+        clientModels[client][model] = (clientModels[client][model] || 0) + modelTokens;
+      }
+      for (const [model, modelCost] of Object.entries(entry.modelCosts)) {
+        modelCosts[model] = (modelCosts[model] || 0) + modelCost;
+        if (!clientModelCosts[client]) clientModelCosts[client] = {};
+        clientModelCosts[client][model] = (clientModelCosts[client][model] || 0) + modelCost;
+      }
     }
     if (tokens > 0) clients[client] = tokens;
+    if (cost > 0) clientCosts[client] = cost;
   }
   const totalTokens = Object.values(clients).reduce((sum, value) => sum + value, 0);
-  const period = { totalTokens, clients, sessions };
+  const costUsd = Object.values(clientCosts).reduce((sum, value) => sum + value, 0);
+  const period = { totalTokens, costUsd, clients, clientCosts, models, modelCosts, clientModels, clientModelCosts, sessions };
   return { periods: { today: period, month: { ...period }, allTime: { ...period } } };
 }
 
@@ -529,4 +549,65 @@ test('provenance, not the client id, decides whether pruning keeps a Pi snapshot
     pruneArchivedClientUsage(marked, 'pi').clients.pi, undefined,
     'a post-split entry is an ordinary client and prunes as before'
   );
+});
+
+// Netting out a session has to remove its model rows too: leaving the archived
+// model map whole would replay the same tokens a second time through the
+// per-model totals, so the breakdown would say 100 while the tool total says 60.
+test('a merged snapshot nets out the removed sessions model rows too', () => {
+  const now = localNoon(2026, 9, 1);
+  const applied = applyArchivedClientUsage(
+    liveSummary(now, { omp: [['omp1', 40]] }),
+    legacyMergedArchive(now),
+    { activeClients: 'omp', now }
+  );
+  const allTime = applied.periods.allTime;
+  assert.equal(allTime.totalTokens, 100);
+  assert.equal(allTime.models.gpt, 100, 'model totals must shrink with the token total');
+  assert.equal(allTime.clientModels.pi.gpt, 60);
+  assert.equal(allTime.clientModels.omp.gpt, 40);
+});
+
+test('a merged snapshot nets out the removed sessions model costs too', () => {
+  const now = localNoon(2026, 9, 1);
+  const sessions = {
+    'pi:pi1': { ...session('pi', 'pi1', 60), costUsd: 6, modelCosts: { gpt: 6 } },
+    'pi:omp1': { ...session('pi', 'omp1', 40), costUsd: 4, modelCosts: { gpt: 4 } }
+  };
+  const period = { totalTokens: 100, costUsd: 10, models: { gpt: 100 }, modelCosts: { gpt: 10 }, sessions };
+  const archive = {
+    version: 1,
+    clients: {
+      pi: {
+        client: 'pi',
+        capturedAt: now.toISOString(),
+        day: localDayKey(now),
+        month: localDayKey(now).slice(0, 7),
+        periods: { today: period, month: period, allTime: period }
+      }
+    }
+  };
+  const applied = applyArchivedClientUsage(
+    liveSummary(now, { omp: [['omp1', 40]] }),
+    archive,
+    { activeClients: 'omp', now }
+  );
+  const allTime = applied.periods.allTime;
+  assert.equal(allTime.totalTokens, 100);
+  // The live scan owns the session now, so its archived cost leaves with it.
+  assert.equal(allTime.costUsd, 6);
+  assert.equal(allTime.modelCosts.gpt, 6);
+});
+
+// Session ids are matched only inside the split pair: an unrelated client that
+// happens to mint the same id has no overlap with the snapshot at all.
+test('an unrelated client sharing a session id does not eat the merged snapshot', () => {
+  const now = localNoon(2026, 9, 1);
+  const applied = applyArchivedClientUsage(
+    liveSummary(now, { claude: [['omp1', 40]] }),
+    legacyMergedArchive(now),
+    { activeClients: 'claude', now }
+  );
+  assert.equal(applied.periods.allTime.totalTokens, 140, 'archived 100 + unrelated live 40');
+  assert.ok(applied.periods.allTime.sessions['pi:omp1'], 'the archived session must survive');
 });

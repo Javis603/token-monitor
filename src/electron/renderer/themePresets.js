@@ -85,6 +85,7 @@
     grok: 'Grok Build',
     copilot: 'GitHub Copilot',
     pi: 'Pi',
+    omp: 'Oh My Pi',
     zed: 'Zed',
     kilo: 'Kilo',
     commandcode: 'Command Code',

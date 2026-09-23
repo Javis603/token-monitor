@@ -502,7 +502,6 @@ enum WidgetFormat {
         // label, so tools are listed rather than left to the fallback. The
         // fallback stays for ids this app does not track.
         case "openclaw": "OpenClaw"
-        case "cline": "Cline"
         case "amp": "Amp"
         case "qwen": "Qwen"
         case "pi": "Pi"

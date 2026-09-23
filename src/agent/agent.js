@@ -3,11 +3,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  defaultDeviceId, loadDotEnv, parseArgs, pidFilePath, readJson, sharedDataDir, writeJsonAtomic
+  defaultDeviceId, loadDotEnv, parseArgs, pidFilePath
 } = require('../shared/config');
 const { appVersion } = require('../shared/appVersion');
 const { clientsCsvForSetting } = require('../shared/clientTracking');
-const { seedSplitClients } = require('../shared/clientIdentitySplits');
+const { seedAgentClients } = require('./seedClients');
 const { normalizeHistoryIntervalMs } = require('../shared/collector');
 const {
   normalizeLimitsRefreshMode,
@@ -33,34 +33,6 @@ const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usag
 loadDotEnv();
 const args = parseArgs(process.argv.slice(2));
 
-// The headless equivalent of the widget's `seededClientSplits`. A resolved CSV
-// written before a client identity split listed the merged id while the scan
-// counted both products, so the split client has to be added once or its usage
-// silently drops. `--clients` and TOKEN_MONITOR_CLIENTS carry no history of their
-// own, so the record lives in the shared data directory; without it, an operator
-// who removes the client afterwards would have it re-added on the next launch.
-function seedAgentClients(resolved) {
-  const markerPath = path.join(sharedDataDir(), 'seeded-client-splits.json');
-  const stored = readJson(markerPath, null);
-  const applied = stored && typeof stored === 'object' && Array.isArray(stored.applied)
-    ? stored.applied
-    : [];
-  const seeded = seedSplitClients(resolved, { applied });
-  if (seeded.evaluated.length > 0) {
-    const next = [...new Set([
-      ...applied.map((value) => String(value || '').trim()).filter(Boolean),
-      ...seeded.evaluated
-    ])];
-    try {
-      writeJsonAtomic(markerPath, { version: 1, applied: next });
-    } catch (error) {
-      // A read-only data directory must not stop collection; the worst case is
-      // that the next launch re-evaluates and re-adds the split client.
-      console.warn(`[agent] could not record the client-identity migration: ${error.message}`);
-    }
-  }
-  return seeded.clients;
-}
 const hubUrl = String(args.hub || args.hubUrl || process.env.TOKEN_MONITOR_HUB_URL || 'http://127.0.0.1:17321').replace(/\/$/, '');
 const secret = String(args.secret || process.env.TOKEN_MONITOR_SECRET || '').trim();
 const deviceId = String(args.device || args.deviceId || process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId());
@@ -74,7 +46,9 @@ const watchDebounceMs = Number(args.watchDebounceMs || process.env.TOKEN_MONITOR
 // a CSV written before the split listed the merged id and counted both products.
 // The marker therefore lives beside the collector anchor, and it is what stops
 // the seed from re-adding a client the operator deliberately removed afterwards.
-const clients = seedAgentClients(clientsCsvForSetting(args.clients ?? process.env.TOKEN_MONITOR_CLIENTS));
+const clients = seedAgentClients(clientsCsvForSetting(args.clients ?? process.env.TOKEN_MONITOR_CLIENTS), {
+  persist: !(args['dry-run'] || args.dryRun)
+});
 const allTimeSince = String(args.since || args.allTimeSince || process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01');
 const commandTimeoutMs = Number(args.timeoutMs || process.env.TOKEN_MONITOR_TOKSCALE_TIMEOUT_MS || 120 * 1000);
 const limitsEnabled = parseBoolean(args.limits ?? args.limitsEnabled ?? process.env.TOKEN_MONITOR_LIMITS_ENABLED, true);

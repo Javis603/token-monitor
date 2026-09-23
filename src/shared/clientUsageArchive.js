@@ -267,8 +267,14 @@ function mergedSnapshotFor(client, entry) {
 function netOutLiveUsage(usage, livePeriod, splitDef) {
   const archivedSessions = Object.entries(usage?.sessions || {});
   const liveSessionIds = new Set();
+  // Only the pair's own sessions can overlap the snapshot. Matching on the bare
+  // session id against every client in the period would let an unrelated client
+  // that happens to mint the same id erase archived usage it never contained.
+  const pairIds = new Set([splitDef.merged, splitDef.split]);
   for (const [key, session] of Object.entries(livePeriod?.sessions || {})) {
     const separator = key.indexOf(':');
+    const client = normalizeClientId(session?.client || (separator >= 0 ? key.slice(0, separator) : ''));
+    if (!pairIds.has(client)) continue;
     const sessionId = String(session?.sessionId || (separator >= 0 ? key.slice(separator + 1) : key)).trim();
     if (sessionId) liveSessionIds.add(sessionId);
   }
@@ -283,19 +289,38 @@ function netOutLiveUsage(usage, livePeriod, splitDef) {
   if (archivedSessions.length === 0 || liveSessionIds.size === 0) {
     let liveTokens = 0;
     let liveCost = 0;
+    const models = { ...(usage?.models || {}) };
+    const modelCosts = { ...(usage?.modelCosts || {}) };
     for (const liveClientId of [splitDef.merged, splitDef.split]) {
       liveTokens += Math.max(0, Math.round(numberValue(livePeriod?.clients?.[liveClientId])));
       liveCost += numberValue(livePeriod?.clientCosts?.[liveClientId]);
+      // The model breakdown has to shrink with the totals or the summary would
+      // add back usage the aggregate just removed. Without session detail the
+      // live client's own model map is the closest answer to which models left.
+      for (const [model, tokens] of Object.entries(livePeriod?.clientModels?.[liveClientId] || {})) {
+        if (models[model] === undefined) continue;
+        models[model] = Math.max(0, Math.round(numberValue(models[model]) - numberValue(tokens)));
+        if (models[model] === 0) delete models[model];
+      }
+      for (const [model, cost] of Object.entries(livePeriod?.clientModelCosts?.[liveClientId] || {})) {
+        if (modelCosts[model] === undefined) continue;
+        modelCosts[model] = Math.max(0, numberValue(modelCosts[model]) - numberValue(cost));
+        if (modelCosts[model] === 0) delete modelCosts[model];
+      }
     }
     if (liveTokens === 0 && liveCost === 0) return usage;
     return {
       ...usage,
       totalTokens: Math.max(0, Math.round(numberValue(usage?.totalTokens)) - liveTokens),
-      costUsd: Math.max(0, numberValue(usage?.costUsd) - liveCost)
+      costUsd: Math.max(0, numberValue(usage?.costUsd) - liveCost),
+      models,
+      modelCosts
     };
   }
 
   const sessions = {};
+  const models = { ...(usage?.models || {}) };
+  const modelCosts = { ...(usage?.modelCosts || {}) };
   let removedTokens = 0;
   let removedCost = 0;
   for (const [key, session] of archivedSessions) {
@@ -304,6 +329,19 @@ function netOutLiveUsage(usage, livePeriod, splitDef) {
     if (sessionId && liveSessionIds.has(sessionId)) {
       removedTokens += Math.max(0, Math.round(numberValue(session?.totalTokens)));
       removedCost += numberValue(session?.costUsd);
+      // Removing the session but not its model rows would leave the breakdown
+      // counting usage the totals no longer do — the live scan adds the same
+      // models back under the split id.
+      for (const [model, tokens] of Object.entries(session?.models || {})) {
+        if (models[model] === undefined) continue;
+        models[model] = Math.max(0, Math.round(numberValue(models[model]) - numberValue(tokens)));
+        if (models[model] === 0) delete models[model];
+      }
+      for (const [model, cost] of Object.entries(session?.modelCosts || {})) {
+        if (modelCosts[model] === undefined) continue;
+        modelCosts[model] = Math.max(0, numberValue(modelCosts[model]) - numberValue(cost));
+        if (modelCosts[model] === 0) delete modelCosts[model];
+      }
       continue;
     }
     sessions[key] = session;
@@ -313,7 +351,9 @@ function netOutLiveUsage(usage, livePeriod, splitDef) {
     ...usage,
     totalTokens: Math.max(0, Math.round(numberValue(usage?.totalTokens)) - removedTokens),
     costUsd: Math.max(0, numberValue(usage?.costUsd) - removedCost),
-    sessions
+    sessions,
+    models,
+    modelCosts
   };
 }
 
