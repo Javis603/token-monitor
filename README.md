@@ -147,7 +147,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Multi-device & deployment
 
-- **Real-time multi-device sync** — Server-Sent Events push an update on one device to the others within seconds
+- **Real-time multi-device sync** — hub-backed sync uses Server-Sent Events to push updates to other devices within seconds; iCloud Drive sync is eventually consistent
 - **Local-first** — no servers needed for single-device use
 - **Self-hosted sync backend** — in-widget hub, Node CLI hub, or Cloudflare Worker
 - **iOS widget support** — Widgy and Scriptable through the Worker hub
@@ -265,7 +265,7 @@ Mode B — Sync (opt-in, multi-device)
     device C agent ──▶
 ```
 
-The widget chooses local vs sync mode based on Settings → Multi-device Sync. The hub itself can run as a separate `npm run hub` process, a Cloudflare Worker, or directly inside one of the widgets (Host mode). In sync mode the hub pushes aggregated stats to every connected widget over Server-Sent Events, so updates on one device appear on the others within a few seconds.
+The widget chooses local vs sync mode based on Settings → Multi-device Sync. The hub itself can run as a separate `npm run hub` process, a Cloudflare Worker, or directly inside one of the widgets (Host mode). In Hub Client and Host modes, the hub pushes aggregated stats to every connected widget over Server-Sent Events, so updates on one device usually appear on the others within a few seconds. iCloud Drive mode syncs files directly; propagation is eventually consistent and may take longer.
 
 ## Session data retention
 

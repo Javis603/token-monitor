@@ -7,6 +7,15 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
+const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+
+function functionSource(source, name, nextName) {
+  const start = source.indexOf(`function ${name}(`);
+  const next = source.indexOf(`${nextName}(`, start + 1);
+  const end = next < 0 ? -1 : source.lastIndexOf('\n', next) + 1;
+  assert.ok(start >= 0 && end > start, `${name} source should be present`);
+  return source.slice(start, end);
+}
 
 class FakeNode {
   constructor(tagName) {
@@ -192,4 +201,15 @@ test('device deletion requires the second click and resets after failure', async
   assert.equal(failedRemove.dataset.confirm, '');
   assert.equal(failedRemove.textContent, 'Delete');
   assert.equal(failedRemove.disabled, false);
+});
+
+test('device deletion rejects a blank id before calling the sync backend', () => {
+  const source = functionSource(main, 'normalizeDeviceIdForDeletion', 'deleteDeviceFromCurrentSync');
+  const context = vm.createContext({ String, Error, Object });
+  vm.runInContext(`${source}\nglobalThis.normalizeDeviceIdForDeletion = normalizeDeviceIdForDeletion;`, context);
+
+  assert.equal(context.normalizeDeviceIdForDeletion(' remote-a '), 'remote-a');
+  assert.throws(() => context.normalizeDeviceIdForDeletion('   '), (error) => error.code === 'invalid_device_id');
+  assert.throws(() => context.normalizeDeviceIdForDeletion(null), (error) => error.code === 'invalid_device_id');
+  assert.match(main, /ipcMain\.handle\('devices:delete',[\s\S]*?deleteDeviceFromCurrentSync\(normalizeDeviceIdForDeletion\(deviceId\)\)/);
 });

@@ -147,7 +147,7 @@ Qoder CN 的 Token 用量来自应用本地 SQLite 数据库，而非 API ——
 
 ### 多设备与部署
 
-- **多设备实时同步**：通过 Server-Sent Events 推送，一台设备的更新数秒内出现在其他设备
+- **多设备同步**：Hub 同步通过 Server-Sent Events 在数秒内推送更新；iCloud Drive 同步具有最终一致性
 - **本地优先**：单设备使用完全无需服务器
 - **自托管同步后端**：小部件内 hub、Node CLI hub 或 Cloudflare Worker
 - **iOS 小部件支持**：通过 Worker hub 搭配 Widgy、Scriptable
@@ -265,7 +265,7 @@ npm run pack         # 未打包的 app 目录（无安装包），方便本机�
     设备 C agent ──▶
 ```
 
-小部件会根据 设置 → 多设备同步 决定走本地还是同步模式。hub 本身可以是单独的 `npm run hub` 进程、Cloudflare Worker，或直接跑在某一个小部件里（Host 模式）。同步模式下，hub 通过 Server-Sent Events 把聚合后的统计推送给每个连接中的小部件，所以一台设备上的更新会在数秒内出现在其他设备上。
+小部件会根据 设置 → 多设备同步 决定走本地还是同步模式。hub 本身可以是单独的 `npm run hub` 进程、Cloudflare Worker，或直接跑在某一个小部件里（Host 模式）。在 Hub Client 和 Host 模式下，hub 通过 Server-Sent Events 把聚合后的统计推送给每个连接中的小部件，所以一台设备上的更新通常会在数秒内出现在其他设备上。iCloud Drive 模式直接同步文件，具有最终一致性，更新可能需要更长时间才会出现。
 
 ## 会话数据保留期
 

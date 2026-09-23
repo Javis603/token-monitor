@@ -3449,6 +3449,12 @@ async function deleteDeviceFromHub(deviceId) {
   if (!response.ok && response.status !== 404) throw new Error(`DELETE ${response.status}`);
 }
 
+function normalizeDeviceIdForDeletion(deviceId) {
+  const id = String(deviceId ?? '').trim();
+  if (!id) throw Object.assign(new Error('invalid_device_id'), { code: 'invalid_device_id' });
+  return id;
+}
+
 async function deleteDeviceFromCurrentSync(deviceId) {
   if (typeof settings !== 'undefined' && settings?.hubMode === 'icloud') {
     if (!icloudRuntimeHandle) throw Object.assign(new Error('iCloud sync is unavailable'), { code: 'icloud_unavailable' });
@@ -3802,6 +3808,7 @@ async function adoptOrphanedSubscriptions() {
       const merged = new Map((held?.subscriptions || []).map((entry) => [entry.id, entry]));
       for (const orphan of orphans) merged.set(orphan.id, orphan);
       const result = await runtime.saveSubscriptions([...merged.values()], held?.revisionToken || '');
+      if (!subscriptionOpIsCurrent(hub) || icloudRuntimeHandle !== runtime) throw hubChangedError();
       if (result?.winner) {
         cacheSharedSubscriptions({
           version: 1,
@@ -3872,11 +3879,12 @@ async function refreshSharedSubscriptionsNow({ seedFromLocal = false } = {}) {
     const runtime = icloudRuntimeHandle;
     if (!runtime) return false;
     await runtime.reconcile('subscription-refresh');
-    if (!subscriptionOpIsCurrent(hub)) return false;
+    if (!subscriptionOpIsCurrent(hub) || icloudRuntimeHandle !== runtime) return false;
     const local = settings.subscriptionsCacheHub ? [] : (settings.subscriptions || []);
     let document = runtime.getSubscriptions?.() || null;
     if (!document && seedFromLocal && local.length > 0) {
       const written = await runtime.saveSubscriptions(local, '');
+      if (!subscriptionOpIsCurrent(hub) || icloudRuntimeHandle !== runtime) return false;
       document = written?.winner
         ? { ...written.winner, revisionToken: written.revisionToken || '' }
         : null;
@@ -4051,18 +4059,23 @@ async function saveSubscriptions(list, base) {
   // report no version, so an edit made against one would pass a version check
   // against the other and be written into a list it was never meant for.
   if (settings.hubMode === 'icloud') {
-    if (!icloudRuntimeHandle) throw Object.assign(new Error('iCloud sync is unavailable'), { code: 'icloud_unavailable' });
-    const result = await icloudRuntimeHandle.saveSubscriptions(list, String(base?.updatedAt || ''));
-    if (result?.winner) {
-      cacheSharedSubscriptions({
-        version: 1,
-        updatedAt: result.winner.updatedAt || '',
-        subscriptions: result.winner.subscriptions || [],
-        revisionToken: result.revisionToken || ''
-      }, 'icloud');
-    }
-    pushSettingsToRenderer();
-    return settingsForRenderer();
+    return queueSubscriptionOp(async (hub) => {
+      if (!subscriptionOpIsCurrent(hub) || settings.hubMode !== 'icloud') throw hubChangedError();
+      const runtime = icloudRuntimeHandle;
+      if (!runtime) throw Object.assign(new Error('iCloud sync is unavailable'), { code: 'icloud_unavailable' });
+      const result = await runtime.saveSubscriptions(list, String(base?.updatedAt || ''));
+      if (!subscriptionOpIsCurrent(hub) || icloudRuntimeHandle !== runtime) throw hubChangedError();
+      if (result?.winner) {
+        cacheSharedSubscriptions({
+          version: 1,
+          updatedAt: result.winner.updatedAt || '',
+          subscriptions: result.winner.subscriptions || [],
+          revisionToken: result.revisionToken || ''
+        }, hub);
+      }
+      pushSettingsToRenderer();
+      return settingsForRenderer();
+    });
   }
   await writeSharedSubscriptions(list, String(base?.updatedAt || ''));
   return settingsForRenderer();
@@ -7467,11 +7480,11 @@ app.whenReady().then(() => {
       throw new Error(subscriptionWriteFailureCode(error), { cause: error });
     }
   });
-  ipcMain.handle('sessionUsageArchive:clear', () => {
+  ipcMain.handle('sessionUsageArchive:clear', async () => {
     if (isExternalAgentActive()) return { ok: false, error: 'agentActive' };
     try {
       sessionUsageArchiveStore.clear();
-      clearDailyHistoryArchive();
+      await clearDailyHistoryArchive();
       sessionUsageArchive = normalizeSessionUsageArchive({});
       return { ok: true };
     } catch (error) {
@@ -7983,7 +7996,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('devices:delete', async (_event, deviceId) => {
     try {
-      await deleteDeviceFromCurrentSync(String(deviceId || '').trim());
+      await deleteDeviceFromCurrentSync(normalizeDeviceIdForDeletion(deviceId));
       return { ok: true };
     } catch (error) {
       throw new Error(error.code || error.message, { cause: error });

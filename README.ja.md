@@ -147,7 +147,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 
 ### マルチデバイスとデプロイ
 
-- **マルチデバイスリアルタイム同期** — Server-Sent Events。1 台の変更が数秒以内に他のデバイスに反映
+- **マルチデバイス同期** — Hub 同期は Server-Sent Events で数秒以内に他のデバイスへ反映。iCloud Drive 同期は eventual consistency
 - **ローカルファースト** — 単一デバイスではサーバー不要
 - **セルフホスト同期** — ウィジェット内 hub、Node CLI hub、Cloudflare Worker
 - **iOS ウィジェット** — Worker hub + Widgy、Scriptable
@@ -265,7 +265,7 @@ npm run pack         # インストーラーなしのアプリディレクトリ
     デバイス C agent ──▶
 ```
 
-ウィジェットは **設定 → マルチデバイス同期** に応じてローカル/同期を選択します。hub は `npm run hub`、Cloudflare Worker、またはウィジェット内 Host モードで実行できます。同期モードでは hub が SSE で集計統計をプッシュし、1 台の変更が数秒以内に他のデバイスに反映されます。
+ウィジェットは **設定 → マルチデバイス同期** に応じてローカル/同期を選択します。hub は `npm run hub`、Cloudflare Worker、またはウィジェット内 Host モードで実行できます。Hub Client/Host モードでは hub が SSE で集計統計をプッシュし、1 台の変更は通常数秒以内に他のデバイスに反映されます。iCloud Drive モードはファイルを直接同期する eventual consistency の方式で、反映に時間がかかる場合があります。
 
 ## セッションデータの保持期間
 

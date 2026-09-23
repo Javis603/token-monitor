@@ -147,7 +147,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 SQLite 데이터베이�
 
 ### 멀티 디바이스와 배포
 
-- **멀티 디바이스 실시간 동기화** — Server-Sent Events. 한 기기의 변경이 수 초 내 다른 기기에 반영
+- **멀티 디바이스 동기화** — Hub 동기화는 Server-Sent Events로 수 초 내 다른 기기에 반영되며, iCloud Drive 동기화는 eventual consistency 방식입니다
 - **로컬 우선** — 단일 기기는 서버 불필요
 - **자체 호스트 동기화** — 위젯 내 hub, Node CLI hub, Cloudflare Worker
 - **iOS 위젯** — Worker hub + Widgy, Scriptable
@@ -265,7 +265,7 @@ npm run pack         # 설치 없이 앱 디렉터리만 (로컬 테스트)
     기기 C agent ──▶
 ```
 
-위젯은 **설정 → 멀티 디바이스 동기화**에 따라 로컬/동기화를 선택합니다. hub는 `npm run hub`, Cloudflare Worker, 또는 위젯 내 Host 모드로 실행할 수 있습니다. 동기화 모드에서는 hub가 SSE로 집계 통계를 푸시해 한 기기의 변경이 수 초 내 다른 기기에 반영됩니다.
+위젯은 **설정 → 멀티 디바이스 동기화**에 따라 로컬/동기화를 선택합니다. hub는 `npm run hub`, Cloudflare Worker, 또는 위젯 내 Host 모드로 실행할 수 있습니다. Hub Client/Host 모드에서는 hub가 SSE로 집계 통계를 푸시해 한 기기의 변경이 보통 수 초 내 다른 기기에 반영됩니다. iCloud Drive 모드는 파일을 직접 동기화하는 eventual consistency 방식이며 반영이 더 늦어질 수 있습니다.
 
 ## 세션 데이터 보존 기간
 

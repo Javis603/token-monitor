@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
+const properLockfile = require('proper-lockfile');
 const { sharedDataDir, writeJsonAtomic } = require('./config');
 const {
   normalizeTokscaleClientName, num, sumOutputTokens, sumTokens
@@ -10,6 +11,12 @@ const {
 
 const ARCHIVE_VERSION = 1;
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const ARCHIVE_LOCK_OPTIONS = {
+  realpath: false,
+  stale: 30_000,
+  update: 10_000,
+  retries: { retries: 20, factor: 1.3, minTimeout: 50, maxTimeout: 500 }
+};
 
 function observationKey(value) {
   return JSON.stringify([
@@ -579,6 +586,19 @@ function dailyHistoryArchivePath(options = {}) {
   return options.path || path.join(sharedDataDir(options), 'daily-history-archive.json');
 }
 
+async function withDailyHistoryArchiveLock(options, operation) {
+  if (typeof options.withArchiveLock === 'function') return options.withArchiveLock(operation);
+
+  const filePath = dailyHistoryArchivePath(options);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const release = await properLockfile.lock(filePath, ARCHIVE_LOCK_OPTIONS);
+  try {
+    return await operation();
+  } finally {
+    await release();
+  }
+}
+
 function validateDailyHistoryArchiveDocument(value, filePath) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`Could not parse JSON in ${filePath}: archive root must be an object`);
@@ -625,15 +645,17 @@ function writeDailyHistoryArchive(archive, options = {}) {
   write(dailyHistoryArchivePath(options), normalizeDailyHistoryArchive(archive));
 }
 
-function clearDailyHistoryArchive(options = {}) {
-  const unlink = options.unlinkSync || fs.unlinkSync;
-  try {
-    unlink(dailyHistoryArchivePath(options));
-    return true;
-  } catch (error) {
-    if (error?.code === 'ENOENT') return false;
-    throw error;
-  }
+async function clearDailyHistoryArchive(options = {}) {
+  return withDailyHistoryArchiveLock(options, () => {
+    const unlink = options.unlinkSync || fs.unlinkSync;
+    try {
+      unlink(dailyHistoryArchivePath(options));
+      return true;
+    } catch (error) {
+      if (error?.code === 'ENOENT') return false;
+      throw error;
+    }
+  });
 }
 
 function mergeLiveDaysIntoArchive(existingArchive, liveDays) {
@@ -654,46 +676,50 @@ function archiveWriteEnabled(options = {}) {
     : options.writeEnabled !== false;
 }
 
-function retainDailyHistory(graphs, options = {}) {
-  const previous = readDailyHistoryArchive(options);
-  const capture = (archive) => captureDailyHistoryArchive(
-    mergeLiveDaysIntoArchive(archive, options.liveDays),
-    graphs,
-    options
-  );
-  let next = capture(previous);
-  // Ownership can change while a graph scan is running (for example, a
-  // headless agent starts after Electron's collector tick begins). Resolve a
-  // lazy guard immediately before the write instead of freezing it at startup.
-  if (archiveWriteEnabled(options) && !isDeepStrictEqual(previous, next)) {
-    // The graph scan can take long enough for the other collector to update the
-    // shared archive. Rebase on the latest file immediately before writing so
-    // this scan cannot put that newer observation back on disk.
-    const latest = readDailyHistoryArchive(options);
-    next = capture(latest);
-    if (archiveWriteEnabled(options) && !isDeepStrictEqual(latest, next)) {
-      writeDailyHistoryArchive(next, options);
+async function retainDailyHistory(graphs, options = {}) {
+  return withDailyHistoryArchiveLock(options, () => {
+    const previous = readDailyHistoryArchive(options);
+    const capture = (archive) => captureDailyHistoryArchive(
+      mergeLiveDaysIntoArchive(archive, options.liveDays),
+      graphs,
+      options
+    );
+    let next = capture(previous);
+    // Ownership can change while a graph scan is running (for example, a
+    // headless agent starts after Electron's collector tick begins). Resolve a
+    // lazy guard immediately before the write instead of freezing it at startup.
+    if (archiveWriteEnabled(options) && !isDeepStrictEqual(previous, next)) {
+      // The graph scan can take long enough for the other collector to update
+      // the shared archive. Rebase on the latest file immediately before
+      // writing so this scan cannot put that newer observation back on disk.
+      const latest = readDailyHistoryArchive(options);
+      next = capture(latest);
+      if (archiveWriteEnabled(options) && !isDeepStrictEqual(latest, next)) {
+        writeDailyHistoryArchive(next, options);
+      }
     }
-  }
-  return graphFromDailyHistoryArchive(graphs, next, options);
+    return graphFromDailyHistoryArchive(graphs, next, options);
+  });
 }
 
-function retainLiveDailyHistory(period, options = {}) {
-  const previous = readDailyHistoryArchive(options);
-  const capture = (archive) => captureLiveDailyHistory(
-    mergeLiveDaysIntoArchive(archive, options.liveDays),
-    period,
-    options
-  );
-  let next = capture(previous);
-  if (archiveWriteEnabled(options) && !isDeepStrictEqual(previous, next)) {
-    const latest = readDailyHistoryArchive(options);
-    next = capture(latest);
-    if (archiveWriteEnabled(options) && !isDeepStrictEqual(latest, next)) {
-      writeDailyHistoryArchive(next, options);
+async function retainLiveDailyHistory(period, options = {}) {
+  return withDailyHistoryArchiveLock(options, () => {
+    const previous = readDailyHistoryArchive(options);
+    const capture = (archive) => captureLiveDailyHistory(
+      mergeLiveDaysIntoArchive(archive, options.liveDays),
+      period,
+      options
+    );
+    let next = capture(previous);
+    if (archiveWriteEnabled(options) && !isDeepStrictEqual(previous, next)) {
+      const latest = readDailyHistoryArchive(options);
+      next = capture(latest);
+      if (archiveWriteEnabled(options) && !isDeepStrictEqual(latest, next)) {
+        writeDailyHistoryArchive(next, options);
+      }
     }
-  }
-  return next;
+    return next;
+  });
 }
 
 module.exports = {
