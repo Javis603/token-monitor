@@ -1185,7 +1185,9 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
   const provider = mapClaudeUsageToProvider(usage, {
     ...context.identity,
     updatedAt: nowIso(nowMs),
-    now: nowMs,
+    // Pass the clock itself, not nowMs: the request is awaited between them,
+    // and a grant that lapses mid-flight must not still count as available.
+    now: deps.now,
     source: 'web'
   });
   if (!balance) return provider;
@@ -1338,7 +1340,7 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
       ...oauthIdentity,
       accountLabel: credentials.accountLabel,
       updatedAt: nowIso(nowMs),
-      now: nowMs,
+      now: deps.now,
       source: 'oauth'
     });
     return provider;
