@@ -1,5 +1,6 @@
 ---
 summary: "Kimi provider notes: the three Kimi front-ends and their roots, which plane owns usage, workspace attribution and session metadata, and the two generations of the session document the metadata reader has to accept."
+ids: [kimi]
 read_when:
   - Changing or debugging Kimi session discovery, project attribution, timestamps or session names
   - Investigating Kimi usage that is missing from, or zero in, the widget
