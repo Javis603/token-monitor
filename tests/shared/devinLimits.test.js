@@ -200,7 +200,6 @@ test('devinSubscriptionUrls scopes the subscription endpoint to the organization
     'https://app.devin.ai/api/org_GQ6LhcfkW1TSinM6/billing/subscription'
   ]);
   assert.deepEqual(devinSubscriptionUrls('org/example-org'), [
-    'https://app.devin.ai/api/billing/subscription',
     'https://app.devin.ai/api/org/example-org/billing/subscription',
     'https://app.devin.ai/api/example-org/billing/subscription'
   ]);

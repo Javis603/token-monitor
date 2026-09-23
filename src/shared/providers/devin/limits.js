@@ -81,13 +81,16 @@ function devinQuotaUrls(organization) {
 // (org scoped through the x-cog-org-id header) instead.
 function devinSubscriptionUrls(organization) {
   const normalized = normalizeDevinOrganization(organization);
-  const paths = ['billing/subscription'];
-  if (normalized) {
-    paths.push(`${normalized}/billing/subscription`);
-    const internalId = internalOrganizationId(normalized);
-    if (internalId) paths.push(`${internalId}/billing/subscription`, `organizations/${internalId}/billing/subscription`);
-    if (normalized.startsWith('org/')) paths.push(`${normalized.slice(4)}/billing/subscription`);
-  }
+  if (!normalized) return [];
+  const internalId = internalOrganizationId(normalized);
+  const paths = [];
+  // The unscoped endpoint resolves the org purely from x-cog-org-id, so it is
+  // only meaningful when the configuration carries an internal org id — a slug
+  // org would read whichever org the token defaults to.
+  if (internalId) paths.push('billing/subscription');
+  paths.push(`${normalized}/billing/subscription`);
+  if (internalId) paths.push(`${internalId}/billing/subscription`, `organizations/${internalId}/billing/subscription`);
+  if (normalized.startsWith('org/')) paths.push(`${normalized.slice(4)}/billing/subscription`);
   return [...new Set(paths)].map((path) => `${DEVIN_ORIGIN}/api/${path}`);
 }
 
@@ -127,9 +130,15 @@ function parseDevinSubscriptionPlan(body) {
 }
 
 async function fetchDevinPlanName(headers, organization, deps = {}) {
+  // One shared budget for the whole optional lookup: each sequential candidate
+  // gets only the time left, so a stalled endpoint cannot multiply the delay.
+  const budgetMs = Number(deps.devinPlanTimeoutMs || DEVIN_FETCH_TIMEOUT_MS);
+  const startedAt = Date.now();
   for (const url of devinSubscriptionUrls(organization)) {
+    const remainingMs = budgetMs - (Date.now() - startedAt);
+    if (remainingMs <= 0) break;
     try {
-      const { response, body } = await fetchJson(url, headers, deps);
+      const { response, body } = await fetchJson(url, headers, { ...deps, devinFetchTimeoutMs: remainingMs });
       if (!response.ok) continue;
       const plan = parseDevinSubscriptionPlan(body);
       if (plan) return plan;
