@@ -213,3 +213,57 @@ test('device deletion rejects a blank id before calling the sync backend', () =>
   assert.throws(() => context.normalizeDeviceIdForDeletion(null), (error) => error.code === 'invalid_device_id');
   assert.match(main, /ipcMain\.handle\('devices:delete',[\s\S]*?deleteDeviceFromCurrentSync\(normalizeDeviceIdForDeletion\(deviceId\)\)/);
 });
+
+test('main process deletion accepts only a known remote device in the current sync runtime', async () => {
+  const source = functionSource(main, 'deleteDeviceFromCurrentSync', 'postToHub');
+  const context = vm.createContext({
+    settings: { hubMode: 'icloud', deviceId: 'local' },
+    icloudRuntimeHandle: { deleteDevice: async (id) => { context.deleted = id; } },
+    currentHubIdentity: () => 'icloud',
+    fetchStats: async () => ({ devices: [{ deviceId: 'local' }, { deviceId: 'remote' }] }),
+    deleteDeviceFromHub: async (id) => { context.deleted = id; },
+    defaultDeviceId: () => 'fallback-device',
+    Promise,
+    String,
+    Object
+  });
+  vm.runInContext(`async ${source}\nglobalThis.deleteDeviceFromCurrentSync = deleteDeviceFromCurrentSync;`, context);
+
+  await assert.rejects(
+    () => context.deleteDeviceFromCurrentSync('local'),
+    (error) => error.code === 'local_device_delete_not_allowed'
+  );
+  await assert.rejects(
+    () => context.deleteDeviceFromCurrentSync('unknown'),
+    (error) => error.code === 'device_not_found'
+  );
+  assert.equal(context.deleted, undefined);
+
+  await context.deleteDeviceFromCurrentSync('remote');
+  assert.equal(context.deleted, 'remote');
+});
+
+test('main process deletion abandons eligibility checks after a mode switch', async () => {
+  const source = functionSource(main, 'deleteDeviceFromCurrentSync', 'postToHub');
+  let finishStats;
+  const context = vm.createContext({
+    settings: { hubMode: 'icloud', deviceId: 'local' },
+    icloudRuntimeHandle: { deleteDevice: async () => { context.deleted = true; } },
+    currentHubIdentity: () => context.settings.hubMode === 'icloud' ? 'icloud' : '',
+    fetchStats: () => new Promise((resolve) => { finishStats = resolve; }),
+    deleteDeviceFromHub: async () => { context.deleted = true; },
+    defaultDeviceId: () => 'fallback-device',
+    Promise,
+    String,
+    Object
+  });
+  vm.runInContext(`async ${source}\nglobalThis.deleteDeviceFromCurrentSync = deleteDeviceFromCurrentSync;`, context);
+
+  const deleting = context.deleteDeviceFromCurrentSync('remote');
+  await new Promise((resolve) => setImmediate(resolve));
+  context.settings.hubMode = 'local';
+  finishStats({ devices: [{ deviceId: 'remote' }] });
+
+  await assert.rejects(deleting, (error) => error.code === 'hub_changed');
+  assert.equal(context.deleted, undefined);
+});

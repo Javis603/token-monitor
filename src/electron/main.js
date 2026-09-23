@@ -3456,14 +3456,35 @@ function normalizeDeviceIdForDeletion(deviceId) {
 }
 
 async function deleteDeviceFromCurrentSync(deviceId) {
-  if (typeof settings !== 'undefined' && settings?.hubMode === 'icloud') {
-    if (!icloudRuntimeHandle) throw Object.assign(new Error('iCloud sync is unavailable'), { code: 'icloud_unavailable' });
-    return icloudRuntimeHandle.deleteDevice(deviceId);
+  const hubMode = settings?.hubMode;
+  if (hubMode !== 'icloud' && hubMode !== 'client' && hubMode !== 'host') {
+    throw Object.assign(new Error('Device deletion is only available in shared sync mode'), { code: 'not_shared' });
   }
-  if (settings?.hubMode === 'client' || settings?.hubMode === 'host') {
-    return deleteDeviceFromHub(deviceId);
+  const hubIdentity = currentHubIdentity();
+  const runtime = hubMode === 'icloud' ? icloudRuntimeHandle : null;
+  if (hubMode === 'icloud' && !runtime) {
+    throw Object.assign(new Error('iCloud sync is unavailable'), { code: 'icloud_unavailable' });
   }
-  throw Object.assign(new Error('Device deletion is only available in shared sync mode'), { code: 'not_shared' });
+
+  const stats = await fetchStats();
+  if (
+    settings?.hubMode !== hubMode
+    || currentHubIdentity() !== hubIdentity
+    || (hubMode === 'icloud' && icloudRuntimeHandle !== runtime)
+  ) {
+    throw Object.assign(new Error('hub changed'), { code: 'hub_changed' });
+  }
+  const localDeviceId = String(settings?.deviceId || defaultDeviceId()).trim();
+  if (deviceId === localDeviceId) {
+    throw Object.assign(new Error('local_device_delete_not_allowed'), { code: 'local_device_delete_not_allowed' });
+  }
+  const devices = Array.isArray(stats?.devices) ? stats.devices : [];
+  if (!devices.some((device) => device?.deviceId === deviceId)) {
+    throw Object.assign(new Error('device_not_found'), { code: 'device_not_found' });
+  }
+
+  if (hubMode === 'icloud') return runtime.deleteDevice(deviceId);
+  return deleteDeviceFromHub(deviceId);
 }
 
 async function postToHub(summary) {
