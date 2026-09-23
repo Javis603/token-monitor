@@ -218,10 +218,16 @@
     }).format(date);
   }
 
-  function codexResetCreditsNode(resetCredits) {
+  // `detail` optionally replaces the ⓘ tooltip's contents: Claude's reset
+  // grants carry a label, the windows they clear, and a usability state, which
+  // is more than the bare expiry dates Codex has to work with.
+  function codexResetCreditsNode(resetCredits, detail = null) {
     const valueText = formatCodexResetCreditsValue(resetCredits);
     if (!valueText) return null;
     const expirationDates = codexResetCreditExpirationDates(resetCredits);
+    const detailEntries = Array.isArray(detail?.entries) && detail.entries.length > 0
+      ? detail.entries
+      : null;
     const item = document.createElement('div');
     item.className = 'limit-window limit-window-wide limit-window-note limit-reset-credits';
     const line = document.createElement('div');
@@ -230,44 +236,117 @@
     value.className = 'limit-reset-credits-value';
     value.textContent = valueText;
     line.append(value);
-    if (expirationDates.length > 0) {
+    if (expirationDates.length > 0 || detailEntries) {
       const expiryGroup = document.createElement('span');
       expiryGroup.className = 'limit-reset-credits-expiry-group';
-      const timeline = document.createElement('span');
-      timeline.className = 'limit-reset-credits-timeline';
-      const summaryParts = expirationDates.slice(0, 3).map(codexResetCreditExpiryLabel);
-      const hiddenExpirationCount = expirationDates.length - summaryParts.length;
-      if (hiddenExpirationCount > 0) summaryParts.push(`+${hiddenExpirationCount}`);
-      summaryParts.forEach((text, index) => {
-        const time = document.createElement('span');
-        time.className = 'limit-reset-credits-time';
-        if (index > 0) {
-          const separator = document.createElement('span');
-          separator.className = 'limit-reset-credits-separator';
-          separator.textContent = '·';
-          separator.setAttribute('aria-hidden', 'true');
-          time.append(separator);
-        }
-        time.append(document.createTextNode(text));
-        timeline.append(time);
-      });
-      expiryGroup.append(timeline);
       if (expirationDates.length > 0) {
-        // A date paired with a bare duration doesn't read as `<name>: <value>`, so
-        // the spoken label is supplied rather than derived from the cells. Keep
-        // this detail available for a single reset as well as multiple resets.
-        const infoNode = limitDetailInfoNode(
+        const timeline = document.createElement('span');
+        timeline.className = 'limit-reset-credits-timeline';
+        const summaryParts = expirationDates.slice(0, 3).map(codexResetCreditExpiryLabel);
+        const hiddenExpirationCount = expirationDates.length - summaryParts.length;
+        if (hiddenExpirationCount > 0) summaryParts.push(`+${hiddenExpirationCount}`);
+        summaryParts.forEach((text, index) => {
+          const time = document.createElement('span');
+          time.className = 'limit-reset-credits-time';
+          if (index > 0) {
+            const separator = document.createElement('span');
+            separator.className = 'limit-reset-credits-separator';
+            separator.textContent = '·';
+            separator.setAttribute('aria-hidden', 'true');
+            time.append(separator);
+          }
+          time.append(document.createTextNode(text));
+          timeline.append(time);
+        });
+        expiryGroup.append(timeline);
+      }
+      // A date paired with a bare duration doesn't read as `<name>: <value>`, so
+      // the spoken label is supplied rather than derived from the cells. Keep
+      // this detail available for a single reset as well as multiple resets.
+      const infoNode = detailEntries
+        ? limitDetailInfoNode(detailEntries, '', detail?.ariaLabel || '')
+        : limitDetailInfoNode(
           expirationDates.map((date) => [expiryDateLabel(date), codexResetCreditExpiryLabel(date)]),
           '',
           expirationDates.map((date, index) => `Reset ${index + 1}: ${codexResetCreditExpiryDetailLabel(date)}`).join(', ')
         );
-        if (infoNode) expiryGroup.append(infoNode);
-      }
+      if (infoNode) expiryGroup.append(infoNode);
       line.append(expiryGroup);
     }
     item.append(line);
     item.setAttribute('aria-label', ['Reset credits', valueText, expirationDates.map(codexResetCreditExpiryDetailLabel).join(', ')].filter(Boolean).join(', '));
     return item;
+  }
+
+  // Window ids a Claude reset grant reports in `clears`, in the same words the
+  // provider's own windows use. An id this table does not know still reads as
+  // words rather than vanishing, since Anthropic adds scoped windows over time.
+  function claudeResetClearLabel(key) {
+    switch (key) {
+      case 'five_hour': return 'Session';
+      case 'seven_day': return 'Weekly';
+      // The CLI's own label map calls this 'Fable limit' — the
+      // credits-backed model's weekly bucket, not a modifier on seven_day.
+      case 'seven_day_overage_included': return 'Fable weekly';
+      case 'seven_day_opus': return 'Opus weekly';
+      case 'seven_day_sonnet': return 'Sonnet weekly';
+      case 'seven_day_oauth_apps': return 'OAuth apps weekly';
+      case 'seven_day_cowork': return 'Cowork weekly';
+      case 'seven_day_omelette': return 'Omelette weekly';
+      default: return String(key || '').replace(/_/g, ' ').trim();
+    }
+  }
+
+  // One block per grant: the label opens as a small caption — Anthropic
+  // labels are full sentences, so they wrap on a full-width line rather
+  // than a grid cell — then name:value rows for expiry, coverage, and
+  // any spending restriction.
+  function claudeResetGrantRows(grants) {
+    const rows = [];
+    grants.forEach((grant, index) => {
+      const endsAt = grant?.endsAt ? new Date(grant.endsAt) : null;
+      const hasDate = endsAt && !Number.isNaN(endsAt.getTime());
+      const remaining = grant?.paused === true
+        ? 'Paused'
+        : (hasDate
+          ? (endsAt.getTime() - Date.now() <= 0 ? 'Expired' : formatDuration(endsAt.getTime() - Date.now()))
+          : '');
+      if (grant?.label) rows.push({ full: grant.label, caption: true, separated: index > 0 });
+      rows.push(['Expires', hasDate
+        ? [expiryDateLabel(endsAt), remaining].filter(Boolean).join(' · ')
+        : remaining || 'No expiry']);
+      const clearKeys = Array.isArray(grant?.clears) ? grant.clears : [];
+      const clears = clearKeys
+        .map(claudeResetClearLabel)
+        .filter(Boolean);
+      const clearsText = clears.join(' · ');
+      if (clearsText) rows.push(['Clears', clearsText]);
+      if (grant?.useRequiresLimit === true) rows.push(['Usable', 'at a limit only']);
+      else if (grant?.usableNow === false) rows.push(['Usable', 'not right now']);
+    });
+    return rows;
+  }
+
+  // Claude's reset grants share Codex's compact "N resets · time" line; the ⓘ
+  // tooltip carries what Codex cannot say — why each reset exists, what it
+  // clears, and whether it can be spent right now.
+  function claudeResetCreditsNode(resetCredits) {
+    const grants = Array.isArray(resetCredits?.grants) ? resetCredits.grants : [];
+    if (grants.length === 0) return codexResetCreditsNode(resetCredits);
+    const ariaLabel = grants.map((grant, index) => {
+      const left = Number(grant?.resetsLeft);
+      const count = Number.isFinite(left) ? `${Math.max(0, Math.floor(left))} left` : '';
+      // Speak the same rows the tooltip shows — expiry, cleared windows,
+      // usability — so a restriction like 'not right now' is not silent.
+      const details = claudeResetGrantRows([grant])
+        .map((row) => (Array.isArray(row) ? `${row[0]}: ${row[1]}` : row.full))
+        .filter(Boolean)
+        .join(', ');
+      return [`Reset ${index + 1}`, count, details]
+        .filter(Boolean)
+        .join(', ');
+    }).join('; ');
+    return codexResetCreditsNode(resetCredits, { entries: claudeResetGrantRows(grants), ariaLabel });
   }
 
   function providerSpendEntries(balance) {
@@ -350,11 +429,18 @@
   // Entries are rows of cells: `[label, value]`, or `[label, middle, value]` when
   // a row carries an extra field. Rows are grid cells (`display: contents`), so a
   // short row would slide into the next row's columns — pad every row to the
-  // widest one and widen the grid to match. `ariaLabel` overrides the spoken label
-  // for callers whose cells don't read as `<name>: <value>` on their own.
+  // widest one and widen the grid to match. An entry that is not an array but
+  // `{full: 'text'}` renders one full-width line that wraps in place — a long
+  // sentence in a nowrap cell would push the popover past the window edge —
+  // and `{separated: true}` draws a divider above it for a second block.
+  // `ariaLabel` overrides the spoken label for callers whose cells don't read
+  // as `<name>: <value>` on their own.
   function limitDetailInfoNode(entries, extraClass = '', ariaLabel = '') {
     if (!Array.isArray(entries) || entries.length === 0) return null;
-    const columns = entries.reduce((widest, entry) => Math.max(widest, entry.length), 0);
+    const columns = entries.reduce(
+      (widest, entry) => Math.max(widest, Array.isArray(entry) ? entry.length : 0),
+      0
+    );
     const infoWrap = document.createElement('span');
     infoWrap.className = ['limit-detail-tooltip-wrap', extraClass].filter(Boolean).join(' ');
     infoWrap.classList.toggle('has-opened', tooltipHost.hasOpened());
@@ -364,13 +450,27 @@
     info.tabIndex = 0;
     info.setAttribute(
       'aria-label',
-      ariaLabel || entries.map(([entryLabel, ...rest]) => `${entryLabel}: ${rest.filter(Boolean).join(' ')}`).join(', ')
+      ariaLabel || entries
+        .filter(Array.isArray)
+        .map(([entryLabel, ...rest]) => `${entryLabel}: ${rest.filter(Boolean).join(' ')}`)
+        .join(', ')
     );
     const tooltip = document.createElement('span');
     tooltip.className = ['limit-detail-tooltip', columns > 2 ? 'limit-detail-tooltip-triple' : '']
       .filter(Boolean).join(' ');
     tooltip.setAttribute('role', 'tooltip');
     entries.forEach((entry) => {
+      if (!Array.isArray(entry)) {
+        const full = document.createElement('span');
+        full.className = [
+          'limit-detail-tooltip-full',
+          entry?.caption === true ? 'is-caption' : '',
+          entry?.separated === true ? 'is-separated' : ''
+        ].filter(Boolean).join(' ');
+        full.textContent = String(entry?.full ?? '');
+        tooltip.append(full);
+        return;
+      }
       const row = document.createElement('span');
       row.className = 'limit-detail-tooltip-row';
       for (let column = 0; column < columns; column += 1) {
@@ -1243,6 +1343,10 @@
       }
       const balanceNode = claudeBalanceNode(provider);
       if (balanceNode) windows.append(balanceNode);
+      // Usage-limit reset grants (Anthropic's "reset coupon") share Codex's
+      // compact line; the ⓘ tooltip carries each grant's label and coverage.
+      const resetNode = claudeResetCreditsNode(provider.resetCredits);
+      if (resetNode) windows.append(resetNode);
     } else if (provider.provider === 'cline') {
       // ClinePass measures three quota windows, and the account's credit arrives as
       // a fourth "billing" window — told apart by its metric rather than by its
