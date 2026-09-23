@@ -5210,6 +5210,7 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     currency: source.currency,
     currencyRatesEffective: source.currencyRatesEffective,
     compactTokenUnits: source.compactTokenUnits,
+    showCompactTotalTokens: source.showCompactTotalTokens,
     themeColors: source.themeColors,
     vendorColors: source.vendorColors,
     glassOpacity: source.glassOpacity,

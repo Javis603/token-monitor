@@ -625,7 +625,7 @@ html.edge-dock-no-material .edge-dock-shape-fill {
   35%  { filter: drop-shadow(0 0 6px rgba(var(--overlay-rgb), 0.62)); }
   100% { filter: drop-shadow(0 0 2px rgba(var(--overlay-rgb), 0.36)); }
 }
-.edge-dock-session-tokens { color: var(--text); font-size: 11.5px; text-align: right; }
+.edge-dock-session-tokens { min-width: 0; color: var(--text); font-size: 11.5px; text-align: right; overflow-wrap: anywhere; }
 /* The row's own tool, in the mixed Sessions list. Sized between the state mark
    beside it and the card's provider mark: it is an identity, not a status, so it
    reads as the smallest of the three. The slot is only emitted on a mixed list,
@@ -716,7 +716,7 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
   background: rgba(var(--overlay-rgb), 0.05);
 }
 .edge-dock-usage-label { color: var(--muted); font-size: 10px; }
-.edge-dock-usage-tokens { font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
+.edge-dock-usage-tokens { font-size: 13px; font-weight: 650; letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .edge-dock-usage-cost {
   overflow: hidden;
   color: var(--muted);
@@ -755,7 +755,7 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.edge-dock-client-tokens { font-weight: 600; text-align: right; white-space: nowrap; }
+.edge-dock-client-tokens { min-width: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
 .edge-dock-client-share { color: var(--muted); text-align: right; white-space: nowrap; }
 
 /* Caption, figure and cost follow the widget's headline rhythm: a small muted
@@ -774,6 +774,9 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
   margin: 2px 0 6px;
   flex-shrink: 0;
 }
+.edge-dock-total-row { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; }
+.edge-dock-total-row strong,
+.edge-dock-total-compact { flex: 0 0 auto; }
 .edge-dock-stat-headline strong {
   font-size: 28px;
   font-weight: 650;
