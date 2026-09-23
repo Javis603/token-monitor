@@ -69,6 +69,10 @@ it.
 | `generated` | the runtime's `chat_title` summary (asked for by a client; a failed request is logged and dropped, leaving `replaceable` in place) | yes |
 | `custom` | a user rename, which the runtime never overwrites | yes |
 
+Legacy documents carry no `titleKind`; the reader maps `isCustomTitle: true` to `custom` and leaves
+`title` unread for any other value, matching the normalization the runtime applies when it migrates
+them on read.
+
 The resolver owns the display cleaning, because the persistence layer stores a `setTitle` value
 verbatim even though the prompt path sanitizes (secret redaction, whitespace collapse, 200-character
 cap): names are collapsed to one line and capped at the same 96 code points the claude and codex resolvers use.
