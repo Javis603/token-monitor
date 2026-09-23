@@ -1604,6 +1604,7 @@ test('Claude OAuth usage without cedar_ember grants carries no resetCredits', ()
 
 test('Claude OAuth usage asks the usage endpoint for reset grants', async () => {
   const requested = [];
+  let usageHeaders = null;
   const provider = await fetchClaudeLimits({}, {
     platform: 'linux',
     now: () => Date.parse('2026-07-25T00:00:00Z'),
@@ -1616,8 +1617,9 @@ test('Claude OAuth usage asks the usage endpoint for reset grants', async () => 
         expiresAt: Date.parse('2026-07-26T00:00:00Z')
       }
     }),
-    fetch: async (url) => {
+    fetch: async (url, options) => {
       requested.push(url);
+      if (url.includes('/api/oauth/usage')) usageHeaders = options?.headers || null;
       if (url.endsWith('/api/oauth/profile')) {
         return { ok: true, json: async () => DEFAULT_CLAUDE_PROFILE };
       }
@@ -1643,6 +1645,10 @@ test('Claude OAuth usage asks the usage endpoint for reset grants', async () => 
 
   const usageRequest = requested.find((url) => url.includes('/api/oauth/usage'));
   assert.equal(new URL(usageRequest).searchParams.get('cedar_ember'), '1');
+  // Anthropic gates cedar_ember on the client surface: any user-agent that
+  // is not Claude Code gets `eligible: false` with no grants, so the OAuth
+  // usage call must present as the CLI.
+  assert.match(usageHeaders?.['user-agent'], /^claude-cli\/\d+\.\d+\.\d+ \(external, cli\)$/);
   assert.equal(provider.resetCredits.availableCount, 1);
   assert.equal(provider.resetCredits.grants[0].label, 'Launch promo reset');
 });

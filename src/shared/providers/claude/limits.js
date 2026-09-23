@@ -36,6 +36,11 @@ const CLAUDE_PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile';
 // endpoints carry the block only when asked, so every usage request takes the
 // same flag; without it the key is present but null.
 const CLAUDE_RESET_GRANTS_QUERY = 'cedar_ember=1';
+// Anthropic gates `cedar_ember` on the client surface: the OAuth usage
+// endpoint answers `eligible: false, ineligible_reason: "surface"` — no
+// grants — unless the request presents as Claude Code. The credential is a
+// Claude Code OAuth token, so the usage call identifies as that CLI.
+const CLAUDE_CLI_USER_AGENT = 'claude-cli/2.1.280 (external, cli)';
 const CLAUDE_WEB_BASE_URL = 'https://claude.ai';
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
@@ -509,10 +514,10 @@ function claudeUsageCreditsWindow(usage) {
 // was issued, how many resets it still holds, the windows it clears, and when
 // it lapses. Grants with nothing left or already past `ends_at` are spent —
 // counting them would promise a reset the account can no longer use.
-function claudeResetCredits(usage) {
+function claudeResetCredits(usage, now) {
   const block = usage?.cedar_ember;
   if (!block || typeof block !== 'object') return null;
-  const nowMs = Date.now();
+  const nowMs = Number.isFinite(now) ? now : (typeof now === 'function' ? now() : Date.now());
   const grants = (Array.isArray(block.grants) ? block.grants : [])
     .filter((grant) => grant && Number(grant.resets_left) > 0)
     .filter((grant) => {
@@ -578,7 +583,7 @@ function mapClaudeUsageToProvider(usage, meta = {}) {
     status: 'ok',
     updatedAt: meta.updatedAt,
     windows,
-    resetCredits: claudeResetCredits(usage)
+    resetCredits: claudeResetCredits(usage, meta.now)
   });
 }
 
@@ -661,7 +666,7 @@ function callClaudeUsage(accessToken, deps = {}) {
     accept: 'application/json',
     authorization: `Bearer ${accessToken}`,
     'anthropic-beta': 'oauth-2025-04-20',
-    'user-agent': TOKEN_MONITOR_USER_AGENT
+    'user-agent': CLAUDE_CLI_USER_AGENT
   }, deps);
 }
 
@@ -1180,6 +1185,7 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
   const provider = mapClaudeUsageToProvider(usage, {
     ...context.identity,
     updatedAt: nowIso(nowMs),
+    now: nowMs,
     source: 'web'
   });
   if (!balance) return provider;
@@ -1332,6 +1338,7 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
       ...oauthIdentity,
       accountLabel: credentials.accountLabel,
       updatedAt: nowIso(nowMs),
+      now: nowMs,
       source: 'oauth'
     });
     return provider;

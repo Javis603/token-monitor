@@ -310,7 +310,9 @@
           ? (endsAt.getTime() - Date.now() <= 0 ? 'Expired' : formatDuration(endsAt.getTime() - Date.now()))
           : '');
       if (grant?.label) rows.push({ full: grant.label, caption: true, separated: index > 0 });
-      rows.push(['Expires', [hasDate ? expiryDateLabel(endsAt) : '', remaining].filter(Boolean).join(' · ')]);
+      rows.push(['Expires', hasDate
+        ? [expiryDateLabel(endsAt), remaining].filter(Boolean).join(' · ')
+        : remaining || 'No expiry']);
       const clearKeys = Array.isArray(grant?.clears) ? grant.clears : [];
       // `seven_day_overage_included` is not a third window — it says the
       // weekly reset also covers accrued overage, so it folds into the
