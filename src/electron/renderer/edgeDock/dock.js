@@ -244,6 +244,14 @@ function formatCardTokens(value) {
   return Math.round(Number(value || 0)).toLocaleString('en-US');
 }
 
+// Breakdown rows copy the widget's home list: a compact token reading, then the
+// share. The rail keeps its own tray style (two-decimal B, trailing zeros);
+// the card uses the widget's plainer single-decimal reading instead.
+function formatBreakdownTokens(value) {
+  const units = compactTokenApi.effectiveCompactTokenUnits(appearance().compactTokenUnits, state.locale);
+  return compactTokenApi.formatCompactTokens(value, units, state.locale);
+}
+
 function compactCardTotal(value) {
   if (appearance().showCompactTotalTokens !== true) return '';
   const units = compactTokenApi.effectiveCompactTokenUnits(appearance().compactTokenUnits, state.locale);
@@ -1110,7 +1118,7 @@ function statCard(cell) {
     row.append(
       markNode(entry.id, entry.color),
       el('span', 'edge-dock-client-name', entry.name),
-      el('span', 'edge-dock-client-tokens', formatCardTokens(entry.tokens)),
+      el('span', 'edge-dock-client-tokens', formatBreakdownTokens(entry.tokens)),
       el('span', 'edge-dock-client-share', `${Math.round((entry.tokens / sum) * 100)}%`),
       meter
     );

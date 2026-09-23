@@ -12,14 +12,26 @@ function readRendererFile(name) {
   return fs.readFileSync(path.join(rendererDir, name), 'utf8');
 }
 
-test('detail cards keep exact token counts while the narrow rail stays compact', () => {
+test('detail cards keep exact totals while the rail and breakdown rows stay compact', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const formatCardTokens = Function(`return (${dock.match(/function formatCardTokens\(value\) \{[^}]+\}/)[0]})`)();
   assert.equal(formatCardTokens(216_935_653), '216,935,653');
   assert.equal(formatCardTokens(162_821_017), '162,821,017');
+  // The breakdown rows read like the widget's home list: one-decimal compact
+  // tokens with trailing zeros stripped, not the rail's two-decimal tray style.
+  const breakdownSource = dock.slice(
+    dock.indexOf('function formatBreakdownTokens('),
+    dock.indexOf('function compactCardTotal(')
+  ).trim();
+  const formatBreakdownTokens = Function('appearance', 'state', 'compactTokenApi', 'return (' + breakdownSource + ')')(
+    () => ({ compactTokenUnits: 'western' }), { locale: 'en' }, require('../../src/shared/compactTokens')
+  );
+  assert.equal(formatBreakdownTokens(216_935_653), '216.9M');
+  assert.equal(formatBreakdownTokens(1_234_567_890), '1.2B');
+  assert.equal(formatBreakdownTokens(512), '512');
   assert.match(dock, /edge-dock-stat-value', formatTokens\(cell\.totalTokens\)/);
   assert.match(dock, /edge-dock-total-row'[\s\S]*?formatCardTokens\(cell\.totalTokens\)/);
-  assert.match(dock, /edge-dock-client-tokens', formatCardTokens\(entry\.tokens\)/);
+  assert.match(dock, /edge-dock-client-tokens', formatBreakdownTokens\(entry\.tokens\)/);
   assert.match(dock, /edge-dock-session-tokens', formatCardTokens\(session\.totalTokens\)/);
 });
 

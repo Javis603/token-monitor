@@ -736,7 +736,7 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
    Fixed trailing columns keep every figure right-aligned on the same edge. */
 .edge-dock-client {
   display: grid;
-  grid-template-columns: 14px minmax(0, 1fr) auto 34px;
+  grid-template-columns: 14px minmax(0, 1fr) minmax(42px, auto) minmax(31px, auto);
   align-items: center;
   column-gap: 8px;
   row-gap: 6px;
@@ -755,8 +755,24 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.edge-dock-client-tokens { min-width: 0; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
-.edge-dock-client-share { color: var(--muted); text-align: right; white-space: nowrap; }
+/* Token and share columns copy the widget's home list (.home-list-value,
+   .home-list-aux): an 11px compact reading, then a smaller muted percent. */
+.edge-dock-client-tokens {
+  min-width: 0;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: right;
+  white-space: nowrap;
+}
+.edge-dock-client-share {
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  text-align: right;
+  white-space: nowrap;
+}
 
 /* Caption, figure and cost follow the widget's headline rhythm: a small muted
    caption, room above the figure, the cost tucked just under it, then a clear
