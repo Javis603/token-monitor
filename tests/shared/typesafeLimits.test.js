@@ -56,7 +56,8 @@ test('TypeSafe balance and usage remain distinct while token spend stays precise
   assert.equal(provider.windows[0].metric, 'credits');
   assert.equal(provider.windows[0].remaining, 5);
   assert.equal(provider.windows[0].showMeter, true);
-  assert.equal(provider.windows[0].resetsAt, new Date(now + 7 * 86400000).toISOString());
+  // Billing resetsInDays does not identify when the visible credit grant expires.
+  assert.equal(provider.windows[0].resetsAt, null);
   assert.equal(provider.balance.weekSpend, null);
   assert.equal(provider.usageSummary.period, 'month');
   assert.equal(provider.usageSummary.todayTokens, 0);
@@ -138,7 +139,7 @@ test('TypeSafe resolves the bundle rate constants and falls back when absent', a
   assert.equal(fallbackProvider.usageSummary.standardCost, 1888 * 0.042 / 1_000_000);
 });
 
-test('TypeSafe prettifies the plan label and omits reset when the cycle is absent', async () => {
+test('TypeSafe prettifies the plan label', async () => {
   const transport = mockFetch({ billing: { balance: 25, spent: 3, plan: 'pro_plan' } });
   const provider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...transport, now: () => now });
   assert.equal(provider.status, 'ok');

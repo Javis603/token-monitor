@@ -227,21 +227,16 @@ async function fetchTypesafeLimits(options = {}, deps = {}) {
         status: 'ok',
         accountKey: hashKey('typesafe', cookie),
         accountLabel: planLabel(billing.plan),
-        // TypeSafe has no rate-limit windows. The balance is the only quota it
-        // exposes, so it ships as a credits window: money, no wire percentage.
-        // The meter is derived from balance vs this month's estimated spend,
-        // and resetsInDays is the monthly free-credit replenishment the
-        // console counts down to — the same "quota comes back" boundary every
-        // other provider's Reset line reports.
+        // TypeSafe has no rate-limit windows. The balance ships as a credits
+        // window; the meter derives from this month's estimated spend.
+        // Billing's resetsInDays is not the credit expiry shown by the Console,
+        // so it cannot provide a meaningful reset boundary for this balance.
         windows: [{
           kind: 'billing',
           metric: 'credits',
           label: 'Balance',
           remaining: billing.balance,
-          currency: 'USD',
-          ...(Number.isFinite(billing.resetsInDays)
-            ? { resetsAt: new Date(now + billing.resetsInDays * 86400000).toISOString() }
-            : {})
+          currency: 'USD'
         }],
         balance: { amount: billing.balance, currency: 'USD', monthSpend: usage.monthCost },
         usageSummary: { period: 'month', todayTokens: usage.today, weekTokens: usage.week,
