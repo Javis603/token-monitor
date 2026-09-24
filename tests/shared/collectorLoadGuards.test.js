@@ -5026,3 +5026,170 @@ test('the quit variant of stop() skips the watcher walk and leans on `stopped`',
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('locally parsed clients fold Pi Desktop into pi and surface every history graph', async () => {
+  const tmp = withTmpHome([]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const todayKey = localDayKey();
+  const graphFor = (client, tokens) => ({
+    contributions: [{
+      date: todayKey,
+      clients: [{
+        client,
+        modelId: 'glm-5.3',
+        tokens: { input: tokens, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+        cost: 0,
+        messages: 1
+      }]
+    }]
+  });
+  const periodFor = (client, tokens) => ({
+    today: { entries: [{ client, model: 'glm-5.3', input: tokens }] },
+    month: { entries: [{ client, model: 'glm-5.3', input: tokens }] },
+    allTime: { entries: [{ client, model: 'glm-5.3', input: tokens }] }
+  });
+
+  const liveAgent = require('../../src/shared/providers/liveagent/usage');
+  const piDesktop = require('../../src/shared/providers/pi/desktopUsage');
+  const originals = {
+    liveAgent: {
+      collectLiveAgentRows: liveAgent.collectLiveAgentRows,
+      buildLiveAgentPeriods: liveAgent.buildLiveAgentPeriods,
+      buildLiveAgentHistoryGraph: liveAgent.buildLiveAgentHistoryGraph,
+      liveAgentDataPaths: liveAgent.liveAgentDataPaths
+    },
+    piDesktop: {
+      collectPiDesktopRows: piDesktop.collectPiDesktopRows,
+      buildPiDesktopPeriods: piDesktop.buildPiDesktopPeriods,
+      buildPiDesktopHistoryGraph: piDesktop.buildPiDesktopHistoryGraph
+    }
+  };
+
+  try {
+    liveAgent.collectLiveAgentRows = () => [];
+    liveAgent.buildLiveAgentPeriods = () => periodFor('liveagent', 2);
+    liveAgent.buildLiveAgentHistoryGraph = () => graphFor('liveagent', 2);
+    liveAgent.liveAgentDataPaths = () => ({ dbPaths: [] });
+    piDesktop.collectPiDesktopRows = () => [];
+    piDesktop.buildPiDesktopPeriods = () => periodFor('pi', 4);
+    piDesktop.buildPiDesktopHistoryGraph = () => graphFor('pi', 4);
+    delete require.cache[collectorPath];
+
+    const { collectUsageOnce } = freshCollector();
+    const summary = await collectUsageOnce({
+      clients: 'liveagent,pi',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      platform: 'linux',
+      historyEnabled: true,
+      includeHistory: true,
+      limitsEnabled: false,
+      lookupModelPricing: async () => { throw new Error('unknown model'); },
+      runTokscale: async () => ({ entries: [{ client: 'pi', model: 'glm-5.3', input: 5 }] }),
+      runGraph: async () => ({ contributions: [] })
+    });
+
+    assert.equal(summary.today.clients.liveagent, 2);
+    assert.equal(summary.today.clients.pi, 9, 'Pi Desktop turns merge into the pi client');
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(summary.today.clients, 'pi-desktop'),
+      false,
+      'no phantom pi-desktop client may leak into the summary'
+    );
+
+    const day = (summary.history?.daily || []).find((bucket) => bucket.date === todayKey);
+    assert.ok(day, 'history keeps a daily bucket for the locally parsed clients');
+    assert.equal(day.perClient.liveagent.tokens, 2);
+    assert.equal(day.perClient.pi.tokens, 4);
+  } finally {
+    Object.assign(liveAgent, originals.liveAgent);
+    Object.assign(piDesktop, originals.piDesktop);
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('LiveAgent custom scan roots extend the default database instead of replacing it', async () => {
+  const tmp = withTmpHome([]);
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const liveAgent = require('../../src/shared/providers/liveagent/usage');
+  const piDesktop = require('../../src/shared/providers/pi/desktopUsage');
+  const originals = {
+    liveAgent: {
+      collectLiveAgentRows: liveAgent.collectLiveAgentRows,
+      buildLiveAgentPeriods: liveAgent.buildLiveAgentPeriods,
+      buildLiveAgentHistoryGraph: liveAgent.buildLiveAgentHistoryGraph
+    },
+    piDesktop: {
+      collectPiDesktopRows: piDesktop.collectPiDesktopRows,
+      buildPiDesktopPeriods: piDesktop.buildPiDesktopPeriods,
+      buildPiDesktopHistoryGraph: piDesktop.buildPiDesktopHistoryGraph
+    }
+  };
+
+  try {
+    const seenDbPaths = [];
+    liveAgent.collectLiveAgentRows = (options) => {
+      seenDbPaths.push(options.dbPaths);
+      return [];
+    };
+    liveAgent.buildLiveAgentPeriods = () => ({ today: { entries: [] }, month: { entries: [] }, allTime: { entries: [] } });
+    liveAgent.buildLiveAgentHistoryGraph = () => ({ contributions: [] });
+    piDesktop.collectPiDesktopRows = () => [];
+    piDesktop.buildPiDesktopPeriods = () => ({ today: { entries: [] }, month: { entries: [] }, allTime: { entries: [] } });
+    piDesktop.buildPiDesktopHistoryGraph = () => ({ contributions: [] });
+    delete require.cache[collectorPath];
+
+    const { collectUsageOnce } = freshCollector();
+    await collectUsageOnce({
+      clients: 'liveagent,pi',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      platform: 'linux',
+      historyEnabled: true,
+      includeHistory: true,
+      limitsEnabled: false,
+      lookupModelPricing: async () => { throw new Error('unknown model'); },
+      runTokscale: async () => ({ entries: [] }),
+      runGraph: async () => ({ contributions: [] }),
+      customScanPaths: { liveagent: ['C:/custom/liveagent'] }
+    });
+
+    // Both the period read and the history read must see the default database
+    // (home root or env override) AND every custom root in one call.
+    assert.ok(seenDbPaths.length >= 2, 'period and history reads both collect rows');
+    for (const dbPaths of seenDbPaths) {
+      assert.ok(
+        dbPaths.some((p) => String(p).includes(path.join('.liveagent', 'chat-history.sqlite3'))),
+        'the default chat-history.sqlite3 stays in the read set'
+      );
+      assert.ok(
+        dbPaths.some((p) => String(p).replace(/\\/g, '/') === 'C:/custom/liveagent/chat-history.sqlite3'),
+        'each custom root contributes its resolved database file'
+      );
+    }
+  } finally {
+    Object.assign(liveAgent, originals.liveAgent);
+    Object.assign(piDesktop, originals.piDesktop);
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

@@ -217,6 +217,8 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'pi-sessions',
   'proma-sessions',
   'qodercn-db',
+  'liveagent-db',
+  'pi-desktop-db',
   REASONIX_SOURCE_CHECK_ID,
   'qwen-projects',
   'tokscale-antigravity-cache',

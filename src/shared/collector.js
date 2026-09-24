@@ -64,6 +64,31 @@ const {
   qoderCnDataPaths,
   resolveQoderCnPricing
 } = require('./providers/qodercn/usage');
+const {
+  buildLiveAgentHistoryGraph,
+  buildLiveAgentPeriods,
+  collectLiveAgentRows,
+  liveAgentDataPaths
+} = require('./providers/liveagent/usage');
+const {
+  buildPiDesktopHistoryGraph,
+  buildPiDesktopPeriods,
+  collectPiDesktopRows,
+  piDesktopDataPaths
+} = require('./providers/pi/desktopUsage');
+
+// Custom scan paths configured for liveagent are directories its locally
+// parsed adapter can resolve itself: the database-backed client stores one
+// file per directory (the suffix is known here).
+function localCustomScanDirs(client, customScanPaths) {
+  const dirs = (customScanPaths && customScanPaths[client]) || [];
+  return dirs.filter((dir) => dir && dir.length > 0);
+}
+
+function localCustomScanDbPaths(client, customScanPaths, suffix) {
+  return localCustomScanDirs(client, customScanPaths).map((dir) => path.join(dir, suffix));
+}
+
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 const {
@@ -1053,6 +1078,12 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
   }
+  for (const graph of [options.liveAgentGraph, options.piDesktopGraph]) {
+    if (graph) {
+      rawGraphs.push(graph);
+      histories.push(normalizeHistory(parseGraphResult(graph), { capDays, todayKey }));
+    }
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -1158,6 +1189,8 @@ async function collectUsageOnce(options) {
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
+  const includesLiveAgent = normalizedClients.split(',').includes('liveagent');
+  const includesPi = normalizedClients.split(',').includes('pi');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -1188,11 +1221,19 @@ async function collectUsageOnce(options) {
   let qoderCnRows = null;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
+  let liveAgentPeriods = null;
+  let liveAgentPricing = null;
+  let piDesktopPeriods = null;
+  let piDesktopPricing = null;
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     const progress = { ...periods };
     if (qoderCnPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, qoderCnPeriods.today);
     if (qoderCnPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, qoderCnPeriods.month);
+    if (liveAgentPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, liveAgentPeriods.today);
+    if (liveAgentPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, liveAgentPeriods.month);
+    if (piDesktopPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, piDesktopPeriods.today);
+    if (piDesktopPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, piDesktopPeriods.month);
     try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
   };
   if (normalizedClients) {
@@ -1260,6 +1301,47 @@ async function collectUsageOnce(options) {
       }
     }
     throwIfAborted(options.signal);
+    if (includesLiveAgent && (!targetRequested || targetClients.includes('liveagent'))) {
+      try {
+        const liveAgentRowsCollected = collectLiveAgentRows({ homeDir: options.homeDir, dbPaths: [...liveAgentDataPaths({ homeDir: options.homeDir }).dbPaths, ...localCustomScanDbPaths('liveagent', options.customScanPaths, 'chat-history.sqlite3')] });
+        liveAgentPricing = await resolvePromaPricing(liveAgentRowsCollected, {
+          lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs,
+          pricingRevision: options.pricingRevision
+        });
+        const liveAgentJson = buildLiveAgentPeriods({ now: collectedAt, allTimeSince, rows: liveAgentRowsCollected, pricingByModel: liveAgentPricing });
+        liveAgentPeriods = {
+          today: extractUsageFromTokscale(liveAgentJson.today),
+          month: extractUsageFromTokscale(liveAgentJson.month),
+          allTime: extractUsageFromTokscale(liveAgentJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`liveagent parse failed: ${err.message}`);
+      }
+    }
+    if (includesPi && (!targetRequested || targetClients.includes('pi'))) {
+      try {
+        // Pi Desktop is a separate local store behind the tokscale-parsed `pi`
+        // client; its database path is controlled by
+        // TOKEN_MONITOR_PI_DESKTOP_DB_PATH, not by the pi custom scan roots
+        // (those stay tokscale session roots).
+        const piDesktopRowsCollected = collectPiDesktopRows({ homeDir: options.homeDir });
+        piDesktopPricing = await resolvePromaPricing(piDesktopRowsCollected, {
+          lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs,
+          pricingRevision: options.pricingRevision
+        });
+        const piDesktopJson = buildPiDesktopPeriods({ now: collectedAt, allTimeSince, rows: piDesktopRowsCollected, pricingByModel: piDesktopPricing });
+        piDesktopPeriods = {
+          today: extractUsageFromTokscale(piDesktopJson.today),
+          month: extractUsageFromTokscale(piDesktopJson.month),
+          allTime: extractUsageFromTokscale(piDesktopJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`pi desktop parse failed: ${err.message}`);
+      }
+    }
+
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
       // same full load + filter, so scan only --today and update the broader
@@ -1305,6 +1387,15 @@ async function collectUsageOnce(options) {
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
       if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
+      if (liveAgentPeriods) freshPartitions.liveagent = liveAgentPeriods.today;
+      if (piDesktopPeriods) {
+        // Pi Desktop rows are emitted under the `pi` client, so they must fold
+        // into the pi partition instead of inventing a `pi-desktop` one that no
+        // targeted tick, health check, or tracked-client list knows about.
+        freshPartitions.pi = freshPartitions.pi
+          ? mergePeriods(freshPartitions.pi, piDesktopPeriods.today)
+          : piDesktopPeriods.today;
+      }
       if (qoderCnPeriodReadFailed && anchor.todayPartitions?.qodercn) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
@@ -1376,6 +1467,23 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, qoderCnPeriods.month);
       allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), qodercn: qoderCnPeriods.today };
+    }
+    if (liveAgentPeriods && !anchorUsed) {
+      today = mergePeriods(today, liveAgentPeriods.today);
+      month = mergePeriods(month, liveAgentPeriods.month);
+      allTime = mergePeriods(allTime, liveAgentPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), liveagent: liveAgentPeriods.today };
+    }
+    if (piDesktopPeriods && !anchorUsed) {
+      today = mergePeriods(today, piDesktopPeriods.today);
+      month = mergePeriods(month, piDesktopPeriods.month);
+      allTime = mergePeriods(allTime, piDesktopPeriods.allTime);
+      todayPartitions = {
+        ...(todayPartitions || {}),
+        pi: (todayPartitions || {}).pi
+          ? mergePeriods(todayPartitions.pi, piDesktopPeriods.today)
+          : piDesktopPeriods.today
+      };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1589,11 +1697,45 @@ async function collectUsageOnce(options) {
     const historyQoderCnGraph = qoderCnHistoryReadFailed
       ? options.qoderCnHistoryFallbackGraph
       : qoderCnGraph;
+    let liveAgentGraph = null;
+    let liveAgentHistoryReadFailed = false;
+    if (includesLiveAgent) {
+      try {
+        const rows = collectLiveAgentRows({ homeDir: options.homeDir, dbPaths: [...liveAgentDataPaths({ homeDir: options.homeDir }).dbPaths, ...localCustomScanDbPaths('liveagent', options.customScanPaths, 'chat-history.sqlite3')] });
+        const pricing = (!anchorUsed && liveAgentPricing) ? liveAgentPricing : await resolvePromaPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs,
+          pricingRevision: options.pricingRevision
+        });
+        liveAgentGraph = buildLiveAgentHistoryGraph({ rows, pricingByModel: pricing });
+      } catch (err) {
+        liveAgentHistoryReadFailed = true;
+        if (typeof options.logger === 'function') options.logger(`liveagent history parse failed: ${err.message}`);
+      }
+    }
+    let piDesktopGraph = null;
+    let piDesktopHistoryReadFailed = false;
+    if (includesPi) {
+      try {
+        const rows = collectPiDesktopRows({ homeDir: options.homeDir });
+        const pricing = (!anchorUsed && piDesktopPricing) ? piDesktopPricing : await resolvePromaPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs,
+          pricingRevision: options.pricingRevision
+        });
+        piDesktopGraph = buildPiDesktopHistoryGraph({ rows, pricingByModel: pricing });
+      } catch (err) {
+        piDesktopHistoryReadFailed = true;
+        if (typeof options.logger === 'function') options.logger(`pi desktop history parse failed: ${err.message}`);
+      }
+    }
     throwIfAborted(options.signal);
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
       qoderCnGraph: historyQoderCnGraph || null,
+      liveAgentGraph: liveAgentHistoryReadFailed ? options.liveAgentHistoryFallbackGraph : liveAgentGraph || null,
+      piDesktopGraph: piDesktopHistoryReadFailed ? options.piDesktopHistoryFallbackGraph : piDesktopGraph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1869,7 +2011,8 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const exporter = copilotExporterWatch(home);
   if (exporter) copilotRoots.push(['copilot-otel-exporter', exporter.dir, exporter.file]);
   add('copilot', ...copilotRoots);
-  add('pi', ['pi-sessions', path.join(home, '.pi', 'agent', 'sessions')], ['omp-sessions', path.join(home, '.omp', 'agent', 'sessions')]);
+  const piDesktopPaths = piDesktopDataPaths({ homeDir: home, env: process.env });
+  add('pi', ['pi-sessions', path.join(home, '.pi', 'agent', 'sessions')], ['omp-sessions', path.join(home, '.omp', 'agent', 'sessions')], ['pi-desktop-db', path.dirname(piDesktopPaths.dbPaths[0] || path.join(home, '.pi-desktop')), piDesktopPaths.dbPaths[0] || path.join(home, '.pi-desktop', 'pi.sqlite')]);
   // Zed: tokscale reads the XdgData root on every platform AND the native macOS
   // (Application Support) / Windows (LOCALAPPDATA) roots (see tokscale scanner.rs
   // cfg(macos)/cfg(windows) blocks) — watch all three so native mac/win users get
@@ -1957,6 +2100,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // Qoder CN — SQLite DB under the platform Application Support dir.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform: process.platform, env: process.env });
   add('qodercn', ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]));
+  add('liveagent', ...liveAgentDataPaths({ homeDir: home }).dbPaths.map((dbPath) => ['liveagent-db', path.dirname(dbPath), dbPath]));
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
     resolveReasonixStatsDir({ env: process.env, homeDir: home, platform: process.platform, cwdDir: process.cwd() })
