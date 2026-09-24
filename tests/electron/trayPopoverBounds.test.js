@@ -89,6 +89,18 @@ test('a single display keeps the geometry it had before the fix', () => {
   assert.deepEqual(bounds, { x: 742, y: 29, width: 340, height: 650 });
 });
 
+test('without a click the popover keeps its display from the tray rectangle', () => {
+  // Keyboard shortcut / VoiceOver path: the cursor sits on the external display
+  // but the tray rectangle is on the primary one, so the popover stays on the
+  // primary display exactly as it did before this fix.
+  const bounds = popoverBounds(mirroredTray, 340, 650, {
+    screen: screenFor({ x: 500, y: -1060 }),
+    clickPoint: null,
+    platform: 'darwin'
+  });
+  assert.deepEqual(bounds, { x: 742, y: 29, width: 340, height: 650 });
+});
+
 test('a zero-width tray rectangle falls back to the pointer for horizontal placement', () => {
   const clickPoint = { x: 500, y: 10 };
   const flatTray = { getBounds: () => ({ x: 0, y: 0, width: 0, height: 0 }) };
@@ -128,20 +140,23 @@ test('popoverAnchor reports whether it could use the tray rectangle', () => {
   assert.deepEqual(offDisplay, { x: 1200, top: -1060, onTray: false });
 });
 
-test('pointerPoint prefers the cursor and falls back to the event position', () => {
+test('pointerPoint prefers the event position and falls back to the cursor', () => {
+  // Electron captures the event position natively at click time; the live
+  // cursor is only a fallback for activations without a usable position.
   const withScreen = { screen: { getCursorScreenPoint: () => ({ x: 5, y: 6 }) } };
-  assert.deepEqual(pointerPoint({ x: 1, y: 2 }, withScreen), { x: 5, y: 6 });
+  assert.deepEqual(pointerPoint({ x: 1, y: 2 }, withScreen), { x: 1, y: 2 });
+  assert.deepEqual(pointerPoint(null, withScreen), { x: 5, y: 6 });
 
   const noScreen = { screen: {} };
   assert.deepEqual(pointerPoint({ x: 1, y: 2 }, noScreen), { x: 1, y: 2 });
 
   assert.equal(pointerPoint(null, noScreen), null);
-  assert.equal(pointerPoint({ x: Number.NaN, y: 2 }, noScreen), null);
+  assert.equal(pointerPoint({ x: Number.NaN, y: 2 }, { screen: {} }), null);
 
   const throwing = {
     screen: {
       getCursorScreenPoint: () => { throw new Error('no display server'); }
     }
   };
-  assert.deepEqual(pointerPoint({ x: 1, y: 2 }, throwing), { x: 1, y: 2 });
+  assert.equal(pointerPoint(null, throwing), null);
 });

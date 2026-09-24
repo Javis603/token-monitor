@@ -503,19 +503,21 @@ function createTray({
   return tray;
 }
 
-// The cursor first, the event's own position second. A tray click always happens
-// under the pointer, but an activation that did not come from a click (VoiceOver,
-// for one) does not carry a usable position.
+// The event's own position first, the live cursor second. Electron captures
+// `position` in native code when the click is dispatched — the same signal as
+// the cursor, but earlier, so it cannot be moved between the click and the
+// event reaching us. An activation that did not come from a click (VoiceOver,
+// for one) can carry an unusable position, so the cursor stays as fallback.
 function pointerPoint(position, electron = require('electron')) {
+  if (position && Number.isFinite(Number(position.x)) && Number.isFinite(Number(position.y))) {
+    return { x: Number(position.x), y: Number(position.y) };
+  }
   try {
     const cursor = electron?.screen?.getCursorScreenPoint?.();
     if (cursor && Number.isFinite(Number(cursor.x)) && Number.isFinite(Number(cursor.y))) {
       return { x: Number(cursor.x), y: Number(cursor.y) };
     }
-  } catch (_) { /* fall through to the event position */ }
-  if (position && Number.isFinite(Number(position.x)) && Number.isFinite(Number(position.y))) {
-    return { x: Number(position.x), y: Number(position.y) };
-  }
+  } catch (_) { /* no usable point */ }
   return null;
 }
 
@@ -525,14 +527,7 @@ function pointInside(point, area) {
     point.y >= area.y && point.y < area.y + area.height;
 }
 
-// Which display the popover belongs on, and where on it to hang the popover from.
-//
-// The display is chosen from the pointer, never from the tray rectangle. On macOS
-// Tray.getBounds() resolves `[status_item_view_ window].frame` — one view inside
-// one window, with no display parameter — so it describes the primary display's
-// menu bar even when the icon was clicked on another screen; feeding it to
-// getDisplayNearestPoint() maps an anchor that never moved back onto the display
-// it already belonged to.
+// Where on the chosen display to hang the popover from.
 //
 // The tray rectangle is still the better horizontal anchor when it genuinely sits
 // on the display we chose, so it is used there and ignored otherwise. `onTray`
@@ -556,7 +551,18 @@ function popoverBounds(tray, popoverWidth, popoverHeight, options = {}) {
   } = options;
   const trayBounds = tray?.getBounds?.() || { x: 0, y: 0, width: 0, height: 0 };
   const cursor = clickPoint || screen.getCursorScreenPoint();
-  const display = screen.getDisplayNearestPoint({ x: cursor.x, y: cursor.y });
+  // On a real click the pointer decides the display: on macOS Tray.getBounds()
+  // resolves `[status_item_view_ window].frame` — one view inside one window,
+  // with no display parameter — so it can describe the primary display's menu
+  // bar even when the icon was clicked on another screen. Without a click
+  // (keyboard shortcut, VoiceOver) keep the pre-fix lookup from the tray
+  // rectangle, falling back to the cursor only when there is no rectangle.
+  const displayPoint = clickPoint || (
+    trayBounds.width > 0
+      ? { x: trayBounds.x + trayBounds.width / 2, y: trayBounds.y }
+      : cursor
+  );
+  const display = screen.getDisplayNearestPoint(displayPoint);
   const wa = display.workArea;
   const anchor = popoverAnchor({ trayBounds, cursor, display });
 
