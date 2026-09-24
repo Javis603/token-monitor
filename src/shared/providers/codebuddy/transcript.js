@@ -80,6 +80,21 @@ function isSyntheticPromptText(text) {
   return SYNTHETIC_PROMPT_PREFIX.test(trimmed);
 }
 
+// WorkBuddy wraps a conversation-opening user record in a
+// `<system-reminder data-role="user-context">` envelope — workspace info, the
+// same shape CodeBuddy emits as standalone reminder records — and puts the
+// prompt itself in a `<user_query>` tag after it. Reading the envelope text
+// alone would classify the record as one of the synthetic injections below and
+// drop every prompt in the store, so the tag is extracted wherever it is
+// present and the whole text is kept when it is not.
+const USER_QUERY_TAG = /<user_query>([\s\S]*?)<\/user_query>/;
+
+function userPromptText(entry) {
+  const text = contentText(entry.content);
+  const query = USER_QUERY_TAG.exec(text);
+  return (query ? query[1] : text).replace(/\s+/g, ' ').trim();
+}
+
 // Whether a `user` record is something the user actually asked.
 function isUserPromptRecord(entry) {
   if (entry?.type !== 'message' || entry?.role !== 'user') return false;
@@ -89,7 +104,7 @@ function isUserPromptRecord(entry) {
       if (providerData[flag] === true) return false;
     }
   }
-  return !isSyntheticPromptText(contentText(entry.content));
+  return !isSyntheticPromptText(userPromptText(entry));
 }
 
 // The response's completion state, or '' for a record that states none.
@@ -177,6 +192,7 @@ module.exports = {
   contentText,
   isSyntheticPromptText,
   isUserPromptRecord,
+  userPromptText,
   assistantStatus,
   messageIdOf,
   usageTokens

@@ -3,10 +3,10 @@
 const fs = require('node:fs');
 const { resolveSessionFile } = require('./sessionFiles');
 const {
-  contentText,
   isUserPromptRecord,
   messageIdOf,
-  usageTokens
+  usageTokens,
+  userPromptText
 } = require('./providers/codebuddy/transcript');
 const codebuddyExtension = require('./providers/codebuddy/extension');
 const opencodeSession = require('./providers/opencode/session');
@@ -266,7 +266,7 @@ function parseCodebuddyTranscript(text) {
     try { entry = JSON.parse(trimmed); } catch (_) { continue; }
 
     if (isUserPromptRecord(entry)) {
-      const prompt = contentText(entry.content).replace(/\s+/g, ' ').trim();
+      const prompt = userPromptText(entry);
       events.push({ kind: 'prompt', timestamp: codebuddyTimestamp(entry.timestamp), text: prompt });
       continue;
     }

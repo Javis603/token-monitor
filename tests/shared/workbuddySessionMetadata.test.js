@@ -37,7 +37,12 @@ function transcript() {
       timestamp: 1776418025188,
       sessionId: SESSION,
       cwd: 'D:\\work\\demo',
-      content: [{ type: 'input_text', text: '你好' }]
+      // The conversation opener wraps its context in a user-context envelope
+      // and carries the prompt in a <user_query> tag after it.
+      content: [{
+        type: 'input_text',
+        text: '<system-reminder data-role="user-context">\n<user_info>\nWorkspace Folder: D:\\work\\demo\n</user_info>\n</system-reminder>\n<user_query>你好</user_query>'
+      }]
     }),
     JSON.stringify({
       id: 'call-1',
