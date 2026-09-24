@@ -382,6 +382,16 @@
               <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="glassSliderLabel" class="settings-item-title" data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" title="Reset glass" data-i18n-title="settings.appearance.resetGlass">↺</button></span></span><input id="glassInput" type="range" min="0" max="100" step="1" aria-labelledby="glassSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="depthSliderLabel" class="settings-item-title" data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="reset-appearance-button reset-inline" title="Reset depth" data-i18n-title="settings.appearance.resetDepth">↺</button></span></span><input id="blurInput" type="range" min="0" max="100" step="1" aria-labelledby="depthSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="zoomSliderLabel" class="settings-item-title" data-i18n="settings.appearance.zoom">Zoom</span><button id="resetZoomButton" type="button" class="reset-appearance-button reset-inline" title="Reset zoom" data-i18n-title="settings.appearance.resetZoom">↺</button></span></span><input id="zoomInput" type="range" min="70" max="160" step="5" aria-labelledby="zoomSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div class="settings-item background-image-setting">
+                <span class="settings-item-text">
+                  <span class="settings-item-title" data-i18n="settings.appearance.backgroundImage">Background image</span>
+                  <span id="backgroundImageStatus" class="settings-note settings-item-desc" data-i18n="settings.appearance.backgroundImageNone">No image selected</span>
+                </span>
+                <div class="background-image-actions">
+                  <button id="chooseBackgroundImageButton" type="button" data-i18n="settings.appearance.backgroundImageChoose">Choose image…</button>
+                  <button id="clearBackgroundImageButton" type="button" class="hidden" data-i18n="settings.appearance.backgroundImageClear">Remove</button>
+                </div>
+              </div>
               <div class="settings-item">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.appearance.reduceMotion">Reduce Motion</span>
@@ -1907,6 +1917,7 @@
     </button>
     <script src="../../shared/clientCatalog.js"></script>
     <script src="../../shared/limitProviders.js"></script>
+    <script src="../../shared/compactTokens.js"></script>
     <script src="../../shared/limitBalanceDisplay.js"></script>
     <script src="../../shared/limitWindowLabels.js"></script>
     <script src="../../shared/limitWindowText.js"></script>
@@ -1957,7 +1968,6 @@
     <script src="../../shared/currency.js"></script>
     <script src="../../shared/subscriptionDisplay.js"></script>
     <script src="../../shared/subscriptionText.js"></script>
-    <script src="../../shared/compactTokens.js"></script>
     <script src="../../shared/compactMoney.js"></script>
     <script src="../../shared/fontSettings.js"></script>
     <script src="../../shared/trayText.js"></script>

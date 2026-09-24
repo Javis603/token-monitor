@@ -317,6 +317,10 @@
         : remaining || 'No expiry']);
       const clearKeys = Array.isArray(grant?.clears) ? grant.clears : [];
       const clears = clearKeys
+        // `seven_day_overage_included` is the Fable model's weekly bucket — a
+        // distinct limit, but noise next to the general weekly clear that
+        // most accounts never see. List it only when it is the only weekly.
+        .filter((key) => key !== 'seven_day_overage_included' || !clearKeys.includes('seven_day'))
         .map(claudeResetClearLabel)
         .filter(Boolean);
       const clearsText = clears.join(' · ');

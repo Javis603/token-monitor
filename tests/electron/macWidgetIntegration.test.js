@@ -785,6 +785,20 @@ test('each Widget family has a purpose-built composition', () => {
   assert.match(widgetDashboardSource, /\(width\|height\)=\["'\]1em\["'\]/);
 });
 
+test('macOS Widget model vendor marks cover the Kimi coding-plan ids', () => {
+  // The widget classifies raw model names itself (the snapshot ships display
+  // names), so its Kimi rule has to stay in step with the renderer's
+  // modelVendorFor — the `k2d6-agent`/`k3-agent` forms whose suffix is
+  // alphanumeric, plus the bare `k2`/`k3` coding-plan ids behind a delimited
+  // token alternative. widgetVendorParity.test.js already locks the pattern to
+  // the renderer's verbatim; this pins that the delimited rule is in it.
+  assert.ok(
+    widgetDashboardSource.includes(
+      'if matches("kimi|moonshot|k2d6-agent|k3-agent|(?:^|[^a-z0-9])k[23](?:[^a-z0-9]|$)") { return "kimi" }'
+    )
+  );
+});
+
 test('macOS Widget packaging keeps the canonical Token Monitor app identity', () => {
   assert.equal(packageJson.scripts['mac:local'], undefined);
   assert.equal(packageJson.scripts['mac:local:open'], undefined);

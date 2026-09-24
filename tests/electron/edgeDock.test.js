@@ -12,6 +12,105 @@ function readRendererFile(name) {
   return fs.readFileSync(path.join(rendererDir, name), 'utf8');
 }
 
+test('detail cards keep an exact headline while the rail and list rows stay compact', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const formatCardTokens = Function(`return (${dock.match(/function formatCardTokens\(value\) \{[^}]+\}/)[0]})`)();
+  assert.equal(formatCardTokens(216_935_653), '216,935,653');
+  assert.equal(formatCardTokens(162_821_017), '162,821,017');
+  // The breakdown rows read like the widget's home list: one-decimal compact
+  // tokens with trailing zeros stripped, not the rail's two-decimal tray style.
+  const breakdownSource = dock.slice(
+    dock.indexOf('function formatBreakdownTokens('),
+    dock.indexOf('function compactCardTotal(')
+  ).trim();
+  const formatBreakdownTokens = Function('appearance', 'state', 'compactTokenApi', 'return (' + breakdownSource + ')')(
+    () => ({ compactTokenUnits: 'western' }), { locale: 'en' }, require('../../src/shared/compactTokens')
+  );
+  assert.equal(formatBreakdownTokens(216_935_653), '216.9M');
+  assert.equal(formatBreakdownTokens(1_234_567_890), '1.2B');
+  assert.equal(formatBreakdownTokens(512), '512');
+  assert.match(dock, /edge-dock-stat-value', formatTokens\(cell\.totalTokens\)/);
+  assert.match(dock, /edge-dock-total-row'[\s\S]*?formatCardTokens\(cell\.totalTokens\)/);
+  assert.match(dock, /edge-dock-client-tokens', formatBreakdownTokens\(entry\.tokens\)/);
+  // Session rows and the period tiles read compact like the breakdown rows —
+  // the exact-count rule from #784 covers the headline only.
+  assert.match(dock, /edge-dock-session-tokens', formatBreakdownTokens\(session\.totalTokens\)/);
+  assert.match(dock, /edge-dock-usage-tokens', usage \? formatBreakdownTokens\(usage\.tokens\) : '—'/);
+});
+
+test('rail money compacts through the shared helper so it follows the token units', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  assert.match(dock, /const compactMoneyApi = window\.TokenMonitorCompactMoney;/);
+  const source = dock.slice(
+    dock.indexOf('function formatRailCost('),
+    dock.indexOf('function statShortLabel(')
+  ).trim();
+  const build = () => Function(
+    'appearance', 'state', 'currencyApi', 'compactMoneyApi', 'return (' + source + ')'
+  );
+  const currency = require('../../src/shared/currency');
+  const compactMoney = require('../../src/shared/compactMoney');
+  const localized = build()(
+    () => ({ currency: 'HKD', compactTokenUnits: 'localized' }),
+    { locale: 'zh-TW' },
+    currency,
+    compactMoney
+  );
+  assert.equal(localized(15_846), 'HK$12.4萬');
+  const western = build()(
+    () => ({ currency: 'HKD', compactTokenUnits: 'western' }),
+    { locale: 'zh-TW' },
+    currency,
+    compactMoney
+  );
+  assert.equal(western(15_846), 'HK$123.6K');
+  assert.equal(western(72.697), 'HK$567'); // sub-10k keeps the fixed-digit path
+});
+
+test('the detail total follows the main app compact toggle and unit threshold', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const source = dock.slice(dock.indexOf('function compactCardTotal('), dock.indexOf('function formatCost(')).trim();
+  const appearance = { showCompactTotalTokens: false, compactTokenUnits: 'western' };
+  const state = { locale: 'zh-TW' };
+  const compactCardTotal = Function('appearance', 'state', 'compactTokenApi', `return (${source})`)(
+    () => appearance, state, require('../../src/shared/compactTokens')
+  );
+  assert.equal(compactCardTotal(223_451_737), '');
+  appearance.showCompactTotalTokens = true;
+  assert.equal(compactCardTotal(223_451_737), '≈ 223.5M');
+  assert.equal(compactCardTotal(999), '');
+  appearance.compactTokenUnits = 'localized';
+  assert.equal(compactCardTotal(9_999), '');
+  assert.equal(compactCardTotal(223_451_737), '≈ 2.23億');
+  assert.match(main, /function edgeDockAppearance\([\s\S]*?showCompactTotalTokens: source\.showCompactTotalTokens/);
+  assert.match(dock, /if \(compact\) \{[\s\S]*?el\('span', 'edge-dock-total-compact', compact\)[\s\S]*?totalRow\.append\(compactNode\)/);
+});
+
+test('a long detail total shrinks beside its compact reading instead of wrapping', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
+  const source = dock.slice(dock.indexOf('function fitCardTotal('), dock.indexOf('function renderBubble(')).trim();
+  const fitCardTotal = Function('getComputedStyle', `return (${source})`)((node) => (
+    node.columnGap === undefined ? { fontSize: '30px' } : { columnGap: '8px' }
+  ));
+  const number = { style: {}, getBoundingClientRect: () => ({ width: 236 }) };
+  const compact = { getBoundingClientRect: () => ({ width: 47 }) };
+  const row = {
+    clientWidth: 252,
+    columnGap: '8px',
+    querySelector: (selector) => selector === 'strong' ? number : compact
+  };
+  fitCardTotal({ querySelector: () => row });
+  assert.equal(number.style.fontSize, '24px');
+  number.style = {};
+  row.querySelector = (selector) => selector === 'strong' ? number : null;
+  fitCardTotal({ querySelector: () => row });
+  assert.equal(number.style.fontSize, undefined);
+  assert.match(css, /\.edge-dock-total-row \{[^}]*white-space: nowrap/);
+  assert.ok(dock.indexOf('fitCardTotal(card);') < dock.indexOf('const height = Math.ceil(card.getBoundingClientRect().height)'));
+});
+
 const {
   EDGE_DOCK_METRICS,
   EDGE_DOCK_TIMING,
@@ -163,7 +262,7 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   const app = readRendererFile('app.js');
   // The token total must survive: headroom is additional, not a replacement for
   // the figure the row already carried.
-  assert.match(dock, /el\('span', 'edge-dock-session-tokens', formatTokens\(session\.totalTokens\)\)/);
+  assert.match(dock, /el\('span', 'edge-dock-session-tokens', formatBreakdownTokens\(session\.totalTokens\)\)/);
   // ...and both live on the same row, with the context reading appended to the
   // meta line rather than taking the token column.
   const sessions = dock.slice(dock.indexOf('function sessionsNode('), dock.indexOf('function providerCard('));
@@ -1303,7 +1402,7 @@ test('period cards expose an accessible tools and models switch', () => {
   const bubble = dock.slice(dock.indexOf('function clampBreakdownList('), dock.indexOf('// ---- Wiring'));
   assert.match(bubble, /rows\[BREAKDOWN_VISIBLE_ROWS - 1\]\.getBoundingClientRect\(\)/);
   assert.match(bubble, /list\.style\.maxHeight = `\$\{height\}px`/);
-  assert.match(bubble, /stagingLayer\.replaceChildren\(card\);\s+clampBreakdownList\(card\);/);
+  assert.match(bubble, /stagingLayer\.replaceChildren\(card\);\s+fitCardTotal\(card\);\s+clampBreakdownList\(card\);/);
 });
 
 test('provider cards list the newest sessions of their own clients this month', () => {

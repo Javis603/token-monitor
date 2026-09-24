@@ -117,7 +117,9 @@ function dockView(appearance = {}, overrides = {}) {
     tooltip: { hasOpened: () => false, markOpened() {}, release() {} },
     formatCompact: (value) => `${value}`,
     formatMoney: balanceDisplay.formatMoney,
-    formatCompactMoney: balanceDisplay.formatCompactMoney,
+    formatCompactMoney: (value, currency) => balanceDisplay.formatCompactMoney(
+      value, currency, settings.compactTokenUnits, 'en-US'
+    ),
     formatPercent: (value) => (Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'),
     formatDuration: limitPresentationApi.limitDurationText,
     formatLimitBoundary: limitPresentationApi.limitBoundaryText,

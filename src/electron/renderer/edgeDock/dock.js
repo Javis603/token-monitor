@@ -16,6 +16,7 @@ const fontSettingsApi = window.TokenMonitorFontSettings;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const currencyApi = window.TokenMonitorCurrency;
 const compactTokenApi = window.TokenMonitorCompactTokens;
+const compactMoneyApi = window.TokenMonitorCompactMoney;
 const balanceDisplay = window.TokenMonitorLimitBalanceDisplay;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
@@ -240,6 +241,26 @@ function formatTokens(value) {
   return compactTokenApi.formatCompactTokens(value, units, state.locale, { style: 'tray' });
 }
 
+function formatCardTokens(value) {
+  return Math.round(Number(value || 0)).toLocaleString('en-US');
+}
+
+// Breakdown rows copy the widget's home list: a compact token reading, then the
+// share. The rail keeps its own tray style (two-decimal B, trailing zeros);
+// the card uses the widget's plainer single-decimal reading instead.
+function formatBreakdownTokens(value) {
+  const units = compactTokenApi.effectiveCompactTokenUnits(appearance().compactTokenUnits, state.locale);
+  return compactTokenApi.formatCompactTokens(value, units, state.locale);
+}
+
+function compactCardTotal(value) {
+  if (appearance().showCompactTotalTokens !== true) return '';
+  const units = compactTokenApi.effectiveCompactTokenUnits(appearance().compactTokenUnits, state.locale);
+  const tokens = Math.round(Number(value || 0));
+  if (Math.abs(tokens) < compactTokenApi.compactTokenUnitThreshold(units, state.locale)) return '';
+  return `≈ ${compactTokenApi.formatCompactTokens(tokens, units, state.locale)}`;
+}
+
 function formatCost(value) {
   return currencyApi.formatCurrencyFromUsd(value, appearance().currency || 'USD');
 }
@@ -343,7 +364,9 @@ const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
   },
   formatCompact: formatTokens,
   formatMoney: balanceDisplay.formatMoney,
-  formatCompactMoney: balanceDisplay.formatCompactMoney,
+  formatCompactMoney: (value, currency) => balanceDisplay.formatCompactMoney(
+    value, currency, appearance().compactTokenUnits, state.locale
+  ),
   formatPercent: (value) => (Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'),
   formatDuration: presentation.formatResetDuration,
   formatLimitBoundary: limitPresentationApi.limitBoundaryText,
@@ -493,7 +516,9 @@ function providerCellNode(cell) {
   const color = providerColor(cell.provider);
   const value = el('span', 'edge-dock-value');
   if (cell.credits && cell.credits.amount !== null && cell.credits.amount !== undefined) {
-    value.textContent = balanceDisplay.formatCompactMoney(cell.credits.amount, cell.credits.currency);
+    value.textContent = balanceDisplay.formatCompactMoney(
+      cell.credits.amount, cell.credits.currency, appearance().compactTokenUnits, state.locale
+    );
   } else {
     value.textContent = percentText(cell.remainingPercent);
   }
@@ -522,15 +547,19 @@ function statLabel(metric) {
 
 // Rail-width money: whole units past 100 and compact notation past 10k, so a
 // figure like HK$569.82 does not overflow a 56px readout. The card keeps the
-// full-precision figure.
+// full-precision figure. The compact form goes through the same shared helper
+// as the tray and dashboard, so it follows the token unit system — a localized
+// user sees 萬/億 here too, never 億 beside K.
 function formatRailCost(value) {
   const code = appearance().currency || 'USD';
-  const full = currencyApi.formatCurrencyFromUsd(value, code);
-  const symbol = full.replace(/[\d.,\s-]+$/, '');
   const amount = Math.abs(currencyApi.convertUsd(value, code));
   if (amount >= 10_000) {
-    return `${symbol}${new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(amount)}`;
+    return compactMoneyApi.formatCompactCurrencyFromUsd(
+      Math.abs(value), code, appearance().compactTokenUnits, state.locale
+    );
   }
+  const full = currencyApi.formatCurrencyFromUsd(value, code);
+  const symbol = full.replace(/[\d.,\s-]+$/, '');
   const digits = amount >= 100 ? 0 : amount >= 10 ? 1 : 2;
   return `${symbol}${amount.toFixed(digits)}`;
 }
@@ -755,7 +784,7 @@ function usageTile(label, usage) {
   const tile = el('div', 'edge-dock-usage-tile');
   tile.append(
     el('span', 'edge-dock-usage-label', label),
-    el('span', 'edge-dock-usage-tokens', usage ? formatTokens(usage.tokens) : '—')
+    el('span', 'edge-dock-usage-tokens', usage ? formatBreakdownTokens(usage.tokens) : '—')
   );
   if (usage) tile.append(el('span', 'edge-dock-usage-cost', formatCost(usage.costUsd)));
   return tile;
@@ -920,7 +949,7 @@ function sessionsContainer(sessions, options = {}) {
     if (context) meta.append(context);
     row.append(
       nameNode,
-      el('span', 'edge-dock-session-tokens', formatTokens(session.totalTokens)),
+      el('span', 'edge-dock-session-tokens', formatBreakdownTokens(session.totalTokens)),
       meta
     );
     list.append(row);
@@ -1026,9 +1055,17 @@ function statCard(cell) {
     card.append(el('div', 'edge-dock-note', t('edgeDock.periodUnavailable')));
     return card;
   }
-  // Same hierarchy as the widget's headline: the token total, its cost beneath.
+  // Keep the exact total, with the optional compact reading beside it as in the widget.
   const total = el('div', 'edge-dock-stat-headline');
-  total.append(el('strong', '', formatTokens(cell.totalTokens)), el('span', '', formatCost(cell.costUsd)));
+  const totalRow = el('div', 'edge-dock-total-row');
+  totalRow.append(el('strong', '', formatCardTokens(cell.totalTokens)));
+  const compact = compactCardTotal(cell.totalTokens);
+  if (compact) {
+    const compactNode = el('span', 'edge-dock-total-compact', compact);
+    compactNode.setAttribute('aria-hidden', 'true');
+    totalRow.append(compactNode);
+  }
+  total.append(totalRow, el('span', '', formatCost(cell.costUsd)));
   card.append(total);
   if (!cell.clients.length && !(cell.models || []).length) {
     card.append(el('div', 'edge-dock-note', t('edgeDock.noUsagePeriod')));
@@ -1090,7 +1127,7 @@ function statCard(cell) {
     row.append(
       markNode(entry.id, entry.color),
       el('span', 'edge-dock-client-name', entry.name),
-      el('span', 'edge-dock-client-tokens', formatTokens(entry.tokens)),
+      el('span', 'edge-dock-client-tokens', formatBreakdownTokens(entry.tokens)),
       el('span', 'edge-dock-client-share', `${Math.round((entry.tokens / sum) * 100)}%`),
       meter
     );
@@ -1206,6 +1243,19 @@ function clampBreakdownList(card) {
   if (height > 0) list.style.maxHeight = `${height}px`;
 }
 
+function fitCardTotal(card) {
+  const row = card.querySelector('.edge-dock-total-row');
+  if (!row) return;
+  const number = row.querySelector('strong');
+  const compact = row.querySelector('.edge-dock-total-compact');
+  const gap = compact ? parseFloat(getComputedStyle(row).columnGap) || 0 : 0;
+  const available = row.clientWidth - (compact?.getBoundingClientRect().width || 0) - gap;
+  const natural = number.getBoundingClientRect().width;
+  if (!(available > 0 && natural > available)) return;
+  const base = parseFloat(getComputedStyle(number).fontSize);
+  if (base > 0) number.style.fontSize = `${Math.max(12, Math.floor(base * (available - 1) / natural))}px`;
+}
+
 function renderBubble(payload) {
   root.dataset.side = payload.side;
   const cell = payload.cell;
@@ -1217,6 +1267,7 @@ function renderBubble(payload) {
   card.dataset.cellId = cell.id;
   if (payload.maxCardHeight) card.style.maxHeight = `${payload.maxCardHeight}px`;
   stagingLayer.replaceChildren(card);
+  fitCardTotal(card);
   clampBreakdownList(card);
   const height = Math.ceil(card.getBoundingClientRect().height);
   if (payload.placed?.cellId === cell.id && payload.placed.height === height) {

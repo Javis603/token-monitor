@@ -86,6 +86,37 @@ input, textarea, [contenteditable="true"] {
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
 }
+.shell.has-custom-background {
+  background: transparent;
+}
+.shell.has-custom-background::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(var(--glass-rgb), 0.18), rgba(var(--glass-rgb), 0.18)), var(--custom-background-image);
+  background-position: center;
+  background-size: cover;
+  opacity: var(--glass-alpha);
+}
+.background-image-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.background-image-actions button {
+  min-height: 26px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
+  color: var(--text);
+  cursor: pointer;
+}
+.background-image-actions button:hover { border-color: var(--line-strong); }
+.background-image-actions button:disabled { opacity: 0.5; cursor: default; }
 html.is-windows, html.is-windows body {
   border-radius: 8px;
 }
