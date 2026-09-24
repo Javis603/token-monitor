@@ -508,6 +508,7 @@ enum WidgetFormat {
         case "qoder": "Qoder"
         case "deepseek": "DeepSeek"
         case "devin": "Devin"
+        case "typesafe": "TypeSafe"
         case "lmstudio": "LM Studio"
         case "openrouter": "OpenRouter"
         case "minimax": "Minimax"

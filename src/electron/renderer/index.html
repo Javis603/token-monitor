@@ -1302,6 +1302,35 @@
                 <div id="devinErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
+            <div id="typesafeAccountGroup" class="settings-group cursor-account-group">
+              <button id="typesafeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="typesafeSettingsDetails">
+                <span data-i18n="settings.typesafe.title">TypeSafe Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="typesafeAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="typesafeSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="typesafeOpenBrowser" data-i18n="settings.typesafe.openBrowser">Open TypeSafe Billing</button>
+                  <button id="typesafeLogoutButton" class="hidden" data-i18n="settings.typesafe.clearCookie">Clear cookie</button>
+                  <button id="typesafeRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="typesafeManualPanel">
+                  <p class="settings-note">
+                    <strong>1.</strong> <span data-i18n="settings.typesafe.step1">Open TypeSafe Billing and sign in.</span><br>
+                    <strong>2.</strong> <span data-i18n="settings.typesafe.step2">Open DevTools → Network, reload, and select the billing request.</span><br>
+                    <strong>3.</strong> <span data-i18n="settings.typesafe.step3">Copy the full Cookie value from Request Headers.</span><br>
+                    <strong>4.</strong> <span data-i18n="settings.typesafe.step4">Paste it below and save.</span>
+                  </p>
+                  <textarea id="typesafeCookieInput" rows="3" autocomplete="off" spellcheck="false" placeholder="Cookie: ..." data-i18n-placeholder="settings.typesafe.cookiePlaceholder"></textarea>
+                  <div class="settings-actions">
+                    <button id="typesafeCookieSubmit" data-i18n="settings.typesafe.saveCookie">Save cookie</button>
+                  </div>
+                </div>
+                <div id="typesafeErrorMessage" class="settings-note error hidden" role="alert"></div>
+              </div>
+            </div>
             <div id="openrouterAccountGroup" class="settings-group cursor-account-group">
               <button id="openrouterSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="openrouterSettingsDetails">
                 <span data-i18n="settings.openrouter.title">OpenRouter Accounts</span>

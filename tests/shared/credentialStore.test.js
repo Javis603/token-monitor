@@ -336,3 +336,10 @@ test('stores Zed dashboard Cookie as a fixed credential and redacts it for rende
   assert.equal(store.settingsCredentials().zedCookie, 'zed.session=secret; c15t=challenge');
   assert.equal(credentialSettingsForRenderer({ zedCookie: 'secret' }).zedCookie, '');
 });
+
+test('stores TypeSafe Console Cookie outside settings and redacts it for the renderer', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  store.replaceSettingsCredentials({ typesafeCookie: 'session=secret' });
+  assert.equal(store.settingsCredentials().typesafeCookie, 'session=secret');
+  assert.equal(credentialSettingsForRenderer({ typesafeCookie: 'session=secret' }).typesafeCookie, '');
+});

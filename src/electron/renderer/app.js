@@ -84,6 +84,7 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   qoder: 'qoderAccountGroup',
   deepseek: 'deepseekAccountGroup',
   devin: 'devinAccountGroup',
+  typesafe: 'typesafeAccountGroup',
   openrouter: 'openrouterAccountGroup',
   minimax: 'minimaxAccountGroup',
   volcengine: 'volcengineAccountGroup',
@@ -110,6 +111,7 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   qoder: 'qoderAccountStatus',
   deepseek: 'deepseekApiKeyStatus',
   devin: 'devinAccountStatus',
+  typesafe: 'typesafeAccountStatus',
   openrouter: 'openrouterStatus',
   minimax: 'minimaxApiKeyStatus',
   volcengine: 'volcengineAccountStatus',
@@ -319,6 +321,8 @@ state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.zedAccountExpanded = false;
 state.zedPendingCheckSince = 0;
+state.typesafeAccountExpanded = false;
+state.typesafePendingCheckSince = 0;
 state.toolDetailMode = 'tokens';
 state.codexResetForecast = null;
 state.codexResetForecastBusy = false;
@@ -4031,6 +4035,9 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
     }
   },
   formatCompact,
+  compactTokenThreshold: () => compactTokenApi.compactTokenUnitThreshold(
+    effectiveCompactTokenUnits(), currentLocale()
+  ),
   formatMoney,
   formatCompactMoney: (value, currency) => formatCompactMoney(
     value, currency, state.settings?.compactTokenUnits, currentLocale()
@@ -8009,6 +8016,7 @@ function syncSettingsForm() {
   renderExternalProviderStatus('devin');
   renderExternalProviderStatus('trae');
   renderExternalProviderStatus('zed');
+  renderExternalProviderStatus('typesafe');
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
@@ -11689,6 +11697,7 @@ function renderStatsUpdate() {
   renderExternalProviderStatus('devin');
   renderExternalProviderStatus('trae');
   renderExternalProviderStatus('zed');
+  renderExternalProviderStatus('typesafe');
   renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
@@ -13681,6 +13690,11 @@ const externalLimitAccountConfig = {
     configuredKey: 'devinBearerTokenConfigured',
     sourceKey: 'devinBearerTokenSource',
     pendingKey: 'devinPendingCheckSince'
+  },
+  typesafe: {
+    configuredKey: 'typesafeCookieConfigured',
+    sourceKey: 'typesafeCookieSource',
+    pendingKey: 'typesafePendingCheckSince'
   },
   volcengine: {
     configuredKey: 'volcengineCredentialsConfigured',
@@ -16541,6 +16555,52 @@ function setupCursorAccountUI() {
   }
 
   const zedToggle = document.getElementById('zedSettingsToggle');
+  const typesafeToggle = document.getElementById('typesafeSettingsToggle');
+  if (typesafeToggle) {
+    typesafeToggle.addEventListener('click', () => setExternalAccountExpanded('typesafe', !state.typesafeAccountExpanded));
+    setExternalAccountExpanded('typesafe', false);
+    renderExternalProviderStatus('typesafe');
+    document.getElementById('typesafeOpenBrowser').addEventListener('click', () => {
+      window.tokenMonitor.openExternal('https://console.typesafe.ai/settings/billing');
+    });
+    document.getElementById('typesafeLogoutButton').addEventListener('click', async () => {
+      await saveSettings({ typesafeCookie: '' });
+      clearExternalProviderCheckPending('typesafe');
+      clearExternalProviderPendingStatus('typesafe');
+      renderExternalProviderStatus('typesafe');
+      await refreshStats({ force: true });
+    });
+    document.getElementById('typesafeRefreshButton').addEventListener('click', async () => {
+      await refreshStats({ force: true });
+    });
+    document.getElementById('typesafeCookieSubmit').addEventListener('click', async () => {
+      const input = document.getElementById('typesafeCookieInput');
+      const errorEl = document.getElementById('typesafeErrorMessage');
+      errorEl.classList.add('hidden');
+      if (!String(input.value || '').trim()) {
+        errorEl.textContent = t('settings.typesafe.statusNotSet');
+        errorEl.classList.remove('hidden');
+        return;
+      }
+      try {
+        markExternalProviderCheckPending('typesafe');
+        await saveSettings({
+          typesafeCookie: input.value,
+          limitProviders: limitProviderSelectionIncluding('typesafe'),
+          limitsEnabled: true
+        });
+        input.value = '';
+        renderExternalProviderStatus('typesafe');
+        await refreshStats({ force: true });
+        setExternalAccountExpanded('typesafe', !externalProviderAccountLinked('typesafe'));
+        renderExternalProviderStatus('typesafe');
+      } catch (err) {
+        clearExternalProviderCheckPending('typesafe');
+        errorEl.textContent = t('settings.typesafe.saveFailed', { message: err.message });
+        errorEl.classList.remove('hidden');
+      }
+    });
+  }
   if (zedToggle) {
     zedToggle.addEventListener('click', () => setExternalAccountExpanded('zed', !state.zedAccountExpanded));
     setExternalAccountExpanded('zed', false);
@@ -17134,6 +17194,7 @@ function initSettingsAnimationWrappers() {
     '#factoryManualPanel',
     '#kimiManualPanel',
     '#zedManualPanel',
+    '#typesafeManualPanel',
     '#commandcodeManualPanel',
     '#zaiManualPanel',
     '#zaiteamManualPanel',

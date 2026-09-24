@@ -98,7 +98,7 @@ const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared
 const { normalizeModelAliases, normalizeModelAliasGrouping, projectModelAliasStats, projectModelAliasHistory } = require('./modelAliasPresentation');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
-const { claudeWebCookie, clineApiKey, deepseekToken, devinBearerToken, factoryEnvApiKey, fetchClaudeLimits, fetchClineLimits, fetchFactoryLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, resolveClineAutomaticCredential, resolveFactoryAutomaticApiKey, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie, alibabaCookie, alibabaVariant, normalizeAlibabaCookieHeader } = require('../shared/limits/collector');
+const { claudeWebCookie, clineApiKey, deepseekToken, devinBearerToken, factoryEnvApiKey, fetchClaudeLimits, fetchClineLimits, fetchFactoryLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, resolveClineAutomaticCredential, resolveFactoryAutomaticApiKey, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie, typesafeCookie, alibabaCookie, alibabaVariant, normalizeAlibabaCookieHeader } = require('../shared/limits/collector');
 const { normalizeDevinOrganization } = require('../shared/providers/devin/limits');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 const { discoverZcodeConnection } = require('../shared/providers/zai/zcodeDiscovery');
@@ -658,6 +658,7 @@ function defaultSettings() {
     traeAccessToken: '',
     traeDeviceId: '',
     zedCookie: '',
+    typesafeCookie: '',
     commandcodeCookie: '',
     kimiApiKey: '',
     kimiWebAccessToken: '',
@@ -1027,6 +1028,14 @@ function normalizeZedCookie(value) {
 
 function currentZedCookie() {
   return settings?.zedCookie || zedCookie(process.env);
+}
+
+function normalizeTypesafeCookie(value) {
+  return typesafeCookie({}, { typesafeCookie: String(value || '') });
+}
+
+function currentTypesafeCookie() {
+  return settings?.typesafeCookie || typesafeCookie(process.env);
 }
 
 function normalizeCommandcodeCookie(value) {
@@ -4974,6 +4983,11 @@ function settingsForRenderer() {
     : zedCookie(process.env)
       ? 'env'
       : '';
+  const typesafeCookieSource = settings?.typesafeCookie
+    ? 'settings'
+    : typesafeCookie(process.env)
+      ? 'env'
+      : '';
   const commandcodeCookieSource = settings?.commandcodeCookie
     ? 'settings'
     : commandcodeCookie(process.env)
@@ -5043,6 +5057,7 @@ function settingsForRenderer() {
     traeAccessToken: settings?.traeAccessToken ? 'set' : '',
     traeDeviceId: settings?.traeDeviceId ? 'set' : '',
     zedCookie: settings?.zedCookie ? 'set' : '',
+    typesafeCookie: settings?.typesafeCookie ? 'set' : '',
     commandcodeCookie: settings?.commandcodeCookie ? 'set' : '',
     ollamaCookie: settings?.ollamaCookie ? 'set' : '',
     // Never ship OpenCode session cookies to the renderer; the UI only needs to
@@ -5097,6 +5112,8 @@ function settingsForRenderer() {
     traeAccessTokenSource,
     zedCookieConfigured: Boolean(currentZedCookie()),
     zedCookieSource,
+    typesafeCookieConfigured: Boolean(currentTypesafeCookie()),
+    typesafeCookieSource,
     commandcodeCookieConfigured: Boolean(currentCommandcodeCookie()),
     commandcodeCookieSource,
     ollamaCookieConfigured: Boolean(currentOllamaCookie()),
@@ -6694,6 +6711,7 @@ function isAllowedExternalUrl(value) {
   if (parsed.hostname === 'trae.cn' || parsed.hostname === 'www.trae.cn') return true;
   if (parsed.hostname === 'commandcode.ai' || parsed.hostname === 'www.commandcode.ai') return true;
   if (parsed.hostname === 'dashboard.zed.dev') return true;
+  if (parsed.hostname === 'console.typesafe.ai' && parsed.pathname === '/settings/billing') return true;
   if ((parsed.hostname === 'ollama.com' || parsed.hostname === 'www.ollama.com') && (parsed.pathname === '/settings' || parsed.pathname === '/signin')) return true;
   if ((parsed.hostname === 'kimi.com' || parsed.hostname === 'www.kimi.com') && parsed.pathname.startsWith('/code')) return true;
   // Token Plan lives behind a hash route, so the console's region path is all
@@ -7292,6 +7310,7 @@ app.whenReady().then(() => {
     if (patch.traeAccessToken !== undefined) normalizedPatch.traeAccessToken = normalizeTraeAccessToken(patch.traeAccessToken);
     if (patch.traeDeviceId !== undefined) normalizedPatch.traeDeviceId = normalizeTraeDeviceId(patch.traeDeviceId);
     if (patch.zedCookie !== undefined) normalizedPatch.zedCookie = normalizeZedCookie(patch.zedCookie);
+    if (patch.typesafeCookie !== undefined) normalizedPatch.typesafeCookie = normalizeTypesafeCookie(patch.typesafeCookie);
     if (patch.commandcodeCookie !== undefined) normalizedPatch.commandcodeCookie = normalizeCommandcodeCookie(patch.commandcodeCookie);
     if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
     if (patch.kimiWebAccessToken !== undefined) normalizedPatch.kimiWebAccessToken = normalizeKimiWebAccessToken(patch.kimiWebAccessToken);
@@ -7448,6 +7467,7 @@ app.whenReady().then(() => {
       traeAccessToken: patch.traeAccessToken !== undefined ? normalizeTraeAccessToken(patch.traeAccessToken) : (settings.traeAccessToken || ''),
       traeDeviceId: patch.traeDeviceId !== undefined ? normalizeTraeDeviceId(patch.traeDeviceId) : (settings.traeDeviceId || ''),
       zedCookie: patch.zedCookie !== undefined ? normalizeZedCookie(patch.zedCookie) : (settings.zedCookie || ''),
+      typesafeCookie: patch.typesafeCookie !== undefined ? normalizeTypesafeCookie(patch.typesafeCookie) : (settings.typesafeCookie || ''),
       commandcodeCookie: patch.commandcodeCookie !== undefined ? normalizeCommandcodeCookie(patch.commandcodeCookie) : (settings.commandcodeCookie || ''),
       ollamaCookie: patch.ollamaCookie !== undefined ? normalizeOllamaCookie(patch.ollamaCookie) : (settings.ollamaCookie || ''),
       customModelPricing: patch.customModelPricing !== undefined

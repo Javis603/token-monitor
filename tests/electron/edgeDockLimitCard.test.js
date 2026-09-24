@@ -116,6 +116,7 @@ function dockView(appearance = {}, overrides = {}) {
     motion: limitResetMotionApi,
     tooltip: { hasOpened: () => false, markOpened() {}, release() {} },
     formatCompact: (value) => `${value}`,
+    compactTokenThreshold: () => 1e3,
     formatMoney: balanceDisplay.formatMoney,
     formatCompactMoney: (value, currency) => balanceDisplay.formatCompactMoney(
       value, currency, settings.compactTokenUnits, 'en-US'

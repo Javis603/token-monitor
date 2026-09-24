@@ -412,6 +412,8 @@ test('Sub2API adapter attaches rolling-month and all-time spend and survives sta
   assert.deepEqual(enriched.usageSummary, {
     period: 'month',
     requests: 21,
+    todayTokens: null,
+    weekTokens: null,
     inputTokens: 1234,
     outputTokens: 456,
     cacheReadTokens: 200,

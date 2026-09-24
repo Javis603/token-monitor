@@ -74,6 +74,7 @@
     qoder: ['Manual login', 'Web'],
     deepseek: ['Pay-as-you-go', 'API key'],
     devin: ['Manual login', 'Web'],
+    typesafe: ['Manual login', 'Web'],
     openrouter: ['Pay-as-you-go', 'API key'],
     minimax: ['Token Plan', 'API key'],
     volcengine: ['Auto', 'API key', 'CLI'],
@@ -462,7 +463,7 @@
     if (status === 'notConfigured') {
       if (providerName === 'kimi') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'antigravity') return { label: 'Not set up', tone: 'setup' };
-      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama' || providerName === 'alibaba') return { label: 'Sign in', tone: 'setup' };
+      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'typesafe' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama' || providerName === 'alibaba') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       // Cline joins the key-configured family: with neither a key nor a stored
       // sign-in, the one thing this application can be told is a key (the sign-in

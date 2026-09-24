@@ -20,6 +20,7 @@ const CREDENTIAL_SETTING_PATHS = Object.freeze({
   kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
   copilotApiToken: ['providers', 'copilot', 'apiToken'],
   zedCookie: ['providers', 'zed', 'cookie'],
+  typesafeCookie: ['providers', 'typesafe', 'cookie'],
   commandcodeCookie: ['providers', 'commandcode', 'cookie'],
   zaiApiKey: ['providers', 'zai', 'apiKey'],
   zaiTeamApiKey: ['providers', 'zaiTeam', 'apiKey'],
