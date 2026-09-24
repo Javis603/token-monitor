@@ -247,6 +247,20 @@ test('a TypeSafe card shows the next credit expiry without calling it a reset', 
   assert.equal(card.find('limit-window').classNames.has('limit-window-no-reset'), false);
 });
 
+test('a TypeSafe card does not repeat the full balance beside its expiry', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'typesafe',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 5, currency: 'USD',
+      resetsAt: '2099-01-02T00:00:00Z', boundaryKind: 'expiry' }],
+    balance: { amount: 5, currency: 'USD', tranches: [
+      { amount: 5, currency: 'USD', expiresAt: '2099-01-02T00:00:00Z' }
+    ] }
+  }, '#59A4D0');
+
+  assert.match(card.text, /Expires \d+d \d+h/);
+  assert.equal(card.text.match(/\$5\.00/g)?.length, 1);
+});
+
 test('a TypeSafe card omits expiry when the billing response has no valid grants', () => {
   const card = dockView().renderProviderWindows({
     provider: 'typesafe',

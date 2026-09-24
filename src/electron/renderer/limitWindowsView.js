@@ -1033,6 +1033,9 @@
           ? balance.tranches.find((grant) => grant.expiresAt && Date.parse(grant.expiresAt) > Date.now())
           : null;
         const boundaryAt = provider.provider === 'typesafe' ? nextGrant?.expiresAt : creditsWindow?.resetsAt;
+        const expiringAmount = nextGrant && Math.abs(nextGrant.amount - balance.amount) >= 0.005
+          ? formatMoney(nextGrant.amount, nextGrant.currency || currency)
+          : '';
         const balanceNode = limitWindowNode(
           'Balance',
           { remainingPercent: creditsMeterPercent(provider, creditsWindow),
@@ -1040,10 +1043,9 @@
           color,
           0.95,
           formatMoney(balance.amount, currency),
-          nextGrant ? formatMoney(nextGrant.amount, nextGrant.currency || currency) : ''
+          expiringAmount
         );
         balanceNode.classList.add('limit-window-wide');
-       if (!creditsWindow?.resetsAt && !nextGrant) balanceNode.classList.add('limit-window-no-reset');
         if (!boundaryAt) balanceNode.classList.add('limit-window-no-reset');
         windows.append(balanceNode);
 
