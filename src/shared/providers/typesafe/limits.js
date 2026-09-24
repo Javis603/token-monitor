@@ -38,7 +38,8 @@ function typesafeCookie(env = process.env, options = {}) {
     if (separator <= 0) return null;
     const name = part.slice(0, separator).trim();
     const cookieValue = part.slice(separator + 1).trim();
-    return /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(name) && cookieValue ? `${name}=${cookieValue}` : null;
+    // Empty cookie values are valid.
+    return /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(name) ? `${name}=${cookieValue}` : null;
   });
   return pairs.length && pairs.every(Boolean) ? pairs.join('; ') : '';
 }
@@ -79,12 +80,17 @@ function request(fetchImpl, url, cookie, options = {}) {
 // name=.042/1e6 (USD per token). Resolve both shapes, evaluating a single
 // division; anything else stays null so the caller falls back to the last
 // observed constant.
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function extractRate(chunk, name) {
-  const entry = new RegExp(`"${name}"\\s*,\\s*[\\w$]+\\s*,\\s*([\\w$]+)`).exec(chunk);
+  const entry = new RegExp(`"${escapeRegExp(name)}"\\s*,\\s*[\\w$.eE+-]+\\s*,\\s*([\\w$.eE+-]+)`).exec(chunk);
   if (!entry) return null;
   const raw = entry[1];
-  if (/^[\d.]+$/u.test(raw)) return Number(raw);
-  const assignment = new RegExp(`(?:^|[^\\w$])${raw.replace(/\$/g, '\\$&')}\\s*=\\s*([\\d.eE+-]+(?:\\s*\\/\\s*[\\d.eE+-]+)?)`).exec(chunk);
+  if (/^(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/u.test(raw)) return Number(raw);
+  if (!/^[\w$]+$/u.test(raw)) return null;
+  const assignment = new RegExp(`(?:^|[^\\w$])${escapeRegExp(raw)}\\s*=\\s*([\\d.eE+-]+(?:\\s*\\/\\s*[\\d.eE+-]+)?)`).exec(chunk);
   if (!assignment) return null;
   const [numerator, denominator] = assignment[1].split('/').map((part) => Number(part));
   const value = denominator ? numerator / denominator : numerator;

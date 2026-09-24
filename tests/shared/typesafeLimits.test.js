@@ -36,6 +36,8 @@ function mockFetch({ billing = { balance: 5, spent: 0, plan: 'free_plan', resets
 
 test('TypeSafe cookie accepts a full header and rejects malformed values', () => {
   assert.equal(typesafeCookie({}, { typesafeCookie: 'Cookie: session=secret; second=ok' }), 'session=secret; second=ok');
+  // An empty value is a legal cookie pair (`name=`); it must not void the header.
+  assert.equal(typesafeCookie({}, { typesafeCookie: 'session=secret; preference=' }), 'session=secret; preference=');
   assert.equal(typesafeCookie({}, { typesafeCookie: 'session=secret\nHost: evil' }), '');
   assert.equal(typesafeCookie({}, { typesafeCookie: 'Bearer secret' }), '');
 });
@@ -97,6 +99,22 @@ test('TypeSafe resolves the bundle rate constants and falls back when absent', a
   const provider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...rated, now: () => now });
   assert.equal(provider.status, 'ok');
   assert.equal(provider.usageSummary.standardCost, 1888 * 0.05 / 1_000_000);
+
+  // Literal rates ship as plain decimals or exponents; a narrow capture used to
+  // truncate them at the first "." or "e" and silently zero the estimate.
+  resetBillingCache();
+  const literal = mockFetch({
+    chunk: `t.s(["INPUT_TOKEN_COST_USD",0,0.000000042]);"${actionId}","getBillingOverviewResult"`
+  });
+  const literalProvider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...literal, now: () => now });
+  assert.equal(literalProvider.usageSummary.standardCost, 1888 * 0.000000042);
+
+  resetBillingCache();
+  const exponent = mockFetch({
+    chunk: `t.s(["INPUT_TOKEN_COST_USD",0,4.2e-8]);"${actionId}","getBillingOverviewResult"`
+  });
+  const exponentProvider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...exponent, now: () => now });
+  assert.equal(exponentProvider.usageSummary.standardCost, 1888 * 4.2e-8);
 
   resetBillingCache();
   const fallback = mockFetch();
