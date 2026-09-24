@@ -1,5 +1,6 @@
 ---
 summary: "CodeBuddy Code provider notes: where the client stores session transcripts, how titles, turn boundaries and Session Detail read them, and why usage totals still come from tokscale."
+ids: [codebuddy]
 read_when:
   - Changing or debugging CodeBuddy session discovery, titles or Session Detail
   - Investigating CodeBuddy usage that is missing from the widget
