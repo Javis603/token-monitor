@@ -413,7 +413,7 @@ const CSP_HEADER = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self'",
-  "img-src 'self' data:",
+  "img-src 'self' data: blob:",
   "font-src 'self'",
   "connect-src 'self'",
   "object-src 'none'",
@@ -7217,7 +7217,7 @@ app.whenReady().then(() => {
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }]
     });
     if (result.canceled || !result.filePaths[0]) return { canceled: true };
-    return { dataUrl: await importBackgroundImage(result.filePaths[0], app.getPath('userData'), nativeImage) };
+    return { bytes: await importBackgroundImage(result.filePaths[0], app.getPath('userData'), nativeImage) };
   });
   ipcMain.handle('appearance:clearBackgroundImage', async () => {
     await clearBackgroundImage(app.getPath('userData'));

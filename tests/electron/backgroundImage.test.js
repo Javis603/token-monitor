@@ -28,9 +28,9 @@ test('chosen background survives source removal and can be cleared', async (t) =
     })
   };
 
-  const dataUrl = await importBackgroundImage(source, userData, nativeImage);
+  const bytes = await importBackgroundImage(source, userData, nativeImage);
   await fs.promises.unlink(source);
-  assert.equal(await getBackgroundImage(userData), dataUrl);
+  assert.deepEqual(await getBackgroundImage(userData), bytes);
   assert.deepEqual(await fs.promises.readFile(backgroundImagePath(userData)), output);
   await clearBackgroundImage(userData);
   assert.equal(await getBackgroundImage(userData), null);

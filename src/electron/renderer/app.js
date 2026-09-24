@@ -6754,6 +6754,7 @@ let backgroundImageActive = false;
 let backgroundImageBusy = false;
 let backgroundImageError = false;
 let backgroundImageRequest = 0;
+let backgroundImageObjectUrl = null;
 
 function syncBackgroundImageStatus() {
   if (els.backgroundImageStatus) {
@@ -6768,10 +6769,20 @@ function syncBackgroundImageStatus() {
   if (els.clearBackgroundImageButton) els.clearBackgroundImageButton.disabled = backgroundImageBusy;
 }
 
-function applyBackgroundImage(dataUrl) {
-  backgroundImageActive = typeof dataUrl === 'string' && dataUrl.startsWith('data:image/png;base64,');
+function applyBackgroundImage(bytes) {
+  // The PNG is carried over IPC as bytes and shown through a blob: URL. A
+  // data: URL is not an option: Blink silently truncates CSS values set via
+  // setProperty() at 2 MiB, which corrupted the url("data:...") value and made
+  // larger saved images render as nothing at all.
+  const buffer = bytes instanceof Uint8Array && bytes.byteLength > 0 ? bytes : null;
+  backgroundImageActive = buffer !== null;
+  if (backgroundImageObjectUrl) {
+    URL.revokeObjectURL(backgroundImageObjectUrl);
+    backgroundImageObjectUrl = null;
+  }
   if (backgroundImageActive) {
-    els.shell.style.setProperty('--custom-background-image', `url("${dataUrl}")`);
+    backgroundImageObjectUrl = URL.createObjectURL(new Blob([buffer], { type: 'image/png' }));
+    els.shell.style.setProperty('--custom-background-image', `url("${backgroundImageObjectUrl}")`);
   } else {
     els.shell.style.removeProperty('--custom-background-image');
   }
@@ -6783,8 +6794,8 @@ function applyBackgroundImage(dataUrl) {
 async function loadBackgroundImage() {
   const request = ++backgroundImageRequest;
   try {
-    const dataUrl = await window.tokenMonitor.getBackgroundImage();
-    if (request === backgroundImageRequest) applyBackgroundImage(dataUrl);
+    const bytes = await window.tokenMonitor.getBackgroundImage();
+    if (request === backgroundImageRequest) applyBackgroundImage(bytes);
   } catch (_) {
     if (request !== backgroundImageRequest) return;
     backgroundImageError = true;
@@ -6803,7 +6814,7 @@ async function changeBackgroundImage(clear = false) {
       applyBackgroundImage(null);
     } else {
       const result = await window.tokenMonitor.chooseBackgroundImage();
-      if (!result?.canceled && result?.dataUrl) applyBackgroundImage(result.dataUrl);
+      if (!result?.canceled && result?.bytes) applyBackgroundImage(result.bytes);
     }
   } catch (_) {
     backgroundImageError = true;
