@@ -33,7 +33,7 @@ function typesafeCookie(env = process.env, options = {}) {
   let value = String(options.typesafeCookie || env?.TOKEN_MONITOR_TYPESAFE_COOKIE || env?.TYPESAFE_COOKIE || '').trim();
   if (/^Cookie\s*:/i.test(value)) value = value.replace(/^Cookie\s*:/i, '').trim();
   if (!value || /[\u0000-\u001f\u007f]/u.test(value)) return '';
-  const pairs = value.split(';').map((part) => {
+  const pairs = value.split(';').filter((part) => part.trim()).map((part) => {
     const separator = part.indexOf('=');
     if (separator <= 0) return null;
     const name = part.slice(0, separator).trim();
@@ -90,10 +90,13 @@ function extractRate(chunk, name) {
   const raw = entry[1];
   if (/^(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/u.test(raw)) return Number(raw);
   if (!/^[\w$]+$/u.test(raw)) return null;
-  const assignment = new RegExp(`(?:^|[^\\w$])${escapeRegExp(raw)}\\s*=\\s*([\\d.eE+-]+(?:\\s*\\/\\s*[\\d.eE+-]+)?)`).exec(chunk);
-  if (!assignment) return null;
-  const [numerator, denominator] = assignment[1].split('/').map((part) => Number(part));
-  const value = denominator ? numerator / denominator : numerator;
+  const assignments = new RegExp(`(?:^|[^\\w$])${escapeRegExp(raw)}\\s*=\\s*([\\d.eE+-]+(?:\\s*\\/\\s*[\\d.eE+-]+)?)`, 'g');
+  let latestAssignment = null;
+  for (const match of chunk.slice(0, entry.index).matchAll(assignments)) latestAssignment = match[1];
+  if (!latestAssignment) return null;
+  const [numerator, denominator] = latestAssignment.split('/').map((part) => Number(part));
+  if (denominator !== undefined && (!Number.isFinite(denominator) || denominator === 0)) return null;
+  const value = denominator === undefined ? numerator : numerator / denominator;
   return Number.isFinite(value) ? value : null;
 }
 

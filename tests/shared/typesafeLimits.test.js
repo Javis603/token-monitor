@@ -38,6 +38,8 @@ test('TypeSafe cookie accepts a full header and rejects malformed values', () =>
   assert.equal(typesafeCookie({}, { typesafeCookie: 'Cookie: session=secret; second=ok' }), 'session=secret; second=ok');
   // An empty value is a legal cookie pair (`name=`); it must not void the header.
   assert.equal(typesafeCookie({}, { typesafeCookie: 'session=secret; preference=' }), 'session=secret; preference=');
+  assert.equal(typesafeCookie({}, { typesafeCookie: 'session=secret; ' }), 'session=secret');
+  assert.equal(typesafeCookie({}, { typesafeCookie: 'session=secret; invalid' }), '');
   assert.equal(typesafeCookie({}, { typesafeCookie: 'session=secret\nHost: evil' }), '');
   assert.equal(typesafeCookie({}, { typesafeCookie: 'Bearer secret' }), '');
 });
@@ -115,6 +117,20 @@ test('TypeSafe resolves the bundle rate constants and falls back when absent', a
   });
   const exponentProvider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...exponent, now: () => now });
   assert.equal(exponentProvider.usageSummary.standardCost, 1888 * 4.2e-8);
+
+  resetBillingCache();
+  const reusedVariable = mockFetch({
+    chunk: `gt=1;gt=.042/1e6;t.s(["INPUT_TOKEN_COST_USD",0,gt]);gt=2;"${actionId}","getBillingOverviewResult"`
+  });
+  const reusedProvider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...reusedVariable, now: () => now });
+  assert.equal(reusedProvider.usageSummary.standardCost, 1888 * 0.042 / 1_000_000);
+
+  resetBillingCache();
+  const invalidDivisor = mockFetch({
+    chunk: `gt=.05/1e6;gt=1/0;t.s(["INPUT_TOKEN_COST_USD",0,gt]);"${actionId}","getBillingOverviewResult"`
+  });
+  const invalidProvider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...invalidDivisor, now: () => now });
+  assert.equal(invalidProvider.usageSummary.standardCost, 1888 * 0.042 / 1_000_000);
 
   resetBillingCache();
   const fallback = mockFetch();
