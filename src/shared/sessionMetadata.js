@@ -11,6 +11,7 @@ const droidSessionMetadata = require('./providers/droid/sessionMetadata');
 const opencodeSession = require('./providers/opencode/session');
 const kimiSessionMetadata = require('./providers/kimi/sessionMetadata');
 const dshSessionMetadata = require('./providers/dsh/sessionMetadata');
+const workbuddySession = require('./providers/workbuddy/sessionMetadata');
 const devinSessionMetadata = require('./providers/devin/sessionMetadata');
 
 function isoFromDate(value) {
@@ -229,7 +230,8 @@ const SESSION_METADATA_RESOLVERS = new Map([
   ['droid', { resolve: droidSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['kimi', { resolve: kimiSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: false }],
   ['dsh', { resolve: dshSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
-  ['devin', { resolve: devinSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }]
+  ['devin', { resolve: devinSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
+  ['workbuddy', { resolve: workbuddySession.resolveSessionMetadata, retryAfterTimestampFallback: true }]
 ]);
 
 function resolverDefinition(entry) {

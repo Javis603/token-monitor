@@ -155,8 +155,11 @@ function usageTokens(entry) {
   if (!providerData || typeof providerData !== 'object') return null;
   const rawUsage = providerData.rawUsage && typeof providerData.rawUsage === 'object' ? providerData.rawUsage : {};
   const usage = providerData.usage && typeof providerData.usage === 'object' ? providerData.usage : {};
-  const prompt = num(rawUsage.prompt_tokens) || num(usage.inputTokens);
-  const output = num(rawUsage.completion_tokens) || num(usage.outputTokens);
+  // Older WorkBuddy builds wrote a bare snake-case `usage` with no mirror and
+  // no cache detail at all; both spellings are read rather than assuming the
+  // newer shape.
+  const prompt = num(rawUsage.prompt_tokens) || num(usage.inputTokens) || num(usage.input_tokens);
+  const output = num(rawUsage.completion_tokens) || num(usage.outputTokens) || num(usage.output_tokens);
   if (!prompt && !output) return null;
   const cacheRead = cachedTokens(rawUsage, usage);
   return {

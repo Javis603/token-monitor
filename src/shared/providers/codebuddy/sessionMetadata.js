@@ -26,7 +26,14 @@ const READ_CHUNK_BYTES = 256 * 1024;
 const MAX_LINE_BYTES = 64 * 1024;
 
 function emptyState() {
-  return { title: '', status: '', userSinceStop: false, trailing: Buffer.alloc(0), droppingLongLine: false };
+  return {
+    customTitle: '',
+    title: '',
+    status: '',
+    userSinceStop: false,
+    trailing: Buffer.alloc(0),
+    droppingLongLine: false
+  };
 }
 
 function applyLine(state, line) {
@@ -37,12 +44,16 @@ function applyLine(state, line) {
   } catch (_) {
     return; // a torn trailing write, or a record this reader has no use for
   }
-  if (entry?.type === 'ai-title') {
-    // The client rewrites the title as the session evolves, so the newest
-    // non-empty one wins. A record that cleans down to nothing is not an
-    // answer and must not erase the title already read.
-    const title = cleanTitle(entry.aiTitle);
-    if (title) state.title = title;
+  if (entry?.type === 'custom-title' || entry?.type === 'ai-title') {
+    // WorkBuddy lets the user rename a conversation (`custom-title`), which
+    // outranks the generated one; the client otherwise rewrites `ai-title` as
+    // the session evolves, so the newest non-empty one wins. A record that
+    // cleans down to nothing is not an answer and must not erase the title
+    // already read.
+    const title = cleanTitle(entry.customTitle ?? entry.aiTitle);
+    if (!title) return;
+    if (entry.type === 'custom-title') state.customTitle = title;
+    else state.title = title;
     return;
   }
   const status = assistantStatus(entry);
@@ -146,7 +157,7 @@ function readSessionMetadata(filePath, deps = {}) {
     const state = emptyState();
     fd = fsApi.openSync(file, 'r');
     scanRange(fd, stat.size, state, fsApi);
-    const metadata = { title: state.title, turnEnded: turnEndedOf(state) };
+    const metadata = { title: state.customTitle || state.title, turnEnded: turnEndedOf(state) };
     cache.set(file, { ...metadata, identity, size: stat.size, mtimeMs: stat.mtimeMs });
     return metadata;
   } catch (_) {
@@ -158,29 +169,46 @@ function readSessionMetadata(filePath, deps = {}) {
   }
 }
 
+// WorkBuddy writes the same transcript family under its own roots, so both
+// clients share this reader and differ only in where their projects live and
+// in whether the VS Code extension store exists for them.
+function createProjectsResolver(projectsRoots, { extension = false } = {}) {
+  return (sessionIds, context) => {
+    const { deps, metadata, client = 'codebuddy' } = context;
+    const result = new Map();
+    const files = new Map();
+    for (const root of projectsRoots(context)) {
+      for (const [sessionId, filePath] of findSessionFiles(root, sessionIds)) {
+        if (!files.has(sessionId)) files.set(sessionId, filePath);
+      }
+    }
+    for (const [sessionId, filePath] of files) {
+      const local = readSessionMetadata(filePath, deps.codebuddyMetadataDeps);
+      // Timestamps and project attribution come from the shared helper, which
+      // reads `cwd` out of the same transcript the scan already reported a
+      // project for — so only the two fields the scan cannot answer are added
+      // here.
+      const meta = context.fileSessionMetadata(
+        sessionId,
+        filePath,
+        metadata.get(`${client}:${sessionId}`)
+      );
+      result.set(sessionId, {
+        ...meta,
+        ...(local.title ? { title: local.title } : {}),
+        ...(local.turnEnded === undefined ? {} : { turnEnded: local.turnEnded })
+      });
+    }
+    if (extension) applyExtensionMetadata(sessionIds, context, result);
+    return result;
+  };
+}
+
 function resolveSessionMetadata(sessionIds, context) {
-  const { deps, home, metadata } = context;
-  const result = new Map();
-  const files = findSessionFiles(codebuddyProjectsRoot({ homeDir: home }), sessionIds);
-  for (const [sessionId, filePath] of files) {
-    const local = readSessionMetadata(filePath, deps.codebuddyMetadataDeps);
-    // Timestamps and project attribution come from the shared helper, which
-    // reads `cwd` out of the same transcript the scan already reported a
-    // project for — so only the two fields the scan cannot answer are added
-    // here.
-    const meta = context.fileSessionMetadata(
-      sessionId,
-      filePath,
-      metadata.get(`codebuddy:${sessionId}`)
-    );
-    result.set(sessionId, {
-      ...meta,
-      ...(local.title ? { title: local.title } : {}),
-      ...(local.turnEnded === undefined ? {} : { turnEnded: local.turnEnded })
-    });
-  }
-  applyExtensionMetadata(sessionIds, context, result);
-  return result;
+  return createProjectsResolver(
+    ({ home }) => [codebuddyProjectsRoot({ homeDir: home })],
+    { extension: true }
+  )(sessionIds, context);
 }
 
 // Sessions reported from the VS Code extension's own store have no CLI
@@ -221,4 +249,4 @@ function applyExtensionMetadata(sessionIds, context, result) {
   }
 }
 
-module.exports = { readSessionMetadata, resolveSessionMetadata };
+module.exports = { createProjectsResolver, readSessionMetadata, resolveSessionMetadata };

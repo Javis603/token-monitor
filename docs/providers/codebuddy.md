@@ -184,6 +184,29 @@ where those use `Logs`): `%LOCALAPPDATA%` on Windows, `Application Support` on
 macOS, and the XDG data home on Linux. There is deliberately no env override —
 the same reasoning as `CODEBUDDY_CONFIG_DIR` above applies to this root too.
 
+## WorkBuddy writes the same family
+
+WorkBuddy's `~/.workbuddy/projects/**/*.jsonl` (and 5.5's `~/.workbuddy-ai`
+home, which tokscale still scans alongside it) is the same transcript family —
+same record types, the same `ai-title`/`status`/`providerData.messageId`
+fields, usage on the response's `function_call` or assistant message. Two
+differences, both handled by the shared readers in this folder:
+
+- **`custom-title` exists**: the user can rename a conversation, and it
+  outranks the generated `ai-title` — the same precedence Claude Code's reader
+  gives its `custom-title` record.
+- **Older builds group nothing**: `providerData.messageId` can be absent from
+  every response record, and their `usage` is a bare snake-case
+  `{input_tokens, output_tokens}` with no cache detail. A usage-bearing record
+  without a grouping id is its own response; the calls before it ride the next
+  turn's tools, the way the Codex parser consumes its pending calls. Verified
+  against a scan: a real transcript in this shape folds to the scan's exact
+  input, output and message count (1915931 / 27141, 8 messages).
+
+`providers/workbuddy/sessionMetadata.js` binds this folder's readers to
+WorkBuddy's two roots; see that provider's own notes for its limits and
+credential planes.
+
 ## Known gaps
 
 - **No context window.** CodeBuddy records no window size anywhere, and

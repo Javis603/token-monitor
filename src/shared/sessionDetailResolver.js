@@ -14,7 +14,7 @@ const { wslUsageHomes } = require('./wslUsage');
 // transcripts directly, not tokscale JSONL). CodeBuddy resolves its transcripts
 // under the scoped home exactly as Claude and Codex do, so it needs the entry
 // and nothing else.
-const WSL_FALLBACK_CLIENTS = new Set(['claude', 'codebuddy', 'codex', 'dsh']);
+const WSL_FALLBACK_CLIENTS = new Set(['claude', 'codebuddy', 'codex', 'dsh', 'workbuddy']);
 const SESSION_DETAIL_WORKER_TIMEOUT_MS = 20_000;
 
 function resolveSessionDetailForPlatform(args = {}, deps = {}) {

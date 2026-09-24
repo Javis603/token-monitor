@@ -254,6 +254,11 @@ function parseCodebuddyTranscript(text) {
   // records are adjacent, and its usage may arrive on the call while its text
   // arrives on the message (or the other way round).
   const turns = new Map();
+  // Tool calls a response cannot claim — older WorkBuddy builds wrote no
+  // grouping id at all, so a call before a usage-bearing reply cannot be
+  // attached to one. They ride the next emitted turn, the way the Codex
+  // parser consumes its pending calls.
+  const pendingTools = [];
   for (const line of String(text || '').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -269,7 +274,30 @@ function parseCodebuddyTranscript(text) {
       || (entry.type === 'message' && entry.role === 'assistant');
     if (!isResponse) continue;
     const messageId = messageIdOf(entry);
-    if (!messageId) continue;
+    const usage = usageTokens(entry);
+
+    if (!messageId) {
+      // Older builds recorded usage without the grouping id, so the record is
+      // its own response. One with usage becomes a turn on its own; a call
+      // without usage joins the next turn's tools, since nothing ties it to a
+      // response of its own.
+      if (usage) {
+        const tools = [...pendingTools];
+        pendingTools.length = 0;
+        if (entry.type === 'function_call') tools.push(entry.name || entry.tool_name || '');
+        events.push({
+          kind: 'turn',
+          timestamp: codebuddyTimestamp(entry.timestamp),
+          tokens: makeTokens(usage),
+          tokensAvailable: true,
+          tools
+        });
+      } else if (entry.type === 'function_call') {
+        const name = entry.name || entry.tool_name;
+        if (typeof name === 'string' && name) pendingTools.push(name);
+      }
+      continue;
+    }
 
     let turn = turns.get(messageId);
     if (!turn) {
@@ -286,9 +314,8 @@ function parseCodebuddyTranscript(text) {
     // the shared grouping and the detail view both understand: the reply is
     // still shown, with its tools, and only its token numbers are missing.
     if (!turn.tokensAvailable) {
-      const tokens = usageTokens(entry);
-      if (tokens) {
-        turn.tokens = makeTokens(tokens);
+      if (usage) {
+        turn.tokens = makeTokens(usage);
         turn.tokensAvailable = true;
       }
     }
@@ -403,7 +430,8 @@ function distributeCost(exchanges, sessionCost) {
 
 function parseByClient(client, text) {
   if (client === 'claude') return parseClaudeTranscript(text);
-  if (client === 'codebuddy') return parseCodebuddyTranscript(text);
+  // WorkBuddy writes the same transcript family as CodeBuddy Code.
+  if (client === 'codebuddy' || client === 'workbuddy') return parseCodebuddyTranscript(text);
   if (client === 'codex') return parseCodexTranscript(text);
   return [];
 }
