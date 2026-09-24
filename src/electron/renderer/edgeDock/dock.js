@@ -788,7 +788,7 @@ function usageTile(label, usage) {
   const tile = el('div', 'edge-dock-usage-tile');
   tile.append(
     el('span', 'edge-dock-usage-label', label),
-    el('span', 'edge-dock-usage-tokens', usage ? formatCardTokens(usage.tokens) : '—')
+    el('span', 'edge-dock-usage-tokens', usage ? formatBreakdownTokens(usage.tokens) : '—')
   );
   if (usage) tile.append(el('span', 'edge-dock-usage-cost', formatCost(usage.costUsd)));
   return tile;
@@ -953,7 +953,7 @@ function sessionsContainer(sessions, options = {}) {
     if (context) meta.append(context);
     row.append(
       nameNode,
-      el('span', 'edge-dock-session-tokens', formatCardTokens(session.totalTokens)),
+      el('span', 'edge-dock-session-tokens', formatBreakdownTokens(session.totalTokens)),
       meta
     );
     list.append(row);

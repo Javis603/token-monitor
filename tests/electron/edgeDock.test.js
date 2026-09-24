@@ -12,7 +12,7 @@ function readRendererFile(name) {
   return fs.readFileSync(path.join(rendererDir, name), 'utf8');
 }
 
-test('detail cards keep exact totals while the rail and breakdown rows stay compact', () => {
+test('detail cards keep an exact headline while the rail and list rows stay compact', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const formatCardTokens = Function(`return (${dock.match(/function formatCardTokens\(value\) \{[^}]+\}/)[0]})`)();
   assert.equal(formatCardTokens(216_935_653), '216,935,653');
@@ -32,7 +32,10 @@ test('detail cards keep exact totals while the rail and breakdown rows stay comp
   assert.match(dock, /edge-dock-stat-value', formatTokens\(cell\.totalTokens\)/);
   assert.match(dock, /edge-dock-total-row'[\s\S]*?formatCardTokens\(cell\.totalTokens\)/);
   assert.match(dock, /edge-dock-client-tokens', formatBreakdownTokens\(entry\.tokens\)/);
-  assert.match(dock, /edge-dock-session-tokens', formatCardTokens\(session\.totalTokens\)/);
+  // Session rows and the period tiles read compact like the breakdown rows —
+  // the exact-count rule from #784 covers the headline only.
+  assert.match(dock, /edge-dock-session-tokens', formatBreakdownTokens\(session\.totalTokens\)/);
+  assert.match(dock, /edge-dock-usage-tokens', usage \? formatBreakdownTokens\(usage\.tokens\) : '—'/);
 });
 
 test('rail money compacts through the shared helper so it follows the token units', () => {
@@ -259,7 +262,7 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   const app = readRendererFile('app.js');
   // The token total must survive: headroom is additional, not a replacement for
   // the figure the row already carried.
-  assert.match(dock, /el\('span', 'edge-dock-session-tokens', formatCardTokens\(session\.totalTokens\)\)/);
+  assert.match(dock, /el\('span', 'edge-dock-session-tokens', formatBreakdownTokens\(session\.totalTokens\)\)/);
   // ...and both live on the same row, with the context reading appended to the
   // meta line rather than taking the token column.
   const sessions = dock.slice(dock.indexOf('function sessionsNode('), dock.indexOf('function providerCard('));

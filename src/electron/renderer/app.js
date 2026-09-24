@@ -494,6 +494,9 @@ Object.assign(els, {
   mainSettingsSummary: document.getElementById('mainSettingsSummary'),
   windowSettingsSummary: document.getElementById('windowSettingsSummary'),
   appearanceSettingsSummary: document.getElementById('appearanceSettingsSummary'),
+  backgroundImageStatus: document.getElementById('backgroundImageStatus'),
+  chooseBackgroundImageButton: document.getElementById('chooseBackgroundImageButton'),
+  clearBackgroundImageButton: document.getElementById('clearBackgroundImageButton'),
   subscriptionsSettingsSummary: document.getElementById('subscriptionsSettingsSummary'),
   themePresetChips: document.getElementById('themePresetChips'),
   themeColorGrid: document.getElementById('themeColorGrid'),
@@ -6743,7 +6746,72 @@ function applyAppearanceSettings(settings) {
   
   document.documentElement.classList.toggle('is-mac-legacy', isMacLegacyRadius);
   document.body.classList.toggle('is-mac-legacy', isMacLegacyRadius);
+  syncBackgroundImageStatus();
   updateTitleFit();
+}
+
+let backgroundImageActive = false;
+let backgroundImageBusy = false;
+let backgroundImageError = false;
+let backgroundImageRequest = 0;
+
+function syncBackgroundImageStatus() {
+  if (els.backgroundImageStatus) {
+    els.backgroundImageStatus.textContent = t(backgroundImageError
+      ? 'settings.appearance.backgroundImageError'
+      : backgroundImageActive
+        ? 'settings.appearance.backgroundImageActive'
+        : 'settings.appearance.backgroundImageNone');
+  }
+  els.clearBackgroundImageButton?.classList.toggle('hidden', !backgroundImageActive);
+  if (els.chooseBackgroundImageButton) els.chooseBackgroundImageButton.disabled = backgroundImageBusy;
+  if (els.clearBackgroundImageButton) els.clearBackgroundImageButton.disabled = backgroundImageBusy;
+}
+
+function applyBackgroundImage(dataUrl) {
+  backgroundImageActive = typeof dataUrl === 'string' && dataUrl.startsWith('data:image/png;base64,');
+  if (backgroundImageActive) {
+    els.shell.style.setProperty('--custom-background-image', `url("${dataUrl}")`);
+  } else {
+    els.shell.style.removeProperty('--custom-background-image');
+  }
+  els.shell.classList.toggle('has-custom-background', backgroundImageActive);
+  backgroundImageError = false;
+  syncBackgroundImageStatus();
+}
+
+async function loadBackgroundImage() {
+  const request = ++backgroundImageRequest;
+  try {
+    const dataUrl = await window.tokenMonitor.getBackgroundImage();
+    if (request === backgroundImageRequest) applyBackgroundImage(dataUrl);
+  } catch (_) {
+    if (request !== backgroundImageRequest) return;
+    backgroundImageError = true;
+    syncBackgroundImageStatus();
+  }
+}
+
+async function changeBackgroundImage(clear = false) {
+  if (backgroundImageBusy) return;
+  backgroundImageBusy = true;
+  backgroundImageRequest += 1;
+  syncBackgroundImageStatus();
+  try {
+    if (clear) {
+      await window.tokenMonitor.clearBackgroundImage();
+      applyBackgroundImage(null);
+    } else {
+      const result = await window.tokenMonitor.chooseBackgroundImage();
+      if (!result?.canceled && result?.dataUrl) applyBackgroundImage(result.dataUrl);
+    }
+  } catch (_) {
+    backgroundImageError = true;
+    syncBackgroundImageStatus();
+  } finally {
+    backgroundImageBusy = false;
+    syncBackgroundImageStatus();
+  }
 }
 
 const themePresetsApi = window.TokenMonitorThemePresets;
@@ -11238,6 +11306,9 @@ els.resetDepthButton.addEventListener('click', async () => {
 els.glassInput.addEventListener('input', applyAppearanceFromControls);
 els.blurInput.addEventListener('input', applyAppearanceFromControls);
 els.zoomInput.addEventListener('input', applyAppearanceFromControls);
+els.chooseBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(); });
+els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(true); });
+void loadBackgroundImage();
 els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}));
 els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
 els.interfaceFontPreset?.addEventListener('change', () => handleFontPresetChange('interface'));
