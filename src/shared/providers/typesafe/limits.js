@@ -29,6 +29,19 @@ function planLabel(plan) {
   return cleaned.replace(/\b\w/g, (ch) => ch.toUpperCase());
 }
 
+function activeCreditGrants(credits, now) {
+  if (!Array.isArray(credits)) return [];
+  return credits
+    .filter((credit) => credit && typeof credit === 'object')
+    .map((credit) => ({ amount: credit.remaining, expiresAt: credit.expiresAt }))
+    .filter(({ amount, expiresAt }) => Number.isFinite(amount) && amount > 0
+      && typeof expiresAt === 'string' && Number.isFinite(Date.parse(expiresAt))
+      && Date.parse(expiresAt) > now)
+    .sort((left, right) => Date.parse(left.expiresAt) - Date.parse(right.expiresAt))
+    .slice(0, 24)
+    .map(({ amount, expiresAt }) => ({ amount, currency: 'USD', expiresAt: new Date(expiresAt).toISOString() }));
+}
+
 function typesafeCookie(env = process.env, options = {}) {
   let value = String(options.typesafeCookie || env?.TOKEN_MONITOR_TYPESAFE_COOKIE || env?.TYPESAFE_COOKIE || '').trim();
   if (/^Cookie\s*:/i.test(value)) value = value.replace(/^Cookie\s*:/i, '').trim();
@@ -229,8 +242,8 @@ async function fetchTypesafeLimits(options = {}, deps = {}) {
         accountLabel: planLabel(billing.plan),
         // TypeSafe has no rate-limit windows. The balance ships as a credits
         // window; the meter derives from this month's estimated spend.
-        // Billing's resetsInDays is not the credit expiry shown by the Console,
-        // so it cannot provide a meaningful reset boundary for this balance.
+        // Billing's resetsInDays is not the credit expiry shown by the Console.
+        // Individual credit grants carry their own expiry dates.
         windows: [{
           kind: 'billing',
           metric: 'credits',
@@ -238,7 +251,8 @@ async function fetchTypesafeLimits(options = {}, deps = {}) {
           remaining: billing.balance,
           currency: 'USD'
         }],
-        balance: { amount: billing.balance, currency: 'USD', monthSpend: usage.monthCost },
+        balance: { amount: billing.balance, currency: 'USD', monthSpend: usage.monthCost,
+          tranches: activeCreditGrants(billing.credits, now) },
         usageSummary: { period: 'month', todayTokens: usage.today, weekTokens: usage.week,
           inputTokens: usage.monthInput, outputTokens: usage.monthOutput,
           totalTokens: usage.month, requests: usage.monthRequests, standardCost: usage.monthCost }

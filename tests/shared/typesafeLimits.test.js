@@ -86,6 +86,23 @@ test('TypeSafe rejects malformed usage buckets', () => {
   assert.throws(() => parseUsage({ buckets: [{ day: '2026-09-21T05:00:00+00:00', inputTokens: '1888', outputTokens: 249, requests: 6 }] }, now));
 });
 
+test('TypeSafe keeps only active credit grants with real expiry dates', async () => {
+  const transport = mockFetch({ billing: { balance: 7, plan: 'free_plan', resetsInDays: 7, credits: [
+    { amount: 5, remaining: 2, expiresAt: '2026-10-21T00:00:00Z' },
+    { amount: 5, remaining: 0, expiresAt: '2026-10-01T00:00:00Z' },
+    { amount: 3, remaining: 1, expiresAt: '2026-10-01T00:00:00Z' },
+    { amount: 5, remaining: 3, expiresAt: '2026-09-22T00:00:00Z' },
+    { amount: 1, remaining: 1, expiresAt: 'invalid' }
+  ] } });
+  const provider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...transport, now: () => now });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.windows[0].resetsAt, null);
+  assert.deepEqual(provider.balance.tranches, [
+    { amount: 1, currency: 'USD', expiresAt: '2026-10-01T00:00:00.000Z' },
+    { amount: 2, currency: 'USD', expiresAt: '2026-10-21T00:00:00.000Z' }
+  ]);
+});
+
 test('TypeSafe rediscovers a stale billing action once', async () => {
   const transport = mockFetch({ staleOnce: true });
   const provider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...transport, now: () => now });

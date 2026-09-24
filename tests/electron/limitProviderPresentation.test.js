@@ -1663,13 +1663,12 @@ test('DeepSeek main Limits row preserves the intentional month-spend balance met
   const balanceWindow = readSharedFile('limitBalanceDisplay.js');
   const styles = readRendererFile('styles.css');
 
-  // DeepSeek's credits window has no resetsAt, so it still renders the
-  // no-reset layout; TypeSafe's carries the free-credit replenishment date and
-  // keeps its Reset line. The meter denominator is shared either way.
-  assert.match(renderProviderWindows, /\{ remainingPercent: creditsMeterPercent\(provider, creditsWindow\), resetsAt: creditsWindow\?\.resetsAt \},/);
+  // The two providers share the balance meter; TypeSafe adds a grant expiry
+  // only when the billing response contains one.
+  assert.match(renderProviderWindows, /creditsMeterPercent\(provider, creditsWindow\)/);
   assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide'\);/);
-  assert.match(renderProviderWindows, /if \(!creditsWindow\?\.resetsAt\) balanceNode\.classList\.add\('limit-window-no-reset'\);/);
-  assert.match(renderProviderWindows, /const spendNode = providerSpendNode\(balance\);/);
+  assert.match(renderProviderWindows, /if \(!creditsWindow\?\.resetsAt && !nextGrant\) balanceNode\.classList\.add\('limit-window-no-reset'\);/);
+  assert.match(renderProviderWindows, /const spendNode = providerSpendNode\(balance, provider\);/);
   assert.match(limitsViewSource(), /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
   assert.match(limitsViewSource(), /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
   assert.doesNotMatch(renderProviderWindows, /Month \(since tracking\)/);
