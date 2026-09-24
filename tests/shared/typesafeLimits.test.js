@@ -96,7 +96,8 @@ test('TypeSafe keeps only active credit grants with real expiry dates', async ()
   ] } });
   const provider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...transport, now: () => now });
   assert.equal(provider.status, 'ok');
-  assert.equal(provider.windows[0].resetsAt, null);
+  assert.equal(provider.windows[0].resetsAt, '2026-10-01T00:00:00.000Z');
+  assert.equal(provider.windows[0].boundaryKind, 'expiry');
   assert.deepEqual(provider.balance.tranches, [
     { amount: 1, currency: 'USD', expiresAt: '2026-10-01T00:00:00.000Z' },
     { amount: 2, currency: 'USD', expiresAt: '2026-10-21T00:00:00.000Z' }

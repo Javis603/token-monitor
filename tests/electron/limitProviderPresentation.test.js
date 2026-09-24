@@ -1667,7 +1667,7 @@ test('DeepSeek main Limits row preserves the intentional month-spend balance met
   // only when the billing response contains one.
   assert.match(renderProviderWindows, /creditsMeterPercent\(provider, creditsWindow\)/);
   assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide'\);/);
-  assert.match(renderProviderWindows, /if \(!creditsWindow\?\.resetsAt && !nextGrant\) balanceNode\.classList\.add\('limit-window-no-reset'\);/);
+  assert.match(renderProviderWindows, /if \(!boundaryAt\) balanceNode\.classList\.add\('limit-window-no-reset'\);/);
   assert.match(renderProviderWindows, /const spendNode = providerSpendNode\(balance, provider\);/);
   assert.match(limitsViewSource(), /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
   assert.match(limitsViewSource(), /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);

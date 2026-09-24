@@ -1032,20 +1032,19 @@
         const nextGrant = provider.provider === 'typesafe' && Array.isArray(balance.tranches)
           ? balance.tranches.find((grant) => grant.expiresAt && Date.parse(grant.expiresAt) > Date.now())
           : null;
-        const expiryText = nextGrant
-          ? `Next expiry ${new Intl.DateTimeFormat(currentLocale(), { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(nextGrant.expiresAt))}`
-          : '';
+        const boundaryAt = provider.provider === 'typesafe' ? nextGrant?.expiresAt : creditsWindow?.resetsAt;
         const balanceNode = limitWindowNode(
           'Balance',
           { remainingPercent: creditsMeterPercent(provider, creditsWindow),
-            resetsAt: creditsWindow?.resetsAt, resetDescription: expiryText },
+            resetsAt: boundaryAt, boundaryKind: creditsWindow?.boundaryKind },
           color,
           0.95,
           formatMoney(balance.amount, currency),
           nextGrant ? formatMoney(nextGrant.amount, nextGrant.currency || currency) : ''
         );
         balanceNode.classList.add('limit-window-wide');
-        if (!creditsWindow?.resetsAt && !nextGrant) balanceNode.classList.add('limit-window-no-reset');
+       if (!creditsWindow?.resetsAt && !nextGrant) balanceNode.classList.add('limit-window-no-reset');
+        if (!boundaryAt) balanceNode.classList.add('limit-window-no-reset');
         windows.append(balanceNode);
 
         const spendNode = providerSpendNode(balance, provider);

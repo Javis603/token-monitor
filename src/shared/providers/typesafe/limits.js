@@ -235,6 +235,7 @@ async function fetchTypesafeLimits(options = {}, deps = {}) {
         'json'
       );
       const usage = parseUsage(usageBody, now, rates);
+      const tranches = activeCreditGrants(billing.credits, now);
       return normalizeLimitProvider({
         ...base,
         status: 'ok',
@@ -249,10 +250,11 @@ async function fetchTypesafeLimits(options = {}, deps = {}) {
           metric: 'credits',
           label: 'Balance',
           remaining: billing.balance,
-          currency: 'USD'
+          currency: 'USD',
+          ...(tranches.length > 0 ? { resetsAt: tranches[0].expiresAt, boundaryKind: 'expiry' } : {})
         }],
         balance: { amount: billing.balance, currency: 'USD', monthSpend: usage.monthCost,
-          tranches: activeCreditGrants(billing.credits, now) },
+          tranches },
         usageSummary: { period: 'month', todayTokens: usage.today, weekTokens: usage.week,
           inputTokens: usage.monthInput, outputTokens: usage.monthOutput,
           totalTokens: usage.month, requests: usage.monthRequests, standardCost: usage.monthCost }

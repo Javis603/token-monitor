@@ -233,14 +233,15 @@ test('a DeepSeek card shows the spend row the projection used to drop', () => {
 test('a TypeSafe card shows the next credit expiry without calling it a reset', () => {
   const card = dockView().renderProviderWindows({
     provider: 'typesafe',
-    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 5, currency: 'USD' }],
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 5, currency: 'USD',
+      resetsAt: '2099-01-02T00:00:00Z', boundaryKind: 'expiry' }],
     balance: { amount: 5, currency: 'USD', tranches: [
       { amount: 2, currency: 'USD', expiresAt: '2099-01-02T00:00:00Z' },
       { amount: 3, currency: 'USD', expiresAt: '2099-02-02T00:00:00Z' }
     ] }
   }, '#59A4D0');
 
-  assert.match(card.text, /Next expiry Jan 2, 2099/);
+  assert.match(card.text, /Expires \d+d \d+h/);
   assert.match(card.text, /\$2\.00/);
   assert.doesNotMatch(card.text, /Reset/);
   assert.equal(card.find('limit-window').classNames.has('limit-window-no-reset'), false);
