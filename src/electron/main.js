@@ -76,6 +76,7 @@ const {
   clientsCsvForSetting,
   normalizeClientsCsv
 } = require('../shared/clientTracking');
+const { seedSplitClients } = require('../shared/clientIdentitySplits');
 const {
   clientDiagnosticRoots,
   lookupModelPricing,
@@ -445,6 +446,11 @@ let dashboardWindowNativeBlurEnabled = false;
 let settingsPath = null;
 let settings = null;
 let initialLimitProvidersPending = false;
+// Set by readSettings() when a client identity split was seeded into the tracked
+// CSV. The addition has to reach disk (the seed is persisted, not recomputed), but
+// settings are written through saveSettings() after the window exists, so the flag
+// carries the decision from the read to that first save.
+let seededClientSplitsPending = false;
 let claudeWebCookieMutationRevision = 0;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
@@ -572,6 +578,7 @@ function defaultSettings() {
     hiddenServiceProviders: '',
     serviceStatusRefreshMs: 60000,
     archivedClientUsage: { version: 1, clients: {} },
+    seededClientSplits: '',
     allTimeSince: process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01',
     customModelPricing: [],
     modelAliases: {},
@@ -2212,6 +2219,14 @@ function ensureSettingsLoaded() {
       settings.codexManagedAccounts = hydratedCodexAccounts;
     }
   }
+  // A seeded client identity split is an in-memory addition at this point.
+  // Persist it with the same retry-on-next-save tolerance as the migration
+  // above, so a read-only or failing settings file delays the write instead of
+  // losing the tracked client.
+  if (seededClientSplitsPending) {
+    seededClientSplitsPending = false;
+    saveSettings();
+  }
   rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
   return settings;
 }
@@ -2580,6 +2595,34 @@ function readSettings() {
     if (!saved.secret && defaults.secret) delete saved.secret;
     const merged = { ...defaults, ...saved, ...storedCredentials };
     merged.clients = clientsCsvForSetting(merged.clients);
+    // A client identity split (see clientIdentitySplits.js) is not a new tool:
+    // the user tracking its parent was already counting it, so the split has to
+    // be seeded or their usage drops. `seededClientSplits` makes that a one-time
+    // addition, so untracking the row afterwards is not undone on next launch.
+    //
+    // Every launch is evaluated, fresh installs included. Restricting this to an
+    // existing settings file with an explicit `clients` field left two installs
+    // un-marked: one whose file predates that field, and a fresh install, which
+    // takes the split client from DEFAULT_CLIENTS without ever recording that it
+    // did. Both would then be migrated on a later launch, and the seed would fire
+    // on a deliberate untrack — the user drops Oh My Pi and it reappears next start.
+    // Evaluating unconditionally is also cheap: with the split client already
+    // present nothing is inserted, and the marker is what makes that a decision
+    // rather than an absence.
+    const seeded = seedSplitClients(merged.clients, { applied: merged.seededClientSplits });
+    // The marker records that this install has been through the migration, not
+    // that it gained a client. Recording it only on a successful insert would
+    // leave an install that tracks the parent later still un-migrated, so the
+    // seed would fire on a deliberate post-split choice instead of on the
+    // upgrade. `evaluated` is what makes the decision belong to this launch.
+    if (seeded.evaluated.length > 0) {
+      merged.clients = seeded.clients;
+      merged.seededClientSplits = [...new Set([
+        ...String(merged.seededClientSplits || '').split(',').map((value) => value.trim()).filter(Boolean),
+        ...seeded.evaluated
+      ])].join(',');
+      seededClientSplitsPending = true;
+    }
     merged.customScanPaths = normalizeCustomScanPaths(merged.customScanPaths);
     // A missing settings file is the only reliable fresh-install signal: a
     // missing limitProviders field also occurs when an existing installation
@@ -4714,13 +4757,13 @@ async function startStatsStream(options = {}) {
   }
 }
 
-function showPopover() {
+function showPopover(clickPoint = null) {
   if (!mainWindow || mainWindow.isDestroyed() || !tray) return;
   applyMacActivationPolicy();
   applyMacSpaceBehavior(true);
   applyWindowSettings();
   const current = mainWindow.getBounds();
-  const target = popoverBounds(tray, current.width, current.height);
+  const target = popoverBounds(tray, current.width, current.height, { clickPoint });
   mainWindow.setBounds(target);
   suppressNextBlurHide = true;
   mainWindow.show();
@@ -4735,10 +4778,10 @@ function hidePopover() {
   if (mainWindow.isVisible()) mainWindow.hide();
 }
 
-function togglePopover() {
+function togglePopover(clickPoint = null) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isVisible() && mainWindow.isFocused()) hidePopover();
-  else showPopover();
+  else showPopover(clickPoint);
 }
 
 function focusExistingWindow() {
@@ -5596,9 +5639,9 @@ function handleWindowToggleShortcut() {
   else focusExistingWindow();
 }
 
-function handleTrayToggle() {
+function handleTrayToggle(_tray, clickPoint = null) {
   const action = trayToggleAction(settings);
-  if (action === 'togglePopover') togglePopover();
+  if (action === 'togglePopover') togglePopover(clickPoint);
   else if (action === 'focusWindow') focusExistingWindow();
 }
 
