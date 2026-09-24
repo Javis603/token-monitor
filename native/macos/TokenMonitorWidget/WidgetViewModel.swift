@@ -489,11 +489,31 @@ enum WidgetFormat {
         case "antigravity": "Antigravity"
         case "cline": "Cline"
         case "factory": "Factory Droid"
+        case "droid": "Factory Droid"
         case "kimi": "Kimi"
         case "grok": "Grok"
         case "copilot": "GitHub Copilot"
+        case "omp": "Oh My Pi"
         case "zed": "Zed"
         case "commandcode": "Command Code"
+        // Every tracked tool carries an explicit case. The `default` below is
+        // `value.capitalized`, which mangles a multi-word or inner-capitalised
+        // name ("Codebuddy", "Qodercn", "Dsh") and would silently ship a wrong
+        // label, so tools are listed rather than left to the fallback. The
+        // fallback stays for ids this app does not track.
+        case "openclaw": "OpenClaw"
+        case "amp": "Amp"
+        case "qwen": "Qwen"
+        case "pi": "Pi"
+        case "kilo": "Kilo"
+        case "zcode": "ZCode"
+        case "codebuddy": "CodeBuddy"
+        case "proma": "Proma"
+        case "qodercn": "Qoder CN"
+        case "reasonix": "Reasonix"
+        case "dsh": "DeepSeek Harness"
+        case "cherrystudio": "Cherry Studio"
+        case "unsloth": "Unsloth"
         case "mimo": "Xiaomi MiMo"
         // Legacy snapshot id. Breakdown rows carry tracked-client ids, which
         // the app renamed from `micode` to `mimo`; a snapshot written by an

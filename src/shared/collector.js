@@ -1869,7 +1869,12 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const exporter = copilotExporterWatch(home);
   if (exporter) copilotRoots.push(['copilot-otel-exporter', exporter.dir, exporter.file]);
   add('copilot', ...copilotRoots);
-  add('pi', ['pi-sessions', path.join(home, '.pi', 'agent', 'sessions')], ['omp-sessions', path.join(home, '.omp', 'agent', 'sessions')]);
+  // Pi and Oh My Pi are two products with two fixed roots. Oh My Pi reads
+  // PI_CODING_AGENT_DIR too, but so does Pi — which is exactly why Tokscale
+  // keeps its root fixed and ignores that variable for `omp`; mirror that here
+  // rather than inventing an env override the scan does not honor.
+  add('pi', ['pi-sessions', path.join(home, '.pi', 'agent', 'sessions')]);
+  add('omp', ['omp-sessions', path.join(home, '.omp', 'agent', 'sessions')]);
   // Zed: tokscale reads the XdgData root on every platform AND the native macOS
   // (Application Support) / Windows (LOCALAPPDATA) roots (see tokscale scanner.rs
   // cfg(macos)/cfg(windows) blocks) — watch all three so native mac/win users get
