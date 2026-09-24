@@ -279,18 +279,31 @@ function runLocalLiveCodexProvider(source, state) {
   );
 }
 
-function runProviderSpendNode(source, balance) {
+function runProviderSpendNode(source, balance, provider = null) {
   const optionalNumber = functionBody(source, 'optionalFiniteNumber', 'formatHomeLimitWindowValue');
   const spendEntries = viewBody('providerSpendEntries', 'limitNoteRowNode');
   const spendNode = viewBody('providerSpendNode', 'thirdPartySpendNode');
   const context = {
     formatMoney: (value, currency) => `${currency} ${Number(value).toFixed(2)}`,
     formatBalanceSpendAmount: (value, balance) => `${balance?.currency || ''} ${Number(value).toFixed(2)}`.trim(),
+    currentLocale: () => 'en-US',
+    formatCompact: (value) => compactTokenApi.formatCompactTokens(value, 'western', 'en-US'),
+    compactTokenThreshold: () => compactTokenApi.compactTokenUnitThreshold('western', 'en-US'),
+    t: (key) => ({
+      'settings.typesafe.estimatedSpend': 'Estimated spend',
+      'settings.typesafe.today': 'Today',
+      'settings.typesafe.lastSevenDays': 'Last 7 days',
+      'settings.typesafe.month': 'Month',
+      'settings.typesafe.tokens': 'Tokens',
+      'settings.thirdparty.inputTokens': 'Input tokens',
+      'settings.thirdparty.outputTokens': 'Output tokens',
+      'settings.thirdparty.requests': 'Requests'
+    })[key] || key,
     limitNoteRowNode: (options) => options
   };
   vm.runInNewContext(
     `${optionalNumber}\n${spendEntries}\n${spendNode}\n`
-      + `result = providerSpendNode(${JSON.stringify(balance)});`,
+      + `result = providerSpendNode(${JSON.stringify(balance)}, ${JSON.stringify(provider)});`,
     context
   );
   return JSON.parse(JSON.stringify(context.result));
@@ -1650,9 +1663,12 @@ test('DeepSeek main Limits row preserves the intentional month-spend balance met
   const balanceWindow = readSharedFile('limitBalanceDisplay.js');
   const styles = readRendererFile('styles.css');
 
-  assert.match(renderProviderWindows, /\{ remainingPercent: creditsMeterPercent\(provider, null\) \},/);
-  assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide', 'limit-window-no-reset'\);/);
-  assert.match(renderProviderWindows, /const spendNode = providerSpendNode\(balance\);/);
+  // The two providers share the balance meter; TypeSafe adds a grant expiry
+  // only when the billing response contains one.
+  assert.match(renderProviderWindows, /creditsMeterPercent\(provider, creditsWindow\)/);
+  assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide'\);/);
+  assert.match(renderProviderWindows, /if \(!boundaryAt\) balanceNode\.classList\.add\('limit-window-no-reset'\);/);
+  assert.match(renderProviderWindows, /const spendNode = providerSpendNode\(balance, provider\);/);
   assert.match(limitsViewSource(), /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
   assert.match(limitsViewSource(), /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
   assert.doesNotMatch(renderProviderWindows, /Month \(since tracking\)/);
@@ -1700,6 +1716,45 @@ test('shared spend presentation preserves zeroes and omits missing periods', () 
   assert.deepEqual(missingWeek.detailEntries.map(([label]) => label), ['Today', 'Month', 'All time']);
   assert.equal(missingWeek.ariaParts.some((part) => part.startsWith('Week ')), false);
 
+});
+
+test('TypeSafe row mirrors the Spend row with token totals and keeps the month breakdown in the tooltip', () => {
+  const row = runProviderSpendNode(readRendererFile('app.js'), {
+    currency: 'USD'
+  }, {
+    provider: 'typesafe',
+    usageSummary: { period: 'month', todayTokens: 0, weekTokens: 2137, totalTokens: 3147, inputTokens: 2888, outputTokens: 259, requests: 8, standardCost: 0.000121296 }
+  });
+  assert.equal(row.label, 'Tokens');
+  assert.equal(row.summary, 'Today 0 · Month 3.1K');
+  assert.deepEqual(row.detailEntries, [
+    ['Today', '0'],
+    ['Last 7 days', '2,137'],
+    { full: 'Month', caption: true, separated: true },
+    ['Tokens', '3,147'],
+    ['Input tokens', '2,888'],
+    ['Output tokens', '259'],
+    ['Requests', '8'],
+    ['Estimated spend', '$0.0001']
+  ]);
+
+  const large = runProviderSpendNode(readRendererFile('app.js'), {
+    currency: 'USD'
+  }, {
+    provider: 'typesafe',
+    usageSummary: { period: 'month', todayTokens: 1234567, weekTokens: 2137, totalTokens: 123456789, inputTokens: 2888, outputTokens: 259, requests: 8, standardCost: 0.000121296 }
+  });
+  assert.equal(large.summary, 'Today 1.2M · Month 123.5M');
+  assert.deepEqual(large.detailEntries[0], ['Today', '1,234,567']);
+  assert.deepEqual(large.detailEntries[3], ['Tokens', '123,456,789']);
+
+  const small = runProviderSpendNode(readRendererFile('app.js'), {
+    currency: 'USD'
+  }, {
+    provider: 'typesafe',
+    usageSummary: { period: 'month', todayTokens: 0, weekTokens: 999, totalTokens: 999, inputTokens: 900, outputTokens: 99, requests: 3, standardCost: 0 }
+  });
+  assert.equal(small.summary, 'Today 0 · Month 999');
 });
 
 test('Balance and token quota values omit the redundant left suffix', () => {

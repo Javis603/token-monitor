@@ -436,6 +436,8 @@ function normalizeProviderUsageSummary(input) {
   const summary = {
     period,
     requests: count(input.requests),
+    todayTokens: count(input.todayTokens ?? input.today_tokens),
+    weekTokens: count(input.weekTokens ?? input.week_tokens),
     inputTokens: count(input.inputTokens ?? input.input_tokens),
     outputTokens: count(input.outputTokens ?? input.output_tokens),
     cacheReadTokens: count(input.cacheReadTokens ?? input.cache_read_tokens),

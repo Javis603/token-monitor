@@ -49,6 +49,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'qoder',
     'deepseek',
     'devin',
+    'typesafe',
     'openrouter',
     'minimax',
     'volcengine',

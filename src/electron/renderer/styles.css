@@ -3617,6 +3617,7 @@ html.is-windows .settings-panel select option {
 .row-icon-pi         { -webkit-mask-image: url(../../../assets/icons/pi.svg);            mask-image: url(../../../assets/icons/pi.svg); }
 .row-icon-omp        { -webkit-mask-image: url(../../../assets/icons/omp.svg);            mask-image: url(../../../assets/icons/omp.svg); }
 .row-icon-zed        { -webkit-mask-image: url(../../../assets/icons/zed.svg);           mask-image: url(../../../assets/icons/zed.svg); }
+.row-icon-typesafe   { -webkit-mask-image: url(../../../assets/icons/typesafe.svg);      mask-image: url(../../../assets/icons/typesafe.svg); }
 .row-icon-kilo       { -webkit-mask-image: url(../../../assets/icons/kilo.svg);          mask-image: url(../../../assets/icons/kilo.svg); }
 .row-icon-commandcode { -webkit-mask-image: url(../../../assets/icons/commandcode.svg);   mask-image: url(../../../assets/icons/commandcode.svg); }
 .row-icon-zcode      { -webkit-mask-image: url(../../../assets/icons/zai.svg);          mask-image: url(../../../assets/icons/zai.svg); }
@@ -5595,6 +5596,7 @@ html.is-windows .limit-live-badge {
 #kimiManualPanel,
 #copilotManualPanel,
 #zedManualPanel,
+#typesafeManualPanel,
 #commandcodeManualPanel,
 #mimoManualPanel,
 #zaiManualPanel,
@@ -5615,6 +5617,7 @@ html.is-windows .limit-live-badge {
 #factoryManualPanel > .accordion-animation-inner,
 #kimiManualPanel > .accordion-animation-inner,
 #zedManualPanel > .accordion-animation-inner,
+#typesafeManualPanel > .accordion-animation-inner,
 #commandcodeManualPanel > .accordion-animation-inner,
 #mimoManualPanel > .accordion-animation-inner,
 #zaiManualPanel > .accordion-animation-inner,
@@ -5640,6 +5643,7 @@ html.is-windows .limit-live-badge {
 #kimiManualPanel textarea,
 #copilotManualDetails input,
 #zedManualPanel textarea,
+#typesafeManualPanel textarea,
 #commandcodeManualPanel textarea,
 #mimoManualPanel input,
 #mimoManualPanel textarea,
@@ -5682,6 +5686,7 @@ html.is-windows .limit-live-badge {
 #kimiManualPanel textarea,
 #copilotManualDetails input,
 #zedManualPanel textarea,
+#typesafeManualPanel textarea,
 #commandcodeManualPanel textarea,
 #mimoManualPanel input,
 #mimoManualPanel textarea,

@@ -89,6 +89,7 @@ const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
   qoder: ['qoderCookie', 'qoderSite'],
   deepseek: ['deepseekApiKey'],
   devin: ['devinBearerToken', 'devinOrganization'],
+  typesafe: ['typesafeCookie'],
   openrouter: ['openrouterProfiles'],
   minimax: ['minimaxApiKey'],
   volcengine: [
@@ -211,6 +212,10 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     zedCookie: settings.zedCookie
       || env.TOKEN_MONITOR_ZED_COOKIE
       || env.ZED_COOKIE
+      || '',
+    typesafeCookie: settings.typesafeCookie
+      || env.TOKEN_MONITOR_TYPESAFE_COOKIE
+      || env.TYPESAFE_COOKIE
       || '',
     commandcodeCookie: settings.commandcodeCookie || '',
     workbuddyAccessToken: workbuddySettings.workbuddyAccessToken

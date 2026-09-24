@@ -363,6 +363,10 @@ const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
     }
   },
   formatCompact: formatTokens,
+  compactTokenThreshold: () => compactTokenApi.compactTokenUnitThreshold(
+    compactTokenApi.effectiveCompactTokenUnits(appearance().compactTokenUnits, state.locale),
+    state.locale
+  ),
   formatMoney: balanceDisplay.formatMoney,
   formatCompactMoney: (value, currency) => balanceDisplay.formatCompactMoney(
     value, currency, appearance().compactTokenUnits, state.locale

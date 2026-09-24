@@ -40,6 +40,7 @@ const { kimiToken, kimiWebToken, fetchKimiLimits } = kimiLimits;
 const workbuddyLimits = require('../providers/workbuddy/limits');
 const traeLimits = require('../providers/trae/limits');
 const zedLimits = require('../providers/zed/limits');
+const typesafeLimits = require('../providers/typesafe/limits');
 const {
   grokCredential,
   readAuthJson,
@@ -147,6 +148,7 @@ function providerFetchers(deps = {}) {
     qoder: (providerOptions, probeDeps) => qoderLimits.fetchQoderLimits(providerOptions, probeDeps),
     deepseek: (providerOptions, probeDeps) => fetchDeepSeekLimits(providerOptions, probeDeps),
     devin: (providerOptions, probeDeps) => devinLimits.fetchDevinLimits(providerOptions, probeDeps),
+    typesafe: (providerOptions, probeDeps) => typesafeLimits.fetchTypesafeLimits(providerOptions, probeDeps),
     openrouter: (providerOptions, probeDeps) => openrouterLimits.fetchOpenRouterLimits(providerOptions, probeDeps),
     minimax: (providerOptions, probeDeps) => minimaxLimits.fetchMinimaxLimits(providerOptions, probeDeps),
     volcengine: (providerOptions, probeDeps) => volcengineLimits.fetchVolcengineLimits(providerOptions, probeDeps),
@@ -358,6 +360,7 @@ module.exports = {
   kimiWebToken,
   fetchKimiLimits,
   zedCookie: zedLimits.zedCookie,
+  typesafeCookie: typesafeLimits.typesafeCookie,
   normalizeZedCookieHeader: zedLimits.normalizeZedCookieHeader,
   fetchZedLimits: zedLimits.fetchZedLimits,
   mapClaudeCliUsageToProvider,

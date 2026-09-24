@@ -698,7 +698,7 @@ enum WidgetVendorIdentity {
             "gcmp": "#3B82F6",
             "dsh": "#4D6BFE", "cherrystudio": "#EA5E5D", "lmstudio": "#8074E8",
             "unsloth": "#40B85A", "cohere": "#66937D", "xiaomi": "#000000",
-            "mimo": "#000000", "micode": "#000000", "minimax": "#F23F5D",
+            "mimo": "#000000", "micode": "#000000", "typesafe": "#000000", "minimax": "#F23F5D",
             "doubao": "#5064FF", "hunyuan": "#277DE3", "volcengine": "#2A88FF",
             "nvidia": "#74B71B",
             "trae": "#32F08C", "alibaba": "#7771F4", "thirdparty": "#8090A6",
@@ -713,7 +713,7 @@ enum WidgetVendorIdentity {
         // "#000000" in `colors` would make that id's PercentageBar invisible on a
         // dark widget, which is worse than the fallback it replaced. Factory Droid
         // and Droid CLI share one client and one dark mark.
-        let adaptiveInk = ["grok", "xai", "copilot", "cursor", "opencode", "pi", "droid", "factory", "zai", "zaiteam", "zcode", "proma", "kimi", "moonshot", "ollama", "devin", "micode", "mimo", "xiaomi", "stepfun"]
+        let adaptiveInk = ["grok", "xai", "copilot", "cursor", "opencode", "pi", "droid", "factory", "zai", "zaiteam", "zcode", "proma", "kimi", "moonshot", "ollama", "devin", "micode", "mimo", "xiaomi", "typesafe", "stepfun"]
         if adaptiveInk.contains(vendorID.lowercased()) { return Color.white.opacity(0.86) }
         return Color(widgetHex: colors[vendorID.lowercased()] ?? colors["default"]!)
     }

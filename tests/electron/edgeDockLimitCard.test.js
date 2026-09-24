@@ -116,6 +116,7 @@ function dockView(appearance = {}, overrides = {}) {
     motion: limitResetMotionApi,
     tooltip: { hasOpened: () => false, markOpened() {}, release() {} },
     formatCompact: (value) => `${value}`,
+    compactTokenThreshold: () => 1e3,
     formatMoney: balanceDisplay.formatMoney,
     formatCompactMoney: (value, currency) => balanceDisplay.formatCompactMoney(
       value, currency, settings.compactTokenUnits, 'en-US'
@@ -227,6 +228,48 @@ test('a DeepSeek card shows the spend row the projection used to drop', () => {
   assert.match(card.text, /Today/);
   assert.match(card.text, /Month/);
   assert.match(card.text, /\$4\.20/);
+});
+
+test('a TypeSafe card shows the next credit expiry without calling it a reset', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'typesafe',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 5, currency: 'USD',
+      resetsAt: '2099-01-02T00:00:00Z', boundaryKind: 'expiry' }],
+    balance: { amount: 5, currency: 'USD', tranches: [
+      { amount: 2, currency: 'USD', expiresAt: '2099-01-02T00:00:00Z' },
+      { amount: 3, currency: 'USD', expiresAt: '2099-02-02T00:00:00Z' }
+    ] }
+  }, '#59A4D0');
+
+  assert.match(card.text, /Expires \d+d \d+h/);
+  assert.match(card.text, /\$2\.00/);
+  assert.doesNotMatch(card.text, /Reset/);
+  assert.equal(card.find('limit-window').classNames.has('limit-window-no-reset'), false);
+});
+
+test('a TypeSafe card does not repeat the full balance beside its expiry', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'typesafe',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 5, currency: 'USD',
+      resetsAt: '2099-01-02T00:00:00Z', boundaryKind: 'expiry' }],
+    balance: { amount: 5, currency: 'USD', tranches: [
+      { amount: 5, currency: 'USD', expiresAt: '2099-01-02T00:00:00Z' }
+    ] }
+  }, '#59A4D0');
+
+  assert.match(card.text, /Expires \d+d \d+h/);
+  assert.equal(card.text.match(/\$5\.00/g)?.length, 1);
+});
+
+test('a TypeSafe card omits expiry when the billing response has no valid grants', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'typesafe',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 5, currency: 'USD' }],
+    balance: { amount: 5, currency: 'USD' }
+  }, '#59A4D0');
+
+  assert.doesNotMatch(card.text, /expiry|Reset/);
+  assert.equal(card.find('limit-window').classNames.has('limit-window-no-reset'), true);
 });
 
 test('an OpenRouter card carries the balance meter and its detail tooltip', () => {

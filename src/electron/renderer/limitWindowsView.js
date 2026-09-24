@@ -56,6 +56,7 @@
       motion,
       tooltip: tooltipHost,
       formatCompact,
+      compactTokenThreshold,
       formatMoney,
       formatCompactMoney,
       formatPercent,
@@ -489,7 +490,42 @@
     return infoWrap;
   }
 
-  function providerSpendNode(balance) {
+  function providerSpendNode(balance, provider = null) {
+    if (provider?.provider === 'typesafe') {
+      const usage = provider.usageSummary;
+      if (usage?.period !== 'month' || usage.totalTokens === null) return null;
+      const count = (value) => Number(value).toLocaleString(currentLocale());
+      // Summary numbers compact at the same threshold every other token
+      // surface uses — 1K western, 1萬 localized — and honor the compact-units
+      // setting. The tooltip keeps exact counts.
+      const threshold = compactTokenThreshold();
+      const brief = (value) => (Number.isFinite(value) && Math.abs(value) >= threshold
+        ? formatCompact(value)
+        : count(value));
+      const details = [];
+      if (Number.isFinite(usage.todayTokens)) details.push([t('settings.typesafe.today'), count(usage.todayTokens)]);
+      if (Number.isFinite(usage.weekTokens)) details.push([t('settings.typesafe.lastSevenDays'), count(usage.weekTokens)]);
+      details.push({ full: t('settings.typesafe.month'), caption: true, separated: details.length > 0 });
+      details.push([t('settings.typesafe.tokens'), count(usage.totalTokens)]);
+      if (usage.inputTokens !== null) details.push([t('settings.thirdparty.inputTokens'), count(usage.inputTokens)]);
+      if (usage.outputTokens !== null) details.push([t('settings.thirdparty.outputTokens'), count(usage.outputTokens)]);
+      if (usage.requests !== null) details.push([t('settings.thirdparty.requests'), count(usage.requests)]);
+      const cost = optionalFiniteNumber(usage.standardCost);
+      if (cost !== null) details.push([t('settings.typesafe.estimatedSpend'), cost > 0 && cost < 0.00005 ? '<$0.0001' : `$${cost.toFixed(4)}`]);
+      const summaryParts = [
+        Number.isFinite(usage.todayTokens) ? `Today ${brief(usage.todayTokens)}` : '',
+        `Month ${brief(usage.totalTokens)}`
+      ].filter(Boolean);
+      return limitNoteRowNode({
+        // Row labels on this page are fixed English ('Balance', 'Spend',
+        // 'Reset'); the token row mirrors the Spend row's Today · Month shape.
+        // Only the tooltip stays localized, matching the third-party rows.
+        label: 'Tokens',
+        summary: summaryParts.join(' · '),
+        detailEntries: details,
+        ariaParts: details.filter(Array.isArray).map(([label, value]) => `${label} ${value}`)
+      });
+    }
     const entries = providerSpendEntries(balance);
     if (entries.length === 0) return null;
     const preferredSummary = entries.filter(([label]) => label === 'Today' || label === 'Month');
@@ -984,7 +1020,7 @@
       }
       const spendNode = thirdPartySpendNode(provider, quotaWindow);
       if (spendNode) windows.append(spendNode);
-    } else if (provider.provider === 'deepseek') {
+    } else if (provider.provider === 'deepseek' || provider.provider === 'typesafe') {
       // DeepSeek does not expose a fixed quota denominator. This intentionally
       // visualizes the balance relative to this month's inferred starting funds:
       // current / (current + observed month spend).
@@ -992,17 +1028,28 @@
       const balance = provider.balance || null;
       if (balance) {
         const currency = balance.currency;
+        const creditsWindow = (provider.windows || []).find((window) => isCreditsWindow(window));
+        const nextGrant = provider.provider === 'typesafe' && Array.isArray(balance.tranches)
+          ? balance.tranches.find((grant) => grant.expiresAt && Date.parse(grant.expiresAt) > Date.now())
+          : null;
+        const boundaryAt = provider.provider === 'typesafe' ? nextGrant?.expiresAt : creditsWindow?.resetsAt;
+        const expiringAmount = nextGrant && Math.abs(nextGrant.amount - balance.amount) >= 0.005
+          ? formatMoney(nextGrant.amount, nextGrant.currency || currency)
+          : '';
         const balanceNode = limitWindowNode(
           'Balance',
-          { remainingPercent: creditsMeterPercent(provider, null) },
+          { remainingPercent: creditsMeterPercent(provider, creditsWindow),
+            resetsAt: boundaryAt, boundaryKind: creditsWindow?.boundaryKind },
           color,
           0.95,
-          formatMoney(balance.amount, currency)
+          formatMoney(balance.amount, currency),
+          expiringAmount
         );
-        balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
+        balanceNode.classList.add('limit-window-wide');
+        if (!boundaryAt) balanceNode.classList.add('limit-window-no-reset');
         windows.append(balanceNode);
 
-        const spendNode = providerSpendNode(balance);
+        const spendNode = providerSpendNode(balance, provider);
         if (spendNode) windows.append(spendNode);
       }
     } else if (provider.provider === 'mimo') {
