@@ -1162,6 +1162,82 @@ test('aggregateDevices keeps a zero-usage live session unarchived in either merg
   assert.equal(aggregateDevices([archived, live], 0).periods.allTime.sessions['codex:s1'].archived, undefined);
 });
 
+// aggregateDevices() adds each device's periods exactly as normalizeDeviceRecord()
+// left them. It used to normalize them a second time with default options, so
+// this is the property that makes dropping that pass output-preserving.
+test('normalizePeriod is idempotent, including under default options on a second pass', () => {
+  const legacyAndRich = {
+    total_tokens: 1000.6,
+    cost_usd: 1.25,
+    cache_read_tokens: 400,
+    cache_write_tokens: 100,
+    output_tokens: 300,
+    unclassified_tokens: 101,
+    timed_tokens: 200,
+    timed_output_tokens: 900,
+    timed_duration_ms: 4000,
+    clients: { 'Claude Code': 600, codex: 400.4, '': 5 },
+    clientCacheReads: { 'Claude Code': 300 },
+    clientOutputs: { codex: 150 },
+    clientCosts: { 'Claude Code': 1, codex: 0.25 },
+    models: { 'GPT-5': 400, 'claude-sonnet-4': 600 },
+    modelCacheReads: { 'claude-sonnet-4': 300 },
+    modelCosts: { 'GPT-5': 0.25 },
+    clientModels: { codex: { 'GPT-5': 400 } },
+    clientModelCosts: { codex: { 'GPT-5': 0.25 } },
+    projects: { '/work/app': { label: ' app ', tokens: 700, costUsd: 1, clients: { codex: 400 } } },
+    sessions: {
+      'codex:live': {
+        client: 'codex',
+        session_id: 'live',
+        total_tokens: 400,
+        input_tokens: 100,
+        output_tokens: 150,
+        cache_read_tokens: 150,
+        cost_usd: 0.25,
+        startedAt: '2026-05-30T00:00:00Z',
+        lastUsedAt: '2026-05-30T01:00:00Z',
+        contextTokens: 50000,
+        contextWindow: 200000,
+        turnEnded: true,
+        projectLabel: 'app',
+        title: '  Fix   the build  ',
+        models: { 'GPT-5': 400 },
+        providers: { OpenAI: 400 }
+      },
+      'claude:gone': {
+        client: 'Claude Code',
+        sessionId: 'gone',
+        totalTokens: 600,
+        archived: true,
+        turnEnded: false,
+        projectLabel: 'app'
+      },
+      'claude:gone-again': { client: 'claude', sessionId: 'gone', totalTokens: 1, deleted: true }
+    }
+  };
+  const aggregateOnly = { totalTokens: 50, costUsd: 0.1, unclassifiedTokens: 50, capabilities: { tokenComponents: false, throughput: false } };
+
+  for (const input of [legacyAndRich, aggregateOnly, undefined]) {
+    for (const options of [{}, { projectsEnabled: true }, { projectsEnabled: false }]) {
+      const once = normalizePeriod(input, options);
+      assert.deepEqual(normalizePeriod(once, options), once);
+      assert.deepEqual(normalizePeriod(once), once);
+    }
+  }
+  // The fixture has to exercise what normalization actually changes, or the
+  // equalities above hold trivially.
+  const once = normalizePeriod(legacyAndRich);
+  assert.equal(once.capabilities.tokenComponents, false);
+  assert.equal(once.capabilities.throughput, true);
+  assert.equal(once.timedOutputTokens, 300);
+  assert.ok(once.models['gpt-5']);
+  assert.equal(once.sessions['codex:live'].title, 'Fix the build');
+  assert.equal(once.sessions['claude:gone'].archived, true);
+  assert.ok(Object.keys(once.projects).length > 0);
+  assert.equal(Object.keys(normalizePeriod(legacyAndRich, { projectsEnabled: false }).projects).length, 0);
+});
+
 const { normalizeDeviceRecord, aggregateHistory, carryDeviceHistory } = require('../../src/shared/usage');
 
 test('normalizeDeviceRecord carries a history field when present', () => {
