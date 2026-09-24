@@ -97,11 +97,20 @@ function escapeRegExp(text) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function plausibleTokenRate(rate) {
+  // The bundle parser cannot resolve JS scope. Reject obvious collisions
+  // rather than caching an implausible USD-per-token price for 12 hours.
+  return Number.isFinite(rate) && rate >= 0 && rate < 1e-3;
+}
+
 function extractRate(chunk, name) {
   const entry = new RegExp(`"${escapeRegExp(name)}"\\s*,\\s*[\\w$.eE+-]+\\s*,\\s*([\\w$.eE+-]+)`).exec(chunk);
   if (!entry) return null;
   const raw = entry[1];
-  if (/^(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/u.test(raw)) return Number(raw);
+  if (/^(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/u.test(raw)) {
+    const value = Number(raw);
+    return plausibleTokenRate(value) ? value : null;
+  }
   if (!/^[\w$]+$/u.test(raw)) return null;
   const assignments = new RegExp(`(?:^|[^\\w$])${escapeRegExp(raw)}\\s*=\\s*([\\d.eE+-]+(?:\\s*\\/\\s*[\\d.eE+-]+)?)`, 'g');
   let latestAssignment = null;
@@ -110,7 +119,7 @@ function extractRate(chunk, name) {
   const [numerator, denominator] = latestAssignment.split('/').map((part) => Number(part));
   if (denominator !== undefined && (!Number.isFinite(denominator) || denominator === 0)) return null;
   const value = denominator === undefined ? numerator : numerator / denominator;
-  return Number.isFinite(value) ? value : null;
+  return plausibleTokenRate(value) ? value : null;
 }
 
 async function discoverBilling(fetchImpl, cookie, signal) {

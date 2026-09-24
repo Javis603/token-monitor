@@ -151,6 +151,29 @@ test('TypeSafe resolves the bundle rate constants and falls back when absent', a
   const invalidProvider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...invalidDivisor, now: () => now });
   assert.equal(invalidProvider.usageSummary.standardCost, 1888 * 0.042 / 1_000_000);
 
+  // The nearest textual assignment can belong to a nested scope. Reject its
+  // implausible rate rather than caching it in place of the outer variable.
+  resetBillingCache();
+  const nestedScope = mockFetch({
+    chunk: `let gt=.05/1e6;(()=>{let gt=1})();t.s(["INPUT_TOKEN_COST_USD",0,gt]);"${actionId}","getBillingOverviewResult"`
+  });
+  const nestedProvider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...nestedScope, now: () => now });
+  assert.equal(nestedProvider.usageSummary.standardCost, 1888 * 0.042 / 1_000_000);
+
+  resetBillingCache();
+  const negativeRate = mockFetch({
+    chunk: `gt=-1/1e6;t.s(["INPUT_TOKEN_COST_USD",0,gt]);"${actionId}","getBillingOverviewResult"`
+  });
+  const negativeProvider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...negativeRate, now: () => now });
+  assert.equal(negativeProvider.usageSummary.standardCost, 1888 * 0.042 / 1_000_000);
+
+  resetBillingCache();
+  const implausibleLiteral = mockFetch({
+    chunk: `t.s(["INPUT_TOKEN_COST_USD",0,1]);"${actionId}","getBillingOverviewResult"`
+  });
+  const literalFallbackProvider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...implausibleLiteral, now: () => now });
+  assert.equal(literalFallbackProvider.usageSummary.standardCost, 1888 * 0.042 / 1_000_000);
+
   resetBillingCache();
   const fallback = mockFetch();
   const fallbackProvider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...fallback, now: () => now });
