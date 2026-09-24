@@ -8,6 +8,7 @@ const {
   messageIdOf,
   usageTokens
 } = require('./providers/codebuddy/transcript');
+const codebuddyExtension = require('./providers/codebuddy/extension');
 const opencodeSession = require('./providers/opencode/session');
 const { readReasonixSessionEvents } = require('./providers/reasonix/sessionDetail');
 
@@ -462,10 +463,61 @@ function readReasonixSessionDetail({ sessionId, period = 'total', home, deps = {
   };
 }
 
+// CodeBuddy conversations from the VS Code extension live in the extension's
+// own store, not in a transcript file, so the generic file path below answers
+// nothing for them. One reported trace id is one request: its user messages
+// are the exchange's prompts and the request's own usage is its single turn —
+// the client counts the same way (one usage-bearing request, one message).
+function readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, home, env, deps = {} }) {
+  const session = codebuddyExtension.findExtensionSession(sessionId, {
+    homeDir: home,
+    env,
+    platform: deps.platform,
+    fs: deps.fs,
+    dataRoots: deps.codebuddyExtensionDataRoots
+  });
+  if (!session) {
+    return { found: false, client: 'codebuddy', sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
+  }
+
+  const events = [];
+  for (const entry of session.entries) {
+    if (entry.role !== 'user') continue;
+    // The client keeps the prompt the user actually saw beside the
+    // context-wrapped payload; the fallback is that payload's own text.
+    const prompt = cleanPromptText(entry.displayText || entry.text);
+    if (!prompt) continue;
+    events.push({ kind: 'prompt', timestamp: codebuddyTimestamp(entry.createdAt), text: prompt });
+  }
+  const usage = session.usage || {};
+  const cacheRead = num(usage.cacheTokens);
+  const cacheWrite = num(usage.cachedWriteTokens);
+  // `cachedMissTokens` is what the client reports as uncached input, and it is
+  // exactly `inputTokens` minus the cache fields; the subtraction is the
+  // fallback for a record that states only the totals. Reading the gross
+  // `inputTokens` as input would count the cached part twice — the same
+  // convention the CLI transcript's `prompt_tokens` follows.
+  const input = num(usage.cachedMissTokens) || Math.max(0, num(usage.inputTokens) - cacheRead - cacheWrite);
+  events.push({
+    kind: 'turn',
+    timestamp: codebuddyTimestamp(session.startedAt),
+    tokens: makeTokens({ input, output: num(usage.outputTokens), cacheRead, cacheWrite, reasoning: 0 }),
+    tools: []
+  });
+
+  const now = new Date((deps.now || Date.now)());
+  const grouped = filterExchangesByPeriod(groupEvents(events), period, now);
+  distributeCost(grouped, sessionCost);
+  return { found: true, client: 'codebuddy', sessionId, period, exchanges: grouped, totals: totalsOf(grouped, sessionCost) };
+}
+
 function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 0, home, env, useEnvRoots, deps = {} }) {
   if (client === 'opencode') return readOpenCodeSessionDetail({ sessionId, period, deps });
   if (client === 'reasonix') return readReasonixSessionDetail({ sessionId, period, home, deps });
   const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots });
+  if (!filePath && client === 'codebuddy') {
+    return readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, home, env, deps });
+  }
   if (!filePath) return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
   let text;
   try { text = fs.readFileSync(filePath, 'utf8'); } catch (_) {
@@ -483,6 +535,7 @@ module.exports = {
   parseCodebuddyTranscript,
   parseCodexTranscript,
   makeTokens,
+  readCodebuddyExtensionSessionDetail,
   groupEvents,
   filterExchangesByPeriod,
   distributeCost,

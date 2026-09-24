@@ -142,6 +142,48 @@ transcript. The response count also equals tokscale's `messageCount`, which is
 the check that the `messageId` grouping is the client's own unit and not an
 invention of this parser.
 
+## The VS Code extension's own store
+
+Sessions started from the CodeBuddy VS Code extension never touch the CLI
+tree. Their conversations live in the shared extension data dir, one tree per
+install and per editor:
+
+```
+<CodeBuddyExtension>/Data/<install-id>/VSCode/<editor-uuid>/history/<workspace-hash>/
+├── index.json                                  conversations[]: id, name, createdAt, lastMessageAt
+└── <conversation-id>/
+    ├── index.json                              messages[] (order), requests[] (one model call each)
+    └── messages/<message-id>.json              {role, message: "<json>", extra: "<json>", createdAt}
+```
+
+The session id tokscale keys these on is the request's `extra.traceId`, not
+the conversation id — trace ids are per request, so one conversation with
+three model calls is three reported sessions. `providers/codebuddy/extension.js`
+walks the history roots (bounded-depth, matching on the `history` directory
+name because the two intermediate levels are opaque ids), and per conversation
+caches the trace-id → request mapping keyed on the directory's mtime, so a
+tick costs one stat per conversation.
+
+From there both reads work without any new data plane:
+
+- **Title**: the workspace index's `conversations[].name`. The workspace's own
+  path is not stored anywhere, but the first user message's context envelope
+  opens with `Workspace Folder: <path>`, which is what joins these sessions to
+  project grouping.
+- **Session Detail**: one request is one exchange. Its user messages carry the
+  prompt the user actually saw in `extra.sourceContentBlocks` (the `message`
+  payload itself is the context-wrapped form), and the request's `usage` is
+  the turn: `cachedMissTokens` is the uncached input and `cacheTokens` /
+  `cachedWriteTokens` are the cache fields. Verified against a scan: for one
+  request the store says 232098 in / 189056 cached and tokscale reports
+  43042 / 189056 — the subtraction is exact, including the version where
+  `cachedMissTokens` is absent and only the subtraction produces the answer.
+
+The base directories mirror the collector's extension watch roots (`Data`
+where those use `Logs`): `%LOCALAPPDATA%` on Windows, `Application Support` on
+macOS, and the XDG data home on Linux. There is deliberately no env override —
+the same reasoning as `CODEBUDDY_CONFIG_DIR` above applies to this root too.
+
 ## Known gaps
 
 - **No context window.** CodeBuddy records no window size anywhere, and

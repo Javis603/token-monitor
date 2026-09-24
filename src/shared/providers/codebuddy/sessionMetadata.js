@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const { findExtensionSession } = require('./extension');
 const { findSessionFiles } = require('../../sessionFiles');
 const { codebuddyProjectsRoot } = require('./paths');
 const { assistantStatus, cleanTitle, isUserPromptRecord } = require('./transcript');
@@ -178,7 +179,46 @@ function resolveSessionMetadata(sessionIds, context) {
       ...(local.turnEnded === undefined ? {} : { turnEnded: local.turnEnded })
     });
   }
+  applyExtensionMetadata(sessionIds, context, result);
   return result;
+}
+
+// Sessions reported from the VS Code extension's own store have no CLI
+// transcript to find, so the projects walk above answers nothing for them.
+// Their title and workspace come from the extension's two index levels, and
+// the turn boundary from the request's own completion state — a state field
+// the client maintains per model call, in the role of the CLI transcript's
+// assistant `status`.
+function applyExtensionMetadata(sessionIds, context, result) {
+  const { deps, home } = context;
+  const options = {
+    homeDir: home,
+    env: deps.env,
+    platform: deps.platform,
+    fs: deps.fs,
+    dataRoots: deps.codebuddyExtensionDataRoots
+  };
+  for (const sessionId of sessionIds) {
+    if (result.has(sessionId)) continue;
+    const extension = findExtensionSession(sessionId, options);
+    if (!extension) continue;
+    const identity = extension.workspaceFolder
+      && context.resolveProjects !== false
+      && typeof context.projectIdentity === 'function'
+      ? context.projectIdentity(extension.workspaceFolder)
+      : {};
+    // `complete` is a finished model call; a stated other state is one still
+    // running, and no request at all is no evidence — the same three states
+    // the CLI transcript reader forwards.
+    const turnEnded = !extension.state
+      ? undefined
+      : extension.state === 'complete';
+    result.set(sessionId, {
+      ...(identity.projectId ? { projectId: identity.projectId, projectLabel: identity.projectLabel } : {}),
+      ...(extension.title ? { title: extension.title } : {}),
+      ...(turnEnded === undefined ? {} : { turnEnded })
+    });
+  }
 }
 
 module.exports = { readSessionMetadata, resolveSessionMetadata };
