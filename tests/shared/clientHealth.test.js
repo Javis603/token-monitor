@@ -437,7 +437,7 @@ test('source resolution feeds watcher paths and exact-file diagnostics without c
   const env = { XDG_DATA_HOME: path.join(homeDir, 'xdg') };
   const options = {
     homeDir,
-    platform: 'linux',
+    platform: process.platform,
     env,
     customScanPaths: { codex: [path.join(homeDir, 'extra-codex')] }
   };
