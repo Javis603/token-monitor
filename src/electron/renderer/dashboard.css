@@ -26,6 +26,16 @@ body {
   overflow: hidden;
 }
 body.flat { background: rgb(var(--glass-rgb)); }
+html.native-liquid-glass body { background: transparent; }
+html.native-liquid-glass body.flat { background: rgb(var(--glass-rgb)); }
+html.native-material-opaque body,
+html.native-reduced-transparency body { background: rgb(var(--glass-rgb)); }
+html.native-reduced-transparency body * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.native-high-contrast .dash-header,
+html.native-high-contrast .dash-cards { border-color: var(--line-strong); }
 
 .dash-header {
   -webkit-app-region: drag;
