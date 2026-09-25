@@ -1196,6 +1196,44 @@ test('default worst-provider pick reports an exhausted billing quota as 0%', () 
     }
   });
   assert.equal(scoped.remaining, 80);
+
+  // A lone scoped pool also cannot become the exhaustion gate — but note it
+  // still lands in the secondary slot, and the default pick reports the
+  // tighter of primary/secondary by design (pre-existing semantics, not the
+  // new gate), so the figure is 0% either way.
+  const scopedOnly = pickWorstLimitProvider({
+    limits: {
+      providers: [{
+        provider: 'claude',
+        status: 'ok',
+        windows: [
+          { kind: 'session', remainingPercent: 80 },
+          { kind: 'weekly', label: 'Fable', remainingPercent: 0 }
+        ]
+      }]
+    }
+  });
+  assert.equal(scopedOnly.remaining, 0);
+  assert.equal(scopedOnly.exhaustedWindow, null);
+
+  // Provider-declared additional pools (Factory Core/Premium) never gate,
+  // whatever their kind. The default pick stays on the session headline
+  // because billing windows never join the primary/secondary pair.
+  const additionalPool = pickWorstLimitProvider({
+    limits: {
+      providers: [{
+        provider: 'factory',
+        status: 'ok',
+        windows: [
+          { kind: 'session', remainingPercent: 80 },
+          { kind: 'billing', label: 'Monthly', remainingPercent: 50 },
+          { kind: 'billing', label: 'Core Monthly', remainingPercent: 0, additional: true }
+        ]
+      }]
+    }
+  });
+  assert.equal(additionalPool.remaining, 80);
+  assert.equal(additionalPool.exhaustedWindow, null);
 });
 
 test('tray session quota text keeps lowest-remaining account selection when showing used percent', () => {

@@ -1383,6 +1383,32 @@ test('the rail headline reports the pool that gates the account, not just the se
   assert.equal(cells5[0].windowKind, 'weekly');
   assert.equal(cells5[0].severityPercent, 0);
 
+  // The same scoped pool is still not a gate when it has no aggregate sibling:
+  // preferredWindow() returns a lone window without checking its label, so
+  // gatingWindow() re-checks canonical labels for the single-window case.
+  const fableOnly = provider('claude', {
+    windows: [
+      { kind: 'session', label: '', remainingPercent: 80 },
+      { kind: 'weekly', label: 'Fable', remainingPercent: 0 }
+    ]
+  });
+  const cells5b = buildEdgeDockCells({ limits: { providers: [fableOnly] } }, { limitProviders: 'claude' });
+  assert.equal(cells5b[0].remainingPercent, 80);
+  assert.equal(cells5b[0].windowKind, 'session');
+
+  // Provider-declared additional pools never gate either: Factory's Core
+  // Monthly carries additional: true, so a drained Core pool beside a live
+  // aggregate Monthly leaves the headline at the aggregate's figure.
+  const factoryAdditional = provider('factory', {
+    windows: [
+      { kind: 'billing', label: 'Monthly', remainingPercent: 50 },
+      { kind: 'billing', label: 'Core Monthly', remainingPercent: 0, additional: true }
+    ]
+  });
+  const cells5c = buildEdgeDockCells({ limits: { providers: [factoryAdditional] } }, { limitProviders: 'factory' });
+  assert.equal(cells5c[0].remainingPercent, 50);
+  assert.equal(cells5c[0].severityPercent, 0);
+
   // A hub older than the spend metric strips it but keeps the window, so the
   // same money figure arrives unlabeled. It must still not read as an
   // exhausted quota — identity, not the metric flag, is what excludes it.
