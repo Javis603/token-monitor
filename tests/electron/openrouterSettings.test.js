@@ -77,12 +77,18 @@ test('OpenRouter account statuses settle when refreshed stats arrive', () => {
 test('OpenRouter credentials stay in the main process and renderer receives configured state only', () => {
   const app = read('src/electron/renderer/app.js');
   const main = read('src/electron/main.js');
-  const credentials = read('src/shared/credentialStore.js');
+  const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
+  const { accountFieldProjection, normalizeAccountPatch } = require('../../src/electron/limits/accountSettings');
+  const accountSettings = read('src/electron/limits/accountSettings.js');
 
-  assert.match(credentials, /openrouterProfiles: \['providers', 'openrouter', 'profiles'\]/);
-  assert.match(main, /function redactOpenRouterProfilesForRenderer/);
-  assert.match(main, /apiKey: profile\?\.apiKey \? 'set' : ''/);
-  assert.match(main, /delete normalizedPatch\.openrouterProfiles/);
+  assert.deepEqual(CREDENTIAL_SETTING_PATHS.openrouterProfiles, ['providers', 'openrouter', 'profiles']);
+  assert.match(accountSettings, /function redactOpenRouterProfilesForRenderer/);
+  assert.match(accountSettings, /apiKey: profile\?\.apiKey \? 'set' : ''/);
+  assert.equal(accountFieldProjection({ openrouterProfiles: { example: { apiKey: 'private' } } }).openrouterProfiles.example.apiKey, 'set');
+  assert.match(main, /normalizeAccountPatch\(patch, normalizedPatch\)/);
+  const patch = { openrouterProfiles: { example: { apiKey: 'private' } } };
+  normalizeAccountPatch(patch, patch);
+  assert.equal(Object.hasOwn(patch, 'openrouterProfiles'), false);
   assert.match(main, /ipcMain\.handle\('openrouter:saveProfile'/);
   assert.match(main, /ipcMain\.handle\('openrouter:deleteProfile'/);
   assert.match(main, /ipcMain\.handle\('openrouter:renameProfile'/);
@@ -171,5 +177,8 @@ test('OpenRouter settings status uses collision-free row identity and a stable e
 
 test('OpenRouter key page is narrowly allowlisted', () => {
   const main = read('src/electron/main.js');
-  assert.match(main, /parsed\.hostname === 'openrouter\.ai' && parsed\.pathname\.startsWith\('\/settings\/keys'\)/);
+  assert.match(main, /limitProviderUrlAllowed\(parsed\.hostname, parsed\.pathname\)/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  assert.equal(limitProviderUrlAllowed('openrouter.ai', '/settings/keys'), true);
+  assert.equal(limitProviderUrlAllowed('openrouter.ai', '/settings'), false);
 });

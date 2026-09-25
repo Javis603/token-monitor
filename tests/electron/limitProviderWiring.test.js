@@ -18,6 +18,16 @@ const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
 const { isAllowedVerificationUrl } = require('../../src/shared/providers/copilot/deviceFlow');
 const { isAllowedCodexLoginUrl } = require('../../src/shared/providers/codex/login');
 const { SERVICE_STATUS_PROVIDERS } = require('../../src/electron/serviceStatus');
+const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+const { LIMIT_PROVIDER_REGISTRY, LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
+const {
+  accountFieldProjection,
+  accountStatusProjection,
+  finalAccountSettings,
+  limitAccountFormsForRenderer,
+  normalizeAccountField,
+  normalizeAccountPatch
+} = require('../../src/electron/limits/accountSettings');
 
 const ROOT = path.resolve(__dirname, '../..');
 const mainSource = fs.readFileSync(path.join(ROOT, 'src/electron/main.js'), 'utf8');
@@ -36,6 +46,18 @@ function evalTopLevel(source, from, to, sandbox = {}) {
   code = code.replace(/^(?:const|let|var)\s+[\w$]+\s*=\s*/, 'return ').replace(/^function\s+[\w$]+/, 'return function');
   return vm.runInNewContext(`(function () { ${code} })()`, sandbox);
 }
+
+test('the limits registry matches the catalog, binds each fetcher and keeps account leaves require-free', () => {
+  assert.deepEqual(LIMIT_PROVIDER_REGISTRY.map(({ id }) => id), LIMIT_PROVIDER_IDS);
+  assert.deepEqual(Object.keys(LIMIT_PROVIDER_FETCHERS), LIMIT_PROVIDER_IDS);
+  for (const { id, fetchLimits, fields } of LIMIT_PROVIDER_REGISTRY) {
+    assert.equal(typeof fetchLimits, 'function', id);
+    assert.equal(typeof LIMIT_PROVIDER_FETCHERS[id], 'function', id);
+    assert.equal(new Set(fields.map(({ key }) => key)).size, fields.length, id);
+    const leaf = fs.readFileSync(path.join(ROOT, 'src', 'shared', 'providers', id, 'account.js'), 'utf8');
+    assert.doesNotMatch(leaf, /\brequire\s*\(/, `${id} account declaration must stay a leaf`);
+  }
+});
 
 test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)', () => {
   assert.deepEqual(CREDENTIAL_SETTING_PATHS, {
@@ -197,71 +219,54 @@ test('desktop WorkBuddy ignores env and settings tokens and reads the app sessio
   assert.equal(config.workbuddyAccountType, 'enterprise');
 });
 
-test('settings:update normalizes every provider field and never persists these keys', () => {
-  // The normalizer each patch key goes through inside the settings:update
-  // handler. Pinning name-by-name catches a key silently losing its normalize.
-  const normalizers = {
-    claudeWebCookie: 'normalizeClaudeWebCookie',
-    deepseekApiKey: 'normalizeDeepSeekApiKey',
-    minimaxApiKey: 'normalizeMinimaxApiKey',
-    copilotApiToken: 'normalizeCopilotApiToken',
-    copilotEnterpriseHost: 'normalizeCopilotEnterpriseHost',
-    factoryApiKey: 'normalizeFactoryApiKey',
-    clineApiKey: 'normalizeClineApiKey',
-    zaiApiKey: 'normalizeZaiApiKey',
-    zaiApiRegion: 'normalizeZaiApiRegion',
-    zaiTeamApiKey: 'normalizeZaiTeamApiKey',
-    zaiTeamOrganizationId: 'normalizeZaiTeamId',
-    zaiTeamProjectId: 'normalizeZaiTeamId',
-    volcengineAccessKeyId: 'normalizeSecretSetting',
-    volcengineSecretAccessKey: 'normalizeSecretSetting',
-    volcengineRegion: 'normalizeVolcengineRegion',
-    volcengineAgentAccessKeyId: 'normalizeSecretSetting',
-    volcengineAgentSecretAccessKey: 'normalizeSecretSetting',
-    volcengineAgentRegion: 'normalizeVolcengineRegion',
-    qoderCookie: 'normalizeQoderCookie',
-    qoderSite: 'normalizeQoderSite',
-    devinBearerToken: 'normalizeDevinBearerToken',
-    devinOrganization: 'normalizeDevinOrganization',
-    alibabaCookie: 'normalizeAlibabaCookie',
-    alibabaVariant: 'normalizeAlibabaVariant',
-    traeAccessToken: 'normalizeTraeAccessToken',
-    traeDeviceId: 'normalizeTraeDeviceId',
-    zedCookie: 'normalizeZedCookie',
-    typesafeCookie: 'normalizeTypesafeCookie',
-    commandcodeCookie: 'normalizeCommandcodeCookie',
-    kimiApiKey: 'normalizeKimiApiKey',
-    kimiWebAccessToken: 'normalizeKimiWebAccessToken',
-    ollamaCookie: 'normalizeOllamaCookie'
-  };
-  // Fields whose stored value is re-normalized on read rather than trusted.
-  const fallbackNormalizers = { zaiApiRegion: 'normalizeZaiApiRegion', qoderSite: 'normalizeQoderSite' };
-  // The kimi keys have no explicit line in the final settings object; they reach
-  // it through the normalizedPatch spread, which the step assertion covers.
-  const spreadOnly = new Set(['kimiApiKey', 'kimiWebAccessToken']);
-  const handlerStart = mainSource.indexOf("ipcMain.handle('settings:update'");
-  const handlerEnd = mainSource.indexOf('ipcMain.handle(', handlerStart + 10);
-  const handler = mainSource.slice(handlerStart, handlerEnd);
-  for (const [key, normalizer] of Object.entries(normalizers)) {
-    const step = new RegExp(`if \\(patch\\.${key} !== undefined\\) normalizedPatch\\.${key} = ${normalizer}\\(patch\\.${key}\\)`);
-    assert.match(handler, step, `${key} normalized in normalizedPatch`);
-    if (spreadOnly.has(key)) continue;
-    const fallback = fallbackNormalizers[key]
-      ? `${fallbackNormalizers[key]}\\(settings\\.${key} \\|\\| 'global'\\)`
-      : `\\(settings\\.${key} \\|\\| ''\\)`;
-    const final = new RegExp(`${key}: patch\\.${key} !== undefined\\s*\\?\\s*${normalizer}\\(patch\\.${key}\\)\\s*:\\s*${fallback}`);
-    assert.match(handler, final, `${key} normalized in final settings object`);
+test('settings:update normalizes provider fields and strips separately managed accounts', () => {
+  const handler = mainSource.slice(
+    mainSource.indexOf("ipcMain.handle('settings:update'"),
+    mainSource.indexOf('ipcMain.handle(', mainSource.indexOf("ipcMain.handle('settings:update'") + 10)
+  );
+  assert.match(handler, /normalizeAccountPatch\(patch, normalizedPatch\)/);
+  assert.match(handler, /\.\.\.finalAccountSettings\(patch, settings\)/);
+
+  const fields = LIMIT_PROVIDER_REGISTRY.flatMap(({ fields }) => fields);
+  const normalizedKeys = fields.filter(({ normalize, persist }) => normalize && persist !== 'never').map(({ key }) => key);
+  assert.deepEqual(normalizedKeys.sort(), [
+    'claudeWebCookie', 'deepseekApiKey', 'minimaxApiKey', 'copilotApiToken', 'copilotEnterpriseHost',
+    'factoryApiKey', 'clineApiKey', 'zaiApiKey', 'zaiApiRegion', 'zaiTeamApiKey',
+    'zaiTeamOrganizationId', 'zaiTeamProjectId', 'volcengineAccessKeyId',
+    'volcengineSecretAccessKey', 'volcengineRegion', 'volcengineAgentAccessKeyId',
+    'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
+    'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
+    'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie',
+    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie'
+  ].sort());
+  for (const key of normalizedKeys) {
+    const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test' : ' example ';
+    const patch = { [key]: value };
+    const normalized = { ...patch };
+    normalizeAccountPatch(patch, normalized);
+    assert.equal(normalized[key], normalizeAccountField(key, value), key);
+    if (fields.find((field) => field.key === key).persist !== 'spread') {
+      assert.equal(finalAccountSettings(patch, {})[key], normalized[key], key);
+    }
   }
-  // These keys are managed elsewhere and must never survive the patch spread.
-  for (const key of [
+  assert.equal(finalAccountSettings({}, {}).zaiApiRegion, 'global');
+  assert.equal(finalAccountSettings({}, {}).qoderSite, 'global');
+  // Kimi's keys are normalized in the patch but have no final literal entry.
+  assert.equal(Object.hasOwn(finalAccountSettings({ kimiApiKey: 'x' }, {}), 'kimiApiKey'), false);
+
+  const managedKeys = [
     'codexManagedAccounts', 'antigravityManagedAccounts', 'mimoManagedAccounts',
     'workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId',
-    'workbuddyEndpoint', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo',
-    'workbuddyLocalAppEnabled', 'openrouterProfiles', 'thirdPartyProfiles',
-    'subscriptions', 'subscriptionsOrphaned', 'subscriptionsCacheHub',
-    'subscriptionsShared', 'subscriptionsHub', 'subscriptionsUpdatedAt'
-  ]) {
-    assert.match(handler, new RegExp(`delete normalizedPatch\\.${key};`), `${key} stripped from the patch`);
+    'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo',
+    'openrouterProfiles', 'thirdPartyProfiles'
+  ];
+  const managedPatch = Object.fromEntries(managedKeys.map((key) => [key, 'private']));
+  const normalized = { ...managedPatch };
+  normalizeAccountPatch(managedPatch, normalized);
+  for (const key of managedKeys) assert.equal(Object.hasOwn(normalized, key), false, key);
+  for (const key of ['workbuddyEndpoint', 'workbuddyLocalAppEnabled', 'subscriptions', 'subscriptionsOrphaned',
+    'subscriptionsCacheHub', 'subscriptionsShared', 'subscriptionsHub', 'subscriptionsUpdatedAt']) {
+    assert.match(handler, new RegExp(`delete normalizedPatch\\.${key};`), key);
   }
 });
 
@@ -276,6 +281,7 @@ test('the external URL allowlist admits exactly the provider consoles it should'
       process: { env: {} },
       isAllowedVerificationUrl,
       isAllowedCodexLoginUrl,
+      limitProviderUrlAllowed,
       STATUS_PAGE_HOSTS: new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname))
     }
   );
@@ -354,36 +360,93 @@ test('the external URL allowlist admits exactly the provider consoles it should'
   for (const url of denied) assert.equal(isAllowedExternalUrl(url), false, url);
 });
 
-test('the renderer account config names the settings keys main must project', () => {
-  const config = evalTopLevel(appSource, 'const externalLimitAccountConfig = {', '\nfunction clearDisabledLimitProviderPendingChecks(');
-  assert.deepEqual(Object.keys(config).sort(), [
-    'alibaba', 'claude', 'cline', 'commandcode', 'devin', 'factory', 'kimi',
-    'ollama', 'qoder', 'trae', 'typesafe', 'volcengine', 'zai', 'zaiteam', 'zed'
-  ].sort());
-  for (const [provider, entry] of Object.entries(config)) {
-    assert.deepEqual(Object.keys(entry).sort(), ['configuredKey', 'pendingKey', 'sourceKey'], provider);
-    // Every configured/source pair the renderer reads must exist in
-    // settingsForRenderer()'s projection, either as `key: value` or shorthand.
-    for (const key of [entry.configuredKey, entry.sourceKey]) {
-      assert.match(mainSource, new RegExp(`\\b${key}[:,]`), `${provider}.${key} projected`);
+test('account projections redact secrets while preserving profile metadata and source labels', () => {
+  assert.match(mainSource, /\.\.\.accountFieldProjection\(settings, process\.env\)/);
+  const projected = accountFieldProjection({
+    claudeWebCookie: 'private',
+    zaiTeamOrganizationId: 'private',
+    opencodeProfiles: { default: { enabled: false, cookie: 'private', apiKey: 'private' } },
+    openrouterProfiles: { default: { apiKey: 'private' } }
+  });
+  assert.equal(projected.claudeWebCookie, 'set');
+  assert.equal(projected.zaiTeamOrganizationId, 'set');
+  assert.deepEqual({ ...projected.opencodeProfiles.default }, { enabled: false, cookie: 'set', apiKey: 'set' });
+  assert.deepEqual({ ...projected.openrouterProfiles.default }, { enabled: true, apiKey: 'set' });
+  assert.equal(JSON.stringify(projected).includes('private'), false);
+  const status = accountStatusProjection({ clineApiKey: 'stored' }, { CLINE_API_KEY: 'environment' });
+  assert.equal(status.clineCredentialConfigured, true);
+  assert.equal(status.clineCredentialSource, 'settings');
+});
+
+test('the renderer receives serializable account forms but no credential declarations', () => {
+  const forms = limitAccountFormsForRenderer();
+  assert.equal(forms.length, 5);
+  for (const candidate of forms) {
+    assert.deepEqual(JSON.parse(JSON.stringify(candidate)), candidate);
+    assert.equal(JSON.stringify(candidate).includes('storePath'), false);
+    assert.equal(JSON.stringify(candidate).includes('envFallback'), false);
+  }
+  const form = forms.find(({ id }) => id === 'typesafe');
+  assert.deepEqual(JSON.parse(JSON.stringify(form)), form);
+  assert.equal(form.id, 'typesafe');
+  assert.equal(form.field, 'typesafeCookie');
+  assert.equal(form.kind, 'singleCredential');
+  assert.equal(form.input, 'textarea');
+  assert.deepEqual(form.status, {
+    configuredKey: 'typesafeCookieConfigured',
+    sourceKey: 'typesafeCookieSource',
+    pendingKey: 'typesafePendingCheckSince'
+  });
+  assert.equal(JSON.stringify(form).includes('storePath'), false);
+  assert.equal(JSON.stringify(form).includes('envFallback'), false);
+  assert.match(mainSource, /limitAccountForms: limitAccountFormsForRenderer\(\)/);
+  assert.match(indexHtml, /<script src="limits\/accountPanels\.js"><\/script>/);
+  assert.doesNotMatch(indexHtml, /id="typesafeAccountGroup"/);
+  assert.match(appSource, /limitAccountPanelsApi\.createSingleCredentialPanel\(form/);
+});
+
+test('every account form display key exists in each supported locale', () => {
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const form of limitAccountFormsForRenderer()) {
+    const keys = [
+      form.titleKey, form.openKey, form.clearKey, form.placeholderKey,
+      form.ariaLabelKey, form.saveKey, form.emptyKey, form.failedKey,
+      form.noteKey, ...(form.steps || []), ...Object.values(form.validation || {})
+    ].filter(Boolean);
+    for (const [locale, messages] of Object.entries(MESSAGES)) {
+      for (const key of keys) {
+        assert.ok(Object.hasOwn(messages, key), `${form.id}: ${key} missing in ${locale}`);
+      }
     }
   }
 });
 
-test('renderExternalProviderStatus runs for exactly the account-config providers, in both call sites', () => {
-  const calls = [...appSource.matchAll(/renderExternalProviderStatus\('([a-z]+)'\)/g)].map((match) => match[1]);
+test('the renderer account config names the settings keys main must project', () => {
+  const config = evalTopLevel(appSource, 'const externalLimitAccountConfig = {', '\nfunction clearDisabledLimitProviderPendingChecks(');
+  assert.deepEqual(Object.keys(config).sort(), [
+    'alibaba', 'claude', 'devin', 'kimi',
+    'ollama', 'qoder', 'trae', 'volcengine', 'zai', 'zaiteam'
+  ].sort());
+  assert.match(mainSource, /\.\.\.accountStatusProjection\(settings, process\.env\)/);
+  const projected = accountStatusProjection({}, {});
+  for (const [provider, entry] of Object.entries(config)) {
+    assert.deepEqual(Object.keys(entry).sort(), ['configuredKey', 'pendingKey', 'sourceKey'], provider);
+    for (const key of [entry.configuredKey, entry.sourceKey]) {
+      assert.ok(Object.hasOwn(projected, key), `${provider}.${key} projected`);
+    }
+  }
+});
+
+test('static account statuses refresh in both paths while descriptor panels use the form loop', () => {
   const config = evalTopLevel(appSource, 'const externalLimitAccountConfig = {', '\nfunction clearDisabledLimitProviderPendingChecks(');
   const expected = Object.keys(config).sort();
-  // The two refresh loops each render every configured provider; every other
-  // call lives inside that provider's own setup block.
-  const firstLoop = calls.slice(0, expected.length).sort();
-  const secondLoop = calls.slice(expected.length, expected.length * 2).sort();
-  assert.deepEqual(firstLoop, expected);
-  assert.deepEqual(secondLoop, expected);
-  const setupCalls = calls.slice(expected.length * 2);
+  const calls = [...appSource.matchAll(/renderExternalProviderStatus\('([a-z]+)'\)/g)].map((match) => match[1]);
+  assert.deepEqual(calls.slice(0, expected.length).sort(), expected);
+  assert.deepEqual(calls.slice(expected.length, expected.length * 2).sort(), expected);
   for (const provider of expected) {
-    assert.ok(setupCalls.includes(provider), `${provider} is re-rendered by its own wiring`);
+    assert.ok(calls.slice(expected.length * 2).includes(provider), `${provider} is re-rendered by its own wiring`);
   }
+  assert.match(appSource, /for \(const form of state\.settings\?\.limitAccountForms \|\| \[\]\)[\s\S]*?renderExternalProviderStatus\(form\.id\)/);
 });
 
 test('every provider with an account panel has its group and status markup in index.html', () => {
@@ -392,7 +455,7 @@ test('every provider with an account panel has its group and status markup in in
   // credentials from the tool itself); the map is the list of those that do.
   assert.deepEqual(
     LIMIT_PROVIDER_IDS.filter((provider) => !groupIds[provider]).sort(),
-    ['grok', 'kiro', 'workbuddy']
+    ['cline', 'commandcode', 'factory', 'grok', 'kiro', 'typesafe', 'workbuddy', 'zed']
   );
   for (const [provider, id] of Object.entries(groupIds)) {
     assert.ok(LIMIT_PROVIDER_IDS.includes(provider), `${provider} is a catalog id`);

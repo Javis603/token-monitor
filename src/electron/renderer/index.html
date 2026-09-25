@@ -920,56 +920,6 @@
                 <div id="antigravityAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
-            <div id="clineAccountGroup" class="settings-group cursor-account-group">
-              <button id="clineSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="clineSettingsDetails">
-                <span data-i18n="settings.cline.title">Cline Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="clineAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="clineSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="clineOpenBrowser" data-i18n="settings.cline.openBrowser">Open Cline API keys</button>
-                  <button id="clineLogoutButton" class="hidden" data-i18n="settings.cline.clearApiKey">Clear key</button>
-                  <button id="clineRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="clineManualPanel">
-                  <p class="settings-note" data-i18n="settings.cline.note">Token Monitor reads the Cline sign-in that Cline Desktop and the CLI already store, so limits usually work with no setup. To use an API key instead, paste it here: the key is used ahead of that sign-in and stays on this device.</p>
-                  <!-- Named after the credential it holds, the way opencodeApiKeyInput is:
-                       a password box with a placeholder has no accessible name of its own. -->
-                  <input id="clineApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.cline.apiKeyPlaceholder" aria-label="Cline API key" data-i18n-aria-label="settings.cline.apiKeyLabel" />
-                  <div class="settings-actions">
-                    <button id="clineApiKeySubmit" data-i18n="settings.cline.saveApiKey">Save API key</button>
-                  </div>
-                </div>
-                <div id="clineErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="factoryAccountGroup" class="settings-group cursor-account-group">
-              <button id="factorySettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="factorySettingsDetails">
-                <span data-i18n="settings.factory.title">Factory Droid Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="factoryAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="factorySettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="factoryOpenBrowser" data-i18n="settings.factory.openBrowser">Open Factory API keys</button>
-                  <button id="factoryLogoutButton" class="hidden" data-i18n="settings.factory.clearApiKey">Clear key</button>
-                  <button id="factoryRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="factoryManualPanel">
-                  <p class="settings-note" data-i18n="settings.factory.note">Token Monitor automatically detects FACTORY_API_KEY or Droid's ~/.factory/.env. To use a different Factory API key instead, paste it here. It stays on this device and is used only to query Factory plan quotas and Extra Usage balance.</p>
-                  <input id="factoryApiKeyInput" type="password" spellcheck="false" placeholder="fk-..." data-i18n-placeholder="settings.factory.apiKeyPlaceholder" />
-                  <div class="settings-actions">
-                    <button id="factoryApiKeySubmit" data-i18n="settings.factory.saveApiKey">Save API key</button>
-                  </div>
-                </div>
-                <div id="factoryErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
             <div id="kimiAccountGroup" class="settings-group cursor-account-group">
               <button id="kimiSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="kimiSettingsDetails">
                 <span data-i18n="settings.kimi.title">Kimi Account</span>
@@ -1044,64 +994,6 @@
                   </div>
                 </div>
                 <div id="copilotErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="zedAccountGroup" class="settings-group cursor-account-group">
-              <button id="zedSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="zedSettingsDetails">
-                <span data-i18n="settings.zed.title">Zed Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="zedAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="zedSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="zedOpenBrowser" data-i18n="settings.zed.openBrowser">Open Zed in browser</button>
-                  <button id="zedLogoutButton" class="hidden" data-i18n="settings.zed.clearCookie">Clear cookie</button>
-                  <button id="zedRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="zedManualPanel">
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.zed.step1">Open Zed in your browser (button above), sign in, then select the organization.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.zed.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the usage request.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.zed.step3">In Headers -> Request Headers, copy the full Cookie value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.zed.step4">Paste it below and click Save cookie.</span>
-                  </p>
-                  <textarea id="zedCookieInput" rows="3" autocomplete="off" spellcheck="false" placeholder="zed.session=...; c15t=..." data-i18n-placeholder="settings.zed.cookiePlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="zedCookieSubmit" data-i18n="settings.zed.saveCookie">Save cookie</button>
-                  </div>
-                </div>
-                <div id="zedErrorMessage" class="settings-note error hidden" role="alert"></div>
-              </div>
-            </div>
-            <div id="commandcodeAccountGroup" class="settings-group cursor-account-group">
-              <button id="commandcodeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="commandcodeSettingsDetails">
-                <span data-i18n="settings.commandcode.title">Command Code Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="commandcodeAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="commandcodeSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="commandcodeOpenBrowser" data-i18n="settings.commandcode.openBrowser">Open Command Code usage</button>
-                  <button id="commandcodeLogoutButton" class="hidden" data-i18n="settings.commandcode.clearCookie">Clear cookie</button>
-                  <button id="commandcodeRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="commandcodeManualPanel">
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.commandcode.step1">Open the Command Code usage page in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.commandcode.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the credits request.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.commandcode.step3">In Headers -> Request Headers, copy the full Cookie value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.commandcode.step4">Paste it below and click Save cookie.</span>
-                  </p>
-                  <textarea id="commandcodeCookieInput" rows="3" spellcheck="false" placeholder="__Secure-commandcode_prod_.session_token=..." data-i18n-placeholder="settings.commandcode.cookiePlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="commandcodeCookieSubmit" data-i18n="settings.commandcode.saveCookie">Save cookie</button>
-                  </div>
-                </div>
-                <div id="commandcodeErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
             <div id="mimoAccountGroup" class="settings-group cursor-account-group">
@@ -1310,35 +1202,6 @@
                   </div>
                 </div>
                 <div id="devinErrorMessage" class="settings-note error hidden" role="alert"></div>
-              </div>
-            </div>
-            <div id="typesafeAccountGroup" class="settings-group cursor-account-group">
-              <button id="typesafeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="typesafeSettingsDetails">
-                <span data-i18n="settings.typesafe.title">TypeSafe Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="typesafeAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="typesafeSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="typesafeOpenBrowser" data-i18n="settings.typesafe.openBrowser">Open TypeSafe Billing</button>
-                  <button id="typesafeLogoutButton" class="hidden" data-i18n="settings.typesafe.clearCookie">Clear cookie</button>
-                  <button id="typesafeRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="typesafeManualPanel">
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.typesafe.step1">Open TypeSafe Billing and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.typesafe.step2">Open DevTools → Network, reload, and select the billing request.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.typesafe.step3">Copy the full Cookie value from Request Headers.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.typesafe.step4">Paste it below and save.</span>
-                  </p>
-                  <textarea id="typesafeCookieInput" rows="3" autocomplete="off" spellcheck="false" placeholder="Cookie: ..." data-i18n-placeholder="settings.typesafe.cookiePlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="typesafeCookieSubmit" data-i18n="settings.typesafe.saveCookie">Save cookie</button>
-                  </div>
-                </div>
-                <div id="typesafeErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="openrouterAccountGroup" class="settings-group cursor-account-group">
@@ -1957,6 +1820,7 @@
     <script src="themePresets.js"></script>
     <script src="trayProviderIcons.js"></script>
     <script src="limitProviderOrder.js"></script>
+    <script src="limits/accountPanels.js"></script>
     <script src="accountIdentity.js"></script>
     <script src="appUpdatePresentation.js"></script>
     <script src="limitProviderPresentation.js"></script>

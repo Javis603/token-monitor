@@ -846,5 +846,7 @@ module.exports = {
   fetchZaiLimits,
   // Shared with the team provider: the same BigModel gateways answer with the
   // same HTTP 200 body envelopes, so the classification lives in one place.
-  readZaiBody
+  readZaiBody,
+  // Re-exported for the account registry's discovery lane (zcode-auto).
+  discoverZcodeConnection
 };

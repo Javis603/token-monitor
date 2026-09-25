@@ -69,17 +69,23 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
 });
 
 test('third-party credentials stay local while renderer metadata is redacted', () => {
-  const credentials = read('src/shared/credentialStore.js');
   const main = read('src/electron/main.js');
+  const accountSettings = read('src/electron/limits/accountSettings.js');
+  const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
+  const { accountFieldProjection, normalizeAccountPatch } = require('../../src/electron/limits/accountSettings');
 
-  assert.match(credentials, /thirdPartyProfiles: \['providers', 'thirdparty', 'profiles'\]/);
-  assert.match(main, /function redactThirdPartyProfilesForRenderer/);
-  assert.match(main, /function redactThirdPartyProfilesForRenderer[\s\S]*?const out = Object\.create\(null\)/);
-  assert.match(main, /const adapter = thirdPartyLimits\.normalizeAdapterId\(profile\?\.adapter\)/);
-  assert.match(main, /baseUrl: thirdPartyLimits\.normalizeThirdPartyBaseUrl\(profile\?\.baseUrl, \{/);
-  assert.match(main, /accessToken: profile\?\.accessToken \? 'set' : ''/);
-  assert.match(main, /apiKey: profile\?\.apiKey \? 'set' : ''/);
-  assert.match(main, /refreshToken: profile\?\.refreshToken \? 'set' : ''/);
+  assert.deepEqual(CREDENTIAL_SETTING_PATHS.thirdPartyProfiles, ['providers', 'thirdparty', 'profiles']);
+  assert.match(main, /\.\.\.accountFieldProjection\(settings, process\.env\)/);
+  assert.match(accountSettings, /function redactThirdPartyProfilesForRenderer[\s\S]*?const out = Object\.create\(null\)/);
+  assert.match(accountSettings, /const adapter = thirdPartyLimits\.normalizeAdapterId\(profile\?\.adapter\)/);
+  assert.match(accountSettings, /baseUrl: thirdPartyLimits\.normalizeThirdPartyBaseUrl\(profile\?\.baseUrl, \{/);
+  assert.match(accountSettings, /accessToken: profile\?\.accessToken \? 'set' : ''/);
+  assert.match(accountSettings, /apiKey: profile\?\.apiKey \? 'set' : ''/);
+  assert.match(accountSettings, /refreshToken: profile\?\.refreshToken \? 'set' : ''/);
+  const projected = accountFieldProjection({ thirdPartyProfiles: { example: { accessToken: 'secret', apiKey: 'secret', refreshToken: 'secret' } } });
+  assert.equal(projected.thirdPartyProfiles.example.accessToken, 'set');
+  assert.equal(projected.thirdPartyProfiles.example.apiKey, 'set');
+  assert.equal(projected.thirdPartyProfiles.example.refreshToken, 'set');
   assert.match(main, /function persistThirdPartyCredentialsRenewal\(renewal = \{\}\)/);
   assert.match(main, /function persistThirdPartyAccountKey\(update = \{\}\)/);
   assert.match(main, /onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal/);
@@ -88,9 +94,12 @@ test('third-party credentials stay local while renderer metadata is redacted', (
   assert.match(main, /canonicalAccountKey: provider\?\.accountKey/);
   assert.doesNotMatch(main, /persistThirdPartyCredentialsRenewal\(renewal, profile\)/);
   assert.doesNotMatch(main, /profiles\[accountName\] \|\| fallbackProfile/);
-  assert.match(main, /endpointPath: thirdPartyLimits\.normalizeCustomEndpointPath\(profile\?\.endpointPath\)/);
-  assert.match(main, /remainingPath: thirdPartyLimits\.normalizeCustomJsonPath\(profile\?\.remainingPath\)/);
-  assert.match(main, /delete normalizedPatch\.thirdPartyProfiles/);
+  assert.match(accountSettings, /endpointPath: thirdPartyLimits\.normalizeCustomEndpointPath\(profile\?\.endpointPath\)/);
+  assert.match(accountSettings, /remainingPath: thirdPartyLimits\.normalizeCustomJsonPath\(profile\?\.remainingPath\)/);
+  assert.match(main, /normalizeAccountPatch\(patch, normalizedPatch\)/);
+  const normalized = { thirdPartyProfiles: { example: { apiKey: 'secret' } } };
+  normalizeAccountPatch(normalized, normalized);
+  assert.equal(Object.hasOwn(normalized, 'thirdPartyProfiles'), false);
   assert.match(main, /ipcMain\.handle\('thirdparty:saveProfile'/);
   assert.match(main, /ipcMain\.handle\('thirdparty:deleteProfile'/);
   assert.match(main, /ipcMain\.handle\('thirdparty:renameProfile'/);

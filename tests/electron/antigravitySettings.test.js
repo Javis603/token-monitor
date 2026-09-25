@@ -58,7 +58,11 @@ test('Antigravity OAuth credentials remain in the main-process credential store'
   assert.match(main, /antigravityManagedAccountsForCollector\(\)/);
   assert.match(main, /antigravityOAuth\.managedAccountsForCollector/);
   assert.match(main, /antigravityManagedAccounts: antigravityAccountsForRenderer\(\)/);
-  assert.match(main, /delete normalizedPatch\.antigravityManagedAccounts/);
+  assert.match(main, /normalizeAccountPatch\(patch, normalizedPatch\)/);
+  const { normalizeAccountPatch } = require('../../src/electron/limits/accountSettings');
+  const patch = { antigravityManagedAccounts: [{ id: 'private' }] };
+  normalizeAccountPatch(patch, patch);
+  assert.equal(Object.hasOwn(patch, 'antigravityManagedAccounts'), false);
   const app = read('src/electron/renderer/app.js');
   const antigravityRenderer = app.slice(
     app.indexOf('function renderAntigravityStatus()'),

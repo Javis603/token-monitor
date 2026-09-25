@@ -798,23 +798,23 @@ test('API key account entries share styling and Copilot uses the folded token en
   // Each provider's error line starts hidden. Hiding itself is the stylesheet's
   // one blanket rule, so what is worth asserting here is that every provider has
   // such a line and that none of them ship visible.
-  for (const provider of ['deepseek', 'devin', 'minimax', 'factory', 'zai', 'zaiteam', 'volcengine', 'qoder', 'trae', 'zed', 'typesafe', 'commandcode', 'ollama', 'kimi', 'copilot']) {
+  for (const provider of ['deepseek', 'devin', 'minimax', 'zai', 'zaiteam', 'volcengine', 'qoder', 'trae', 'ollama', 'kimi', 'copilot']) {
     assert.match(html, new RegExp(`id="${provider}ErrorMessage"[^>]*class="[^"]*hidden"`), provider);
   }
-  assert.match(css, /#factoryManualPanel,\n#kimiManualPanel,\n#copilotManualPanel,\n#zedManualPanel,\n#typesafeManualPanel,\n#commandcodeManualPanel,\n#mimoManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#qoderManualPanel,\n#devinManualPanel,\n#deepseekManualPanel,\n#minimaxManualPanel,\n#volcengineManualPanel,\n#ollamaManualPanel,\n#traeManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#factoryManualPanel > \.accordion-animation-inner,\n#kimiManualPanel > \.accordion-animation-inner,\n#zedManualPanel > \.accordion-animation-inner,\n#typesafeManualPanel > \.accordion-animation-inner,\n#commandcodeManualPanel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#devinManualPanel > \.accordion-animation-inner,\n#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#alibabaManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#kimiManualPanel,\n#copilotManualPanel,\n.single-credential-manual-panel,\n#mimoManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#qoderManualPanel,\n#devinManualPanel,\n#deepseekManualPanel,\n#minimaxManualPanel,\n#volcengineManualPanel,\n#ollamaManualPanel,\n#traeManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#kimiManualPanel > \.accordion-animation-inner,\n.single-credential-manual-panel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#devinManualPanel > \.accordion-animation-inner,\n#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#alibabaManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
   {
-    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes("#factoryManualPanel input") && match[2].includes("font-size: 12px;"));
+    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes(".single-credential-manual-panel input") && match[2].includes("font-size: 12px;"));
     assert.ok(rule, 'shared credential input style should exist');
-    for (const selector of ["#factoryManualPanel input", "#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", "#zedManualPanel textarea", "#typesafeManualPanel textarea", "#commandcodeManualPanel textarea", "#mimoManualPanel input", "#mimoManualPanel textarea", "#zaiManualPanel input", "#zaiApiRegionInput", "#zaiteamManualPanel input", "#qoderManualPanel textarea", "#qoderManualPanel select", "#deepseekManualPanel input", "#minimaxManualPanel input", "#volcengineManualPanel input", "#ollamaManualPanel textarea", "#traeManualPanel input", "#alibabaManualPanel textarea", "#alibabaManualPanel select"]) {
+    for (const selector of [".single-credential-manual-panel input","#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", ".single-credential-manual-panel textarea", "#mimoManualPanel input", "#mimoManualPanel textarea", "#zaiManualPanel input", "#zaiApiRegionInput", "#zaiteamManualPanel input", "#qoderManualPanel textarea", "#qoderManualPanel select", "#deepseekManualPanel input", "#minimaxManualPanel input", "#volcengineManualPanel input", "#ollamaManualPanel textarea", "#traeManualPanel input", "#alibabaManualPanel textarea", "#alibabaManualPanel select"]) {
       assert.ok(rule[1].split(',').map((value) => value.trim()).includes(selector), selector);
     }
   }
   {
-    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes("#factoryManualPanel input") && match[2].includes("font-family: monospace;"));
+    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes(".single-credential-manual-panel input") && match[2].includes("font-family: monospace;"));
     assert.ok(rule, 'shared credential input style should exist');
-    for (const selector of ["#factoryManualPanel input", "#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", "#zedManualPanel textarea", "#typesafeManualPanel textarea", "#commandcodeManualPanel textarea", "#mimoManualPanel input", "#mimoManualPanel textarea", "#zaiManualPanel input", "#zaiteamManualPanel input", "#qoderManualPanel textarea", "#deepseekManualPanel input", "#minimaxManualPanel input", "#volcengineManualPanel input", "#ollamaManualPanel textarea", "#traeManualPanel input"]) {
+    for (const selector of [".single-credential-manual-panel input","#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", ".single-credential-manual-panel textarea", "#mimoManualPanel input", "#mimoManualPanel textarea", "#zaiManualPanel input", "#zaiteamManualPanel input", "#qoderManualPanel textarea", "#deepseekManualPanel input", "#minimaxManualPanel input", "#volcengineManualPanel input", "#ollamaManualPanel textarea", "#traeManualPanel input"]) {
       assert.ok(rule[1].split(',').map((value) => value.trim()).includes(selector), selector);
     }
   }
@@ -931,7 +931,7 @@ test('Z.ai, Volcengine, Qoder, Trae, and Ollama account panels are exposed in se
     main.indexOf("ipcMain.handle('ollama:validateCookie'"),
     main.indexOf("ipcMain.handle('opencode:saveCookie'")
   );
-  assert.match(validationHandler, /const cookie = normalizeOllamaCookie\(raw\);/);
+  assert.match(validationHandler, /const cookie = normalizeAccountField\('ollamaCookie', raw\);/);
   assert.match(validationHandler, /await fetchOllamaLimits\(\{ ollamaCookie: cookie \}, electronProviderDeps\(\{ bypassValidationCache: true \}\)\)/);
   assert.match(validationHandler, /rememberOllamaValidation\(cookie, provider\);/);
   assert.match(validationHandler, /return \{ ok: provider\.status === 'ok', status: provider\.status \};/);
@@ -955,12 +955,15 @@ test('Z.ai, Volcengine, Qoder, Trae, and Ollama account panels are exposed in se
 
 test('Zed account panel follows the manual browser Cookie flow without exposing credentials', () => {
   const html = readRendererFile('index.html');
-  const details = html.match(/<div id="zedSettingsDetails"[\s\S]*?<div id="zedErrorMessage"[^>]*><\/div>/)?.[0] || '';
-  assert.match(details, /id="zedOpenBrowser"/);
-  assert.match(details, /<textarea id="zedCookieInput" rows="3" autocomplete="off"/);
-  assert.doesNotMatch(details, /<label for="zedCookieInput"|cloud\.zed\.dev\/frontend\/billing\/usage|AI Usage/);
-  assert.match(details, /id="zedCookieSubmit"/);
-  assert.doesNotMatch(details, /zedUserIdInput|zedAccessTokenInput|zedServerUrlInput|zedAccountList/);
+  assert.doesNotMatch(html, /id="zedAccountGroup"/);
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'zed');
+  assert.equal(form.kind, 'singleCredential');
+  assert.equal(form.input, 'textarea');
+  assert.equal(form.field, 'zedCookie');
+  assert.equal(form.url, 'https://dashboard.zed.dev/');
+  assert.deepEqual(form.steps, [1, 2, 3, 4].map((step) => `settings.zed.step${step}`));
+  assert.doesNotMatch(JSON.stringify(form), /zedUserId|zedAccessToken|zedServerUrl|cloud.zed.dev/);
 
   const app = readRendererFile('app.js');
   const connectionDetailMap = app.slice(
@@ -968,26 +971,27 @@ test('Zed account panel follows the manual browser Cookie flow without exposing 
     app.indexOf('const TRAY_ICON_VARIANTS = [')
   );
   assert.doesNotMatch(connectionDetailMap, /\bzed:/);
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(zedPlatformUrl\(\)\)/);
-  assert.match(setupBody, /saveSettings\(\{[\s\S]*zedCookie: input\.value/);
-  assert.match(setupBody, /limitProviderSelectionIncluding\('zed'\)/);
-  assert.doesNotMatch(setupBody, /window\.tokenMonitor\.zed|zedUserId|zedAccessToken|zedServerUrl/);
+  assert.match(app, /limitAccountPanelsApi\.createSingleCredentialPanel\(form/);
+  assert.match(app, /\[field\]: value,\n\s*limitProviders: limitProviderSelectionIncluding\(id\),\n\s*limitsEnabled: true/);
+  assert.doesNotMatch(app, /window\.tokenMonitor\.zed|zedUserId|zedAccessToken|zedServerUrl/);
 
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
   assert.doesNotMatch(preload, /zed:addAccount|zed:accounts|zed:cancelLogin/);
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const settingsForRenderer = functionBody(main, 'settingsForRenderer', 'pushSettingsToRenderer');
-  assert.match(settingsForRenderer, /zedCookie: settings\?\.zedCookie \? 'set' : ''/);
-  assert.match(settingsForRenderer, /zedCookieConfigured: Boolean\(currentZedCookie\(\)\)/);
+  assert.match(settingsForRenderer, /\.\.\.accountFieldProjection\(settings, process\.env\)/);
+  assert.match(settingsForRenderer, /\.\.\.accountStatusProjection\(settings, process\.env\)/);
+  const { accountFieldProjection, accountStatusProjection } = require('../../src/electron/limits/accountSettings');
+  assert.equal(accountFieldProjection({ zedCookie: 'private' }).zedCookie, 'set');
+  assert.equal(accountStatusProjection({ zedCookie: 'private' }, {}).zedCookieConfigured, true);
   assert.doesNotMatch(settingsForRenderer, /zedCookie:\s*settings\?\.zedCookie,/);
   assert.doesNotMatch(main, /runZedOAuthLogin|readZedCredential|ipcMain\.handle\('zed:addAccount'/);
 
-  const zedUrlBody = functionBody(app, 'zedPlatformUrl', 'ollamaValidationError');
-  assert.match(zedUrlBody, /https:\/\/dashboard\.zed\.dev\//);
-  const css = readRendererFile('styles.css');
-  assert.match(css, /#zedManualPanel textarea,/);
-  assert.match(readRendererFile('index.html'), /id="zedErrorMessage"[^>]*class="[^"]*hidden"/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  assert.equal(limitProviderUrlAllowed('dashboard.zed.dev', '/'), true);
+  const panel = readRendererFile('limits/accountPanels.js');
+  assert.match(panel, /element\('div', 'ErrorMessage', 'settings-note error hidden'\)/);
+  assert.match(readRendererFile('styles.css'), /\.single-credential-manual-panel textarea,/);
 
   const i18n = readRendererFile('i18n.js');
   assert.doesNotMatch(i18n, /settings\.limits\.connection\.zed/);
@@ -1002,30 +1006,26 @@ test('Zed account panel follows the manual browser Cookie flow without exposing 
   }
 });
 
-test('Command Code account panel saves a cookie, enables its provider, and opens the allowlisted usage page', () => {
+test('Command Code generic account panel saves a cookie and opens the allowlisted usage page', () => {
   const html = readRendererFile('index.html');
-  assert.match(html, /<div id="commandcodeAccountGroup"[\s\S]*?<textarea id="commandcodeCookieInput"[\s\S]*?<button id="commandcodeCookieSubmit"[\s\S]*data-i18n="settings\.commandcode\.saveCookie">/);
-  const details = html.match(/<div id="commandcodeSettingsDetails"[\s\S]*?<div id="commandcodeErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
-  for (const step of [1, 2, 3, 4]) {
-    assert.match(details, new RegExp(`<strong>${step}\\.<\\/strong> <span data-i18n="settings\\.commandcode\\.step${step}">`));
-  }
-  assert.match(details, /placeholder="__Secure-commandcode_prod_\.session_token=\.\.\."/);
-
+  assert.doesNotMatch(html, /id="commandcodeAccountGroup"/);
+  const { limitAccountFormsForRenderer, accountFieldProjection, accountStatusProjection } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'commandcode');
+  assert.equal(form.field, 'commandcodeCookie');
+  assert.equal(form.input, 'textarea');
+  assert.equal(form.url, 'https://commandcode.ai/settings/usage');
+  assert.deepEqual(form.steps, [1, 2, 3, 4].map((step) => `settings.commandcode.step${step}`));
+  const panel = readRendererFile('limits/accountPanels.js');
+  assert.match(panel, /onSave\(form, input\.value, \(\) => \{ input\.value = ''; \}\)/);
+  assert.match(panel, /onClear\(form\)/);
   const app = readRendererFile('app.js');
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /commandcodeCookie: input\.value,\n\s*limitProviders: limitProviderSelectionIncluding\('commandcode'\),\n\s*limitsEnabled: true/);
-  assert.match(setupBody, /saveSettings\(\{ commandcodeCookie: '' \}\)/);
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(commandcodePlatformUrl\(\)\)/);
-  const urlBody = functionBody(app, 'commandcodePlatformUrl', 'ollamaValidationError');
-  assert.match(urlBody, /return 'https:\/\/commandcode\.ai\/settings\/usage';/);
-
-  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
-  assert.match(allowlist, /parsed\.hostname === 'commandcode\.ai' \|\| parsed\.hostname === 'www\.commandcode\.ai'/);
-  // The cookie is a credential: the renderer only ever learns that one is set.
-  const settingsForRenderer = functionBody(main, 'settingsForRenderer', 'pushSettingsToRenderer');
-  assert.match(settingsForRenderer, /commandcodeCookie: settings\?\.commandcodeCookie \? 'set' : ''/);
-  assert.match(settingsForRenderer, /commandcodeCookieConfigured: Boolean\(currentCommandcodeCookie\(\)\)/);
+  assert.match(app, /\[field\]: value,\n\s*limitProviders: limitProviderSelectionIncluding\(id\),\n\s*limitsEnabled: true/);
+  assert.match(app, /saveSettings\(\{ \[field\]: '' \}\)/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  assert.equal(limitProviderUrlAllowed('commandcode.ai', '/settings/usage'), true);
+  assert.equal(limitProviderUrlAllowed('www.commandcode.ai', '/settings/usage'), true);
+  assert.equal(accountFieldProjection({ commandcodeCookie: 'private' }).commandcodeCookie, 'set');
+  assert.equal(accountStatusProjection({ commandcodeCookie: 'private' }, {}).commandcodeCookieConfigured, true);
 });
 
 test('Kimi account panel makes the Code API primary and keeps Web access as a fallback', () => {
@@ -1046,9 +1046,16 @@ test('Kimi account panel makes the Code API primary and keeps Web access as a fa
 
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
-  assert.match(allowlist, /parsed\.hostname === 'kimi\.com' \|\| parsed\.hostname === 'www\.kimi\.com'/);
-  assert.match(allowlist, /parsed\.hostname === 'ollama\.com' \|\| parsed\.hostname === 'www\.ollama\.com'/);
-  assert.match(allowlist, /parsed\.pathname\.startsWith\('\/code'\)/);
+  assert.match(allowlist, /limitProviderUrlAllowed\(parsed\.hostname, parsed\.pathname\)/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  for (const host of ['kimi.com', 'www.kimi.com']) {
+    assert.equal(limitProviderUrlAllowed(host, '/code/console'), true);
+    assert.equal(limitProviderUrlAllowed(host, '/'), false);
+  }
+  for (const host of ['ollama.com', 'www.ollama.com']) {
+    assert.equal(limitProviderUrlAllowed(host, '/settings'), true);
+    assert.equal(limitProviderUrlAllowed(host, '/'), false);
+  }
 });
 
 test('Claude Web account panel stores a redacted cookie and opens only the usage page', () => {
@@ -1155,7 +1162,8 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   assert.match(urlBody, /return 'https:\/\/claude\.ai\/settings\/usage';/);
 
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
-  assert.match(main, /function normalizeClaudeWebCookie\(value\) \{\s*return normalizeClaudeWebCookieInput\(value\);\s*\}/);
+  const { normalizeAccountField, accountFieldProjection, accountStatusProjection } = require('../../src/electron/limits/accountSettings');
+  assert.throws(() => normalizeAccountField('claudeWebCookie', 'sessionKey=abc'), /sk-ant-/);
   assert.match(main, /ipcMain\.handle\('claude:saveCookie'[\s\S]*fetchClaudeLimits\([\s\S]*providerRuntimeState: new Map\(\)/);
   assert.match(main, /const requestRevision = \+\+claudeWebCookieMutationRevision;/);
   assert.match(main, /claudeWebCookieMutationRevision !== requestRevision[\s\S]*superseded: true/);
@@ -1167,16 +1175,22 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     main.indexOf("ipcMain.handle('appearance:preview'")
   );
   assert.ok(
-    updateHandler.indexOf('normalizeClaudeWebCookie(patch.claudeWebCookie)')
+    updateHandler.indexOf('normalizeAccountPatch(patch, normalizedPatch)')
       < updateHandler.indexOf('saveSettings({ throwOnError: true })'),
     'invalid Claude cookies must be rejected before the existing credential can be persisted over'
   );
   const rendererSettings = functionBody(main, 'settingsForRenderer', 'pushSettingsToRenderer');
-  assert.match(rendererSettings, /claudeWebCookie: settings\?\.claudeWebCookie \? 'set' : ''/);
-  assert.match(rendererSettings, /claudeWebCookieConfigured: Boolean\(currentClaudeWebCookie\(\)\)/);
-  assert.match(rendererSettings, /claudeWebCookieSource/);
+  assert.match(rendererSettings, /\.\.\.accountFieldProjection\(settings, process\.env\)/);
+  assert.match(rendererSettings, /\.\.\.accountStatusProjection\(settings, process\.env\)/);
+  assert.equal(accountFieldProjection({ claudeWebCookie: 'private' }).claudeWebCookie, 'set');
+  const claudeStatus = accountStatusProjection({ claudeWebCookie: 'private' }, {});
+  assert.equal(claudeStatus.claudeWebCookieConfigured, true);
+  assert.equal(claudeStatus.claudeWebCookieSource, 'settings');
   const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
-  assert.match(allowlist, /parsed\.hostname === 'claude\.ai' && parsed\.pathname\.startsWith\('\/settings'\)/);
+  assert.match(allowlist, /limitProviderUrlAllowed\(parsed\.hostname, parsed\.pathname\)/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  assert.equal(limitProviderUrlAllowed('claude.ai', '/settings/usage'), true);
+  assert.equal(limitProviderUrlAllowed('claude.ai', '/'), false);
 });
 
 test('DeepSeek account pill keeps its validated API key state after moving into Limits', () => {
@@ -1328,7 +1342,10 @@ test('DeepSeek account copy says browser and external URL is allowlisted', () =>
 
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
-  assert.match(allowlist, /parsed\.hostname === 'platform\.deepseek\.com'/);
+  assert.match(allowlist, /limitProviderUrlAllowed\(parsed\.hostname, parsed\.pathname\)/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  assert.equal(limitProviderUrlAllowed('platform.deepseek.com', '/api_keys'), true);
+  assert.equal(limitProviderUrlAllowed('platform.deepseek.com', '/'), false);
 
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
@@ -1359,99 +1376,82 @@ test('Devin account panel uses the shared status label and opens the allowlisted
 
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
-  assert.match(allowlist, /parsed\.hostname === 'app\.devin\.ai' && parsed\.pathname\.startsWith\('\/settings\/usage'\)/);
+  assert.match(allowlist, /limitProviderUrlAllowed\(parsed\.hostname, parsed\.pathname\)/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  assert.equal(limitProviderUrlAllowed('app.devin.ai', '/settings/usage'), true);
+  assert.equal(limitProviderUrlAllowed('app.devin.ai', '/settings'), false);
 });
 
 test('Z.ai global and BigModel CN browser links are allowlisted', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
-  assert.match(allowlist, /parsed\.hostname === 'z\.ai' \|\| parsed\.hostname === 'www\.z\.ai'/);
-  assert.match(allowlist, /parsed\.hostname === 'bigmodel\.cn' \|\| parsed\.hostname === 'www\.bigmodel\.cn'/);
+  assert.match(allowlist, /limitProviderUrlAllowed\(parsed\.hostname, parsed\.pathname\)/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  for (const host of ['z.ai', 'www.z.ai', 'bigmodel.cn', 'www.bigmodel.cn']) {
+    assert.equal(limitProviderUrlAllowed(host, '/'), true);
+  }
 });
 
-test('Factory account panel validates an API key before saving and opens the allowlisted API keys page', () => {
-  const html = readRendererFile('index.html');
-  assert.match(html, /<div id="factoryAccountGroup"[\s\S]*?<input id="factoryApiKeyInput" type="password"[\s\S]*?<button id="factoryApiKeySubmit"/);
-  assert.match(html, /automatically detects FACTORY_API_KEY[\s\S]*To use a different Factory API key instead[\s\S]*used only to query Factory plan quotas and Extra Usage balance/);
-
+test('Factory account form keeps its setup copy and validates before saving', () => {
+  const { limitAccountFormsForRenderer, accountStatusProjection, normalizeAccountField } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'factory');
+  assert.equal(form.input, 'input');
+  assert.equal(form.field, 'factoryApiKey');
+  assert.equal(form.noteKey, 'settings.factory.note');
+  assert.equal(form.url, 'https://app.factory.ai/settings/api-keys');
+  assert.equal(form.validation.invalidKey, 'settings.factory.validationInvalid');
+  assert.doesNotMatch(readRendererFile('index.html'), /id="factoryAccountGroup"/);
   const app = readRendererFile('app.js');
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /const validation = await window\.tokenMonitor\.factory\.validateApiKey\(input\.value\);[\s\S]*?if \(!validation\?\.ok\) \{[\s\S]*?factoryApiKeyValidationError\(validation\);[\s\S]*?return;[\s\S]*?await saveSettings\(\{ factoryApiKey: input\.value \}\)/);
-  assert.match(setupBody, /submit\.disabled = true;[\s\S]*?submit\.textContent = t\('settings\.common\.checking'\);[\s\S]*?finally \{[\s\S]*?submit\.disabled = false;[\s\S]*?submit\.textContent = t\('settings\.factory\.saveApiKey'\)/);
-  assert.match(setupBody, /saveSettings\(\{ factoryApiKey: '' \}\)/);
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(factoryPlatformUrl\(\)\)/);
-  const urlBody = functionBody(app, 'factoryPlatformUrl', 'zaiteamPlatformUrl');
-  assert.match(urlBody, /return 'https:\/\/app\.factory\.ai\/settings\/api-keys';/);
-
+  const setup = functionBody(app, 'setupLimitAccountPanels', 'limitProviderAccountGroup');
+  assert.match(setup, /const result = await window\.tokenMonitor\.limits\.validateCredential\(id, value\);[\s\S]*?if \(!result\?\.ok\)[\s\S]*?throw error;[\s\S]*?await saveSettings\(validation \? \{ \[field\]: value \}/);
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
-  assert.match(preload, /validateApiKey: \(apiKey\) => ipcRenderer\.invoke\('factory:validateApiKey', apiKey\)/);
-  assert.match(main, /ipcMain\.handle\('factory:validateApiKey', \(_event, raw\) => validateFactoryApiKey\(raw\)\)/);
-  const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
-  assert.match(allowlist, /parsed\.hostname === 'app\.factory\.ai'[\s\S]*parsed\.pathname\.startsWith\('\/settings\/api-keys'\)/);
-  const normalizeKey = functionBody(main, 'normalizeFactoryApiKey', 'currentFactoryApiKey');
-  assert.doesNotMatch(normalizeKey, /factoryEnvApiKey/);
-  assert.equal(runMainFunction(
-    main,
-    'currentFactoryApiKey',
-    'normalizeSecretSetting',
-    'currentFactoryApiKey()',
-    {
-      settings: { factoryApiKey: '' },
-      factoryEnvApiKey: () => 'auto-detected-key',
-      process: { env: {} }
-    }
-  ), 'auto-detected-key');
+  assert.match(preload, /validateCredential: \(providerId, credential\) => ipcRenderer\.invoke\('limits:validateCredential', providerId, credential\)/);
+  assert.match(main, /ipcMain\.handle\('limits:validateCredential', \(_event, providerId, raw\) => validateLimitCredential\(providerId, raw\)\)/);
+  assert.equal(normalizeAccountField('factoryApiKey', ' " fk-live " '), 'fk-live');
+  const projected = accountStatusProjection({ factoryApiKey: '' }, { FACTORY_API_KEY: 'auto-detected-key' });
+  assert.equal(projected.factoryCredentialConfigured, true);
+  assert.equal(projected.factoryCredentialSource, 'env');
 });
 
-test('Factory API key validation accepts only a successful provider probe', async () => {
+test('validated account probes use the chosen registry entry and reject unknown ids', async () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  const valid = await runMainFunction(
-    main,
-    'validateFactoryApiKey',
-    'normalizeSecretSetting',
-    `validateFactoryApiKey(' fk-live ', {
-      normalizeApiKey: value => value.trim(),
+  const validate = (expression) => runMainFunction(main, 'validateLimitCredential', 'electronLimitsDeps', expression, {
+    limitProviderEntry: require('../../src/shared/limits/registry').limitProviderEntry
+  });
+  for (const [id, field, value] of [['factory', 'factoryApiKey', 'fk-live'], ['cline', 'clineApiKey', 'sk-live']]) {
+    const valid = await validate(`validateLimitCredential('${id}', ' ${value} ', {
+      normalizeCredential: value => value.trim(),
       providerDeps: { transport: 'electron' },
       fetchLimits: async (options, deps) => ({
-        status: options.factoryApiKey === 'fk-live' && deps.transport === 'electron' ? 'ok' : 'unavailable'
+        status: options.${field} === '${value}' && deps.transport === 'electron' ? 'ok' : 'unavailable'
       })
-    })`
-  );
-  assert.equal(valid.ok, true);
-  assert.equal(valid.status, 'ok');
-
-  const invalid = await runMainFunction(
-    main,
-    'validateFactoryApiKey',
-    'normalizeSecretSetting',
-    `validateFactoryApiKey('1', {
-      normalizeApiKey: value => value.trim(),
-      providerDeps: {},
-      fetchLimits: async () => {
-        const error = new Error('rejected');
-        error.status = 'unauthorized';
-        throw error;
-      }
-    })`
-  );
-  assert.equal(invalid.ok, false);
-  assert.equal(invalid.status, 'unauthorized');
+    })`);
+    assert.equal(valid.ok, true);
+    assert.equal(valid.status, 'ok');
+    const invalid = await validate(`validateLimitCredential('${id}', '1', {
+      normalizeCredential: value => value.trim(), providerDeps: {},
+      fetchLimits: async () => { const error = new Error('rejected'); error.status = 'unauthorized'; throw error; }
+    })`);
+    assert.deepEqual({ ...invalid }, { ok: false, status: 'unauthorized' });
+    const empty = await validate(`validateLimitCredential('${id}', '  ', {
+      normalizeCredential: value => value.trim(), fetchLimits: async () => { throw new Error('must not probe'); }
+    })`);
+    assert.equal(empty.status, 'notConfigured');
+  }
+  for (const id of ['typesafe', 'unknown', '__proto__']) {
+    const result = await validate(`validateLimitCredential('${id}', 'secret', {
+      fetchLimits: async () => { throw new Error('must not probe'); }
+    })`);
+    assert.equal(result.ok, false);
+    assert.equal(result.status, 'notConfigured');
+  }
 });
 
-test('Factory API key validation errors distinguish invalid, rate-limited, and unavailable checks', () => {
-  const app = readRendererFile('app.js');
-  const messages = runRendererFunctions(
-    app,
-    ['factoryApiKeyValidationError'],
-    `[
-      factoryApiKeyValidationError({ status: 'unauthorized' }),
-      factoryApiKeyValidationError({ status: 'sourceRateLimited' }),
-      factoryApiKeyValidationError({ status: 'unavailable' })
-    ]`,
-    { t: key => key }
-  );
-  assert.deepEqual(Array.from(messages), [
+test('Factory API key validation keeps all translated failure messages', () => {
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'factory');
+  assert.deepEqual(Object.values(form.validation), [
     'settings.factory.validationInvalid',
     'settings.factory.validationRateLimited',
     'settings.factory.validationUnavailable'
@@ -1470,8 +1470,10 @@ test('Factory API key validation errors distinguish invalid, rate-limited, and u
 test('Factory identifies environment and Droid .env credentials separately', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const settingsBody = functionBody(main, 'settingsForRenderer', 'systemDarkTrayUi');
-  assert.match(settingsBody, /resolveFactoryAutomaticApiKey\(\{\}, \{ env: process\.env \}\)/);
-  assert.match(settingsBody, /settings\?\.factoryApiKey \? 'settings' : factoryAutomaticCredential\.source/);
+  assert.match(settingsBody, /\.\.\.accountStatusProjection\(settings, process\.env\)/);
+  const { accountStatusProjection } = require('../../src/electron/limits/accountSettings');
+  const projected = accountStatusProjection({}, { FACTORY_API_KEY: 'env-key' });
+  assert.equal(projected.factoryCredentialSource, 'env');
 
   const app = readRendererFile('app.js');
   const labels = runRendererFunctions(
@@ -1489,27 +1491,20 @@ test('Factory identifies environment and Droid .env credentials separately', () 
   assert.equal((i18n.match(/'settings\.factory\.statusDroidEnv'/g) || []).length, 5);
 });
 
-test('Cline account panel validates an API key before saving and opens the allowlisted account page', () => {
+test('Cline account form keeps sign-in precedence, accessible input, and allowlisted setup URL', () => {
   const html = readRendererFile('index.html');
-  assert.match(html, /<div id="clineAccountGroup"[\s\S]*?<input id="clineApiKeyInput" type="password"[\s\S]*?<button id="clineApiKeySubmit"/);
-  // A password box with only a placeholder has no accessible name, so it is named
-  // the way opencodeApiKeyInput is — and the completeness check below holds the key
-  // to all five locales.
-  assert.match(html, /<input id="clineApiKeyInput"[^>]*aria-label="Cline API key"[^>]*data-i18n-aria-label="settings\.cline\.apiKeyLabel"/);
-  assert.match(html, /reads the Cline sign-in that Cline Desktop and the CLI already store[\s\S]*the key is used ahead of that sign-in/);
-
-  const app = readRendererFile('app.js');
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /const validation = await window\.tokenMonitor\.cline\.validateApiKey\(input\.value\);([\s\S]*?)if \(!validation\?\.ok\) \{([\s\S]*?)clineApiKeyValidationError\(validation\);([\s\S]*?)return;([\s\S]*?)await saveSettings\(\{ clineApiKey: input\.value \}\)/);
-  assert.match(setupBody, /submit\.disabled = true;[\s\S]*?submit\.textContent = t\('settings\.common\.checking'\);[\s\S]*?finally \{[\s\S]*?submit\.disabled = false;[\s\S]*?submit\.textContent = t\('settings\.cline\.saveApiKey'\)/);
-  assert.match(setupBody, /saveSettings\(\{ clineApiKey: '' \}\)/);
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(clinePlatformUrl\(\)\)/);
-  assert.match(functionBody(app, 'clinePlatformUrl', 'factoryPlatformUrl'), /return 'https:\/\/app\.cline\.bot\/dashboard\/account';/);
-
+  assert.doesNotMatch(html, /id="clineAccountGroup"/);
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'cline');
+  assert.equal(form.input, 'input');
+  assert.equal(form.field, 'clineApiKey');
+  assert.equal(form.noteKey, 'settings.cline.note');
+  assert.equal(form.ariaLabelKey, 'settings.cline.apiKeyLabel');
+  assert.equal(form.url, 'https://app.cline.bot/dashboard/account');
+  assert.equal(form.validation.invalidKey, 'settings.cline.validationInvalid');
+  const panel = readRendererFile('limits/accountPanels.js');
+  assert.match(panel, /input\.setAttribute\('aria-label', translate\(form\.ariaLabelKey\)\)/);
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
-  assert.match(preload, /validateApiKey: \(apiKey\) => ipcRenderer\.invoke\('cline:validateApiKey', apiKey\)/);
-  assert.match(main, /ipcMain\.handle\('cline:validateApiKey', \(_event, raw\) => validateClineApiKey\(raw\)\)/);
   // The panel's one outbound link has to survive the same allowlist as every other
   // provider console, which is what no assertion was checking when Cline shipped and
   // the button silently did nothing. Asserted by running the predicate rather than by
@@ -1532,83 +1527,22 @@ test('Cline account panel validates an API key before saving and opens the allow
       process: { env: {} },
       isAllowedVerificationUrl: () => false,
       isAllowedCodexLoginUrl: () => false,
+      limitProviderUrlAllowed: require('../../src/shared/limits/accounts').limitProviderUrlAllowed,
       STATUS_PAGE_HOSTS: new Set()
     }
   );
   assert.deepEqual(Array.from(allowed), [true, false, false, false]);
   // The normalizer cleans the pasted value only; reading the environment is the
   // resolver's job, so an empty field never falls back to an env key on save.
-  assert.doesNotMatch(functionBody(main, 'normalizeClineApiKey', 'currentClineApiKey'), /clineApiKey\(/);
-  assert.equal(runMainFunction(
-    main,
-    'currentClineApiKey',
-    'normalizeSecretSetting',
-    'currentClineApiKey()',
-    {
-      settings: { clineApiKey: '' },
-      clineApiKey: () => 'auto-detected-key',
-      process: { env: {} }
-    }
-  ), 'auto-detected-key');
-});
-
-test('Cline API key validation accepts only a successful provider probe', async () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  const valid = await runMainFunction(
-    main,
-    'validateClineApiKey',
-    'normalizeSecretSetting',
-    `validateClineApiKey(' sk-live ', {
-      normalizeApiKey: value => value.trim(),
-      providerDeps: { transport: 'electron' },
-      fetchLimits: async (options, deps) => ({
-        status: options.clineApiKey === 'sk-live' && deps.transport === 'electron' ? 'ok' : 'unavailable'
-      })
-    })`
-  );
-  assert.equal(valid.ok, true);
-  assert.equal(valid.status, 'ok');
-
-  const invalid = await runMainFunction(
-    main,
-    'validateClineApiKey',
-    'normalizeSecretSetting',
-    `validateClineApiKey('1', {
-      normalizeApiKey: value => value.trim(),
-      providerDeps: {},
-      fetchLimits: async () => {
-        const error = new Error('rejected');
-        error.status = 'unauthorized';
-        throw error;
-      }
-    })`
-  );
-  assert.equal(invalid.ok, false);
-  assert.equal(invalid.status, 'unauthorized');
-  // An empty field is not a probe: nothing is asked, and nothing is claimed.
-  const empty = await runMainFunction(
-    main,
-    'validateClineApiKey',
-    'normalizeSecretSetting',
-    `validateClineApiKey('   ', { normalizeApiKey: value => value.trim(), fetchLimits: async () => { throw new Error('should not be called'); } })`
-  );
-  assert.equal(empty.ok, false);
-  assert.equal(empty.status, 'notConfigured');
+  const { currentAccountField, normalizeAccountField } = require('../../src/electron/limits/accountSettings');
+  assert.equal(normalizeAccountField('clineApiKey', ' " sk-live " '), 'sk-live');
+  assert.equal(currentAccountField('clineApiKey', { clineApiKey: '' }, { CLINE_API_KEY: 'auto-detected-key' }), 'auto-detected-key');
 });
 
 test('Cline API key validation errors distinguish invalid, limited, and unavailable checks', () => {
-  const app = readRendererFile('app.js');
-  const messages = runRendererFunctions(
-    app,
-    ['clineApiKeyValidationError'],
-    `[
-      clineApiKeyValidationError({ status: 'unauthorized' }),
-      clineApiKeyValidationError({ status: 'sourceRateLimited' }),
-      clineApiKeyValidationError({ status: 'unavailable' })
-    ]`,
-    { t: key => key }
-  );
-  assert.deepEqual(Array.from(messages), [
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'cline');
+  assert.deepEqual(Object.values(form.validation), [
     'settings.cline.validationInvalid',
     'settings.cline.validationRateLimited',
     'settings.cline.validationUnavailable'
@@ -1783,26 +1717,33 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   );
   assert.ok(body, 'settingsForRenderer should exist');
   assert.match(body, /credentialSettingsForRenderer\(settings, \{\s*expose: \['hubHostSecret', 'secret'\]\s*\}\)/);
-  // The raw OpenCode cookie must be reduced to a presence flag, never forwarded verbatim.
-  assert.match(body, /opencodeCookie:[^,}]*\?\s*'set'\s*:\s*''/);
-  // Multi-account profile cookies are redacted the same way.
-  assert.match(body, /opencodeProfiles: redactOpencodeProfilesForRenderer\(/);
-  assert.match(body, /'workbuddyAccessToken',[\s\S]*'workbuddyDepartmentInfo'/);
+  assert.match(body, /\.\.\.accountFieldProjection\(settings, process\.env\)/);
+  assert.match(body, /rendererOmittedAccountKeys\(\)/);
+  const { accountFieldProjection, rendererOmittedAccountKeys } = require('../../src/electron/limits/accountSettings');
+  const fields = accountFieldProjection({ opencodeCookie: 'private', opencodeProfiles: { default: { cookie: 'private', apiKey: 'private' } } });
+  assert.equal(fields.opencodeCookie, 'set');
+  assert.deepEqual({ ...fields.opencodeProfiles.default }, { enabled: true, cookie: 'set', apiKey: 'set' });
+  for (const key of ['workbuddyAccessToken', 'workbuddyDepartmentInfo']) {
+    assert.ok(rendererOmittedAccountKeys().includes(key));
+  }
   assert.doesNotMatch(body, /workbuddyLocalApp/);
   assert.doesNotMatch(main, /workbuddySession|workbuddyBrowserSession/);
   assert.doesNotMatch(body, /workbuddyBrowserSessionEnabled: settings\?\.workbuddyBrowserSessionEnabled/);
   // That redactor must name the fields it forwards. A spread of the stored
   // profile hands any field added later to the renderer verbatim, which is how
   // the API key would have leaked when profiles gained one.
-  const opencodeRedactor = main.slice(
-    main.indexOf('function redactOpencodeProfilesForRenderer'),
-    main.indexOf('function redactOpenRouterProfilesForRenderer')
+  const accountSettingsSource = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'limits', 'accountSettings.js'), 'utf8');
+  const opencodeRedactor = accountSettingsSource.slice(
+    accountSettingsSource.indexOf('function redactOpencodeProfilesForRenderer'),
+    accountSettingsSource.indexOf('function redactOpenRouterProfilesForRenderer')
   );
   assert.doesNotMatch(opencodeRedactor, /\.\.\.profile/);
   assert.match(opencodeRedactor, /cookie: profile\?\.cookie \? 'set' : ''/);
   assert.match(opencodeRedactor, /apiKey: profile\?\.apiKey \? 'set' : ''/);
-  assert.match(credentialStore, /kimiWebAccessToken: \['providers', 'kimi', 'webAccessToken'\]/);
-  assert.match(body, /kimiWebAccessTokenConfigured: Boolean\(currentKimiWebAccessToken\(\)\)/);
+  const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
+  assert.deepEqual(CREDENTIAL_SETTING_PATHS.kimiWebAccessToken, ['providers', 'kimi', 'webAccessToken']);
+  const { accountStatusProjection } = require('../../src/electron/limits/accountSettings');
+  assert.equal(accountStatusProjection({ kimiWebAccessToken: 'private' }, {}).kimiWebAccessTokenConfigured, true);
   const mimoRendererShape = main.slice(
     main.indexOf('function mimoAccountsForRenderer'),
     main.indexOf('function mimoManagedAccountsForCollector')
@@ -1903,13 +1844,19 @@ test('successful settings saves invalidate the exported tray menu', () => {
 test('main settings normalize the Z.ai API region', () => {
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const defaults = main.slice(main.indexOf('function defaultSettings'), main.indexOf('function defaultLimitProviders'));
-  assert.match(defaults, /zaiApiRegion: normalizeZaiApiRegion\(process\.env\.TOKEN_MONITOR_ZAI_API_REGION \|\| process\.env\.ZAI_API_REGION \|\| process\.env\.Z_AI_API_HOST \|\| 'global'\)/);
+  assert.match(defaults, /\.\.\.initialAccountSettings\(process\.env\)/);
+  const { initialAccountSettings, normalizeAccountField, normalizeAccountPatch } = require('../../src/electron/limits/accountSettings');
+  assert.equal(initialAccountSettings({ Z_AI_API_HOST: 'bigmodel.cn' }).zaiApiRegion, 'bigmodel-cn');
 
   const handler = main.slice(
     main.indexOf("ipcMain.handle('settings:update'"),
     main.indexOf("ipcMain.handle('customPricing:list'")
   );
-  assert.match(handler, /if \(patch\.zaiApiRegion !== undefined\) normalizedPatch\.zaiApiRegion = normalizeZaiApiRegion\(patch\.zaiApiRegion\);/);
+  assert.match(handler, /normalizeAccountPatch\(patch, normalizedPatch\)/);
+  const patch = { zaiApiRegion: 'bigmodel-cn' };
+  const normalized = { ...patch };
+  normalizeAccountPatch(patch, normalized);
+  assert.equal(normalized.zaiApiRegion, normalizeAccountField('zaiApiRegion', patch.zaiApiRegion));
 });
 
 test('main settings migration preserves explicit AI limit provider selections', () => {
@@ -2759,24 +2706,23 @@ test('main collectors share one live GUI limit credential resolver in every widg
     assert.match(collector, /limitsOptions: electronLimitsConfig\(\)/);
     assert.match(collector, /limitsDeps: electronLimitsDeps\(\)/);
   }
-  const limitsDeps = functionBody(main, 'electronLimitsDeps', 'normalizeDeepSeekApiKey');
+  const limitsDeps = functionBody(main, 'electronLimitsDeps', 'normalizeCodexManagedAccounts');
   assert.match(limitsDeps, /fetch: electronLimitsFetch\(\)/);
   assert.match(limitsDeps, /resolveConfigSnapshot: \(\) => electronLimitsConfig\(\)/);
   assert.match(limitsDeps, /onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal/);
   const renewalPersistence = functionBody(
     main,
     'persistClaudeWebCookieRenewal',
-    'electronLimitsDeps'
+    'validateLimitCredential'
   );
   assert.match(renewalPersistence, /settings\.claudeWebCookie === renewed\) return true/);
   assert.match(renewalPersistence, /saveSettings\(\{ throwOnError: true \}\)/);
   assert.doesNotMatch(renewalPersistence, /queueLimitInvalidation|classifySettingsChange/);
-  for (const key of [
-    'claudeWebCookie', 'zaiApiKey', 'zaiApiRegion', 'volcengineAccessKeyId', 'volcengineSecretAccessKey',
-    'volcengineRegion', 'qoderCookie', 'qoderSite', 'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken',
-    'ollamaCookie', 'zedCookie'
-  ]) assert.match(runtimeConfig, new RegExp(`${key}: settings\\.${key}`));
-  assert.match(runtimeConfig, /env\.TOKEN_MONITOR_ZED_COOKIE/);
+  assert.match(runtimeConfig, /\.\.\.limitsAccountConfig\(settings, context\)/);
+  const { limitsConfigFromSettings } = require('../../src/electron/runtimeConfig');
+  const config = limitsConfigFromSettings({ zedCookie: 'stored' }, { env: { TOKEN_MONITOR_ZED_COOKIE: 'env' } });
+  assert.equal(config.zedCookie, 'stored');
+  assert.equal(limitsConfigFromSettings({}, { env: { TOKEN_MONITOR_ZED_COOKIE: 'env' } }).zedCookie, 'env');
   assert.doesNotMatch(runtimeConfig, /TOKEN_MONITOR_ZED_USER_ID|TOKEN_MONITOR_ZED_ACCESS_TOKEN|zedManagedAccounts/);
   assert.doesNotMatch(main, /zedManagedAccountsForCollector/);
 });
@@ -2784,7 +2730,7 @@ test('main collectors share one live GUI limit credential resolver in every widg
 test('WorkBuddy Electron fetch adapter forwards parsed response JSON', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   assert.match(main, /createWorkbuddyLocalAuth\(\{\s*fetch: electronLimitsFetch\(\)/);
-  const limitsDeps = functionBody(main, 'electronLimitsDeps', 'normalizeDeepSeekApiKey');
+  const limitsDeps = functionBody(main, 'electronLimitsDeps', 'normalizeCodexManagedAccounts');
   assert.match(limitsDeps, /json: \(\) => result\.json\(\)/);
   assert.doesNotMatch(limitsDeps, /result\.body/);
 });
