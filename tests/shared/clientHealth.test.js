@@ -433,7 +433,7 @@ test('the Cursor cache follows an absolute Windows HOME override', () => {
 });
 
 test('source resolution feeds watcher paths and exact-file diagnostics without changing the root contract', () => {
-  const homeDir = path.join(path.sep, 'tmp', 'source-resolution');
+  const homeDir = path.join(os.tmpdir(), 'source-resolution');
   const env = { XDG_DATA_HOME: path.join(homeDir, 'xdg') };
   const options = {
     homeDir,
