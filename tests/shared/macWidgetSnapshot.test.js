@@ -10,6 +10,7 @@ const {
   resolveWidgetSourceFreshness,
   serializeMacWidgetSnapshot
 } = require('../../src/shared/macWidgetSnapshot');
+const { widgetVendorPalette } = require('../../src/shared/vendorPresentation');
 const { aggregateDevices } = require('../../src/shared/usage');
 const { localIso } = require('../helpers/localTime');
 
@@ -83,7 +84,7 @@ function aggregateDevice(deviceId, sourceTime, totalTokens = 42) {
   };
 }
 
-test('builds schema v10 periods, quota and presentation', () => {
+test('builds schema v11 periods, quota and presentation', () => {
   const snapshot = buildSnapshot(sampleStats(), {
     now: NOW,
     presentation: {
@@ -93,7 +94,7 @@ test('builds schema v10 periods, quota and presentation', () => {
   });
 
   assert.equal(snapshot.schemaVersion, MAC_WIDGET_SCHEMA_VERSION);
-  assert.equal(MAC_WIDGET_SCHEMA_VERSION, 10);
+  assert.equal(MAC_WIDGET_SCHEMA_VERSION, 11);
   assert.deepEqual(snapshot.periods.day.overview, {
     totalTokens: 1_200_000, costUsd: 1.25
   });
@@ -105,6 +106,12 @@ test('builds schema v10 periods, quota and presentation', () => {
   ]);
   assert.ok(Math.abs(snapshot.periods.day.tools[0].sharePercent - (100 / 1.2)) < Number.EPSILON * 100);
   assert.ok(Math.abs(snapshot.periods.day.tools[1].sharePercent - (100 / 6)) < Number.EPSILON * 100);
+  // Tool rows arrive named, and the palette is the vendor table's, so the
+  // widget keeps no label or colour table of its own.
+  assert.deepEqual(snapshot.periods.day.tools.map((tool) => tool.displayName), ['Codex', 'Claude']);
+  assert.deepEqual(snapshot.vendors, widgetVendorPalette());
+  assert.deepEqual(snapshot.vendors.doubao, { color: '#5064FF' });
+  assert.deepEqual(snapshot.vendors.factory, { ink: true, icon: 'droid' });
   assert.deepEqual(snapshot.quota[0].windows[0], {
     kind: 'weekly', label: 'Weekly', metric: null, showMeter: true,
     usedPercent: 35,
@@ -599,7 +606,7 @@ test('accepts only real UTC calendar dates and lets the last duplicate date win'
 
 test('returns a complete empty schema and stale status for missing or old data', () => {
   const empty = buildSnapshot({}, { now: NOW });
-  assert.equal(empty.schemaVersion, 10);
+  assert.equal(empty.schemaVersion, 11);
   assert.equal(empty.periods.day.overview.totalTokens, 0);
   assert.equal(empty.periods.month.overview.totalTokens, 0);
   assert.equal(empty.periods.total.overview.totalTokens, 0);
@@ -734,7 +741,7 @@ test('uses explicit allowlists so secrets, identities and raw history never ente
   for (const value of sensitive) assert.equal(serialized.includes(value), false);
   assert.equal(serialized.endsWith('\n'), true);
   const parsed = JSON.parse(serialized);
-  assert.equal(parsed.schemaVersion, 10);
+  assert.equal(parsed.schemaVersion, 11);
   assert.equal(parsed.quota.find((provider) => provider.provider === 'codex').accountLabel, 'p***e@example.com');
   assert.deepEqual(parsed.quota.find((provider) => provider.provider === 'mimo').balance, {
     amount: 3.62,

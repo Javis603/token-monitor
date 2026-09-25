@@ -1,10 +1,12 @@
 'use strict';
 
+const { CLIENT_LABELS } = require('./clientCatalog');
 const { KNOWN_CLIENTS } = require('./clientTracking');
 const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } = require('./limitProviders');
 const { limitWindowKindLabel } = require('./limitWindowLabels');
+const { widgetVendorPalette } = require('./vendorPresentation');
 
-const MAC_WIDGET_SCHEMA_VERSION = 10;
+const MAC_WIDGET_SCHEMA_VERSION = 11;
 const MAC_WIDGET_FRESHNESS_HEARTBEAT_MS = 5 * 60 * 1000;
 const KNOWN_TOOLS = new Set(KNOWN_CLIENTS.split(',').filter(Boolean));
 const KNOWN_LIMIT_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
@@ -148,6 +150,7 @@ function buildTools(period) {
   const denominator = tools.reduce((sum, tool) => sum + tool.totalTokens, 0);
   return tools.slice(0, 10).map((tool) => ({
     id: tool.id,
+    displayName: toolLabel(tool.id),
     totalTokens: tool.totalTokens,
     costUsd: tool.costUsd,
     sharePercent: denominator > 0 ? Math.max(0, Math.min(100, tool.totalTokens / denominator * 100)) : 0
@@ -337,6 +340,13 @@ function buildQuota(limits, activeCodexAccount) {
 // displayName and the Swift side prefers that over its own fallback map.
 function providerLabel(provider) {
   return LIMIT_PROVIDER_LABELS[provider] || provider;
+}
+
+// A tool row is named the way the same id's quota row is, so where an id is
+// both the limits name wins: the widget says "Claude" and "Grok" where the
+// app's usage rows say "Claude Code" and "Grok Build".
+function toolLabel(id) {
+  return LIMIT_PROVIDER_LABELS[id] || CLIENT_LABELS[id] || id;
 }
 
 function buildModels(period) {
@@ -602,6 +612,10 @@ function buildMacWidgetSnapshot(stats, options = {}) {
     periods,
     quota,
     presentation,
+    // Colour and artwork per mark id, from the vendor presentation table. The
+    // widget keeps no copy of its own, so a vendor added there needs no Swift
+    // edit. Model rows still resolve their vendor id in Swift.
+    vendors: widgetVendorPalette(),
     status: buildStatus({ now: safeNow, sourceFreshness })
   };
 }

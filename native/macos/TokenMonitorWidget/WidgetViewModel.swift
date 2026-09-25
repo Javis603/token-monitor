@@ -473,72 +473,10 @@ enum WidgetFormat {
         return "\(presentation.currencySymbol)\(String(format: "%.2f", converted))"
     }
 
-    // Mirrors LIMIT_PROVIDERS in src/electron/renderer/app.js — the widget must
-    // name a provider exactly the way the app does. Kept complete rather than
-    // leaning on the `default` branch: `.capitalized` happens to be right for a
-    // few ids and silently wrong for the rest, and it collapsed zai/zaiteam
-    // onto one label. tests/electron/macWidgetProviderLabels.test.js fails when
-    // this list and the renderer's drift apart.
+    // Only for a row the snapshot did not name. The app stamps displayName on
+    // every tool and quota row, so this is never what a current snapshot shows.
     static func provider(_ value: String) -> String {
-        switch value.lowercased() {
-        case "claude": "Claude"
-        case "codex": "Codex"
-        case "opencode": "OpenCode"
-        case "hermes": "Hermes Agent"
-        case "cursor": "Cursor"
-        case "antigravity": "Antigravity"
-        case "cline": "Cline"
-        case "factory": "Factory Droid"
-        case "droid": "Factory Droid"
-        case "kimi": "Kimi"
-        case "grok": "Grok"
-        case "copilot": "GitHub Copilot"
-        case "omp": "Oh My Pi"
-        case "zed": "Zed"
-        case "commandcode": "Command Code"
-        // Every tracked tool carries an explicit case. The `default` below is
-        // `value.capitalized`, which mangles a multi-word or inner-capitalised
-        // name ("Codebuddy", "Qodercn", "Dsh") and would silently ship a wrong
-        // label, so tools are listed rather than left to the fallback. The
-        // fallback stays for ids this app does not track.
-        case "openclaw": "OpenClaw"
-        case "amp": "Amp"
-        case "qwen": "Qwen"
-        case "pi": "Pi"
-        case "kilo": "Kilo"
-        case "zcode": "ZCode"
-        case "codebuddy": "CodeBuddy"
-        case "proma": "Proma"
-        case "qodercn": "Qoder CN"
-        case "reasonix": "Reasonix"
-        case "dsh": "DeepSeek Harness"
-        case "cherrystudio": "Cherry Studio"
-        case "unsloth": "Unsloth"
-        case "mimo": "Xiaomi MiMo"
-        // Legacy snapshot id. Breakdown rows carry tracked-client ids, which
-        // the app renamed from `micode` to `mimo`; a snapshot written by an
-        // older build can still be on disk when the widget renders, so the old
-        // spelling has to keep resolving. Same reason for the `micode` entries
-        // in WidgetDashboardViews' icon and colour tables.
-        case "micode": "Xiaomi MiMo"
-        case "zai": "GLM"
-        case "zaiteam": "GLM Team"
-        case "kiro": "Kiro"
-        case "workbuddy": "WorkBuddy"
-        case "qoder": "Qoder"
-        case "deepseek": "DeepSeek"
-        case "devin": "Devin"
-        case "typesafe": "TypeSafe"
-        case "lmstudio": "LM Studio"
-        case "openrouter": "OpenRouter"
-        case "minimax": "Minimax"
-        case "volcengine": "Volcengine"
-        case "ollama": "Ollama"
-        case "trae": "Trae CN"
-        case "alibaba": "Alibaba Cloud"
-        case "thirdparty": "Third-party APIs"
-        default: value.capitalized
-        }
+        value.capitalized
     }
 
     static func quotaValue(_ provider: WidgetQuotaProvider) -> String {
