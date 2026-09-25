@@ -119,7 +119,7 @@ test('provider registration and account layout order follows the catalog', () =>
     assert.deepEqual(ids, canonical.filter((id) => ids.includes(id)), label);
   };
   for (const [file, names, indent] of [
-    ['src/electron/renderer/app.js', ['LIMIT_PROVIDER_ACCOUNT_GROUP_IDS', 'LIMIT_PROVIDER_ACCOUNT_STATUS_IDS', 'externalLimitAccountConfig'], '  '],
+    ['src/electron/renderer/app.js', ['LIMIT_PROVIDER_ACCOUNT_NODES', 'externalLimitAccountConfig'], '  '],
     ['src/electron/renderer/limits/providerPresentation.js', ['PROVIDER_SOURCE_LABELS', 'CAPABILITY_TAGS'], '    ']
   ]) {
     const source = read(file);

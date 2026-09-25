@@ -7,6 +7,7 @@ const test = require('node:test');
 const { rendererStyles } = require('../helpers/rendererStyles');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
+const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
 const compactTokenApi = require('../../src/shared/compactTokens');
 const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
 const limitProviderOrderApi = require('../../src/electron/renderer/limits/providerOrder');
@@ -2056,12 +2057,8 @@ test('Copilot env token is documented in env example, not the README overview', 
 test('AI Tool Limits owns every live account group and its status pill', () => {
   const app = readRendererFile('app.js');
   const html = readRendererFile('index.html');
-  const groupMap = app.slice(
-    app.indexOf('const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {'),
-    app.indexOf('const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {')
-  );
-  const statusMap = app.slice(
-    app.indexOf('const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {'),
+  const accountNodes = app.slice(
+    app.indexOf('const LIMIT_PROVIDER_ACCOUNT_NODES = {'),
     app.indexOf('const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {')
   );
   const providers = [
@@ -2077,8 +2074,7 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
   ];
 
   for (const [provider, groupId, statusId] of providers) {
-    assert.match(groupMap, new RegExp(`${provider}: '${groupId}'`));
-    assert.match(statusMap, new RegExp(`${provider}: '${statusId}'`));
+    assert.match(accountNodes, new RegExp(`${provider}: \\{ group: '${groupId}', status: '${statusId}' \\}`));
     assert.match(html, new RegExp(`id="${groupId}"`));
     assert.match(html, new RegExp(`id="${statusId}"[^>]*class="cursor-status-pill`));
   }
@@ -2419,6 +2415,7 @@ test('empty OpenCode profiles render a localized summary before returning', () =
       }
     },
     state: { opencodeProfileCount: 0 },
+    accountShellApi,
     t: (key, params) => params ? `${key}:${params.linked}/${params.total}` : `localized:${key}`
   };
 
