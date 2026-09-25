@@ -9,7 +9,8 @@ const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv, PARSE_LOCAL_CLIENTS } = require('./clientTracking');
-const { canonicalWatchPath, cherryStudioTranscriptRoots, clientSourceRoots, copilotExporterWatch } = require('./clientSources');
+const { antigravityCliDataDir, canonicalWatchPath, cherryStudioTranscriptRoots, clientSourceRoots, copilotExporterWatch } = require('./clientSources');
+const { clientDiagnosticRoots, clientSourceChecks, dirExists, visibleDiagnosticRoots } = require('./clientSourceObservations');
 const {
   CLIENT_HEALTH_VERSION,
   MAX_DIAGNOSTICS_PER_CLIENT,
@@ -37,11 +38,7 @@ const {
   createSubprocessTermination,
   terminationUnconfirmedError
 } = require('./subprocessTermination');
-const {
-  antigravityDataPresent,
-  antigravityDataRoots,
-  createAntigravitySelfSync
-} = require('./providers/antigravity/selfSync');
+const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
 const {
@@ -1618,23 +1615,6 @@ async function collectUsageOnce(options) {
   return summary;
 }
 
-function dirExists(dir) {
-  try { return fs.statSync(dir).isDirectory(); } catch (_) { return false; }
-}
-
-function fileExists(file) {
-  try { return fs.statSync(file).isFile(); } catch (_) { return false; }
-}
-
-function hasCopilotChatSessions(workspaceRoot) {
-  try {
-    return fs.readdirSync(workspaceRoot, { withFileTypes: true })
-      .some((entry) => entry.isDirectory() && dirExists(path.join(workspaceRoot, entry.name, 'chatSessions')));
-  } catch (_) {
-    return false;
-  }
-}
-
 // Sources that remain part of collection, health, and diagnostics but are too
 // broad for a persistent recursive watcher. Kiro globalStorage accepts every
 // `.chat`, `.json`, and extensionless file at any depth in tokscale, so a real
@@ -1666,15 +1646,6 @@ function clientWatchCandidates(clientsCsv, options = {}) {
 // Clients whose dirs are tokscale caches written only by our own maybeSync* calls.
 // Watching them turns every tick into the trigger for the next one (issue #15).
 const SELF_SYNCED_CLIENTS = new Set(SELF_SYNC_KINDS);
-
-// The Antigravity CLI's parse-local data dir (honors GEMINI_CLI_HOME like tokscale).
-// It belongs to the umbrella `antigravity` client but, unlike that client's IDE
-// sync cache, is written by `agy` and never by us — so it is both watchable and a
-// real presence signal, sharing this single source of truth.
-function antigravityCliDataDir() {
-  const geminiHome = process.env.GEMINI_CLI_HOME || path.join(os.homedir(), '.gemini');
-  return path.join(geminiHome, 'antigravity-cli', 'conversations');
-}
 
 // Watch roots that feed a self-sync, keyed by client. Antigravity's IDE cache is
 // written by our sync and must stay watch-excluded, but the native session roots
@@ -2096,111 +2067,6 @@ function watchIgnoreMatcher(clientsCsv, options = {}) {
     }
     return contained; // a path under no source root at all is never ignored
   };
-}
-
-// Which source roots each tracked client actually has on disk, one entry per
-// check id with same-kind paths collapsed by OR. clientDataDirPresence() is
-// derived from this rather than computed beside it, so the presence dot in the
-// UI and the health record can never disagree about what was found.
-function sourceRootExists(root) {
-  if (root.sourcePath) return fileExists(root.sourcePath);
-  return root.id === 'vscode-workspace-storage'
-    ? hasCopilotChatSessions(root.dir)
-    : dirExists(root.dir);
-}
-
-// `dir` is what the diagnostics panel prints, so for an exact-file source it has
-// to be the file `exists` actually answered for. Printing the watch parent while
-// `exists` probed a file inside it makes the panel report a directory that is
-// plainly there as missing — the one question the panel exists to answer. The
-// watch root stays available to the watcher through clientWatchCandidates(),
-// which reads clientSourceRoots() directly; `sourcePath` rides along so a reveal
-// can tell a file from a directory without stat-ing it again.
-function evaluatedClientSourceRoots(clientsCsv, options = {}) {
-  return Object.fromEntries(Object.entries(clientSourceRoots(clientsCsv, options)).map(([client, roots]) => [
-    client,
-    roots.map((root) => ({
-      id: root.id,
-      dir: root.sourcePath || root.dir,
-      ...(root.sourcePath ? { sourcePath: root.sourcePath } : {}),
-      ...(root.optional ? { optional: true } : {}),
-      ...(root.custom ? { custom: true } : {}),
-      exists: sourceRootExists(root)
-    }))
-  ]));
-}
-
-function clientSourceChecks(clientsCsv, options = {}) {
-  const checks = {};
-  const push = (client, id, exists) => {
-    const list = checks[client] || (checks[client] = []);
-    const found = list.find((entry) => entry.id === id);
-    if (found) found.exists = found.exists || exists;
-    else list.push({ id, exists });
-  };
-  for (const [client, roots] of Object.entries(evaluatedClientSourceRoots(clientsCsv, options))) {
-    checks[client] = checks[client] || [];
-    for (const { id, exists } of roots) push(client, id, exists);
-  }
-  // antigravity's watch candidate is only the IDE sync cache, which our own sync
-  // writes. Its two real sources are separate checks so a health record can say
-  // "the IDE is installed but the cache was never written" rather than collapse
-  // all three into one boolean. A source-only or CLI-only install with no
-  // countable usage yet must read `waiting`, not `missing`; the sync cache stays
-  // a valid presence signal for snapshots taken before either of the others
-  // existed.
-  if (Object.prototype.hasOwnProperty.call(checks, 'antigravity')) {
-    push('antigravity', 'antigravity-ide-source', antigravityDataPresent(os.homedir()));
-    push('antigravity', 'antigravity-cli-data', dirExists(antigravityCliDataDir()));
-  }
-  // A client installed only inside WSL has no host directory, but its usage is
-  // merged into the same periods — so without this its source reads `missing`
-  // while the very same snapshot counts its tokens. The WSL marker is a source
-  // that exists; it just lives in a filesystem this process reaches through
-  // `wsl.exe` rather than through `fs`.
-  for (const client of options.wslDetected || []) {
-    if (Object.prototype.hasOwnProperty.call(checks, client)) push(client, 'wsl-home', true);
-  }
-  return checks;
-}
-
-// Every directory a tracked client's usage can come from on this machine, keyed
-// by client as {id, dir, exists} — the path-level table behind
-// clientSourceChecks(), before same-id roots are collapsed into one boolean.
-//
-// Only the diagnostics panel wants this shape: a user asking "is it looking
-// where I installed it" needs the paths, and a check id cannot answer that. The
-// self-synced clients are why it is not simply clientSourceRoots(): that table
-// holds antigravity's *sync cache*, which is ours and says nothing about which
-// Antigravity is installed — the IDE session roots and the CLI's own data dir
-// are the ones that answer it, and they are checks without being watch roots.
-// What the diagnostics panel should list, which is not everything probed. An
-// optional root that is absent is dropped here, in the main process, so the
-// flag never crosses IPC: the renderer flattens cached sources to
-// `exists: false, pending: true` while a re-probe is in flight, and any
-// visibility rule that reads `exists` downstream of that would blink an
-// existing capture directory out of the panel and back on every snapshot.
-// Deciding it where `exists` is still the answer to a real stat() is the only
-// place the question can be asked once.
-//
-// clientDiagnosticRoots() stays faithful for callers that want every probed
-// root — the reveal handler picks from it and selects on `exists` itself.
-function visibleDiagnosticRoots(clientsCsv, options = {}) {
-  return Object.fromEntries(Object.entries(clientDiagnosticRoots(clientsCsv, options)).map(([client, roots]) => [
-    client,
-    roots.filter((root) => !(root.optional === true && root.exists !== true))
-  ]));
-}
-
-function clientDiagnosticRoots(clientsCsv, options = {}) {
-  const byClient = evaluatedClientSourceRoots(clientsCsv, options);
-  if (byClient.antigravity) {
-    byClient.antigravity.unshift(
-      ...antigravityDataRoots().map((dir) => ({ id: 'antigravity-ide-source', dir, exists: dirExists(dir) })),
-      { id: 'antigravity-cli-data', dir: antigravityCliDataDir(), exists: dirExists(antigravityCliDataDir()) }
-    );
-  }
-  return byClient;
 }
 
 // Whether each tracked client has at least one data directory on disk. Takes
