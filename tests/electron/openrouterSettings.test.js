@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { rendererStyles } = require('../helpers/rendererStyles');
 const vm = require('node:vm');
 
 const root = path.join(__dirname, '..', '..');
@@ -104,8 +105,8 @@ test('OpenRouter credentials stay in the main process and renderer receives conf
 test('OpenRouter Limits presentation shows a real balance meter and compact spend tooltip', () => {
   const app = read('src/electron/renderer/app.js');
   const presentation = read('src/electron/renderer/limitProviderPresentation.js');
-  const styles = read('src/electron/renderer/styles.css');
-  const colors = read('src/electron/renderer/usageCharts.js');
+  const styles = rendererStyles();
+  const { clientColors } = require('../../src/electron/renderer/usageCharts');
 
   assert.equal(LIMIT_PROVIDER_LABELS.openrouter, 'OpenRouter');
   assert.match(limitsViewSource(), /provider\.provider === 'openrouter'/);
@@ -139,7 +140,7 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   assert.match(presentation, /openrouter: \['Pay-as-you-go', 'API key'\]/);
   assert.match(styles, /^\.row-icon-openrouter/m);
   assert.match(styles, /\.limit-spend-summary\s*\{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
-  assert.match(colors, /openrouter: '#6566F1'/);
+  assert.equal(clientColors.openrouter, '#6566F1');
 });
 
 test('OpenRouter credits lookup keeps the mixed-version label fallback', () => {

@@ -1,28 +1,23 @@
 'use strict';
 
 (function exposeTrayProviderIcons(root, factory) {
-  const api = factory();
-  if (typeof module === 'object' && module.exports) module.exports = api;
+  const node = typeof module === 'object' && module.exports;
+  const api = factory(node ? require('../../shared/vendorPresentation') : root?.TokenMonitorVendorPresentation);
+  if (node) module.exports = api;
   if (root) root.TokenMonitorTrayProviderIcons = api;
-})(typeof window !== 'undefined' ? window : null, function createTrayProviderIconsApi() {
-  const SPECIAL_ICON_SOURCES = {
-    claude: '../../../assets/icons/tray-claude.svg',
-    'claude-brand': '../../../assets/icons/claude.svg',
-    codex: '../../../assets/icons/tray-codex.svg',
-    chatgpt: '../../../assets/icons/codex.svg',
-    hermes: '../../../assets/icons/hermes-agent.svg',
-    factory: '../../../assets/icons/droid.svg',
-    kimi: '../../../assets/icons/kimi.svg',
-    mimo: '../../../assets/icons/xiaomi.svg',
-    grok: '../../../assets/icons/grok.svg',
-    zcode: '../../../assets/icons/zai.svg',
-    zaiteam: '../../../assets/icons/zai.svg'
+})(typeof window !== 'undefined' ? window : null, function createTrayProviderIconsApi(vendorPresentation) {
+  // Tray-only picker variants: alternative artwork for a provider that already
+  // has a mark, so they are not vendors of their own.
+  const VARIANT_ICON_FILES = {
+    'claude-brand': 'claude',
+    chatgpt: 'codex'
   };
 
   function trayProviderIconSources(clientIds) {
     const sources = {};
     for (const id of clientIds || []) {
-      sources[id] = SPECIAL_ICON_SOURCES[id] || `../../../assets/icons/${id}.svg`;
+      const file = VARIANT_ICON_FILES[id] || vendorPresentation.trayIconFile(id);
+      sources[id] = `../../../assets/icons/${file}.svg`;
     }
     return sources;
   }
