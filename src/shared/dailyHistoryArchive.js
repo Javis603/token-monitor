@@ -734,12 +734,194 @@ function retainLiveDailyHistory(period, options = {}) {
   return next;
 }
 
+// ---------------------------------------------------------------------------
+// Lifetime floor
+// ---------------------------------------------------------------------------
+
+// One (client, model) pair on one date can exist as both a committed
+// observation — captured from the history graph with a component breakdown —
+// and a live-day one, which periodLiveDay records as bare tokens and cost
+// because the period carries no per-pair components. Take the largest token
+// reading for the floor, but attribute components by the proportion of the
+// most detailed record, so a component-less live-day snapshot cannot erase
+// the committed day's breakdown.
+function lifetimeObservation(candidates) {
+  const tokens = Math.max(0, ...candidates.map((observation) => num(observation.tokens)));
+  const cost = Math.max(0, ...candidates.map((observation) => num(observation.cost)));
+  const hasComponents = (observation) => observation.tokenComponentsAvailable === true
+    || num(observation.cacheReadTokens) > 0
+    || num(observation.cacheWriteTokens) > 0
+    || num(observation.outputTokens) > 0
+    || num(observation.unclassifiedTokens) < num(observation.tokens);
+  const template = candidates
+    .filter(hasComponents)
+    .sort((left, right) => num(right.tokens) - num(left.tokens))[0];
+  if (!template || num(template.tokens) <= 0) {
+    return { tokens, cost, cacheRead: 0, cacheWrite: 0, output: 0, unclassified: tokens };
+  }
+  const ratio = tokens / num(template.tokens);
+  return {
+    tokens,
+    cost,
+    cacheRead: Math.round(num(template.cacheReadTokens) * ratio),
+    cacheWrite: Math.round(num(template.cacheWriteTokens) * ratio),
+    output: Math.round(num(template.outputTokens) * ratio),
+    unclassified: Math.round(num(template.unclassifiedTokens) * ratio)
+  };
+}
+
+// Cumulative per-client/model totals over the whole retained archive — the
+// lifetime floor for a period that only reflects sources still on disk. A scan
+// reports nothing for transcripts that rotated away (or for an untracked
+// client), so allTime silently shrinks even though the archive still holds
+// those days; this total is the accounting side of the archive that lets
+// allTime keep them.
+function dailyArchiveLifetimeTotals(archive, options = {}) {
+  const normalizedArchive = normalizeDailyHistoryArchive(archive);
+  const todayKey = String(options.todayKey || '').slice(0, 10);
+  const hasTodayKey = DAY_KEY_RE.test(todayKey);
+  const dates = new Set([
+    ...Object.keys(normalizedArchive.days || {}),
+    ...Object.keys(normalizedArchive.liveDays || {})
+  ]);
+  const totals = {};
+  for (const date of dates) {
+    if (hasTodayKey && date > todayKey) continue;
+    const committed = normalizedArchive.days?.[date]?.observations || {};
+    const live = normalizedArchive.liveDays?.[date]?.observations || {};
+    const keys = new Set([...Object.keys(committed), ...Object.keys(live)]);
+    for (const key of keys) {
+      const candidates = [committed[key], live[key]].filter(Boolean);
+      const observation = lifetimeObservation(candidates);
+      const models = totals[candidates[0].client] || (totals[candidates[0].client] = {});
+      const entry = models[candidates[0].modelId] || (models[candidates[0].modelId] = {
+        tokens: 0, cost: 0, cacheRead: 0, cacheWrite: 0, output: 0, unclassified: 0
+      });
+      entry.tokens += observation.tokens;
+      entry.cost += observation.cost;
+      entry.cacheRead += observation.cacheRead;
+      entry.cacheWrite += observation.cacheWrite;
+      entry.output += observation.output;
+      entry.unclassified += observation.unclassified;
+    }
+  }
+  return totals;
+}
+
+// Raises the summary's allTime rows to the archive's lifetime totals and rolls
+// each positive delta into the period's aggregates. The floor never lowers a
+// period: a live scan that still covers a (client, model) pair reports a larger
+// value and stays. Session rows cannot be rebuilt from day-level data, so
+// `sessions` is left untouched — this restores totals, not session history.
+function applyDailyArchiveLifetimeFloor(summary, totals) {
+  if (!summary || typeof summary !== 'object' || !totals) return summary;
+  const container = summary.periods && typeof summary.periods === 'object' ? summary.periods : summary;
+  const period = container.allTime;
+  if (!period || typeof period !== 'object') return summary;
+  for (const [client, models] of Object.entries(totals)) {
+    for (const [model, archived] of Object.entries(models || {})) {
+      const archivedTokens = Math.max(0, Math.round(num(archived?.tokens)));
+      const deltaTokens = archivedTokens - Math.max(0, Math.round(num(period.clientModels?.[client]?.[model])));
+      const deltaCost = Math.max(0, num(archived?.cost))
+        - Math.max(0, num(period.clientModelCosts?.[client]?.[model]));
+      if (deltaTokens <= 0 && deltaCost <= 0) continue;
+      period.clients = period.clients || {};
+      period.clientCosts = period.clientCosts || {};
+      period.models = period.models || {};
+      period.modelCosts = period.modelCosts || {};
+      period.clientModels = period.clientModels || {};
+      period.clientModelCosts = period.clientModelCosts || {};
+      period.clientModels[client] = period.clientModels[client] || {};
+      period.clientModelCosts[client] = period.clientModelCosts[client] || {};
+      if (deltaTokens > 0) {
+        // The rotated share keeps the archived observation's own component
+        // proportions — including its unclassified bucket. Plain input tokens
+        // carry no component bucket, so the remainder stays unbucketed rather
+        // than being reported as unclassified.
+        const share = deltaTokens / archivedTokens;
+        const deltaCacheRead = Math.min(deltaTokens, Math.round(num(archived.cacheRead) * share));
+        const deltaCacheWrite = Math.min(deltaTokens - deltaCacheRead, Math.round(num(archived.cacheWrite) * share));
+        const deltaOutput = Math.min(deltaTokens - deltaCacheRead - deltaCacheWrite, Math.round(num(archived.output) * share));
+        const deltaUnclassified = Math.min(
+          deltaTokens - deltaCacheRead - deltaCacheWrite - deltaOutput,
+          Math.round(num(archived.unclassified) * share)
+        );
+        period.totalTokens = num(period.totalTokens) + deltaTokens;
+        period.clients[client] = num(period.clients[client]) + deltaTokens;
+        period.models[model] = num(period.models[model]) + deltaTokens;
+        period.clientModels[client][model] = num(period.clientModels[client][model]) + deltaTokens;
+        if (deltaCacheRead > 0) {
+          period.cacheReadTokens = num(period.cacheReadTokens) + deltaCacheRead;
+          period.clientCacheReads = period.clientCacheReads || {};
+          period.clientCacheReads[client] = num(period.clientCacheReads[client]) + deltaCacheRead;
+          period.modelCacheReads = period.modelCacheReads || {};
+          period.modelCacheReads[model] = num(period.modelCacheReads[model]) + deltaCacheRead;
+        }
+        if (deltaCacheWrite > 0) {
+          period.cacheWriteTokens = num(period.cacheWriteTokens) + deltaCacheWrite;
+          period.clientCacheWrites = period.clientCacheWrites || {};
+          period.clientCacheWrites[client] = num(period.clientCacheWrites[client]) + deltaCacheWrite;
+          period.modelCacheWrites = period.modelCacheWrites || {};
+          period.modelCacheWrites[model] = num(period.modelCacheWrites[model]) + deltaCacheWrite;
+        }
+        if (deltaOutput > 0) {
+          period.outputTokens = num(period.outputTokens) + deltaOutput;
+          period.clientOutputs = period.clientOutputs || {};
+          period.clientOutputs[client] = num(period.clientOutputs[client]) + deltaOutput;
+          period.modelOutputs = period.modelOutputs || {};
+          period.modelOutputs[model] = num(period.modelOutputs[model]) + deltaOutput;
+        }
+        if (deltaUnclassified > 0) {
+          period.unclassifiedTokens = num(period.unclassifiedTokens) + deltaUnclassified;
+          period.clientUnclassifiedTokens = period.clientUnclassifiedTokens || {};
+          period.clientUnclassifiedTokens[client] = num(period.clientUnclassifiedTokens[client]) + deltaUnclassified;
+          period.modelUnclassifiedTokens = period.modelUnclassifiedTokens || {};
+          period.modelUnclassifiedTokens[model] = num(period.modelUnclassifiedTokens[model]) + deltaUnclassified;
+          if (period.capabilities) period.capabilities.tokenComponents = false;
+        }
+      }
+      if (deltaCost > 0) {
+        period.costUsd = num(period.costUsd) + deltaCost;
+        period.clientCosts[client] = num(period.clientCosts[client]) + deltaCost;
+        period.modelCosts[model] = num(period.modelCosts[model]) + deltaCost;
+        period.clientModelCosts[client][model] = num(period.clientModelCosts[client][model]) + deltaCost;
+      }
+    }
+  }
+  return summary;
+}
+
+// mtime:size-keyed cache so the per-tick summary transform stats the file
+// instead of re-parsing it — the archive only changes on capture ticks, and a
+// stat alone costs nothing next to a scan.
+let lifetimeTotalsCache = { key: '', stamp: '', totals: null };
+function loadDailyArchiveLifetimeTotals(options = {}) {
+  const filePath = dailyHistoryArchivePath(options);
+  let stamp = '';
+  try {
+    const stat = fs.statSync(filePath);
+    stamp = `${stat.mtimeMs}:${stat.size}`;
+  } catch (_) { /* unreadable — fall through to the injected/last-good read */ }
+  if (stamp && lifetimeTotalsCache.key === filePath && lifetimeTotalsCache.stamp === stamp) {
+    return lifetimeTotalsCache.totals;
+  }
+  let totals = lifetimeTotalsCache.key === filePath ? lifetimeTotalsCache.totals : null;
+  try {
+    totals = dailyArchiveLifetimeTotals(readDailyHistoryArchive(options));
+  } catch (_) { /* a failed read keeps the last good floor rather than zeroing it */ }
+  lifetimeTotalsCache = { key: filePath, stamp, totals };
+  return totals;
+}
+
 module.exports = {
+  applyDailyArchiveLifetimeFloor,
   captureDailyHistoryArchive,
   clearDailyHistoryArchive,
+  dailyArchiveLifetimeTotals,
   dailyHistoryArchivePath,
   graphFromDailyHistoryArchive,
   captureLiveDailyHistory,
+  loadDailyArchiveLifetimeTotals,
   normalizeDailyHistoryArchive,
   observationKey,
   readDailyHistoryArchive,

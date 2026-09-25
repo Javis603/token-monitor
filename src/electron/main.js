@@ -244,7 +244,11 @@ const {
   readSessionUsageArchiveSnapshot,
   sessionUsageArchiveDatabasePath
 } = require('../shared/sessionUsageArchiveStore');
-const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
+const {
+  applyDailyArchiveLifetimeFloor,
+  clearDailyHistoryArchive,
+  loadDailyArchiveLifetimeTotals
+} = require('../shared/dailyHistoryArchive');
 const { aggregateDevices, aggregateHistory, applyProjectRollups } = require('../shared/usage');
 const {
   HUB_RESPONSE_HEADER,
@@ -2684,14 +2688,21 @@ function summaryWithArchivesApplied(summary, sessionArchive, now) {
     activeClients: settings?.clients,
     now
   });
-  const visibleSummary = settings?.sessionUsageArchiveEnabled === false
-    ? withArchivedClients
-    : applySessionUsageArchive(withArchivedClients, sessionArchive, {
+  const archivesEnabled = settings?.sessionUsageArchiveEnabled !== false;
+  const withSessions = archivesEnabled
+    ? applySessionUsageArchive(withArchivedClients, sessionArchive, {
         now,
         canonical: true,
         canonicalSummary: true,
         mutate: true
-      });
+      })
+    : withArchivedClients;
+  // The session archive only covers what was captured since it first ran; the
+  // daily archive reaches further back, so its per-(client, model) lifetime
+  // totals floor allTime for anything that rotated off disk earlier still.
+  const visibleSummary = archivesEnabled
+    ? applyDailyArchiveLifetimeFloor(withSessions, loadDailyArchiveLifetimeTotals())
+    : withSessions;
   return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
 }
 

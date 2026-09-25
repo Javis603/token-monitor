@@ -7,10 +7,13 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  applyDailyArchiveLifetimeFloor,
   captureDailyHistoryArchive,
   captureLiveDailyHistory,
   clearDailyHistoryArchive,
+  dailyArchiveLifetimeTotals,
   graphFromDailyHistoryArchive,
+  loadDailyArchiveLifetimeTotals,
   normalizeDailyHistoryArchive,
   retainDailyHistory,
   retainLiveDailyHistory
@@ -1012,4 +1015,294 @@ test('a Cursor graph day kept on a tied aggregate cost still fills a price only 
   assert.equal(day.perModel['cursor-grok-4.6-high'].cost, 1);
   assert.equal(day.perModel['gpt-5.5'].cost, 3);
   assert.equal(day.cost, 4);
+});
+
+test('dailyArchiveLifetimeTotals accumulates per client/model and lets a winning liveDay replace the day', () => {
+  const archive = captureDailyHistoryArchive({}, [
+    graph('2026-07-17', [client('claude', 'opus', 100, 4, 5)]),
+    graph('2026-07-18', [client('claude', 'opus', 50, 2, 2), client('codex', 'gpt', 30, 1, 1)])
+  ], { todayKey: '2026-07-18' });
+  archive.liveDays = {
+    '2026-07-18': {
+      date: '2026-07-18',
+      activeTimeMs: 0,
+      observations: {
+        '["claude","opus"]': { client: 'claude', modelId: 'opus', tokens: 120, cost: 5, messages: 3 }
+      }
+    }
+  };
+  const totals = dailyArchiveLifetimeTotals(archive);
+  assert.equal(totals.claude.opus.tokens, 220);
+  assert.equal(totals.claude.opus.cost, 9);
+  // Per-pair resolution: the liveDay only shadows pairs it records — the
+  // committed day's codex row survives.
+  assert.equal(totals.codex.gpt.tokens, 30);
+});
+
+test('dailyArchiveLifetimeTotals prefers committed-day components over a component-less liveDay', () => {
+  const archive = normalizeDailyHistoryArchive({
+    days: {
+      '2026-08-08': {
+        observations: [{
+          client: 'codex',
+          modelId: 'gpt',
+          tokens: 100,
+          cost: 2,
+          tokenComponentsAvailable: true,
+          cacheReadTokens: 80,
+          outputTokens: 10
+        }]
+      }
+    },
+    liveDays: {
+      '2026-08-08': {
+        date: '2026-08-08',
+        activeTimeMs: 0,
+        observations: {
+          '["codex","gpt"]': {
+            client: 'codex',
+            modelId: 'gpt',
+            tokens: 150,
+            cost: 3,
+            unclassifiedTokens: 150
+          }
+        }
+      }
+    }
+  });
+  const totals = dailyArchiveLifetimeTotals(archive);
+  assert.equal(totals.codex.gpt.tokens, 150);
+  assert.equal(totals.codex.gpt.cost, 3);
+  // Components scale from the committed observation: 120 cacheRead + 15
+  // output of 150; the liveDay's component-less record adds no unclassified.
+  assert.equal(totals.codex.gpt.cacheRead, 120);
+  assert.equal(totals.codex.gpt.output, 15);
+  assert.equal(totals.codex.gpt.unclassified, 0);
+});
+
+test('applyDailyArchiveLifetimeFloor restores a fully rotated pair into allTime', () => {
+  const archive = normalizeDailyHistoryArchive({
+    days: {
+      '2026-07-07': {
+        observations: [{ client: 'claude', modelId: 'opus', tokens: 1000, cost: 10 }]
+      }
+    }
+  });
+  const summary = {
+    allTime: {
+      capabilities: { tokenComponents: true, throughput: true },
+      totalTokens: 0,
+      costUsd: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 0,
+      unclassifiedTokens: 0,
+      clients: {},
+      clientCosts: {},
+      clientCacheReads: {},
+      clientCacheWrites: {},
+      clientOutputs: {},
+      clientUnclassifiedTokens: {},
+      models: {},
+      modelCosts: {},
+      modelCacheReads: {},
+      modelCacheWrites: {},
+      modelOutputs: {},
+      modelUnclassifiedTokens: {},
+      clientModels: {},
+      clientModelCosts: {},
+      sessions: { keep: { client: 'claude', sessionId: 'keep' } }
+    }
+  };
+  applyDailyArchiveLifetimeFloor(summary, dailyArchiveLifetimeTotals(archive));
+  const allTime = summary.allTime;
+  assert.equal(allTime.totalTokens, 1000);
+  assert.equal(allTime.costUsd, 10);
+  assert.equal(allTime.clients.claude, 1000);
+  assert.equal(allTime.models.opus, 1000);
+  assert.equal(allTime.clientModels.claude.opus, 1000);
+  assert.equal(allTime.clientModelCosts.claude.opus, 10);
+  // The observation carried no component breakdown, so the restored tokens are
+  // genuinely unclassified and the period's component flag drops.
+  assert.equal(allTime.unclassifiedTokens, 1000);
+  assert.equal(allTime.clientUnclassifiedTokens.claude, 1000);
+  assert.equal(allTime.modelUnclassifiedTokens.opus, 1000);
+  assert.equal(allTime.capabilities.tokenComponents, false);
+  assert.deepEqual(Object.keys(allTime.sessions), ['keep']);
+});
+
+test('applyDailyArchiveLifetimeFloor keeps plain input out of unclassifiedTokens', () => {
+  const archive = normalizeDailyHistoryArchive({
+    days: {
+      '2026-07-07': {
+        observations: [{
+          client: 'codex',
+          modelId: 'gpt',
+          tokens: 1000,
+          cost: 10,
+          tokenComponentsAvailable: true,
+          cacheReadTokens: 600,
+          outputTokens: 100
+        }]
+      }
+    }
+  });
+  const summary = {
+    allTime: {
+      capabilities: { tokenComponents: true, throughput: true },
+      totalTokens: 0,
+      costUsd: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 0,
+      unclassifiedTokens: 0,
+      clients: {},
+      clientCosts: {},
+      models: {},
+      modelCosts: {},
+      clientModels: {},
+      clientModelCosts: {},
+      sessions: {}
+    }
+  };
+  applyDailyArchiveLifetimeFloor(summary, dailyArchiveLifetimeTotals(archive));
+  const allTime = summary.allTime;
+  assert.equal(allTime.totalTokens, 1000);
+  assert.equal(allTime.cacheReadTokens, 600);
+  assert.equal(allTime.outputTokens, 100);
+  // The remaining 300 tokens are plain input — part of the total but not a
+  // component bucket and definitely not unclassified.
+  assert.equal(allTime.unclassifiedTokens, 0);
+  assert.equal(allTime.clientUnclassifiedTokens, undefined);
+  assert.equal(allTime.capabilities.tokenComponents, true);
+});
+
+test('applyDailyArchiveLifetimeFloor only tops up what the live scan lost and is idempotent', () => {
+  const totals = dailyArchiveLifetimeTotals(normalizeDailyHistoryArchive({
+    days: {
+      '2026-07-07': {
+        observations: [{
+          client: 'claude',
+          modelId: 'opus',
+          tokens: 1000,
+          cost: 10,
+          tokenComponentsAvailable: true,
+          cacheReadTokens: 600,
+          outputTokens: 100
+        }]
+      }
+    }
+  }));
+  const summary = {
+    allTime: {
+      capabilities: { tokenComponents: true, throughput: true },
+      totalTokens: 400,
+      costUsd: 4,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      outputTokens: 0,
+      unclassifiedTokens: 0,
+      clients: { claude: 400 },
+      clientCosts: { claude: 4 },
+      models: { opus: 400 },
+      modelCosts: { opus: 4 },
+      clientModels: { claude: { opus: 400 } },
+      clientModelCosts: { claude: { opus: 4 } },
+      sessions: {}
+    }
+  };
+  applyDailyArchiveLifetimeFloor(summary, totals);
+  assert.equal(summary.allTime.totalTokens, 1000);
+  assert.equal(summary.allTime.clients.claude, 1000);
+  assert.equal(summary.allTime.costUsd, 10);
+  // share = 600/1000: of the delta, 360 cacheRead + 60 output; the observation
+  // had no unclassified bucket, so the rest stays unbucketed.
+  assert.equal(summary.allTime.cacheReadTokens, 360);
+  assert.equal(summary.allTime.outputTokens, 60);
+  assert.equal(summary.allTime.unclassifiedTokens, 0);
+  applyDailyArchiveLifetimeFloor(summary, totals);
+  assert.equal(summary.allTime.totalTokens, 1000);
+  assert.equal(summary.allTime.clients.claude, 1000);
+});
+
+test('applyDailyArchiveLifetimeFloor leaves a live-covered pair alone', () => {
+  const totals = dailyArchiveLifetimeTotals(normalizeDailyHistoryArchive({
+    days: {
+      '2026-07-07': {
+        observations: [{ client: 'claude', modelId: 'opus', tokens: 100, cost: 1 }]
+      }
+    }
+  }));
+  const summary = {
+    allTime: {
+      capabilities: { tokenComponents: true, throughput: true },
+      totalTokens: 500,
+      costUsd: 5,
+      unclassifiedTokens: 0,
+      clients: { claude: 500 },
+      clientCosts: { claude: 5 },
+      models: { opus: 500 },
+      modelCosts: { opus: 5 },
+      clientModels: { claude: { opus: 500 } },
+      clientModelCosts: { claude: { opus: 5 } },
+      sessions: {}
+    }
+  };
+  applyDailyArchiveLifetimeFloor(summary, totals);
+  assert.equal(summary.allTime.totalTokens, 500);
+  assert.equal(summary.allTime.clients.claude, 500);
+  assert.equal(summary.allTime.capabilities.tokenComponents, true);
+});
+
+test('applyDailyArchiveLifetimeFloor resolves the periods container', () => {
+  const totals = dailyArchiveLifetimeTotals(normalizeDailyHistoryArchive({
+    days: {
+      '2026-07-07': {
+        observations: [{ client: 'zcode', modelId: 'glm', tokens: 70, cost: 2 }]
+      }
+    }
+  }));
+  const summary = {
+    periods: {
+      allTime: {
+        capabilities: { tokenComponents: true, throughput: true },
+        totalTokens: 0,
+        costUsd: 0,
+        unclassifiedTokens: 0,
+        clients: {},
+        clientCosts: {},
+        models: {},
+        modelCosts: {},
+        clientModels: {},
+        clientModelCosts: {},
+        sessions: {}
+      }
+    }
+  };
+  applyDailyArchiveLifetimeFloor(summary, totals);
+  assert.equal(summary.periods.allTime.clients.zcode, 70);
+  assert.equal(summary.periods.allTime.totalTokens, 70);
+});
+
+test('loadDailyArchiveLifetimeTotals caches by file stamp and reloads on change', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-archive-'));
+  const archivePath = path.join(directory, 'daily-history-archive.json');
+  try {
+    const first = captureDailyHistoryArchive({}, [
+      graph('2026-07-17', [client('claude', 'opus', 100, 4, 5)])
+    ], { todayKey: '2026-07-17' });
+    fs.writeFileSync(archivePath, JSON.stringify(first));
+    const totals = loadDailyArchiveLifetimeTotals({ path: archivePath });
+    assert.equal(totals.claude.opus.tokens, 100);
+    assert.equal(loadDailyArchiveLifetimeTotals({ path: archivePath }), totals);
+    const second = captureDailyHistoryArchive(first, [
+      graph('2026-07-18', [client('codex', 'gpt', 50, 1, 1)])
+    ], { todayKey: '2026-07-18' });
+    fs.writeFileSync(archivePath, JSON.stringify(second));
+    const reloaded = loadDailyArchiveLifetimeTotals({ path: archivePath });
+    assert.equal(reloaded.codex.gpt.tokens, 50);
+    assert.equal(reloaded.claude.opus.tokens, 100);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
