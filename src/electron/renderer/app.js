@@ -32,6 +32,7 @@ const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
+const macBackdropApi = window.TokenMonitorMacBackdropMode;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const fontSettingsApi = window.TokenMonitorFontSettings;
 const wslStatusPresentationApi = window.TokenMonitorWslStatusPresentation;
@@ -337,7 +338,7 @@ state.projectSettingsExpanded = false;
 state.sessionSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'liquid-glass', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
 let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
 let nativeMaterialRevision = 0;
 let appearancePreview = {};
@@ -398,6 +399,8 @@ Object.assign(els, {
   windowsBackdropRow: document.getElementById('windowsBackdropRow'),
   windowsBackdropInput: document.getElementById('windowsBackdropInput'),
   windowsBackdropNote: document.getElementById('windowsBackdropNote'),
+  macBackdropRow: document.getElementById('macBackdropRow'),
+  macBackdropInput: document.getElementById('macBackdropInput'),
   clearSessionUsageArchiveButton: document.getElementById('clearSessionUsageArchiveButton'),
   startupGroup: document.getElementById('startupGroup'),
   startAtLoginInput: document.getElementById('startAtLoginInput'),
@@ -6663,6 +6666,9 @@ function applyAppearanceSettings(settings) {
   const systemGlassDisabled = settings?.systemGlass === false;
   const isWindows = navigator.userAgent.toLowerCase().includes('windows');
   const windowsGlass = windowsGlassApi.appearanceState(settings, { isWindows });
+  const macGlass = macBackdropApi.appearanceState(settings, {
+    liquidGlassSupported: nativeMaterialState.liquidGlassSupported
+  });
   document.documentElement.style.setProperty('--glass-alpha', opacity.toFixed(2));
   document.documentElement.style.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
   document.documentElement.style.setProperty('--line-strong-alpha', (0.18 + depth * 0.14).toFixed(3));
@@ -6688,6 +6694,8 @@ function applyAppearanceSettings(settings) {
     els.windowsBackdropNote.classList.toggle('error', accentFallback);
     els.windowsBackdropNote.classList.toggle('hidden', !windowsGlass.showAccentNote);
   }
+  els.macBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
+  if (els.macBackdropInput) els.macBackdropInput.value = macGlass.backdropMode;
   applyReduceMotionPreference(settings?.reduceMotion);
   applyFontSettings(settings);
   // Only full settings objects carry themeColors; glass/zoom preview patches
@@ -7442,6 +7450,7 @@ function appearancePatchFromControls() {
   return {
     systemGlass,
     windowsBackdrop: windowsGlassApi.normalizeWindowsBackdropMode(els.windowsBackdropInput?.value),
+    macBackdrop: macBackdropApi.normalizeMacBackdropMode(els.macBackdropInput?.value),
     reduceMotion: els.reduceMotionInputs?.find((input) => input.checked)?.value || 'system',
     showLiveDot: Boolean(els.liveDotInput.checked),
     showToolIcons: Boolean(els.toolIconsInput.checked),
@@ -8007,6 +8016,7 @@ function syncSettingsForm() {
   const systemGlass = state.settings.systemGlass === false ? 'off' : 'system';
   for (const input of els.systemGlassInputs || []) input.checked = input.value === systemGlass;
   if (els.windowsBackdropInput) els.windowsBackdropInput.value = windowsGlassApi.normalizeWindowsBackdropMode(state.settings.windowsBackdrop);
+  if (els.macBackdropInput) els.macBackdropInput.value = macBackdropApi.normalizeMacBackdropMode(state.settings.macBackdrop);
   const reduceMotion = motionPreferenceApi.normalize(state.settings.reduceMotion);
   for (const input of els.reduceMotionInputs || []) input.checked = input.value === reduceMotion;
   els.liveDotInput.checked = state.settings.showLiveDot !== false;
@@ -11494,6 +11504,7 @@ for (const input of els.systemGlassInputs || []) {
   });
 }
 els.windowsBackdropInput?.addEventListener('change', saveAppearanceFromControls);
+els.macBackdropInput?.addEventListener('change', saveAppearanceFromControls);
 for (const input of els.reduceMotionInputs || []) {
   input.addEventListener('change', async () => {
     if (!input.checked) return;

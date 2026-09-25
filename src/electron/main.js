@@ -397,6 +397,7 @@ const {
   normalizeWindowsBackdropMode
 } = require('./windowsBackdropMode');
 const { applyWindowsAccentBlur } = require('./windowsBackdrop');
+const { MAC_BACKDROP_LIQUID_GLASS, normalizeMacBackdropMode } = require('./macBackdropMode');
 const {
   attachNativeMaterialVisibility,
   syncNativeMaterialVisibility,
@@ -529,6 +530,7 @@ function defaultSettings() {
     glassBlur: 32,
     systemGlass: true,
     windowsBackdrop: 'acrylic',
+    macBackdrop: 'liquid-glass',
     reduceMotion: 'system',
     showLiveDot: true,
     showToolIcons: true,
@@ -2824,6 +2826,7 @@ function nativeBlurEnabled(source = settings) {
 function nativeMaterialOptions(source = settings, dashboard = false) {
   return {
     enabled: nativeBlurEnabled(source),
+    liquidGlass: normalizeMacBackdropMode(source.macBackdrop) === MAC_BACKDROP_LIQUID_GLASS,
     opaque: dashboard && source.dashboardFlat === true,
     reducedTransparency: nativeTheme.prefersReducedTransparency === true,
     highContrast: nativeTheme.shouldUseHighContrastColors === true,
@@ -6863,6 +6866,7 @@ app.whenReady().then(() => {
       glassBlur: Math.max(0, Math.min(100, Number(patch.glassBlur ?? settings.glassBlur ?? 32))),
       systemGlass: patch.systemGlass ?? settings.systemGlass ?? true,
       windowsBackdrop: normalizeWindowsBackdropMode(patch.windowsBackdrop ?? settings.windowsBackdrop),
+      macBackdrop: normalizeMacBackdropMode(patch.macBackdrop ?? settings.macBackdrop),
       reduceMotion: motionPreferenceApi.normalize(patch.reduceMotion ?? settings.reduceMotion),
       showLiveDot: patch.showLiveDot ?? settings.showLiveDot ?? true,
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,

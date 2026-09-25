@@ -16,7 +16,7 @@ function entryFor(win) {
 
 function getNativeMaterialState(win) {
   return windows.get(win)?.state || {
-    type: 'transparent', reducedTransparency: false, highContrast: false, fallbackReason: null
+    type: 'transparent', reducedTransparency: false, highContrast: false, fallbackReason: null, liquidGlassSupported: false
   };
 }
 
@@ -37,13 +37,16 @@ function disposeGlass(entry, options) {
 function syncNativeMaterialVisibility(win, options, platform = process.platform, deps = {}) {
   if (!win || win.isDestroyed?.() || platform !== 'darwin') return;
   const entry = entryFor(win);
-  const { enabled, opaque, reducedTransparency: systemReduced = false, highContrast = false, dark = true, radius = 14 } =
-    typeof options === 'boolean' ? { enabled: options } : (options || {});
+  const {
+    enabled, opaque, liquidGlass = true, reducedTransparency: systemReduced = false, highContrast = false, dark = true, radius = 14
+  } = typeof options === 'boolean' ? { enabled: options } : (options || {});
   // Reduce Transparency replaces only the system material. With System Glass
   // off, the CSS glass and background image stay under the user's sliders.
   const reducedTransparency = Boolean(enabled) && systemReduced;
   const visible = win.isVisible() && !win.isMinimized();
-  const wantsGlass = enabled && !opaque && !reducedTransparency;
+  // Choosing the classic style is not a failure: it only skips Liquid Glass,
+  // so the HUD vibrancy below takes over exactly as on older macOS.
+  const wantsGlass = enabled && !opaque && !reducedTransparency && liquidGlass !== false;
   const supported = Number.parseInt(deps.osRelease || os.release(), 10) >= 25;
   const setVibrancy = (material) => {
     if (entry.vibrancy === material) return;
@@ -67,7 +70,7 @@ function syncNativeMaterialVisibility(win, options, platform = process.platform,
     : !enabled ? 'transparent'
       : entry.glass ? 'liquid-glass' : 'vibrancy';
   setVibrancy(type === 'vibrancy' && visible ? 'hud' : null);
-  const state = { type, reducedTransparency, highContrast, fallbackReason: entry.failed };
+  const state = { type, reducedTransparency, highContrast, fallbackReason: entry.failed, liquidGlassSupported: supported };
   if (JSON.stringify(entry.state) !== JSON.stringify(state)) {
     entry.state = state;
     if (!win.webContents.isDestroyed()) win.webContents.send('appearance:nativeMaterial', state);

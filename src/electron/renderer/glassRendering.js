@@ -31,7 +31,8 @@
       type,
       reducedTransparency: value?.reducedTransparency === true,
       highContrast: value?.highContrast === true,
-      fallbackReason: value?.fallbackReason == null ? null : String(value.fallbackReason)
+      fallbackReason: value?.fallbackReason == null ? null : String(value.fallbackReason),
+      liquidGlassSupported: value?.liquidGlassSupported === true
     };
   }
 

@@ -169,6 +169,47 @@ test('Reduce Transparency replaces only the system material, not the CSS glass',
   assert.equal(getNativeMaterialState(win).reducedTransparency, true);
 });
 
+test('the classic style swaps Liquid Glass for HUD vibrancy and back without a failure', () => {
+  const win = fakeWindow();
+  let creations = 0;
+  let disposals = 0;
+  const deps = {
+    osRelease: '26.0.0',
+    createGlass() {
+      creations += 1;
+      return { update() {}, dispose() { disposals += 1; } };
+    }
+  };
+  win.setVisible(true);
+  syncNativeMaterialVisibility(win, { enabled: true }, 'darwin', deps);
+  assert.equal(getNativeMaterialState(win).type, 'liquid-glass');
+  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: false }, 'darwin', deps);
+  assert.equal(disposals, 1);
+  assert.deepEqual(win.materials, [null, 'hud']);
+  assert.deepEqual(getNativeMaterialState(win), {
+    type: 'vibrancy',
+    reducedTransparency: false,
+    highContrast: false,
+    fallbackReason: null,
+    liquidGlassSupported: true
+  });
+  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true }, 'darwin', deps);
+  assert.equal(creations, 2);
+  assert.deepEqual(win.materials, [null, 'hud', null]);
+  assert.equal(getNativeMaterialState(win).type, 'liquid-glass');
+});
+
+test('native material state reports whether the system offers Liquid Glass', () => {
+  const deps = { createGlass: () => ({ update() {}, dispose() {} }) };
+  for (const [osRelease, supported] of [['24.6.0', false], ['25.0.0', true]]) {
+    const win = fakeWindow();
+    win.setVisible(true);
+    syncNativeMaterialVisibility(win, { enabled: false }, 'darwin', { ...deps, osRelease });
+    assert.equal(getNativeMaterialState(win).liquidGlassSupported, supported);
+  }
+  assert.equal(getNativeMaterialState(fakeWindow()).liquidGlassSupported, false);
+});
+
 test('main and Dashboard windows use the visibility-aware material lifecycle', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const mainWindowConstructor = main.slice(
