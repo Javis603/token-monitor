@@ -155,7 +155,8 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     validateCookie: (cookie) => ipcRenderer.invoke('ollama:validateCookie', cookie)
   },
   limits: {
-    validateCredential: (providerId, credential) => ipcRenderer.invoke('limits:validateCredential', providerId, credential)
+    saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
+    clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId)
   },
   opencode: {
     saveCookie: (cookie) => ipcRenderer.invoke('opencode:saveCookie', cookie),

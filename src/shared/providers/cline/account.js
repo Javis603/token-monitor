@@ -37,9 +37,7 @@ module.exports = {
     failedKey: 'settings.cline.saveFailed',
     noteKey: 'settings.cline.note',
     validation: {
-      invalidKey: 'settings.cline.validationInvalid',
-      rateLimitedKey: 'settings.cline.validationRateLimited',
-      unavailableKey: 'settings.cline.validationUnavailable'
+      invalidKey: 'settings.cline.validationInvalid'
     },
     url: 'https://app.cline.bot/dashboard/account'
   },

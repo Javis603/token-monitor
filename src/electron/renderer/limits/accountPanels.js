@@ -1,7 +1,9 @@
 'use strict';
 
 // A form descriptor is a renderer-safe snapshot from main, never an account
-// declaration. Saves still go through settings:update, which owns the secret.
+// declaration. The panel is DOM and a busy guard only: saving, clearing and the
+// message line belong to the caller, which saves through limits:saveCredential
+// and draws the message from state so a stats re-render cannot wipe it.
 function createSingleCredentialPanel(form, { document, translate, onToggle, onOpen, onClear, onRefresh, onSave }) {
   const { id, input: inputKind, field } = form;
   const element = (tag, elementId, className = '') => {
@@ -78,28 +80,15 @@ function createSingleCredentialPanel(form, { document, translate, onToggle, onOp
   let saving = false;
   submit.addEventListener('click', async () => {
     if (saving) return;
-    error.classList.add('hidden');
-    if (!String(input.value || '').trim()) {
-      error.textContent = translate(form.emptyKey);
-      error.classList.remove('hidden');
-      return;
-    }
     saving = true;
     submit.disabled = true;
-    if (form.validation) submit.textContent = translate('settings.common.checking');
+    submit.textContent = translate('settings.common.checking');
     try {
       await onSave(form, input.value, () => { input.value = ''; });
-    } catch (cause) {
-      error.textContent = form.validation && cause?.validationStatus
-        ? translate(cause.validationStatus === 'unauthorized' ? form.validation.invalidKey
-          : ['rateLimited', 'sourceRateLimited'].includes(cause.validationStatus)
-            ? form.validation.rateLimitedKey : form.validation.unavailableKey)
-        : translate(form.failedKey, { message: cause.message });
-      error.classList.remove('hidden');
     } finally {
       saving = false;
       submit.disabled = false;
-      if (form.validation) submit.textContent = translate(form.saveKey);
+      submit.textContent = translate(form.saveKey);
     }
   });
   return group;

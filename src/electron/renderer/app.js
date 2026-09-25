@@ -298,7 +298,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '' };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.zedAccountExpanded = false;
@@ -10219,6 +10219,61 @@ function moveOpenCodeLocalFallbackSetting() {
   }
 }
 
+// Every account form saves through limits:saveCredential, which probes the
+// credential in main and stores it unless the provider rejected it. The panel
+// only turns the verdict into its message line and the pending pill.
+async function saveAccountFormCredential({ id, field, emptyKey, failedKey, validation }, value, clearInput) {
+  const provider = LIMIT_PROVIDERS.find((entry) => entry.id === id);
+  const name = provider?.settingsLabel || provider?.label || id;
+  if (!String(value || '').trim()) {
+    setAccountPanelMessage(id, { key: 'settings.common.credentialRequired' });
+    renderExternalProviderStatus(id);
+    return;
+  }
+  setAccountPanelMessage(id, null);
+  renderExternalProviderStatus(id);
+  let result;
+  try {
+    result = await commitAccountCredential(() => window.tokenMonitor.limits.saveCredential(id, { [field]: value }));
+  } catch (error) {
+    setAccountPanelMessage(id, { key: failedKey || emptyKey, params: { message: error.message } });
+    renderExternalProviderStatus(id);
+    return;
+  }
+  if (result?.verdict === 'superseded') return;
+  if (!result?.saved) {
+    setAccountPanelMessage(id, result?.status === 'invalidFormat'
+      ? { key: 'settings.common.credentialInvalidFormat' }
+      : { key: validation?.invalidKey || 'settings.common.credentialRejected', params: { provider: name } });
+    renderExternalProviderStatus(id);
+    return;
+  }
+  clearInput();
+  // Marked only once the credential is stored: marking drops the provider's
+  // current record, and a rejected key must leave the linked status on screen.
+  markExternalProviderCheckPending(id);
+  if (result.verdict === 'indeterminate') {
+    const throttled = result.status === 'rateLimited' || result.status === 'sourceRateLimited';
+    setAccountPanelMessage(id, {
+      key: throttled ? 'settings.common.credentialSavedRateLimited' : 'settings.common.credentialSavedUnconfirmed',
+      params: { provider: name },
+      tone: 'notice',
+      untilChecked: true
+    });
+  }
+  renderExternalProviderStatus(id);
+  await refreshStats({ force: true });
+  setExternalAccountExpanded(id, !externalProviderAccountLinked(id));
+  renderExternalProviderStatus(id);
+}
+
+async function commitAccountCredential(request) {
+  const settingsPushRevision = state.settingsPushRevision;
+  const result = await request();
+  if (result?.settings) applyPersistedSettings(result.settings, settingsPushRevision);
+  return result;
+}
+
 function limitAccountForm(providerId) {
   return state.settings?.limitAccountForms?.find((form) => form.id === providerId);
 }
@@ -10238,43 +10293,15 @@ function setupLimitAccountPanels() {
         form.id === 'minimax' ? minimaxPlatformUrl() : form.url
       ),
       onRefresh: () => refreshStats({ force: true }),
-      onClear: async ({ id, field }) => {
-        await saveSettings({ [field]: '' });
+      onClear: async ({ id }) => {
+        setAccountPanelMessage(id, null);
+        await commitAccountCredential(() => window.tokenMonitor.limits.clearCredential(id));
         clearExternalProviderCheckPending(id);
         clearExternalProviderPendingStatus(id);
         renderExternalProviderStatus(id);
         await refreshStats({ force: true });
       },
-      onSave: async ({ id, field, validation }, value, clearInput) => {
-        try {
-          // Mark pending only once the credential is going to be saved: marking
-          // drops the provider's current record, and a rejected key must leave
-          // the linked account's status on screen.
-          if (validation) {
-            const result = await window.tokenMonitor.limits.validateCredential(id, value);
-            if (!result?.ok) {
-              const error = new Error('Credential validation failed');
-              error.validationStatus = result?.status || 'unavailable';
-              throw error;
-            }
-          }
-          markExternalProviderCheckPending(id);
-          await saveSettings(validation ? { [field]: value } : {
-            [field]: value,
-            limitProviders: limitProviderSelectionIncluding(id),
-            limitsEnabled: true
-          });
-          clearInput();
-          renderExternalProviderStatus(id);
-          await refreshStats({ force: true });
-          setExternalAccountExpanded(id, !externalProviderAccountLinked(id));
-          renderExternalProviderStatus(id);
-        } catch (error) {
-          clearExternalProviderCheckPending(id);
-          renderExternalProviderStatus(id);
-          throw error;
-        }
-      }
+      onSave: (form, value, clearInput) => saveAccountFormCredential(form, value, clearInput)
     });
     const catalogIndex = LIMIT_PROVIDERS.findIndex((provider) => provider.id === form.id);
     const nextGroup = LIMIT_PROVIDERS.slice(catalogIndex + 1)
@@ -10767,8 +10794,9 @@ function preserveSettingsPanelScroll(callback) {
 
 async function saveSettings(patch) {
   const settingsPushRevision = state.settingsPushRevision;
+  let next;
   try {
-    state.settings = await window.tokenMonitor.updateSettings(patch);
+    next = await window.tokenMonitor.updateSettings(patch);
   } catch (error) {
     console.error('Could not persist settings:', error);
     try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
@@ -10779,6 +10807,17 @@ async function saveSettings(patch) {
     maybeUpdateBarsIcon();
     throw error;
   }
+  applyPersistedSettings(next, settingsPushRevision);
+  if (patch.showTrayProviderBadge !== undefined) {
+    await deliverTrayProviderIcons(patch.showTrayProviderBadge === true);
+  }
+  return true;
+}
+
+// The resolved settings of a write that went through settings:update in main,
+// whether the renderer sent it as a patch or as an account credential command.
+function applyPersistedSettings(next, settingsPushRevision) {
+  state.settings = next;
   applyEffectiveCurrencyRates();
   // settings:update broadcasts the normalized settings before resolving the
   // IPC request. The push already ran the full sync; repeating it when the
@@ -10790,10 +10829,6 @@ async function saveSettings(patch) {
   }
   restartTimer();
   maybeUpdateBarsIcon();
-  if (patch.showTrayProviderBadge !== undefined) {
-    await deliverTrayProviderIcons(patch.showTrayProviderBadge === true);
-  }
-  return true;
 }
 
 function renderHomeIfVisible() {
@@ -13777,6 +13812,11 @@ function externalProviderAccountLinked(providerName) {
   return Boolean(config && state.settings?.[config.configuredKey]) && provider?.status === 'ok';
 }
 
+function setAccountPanelMessage(providerName, message) {
+  if (message) state.accountPanelMessages[providerName] = message;
+  else delete state.accountPanelMessages[providerName];
+}
+
 function markExternalProviderCheckPending(providerName) {
   const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   if (!config) return;
@@ -14012,12 +14052,20 @@ function renderExternalProviderStatus(providerName) {
   const errorEl = document.getElementById(`${providerName}ErrorMessage`);
   if (!config || !statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
 
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
-
   const source = state.settings?.[config.sourceKey] || '';
   const wasPending = Number(state[config.pendingKey] || 0) > 0;
   const provider = externalProviderForAccount(providerName);
+  // The message line is state, not DOM: this runs on every stats push, and a
+  // line written straight into the element would be wiped by the next one.
+  // A "saved but not yet confirmed" notice retires once a record newer than
+  // the save arrives, because the pill then carries the real answer.
+  if (state.accountPanelMessages[providerName]?.untilChecked && provider) {
+    delete state.accountPanelMessages[providerName];
+  }
+  const message = state.accountPanelMessages[providerName];
+  errorEl.textContent = message ? t(message.key, message.params) : '';
+  errorEl.classList.toggle('hidden', !message);
+  errorEl.classList.toggle('error', message?.tone !== 'notice');
   const configured = Boolean(state.settings?.[config.configuredKey]);
   const enabled = limitProviderEnabled(providerName);
   const pending = enabled && Number(state[config.pendingKey] || 0) > 0;

@@ -254,7 +254,9 @@ function limitAccountFormsForRenderer() {
     if ((!Array.isArray(steps) || !steps.length) && !noteKey) {
       throw new Error(`limits form: missing setup instructions for ${entry.id}`);
     }
-    if (validation && (!validation.invalidKey || !validation.rateLimitedKey || !validation.unavailableKey)) {
+    // Every form's credential is probed before it is saved; `validation` only
+    // overrides the shared "rejected" message with provider-specific guidance.
+    if (validation && (!validation.invalidKey || Object.keys(validation).length !== 1)) {
       throw new Error(`limits form: invalid validation messages for ${entry.id}`);
     }
     const { configuredKey, sourceKey, pendingKey } = entry.status;

@@ -990,7 +990,7 @@ test('Zed account panel follows the manual browser Cookie flow without exposing 
   );
   assert.doesNotMatch(connectionDetailMap, /\bzed:/);
   assert.match(app, /limitAccountPanelsApi\.createSingleCredentialPanel\(form/);
-  assert.match(app, /\[field\]: value,\n\s*limitProviders: limitProviderSelectionIncluding\(id\),\n\s*limitsEnabled: true/);
+  assert.match(app, /window\.tokenMonitor\.limits\.saveCredential\(id, \{ \[field\]: value \}\)/);
   assert.doesNotMatch(app, /window\.tokenMonitor\.zed|zedUserId|zedAccessToken|zedServerUrl/);
 
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
@@ -1037,8 +1037,11 @@ test('Command Code generic account panel saves a cookie and opens the allowliste
   assert.match(panel, /onSave\(form, input\.value, \(\) => \{ input\.value = ''; \}\)/);
   assert.match(panel, /onClear\(form\)/);
   const app = readRendererFile('app.js');
-  assert.match(app, /\[field\]: value,\n\s*limitProviders: limitProviderSelectionIncluding\(id\),\n\s*limitsEnabled: true/);
-  assert.match(app, /saveSettings\(\{ \[field\]: '' \}\)/);
+  assert.match(app, /window\.tokenMonitor\.limits\.saveCredential\(id, \{ \[field\]: value \}\)/);
+  assert.match(app, /window\.tokenMonitor\.limits\.clearCredential\(id\)/);
+  // Saving selects the provider in main, in the same write as the credential.
+  assert.match(fs.readFileSync(path.join(rendererDir, '..', 'limits', 'credentialCommands.js'), 'utf8'),
+    /limitProviders: providerSelectionIncluding\(getSettings\(\)\.limitProviders, entry\.id\),\n\s*limitsEnabled: true/);
   const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
   assert.equal(limitProviderUrlAllowed('commandcode.ai', '/settings/usage'), true);
   assert.equal(limitProviderUrlAllowed('www.commandcode.ai', '/settings/usage'), true);
@@ -1220,9 +1223,10 @@ test('DeepSeek and MiniMax key changes invalidate stale provider status before r
   assert.match(app, /deepseekPendingCheckSince: 0/);
   assert.match(app, /minimaxPendingCheckSince: 0/);
 
+  const saveBody = functionBody(app, 'saveAccountFormCredential', 'commitAccountCredential');
+  assert.match(saveBody, /saveCredential\(id, \{ \[field\]: value \}\)[\s\S]*markExternalProviderCheckPending\(id\);[\s\S]*renderExternalProviderStatus\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
   const panelsBody = functionBody(app, 'setupLimitAccountPanels', 'limitProviderAccountGroup');
-  assert.match(panelsBody, /markExternalProviderCheckPending\(id\);[\s\S]*await saveSettings\([\s\S]*?\);[\s\S]*renderExternalProviderStatus\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
-  assert.match(panelsBody, /await saveSettings\(\{ \[field\]: '' \}\);[\s\S]*clearExternalProviderCheckPending\(id\);[\s\S]*clearExternalProviderPendingStatus\(id\);[\s\S]*renderExternalProviderStatus\(id\);/);
+  assert.match(panelsBody, /clearCredential\(id\)\);[\s\S]*clearExternalProviderCheckPending\(id\);[\s\S]*clearExternalProviderPendingStatus\(id\);[\s\S]*renderExternalProviderStatus\(id\);/);
 
   const configLookup = /const config = externalLimitAccountConfig\[providerName\] \|\| limitAccountForm\(providerName\)\?\.status;/;
   const pendingBody = functionBody(app, 'markExternalProviderCheckPending', 'clearExternalProviderCheckPending');
@@ -1383,69 +1387,31 @@ test('Factory account form keeps its setup copy and validates before saving', ()
   assert.equal(form.validation.invalidKey, 'settings.factory.validationInvalid');
   assert.doesNotMatch(readRendererFile('index.html'), /id="factoryAccountGroup"/);
   const app = readRendererFile('app.js');
-  const setup = functionBody(app, 'setupLimitAccountPanels', 'limitProviderAccountGroup');
-  assert.match(setup, /const result = await window\.tokenMonitor\.limits\.validateCredential\(id, value\);[\s\S]*?if \(!result\?\.ok\)[\s\S]*?throw error;[\s\S]*?await saveSettings\(validation \? \{ \[field\]: value \}/);
+  const save = functionBody(app, 'saveAccountFormCredential', 'commitAccountCredential');
+  assert.match(save, /validation\?\.invalidKey \|\| 'settings\.common\.credentialRejected'/);
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
-  assert.match(preload, /validateCredential: \(providerId, credential\) => ipcRenderer\.invoke\('limits:validateCredential', providerId, credential\)/);
-  assert.match(main, /ipcMain\.handle\('limits:validateCredential', \(_event, providerId, raw\) => validateLimitCredential\(providerId, raw\)\)/);
+  assert.match(preload, /saveCredential: \(providerId, values\) => ipcRenderer\.invoke\('limits:saveCredential', providerId, values\)/);
+  assert.match(preload, /clearCredential: \(providerId\) => ipcRenderer\.invoke\('limits:clearCredential', providerId\)/);
+  assert.match(main, /ipcMain\.handle\('limits:saveCredential', \(_event, providerId, values\) => credentialCommands\.saveCredential\(providerId, values\)\)/);
+  assert.match(main, /ipcMain\.handle\('limits:clearCredential', \(_event, providerId\) => credentialCommands\.clearCredential\(providerId\)\)/);
+  assert.doesNotMatch(main + preload, /limits:validateCredential|validateLimitCredential/);
   assert.equal(normalizeAccountField('factoryApiKey', ' " fk-live " '), 'fk-live');
   const projected = accountStatusProjection({ factoryApiKey: '' }, { FACTORY_API_KEY: 'auto-detected-key' });
   assert.equal(projected.factoryCredentialConfigured, true);
   assert.equal(projected.factoryCredentialSource, 'env');
 });
 
-test('validated account probes use the chosen registry entry and reject unknown ids', async () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  const validate = (expression) => runMainFunction(main, 'validateLimitCredential', 'electronLimitsDeps', expression, {
-    limitProviderEntry: require('../../src/shared/limits/registry').limitProviderEntry
-  });
-  for (const [id, field, value] of [['factory', 'factoryApiKey', 'fk-live'], ['cline', 'clineApiKey', 'sk-live']]) {
-    const valid = await validate(`validateLimitCredential('${id}', ' ${value} ', {
-      normalizeCredential: value => value.trim(),
-      providerDeps: { transport: 'electron' },
-      fetchLimits: async (options, deps) => ({
-        status: options.${field} === '${value}' && deps.transport === 'electron' ? 'ok' : 'unavailable'
-      })
-    })`);
-    assert.equal(valid.ok, true);
-    assert.equal(valid.status, 'ok');
-    const invalid = await validate(`validateLimitCredential('${id}', '1', {
-      normalizeCredential: value => value.trim(), providerDeps: {},
-      fetchLimits: async () => { const error = new Error('rejected'); error.status = 'unauthorized'; throw error; }
-    })`);
-    assert.deepEqual({ ...invalid }, { ok: false, status: 'unauthorized' });
-    const empty = await validate(`validateLimitCredential('${id}', '  ', {
-      normalizeCredential: value => value.trim(), fetchLimits: async () => { throw new Error('must not probe'); }
-    })`);
-    assert.equal(empty.status, 'notConfigured');
-  }
-  for (const id of ['typesafe', 'unknown', '__proto__']) {
-    const result = await validate(`validateLimitCredential('${id}', 'secret', {
-      fetchLimits: async () => { throw new Error('must not probe'); }
-    })`);
-    assert.equal(result.ok, false);
-    assert.equal(result.status, 'notConfigured');
-  }
-});
-
-test('Factory API key validation keeps all translated failure messages', () => {
+test('Factory API key validation keeps its translated rejection message', () => {
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'factory');
-  assert.deepEqual(Object.values(form.validation), [
-    'settings.factory.validationInvalid',
-    'settings.factory.validationRateLimited',
-    'settings.factory.validationUnavailable'
-  ]);
+  // Throttled and unreachable checks now save and say so through the shared
+  // copy, so the rejection is the only outcome with Factory-specific guidance.
+  assert.deepEqual({ ...form.validation }, { invalidKey: 'settings.factory.validationInvalid' });
 
   const i18n = readRendererFile('i18n.js');
-  for (const key of [
-    'settings.factory.validationInvalid',
-    'settings.factory.validationRateLimited',
-    'settings.factory.validationUnavailable'
-  ]) {
-    assert.equal(i18n.match(new RegExp(`'${key.replaceAll('.', '\\.')}':`, 'g'))?.length, 5);
-  }
+  assert.equal(i18n.match(/'settings\.factory\.validationInvalid':/g)?.length, 5);
+  assert.doesNotMatch(i18n, /settings\.factory\.validation(RateLimited|Unavailable)/);
 });
 
 test('Factory identifies environment and Droid .env credentials separately', () => {
@@ -1520,21 +1486,17 @@ test('Cline account form keeps sign-in precedence, accessible input, and allowli
   assert.equal(currentAccountField('clineApiKey', { clineApiKey: '' }, { CLINE_API_KEY: 'auto-detected-key' }), 'auto-detected-key');
 });
 
-test('Cline API key validation errors distinguish invalid, limited, and unavailable checks', () => {
+test('Cline API key validation keeps its rejection copy in every locale', () => {
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'cline');
-  assert.deepEqual(Object.values(form.validation), [
-    'settings.cline.validationInvalid',
-    'settings.cline.validationRateLimited',
-    'settings.cline.validationUnavailable'
-  ]);
+  assert.deepEqual({ ...form.validation }, { invalidKey: 'settings.cline.validationInvalid' });
 
   // Every cline string the UI can render exists in all five locales — the same
   // completeness Antigravity copy is held to, derived here from the source of truth
   // rather than hand-listed so a key added later cannot skip a locale.
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
   const clineKeys = Object.keys(MESSAGES.en).filter((key) => key.startsWith('settings.cline.'));
-  assert.ok(clineKeys.length >= 16, `expected the Cline copy, found ${clineKeys.length} keys`);
+  assert.ok(clineKeys.includes('settings.cline.validationInvalid'), `expected the Cline copy, found ${clineKeys.length} keys`);
   for (const [locale, messages] of Object.entries(MESSAGES)) {
     const missing = clineKeys.filter((key) => typeof messages[key] !== 'string');
     assert.deepEqual(missing, [], `${locale} is missing Cline copy`);
@@ -1650,7 +1612,7 @@ test('Factory keeps a saved-key Clear action available after validation fails', 
           pendingKey: 'factoryPendingCheckSince'
         }
       },
-      state: { settings, factoryPendingCheckSince: 0 },
+      state: { settings, factoryPendingCheckSince: 0, accountPanelMessages: {} },
       document: { getElementById: id => elements.get(id) || null },
       externalProviderForAccount: () => ({ provider: 'factory', status }),
       externalProviderAccountLinked: () => false,
@@ -1676,6 +1638,80 @@ test('Factory keeps a saved-key Clear action available after validation fails', 
     render();
     assert.equal(elements.get('factoryLogoutButton').classList.contains('hidden'), true, `${source} credentials must not expose Clear`);
   }
+});
+
+test('an account message survives the stats re-renders until its own condition retires it', () => {
+  const app = readRendererFile('app.js');
+  const elements = new Map();
+  for (const suffix of ['AccountStatus', 'OpenBrowser', 'LogoutButton', 'RefreshButton', 'ManualPanel', 'ErrorMessage']) {
+    const classes = new Set(suffix === 'ErrorMessage' ? ['settings-note', 'error', 'hidden'] : []);
+    elements.set(`deepseek${suffix}`, {
+      classList: {
+        add: (...names) => names.forEach(name => classes.add(name)),
+        remove: (...names) => names.forEach(name => classes.delete(name)),
+        toggle: (name, force) => (force ? classes.add(name) : classes.delete(name)),
+        contains: name => classes.has(name)
+      },
+      textContent: ''
+    });
+  }
+  const state = {
+    settings: { deepseekApiKeyConfigured: true, deepseekApiKeySource: 'settings' },
+    deepseekPendingCheckSince: 0,
+    accountPanelMessages: {}
+  };
+  let provider = null;
+  const render = () => runRendererFunctions(app, ['renderExternalProviderStatus'], "renderExternalProviderStatus('deepseek')", {
+    externalLimitAccountConfig: {},
+    limitAccountForm: () => ({ status: { configuredKey: 'deepseekApiKeyConfigured', sourceKey: 'deepseekApiKeySource', pendingKey: 'deepseekPendingCheckSince' } }),
+    state,
+    document: { getElementById: id => elements.get(id) || null },
+    externalProviderForAccount: () => provider,
+    externalProviderAccountLinked: () => false,
+    limitProviderEnabled: () => true,
+    setCursorStatusText: () => {},
+    apiKeyAccountStatusText: () => '',
+    t: (key, params) => (params ? `${key}:${JSON.stringify(params)}` : key),
+    renderSettingsSummaries: () => {},
+    setExternalAccountExpanded: () => {},
+    renderVolcengineAgentOverrideState: () => {},
+    updateQoderUsagePageHint: () => {},
+    alibabaSavedVariant: () => ''
+  });
+  const line = elements.get('deepseekErrorMessage');
+
+  // A rejection stays on screen through any number of stats pushes.
+  state.accountPanelMessages.deepseek = { key: 'settings.common.credentialRejected', params: { provider: 'DeepSeek' } };
+  for (let push = 0; push < 3; push += 1) render();
+  assert.equal(line.textContent, 'settings.common.credentialRejected:{"provider":"DeepSeek"}');
+  assert.equal(line.classList.contains('hidden'), false);
+  assert.equal(line.classList.contains('error'), true);
+
+  // "Saved, not yet confirmed" reads as a notice and retires with the first
+  // record that answers for the saved key, because the pill then does.
+  state.accountPanelMessages.deepseek = { key: 'settings.common.credentialSavedUnconfirmed', tone: 'notice', untilChecked: true };
+  render();
+  assert.equal(line.classList.contains('error'), false);
+  assert.equal(line.classList.contains('hidden'), false);
+  provider = { provider: 'deepseek', status: 'ok' };
+  render();
+  assert.equal(line.classList.contains('hidden'), true);
+  assert.equal(line.textContent, '');
+  assert.equal(state.accountPanelMessages.deepseek, undefined);
+});
+
+test('account credentials persist through the settings:update body, not a second write path', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  assert.match(main, /ipcMain\.handle\('settings:update', \(_event, patch\) => applySettingsPatch\(patch\)\);/);
+  assert.match(main, /createCredentialCommands\(\{\s*getSettings: \(\) => settings,\s*applySettingsPatch,\s*probeDeps: credentialProbeDeps\s*\}\)/);
+  const body = main.slice(main.indexOf('function applySettingsPatch(patch) {'), main.indexOf("ipcMain.handle('appearance:preview'"));
+  assert.match(body, /credentialCommands\.noteSettingsPatch\(patch\);/);
+  assert.match(body, /normalizeAccountPatch\(patch, normalizedPatch\)/);
+  assert.match(body, /return settingsForRenderer\(\);\n {2}\}\n\s*$/);
+  const probe = functionBody(main, 'credentialProbeDeps', 'electronLimitsDeps');
+  assert.match(probe, /providerRuntimeState: new Map\(\)/);
+  assert.match(probe, /probe: true/);
+  assert.doesNotMatch(probe, /onClaudeWebCookieRenewed|resolveConfigSnapshot|onThirdParty/);
 });
 
 test('opencode status env account avoids saved profile names', () => {
@@ -2694,7 +2730,7 @@ test('main collectors share one live GUI limit credential resolver in every widg
   const renewalPersistence = functionBody(
     main,
     'persistClaudeWebCookieRenewal',
-    'validateLimitCredential'
+    'credentialProbeDeps'
   );
   assert.match(renewalPersistence, /settings\.claudeWebCookie === renewed\) return true/);
   assert.match(renewalPersistence, /saveSettings\(\{ throwOnError: true \}\)/);

@@ -1986,8 +1986,8 @@ test('Cline exposes its API key through the settings and credential-store patter
   assert.equal(form.ariaLabelKey, 'settings.cline.apiKeyLabel');
   assert.match(app, /clineAccountExpanded/);
   assert.equal(form.status.configuredKey, 'clineCredentialConfigured');
-  assert.match(app, /window\.tokenMonitor\.limits\.validateCredential\(id, value\)/);
-  assert.match(preload, /validateCredential: \(providerId, credential\) => ipcRenderer\.invoke\('limits:validateCredential'/);
+  assert.match(app, /window\.tokenMonitor\.limits\.saveCredential\(id, \{ \[field\]: value \}\)/);
+  assert.match(preload, /saveCredential: \(providerId, values\) => ipcRenderer\.invoke\('limits:saveCredential'/);
   // The key itself never crosses to the renderer: the projection carries the
   // boolean and the source label only, never a `clineApiKey` field.
   const projection = main.slice(
@@ -2005,7 +2005,7 @@ test('Cline exposes its API key through the settings and credential-store patter
   assert.match(runtimeConfig, /limitProviderSettingKeys\(\)/);
   assert.deepEqual(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.cline, ['clineApiKey']);
   assert.deepEqual(CREDENTIAL_SETTING_PATHS.clineApiKey, ['providers', 'cline', 'apiKey']);
-  assert.match(main, /ipcMain\.handle\('limits:validateCredential'/);
+  assert.match(main, /ipcMain\.handle\('limits:saveCredential'/);
   assert.match(main, /\.\.\.finalAccountSettings\(patch, settings\)/);
   const clinePatch = { clineApiKey: ' " pasted " ' };
   const normalized = { ...clinePatch };

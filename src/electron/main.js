@@ -110,7 +110,6 @@ const {
 } = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 const { limitProviderUrlAllowed } = require('../shared/limits/accounts');
-const { limitProviderEntry } = require('../shared/limits/registry');
 const {
   accountFieldProjection,
   accountStatusProjection,
@@ -123,6 +122,7 @@ const {
   redactThirdPartyProfilesForRenderer,
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
+const { createCredentialCommands } = require('./limits/credentialCommands');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/providers/ollama/limits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const {
@@ -808,23 +808,17 @@ function persistClaudeWebCookieRenewal({ previousCookie, cookie } = {}) {
   return true;
 }
 
-// Probe only explicitly validated account forms. The id is untrusted IPC input;
-// the registry supplies both the credential field and its fetcher.
-async function validateLimitCredential(providerId, raw, deps = {}) {
-  const entry = limitProviderEntry(providerId);
-  if (!entry?.form?.validation) return { ok: false, status: 'notConfigured' };
-  const { field } = entry.form;
-  const credential = (deps.normalizeCredential || ((value) => normalizeAccountField(field, value)))(raw);
-  if (!credential) return { ok: false, status: 'notConfigured' };
-  try {
-    const provider = await (deps.fetchLimits || entry.fetchLimits)(
-      { [field]: credential },
-      deps.providerDeps || electronProviderDeps()
-    );
-    return { ok: provider?.status === 'ok', status: provider?.status || 'unavailable' };
-  } catch (error) {
-    return { ok: false, status: error?.status || 'unavailable' };
-  }
+// A save-time probe gets the collector's transports but none of its write-backs:
+// a credential that has not been saved yet must not renew itself into
+// settings, and a fresh runtime state keeps it from reading or seeding the
+// collector's caches. `probe` tells fetchers with persistent bookkeeping (the
+// DeepSeek balance history) to skip it.
+function credentialProbeDeps() {
+  return electronProviderDeps({
+    claudeWebFetch: electronClaudeWebFetch,
+    providerRuntimeState: new Map(),
+    probe: true
+  });
 }
 
 function electronLimitsDeps() {
@@ -6789,8 +6783,17 @@ app.whenReady().then(() => {
       return { ok: false, error: error.message };
     }
   });
-  ipcMain.handle('settings:update', (_event, patch) => {
+  const credentialCommands = createCredentialCommands({
+    getSettings: () => settings,
+    applySettingsPatch,
+    probeDeps: credentialProbeDeps
+  });
+  ipcMain.handle('settings:update', (_event, patch) => applySettingsPatch(patch));
+  // The settings:update body, named so a credential save persists through the
+  // exact same normalization, runtime reconfigure and limit invalidation.
+  function applySettingsPatch(patch) {
     if (patch?.claudeWebCookie !== undefined) claudeWebCookieMutationRevision += 1;
+    credentialCommands.noteSettingsPatch(patch);
     const previousSettingsState = settings;
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
     const previousNativeMaterial = nativeBlurEnabled();
@@ -7089,7 +7092,7 @@ app.whenReady().then(() => {
     }
     pushSettingsToRenderer();
     return settingsForRenderer();
-  });
+  }
   ipcMain.handle('appearance:preview', (_event, patch) => {
     applyNativeMaterial({ ...settings, ...patch });
     if (patch && patch.zoomFactor !== undefined && mainWindow && !mainWindow.isDestroyed()) {
@@ -7466,7 +7469,8 @@ app.whenReady().then(() => {
     rememberOllamaValidation(cookie, provider);
     return { ok: provider.status === 'ok', status: provider.status };
   });
-  ipcMain.handle('limits:validateCredential', (_event, providerId, raw) => validateLimitCredential(providerId, raw));
+  ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
+  ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
     const cookie = opencodeWeb.sanitizeCookieHeader(raw);
     if (!cookie) {
