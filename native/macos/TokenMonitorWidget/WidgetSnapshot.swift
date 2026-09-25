@@ -526,10 +526,11 @@ extension WidgetModel {
 }
 
 extension WidgetTool {
-    private enum CodingKeys: String, CodingKey { case id, totalTokens, costUsd, sharePercent }
+    private enum CodingKeys: String, CodingKey { case id, displayName, totalTokens, costUsd, sharePercent }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
+        displayName = c.optionalString(.displayName)
         totalTokens = try c.decode(Int.self, forKey: .totalTokens)
         costUsd = try c.decode(Double.self, forKey: .costUsd)
         sharePercent = try c.decode(Double.self, forKey: .sharePercent)
