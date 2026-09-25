@@ -820,7 +820,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     }
 
     func testStaleStatusWinsOverGeneratedAtThreshold() throws {
-        let snapshot = try decode("{\"schemaVersion\":10,\"generatedAt\":\"2026-07-17T09:00:00Z\",\"periods\":{\"day\":{}},\"status\":{\"isStale\":true,\"noData\":false}}")
+        let snapshot = try decode("{\"schemaVersion\":11,\"generatedAt\":\"2026-07-17T09:00:00Z\",\"periods\":{\"day\":{}},\"status\":{\"isStale\":true,\"noData\":false}}")
         XCTAssertTrue(snapshot.isStale(at: Date(timeIntervalSince1970: 0)))
     }
 
