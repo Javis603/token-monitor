@@ -7091,7 +7091,7 @@ app.whenReady().then(() => {
     }
     pushSettingsToRenderer();
     return settingsForRenderer();
-  });
+  }
   ipcMain.handle('appearance:preview', (event, patch) => {
     // Preview only the requesting surface: another window still renders its
     // saved theme until settings:update broadcasts the committed preference.
