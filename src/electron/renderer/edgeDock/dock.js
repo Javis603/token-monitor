@@ -528,7 +528,11 @@ function providerCellNode(cell) {
   } else {
     value.textContent = percentText(cell.remainingPercent);
   }
-  value.dataset.severity = displaySeverity(cell.remainingPercent);
+  // Colour answers "how close is the closest quota to empty"; the figure itself
+  // answers "what does the primary window say" (0% when a quota is spent).
+  // Splitting the two lets a tight secondary window warn without turning the
+  // headline into whichever window is lowest this minute.
+  value.dataset.severity = displaySeverity(cell.severityPercent ?? cell.remainingPercent);
   node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider)), value);
   // The halo is decorative and carries no text, so the state it announces is
   // spoken here instead, from the same reading it is drawn from.

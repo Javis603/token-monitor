@@ -204,14 +204,44 @@
     // A compact, unlabeled icon cannot explain two pools of the same kind. Prefer
     // the provider's canonical aggregate window instead of silently substituting
     // a scoped/model pool (Claude Fable) or a sub-quota (Cursor API) for it.
-    const canonicalLabels = kind === 'weekly' ? new Set(['', 'weekly'])
-      : kind === 'billing' ? new Set(['', 'total'])
-        : new Set(['']);
-    const canonical = windows.find((window) => canonicalLabels.has(String(window.label || '').trim().toLowerCase()));
+    const canonical = windows.find((window) => canonicalWindowLabels(kind).has(String(window.label || '').trim().toLowerCase()));
     if (canonical) return canonical;
     return windows.reduce((pick, window) => (
       !pick || remainingPercent(window, provider) < remainingPercent(pick, provider) ? window : pick
     ), null);
+  }
+
+  // Canonical label sets, shared by preferredWindow() and the exhaustion gate.
+  // "Monthly" counts as canonical for billing: it is this app's own convention
+  // label for the account-level cadence window (Codex, Kimi, OpenCode, …), not
+  // a named sub-pool like "MCP" or "Token Spend". Session/daily get their
+  // display convention labels for the same reason.
+  const CANONICAL_KIND_LABELS = {
+    session: new Set(['', 'session', '5-hour', '5h']),
+    daily: new Set(['', 'daily']),
+    weekly: new Set(['', 'weekly']),
+    billing: new Set(['', 'total', 'monthly'])
+  };
+  const CANONICAL_DEFAULT_LABELS = new Set(['']);
+
+  function canonicalWindowLabels(kind) {
+    return CANONICAL_KIND_LABELS[kind] || CANONICAL_DEFAULT_LABELS;
+  }
+
+  // Which window of a kind may testify that the account is out of quota —
+  // stricter than preferredWindow() on purpose. The additional flag marks a
+  // provider-declared extra pool (Factory's Core/Premium pools, Codex
+  // additional_rate_limits): it can never testify about the account aggregate,
+  // whatever its kind. And only a canonically labelled window counts at all:
+  // a pool that is the sole window of its kind is returned by preferredWindow()
+  // without a label check, and several same-kind pools fall back to the
+  // tightest — both paths would let a scoped/model pool (Claude Fable-only
+  // weekly, Cursor Grok Bot, an Antigravity per-model pool at 0%) look like the
+  // account gate it provably is not.
+  function gatingWindow(provider, kind) {
+    const windows = meteredWindows(provider, kind).filter((window) => window.additional !== true);
+    return windows.find((window) => canonicalWindowLabels(kind).has(String(window.label || '').trim().toLowerCase()))
+      || null;
   }
 
   function compactLimitSelection(provider) {
@@ -223,11 +253,50 @@
     const primaryWindow = session || daily || weekly || billing;
     if (!primaryWindow) return null;
     const secondaryWindow = session ? (daily || weekly) : daily ? weekly : null;
+    // Severity scans every window that can show a meter — including pools the
+    // headline excludes: Codex additional_rate_limits (filtered out of
+    // meteredWindows for headline purposes), scoped/model pools, and money
+    // windows. The gate is about the account verdict; the warn colour is about
+    // the tightest pool, and a drained additional pool deserves the early
+    // warning even though it cannot gate.
+    const metered = (provider?.windows || []).filter((window) => (
+      window
+      && window.showMeter !== false
+      && remainingPercent(window, provider) !== null
+    ));
+    // An empty pool gates the account no matter which window the headline
+    // would otherwise print: a full session bar beside a monthly quota at 0%
+    // still means unusable. Any metered window counts, not just the primary and
+    // secondary pair, so a monthly-only drain still surfaces. Money windows are
+    // the exception: a balance or spend figure at its end (credits, spend) is
+    // not proof the account stopped serving — grants can run dry while top-ups
+    // still fund requests, and balances often bill past zero — so only plain
+    // quota windows may exhaust the headline.
+    // Only the canonical window per kind counts: a scoped or model-specific pool
+    // (Claude Fable, Cursor API sub-quota) draining to zero says nothing about
+    // the rest of the account, which is why preferredWindow() exists. And a
+    // legacy spend row arriving through an old hub carries no metric marker, so
+    // it has to be excluded by identity, not by the metric flag alone.
+    const spend = balanceDisplay.spendWindow(provider);
+    const exhaustedWindow = ['session', 'daily', 'weekly', 'billing']
+      .map((kind) => gatingWindow(provider, kind))
+      .filter((window) => window && !window.metric && window !== spend)
+      .find((window) => remainingPercent(window, provider) === 0) || null;
+    // The tightest metered pool, whatever its kind and including additional
+    // pools. The headline does not report this — a 100% session beside a 9%
+    // weekly still reads 100% — but a warn-colour surface needs it so an
+    // almost-gated account can flag before the headline flips to 0%.
+    const tightestPercent = metered.reduce((low, window) => {
+      const remaining = remainingPercent(window, provider);
+      return remaining === null ? low : (low === null || remaining < low ? remaining : low);
+    }, null);
     return {
       provider: normalizedProviderId(provider.provider),
       providerRecord: provider,
       primaryWindow,
       secondaryWindow,
+      exhaustedWindow,
+      tightestPercent,
       // Resolved remaining percentages. Credits windows carry no wire
       // percentage, so consumers must read these instead of re-deriving from
       // the raw window — doing so yields a fabricated 0%.
