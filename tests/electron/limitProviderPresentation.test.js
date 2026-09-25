@@ -1853,10 +1853,12 @@ test('settings provider status waits for stats and refreshes when stats arrive',
     assert.match(statsRender, new RegExp(`${fn}\\(\\);`), `${fn} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
   }
-  for (const provider of ['claude', 'factory', 'zai', 'volcengine', 'qoder', 'trae', 'commandcode', 'kimi', 'ollama']) {
+  for (const provider of ['claude', 'zai', 'volcengine', 'qoder', 'trae', 'kimi', 'ollama']) {
     assert.match(statsRender, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
   }
+  assert.match(statsRender, /for \(const form of state\.settings\?\.limitAccountForms \|\| \[\]\)/);
+  assert.match(syncSettings, /for \(const form of state\.settings\?\.limitAccountForms \|\| \[\]\)/);
   for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus']) {
     assert.doesNotMatch(settingsPush, new RegExp(`${fn}\\(\\);`), `${fn} should not be duplicated in onSettingsPush (syncSettingsForm covers it)`);
   }
@@ -1979,21 +1981,18 @@ test('Cline exposes its API key through the settings and credential-store patter
     'utf8'
   );
 
-  // The panel: every id the shared renderer requires before it draws the row.
-  for (const id of [
-    'clineAccountGroup', 'clineAccountStatus', 'clineSettingsToggle', 'clineSettingsDetails',
-    'clineOpenBrowser', 'clineLogoutButton', 'clineRefreshButton', 'clineManualPanel',
-    'clineApiKeyInput', 'clineApiKeySubmit', 'clineErrorMessage'
-  ]) {
-    assert.match(html, new RegExp(`id="${id}"`), `${id} is missing from index.html`);
-  }
-  // The renderer's side of it: the row, its platform link, and the probe the save
-  // button awaits.
+  // Cline's account panel is built from the redacted form DTO.
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'cline');
+  assert.doesNotMatch(html, /id="clineAccountGroup"/);
+  assert.equal(form.field, 'clineApiKey');
+  assert.equal(form.url, 'https://app.cline.bot/dashboard/account');
+  assert.equal(form.noteKey, 'settings.cline.note');
+  assert.equal(form.ariaLabelKey, 'settings.cline.apiKeyLabel');
   assert.match(app, /clineAccountExpanded/);
-  assert.match(app, /clineCredentialConfigured/);
-  assert.match(app, /function clinePlatformUrl/);
-  assert.match(app, /window\.tokenMonitor\.cline\.validateApiKey/);
-  assert.match(preload, /cline: \{\n {4}validateApiKey: \(apiKey\) => ipcRenderer\.invoke\('cline:validateApiKey'/);
+  assert.equal(form.status.configuredKey, 'clineCredentialConfigured');
+  assert.match(app, /window\.tokenMonitor\.limits\.validateCredential\(id, value\)/);
+  assert.match(preload, /validateCredential: \(providerId, credential\) => ipcRenderer\.invoke\('limits:validateCredential'/);
   // The key itself never crosses to the renderer: the projection carries the
   // boolean and the source label only, never a `clineApiKey` field.
   const projection = main.slice(
@@ -2001,14 +2000,23 @@ test('Cline exposes its API key through the settings and credential-store patter
     main.indexOf('function pushSettingsToRenderer')
   );
   assert.doesNotMatch(projection, /clineApiKey:/);
-  assert.match(projection, /clineCredentialConfigured/);
-  assert.match(projection, /clineCredentialSource/);
+  assert.match(projection, /\.\.\.accountStatusProjection\(settings, process\.env\)/);
+  const { accountStatusProjection, finalAccountSettings, normalizeAccountPatch } = require('../../src/electron/limits/accountSettings');
+  const clineStatus = accountStatusProjection({ clineApiKey: 'stored' }, {});
+  assert.equal(clineStatus.clineCredentialConfigured, true);
+  assert.equal(clineStatus.clineCredentialSource, 'settings');
   // Settings + credential store + IPC, the pattern the pattern-bound test above
   // asserts for the catalog; the path is what keeps the key out of settings.json.
-  assert.match(runtimeConfig, /cline: \['clineApiKey'\]/);
+  assert.match(runtimeConfig, /limitProviderSettingKeys\(\)/);
+  assert.deepEqual(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.cline, ['clineApiKey']);
   assert.deepEqual(CREDENTIAL_SETTING_PATHS.clineApiKey, ['providers', 'cline', 'apiKey']);
-  assert.match(main, /ipcMain\.handle\('cline:validateApiKey'/);
-  assert.match(main, /clineApiKey: patch\.clineApiKey !== undefined \? normalizeClineApiKey\(patch\.clineApiKey\) : \(settings\.clineApiKey \|\| ''\)/);
+  assert.match(main, /ipcMain\.handle\('limits:validateCredential'/);
+  assert.match(main, /\.\.\.finalAccountSettings\(patch, settings\)/);
+  const clinePatch = { clineApiKey: ' " pasted " ' };
+  const normalized = { ...clinePatch };
+  normalizeAccountPatch(clinePatch, normalized);
+  assert.equal(normalized.clineApiKey, 'pasted');
+  assert.equal(finalAccountSettings(clinePatch, {}).clineApiKey, 'pasted');
   assert.match(envExample, /CLINE_API_KEY=/);
   assert.match(clineLimits, /CLINE_API_KEY/);
   assert.match(clineLimits, /CLINEPASS_API_KEY/);

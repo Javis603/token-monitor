@@ -10,6 +10,7 @@ const {
 // Limits provider identity comes from its own shared catalog, bound here rather
 // than at its first use below because the icon tables are derived from it.
 const { LIMIT_PROVIDER_CATALOG: LIMIT_PROVIDERS, LIMIT_PROVIDER_IDS } = window.TokenMonitorLimitProviders;
+const limitAccountPanelsApi = window.TokenMonitorLimitAccountPanels;
 const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
@@ -72,19 +73,14 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   opencode: 'opencodeCookieGroup',
   cursor: 'cursorAccountGroup',
   antigravity: 'antigravityAccountGroup',
-  cline: 'clineAccountGroup',
-  factory: 'factoryAccountGroup',
   kimi: 'kimiAccountGroup',
   copilot: 'copilotAccountGroup',
-  zed: 'zedAccountGroup',
-  commandcode: 'commandcodeAccountGroup',
   mimo: 'mimoAccountGroup',
   zai: 'zaiAccountGroup',
   zaiteam: 'zaiteamAccountGroup',
   qoder: 'qoderAccountGroup',
   deepseek: 'deepseekAccountGroup',
   devin: 'devinAccountGroup',
-  typesafe: 'typesafeAccountGroup',
   openrouter: 'openrouterAccountGroup',
   minimax: 'minimaxAccountGroup',
   volcengine: 'volcengineAccountGroup',
@@ -99,19 +95,14 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   opencode: 'opencodeCookieStatus',
   cursor: 'cursorAccountStatus',
   antigravity: 'antigravityAccountStatus',
-  cline: 'clineAccountStatus',
-  factory: 'factoryAccountStatus',
   kimi: 'kimiAccountStatus',
   copilot: 'copilotApiTokenStatus',
-  zed: 'zedAccountStatus',
-  commandcode: 'commandcodeAccountStatus',
   mimo: 'mimoAccountStatus',
   zai: 'zaiAccountStatus',
   zaiteam: 'zaiteamAccountStatus',
   qoder: 'qoderAccountStatus',
   deepseek: 'deepseekApiKeyStatus',
   devin: 'devinAccountStatus',
-  typesafe: 'typesafeAccountStatus',
   openrouter: 'openrouterStatus',
   minimax: 'minimaxApiKeyStatus',
   volcengine: 'volcengineAccountStatus',
@@ -316,13 +307,11 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '' };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '' };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.zedAccountExpanded = false;
 state.zedPendingCheckSince = 0;
-state.typesafeAccountExpanded = false;
-state.typesafePendingCheckSince = 0;
 state.toolDetailMode = 'tokens';
 state.codexResetForecast = null;
 state.codexResetForecastBusy = false;
@@ -6754,6 +6743,7 @@ let backgroundImageActive = false;
 let backgroundImageBusy = false;
 let backgroundImageError = false;
 let backgroundImageRequest = 0;
+let backgroundImageObjectUrl = null;
 
 function syncBackgroundImageStatus() {
   if (els.backgroundImageStatus) {
@@ -6768,10 +6758,20 @@ function syncBackgroundImageStatus() {
   if (els.clearBackgroundImageButton) els.clearBackgroundImageButton.disabled = backgroundImageBusy;
 }
 
-function applyBackgroundImage(dataUrl) {
-  backgroundImageActive = typeof dataUrl === 'string' && dataUrl.startsWith('data:image/png;base64,');
+function applyBackgroundImage(bytes) {
+  // The PNG is carried over IPC as bytes and shown through a blob: URL. A
+  // data: URL is not an option: Blink silently truncates CSS values set via
+  // setProperty() at 2 MiB, which corrupted the url("data:...") value and made
+  // larger saved images render as nothing at all.
+  const buffer = bytes instanceof Uint8Array && bytes.byteLength > 0 ? bytes : null;
+  backgroundImageActive = buffer !== null;
+  if (backgroundImageObjectUrl) {
+    URL.revokeObjectURL(backgroundImageObjectUrl);
+    backgroundImageObjectUrl = null;
+  }
   if (backgroundImageActive) {
-    els.shell.style.setProperty('--custom-background-image', `url("${dataUrl}")`);
+    backgroundImageObjectUrl = URL.createObjectURL(new Blob([buffer], { type: 'image/png' }));
+    els.shell.style.setProperty('--custom-background-image', `url("${backgroundImageObjectUrl}")`);
   } else {
     els.shell.style.removeProperty('--custom-background-image');
   }
@@ -6783,8 +6783,8 @@ function applyBackgroundImage(dataUrl) {
 async function loadBackgroundImage() {
   const request = ++backgroundImageRequest;
   try {
-    const dataUrl = await window.tokenMonitor.getBackgroundImage();
-    if (request === backgroundImageRequest) applyBackgroundImage(dataUrl);
+    const bytes = await window.tokenMonitor.getBackgroundImage();
+    if (request === backgroundImageRequest) applyBackgroundImage(bytes);
   } catch (_) {
     if (request !== backgroundImageRequest) return;
     backgroundImageError = true;
@@ -6803,7 +6803,7 @@ async function changeBackgroundImage(clear = false) {
       applyBackgroundImage(null);
     } else {
       const result = await window.tokenMonitor.chooseBackgroundImage();
-      if (!result?.canceled && result?.dataUrl) applyBackgroundImage(result.dataUrl);
+      if (!result?.canceled && result?.bytes) applyBackgroundImage(result.bytes);
     }
   } catch (_) {
     backgroundImageError = true;
@@ -7945,6 +7945,7 @@ function syncSettingsForm() {
     return;
   }
   settingsDomSyncPending = false;
+  setupLimitAccountPanels();
   applySettingsTranslations();
   applyInitialBreakdownPreference();
   syncPeriodTabs();
@@ -8075,17 +8076,15 @@ function syncSettingsForm() {
   renderDeepseekStatus();
   renderMinimaxStatus();
   renderExternalProviderStatus('claude');
-  renderExternalProviderStatus('cline');
-  renderExternalProviderStatus('factory');
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
   renderExternalProviderStatus('devin');
   renderExternalProviderStatus('trae');
-  renderExternalProviderStatus('zed');
-  renderExternalProviderStatus('typesafe');
-  renderExternalProviderStatus('commandcode');
+  for (const form of state.settings?.limitAccountForms || []) {
+    if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
+  }
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
   renderExternalProviderStatus('alibaba');
@@ -10231,14 +10230,83 @@ function moveOpenCodeLocalFallbackSetting() {
   }
 }
 
+function limitAccountForm(providerId) {
+  return state.settings?.limitAccountForms?.find((form) => form.id === providerId);
+}
+
+function setupLimitAccountPanels() {
+  const container = document.getElementById('accountsSettingsDetails');
+  let added = false;
+  for (const form of state.settings?.limitAccountForms || []) {
+    if (form.kind !== 'singleCredential' || document.getElementById(`${form.id}AccountGroup`)) continue;
+    const panel = limitAccountPanelsApi.createSingleCredentialPanel(form, {
+      document,
+      translate: t,
+      onToggle: ({ id }) => setExternalAccountExpanded(id, !state[`${id}AccountExpanded`]),
+      onOpen: (url) => window.tokenMonitor.openExternal(url),
+      onRefresh: () => refreshStats({ force: true }),
+      onClear: async ({ id, field }) => {
+        await saveSettings({ [field]: '' });
+        clearExternalProviderCheckPending(id);
+        clearExternalProviderPendingStatus(id);
+        renderExternalProviderStatus(id);
+        await refreshStats({ force: true });
+      },
+      onSave: async ({ id, field, validation }, value, clearInput) => {
+        try {
+          // Mark pending only once the credential is going to be saved: marking
+          // drops the provider's current record, and a rejected key must leave
+          // the linked account's status on screen.
+          if (validation) {
+            const result = await window.tokenMonitor.limits.validateCredential(id, value);
+            if (!result?.ok) {
+              const error = new Error('Credential validation failed');
+              error.validationStatus = result?.status || 'unavailable';
+              throw error;
+            }
+          }
+          markExternalProviderCheckPending(id);
+          await saveSettings(validation ? { [field]: value } : {
+            [field]: value,
+            limitProviders: limitProviderSelectionIncluding(id),
+            limitsEnabled: true
+          });
+          clearInput();
+          renderExternalProviderStatus(id);
+          await refreshStats({ force: true });
+          setExternalAccountExpanded(id, !externalProviderAccountLinked(id));
+          renderExternalProviderStatus(id);
+        } catch (error) {
+          clearExternalProviderCheckPending(id);
+          renderExternalProviderStatus(id);
+          throw error;
+        }
+      }
+    });
+    const catalogIndex = LIMIT_PROVIDERS.findIndex((provider) => provider.id === form.id);
+    const nextGroup = LIMIT_PROVIDERS.slice(catalogIndex + 1)
+      .map((provider) => limitProviderAccountGroup(provider.id))
+      .find((group) => group?.parentElement === container);
+    container.insertBefore(panel, nextGroup || null);
+    added = true;
+    setExternalAccountExpanded(form.id, false);
+    renderExternalProviderStatus(form.id);
+  }
+  if (added) initSettingsAnimationWrappers();
+}
+
 function limitProviderAccountGroup(providerId) {
   const groupId = LIMIT_PROVIDER_ACCOUNT_GROUP_IDS[providerId];
-  return groupId ? document.getElementById(groupId) : null;
+  return (groupId || limitAccountForm(providerId))
+    ? document.getElementById(groupId || `${providerId}AccountGroup`)
+    : null;
 }
 
 function limitProviderAccountStatus(providerId) {
   const statusId = LIMIT_PROVIDER_ACCOUNT_STATUS_IDS[providerId];
-  return statusId ? document.getElementById(statusId) : null;
+  return (statusId || limitAccountForm(providerId))
+    ? document.getElementById(statusId || `${providerId}AccountStatus`)
+    : null;
 }
 
 function limitProviderConnectionDetail(bodyKey) {
@@ -11759,17 +11827,15 @@ function renderStatsUpdate() {
   renderDeepseekStatus();
   renderMinimaxStatus();
   renderExternalProviderStatus('claude');
-  renderExternalProviderStatus('cline');
-  renderExternalProviderStatus('factory');
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('qoder');
   renderExternalProviderStatus('devin');
   renderExternalProviderStatus('trae');
-  renderExternalProviderStatus('zed');
-  renderExternalProviderStatus('typesafe');
-  renderExternalProviderStatus('commandcode');
+  for (const form of state.settings?.limitAccountForms || []) {
+    if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
+  }
   renderExternalProviderStatus('kimi');
   renderExternalProviderStatus('ollama');
   renderExternalProviderStatus('alibaba');
@@ -13063,7 +13129,7 @@ function setAccountGroupExpanded(prefix, expanded, stateKey) {
 }
 
 function syncLimitProviderAccountExpansion(providerId, expanded) {
-  if (!LIMIT_PROVIDER_ACCOUNT_GROUP_IDS[providerId]) return;
+  if (!LIMIT_PROVIDER_ACCOUNT_GROUP_IDS[providerId] && !limitAccountForm(providerId)) return;
   if (expanded) {
     setLimitProviderSettingsExpanded(providerId);
   } else if (state.limitProviderSettingsExpanded === providerId) {
@@ -13717,30 +13783,10 @@ const externalLimitAccountConfig = {
     sourceKey: 'claudeWebCookieSource',
     pendingKey: 'claudePendingCheckSince'
   },
-  cline: {
-    configuredKey: 'clineCredentialConfigured',
-    sourceKey: 'clineCredentialSource',
-    pendingKey: 'clinePendingCheckSince'
-  },
-  factory: {
-    configuredKey: 'factoryCredentialConfigured',
-    sourceKey: 'factoryCredentialSource',
-    pendingKey: 'factoryPendingCheckSince'
-  },
   kimi: {
     configuredKey: 'kimiCredentialConfigured',
     sourceKey: 'kimiCredentialSource',
     pendingKey: 'kimiPendingCheckSince'
-  },
-  zed: {
-    configuredKey: 'zedCookieConfigured',
-    sourceKey: 'zedCookieSource',
-    pendingKey: 'zedPendingCheckSince'
-  },
-  commandcode: {
-    configuredKey: 'commandcodeCookieConfigured',
-    sourceKey: 'commandcodeCookieSource',
-    pendingKey: 'commandcodePendingCheckSince'
   },
   zai: {
     configuredKey: 'zaiApiKeyConfigured',
@@ -13761,11 +13807,6 @@ const externalLimitAccountConfig = {
     configuredKey: 'devinBearerTokenConfigured',
     sourceKey: 'devinBearerTokenSource',
     pendingKey: 'devinPendingCheckSince'
-  },
-  typesafe: {
-    configuredKey: 'typesafeCookieConfigured',
-    sourceKey: 'typesafeCookieSource',
-    pendingKey: 'typesafePendingCheckSince'
   },
   volcengine: {
     configuredKey: 'volcengineCredentialsConfigured',
@@ -13793,14 +13834,15 @@ function clearDisabledLimitProviderPendingChecks(enabledProviders) {
   if (!enabledProviders.has('deepseek')) clearDeepseekPendingCheck();
   if (!enabledProviders.has('minimax')) clearMinimaxPendingCheck();
   if (!enabledProviders.has('copilot')) clearCopilotPendingCheck();
-  for (const providerName of Object.keys(externalLimitAccountConfig)) {
+  for (const providerName of [...Object.keys(externalLimitAccountConfig),
+    ...(state.settings?.limitAccountForms || []).map((form) => form.id)]) {
     if (!enabledProviders.has(providerName)) clearExternalProviderCheckPending(providerName);
   }
 }
 
 function externalProviderForAccount(providerName) {
   const provider = localProviderStatus(providerName);
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const pendingSince = Number(config ? state[config.pendingKey] : 0);
   if (!provider || !pendingSince) return provider;
   const updatedAt = Date.parse(provider.updatedAt || '');
@@ -13810,20 +13852,20 @@ function externalProviderForAccount(providerName) {
 }
 
 function externalProviderAccountLinked(providerName) {
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const provider = externalProviderForAccount(providerName);
   return Boolean(config && state.settings?.[config.configuredKey]) && provider?.status === 'ok';
 }
 
 function markExternalProviderCheckPending(providerName) {
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   if (!config) return;
   state[config.pendingKey] = Date.now();
   clearExternalProviderPendingStatus(providerName);
 }
 
 function clearExternalProviderCheckPending(providerName) {
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   if (config) state[config.pendingKey] = 0;
 }
 
@@ -13938,14 +13980,6 @@ function zaiPlatformUrl() {
     : 'https://z.ai/manage-apikey/coding-plan/personal/my-plan';
 }
 
-function clinePlatformUrl() {
-  return 'https://app.cline.bot/dashboard/account';
-}
-
-function factoryPlatformUrl() {
-  return 'https://app.factory.ai/settings/api-keys';
-}
-
 function zaiteamPlatformUrl() {
   return 'https://bigmodel.cn/coding-plan/team/usage-stats';
 }
@@ -14040,17 +14074,6 @@ function renderAlibabaVariantHints() {
   document.getElementById('alibabaPersonalNote')?.classList.toggle('hidden', !personal);
 }
 
-function commandcodePlatformUrl() {
-  // Account-scoped in the address bar (/<username>/settings/usage), but this
-  // path resolves to it and bounces through signin?returnTo= when signed out,
-  // so it is the one link that works without knowing the username.
-  return 'https://commandcode.ai/settings/usage';
-}
-
-function zedPlatformUrl() {
-  return 'https://dashboard.zed.dev/';
-}
-
 function ollamaValidationError(provider) {
   if (provider?.status === 'unauthorized') return t('settings.ollama.validationInvalid');
   if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
@@ -14059,24 +14082,8 @@ function ollamaValidationError(provider) {
   return t('settings.ollama.validationUnavailable');
 }
 
-function clineApiKeyValidationError(provider) {
-  if (provider?.status === 'unauthorized') return t('settings.cline.validationInvalid');
-  if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
-    return t('settings.cline.validationRateLimited');
-  }
-  return t('settings.cline.validationUnavailable');
-}
-
-function factoryApiKeyValidationError(provider) {
-  if (provider?.status === 'unauthorized') return t('settings.factory.validationInvalid');
-  if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
-    return t('settings.factory.validationRateLimited');
-  }
-  return t('settings.factory.validationUnavailable');
-}
-
 function renderExternalProviderStatus(providerName) {
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const statusEl = document.getElementById(`${providerName}AccountStatus`);
   const openBtn = document.getElementById(`${providerName}OpenBrowser`);
   const logoutBtn = document.getElementById(`${providerName}LogoutButton`);
@@ -16069,127 +16076,6 @@ function setupCursorAccountUI() {
     });
   }
 
-  const clineToggle = document.getElementById('clineSettingsToggle');
-  if (clineToggle) {
-    clineToggle.addEventListener('click', () => setExternalAccountExpanded('cline', !state.clineAccountExpanded));
-    setExternalAccountExpanded('cline', false);
-    renderExternalProviderStatus('cline');
-
-    document.getElementById('clineOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(clinePlatformUrl());
-    });
-
-    document.getElementById('clineLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ clineApiKey: '' });
-      clearExternalProviderCheckPending('cline');
-      clearExternalProviderPendingStatus('cline');
-      renderExternalProviderStatus('cline');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('clineRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('clineApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('clineApiKeyInput');
-      const errorEl = document.getElementById('clineErrorMessage');
-      const submit = document.getElementById('clineApiKeySubmit');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.cline.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      submit.disabled = true;
-      submit.textContent = t('settings.common.checking');
-      try {
-        markExternalProviderCheckPending('cline');
-        const validation = await window.tokenMonitor.cline.validateApiKey(input.value);
-        if (!validation?.ok) {
-          clearExternalProviderCheckPending('cline');
-          renderExternalProviderStatus('cline');
-          errorEl.textContent = clineApiKeyValidationError(validation);
-          errorEl.classList.remove('hidden');
-          return;
-        }
-        await saveSettings({ clineApiKey: input.value });
-        input.value = '';
-        renderExternalProviderStatus('cline');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('cline', !externalProviderAccountLinked('cline'));
-        renderExternalProviderStatus('cline');
-      } catch (err) {
-        clearExternalProviderCheckPending('cline');
-        errorEl.textContent = t('settings.cline.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      } finally {
-        submit.disabled = false;
-        submit.textContent = t('settings.cline.saveApiKey');
-      }
-    });
-  }
-
-  const factoryToggle = document.getElementById('factorySettingsToggle');
-  if (factoryToggle) {
-    factoryToggle.addEventListener('click', () => setExternalAccountExpanded('factory', !state.factoryAccountExpanded));
-    setExternalAccountExpanded('factory', false);
-    renderExternalProviderStatus('factory');
-
-    document.getElementById('factoryOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(factoryPlatformUrl());
-    });
-
-    document.getElementById('factoryLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ factoryApiKey: '' });
-      clearExternalProviderCheckPending('factory');
-      clearExternalProviderPendingStatus('factory');
-      renderExternalProviderStatus('factory');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('factoryRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('factoryApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('factoryApiKeyInput');
-      const errorEl = document.getElementById('factoryErrorMessage');
-      const submit = document.getElementById('factoryApiKeySubmit');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.factory.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      submit.disabled = true;
-      submit.textContent = t('settings.common.checking');
-      try {
-        markExternalProviderCheckPending('factory');
-        const validation = await window.tokenMonitor.factory.validateApiKey(input.value);
-        if (!validation?.ok) {
-          clearExternalProviderCheckPending('factory');
-          renderExternalProviderStatus('factory');
-          errorEl.textContent = factoryApiKeyValidationError(validation);
-          errorEl.classList.remove('hidden');
-          return;
-        }
-        await saveSettings({ factoryApiKey: input.value });
-        input.value = '';
-        renderExternalProviderStatus('factory');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('factory', !externalProviderAccountLinked('factory'));
-        renderExternalProviderStatus('factory');
-      } catch (err) {
-        clearExternalProviderCheckPending('factory');
-        errorEl.textContent = t('settings.factory.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      } finally {
-        submit.disabled = false;
-        submit.textContent = t('settings.factory.saveApiKey');
-      }
-    });
-  }
 
   const zaiToggle = document.getElementById('zaiSettingsToggle');
   if (zaiToggle) {
@@ -16625,153 +16511,6 @@ function setupCursorAccountUI() {
     });
   }
 
-  const zedToggle = document.getElementById('zedSettingsToggle');
-  const typesafeToggle = document.getElementById('typesafeSettingsToggle');
-  if (typesafeToggle) {
-    typesafeToggle.addEventListener('click', () => setExternalAccountExpanded('typesafe', !state.typesafeAccountExpanded));
-    setExternalAccountExpanded('typesafe', false);
-    renderExternalProviderStatus('typesafe');
-    document.getElementById('typesafeOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://console.typesafe.ai/settings/billing');
-    });
-    document.getElementById('typesafeLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ typesafeCookie: '' });
-      clearExternalProviderCheckPending('typesafe');
-      clearExternalProviderPendingStatus('typesafe');
-      renderExternalProviderStatus('typesafe');
-      await refreshStats({ force: true });
-    });
-    document.getElementById('typesafeRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-    document.getElementById('typesafeCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('typesafeCookieInput');
-      const errorEl = document.getElementById('typesafeErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.typesafe.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('typesafe');
-        await saveSettings({
-          typesafeCookie: input.value,
-          limitProviders: limitProviderSelectionIncluding('typesafe'),
-          limitsEnabled: true
-        });
-        input.value = '';
-        renderExternalProviderStatus('typesafe');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('typesafe', !externalProviderAccountLinked('typesafe'));
-        renderExternalProviderStatus('typesafe');
-      } catch (err) {
-        clearExternalProviderCheckPending('typesafe');
-        errorEl.textContent = t('settings.typesafe.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-  if (zedToggle) {
-    zedToggle.addEventListener('click', () => setExternalAccountExpanded('zed', !state.zedAccountExpanded));
-    setExternalAccountExpanded('zed', false);
-    renderExternalProviderStatus('zed');
-
-    document.getElementById('zedOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(zedPlatformUrl());
-    });
-
-    document.getElementById('zedLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ zedCookie: '' });
-      clearExternalProviderCheckPending('zed');
-      clearExternalProviderPendingStatus('zed');
-      renderExternalProviderStatus('zed');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zedRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zedCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('zedCookieInput');
-      const errorEl = document.getElementById('zedErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.zed.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('zed');
-        await saveSettings({
-          zedCookie: input.value,
-          limitProviders: limitProviderSelectionIncluding('zed'),
-          limitsEnabled: true
-        });
-        input.value = '';
-        renderExternalProviderStatus('zed');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('zed', !externalProviderAccountLinked('zed'));
-        renderExternalProviderStatus('zed');
-      } catch (err) {
-        clearExternalProviderCheckPending('zed');
-        errorEl.textContent = t('settings.zed.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const commandcodeToggle = document.getElementById('commandcodeSettingsToggle');
-  if (commandcodeToggle) {
-    commandcodeToggle.addEventListener('click', () => setExternalAccountExpanded('commandcode', !state.commandcodeAccountExpanded));
-    setExternalAccountExpanded('commandcode', false);
-    renderExternalProviderStatus('commandcode');
-
-    document.getElementById('commandcodeOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(commandcodePlatformUrl());
-    });
-
-    document.getElementById('commandcodeLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ commandcodeCookie: '' });
-      clearExternalProviderCheckPending('commandcode');
-      clearExternalProviderPendingStatus('commandcode');
-      renderExternalProviderStatus('commandcode');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('commandcodeRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('commandcodeCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('commandcodeCookieInput');
-      const errorEl = document.getElementById('commandcodeErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.commandcode.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('commandcode');
-        await saveSettings({
-          commandcodeCookie: input.value,
-          limitProviders: limitProviderSelectionIncluding('commandcode'),
-          limitsEnabled: true
-        });
-        input.value = '';
-        renderExternalProviderStatus('commandcode');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('commandcode', !externalProviderAccountLinked('commandcode'));
-        renderExternalProviderStatus('commandcode');
-      } catch (err) {
-        clearExternalProviderCheckPending('commandcode');
-        errorEl.textContent = t('settings.commandcode.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
 
   const alibabaToggle = document.getElementById('alibabaSettingsToggle');
   if (alibabaToggle) {
@@ -17261,12 +17000,8 @@ function initSettingsAnimationWrappers() {
     '#claudeManualPanel',
     '#opencodeManualPanel',
     '#cursorManualPanel',
-    '#clineManualPanel',
-    '#factoryManualPanel',
     '#kimiManualPanel',
-    '#zedManualPanel',
-    '#typesafeManualPanel',
-    '#commandcodeManualPanel',
+    '.single-credential-manual-panel',
     '#zaiManualPanel',
     '#zaiteamManualPanel',
     '#qoderManualPanel',
@@ -17288,9 +17023,9 @@ function initSettingsAnimationWrappers() {
       ? 'cursor-settings-details-inner'
       : el.classList.contains('settings-section-details')
         ? 'settings-section-details-inner'
-        : 'accordion-animation-inner';
+        : '';
 
-    inner.className = `accordion-animation-inner ${innerSpecificClass}`;
+    inner.className = ['accordion-animation-inner', innerSpecificClass].filter(Boolean).join(' ');
     while (el.firstChild) {
       inner.appendChild(el.firstChild);
     }

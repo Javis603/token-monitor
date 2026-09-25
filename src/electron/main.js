@@ -100,10 +100,29 @@ const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared
 const { normalizeModelAliases, normalizeModelAliasGrouping, projectModelAliasStats, projectModelAliasHistory } = require('./modelAliasPresentation');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
-const { claudeWebCookie, clineApiKey, deepseekToken, devinBearerToken, factoryEnvApiKey, fetchClaudeLimits, fetchClineLimits, fetchFactoryLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, resolveClineAutomaticCredential, resolveFactoryAutomaticApiKey, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie, typesafeCookie, alibabaCookie, alibabaVariant, normalizeAlibabaCookieHeader } = require('../shared/limits/collector');
-const { normalizeDevinOrganization } = require('../shared/providers/devin/limits');
+const {
+  fetchClaudeLimits,
+  normalizeLimitsRefreshMode,
+  normalizeLimitsRefreshMs,
+  parseBoolean,
+  parseLimitProviders,
+  runCodexLogin
+} = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
-const { discoverZcodeConnection } = require('../shared/providers/zai/zcodeDiscovery');
+const { limitProviderUrlAllowed } = require('../shared/limits/accounts');
+const { limitProviderEntry } = require('../shared/limits/registry');
+const {
+  accountFieldProjection,
+  accountStatusProjection,
+  finalAccountSettings,
+  initialAccountSettings,
+  limitAccountFormsForRenderer,
+  normalizeAccountField,
+  normalizeAccountPatch,
+  redactOpenRouterProfilesForRenderer,
+  redactThirdPartyProfilesForRenderer,
+  rendererOmittedAccountKeys
+} = require('./limits/accountSettings');
 const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/providers/ollama/limits');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const {
@@ -413,7 +432,7 @@ const CSP_HEADER = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self'",
-  "img-src 'self' data:",
+  "img-src 'self' data: blob:",
   "font-src 'self'",
   "connect-src 'self'",
   "object-src 'none'",
@@ -591,7 +610,6 @@ function defaultSettings() {
     homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
     limitsRefreshMode: normalizeLimitsRefreshMode(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE),
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
-    cursorDisabledAccountIds: [],
     cursorManualAccountIds: [],
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
@@ -631,49 +649,7 @@ function defaultSettings() {
     startAtLogin: false,
     automaticAppUpdates: false,
     language: 'auto',
-    claudeWebCookie: '',
-    opencodeCookie: '',
-    opencodeProfiles: {},
-    openrouterProfiles: {},
-    thirdPartyProfiles: {},
-    deepseekApiKey: '',
-    minimaxApiKey: '',
-    copilotApiToken: '',
-    copilotEnterpriseHost: '',
-    clineApiKey: '',
-    factoryApiKey: '',
-    zaiApiKey: '',
-    zaiApiRegion: normalizeZaiApiRegion(process.env.TOKEN_MONITOR_ZAI_API_REGION || process.env.ZAI_API_REGION || process.env.Z_AI_API_HOST || 'global'),
-    zaiTeamApiKey: '',
-    zaiTeamOrganizationId: '',
-    zaiTeamProjectId: '',
-    volcengineAccessKeyId: '',
-    volcengineSecretAccessKey: '',
-    volcengineRegion: '',
-    volcengineAgentAccessKeyId: '',
-    volcengineAgentSecretAccessKey: '',
-    volcengineAgentRegion: '',
-    alibabaCookie: '',
-    // Empty, not 'cn': defaults are merged into settings before any read, so a
-    // concrete value here would satisfy the `options || env` fallback and make
-    // ALIBABA_TOKEN_PLAN_VARIANT unreachable in both the UI and the collector.
-    // The effective variant is resolved at use, never stored eagerly.
-    alibabaVariant: '',
-    qoderCookie: '',
-    qoderSite: 'global',
-    devinBearerToken: '',
-    devinOrganization: '',
-    traeAccessToken: '',
-    traeDeviceId: '',
-    zedCookie: '',
-    typesafeCookie: '',
-    commandcodeCookie: '',
-    kimiApiKey: '',
-    kimiWebAccessToken: '',
-    ollamaCookie: '',
-    codexManagedAccounts: [],
-    antigravityManagedAccounts: [],
-    mimoManagedAccounts: [],
+    ...initialAccountSettings(process.env),
     appUpdate: {
       lastCheckedAt: null,
       lastKnownLatest: null,
@@ -815,29 +791,40 @@ function defaultLimitProviderOrder() {
   return parseLimitProviders().join(',');
 }
 
-function normalizeClaudeWebCookie(value) {
-  return normalizeClaudeWebCookieInput(value);
-}
-
-function currentClaudeWebCookie() {
-  return settings?.claudeWebCookie || claudeWebCookie(process.env);
-}
-
 function persistClaudeWebCookieRenewal({ previousCookie, cookie } = {}) {
   if (!settings?.claudeWebCookie) return false;
   let expected;
   let renewed;
   try {
-    expected = normalizeClaudeWebCookie(previousCookie);
-    renewed = normalizeClaudeWebCookie(cookie);
+    expected = normalizeAccountField('claudeWebCookie', previousCookie);
+    renewed = normalizeAccountField('claudeWebCookie', cookie);
   } catch (_) {
     return false;
   }
-  if (!renewed || normalizeClaudeWebCookie(settings.claudeWebCookie) !== expected) return false;
+  if (!renewed || normalizeAccountField('claudeWebCookie', settings.claudeWebCookie) !== expected) return false;
   if (settings.claudeWebCookie === renewed) return true;
   settings.claudeWebCookie = renewed;
   saveSettings({ throwOnError: true });
   return true;
+}
+
+// Probe only explicitly validated account forms. The id is untrusted IPC input;
+// the registry supplies both the credential field and its fetcher.
+async function validateLimitCredential(providerId, raw, deps = {}) {
+  const entry = limitProviderEntry(providerId);
+  if (!entry?.form?.validation) return { ok: false, status: 'notConfigured' };
+  const { field } = entry.form;
+  const credential = (deps.normalizeCredential || ((value) => normalizeAccountField(field, value)))(raw);
+  if (!credential) return { ok: false, status: 'notConfigured' };
+  try {
+    const provider = await (deps.fetchLimits || entry.fetchLimits)(
+      { [field]: credential },
+      deps.providerDeps || electronProviderDeps()
+    );
+    return { ok: provider?.status === 'ok', status: provider?.status || 'unavailable' };
+  } catch (error) {
+    return { ok: false, status: error?.status || 'unavailable' };
+  }
 }
 
 function electronLimitsDeps() {
@@ -860,227 +847,6 @@ function electronLimitsDeps() {
   };
 }
 
-function normalizeDeepSeekApiKey(value) {
-  return deepseekToken({}, String(value || ''));
-}
-
-function currentDeepSeekApiKey() {
-  return settings?.deepseekApiKey || deepseekToken(process.env);
-}
-
-function normalizeMinimaxApiKey(value) {
-  return minimaxToken({}, String(value || ''));
-}
-
-function currentMinimaxApiKey() {
-  return settings?.minimaxApiKey || minimaxToken(process.env);
-}
-
-function normalizeCopilotApiToken(value) {
-  return copilotToken({}, { copilotApiToken: String(value || '') });
-}
-
-function currentCopilotApiToken() {
-  return settings?.copilotApiToken || copilotToken(process.env);
-}
-
-function normalizeFactoryApiKey(value) {
-  return normalizeSecretSetting(value);
-}
-
-function currentFactoryApiKey() {
-  return settings?.factoryApiKey || factoryEnvApiKey({}, { env: process.env });
-}
-
-async function validateFactoryApiKey(raw, deps = {}) {
-  const apiKey = (deps.normalizeApiKey || normalizeFactoryApiKey)(raw);
-  if (!apiKey) return { ok: false, status: 'notConfigured' };
-  try {
-    const provider = await (deps.fetchLimits || fetchFactoryLimits)(
-      { factoryApiKey: apiKey },
-      deps.providerDeps || electronProviderDeps()
-    );
-    return { ok: provider?.status === 'ok', status: provider?.status || 'unavailable' };
-  } catch (error) {
-    return { ok: false, status: error?.status || 'unavailable' };
-  }
-}
-
-function normalizeClineApiKey(value) {
-  return normalizeSecretSetting(value);
-}
-
-function currentClineApiKey() {
-  return settings?.clineApiKey || clineApiKey(process.env, {});
-}
-
-// Probe the pasted key against the account API before it is stored: the settings
-// row keeps a rejected key out of the credential store and says why.
-async function validateClineApiKey(raw, deps = {}) {
-  const apiKey = (deps.normalizeApiKey || normalizeClineApiKey)(raw);
-  if (!apiKey) return { ok: false, status: 'notConfigured' };
-  try {
-    const provider = await (deps.fetchLimits || fetchClineLimits)(
-      { clineApiKey: apiKey },
-      deps.providerDeps || electronProviderDeps()
-    );
-    return { ok: provider?.status === 'ok', status: provider?.status || 'unavailable' };
-  } catch (error) {
-    return { ok: false, status: error?.status || 'unavailable' };
-  }
-}
-
-function normalizeSecretSetting(value) {
-  let raw = String(value || '').trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
-
-function normalizeZaiApiKey(value) {
-  return zaiToken({}, String(value || ''));
-}
-
-function normalizeZaiApiRegion(value) {
-  return zaiRegion({ zaiApiRegion: value }, {});
-}
-
-function currentZaiApiKey() {
-  return settings?.zaiApiKey || zaiToken(process.env);
-}
-
-// A locally logged-in ZCode install is a credential source for the GLM lane
-// even when no console key was entered. Reads the ZCode data files
-// synchronously (setting.json, config.json, and the credential store where it
-// exists); settingsForRenderer renders at human interaction speed, so the cost
-// is bounded by how often that runs, not by any refresh loop.
-function currentZcodeAutoCredential() {
-  const discovery = discoverZcodeConnection();
-  return discovery.entitled && discovery.credential ? discovery : null;
-}
-
-function normalizeZaiTeamApiKey(value) {
-  return zaiTeamToken({}, String(value || ''));
-}
-
-function normalizeZaiTeamId(value) {
-  return String(value || '').trim();
-}
-
-function currentZaiTeamApiKey() {
-  return settings?.zaiTeamApiKey || zaiTeamToken(process.env);
-}
-
-function normalizeVolcengineRegion(value) {
-  const raw = String(value || '').trim().toLowerCase();
-  return raw || '';
-}
-
-function currentVolcengineCredentials() {
-  return volcengineCredentials(process.env, settings || {});
-}
-
-function normalizeQoderCookie(value) {
-  return qoderCookie({}, { qoderCookie: String(value || '') });
-}
-
-function normalizeAlibabaCookie(value) {
-  return normalizeAlibabaCookieHeader(String(value || ''));
-}
-
-function normalizeAlibabaVariant(value) {
-  // Env is consulted here, not just in the collector: resolving it in only one
-  // of the two leaves the settings UI showing a different console than the one
-  // the quota request actually goes to.
-  return alibabaVariant({ alibabaVariant: value }, process.env);
-}
-
-function currentAlibabaCookie() {
-  return settings?.alibabaCookie || alibabaCookie(process.env);
-}
-
-function normalizeQoderSite(value) {
-  const raw = String(value || '').trim().toLowerCase();
-  if (raw === 'cn' || raw === 'china' || raw.includes('qoder.com.cn')) return 'cn';
-  return 'global';
-}
-
-function currentQoderCookie() {
-  return settings?.qoderCookie || qoderCookie(process.env);
-}
-
-function normalizeDevinBearerToken(value) {
-  return devinBearerToken({}, { devinBearerToken: String(value || '') });
-}
-
-function currentDevinBearerToken() {
-  return settings?.devinBearerToken || devinBearerToken(process.env);
-}
-
-function normalizeTraeAccessToken(value) {
-  return traeAccessToken({}, { traeAccessToken: String(value || '') });
-}
-
-function normalizeTraeDeviceId(value) {
-  return traeDeviceId({}, { traeDeviceId: String(value || '') });
-}
-
-function currentTraeAccessToken() {
-  return settings?.traeAccessToken || traeAccessToken(process.env);
-}
-
-function normalizeZedCookie(value) {
-  return zedCookie({}, { zedCookie: String(value || '') });
-}
-
-function currentZedCookie() {
-  return settings?.zedCookie || zedCookie(process.env);
-}
-
-function normalizeTypesafeCookie(value) {
-  return typesafeCookie({}, { typesafeCookie: String(value || '') });
-}
-
-function currentTypesafeCookie() {
-  return settings?.typesafeCookie || typesafeCookie(process.env);
-}
-
-function normalizeCommandcodeCookie(value) {
-  return commandcodeCookie({}, { commandcodeCookie: String(value || '') });
-}
-
-function currentCommandcodeCookie() {
-  return settings?.commandcodeCookie || commandcodeCookie(process.env);
-}
-
-function normalizeOllamaCookie(value) {
-  return ollamaSessionCookie({}, { ollamaCookie: String(value || '') });
-}
-
-function currentOllamaCookie() {
-  return settings?.ollamaCookie || ollamaSessionCookie(process.env);
-}
-
-function normalizeKimiApiKey(value) {
-  return kimiToken({}, String(value || ''));
-}
-
-function currentKimiApiKey() {
-  return settings?.kimiApiKey || kimiToken(process.env);
-}
-
-function normalizeKimiWebAccessToken(value) {
-  return kimiWebToken({}, String(value || ''));
-}
-
-function currentKimiWebAccessToken() {
-  return settings?.kimiWebAccessToken || kimiWebToken(process.env);
-}
-
-function normalizeCopilotEnterpriseHost(value) {
-  return String(value || '').trim().replace(/^https?:\/\//i, '').split('/')[0].toLowerCase();
-}
 
 let codexLoginController = null;
 let codexLoginFlowId = '';
@@ -4822,59 +4588,6 @@ function currentWindowToggleShortcutStatus() {
 // Default-deny: name every field allowed through instead of spreading the stored
 // profile. A spread hands any field added later to the renderer verbatim, which
 // is exactly how a credential leaks.
-function redactOpencodeProfilesForRenderer(profiles) {
-  if (!profiles || typeof profiles !== 'object') return profiles;
-  const out = Object.create(null);
-  for (const [name, profile] of Object.entries(profiles)) {
-    out[name] = {
-      enabled: profile?.enabled !== false,
-      cookie: profile?.cookie ? 'set' : '',
-      apiKey: profile?.apiKey ? 'set' : ''
-    };
-  }
-  return out;
-}
-
-function redactOpenRouterProfilesForRenderer(profiles) {
-  if (!profiles || typeof profiles !== 'object') return profiles;
-  const out = Object.create(null);
-  for (const [name, profile] of Object.entries(profiles)) {
-    out[name] = { enabled: profile?.enabled !== false, apiKey: profile?.apiKey ? 'set' : '' };
-  }
-  return out;
-}
-
-function redactThirdPartyProfilesForRenderer(profiles) {
-  if (!profiles || typeof profiles !== 'object') return profiles;
-  const out = Object.create(null);
-  for (const [name, profile] of Object.entries(profiles)) {
-    const adapter = thirdPartyLimits.normalizeAdapterId(profile?.adapter);
-    out[name] = {
-      enabled: profile?.enabled !== false,
-      adapter,
-      baseUrl: thirdPartyLimits.normalizeThirdPartyBaseUrl(profile?.baseUrl, {
-        stripTerminalV1: adapter !== thirdPartyLimits.CUSTOM_BALANCE_ADAPTER
-      }),
-      userId: String(profile?.userId || '').trim(),
-      ...(adapter === thirdPartyLimits.CUSTOM_BALANCE_ADAPTER
-        ? {
-            endpointPath: thirdPartyLimits.normalizeCustomEndpointPath(profile?.endpointPath),
-            authMode: thirdPartyLimits.normalizeCustomAuthMode(profile?.authMode),
-            remainingPath: thirdPartyLimits.normalizeCustomJsonPath(profile?.remainingPath),
-            usedPath: thirdPartyLimits.normalizeCustomJsonPath(profile?.usedPath),
-            totalPath: thirdPartyLimits.normalizeCustomJsonPath(profile?.totalPath),
-            currency: thirdPartyLimits.normalizeCustomCurrency(profile?.currency),
-            divisor: thirdPartyLimits.normalizeCustomDivisor(profile?.divisor)
-          }
-        : {}),
-      accessToken: profile?.accessToken ? 'set' : '',
-      apiKey: profile?.apiKey ? 'set' : '',
-      refreshToken: profile?.refreshToken ? 'set' : ''
-    };
-  }
-  return out;
-}
-
 // Sub2API rotates its single-use refresh token on every renewal. Persist the
 // new pair with a compare-and-swap before the collector retries with it.
 // New profiles require a current access token and are never persisted from a
@@ -4960,103 +4673,6 @@ function thirdPartyProfileWithCanonicalIdentity(profile, provider) {
 }
 
 function settingsForRenderer() {
-  const claudeWebCookieSource = settings?.claudeWebCookie
-    ? 'settings'
-    : claudeWebCookie(process.env)
-      ? 'env'
-      : '';
-  const deepseekApiKeySource = settings?.deepseekApiKey
-    ? 'settings'
-    : deepseekToken(process.env)
-      ? 'env'
-      : '';
-  const minimaxApiKeySource = settings?.minimaxApiKey
-    ? 'settings'
-    : minimaxToken(process.env)
-      ? 'env'
-      : '';
-  const copilotApiTokenSource = settings?.copilotApiToken
-    ? 'settings'
-    : copilotToken(process.env)
-      ? 'env'
-      : '';
-  const factoryAutomaticCredential = resolveFactoryAutomaticApiKey({}, { env: process.env });
-  const factoryCredentialSource = settings?.factoryApiKey ? 'settings' : factoryAutomaticCredential.source;
-  const clineAutomaticCredential = resolveClineAutomaticCredential(process.env);
-  const clineCredentialSource = settings?.clineApiKey ? 'settings' : clineAutomaticCredential.source;
-  const zcodeAutoCredential = currentZcodeAutoCredential();
-  // "A usable local ZCode login exists" — advertised so the renderer shows
-  // the auto-detect state instead of "disabled" when the provider is
-  // unchecked. Anything else (API-only, unentitled plan) is not an auto
-  // quota source.
-  const zcodeLoginDetected = Boolean(zcodeAutoCredential);
-  const zaiApiKeySource = settings?.zaiApiKey
-    ? 'settings'
-    : zaiToken(process.env)
-      ? 'env'
-      : zcodeAutoCredential
-        ? 'zcode-auto'
-        : '';
-  const zaiTeamApiKeySource = settings?.zaiTeamApiKey
-    ? 'settings'
-    : zaiTeamToken(process.env)
-      ? 'env'
-      : '';
-  const volcengineCredentialsSource = volcengineCredentials({}, settings || {})
-    ? 'settings'
-    : volcengineCredentials(process.env)
-      ? 'env'
-      : '';
-  const qoderCookieSource = settings?.qoderCookie
-    ? 'settings'
-    : qoderCookie(process.env)
-      ? 'env'
-      : '';
-  const devinBearerTokenSource = settings?.devinBearerToken
-    ? 'settings'
-    : devinBearerToken(process.env)
-      ? 'env'
-      : '';
-  const traeAccessTokenSource = settings?.traeAccessToken
-    ? 'settings'
-    : traeAccessToken(process.env)
-      ? 'env'
-      : '';
-  const zedCookieSource = settings?.zedCookie
-    ? 'settings'
-    : zedCookie(process.env)
-      ? 'env'
-      : '';
-  const typesafeCookieSource = settings?.typesafeCookie
-    ? 'settings'
-    : typesafeCookie(process.env)
-      ? 'env'
-      : '';
-  const commandcodeCookieSource = settings?.commandcodeCookie
-    ? 'settings'
-    : commandcodeCookie(process.env)
-      ? 'env'
-      : '';
-  const ollamaCookieSource = settings?.ollamaCookie
-    ? 'settings'
-    : ollamaSessionCookie(process.env)
-      ? 'env'
-      : '';
-  const alibabaCookieSource = settings?.alibabaCookie
-    ? 'settings'
-    : alibabaCookie(process.env)
-      ? 'env'
-      : '';
-  const kimiApiKeySource = settings?.kimiApiKey
-    ? 'settings'
-    : kimiToken(process.env)
-      ? 'env'
-      : '';
-  const kimiWebAccessTokenSource = settings?.kimiWebAccessToken
-    ? 'settings'
-    : kimiWebToken(process.env)
-      ? 'env'
-      : '';
   // Default-deny every credential field added to the canonical store. The two
   // hub secrets remain explicit exceptions because the existing sync UI must
   // prefill/copy them; provider credentials only cross as blank/configured state.
@@ -5064,14 +4680,7 @@ function settingsForRenderer() {
     expose: ['hubHostSecret', 'secret']
   });
   const rendererSettings = { ...settings };
-  for (const key of [
-    'workbuddyAccessToken',
-    'workbuddyUserId',
-    'workbuddyEnterpriseId',
-    'workbuddyLocale',
-    'workbuddyDomain',
-    'workbuddyDepartmentInfo'
-  ]) delete rendererSettings[key];
+  for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
   return {
     ...rendererSettings,
     locale: trayMenuLocale(),
@@ -5087,89 +4696,12 @@ function settingsForRenderer() {
     subscriptionsHub: currentHubIdentity(),
     subscriptionsUpdatedAt: subscriptionsDocumentFor(currentHubIdentity())?.updatedAt || '',
     subscriptionsOrphaned: pendingOrphanedSubscriptions(),
-    zaiApiRegion: normalizeZaiApiRegion(settings?.zaiApiRegion || 'global'),
-    zaiTeamOrganizationId: settings?.zaiTeamOrganizationId ? 'set' : '',
-    zaiTeamProjectId: settings?.zaiTeamProjectId ? 'set' : '',
-    volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
-    volcengineAgentAccessKeyId: settings?.volcengineAgentAccessKeyId ? 'set' : '',
-    claudeWebCookie: settings?.claudeWebCookie ? 'set' : '',
-    alibabaCookie: settings?.alibabaCookie ? 'set' : '',
-    alibabaVariant: normalizeAlibabaVariant(settings?.alibabaVariant),
-    qoderCookie: settings?.qoderCookie ? 'set' : '',
-    devinBearerToken: settings?.devinBearerToken ? 'set' : '',
-    devinOrganization: settings?.devinOrganization || '',
-    traeAccessToken: settings?.traeAccessToken ? 'set' : '',
-    traeDeviceId: settings?.traeDeviceId ? 'set' : '',
-    zedCookie: settings?.zedCookie ? 'set' : '',
-    typesafeCookie: settings?.typesafeCookie ? 'set' : '',
-    commandcodeCookie: settings?.commandcodeCookie ? 'set' : '',
-    ollamaCookie: settings?.ollamaCookie ? 'set' : '',
-    // Never ship OpenCode session cookies to the renderer; the UI only needs to
-    // know whether a cookie is configured, not its value.
-    opencodeCookie: settings?.opencodeCookie ? 'set' : '',
-    ...(settings?.opencodeProfiles
-      ? { opencodeProfiles: redactOpencodeProfilesForRenderer(settings.opencodeProfiles) }
-      : {}),
-    ...(settings?.openrouterProfiles
-      ? { openrouterProfiles: redactOpenRouterProfilesForRenderer(settings.openrouterProfiles) }
-      : {}),
-    ...(settings?.thirdPartyProfiles
-      ? { thirdPartyProfiles: redactThirdPartyProfilesForRenderer(settings.thirdPartyProfiles) }
-      : {}),
-    openrouterEnvConfigured: Boolean(openrouterLimits.openrouterToken(process.env)),
-    thirdPartyEnvConfigured: thirdPartyLimits.configuredAccounts({}, { env: process.env }).length > 0,
+    ...accountFieldProjection(settings, process.env),
     codexManagedAccounts: codexAccountsForRenderer(),
     antigravityManagedAccounts: antigravityAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
-    claudeWebCookieConfigured: Boolean(currentClaudeWebCookie()),
-    claudeWebCookieSource,
-    deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()),
-    deepseekApiKeySource,
-    minimaxApiKeyConfigured: Boolean(currentMinimaxApiKey()),
-    minimaxApiKeySource,
-    copilotApiTokenConfigured: Boolean(currentCopilotApiToken()),
-    copilotApiTokenSource,
-    factoryCredentialConfigured: Boolean(currentFactoryApiKey()),
-    factoryCredentialSource,
-    // A discovered sign-in counts as configured, the way zai counts its ZCode login:
-    // otherwise the pill reads "Not configured" on the machine this provider is
-    // built for. The source label then says which lane it is.
-    clineCredentialConfigured: Boolean(currentClineApiKey() || clineAutomaticCredential.source),
-    clineCredentialSource,
-    zaiApiKeyConfigured: Boolean(currentZaiApiKey() || zcodeAutoCredential),
-    zaiApiKeySource,
-    zcodeLoginDetected,
-    zaiTeamApiKeyConfigured: Boolean(currentZaiTeamApiKey()),
-    zaiTeamApiKeySource,
-    volcengineCredentialsConfigured: Boolean(currentVolcengineCredentials()),
-    volcengineCredentialsSource,
-    qoderCookieConfigured: Boolean(currentQoderCookie()),
-    qoderCookieSource,
-    devinBearerTokenConfigured: Boolean(currentDevinBearerToken() && normalizeDevinOrganization(
-      settings?.devinOrganization
-      || process.env.TOKEN_MONITOR_DEVIN_ORGANIZATION
-      || process.env.DEVIN_ORGANIZATION
-      || process.env.DEVIN_ORG
-    )),
-    devinBearerTokenSource,
-    traeAccessTokenConfigured: Boolean(currentTraeAccessToken()),
-    traeAccessTokenSource,
-    zedCookieConfigured: Boolean(currentZedCookie()),
-    zedCookieSource,
-    typesafeCookieConfigured: Boolean(currentTypesafeCookie()),
-    typesafeCookieSource,
-    commandcodeCookieConfigured: Boolean(currentCommandcodeCookie()),
-    commandcodeCookieSource,
-    ollamaCookieConfigured: Boolean(currentOllamaCookie()),
-    ollamaCookieSource,
-    alibabaCookieConfigured: Boolean(currentAlibabaCookie()),
-    alibabaCookieSource,
-    kimiApiKeyConfigured: Boolean(currentKimiApiKey()),
-    kimiApiKeySource,
-    kimiWebAccessTokenConfigured: Boolean(currentKimiWebAccessToken()),
-    kimiWebAccessTokenSource,
-    kimiCredentialConfigured: Boolean(currentKimiWebAccessToken() || currentKimiApiKey()),
-    kimiCredentialSource: kimiWebAccessTokenSource || kimiApiKeySource,
+    ...accountStatusProjection(settings, process.env),
+    limitAccountForms: limitAccountFormsForRenderer(),
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
     windowToggleShortcutStatus: currentWindowToggleShortcutStatus()
@@ -6738,31 +6270,8 @@ function isAllowedExternalUrl(value) {
     (parsed.hostname === 'javis-ai.com' || parsed.hostname === 'www.javis-ai.com')
     && (parsed.pathname === '/token-monitor' || parsed.pathname.startsWith('/token-monitor/'))
   ) return true;
-  if (parsed.hostname === 'claude.ai' && parsed.pathname.startsWith('/settings')) return true;
-  if ((parsed.hostname === 'cursor.com' || parsed.hostname === 'www.cursor.com') && parsed.pathname.startsWith('/settings')) return true;
-  if (parsed.hostname === 'opencode.ai' || parsed.hostname === 'www.opencode.ai') return true;
-  if (parsed.hostname === 'openrouter.ai' && parsed.pathname.startsWith('/settings/keys')) return true;
-  if (parsed.hostname === 'platform.deepseek.com' && parsed.pathname.startsWith('/api_keys')) return true;
-  if (parsed.hostname === 'app.devin.ai' && parsed.pathname.startsWith('/settings/usage')) return true;
-  if (parsed.hostname === 'platform.minimaxi.com') return true;
-  if (parsed.hostname === 'platform.minimax.io') return true;
-  if (parsed.hostname === 'app.factory.ai' && parsed.pathname.startsWith('/settings/api-keys')) return true;
-  if (parsed.hostname === 'app.cline.bot' && parsed.pathname.startsWith('/dashboard')) return true;
-  if (parsed.hostname === 'z.ai' || parsed.hostname === 'www.z.ai') return true;
-  if (parsed.hostname === 'bigmodel.cn' || parsed.hostname === 'www.bigmodel.cn') return true;
-  if (parsed.hostname === 'www.volcengine.com' || parsed.hostname === 'console.volcengine.com') return true;
-  if (parsed.hostname === 'qoder.com' || parsed.hostname === 'www.qoder.com' || parsed.hostname === 'qoder.com.cn' || parsed.hostname === 'www.qoder.com.cn') return true;
-  if (parsed.hostname === 'trae.cn' || parsed.hostname === 'www.trae.cn') return true;
-  if (parsed.hostname === 'commandcode.ai' || parsed.hostname === 'www.commandcode.ai') return true;
-  if (parsed.hostname === 'dashboard.zed.dev') return true;
-  if (parsed.hostname === 'console.typesafe.ai' && parsed.pathname === '/settings/billing') return true;
-  if ((parsed.hostname === 'ollama.com' || parsed.hostname === 'www.ollama.com') && (parsed.pathname === '/settings' || parsed.pathname === '/signin')) return true;
-  if ((parsed.hostname === 'kimi.com' || parsed.hostname === 'www.kimi.com') && parsed.pathname.startsWith('/code')) return true;
-  // Token Plan lives behind a hash route, so the console's region path is all
-  // there is to match on. Kept host-scoped rather than opening the whole
-  // console, in line with every other entry here.
-  if (parsed.hostname === 'bailian.console.aliyun.com' && parsed.pathname.startsWith('/cn-beijing')) return true;
-  if (parsed.hostname === 'modelstudio.console.alibabacloud.com' && parsed.pathname.startsWith('/ap-southeast-1')) return true;
+  // Provider console links come from each account declaration's urlPolicy.
+  if (limitProviderUrlAllowed(parsed.hostname, parsed.pathname)) return true;
   if (STATUS_PAGE_HOSTS.has(parsed.hostname) && (parsed.pathname === '' || parsed.pathname === '/')) return true;
   return false;
 }
@@ -7217,7 +6726,7 @@ app.whenReady().then(() => {
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }]
     });
     if (result.canceled || !result.filePaths[0]) return { canceled: true };
-    return { dataUrl: await importBackgroundImage(result.filePaths[0], app.getPath('userData'), nativeImage) };
+    return { bytes: await importBackgroundImage(result.filePaths[0], app.getPath('userData'), nativeImage) };
   });
   ipcMain.handle('appearance:clearBackgroundImage', async () => {
     await clearBackgroundImage(app.getPath('userData'));
@@ -7305,20 +6814,12 @@ app.whenReady().then(() => {
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
     delete normalizedPatch.windowMaximized;
-    delete normalizedPatch.codexManagedAccounts;
-    delete normalizedPatch.antigravityManagedAccounts;
-    delete normalizedPatch.mimoManagedAccounts;
-    delete normalizedPatch.workbuddyAccessToken;
-    delete normalizedPatch.workbuddyUserId;
-    delete normalizedPatch.workbuddyEnterpriseId;
     delete normalizedPatch.workbuddyEndpoint;
-    delete normalizedPatch.workbuddyLocale;
-    delete normalizedPatch.workbuddyDomain;
-    delete normalizedPatch.workbuddyDepartmentInfo;
     delete normalizedPatch.workbuddyLocalAppEnabled;
-    delete normalizedPatch.openrouterProfiles;
-    delete normalizedPatch.thirdPartyProfiles;
     delete normalizedPatch.customModelPricing;
+    // Account fields declared persist:'never' (managed account lists, profile
+    // maps, workbuddy session fields) are stripped by the registry walk below.
+    normalizeAccountPatch(patch, normalizedPatch);
     // Subscriptions go through subscriptions:save, which knows whether this
     // device owns the list or shares it with a hub. The explicit fields further
     // down are what actually hold the line — they are applied after the spread
@@ -7340,38 +6841,6 @@ app.whenReady().then(() => {
       normalizedPatch.customScanPaths = normalizeCustomScanPaths(patch.customScanPaths);
     }
     if (patch.vendorColors !== undefined) normalizedPatch.vendorColors = migrateVendorColors(patch.vendorColors);
-    if (patch.claudeWebCookie !== undefined) normalizedPatch.claudeWebCookie = normalizeClaudeWebCookie(patch.claudeWebCookie);
-    if (patch.deepseekApiKey !== undefined) normalizedPatch.deepseekApiKey = normalizeDeepSeekApiKey(patch.deepseekApiKey);
-    if (patch.minimaxApiKey !== undefined) normalizedPatch.minimaxApiKey = normalizeMinimaxApiKey(patch.minimaxApiKey);
-    if (patch.copilotApiToken !== undefined) normalizedPatch.copilotApiToken = normalizeCopilotApiToken(patch.copilotApiToken);
-    if (patch.copilotEnterpriseHost !== undefined) normalizedPatch.copilotEnterpriseHost = normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost);
-    if (patch.factoryApiKey !== undefined) normalizedPatch.factoryApiKey = normalizeFactoryApiKey(patch.factoryApiKey);
-    if (patch.clineApiKey !== undefined) normalizedPatch.clineApiKey = normalizeClineApiKey(patch.clineApiKey);
-    if (patch.zaiApiKey !== undefined) normalizedPatch.zaiApiKey = normalizeZaiApiKey(patch.zaiApiKey);
-    if (patch.zaiApiRegion !== undefined) normalizedPatch.zaiApiRegion = normalizeZaiApiRegion(patch.zaiApiRegion);
-    if (patch.zaiTeamApiKey !== undefined) normalizedPatch.zaiTeamApiKey = normalizeZaiTeamApiKey(patch.zaiTeamApiKey);
-    if (patch.zaiTeamOrganizationId !== undefined) normalizedPatch.zaiTeamOrganizationId = normalizeZaiTeamId(patch.zaiTeamOrganizationId);
-    if (patch.zaiTeamProjectId !== undefined) normalizedPatch.zaiTeamProjectId = normalizeZaiTeamId(patch.zaiTeamProjectId);
-    if (patch.volcengineAccessKeyId !== undefined) normalizedPatch.volcengineAccessKeyId = normalizeSecretSetting(patch.volcengineAccessKeyId);
-    if (patch.volcengineSecretAccessKey !== undefined) normalizedPatch.volcengineSecretAccessKey = normalizeSecretSetting(patch.volcengineSecretAccessKey);
-    if (patch.volcengineRegion !== undefined) normalizedPatch.volcengineRegion = normalizeVolcengineRegion(patch.volcengineRegion);
-    if (patch.volcengineAgentAccessKeyId !== undefined) normalizedPatch.volcengineAgentAccessKeyId = normalizeSecretSetting(patch.volcengineAgentAccessKeyId);
-    if (patch.volcengineAgentSecretAccessKey !== undefined) normalizedPatch.volcengineAgentSecretAccessKey = normalizeSecretSetting(patch.volcengineAgentSecretAccessKey);
-    if (patch.volcengineAgentRegion !== undefined) normalizedPatch.volcengineAgentRegion = normalizeVolcengineRegion(patch.volcengineAgentRegion);
-    if (patch.qoderCookie !== undefined) normalizedPatch.qoderCookie = normalizeQoderCookie(patch.qoderCookie);
-    if (patch.devinBearerToken !== undefined) normalizedPatch.devinBearerToken = normalizeDevinBearerToken(patch.devinBearerToken);
-    if (patch.devinOrganization !== undefined) normalizedPatch.devinOrganization = normalizeDevinOrganization(patch.devinOrganization);
-    if (patch.alibabaCookie !== undefined) normalizedPatch.alibabaCookie = normalizeAlibabaCookie(patch.alibabaCookie);
-    if (patch.alibabaVariant !== undefined) normalizedPatch.alibabaVariant = normalizeAlibabaVariant(patch.alibabaVariant);
-    if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
-    if (patch.traeAccessToken !== undefined) normalizedPatch.traeAccessToken = normalizeTraeAccessToken(patch.traeAccessToken);
-    if (patch.traeDeviceId !== undefined) normalizedPatch.traeDeviceId = normalizeTraeDeviceId(patch.traeDeviceId);
-    if (patch.zedCookie !== undefined) normalizedPatch.zedCookie = normalizeZedCookie(patch.zedCookie);
-    if (patch.typesafeCookie !== undefined) normalizedPatch.typesafeCookie = normalizeTypesafeCookie(patch.typesafeCookie);
-    if (patch.commandcodeCookie !== undefined) normalizedPatch.commandcodeCookie = normalizeCommandcodeCookie(patch.commandcodeCookie);
-    if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
-    if (patch.kimiWebAccessToken !== undefined) normalizedPatch.kimiWebAccessToken = normalizeKimiWebAccessToken(patch.kimiWebAccessToken);
-    if (patch.ollamaCookie !== undefined) normalizedPatch.ollamaCookie = normalizeOllamaCookie(patch.ollamaCookie);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
@@ -7495,38 +6964,7 @@ app.whenReady().then(() => {
       language: patch.language !== undefined ? normalizeLanguageSetting(patch.language, settings.language) : normalizeLanguageSetting(settings.language),
       startAtLogin: loginItemEnabledHere() ? parseBoolean(patch.startAtLogin ?? settings.startAtLogin, false) : false,
       automaticAppUpdates: parseBoolean(patch.automaticAppUpdates ?? settings.automaticAppUpdates, false),
-      claudeWebCookie: patch.claudeWebCookie !== undefined
-        ? normalizeClaudeWebCookie(patch.claudeWebCookie)
-        : (settings.claudeWebCookie || ''),
-      deepseekApiKey: patch.deepseekApiKey !== undefined ? normalizeDeepSeekApiKey(patch.deepseekApiKey) : (settings.deepseekApiKey || ''),
-      minimaxApiKey: patch.minimaxApiKey !== undefined ? normalizeMinimaxApiKey(patch.minimaxApiKey) : (settings.minimaxApiKey || ''),
-      copilotApiToken: patch.copilotApiToken !== undefined ? normalizeCopilotApiToken(patch.copilotApiToken) : (settings.copilotApiToken || ''),
-      copilotEnterpriseHost: patch.copilotEnterpriseHost !== undefined ? normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost) : (settings.copilotEnterpriseHost || ''),
-      factoryApiKey: patch.factoryApiKey !== undefined ? normalizeFactoryApiKey(patch.factoryApiKey) : (settings.factoryApiKey || ''),
-      clineApiKey: patch.clineApiKey !== undefined ? normalizeClineApiKey(patch.clineApiKey) : (settings.clineApiKey || ''),
-      zaiApiKey: patch.zaiApiKey !== undefined ? normalizeZaiApiKey(patch.zaiApiKey) : (settings.zaiApiKey || ''),
-      zaiApiRegion: patch.zaiApiRegion !== undefined ? normalizeZaiApiRegion(patch.zaiApiRegion) : normalizeZaiApiRegion(settings.zaiApiRegion || 'global'),
-      zaiTeamApiKey: patch.zaiTeamApiKey !== undefined ? normalizeZaiTeamApiKey(patch.zaiTeamApiKey) : (settings.zaiTeamApiKey || ''),
-      zaiTeamOrganizationId: patch.zaiTeamOrganizationId !== undefined ? normalizeZaiTeamId(patch.zaiTeamOrganizationId) : (settings.zaiTeamOrganizationId || ''),
-      zaiTeamProjectId: patch.zaiTeamProjectId !== undefined ? normalizeZaiTeamId(patch.zaiTeamProjectId) : (settings.zaiTeamProjectId || ''),
-      volcengineAccessKeyId: patch.volcengineAccessKeyId !== undefined ? normalizeSecretSetting(patch.volcengineAccessKeyId) : (settings.volcengineAccessKeyId || ''),
-      volcengineSecretAccessKey: patch.volcengineSecretAccessKey !== undefined ? normalizeSecretSetting(patch.volcengineSecretAccessKey) : (settings.volcengineSecretAccessKey || ''),
-      volcengineRegion: patch.volcengineRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineRegion) : (settings.volcengineRegion || ''),
-      volcengineAgentAccessKeyId: patch.volcengineAgentAccessKeyId !== undefined ? normalizeSecretSetting(patch.volcengineAgentAccessKeyId) : (settings.volcengineAgentAccessKeyId || ''),
-      volcengineAgentSecretAccessKey: patch.volcengineAgentSecretAccessKey !== undefined ? normalizeSecretSetting(patch.volcengineAgentSecretAccessKey) : (settings.volcengineAgentSecretAccessKey || ''),
-      volcengineAgentRegion: patch.volcengineAgentRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineAgentRegion) : (settings.volcengineAgentRegion || ''),
-      qoderCookie: patch.qoderCookie !== undefined ? normalizeQoderCookie(patch.qoderCookie) : (settings.qoderCookie || ''),
-      qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
-      devinBearerToken: patch.devinBearerToken !== undefined ? normalizeDevinBearerToken(patch.devinBearerToken) : (settings.devinBearerToken || ''),
-      devinOrganization: patch.devinOrganization !== undefined ? normalizeDevinOrganization(patch.devinOrganization) : (settings.devinOrganization || ''),
-      alibabaCookie: patch.alibabaCookie !== undefined ? normalizeAlibabaCookie(patch.alibabaCookie) : (settings.alibabaCookie || ''),
-      alibabaVariant: patch.alibabaVariant !== undefined ? normalizeAlibabaVariant(patch.alibabaVariant) : (settings.alibabaVariant || ''),
-      traeAccessToken: patch.traeAccessToken !== undefined ? normalizeTraeAccessToken(patch.traeAccessToken) : (settings.traeAccessToken || ''),
-      traeDeviceId: patch.traeDeviceId !== undefined ? normalizeTraeDeviceId(patch.traeDeviceId) : (settings.traeDeviceId || ''),
-      zedCookie: patch.zedCookie !== undefined ? normalizeZedCookie(patch.zedCookie) : (settings.zedCookie || ''),
-      typesafeCookie: patch.typesafeCookie !== undefined ? normalizeTypesafeCookie(patch.typesafeCookie) : (settings.typesafeCookie || ''),
-      commandcodeCookie: patch.commandcodeCookie !== undefined ? normalizeCommandcodeCookie(patch.commandcodeCookie) : (settings.commandcodeCookie || ''),
-      ollamaCookie: patch.ollamaCookie !== undefined ? normalizeOllamaCookie(patch.ollamaCookie) : (settings.ollamaCookie || ''),
+      ...finalAccountSettings(patch, settings),
       customModelPricing: patch.customModelPricing !== undefined
         ? normalizeCustomPricingSetting(patch.customModelPricing)
         : normalizeCustomPricingSetting(settings.customModelPricing)
@@ -7966,7 +7404,7 @@ app.whenReady().then(() => {
     const requestRevision = ++claudeWebCookieMutationRevision;
     let cookie;
     try {
-      cookie = normalizeClaudeWebCookie(raw);
+      cookie = normalizeAccountField('claudeWebCookie', raw);
     } catch (error) {
       return {
         ok: false,
@@ -8022,14 +7460,13 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('ollama:validateCookie', async (_event, raw) => {
-    const cookie = normalizeOllamaCookie(raw);
+    const cookie = normalizeAccountField('ollamaCookie', raw);
     if (!cookie) return { ok: false, status: 'notConfigured' };
     const provider = await fetchOllamaLimits({ ollamaCookie: cookie }, electronProviderDeps({ bypassValidationCache: true }));
     rememberOllamaValidation(cookie, provider);
     return { ok: provider.status === 'ok', status: provider.status };
   });
-  ipcMain.handle('factory:validateApiKey', (_event, raw) => validateFactoryApiKey(raw));
-  ipcMain.handle('cline:validateApiKey', (_event, raw) => validateClineApiKey(raw));
+  ipcMain.handle('limits:validateCredential', (_event, providerId, raw) => validateLimitCredential(providerId, raw));
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
     const cookie = opencodeWeb.sanitizeCookieHeader(raw);
     if (!cookie) {
@@ -8877,7 +8314,7 @@ app.whenReady().then(() => {
       if (copilotLoginController !== controller) {
         return { ok: false, error: copilotLoginErrorMessage({ status: 'cancelled' }), flowId };
       }
-      settings.copilotApiToken = normalizeCopilotApiToken(result.accessToken);
+      settings.copilotApiToken = normalizeAccountField('copilotApiToken', result.accessToken);
       saveSettings({ throwOnError: true });
       pushSettingsToRenderer();
       void queueLimitInvalidation({ provider: 'copilot' }, 'login', { clear: true });

@@ -68,7 +68,11 @@ test('every catalog provider reaches an account group or a connection explainer'
   // explanation of how it connects without one.
   // The two maps are deliberately not exclusive — antigravity carries an
   // explainer above its account group — so this is a union, not a partition.
-  const configured = new Set([...Object.keys(accountGroups), ...Object.keys(connectionDetails)]);
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const configured = new Set([
+    ...Object.keys(accountGroups), ...Object.keys(connectionDetails),
+    ...limitAccountFormsForRenderer().map((form) => form.id)
+  ]);
   assert.deepEqual([...configured].sort(), [...LIMIT_PROVIDER_IDS].sort());
 });
 

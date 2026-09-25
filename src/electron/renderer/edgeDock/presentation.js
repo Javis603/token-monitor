@@ -156,7 +156,6 @@
   // it the card could not say which tool a row belongs to.
   function sessionRowsFor(entries, stateByKey) {
     return entries.map(({ key, session }) => {
-      const models = Object.entries(session.models || {}).sort((a, b) => (finite(b[1]) || 0) - (finite(a[1]) || 0));
       return {
         title: String(session.title || ''),
         projectLabel: String(session.projectLabel || ''),
@@ -166,7 +165,11 @@
         key,
         sessionId: String(session.sessionId || ''),
         client: normalizedId(session.client),
-        model: models[0]?.[0] || '',
+        // The whole model map, not just the top one: the card composes its
+        // label with the Sessions list's own sessionModelLabel(), which reads
+        // "N models" for a multi-model session — a reading this projection
+        // could not reproduce from a flattened winner.
+        models: session.models || {},
         totalTokens: finite(session.totalTokens) || 0,
         costUsd: finite(session.costUsd) || 0,
         lastUsedAt: session.lastUsedAt || session.startedAt || null,
