@@ -1,7 +1,7 @@
 import Foundation
 
 struct WidgetSnapshot: Decodable, Equatable {
-    static let currentSchemaVersion = 11
+    static let currentSchemaVersion = 10
 
     let schemaVersion: Int
     let generatedAt: Date
@@ -10,7 +10,9 @@ struct WidgetSnapshot: Decodable, Equatable {
     let presentation: WidgetPresentation
     let status: WidgetStatus
     // Colour and artwork per mark id, written by the app from its vendor
-    // presentation table. An id missing here paints with the `default` entry.
+    // presentation table. An id missing here paints with the `default` entry;
+    // a snapshot written before the palette existed has none and paints every
+    // mark that way until the app rewrites it.
     let vendors: [String: WidgetVendorStyle]
     private let selectedPeriod: WidgetPeriod
 

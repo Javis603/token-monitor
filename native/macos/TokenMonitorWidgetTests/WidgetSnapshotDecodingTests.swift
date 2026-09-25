@@ -44,7 +44,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     func testDecodesCurrentSchemaFromPeriods() throws {
         let snapshot = try decode("""
         {
-          "schemaVersion": 11,
+          "schemaVersion": 10,
           "generatedAt": "2026-07-17T09:00:00.000Z",
           "periods": {
             "day": {
@@ -95,12 +95,12 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     func testRejectsMissingDayPeriodAndInvalidGeneratedTimestamp() {
         XCTAssertThrowsError(
             try decodeRaw("""
-            {"schemaVersion":11,"generatedAt":"2026-07-17T09:00:00Z","periods":{"month":{}}}
+            {"schemaVersion":10,"generatedAt":"2026-07-17T09:00:00Z","periods":{"month":{}}}
             """)
         )
         XCTAssertThrowsError(
             try decodeRaw("""
-            {"schemaVersion":11,"generatedAt":"not-a-date","periods":{"day":{}}}
+            {"schemaVersion":10,"generatedAt":"not-a-date","periods":{"day":{}}}
             """)
         )
     }
@@ -108,7 +108,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     func testMalformedQuotaEntryIsDroppedWithoutBlankingCurrentSnapshot() throws {
         let snapshot = try decode("""
         {
-          "schemaVersion":11,
+          "schemaVersion":10,
           "generatedAt":"2026-07-17T09:00:00Z",
           "periods":{"day":{"overview":{"totalTokens":42}}},
           "quota":[
@@ -126,7 +126,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     func testCustomQuotaSelectionNeverFallsBackToUnselectedAccounts() throws {
         let snapshot = try decode("""
         {
-          "schemaVersion":11,
+          "schemaVersion":10,
           "generatedAt":"2026-07-17T09:00:00Z",
           "periods":{"day":{}},
           "quota":[
@@ -172,7 +172,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     func testAutomaticQuotaSelectionPrefersFreshAvailableDataAndFallsBackToStaleData() throws {
         let snapshot = try decode("""
         {
-          "schemaVersion":11,
+          "schemaVersion":10,
           "generatedAt":"2026-07-17T09:30:00.000Z",
           "periods":{"day":{}},
           "quota":[
@@ -200,7 +200,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     func testAutomaticQuotaSelectionKeepsStableOrderWithinFreshAccounts() throws {
         let snapshot = try decode("""
         {
-          "schemaVersion":11,
+          "schemaVersion":10,
           "generatedAt":"2026-07-17T09:30:00.000Z",
           "periods":{"day":{}},
           "quota":[
@@ -272,7 +272,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     func testCurrentSchemaDecodesMaskedAccountLabelsAndTypedQuotaWindows() throws {
         let snapshot = try decode("""
         {
-          "schemaVersion":11,
+          "schemaVersion":10,
           "generatedAt":"2026-07-17T09:00:00.000Z",
           "periods":{"day":{}},
           "quota":[{
@@ -315,7 +315,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     func testSourceFreshnessUsesCurrentStatusTimestamp() throws {
         let snapshot = try decode("""
         {
-          "schemaVersion":11,
+          "schemaVersion":10,
           "generatedAt":"2026-07-17T09:30:00.000Z",
           "periods":{"day":{"overview":{"updatedAt":"2026-07-17T09:29:00.000Z"}}},
           "status":{"isStale":true,"sourceStale":true,"sourceUpdatedAt":"2026-07-17T08:00:00.000Z","noData":false}
@@ -332,7 +332,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     func testToolRowsAndVendorStylesComeFromTheSnapshot() throws {
         let snapshot = try decode("""
         {
-          "schemaVersion":11,
+          "schemaVersion":10,
           "generatedAt":"2026-07-17T09:00:00Z",
           "periods":{"day":{"tools":[{"id":"mimo","displayName":"Xiaomi MiMo","totalTokens":5,"costUsd":0,"sharePercent":100}]}},
           "vendors":{
@@ -355,9 +355,22 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         XCTAssertEqual(palette.ink(for: "unlisted"), .hex("#6ab4f0"))
     }
 
+    func testSnapshotWithoutPaletteOrToolNamesStillDecodes() throws {
+        // What an app build from before the vendor palette writes: same schema,
+        // no `vendors`, no tool displayName. It must render, not wait for data.
+        let snapshot = try decode("""
+        {"schemaVersion":10,"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{"tools":[{"id":"codebuddy","totalTokens":5,"costUsd":0,"sharePercent":100}]}},"status":{"isStale":false}}
+        """)
+
+        XCTAssertNil(snapshot.tools.first?.displayName)
+        XCTAssertEqual(snapshot.vendors, [:])
+        XCTAssertEqual(WidgetVendorPalette(styles: snapshot.vendors).ink(for: "codebuddy"), .hex("#6AB4F0"))
+        XCTAssertEqual(WidgetVendorPalette(styles: snapshot.vendors).iconName(for: "codebuddy"), "codebuddy")
+    }
+
     func testMalformedVendorPaletteKeepsTheSnapshot() throws {
         let snapshot = try decode("""
-        {"schemaVersion":11,"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{}},"vendors":["not","a","map"],"status":{"isStale":false}}
+        {"schemaVersion":10,"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{}},"vendors":["not","a","map"],"status":{"isStale":false}}
         """)
 
         XCTAssertEqual(snapshot.vendors, [:])
@@ -491,7 +504,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
 
     func testQuotaWindowDecodesTypedLifecycleBoundaries() throws {
         let snapshot = try decode("""
-        {"schemaVersion":11,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{}},"quota":[{"provider":"kiro","instanceId":"kiro-a","status":"ok","windows":[{"kind":"billing","showMeter":true,"remainingPercent":50,"resetsAt":"2026-07-24T09:00:00.000Z","boundaryKind":"expiry"},{"kind":"billing","showMeter":true,"remainingPercent":40,"resetsAt":"2026-07-24T09:00:00.000Z","boundaryKind":"mixed"}]}],"status":{"noData":false}}
+        {"schemaVersion":10,"generatedAt":"2026-07-17T09:00:00.000Z","periods":{"day":{}},"quota":[{"provider":"kiro","instanceId":"kiro-a","status":"ok","windows":[{"kind":"billing","showMeter":true,"remainingPercent":50,"resetsAt":"2026-07-24T09:00:00.000Z","boundaryKind":"expiry"},{"kind":"billing","showMeter":true,"remainingPercent":40,"resetsAt":"2026-07-24T09:00:00.000Z","boundaryKind":"mixed"}]}],"status":{"noData":false}}
         """)
         let windows = try XCTUnwrap(snapshot.quota.first?.windows)
         XCTAssertEqual(windows.map(\.boundaryKind), ["expiry", "mixed"])
@@ -810,7 +823,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
 
     func testCurrentSchemaRequiresEveryPeriodAndSelectsWithoutFabricatingData() throws {
         XCTAssertThrowsError(try decodeRaw("""
-        {"schemaVersion":11,"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{"overview":{"totalTokens":7,"costUsd":0},"tools":[],"models":[],"activity":{"activeDays":0,"days":[]},"trend":{"points":[]}}},"quota":[],"presentation":{"currencyCode":"USD","currencySymbol":"$","currencyRate":1,"numberStyle":"compact","compactTokenUnits":"western","showCost":true,"locale":"auto","theme":"system"},"status":{"isStale":false}}
+        {"schemaVersion":10,"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{"overview":{"totalTokens":7,"costUsd":0},"tools":[],"models":[],"activity":{"activeDays":0,"days":[]},"trend":{"points":[]}}},"quota":[],"presentation":{"currencyCode":"USD","currencySymbol":"$","currencyRate":1,"numberStyle":"compact","compactTokenUnits":"western","showCost":true,"locale":"auto","theme":"system"},"status":{"isStale":false}}
         """))
         let snapshot = try decode("""
         {"periods":{"day":{"overview":{"totalTokens":7}},"month":{"overview":{"totalTokens":11}}},"presentation":{"currencySymbol":"¥"}}
@@ -820,7 +833,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
     }
 
     func testStaleStatusWinsOverGeneratedAtThreshold() throws {
-        let snapshot = try decode("{\"schemaVersion\":11,\"generatedAt\":\"2026-07-17T09:00:00Z\",\"periods\":{\"day\":{}},\"status\":{\"isStale\":true,\"noData\":false}}")
+        let snapshot = try decode("{\"schemaVersion\":10,\"generatedAt\":\"2026-07-17T09:00:00Z\",\"periods\":{\"day\":{}},\"status\":{\"isStale\":true,\"noData\":false}}")
         XCTAssertTrue(snapshot.isStale(at: Date(timeIntervalSince1970: 0)))
     }
 
@@ -850,7 +863,7 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
 
     private static let currentSnapshotJSON = """
     {
-      "schemaVersion":11,
+      "schemaVersion":10,
       "generatedAt":"2026-07-17T09:00:00Z",
       "periods":{
         "day":{"overview":{"totalTokens":0,"costUsd":0},"tools":[],"models":[],"activity":{"activeDays":0,"days":[]},"trend":{"points":[]}},
@@ -1161,7 +1174,7 @@ final class WidgetTimelineProviderPreviewTests: XCTestCase {
 
     private static func writeSnapshotFixture() -> URL {
         let json = """
-        {"schemaVersion":11,"generatedAt":"2026-08-09T07:00:00.000Z",
+        {"schemaVersion":10,"generatedAt":"2026-08-09T07:00:00.000Z",
          "periods":{
            "day":{"overview":{"totalTokens":4242,"costUsd":1.5},"tools":[],"models":[],"activity":{"days":[],"activeDays":0},"trend":{"points":[]}},
            "month":{"overview":{"totalTokens":0,"costUsd":0},"tools":[],"models":[],"activity":{"days":[],"activeDays":0},"trend":{"points":[]}},

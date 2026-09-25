@@ -6,7 +6,7 @@ const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } 
 const { limitWindowKindLabel } = require('./limitWindowLabels');
 const { widgetVendorPalette } = require('./vendorPresentation');
 
-const MAC_WIDGET_SCHEMA_VERSION = 11;
+const MAC_WIDGET_SCHEMA_VERSION = 10;
 const MAC_WIDGET_FRESHNESS_HEARTBEAT_MS = 5 * 60 * 1000;
 const KNOWN_TOOLS = new Set(KNOWN_CLIENTS.split(',').filter(Boolean));
 const KNOWN_LIMIT_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
@@ -614,7 +614,9 @@ function buildMacWidgetSnapshot(stats, options = {}) {
     presentation,
     // Colour and artwork per mark id, from the vendor presentation table. The
     // widget keeps no copy of its own, so a vendor added there needs no Swift
-    // edit. Model rows still resolve their vendor id in Swift.
+    // edit. Model rows still resolve their vendor id in Swift. Additive, like
+    // tool displayName: a widget that predates them ignores both, and one that
+    // reads an older snapshot falls back to defaults, so the schema stays put.
     vendors: widgetVendorPalette(),
     status: buildStatus({ now: safeNow, sourceFreshness })
   };
