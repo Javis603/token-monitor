@@ -103,27 +103,31 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
 
     // The probe sees the draft and nothing it would not store: a credential of
     // this form that is not part of the draft is blanked, so a stored sibling
-    // (Kimi's other lane) cannot answer for a bad one.
+    // (Kimi's other lane) cannot answer for a bad one, and an empty env keeps
+    // the same fallback from vouching through a process variable.
     const options = limitsAccountConfig(getSettings(), { env });
     for (const field of formFields(entry)) {
       if (field.secret && !Object.hasOwn(candidate, field.key)) options[field.key] = '';
     }
     const renewed = {};
+    const deps = { ...probeDeps(renewed), env: {} };
     let provider = null;
     let status;
     let errorCode = '';
     try {
-      provider = await entry.fetchLimits({ ...options, ...candidate }, probeDeps(renewed));
+      provider = await entry.fetchLimits({ ...options, ...candidate }, deps);
       status = provider?.status || 'unavailable';
     } catch (error) {
       status = error?.status || 'unavailable';
       errorCode = error?.code || '';
     }
-    const verdict = credentialVerdict(status);
-    if (verdict === 'invalid') return invalid(status, errorCode);
+    // Any later write for this form retires the whole probe — a stale
+    // rejection must not land over a newer credential either.
     if (revisions.get(entry.id) !== revision) {
       return { saved: false, verdict: 'superseded', status: 'superseded', errorCode: '' };
     }
+    const verdict = credentialVerdict(status);
+    if (verdict === 'invalid') return invalid(status, errorCode);
     // A probe may rotate the credential it was given (Claude's session key);
     // what gets stored is the value the provider will accept next.
     for (const [key, value] of Object.entries(renewed)) {

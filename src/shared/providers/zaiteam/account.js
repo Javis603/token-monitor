@@ -72,5 +72,8 @@ module.exports = {
       { field: 'zaiTeamProjectId' }
     ],
     openUrl: { url: 'https://bigmodel.cn/coding-plan/team/usage-stats' }
-  }
+  },
+  urlPolicy: [
+    { hosts: ['bigmodel.cn', 'www.bigmodel.cn'], pathPrefixes: ['/coding-plan'] }
+  ]
 };

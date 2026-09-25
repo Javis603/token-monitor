@@ -307,7 +307,7 @@ function assertAccountForm(entry, form) {
   if (!urls.length) fail('missing openUrl');
   for (const url of urls) {
     const parsed = new URL(url);
-    if (parsed.protocol !== 'https:' || !limitProviderUrlAllowed(parsed.hostname, parsed.pathname)) {
+    if (parsed.protocol !== 'https:' || !limitProviderUrlAllowed(parsed.hostname, parsed.pathname, entry.id)) {
       fail(`URL ${url} is not allowlisted`);
     }
   }

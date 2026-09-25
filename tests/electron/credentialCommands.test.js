@@ -129,6 +129,21 @@ test('a probe overtaken by a later write for the same provider does not land', a
   assert.equal((await second).saved, true);
 });
 
+test('a stale probe that was rejected still reports superseded, not invalid', async () => {
+  let release;
+  const { api, patches } = commands({
+    answer: () => new Promise((resolve) => { release = () => resolve(response(401)); })
+  });
+  const first = api.saveCredential('deepseek', { deepseekApiKey: 'sk-bad' });
+  await new Promise((resolve) => setImmediate(resolve));
+  api.noteSettingsPatch({ deepseekApiKey: '' });
+  release();
+  // A later write already settled this form's fate; the old probe's rejection
+  // must not land over it and must not keep a stale rejection message alive.
+  assert.deepEqual(await first, { saved: false, verdict: 'superseded', status: 'superseded', errorCode: '' });
+  assert.deepEqual(patches, []);
+});
+
 test('clearing removes the form credential through the same settings write', () => {
   const { api, patches } = commands();
   assert.deepEqual(api.clearCredential('minimax'), { cleared: true, settings: { projected: true } });
@@ -194,6 +209,66 @@ test('a lane saved on its own is probed without the stored sibling vouching for 
   assert.ok(seen.length > 0);
   assert.ok(seen.every((headers) => !JSON.stringify(headers).includes('stored-web-token')), 'the stored web token must not be sent');
   assert.deepEqual(patches, []);
+});
+
+// The stored sibling is not the only credential that can vouch: each lane also
+// falls back to a process variable, so the probe runs with an empty env.
+test('a credential lane outside the draft cannot vouch through the process env either', async () => {
+  const KIMI_CODE_URL = 'https://api.kimi.com/coding/v1/usages';
+  const webUsage = {
+    usages: [{ scope: 'FEATURE_CODING', detail: { used: 20, limit: 100 } }]
+  };
+  const codeUsage = {
+    limits: [{ detail: { used: 10, limit: 100, remaining: 90 }, window: { duration: 5, timeUnit: 'HOUR' } }]
+  };
+  const kimiCommands = ({ env, answer }) => {
+    const requested = [];
+    const patches = [];
+    const api = createCredentialCommands({
+      getSettings: () => ({}),
+      applySettingsPatch: (patch) => { patches.push(patch); return {}; },
+      probeDeps: () => ({
+        probe: true,
+        providerRuntimeState: new Map(),
+        env,
+        fetch: async (url, init) => {
+          requested.push({ url: String(url), headers: init?.headers || {} });
+          const [status, body] = answer(String(url));
+          return response(status, body);
+        }
+      }),
+      env
+    });
+    return { api, patches, requested };
+  };
+
+  // A valid web token in the env must not rescue a rejected Code key.
+  {
+    const { api, patches, requested } = kimiCommands({
+      env: { KIMI_AUTH_TOKEN: 'env-web-token' },
+      answer: (url) => (url.includes('kimi.com/apiv2') ? [200, webUsage] : [401, {}])
+    });
+    const result = await api.saveCredential('kimi', { kimiApiKey: 'sk-kimi-bad' });
+    assert.equal(result.verdict, 'invalid');
+    assert.equal(result.status, 'unauthorized');
+    assert.deepEqual(patches, []);
+    assert.equal(requested.every(({ url }) => url === KIMI_CODE_URL), true, 'the env web lane must not be probed');
+    assert.equal(requested.every(({ headers }) => !JSON.stringify(headers).includes('env-web-token')), true);
+  }
+
+  // And a valid Code key in the env must not rescue a rejected web token.
+  {
+    const { api, patches, requested } = kimiCommands({
+      env: { KIMI_CODE_API_KEY: 'env-code-key' },
+      answer: (url) => (url.includes('kimi.com/apiv2') ? [401, {}] : [200, codeUsage])
+    });
+    const result = await api.saveCredential('kimi', { kimiWebAccessToken: 'bad-web-token' });
+    assert.equal(result.verdict, 'invalid');
+    assert.equal(result.status, 'unauthorized');
+    assert.deepEqual(patches, []);
+    assert.equal(requested.every(({ url }) => url !== KIMI_CODE_URL), true, 'the env code lane must not be probed');
+    assert.equal(requested.every(({ headers }) => !JSON.stringify(headers).includes('env-code-key')), true);
+  }
 });
 
 test('a partial draft stores only the lane that was sent', async () => {
