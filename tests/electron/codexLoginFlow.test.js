@@ -14,7 +14,7 @@ function read(filePath) {
 
 test('Codex account login exposes browser, copy, and cancel controls', () => {
   const html = read(path.join(rendererDir, 'index.html'));
-  const details = html.match(/<div id="codexSettingsDetails"[\s\S]*?<div id="codexAccountErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  const details = html.match(/<div id="codexSettingsDetails"[\s\S]*?<div id="codexAccountErrorMessage" class="settings-note error hidden" role="alert"><\/div>/)?.[0] || '';
 
   assert.match(details, /<button id="codexCancelLoginButton"[\s\S]*class="hidden"[\s\S]*data-i18n="settings\.common\.cancel">/);
   assert.match(details, /<div id="codexLoginUrlActions" class="settings-actions hidden">[\s\S]*codexOpenLoginUrlButton[\s\S]*codexCopyLoginUrlButton[\s\S]*codexCancelLoginButton/);

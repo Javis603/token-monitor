@@ -489,7 +489,8 @@ test('static account statuses refresh in both paths while descriptor panels use 
 });
 
 test('every provider with an account panel has its group and status markup in index.html', () => {
-  const groupIds = evalTopLevel(appSource, 'const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {', '\nconst LIMIT_PROVIDER_ACCOUNT_STATUS_IDS');
+  const nodes = evalTopLevel(appSource, 'const LIMIT_PROVIDER_ACCOUNT_NODES = {', '\nconst LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS');
+  const groupIds = Object.fromEntries(Object.entries(nodes).map(([provider, node]) => [provider, node.group]));
   // Not every catalog provider has a hand-written panel: grok, kiro and workbuddy
   // take their credentials from the tool itself, and the account-form providers
   // get theirs generated. The map is the list of those whose markup is static.
@@ -501,10 +502,7 @@ test('every provider with an account panel has its group and status markup in in
     assert.ok(LIMIT_PROVIDER_IDS.includes(provider), `${provider} is a catalog id`);
     assert.match(indexHtml, new RegExp(`id="${id}"`), `${provider} group exists in index.html`);
   }
-  // The two id maps cover the same providers.
-  const statusIds = evalTopLevel(appSource, 'const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {', '\nconst LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS');
-  assert.deepEqual(Object.keys(statusIds).sort(), Object.keys(groupIds).sort());
-  for (const [provider, id] of Object.entries(statusIds)) {
-    assert.match(indexHtml, new RegExp(`id="${id}"`), `${provider} status pill exists in index.html`);
+  for (const [provider, { status }] of Object.entries(nodes)) {
+    assert.match(indexHtml, new RegExp(`id="${status}"`), `${provider} status pill exists in index.html`);
   }
 });

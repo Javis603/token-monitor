@@ -11,6 +11,23 @@ const {
 // than at its first use below because the icon tables are derived from it.
 const { LIMIT_PROVIDER_CATALOG: LIMIT_PROVIDERS, LIMIT_PROVIDER_IDS } = window.TokenMonitorLimitProviders;
 const limitAccountPanelsApi = window.TokenMonitorLimitAccountPanels;
+const accountShellApi = window.TokenMonitorAccountShell;
+const accountProfileRequests = accountShellApi.createRequestGuard();
+const accountProfileStatuses = accountShellApi.createRequestGuard();
+const accountProfileSaves = accountShellApi.createBusyGuard();
+const accountShellErrors = Object.create(null);
+
+function setAccountShellError(id, message) {
+  accountShellErrors[id] = message || '';
+  renderAccountShellError(id);
+}
+
+function renderAccountShellError(id) {
+  accountShellApi.render({
+    error: document.getElementById(`${id}ErrorMessage`),
+    errorText: accountShellErrors[id] || ''
+  });
+}
 const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
@@ -62,29 +79,17 @@ function iconKindFor(rowData, breakdown) {
     : { kind: 'dot' };
 }
 
-const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
-  codex: 'codexAccountGroup',
-  opencode: 'opencodeCookieGroup',
-  cursor: 'cursorAccountGroup',
-  antigravity: 'antigravityAccountGroup',
-  kimi: 'kimiAccountGroup',
-  copilot: 'copilotAccountGroup',
-  mimo: 'mimoAccountGroup',
-  openrouter: 'openrouterAccountGroup',
-  volcengine: 'volcengineAccountGroup',
-  thirdparty: 'thirdpartyAccountGroup'
-};
-const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
-  codex: 'codexAccountStatus',
-  opencode: 'opencodeCookieStatus',
-  cursor: 'cursorAccountStatus',
-  antigravity: 'antigravityAccountStatus',
-  kimi: 'kimiAccountStatus',
-  copilot: 'copilotApiTokenStatus',
-  mimo: 'mimoAccountStatus',
-  openrouter: 'openrouterStatus',
-  volcengine: 'volcengineAccountStatus',
-  thirdparty: 'thirdpartyStatus'
+const LIMIT_PROVIDER_ACCOUNT_NODES = {
+  codex: { group: 'codexAccountGroup', status: 'codexAccountStatus' },
+  opencode: { group: 'opencodeCookieGroup', status: 'opencodeCookieStatus' },
+  cursor: { group: 'cursorAccountGroup', status: 'cursorAccountStatus' },
+  antigravity: { group: 'antigravityAccountGroup', status: 'antigravityAccountStatus' },
+  kimi: { group: 'kimiAccountGroup', status: 'kimiAccountStatus' },
+  copilot: { group: 'copilotAccountGroup', status: 'copilotApiTokenStatus' },
+  mimo: { group: 'mimoAccountGroup', status: 'mimoAccountStatus' },
+  openrouter: { group: 'openrouterAccountGroup', status: 'openrouterStatus' },
+  volcengine: { group: 'volcengineAccountGroup', status: 'volcengineAccountStatus' },
+  thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
 };
 const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
@@ -10316,14 +10321,14 @@ function setupLimitAccountPanels() {
 }
 
 function limitProviderAccountGroup(providerId) {
-  const groupId = LIMIT_PROVIDER_ACCOUNT_GROUP_IDS[providerId];
+  const groupId = LIMIT_PROVIDER_ACCOUNT_NODES[providerId]?.group;
   return (groupId || limitAccountForm(providerId))
     ? document.getElementById(groupId || `${providerId}AccountGroup`)
     : null;
 }
 
 function limitProviderAccountStatus(providerId) {
-  const statusId = LIMIT_PROVIDER_ACCOUNT_STATUS_IDS[providerId];
+  const statusId = LIMIT_PROVIDER_ACCOUNT_NODES[providerId]?.status;
   return (statusId || limitAccountForm(providerId))
     ? document.getElementById(statusId || `${providerId}AccountStatus`)
     : null;
@@ -13140,14 +13145,14 @@ function setAccountGroupExpanded(prefix, expanded, stateKey) {
   if (!toggle || !details) return;
   const next = Boolean(expanded);
   if (stateKey) state[stateKey] = next;
-  toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-  details.classList.toggle('hidden', !next);
-  if (group) group.classList.toggle('expanded', next);
-  syncLimitProviderAccountExpansion(prefix, next);
+  accountShellApi.setExpanded({
+    toggle, details, group, expanded: next,
+    onChange: (open) => syncLimitProviderAccountExpansion(prefix, open)
+  });
 }
 
 function syncLimitProviderAccountExpansion(providerId, expanded) {
-  if (!LIMIT_PROVIDER_ACCOUNT_GROUP_IDS[providerId] && !limitAccountForm(providerId)) return;
+  if (!LIMIT_PROVIDER_ACCOUNT_NODES[providerId] && !limitAccountForm(providerId)) return;
   if (expanded) {
     setLimitProviderSettingsExpanded(providerId);
   } else if (state.limitProviderSettingsExpanded === providerId) {
@@ -13301,8 +13306,7 @@ function renderCodexLoginStatus() {
   addButton.classList.toggle('hidden', state.codexSignInBusy);
   cancelButton.classList.toggle('hidden', !state.codexSignInBusy);
   refreshButton.classList.toggle('hidden', state.codexSignInBusy);
-  statusEl.textContent = state.codexLoginStatus;
-  statusEl.classList.toggle('hidden', !state.codexLoginStatus);
+  accountShellApi.render({ progress: statusEl, progressText: state.codexLoginStatus });
   workspaceSelection.classList.toggle('hidden', state.codexWorkspaceChoices.length === 0);
   workspaceSelect.replaceChildren(...state.codexWorkspaceChoices.map((workspace) => {
     const option = document.createElement('option');
@@ -13332,9 +13336,7 @@ function renderCodexAccounts() {
   const statusText = accounts.length === 0
     ? t('settings.codex.notConfigured')
     : t('settings.opencode.connected', { linked: enabledCount, total: accounts.length });
-  setCursorStatusText(statusEl, statusText);
-  errorEl.textContent = state.codexAccountError || '';
-  errorEl.classList.toggle('hidden', !state.codexAccountError);
+  accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.codexAccountError });
   listEl.replaceChildren();
   if (accounts.length === 0) {
     const empty = document.createElement('p');
@@ -13481,20 +13483,21 @@ function renderAntigravityStatus() {
   if (!statusEl || !listEl || !errorEl || !addButton || !cancelButton) return;
   const accounts = state.settings?.antigravityManagedAccounts || [];
   const enabledCount = accounts.filter((account) => account.enabled !== false).length;
-  setCursorStatusText(statusEl, accounts.length === 0
-    ? t('settings.antigravity.notConfigured')
-    : t('settings.antigravity.connected', { linked: enabledCount, total: accounts.length }));
-  errorEl.textContent = state.antigravityAccountError || '';
-  errorEl.classList.toggle('hidden', !state.antigravityAccountError);
+  accountShellApi.render({
+    status: statusEl,
+    statusText: accounts.length === 0
+      ? t('settings.antigravity.notConfigured')
+      : t('settings.antigravity.connected', { linked: enabledCount, total: accounts.length }),
+    error: errorEl,
+    errorText: state.antigravityAccountError,
+    progress: statusMessage,
+    progressText: state.antigravitySignInBusy ? t('settings.antigravity.loginStatus') : ''
+  });
   addButton.disabled = state.antigravitySignInBusy;
   addButton.textContent = t(state.antigravitySignInBusy
     ? 'settings.antigravity.waitingForGoogle'
     : 'settings.antigravity.addAccount');
   cancelButton.classList.toggle('hidden', !state.antigravitySignInBusy);
-  if (statusMessage) {
-    statusMessage.textContent = state.antigravitySignInBusy ? t('settings.antigravity.loginStatus') : '';
-    statusMessage.classList.toggle('hidden', !state.antigravitySignInBusy);
-  }
 
   listEl.replaceChildren();
   if (accounts.length === 0) {
@@ -13608,9 +13611,7 @@ function renderMimoStatus() {
   const statusText = accounts.length === 0
     ? t('settings.mimo.notConfigured')
     : t('settings.mimo.connected', { linked: enabledCount, total: accounts.length });
-  setCursorStatusText(statusEl, statusText);
-  errorEl.textContent = state.mimoAccountError || '';
-  errorEl.classList.toggle('hidden', !state.mimoAccountError);
+  accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.mimoAccountError });
   emptyEl.classList.toggle('hidden', accounts.length > 0);
 
   listEl.replaceChildren();
@@ -13867,10 +13868,10 @@ function setExternalAccountExpanded(providerName, expanded) {
   if (!details || !toggle) return;
   const next = Boolean(expanded);
   state[`${providerName}AccountExpanded`] = next;
-  details.classList.toggle('hidden', !next);
-  toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-  limitProviderAccountGroup(providerName)?.classList.toggle('expanded', next);
-  syncLimitProviderAccountExpansion(providerName, next);
+  accountShellApi.setExpanded({
+    toggle, details, group: limitProviderAccountGroup(providerName), expanded: next,
+    onChange: (open) => syncLimitProviderAccountExpansion(providerName, open)
+  });
 }
 
 function volcenginePlatformUrl() {
@@ -13983,17 +13984,20 @@ function renderCopilotStatus() {
   const configured = Boolean(state.settings?.copilotApiTokenConfigured);
   const enabled = limitProviderEnabled('copilot');
   const linked = copilotAccountLinked();
-  errorEl.textContent = state.copilotErrorMessage || '';
-  errorEl.classList.toggle('hidden', !state.copilotErrorMessage);
-  setCursorStatusText(statusEl, copilotAccountStatusText(provider, configured, source, enabled));
+  accountShellApi.render({
+    status: statusEl,
+    statusText: copilotAccountStatusText(provider, configured, source, enabled),
+    error: errorEl,
+    errorText: state.copilotErrorMessage,
+    progress: loginStatusEl,
+    progressText: state.copilotLoginStatus
+  });
   manualPanel.classList.toggle('hidden', linked);
   if (linked && state.copilotManualExpanded) setCopilotManualExpanded(false);
   signInBtn.classList.toggle('hidden', linked || state.copilotSignInBusy);
   cancelBtn.classList.toggle('hidden', !state.copilotSignInBusy || !state.copilotSignInCancelable || linked);
   logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
   refreshBtn.classList.toggle('hidden', !configured || (state.copilotSignInBusy && !linked));
-  loginStatusEl.classList.toggle('hidden', !state.copilotLoginStatus);
-  loginStatusEl.textContent = state.copilotLoginStatus;
   renderSettingsSummaries();
 }
 
@@ -14002,16 +14006,22 @@ function renderOpenCodeProfiles() {
   if (!isSettingsSurfaceVisible()) return;
   const listEl = document.getElementById('opencodeProfileList');
   if (!listEl) return;
+  renderAccountShellError('opencode');
 
   const api = window.tokenMonitor.opencode;
 
+  const isCurrent = accountProfileRequests.begin('opencode');
   api.getProfiles().then(({ profiles, hasEnvVar, hasAmbientKey, ambientEnabled = true }) => {
-    if (!isSettingsSurfaceVisible()) return;
-    listEl.innerHTML = '';
+    if (!isCurrent() || !isSettingsSurfaceVisible() || document.getElementById('opencodeProfileList') !== listEl) return;
+    accountProfileStatuses.retire('opencode');
+    listEl.replaceChildren();
     const entries = Object.entries(profiles);
 
     if (entries.length === 0 && !hasEnvVar && !hasAmbientKey) {
-      listEl.innerHTML = '<div class="opencode-empty">' + t('settings.opencode.emptyList') + '</div>';
+      const empty = document.createElement('div');
+      empty.className = 'opencode-empty';
+      empty.textContent = t('settings.opencode.emptyList');
+      listEl.append(empty);
       state.opencodeProfileCount = 0;
       renderOpenCodeProfilesStatusSummary({});
       renderSettingsSummaries();
@@ -14072,11 +14082,10 @@ function renderOpenCodeProfiles() {
             return;
           }
           if (offer.stale(at)) return;
-          const errorEl = document.getElementById('opencodeErrorMessage');
-          errorEl.textContent = opencodeSaveErrorText(result);
-          errorEl.classList.remove('hidden');
+          setAccountShellError('opencode', opencodeSaveErrorText(result));
           return;
         }
+        setAccountShellError('opencode', '');
         renderOpenCodeProfiles();
         updateOpenCodeProfilesStatus();
         renderSettingsSummaries();
@@ -14172,7 +14181,6 @@ function renderOpenCodeProfiles() {
       const offer = opencodeMergeOffer(mergeBtn, (next) => applyRename(next, true));
       const applyRename = async (next, merge) => {
         const at = offer.revision();
-        const errorEl = document.getElementById('opencodeErrorMessage');
         const result = await api.renameProfile(name, next, { merge });
         if (!result.ok) {
           if (result.nameTaken) {
@@ -14180,11 +14188,10 @@ function renderOpenCodeProfiles() {
             return;
           }
           if (offer.stale(at)) return;
-          errorEl.textContent = opencodeSaveErrorText(result);
-          errorEl.classList.remove('hidden');
+          setAccountShellError('opencode', opencodeSaveErrorText(result));
           return;
         }
-        errorEl.classList.add('hidden');
+        setAccountShellError('opencode', '');
         renderOpenCodeProfiles();
         updateOpenCodeProfilesStatus();
         renderSettingsSummaries();
@@ -14307,6 +14314,12 @@ function renderOpenCodeProfiles() {
     }
 
     updateOpenCodeProfilesStatus();
+  }).catch(() => {
+    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
+    accountShellApi.render({
+      status: document.getElementById('opencodeCookieStatus'),
+      statusText: t('settings.opencode.connectFailed')
+    });
   });
 }
 
@@ -14385,7 +14398,6 @@ function opencodeRowId(prefix, name) {
 // deleting drops just this credential and leaves the rest of the account.
 function opencodeCredentialRow(accountName, kind, label) {
   const api = window.tokenMonitor.opencode;
-  const errorEl = () => document.getElementById('opencodeErrorMessage');
   const refresh = () => {
     renderOpenCodeProfiles();
     updateOpenCodeProfilesStatus();
@@ -14428,10 +14440,10 @@ function opencodeCredentialRow(accountName, kind, label) {
         return;
       }
       if (offer.stale(at)) return;
-      errorEl().textContent = opencodeSaveErrorText(result);
-      errorEl().classList.remove('hidden');
+      setAccountShellError('opencode', opencodeSaveErrorText(result));
       return;
     }
+    setAccountShellError('opencode', '');
     refresh();
   };
   const endMove = async (save) => {
@@ -14480,7 +14492,9 @@ function opencodeCredentialRow(accountName, kind, label) {
 
 async function updateOpenCodeProfilesStatus() {
   const api = window.tokenMonitor.opencode;
+  const isCurrent = accountProfileStatuses.begin('opencode');
   const status = await api.status();
+  if (!isCurrent() || !isSettingsSurfaceVisible()) return;
   const profiles = status.profiles || {};
 
   // The auto-detected key has no account name, so it arrives in its own field
@@ -14534,11 +14548,12 @@ function renderOpenCodeProfilesStatusSummary(profiles, ambient = null) {
     const linkedCount = statuses.filter(s => s.linked).length;
     const configuredProfileCount = state.opencodeProfileCount || 0;
     const totalCount = Math.max(statuses.length, configuredProfileCount);
-    if (totalCount > 0) {
-      totalEl.textContent = t('settings.opencode.connected', { linked: linkedCount, total: totalCount });
-    } else {
-      totalEl.textContent = t('settings.opencode.statusNotSet');
-    }
+    accountShellApi.render({
+      status: totalEl,
+      statusText: totalCount > 0
+        ? t('settings.opencode.connected', { linked: linkedCount, total: totalCount })
+        : t('settings.opencode.statusNotSet')
+    });
   }
 }
 
@@ -14600,11 +14615,14 @@ function updateNamedApiProfilesStatus({
   if (!statusEl) return;
   const total = state[profileCountStateKey] || 0;
   const linked = providers.filter((provider) => provider.status === 'ok').length;
-  statusEl.textContent = total === 0
-    ? t(`settings.${providerId}.statusNotSet`)
-    : !providerEnabled
-      ? t(`settings.${providerId}.nAccounts`, { count: total })
-      : t(`settings.${providerId}.connected`, { linked, total });
+  accountShellApi.render({
+    status: statusEl,
+    statusText: total === 0
+      ? t(`settings.${providerId}.statusNotSet`)
+      : !providerEnabled
+        ? t(`settings.${providerId}.nAccounts`, { count: total })
+        : t(`settings.${providerId}.connected`, { linked, total })
+  });
 }
 
 function updateOpenRouterProfilesStatus() {
@@ -14735,14 +14753,11 @@ function appendNamedApiProfileRow(listEl, config) {
       if (save && nextName && nextName !== name) {
         const result = await api.renameProfile(name, nextName);
         if (result?.ok) {
+          setAccountShellError(providerId, '');
           rerender();
         } else {
           nameInput.value = name;
-          const errorEl = document.getElementById(`${providerId}ErrorMessage`);
-          if (errorEl) {
-            errorEl.textContent = errorText(result);
-            errorEl.classList.remove('hidden');
-          }
+          setAccountShellError(providerId, errorText(result));
         }
       }
     };
@@ -14809,8 +14824,10 @@ function renderNamedApiProfiles(config) {
   } = config;
   const listEl = document.getElementById(`${providerId}ProfileList`);
   if (!listEl || !api) return;
+  renderAccountShellError(providerId);
+  const isCurrent = accountProfileRequests.begin(providerId);
   api.getProfiles().then(({ profiles, hasEnvVar }) => {
-    if (!isSettingsSurfaceVisible()) return;
+    if (!isCurrent() || !isSettingsSurfaceVisible() || document.getElementById(`${providerId}ProfileList`) !== listEl) return;
     listEl.replaceChildren();
     state.settings[profileSettingsKey] = profiles;
     state.settings[envConfiguredKey] = Boolean(hasEnvVar);
@@ -14851,8 +14868,11 @@ function renderNamedApiProfiles(config) {
     updateStatus();
     renderSettingsSummaries();
   }).catch(() => {
-    const statusEl = document.getElementById(`${providerId}Status`);
-    if (statusEl) statusEl.textContent = t(`settings.${providerId}.unavailable`);
+    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
+    accountShellApi.render({
+      status: document.getElementById(`${providerId}Status`),
+      statusText: t(`settings.${providerId}.unavailable`)
+    });
   });
 }
 
@@ -14901,13 +14921,15 @@ function renderCursorStatus() {
   const errorEl = document.getElementById('cursorErrorMessage');
   if (!statusEl || !listEl || !errorEl) return;
 
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
+  accountShellApi.render({
+    error: errorEl,
+    errorText: state.cursorAccount.error
+      ? t('settings.cursor.statusCheckFailed', { message: state.cursorAccount.error })
+      : accountShellErrors.cursor || ''
+  });
 
   if (state.cursorAccount.error) {
     setCursorStatusText(statusEl, t('settings.common.error'));
-    errorEl.textContent = t('settings.cursor.statusCheckFailed', { message: state.cursorAccount.error });
-    errorEl.classList.remove('hidden');
     setCursorCheckboxesEnabled(Boolean(state.cursorAccount.status?.accounts?.length));
     setSettingsSectionExpanded('limits', true);
     setCursorAccountExpanded(true);
@@ -15024,6 +15046,7 @@ function renderCursorStatus() {
 }
 
 async function refreshCursorStatus({ force = false, discover = false } = {}) {
+  setAccountShellError('cursor', '');
   state.cursorAccount = { status: null, error: '', busy: true };
   renderCursorStatus();
   try {
@@ -15423,25 +15446,25 @@ function setupCursorAccountUI() {
     window.tokenMonitor.openExternal('https://cursor.com/dashboard');
   });
 
-  document.getElementById('cursorManualSubmit').addEventListener('click', async () => {
+  const cursorManualSubmit = document.getElementById('cursorManualSubmit');
+  cursorManualSubmit.addEventListener('click', () => accountProfileSaves.run('cursor', cursorManualSubmit, async () => {
     const input = document.getElementById('cursorManualInput');
-    const errorEl = document.getElementById('cursorErrorMessage');
-    errorEl.classList.add('hidden');
+    setAccountShellError('cursor', '');
     const result = await window.tokenMonitor.cursor.loginManual(input.value);
     if (!result.ok) {
       const message = result.code === 'EXTERNAL_AGENT_ACTIVE'
         ? t('settings.cursor.agentActive')
         : result.error;
-      errorEl.textContent = t('settings.cursor.loginFailed', { message });
-      errorEl.classList.remove('hidden');
+      setAccountShellError('cursor', t('settings.cursor.loginFailed', { message }));
       return;
     }
     input.value = '';
+    setAccountShellError('cursor', '');
     state.cursorAccount = { status: result.status, error: '', busy: false };
     renderCursorStatus();
     setCursorManualExpanded(false);
     await refreshStats({ force: true });
-  });
+  }));
 
   refreshCursorStatus({ discover: true });
 
@@ -15502,23 +15525,23 @@ function setupCursorAccountUI() {
       // can never be submitted as the other.
       const stale = document.getElementById(isCookie ? 'opencodeApiKeyInput' : 'opencodeCookieInput');
       if (stale) stale.value = '';
-      document.getElementById('opencodeErrorMessage')?.classList.add('hidden');
+      setAccountShellError('opencode', '');
       clearOpenCodeMergeOffer();
     };
     kindSelect?.addEventListener('change', applyOpenCodeCredentialKind);
     applyOpenCodeCredentialKind();
 
-    document.getElementById('opencodeCookieSubmit').addEventListener('click', async () => {
+    const profileSubmit = document.getElementById('opencodeCookieSubmit');
+    profileSubmit.addEventListener('click', () => accountProfileSaves.run('opencode', profileSubmit, async () => {
       const opencodeCredentialKind = kindSelect?.value === 'cookie' ? 'cookie' : 'api';
       const input = document.getElementById(opencodeCredentialKind === 'cookie'
         ? 'opencodeCookieInput'
         : 'opencodeApiKeyInput');
       const nameInput = document.getElementById('opencodeProfileName');
-      const errorEl = document.getElementById('opencodeErrorMessage');
       const name = (nameInput.value || '').trim();
       const cookie = input.value;
 
-      errorEl.classList.add('hidden');
+      setAccountShellError('opencode', '');
 
       // The name is required rather than defaulted. Saving one credential keeps
       // the other under the same name, and the collector reads that as "these
@@ -15526,8 +15549,7 @@ function setupCursorAccountUI() {
       // could attach one account's key to another account's cookie. Making the
       // user type the name is what keeps the association explicit.
       if (!name) {
-        errorEl.textContent = t('settings.opencode.nameRequired');
-        errorEl.classList.remove('hidden');
+        setAccountShellError('opencode', t('settings.opencode.nameRequired'));
         nameInput.focus();
         return;
       }
@@ -15538,7 +15560,7 @@ function setupCursorAccountUI() {
       // it: the next click has different consequences from the one just made.
       const submit = async (merge) => {
         const at = addMergeOffer?.revision();
-        confirmOpenCodeMerge = () => submit(true);
+        confirmOpenCodeMerge = () => accountProfileSaves.run('opencode', addMergeButton, () => submit(true));
         const result = await window.tokenMonitor.opencode.saveProfile(
           name,
           cookie,
@@ -15559,6 +15581,7 @@ function setupCursorAccountUI() {
             nameInput.value = '';
             addMergeOffer?.withdraw();
           }
+          if (!stale) setAccountShellError('opencode', '');
           renderOpenCodeProfiles();
           updateOpenCodeProfilesStatus();
           renderSettingsSummaries();
@@ -15569,11 +15592,10 @@ function setupCursorAccountUI() {
           addMergeOffer.offer(at, name, t('settings.opencode.mergeInto', { name }));
           return;
         }
-        errorEl.textContent = opencodeSaveErrorText(result);
-        errorEl.classList.remove('hidden');
+        setAccountShellError('opencode', opencodeSaveErrorText(result));
       };
       await submit(false);
-    });
+    }));
   }
 
   const openrouterToggle = document.getElementById('openrouterSettingsToggle');
@@ -15596,18 +15618,15 @@ function setupCursorAccountUI() {
     document.getElementById('openrouterOpenBrowser')?.addEventListener('click', () => {
       window.tokenMonitor.openExternal('https://openrouter.ai/settings/keys');
     });
-    document.getElementById('openrouterProfileSubmit')?.addEventListener('click', async () => {
+    const profileSubmit = document.getElementById('openrouterProfileSubmit');
+    profileSubmit?.addEventListener('click', () => accountProfileSaves.run('openrouter', profileSubmit, async () => {
       const nameInput = document.getElementById('openrouterProfileName');
       const keyInput = document.getElementById('openrouterApiKeyInput');
-      const errorEl = document.getElementById('openrouterErrorMessage');
       const name = String(nameInput?.value || '').trim() || 'default';
       const apiKey = String(keyInput?.value || '').trim();
-      errorEl?.classList.add('hidden');
+      setAccountShellError('openrouter', '');
       if (!apiKey) {
-        if (errorEl) {
-          errorEl.textContent = t('settings.openrouter.statusNotSet');
-          errorEl.classList.remove('hidden');
-        }
+        setAccountShellError('openrouter', t('settings.openrouter.statusNotSet'));
         return;
       }
       const result = await window.tokenMonitor.openrouter.saveProfile(name, apiKey);
@@ -15616,11 +15635,10 @@ function setupCursorAccountUI() {
         keyInput.value = '';
         renderOpenRouterProfiles();
         await refreshStats({ force: true });
-      } else if (errorEl) {
-        errorEl.textContent = openrouterProfileErrorText(result);
-        errorEl.classList.remove('hidden');
+      } else {
+        setAccountShellError('openrouter', openrouterProfileErrorText(result));
       }
-    });
+    }));
   }
 
   const thirdpartyToggle = document.getElementById('thirdpartySettingsToggle');
@@ -15648,7 +15666,8 @@ function setupCursorAccountUI() {
       addDetails?.classList.toggle('hidden', !expanded);
       document.getElementById('thirdpartyAddForm')?.classList.toggle('expanded', expanded);
     });
-    document.getElementById('thirdpartyProfileSubmit')?.addEventListener('click', async () => {
+    const profileSubmit = document.getElementById('thirdpartyProfileSubmit');
+    profileSubmit?.addEventListener('click', () => accountProfileSaves.run('thirdparty', profileSubmit, async () => {
       const nameInput = document.getElementById('thirdpartyProfileName');
       const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
       const refreshTokenInput = document.getElementById('thirdpartyRefreshTokenInput');
@@ -15661,7 +15680,6 @@ function setupCursorAccountUI() {
       const totalPathInput = document.getElementById('thirdpartyTotalPathInput');
       const currencyInput = document.getElementById('thirdpartyCurrencyInput');
       const divisorInput = document.getElementById('thirdpartyDivisorInput');
-      const errorEl = document.getElementById('thirdpartyErrorMessage');
       const name = String(nameInput?.value || '').trim() || 'default';
       const adapter = selectedThirdPartyAdapter();
       const baseUrl = String(baseUrlInput?.value || '').trim();
@@ -15669,7 +15687,7 @@ function setupCursorAccountUI() {
       const refreshToken = String(refreshTokenInput?.value || '').trim();
       const userId = String(userIdInput?.value || '').trim();
       const apiKey = String(keyInput?.value || '').trim();
-      errorEl?.classList.add('hidden');
+      setAccountShellError('thirdparty', '');
       const result = await window.tokenMonitor.thirdparty.saveProfile({
         name,
         adapter,
@@ -15703,11 +15721,10 @@ function setupCursorAccountUI() {
         divisorInput.value = '1';
         renderThirdPartyProfiles();
         await refreshStats({ force: true });
-      } else if (errorEl) {
-        errorEl.textContent = thirdPartyProfileErrorText(result, adapter);
-        errorEl.classList.remove('hidden');
+      } else {
+        setAccountShellError('thirdparty', thirdPartyProfileErrorText(result, adapter));
       }
-    });
+    }));
   }
 
   const volcengineToggle = document.getElementById('volcengineSettingsToggle');
@@ -15960,13 +15977,9 @@ function setupCursorAccountUI() {
     setCopilotManualExpanded(false);
     renderCopilotStatus();
 
-    const errorEl = document.getElementById('copilotErrorMessage');
     const setCopilotError = (message) => {
       state.copilotErrorMessage = message || '';
-      if (errorEl) {
-        errorEl.textContent = state.copilotErrorMessage;
-        errorEl.classList.toggle('hidden', !state.copilotErrorMessage);
-      }
+      renderCopilotStatus();
     };
 
     window.tokenMonitor.copilot?.onLoginStatus?.((status) => {
