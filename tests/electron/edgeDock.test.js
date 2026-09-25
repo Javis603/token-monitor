@@ -267,6 +267,9 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   // meta line rather than taking the token column.
   const sessions = dock.slice(dock.indexOf('function sessionsNode('), dock.indexOf('function providerCard('));
   assert.match(sessions, /edge-dock-session-meta/);
+  // The meta line must compose through the shared helper — a projection that
+  // still handed the card a flattened top model would pass the map assertions.
+  assert.match(sessions, /sessionRowsApi\.sessionModelLabel\(session\)/);
   assert.match(sessions, /if \(context\) meta\.append\(context\)/);
   // Running is a dot beside the name, not a recoloured title.
   assert.match(sessions, /nameNode\.append\(stateMark\(session, key, state\)\)/);
@@ -1413,7 +1416,7 @@ test('provider cards list the newest sessions of their own clients this month', 
         sessions: {
           'codex:a': session('codex', 'a', '2026-09-10T00:00:00Z'),
           'codex:b': session('codex', 'b', '2026-09-16T00:00:00Z', { projectLabel: 'token-monitor' }),
-          'claude:c': session('claude', 'c', '2026-09-17T00:00:00Z'),
+          'claude:c': session('claude', 'c', '2026-09-17T00:00:00Z', { models: { 'claude-opus-5-5': 8, 'swe-2': 2 } }),
           'codex:r': session('codex', 'r', '2026-09-17T01:00:00Z', { sessionKind: 'background-review' }),
           'codex:d': session('codex', 'd', '2026-09-15T00:00:00Z'),
           'codex:e': session('codex', 'e', '2026-09-01T00:00:00Z')
@@ -1427,7 +1430,12 @@ test('provider cards list the newest sessions of their own clients this month', 
   assert.deepEqual(codex.sessions.map((entry) => entry.sessionId), ['t', 'b', 'd']);
   assert.equal(codex.sessions[0].title, 'Fix dock');
   assert.equal(codex.sessions[1].projectLabel, 'token-monitor');
-  assert.equal(codex.sessions[1].model, 'gpt-5');
+  // The whole model map rides the row: the card labels it with the Sessions
+  // list's own sessionModelLabel(), which a flattened top-model string could
+  // never reproduce ("N models" for a multi-model session).
+  assert.deepEqual(codex.sessions[1].models, { 'gpt-5': 10 });
+  const [claude] = buildEdgeDockCells({ ...stats, limits: { providers: [provider('claude')] } }, {});
+  assert.deepEqual(claude.sessions[0].models, { 'claude-opus-5-5': 8, 'swe-2': 2 });
   // The rows are the rail's activity reading as well as this card's list, so hiding
   // the list is a choice the cell carries rather than one it applies: the rows stay.
   const [hidden] = buildEdgeDockCells(stats, { items: [{ type: 'limit', provider: 'codex', showSessions: false }] });

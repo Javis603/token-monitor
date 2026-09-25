@@ -38,6 +38,7 @@ const { CLIENT_LABELS } = window.TokenMonitorClientCatalog;
 // payload on a timer, so whether a session is still running has to be answered
 // at paint time rather than frozen at push time.
 const sessionLive = window.TokenMonitorSessionLive;
+const sessionRowsApi = window.TokenMonitorSessionRows;
 const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
   spin: 'edge-dock-session-spin',
   check: 'edge-dock-session-check',
@@ -948,7 +949,11 @@ function sessionsContainer(sessions, options = {}) {
     // The meta line carries model, age, and (when the transcript stated one)
     // the context reading, so nothing the row showed before is displaced.
     const meta = el('span', 'edge-dock-session-meta');
-    meta.append(document.createTextNode([session.model, relativeAgo(session.lastUsedAt)].filter(Boolean).join(' · ')));
+    // The model label is composed by the Sessions list's own helper, so a
+    // multi-model session reads "N models" here exactly as it does there —
+    // projecting only the top model showed a different name than the list's
+    // for the same session.
+    meta.append(document.createTextNode([sessionRowsApi.sessionModelLabel(session), relativeAgo(session.lastUsedAt)].filter(Boolean).join(' · ')));
     const context = contextNode(session);
     if (context) meta.append(context);
     row.append(
