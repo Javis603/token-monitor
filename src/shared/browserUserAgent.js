@@ -12,4 +12,14 @@
 // belong here.
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36';
 
-module.exports = { BROWSER_USER_AGENT };
+// The user-agent alone is not enough for Cloudflare's managed challenge: the
+// same cookie is refused unless the request also carries the client-hint
+// headers a real browser sends. Keep the version in step with the agent above.
+const BROWSER_CLIENT_HINTS = Object.freeze({
+  'sec-ch-ua': '"Chromium";v="143", "Not_A Brand";v="24"',
+  'sec-ch-ua-mobile': '?0',
+  'sec-ch-ua-platform': '"macOS"',
+  'Accept-Language': 'en-US,en;q=0.9'
+});
+
+module.exports = { BROWSER_USER_AGENT, BROWSER_CLIENT_HINTS };
