@@ -182,8 +182,44 @@ test('TypeSafe resolves the bundle rate constants and falls back when absent', a
 
 test('TypeSafe prettifies the plan label', async () => {
   const transport = mockFetch({ billing: { balance: 25, spent: 3, plan: 'pro_plan' } });
-  const provider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...transport, now: () => now });
+ const provider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...transport, now: () => now });
   assert.equal(provider.status, 'ok');
   assert.equal(provider.accountLabel, 'Pro');
   assert.equal(provider.windows[0].resetsAt, null);
+});
+
+test('TypeSafe requests carry the browser client hints Cloudflare requires', async () => {
+  resetBillingCache();
+  const transport = mockFetch();
+  const provider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { ...transport, now: () => now });
+  assert.equal(provider.status, 'ok');
+  for (const { options } of transport.calls) {
+    assert.ok(options.headers['sec-ch-ua'], 'client hints missing');
+    assert.equal(options.headers['sec-ch-ua-mobile'], '?0');
+    assert.ok(options.headers['sec-ch-ua-platform']);
+    assert.ok(options.headers['Accept-Language']);
+  }
+});
+
+test('TypeSafe reports a Cloudflare challenge as unavailable, not expired', async () => {
+  resetBillingCache();
+  const challenge = (headers = {}) => async () => new Response(
+    '<html><title>Just a moment...</title>challenge-platform</html>',
+    { status: 403, headers: { server: 'cloudflare', ...headers } }
+  );
+  let provider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, { fetch: challenge(), now: () => now });
+  assert.equal(provider.status, 'unavailable');
+
+  provider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, {
+    fetch: challenge({ 'cf-mitigated': 'challenge' }),
+    now: () => now
+  });
+  assert.equal(provider.status, 'unavailable');
+
+  // A plain non-Cloudflare 403 is still a dead session.
+  provider = await fetchTypesafeLimits({ typesafeCookie: 'session=secret' }, {
+    fetch: async () => new Response('Forbidden', { status: 403 }),
+    now: () => now
+  });
+  assert.equal(provider.status, 'unauthorized');
 });
