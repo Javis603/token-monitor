@@ -33,9 +33,9 @@ Token Monitor recognizes these native Antigravity roots under `~/.gemini/`:
 
 When Antigravity tracking is enabled and at least one native root exists, `maybeSyncAntigravity()` in `src/shared/providers/antigravity/selfSync.js` runs `tokscale antigravity sync` before the relevant scan. It is built once by the collector, which injects the process-wide self-sync throttle and the tokscale command resolver rather than letting this module create either. `tokscale` writes the normalized cache under its configured `antigravity-cache` directory.
 
-The normalized client id is `antigravity`. The tokscale alias `antigravity-cli` must continue to normalize and filter back to that parent id so targeted scans do not clear one partition and write another.
+The normalized client id is `antigravity`. The tokscale aliases `antigravity-cli` and `antigravity-extension` must continue to normalize and filter back to that parent id so targeted scans do not clear one partition and write another.
 
-The parse-local CLI source lives under `${GEMINI_CLI_HOME || ~/.gemini}/antigravity-cli/conversations`. It is a direct scan source rather than part of the native self-sync roots.
+The parse-local CLI source lives under `${GEMINI_CLI_HOME || ~/.gemini}/antigravity-cli/conversations`. The IDE extension's generation databases are read directly from `~/.gemini/antigravity/conversations/*.db`; this source follows the home directory and not `GEMINI_CLI_HOME`. Neither source depends on a successful `antigravity sync`. The extension directory is already inside a watched native root, while the CLI directory is watched separately.
 
 ### Watch behavior
 

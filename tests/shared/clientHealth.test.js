@@ -393,6 +393,9 @@ test('the Cursor cache stays home-relative while Antigravity follows the config 
   assert.deepEqual(roots.antigravity, [{
     id: 'tokscale-antigravity-cache',
     dir: path.join(appData, 'tokscale', 'antigravity-cache')
+  }, {
+    id: 'antigravity-extension-data',
+    dir: path.join(homeDir, '.gemini', 'antigravity', 'conversations')
   }]);
   // The sync lock lives inside the Antigravity cache, so it has to move with it.
   assert.equal(
@@ -416,6 +419,9 @@ test('TOKSCALE_CONFIG_DIR moves the Antigravity cache but not the Cursor one', (
   assert.deepEqual(roots.antigravity, [{
     id: 'tokscale-antigravity-cache',
     dir: path.join('C:\\iso\\tokscale', 'antigravity-cache')
+  }, {
+    id: 'antigravity-extension-data',
+    dir: path.join(homeDir, '.gemini', 'antigravity', 'conversations')
   }]);
 });
 
@@ -490,6 +496,7 @@ test('source observations keep exact files, optional roots and WSL health in syn
     assert.equal(deriveClientHealth('hermes', { clients: {} }, { sourceChecks: missing.checks }).clients.hermes.overall, 'waiting');
     assert.deepEqual(missing.checks.antigravity.map(({ id, exists }) => ({ id, exists })), [
       { id: 'tokscale-antigravity-cache', exists: false },
+      { id: 'antigravity-extension-data', exists: false },
       { id: 'antigravity-ide-source', exists: true },
       { id: 'antigravity-cli-data', exists: false }
     ]);
@@ -497,11 +504,16 @@ test('source observations keep exact files, optional roots and WSL health in syn
 
     fs.writeFileSync(path.join(dbDir, 'db.sqlite'), '');
     fs.mkdirSync(capture, { recursive: true });
+    const extensionDir = path.join(homeDir, '.gemini', 'antigravity', 'conversations');
+    fs.mkdirSync(extensionDir, { recursive: true });
     const present = observe();
     assert.deepEqual(present.checks.zcode.find((check) => check.id === 'zcode-cli-db'), { id: 'zcode-cli-db', exists: true });
     assert.equal(present.diagnostics.zcode.find((root) => root.id === 'zcode-cli-db').exists, true);
     assert.equal(present.visible.codex.some((root) => root.dir === capture), true);
     assert.equal(clientDataDirPresence('zcode', { sourceChecks: present.checks }).zcode, true);
+    assert.deepEqual(present.checks.antigravity.find((check) => check.id === 'antigravity-extension-data'),
+      { id: 'antigravity-extension-data', exists: true });
+    assert.equal(present.diagnostics.antigravity.find((root) => root.id === 'antigravity-extension-data').dir, extensionDir);
   } finally {
     os.homedir = previousHome;
     if (previousGeminiHome === undefined) delete process.env.GEMINI_CLI_HOME;
@@ -536,9 +548,11 @@ test('clientSourceChecks collapses same-kind roots into one entry', () => {
   assert.deepEqual(ids('copilot'), ['copilot-otel', 'copilot-data', 'copilot-session-store', 'vscode-workspace-storage']);
   assert.deepEqual(ids('zed'), ['zed-threads']);
   assert.deepEqual(ids('cline'), ['cline-tasks', 'cline-cli-sessions']);
-  // antigravity's watch candidate is only the tokscale cache; its two real
-  // sources are separate checks so the record can tell them apart.
-  assert.deepEqual(ids('antigravity'), ['tokscale-antigravity-cache', 'antigravity-ide-source', 'antigravity-cli-data']);
+  // The extension database is a direct parser source alongside the synced IDE
+  // cache and the separate CLI database.
+  assert.deepEqual(ids('antigravity'), [
+    'tokscale-antigravity-cache', 'antigravity-extension-data', 'antigravity-ide-source', 'antigravity-cli-data'
+  ]);
   for (const list of Object.values(checks)) {
     for (const check of list) assert.equal(typeof check.exists, 'boolean');
   }
@@ -576,13 +590,15 @@ test('diagnostic roots expose antigravity native sources without treating them a
     'antigravity-ide-source',
     'antigravity-ide-source',
     'antigravity-cli-data',
-    'tokscale-antigravity-cache'
+    'tokscale-antigravity-cache',
+    'antigravity-extension-data'
   ]);
   assert.deepEqual(
     diagnostics.slice(0, 3).map(({ dir }) => dir.split(/[\\/]/).at(-1)),
     ['antigravity', 'antigravity-ide', 'antigravity-backup']
   );
   assert.equal(diagnostics[3].dir.split(/[\\/]/).at(-1), 'conversations');
+  assert.equal(diagnostics[5].dir, path.join(os.homedir(), '.gemini', 'antigravity', 'conversations'));
   for (const root of diagnostics) {
     assert.equal(typeof root.dir, 'string');
     assert.equal(typeof root.exists, 'boolean');

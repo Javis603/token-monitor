@@ -130,6 +130,7 @@ test('umbrella custom directories use each source without double-scanning shared
     [
       'antigravity:/var/data/antigravity',
       'antigravity-cli:/var/data/antigravity',
+      'antigravity-extension:/var/data/antigravity',
       'pi:/var/data/pi',
       'kilocode:/var/data/kilo-tasks'
     ].join(',')

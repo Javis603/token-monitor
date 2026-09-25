@@ -218,7 +218,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
   //                    the sync cache too.
   const tokscaleConfigRoot = tokscaleConfigDir({ env, platform, homeDir: home });
   add('cursor', ['tokscale-cursor-cache', path.join(tokscaleHome, '.config', 'tokscale', 'cursor-cache')]);
-  add('antigravity', ['tokscale-antigravity-cache', path.join(tokscaleConfigRoot, 'antigravity-cache')]);
+  add('antigravity',
+    ['tokscale-antigravity-cache', path.join(tokscaleConfigRoot, 'antigravity-cache')],
+    ['antigravity-extension-data', path.join(home, '.gemini', 'antigravity', 'conversations')]);
   // A whitespace-only KIMI_CODE_HOME counts as unset, matching tokscale: it
   // joins `sessions` onto the raw value, so a blank export would resolve to the
   // root-level /sessions and hide the real one.
