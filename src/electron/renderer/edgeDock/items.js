@@ -13,7 +13,7 @@
 //                              and groupBy; see normalizeItem)
 (function exposeEdgeDockItems(root, factory) {
   const node = typeof module === 'object' && module.exports;
-  const api = factory(node ? require('../../../shared/limitProviders') : root?.TokenMonitorLimitProviders);
+  const api = factory(node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders);
   if (node) module.exports = api;
   if (root) root.TokenMonitorEdgeDockItems = api;
 })(typeof window !== 'undefined' ? window : null, function createEdgeDockItems(limitProviders) {

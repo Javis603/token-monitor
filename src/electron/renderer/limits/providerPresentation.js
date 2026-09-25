@@ -2,7 +2,7 @@
 
 (function exposeLimitProviderPresentation(root, factory) {
   const accountIdentityApi = typeof module === 'object' && module.exports
-    ? require('./accountIdentity')
+    ? require('../accountIdentity')
     : root?.TokenMonitorAccountIdentity;
   const api = factory(accountIdentityApi);
   if (typeof module === 'object' && module.exports) module.exports = api;

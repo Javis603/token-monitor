@@ -4303,7 +4303,7 @@ html.is-windows .limit-live-badge {
    notice. Scoping it to `.limit-row-group` is what made the rule appear in a
    multi-account row and go missing in a single-account one — and since the dock
    card is built on this same row, it showed only the missing half. The forecast
-   is only ever a child of one of those two shapes (limitWindowsView.js appends
+   is only ever a child of one of those two shapes (limits/windowsView.js appends
    it to a solo row and to a group, never to an account row), so an unscoped
    selector reaches no third case. */
 .limit-account-row + .limit-account-row {

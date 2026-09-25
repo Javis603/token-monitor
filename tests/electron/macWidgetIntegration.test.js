@@ -74,7 +74,7 @@ const {
   MAC_APP_MIN_VERSION,
   MAC_WIDGET_MIN_VERSION
 } = require('../../src/shared/macSystemRequirements');
-const { projectLimitStatsForDisplay } = require('../../src/electron/limitStatsPresentation');
+const { projectLimitStatsForDisplay } = require('../../src/electron/limits/statsPresentation');
 
 function functionSource(name, nextName) {
   const start = mainSource.indexOf(`function ${name}(`);

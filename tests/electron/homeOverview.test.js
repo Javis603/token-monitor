@@ -26,7 +26,7 @@ const {
   shouldRetryHomeHistory,
   homeHistoryFetchOutcome
 } = require('../../src/electron/renderer/homeOverview');
-const { limitProviderCompactWindows } = require('../../src/electron/renderer/limitProviderPresentation');
+const { limitProviderCompactWindows } = require('../../src/electron/renderer/limits/providerPresentation');
 
 const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], monthly: [], summary: {} };
 const emptyHistory = { daily: [], monthly: [], summary: {} };

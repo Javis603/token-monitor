@@ -7,7 +7,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
-const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
+const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
 const {
   accountEmailLabel,
   accountTitleLabel,
@@ -76,7 +76,7 @@ function titleContext(maskLimitAccountEmails) {
 }
 
 test('account email masking is applied by the shared limits title resolver', () => {
-  const view = readRendererFile('limitWindowsView.js');
+  const view = readRendererFile('limits/windowsView.js');
 
   assert.equal(maskEmailAddress('primary.user@example.com'), 'p***r@example.com');
   assert.equal(maskEmailAddress('secondary.user@example.com'), 's***r@example.com');
@@ -120,7 +120,7 @@ test('account email masking is applied by the shared limits title resolver', () 
 // addresses while the limits panel masked them. Every provider now resolves
 // through one table, and a provider that is missing from it must still mask.
 test('no limits provider can render a raw account email while masking is on', () => {
-  const view = readRendererFile('limitWindowsView.js');
+  const view = readRendererFile('limits/windowsView.js');
   const providers = [...LIMIT_PROVIDER_IDS, 'future-provider'];
 
   for (const id of providers) {
@@ -145,7 +145,7 @@ test('no limits provider can render a raw account email while masking is on', ()
 
 test('title resolution matches between the limits panel and Home', () => {
   const app = readRendererFile('app.js');
-  const view = readRendererFile('limitWindowsView.js');
+  const view = readRendererFile('limits/windowsView.js');
   const dock = readRendererFile('edgeDock/dock.js');
   // Every surface resolves account titles through the one function, and it is
   // called from exactly one place per surface: the view's own group builder,
@@ -195,7 +195,7 @@ test('title resolution matches between the limits panel and Home', () => {
 // Masking collapses distinct addresses into one label, so rows that share a
 // visible email must stay distinguishable without revealing what is hidden.
 test('accounts sharing a visible email are disambiguated', () => {
-  const view = readRendererFile('limitWindowsView.js');
+  const view = readRendererFile('limits/windowsView.js');
   const titlesFor = (peers, mask) => peers.map((peer, index) => runTitle(
     view,
     `limitAccountTitle('claude', ${JSON.stringify(peer)}, ${index}, ${JSON.stringify(peers)})`,

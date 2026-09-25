@@ -37,7 +37,7 @@
 // give three hosts three chances to supply a different one.
 (function exposeLimitWindowsView(root, factory) {
   const node = typeof module === 'object' && module.exports;
-  const api = factory(node ? require('../../shared/limitProviders') : root?.TokenMonitorLimitProviders);
+  const api = factory(node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders);
   if (node) module.exports = api;
   if (root) root.TokenMonitorLimitWindowsView = api;
 })(typeof window !== 'undefined' ? window : globalThis, function createLimitWindowsViewApi(limitProviders) {

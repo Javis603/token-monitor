@@ -14,18 +14,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const balanceDisplay = require('../../src/shared/limitBalanceDisplay');
+const balanceDisplay = require('../../src/shared/limits/balanceDisplay');
 const currencyApi = require('../../src/shared/currency');
 const subscriptionApi = require('../../src/shared/subscriptionDisplay');
 const subscriptionText = require('../../src/shared/subscriptionText');
-const limitDisplayMode = require('../../src/electron/renderer/limitDisplayMode');
-const limitPresentationApi = require('../../src/electron/renderer/limitProviderPresentation');
-const limitResetMotionApi = require('../../src/electron/renderer/limitResetMotion');
-const limitWindowLabels = require('../../src/shared/limitWindowLabels');
-const limitWindowTextApi = require('../../src/shared/limitWindowText');
+const limitDisplayMode = require('../../src/electron/renderer/limits/displayMode');
+const limitPresentationApi = require('../../src/electron/renderer/limits/providerPresentation');
+const limitResetMotionApi = require('../../src/electron/renderer/limits/resetMotion');
+const limitWindowLabels = require('../../src/shared/limits/windowLabels');
+const limitWindowTextApi = require('../../src/shared/limits/windowText');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 const i18n = require('../../src/electron/renderer/i18n');
-const { createLimitWindowsView } = require('../../src/electron/renderer/limitWindowsView');
+const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
 const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
 
 const root = path.join(__dirname, '../..');
@@ -164,7 +164,7 @@ function dockView(appearance = {}, overrides = {}) {
 }
 
 test('the dock hands the shared view every dependency it destructures', () => {
-  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limitWindowsView.js'), 'utf8');
+  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
   const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
   const required = view
     .slice(view.indexOf('const {'), view.indexOf('} = deps;'))
@@ -193,7 +193,7 @@ test('the dock hands the shared view every dependency it destructures', () => {
 // omissions this guards against (`showLimitSource`, `codexResetForecastEnabled`)
 // shipped as exactly that: a card that stayed silent where the page spoke.
 test('every preference the shared view reads reaches the dock through the appearance projection', () => {
-  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limitWindowsView.js'), 'utf8');
+  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
   const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'src/electron/main.js'), 'utf8');
   const projection = main.slice(

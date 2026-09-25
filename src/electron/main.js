@@ -32,7 +32,7 @@ const {
   createWorkbuddyLocalAuth,
   isSupportedWorkbuddyLocalAppPlatform
 } = require('./providers/workbuddy/localAuth');
-const { createElectronLimitsFetch } = require('./limitsFetch');
+const { createElectronLimitsFetch } = require('./limits/fetch');
 const {
   expandedBoundsForCollapse,
   normalWindowBounds,
@@ -55,7 +55,7 @@ const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
   fetch: electronLimitsFetch()
 });
 // One transport for every widget provider call that resolves through
-// `deps.fetch` — see limitsFetch.js for why the branch and the request options
+// `deps.fetch` — see limits/fetch.js for why the branch and the request options
 // are what they are. Probes that build their own transport inherit neither
 // branch: cursorProbe and antigravityProbe on node:https, Claude Web on the
 // claudeWebFetch above, the CLI fallbacks on a spawned binary.
@@ -283,7 +283,7 @@ const {
   writeMacWidgetHistoryCache
 } = require('./macWidget/historyStore');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidget/launchServicesRecovery');
-const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
+const { projectLimitStatsForDisplay } = require('./limits/statsPresentation');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidget/reloader');
 const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidget/demand');
 const linuxAutostart = require('./linuxAutostart');

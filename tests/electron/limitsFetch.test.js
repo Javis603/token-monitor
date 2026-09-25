@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { createElectronLimitsFetch } = require('../../src/electron/limitsFetch');
+const { createElectronLimitsFetch } = require('../../src/electron/limits/fetch');
 const { resetOutboundFetchCache } = require('../../src/shared/outboundFetch');
 
 function recordingNet() {

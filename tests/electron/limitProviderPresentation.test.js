@@ -9,11 +9,11 @@ const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 const compactTokenApi = require('../../src/shared/compactTokens');
 const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
-const limitProviderOrderApi = require('../../src/electron/renderer/limitProviderOrder');
+const limitProviderOrderApi = require('../../src/electron/renderer/limits/providerOrder');
 const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
-const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
-const { limitWindowLabel } = require('../../src/shared/limitWindowLabels');
-const { limitWindowText } = require('../../src/shared/limitWindowText');
+const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
+const { limitWindowLabel } = require('../../src/shared/limits/windowLabels');
+const { limitWindowText } = require('../../src/shared/limits/windowText');
 
 const {
   antigravityQuotaWindow,
@@ -34,7 +34,7 @@ const {
   limitProviderProvenance,
   limitResetRemainingMs,
   limitProviderSettingsTags
-} = require('../../src/electron/renderer/limitProviderPresentation');
+} = require('../../src/electron/renderer/limits/providerPresentation');
 
 test('isCodexLiveAccount marks the live system login but not managed-added accounts', () => {
   assert.equal(isCodexLiveAccount({ provider: 'codex', status: 'ok', sourceDetail: 'app' }), true);
@@ -227,11 +227,11 @@ function functionBody(source, name, nextName) {
   return source.slice(start, endLineStart);
 }
 
-// The Limits rows moved to limitWindowsView.js, which the edge dock renders
+// The Limits rows moved to limits/windowsView.js, which the edge dock renders
 // from too, so a provider's markup is built once rather than twice. These read
 // whichever file now holds the function.
 function limitsViewSource() {
-  return readRendererFile('limitWindowsView.js');
+  return readRendererFile('limits/windowsView.js');
 }
 
 function viewBody(name, nextName = '') {
@@ -310,7 +310,7 @@ function runProviderSpendNode(source, balance, provider = null) {
   return JSON.parse(JSON.stringify(context.result));
 }
 
-// Window wording now lives in src/shared/limitWindowText.js, painted by both
+// Window wording now lives in src/shared/limits/windowText.js, painted by both
 // the Limits view and the edge dock, so these assert the module's output rather
 // than the shape of the renderer's source.
 function windowText(providerId, window, options = {}) {
@@ -836,7 +836,7 @@ test('Claude limits render as one provider group with account subrows', () => {
 });
 
 test('every multi-account Limits group uses its provider-localized account count', () => {
-  const view = readRendererFile('limitWindowsView.js');
+  const view = readRendererFile('limits/windowsView.js');
   const i18n = readRendererFile('i18n.js');
   // One derivation instead of one string per wrapper: a provider that has a key
   // gets its own phrase, and one that does not renders no count rather than the
@@ -1661,7 +1661,7 @@ test('tray bars draw the resolved primary window on top and preserve an empty lo
 
 test('DeepSeek main Limits row preserves the intentional month-spend balance meter', () => {
   const renderProviderWindows = viewBody('renderProviderWindows');
-  const balanceWindow = readSharedFile('limitBalanceDisplay.js');
+  const balanceWindow = readSharedFile('limits/balanceDisplay.js');
   const styles = readRendererFile('styles.css');
 
   // The two providers share the balance meter; TypeSafe adds a grant expiry
@@ -2054,7 +2054,7 @@ test('Cline exposes its API key through the settings and credential-store patter
   // appears. Guarded by source patterns because the view module builds DOM and this
   // repository has no DOM harness; the branch was also confirmed by driving the
   // running widget (a mocked row renders Session, Weekly and a full-width Monthly).
-  const windowsView = readRendererFile('limitWindowsView.js');
+  const windowsView = readRendererFile('limits/windowsView.js');
   assert.match(windowsView, /provider\.provider === 'cline'/);
   // The account credit shares the `billing` kind with the monthly quota, so the
   // branch tells them apart by metric and renders the credit through the panel's own
@@ -2784,7 +2784,7 @@ test('account validation keeps aggregate fallback for legacy stats without devic
   assert.equal(provider.sourceDeviceId, 'this-mac');
 });
 
-const presentation = require('../../src/electron/renderer/limitProviderPresentation');
+const presentation = require('../../src/electron/renderer/limits/providerPresentation');
 
 test('Antigravity uses the shared OAuth source label', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'antigravity', source: 'oauth' }), 'OAuth');

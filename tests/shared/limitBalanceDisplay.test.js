@@ -11,7 +11,7 @@ const {
   formatMoney,
   isCreditsWindow,
   spendWindow
-} = require('../../src/shared/limitBalanceDisplay');
+} = require('../../src/shared/limits/balanceDisplay');
 
 test('isCreditsWindow keys off the metric tag only', () => {
   assert.equal(isCreditsWindow({ metric: 'credits' }), true);

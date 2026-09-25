@@ -1,6 +1,6 @@
 'use strict';
 
-const { LIMIT_PROVIDER_IDS } = require('../limitProviders');
+const { LIMIT_PROVIDER_IDS } = require('./providers');
 const { LIMIT_PROVIDER_FETCHERS, limitProviderEntry } = require('./registry');
 const {
   DEFAULT_LIMITS_REFRESH_MS,

@@ -8,8 +8,8 @@
   const node = typeof module === 'object' && module.exports;
   const api = factory(
     node ? require('../../../shared/trayText') : root?.TokenMonitorTrayText,
-    node ? require('../../../shared/limitBalanceDisplay') : root?.TokenMonitorLimitBalanceDisplay,
-    node ? require('../../../shared/limitProviders') : root?.TokenMonitorLimitProviders,
+    node ? require('../../../shared/limits/balanceDisplay') : root?.TokenMonitorLimitBalanceDisplay,
+    node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders,
     node ? require('./items') : root?.TokenMonitorEdgeDockItems,
     node ? require('../accountIdentity') : root?.TokenMonitorAccountIdentity,
     node ? require('../../../shared/sessionLive') : root?.TokenMonitorSessionLive,

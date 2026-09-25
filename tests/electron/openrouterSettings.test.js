@@ -9,7 +9,7 @@ const vm = require('node:vm');
 
 const root = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
-const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
+const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
 
 function functionBody(source, name, nextName) {
   const start = source.indexOf(`function ${name}(`);
@@ -19,11 +19,11 @@ function functionBody(source, name, nextName) {
   return source.slice(start, end);
 }
 
-// The Limits rows moved to limitWindowsView.js, which the edge dock renders
+// The Limits rows moved to limits/windowsView.js, which the edge dock renders
 // from too, so a provider's markup is built once rather than twice. These read
 // whichever file now holds the function.
 function limitsViewSource() {
-  return read('src/electron/renderer/limitWindowsView.js');
+  return read('src/electron/renderer/limits/windowsView.js');
 }
 
 function viewBody(name, nextName = '') {
@@ -104,7 +104,7 @@ test('OpenRouter credentials stay in the main process and renderer receives conf
 
 test('OpenRouter Limits presentation shows a real balance meter and compact spend tooltip', () => {
   const app = read('src/electron/renderer/app.js');
-  const presentation = read('src/electron/renderer/limitProviderPresentation.js');
+  const presentation = read('src/electron/renderer/limits/providerPresentation.js');
   const styles = rendererStyles();
   const { clientColors } = require('../../src/electron/renderer/usageCharts');
 

@@ -10,7 +10,7 @@ const root = path.resolve(__dirname, '..', '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 const { VENDOR_LABELS, VENDOR_ORDER } = require('../../src/electron/renderer/themePresets');
 const { rendererStyles } = require('../helpers/rendererStyles');
-const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
+const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
 
 test('third-party settings separate presets, scope, and safe custom mappings', () => {
   const html = read('src/electron/renderer/index.html');
@@ -127,17 +127,17 @@ test('third-party profile rows share the named-account component with OpenRouter
 test('third-party Limits presentation uses compact scope labels and a details tooltip', () => {
   const app = read('src/electron/renderer/app.js');
   const i18n = read('src/electron/renderer/i18n.js');
-  const presentation = read('src/electron/renderer/limitProviderPresentation.js');
-  const balanceDisplay = read('src/shared/limitBalanceDisplay.js');
+  const presentation = read('src/electron/renderer/limits/providerPresentation.js');
+  const balanceDisplay = read('src/shared/limits/balanceDisplay.js');
   const styles = rendererStyles();
   const { clientColors } = require('../../src/electron/renderer/usageCharts');
 
   assert.equal(LIMIT_PROVIDER_LABELS.thirdparty, 'Third-party APIs');
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /provider\.provider === 'thirdparty'/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /function thirdPartyQuotaWindow/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /quotaWindow\?\.label \|\| 'Balance'/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /const meterPercent = creditsMeterPercent\(provider, quotaWindow\)/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /\.\.\.\(meterPercent !== null \? \{ remainingPercent: meterPercent, showMeter: true \} : \{\}\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /provider\.provider === 'thirdparty'/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /function thirdPartyQuotaWindow/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /quotaWindow\?\.label \|\| 'Balance'/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /const meterPercent = creditsMeterPercent\(provider, quotaWindow\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /\.\.\.\(meterPercent !== null \? \{ remainingPercent: meterPercent, showMeter: true \} : \{\}\)/);
   // The adapter's own name, mark and colour are provider presentation, so they
   // live in the module both surfaces load rather than in the page that happened
   // to need them first. The dock card renders the same rows and cannot reach
@@ -150,23 +150,23 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(presentation, /if \(planLabel === 'api key'\) return 'API key'/);
   assert.match(presentation, /if \(planLabel === 'custom'\) return 'Custom'/);
   assert.doesNotMatch(presentation, /planLabel\.includes\('token'\) \|\| quotaLabel\.includes\('token'\)/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /function thirdPartySpendNode/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /balance\?\.requestCount/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /settings\.thirdparty\.requests/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /if \(allTimeSpend === null && monthSpend === null && entries\.length === 0\) return null/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /monthSpend !== null[\s\S]*?`Month \$\{formatMoney\(monthSpend, currency\)\}`/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /allTimeSpend !== null[\s\S]*?`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /\]\.join\(' · '\)/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /settings\.thirdparty\.monthTokens/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /settings\.thirdparty\.avgResponse/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /label: summary \? 'Spend' : 'Details'/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /function thirdPartySpendNode/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /balance\?\.requestCount/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /settings\.thirdparty\.requests/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /if \(allTimeSpend === null && monthSpend === null && entries\.length === 0\) return null/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /monthSpend !== null[\s\S]*?`Month \$\{formatMoney\(monthSpend, currency\)\}`/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /allTimeSpend !== null[\s\S]*?`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /\]\.join\(' · '\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /settings\.thirdparty\.monthTokens/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /settings\.thirdparty\.avgResponse/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /label: summary \? 'Spend' : 'Details'/);
   assert.match(balanceDisplay, /return symbol \? `\$\{symbol\}\$\{number\.toFixed\(2\)\}` : `\$\{code\} \$\{number\.toFixed\(2\)\}`/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
   // The group builder is the shared view's, and it now derives the adapter
   // decorations itself: a host that passes nothing — the dock card — still gets
   // each row's own mark, colour and adapter name, and a header that wears the
   // family they share.
-  const view = read('src/electron/renderer/limitWindowsView.js');
+  const view = read('src/electron/renderer/limits/windowsView.js');
   assert.match(view, /function renderLimitProviderGroup\(providerId, label, providers, color\)/);
   assert.match(view, /planText: limitGroupCountText\(providerId, providers\.length\)/);
   assert.match(view, /thirdparty: \(providers\) => \{[\s\S]*?markId: family \|\| 'thirdparty', sharedFamily: family/);
@@ -176,7 +176,7 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(app, /renderLimitProviderGroup\(id, label, visibleProviders, color\)/);
   assert.doesNotMatch(app, /groupPlanText|markIdForProvider|colorForProvider/);
   assert.doesNotMatch(i18n, /settings\.thirdparty\.(?:spend|allTime)/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /limitDetailInfoNode\(detailEntries, 'limit-spend-info-wrap'\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /limitDetailInfoNode\(detailEntries, 'limit-spend-info-wrap'\)/);
   assert.match(presentation, /thirdparty: \['Relay', 'API'\]/);
   assert.match(styles, /^\.row-icon-sub2api/m);
   assert.match(styles, /assets\/icons\/sub2api\.svg/);
@@ -188,7 +188,7 @@ test('third-party Limits presentation uses compact scope labels and a details to
 });
 
 test('third-party money formatting preserves supported custom units', () => {
-  const { formatMoney, formatCompactMoney } = require('../../src/shared/limitBalanceDisplay');
+  const { formatMoney, formatCompactMoney } = require('../../src/shared/limits/balanceDisplay');
   assert.deepEqual([
     formatMoney(12.5, 'USD'),
     formatMoney(12.5, 'USDT'),
@@ -205,7 +205,7 @@ test('third-party money formatting preserves supported custom units', () => {
 });
 
 test('third-party scope labels do not infer adapters from display text', () => {
-  const presentation = read('src/electron/renderer/limitProviderPresentation.js');
+  const presentation = read('src/electron/renderer/limits/providerPresentation.js');
   const source = thirdPartyPresentationSource(presentation);
   const result = vm.runInNewContext(
     `${source}
@@ -234,7 +234,7 @@ function thirdPartyPresentationSource(presentation) {
 }
 
 test('third-party group icon represents a shared adapter family', () => {
-  const presentation = read('src/electron/renderer/limitProviderPresentation.js');
+  const presentation = read('src/electron/renderer/limits/providerPresentation.js');
   const source = thirdPartyPresentationSource(presentation);
   const result = vm.runInNewContext(
     `${source}

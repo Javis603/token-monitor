@@ -9,8 +9,8 @@ const {
   normalizeLimitProviderSelection,
   orderedLimitProviders,
   reorderLimitProvider
-} = require('../../src/electron/renderer/limitProviderOrder');
-const { LIMIT_PROVIDER_CATALOG } = require('../../src/shared/limitProviders');
+} = require('../../src/electron/renderer/limits/providerOrder');
+const { LIMIT_PROVIDER_CATALOG } = require('../../src/shared/limits/providers');
 
 const providers = [
   { id: 'claude', label: 'Claude' },
@@ -120,7 +120,7 @@ test('provider registration and account layout order follows the catalog', () =>
   };
   for (const [file, names, indent] of [
     ['src/electron/renderer/app.js', ['LIMIT_PROVIDER_ACCOUNT_GROUP_IDS', 'LIMIT_PROVIDER_ACCOUNT_STATUS_IDS', 'externalLimitAccountConfig'], '  '],
-    ['src/electron/renderer/limitProviderPresentation.js', ['PROVIDER_SOURCE_LABELS', 'CAPABILITY_TAGS'], '    ']
+    ['src/electron/renderer/limits/providerPresentation.js', ['PROVIDER_SOURCE_LABELS', 'CAPABILITY_TAGS'], '    ']
   ]) {
     const source = read(file);
     for (const name of names) {

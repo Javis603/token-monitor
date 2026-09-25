@@ -23,7 +23,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
+const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
 const { MESSAGES } = require('../../src/electron/renderer/i18n');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
