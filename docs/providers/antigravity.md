@@ -138,7 +138,7 @@ Token/session tracking remains dependent on local source data. OAuth does not ma
 
 | Concern | Primary files |
 | --- | --- |
-| Usage source roots and watch mapping | `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/clientHealth.js`, `src/shared/usage.js` |
+| Usage source roots, health and watch mapping | `src/shared/clientSources.js`, `src/shared/clientSourceObservations.js`, `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/clientHealth.js`, `src/shared/usage.js` |
 | Self-sync and the tokscale sync lock | `src/shared/providers/antigravity/selfSync.js`, `src/shared/selfSyncThrottle.js` |
 | Local RPC and remote quota requests | `src/shared/providers/antigravity/probe.js`, `src/shared/providers/antigravity/oauth.js`, `src/shared/providers/antigravity/limits.js` |
 | Browser OAuth lifecycle | `src/electron/providers/antigravity/oauthLogin.js`, `src/electron/main.js`, `src/electron/preload.js` |
