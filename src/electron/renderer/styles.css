@@ -5529,62 +5529,35 @@ html.is-windows .limit-live-badge {
   .service-status-panel { display: none; }
 }
 
-#claudeManualPanel,
 #opencodeManualPanel,
 #cursorManualPanel,
 #kimiManualPanel,
 #copilotManualPanel,
-.single-credential-manual-panel,
+.credential-manual-panel,
 #mimoManualPanel,
-#zaiManualPanel,
-#zaiteamManualPanel,
-#qoderManualPanel,
-#devinManualPanel,
-#volcengineManualPanel,
-#ollamaManualPanel,
-#traeManualPanel {
+#volcengineManualPanel {
   min-width: 0;
 }
-#claudeManualPanel > .accordion-animation-inner,
 #opencodeManualPanel > .accordion-animation-inner,
 #cursorManualPanel > .accordion-animation-inner,
 #kimiManualPanel > .accordion-animation-inner,
-.single-credential-manual-panel > .accordion-animation-inner,
+.credential-manual-panel > .accordion-animation-inner,
 #mimoManualPanel > .accordion-animation-inner,
-#zaiManualPanel > .accordion-animation-inner,
-#zaiteamManualPanel > .accordion-animation-inner,
-#qoderManualPanel > .accordion-animation-inner,
-#devinManualPanel > .accordion-animation-inner,
-#volcengineManualPanel > .accordion-animation-inner,
-#ollamaManualPanel > .accordion-animation-inner,
-#traeManualPanel > .accordion-animation-inner,
-#alibabaManualPanel > .accordion-animation-inner {
+#volcengineManualPanel > .accordion-animation-inner {
   display: grid;
   min-width: 0;
   gap: 8px;
 }
-#claudeManualPanel textarea,
 #opencodeManualPanel textarea,
 #cursorManualPanel textarea,
 #kimiManualPanel input,
 #kimiManualPanel textarea,
 #copilotManualDetails input,
-.single-credential-manual-panel textarea,
-.single-credential-manual-panel input,
+.credential-input,
 #mimoManualPanel input,
 #mimoManualPanel textarea,
-#zaiManualPanel input,
-#zaiApiRegionInput,
-#zaiteamManualPanel input,
-#qoderManualPanel textarea,
-#qoderManualPanel select,
-#devinManualPanel input,
 #openrouterApiKeyInput,
 #volcengineManualPanel input,
-#ollamaManualPanel textarea,
-#traeManualPanel input,
-#alibabaManualPanel textarea,
-#alibabaManualPanel select,
 #thirdpartyPlatformInput,
 #thirdpartyModeInput,
 #thirdpartyAuthModeInput,
@@ -5601,23 +5574,15 @@ html.is-windows .limit-live-badge {
   width: 100%;
   font-size: 12px;
 }
-#claudeManualPanel textarea,
 #opencodeManualPanel textarea,
 #cursorManualPanel textarea,#kimiManualPanel input,
 #kimiManualPanel textarea,
 #copilotManualDetails input,
-.single-credential-manual-panel textarea,
-.single-credential-manual-panel input,
+.credential-input:not(select),
 #mimoManualPanel input,
 #mimoManualPanel textarea,
-#zaiManualPanel input,
-#zaiteamManualPanel input,
-#qoderManualPanel textarea,
-#devinManualPanel input,
 #openrouterApiKeyInput,
 #volcengineManualPanel input,
-#ollamaManualPanel textarea,
-#traeManualPanel input,
 #thirdpartyBaseUrlInput,
 #thirdpartyAccessTokenInput,
 #thirdpartyUserIdInput,

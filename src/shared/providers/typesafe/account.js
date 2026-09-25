@@ -21,7 +21,6 @@ module.exports = {
     pendingKey: 'typesafePendingCheckSince'
   },
   form: {
-    kind: 'singleCredential',
     field: 'typesafeCookie',
     input: 'textarea',
     titleKey: 'settings.typesafe.title',

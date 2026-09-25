@@ -20,7 +20,6 @@ module.exports = {
     pendingKey: 'minimaxPendingCheckSince'
   },
   form: {
-    kind: 'singleCredential',
     field: 'minimaxApiKey',
     input: 'input',
     titleKey: 'settings.minimax.title',
@@ -31,9 +30,13 @@ module.exports = {
     emptyKey: 'settings.minimax.statusNotSet',
     failedKey: 'settings.minimax.saveFailed',
     noteKey: 'settings.minimax.note',
-    // The CN landing page: the renderer overrides this with the region the last
-    // successful poll resolved to.
-    url: 'https://platform.minimaxi.com/user-center/payment/token-plan'
+    // Follow the region the last successful poll resolved to, so a global
+    // (minimax.io) account lands on its own platform; the CN host until then.
+    openUrl: {
+      byStatus: 'region',
+      urls: { en: 'https://platform.minimax.io/user-center/payment/token-plan' },
+      default: 'https://platform.minimaxi.com/user-center/payment/token-plan'
+    }
   },
   urlPolicy: [
     { hosts: ['platform.minimaxi.com'] },

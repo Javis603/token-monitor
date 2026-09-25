@@ -63,7 +63,6 @@ function iconKindFor(rowData, breakdown) {
 }
 
 const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
-  claude: 'claudeAccountGroup',
   codex: 'codexAccountGroup',
   opencode: 'opencodeCookieGroup',
   cursor: 'cursorAccountGroup',
@@ -71,19 +70,11 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   kimi: 'kimiAccountGroup',
   copilot: 'copilotAccountGroup',
   mimo: 'mimoAccountGroup',
-  zai: 'zaiAccountGroup',
-  zaiteam: 'zaiteamAccountGroup',
-  qoder: 'qoderAccountGroup',
-  devin: 'devinAccountGroup',
   openrouter: 'openrouterAccountGroup',
   volcengine: 'volcengineAccountGroup',
-  ollama: 'ollamaAccountGroup',
-  trae: 'traeAccountGroup',
-  alibaba: 'alibabaAccountGroup',
   thirdparty: 'thirdpartyAccountGroup'
 };
 const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
-  claude: 'claudeAccountStatus',
   codex: 'codexAccountStatus',
   opencode: 'opencodeCookieStatus',
   cursor: 'cursorAccountStatus',
@@ -91,15 +82,8 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   kimi: 'kimiAccountStatus',
   copilot: 'copilotApiTokenStatus',
   mimo: 'mimoAccountStatus',
-  zai: 'zaiAccountStatus',
-  zaiteam: 'zaiteamAccountStatus',
-  qoder: 'qoderAccountStatus',
-  devin: 'devinAccountStatus',
   openrouter: 'openrouterStatus',
   volcengine: 'volcengineAccountStatus',
-  ollama: 'ollamaAccountStatus',
-  trae: 'traeAccountStatus',
-  alibaba: 'alibabaAccountStatus',
   thirdparty: 'thirdpartyStatus'
 };
 const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
@@ -3923,15 +3907,6 @@ function enabledLimitProviderSet() {
 
 function limitProviderEnabled(providerName) {
   return enabledLimitProviderSet().has(providerName);
-}
-
-function limitProviderSelectionIncluding(providerName) {
-  const selected = new Set(configuredLimitProviderSelection());
-  selected.add(providerName);
-  return LIMIT_PROVIDERS
-    .map((provider) => provider.id)
-    .filter((id) => selected.has(id))
-    .join(',');
 }
 
 function missingLimitProviderStatus() {
@@ -8064,19 +8039,11 @@ function syncSettingsForm() {
   els.blurInput.value = String(state.settings.glassBlur ?? 32);
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
   syncSliderRows();
-  renderExternalProviderStatus('claude');
-  renderExternalProviderStatus('zai');
-  renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
-  renderExternalProviderStatus('qoder');
-  renderExternalProviderStatus('devin');
-  renderExternalProviderStatus('trae');
+  renderExternalProviderStatus('kimi');
   for (const form of state.settings?.limitAccountForms || []) {
     if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
   }
-  renderExternalProviderStatus('kimi');
-  renderExternalProviderStatus('ollama');
-  renderExternalProviderStatus('alibaba');
   renderAntigravityStatus();
   renderMimoStatus();
   renderCopilotStatus();
@@ -10219,34 +10186,33 @@ function moveOpenCodeLocalFallbackSetting() {
   }
 }
 
-// Every account form saves through limits:saveCredential, which probes the
-// credential in main and stores it unless the provider rejected it. The panel
-// only turns the verdict into its message line and the pending pill.
-async function saveAccountFormCredential({ id, field, emptyKey, failedKey, validation }, value, clearInput) {
+// Every account form saves through limits:saveCredential, which checks the
+// draft, probes it in main and stores it unless the provider rejected it. The
+// panel only turns the answer into its message line and the pending pill;
+// generated and hand-built panels share this, including which messages they
+// may override (`messages.required` / `rejected` / `invalidFormat`).
+async function saveAccountCredential(id, values, { messages = {}, failedKey, clearInput = () => {} } = {}) {
   const provider = LIMIT_PROVIDERS.find((entry) => entry.id === id);
   const name = provider?.settingsLabel || provider?.label || id;
-  if (!String(value || '').trim()) {
-    setAccountPanelMessage(id, { key: 'settings.common.credentialRequired' });
-    renderExternalProviderStatus(id);
-    return;
-  }
   setAccountPanelMessage(id, null);
   renderExternalProviderStatus(id);
   let result;
   try {
-    result = await commitAccountCredential(() => window.tokenMonitor.limits.saveCredential(id, { [field]: value }));
+    result = await commitAccountCredential(() => window.tokenMonitor.limits.saveCredential(id, values));
   } catch (error) {
-    setAccountPanelMessage(id, { key: failedKey || emptyKey, params: { message: error.message } });
+    setAccountPanelMessage(id, { key: failedKey, params: { message: error.message } });
     renderExternalProviderStatus(id);
-    return;
+    return result;
   }
-  if (result?.verdict === 'superseded') return;
+  if (result?.verdict === 'superseded') return result;
   if (!result?.saved) {
-    setAccountPanelMessage(id, result?.status === 'invalidFormat'
-      ? { key: 'settings.common.credentialInvalidFormat' }
-      : { key: validation?.invalidKey || 'settings.common.credentialRejected', params: { provider: name } });
+    const rejection = {
+      required: { key: messages.required || 'settings.common.credentialRequired' },
+      invalidFormat: { key: messages.invalidFormat || 'settings.common.credentialInvalidFormat' }
+    }[result?.status] || { key: messages.rejected || 'settings.common.credentialRejected', params: { provider: name } };
+    setAccountPanelMessage(id, rejection);
     renderExternalProviderStatus(id);
-    return;
+    return result;
   }
   clearInput();
   // Marked only once the credential is stored: marking drops the provider's
@@ -10265,6 +10231,31 @@ async function saveAccountFormCredential({ id, field, emptyKey, failedKey, valid
   await refreshStats({ force: true });
   setExternalAccountExpanded(id, !externalProviderAccountLinked(id));
   renderExternalProviderStatus(id);
+  return result;
+}
+
+// The busy guard generated panels get from their factory, for a hand-built
+// panel's own submit button.
+async function submitAccountCredential(button, id, values, options) {
+  if (button.disabled) return undefined;
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = t('settings.common.checking');
+  try {
+    return await saveAccountCredential(id, values, options);
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+async function clearAccountCredential(id) {
+  setAccountPanelMessage(id, null);
+  await commitAccountCredential(() => window.tokenMonitor.limits.clearCredential(id));
+  clearExternalProviderCheckPending(id);
+  clearExternalProviderPendingStatus(id);
+  renderExternalProviderStatus(id);
+  await refreshStats({ force: true });
 }
 
 async function commitAccountCredential(request) {
@@ -10278,30 +10269,38 @@ function limitAccountForm(providerId) {
   return state.settings?.limitAccountForms?.find((form) => form.id === providerId);
 }
 
+// A select beside a credential (region, site, console) saves as soon as it
+// changes. `clears` names what the change invalidates: an Alibaba cookie
+// belongs to the console it was copied from and cannot authenticate the other
+// one, so switching drops it instead of leaving a key that can only fail.
+async function saveAccountFormSetting({ id }, field, value) {
+  if (!field.saveOnChange) return;
+  const cleared = Object.fromEntries((field.clears || []).map((key) => [key, '']));
+  await saveSettings({ [field.key]: value, ...cleared });
+  if (!field.clears?.length) return;
+  clearExternalProviderCheckPending(id);
+  clearExternalProviderPendingStatus(id);
+  renderExternalProviderStatus(id);
+  await refreshStats({ force: true });
+}
+
 function setupLimitAccountPanels() {
   const container = document.getElementById('accountsSettingsDetails');
   let added = false;
   for (const form of state.settings?.limitAccountForms || []) {
-    if (form.kind !== 'singleCredential' || document.getElementById(`${form.id}AccountGroup`)) continue;
-    const panel = limitAccountPanelsApi.createSingleCredentialPanel(form, {
+    if (form.kind !== 'credential' || document.getElementById(`${form.id}AccountGroup`)) continue;
+    const panel = limitAccountPanelsApi.createCredentialPanel(form, {
       document,
       translate: t,
       onToggle: ({ id }) => setExternalAccountExpanded(id, !state[`${id}AccountExpanded`]),
-      // A provider with regional hosts resolves the landing page at click time
-      // from its last poll; everyone else opens the form's allowlisted URL.
-      onOpen: (form) => window.tokenMonitor.openExternal(
-        form.id === 'minimax' ? minimaxPlatformUrl() : form.url
-      ),
+      onOpen: (form) => window.tokenMonitor.openExternal(limitAccountPanelsApi.resolveOpenUrl(form, {
+        document,
+        provider: externalProviderForAccount(form.id)
+      })),
       onRefresh: () => refreshStats({ force: true }),
-      onClear: async ({ id }) => {
-        setAccountPanelMessage(id, null);
-        await commitAccountCredential(() => window.tokenMonitor.limits.clearCredential(id));
-        clearExternalProviderCheckPending(id);
-        clearExternalProviderPendingStatus(id);
-        renderExternalProviderStatus(id);
-        await refreshStats({ force: true });
-      },
-      onSave: (form, value, clearInput) => saveAccountFormCredential(form, value, clearInput)
+      onClear: ({ id }) => clearAccountCredential(id),
+      onSave: ({ id, messages, failedKey }, values, clearInput) => saveAccountCredential(id, values, { messages, failedKey, clearInput }),
+      onFieldChange: (form, field, value) => saveAccountFormSetting(form, field, value)
     });
     const catalogIndex = LIMIT_PROVIDERS.findIndex((provider) => provider.id === form.id);
     const nextGroup = LIMIT_PROVIDERS.slice(catalogIndex + 1)
@@ -10310,6 +10309,7 @@ function setupLimitAccountPanels() {
     container.insertBefore(panel, nextGroup || null);
     added = true;
     setExternalAccountExpanded(form.id, false);
+    limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
     renderExternalProviderStatus(form.id);
   }
   if (added) initSettingsAnimationWrappers();
@@ -11852,19 +11852,11 @@ function renderStatsUpdate() {
   renderWslPanel();
   updateOpenRouterProfilesStatus();
   updateThirdPartyProfilesStatus();
-  renderExternalProviderStatus('claude');
-  renderExternalProviderStatus('zai');
-  renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
-  renderExternalProviderStatus('qoder');
-  renderExternalProviderStatus('devin');
-  renderExternalProviderStatus('trae');
+  renderExternalProviderStatus('kimi');
   for (const form of state.settings?.limitAccountForms || []) {
     if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
   }
-  renderExternalProviderStatus('kimi');
-  renderExternalProviderStatus('ollama');
-  renderExternalProviderStatus('alibaba');
   renderCopilotStatus();
   signalContentReady();
 }
@@ -13735,55 +13727,15 @@ function clearCopilotProviderStatus() {
 }
 
 const externalLimitAccountConfig = {
-  claude: {
-    configuredKey: 'claudeWebCookieConfigured',
-    sourceKey: 'claudeWebCookieSource',
-    pendingKey: 'claudePendingCheckSince'
-  },
   kimi: {
     configuredKey: 'kimiCredentialConfigured',
     sourceKey: 'kimiCredentialSource',
     pendingKey: 'kimiPendingCheckSince'
   },
-  zai: {
-    configuredKey: 'zaiApiKeyConfigured',
-    sourceKey: 'zaiApiKeySource',
-    pendingKey: 'zaiPendingCheckSince'
-  },
-  zaiteam: {
-    configuredKey: 'zaiTeamApiKeyConfigured',
-    sourceKey: 'zaiTeamApiKeySource',
-    pendingKey: 'zaiteamPendingCheckSince'
-  },
-  qoder: {
-    configuredKey: 'qoderCookieConfigured',
-    sourceKey: 'qoderCookieSource',
-    pendingKey: 'qoderPendingCheckSince'
-  },
-  devin: {
-    configuredKey: 'devinBearerTokenConfigured',
-    sourceKey: 'devinBearerTokenSource',
-    pendingKey: 'devinPendingCheckSince'
-  },
   volcengine: {
     configuredKey: 'volcengineCredentialsConfigured',
     sourceKey: 'volcengineCredentialsSource',
     pendingKey: 'volcenginePendingCheckSince'
-  },
-  ollama: {
-    configuredKey: 'ollamaCookieConfigured',
-    sourceKey: 'ollamaCookieSource',
-    pendingKey: 'ollamaPendingCheckSince'
-  },
-  trae: {
-    configuredKey: 'traeAccessTokenConfigured',
-    sourceKey: 'traeAccessTokenSource',
-    pendingKey: 'traePendingCheckSince'
-  },
-  alibaba: {
-    configuredKey: 'alibabaCookieConfigured',
-    sourceKey: 'alibabaCookieSource',
-    pendingKey: 'alibabaPendingCheckSince'
   }
 };
 
@@ -13909,17 +13861,6 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
   return t(statusKeys[accountStatus] || 'settings.common.error');
 }
 
-// Follow the region we last successfully polled so a global (minimax.io)
-// account lands on platform.minimax.io, not the CN landing page. Fall back
-// to the CN host until we've seen a successful poll.
-function minimaxPlatformUrl() {
-  const provider = externalProviderForAccount('minimax');
-  const region = provider && provider.region === 'en' ? 'en' : 'cn';
-  return region === 'en'
-    ? 'https://platform.minimax.io/user-center/payment/token-plan'
-    : 'https://platform.minimaxi.com/user-center/payment/token-plan';
-}
-
 function setExternalAccountExpanded(providerName, expanded) {
   const details = document.getElementById(`${providerName}SettingsDetails`);
   const toggle = document.getElementById(`${providerName}SettingsToggle`);
@@ -13932,114 +13873,12 @@ function setExternalAccountExpanded(providerName, expanded) {
   syncLimitProviderAccountExpansion(providerName, next);
 }
 
-function zaiPlatformUrl() {
-  const selectedRegion = document.getElementById('zaiApiRegionInput')?.value;
-  const region = selectedRegion || (state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global');
-  return region === 'bigmodel-cn'
-    ? 'https://bigmodel.cn/coding-plan/personal/usage'
-    : 'https://z.ai/manage-apikey/coding-plan/personal/my-plan';
-}
-
-function zaiteamPlatformUrl() {
-  return 'https://bigmodel.cn/coding-plan/team/usage-stats';
-}
-
 function volcenginePlatformUrl() {
   return 'https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe';
 }
 
-function claudePlatformUrl() {
-  return 'https://claude.ai/settings/usage';
-}
-
-function selectedQoderSite() {
-  const selectedSite = document.getElementById('qoderSiteInput')?.value;
-  return selectedSite || (state.settings?.qoderSite === 'cn' ? 'cn' : 'global');
-}
-
-function qoderUsagePagePath() {
-  return selectedQoderSite() === 'cn' ? 'qoder.com.cn/account/usage' : 'qoder.com/account/usage';
-}
-
-function qoderPlatformUrl() {
-  return `https://${qoderUsagePagePath()}`;
-}
-
-function devinPlatformUrl() {
-  return 'https://app.devin.ai/settings/usage';
-}
-
-function updateQoderUsagePageHint() {
-  const hint = document.getElementById('qoderUsagePageHint');
-  if (hint) hint.textContent = qoderUsagePagePath();
-}
-
 function kimiPlatformUrl() {
   return 'https://www.kimi.com/code/console';
-}
-
-function ollamaPlatformUrl() {
-  return 'https://ollama.com/settings';
-}
-
-const ALIBABA_DASHBOARD_URLS = {
-  cn: 'https://bailian.console.aliyun.com/cn-beijing?tab=plan#/efm/subscription/token-plan',
-  intl: 'https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=plan#/efm/subscription/token-plan',
-  'cn-personal': 'https://bailian.console.aliyun.com/cn-beijing?tab=plan#/efm/subscription/token-plan/personal',
-  'intl-personal': 'https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=plan#/efm/subscription/token-plan/personal'
-};
-
-// Mirrors normalizeAlibabaCookieHeader's preprocessing in the main process:
-// surrounding quotes and a `Cookie:` prefix come off before the pair check, so
-// the two sides accept and reject exactly the same inputs.
-function alibabaCookieCandidate(value) {
-  let raw = String(value || '').trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw.replace(/^cookie\s*:\s*/i, '').trim();
-}
-
-function alibabaVariantOr(value) {
-  return ALIBABA_DASHBOARD_URLS[value] ? value : 'cn';
-}
-
-// What the user is looking at right now: the live select wins so the "Open
-// Token Plan" button and the request hint follow the dropdown before the
-// change has been saved.
-function alibabaSelectedVariant() {
-  const selected = document.getElementById('alibabaVariantInput')?.value;
-  return alibabaVariantOr(selected || state.settings?.alibabaVariant);
-}
-
-// What is stored. Used when re-rendering the form, so a settings reload can put
-// the select back rather than reading its own value and never changing.
-function alibabaSavedVariant() {
-  return alibabaVariantOr(state.settings?.alibabaVariant);
-}
-
-function alibabaPlatformUrl() {
-  return ALIBABA_DASHBOARD_URLS[alibabaSelectedVariant()];
-}
-
-// Personal/Solo quota comes from a different host than the dashboard, so the
-// cookie has to be copied from that request. Naming the right request is the
-// difference between a working paste and an `unauthorized` the user cannot
-// explain.
-function renderAlibabaVariantHints() {
-  const variant = alibabaSelectedVariant();
-  const personal = variant.endsWith('-personal');
-  const hint = document.getElementById('alibabaRequestHint');
-  if (hint) hint.textContent = personal ? '/tokenplan/personal/api/v2/usage' : 'GetSubscriptionSummary';
-  document.getElementById('alibabaPersonalNote')?.classList.toggle('hidden', !personal);
-}
-
-function ollamaValidationError(provider) {
-  if (provider?.status === 'unauthorized') return t('settings.ollama.validationInvalid');
-  if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
-    return t('settings.ollama.validationRateLimited');
-  }
-  return t('settings.ollama.validationUnavailable');
 }
 
 function renderExternalProviderStatus(providerName) {
@@ -14070,30 +13909,12 @@ function renderExternalProviderStatus(providerName) {
   const enabled = limitProviderEnabled(providerName);
   const pending = enabled && Number(state[config.pendingKey] || 0) > 0;
   const linked = externalProviderAccountLinked(providerName);
-  if (providerName === 'ollama' && wasPending && !pending && linked) {
-    setExternalAccountExpanded('ollama', false);
-  }
-  if (providerName === 'zai') {
-    const regionInput = document.getElementById('zaiApiRegionInput');
-    if (regionInput) regionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
-  }
+  // A pending check that comes back linked folds the panel: the refresh that
+  // followed the save may have returned before the new record did.
+  if (wasPending && !pending && linked) setExternalAccountExpanded(providerName, false);
+  const form = limitAccountForm(providerName);
+  if (form) limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
   if (providerName === 'volcengine') renderVolcengineAgentOverrideState();
-  if (providerName === 'qoder') {
-    const siteInput = document.getElementById('qoderSiteInput');
-    if (siteInput) siteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
-    updateQoderUsagePageHint();
-  }
-  if (providerName === 'devin') {
-    const organizationInput = document.getElementById('devinOrganizationInput');
-    if (organizationInput && !organizationInput.value) {
-      organizationInput.value = state.settings?.devinOrganization || '';
-    }
-  }
-  if (providerName === 'alibaba') {
-    const variantInput = document.getElementById('alibabaVariantInput');
-    if (variantInput) variantInput.value = alibabaSavedVariant();
-    renderAlibabaVariantHints();
-  }
   setCursorStatusText(
     statusEl,
     pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
@@ -15889,111 +15710,6 @@ function setupCursorAccountUI() {
     });
   }
 
-  const zaiToggle = document.getElementById('zaiSettingsToggle');
-  if (zaiToggle) {
-    const zaiApiRegionInput = document.getElementById('zaiApiRegionInput');
-    if (zaiApiRegionInput) zaiApiRegionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
-    zaiApiRegionInput?.addEventListener('change', () => void saveSettings({ zaiApiRegion: zaiApiRegionInput.value || 'global' }));
-    zaiToggle.addEventListener('click', () => setExternalAccountExpanded('zai', !state.zaiAccountExpanded));
-    setExternalAccountExpanded('zai', false);
-    renderExternalProviderStatus('zai');
-
-    document.getElementById('zaiOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(zaiPlatformUrl());
-    });
-
-    document.getElementById('zaiLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ zaiApiKey: '' });
-      clearExternalProviderCheckPending('zai');
-      clearExternalProviderPendingStatus('zai');
-      renderExternalProviderStatus('zai');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('zaiApiKeyInput');
-      const regionInput = document.getElementById('zaiApiRegionInput');
-      const errorEl = document.getElementById('zaiErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.zai.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('zai');
-        await saveSettings({ zaiApiKey: input.value, zaiApiRegion: regionInput?.value || 'global' });
-        input.value = '';
-        renderExternalProviderStatus('zai');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('zai', !externalProviderAccountLinked('zai'));
-        renderExternalProviderStatus('zai');
-      } catch (err) {
-        clearExternalProviderCheckPending('zai');
-        errorEl.textContent = t('settings.zai.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const zaiteamToggle = document.getElementById('zaiteamSettingsToggle');
-  if (zaiteamToggle) {
-    zaiteamToggle.addEventListener('click', () => setExternalAccountExpanded('zaiteam', !state.zaiteamAccountExpanded));
-    setExternalAccountExpanded('zaiteam', false);
-    renderExternalProviderStatus('zaiteam');
-
-    document.getElementById('zaiteamOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(zaiteamPlatformUrl());
-    });
-
-    document.getElementById('zaiteamLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ zaiTeamApiKey: '', zaiTeamOrganizationId: '', zaiTeamProjectId: '' });
-      clearExternalProviderCheckPending('zaiteam');
-      clearExternalProviderPendingStatus('zaiteam');
-      renderExternalProviderStatus('zaiteam');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiteamRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiteamApiKeySubmit').addEventListener('click', async () => {
-      const keyInput = document.getElementById('zaiteamApiKeyInput');
-      const orgInput = document.getElementById('zaiteamOrganizationIdInput');
-      const projectInput = document.getElementById('zaiteamProjectIdInput');
-      const errorEl = document.getElementById('zaiteamErrorMessage');
-      errorEl.classList.add('hidden');
-      const apiKey = String(keyInput.value || '').trim();
-      const organizationId = String(orgInput.value || '').trim();
-      const projectId = String(projectInput.value || '').trim();
-      if (!apiKey || !organizationId || !projectId) {
-        errorEl.textContent = t('settings.zaiteam.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('zaiteam');
-        await saveSettings({ zaiTeamApiKey: apiKey, zaiTeamOrganizationId: organizationId, zaiTeamProjectId: projectId });
-        keyInput.value = '';
-        orgInput.value = '';
-        projectInput.value = '';
-        renderExternalProviderStatus('zaiteam');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('zaiteam', !externalProviderAccountLinked('zaiteam'));
-        renderExternalProviderStatus('zaiteam');
-      } catch (err) {
-        clearExternalProviderCheckPending('zaiteam');
-        errorEl.textContent = t('settings.zaiteam.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
   const volcengineToggle = document.getElementById('volcengineSettingsToggle');
   if (volcengineToggle) {
     volcengineToggle.addEventListener('click', () => setExternalAccountExpanded('volcengine', !state.volcengineAccountExpanded));
@@ -16017,446 +15733,52 @@ function setupCursorAccountUI() {
       await refreshStats({ force: true });
     });
 
-    document.getElementById('volcengineLogoutButton').addEventListener('click', async () => {
-      await saveSettings({
-        volcengineAccessKeyId: '', volcengineSecretAccessKey: '', volcengineRegion: '',
-        volcengineAgentAccessKeyId: '', volcengineAgentSecretAccessKey: '', volcengineAgentRegion: ''
-      });
-      clearExternalProviderCheckPending('volcengine');
-      clearExternalProviderPendingStatus('volcengine');
-      renderExternalProviderStatus('volcengine');
-      await refreshStats({ force: true });
-    });
+    document.getElementById('volcengineLogoutButton').addEventListener('click', () => clearAccountCredential('volcengine'));
 
     document.getElementById('volcengineRefreshButton').addEventListener('click', async () => {
       await refreshStats({ force: true });
     });
 
-    document.getElementById('volcengineCredentialsSubmit').addEventListener('click', async () => {
+    document.getElementById('volcengineCredentialsSubmit').addEventListener('click', async (event) => {
       const accessKeyInput = document.getElementById('volcengineAccessKeyInput');
       const secretInput = document.getElementById('volcengineSecretAccessKeyInput');
       const regionInput = document.getElementById('volcengineRegionInput');
       const agentAccessKeyInput = document.getElementById('volcengineAgentAccessKeyInput');
       const agentSecretInput = document.getElementById('volcengineAgentSecretAccessKeyInput');
       const agentRegionInput = document.getElementById('volcengineAgentRegionInput');
-      const errorEl = document.getElementById('volcengineErrorMessage');
-      errorEl.classList.add('hidden');
       const accessKeyValue = String(accessKeyInput.value || '').trim();
       const secretValue = String(secretInput.value || '').trim();
-      if (!accessKeyValue || (/^AKLT/i.test(accessKeyValue) && !secretValue)) {
-        errorEl.textContent = t('settings.volcengine.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      // Only sent when the user actually filled the override in, so saving the
-      // Coding Plan key again cannot silently wipe a separate Agent account.
+      // Checks only this panel can make: which fields pair with which.
       const agentAccessKeyValue = String(agentAccessKeyInput?.value || '').trim();
       const agentSecretValue = String(agentSecretInput?.value || '').trim();
-      if (agentAccessKeyValue && !agentSecretValue) {
-        errorEl.textContent = t('settings.volcengine.agentSecretRequired');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('volcengine');
-        await saveSettings({
-          volcengineAccessKeyId: accessKeyInput.value,
-          volcengineSecretAccessKey: secretInput.value,
-          volcengineRegion: regionInput.value || 'cn-beijing',
-          ...(agentAccessKeyValue ? {
-            volcengineAgentAccessKeyId: agentAccessKeyValue,
-            volcengineAgentSecretAccessKey: agentSecretValue,
-            volcengineAgentRegion: agentRegionInput?.value || 'cn-beijing'
-          } : {})
-        });
-        accessKeyInput.value = '';
-        secretInput.value = '';
-        if (agentAccessKeyInput) agentAccessKeyInput.value = '';
-        if (agentSecretInput) agentSecretInput.value = '';
+      const pairing = accessKeyValue && /^AKLT/i.test(accessKeyValue) && !secretValue
+        ? 'settings.volcengine.secretRequired'
+        : agentAccessKeyValue && !agentSecretValue ? 'settings.volcengine.agentSecretRequired' : '';
+      if (pairing) {
+        setAccountPanelMessage('volcengine', { key: pairing });
         renderExternalProviderStatus('volcengine');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('volcengine', !externalProviderAccountLinked('volcengine'));
-        renderExternalProviderStatus('volcengine');
-      } catch (err) {
-        clearExternalProviderCheckPending('volcengine');
-        errorEl.textContent = t('settings.volcengine.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const claudeToggle = document.getElementById('claudeSettingsToggle');
-  if (claudeToggle) {
-    claudeToggle.addEventListener('click', () => setExternalAccountExpanded('claude', !state.claudeAccountExpanded));
-    setExternalAccountExpanded('claude', false);
-    renderExternalProviderStatus('claude');
-
-    document.getElementById('claudeOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(claudePlatformUrl());
-    });
-
-    document.getElementById('claudeLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ claudeWebCookie: '' });
-      clearExternalProviderCheckPending('claude');
-      clearExternalProviderPendingStatus('claude');
-      renderExternalProviderStatus('claude');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('claudeRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('claudeWebCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('claudeWebCookieInput');
-      const submitButton = document.getElementById('claudeWebCookieSubmit');
-      const errorEl = document.getElementById('claudeErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.claude.cookieRequired');
-        errorEl.classList.remove('hidden');
         return;
       }
-      if (/[\r\n]/.test(input.value)) {
-        errorEl.textContent = t('settings.claude.cookieInvalidFormat');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      if (submitButton.disabled) return;
-      submitButton.disabled = true;
-      submitButton.textContent = t('settings.common.checking');
-      try {
-        const result = await window.tokenMonitor.claude.saveCookie(input.value);
-        if (result?.superseded) return;
-        if (!result?.ok) {
-          if (result?.errorCode === 'INVALID_CLAUDE_WEB_SESSION_KEY') {
-            errorEl.textContent = t('settings.claude.cookieInvalidFormat');
-          } else if (result?.errorCode === 'CLAUDE_WEB_SOURCE_CHALLENGE') {
-            errorEl.textContent = t('settings.claude.sourceChallenge');
-          } else if (result?.status === 'unauthorized') {
-            errorEl.textContent = t('settings.claude.cookieRejected');
-          } else {
-            errorEl.textContent = t('settings.claude.cookieCheckFailed');
-          }
-          errorEl.classList.remove('hidden');
-          return;
+      await submitAccountCredential(event.currentTarget, 'volcengine', {
+        volcengineAccessKeyId: accessKeyInput.value,
+        volcengineSecretAccessKey: secretInput.value,
+        volcengineRegion: regionInput.value || 'cn-beijing',
+        // Only sent when the user actually filled the override in, so saving the
+        // Coding Plan key again cannot silently wipe a separate Agent account.
+        ...(agentAccessKeyValue ? {
+          volcengineAgentAccessKeyId: agentAccessKeyValue,
+          volcengineAgentSecretAccessKey: agentSecretValue,
+          volcengineAgentRegion: agentRegionInput?.value || 'cn-beijing'
+        } : {})
+      }, {
+        failedKey: 'settings.volcengine.saveFailed',
+        clearInput: () => {
+          accessKeyInput.value = '';
+          secretInput.value = '';
+          if (agentAccessKeyInput) agentAccessKeyInput.value = '';
+          if (agentSecretInput) agentSecretInput.value = '';
         }
-        markExternalProviderCheckPending('claude');
-        await saveSettings({
-          limitProviders: limitProviderSelectionIncluding('claude'),
-          limitsEnabled: true
-        });
-        input.value = '';
-        renderExternalProviderStatus('claude');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('claude', !externalProviderAccountLinked('claude'));
-        renderExternalProviderStatus('claude');
-      } catch (err) {
-        clearExternalProviderCheckPending('claude');
-        errorEl.textContent = t('settings.claude.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      } finally {
-        submitButton.disabled = false;
-        submitButton.textContent = t('settings.claude.saveCookie');
-      }
-    });
-  }
-
-  const qoderToggle = document.getElementById('qoderSettingsToggle');
-  if (qoderToggle) {
-    qoderToggle.addEventListener('click', () => setExternalAccountExpanded('qoder', !state.qoderAccountExpanded));
-    setExternalAccountExpanded('qoder', false);
-    renderExternalProviderStatus('qoder');
-
-    const qoderSiteInput = document.getElementById('qoderSiteInput');
-    if (qoderSiteInput) qoderSiteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
-    updateQoderUsagePageHint();
-    qoderSiteInput?.addEventListener('change', () => {
-      updateQoderUsagePageHint();
-      void saveSettings({ qoderSite: qoderSiteInput.value || 'global' });
-    });
-
-    document.getElementById('qoderOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(qoderPlatformUrl());
-    });
-
-    document.getElementById('qoderLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ qoderCookie: '' });
-      clearExternalProviderCheckPending('qoder');
-      clearExternalProviderPendingStatus('qoder');
-      renderExternalProviderStatus('qoder');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('qoderRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('qoderCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('qoderCookieInput');
-      const siteInput = document.getElementById('qoderSiteInput');
-      const errorEl = document.getElementById('qoderErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.qoder.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('qoder');
-        await saveSettings({ qoderCookie: input.value, qoderSite: siteInput?.value || 'global' });
-        input.value = '';
-        renderExternalProviderStatus('qoder');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('qoder', !externalProviderAccountLinked('qoder'));
-        renderExternalProviderStatus('qoder');
-      } catch (err) {
-        clearExternalProviderCheckPending('qoder');
-        errorEl.textContent = t('settings.qoder.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const devinToggle = document.getElementById('devinSettingsToggle');
-  if (devinToggle) {
-    devinToggle.addEventListener('click', () => setExternalAccountExpanded('devin', !state.devinAccountExpanded));
-    setExternalAccountExpanded('devin', false);
-    renderExternalProviderStatus('devin');
-
-    document.getElementById('devinOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(devinPlatformUrl());
-    });
-
-    document.getElementById('devinLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ devinBearerToken: '', devinOrganization: '' });
-      clearExternalProviderCheckPending('devin');
-      clearExternalProviderPendingStatus('devin');
-      renderExternalProviderStatus('devin');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('devinRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('devinCredentialSubmit').addEventListener('click', async () => {
-      const tokenInput = document.getElementById('devinBearerTokenInput');
-      const organizationInput = document.getElementById('devinOrganizationInput');
-      const errorEl = document.getElementById('devinErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(tokenInput.value || '').trim() || !String(organizationInput.value || '').trim()) {
-        errorEl.textContent = t('settings.devin.credentialsRequired');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('devin');
-        await saveSettings({
-          devinBearerToken: tokenInput.value,
-          devinOrganization: organizationInput.value,
-          limitProviders: limitProviderSelectionIncluding('devin'),
-          limitsEnabled: true
-        });
-        tokenInput.value = '';
-        organizationInput.value = '';
-        renderExternalProviderStatus('devin');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('devin', !externalProviderAccountLinked('devin'));
-        renderExternalProviderStatus('devin');
-      } catch (err) {
-        clearExternalProviderCheckPending('devin');
-        errorEl.textContent = t('settings.devin.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const traeToggle = document.getElementById('traeSettingsToggle');
-  if (traeToggle) {
-    traeToggle.addEventListener('click', () => setExternalAccountExpanded('trae', !state.traeAccountExpanded));
-    setExternalAccountExpanded('trae', false);
-    renderExternalProviderStatus('trae');
-
-    document.getElementById('traeOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://www.trae.cn');
-    });
-    document.getElementById('traeLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ traeAccessToken: '', traeDeviceId: '' });
-      clearExternalProviderCheckPending('trae');
-      clearExternalProviderPendingStatus('trae');
-      renderExternalProviderStatus('trae');
-      await refreshStats({ force: true });
-    });
-    document.getElementById('traeRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-    document.getElementById('traeTokenSubmit').addEventListener('click', async () => {
-      const tokenInput = document.getElementById('traeTokenInput');
-      const deviceIdInput = document.getElementById('traeDeviceIdInput');
-      const errorEl = document.getElementById('traeErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(tokenInput.value || '').trim()) {
-        errorEl.textContent = t('settings.trae.missingAuthorization');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('trae');
-        await saveSettings({
-          traeAccessToken: tokenInput.value,
-          traeDeviceId: deviceIdInput.value,
-          limitProviders: limitProviderSelectionIncluding('trae'),
-          limitsEnabled: true
-        });
-        tokenInput.value = '';
-        deviceIdInput.value = '';
-        renderExternalProviderStatus('trae');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('trae', !externalProviderAccountLinked('trae'));
-        renderExternalProviderStatus('trae');
-      } catch (err) {
-        clearExternalProviderCheckPending('trae');
-        errorEl.textContent = t('settings.trae.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-
-  const alibabaToggle = document.getElementById('alibabaSettingsToggle');
-  if (alibabaToggle) {
-    alibabaToggle.addEventListener('click', () => setExternalAccountExpanded('alibaba', !state.alibabaAccountExpanded));
-    setExternalAccountExpanded('alibaba', false);
-    renderExternalProviderStatus('alibaba');
-
-    const variantInput = document.getElementById('alibabaVariantInput');
-    if (variantInput) {
-      variantInput.value = alibabaSavedVariant();
-      variantInput.addEventListener('change', async () => {
-        renderAlibabaVariantHints();
-        // Switching console switches account: the stored cookie belongs to the
-        // console it was copied from and cannot authenticate the other one.
-        // Clearing it here is honest about that instead of leaving a saved
-        // credential that will only ever answer `unauthorized`.
-        await saveSettings({ alibabaVariant: variantInput.value || 'cn', alibabaCookie: '' });
-        clearExternalProviderCheckPending('alibaba');
-        clearExternalProviderPendingStatus('alibaba');
-        renderExternalProviderStatus('alibaba');
-        await refreshStats({ force: true });
       });
-    }
-    renderAlibabaVariantHints();
-
-    document.getElementById('alibabaOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(alibabaPlatformUrl());
-    });
-    document.getElementById('alibabaLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ alibabaCookie: '' });
-      clearExternalProviderCheckPending('alibaba');
-      clearExternalProviderPendingStatus('alibaba');
-      renderExternalProviderStatus('alibaba');
-      await refreshStats({ force: true });
-    });
-    document.getElementById('alibabaRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-    document.getElementById('alibabaCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('alibabaCookieInput');
-      const errorEl = document.getElementById('alibabaErrorMessage');
-      errorEl.classList.add('hidden');
-      // The main process rejects a header with no name=value pair, so catching
-      // it here keeps a mis-paste from being reported back as "saved" while the
-      // stored value is silently empty.
-      // Same anchored rule as normalizeAlibabaCookieHeader in the main process.
-      // A looser test here lets a pasted URL pass, save as empty, and surface as
-      // "Not configured" instead of telling the user the paste was wrong.
-      if (!/(?:^|;\s*)[A-Za-z0-9!#$%&'*+\-.^_`|~]+=/.test(alibabaCookieCandidate(input.value))) {
-        errorEl.textContent = t('settings.alibaba.invalidCookie');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('alibaba');
-        renderExternalProviderStatus('alibaba');
-        await saveSettings({
-          alibabaCookie: input.value,
-          alibabaVariant: alibabaSelectedVariant(),
-          limitProviders: limitProviderSelectionIncluding('alibaba'),
-          limitsEnabled: true
-        });
-        input.value = '';
-        renderExternalProviderStatus('alibaba');
-        await refreshStats({ force: true });
-        renderExternalProviderStatus('alibaba');
-      } catch (err) {
-        clearExternalProviderCheckPending('alibaba');
-        renderExternalProviderStatus('alibaba');
-        errorEl.textContent = t('settings.alibaba.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const ollamaToggle = document.getElementById('ollamaSettingsToggle');
-  if (ollamaToggle) {
-    ollamaToggle.addEventListener('click', () => setExternalAccountExpanded('ollama', !state.ollamaAccountExpanded));
-    setExternalAccountExpanded('ollama', false);
-    renderExternalProviderStatus('ollama');
-
-    document.getElementById('ollamaOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(ollamaPlatformUrl());
-    });
-    document.getElementById('ollamaLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ ollamaCookie: '' });
-      clearExternalProviderCheckPending('ollama');
-      clearExternalProviderPendingStatus('ollama');
-      renderExternalProviderStatus('ollama');
-      await refreshStats({ force: true });
-    });
-    document.getElementById('ollamaRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-    document.getElementById('ollamaCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('ollamaCookieInput');
-      const errorEl = document.getElementById('ollamaErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.ollama.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('ollama');
-        renderExternalProviderStatus('ollama');
-        const validation = await window.tokenMonitor.ollama.validateCookie(input.value);
-        if (!validation?.ok) {
-          clearExternalProviderCheckPending('ollama');
-          renderExternalProviderStatus('ollama');
-          errorEl.textContent = ollamaValidationError(validation);
-          errorEl.classList.remove('hidden');
-          return;
-        }
-        await saveSettings({
-          ollamaCookie: input.value,
-          limitProviders: limitProviderSelectionIncluding('ollama'),
-          limitsEnabled: true
-        });
-        if (!state.settings?.ollamaCookieConfigured) {
-          clearExternalProviderCheckPending('ollama');
-          renderExternalProviderStatus('ollama');
-          errorEl.textContent = t('settings.ollama.validationInvalid');
-          errorEl.classList.remove('hidden');
-          return;
-        }
-        input.value = '';
-        renderExternalProviderStatus('ollama');
-      } catch (err) {
-        clearExternalProviderCheckPending('ollama');
-        renderExternalProviderStatus('ollama');
-        errorEl.textContent = t('settings.ollama.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
     });
   }
 
@@ -16470,65 +15792,26 @@ function setupCursorAccountUI() {
       window.tokenMonitor.openExternal(kimiPlatformUrl());
     });
 
-    document.getElementById('kimiLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ kimiApiKey: '', kimiWebAccessToken: '' });
-      clearExternalProviderCheckPending('kimi');
-      clearExternalProviderPendingStatus('kimi');
-      renderExternalProviderStatus('kimi');
-      await refreshStats({ force: true });
-    });
+    document.getElementById('kimiLogoutButton').addEventListener('click', () => clearAccountCredential('kimi'));
 
     document.getElementById('kimiRefreshButton').addEventListener('click', async () => {
       await refreshStats({ force: true });
     });
 
-    document.getElementById('kimiWebAccessTokenSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('kimiWebAccessTokenInput');
-      const errorEl = document.getElementById('kimiErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.kimi.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('kimi');
-        await saveSettings({ kimiWebAccessToken: input.value });
-        input.value = '';
-        renderExternalProviderStatus('kimi');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('kimi', !externalProviderAccountLinked('kimi'));
-        renderExternalProviderStatus('kimi');
-      } catch (err) {
-        clearExternalProviderCheckPending('kimi');
-        errorEl.textContent = t('settings.kimi.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-
-    document.getElementById('kimiApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('kimiApiKeyInput');
-      const errorEl = document.getElementById('kimiErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.kimi.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('kimi');
-        await saveSettings({ kimiApiKey: input.value });
-        input.value = '';
-        renderExternalProviderStatus('kimi');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('kimi', !externalProviderAccountLinked('kimi'));
-        renderExternalProviderStatus('kimi');
-      } catch (err) {
-        clearExternalProviderCheckPending('kimi');
-        errorEl.textContent = t('settings.kimi.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
+    // Two independent lanes: each submit sends only its own credential, so
+    // saving one never blanks the other.
+    for (const [submitId, inputId, field] of [
+      ['kimiApiKeySubmit', 'kimiApiKeyInput', 'kimiApiKey'],
+      ['kimiWebAccessTokenSubmit', 'kimiWebAccessTokenInput', 'kimiWebAccessToken']
+    ]) {
+      document.getElementById(submitId).addEventListener('click', (event) => {
+        const input = document.getElementById(inputId);
+        return submitAccountCredential(event.currentTarget, 'kimi', { [field]: input.value }, {
+          failedKey: 'settings.kimi.saveFailed',
+          clearInput: () => { input.value = ''; }
+        });
+      });
+    }
   }
 
   const antigravityToggle = document.getElementById('antigravitySettingsToggle');
@@ -16809,19 +16092,11 @@ function initSettingsAnimationWrappers() {
     '.app-update-notes-details',
     '.hub-mode-fields',
     '.presence-feature-body',
-    '#claudeManualPanel',
     '#opencodeManualPanel',
     '#cursorManualPanel',
     '#kimiManualPanel',
-    '.single-credential-manual-panel',
-    '#zaiManualPanel',
-    '#zaiteamManualPanel',
-    '#qoderManualPanel',
-    '#devinManualPanel',
-    '#volcengineManualPanel',
-    '#ollamaManualPanel',
-    '#traeManualPanel',
-    '#alibabaManualPanel'
+    '.credential-manual-panel',
+    '#volcengineManualPanel'
   ].join(', ');
 
   document.querySelectorAll(selectors).forEach(el => {

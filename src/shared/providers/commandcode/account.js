@@ -20,7 +20,6 @@ module.exports = {
     pendingKey: 'commandcodePendingCheckSince'
   },
   form: {
-    kind: 'singleCredential',
     field: 'commandcodeCookie',
     input: 'textarea',
     titleKey: 'settings.commandcode.title',

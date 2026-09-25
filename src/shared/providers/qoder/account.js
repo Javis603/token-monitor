@@ -32,6 +32,44 @@ module.exports = {
     sourceKey: 'qoderCookieSource',
     pendingKey: 'qoderPendingCheckSince'
   },
+  form: {
+    titleKey: 'settings.qoder.title',
+    openKey: 'settings.qoder.openBrowser',
+    clearKey: 'settings.qoder.clearCookie',
+    saveKey: 'settings.qoder.saveCookie',
+    emptyKey: 'settings.qoder.statusNotSet',
+    failedKey: 'settings.qoder.saveFailed',
+    fields: [
+      {
+        key: 'qoderSite',
+        input: 'select',
+        labelKey: 'settings.qoder.site',
+        options: [
+          { value: 'global', labelKey: 'settings.qoder.siteGlobal' },
+          { value: 'cn', labelKey: 'settings.qoder.siteCn' }
+        ],
+        saveOnChange: true
+      },
+      { key: 'qoderCookie', input: 'textarea', placeholderKey: 'settings.qoder.cookiePlaceholder', required: true }
+    ],
+    manual: [
+      { field: 'qoderSite' },
+      {
+        steps: [
+          ['settings.qoder.step1Before', { code: { byField: 'qoderSite', values: { global: 'qoder.com/account/usage', cn: 'qoder.com.cn/account/usage' } } }, 'settings.qoder.step1After'],
+          'settings.qoder.step2',
+          'settings.qoder.step3',
+          'settings.qoder.step4'
+        ]
+      },
+      { field: 'qoderCookie' }
+    ],
+    openUrl: {
+      byField: 'qoderSite',
+      urls: { global: 'https://qoder.com/account/usage', cn: 'https://qoder.com.cn/account/usage' },
+      default: 'https://qoder.com/account/usage'
+    }
+  },
   urlPolicy: [
     { hosts: ['qoder.com', 'www.qoder.com', 'qoder.com.cn', 'www.qoder.com.cn'] }
   ]

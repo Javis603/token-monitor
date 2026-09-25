@@ -95,9 +95,12 @@ test('a probe that says nothing about the credential still stores it', async () 
 test('an empty draft or an unknown provider never reaches a probe', async () => {
   let probes = 0;
   const { api, patches } = commands({ answer: () => { probes += 1; return response(200, BALANCE); } });
-  assert.deepEqual(await api.saveCredential('deepseek', { deepseekApiKey: '   ' }), {
-    saved: false, verdict: 'invalid', status: 'invalidFormat', errorCode: ''
-  });
+  for (const values of [{ deepseekApiKey: '   ' }, {}]) {
+    assert.deepEqual(await api.saveCredential('deepseek', values), {
+      saved: false, verdict: 'invalid', status: 'required', errorCode: ''
+    });
+  }
+  assert.equal((await api.saveCredential('deepseek', null)).saved, false);
   // Codex has no account form: its account flow is not a pasted credential.
   for (const id of ['codex', 'not-a-provider', '__proto__', undefined]) {
     assert.equal((await api.saveCredential(id, { deepseekApiKey: 'sk-live' })).saved, false, String(id));
@@ -138,4 +141,93 @@ test('saving selects the provider without reordering or widening the selection',
   assert.equal(providerSelectionIncluding(undefined, 'zed'), ids.join(','), 'unset keeps the historical every-provider default');
   assert.equal(providerSelectionIncluding('', 'zed'), 'zed', 'an explicitly empty selection gains only the saved provider');
   assert.equal(providerSelectionIncluding('deepseek,claude', 'deepseek'), 'claude,deepseek');
+});
+
+// The real Claude fetcher: a session key the probe rotated is what gets stored,
+// so the next poll does not present the one Claude just retired.
+test('a session key renewed during the probe is the one stored', async () => {
+  const patches = [];
+  const api = createCredentialCommands({
+    getSettings: () => ({}),
+    applySettingsPatch: (patch) => { patches.push(patch); return {}; },
+    probeDeps: (renewed) => ({
+      probe: true,
+      providerRuntimeState: new Map(),
+      bypassValidationCache: true,
+      onClaudeWebCookieRenewed: ({ cookie }) => { renewed.claudeWebCookie = cookie; return true; },
+      stat: async () => { throw new Error('OAuth credentials must not be read when Web is configured'); },
+      fetch: async (url) => {
+        if (url.endsWith('/api/organizations')) {
+          return {
+            ok: true,
+            headers: { getSetCookie: () => ['sessionKey=sk-ant-sid01-rotated; Path=/; Secure; HttpOnly'] },
+            json: async () => [{ uuid: 'organization-web', name: 'Workspace' }]
+          };
+        }
+        if (url.endsWith('/prepaid/credits')) return { ok: true, json: async () => ({ amount: 0, currency: 'USD' }) };
+        if (url.endsWith('/api/account')) return { ok: true, json: async () => ({ uuid: 'account-web', email_address: 'owner@example.com' }) };
+        return { ok: true, json: async () => ({ five_hour: { utilization: 10 } }) };
+      }
+    }),
+    env: {}
+  });
+  assert.deepEqual(await api.saveCredential('claude', { claudeWebCookie: 'sessionKey=abc' }), {
+    saved: false, verdict: 'invalid', status: 'invalidFormat', errorCode: 'INVALID_CLAUDE_WEB_SESSION_KEY'
+  });
+  const result = await api.saveCredential('claude', { claudeWebCookie: 'sk-ant-sid01-first' });
+  assert.equal(result.verdict, 'valid');
+  assert.equal(patches.length, 1);
+  assert.equal(patches[0].claudeWebCookie, 'sessionKey=sk-ant-sid01-rotated');
+});
+
+test('a lane saved on its own is probed without the stored sibling vouching for it', async () => {
+  const seen = [];
+  const { api, patches } = commands({
+    settings: { kimiWebAccessToken: 'stored-web-token' },
+    answer: (url, init) => {
+      seen.push(init?.headers || {});
+      return response(401);
+    }
+  });
+  const result = await api.saveCredential('kimi', { kimiApiKey: 'sk-kimi-bad' });
+  assert.equal(result.verdict, 'invalid');
+  assert.ok(seen.length > 0);
+  assert.ok(seen.every((headers) => !JSON.stringify(headers).includes('stored-web-token')), 'the stored web token must not be sent');
+  assert.deepEqual(patches, []);
+});
+
+test('a partial draft stores only the lane that was sent', async () => {
+  const { api, patches } = commands({ settings: { kimiWebAccessToken: 'stored-web-token' }, answer: () => response(500) });
+  const result = await api.saveCredential('kimi', { kimiApiKey: 'sk-kimi-maybe' });
+  assert.equal(result.saved, true);
+  assert.equal(patches[0].kimiApiKey, 'sk-kimi-maybe');
+  assert.equal(Object.hasOwn(patches[0], 'kimiWebAccessToken'), false);
+});
+
+// Ollama rate-limits its settings page, so a confirmed probe stands in for the
+// first poll after the save instead of asking a second time.
+test('a confirmed Ollama cookie answers the next poll from the probe', async () => {
+  const { fetchOllamaLimits } = require('../../src/shared/providers/ollama/limits');
+  const html = `<span>Cloud Usage</span><span>Pro</span>
+<section aria-label="Session usage 14.5% used"><div style="width: 14.5%"></div></section>`;
+  const page = (status) => ({ ok: status === 200, status, headers: { get: () => '' }, text: async () => html });
+  const { api, patches } = commands({ answer: () => page(200) });
+  assert.equal((await api.saveCredential('ollama', { ollamaCookie: '__Secure-session=abc' })).verdict, 'valid');
+  let requests = 0;
+  const next = await fetchOllamaLimits({ ollamaCookie: patches[0].ollamaCookie }, {
+    env: {},
+    fetch: async () => { requests += 1; return page(500); }
+  });
+  assert.equal(next.status, 'ok');
+  assert.equal(requests, 0);
+
+  // An unconfirmed save leaves nothing behind for the poll to reuse.
+  const unconfirmed = commands({ answer: () => page(500) });
+  assert.equal((await unconfirmed.api.saveCredential('ollama', { ollamaCookie: '__Secure-session=def' })).verdict, 'indeterminate');
+  const polled = await fetchOllamaLimits({ ollamaCookie: unconfirmed.patches[0].ollamaCookie }, {
+    env: {},
+    fetch: async () => { requests += 1; return page(500); }
+  });
+  assert.equal(polled.status, 'unavailable');
+  assert.equal(requests, 1);
 });

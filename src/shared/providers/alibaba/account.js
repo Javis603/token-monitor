@@ -34,6 +34,71 @@ module.exports = {
     sourceKey: 'alibabaCookieSource',
     pendingKey: 'alibabaPendingCheckSince'
   },
+  form: {
+    titleKey: 'settings.alibaba.title',
+    openKey: 'settings.alibaba.openBrowser',
+    clearKey: 'settings.alibaba.clearCookie',
+    saveKey: 'settings.alibaba.saveCookie',
+    emptyKey: 'settings.alibaba.statusNotSet',
+    failedKey: 'settings.alibaba.saveFailed',
+    fields: [
+      {
+        key: 'alibabaVariant',
+        input: 'select',
+        labelKey: 'settings.alibaba.variant',
+        options: [
+          { value: 'cn', labelKey: 'settings.alibaba.variantCn' },
+          { value: 'intl', labelKey: 'settings.alibaba.variantIntl' },
+          { value: 'cn-personal', labelKey: 'settings.alibaba.variantCnPersonal' },
+          { value: 'intl-personal', labelKey: 'settings.alibaba.variantIntlPersonal' }
+        ],
+        saveOnChange: true,
+        // The cookie belongs to the console it was copied from and cannot
+        // authenticate another one.
+        clears: ['alibabaCookie']
+      },
+      {
+        key: 'alibabaCookie',
+        input: 'textarea',
+        placeholderKey: 'settings.alibaba.cookiePlaceholder',
+        required: true
+      }
+    ],
+    manual: [
+      { field: 'alibabaVariant' },
+      {
+        steps: [
+          'settings.alibaba.step1',
+          ['settings.alibaba.step2Before', {
+            code: {
+              byField: 'alibabaVariant',
+              values: {
+                cn: 'GetSubscriptionSummary',
+                intl: 'GetSubscriptionSummary',
+                'cn-personal': '/tokenplan/personal/api/v2/usage',
+                'intl-personal': '/tokenplan/personal/api/v2/usage'
+              }
+            }
+          }, 'settings.alibaba.step2After'],
+          'settings.alibaba.step3',
+          'settings.alibaba.step4'
+        ]
+      },
+      { note: 'settings.alibaba.personalNote', when: { field: 'alibabaVariant', values: ['cn-personal', 'intl-personal'] } },
+      { field: 'alibabaCookie' }
+    ],
+    openUrl: {
+      byField: 'alibabaVariant',
+      urls: {
+        cn: 'https://bailian.console.aliyun.com/cn-beijing?tab=plan#/efm/subscription/token-plan',
+        intl: 'https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=plan#/efm/subscription/token-plan',
+        'cn-personal': 'https://bailian.console.aliyun.com/cn-beijing?tab=plan#/efm/subscription/token-plan/personal',
+        'intl-personal': 'https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=plan#/efm/subscription/token-plan/personal'
+      },
+      default: 'https://bailian.console.aliyun.com/cn-beijing?tab=plan#/efm/subscription/token-plan'
+    },
+    messages: { invalidFormat: 'settings.alibaba.invalidCookie' }
+  },
   urlPolicy: [
     // Token Plan lives behind a hash route, so the console's region path is all
     // there is to match on. Kept host-scoped rather than opening the whole

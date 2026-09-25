@@ -24,7 +24,6 @@ module.exports = {
     pendingKey: 'clinePendingCheckSince'
   },
   form: {
-    kind: 'singleCredential',
     field: 'clineApiKey',
     input: 'input',
     titleKey: 'settings.cline.title',
@@ -36,8 +35,8 @@ module.exports = {
     emptyKey: 'settings.cline.statusNotSet',
     failedKey: 'settings.cline.saveFailed',
     noteKey: 'settings.cline.note',
-    validation: {
-      invalidKey: 'settings.cline.validationInvalid'
+    messages: {
+      rejected: 'settings.cline.validationInvalid'
     },
     url: 'https://app.cline.bot/dashboard/account'
   },

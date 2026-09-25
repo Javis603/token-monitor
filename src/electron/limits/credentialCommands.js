@@ -12,7 +12,7 @@
 
 const { parseLimitProviders } = require('../../shared/limits/collector');
 const { LIMIT_PROVIDER_REGISTRY, limitProviderEntry } = require('../../shared/limits/registry');
-const { limitsAccountConfig, normalizeAccountField } = require('./accountSettings');
+const { accountForm, limitsAccountConfig, normalizeAccountField } = require('./accountSettings');
 
 // A probe can only prove a credential wrong when the provider itself says so.
 // Everything else — throttling, an outage, a timeout, a malformed answer — says
@@ -26,8 +26,40 @@ function credentialVerdict(status) {
   return 'indeterminate';
 }
 
-function formFieldKeys(form) {
-  return [form.field];
+function formFields(entry) {
+  return accountForm(entry)?.fields || [];
+}
+
+function formFieldKeys(entry) {
+  return formFields(entry).map(({ key }) => key);
+}
+
+function invalid(status, errorCode = '') {
+  return { saved: false, verdict: 'invalid', status, errorCode };
+}
+
+// The draft as it would be stored. Only fields the caller sent are part of it,
+// so one of Kimi's two credential lanes can be saved without blanking the
+// other; a select always travels with its form, so it is always sent.
+function draftFor(entry, values) {
+  const candidate = {};
+  for (const field of formFields(entry)) {
+    if (!Object.hasOwn(values, field.key)) continue;
+    const raw = String(values[field.key] ?? '');
+    try {
+      candidate[field.key] = normalizeAccountField(field.key, raw);
+    } catch (error) {
+      return { rejected: invalid('invalidFormat', error?.code || '') };
+    }
+    // Something was pasted, but nothing usable survived normalization.
+    if (field.secret && raw.trim() && !candidate[field.key]) return { rejected: invalid('invalidFormat') };
+  }
+  const fields = formFields(entry);
+  if (fields.some((field) => field.required && !candidate[field.key])
+    || !fields.some((field) => field.secret && candidate[field.key])) {
+    return { rejected: invalid('required') };
+  }
+  return { candidate };
 }
 
 // An unset selection is the historical "every provider"; an explicitly empty
@@ -56,45 +88,49 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
   // an in-flight probe stale, so its result must not land over that write.
   function noteSettingsPatch(patch) {
     for (const entry of LIMIT_PROVIDER_REGISTRY) {
-      if (entry.form && formFieldKeys(entry.form).some((key) => patch?.[key] !== undefined)) {
+      if (entry.form && formFieldKeys(entry).some((key) => patch?.[key] !== undefined)) {
         nextRevision(entry.id);
       }
     }
   }
 
-  async function saveCredential(providerId, values = {}) {
+  async function saveCredential(providerId, values) {
     const entry = formEntry(providerId);
-    if (!entry) return { saved: false, verdict: 'invalid', status: 'notConfigured' };
+    if (!entry || !values || typeof values !== 'object') return invalid('notConfigured');
     const revision = nextRevision(entry.id);
-    const candidate = {};
-    try {
-      for (const key of formFieldKeys(entry.form)) {
-        candidate[key] = normalizeAccountField(key, values[key]);
-      }
-    } catch (error) {
-      return { saved: false, verdict: 'invalid', status: 'invalidFormat', errorCode: error?.code || '' };
-    }
-    if (formFieldKeys(entry.form).some((key) => !candidate[key])) {
-      return { saved: false, verdict: 'invalid', status: 'invalidFormat', errorCode: '' };
-    }
+    const { candidate, rejected } = draftFor(entry, values);
+    if (rejected) return rejected;
 
+    // The probe sees the draft and nothing it would not store: a credential of
+    // this form that is not part of the draft is blanked, so a stored sibling
+    // (Kimi's other lane) cannot answer for a bad one.
+    const options = limitsAccountConfig(getSettings(), { env });
+    for (const field of formFields(entry)) {
+      if (field.secret && !Object.hasOwn(candidate, field.key)) options[field.key] = '';
+    }
+    const renewed = {};
+    let provider = null;
     let status;
     let errorCode = '';
     try {
-      const provider = await entry.fetchLimits(
-        { ...limitsAccountConfig(getSettings(), { env }), ...candidate },
-        probeDeps()
-      );
+      provider = await entry.fetchLimits({ ...options, ...candidate }, probeDeps(renewed));
       status = provider?.status || 'unavailable';
     } catch (error) {
       status = error?.status || 'unavailable';
       errorCode = error?.code || '';
     }
     const verdict = credentialVerdict(status);
-    if (verdict === 'invalid') return { saved: false, verdict, status, errorCode };
+    if (verdict === 'invalid') return invalid(status, errorCode);
     if (revisions.get(entry.id) !== revision) {
       return { saved: false, verdict: 'superseded', status: 'superseded', errorCode: '' };
     }
+    // A probe may rotate the credential it was given (Claude's session key);
+    // what gets stored is the value the provider will accept next.
+    for (const [key, value] of Object.entries(renewed)) {
+      if (Object.hasOwn(candidate, key)) candidate[key] = normalizeAccountField(key, value);
+    }
+    const remember = accountForm(entry).rememberProbe;
+    if (remember && verdict === 'valid') entry.limits[remember.fn](candidate[remember.field], provider);
     const settings = applySettingsPatch({
       ...candidate,
       limitProviders: providerSelectionIncluding(getSettings().limitProviders, entry.id),
@@ -106,7 +142,9 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
   function clearCredential(providerId) {
     const entry = formEntry(providerId);
     if (!entry) return { cleared: false };
-    const settings = applySettingsPatch(Object.fromEntries(formFieldKeys(entry.form).map((key) => [key, ''])));
+    const settings = applySettingsPatch(Object.fromEntries(
+      formFields(entry).filter((field) => field.secret).map(({ key }) => [key, ''])
+    ));
     return { cleared: true, settings };
   }
 
@@ -116,6 +154,5 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
 module.exports = {
   createCredentialCommands,
   credentialVerdict,
-  formFieldKeys,
   providerSelectionIncluding
 };

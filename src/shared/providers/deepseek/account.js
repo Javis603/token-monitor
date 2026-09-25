@@ -20,7 +20,6 @@ module.exports = {
     pendingKey: 'deepseekPendingCheckSince'
   },
   form: {
-    kind: 'singleCredential',
     field: 'deepseekApiKey',
     input: 'input',
     titleKey: 'settings.deepseek.title',

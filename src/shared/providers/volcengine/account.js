@@ -60,6 +60,19 @@ module.exports = {
         ? 'env'
         : ''
   }),
+  // Volcengine keeps its own panel (an optional second account for the Agent
+  // Plan with its own clear) and borrows only the shared save path.
+  form: {
+    kind: 'custom',
+    fields: [
+      { key: 'volcengineAccessKeyId', required: true },
+      { key: 'volcengineSecretAccessKey' },
+      { key: 'volcengineRegion' },
+      { key: 'volcengineAgentAccessKeyId' },
+      { key: 'volcengineAgentSecretAccessKey' },
+      { key: 'volcengineAgentRegion' }
+    ]
+  },
   urlPolicy: [
     { hosts: ['www.volcengine.com', 'console.volcengine.com'] }
   ]

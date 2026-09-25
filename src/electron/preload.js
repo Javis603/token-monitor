@@ -148,12 +148,6 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     logout: (accountId) => ipcRenderer.invoke('cursor:logout', accountId),
     status: (options = {}) => ipcRenderer.invoke('cursor:status', options)
   },
-  claude: {
-    saveCookie: (cookie) => ipcRenderer.invoke('claude:saveCookie', cookie)
-  },
-  ollama: {
-    validateCookie: (cookie) => ipcRenderer.invoke('ollama:validateCookie', cookie)
-  },
   limits: {
     saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
     clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId)

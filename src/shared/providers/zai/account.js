@@ -53,6 +53,39 @@ module.exports = {
     // quota source.
     zcodeLoginDetected: Boolean(discovered)
   }),
+  form: {
+    titleKey: 'settings.zai.title',
+    openKey: 'settings.zai.openBrowser',
+    clearKey: 'settings.zai.clearApiKey',
+    saveKey: 'settings.zai.saveApiKey',
+    emptyKey: 'settings.zai.statusNotSet',
+    failedKey: 'settings.zai.saveFailed',
+    fields: [
+      {
+        key: 'zaiApiRegion',
+        input: 'select',
+        labelKey: 'settings.zai.apiRegion',
+        options: [
+          { value: 'global', labelKey: 'settings.zai.regionGlobal' },
+          { value: 'bigmodel-cn', labelKey: 'settings.zai.regionBigmodelCn' }
+        ],
+        saveOnChange: true
+      },
+      { key: 'zaiApiKey', input: 'password', placeholderKey: 'settings.zai.apiKeyPlaceholder', required: true }
+    ],
+    // The region stays reachable once linked: a ZCode-discovered login keeps
+    // the pasted-key panel open, but a stored key hides it.
+    top: [{ field: 'zaiApiRegion' }],
+    manual: [{ note: 'settings.zai.note' }, { field: 'zaiApiKey' }],
+    openUrl: {
+      byField: 'zaiApiRegion',
+      urls: {
+        global: 'https://z.ai/manage-apikey/coding-plan/personal/my-plan',
+        'bigmodel-cn': 'https://bigmodel.cn/coding-plan/personal/usage'
+      },
+      default: 'https://z.ai/manage-apikey/coding-plan/personal/my-plan'
+    }
+  },
   urlPolicy: [
     { hosts: ['z.ai', 'www.z.ai'] },
     { hosts: ['bigmodel.cn', 'www.bigmodel.cn'] }

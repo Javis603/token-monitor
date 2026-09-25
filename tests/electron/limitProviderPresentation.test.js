@@ -1850,7 +1850,7 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   // Settings pushes route through syncSettingsForm (which init() also calls), so
   // the cards are re-rendered there and onSettingsPush itself does not duplicate
   // the calls.
-  for (const provider of ['claude', 'zai', 'volcengine', 'qoder', 'trae', 'kimi', 'ollama']) {
+  for (const provider of ['volcengine', 'kimi']) {
     assert.match(statsRender, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
   }
@@ -1860,41 +1860,20 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   assert.doesNotMatch(app, /renderGrokStatus|grokAccountLinked|grokAccountExpanded/);
 });
 
-test('saving Ollama credentials enables its provider and always settles validation', () => {
+test('a saved credential folds its panel only once a fresh record confirms the account', () => {
   const app = readRendererFile('app.js');
   const renderExternalStatus = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
-  const selection = functionBody(app, 'limitProviderSelectionIncluding', 'missingLimitProviderStatus');
-  const setup = functionBody(app, 'setupCursorAccountUI', 'initSettingsAnimationWrappers');
-  const ollamaSetup = setup.slice(
-    setup.indexOf("document.getElementById('ollamaCookieSubmit')"),
-    setup.indexOf('const kimiToggle')
-  );
-  assert.match(selection, /selected\.add\(providerName\)/);
-  assert.match(selection, /\.filter\(\(id\) => selected\.has\(id\)\)/);
-  assert.match(ollamaSetup, /limitProviders: limitProviderSelectionIncluding\('ollama'\)/);
-  assert.match(ollamaSetup, /limitsEnabled: true/);
-  assert.match(ollamaSetup, /await window\.tokenMonitor\.ollama\.validateCookie\(input\.value\)/);
-  assert.match(ollamaSetup, /if \(!validation\?\.ok\)/);
-  assert.doesNotMatch(ollamaSetup, /await refreshStats\(\{ force: true \}\);/);
-  assert.match(ollamaSetup, /clearExternalProviderCheckPending\('ollama'\);/);
+  const save = functionBody(app, 'saveAccountCredential', 'submitAccountCredential');
   assert.match(renderExternalStatus, /pending \? t\('settings\.common\.checking'\)/);
-  assert.match(
-    renderExternalStatus,
-    /providerName === 'ollama' && wasPending && !pending && linked[\s\S]*?setExternalAccountExpanded\('ollama', false\)/,
-    'Ollama should collapse only after a fresh provider confirms the account is linked'
-  );
-  assert.doesNotMatch(
-    ollamaSetup,
-    /input\.value = '';[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?setExternalAccountExpanded\('ollama', false\);/,
-    'a successful save must stay pending until the collector publishes a fresh provider'
-  );
-  assert.doesNotMatch(
-    ollamaSetup,
-    /input\.value = '';[\s\S]*?setExternalAccountExpanded\('ollama', false\);/,
-    'the setup panel must remain open while validation is pending'
-  );
-  assert.match(ollamaSetup, /catch \(err\) \{[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?renderExternalProviderStatus\('ollama'\);/);
-  assert.match(ollamaSetup, /ollamaValidationError\(validation\)/);
+  // The refresh after a save can return before the collector publishes the
+  // checked account, so the panel stays open and folds when that record lands.
+  assert.match(renderExternalStatus, /if \(wasPending && !pending && linked\) setExternalAccountExpanded\(providerName, false\);/);
+  assert.match(save, /markExternalProviderCheckPending\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);\n\s*setExternalAccountExpanded\(id, !externalProviderAccountLinked\(id\)\);/);
+  // Ollama answers its first poll from the save-time check instead of fetching
+  // the settings page twice in a row.
+  const { limitProviderEntry } = require('../../src/shared/limits/registry');
+  assert.deepEqual({ ...limitProviderEntry('ollama').form.rememberProbe }, { fn: 'rememberOllamaValidation', field: 'ollamaCookie' });
+  assert.equal(typeof limitProviderEntry('ollama').limits.rememberOllamaValidation, 'function');
 });
 
 test('account validation reads the local device raw limits, not the collapsed aggregate', () => {
@@ -1980,13 +1959,13 @@ test('Cline exposes its API key through the settings and credential-store patter
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'cline');
   assert.doesNotMatch(html, /id="clineAccountGroup"/);
-  assert.equal(form.field, 'clineApiKey');
-  assert.equal(form.url, 'https://app.cline.bot/dashboard/account');
-  assert.equal(form.noteKey, 'settings.cline.note');
-  assert.equal(form.ariaLabelKey, 'settings.cline.apiKeyLabel');
+  assert.equal(form.fields[0].key, 'clineApiKey');
+  assert.equal(form.openUrl.url, 'https://app.cline.bot/dashboard/account');
+  assert.deepEqual(form.manual[0], { note: 'settings.cline.note' });
+  assert.equal(form.fields[0].ariaLabelKey, 'settings.cline.apiKeyLabel');
   assert.match(app, /clineAccountExpanded/);
   assert.equal(form.status.configuredKey, 'clineCredentialConfigured');
-  assert.match(app, /window\.tokenMonitor\.limits\.saveCredential\(id, \{ \[field\]: value \}\)/);
+  assert.match(app, /window\.tokenMonitor\.limits\.saveCredential\(id, values\)/);
   assert.match(preload, /saveCredential: \(providerId, values\) => ipcRenderer\.invoke\('limits:saveCredential'/);
   // The key itself never crosses to the renderer: the projection carries the
   // boolean and the source label only, never a `clineApiKey` field.
@@ -2086,20 +2065,14 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
     app.indexOf('const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {')
   );
   const providers = [
-    ['claude', 'claudeAccountGroup', 'claudeAccountStatus'],
     ['codex', 'codexAccountGroup', 'codexAccountStatus'],
     ['opencode', 'opencodeCookieGroup', 'opencodeCookieStatus'],
     ['cursor', 'cursorAccountGroup', 'cursorAccountStatus'],
     ['kimi', 'kimiAccountGroup', 'kimiAccountStatus'],
     ['copilot', 'copilotAccountGroup', 'copilotApiTokenStatus'],
     ['mimo', 'mimoAccountGroup', 'mimoAccountStatus'],
-    ['zai', 'zaiAccountGroup', 'zaiAccountStatus'],
-    ['zaiteam', 'zaiteamAccountGroup', 'zaiteamAccountStatus'],
     ['openrouter', 'openrouterAccountGroup', 'openrouterStatus'],
     ['volcengine', 'volcengineAccountGroup', 'volcengineAccountStatus'],
-    ['qoder', 'qoderAccountGroup', 'qoderAccountStatus'],
-    ['trae', 'traeAccountGroup', 'traeAccountStatus'],
-    ['ollama', 'ollamaAccountGroup', 'ollamaAccountStatus'],
     ['thirdparty', 'thirdpartyAccountGroup', 'thirdpartyStatus']
   ];
 
@@ -2293,17 +2266,11 @@ renderLimitProviderCheckboxes();`,
 test('dynamic account summaries are never reset by the static translation pass', () => {
   const html = readRendererFile('index.html');
   const statusIds = [
-    'claudeAccountStatus',
     'codexAccountStatus',
     'cursorAccountStatus',
     'opencodeCookieStatus',
     'openrouterStatus',
-    'zaiAccountStatus',
-    'zaiteamAccountStatus',
     'volcengineAccountStatus',
-    'qoderAccountStatus',
-    'traeAccountStatus',
-    'ollamaAccountStatus',
     'kimiAccountStatus',
     'mimoAccountStatus',
     'copilotApiTokenStatus',

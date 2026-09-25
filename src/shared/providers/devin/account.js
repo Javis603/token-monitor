@@ -42,6 +42,39 @@ module.exports = {
         ? 'env'
         : ''
   }),
+  form: {
+    titleKey: 'settings.devin.title',
+    openKey: 'settings.devin.openBrowser',
+    clearKey: 'settings.devin.clearCredentials',
+    saveKey: 'settings.devin.saveCredentials',
+    emptyKey: 'settings.devin.statusNotSet',
+    failedKey: 'settings.devin.saveFailed',
+    fields: [
+      {
+        key: 'devinBearerToken',
+        input: 'password',
+        labelKey: 'settings.devin.bearerToken',
+        placeholderKey: 'settings.devin.bearerTokenPlaceholder',
+        required: true
+      },
+      {
+        key: 'devinOrganization',
+        input: 'text',
+        labelKey: 'settings.devin.organization',
+        placeholderKey: 'settings.devin.organizationPlaceholder',
+        required: true,
+        // Not a secret: shown again so a token rotation needs only the token.
+        prefill: true
+      }
+    ],
+    manual: [
+      { steps: ['settings.devin.step1', 'settings.devin.step2', 'settings.devin.step3', 'settings.devin.step4'] },
+      { field: 'devinBearerToken' },
+      { field: 'devinOrganization' }
+    ],
+    openUrl: { url: 'https://app.devin.ai/settings/usage' },
+    messages: { required: 'settings.devin.credentialsRequired' }
+  },
   urlPolicy: [
     { hosts: ['app.devin.ai'], pathPrefixes: ['/settings/usage'] }
   ]

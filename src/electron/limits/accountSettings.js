@@ -236,43 +236,112 @@ function rendererOmittedAccountKeys() {
   return keys;
 }
 
+const FORM_INPUTS = new Set(['password', 'text', 'textarea', 'select']);
+const FORM_MESSAGE_KEYS = new Set(['rejected', 'invalidFormat', 'required']);
+
+// An account form in its one canonical shape. A single pasted credential may be
+// declared with the shorthand `field` + `input` ('input' | 'textarea'), a
+// `noteKey` or `steps`, and a `url`; everything else declares `fields`, the
+// `top` / `manual` block lists and `openUrl` directly. `custom` forms keep
+// their own markup and only borrow the save path, so they carry just `fields`.
+function accountForm(entry) {
+  const form = entry?.form;
+  if (!form) return null;
+  if (form.kind === 'custom') {
+    return { kind: 'custom', fields: form.fields.map((field) => ({ secret: true, required: false, ...field })) };
+  }
+  if (form.field) {
+    return {
+      ...form,
+      kind: 'credential',
+      fields: [{
+        key: form.field,
+        input: form.input === 'textarea' ? 'textarea' : 'password',
+        placeholderKey: form.placeholderKey,
+        ...(form.ariaLabelKey ? { ariaLabelKey: form.ariaLabelKey } : {}),
+        required: true,
+        secret: true
+      }],
+      top: [],
+      manual: [form.noteKey ? { note: form.noteKey } : { steps: form.steps }, { field: form.field }],
+      openUrl: form.openUrl || { url: form.url }
+    };
+  }
+  return {
+    ...form,
+    kind: 'credential',
+    // A select is a setting beside the credential, so Clear leaves it alone.
+    fields: form.fields.map((field) => ({ required: false, secret: field.input !== 'select', ...field })),
+    top: form.top || [],
+    manual: form.manual || []
+  };
+}
+
+function formUrls(openUrl) {
+  if (openUrl?.url) return [openUrl.url];
+  return [...Object.values(openUrl?.urls || {}), ...(openUrl?.default ? [openUrl.default] : [])];
+}
+
+function assertAccountForm(entry, form) {
+  const fail = (reason) => { throw new Error(`limits form: ${reason} for ${entry.id}`); };
+  const declared = new Map(entry.fields.map((field) => [field.key, field]));
+  if (!form.fields.length) fail('no fields');
+  for (const field of form.fields) {
+    if (!declared.has(field.key)) fail(`undeclared field ${field.key}`);
+    if (form.kind === 'credential' && !FORM_INPUTS.has(field.input)) fail(`invalid input for ${field.key}`);
+    if (field.input === 'select' && !field.options?.length) fail(`select ${field.key} without options`);
+  }
+  if (!form.fields.some((field) => field.secret && declared.get(field.key).kind === 'credential')) {
+    fail('no credential field');
+  }
+  if (!entry.status?.configuredKey || !entry.status?.sourceKey || !entry.status?.pendingKey) fail('incomplete status');
+  if (Object.keys(form.messages || {}).some((key) => !FORM_MESSAGE_KEYS.has(key))) fail('unknown message override');
+  if (form.kind === 'custom') return;
+  const blocks = [...form.top, ...form.manual];
+  const placed = blocks.filter((block) => block.field).map((block) => block.field);
+  if (placed.length !== form.fields.length || form.fields.some((field) => !placed.includes(field.key))) {
+    fail('every field must be placed exactly once');
+  }
+  if (!blocks.some((block) => block.note || block.steps?.length)) fail('missing setup instructions');
+  const urls = formUrls(form.openUrl);
+  if (!urls.length) fail('missing openUrl');
+  for (const url of urls) {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' || !limitProviderUrlAllowed(parsed.hostname, parsed.pathname)) {
+      fail(`URL ${url} is not allowlisted`);
+    }
+  }
+}
+
 // The renderer only needs the form's display and action schema. Never send
 // field declarations, store paths, resolvers, or credential values over IPC.
 function limitAccountFormsForRenderer() {
-  return LIMIT_PROVIDER_REGISTRY.filter((entry) => entry.form).map((entry) => {
-    const { kind, field, input, titleKey, openKey, clearKey, placeholderKey,
-      ariaLabelKey, saveKey, emptyKey, failedKey, steps, noteKey, validation, url } = entry.form;
-    if (kind !== 'singleCredential' || !['input', 'textarea'].includes(input)
-      || !entry.fields.some((candidate) => candidate.key === field && candidate.kind === 'credential')
-      || !entry.status?.configuredKey || !entry.status?.sourceKey || !entry.status?.pendingKey) {
-      throw new Error(`limits form: invalid single-credential declaration for ${entry.id}`);
-    }
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'https:' || !limitProviderUrlAllowed(parsed.hostname, parsed.pathname)) {
-      throw new Error(`limits form: ${entry.id} URL is not allowlisted`);
-    }
-    if ((!Array.isArray(steps) || !steps.length) && !noteKey) {
-      throw new Error(`limits form: missing setup instructions for ${entry.id}`);
-    }
-    // Every form's credential is probed before it is saved; `validation` only
-    // overrides the shared "rejected" message with provider-specific guidance.
-    if (validation && (!validation.invalidKey || Object.keys(validation).length !== 1)) {
-      throw new Error(`limits form: invalid validation messages for ${entry.id}`);
-    }
+  return LIMIT_PROVIDER_REGISTRY.filter((entry) => entry.form).flatMap((entry) => {
+    const form = accountForm(entry);
+    assertAccountForm(entry, form);
+    if (form.kind === 'custom') return [];
     const { configuredKey, sourceKey, pendingKey } = entry.status;
-    return {
-      id: entry.id, kind, field, input, titleKey, openKey, clearKey,
-      placeholderKey, ...(ariaLabelKey ? { ariaLabelKey } : {}),
-      saveKey, emptyKey, failedKey,
-      ...(steps ? { steps: [...steps] } : {}),
-      ...(noteKey ? { noteKey } : {}),
-      ...(validation ? { validation: { ...validation } } : {}),
-      url, status: { configuredKey, sourceKey, pendingKey }
-    };
+    return [JSON.parse(JSON.stringify({
+      id: entry.id,
+      kind: form.kind,
+      titleKey: form.titleKey,
+      openKey: form.openKey,
+      clearKey: form.clearKey,
+      saveKey: form.saveKey,
+      emptyKey: form.emptyKey,
+      failedKey: form.failedKey,
+      fields: form.fields,
+      top: form.top,
+      manual: form.manual,
+      openUrl: form.openUrl,
+      ...(form.messages ? { messages: form.messages } : {}),
+      status: { configuredKey, sourceKey, pendingKey }
+    }))];
   });
 }
 
 module.exports = {
+  accountForm,
   accountFieldProjection,
   accountStatusProjection,
   currentAccountField,

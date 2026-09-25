@@ -21,7 +21,6 @@ module.exports = {
     pendingKey: 'zedPendingCheckSince'
   },
   form: {
-    kind: 'singleCredential',
     field: 'zedCookie',
     input: 'textarea',
     titleKey: 'settings.zed.title',
