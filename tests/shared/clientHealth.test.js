@@ -432,6 +432,33 @@ test('the Cursor cache follows an absolute Windows HOME override', () => {
   }]);
 });
 
+test('source resolution feeds watcher paths and exact-file diagnostics without changing the root contract', () => {
+  const homeDir = path.join(os.tmpdir(), 'source-resolution');
+  const env = { XDG_DATA_HOME: path.join(homeDir, 'xdg') };
+  const options = {
+    homeDir,
+    platform: process.platform,
+    env,
+    customScanPaths: { codex: [path.join(homeDir, 'extra-codex')] }
+  };
+  const roots = clientSourceRoots('copilot,codex,amp,zcode', options);
+  assert.deepEqual(roots.codex.slice(0, 2), [
+    { id: 'codex-sessions', dir: path.join(homeDir, '.codex', 'sessions') },
+    { id: 'codex-sessions', dir: path.join(homeDir, '.codex', 'archived_sessions') }
+  ]);
+  assert.deepEqual(roots.codex.at(-1), { id: 'custom-scan-path', dir: path.join(homeDir, 'extra-codex'), custom: true });
+  assert.deepEqual(roots.amp, [{ id: 'amp-threads', dir: path.join(homeDir, 'xdg', 'amp', 'threads') }]);
+  const zcodeDb = roots.zcode.find((root) => root.id === 'zcode-cli-db');
+  assert.deepEqual(zcodeDb, {
+    id: 'zcode-cli-db',
+    dir: path.join(homeDir, '.zcode', 'cli', 'db'),
+    sourcePath: path.join(homeDir, '.zcode', 'cli', 'db', 'db.sqlite')
+  });
+  assert.deepEqual(clientWatchCandidates('zcode,codex,amp', options).zcode, roots.zcode.map((root) => root.dir));
+  assert.deepEqual(clientSourceChecks('zcode', options).zcode.map((check) => check.id), ['zcode-projects', 'zcode-cli-db']);
+  assert.equal(clientDiagnosticRoots('zcode', options).zcode.find((root) => root.id === 'zcode-cli-db').dir, zcodeDb.sourcePath);
+});
+
 test('labelling roots keeps diagnostics separate from watcher roots', () => {
   const roots = clientSourceRoots(KNOWN_CLIENTS);
   const candidates = clientWatchCandidates(KNOWN_CLIENTS);
