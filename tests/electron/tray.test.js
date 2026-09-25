@@ -1140,7 +1140,7 @@ test('kind-specific resolver can select billing from a mixed-window provider', (
   assert.equal(pick.remaining, 9);
 });
 
-test('default worst-provider pick reports an exhausted billing quota as 0%', () => {
+test('the exhaustion gate stays on the dock rail; tray picks keep their own windows', () => {
   const monthly = { kind: 'billing', label: 'Monthly', remainingPercent: 0 };
   const limitStats = {
     limits: {
@@ -1155,12 +1155,13 @@ test('default worst-provider pick reports an exhausted billing quota as 0%', () 
     }
   };
 
-  // The dock rail reads 0% here because the drained monthly pool gates the
-  // account; the default tray pick must agree instead of showing the
-  // session's 80%.
+  // The selection still reports the gate — the dock rail reads it — but the
+  // default tray pick deliberately keeps its own primary/secondary reading:
+  // the two-lane icon cannot draw a billing gate, and the tray's job is the
+  // tightest headline pool, not the account verdict.
   const pick = pickWorstLimitProvider(limitStats);
-  assert.equal(pick.remaining, 0);
-  assert.equal(pick.selectedWindow, monthly);
+  assert.equal(pick.exhaustedWindow, monthly);
+  assert.equal(pick.remaining, 80);
 
   // A kind-pinned pick stays on its own pool — the pin is a request for that
   // window's number, not for the account verdict.

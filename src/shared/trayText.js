@@ -214,8 +214,11 @@
   // Canonical label sets, shared by preferredWindow() and the exhaustion gate.
   // "Monthly" counts as canonical for billing: it is this app's own convention
   // label for the account-level cadence window (Codex, Kimi, OpenCode, …), not
-  // a named sub-pool like "MCP" or "Token Spend".
+  // a named sub-pool like "MCP" or "Token Spend". Session/daily get their
+  // display convention labels for the same reason.
   const CANONICAL_KIND_LABELS = {
+    session: new Set(['', 'session', '5-hour', '5h']),
+    daily: new Set(['', 'daily']),
     weekly: new Set(['', 'weekly']),
     billing: new Set(['', 'total', 'monthly'])
   };
@@ -225,22 +228,20 @@
     return CANONICAL_KIND_LABELS[kind] || CANONICAL_DEFAULT_LABELS;
   }
 
-  // Which window of a kind may testify that the account is out of quota.
-  // The additional flag marks a provider-declared extra pool (Factory's
-  // Core/Premium pools, Codex additional_rate_limits) — it can never testify
-  // about the account aggregate, whatever its kind. Among the remaining
-  // windows the pick mirrors preferredWindow(), except a lone window is only
-  // trusted when its label is canonical for the kind: preferredWindow()
-  // returns a sole window without checking labels, so a scoped pool with no
-  // aggregate sibling (Claude Fable-only weekly, Cursor Grok Bot) would
-  // otherwise look like the account gate it provably is not.
+  // Which window of a kind may testify that the account is out of quota —
+  // stricter than preferredWindow() on purpose. The additional flag marks a
+  // provider-declared extra pool (Factory's Core/Premium pools, Codex
+  // additional_rate_limits): it can never testify about the account aggregate,
+  // whatever its kind. And only a canonically labelled window counts at all:
+  // a pool that is the sole window of its kind is returned by preferredWindow()
+  // without a label check, and several same-kind pools fall back to the
+  // tightest — both paths would let a scoped/model pool (Claude Fable-only
+  // weekly, Cursor Grok Bot, an Antigravity per-model pool at 0%) look like the
+  // account gate it provably is not.
   function gatingWindow(provider, kind) {
     const windows = meteredWindows(provider, kind).filter((window) => window.additional !== true);
-    if (windows.length === 0) return null;
-    if (windows.length > 1) return preferredWindow(provider, kind);
-    return canonicalWindowLabels(kind).has(String(windows[0].label || '').trim().toLowerCase())
-      ? windows[0]
-      : null;
+    return windows.find((window) => canonicalWindowLabels(kind).has(String(window.label || '').trim().toLowerCase()))
+      || null;
   }
 
   function compactLimitSelection(provider) {
@@ -252,7 +253,17 @@
     const primaryWindow = session || daily || weekly || billing;
     if (!primaryWindow) return null;
     const secondaryWindow = session ? (daily || weekly) : daily ? weekly : null;
-    const metered = meteredWindows(provider);
+    // Severity scans every window that can show a meter — including pools the
+    // headline excludes: Codex additional_rate_limits (filtered out of
+    // meteredWindows for headline purposes), scoped/model pools, and money
+    // windows. The gate is about the account verdict; the warn colour is about
+    // the tightest pool, and a drained additional pool deserves the early
+    // warning even though it cannot gate.
+    const metered = (provider?.windows || []).filter((window) => (
+      window
+      && window.showMeter !== false
+      && remainingPercent(window, provider) !== null
+    ));
     // An empty pool gates the account no matter which window the headline
     // would otherwise print: a full session bar beside a monthly quota at 0%
     // still means unusable. Any metered window counts, not just the primary and
@@ -271,10 +282,10 @@
       .map((kind) => gatingWindow(provider, kind))
       .filter((window) => window && !window.metric && window !== spend)
       .find((window) => remainingPercent(window, provider) === 0) || null;
-    // The tightest metered pool, whatever its kind. The headline does not
-    // report this — a 100% session beside a 9% weekly still reads 100% — but a
-    // warn-colour surface needs it so an almost-gated account can flag before
-    // the headline flips to 0%.
+    // The tightest metered pool, whatever its kind and including additional
+    // pools. The headline does not report this — a 100% session beside a 9%
+    // weekly still reads 100% — but a warn-colour surface needs it so an
+    // almost-gated account can flag before the headline flips to 0%.
     const tightestPercent = metered.reduce((low, window) => {
       const remaining = remainingPercent(window, provider);
       return remaining === null ? low : (low === null || remaining < low ? remaining : low);
@@ -303,14 +314,9 @@
       const candidates = [selection.primaryWindow, selection.secondaryWindow].filter(Boolean);
       const selectedWindow = requestedKind
         ? preferredWindow(selection.providerRecord, requestedKind)
-        // An exhausted canonical quota gates the account even when it sits
-        // outside the primary/secondary pair (monthly billing is never a
-        // candidate), so the default pick reports 0% the same way the dock
-        // rail does. Kind-pinned picks stay on their own pool: a user who
-        // pinned the weekly bar asked for the weekly number, not a verdict.
-        : selection.exhaustedWindow || candidates.reduce((pick, window) => (
-          !pick || remainingPercent(window, provider) < remainingPercent(pick, provider) ? window : pick
-        ), null);
+        : candidates.reduce((pick, window) => (
+            !pick || remainingPercent(window, provider) < remainingPercent(pick, provider) ? window : pick
+          ), null);
       if (!selectedWindow) continue;
       const remaining = remainingPercent(selectedWindow, provider);
       if (!worst || remaining < worst.remaining) worst = { ...selection, selectedWindow, remaining };

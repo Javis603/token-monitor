@@ -1409,6 +1409,34 @@ test('the rail headline reports the pool that gates the account, not just the se
   assert.equal(cells5c[0].remainingPercent, 50);
   assert.equal(cells5c[0].severityPercent, 0);
 
+  // Several same-kind pools with no canonical sibling can also hide a scoped
+  // 0%: per-model pools (Antigravity's Gemini/Claude weeklies) have no
+  // aggregate, and the tightest one must not be read as the account gate.
+  const modelPools = provider('antigravity', {
+    windows: [
+      { kind: 'session', label: 'Gemini', remainingPercent: 80 },
+      { kind: 'weekly', label: 'Gemini Pro', remainingPercent: 72 },
+      { kind: 'weekly', label: 'Gemini Flash', remainingPercent: 0 },
+      { kind: 'weekly', label: 'Claude', remainingPercent: 35 }
+    ]
+  });
+  const cells5d = buildEdgeDockCells({ limits: { providers: [modelPools] } }, { limitProviders: 'antigravity' });
+  assert.equal(cells5d[0].remainingPercent, 80);
+  assert.equal(cells5d[0].severityPercent, 0);
+
+  // Codex additional pools are invisible to the headline entirely, but the
+  // warn colour still sees a drained one — the same contract Factory's
+  // additional pools get.
+  const codexAdditional = provider('codex', {
+    windows: [
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 70 },
+      { kind: 'weekly', label: 'GPT reserve', remainingPercent: 0, additional: true }
+    ]
+  });
+  const cells5e = buildEdgeDockCells({ limits: { providers: [codexAdditional] } }, { limitProviders: 'codex' });
+  assert.equal(cells5e[0].remainingPercent, 70);
+  assert.equal(cells5e[0].severityPercent, 0);
+
   // A hub older than the spend metric strips it but keeps the window, so the
   // same money figure arrives unlabeled. It must still not read as an
   // exhausted quota — identity, not the metric flag, is what excludes it.
