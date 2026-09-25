@@ -9,6 +9,7 @@ const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv, PARSE_LOCAL_CLIENTS } = require('./clientTracking');
+const { simpleHostSourceRoots } = require('./clientSourceRegistration');
 const {
   CLIENT_HEALTH_VERSION,
   MAX_DIAGNOSTICS_PER_CLIENT,
@@ -1811,7 +1812,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // every platform (clients.rs PathRoot::Home). The Factory desktop app is an
   // Electron shell over the same bundled droid kernel and keeps no session data
   // of its own, so this one root covers both.
-  add('droid', ['droid-sessions', path.join(home, '.factory', 'sessions')]);
+  add('droid', ...simpleHostSourceRoots('droid', home));
   // Tokscale resolves these two caches differently and the split is deliberate
   // upstream, so mirror it rather than picking whichever looks tidier:
   //   cursor.rs      — `home_dir().join(".config/tokscale/cursor-cache")`, a
@@ -1836,7 +1837,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['kimi-code-sessions', kimiCodeRoot],
     ...kimiWorkRoots.map((root) => ['kimi-code-sessions', root, null, true])
   );
-  add('qwen', ['qwen-projects', path.join(home, '.qwen', 'projects')]);
+  add('qwen', ...simpleHostSourceRoots('qwen', home));
   const grokHome = nonBlankEnvPath('GROK_HOME', path.join(home, '.grok'));
   add(
     'grok',
@@ -1873,8 +1874,8 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // PI_CODING_AGENT_DIR too, but so does Pi — which is exactly why Tokscale
   // keeps its root fixed and ignores that variable for `omp`; mirror that here
   // rather than inventing an env override the scan does not honor.
-  add('pi', ['pi-sessions', path.join(home, '.pi', 'agent', 'sessions')]);
-  add('omp', ['omp-sessions', path.join(home, '.omp', 'agent', 'sessions')]);
+  add('pi', ...simpleHostSourceRoots('pi', home));
+  add('omp', ...simpleHostSourceRoots('omp', home));
   // Zed: tokscale reads the XdgData root on every platform AND the native macOS
   // (Application Support) / Windows (LOCALAPPDATA) roots (see tokscale scanner.rs
   // cfg(macos)/cfg(windows) blocks) — watch all three so native mac/win users get
@@ -1896,7 +1897,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['kilocode-tasks', path.join(home, '.config', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')],
     ['kilocode-tasks', path.join(home, '.vscode-server', 'data', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')]
   );
-  add('commandcode', ['commandcode-projects', path.join(home, '.commandcode', 'projects')]);
+  add('commandcode', ...simpleHostSourceRoots('commandcode', home));
   // MiMo: tokscale 4.8.0 unions the XDG data dir with orca's hook-sandbox
   // copy (scanner.rs `discover_micode_dbs_in_dirs`), and that copy can hold
   // sessions the XDG one is missing. Watch both so an orca-driven install still
