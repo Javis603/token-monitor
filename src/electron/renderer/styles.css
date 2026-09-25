@@ -3599,73 +3599,14 @@ html.is-windows .settings-panel select option {
   -webkit-mask-size: contain;    mask-size: contain;
   -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
 }
-.row-icon-claude     { -webkit-mask-image: url(../../../assets/icons/claude.svg);        mask-image: url(../../../assets/icons/claude.svg); }
-.row-icon-codex      { -webkit-mask-image: url(../../../assets/icons/codex.svg);         mask-image: url(../../../assets/icons/codex.svg); }
-.row-icon-hermes     { -webkit-mask-image: url(../../../assets/icons/hermes-agent.svg);  mask-image: url(../../../assets/icons/hermes-agent.svg); }
-.row-icon-gemini     { -webkit-mask-image: url(../../../assets/icons/gemini.svg);        mask-image: url(../../../assets/icons/gemini.svg); }
-.row-icon-cursor     { -webkit-mask-image: url(../../../assets/icons/cursor.svg);        mask-image: url(../../../assets/icons/cursor.svg); }
-.row-icon-antigravity { -webkit-mask-image: url(../../../assets/icons/antigravity.svg);   mask-image: url(../../../assets/icons/antigravity.svg); }
-.row-icon-cline      { -webkit-mask-image: url(../../../assets/icons/cline.svg);         mask-image: url(../../../assets/icons/cline.svg); }
-.row-icon-amp        { -webkit-mask-image: url(../../../assets/icons/amp.svg);           mask-image: url(../../../assets/icons/amp.svg); }
-.row-icon-droid      { -webkit-mask-image: url(../../../assets/icons/droid.svg);         mask-image: url(../../../assets/icons/droid.svg); }
-.row-icon-factory    { -webkit-mask-image: url(../../../assets/icons/droid.svg);         mask-image: url(../../../assets/icons/droid.svg); }
-.row-icon-kimi       { -webkit-mask-image: url(../../../assets/icons/kimi.svg);          mask-image: url(../../../assets/icons/kimi.svg); }
-.row-icon-grok       { -webkit-mask-image: url(../../../assets/icons/xai.svg);           mask-image: url(../../../assets/icons/xai.svg); }
-.row-icon-copilot    { -webkit-mask-image: url(../../../assets/icons/copilot.svg);       mask-image: url(../../../assets/icons/copilot.svg); }
-.row-icon-gcmp       { -webkit-mask-image: url(../../../assets/icons/gcmp.svg);          mask-image: url(../../../assets/icons/gcmp.svg); }
-/* Oh My Pi's mark is its own artwork. Rows paint it through a mask, so the row shows a single-ink silhouette and the tray keeps the gradient. The .row-icon-<id> rule is the mapping, not the filename (see AGENTS.md). */
-.row-icon-pi         { -webkit-mask-image: url(../../../assets/icons/pi.svg);            mask-image: url(../../../assets/icons/pi.svg); }
-.row-icon-omp        { -webkit-mask-image: url(../../../assets/icons/omp.svg);            mask-image: url(../../../assets/icons/omp.svg); }
-.row-icon-zed        { -webkit-mask-image: url(../../../assets/icons/zed.svg);           mask-image: url(../../../assets/icons/zed.svg); }
-.row-icon-typesafe   { -webkit-mask-image: url(../../../assets/icons/typesafe.svg);      mask-image: url(../../../assets/icons/typesafe.svg); }
-.row-icon-kilo       { -webkit-mask-image: url(../../../assets/icons/kilo.svg);          mask-image: url(../../../assets/icons/kilo.svg); }
-.row-icon-commandcode { -webkit-mask-image: url(../../../assets/icons/commandcode.svg);   mask-image: url(../../../assets/icons/commandcode.svg); }
-.row-icon-zcode      { -webkit-mask-image: url(../../../assets/icons/zai.svg);          mask-image: url(../../../assets/icons/zai.svg); }
-.row-icon-kiro       { -webkit-mask-image: url(../../../assets/icons/kiro.svg);          mask-image: url(../../../assets/icons/kiro.svg); }
-.row-icon-codebuddy  { -webkit-mask-image: url(../../../assets/icons/codebuddy.svg);     mask-image: url(../../../assets/icons/codebuddy.svg); }
-.row-icon-workbuddy  { -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);     mask-image: url(../../../assets/icons/workbuddy.svg); }
-.row-icon-proma      { -webkit-mask-image: url(../../../assets/icons/proma.svg);         mask-image: url(../../../assets/icons/proma.svg); }
-.row-icon-reasonix   { -webkit-mask-image: url(../../../assets/icons/reasonix.svg);      mask-image: url(../../../assets/icons/reasonix.svg); }
-.row-icon-dsh        { -webkit-mask-image: url(../../../assets/icons/dsh.svg);            mask-image: url(../../../assets/icons/dsh.svg); }
-.row-icon-cherrystudio { -webkit-mask-image: url(../../../assets/icons/cherrystudio.svg); mask-image: url(../../../assets/icons/cherrystudio.svg); }
-.row-icon-lmstudio  { -webkit-mask-image: url(../../../assets/icons/lmstudio.svg);      mask-image: url(../../../assets/icons/lmstudio.svg); }
-.row-icon-unsloth   { -webkit-mask-image: url(../../../assets/icons/unsloth.svg);       mask-image: url(../../../assets/icons/unsloth.svg); }
-.row-icon-devin     { -webkit-mask-image: url(../../../assets/icons/devin.svg);         mask-image: url(../../../assets/icons/devin.svg); }
-.row-icon-opencode   { -webkit-mask-image: url(../../../assets/icons/opencode.svg);      mask-image: url(../../../assets/icons/opencode.svg); }
-.row-icon-openrouter { -webkit-mask-image: url(../../../assets/icons/openrouter.svg);    mask-image: url(../../../assets/icons/openrouter.svg); }
-.row-icon-openclaw   { -webkit-mask-image: url(../../../assets/icons/openclaw.svg);      mask-image: url(../../../assets/icons/openclaw.svg); }
-.row-icon-deepseek   { -webkit-mask-image: url(../../../assets/icons/deepseek.svg);      mask-image: url(../../../assets/icons/deepseek.svg); }
-.row-icon-hunyuan    { -webkit-mask-image: url(../../../assets/icons/hunyuan.svg);       mask-image: url(../../../assets/icons/hunyuan.svg); }
-.row-icon-xai        { -webkit-mask-image: url(../../../assets/icons/grok.svg);          mask-image: url(../../../assets/icons/grok.svg); }
-.row-icon-meta       { -webkit-mask-image: url(../../../assets/icons/meta.svg);          mask-image: url(../../../assets/icons/meta.svg); }
-.row-icon-mistral    { -webkit-mask-image: url(../../../assets/icons/mistral.svg);       mask-image: url(../../../assets/icons/mistral.svg); }
-.row-icon-qwen       { -webkit-mask-image: url(../../../assets/icons/qwen.svg);          mask-image: url(../../../assets/icons/qwen.svg); }
-.row-icon-moonshot   { -webkit-mask-image: url(../../../assets/icons/moonshot.svg);      mask-image: url(../../../assets/icons/moonshot.svg); }
-.row-icon-zai        { -webkit-mask-image: url(../../../assets/icons/zai.svg);           mask-image: url(../../../assets/icons/zai.svg); }
-.row-icon-zaiteam    { -webkit-mask-image: url(../../../assets/icons/zai.svg);           mask-image: url(../../../assets/icons/zai.svg); }
-.row-icon-cohere     { -webkit-mask-image: url(../../../assets/icons/cohere.svg);        mask-image: url(../../../assets/icons/cohere.svg); }
-.row-icon-xiaomi,
-.row-icon-mimo       { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);        mask-image: url(../../../assets/icons/xiaomi.svg); }
-.row-icon-minimax    { -webkit-mask-image: url(../../../assets/icons/minimax.svg);       mask-image: url(../../../assets/icons/minimax.svg); }
-.row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
-.row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
-.row-icon-alibaba    { -webkit-mask-image: url(../../../assets/icons/alibaba.svg);       mask-image: url(../../../assets/icons/alibaba.svg); }
-.row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
-.row-icon-trae       { -webkit-mask-image: url(../../../assets/icons/trae.svg);          mask-image: url(../../../assets/icons/trae.svg); }
-.row-icon-qodercn    { -webkit-mask-image: url(../../../assets/icons/qodercn.svg);      mask-image: url(../../../assets/icons/qodercn.svg); }
-.row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
-.row-icon-thirdparty { -webkit-mask-image: url(../../../assets/icons/thirdparty.svg);      mask-image: url(../../../assets/icons/thirdparty.svg); }
-.row-icon-nvidia    { -webkit-mask-image: url(../../../assets/icons/nvidia.svg);        mask-image: url(../../../assets/icons/nvidia.svg); }
-.row-icon-stepfun   { -webkit-mask-image: url(../../../assets/icons/stepfun.svg);       mask-image: url(../../../assets/icons/stepfun.svg); }
-.row-icon-newapi    { -webkit-mask-image: url(../../../assets/icons/newapi.svg);           mask-image: url(../../../assets/icons/newapi.svg); }
-.row-icon-sub2api   { -webkit-mask-image: url(../../../assets/icons/sub2api.svg);          mask-image: url(../../../assets/icons/sub2api.svg); }
+/* Vendor marks (.row-icon-<id>) are installed by rowIconMasks.js from src/shared/vendorPresentation.js. Only masks that are not vendor marks live here. */
 .row-icon-token-monitor { -webkit-mask-image: url(../../../assets/icons/token-monitor.svg); mask-image: url(../../../assets/icons/token-monitor.svg); }
 .row-icon-os-apple   { -webkit-mask-image: url(../../../assets/icons/os-apple.svg);      mask-image: url(../../../assets/icons/os-apple.svg); }
 .row-icon-os-linux   { -webkit-mask-image: url(../../../assets/icons/os-linux.svg);      mask-image: url(../../../assets/icons/os-linux.svg); }
 .row-icon-os-windows { -webkit-mask-image: url(../../../assets/icons/os-windows.svg);    mask-image: url(../../../assets/icons/os-windows.svg); }
-/* The Limits list mark. Sizing only: the mask itself comes from the shared
-   .row-icon-<id> table below, which every id in limitMarksWithIcon already has
-   a rule in. */
+/* The Limits list mark. Sizing only: the mask itself comes from the same
+   .row-icon-<id> rules a breakdown row uses, installed from the vendor table
+   that limitMarksWithIcon is derived from. */
 .limit-icon {
   display: inline-block;
   flex: 0 0 auto;

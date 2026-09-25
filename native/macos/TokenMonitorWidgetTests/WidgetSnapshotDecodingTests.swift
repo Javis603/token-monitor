@@ -329,11 +329,52 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         )
     }
 
-    func testWidgetToolLabelsMatchTheDesktopCatalogForXiaomiMiMo() {
-        XCTAssertEqual(WidgetFormat.provider("mimo"), "Xiaomi MiMo")
-        // Pre-rename tracked-client id: pinned so the legacy case is not tidied
-        // away while snapshots written by older builds can still be rendered.
-        XCTAssertEqual(WidgetFormat.provider("micode"), "Xiaomi MiMo")
+    func testToolRowsAndVendorStylesComeFromTheSnapshot() throws {
+        let snapshot = try decode("""
+        {
+          "schemaVersion":10,
+          "generatedAt":"2026-07-17T09:00:00Z",
+          "periods":{"day":{"tools":[{"id":"mimo","displayName":"Xiaomi MiMo","totalTokens":5,"costUsd":0,"sharePercent":100}]}},
+          "vendors":{
+            "default":{"color":"#6ab4f0"},
+            "mimo":{"ink":true,"icon":"xiaomi"},
+            "doubao":{"color":"#5064FF"},
+            "factory":{"ink":true,"icon":"droid"}
+          },
+          "status":{"isStale":false}
+        }
+        """)
+
+        XCTAssertEqual(snapshot.tools.first?.displayName, "Xiaomi MiMo")
+        let palette = WidgetVendorPalette(styles: snapshot.vendors)
+        XCTAssertEqual(palette.iconName(for: "mimo"), "xiaomi")
+        XCTAssertEqual(palette.iconName(for: "factory"), "droid")
+        XCTAssertEqual(palette.iconName(for: "claude"), "claude")
+        XCTAssertEqual(palette.ink(for: "mimo"), .adaptive)
+        XCTAssertEqual(palette.ink(for: "doubao"), .hex("#5064FF"))
+        XCTAssertEqual(palette.ink(for: "unlisted"), .hex("#6ab4f0"))
+    }
+
+    func testSnapshotWithoutPaletteOrToolNamesStillDecodes() throws {
+        // What an app build from before the vendor palette writes: same schema,
+        // no `vendors`, no tool displayName. It must render, not wait for data.
+        let snapshot = try decode("""
+        {"schemaVersion":10,"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{"tools":[{"id":"codebuddy","totalTokens":5,"costUsd":0,"sharePercent":100}]}},"status":{"isStale":false}}
+        """)
+
+        XCTAssertNil(snapshot.tools.first?.displayName)
+        XCTAssertEqual(snapshot.vendors, [:])
+        XCTAssertEqual(WidgetVendorPalette(styles: snapshot.vendors).ink(for: "codebuddy"), .hex("#6AB4F0"))
+        XCTAssertEqual(WidgetVendorPalette(styles: snapshot.vendors).iconName(for: "codebuddy"), "codebuddy")
+    }
+
+    func testMalformedVendorPaletteKeepsTheSnapshot() throws {
+        let snapshot = try decode("""
+        {"schemaVersion":10,"generatedAt":"2026-07-17T09:00:00Z","periods":{"day":{}},"vendors":["not","a","map"],"status":{"isStale":false}}
+        """)
+
+        XCTAssertEqual(snapshot.vendors, [:])
+        XCTAssertEqual(WidgetVendorPalette(styles: snapshot.vendors).ink(for: "claude"), .hex("#6AB4F0"))
     }
 
     func testStatusMappingNeverExposesInternalEnums() {

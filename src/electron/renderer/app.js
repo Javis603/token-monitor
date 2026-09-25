@@ -22,18 +22,13 @@ const statsRenderSchedulerApi = window.TokenMonitorStatsRenderScheduler;
 const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-const clientsWithIcon = new Set([
-  'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline', 'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'gcmp', 'pi', 'omp', 'zed', 'kilo', 'commandcode', 'mimo', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth', 'devin',
-  'gemini', 'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan', 'nvidia', 'stepfun'
-]);
-// Limits rows mark more ids than there are tracked clients: every provider, plus
-// relay ids that only ever appear as a limits row and have no catalog entry.
-// Derived rather than listed, because a provider whose id is missing here is
-// drawn as a bare dot — a defect nothing about adding a provider points at. The
-// mask rule behind each id is asserted from the same catalog in
-// limitProviderPresentationCoverage.test.js, which is what makes deriving safe:
-// an id in this set with no rule paints a solid square instead.
-const limitMarksWithIcon = new Set([...clientsWithIcon, ...LIMIT_PROVIDER_IDS, 'newapi', 'sub2api']);
+const vendorPresentationApi = window.TokenMonitorVendorPresentation;
+// Marks come from the vendor presentation table, which is also what installs
+// the .row-icon-<id> masks, so a listed id always has a mask behind it. Usage
+// rows (clients, sessions, models) carry the coloured vendors; Limits rows can
+// also show the marks that have no colour of their own (Factory, the relays).
+const clientsWithIcon = new Set(vendorPresentationApi.VENDOR_IDS);
+const limitMarksWithIcon = new Set(vendorPresentationApi.MARK_IDS);
 
 function osIconFor(platform) {
   const prefix = String(platform || '').toLowerCase().split('-')[0];

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { rendererStyles } = require('../helpers/rendererStyles');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 const compactTokenApi = require('../../src/shared/compactTokens');
@@ -1021,7 +1022,7 @@ test('Grok renders its single Monthly billing window full-width instead of an em
 
 test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with a Limits icon', () => {
   const renderProviderWindows = viewBody('renderProviderWindows');
-  const css = readRendererFile('styles.css');
+  const css = rendererStyles();
 
   assert.match(renderProviderWindows, /provider\.provider === 'zed'/);
   assert.match(renderProviderWindows, /windowsForKind\(provider, 'billing'\)/);

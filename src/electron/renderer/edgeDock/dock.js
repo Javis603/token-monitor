@@ -209,8 +209,9 @@ function clientLabel(id) {
   return CLIENT_LABELS[id] || LIMIT_PROVIDER_LABELS[id] || id;
 }
 
-// Whether styles.css defines a mask for `.row-icon-<id>`. Probed rather than
-// listed so the dock can never drift from the icon table it borrows.
+// Whether `.row-icon-<id>` has a mask — a vendor mark installed by
+// rowIconMasks.js, or one of the few styles.css keeps (token-monitor). Probed
+// rather than listed so the dock can never drift from the rules it borrows.
 function hasMask(id) {
   if (maskSupport.has(id)) return maskSupport.get(id);
   const probe = el('span', `row-icon-${id}`);

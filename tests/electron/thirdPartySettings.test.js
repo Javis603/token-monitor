@@ -9,13 +9,14 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..', '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 const { VENDOR_LABELS, VENDOR_ORDER } = require('../../src/electron/renderer/themePresets');
+const { rendererStyles } = require('../helpers/rendererStyles');
 const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
 
 test('third-party settings separate presets, scope, and safe custom mappings', () => {
   const html = read('src/electron/renderer/index.html');
   const app = read('src/electron/renderer/app.js');
   const preload = read('src/electron/preload.js');
-  const styles = read('src/electron/renderer/styles.css');
+  const styles = rendererStyles();
 
   assert.match(html, /id="thirdpartyAccountGroup"/);
   assert.match(html, /id="thirdpartyProfileList"/);
@@ -128,8 +129,8 @@ test('third-party Limits presentation uses compact scope labels and a details to
   const i18n = read('src/electron/renderer/i18n.js');
   const presentation = read('src/electron/renderer/limitProviderPresentation.js');
   const balanceDisplay = read('src/shared/limitBalanceDisplay.js');
-  const styles = read('src/electron/renderer/styles.css');
-  const colors = read('src/electron/renderer/usageCharts.js');
+  const styles = rendererStyles();
+  const { clientColors } = require('../../src/electron/renderer/usageCharts');
 
   assert.equal(LIMIT_PROVIDER_LABELS.thirdparty, 'Third-party APIs');
   assert.match(read('src/electron/renderer/limitWindowsView.js'), /provider\.provider === 'thirdparty'/);
@@ -183,7 +184,7 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.doesNotMatch(styles, /customapi\.svg/);
   assert.match(presentation, /custom: \{ color: '#8A96A8', markId: 'thirdparty' \}/);
   assert.doesNotMatch(app, /mark\.style\.color/);
-  assert.match(colors, /thirdparty: '#8090A6'/);
+  assert.equal(clientColors.thirdparty, '#8090A6');
 });
 
 test('third-party money formatting preserves supported custom units', () => {
@@ -258,7 +259,7 @@ test('third-party group icon represents a shared adapter family', () => {
 
 test('third-party profile rows keep metadata on line two and rename on line one', () => {
   const html = read('src/electron/renderer/index.html');
-  const styles = read('src/electron/renderer/styles.css');
+  const styles = rendererStyles();
   const app = read('src/electron/renderer/app.js');
 
   assert.match(html, /id="thirdpartyProfileList" class="opencode-profile-list thirdparty-profile-list"/);
@@ -315,14 +316,9 @@ test('third-party fallback stays last after named providers across product surfa
   const html = read('src/electron/renderer/index.html');
   assert.ok(html.indexOf('id="thirdpartyAccountGroup"') > html.indexOf('id="copilotAccountGroup"'));
 
-  const app = read('src/electron/renderer/app.js');
   const providerOrder = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
   assert.ok(providerOrder.indexOf('thirdparty') > providerOrder.indexOf('ollama'));
-  const iconProviders = app.slice(
-    app.indexOf('const clientsWithIcon = new Set(['),
-    app.indexOf('function osIconFor')
-  );
-  assert.ok(iconProviders.lastIndexOf("'thirdparty'") > iconProviders.lastIndexOf("'ollama'"));
+  // clientsWithIcon is VENDOR_ORDER now, so this covers the icon set too.
   assert.equal(VENDOR_ORDER.at(-1), 'thirdparty');
   assert.ok(
     Object.keys(VENDOR_LABELS).indexOf('thirdparty') > Object.keys(VENDOR_LABELS).indexOf('ollama')
