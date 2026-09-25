@@ -83,7 +83,7 @@ A failed usage reconfiguration rolls back to the last-known-good runtime and ret
 - **Precedence** for agent and standalone Hub options with a CLI flag is `CLI flag → env (real or .env) → built-in default`; env-only settings have no CLI layer. There is no JSON config file.
 - **Widget storage** splits by sensitivity: `userData/settings.json` holds preferences and account metadata, `userData/credentials.json` holds raw GUI-managed credentials. The credential store is deliberately plaintext with POSIX `0600` (Windows relies on the `userData` ACL) rather than Keychain, to avoid OS prompts; it does not protect against processes running as the same user. The agent and standalone Hub never read it.
 - **Renderer redaction** is default-deny: raw credentials reach the renderer only through an explicit allowlist (currently the two Hub secrets the sync UI needs).
-- **New credentials** go in `CREDENTIAL_SETTING_PATHS` (`src/shared/credentialStore.js`), or a nested path in the same store for dynamic accounts — never a provider-specific store.
+- **New credentials** are declared as a field `storePath` in the provider's `src/shared/providers/<id>/account.js`; `CREDENTIAL_SETTING_PATHS` derives from those declarations, so a literal entry added to `credentialStore.js` would bypass the refresh-scope keys and renderer projection. Dynamic accounts use a nested path in the same store — never a provider-specific store.
 - **Migration** writes and verifies the new store before stripping the old source. Corrupt, unknown-version or symlinked stores are never replaced with an empty document.
 
 ## Data flow contract

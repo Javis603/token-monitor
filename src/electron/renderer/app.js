@@ -10254,7 +10254,9 @@ function setupLimitAccountPanels() {
       },
       onSave: async ({ id, field, validation }, value, clearInput) => {
         try {
-          markExternalProviderCheckPending(id);
+          // Mark pending only once the credential is going to be saved: marking
+          // drops the provider's current record, and a rejected key must leave
+          // the linked account's status on screen.
           if (validation) {
             const result = await window.tokenMonitor.limits.validateCredential(id, value);
             if (!result?.ok) {
@@ -10263,6 +10265,7 @@ function setupLimitAccountPanels() {
               throw error;
             }
           }
+          markExternalProviderCheckPending(id);
           await saveSettings(validation ? { [field]: value } : {
             [field]: value,
             limitProviders: limitProviderSelectionIncluding(id),
@@ -10275,7 +10278,7 @@ function setupLimitAccountPanels() {
           renderExternalProviderStatus(id);
         } catch (error) {
           clearExternalProviderCheckPending(id);
-          if (validation && error.validationStatus) renderExternalProviderStatus(id);
+          renderExternalProviderStatus(id);
           throw error;
         }
       }

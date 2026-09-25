@@ -59,6 +59,17 @@ test('the limits registry matches the catalog, binds each fetcher and keeps acco
   }
 });
 
+test('loading the account index or the credential store does not load any provider limits module', () => {
+  const { execFileSync } = require('node:child_process');
+  const loaded = JSON.parse(execFileSync(process.execPath, ['-e', `
+    require(${JSON.stringify(path.join(ROOT, 'src', 'shared', 'credentialStore.js'))});
+    process.stdout.write(JSON.stringify(Object.keys(require.cache)));
+  `], { encoding: 'utf8' }));
+  const limitsModules = loaded.filter((file) => /[\\/]providers[\\/][^\\/]+[\\/]limits\.js$/.test(file));
+  assert.ok(loaded.some((file) => file.endsWith(path.join('limits', 'accounts.js'))), 'credentialStore reads the account index');
+  assert.deepEqual(limitsModules, []);
+});
+
 test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)', () => {
   assert.deepEqual(CREDENTIAL_SETTING_PATHS, {
     hubHostSecret: ['hub', 'hostSecret'],

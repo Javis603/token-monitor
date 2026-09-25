@@ -14,36 +14,11 @@
 
 const { LIMIT_PROVIDER_ACCOUNTS } = require('./accounts');
 
-const LIMIT_PROVIDER_MODULES = Object.freeze({
-  claude: require('../providers/claude/limits'),
-  codex: require('../providers/codex/limits'),
-  opencode: require('../providers/opencode/limits'),
-  cursor: require('../providers/cursor/limits'),
-  antigravity: require('../providers/antigravity/limits'),
-  cline: require('../providers/cline/limits'),
-  factory: require('../providers/factory/limits'),
-  kimi: require('../providers/kimi/limits'),
-  grok: require('../providers/grok/limits'),
-  copilot: require('../providers/copilot/limits'),
-  zed: require('../providers/zed/limits'),
-  commandcode: require('../providers/commandcode/limits'),
-  mimo: require('../providers/mimo/limits'),
-  zai: require('../providers/zai/limits'),
-  zaiteam: require('../providers/zaiteam/limits'),
-  kiro: require('../providers/kiro/limits'),
-  workbuddy: require('../providers/workbuddy/limits'),
-  qoder: require('../providers/qoder/limits'),
-  deepseek: require('../providers/deepseek/limits'),
-  devin: require('../providers/devin/limits'),
-  typesafe: require('../providers/typesafe/limits'),
-  openrouter: require('../providers/openrouter/limits'),
-  minimax: require('../providers/minimax/limits'),
-  volcengine: require('../providers/volcengine/limits'),
-  ollama: require('../providers/ollama/limits'),
-  trae: require('../providers/trae/limits'),
-  alibaba: require('../providers/alibaba/limits'),
-  thirdparty: require('../providers/thirdparty/limits')
-});
+// Each accounts.js entry carries a lazy loader for its limits module; binding
+// evaluates it here, so the provider id is written once, in accounts.js.
+const LIMIT_PROVIDER_MODULES = Object.freeze(Object.fromEntries(
+  LIMIT_PROVIDER_ACCOUNTS.map((decl) => [decl.id, decl.loadLimits()])
+));
 
 // Trims surrounding whitespace and one layer of surrounding quotes — the
 // normalizer for pasted secrets that have no provider-specific shape.

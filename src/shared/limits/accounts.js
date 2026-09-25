@@ -6,7 +6,7 @@
 // require anything, because credentialStore derives its store paths from this
 // index and providers/<id>/limits.js is allowed to require credentialStore
 // (factory does). Provider behaviour that needs the limits module (resolvers,
-// discovery, status) is declared here as data or as functions that receive the
+// discovery, status) is declared there as data or as functions that receive the
 // bound module; src/shared/limits/registry.js does the binding.
 //
 // Declaration shape:
@@ -82,35 +82,44 @@
 //     pathPrefixes: ['/settings'],   // optional; absent ⇒ any path
 //     exactPaths: ['/x'] }           // optional, checked alongside prefixes
 
+// A provider registers here and nowhere else: its account leaf, plus a lazy
+// loader for its limits module. The loader stays unevaluated until
+// src/shared/limits/registry.js binds it, so credentialStore (which reads this
+// index) never pulls in provider probes — factory/limits.js requires
+// credentialStore, and an eager require here would be a cycle.
+function registerProvider(account, loadLimits) {
+  return { ...account, loadLimits };
+}
+
 const LIMIT_PROVIDER_ACCOUNTS = Object.freeze([
-  require('../providers/claude/account'),
-  require('../providers/codex/account'),
-  require('../providers/opencode/account'),
-  require('../providers/cursor/account'),
-  require('../providers/antigravity/account'),
-  require('../providers/cline/account'),
-  require('../providers/factory/account'),
-  require('../providers/kimi/account'),
-  require('../providers/grok/account'),
-  require('../providers/copilot/account'),
-  require('../providers/zed/account'),
-  require('../providers/commandcode/account'),
-  require('../providers/mimo/account'),
-  require('../providers/zai/account'),
-  require('../providers/zaiteam/account'),
-  require('../providers/kiro/account'),
-  require('../providers/workbuddy/account'),
-  require('../providers/qoder/account'),
-  require('../providers/deepseek/account'),
-  require('../providers/devin/account'),
-  require('../providers/typesafe/account'),
-  require('../providers/openrouter/account'),
-  require('../providers/minimax/account'),
-  require('../providers/volcengine/account'),
-  require('../providers/ollama/account'),
-  require('../providers/trae/account'),
-  require('../providers/alibaba/account'),
-  require('../providers/thirdparty/account')
+  registerProvider(require('../providers/claude/account'), () => require('../providers/claude/limits')),
+  registerProvider(require('../providers/codex/account'), () => require('../providers/codex/limits')),
+  registerProvider(require('../providers/opencode/account'), () => require('../providers/opencode/limits')),
+  registerProvider(require('../providers/cursor/account'), () => require('../providers/cursor/limits')),
+  registerProvider(require('../providers/antigravity/account'), () => require('../providers/antigravity/limits')),
+  registerProvider(require('../providers/cline/account'), () => require('../providers/cline/limits')),
+  registerProvider(require('../providers/factory/account'), () => require('../providers/factory/limits')),
+  registerProvider(require('../providers/kimi/account'), () => require('../providers/kimi/limits')),
+  registerProvider(require('../providers/grok/account'), () => require('../providers/grok/limits')),
+  registerProvider(require('../providers/copilot/account'), () => require('../providers/copilot/limits')),
+  registerProvider(require('../providers/zed/account'), () => require('../providers/zed/limits')),
+  registerProvider(require('../providers/commandcode/account'), () => require('../providers/commandcode/limits')),
+  registerProvider(require('../providers/mimo/account'), () => require('../providers/mimo/limits')),
+  registerProvider(require('../providers/zai/account'), () => require('../providers/zai/limits')),
+  registerProvider(require('../providers/zaiteam/account'), () => require('../providers/zaiteam/limits')),
+  registerProvider(require('../providers/kiro/account'), () => require('../providers/kiro/limits')),
+  registerProvider(require('../providers/workbuddy/account'), () => require('../providers/workbuddy/limits')),
+  registerProvider(require('../providers/qoder/account'), () => require('../providers/qoder/limits')),
+  registerProvider(require('../providers/deepseek/account'), () => require('../providers/deepseek/limits')),
+  registerProvider(require('../providers/devin/account'), () => require('../providers/devin/limits')),
+  registerProvider(require('../providers/typesafe/account'), () => require('../providers/typesafe/limits')),
+  registerProvider(require('../providers/openrouter/account'), () => require('../providers/openrouter/limits')),
+  registerProvider(require('../providers/minimax/account'), () => require('../providers/minimax/limits')),
+  registerProvider(require('../providers/volcengine/account'), () => require('../providers/volcengine/limits')),
+  registerProvider(require('../providers/ollama/account'), () => require('../providers/ollama/limits')),
+  registerProvider(require('../providers/trae/account'), () => require('../providers/trae/limits')),
+  registerProvider(require('../providers/alibaba/account'), () => require('../providers/alibaba/limits')),
+  registerProvider(require('../providers/thirdparty/account'), () => require('../providers/thirdparty/limits'))
 ].map((decl) => Object.freeze({
   ...decl,
   fields: Object.freeze((decl.fields || []).map((field) => Object.freeze(field)))
