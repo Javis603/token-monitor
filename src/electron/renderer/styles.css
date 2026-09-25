@@ -100,9 +100,15 @@ input, textarea, [contenteditable="true"] {
   background-size: cover;
   opacity: var(--glass-alpha);
 }
-/* Keep the selected image for transparent mode without covering AppKit glass. */
+/* Keep the AppKit material visible through the selected image. Its opacity is
+   intentionally independent of the app glass slider; macOS owns the material. */
 html.native-liquid-glass .shell.has-custom-background::before,
-html.native-material-opaque .shell.has-custom-background::before {
+body.native-liquid-glass .shell.has-custom-background::before {
+  background-image: var(--custom-background-image);
+  opacity: 0.28;
+}
+html.native-material-opaque .shell.has-custom-background::before,
+html.native-reduced-transparency .shell.has-custom-background::before {
   display: none;
 }
 .background-image-actions {

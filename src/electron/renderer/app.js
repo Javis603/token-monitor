@@ -6734,9 +6734,11 @@ function syncBackgroundImageStatus() {
     els.backgroundImageStatus.textContent = t(backgroundImageError
       ? 'settings.appearance.backgroundImageError'
       : backgroundImageActive
-        ? (glassRenderingApi.usesNativeMaterial(nativeMaterialState)
-          ? 'settings.appearance.backgroundImageNativeHidden'
-          : 'settings.appearance.backgroundImageActive')
+        ? (nativeMaterialState.reducedTransparency || nativeMaterialState.type === 'opaque'
+          ? 'settings.appearance.backgroundImageAccessibilityHidden'
+          : nativeMaterialState.type === 'liquid-glass'
+            ? 'settings.appearance.backgroundImageNativeOverlay'
+            : 'settings.appearance.backgroundImageActive')
         : 'settings.appearance.backgroundImageNone');
   }
   els.clearBackgroundImageButton?.classList.toggle('hidden', !backgroundImageActive);
