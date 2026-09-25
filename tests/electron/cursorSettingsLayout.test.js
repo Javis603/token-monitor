@@ -743,27 +743,45 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.doesNotMatch(renderLimits, /codexSwitchPopoverRenderPending/);
 });
 
-test('DeepSeek account panel provides a first-class API key entry', () => {
+test('DeepSeek and MiniMax API key panels come from the generic account form', () => {
   const html = readRendererFile('index.html');
-  const details = html.match(/<div id="deepseekSettingsDetails"[\s\S]*?<div id="deepseekErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
-  assert.match(details, /<button id="deepseekOpenBrowser"[\s\S]*data-i18n="settings\.deepseek\.openBrowser">/);
-  assert.match(details, /<button id="deepseekLogoutButton" class="hidden" data-i18n="settings\.deepseek\.clearApiKey">/);
-  assert.match(details, /<input id="deepseekApiKeyInput" type="password"[\s\S]*data-i18n-placeholder="settings\.deepseek\.apiKeyPlaceholder"/);
-  assert.match(details, /<button id="deepseekApiKeySubmit"[\s\S]*data-i18n="settings\.deepseek\.saveApiKey">/);
+  const css = readRendererFile('styles.css');
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const forms = limitAccountFormsForRenderer();
+  for (const id of ['deepseek', 'minimax']) {
+    assert.doesNotMatch(html, new RegExp(`id="${id}(AccountGroup|ManualPanel|ApiKeyInput)"`), id);
+    assert.doesNotMatch(css, new RegExp(`#${id}ManualPanel`), id);
+    const form = forms.find((candidate) => candidate.id === id);
+    assert.equal(form.kind, 'singleCredential', id);
+    assert.equal(form.field, `${id}ApiKey`, id);
+    assert.equal(form.input, 'input', id);
+    assert.equal(form.noteKey, `settings.${id}.note`, id);
+    assert.deepEqual(form.status, {
+      configuredKey: `${id}ApiKeyConfigured`,
+      sourceKey: `${id}ApiKeySource`,
+      pendingKey: `${id}PendingCheckSince`
+    }, id);
+    for (const key of ['titleKey', 'openKey', 'clearKey', 'placeholderKey', 'saveKey', 'emptyKey', 'failedKey']) {
+      assert.match(form[key], new RegExp(`^settings\\.${id}\\.`), `${id} ${key}`);
+    }
+  }
+  assert.equal(forms.find(({ id }) => id === 'deepseek').url, 'https://platform.deepseek.com/api_keys');
 
+  // MiniMax keeps landing on the region its last successful poll resolved to;
+  // the panel hands the whole form to onOpen so the renderer can make that call.
   const app = readRendererFile('app.js');
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/platform\.deepseek\.com\/api_keys'\)/);
-  assert.match(setupBody, /saveSettings\(\{ deepseekApiKey: input\.value \}\)/);
-  assert.match(setupBody, /saveSettings\(\{ deepseekApiKey: '' \}\)/);
-  assert.match(setupBody, /refreshStats\(\{ force: true \}\)/);
-  const renderBody = functionBody(app, 'renderDeepseekStatus', 'renderOpenCodeProfiles');
-  assert.match(renderBody, /const openBtn = document\.getElementById\('deepseekOpenBrowser'\);/);
-  assert.match(renderBody, /const linked = deepseekAccountLinked\(\);/);
-  assert.match(renderBody, /manualPanel\.classList\.toggle\('hidden', linked\)/);
-  assert.match(renderBody, /openBtn\.classList\.toggle\('hidden', linked\)/);
-  assert.match(renderBody, /logoutBtn\.classList\.toggle\('hidden', !linked \|\| source !== 'settings'\)/);
-  assert.match(renderBody, /refreshBtn\.classList\.toggle\('hidden', !configured\)/);
+  const panel = readRendererFile('limits/accountPanels.js');
+  assert.match(panel, /open\.addEventListener\('click', \(\) => onOpen\(form\)\)/);
+  assert.match(app, /form\.id === 'minimax' \? minimaxPlatformUrl\(\) : form\.url/);
+  const minimaxUrlBody = functionBody(app, 'minimaxPlatformUrl', 'kimiPlatformUrl');
+  assert.match(minimaxUrlBody, /const provider = externalProviderForAccount\('minimax'\);/);
+  assert.match(minimaxUrlBody, /https:\/\/platform\.minimax\.io\/user-center\/payment\/token-plan/);
+  assert.match(minimaxUrlBody, /https:\/\/platform\.minimaxi\.com\/user-center\/payment\/token-plan/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  for (const host of ['platform.minimax.io', 'platform.minimaxi.com']) {
+    assert.equal(limitProviderUrlAllowed(host, '/user-center/payment/token-plan'), true, host);
+  }
+  assert.doesNotMatch(app, /render(Deepseek|Minimax)Status|set(Deepseek|Minimax)AccountExpanded|(deepseek|minimax)AccountLinked/);
 });
 
 test('API key account entries share styling and Copilot uses the folded token entry', () => {
@@ -785,7 +803,7 @@ test('API key account entries share styling and Copilot uses the folded token en
   const barePanels = [...html.matchAll(/<div id="([a-zA-Z]+ManualPanel)"([^>]*)>/g)]
     .filter(([, , attributes]) => !/opencode-add-form/.test(attributes))
     .map(([, id]) => id);
-  assert.ok(barePanels.length > 10, 'the manual panels should be found in index.html');
+  assert.ok(barePanels.includes('claudeManualPanel'), 'the manual panels should be found in index.html');
   for (const id of barePanels) {
     assert.ok(
       animationBody.includes(`'#${id}'`),
@@ -798,23 +816,23 @@ test('API key account entries share styling and Copilot uses the folded token en
   // Each provider's error line starts hidden. Hiding itself is the stylesheet's
   // one blanket rule, so what is worth asserting here is that every provider has
   // such a line and that none of them ship visible.
-  for (const provider of ['deepseek', 'devin', 'minimax', 'zai', 'zaiteam', 'volcengine', 'qoder', 'trae', 'ollama', 'kimi', 'copilot']) {
+  for (const provider of ['devin', 'zai', 'zaiteam', 'volcengine', 'qoder', 'trae', 'ollama', 'kimi', 'copilot']) {
     assert.match(html, new RegExp(`id="${provider}ErrorMessage"[^>]*class="[^"]*hidden"`), provider);
   }
-  assert.match(css, /#kimiManualPanel,\n#copilotManualPanel,\n.single-credential-manual-panel,\n#mimoManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#qoderManualPanel,\n#devinManualPanel,\n#deepseekManualPanel,\n#minimaxManualPanel,\n#volcengineManualPanel,\n#ollamaManualPanel,\n#traeManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#kimiManualPanel > \.accordion-animation-inner,\n.single-credential-manual-panel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#devinManualPanel > \.accordion-animation-inner,\n#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#alibabaManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#kimiManualPanel,\n#copilotManualPanel,\n.single-credential-manual-panel,\n#mimoManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#qoderManualPanel,\n#devinManualPanel,\n#volcengineManualPanel,\n#ollamaManualPanel,\n#traeManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#kimiManualPanel > \.accordion-animation-inner,\n.single-credential-manual-panel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#devinManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#alibabaManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
   {
     const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes(".single-credential-manual-panel input") && match[2].includes("font-size: 12px;"));
     assert.ok(rule, 'shared credential input style should exist');
-    for (const selector of [".single-credential-manual-panel input","#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", ".single-credential-manual-panel textarea", "#mimoManualPanel input", "#mimoManualPanel textarea", "#zaiManualPanel input", "#zaiApiRegionInput", "#zaiteamManualPanel input", "#qoderManualPanel textarea", "#qoderManualPanel select", "#deepseekManualPanel input", "#minimaxManualPanel input", "#volcengineManualPanel input", "#ollamaManualPanel textarea", "#traeManualPanel input", "#alibabaManualPanel textarea", "#alibabaManualPanel select"]) {
+    for (const selector of [".single-credential-manual-panel input","#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", ".single-credential-manual-panel textarea", "#mimoManualPanel input", "#mimoManualPanel textarea", "#zaiManualPanel input", "#zaiApiRegionInput", "#zaiteamManualPanel input", "#qoderManualPanel textarea", "#qoderManualPanel select", "#volcengineManualPanel input", "#ollamaManualPanel textarea", "#traeManualPanel input", "#alibabaManualPanel textarea", "#alibabaManualPanel select"]) {
       assert.ok(rule[1].split(',').map((value) => value.trim()).includes(selector), selector);
     }
   }
   {
     const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes(".single-credential-manual-panel input") && match[2].includes("font-family: monospace;"));
     assert.ok(rule, 'shared credential input style should exist');
-    for (const selector of [".single-credential-manual-panel input","#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", ".single-credential-manual-panel textarea", "#mimoManualPanel input", "#mimoManualPanel textarea", "#zaiManualPanel input", "#zaiteamManualPanel input", "#qoderManualPanel textarea", "#deepseekManualPanel input", "#minimaxManualPanel input", "#volcengineManualPanel input", "#ollamaManualPanel textarea", "#traeManualPanel input"]) {
+    for (const selector of [".single-credential-manual-panel input","#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", ".single-credential-manual-panel textarea", "#mimoManualPanel input", "#mimoManualPanel textarea", "#zaiManualPanel input", "#zaiteamManualPanel input", "#qoderManualPanel textarea", "#volcengineManualPanel input", "#ollamaManualPanel textarea", "#traeManualPanel input"]) {
       assert.ok(rule[1].split(',').map((value) => value.trim()).includes(selector), selector);
     }
   }
@@ -851,7 +869,7 @@ test('Copilot account panel provides GitHub sign-in plus manual token fallback',
   assert.match(setupBody, /saveSettings\(\{ copilotApiToken: input\.value \}\)/);
   assert.match(setupBody, /saveSettings\(\{ copilotApiToken: '' \}\)/);
 
-  const renderBody = functionBody(app, 'renderCopilotStatus', 'renderDeepseekStatus');
+  const renderBody = functionBody(app, 'renderCopilotStatus', 'renderOpenCodeProfiles');
   assert.match(renderBody, /cancelBtn\.classList\.toggle\('hidden', !state\.copilotSignInBusy \|\| !state\.copilotSignInCancelable \|\| linked\)/);
   assert.match(renderBody, /refreshBtn\.classList\.toggle\('hidden', !configured \|\| \(state\.copilotSignInBusy && !linked\)\)/);
   assert.match(renderBody, /errorEl\.textContent = state\.copilotErrorMessage \|\| '';/);
@@ -1154,7 +1172,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   assert.doesNotMatch(setupBody, /saveSettings\(\{\s*claudeWebCookie: input\.value/);
   assert.match(setupBody, /saveSettings\(\{ claudeWebCookie: '' \}\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(claudePlatformUrl\(\)\)/);
-  const statusBody = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
+  const statusBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
   assert.match(statusBody, /const canClearConfiguredCredential = source === 'settings' && configured;/);
   assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked\)/);
   assert.match(statusBody, /logoutBtn\.classList\.toggle\('hidden', !canClearConfiguredCredential\)/);
@@ -1193,90 +1211,56 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   assert.equal(limitProviderUrlAllowed('claude.ai', '/'), false);
 });
 
-test('DeepSeek account pill keeps its validated API key state after moving into Limits', () => {
+test('DeepSeek and MiniMax key changes invalidate stale provider status before re-checking', () => {
   const app = readRendererFile('app.js');
-  assert.match(app, /deepseek: 'deepseekAccountGroup'/);
-  assert.match(app, /deepseek: 'deepseekApiKeyStatus'/);
+  // Their pills and groups are generated from the form id, so the hand-kept id
+  // maps no longer name them.
+  assert.doesNotMatch(app, /deepseek: 'deepseek(AccountGroup|ApiKeyStatus)'/);
+  assert.doesNotMatch(app, /minimax: 'minimax(AccountGroup|ApiKeyStatus)'/);
+  assert.match(app, /deepseekPendingCheckSince: 0/);
+  assert.match(app, /minimaxPendingCheckSince: 0/);
 
-  const linkedBody = functionBody(app, 'deepseekAccountLinked', 'deepseekProviderStatus');
-  assert.match(linkedBody, /Boolean\(state\.settings\?\.deepseekApiKeyConfigured\)/);
-  assert.match(linkedBody, /deepseekProviderForAccount\(\)/);
-  assert.match(linkedBody, /provider\?\.status === 'ok'/);
+  const panelsBody = functionBody(app, 'setupLimitAccountPanels', 'limitProviderAccountGroup');
+  assert.match(panelsBody, /markExternalProviderCheckPending\(id\);[\s\S]*await saveSettings\([\s\S]*?\);[\s\S]*renderExternalProviderStatus\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
+  assert.match(panelsBody, /await saveSettings\(\{ \[field\]: '' \}\);[\s\S]*clearExternalProviderCheckPending\(id\);[\s\S]*clearExternalProviderPendingStatus\(id\);[\s\S]*renderExternalProviderStatus\(id\);/);
 
-  const renderBody = functionBody(app, 'renderDeepseekStatus', 'renderOpenCodeProfiles');
-  assert.match(renderBody, /const configured = Boolean\(state\.settings\?\.deepseekApiKeyConfigured\);/);
-  assert.match(renderBody, /apiKeyAccountStatusText\('deepseek', provider, configured, source, enabled\)/);
-});
+  const configLookup = /const config = externalLimitAccountConfig\[providerName\] \|\| limitAccountForm\(providerName\)\?\.status;/;
+  const pendingBody = functionBody(app, 'markExternalProviderCheckPending', 'clearExternalProviderCheckPending');
+  assert.match(pendingBody, configLookup);
+  assert.match(pendingBody, /state\[config\.pendingKey\] = Date\.now\(\);/);
+  assert.match(pendingBody, /clearExternalProviderPendingStatus\(providerName\);/);
 
-test('DeepSeek key changes invalidate stale provider status before re-checking', () => {
-  const app = readRendererFile('app.js');
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /markDeepseekKeyCheckPending\(\);[\s\S]*await saveSettings\(\{ deepseekApiKey: input\.value \}\);[\s\S]*renderDeepseekStatus\(\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
-  assert.match(setupBody, /await saveSettings\(\{ deepseekApiKey: '' \}\);[\s\S]*clearDeepseekPendingCheck\(\);[\s\S]*clearDeepseekProviderStatus\(\);[\s\S]*renderDeepseekStatus\(\);/);
-
-  const pendingBody = functionBody(app, 'markDeepseekKeyCheckPending', 'clearDeepseekPendingCheck');
-  assert.match(pendingBody, /state\.deepseekPendingCheckSince = Date\.now\(\);/);
-  assert.match(pendingBody, /clearDeepseekProviderStatus\(\);/);
-
-  const providerBody = functionBody(app, 'deepseekProviderForAccount', 'markDeepseekKeyCheckPending');
-  assert.match(providerBody, /const pendingSince = Number\(state\.deepseekPendingCheckSince \|\| 0\);/);
+  const providerBody = functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked');
+  assert.match(providerBody, configLookup);
   assert.match(providerBody, /Date\.parse\(provider\.updatedAt \|\| ''\)/);
   assert.match(providerBody, /updatedAt < pendingSince/);
-  assert.match(providerBody, /state\.deepseekPendingCheckSince = 0;/);
+  assert.match(providerBody, /state\[config\.pendingKey\] = 0;/);
 
-  const clearBody = functionBody(app, 'clearDeepseekProviderStatus', 'renderDeepseekStatus');
+  const linkedBody = functionBody(app, 'externalProviderAccountLinked', 'markExternalProviderCheckPending');
+  assert.match(linkedBody, /state\.settings\?\.\[config\.configuredKey\]/);
+  assert.match(linkedBody, /provider\?\.status === 'ok'/);
+
+  const clearBody = functionBody(app, 'clearExternalProviderPendingStatus', 'nextCopilotSignInFlowId');
   assert.match(clearBody, /state\.stats\.limits\.providers = state\.stats\.limits\.providers\.filter/);
-  assert.match(clearBody, /provider\.provider !== 'deepseek'/);
+  assert.match(clearBody, /provider\.provider !== providerName/);
 });
 
 test('disabled credential providers settle account status instead of checking forever', () => {
   const app = readRendererFile('app.js');
   const toggleBody = functionBody(app, 'onLimitProviderToggle', 'onLimitProviderMove');
   const clearBody = functionBody(app, 'clearDisabledLimitProviderPendingChecks', 'externalProviderForAccount');
-  const externalRenderBody = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
-  const deepseekRenderBody = functionBody(app, 'renderDeepseekStatus', 'renderOpenCodeProfiles');
-  const minimaxRenderBody = functionBody(app, 'renderMinimaxStatus', 'renderCopilotStatus');
-  const copilotRenderBody = functionBody(app, 'renderCopilotStatus', 'renderDeepseekStatus');
+  const externalRenderBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
+  const copilotRenderBody = functionBody(app, 'renderCopilotStatus', 'renderOpenCodeProfiles');
 
   assert.match(toggleBody, /clearDisabledLimitProviderPendingChecks\(new Set\(checked\)\)/);
-  assert.match(clearBody, /clearDeepseekPendingCheck\(\)/);
-  assert.match(clearBody, /clearMinimaxPendingCheck\(\)/);
   assert.match(clearBody, /clearCopilotPendingCheck\(\)/);
   assert.match(clearBody, /Object\.keys\(externalLimitAccountConfig\)/);
+  assert.match(clearBody, /\(state\.settings\?\.limitAccountForms \|\| \[\]\)\.map\(\(form\) => form\.id\)/);
   assert.match(clearBody, /clearExternalProviderCheckPending\(providerName\)/);
   assert.match(externalRenderBody, /const enabled = limitProviderEnabled\(providerName\);/);
   assert.match(externalRenderBody, /const pending = enabled &&/);
   assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, provider, configured, source, enabled\)/);
-  assert.match(deepseekRenderBody, /apiKeyAccountStatusText\('deepseek', provider, configured, source, enabled\)/);
-  assert.match(minimaxRenderBody, /apiKeyAccountStatusText\('minimax', provider, configured, source, enabled\)/);
   assert.match(copilotRenderBody, /copilotAccountStatusText\(provider, configured, source, enabled\)/);
-});
-
-test('MiniMax key changes invalidate stale provider status before re-checking', () => {
-  const app = readRendererFile('app.js');
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /markMinimaxKeyCheckPending\(\);[\s\S]*await saveSettings\(\{ minimaxApiKey: input\.value \}\);[\s\S]*renderMinimaxStatus\(\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
-  assert.match(setupBody, /await saveSettings\(\{ minimaxApiKey: '' \}\);[\s\S]*clearMinimaxPendingCheck\(\);[\s\S]*clearMinimaxProviderStatus\(\);[\s\S]*renderMinimaxStatus\(\);/);
-
-  const linkedBody = functionBody(app, 'minimaxAccountLinked', 'apiKeyAccountStatusText');
-  assert.match(linkedBody, /minimaxProviderForAccount\(\)/);
-
-  const renderBody = functionBody(app, 'renderMinimaxStatus', 'renderDeepseekStatus');
-  assert.match(renderBody, /const provider = minimaxProviderForAccount\(\);/);
-
-  const pendingBody = functionBody(app, 'markMinimaxKeyCheckPending', 'clearMinimaxPendingCheck');
-  assert.match(pendingBody, /state\.minimaxPendingCheckSince = Date\.now\(\);/);
-  assert.match(pendingBody, /clearMinimaxProviderStatus\(\);/);
-
-  const providerBody = functionBody(app, 'minimaxProviderForAccount', 'markMinimaxKeyCheckPending');
-  assert.match(providerBody, /const pendingSince = Number\(state\.minimaxPendingCheckSince \|\| 0\);/);
-  assert.match(providerBody, /Date\.parse\(provider\.updatedAt \|\| ''\)/);
-  assert.match(providerBody, /updatedAt < pendingSince/);
-  assert.match(providerBody, /state\.minimaxPendingCheckSince = 0;/);
-
-  const clearBody = functionBody(app, 'clearMinimaxProviderStatus', 'apiKeyAccountStatusText');
-  assert.match(clearBody, /state\.stats\.limits\.providers = state\.stats\.limits\.providers\.filter/);
-  assert.match(clearBody, /provider\.provider !== 'minimax'/);
 });
 
 test('MiMo account panel matches the manual Cookie provider layout', () => {
@@ -1331,9 +1315,9 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
 });
 
 test('DeepSeek account copy says browser and external URL is allowlisted', () => {
-  const html = readRendererFile('index.html');
-  const details = html.match(/<div id="deepseekSettingsDetails"[\s\S]*?<div id="deepseekErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
-  assert.match(details, /<button id="deepseekOpenBrowser"[\s\S]*data-i18n="settings\.deepseek\.openBrowser">/);
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'deepseek');
+  assert.equal(form.openKey, 'settings.deepseek.openBrowser');
 
   const i18n = readRendererFile('i18n.js');
   assert.match(i18n, /'settings\.deepseek\.openBrowser': 'Open DeepSeek API keys in browser'/);
@@ -1346,10 +1330,7 @@ test('DeepSeek account copy says browser and external URL is allowlisted', () =>
   const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
   assert.equal(limitProviderUrlAllowed('platform.deepseek.com', '/api_keys'), true);
   assert.equal(limitProviderUrlAllowed('platform.deepseek.com', '/'), false);
-
-  const app = readRendererFile('app.js');
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/platform\.deepseek\.com\/api_keys'\)/);
+  assert.equal(form.url, 'https://platform.deepseek.com/api_keys');
 });
 
 test('Devin account panel uses the shared status label and opens the allowlisted usage page', () => {

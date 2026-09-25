@@ -72,7 +72,7 @@ function createSingleCredentialPanel(form, { document, translate, onToggle, onOp
   group.append(toggle, details);
 
   toggle.addEventListener('click', () => onToggle(form));
-  open.addEventListener('click', () => onOpen(form.url));
+  open.addEventListener('click', () => onOpen(form));
   clear.addEventListener('click', () => onClear(form));
   refresh.addEventListener('click', () => onRefresh(form));
   let saving = false;

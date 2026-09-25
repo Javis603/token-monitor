@@ -74,10 +74,8 @@ const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
   zai: 'zaiAccountGroup',
   zaiteam: 'zaiteamAccountGroup',
   qoder: 'qoderAccountGroup',
-  deepseek: 'deepseekAccountGroup',
   devin: 'devinAccountGroup',
   openrouter: 'openrouterAccountGroup',
-  minimax: 'minimaxAccountGroup',
   volcengine: 'volcengineAccountGroup',
   ollama: 'ollamaAccountGroup',
   trae: 'traeAccountGroup',
@@ -96,10 +94,8 @@ const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
   zai: 'zaiAccountStatus',
   zaiteam: 'zaiteamAccountStatus',
   qoder: 'qoderAccountStatus',
-  deepseek: 'deepseekApiKeyStatus',
   devin: 'devinAccountStatus',
   openrouter: 'openrouterStatus',
-  minimax: 'minimaxApiKeyStatus',
   volcengine: 'volcengineAccountStatus',
   ollama: 'ollamaAccountStatus',
   trae: 'traeAccountStatus',
@@ -8068,8 +8064,6 @@ function syncSettingsForm() {
   els.blurInput.value = String(state.settings.glassBlur ?? 32);
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
   syncSliderRows();
-  renderDeepseekStatus();
-  renderMinimaxStatus();
   renderExternalProviderStatus('claude');
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
@@ -10238,7 +10232,11 @@ function setupLimitAccountPanels() {
       document,
       translate: t,
       onToggle: ({ id }) => setExternalAccountExpanded(id, !state[`${id}AccountExpanded`]),
-      onOpen: (url) => window.tokenMonitor.openExternal(url),
+      // A provider with regional hosts resolves the landing page at click time
+      // from its last poll; everyone else opens the form's allowlisted URL.
+      onOpen: (form) => window.tokenMonitor.openExternal(
+        form.id === 'minimax' ? minimaxPlatformUrl() : form.url
+      ),
       onRefresh: () => refreshStats({ force: true }),
       onClear: async ({ id, field }) => {
         await saveSettings({ [field]: '' });
@@ -11819,8 +11817,6 @@ function renderStatsUpdate() {
   renderWslPanel();
   updateOpenRouterProfilesStatus();
   updateThirdPartyProfilesStatus();
-  renderDeepseekStatus();
-  renderMinimaxStatus();
   renderExternalProviderStatus('claude');
   renderExternalProviderStatus('zai');
   renderExternalProviderStatus('zaiteam');
@@ -13239,9 +13235,6 @@ function setThirdPartyAdapterFields() {
   }
 }
 
-function setDeepseekAccountExpanded(expanded) {
-  setAccountGroupExpanded('deepseek', expanded, 'deepseekAccountExpanded');
-}
 
 function setMimoAccountExpanded(expanded) {
   setAccountGroupExpanded('mimo', expanded, 'mimoAccountExpanded');
@@ -13448,39 +13441,6 @@ function localProviderStatuses(name) {
     ? localProviders
     : (state.stats?.limits?.providers || []);
   return providers.filter((provider) => provider.provider === name);
-}
-
-function deepseekAccountLinked() {
-  const provider = deepseekProviderForAccount();
-  return Boolean(state.settings?.deepseekApiKeyConfigured) && provider?.status === 'ok';
-}
-
-function deepseekProviderStatus() {
-  return localProviderStatus('deepseek');
-}
-
-function deepseekProviderForAccount() {
-  const provider = deepseekProviderStatus();
-  const pendingSince = Number(state.deepseekPendingCheckSince || 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state.deepseekPendingCheckSince = 0;
-  return provider;
-}
-
-function markDeepseekKeyCheckPending() {
-  state.deepseekPendingCheckSince = Date.now();
-  clearDeepseekProviderStatus();
-}
-
-function clearDeepseekPendingCheck() {
-  state.deepseekPendingCheckSince = 0;
-}
-
-function clearDeepseekProviderStatus() {
-  if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'deepseek');
 }
 
 function renderAntigravityStatus() {
@@ -13706,39 +13666,6 @@ function renderMimoStatus() {
   renderSettingsSummaries();
 }
 
-function minimaxProviderStatus() {
-  return localProviderStatus('minimax');
-}
-
-function minimaxAccountLinked() {
-  const provider = minimaxProviderForAccount();
-  return Boolean(state.settings?.minimaxApiKeyConfigured) && provider?.status === 'ok';
-}
-
-function minimaxProviderForAccount() {
-  const provider = minimaxProviderStatus();
-  const pendingSince = Number(state.minimaxPendingCheckSince || 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state.minimaxPendingCheckSince = 0;
-  return provider;
-}
-
-function markMinimaxKeyCheckPending() {
-  state.minimaxPendingCheckSince = Date.now();
-  clearMinimaxProviderStatus();
-}
-
-function clearMinimaxPendingCheck() {
-  state.minimaxPendingCheckSince = 0;
-}
-
-function clearMinimaxProviderStatus() {
-  if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'minimax');
-}
-
 function copilotProviderStatus() {
   return localProviderStatus('copilot');
 }
@@ -13826,8 +13753,6 @@ const externalLimitAccountConfig = {
 };
 
 function clearDisabledLimitProviderPendingChecks(enabledProviders) {
-  if (!enabledProviders.has('deepseek')) clearDeepseekPendingCheck();
-  if (!enabledProviders.has('minimax')) clearMinimaxPendingCheck();
   if (!enabledProviders.has('copilot')) clearCopilotPendingCheck();
   for (const providerName of [...Object.keys(externalLimitAccountConfig),
     ...(state.settings?.limitAccountForms || []).map((form) => form.id)]) {
@@ -13948,7 +13873,7 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
 // account lands on platform.minimax.io, not the CN landing page. Fall back
 // to the CN host until we've seen a successful poll.
 function minimaxPlatformUrl() {
-  const provider = minimaxProviderForAccount();
+  const provider = externalProviderForAccount('minimax');
   const region = provider && provider.region === 'en' ? 'en' : 'cn';
   return region === 'en'
     ? 'https://platform.minimax.io/user-center/payment/token-plan'
@@ -14172,42 +14097,6 @@ function setVolcengineAgentExpanded(expanded) {
   document.getElementById('volcengineAgentPanel')?.classList.toggle('expanded', next);
 }
 
-function setMinimaxAccountExpanded(expanded) {
-  const details = document.getElementById('minimaxSettingsDetails');
-  const toggle = document.getElementById('minimaxSettingsToggle');
-  if (!details || !toggle) return;
-  const next = Boolean(expanded);
-  state.minimaxAccountExpanded = next;
-  details.classList.toggle('hidden', !next);
-  toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-  limitProviderAccountGroup('minimax')?.classList.toggle('expanded', next);
-  syncLimitProviderAccountExpansion('minimax', next);
-}
-
-function renderMinimaxStatus() {
-  const statusEl = document.getElementById('minimaxApiKeyStatus');
-  const openBtn = document.getElementById('minimaxOpenBrowser');
-  const logoutBtn = document.getElementById('minimaxLogoutButton');
-  const refreshBtn = document.getElementById('minimaxRefreshButton');
-  const manualPanel = document.getElementById('minimaxManualPanel');
-  const errorEl = document.getElementById('minimaxErrorMessage');
-  if (!statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
-
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
-
-  const source = state.settings?.minimaxApiKeySource || '';
-  const provider = minimaxProviderForAccount();
-  const configured = Boolean(state.settings?.minimaxApiKeyConfigured);
-  const enabled = limitProviderEnabled('minimax');
-  const linked = minimaxAccountLinked();
-  setCursorStatusText(statusEl, apiKeyAccountStatusText('minimax', provider, configured, source, enabled));
-  manualPanel.classList.toggle('hidden', linked);
-  openBtn.classList.toggle('hidden', linked);
-  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
-  refreshBtn.classList.toggle('hidden', !configured);
-  renderSettingsSummaries();
-}
 
 function renderCopilotStatus() {
   const statusEl = document.getElementById('copilotApiTokenStatus');
@@ -14239,30 +14128,6 @@ function renderCopilotStatus() {
   renderSettingsSummaries();
 }
 
-function renderDeepseekStatus() {
-  const statusEl = document.getElementById('deepseekApiKeyStatus');
-  const openBtn = document.getElementById('deepseekOpenBrowser');
-  const logoutBtn = document.getElementById('deepseekLogoutButton');
-  const refreshBtn = document.getElementById('deepseekRefreshButton');
-  const manualPanel = document.getElementById('deepseekManualPanel');
-  const errorEl = document.getElementById('deepseekErrorMessage');
-  if (!statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
-
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
-
-  const source = state.settings?.deepseekApiKeySource || '';
-  const provider = deepseekProviderForAccount();
-  const configured = Boolean(state.settings?.deepseekApiKeyConfigured);
-  const enabled = limitProviderEnabled('deepseek');
-  const linked = deepseekAccountLinked();
-  setCursorStatusText(statusEl, apiKeyAccountStatusText('deepseek', provider, configured, source, enabled));
-  manualPanel.classList.toggle('hidden', linked);
-  openBtn.classList.toggle('hidden', linked);
-  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
-  refreshBtn.classList.toggle('hidden', !configured);
-  renderSettingsSummaries();
-}
 
 function renderOpenCodeProfiles() {
   if (!isSettingsSurfaceVisible()) return;
@@ -15976,102 +15841,6 @@ function setupCursorAccountUI() {
     });
   }
 
-  const deepseekToggle = document.getElementById('deepseekSettingsToggle');
-  if (deepseekToggle) {
-    deepseekToggle.addEventListener('click', () => setDeepseekAccountExpanded(!state.deepseekAccountExpanded));
-    setDeepseekAccountExpanded(false);
-    renderDeepseekStatus();
-
-    document.getElementById('deepseekOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://platform.deepseek.com/api_keys');
-    });
-
-    document.getElementById('deepseekLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ deepseekApiKey: '' });
-      clearDeepseekPendingCheck();
-      clearDeepseekProviderStatus();
-      renderDeepseekStatus();
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('deepseekRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('deepseekApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('deepseekApiKeyInput');
-      const errorEl = document.getElementById('deepseekErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.deepseek.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markDeepseekKeyCheckPending();
-        await saveSettings({ deepseekApiKey: input.value });
-        input.value = '';
-        renderDeepseekStatus();
-        await refreshStats({ force: true });
-        if (deepseekAccountLinked()) setDeepseekAccountExpanded(false);
-        else setDeepseekAccountExpanded(true);
-        renderDeepseekStatus();
-      } catch (err) {
-        clearDeepseekPendingCheck();
-        errorEl.textContent = t('settings.deepseek.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-  const minimaxToggle = document.getElementById('minimaxSettingsToggle');
-  if (minimaxToggle) {
-    minimaxToggle.addEventListener('click', () => setMinimaxAccountExpanded(!state.minimaxAccountExpanded));
-    setMinimaxAccountExpanded(false);
-    renderMinimaxStatus();
-
-    document.getElementById('minimaxOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(minimaxPlatformUrl());
-    });
-
-    document.getElementById('minimaxLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ minimaxApiKey: '' });
-      clearMinimaxPendingCheck();
-      clearMinimaxProviderStatus();
-      renderMinimaxStatus();
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('minimaxRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('minimaxApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('minimaxApiKeyInput');
-      const errorEl = document.getElementById('minimaxErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.minimax.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markMinimaxKeyCheckPending();
-        await saveSettings({ minimaxApiKey: input.value });
-        input.value = '';
-        renderMinimaxStatus();
-        await refreshStats({ force: true });
-        if (minimaxAccountLinked()) setMinimaxAccountExpanded(false);
-        else setMinimaxAccountExpanded(true);
-        renderMinimaxStatus();
-      } catch (err) {
-        clearMinimaxPendingCheck();
-        errorEl.textContent = t('settings.minimax.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-
   const zaiToggle = document.getElementById('zaiSettingsToggle');
   if (zaiToggle) {
     const zaiApiRegionInput = document.getElementById('zaiApiRegionInput');
@@ -17001,8 +16770,6 @@ function initSettingsAnimationWrappers() {
     '#zaiteamManualPanel',
     '#qoderManualPanel',
     '#devinManualPanel',
-    '#deepseekManualPanel',
-    '#minimaxManualPanel',
     '#volcengineManualPanel',
     '#ollamaManualPanel',
     '#traeManualPanel',

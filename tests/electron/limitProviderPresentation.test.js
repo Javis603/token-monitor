@@ -265,7 +265,7 @@ function viewTable(name) {
 
 function runLocalProviderStatus(source, state, providerName) {
   const localDeviceHelper = functionBody(source, 'localDeviceLimitsProviders', 'localProviderStatus');
-  const localProviderHelper = functionBody(source, 'localProviderStatus', 'deepseekAccountLinked');
+  const localProviderHelper = functionBody(source, 'localProviderStatus', 'renderAntigravityStatus');
   return vm.runInNewContext(
     `${localDeviceHelper}\n${localProviderHelper}\nlocalProviderStatus(${JSON.stringify(providerName)});`,
     { accountIdentityApi, state }
@@ -1848,27 +1848,21 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   // re-render them. Grok is automatic and belongs only to the generic provider
   // list, so it must not retain a separate account-card renderer.
   // Settings pushes route through syncSettingsForm (which init() also calls), so
-  // the two cards are re-rendered there and
-  // onSettingsPush itself does not duplicate the calls.
-  for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus']) {
-    assert.match(statsRender, new RegExp(`${fn}\\(\\);`), `${fn} missing from renderStatsUpdate`);
-    assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
-  }
+  // the cards are re-rendered there and onSettingsPush itself does not duplicate
+  // the calls.
   for (const provider of ['claude', 'zai', 'volcengine', 'qoder', 'trae', 'kimi', 'ollama']) {
     assert.match(statsRender, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
   }
   assert.match(statsRender, /for \(const form of state\.settings\?\.limitAccountForms \|\| \[\]\)/);
   assert.match(syncSettings, /for \(const form of state\.settings\?\.limitAccountForms \|\| \[\]\)/);
-  for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus']) {
-    assert.doesNotMatch(settingsPush, new RegExp(`${fn}\\(\\);`), `${fn} should not be duplicated in onSettingsPush (syncSettingsForm covers it)`);
-  }
+  assert.doesNotMatch(settingsPush, /renderExternalProviderStatus\(/, 'syncSettingsForm covers account cards; onSettingsPush should not duplicate them');
   assert.doesNotMatch(app, /renderGrokStatus|grokAccountLinked|grokAccountExpanded/);
 });
 
 test('saving Ollama credentials enables its provider and always settles validation', () => {
   const app = readRendererFile('app.js');
-  const renderExternalStatus = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
+  const renderExternalStatus = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
   const selection = functionBody(app, 'limitProviderSelectionIncluding', 'missingLimitProviderStatus');
   const setup = functionBody(app, 'setupCursorAccountUI', 'initSettingsAnimationWrappers');
   const ollamaSetup = setup.slice(
@@ -1906,7 +1900,7 @@ test('saving Ollama credentials enables its provider and always settles validati
 test('account validation reads the local device raw limits, not the collapsed aggregate', () => {
   const app = readRendererFile('app.js');
   const rawHelper = functionBody(app, 'localDeviceLimitsProviders', 'localProviderStatus');
-  const helper = functionBody(app, 'localProviderStatus', 'deepseekAccountLinked');
+  const helper = functionBody(app, 'localProviderStatus', 'renderAntigravityStatus');
   // Sync-mode aggregateLimits() collapses a local `unauthorized` row out in favor
   // of a remote `ok` (providerCollapseKey for deepseek/minimax/grok is just the
   // provider name; pickBetterProvider keeps the higher statusRank). So the account
@@ -1923,8 +1917,8 @@ test('account validation reads the local device raw limits, not the collapsed ag
   // Falls back to the aggregate only for legacy/non-aggregated stats that do
   // not expose raw device rows at all.
   assert.match(helper, /state\.stats\?\.limits\?\.providers/);
-  assert.match(functionBody(app, 'deepseekProviderStatus', 'deepseekProviderForAccount'), /return localProviderStatus\('deepseek'\);/);
-  assert.match(functionBody(app, 'minimaxProviderStatus', 'minimaxAccountLinked'), /return localProviderStatus\('minimax'\);/);
+  // DeepSeek and MiniMax reach it through the shared account-form lane.
+  assert.match(functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked'), /const provider = localProviderStatus\(providerName\);/);
 });
 
 test('account validation does not treat a sole remote synced device as local', () => {
@@ -2101,9 +2095,7 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
     ['mimo', 'mimoAccountGroup', 'mimoAccountStatus'],
     ['zai', 'zaiAccountGroup', 'zaiAccountStatus'],
     ['zaiteam', 'zaiteamAccountGroup', 'zaiteamAccountStatus'],
-    ['deepseek', 'deepseekAccountGroup', 'deepseekApiKeyStatus'],
     ['openrouter', 'openrouterAccountGroup', 'openrouterStatus'],
-    ['minimax', 'minimaxAccountGroup', 'minimaxApiKeyStatus'],
     ['volcengine', 'volcengineAccountGroup', 'volcengineAccountStatus'],
     ['qoder', 'qoderAccountGroup', 'qoderAccountStatus'],
     ['trae', 'traeAccountGroup', 'traeAccountStatus'],
@@ -2119,6 +2111,10 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
   }
   assert.match(html, /id="accountsSettingsDetails" class="hidden" aria-hidden="true"/);
   assert.doesNotMatch(html, /data-settings-section="accounts"/);
+  // Account-form providers have no static markup: their group and pill resolve
+  // by the generated `${id}AccountGroup` / `${id}AccountStatus` ids.
+  assert.match(functionBody(app, 'limitProviderAccountGroup', 'limitProviderAccountStatus'), /`\$\{providerId\}AccountGroup`/);
+  assert.match(functionBody(app, 'limitProviderAccountStatus', 'limitProviderConnectionDetail'), /`\$\{providerId\}AccountStatus`/);
 });
 
 test('provider rerenders preserve live account nodes and focused controls', () => {
@@ -2302,8 +2298,6 @@ test('dynamic account summaries are never reset by the static translation pass',
     'cursorAccountStatus',
     'opencodeCookieStatus',
     'openrouterStatus',
-    'deepseekApiKeyStatus',
-    'minimaxApiKeyStatus',
     'zaiAccountStatus',
     'zaiteamAccountStatus',
     'volcengineAccountStatus',
@@ -2321,6 +2315,10 @@ test('dynamic account summaries are never reset by the static translation pass',
     assert.ok(tag, `${id} should exist`);
     assert.doesNotMatch(tag, /data-i18n=/, `${id} is owned by its runtime status renderer`);
   }
+  // Generated account-form pills get their initial text directly, never a
+  // data-i18n key the translation pass would later write back over.
+  const panel = readRendererFile('limits/accountPanels.js');
+  assert.match(panel, /const status = element\('span', 'AccountStatus', 'cursor-status-pill'\);\n\s*status\.textContent = translate\(form\.emptyKey\);/);
 });
 
 test('provider toggles converge through the limits push without a forced refresh', () => {

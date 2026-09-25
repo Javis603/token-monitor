@@ -406,7 +406,7 @@ test('account projections redact secrets while preserving profile metadata and s
 
 test('the renderer receives serializable account forms but no credential declarations', () => {
   const forms = limitAccountFormsForRenderer();
-  assert.equal(forms.length, 5);
+  assert.equal(forms.length, 7);
   for (const candidate of forms) {
     assert.deepEqual(JSON.parse(JSON.stringify(candidate)), candidate);
     assert.equal(JSON.stringify(candidate).includes('storePath'), false);
@@ -477,11 +477,12 @@ test('static account statuses refresh in both paths while descriptor panels use 
 
 test('every provider with an account panel has its group and status markup in index.html', () => {
   const groupIds = evalTopLevel(appSource, 'const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {', '\nconst LIMIT_PROVIDER_ACCOUNT_STATUS_IDS');
-  // Not every catalog provider has a panel (grok, kiro and workbuddy take their
-  // credentials from the tool itself); the map is the list of those that do.
+  // Not every catalog provider has a hand-written panel: grok, kiro and workbuddy
+  // take their credentials from the tool itself, and the account-form providers
+  // get theirs generated. The map is the list of those whose markup is static.
   assert.deepEqual(
     LIMIT_PROVIDER_IDS.filter((provider) => !groupIds[provider]).sort(),
-    ['cline', 'commandcode', 'factory', 'grok', 'kiro', 'typesafe', 'workbuddy', 'zed']
+    ['cline', 'commandcode', 'deepseek', 'factory', 'grok', 'kiro', 'minimax', 'typesafe', 'workbuddy', 'zed']
   );
   for (const [provider, id] of Object.entries(groupIds)) {
     assert.ok(LIMIT_PROVIDER_IDS.includes(provider), `${provider} is a catalog id`);

@@ -139,7 +139,7 @@ test('provider registration and account layout order follows the catalog', () =>
   check([...html.matchAll(/^ {12}<div id="(\w+)(?:AccountGroup|CookieGroup)"/gm)]
     .map((match) => match[1]).filter((id) => canonical.includes(id)), 'HTML account groups');
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
-  assert.deepEqual(limitAccountFormsForRenderer().map((form) => form.id), ['cline', 'factory', 'zed', 'commandcode', 'typesafe']);
+  assert.deepEqual(limitAccountFormsForRenderer().map((form) => form.id), ['cline', 'factory', 'zed', 'commandcode', 'deepseek', 'typesafe', 'minimax']);
   const collector = read('src/shared/limits/collector.js');
   assert.match(collector, /\.\.\.LIMIT_PROVIDER_FETCHERS/);
 });
