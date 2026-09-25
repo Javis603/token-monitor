@@ -335,6 +335,28 @@ test('every source-root id the collector emits is in the allowlist', () => {
   }
 });
 
+test('shared home-relative directories retain exact source roots, checks and watch candidates', () => {
+  const homeDir = path.join(path.sep, 'tmp', 'source-home');
+  const clients = 'droid,qwen,pi,omp,commandcode';
+  const expected = {
+    droid: [{ id: 'droid-sessions', dir: path.join(homeDir, '.factory', 'sessions') }],
+    qwen: [{ id: 'qwen-projects', dir: path.join(homeDir, '.qwen', 'projects') }],
+    pi: [{ id: 'pi-sessions', dir: path.join(homeDir, '.pi', 'agent', 'sessions') }],
+    omp: [{ id: 'omp-sessions', dir: path.join(homeDir, '.omp', 'agent', 'sessions') }],
+    commandcode: [{ id: 'commandcode-projects', dir: path.join(homeDir, '.commandcode', 'projects') }]
+  };
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    const options = { homeDir, platform, env: {} };
+    assert.deepEqual(clientSourceRoots(clients, options), expected);
+    const candidates = clientWatchCandidates(clients, options);
+    for (const [client, roots] of Object.entries(expected)) {
+      assert.deepEqual(candidates[client], roots.map(({ dir }) => dir));
+      assert.deepEqual(clientSourceChecks(client, options)[client].map(({ id }) => id), roots.map(({ id }) => id));
+      for (const { id } of roots) assert.ok(CLIENT_SOURCE_CHECK_IDS.includes(id));
+    }
+  }
+});
+
 test('Claude source roots follow CLAUDE_CONFIG_DIR like tokscale', () => {
   const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
   const originalHomedir = os.homedir;

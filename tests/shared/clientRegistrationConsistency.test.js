@@ -23,6 +23,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const { KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
+const { SOURCE_MARKERS } = require('../../src/shared/clientSourceRegistration');
 const { WSL_DATA_MARKERS, MARKER_CLIENTS } = require('../../src/shared/wslUsage');
 
 const rootDir = path.join(__dirname, '..', '..');
@@ -89,6 +90,37 @@ test('every MARKER_CLIENTS attribution points at a real tracked-client id', () =
       `MARKER_CLIENTS['${marker}'] = '${clientId}', which is not a KNOWN_CLIENTS id`
     );
   }
+});
+
+test('source markers declare each WSL path once and preserve discovery order', () => {
+  assert.equal(new Set(SOURCE_MARKERS.map(({ marker }) => marker)).size, SOURCE_MARKERS.length);
+  assert.deepEqual(WSL_DATA_MARKERS, SOURCE_MARKERS.map(({ marker }) => marker));
+  assert.deepEqual(Object.entries(MARKER_CLIENTS), SOURCE_MARKERS.map(({ marker, client }) => [marker, client]));
+  assert.deepEqual(SOURCE_MARKERS.filter(({ hostCheckId }) => hostCheckId).map(({ client }) => client), [
+    'qwen', 'pi', 'omp', 'commandcode', 'droid'
+  ]);
+  assert.deepEqual(WSL_DATA_MARKERS, [
+    '.claude/projects', '.claude/transcripts', '.codex/sessions', '.local/share/opencode',
+    '.openclaw/agents', '.clawdbot/agents', '.moltbot/agents', '.moldbot/agents',
+    '.hermes', '.kimi/sessions', '.kimi-code/sessions', '.qwen/projects',
+    '.grok/sessions', '.copilot/otel', '.gemini/antigravity-cli/conversations',
+    '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks',
+    '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks',
+    '.local/share/amp/threads', '.pi/agent/sessions', '.omp/agent/sessions',
+    '.local/share/zed/threads/threads.db', '.local/share/kilo/kilo.db',
+    '.config/Code/User/globalStorage/kilocode.kilo-code/tasks',
+    '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks',
+    '.commandcode/projects', '.dsh/sessions', '.factory/sessions',
+    '.local/share/mimocode/mimocode.db', '.zcode/projects', '.zcode/cli/db',
+    '.kiro/sessions', '.local/share/kiro-cli/data.sqlite3',
+    '.config/Kiro/User/globalStorage/kiro.kiroagent',
+    '.config/kiro/User/globalStorage/kiro.kiroagent', '.codebuddy/projects',
+    '.workbuddy', '.workbuddy-ai', '.proma/agent-sessions',
+    '.lmstudio/server-logs', '.unsloth/studio/studio.db',
+    '.local/share/devin/cli/sessions.db', 'AppData/Roaming/devin/cli/sessions.db',
+    '.config/Devin/User/acp-events', '.config/devin/User/acp-events',
+    'AppData/Roaming/Devin/User/acp-events', 'Library/Application Support/Devin/User/acp-events'
+  ]);
 });
 
 // --- Discord Rich Presence client maps <-> the canonical client list ---------
