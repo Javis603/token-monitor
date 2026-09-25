@@ -105,7 +105,7 @@ test('the subscription usage comparison reads the scan, never a display-label ta
   // by construction, so no label table can be consulted even by accident. Read
   // from source because the answer is which accessor the function reads.
   const labelOnly = Object.keys(CLIENT_LABELS).filter((id) => !CLIENT_IDS.includes(id));
-  const view = fs.readFileSync(path.join(rootDir, 'src/electron/renderer/limitWindowsView.js'), 'utf8');
+  const view = fs.readFileSync(path.join(rootDir, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
   const body = view.match(/function subscriptionUsageCostUsd\([\s\S]*?\n {2}\}/);
   assert.ok(body, 'subscriptionUsageCostUsd should exist in the shared view');
   assert.doesNotMatch(

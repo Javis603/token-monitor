@@ -2,7 +2,7 @@
 
 (function exposeLimitBalanceDisplay(root, factory) {
   const api = factory(
-    typeof module === 'object' && module.exports ? require('./compactTokens') : root?.TokenMonitorCompactTokens
+    typeof module === 'object' && module.exports ? require('../compactTokens') : root?.TokenMonitorCompactTokens
   );
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorLimitBalanceDisplay = api;

@@ -72,7 +72,7 @@ That distinction is the whole point: an encrypted credential is not a signed-out
 | Billing request and response mapping | `src/shared/providers/workbuddy/limits.js` |
 | Widget lane configuration and reason plumbing | `src/electron/main.js`, `src/electron/runtimeConfig.js` |
 | Action hint bounds | `src/shared/limits/core.js`, generated `worker/src/shared/limits/core.js` |
-| Status label and localized strings | `src/electron/renderer/limitProviderPresentation.js`, `src/electron/renderer/i18n.js` |
+| Status label and localized strings | `src/electron/renderer/limits/providerPresentation.js`, `src/electron/renderer/i18n.js` |
 | Wire contract | `docs/API.md` |
 
 ## Verification checklist

@@ -1,6 +1,6 @@
 'use strict';
 
-const { createOutboundFetch, resolveProxyConfig } = require('../shared/outboundFetch');
+const { createOutboundFetch, resolveProxyConfig } = require('../../shared/outboundFetch');
 
 /**
  * Outbound transport for the widget's provider calls.

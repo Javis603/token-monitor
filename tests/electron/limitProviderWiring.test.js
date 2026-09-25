@@ -14,7 +14,7 @@ const vm = require('node:vm');
 
 const { CREDENTIAL_SETTING_PATHS, credentialSettingsForRenderer } = require('../../src/shared/credentialStore');
 const { LIMIT_PROVIDER_SETTING_KEYS, limitsConfigFromSettings } = require('../../src/electron/runtimeConfig');
-const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
+const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
 const { isAllowedVerificationUrl } = require('../../src/shared/providers/copilot/deviceFlow');
 const { isAllowedCodexLoginUrl } = require('../../src/shared/providers/codex/login');
 const { SERVICE_STATUS_PROVIDERS } = require('../../src/electron/serviceStatus');

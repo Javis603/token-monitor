@@ -36,7 +36,7 @@ test('data bars animate on the compositor instead of changing layout width', () 
   assert.doesNotMatch(css, /(?:\.bar-fill|\.limit-meter-fill)\s*\{[^}]*transition:\s*width/s);
   assert.match(app, /applyBarScale\(fill, width \/ 100\)/);
   // The limit meter moved to the shared Limits view with the rest of the rows.
-  assert.match(read('limitWindowsView.js'), /applyBarScale\(fill, safePercent \/ 100\)/);
+  assert.match(read('limits/windowsView.js'), /applyBarScale\(fill, safePercent \/ 100\)/);
   assert.match(app, /state\.animateBarsFromZero[\s\S]*?animateBarBetween\(fill, 0, safeScale, 0, 420\)/s);
   assert.match(applyBarScale, /animateBarBetween\(fill, 0, safeScale, 0, 420\)/);
 });

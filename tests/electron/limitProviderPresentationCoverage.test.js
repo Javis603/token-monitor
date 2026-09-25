@@ -35,7 +35,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
+const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
 const vendorPresentationApi = require('../../src/shared/vendorPresentation');
 const { STYLES_PATH: stylesPath, rendererStyles } = require('../helpers/rendererStyles');
 const { trayProviderIconSources } = require('../../src/electron/renderer/trayProviderIcons');
@@ -43,7 +43,7 @@ const { MESSAGES } = require('../../src/electron/renderer/i18n');
 const {
   limitProviderCapabilityTags,
   limitProviderStatusLabel
-} = require('../../src/electron/renderer/limitProviderPresentation');
+} = require('../../src/electron/renderer/limits/providerPresentation');
 
 const rootDir = path.join(__dirname, '..', '..');
 const rendererDir = path.join(rootDir, 'src/electron/renderer');
@@ -126,7 +126,7 @@ test('every catalog provider resolves to a mark asset through its CSS rule', () 
   // why the call site is asserted here, next to the table it depends on. The
   // builder lives in the shared limits view, which both limits surfaces render
   // their rows from.
-  const source = fs.readFileSync(path.join(rendererDir, 'limitWindowsView.js'), 'utf8');
+  const source = fs.readFileSync(path.join(rendererDir, 'limits/windowsView.js'), 'utf8');
   assert.match(
     source,
     /mark\.className = `limit-icon row-icon-\$\{id\}`;/,
@@ -179,7 +179,7 @@ test('every catalog provider has capability tags', () => {
     const tags = limitProviderCapabilityTags(id);
     assert.ok(
       Array.isArray(tags) && tags.length > 0,
-      `${id} needs a CAPABILITY_TAGS entry in limitProviderPresentation.js`
+      `${id} needs a CAPABILITY_TAGS entry in limits/providerPresentation.js`
     );
   }
 });

@@ -88,7 +88,7 @@ Token/session tracking still depends on local Zed data that `tokscale` supports 
 | Dashboard Cookie parsing and billing requests | `src/shared/providers/zed/limits.js` |
 | Credential persistence and runtime configuration | `src/shared/providers/zed/account.js`, `src/shared/limits/registry.js`, `src/electron/limits/accountSettings.js` |
 | Settings flow and localized setup instructions | `src/shared/providers/zed/account.js`, `src/electron/renderer/limits/accountPanels.js`, `src/electron/renderer/i18n.js` |
-| Limits presentation | `src/electron/renderer/limitProviderPresentation.js`, `src/electron/renderer/app.js`, `src/shared/macWidgetSnapshot.js` |
+| Limits presentation | `src/electron/renderer/limits/providerPresentation.js`, `src/electron/renderer/app.js`, `src/shared/macWidgetSnapshot.js` |
 | Hub build identity after shared changes | `src/shared/hubBuildRegistry.json`, generated Worker registry |
 
 ## Verification checklist

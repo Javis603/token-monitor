@@ -4,13 +4,13 @@
 // view and the edge dock.
 //
 // This is the second half of what those two surfaces used to decide separately.
-// `limitWindowLabels.js` answers what a window is called; this answers what it
-// reads. Both are display-layer: nothing here is written onto the wire, because
-// the same window is worded differently by the surface that has room for a
-// denominator and the one that does not.
+// `limits/windowLabels.js` answers what a window is called; this answers what
+// it reads. Both are display-layer: nothing here is written onto the wire,
+// because the same window is worded differently by the surface that has room
+// for a denominator and the one that does not.
 //
-// Layout is not here — it is in `limitWindowsView.js`, the row builder both
-// surfaces call. This module answers only what a window reads, which is the
+// Layout is not here — it is in `renderer/limits/windowsView.js`, the row
+// builder both surfaces call. This module answers only what a window reads, which is the
 // question a Node-side caller (the tray, the macOS widget snapshot) can ask
 // without a DOM.
 //
@@ -20,7 +20,7 @@
 (function exposeLimitWindowText(root, factory) {
   const node = typeof module === 'object' && module.exports;
   const api = factory(
-    node ? require('./limitBalanceDisplay') : root?.TokenMonitorLimitBalanceDisplay
+    node ? require('./balanceDisplay') : root?.TokenMonitorLimitBalanceDisplay
   );
   if (node) module.exports = api;
   if (root) root.TokenMonitorLimitWindowText = api;

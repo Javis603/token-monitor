@@ -10,7 +10,7 @@
 // This module is shared/ but Node-side: it loads every provider limits module,
 // several of which use Node built-ins. It is deliberately NOT in the Worker
 // vendored closure (scripts/hub-build-manifest.js); the Worker only needs
-// limitProviders.js and limits/core.js.
+// limits/providers.js and limits/core.js.
 
 const { LIMIT_PROVIDER_ACCOUNTS } = require('./accounts');
 

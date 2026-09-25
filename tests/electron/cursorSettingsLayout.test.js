@@ -49,7 +49,7 @@ function functionBody(source, name, nextName) {
 // both render from it, so a guard that slices a builder out of the page reads
 // the view for the ones that moved there.
 function viewBody(name, nextName = '') {
-  const source = readRendererFile('limitWindowsView.js');
+  const source = readRendererFile('limits/windowsView.js');
   // Without a follower, slice to the factory's own closing brace — some of these
   // are the last function before `return {`.
   return nextName
@@ -61,7 +61,7 @@ function viewBody(name, nextName = '') {
 // per-provider policy — a factory-scope table rather than a page-side wrapper
 // per provider, so both surfaces get the same one.
 function viewTable(name) {
-  const source = readRendererFile('limitWindowsView.js');
+  const source = readRendererFile('limits/windowsView.js');
   const start = source.indexOf(`const ${name} = {`);
   assert.notEqual(start, -1, `${name} table should exist`);
   const rest = source.slice(start);
@@ -371,7 +371,7 @@ test('OpenCode multi-account rows separate profile identity from plan label', ()
   assert.match(policy, /opencode: \(provider, color, \{ grouped \}\) => \(\{[\s\S]*?grouped \? \{ showIcon: false/);
   assert.doesNotMatch(app, /legacyProfileLabel/);
   // The plan/account fallback is the shared view's limitProviderPlan.
-  assert.match(readRendererFile('limitWindowsView.js'), /provider\?\.planLabel \|\| provider\?\.accountLabel/);
+  assert.match(readRendererFile('limits/windowsView.js'), /provider\?\.planLabel \|\| provider\?\.accountLabel/);
   assert.doesNotMatch(app, /renderLimitProviderRow\('opencode', provider\.accountLabel/);
 });
 
@@ -1319,7 +1319,7 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(main, /ipcMain\.handle\('mimo:openConsole'/);
   assert.match(main, /ipcMain\.handle\('mimo:addAccount', \(_event, cookieHeader\) => addMimoManagedAccount\(cookieHeader\)\)/);
   // Limits rows mask through the shared resolver; the settings list stays readable.
-  assert.match(readRendererFile('limitWindowsView.js'), /maskEmail: limitAccountEmailsMasked\(\)/);
+  assert.match(readRendererFile('limits/windowsView.js'), /maskEmail: limitAccountEmailsMasked\(\)/);
   assert.match(app, /function mimoSettingsAccountTitle\(account, index\) \{[\s\S]*account\?\.accountEmail[\s\S]*`Account \$\{index \+ 1\}`/);
   assert.match(app, /const accountName = mimoSettingsAccountTitle\(account, index\);/);
   const addBody = functionBody(main, 'addMimoManagedAccount', 'removeMimoManagedAccount');
@@ -2757,7 +2757,7 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
   );
   assert.match(groupBody, /planText: limitGroupCountText\(providerId, providers\.length\)/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
-  assert.match(readRendererFile('limitWindowsView.js'), /mimo: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
+  assert.match(readRendererFile('limits/windowsView.js'), /mimo: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
   // The page's dispatch is by account count with no provider branch left.
   assert.match(renderLimitsBody, /if \(Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
   assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
@@ -2767,7 +2767,7 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
 test('Limits groups multiple Cursor accounts with separate identity and plan rows', () => {
   const app = readRendererFile('app.js');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  assert.match(readRendererFile('limitWindowsView.js'), /cursor: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
+  assert.match(readRendererFile('limits/windowsView.js'), /cursor: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
   assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
   assert.doesNotMatch(app, /renderCursorAccountGroup/);
 });
@@ -2775,7 +2775,7 @@ test('Limits groups multiple Cursor accounts with separate identity and plan row
 test('Limits groups the Volcengine Coding and Agent plans as rows of one card', () => {
   const app = readRendererFile('app.js');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-  const view = readRendererFile('limitWindowsView.js');
+  const view = readRendererFile('limits/windowsView.js');
   // Both plans are subscriptions on one account, so the rows are titled by the
   // plan — the plan cell hands back to the status label once the account is not
   // healthy — and the header counts plans rather than accounts.

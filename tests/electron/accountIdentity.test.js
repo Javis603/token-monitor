@@ -339,6 +339,6 @@ test('a list of accounts is deduped by the same rule, over the whole list', () =
 test('renderer loads the shared Codex identity API before app.js', () => {
   const html = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/index.html'), 'utf8');
   const identityIndex = html.indexOf('<script src="accountIdentity.js"></script>');
-  assert.ok(identityIndex < html.indexOf('<script src="limitProviderPresentation.js"></script>'));
+  assert.ok(identityIndex < html.indexOf('<script src="limits/providerPresentation.js"></script>'));
   assert.ok(identityIndex < html.indexOf('<script src="app.js"></script>'));
 });

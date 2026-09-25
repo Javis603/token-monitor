@@ -5,7 +5,7 @@
     ? require('./currency')
     : (root && root.TokenMonitorCurrency);
   const balanceDisplay = (typeof require === 'function')
-    ? require('./limitBalanceDisplay')
+    ? require('./limits/balanceDisplay')
     : (root && root.TokenMonitorLimitBalanceDisplay);
   const compactTokens = (typeof require === 'function')
     ? require('./compactTokens')

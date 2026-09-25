@@ -5,7 +5,7 @@
     typeof module === 'object' && module.exports ? require('./currency') : root?.TokenMonitorCurrency,
     typeof module === 'object' && module.exports ? require('./trayText') : root?.TokenMonitorTrayText,
     typeof module === 'object' && module.exports
-      ? require('./limitBalanceDisplay')
+      ? require('./limits/balanceDisplay')
       : root?.TokenMonitorLimitBalanceDisplay,
     typeof module === 'object' && module.exports
       ? require('./compactMoney')
