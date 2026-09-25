@@ -23,10 +23,10 @@ The GUI accepts a full `Cookie` header from an authenticated request to `console
 
 ### Cloudflare
 
-The Console sits behind a managed Cloudflare challenge that profiles the request, not the cookie: the same valid `Cookie` header is refused with a 403 interstitial unless the request also carries a browser's client hints (`sec-ch-ua`, `sec-ch-ua-mobile`, `sec-ch-ua-platform`, `Accept-Language` alongside the shared `BROWSER_USER_AGENT`). Plain Node fetch and curl are refused even with the hints — their TLS fingerprints are flagged — while Electron `net.fetch` and macOS `URLSession` pass once the headers ride along. A challenge response is reported `unavailable` (`TYPESAFE_CF_CHALLENGE`), never `unauthorized`: the cookie is not dead, the transport was refused.
+The Console sits behind a managed Cloudflare challenge that profiles the request, not the cookie: the same valid `Cookie` header is refused with a 403 interstitial unless the request also carries a browser's client hints (`sec-ch-ua`, `sec-ch-ua-mobile`, `sec-ch-ua-platform`, `Accept-Language` alongside the shared `BROWSER_USER_AGENT`). Plain Node fetch and curl are refused even with the hints — their TLS fingerprints are flagged — while Electron `net.fetch` and macOS `URLSession` pass once the headers ride along. A challenge response is reported `unavailable`, never `unauthorized`: the cookie is not dead, the transport was refused.
 
 
-The balance and usage reads both have to succeed for an `ok` snapshot. A partial response is unavailable so the limits runtime can retain the last good result. A login landing, 401/403, or redirect is an expired session. The manually pasted Cookie can expire and the private Billing action can change; both require a new probe or code update. The monochrome mask follows the Console favicon's shape.
+The balance and usage reads both have to succeed for an `ok` snapshot. A partial response is unavailable so the limits runtime can retain the last good result. A login landing, 401, non-challenge 403, or redirect is an expired session. The manually pasted Cookie can expire and the private Billing action can change; both require a new probe or code update. The monochrome mask follows the Console favicon's shape.
 
 ## Verification
 

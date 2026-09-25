@@ -81,9 +81,7 @@ function isCloudflareResponse(response, body = '') {
 }
 
 function cloudflareError() {
-  const error = errorWithStatus('unavailable', 'TypeSafe blocked by Cloudflare');
-  error.code = 'TYPESAFE_CF_CHALLENGE';
-  return error;
+  return errorWithStatus('unavailable', 'TypeSafe blocked by Cloudflare');
 }
 
 async function readResponse(response, kind) {
