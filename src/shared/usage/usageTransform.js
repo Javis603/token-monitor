@@ -7,6 +7,10 @@ const {
   sessionUsageArchiveDate
 } = require('./sessionUsageArchive');
 const { readSessionUsageArchiveSnapshot } = require('./sessionUsageArchiveStore');
+const {
+  applyDailyArchiveLifetimeFloor,
+  loadDailyArchiveLifetimeTotals
+} = require('../dailyHistoryArchive');
 const { applyProjectRollups } = require('../usage');
 
 // Every setting project() and transform() read. A transform running on another
@@ -35,6 +39,7 @@ function createUsageTransform(options = {}) {
   const getSettings = options.getSettings || (() => ({}));
   const isExternalAgentActive = options.isExternalAgentActive || (() => false);
   const readSnapshot = options.readSnapshot || readSessionUsageArchiveSnapshot;
+  const loadLifetimeTotals = options.loadLifetimeTotals || loadDailyArchiveLifetimeTotals;
   const onCaptureFailure = options.onCaptureFailure || (() => {});
   const log = options.log || ((message) => console.log(message));
   let sessionArchive = null;
@@ -92,14 +97,20 @@ function createUsageTransform(options = {}) {
       activeClients: settings.clients,
       now
     });
+    // The session archive only covers what was captured since it first ran; the
+    // daily archive reaches further back, so its per-(client, model) lifetime
+    // totals floor allTime for anything that rotated off disk earlier still.
     const visibleSummary = settings.sessionUsageArchiveEnabled === false
       ? withArchivedClients
-      : applySessionUsageArchive(withArchivedClients, archive, {
-          now,
-          canonical: true,
-          canonicalSummary: true,
-          mutate: true
-        });
+      : applyDailyArchiveLifetimeFloor(
+          applySessionUsageArchive(withArchivedClients, archive, {
+            now,
+            canonical: true,
+            canonicalSummary: true,
+            mutate: true
+          }),
+          loadLifetimeTotals()
+        );
     return settings.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
   }
 
