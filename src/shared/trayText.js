@@ -223,11 +223,39 @@
     const primaryWindow = session || daily || weekly || billing;
     if (!primaryWindow) return null;
     const secondaryWindow = session ? (daily || weekly) : daily ? weekly : null;
+    const metered = meteredWindows(provider);
+    // An empty pool gates the account no matter which window the headline
+    // would otherwise print: a full session bar beside a monthly quota at 0%
+    // still means unusable. Any metered window counts, not just the primary and
+    // secondary pair, so a monthly-only drain still surfaces. Money windows are
+    // the exception: a balance or spend figure at its end (credits, spend) is
+    // not proof the account stopped serving — grants can run dry while top-ups
+    // still fund requests, and balances often bill past zero — so only plain
+    // quota windows may exhaust the headline.
+    // Only the canonical window per kind counts: a scoped or model-specific pool
+    // (Claude Fable, Cursor API sub-quota) draining to zero says nothing about
+    // the rest of the account, which is why preferredWindow() exists. And a
+    // legacy spend row arriving through an old hub carries no metric marker, so
+    // it has to be excluded by identity, not by the metric flag alone.
+    const spend = balanceDisplay.spendWindow(provider);
+    const exhaustedWindow = [session, daily, weekly, billing]
+      .filter((window) => window && !window.metric && window !== spend)
+      .find((window) => remainingPercent(window, provider) === 0) || null;
+    // The tightest metered pool, whatever its kind. The headline does not
+    // report this — a 100% session beside a 9% weekly still reads 100% — but a
+    // warn-colour surface needs it so an almost-gated account can flag before
+    // the headline flips to 0%.
+    const tightestPercent = metered.reduce((low, window) => {
+      const remaining = remainingPercent(window, provider);
+      return remaining === null ? low : (low === null || remaining < low ? remaining : low);
+    }, null);
     return {
       provider: normalizedProviderId(provider.provider),
       providerRecord: provider,
       primaryWindow,
       secondaryWindow,
+      exhaustedWindow,
+      tightestPercent,
       // Resolved remaining percentages. Credits windows carry no wire
       // percentage, so consumers must read these instead of re-deriving from
       // the raw window — doing so yields a fabricated 0%.
@@ -245,9 +273,14 @@
       const candidates = [selection.primaryWindow, selection.secondaryWindow].filter(Boolean);
       const selectedWindow = requestedKind
         ? preferredWindow(selection.providerRecord, requestedKind)
-        : candidates.reduce((pick, window) => (
-            !pick || remainingPercent(window, provider) < remainingPercent(pick, provider) ? window : pick
-          ), null);
+        // An exhausted canonical quota gates the account even when it sits
+        // outside the primary/secondary pair (monthly billing is never a
+        // candidate), so the default pick reports 0% the same way the dock
+        // rail does. Kind-pinned picks stay on their own pool: a user who
+        // pinned the weekly bar asked for the weekly number, not a verdict.
+        : selection.exhaustedWindow || candidates.reduce((pick, window) => (
+          !pick || remainingPercent(window, provider) < remainingPercent(pick, provider) ? window : pick
+        ), null);
       if (!selectedWindow) continue;
       const remaining = remainingPercent(selectedWindow, provider);
       if (!worst || remaining < worst.remaining) worst = { ...selection, selectedWindow, remaining };

@@ -1314,6 +1314,89 @@ test('automatic items follow the limits order and enabled set, capped at the def
   assert.equal(edgeDockCellSignature(buildEdgeDockCells(stats, { limitsEnabled: false })), '');
 });
 
+test('the rail headline reports the pool that gates the account, not just the session', () => {
+  const exhausted = provider('codex', {
+    windows: [
+      { kind: 'session', label: '', remainingPercent: 100 },
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 0 }
+    ]
+  });
+  const stats = { limits: { providers: [exhausted] } };
+  const cells = buildEdgeDockCells(stats, { limitProviders: 'codex' });
+  // A full session bar beside an empty weekly pool is still a blocked account:
+  // the rail must say so, the way the tray's worst-window headline does.
+  assert.equal(cells[0].remainingPercent, 0);
+  assert.equal(cells[0].windowKind, 'weekly');
+  assert.equal(cells[0].severityPercent, 0);
+
+  const drained = provider('codex', {
+    windows: [
+      { kind: 'session', label: '', remainingPercent: 90 },
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 30 }
+    ]
+  });
+  const cells2 = buildEdgeDockCells({ limits: { providers: [drained] } }, { limitProviders: 'codex' });
+  // A partially-used weekly pool does not gate the account, so the rail keeps
+  // reading the primary session window; only an empty pool overrides it.
+  assert.equal(cells2[0].remainingPercent, 90);
+  assert.equal(cells2[0].windowKind, 'session');
+  // ...but the warn colour follows the tightest window, so an almost-gated
+  // account still flags before its headline flips to 0%.
+  assert.equal(cells2[0].severityPercent, 30);
+
+  const drainedMonthly = provider('codex', {
+    windows: [
+      { kind: 'session', label: '', remainingPercent: 80 },
+      { kind: 'billing', label: 'Monthly', remainingPercent: 0 }
+    ]
+  });
+  const cells3 = buildEdgeDockCells({ limits: { providers: [drainedMonthly] } }, { limitProviders: 'codex' });
+  assert.equal(cells3[0].remainingPercent, 0);
+  assert.equal(cells3[0].windowKind, 'billing');
+
+  // A spent money figure is not a spent quota: balances can bill past zero or
+  // share funding with a top-up pool, so credits windows never exhaust the
+  // headline even when their meter reads 0%.
+  const brokeBalance = provider('codex', {
+    windows: [
+      { kind: 'session', label: '', remainingPercent: 80 },
+      { kind: 'billing', metric: 'credits', label: 'Balance', remainingPercent: 0, showMeter: true }
+    ]
+  });
+  const cells4 = buildEdgeDockCells({ limits: { providers: [brokeBalance] } }, { limitProviders: 'codex' });
+  assert.equal(cells4[0].remainingPercent, 80);
+  assert.equal(cells4[0].windowKind, 'session');
+  // The warn colour still follows the tightest pool, money included.
+  assert.equal(cells4[0].severityPercent, 0);
+
+  // A scoped or model-specific pool is not the account gate: Claude's Fable
+  // weekly at 0% leaves every other Claude model usable, so the canonical
+  // weekly stays the headline. The tightest-pool severity still sees it.
+  const scopedOut = provider('claude', {
+    windows: [
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 80 },
+      { kind: 'weekly', label: 'Fable', remainingPercent: 0 }
+    ]
+  });
+  const cells5 = buildEdgeDockCells({ limits: { providers: [scopedOut] } }, { limitProviders: 'claude' });
+  assert.equal(cells5[0].remainingPercent, 80);
+  assert.equal(cells5[0].windowKind, 'weekly');
+  assert.equal(cells5[0].severityPercent, 0);
+
+  // A hub older than the spend metric strips it but keeps the window, so the
+  // same money figure arrives unlabeled. It must still not read as an
+  // exhausted quota — identity, not the metric flag, is what excludes it.
+  const legacySpend = provider('codex', {
+    windows: [
+      { kind: 'session', label: '', remainingPercent: 80 },
+      { kind: 'billing', label: 'Usage credits', usedPercent: 100 }
+    ]
+  });
+  const cells6 = buildEdgeDockCells({ limits: { providers: [legacySpend] } }, { limitProviders: 'codex' });
+  assert.equal(cells6[0].remainingPercent, 80);
+  assert.equal(cells6[0].windowKind, 'session');
+});
+
 test('explicit items keep their order, their empty providers, and add usage readouts', () => {
   const stats = {
     periods: {

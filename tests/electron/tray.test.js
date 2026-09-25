@@ -1140,6 +1140,64 @@ test('kind-specific resolver can select billing from a mixed-window provider', (
   assert.equal(pick.remaining, 9);
 });
 
+test('default worst-provider pick reports an exhausted billing quota as 0%', () => {
+  const monthly = { kind: 'billing', label: 'Monthly', remainingPercent: 0 };
+  const limitStats = {
+    limits: {
+      providers: [{
+        provider: 'opencode',
+        status: 'ok',
+        windows: [
+          { kind: 'session', remainingPercent: 80 },
+          monthly
+        ]
+      }]
+    }
+  };
+
+  // The dock rail reads 0% here because the drained monthly pool gates the
+  // account; the default tray pick must agree instead of showing the
+  // session's 80%.
+  const pick = pickWorstLimitProvider(limitStats);
+  assert.equal(pick.remaining, 0);
+  assert.equal(pick.selectedWindow, monthly);
+
+  // A kind-pinned pick stays on its own pool — the pin is a request for that
+  // window's number, not for the account verdict.
+  const pinned = pickWorstLimitProvider(limitStats, { kind: 'session' });
+  assert.equal(pinned.remaining, 80);
+
+  // Scoped or money windows still never gate: a legacy spend row (no metric)
+  // and a model-scoped weekly at 0% both leave the default pick alone.
+  const legacySpend = pickWorstLimitProvider({
+    limits: {
+      providers: [{
+        provider: 'codex',
+        status: 'ok',
+        windows: [
+          { kind: 'session', remainingPercent: 80 },
+          { kind: 'billing', label: 'Usage credits', usedPercent: 100 }
+        ]
+      }]
+    }
+  });
+  assert.equal(legacySpend.remaining, 80);
+
+  const scoped = pickWorstLimitProvider({
+    limits: {
+      providers: [{
+        provider: 'claude',
+        status: 'ok',
+        windows: [
+          { kind: 'weekly', label: 'Weekly', remainingPercent: 80 },
+          { kind: 'weekly', label: 'Fable', remainingPercent: 0 }
+        ]
+      }]
+    }
+  });
+  assert.equal(scoped.remaining, 80);
+});
+
 test('tray session quota text keeps lowest-remaining account selection when showing used percent', () => {
   const limitStats = {
     limits: {
