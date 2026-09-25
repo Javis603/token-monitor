@@ -59,6 +59,21 @@ test('the limits registry matches the catalog, binds each fetcher and keeps acco
   }
 });
 
+test('field keys and credential store paths are unique across the whole registry', () => {
+  const keys = new Map();
+  const storePaths = new Map();
+  for (const { id, fields } of LIMIT_PROVIDER_REGISTRY) {
+    for (const { key, storePath } of fields) {
+      assert.ok(!keys.has(key), `${id}.${key} is already declared by ${keys.get(key)}`);
+      keys.set(key, id);
+      if (!storePath) continue;
+      const pathKey = storePath.join('.');
+      assert.ok(!storePaths.has(pathKey), `${id}.${key} reuses store path ${pathKey} of ${storePaths.get(pathKey)}`);
+      storePaths.set(pathKey, `${id}.${key}`);
+    }
+  }
+});
+
 test('loading the account index or the credential store does not load any provider limits module', () => {
   const { execFileSync } = require('node:child_process');
   const loaded = JSON.parse(execFileSync(process.execPath, ['-e', `
