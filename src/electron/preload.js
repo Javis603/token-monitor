@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   clearSessionUsageArchive: () => ipcRenderer.invoke('sessionUsageArchive:clear'),
   lookupModelPricing: (modelId) => ipcRenderer.invoke('pricing:lookup', modelId),
   previewAppearance: (patch) => ipcRenderer.invoke('appearance:preview', patch),
+  getBackgroundImage: () => ipcRenderer.invoke('appearance:getBackgroundImage'),
+  chooseBackgroundImage: () => ipcRenderer.invoke('appearance:chooseBackgroundImage'),
+  clearBackgroundImage: () => ipcRenderer.invoke('appearance:clearBackgroundImage'),
   getStats: (options) => ipcRenderer.invoke('stats:get', options),
   deleteDevice: (deviceId) => ipcRenderer.invoke('devices:delete', deviceId),
   getSessionDetail: (args) => ipcRenderer.invoke('session:getDetail', args),
@@ -146,17 +149,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     logout: (accountId) => ipcRenderer.invoke('cursor:logout', accountId),
     status: (options = {}) => ipcRenderer.invoke('cursor:status', options)
   },
-  claude: {
-    saveCookie: (cookie) => ipcRenderer.invoke('claude:saveCookie', cookie)
-  },
-  ollama: {
-    validateCookie: (cookie) => ipcRenderer.invoke('ollama:validateCookie', cookie)
-  },
-  cline: {
-    validateApiKey: (apiKey) => ipcRenderer.invoke('cline:validateApiKey', apiKey)
-  },
-  factory: {
-    validateApiKey: (apiKey) => ipcRenderer.invoke('factory:validateApiKey', apiKey)
+  limits: {
+    saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
+    clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId)
   },
   opencode: {
     saveCookie: (cookie) => ipcRenderer.invoke('opencode:saveCookie', cookie),

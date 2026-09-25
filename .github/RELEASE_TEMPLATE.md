@@ -4,32 +4,31 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Devin usage:** Adds usage tracking for Devin CLI and Devin Desktop. (#757)
-- **Devin limits:** Shows daily and weekly quotas and extra usage balance after connecting a Devin account. (#776)
-- **ClinePass limits:** Shows five-hour, weekly, and monthly quotas and the credit balance from a local Cline sign-in or API key. (#764)
-- **Xiaomi MiMo Desktop usage:** Tracks MiMo Desktop alongside MiMo Code. New installs track Xiaomi MiMo by default. (#772)
-- **GitHub Copilot CLI usage:** Tracks local Copilot CLI tokens. (#772)
-- **Claude Code context:** Shows session context usage with a best-effort window size. (#767)
-- **Edge Dock models:** Switch usage cards between tool and model breakdowns. (#769)
-- **Edge Dock haptics:** Adds optional trackpad feedback on supported Macs. (#762)
+- **Oh My Pi usage:** Tracks Oh My Pi separately from Pi, including on existing installs that tracked Pi. (#701)
+- **TypeSafe limits:** Shows credit balance, plan, expiring credits, and token usage after connecting a TypeSafe account with a Cookie. (#794)
+- **Background image:** Choose a local image in Appearance and adjust its opacity with Glass. (#785)
+- **Claude reset counts:** Shows available usage-limit resets and their details when the account has grants. (#780)
+- **Kimi Code session titles:** Shows generated or custom titles in Sessions. (#726)
 
 ### Improved
-- **Edge Dock breakdowns:** Scroll through tools and models beyond the first six rows. (#769)
+- **Edge Dock usage cards:** Shows the exact headline token count, with compact figures in session, period, and breakdown rows. (#784, #787)
 
 ### Fixed
-- **Windows Floating Bubble:** Fixes duplicate bubbles and crashes when closing the window. (#712)
-- **Linux Floating Bubble:** Expands again after being collapsed. (#756)
-- **Subscription comparison:** Shows the month's usage cost for plans whose tool and limits provider have different names. (#766)
-- **DeepSeek in Edge Dock:** Shows DeepSeek Harness usage and cost on the DeepSeek card. (#765)
-- **ZCode billing:** No longer shows an unattributed fallback balance when the current account is known but its billing credential is unavailable. (#761)
+- **Alibaba Bailian Personal quota:** Shows the monthly quota when the plan no longer reports weekly limits. (#791)
+- **Devin plan:** Shows the subscription plan on the Limits card when available. (#788)
+- **WorkBuddy sign-in:** Identifies app-encrypted credentials instead of asking you to sign in again. (#738)
+- **macOS tray popover:** Opens on the display whose menu bar icon you clicked. (#714)
+- **Kimi Code projects:** Restores project attribution for newer sessions. (#726)
+- **Kimi K3 models:** Recognizes K3 model IDs in usage views. (#726)
+- **Compact money figures:** Follows the selected number-unit setting in Edge Dock balances and costs. (#787)
 <!-- app-update-notes:en:end -->
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.61.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.61.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.61.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-Setup-0.61.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.61.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.61.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.62.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.62.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-Setup-0.62.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.62.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -67,33 +66,32 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **Devin 用量：** 支持追踪 Devin CLI 和 Devin Desktop 用量。（#757）
-- **Devin 额度：** 连接 Devin 账号后可查看每日、每周额度及额外用量余额。（#776）
-- **ClinePass 额度：** 通过本机 Cline 登录或 API 密钥查看五小时、每周、每月额度及余额。（#764）
-- **Xiaomi MiMo Desktop 用量：** 与 MiMo Code 一并追踪 Desktop 用量。全新安装默认追踪 Xiaomi MiMo。（#772）
-- **GitHub Copilot CLI 用量：** 支持追踪本机 Copilot CLI 的 Token 用量。（#772）
-- **Claude Code 上下文：** 在会话中显示上下文使用比例；窗口大小为估算值。（#767）
-- **侧边栏模型：** 用量卡片可切换查看“工具”或“模型”分解。（#769）
-- **侧边栏触觉反馈：** 在支持的 Mac 上可开启触控板触觉反馈。（#762）
+- **Oh My Pi 用量：** 与 Pi 分开追踪；此前追踪 Pi 的安装也会加入 Oh My Pi。（#701）
+- **TypeSafe 额度：** 使用 Cookie 连接账号后，显示余额、方案、即将到期的额度及 Tokens 用量。（#794）
+- **背景图片：** 可在“外观”中选择本机图片，并通过“玻璃”调整透明度。（#785）
+- **Claude 重置次数：** 账号有可用重置次数时，显示次数及详情。（#780）
+- **Kimi Code 会话标题：** 在“会话”中显示自动生成或自定义的标题。（#726）
 
 ### 改进
-- **侧边栏用量分解：** 可滚动查看超过六行的工具或模型。（#769）
+- **侧边栏用量卡片：** 主数字显示精确 Tokens 数量；会话、时段和分解行使用简写数字。（#784, #787）
 
 ### 修复
-- **Windows 悬浮球：** 修复重复显示及关闭窗口时可能崩溃的问题。（#712）
-- **Linux 悬浮球：** 修复收起后无法重新展开的问题。（#756）
-- **订阅费用对比：** 修复工具与额度供应商名称不同时，无法显示当月用量费用的问题。（#766）
-- **侧边栏 DeepSeek：** DeepSeek 卡片可显示 DeepSeek Harness 的用量与费用。（#765）
-- **ZCode 账单余额：** 已识别当前账号但无法读取账单凭证时，不再显示无法归属该账号的备用余额。（#761）
+- **阿里云百炼个人版额度：** 不再提供每周额度的方案可正确显示每月额度。（#791）
+- **Devin 方案：** 可读取订阅方案时，在额度卡片显示方案名称。（#788）
+- **WorkBuddy 登录：** 凭据被应用加密时显示对应状态，不再误提示重新登录。（#738）
+- **macOS 托盘弹窗：** 从哪个显示器的菜单栏图标打开，就显示在哪个显示器。（#714）
+- **Kimi Code 项目归属：** 修复新版本会话无法归入项目的问题。（#726）
+- **Kimi K3 模型：** 用量视图可识别 K3 模型编号。（#726）
+- **侧边栏金额：** 余额与费用简写遵循所选数字单位。（#787）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.61.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.61.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.61.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-Setup-0.61.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.61.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.61.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.62.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.62.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-Setup-0.62.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.62.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -126,7 +124,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.60.0...v0.61.0">v0.60.0...v0.61.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.61.0...v0.62.0">v0.61.0...v0.62.0</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -144,33 +142,32 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **Devin 用量：** 支援追蹤 Devin CLI 和 Devin Desktop 用量。（#757）
-- **Devin 額度：** 連接 Devin 帳號後可查看每日、每週額度及額外用量餘額。（#776）
-- **ClinePass 額度：** 透過本機 Cline 登入或 API 金鑰查看五小時、每週、每月額度及餘額。（#764）
-- **Xiaomi MiMo Desktop 用量：** 與 MiMo Code 一併追蹤 Desktop 用量。全新安裝預設追蹤 Xiaomi MiMo。（#772）
-- **GitHub Copilot CLI 用量：** 支援追蹤本機 Copilot CLI 的 Token 用量。（#772）
-- **Claude Code 上下文：** 在會話中顯示上下文使用比例；視窗大小為估算值。（#767）
-- **側邊欄模型：** 用量卡片可切換查看「工具」或「模型」分解。（#769）
-- **側邊欄觸覺回饋：** 在支援的 Mac 上可開啟觸控板觸覺回饋。（#762）
+- **Oh My Pi 用量：** 與 Pi 分開追蹤；原本追蹤 Pi 的安裝也會加入 Oh My Pi。（#701）
+- **TypeSafe 額度：** 使用 Cookie 連接帳號後，顯示餘額、方案、即將到期的額度及 Tokens 用量。（#794）
+- **背景圖片：** 可在「外觀」選擇本機圖片，並透過「玻璃」調整透明度。（#785）
+- **Claude 重置次數：** 帳號有可用重置次數時，顯示次數及詳情。（#780）
+- **Kimi Code 會話標題：** 在「會話」中顯示自動產生或自訂的標題。（#726）
 
 ### 改進
-- **側邊欄用量分解：** 可捲動查看超過六列的工具或模型。（#769）
+- **側邊欄用量卡片：** 主數字顯示精確 Tokens 數量；會話、時段和分解列使用簡寫數字。（#784, #787）
 
 ### 修復
-- **Windows 浮動泡泡：** 修復重複顯示及關閉視窗時可能當機的問題。（#712）
-- **Linux 浮動泡泡：** 修復收起後無法重新展開的問題。（#756）
-- **訂閱費用比較：** 修復工具與額度供應商名稱不同時，無法顯示當月用量費用的問題。（#766）
-- **側邊欄 DeepSeek：** DeepSeek 卡片可顯示 DeepSeek Harness 的用量與費用。（#765）
-- **ZCode 帳單餘額：** 已識別目前帳號但無法讀取帳單憑證時，不再顯示無法歸屬該帳號的備用餘額。（#761）
+- **阿里雲百煉個人版額度：** 不再提供每週額度的方案可正確顯示每月額度。（#791）
+- **Devin 方案：** 可讀取訂閱方案時，在額度卡片顯示方案名稱。（#788）
+- **WorkBuddy 登入：** 憑證被應用程式加密時顯示對應狀態，不再誤提示重新登入。（#738）
+- **macOS 選單列彈窗：** 從哪個顯示器的圖示開啟，就顯示在哪個顯示器。（#714）
+- **Kimi Code 專案歸屬：** 修復新版會話無法歸入專案的問題。（#726）
+- **Kimi K3 模型：** 用量畫面可識別 K3 模型 ID。（#726）
+- **側邊欄金額：** 餘額與費用簡寫遵循所選數字單位。（#787）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.61.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.61.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.61.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-Setup-0.61.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.61.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.61.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.62.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.62.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-Setup-0.62.0.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.62.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.AppImage)
 
 </details>
 
@@ -183,33 +180,32 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ko:start -->
 ### 추가
-- **Devin 사용량:** Devin CLI와 Devin Desktop 사용량 추적을 지원합니다. (#757)
-- **Devin 한도:** Devin 계정을 연결하면 일간·주간 할당량과 추가 사용 잔액을 표시합니다. (#776)
-- **ClinePass 한도:** 로컬 Cline 로그인 또는 API 키로 5시간·주간·월간 할당량과 크레딧 잔액을 표시합니다. (#764)
-- **Xiaomi MiMo Desktop 사용량:** MiMo Code와 함께 Desktop 사용량을 추적합니다. 새 설치에서는 Xiaomi MiMo를 기본 추적합니다. (#772)
-- **GitHub Copilot CLI 사용량:** 로컬 Copilot CLI의 토큰 사용량을 추적합니다. (#772)
-- **Claude Code 컨텍스트:** 추정한 컨텍스트 창 크기를 기준으로 세션 사용 비율을 표시합니다. (#767)
-- **가장자리 도크 모델:** 사용량 카드에서 도구별 보기와 모델별 보기를 전환할 수 있습니다. (#769)
-- **가장자리 도크 햅틱:** 지원되는 Mac에서 트랙패드 햅틱 피드백을 켤 수 있습니다. (#762)
+- **Oh My Pi 사용량:** Pi와 분리해 추적합니다. 기존에 Pi를 추적하던 설치에도 Oh My Pi가 추가됩니다. (#701)
+- **TypeSafe 한도:** Cookie로 계정을 연결하면 잔액, 요금제, 만료 예정 크레딧과 토큰 사용량을 표시합니다. (#794)
+- **배경 이미지:** 모양 설정에서 로컬 이미지를 선택하고 글래스로 투명도를 조절할 수 있습니다. (#785)
+- **Claude 재설정 횟수:** 계정에 사용 가능한 재설정 혜택이 있으면 남은 횟수와 세부 정보를 표시합니다. (#780)
+- **Kimi Code 세션 제목:** 세션 화면에서 자동 생성 또는 사용자 지정 제목을 표시합니다. (#726)
 
 ### 개선
-- **가장자리 도크 사용량 분류:** 여섯 줄을 넘는 도구와 모델도 스크롤하여 볼 수 있습니다. (#769)
+- **가장자리 도크 사용량 카드:** 주요 토큰 수는 정확히 표시하고 세션, 기간, 분류 행은 축약해 표시합니다. (#784, #787)
 
 ### 수정
-- **Windows 플로팅 버블:** 버블이 중복 표시되거나 창을 닫을 때 충돌하는 문제를 수정했습니다. (#712)
-- **Linux 플로팅 버블:** 접은 뒤 다시 펼쳐지지 않는 문제를 수정했습니다. (#756)
-- **구독 비용 비교:** 도구와 한도 공급자의 이름이 다를 때 월간 사용 비용이 빠지는 문제를 수정했습니다. (#766)
-- **가장자리 도크의 DeepSeek:** DeepSeek 카드에 DeepSeek Harness 사용량과 비용을 표시합니다. (#765)
-- **ZCode 결제 잔액:** 현재 계정은 확인했지만 결제 자격 증명을 읽을 수 없을 때, 계정에 귀속할 수 없는 대체 잔액을 표시하지 않습니다. (#761)
+- **Alibaba Bailian Personal 한도:** 주간 한도를 더 이상 제공하지 않는 요금제의 월간 한도를 표시합니다. (#791)
+- **Devin 요금제:** 구독 정보를 읽을 수 있으면 한도 카드에 요금제 이름을 표시합니다. (#788)
+- **WorkBuddy 로그인:** 앱에서 자격 증명을 암호화한 경우 다시 로그인하라는 안내 대신 해당 상태를 표시합니다. (#738)
+- **macOS 메뉴 막대 팝오버:** 클릭한 메뉴 막대 아이콘이 있는 디스플레이에서 열립니다. (#714)
+- **Kimi Code 프로젝트 연결:** 최신 세션이 프로젝트에 연결되지 않던 문제를 수정했습니다. (#726)
+- **Kimi K3 모델:** 사용량 화면에서 K3 모델 ID를 인식합니다. (#726)
+- **가장자리 도크 금액:** 잔액과 비용의 축약 표기에 선택한 숫자 단위를 적용합니다. (#787)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.61.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.61.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.61.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-Setup-0.61.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.61.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.61.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.62.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.62.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-Setup-0.62.0.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.62.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.AppImage)
 
 </details>
 
@@ -222,33 +218,32 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **Devin の使用量：** Devin CLI と Devin Desktop の使用量追跡に対応します。（#757）
-- **Devin の上限：** Devin アカウントを接続すると、日間・週間のクォータと追加使用残高を表示します。（#776）
-- **ClinePass の上限：** ローカルの Cline ログインまたは API キーから、5時間・週間・月間のクォータとクレジット残高を表示します。（#764）
-- **Xiaomi MiMo Desktop の使用量：** MiMo Code とあわせて Desktop の使用量を追跡します。新規インストールでは Xiaomi MiMo が標準で追跡されます。（#772）
-- **GitHub Copilot CLI の使用量：** ローカルの Copilot CLI のトークン使用量を追跡します。（#772）
-- **Claude Code のコンテキスト：** 推定したコンテキストウィンドウのサイズを基に、セッションの使用率を表示します。（#767）
-- **エッジドックのモデル：** 使用量カードでツール別とモデル別の内訳を切り替えられます。（#769）
-- **エッジドックの触覚フィードバック：** 対応する Mac でトラックパッドの触覚フィードバックを有効にできます。（#762）
+- **Oh My Pi の使用量：** Pi と分けて追跡します。従来 Pi を追跡していた環境にも Oh My Pi が追加されます。（#701）
+- **TypeSafe の上限：** Cookie でアカウントを接続すると、残高、プラン、期限が近いクレジット、トークン使用量を表示します。（#794）
+- **背景画像：** 外観設定でローカル画像を選び、ガラスで透明度を調整できます。（#785）
+- **Claude のリセット回数：** 利用可能なリセット特典がある場合、残り回数と詳細を表示します。（#780）
+- **Kimi Code のセッションタイトル：** セッション画面に自動生成またはカスタムのタイトルを表示します。（#726）
 
 ### 改善
-- **エッジドックの使用量内訳：** 6行を超えるツールやモデルもスクロールして確認できます。（#769）
+- **エッジドックの使用量カード：** メインのトークン数は正確に表示し、セッション、期間、内訳の行は短縮表記にします。（#784、#787）
 
 ### 修正
-- **Windows のフローティングバブル：** バブルの重複表示と、ウィンドウを閉じた際のクラッシュを修正しました。（#712）
-- **Linux のフローティングバブル：** 折りたたんだ後に再展開できない問題を修正しました。（#756）
-- **サブスクリプションの費用比較：** ツールと上限プロバイダーの名前が異なる場合に、月間使用コストが表示されない問題を修正しました。（#766）
-- **エッジドックの DeepSeek：** DeepSeek カードに DeepSeek Harness の使用量と費用を表示します。（#765）
-- **ZCode の請求残高：** 現在のアカウントは判明していても請求用の認証情報を読めない場合、アカウントに紐付かない代替残高を表示しません。（#761）
+- **Alibaba Bailian Personal の上限：** 週次上限が廃止されたプランでも月次上限を表示します。（#791）
+- **Devin のプラン：** サブスクリプション情報を取得できる場合、上限カードにプラン名を表示します。（#788）
+- **WorkBuddy のログイン：** 認証情報がアプリで暗号化されている場合、再ログインを促さず状態を表示します。（#738）
+- **macOS メニューバーのポップオーバー：** クリックしたアイコンがあるディスプレイで開きます。（#714）
+- **Kimi Code のプロジェクト：** 新しい形式のセッションがプロジェクトに紐付かない問題を修正しました。（#726）
+- **Kimi K3 モデル：** 使用量画面で K3 モデル ID を認識します。（#726）
+- **エッジドックの金額：** 残高と費用の短縮表記に選択した数値単位を適用します。（#787）
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.61.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.61.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.61.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-Setup-0.61.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.61.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.61.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.61.0/Token-Monitor-0.61.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.62.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.62.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-Setup-0.62.0.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.62.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.AppImage)
 
 </details>
 

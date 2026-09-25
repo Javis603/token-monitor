@@ -16,6 +16,7 @@ const {
 } = require('./archiveHelpers');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
+const { splitClientIdFor } = require('./clientIdentitySplits');
 const {
   isLegacyCursorEntry,
   legacyCursorLookup,
@@ -314,6 +315,17 @@ function addArchivedSession(period, session, archiveKey = null) {
   addSessionBreakdown(period, archived);
 }
 
+// The session id is product-owned: the Pi-format header id is written by the
+// client that produced the file, so one id belongs to exactly one product. That
+// is what makes this an identity question rather than a heuristic.
+function isLiveUnderSplitId(period, entry, session) {
+  const split = splitClientIdFor(session?.client);
+  if (!split) return false;
+  const sessionId = String(session?.sessionId || entry?.sessionId || '').trim();
+  if (!sessionId) return false;
+  return Boolean(period?.sessions?.[`${split}:${sessionId}`]);
+}
+
 function shouldApplyPeriod(periodName, entry, now) {
   const window = entry?.periodWindows?.[periodName] || {};
   if (periodName === 'today') return (window.day || entry.day) === localDay(now);
@@ -346,6 +358,7 @@ function applySessionUsageArchive(summary, archive, options = {}) {
   };
 
   const supersededRows = [];
+  const mergedRows = [];
   for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
     for (const periodName of PERIODS) {
       const session = entry.periods?.[periodName];
@@ -357,12 +370,37 @@ function applySessionUsageArchive(summary, archive, options = {}) {
       if (!hasSummaryPeriod(next, periodName)) continue;
       const period = targetFor(periodName);
       if (period.sessions[archiveKey]) continue;
+      // A row keyed under a merged id replays only after every other row: an
+      // archived split-id copy of the same session is the same usage twice, and
+      // the merged row can only see that overlap once the split row is already
+      // in the period. Insertion order puts the older merged row first, so
+      // deferring by identity is what makes the replay order-independent.
+      if (splitClientIdFor(session.client || entry.client)) {
+        mergedRows.push([period, archiveKey, entry, session]);
+        continue;
+      }
       if (entry.supersededBy) {
         supersededRows.push([period, archiveKey, session, entry.supersededBy]);
         continue;
       }
       addArchivedSession(period, session, archiveKey);
     }
+  }
+
+  for (const [period, archiveKey, entry, session] of mergedRows) {
+    if (period.sessions[archiveKey]) continue;
+    // An archived session captured while two clients shared one row is keyed
+    // under the merged id, so the live split-id copy of the same session is a
+    // different key. The split id's own scan is the authoritative source now —
+    // it reports the same bytes the merged row was built from — so skip the
+    // archived copy rather than adding it on top. The check runs late enough to
+    // also see the split id's *archived* rows, which the first pass applied.
+    if (isLiveUnderSplitId(period, entry, session)) continue;
+    if (entry.supersededBy) {
+      supersededRows.push([period, archiveKey, session, entry.supersededBy]);
+      continue;
+    }
+    addArchivedSession(period, session, archiveKey);
   }
 
   // A legacy Cursor row whose event now belongs to another session is judged

@@ -23,6 +23,7 @@ const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
+const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
 const { runAntigravityOAuthLogin } = require('./providers/antigravity/oauthLogin');
@@ -31,7 +32,7 @@ const {
   createWorkbuddyLocalAuth,
   isSupportedWorkbuddyLocalAppPlatform
 } = require('./providers/workbuddy/localAuth');
-const { createElectronLimitsFetch } = require('./limitsFetch');
+const { createElectronLimitsFetch } = require('./limits/fetch');
 const {
   expandedBoundsForCollapse,
   normalWindowBounds,
@@ -54,7 +55,7 @@ const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
   fetch: electronLimitsFetch()
 });
 // One transport for every widget provider call that resolves through
-// `deps.fetch` — see limitsFetch.js for why the branch and the request options
+// `deps.fetch` — see limits/fetch.js for why the branch and the request options
 // are what they are. Probes that build their own transport inherit neither
 // branch: cursorProbe and antigravityProbe on node:https, Claude Web on the
 // claudeWebFetch above, the CLI fallbacks on a spawned binary.
@@ -75,6 +76,7 @@ const {
   clientsCsvForSetting,
   normalizeClientsCsv
 } = require('../shared/clientTracking');
+const { seedSplitClients } = require('../shared/clientIdentitySplits');
 const {
   clientDiagnosticRoots,
   lookupModelPricing,
@@ -98,11 +100,28 @@ const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared
 const { normalizeModelAliases, normalizeModelAliasGrouping, projectModelAliasStats, projectModelAliasHistory } = require('./modelAliasPresentation');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
-const { claudeWebCookie, clineApiKey, deepseekToken, devinBearerToken, factoryEnvApiKey, fetchClaudeLimits, fetchClineLimits, fetchFactoryLimits, normalizeClaudeWebCookieInput, normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders, resolveClineAutomaticCredential, resolveFactoryAutomaticApiKey, runCodexLogin, minimaxToken, copilotToken, zaiToken, zaiRegion, zaiTeamToken, volcengineCredentials, qoderCookie, traeAccessToken, traeDeviceId, commandcodeCookie, kimiToken, kimiWebToken, ollamaSessionCookie, zedCookie, alibabaCookie, alibabaVariant, normalizeAlibabaCookieHeader } = require('../shared/limits/collector');
-const { normalizeDevinOrganization } = require('../shared/providers/devin/limits');
+const {
+  normalizeLimitsRefreshMode,
+  normalizeLimitsRefreshMs,
+  parseBoolean,
+  parseLimitProviders,
+  runCodexLogin
+} = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
-const { discoverZcodeConnection } = require('../shared/providers/zai/zcodeDiscovery');
-const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/providers/ollama/limits');
+const { limitProviderUrlAllowed } = require('../shared/limits/accounts');
+const {
+  accountFieldProjection,
+  accountStatusProjection,
+  finalAccountSettings,
+  initialAccountSettings,
+  limitAccountFormsForRenderer,
+  normalizeAccountField,
+  normalizeAccountPatch,
+  redactOpenRouterProfilesForRenderer,
+  redactThirdPartyProfilesForRenderer,
+  rendererOmittedAccountKeys
+} = require('./limits/accountSettings');
+const { createCredentialCommands } = require('./limits/credentialCommands');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const {
   codexAuthIdentity,
@@ -262,7 +281,7 @@ const {
   writeMacWidgetHistoryCache
 } = require('./macWidget/historyStore');
 const { createMacWidgetLaunchServicesRecovery } = require('./macWidget/launchServicesRecovery');
-const { projectLimitStatsForDisplay } = require('./limitStatsPresentation');
+const { projectLimitStatsForDisplay } = require('./limits/statsPresentation');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidget/reloader');
 const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidget/demand');
 const linuxAutostart = require('./linuxAutostart');
@@ -413,7 +432,7 @@ const CSP_HEADER = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self'",
-  "img-src 'self' data:",
+  "img-src 'self' data: blob:",
   "font-src 'self'",
   "connect-src 'self'",
   "object-src 'none'",
@@ -446,7 +465,11 @@ let dashboardWindowNativeBlurEnabled = false;
 let settingsPath = null;
 let settings = null;
 let initialLimitProvidersPending = false;
-let claudeWebCookieMutationRevision = 0;
+// Set by readSettings() when a client identity split was seeded into the tracked
+// CSV. The addition has to reach disk (the seed is persisted, not recomputed), but
+// settings are written through saveSettings() after the window exists, so the flag
+// carries the decision from the read to that first save.
+let seededClientSplitsPending = false;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
@@ -573,6 +596,7 @@ function defaultSettings() {
     hiddenServiceProviders: '',
     serviceStatusRefreshMs: 60000,
     archivedClientUsage: { version: 1, clients: {} },
+    seededClientSplits: '',
     allTimeSince: process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01',
     customModelPricing: [],
     modelAliases: {},
@@ -585,7 +609,6 @@ function defaultSettings() {
     homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
     limitsRefreshMode: normalizeLimitsRefreshMode(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE),
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
-    cursorDisabledAccountIds: [],
     cursorManualAccountIds: [],
     showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
     maskLimitAccountEmails: false,
@@ -625,48 +648,7 @@ function defaultSettings() {
     startAtLogin: false,
     automaticAppUpdates: false,
     language: 'auto',
-    claudeWebCookie: '',
-    opencodeCookie: '',
-    opencodeProfiles: {},
-    openrouterProfiles: {},
-    thirdPartyProfiles: {},
-    deepseekApiKey: '',
-    minimaxApiKey: '',
-    copilotApiToken: '',
-    copilotEnterpriseHost: '',
-    clineApiKey: '',
-    factoryApiKey: '',
-    zaiApiKey: '',
-    zaiApiRegion: normalizeZaiApiRegion(process.env.TOKEN_MONITOR_ZAI_API_REGION || process.env.ZAI_API_REGION || process.env.Z_AI_API_HOST || 'global'),
-    zaiTeamApiKey: '',
-    zaiTeamOrganizationId: '',
-    zaiTeamProjectId: '',
-    volcengineAccessKeyId: '',
-    volcengineSecretAccessKey: '',
-    volcengineRegion: '',
-    volcengineAgentAccessKeyId: '',
-    volcengineAgentSecretAccessKey: '',
-    volcengineAgentRegion: '',
-    alibabaCookie: '',
-    // Empty, not 'cn': defaults are merged into settings before any read, so a
-    // concrete value here would satisfy the `options || env` fallback and make
-    // ALIBABA_TOKEN_PLAN_VARIANT unreachable in both the UI and the collector.
-    // The effective variant is resolved at use, never stored eagerly.
-    alibabaVariant: '',
-    qoderCookie: '',
-    qoderSite: 'global',
-    devinBearerToken: '',
-    devinOrganization: '',
-    traeAccessToken: '',
-    traeDeviceId: '',
-    zedCookie: '',
-    commandcodeCookie: '',
-    kimiApiKey: '',
-    kimiWebAccessToken: '',
-    ollamaCookie: '',
-    codexManagedAccounts: [],
-    antigravityManagedAccounts: [],
-    mimoManagedAccounts: [],
+    ...initialAccountSettings(process.env),
     appUpdate: {
       lastCheckedAt: null,
       lastKnownLatest: null,
@@ -808,29 +790,41 @@ function defaultLimitProviderOrder() {
   return parseLimitProviders().join(',');
 }
 
-function normalizeClaudeWebCookie(value) {
-  return normalizeClaudeWebCookieInput(value);
-}
-
-function currentClaudeWebCookie() {
-  return settings?.claudeWebCookie || claudeWebCookie(process.env);
-}
-
 function persistClaudeWebCookieRenewal({ previousCookie, cookie } = {}) {
   if (!settings?.claudeWebCookie) return false;
   let expected;
   let renewed;
   try {
-    expected = normalizeClaudeWebCookie(previousCookie);
-    renewed = normalizeClaudeWebCookie(cookie);
+    expected = normalizeAccountField('claudeWebCookie', previousCookie);
+    renewed = normalizeAccountField('claudeWebCookie', cookie);
   } catch (_) {
     return false;
   }
-  if (!renewed || normalizeClaudeWebCookie(settings.claudeWebCookie) !== expected) return false;
+  if (!renewed || normalizeAccountField('claudeWebCookie', settings.claudeWebCookie) !== expected) return false;
   if (settings.claudeWebCookie === renewed) return true;
   settings.claudeWebCookie = renewed;
   saveSettings({ throwOnError: true });
   return true;
+}
+
+// A save-time probe gets the collector's transports but none of its write-backs:
+// a credential that has not been saved yet must not renew itself into
+// settings, so a rotation is reported into `renewed` and stored with the rest
+// of the draft. A fresh runtime state keeps the probe from reading or seeding
+// the collector's caches; `probe` tells fetchers with persistent bookkeeping
+// (the DeepSeek balance history) to skip it, and `bypassValidationCache` stops
+// Ollama answering from a cached check of a different save.
+function credentialProbeDeps(renewed = {}) {
+  return electronProviderDeps({
+    claudeWebFetch: electronClaudeWebFetch,
+    onClaudeWebCookieRenewed: ({ cookie }) => {
+      renewed.claudeWebCookie = cookie;
+      return true;
+    },
+    providerRuntimeState: new Map(),
+    bypassValidationCache: true,
+    probe: true
+  });
 }
 
 function electronLimitsDeps() {
@@ -853,219 +847,6 @@ function electronLimitsDeps() {
   };
 }
 
-function normalizeDeepSeekApiKey(value) {
-  return deepseekToken({}, String(value || ''));
-}
-
-function currentDeepSeekApiKey() {
-  return settings?.deepseekApiKey || deepseekToken(process.env);
-}
-
-function normalizeMinimaxApiKey(value) {
-  return minimaxToken({}, String(value || ''));
-}
-
-function currentMinimaxApiKey() {
-  return settings?.minimaxApiKey || minimaxToken(process.env);
-}
-
-function normalizeCopilotApiToken(value) {
-  return copilotToken({}, { copilotApiToken: String(value || '') });
-}
-
-function currentCopilotApiToken() {
-  return settings?.copilotApiToken || copilotToken(process.env);
-}
-
-function normalizeFactoryApiKey(value) {
-  return normalizeSecretSetting(value);
-}
-
-function currentFactoryApiKey() {
-  return settings?.factoryApiKey || factoryEnvApiKey({}, { env: process.env });
-}
-
-async function validateFactoryApiKey(raw, deps = {}) {
-  const apiKey = (deps.normalizeApiKey || normalizeFactoryApiKey)(raw);
-  if (!apiKey) return { ok: false, status: 'notConfigured' };
-  try {
-    const provider = await (deps.fetchLimits || fetchFactoryLimits)(
-      { factoryApiKey: apiKey },
-      deps.providerDeps || electronProviderDeps()
-    );
-    return { ok: provider?.status === 'ok', status: provider?.status || 'unavailable' };
-  } catch (error) {
-    return { ok: false, status: error?.status || 'unavailable' };
-  }
-}
-
-function normalizeClineApiKey(value) {
-  return normalizeSecretSetting(value);
-}
-
-function currentClineApiKey() {
-  return settings?.clineApiKey || clineApiKey(process.env, {});
-}
-
-// Probe the pasted key against the account API before it is stored: the settings
-// row keeps a rejected key out of the credential store and says why.
-async function validateClineApiKey(raw, deps = {}) {
-  const apiKey = (deps.normalizeApiKey || normalizeClineApiKey)(raw);
-  if (!apiKey) return { ok: false, status: 'notConfigured' };
-  try {
-    const provider = await (deps.fetchLimits || fetchClineLimits)(
-      { clineApiKey: apiKey },
-      deps.providerDeps || electronProviderDeps()
-    );
-    return { ok: provider?.status === 'ok', status: provider?.status || 'unavailable' };
-  } catch (error) {
-    return { ok: false, status: error?.status || 'unavailable' };
-  }
-}
-
-function normalizeSecretSetting(value) {
-  let raw = String(value || '').trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw;
-}
-
-function normalizeZaiApiKey(value) {
-  return zaiToken({}, String(value || ''));
-}
-
-function normalizeZaiApiRegion(value) {
-  return zaiRegion({ zaiApiRegion: value }, {});
-}
-
-function currentZaiApiKey() {
-  return settings?.zaiApiKey || zaiToken(process.env);
-}
-
-// A locally logged-in ZCode install is a credential source for the GLM lane
-// even when no console key was entered. Reads the ZCode data files
-// synchronously (setting.json, config.json, and the credential store where it
-// exists); settingsForRenderer renders at human interaction speed, so the cost
-// is bounded by how often that runs, not by any refresh loop.
-function currentZcodeAutoCredential() {
-  const discovery = discoverZcodeConnection();
-  return discovery.entitled && discovery.credential ? discovery : null;
-}
-
-function normalizeZaiTeamApiKey(value) {
-  return zaiTeamToken({}, String(value || ''));
-}
-
-function normalizeZaiTeamId(value) {
-  return String(value || '').trim();
-}
-
-function currentZaiTeamApiKey() {
-  return settings?.zaiTeamApiKey || zaiTeamToken(process.env);
-}
-
-function normalizeVolcengineRegion(value) {
-  const raw = String(value || '').trim().toLowerCase();
-  return raw || '';
-}
-
-function currentVolcengineCredentials() {
-  return volcengineCredentials(process.env, settings || {});
-}
-
-function normalizeQoderCookie(value) {
-  return qoderCookie({}, { qoderCookie: String(value || '') });
-}
-
-function normalizeAlibabaCookie(value) {
-  return normalizeAlibabaCookieHeader(String(value || ''));
-}
-
-function normalizeAlibabaVariant(value) {
-  // Env is consulted here, not just in the collector: resolving it in only one
-  // of the two leaves the settings UI showing a different console than the one
-  // the quota request actually goes to.
-  return alibabaVariant({ alibabaVariant: value }, process.env);
-}
-
-function currentAlibabaCookie() {
-  return settings?.alibabaCookie || alibabaCookie(process.env);
-}
-
-function normalizeQoderSite(value) {
-  const raw = String(value || '').trim().toLowerCase();
-  if (raw === 'cn' || raw === 'china' || raw.includes('qoder.com.cn')) return 'cn';
-  return 'global';
-}
-
-function currentQoderCookie() {
-  return settings?.qoderCookie || qoderCookie(process.env);
-}
-
-function normalizeDevinBearerToken(value) {
-  return devinBearerToken({}, { devinBearerToken: String(value || '') });
-}
-
-function currentDevinBearerToken() {
-  return settings?.devinBearerToken || devinBearerToken(process.env);
-}
-
-function normalizeTraeAccessToken(value) {
-  return traeAccessToken({}, { traeAccessToken: String(value || '') });
-}
-
-function normalizeTraeDeviceId(value) {
-  return traeDeviceId({}, { traeDeviceId: String(value || '') });
-}
-
-function currentTraeAccessToken() {
-  return settings?.traeAccessToken || traeAccessToken(process.env);
-}
-
-function normalizeZedCookie(value) {
-  return zedCookie({}, { zedCookie: String(value || '') });
-}
-
-function currentZedCookie() {
-  return settings?.zedCookie || zedCookie(process.env);
-}
-
-function normalizeCommandcodeCookie(value) {
-  return commandcodeCookie({}, { commandcodeCookie: String(value || '') });
-}
-
-function currentCommandcodeCookie() {
-  return settings?.commandcodeCookie || commandcodeCookie(process.env);
-}
-
-function normalizeOllamaCookie(value) {
-  return ollamaSessionCookie({}, { ollamaCookie: String(value || '') });
-}
-
-function currentOllamaCookie() {
-  return settings?.ollamaCookie || ollamaSessionCookie(process.env);
-}
-
-function normalizeKimiApiKey(value) {
-  return kimiToken({}, String(value || ''));
-}
-
-function currentKimiApiKey() {
-  return settings?.kimiApiKey || kimiToken(process.env);
-}
-
-function normalizeKimiWebAccessToken(value) {
-  return kimiWebToken({}, String(value || ''));
-}
-
-function currentKimiWebAccessToken() {
-  return settings?.kimiWebAccessToken || kimiWebToken(process.env);
-}
-
-function normalizeCopilotEnterpriseHost(value) {
-  return String(value || '').trim().replace(/^https?:\/\//i, '').split('/')[0].toLowerCase();
-}
 
 let codexLoginController = null;
 let codexLoginFlowId = '';
@@ -2216,6 +1997,14 @@ function ensureSettingsLoaded() {
       settings.codexManagedAccounts = hydratedCodexAccounts;
     }
   }
+  // A seeded client identity split is an in-memory addition at this point.
+  // Persist it with the same retry-on-next-save tolerance as the migration
+  // above, so a read-only or failing settings file delays the write instead of
+  // losing the tracked client.
+  if (seededClientSplitsPending) {
+    seededClientSplitsPending = false;
+    saveSettings();
+  }
   rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
   return settings;
 }
@@ -2584,6 +2373,34 @@ function readSettings() {
     if (!saved.secret && defaults.secret) delete saved.secret;
     const merged = { ...defaults, ...saved, ...storedCredentials };
     merged.clients = clientsCsvForSetting(merged.clients);
+    // A client identity split (see clientIdentitySplits.js) is not a new tool:
+    // the user tracking its parent was already counting it, so the split has to
+    // be seeded or their usage drops. `seededClientSplits` makes that a one-time
+    // addition, so untracking the row afterwards is not undone on next launch.
+    //
+    // Every launch is evaluated, fresh installs included. Restricting this to an
+    // existing settings file with an explicit `clients` field left two installs
+    // un-marked: one whose file predates that field, and a fresh install, which
+    // takes the split client from DEFAULT_CLIENTS without ever recording that it
+    // did. Both would then be migrated on a later launch, and the seed would fire
+    // on a deliberate untrack — the user drops Oh My Pi and it reappears next start.
+    // Evaluating unconditionally is also cheap: with the split client already
+    // present nothing is inserted, and the marker is what makes that a decision
+    // rather than an absence.
+    const seeded = seedSplitClients(merged.clients, { applied: merged.seededClientSplits });
+    // The marker records that this install has been through the migration, not
+    // that it gained a client. Recording it only on a successful insert would
+    // leave an install that tracks the parent later still un-migrated, so the
+    // seed would fire on a deliberate post-split choice instead of on the
+    // upgrade. `evaluated` is what makes the decision belong to this launch.
+    if (seeded.evaluated.length > 0) {
+      merged.clients = seeded.clients;
+      merged.seededClientSplits = [...new Set([
+        ...String(merged.seededClientSplits || '').split(',').map((value) => value.trim()).filter(Boolean),
+        ...seeded.evaluated
+      ])].join(',');
+      seededClientSplitsPending = true;
+    }
     merged.customScanPaths = normalizeCustomScanPaths(merged.customScanPaths);
     // A missing settings file is the only reliable fresh-install signal: a
     // missing limitProviders field also occurs when an existing installation
@@ -5008,13 +4825,13 @@ async function startStatsStream(options = {}) {
   }
 }
 
-function showPopover() {
+function showPopover(clickPoint = null) {
   if (!mainWindow || mainWindow.isDestroyed() || !tray) return;
   applyMacActivationPolicy();
   applyMacSpaceBehavior(true);
   applyWindowSettings();
   const current = mainWindow.getBounds();
-  const target = popoverBounds(tray, current.width, current.height);
+  const target = popoverBounds(tray, current.width, current.height, { clickPoint });
   mainWindow.setBounds(target);
   suppressNextBlurHide = true;
   mainWindow.show();
@@ -5029,10 +4846,10 @@ function hidePopover() {
   if (mainWindow.isVisible()) mainWindow.hide();
 }
 
-function togglePopover() {
+function togglePopover(clickPoint = null) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   if (mainWindow.isVisible() && mainWindow.isFocused()) hidePopover();
-  else showPopover();
+  else showPopover(clickPoint);
 }
 
 function focusExistingWindow() {
@@ -5064,59 +4881,6 @@ function currentWindowToggleShortcutStatus() {
 // Default-deny: name every field allowed through instead of spreading the stored
 // profile. A spread hands any field added later to the renderer verbatim, which
 // is exactly how a credential leaks.
-function redactOpencodeProfilesForRenderer(profiles) {
-  if (!profiles || typeof profiles !== 'object') return profiles;
-  const out = Object.create(null);
-  for (const [name, profile] of Object.entries(profiles)) {
-    out[name] = {
-      enabled: profile?.enabled !== false,
-      cookie: profile?.cookie ? 'set' : '',
-      apiKey: profile?.apiKey ? 'set' : ''
-    };
-  }
-  return out;
-}
-
-function redactOpenRouterProfilesForRenderer(profiles) {
-  if (!profiles || typeof profiles !== 'object') return profiles;
-  const out = Object.create(null);
-  for (const [name, profile] of Object.entries(profiles)) {
-    out[name] = { enabled: profile?.enabled !== false, apiKey: profile?.apiKey ? 'set' : '' };
-  }
-  return out;
-}
-
-function redactThirdPartyProfilesForRenderer(profiles) {
-  if (!profiles || typeof profiles !== 'object') return profiles;
-  const out = Object.create(null);
-  for (const [name, profile] of Object.entries(profiles)) {
-    const adapter = thirdPartyLimits.normalizeAdapterId(profile?.adapter);
-    out[name] = {
-      enabled: profile?.enabled !== false,
-      adapter,
-      baseUrl: thirdPartyLimits.normalizeThirdPartyBaseUrl(profile?.baseUrl, {
-        stripTerminalV1: adapter !== thirdPartyLimits.CUSTOM_BALANCE_ADAPTER
-      }),
-      userId: String(profile?.userId || '').trim(),
-      ...(adapter === thirdPartyLimits.CUSTOM_BALANCE_ADAPTER
-        ? {
-            endpointPath: thirdPartyLimits.normalizeCustomEndpointPath(profile?.endpointPath),
-            authMode: thirdPartyLimits.normalizeCustomAuthMode(profile?.authMode),
-            remainingPath: thirdPartyLimits.normalizeCustomJsonPath(profile?.remainingPath),
-            usedPath: thirdPartyLimits.normalizeCustomJsonPath(profile?.usedPath),
-            totalPath: thirdPartyLimits.normalizeCustomJsonPath(profile?.totalPath),
-            currency: thirdPartyLimits.normalizeCustomCurrency(profile?.currency),
-            divisor: thirdPartyLimits.normalizeCustomDivisor(profile?.divisor)
-          }
-        : {}),
-      accessToken: profile?.accessToken ? 'set' : '',
-      apiKey: profile?.apiKey ? 'set' : '',
-      refreshToken: profile?.refreshToken ? 'set' : ''
-    };
-  }
-  return out;
-}
-
 // Sub2API rotates its single-use refresh token on every renewal. Persist the
 // new pair with a compare-and-swap before the collector retries with it.
 // New profiles require a current access token and are never persisted from a
@@ -5202,98 +4966,6 @@ function thirdPartyProfileWithCanonicalIdentity(profile, provider) {
 }
 
 function settingsForRenderer() {
-  const claudeWebCookieSource = settings?.claudeWebCookie
-    ? 'settings'
-    : claudeWebCookie(process.env)
-      ? 'env'
-      : '';
-  const deepseekApiKeySource = settings?.deepseekApiKey
-    ? 'settings'
-    : deepseekToken(process.env)
-      ? 'env'
-      : '';
-  const minimaxApiKeySource = settings?.minimaxApiKey
-    ? 'settings'
-    : minimaxToken(process.env)
-      ? 'env'
-      : '';
-  const copilotApiTokenSource = settings?.copilotApiToken
-    ? 'settings'
-    : copilotToken(process.env)
-      ? 'env'
-      : '';
-  const factoryAutomaticCredential = resolveFactoryAutomaticApiKey({}, { env: process.env });
-  const factoryCredentialSource = settings?.factoryApiKey ? 'settings' : factoryAutomaticCredential.source;
-  const clineAutomaticCredential = resolveClineAutomaticCredential(process.env);
-  const clineCredentialSource = settings?.clineApiKey ? 'settings' : clineAutomaticCredential.source;
-  const zcodeAutoCredential = currentZcodeAutoCredential();
-  // "A usable local ZCode login exists" — advertised so the renderer shows
-  // the auto-detect state instead of "disabled" when the provider is
-  // unchecked. Anything else (API-only, unentitled plan) is not an auto
-  // quota source.
-  const zcodeLoginDetected = Boolean(zcodeAutoCredential);
-  const zaiApiKeySource = settings?.zaiApiKey
-    ? 'settings'
-    : zaiToken(process.env)
-      ? 'env'
-      : zcodeAutoCredential
-        ? 'zcode-auto'
-        : '';
-  const zaiTeamApiKeySource = settings?.zaiTeamApiKey
-    ? 'settings'
-    : zaiTeamToken(process.env)
-      ? 'env'
-      : '';
-  const volcengineCredentialsSource = volcengineCredentials({}, settings || {})
-    ? 'settings'
-    : volcengineCredentials(process.env)
-      ? 'env'
-      : '';
-  const qoderCookieSource = settings?.qoderCookie
-    ? 'settings'
-    : qoderCookie(process.env)
-      ? 'env'
-      : '';
-  const devinBearerTokenSource = settings?.devinBearerToken
-    ? 'settings'
-    : devinBearerToken(process.env)
-      ? 'env'
-      : '';
-  const traeAccessTokenSource = settings?.traeAccessToken
-    ? 'settings'
-    : traeAccessToken(process.env)
-      ? 'env'
-      : '';
-  const zedCookieSource = settings?.zedCookie
-    ? 'settings'
-    : zedCookie(process.env)
-      ? 'env'
-      : '';
-  const commandcodeCookieSource = settings?.commandcodeCookie
-    ? 'settings'
-    : commandcodeCookie(process.env)
-      ? 'env'
-      : '';
-  const ollamaCookieSource = settings?.ollamaCookie
-    ? 'settings'
-    : ollamaSessionCookie(process.env)
-      ? 'env'
-      : '';
-  const alibabaCookieSource = settings?.alibabaCookie
-    ? 'settings'
-    : alibabaCookie(process.env)
-      ? 'env'
-      : '';
-  const kimiApiKeySource = settings?.kimiApiKey
-    ? 'settings'
-    : kimiToken(process.env)
-      ? 'env'
-      : '';
-  const kimiWebAccessTokenSource = settings?.kimiWebAccessToken
-    ? 'settings'
-    : kimiWebToken(process.env)
-      ? 'env'
-      : '';
   // Default-deny every credential field added to the canonical store. The two
   // hub secrets remain explicit exceptions because the existing sync UI must
   // prefill/copy them; provider credentials only cross as blank/configured state.
@@ -5301,14 +4973,7 @@ function settingsForRenderer() {
     expose: ['hubHostSecret', 'secret']
   });
   const rendererSettings = { ...settings };
-  for (const key of [
-    'workbuddyAccessToken',
-    'workbuddyUserId',
-    'workbuddyEnterpriseId',
-    'workbuddyLocale',
-    'workbuddyDomain',
-    'workbuddyDepartmentInfo'
-  ]) delete rendererSettings[key];
+  for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
   return {
     ...rendererSettings,
     locale: trayMenuLocale(),
@@ -5324,86 +4989,12 @@ function settingsForRenderer() {
     subscriptionsHub: currentHubIdentity(),
     subscriptionsUpdatedAt: subscriptionDocumentVersion(subscriptionsDocumentFor(currentHubIdentity())),
     subscriptionsOrphaned: pendingOrphanedSubscriptions(),
-    zaiApiRegion: normalizeZaiApiRegion(settings?.zaiApiRegion || 'global'),
-    zaiTeamOrganizationId: settings?.zaiTeamOrganizationId ? 'set' : '',
-    zaiTeamProjectId: settings?.zaiTeamProjectId ? 'set' : '',
-    volcengineAccessKeyId: settings?.volcengineAccessKeyId ? 'set' : '',
-    volcengineAgentAccessKeyId: settings?.volcengineAgentAccessKeyId ? 'set' : '',
-    claudeWebCookie: settings?.claudeWebCookie ? 'set' : '',
-    alibabaCookie: settings?.alibabaCookie ? 'set' : '',
-    alibabaVariant: normalizeAlibabaVariant(settings?.alibabaVariant),
-    qoderCookie: settings?.qoderCookie ? 'set' : '',
-    devinBearerToken: settings?.devinBearerToken ? 'set' : '',
-    devinOrganization: settings?.devinOrganization || '',
-    traeAccessToken: settings?.traeAccessToken ? 'set' : '',
-    traeDeviceId: settings?.traeDeviceId ? 'set' : '',
-    zedCookie: settings?.zedCookie ? 'set' : '',
-    commandcodeCookie: settings?.commandcodeCookie ? 'set' : '',
-    ollamaCookie: settings?.ollamaCookie ? 'set' : '',
-    // Never ship OpenCode session cookies to the renderer; the UI only needs to
-    // know whether a cookie is configured, not its value.
-    opencodeCookie: settings?.opencodeCookie ? 'set' : '',
-    ...(settings?.opencodeProfiles
-      ? { opencodeProfiles: redactOpencodeProfilesForRenderer(settings.opencodeProfiles) }
-      : {}),
-    ...(settings?.openrouterProfiles
-      ? { openrouterProfiles: redactOpenRouterProfilesForRenderer(settings.openrouterProfiles) }
-      : {}),
-    ...(settings?.thirdPartyProfiles
-      ? { thirdPartyProfiles: redactThirdPartyProfilesForRenderer(settings.thirdPartyProfiles) }
-      : {}),
-    openrouterEnvConfigured: Boolean(openrouterLimits.openrouterToken(process.env)),
-    thirdPartyEnvConfigured: thirdPartyLimits.configuredAccounts({}, { env: process.env }).length > 0,
+    ...accountFieldProjection(settings, process.env),
     codexManagedAccounts: codexAccountsForRenderer(),
     antigravityManagedAccounts: antigravityAccountsForRenderer(),
     mimoManagedAccounts: mimoAccountsForRenderer(),
-    claudeWebCookieConfigured: Boolean(currentClaudeWebCookie()),
-    claudeWebCookieSource,
-    deepseekApiKeyConfigured: Boolean(currentDeepSeekApiKey()),
-    deepseekApiKeySource,
-    minimaxApiKeyConfigured: Boolean(currentMinimaxApiKey()),
-    minimaxApiKeySource,
-    copilotApiTokenConfigured: Boolean(currentCopilotApiToken()),
-    copilotApiTokenSource,
-    factoryCredentialConfigured: Boolean(currentFactoryApiKey()),
-    factoryCredentialSource,
-    // A discovered sign-in counts as configured, the way zai counts its ZCode login:
-    // otherwise the pill reads "Not configured" on the machine this provider is
-    // built for. The source label then says which lane it is.
-    clineCredentialConfigured: Boolean(currentClineApiKey() || clineAutomaticCredential.source),
-    clineCredentialSource,
-    zaiApiKeyConfigured: Boolean(currentZaiApiKey() || zcodeAutoCredential),
-    zaiApiKeySource,
-    zcodeLoginDetected,
-    zaiTeamApiKeyConfigured: Boolean(currentZaiTeamApiKey()),
-    zaiTeamApiKeySource,
-    volcengineCredentialsConfigured: Boolean(currentVolcengineCredentials()),
-    volcengineCredentialsSource,
-    qoderCookieConfigured: Boolean(currentQoderCookie()),
-    qoderCookieSource,
-    devinBearerTokenConfigured: Boolean(currentDevinBearerToken() && normalizeDevinOrganization(
-      settings?.devinOrganization
-      || process.env.TOKEN_MONITOR_DEVIN_ORGANIZATION
-      || process.env.DEVIN_ORGANIZATION
-      || process.env.DEVIN_ORG
-    )),
-    devinBearerTokenSource,
-    traeAccessTokenConfigured: Boolean(currentTraeAccessToken()),
-    traeAccessTokenSource,
-    zedCookieConfigured: Boolean(currentZedCookie()),
-    zedCookieSource,
-    commandcodeCookieConfigured: Boolean(currentCommandcodeCookie()),
-    commandcodeCookieSource,
-    ollamaCookieConfigured: Boolean(currentOllamaCookie()),
-    ollamaCookieSource,
-    alibabaCookieConfigured: Boolean(currentAlibabaCookie()),
-    alibabaCookieSource,
-    kimiApiKeyConfigured: Boolean(currentKimiApiKey()),
-    kimiApiKeySource,
-    kimiWebAccessTokenConfigured: Boolean(currentKimiWebAccessToken()),
-    kimiWebAccessTokenSource,
-    kimiCredentialConfigured: Boolean(currentKimiWebAccessToken() || currentKimiApiKey()),
-    kimiCredentialSource: kimiWebAccessTokenSource || kimiApiKeySource,
+    ...accountStatusProjection(settings, process.env),
+    limitAccountForms: limitAccountFormsForRenderer(),
     currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
     currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
     windowToggleShortcutStatus: currentWindowToggleShortcutStatus()
@@ -5505,6 +5096,7 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     currency: source.currency,
     currencyRatesEffective: source.currencyRatesEffective,
     compactTokenUnits: source.compactTokenUnits,
+    showCompactTotalTokens: source.showCompactTotalTokens,
     themeColors: source.themeColors,
     vendorColors: source.vendorColors,
     glassOpacity: source.glassOpacity,
@@ -5889,9 +5481,9 @@ function handleWindowToggleShortcut() {
   else focusExistingWindow();
 }
 
-function handleTrayToggle() {
+function handleTrayToggle(_tray, clickPoint = null) {
   const action = trayToggleAction(settings);
-  if (action === 'togglePopover') togglePopover();
+  if (action === 'togglePopover') togglePopover(clickPoint);
   else if (action === 'focusWindow') focusExistingWindow();
 }
 
@@ -6994,30 +6586,8 @@ function isAllowedExternalUrl(value) {
     (parsed.hostname === 'javis-ai.com' || parsed.hostname === 'www.javis-ai.com')
     && (parsed.pathname === '/token-monitor' || parsed.pathname.startsWith('/token-monitor/'))
   ) return true;
-  if (parsed.hostname === 'claude.ai' && parsed.pathname.startsWith('/settings')) return true;
-  if ((parsed.hostname === 'cursor.com' || parsed.hostname === 'www.cursor.com') && parsed.pathname.startsWith('/settings')) return true;
-  if (parsed.hostname === 'opencode.ai' || parsed.hostname === 'www.opencode.ai') return true;
-  if (parsed.hostname === 'openrouter.ai' && parsed.pathname.startsWith('/settings/keys')) return true;
-  if (parsed.hostname === 'platform.deepseek.com' && parsed.pathname.startsWith('/api_keys')) return true;
-  if (parsed.hostname === 'app.devin.ai' && parsed.pathname.startsWith('/settings/usage')) return true;
-  if (parsed.hostname === 'platform.minimaxi.com') return true;
-  if (parsed.hostname === 'platform.minimax.io') return true;
-  if (parsed.hostname === 'app.factory.ai' && parsed.pathname.startsWith('/settings/api-keys')) return true;
-  if (parsed.hostname === 'app.cline.bot' && parsed.pathname.startsWith('/dashboard')) return true;
-  if (parsed.hostname === 'z.ai' || parsed.hostname === 'www.z.ai') return true;
-  if (parsed.hostname === 'bigmodel.cn' || parsed.hostname === 'www.bigmodel.cn') return true;
-  if (parsed.hostname === 'www.volcengine.com' || parsed.hostname === 'console.volcengine.com') return true;
-  if (parsed.hostname === 'qoder.com' || parsed.hostname === 'www.qoder.com' || parsed.hostname === 'qoder.com.cn' || parsed.hostname === 'www.qoder.com.cn') return true;
-  if (parsed.hostname === 'trae.cn' || parsed.hostname === 'www.trae.cn') return true;
-  if (parsed.hostname === 'commandcode.ai' || parsed.hostname === 'www.commandcode.ai') return true;
-  if (parsed.hostname === 'dashboard.zed.dev') return true;
-  if ((parsed.hostname === 'ollama.com' || parsed.hostname === 'www.ollama.com') && (parsed.pathname === '/settings' || parsed.pathname === '/signin')) return true;
-  if ((parsed.hostname === 'kimi.com' || parsed.hostname === 'www.kimi.com') && parsed.pathname.startsWith('/code')) return true;
-  // Token Plan lives behind a hash route, so the console's region path is all
-  // there is to match on. Kept host-scoped rather than opening the whole
-  // console, in line with every other entry here.
-  if (parsed.hostname === 'bailian.console.aliyun.com' && parsed.pathname.startsWith('/cn-beijing')) return true;
-  if (parsed.hostname === 'modelstudio.console.alibabacloud.com' && parsed.pathname.startsWith('/ap-southeast-1')) return true;
+  // Provider console links come from each account declaration's urlPolicy.
+  if (limitProviderUrlAllowed(parsed.hostname, parsed.pathname)) return true;
   if (STATUS_PAGE_HOSTS.has(parsed.hostname) && (parsed.pathname === '' || parsed.pathname === '/')) return true;
   return false;
 }
@@ -7465,6 +7035,19 @@ app.whenReady().then(() => {
   syncEdgeDock();
   setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
+  ipcMain.handle('appearance:getBackgroundImage', () => getBackgroundImage(app.getPath('userData')));
+  ipcMain.handle('appearance:chooseBackgroundImage', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }]
+    });
+    if (result.canceled || !result.filePaths[0]) return { canceled: true };
+    return { bytes: await importBackgroundImage(result.filePaths[0], app.getPath('userData'), nativeImage) };
+  });
+  ipcMain.handle('appearance:clearBackgroundImage', async () => {
+    await clearBackgroundImage(app.getPath('userData'));
+    return true;
+  });
 
   // The dock card decorates its plan cell from the subscription records the
   // appearance carries, and only a settings push re-sends that appearance — while
@@ -7522,8 +7105,16 @@ app.whenReady().then(() => {
       return { ok: false, error: error.message };
     }
   });
-  ipcMain.handle('settings:update', (_event, patch) => {
-    if (patch?.claudeWebCookie !== undefined) claudeWebCookieMutationRevision += 1;
+  const credentialCommands = createCredentialCommands({
+    getSettings: () => settings,
+    applySettingsPatch,
+    probeDeps: credentialProbeDeps
+  });
+  ipcMain.handle('settings:update', (_event, patch) => applySettingsPatch(patch));
+  // The settings:update body, named so a credential save persists through the
+  // exact same normalization, runtime reconfigure and limit invalidation.
+  function applySettingsPatch(patch) {
+    credentialCommands.noteSettingsPatch(patch);
     const previousSettingsState = settings;
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
     const previousNativeMaterial = nativeBlurEnabled();
@@ -7547,20 +7138,12 @@ app.whenReady().then(() => {
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
     delete normalizedPatch.windowMaximized;
-    delete normalizedPatch.codexManagedAccounts;
-    delete normalizedPatch.antigravityManagedAccounts;
-    delete normalizedPatch.mimoManagedAccounts;
-    delete normalizedPatch.workbuddyAccessToken;
-    delete normalizedPatch.workbuddyUserId;
-    delete normalizedPatch.workbuddyEnterpriseId;
     delete normalizedPatch.workbuddyEndpoint;
-    delete normalizedPatch.workbuddyLocale;
-    delete normalizedPatch.workbuddyDomain;
-    delete normalizedPatch.workbuddyDepartmentInfo;
     delete normalizedPatch.workbuddyLocalAppEnabled;
-    delete normalizedPatch.openrouterProfiles;
-    delete normalizedPatch.thirdPartyProfiles;
     delete normalizedPatch.customModelPricing;
+    // Account fields declared persist:'never' (managed account lists, profile
+    // maps, workbuddy session fields) are stripped by the registry walk below.
+    normalizeAccountPatch(patch, normalizedPatch);
     // Subscriptions go through subscriptions:save, which knows whether this
     // device owns the list or shares it with a hub. The explicit fields further
     // down are what actually hold the line — they are applied after the spread
@@ -7582,37 +7165,6 @@ app.whenReady().then(() => {
       normalizedPatch.customScanPaths = normalizeCustomScanPaths(patch.customScanPaths);
     }
     if (patch.vendorColors !== undefined) normalizedPatch.vendorColors = migrateVendorColors(patch.vendorColors);
-    if (patch.claudeWebCookie !== undefined) normalizedPatch.claudeWebCookie = normalizeClaudeWebCookie(patch.claudeWebCookie);
-    if (patch.deepseekApiKey !== undefined) normalizedPatch.deepseekApiKey = normalizeDeepSeekApiKey(patch.deepseekApiKey);
-    if (patch.minimaxApiKey !== undefined) normalizedPatch.minimaxApiKey = normalizeMinimaxApiKey(patch.minimaxApiKey);
-    if (patch.copilotApiToken !== undefined) normalizedPatch.copilotApiToken = normalizeCopilotApiToken(patch.copilotApiToken);
-    if (patch.copilotEnterpriseHost !== undefined) normalizedPatch.copilotEnterpriseHost = normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost);
-    if (patch.factoryApiKey !== undefined) normalizedPatch.factoryApiKey = normalizeFactoryApiKey(patch.factoryApiKey);
-    if (patch.clineApiKey !== undefined) normalizedPatch.clineApiKey = normalizeClineApiKey(patch.clineApiKey);
-    if (patch.zaiApiKey !== undefined) normalizedPatch.zaiApiKey = normalizeZaiApiKey(patch.zaiApiKey);
-    if (patch.zaiApiRegion !== undefined) normalizedPatch.zaiApiRegion = normalizeZaiApiRegion(patch.zaiApiRegion);
-    if (patch.zaiTeamApiKey !== undefined) normalizedPatch.zaiTeamApiKey = normalizeZaiTeamApiKey(patch.zaiTeamApiKey);
-    if (patch.zaiTeamOrganizationId !== undefined) normalizedPatch.zaiTeamOrganizationId = normalizeZaiTeamId(patch.zaiTeamOrganizationId);
-    if (patch.zaiTeamProjectId !== undefined) normalizedPatch.zaiTeamProjectId = normalizeZaiTeamId(patch.zaiTeamProjectId);
-    if (patch.volcengineAccessKeyId !== undefined) normalizedPatch.volcengineAccessKeyId = normalizeSecretSetting(patch.volcengineAccessKeyId);
-    if (patch.volcengineSecretAccessKey !== undefined) normalizedPatch.volcengineSecretAccessKey = normalizeSecretSetting(patch.volcengineSecretAccessKey);
-    if (patch.volcengineRegion !== undefined) normalizedPatch.volcengineRegion = normalizeVolcengineRegion(patch.volcengineRegion);
-    if (patch.volcengineAgentAccessKeyId !== undefined) normalizedPatch.volcengineAgentAccessKeyId = normalizeSecretSetting(patch.volcengineAgentAccessKeyId);
-    if (patch.volcengineAgentSecretAccessKey !== undefined) normalizedPatch.volcengineAgentSecretAccessKey = normalizeSecretSetting(patch.volcengineAgentSecretAccessKey);
-    if (patch.volcengineAgentRegion !== undefined) normalizedPatch.volcengineAgentRegion = normalizeVolcengineRegion(patch.volcengineAgentRegion);
-    if (patch.qoderCookie !== undefined) normalizedPatch.qoderCookie = normalizeQoderCookie(patch.qoderCookie);
-    if (patch.devinBearerToken !== undefined) normalizedPatch.devinBearerToken = normalizeDevinBearerToken(patch.devinBearerToken);
-    if (patch.devinOrganization !== undefined) normalizedPatch.devinOrganization = normalizeDevinOrganization(patch.devinOrganization);
-    if (patch.alibabaCookie !== undefined) normalizedPatch.alibabaCookie = normalizeAlibabaCookie(patch.alibabaCookie);
-    if (patch.alibabaVariant !== undefined) normalizedPatch.alibabaVariant = normalizeAlibabaVariant(patch.alibabaVariant);
-    if (patch.qoderSite !== undefined) normalizedPatch.qoderSite = normalizeQoderSite(patch.qoderSite);
-    if (patch.traeAccessToken !== undefined) normalizedPatch.traeAccessToken = normalizeTraeAccessToken(patch.traeAccessToken);
-    if (patch.traeDeviceId !== undefined) normalizedPatch.traeDeviceId = normalizeTraeDeviceId(patch.traeDeviceId);
-    if (patch.zedCookie !== undefined) normalizedPatch.zedCookie = normalizeZedCookie(patch.zedCookie);
-    if (patch.commandcodeCookie !== undefined) normalizedPatch.commandcodeCookie = normalizeCommandcodeCookie(patch.commandcodeCookie);
-    if (patch.kimiApiKey !== undefined) normalizedPatch.kimiApiKey = normalizeKimiApiKey(patch.kimiApiKey);
-    if (patch.kimiWebAccessToken !== undefined) normalizedPatch.kimiWebAccessToken = normalizeKimiWebAccessToken(patch.kimiWebAccessToken);
-    if (patch.ollamaCookie !== undefined) normalizedPatch.ollamaCookie = normalizeOllamaCookie(patch.ollamaCookie);
     if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
     if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
     if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
@@ -7738,37 +7290,7 @@ app.whenReady().then(() => {
       language: patch.language !== undefined ? normalizeLanguageSetting(patch.language, settings.language) : normalizeLanguageSetting(settings.language),
       startAtLogin: loginItemEnabledHere() ? parseBoolean(patch.startAtLogin ?? settings.startAtLogin, false) : false,
       automaticAppUpdates: parseBoolean(patch.automaticAppUpdates ?? settings.automaticAppUpdates, false),
-      claudeWebCookie: patch.claudeWebCookie !== undefined
-        ? normalizeClaudeWebCookie(patch.claudeWebCookie)
-        : (settings.claudeWebCookie || ''),
-      deepseekApiKey: patch.deepseekApiKey !== undefined ? normalizeDeepSeekApiKey(patch.deepseekApiKey) : (settings.deepseekApiKey || ''),
-      minimaxApiKey: patch.minimaxApiKey !== undefined ? normalizeMinimaxApiKey(patch.minimaxApiKey) : (settings.minimaxApiKey || ''),
-      copilotApiToken: patch.copilotApiToken !== undefined ? normalizeCopilotApiToken(patch.copilotApiToken) : (settings.copilotApiToken || ''),
-      copilotEnterpriseHost: patch.copilotEnterpriseHost !== undefined ? normalizeCopilotEnterpriseHost(patch.copilotEnterpriseHost) : (settings.copilotEnterpriseHost || ''),
-      factoryApiKey: patch.factoryApiKey !== undefined ? normalizeFactoryApiKey(patch.factoryApiKey) : (settings.factoryApiKey || ''),
-      clineApiKey: patch.clineApiKey !== undefined ? normalizeClineApiKey(patch.clineApiKey) : (settings.clineApiKey || ''),
-      zaiApiKey: patch.zaiApiKey !== undefined ? normalizeZaiApiKey(patch.zaiApiKey) : (settings.zaiApiKey || ''),
-      zaiApiRegion: patch.zaiApiRegion !== undefined ? normalizeZaiApiRegion(patch.zaiApiRegion) : normalizeZaiApiRegion(settings.zaiApiRegion || 'global'),
-      zaiTeamApiKey: patch.zaiTeamApiKey !== undefined ? normalizeZaiTeamApiKey(patch.zaiTeamApiKey) : (settings.zaiTeamApiKey || ''),
-      zaiTeamOrganizationId: patch.zaiTeamOrganizationId !== undefined ? normalizeZaiTeamId(patch.zaiTeamOrganizationId) : (settings.zaiTeamOrganizationId || ''),
-      zaiTeamProjectId: patch.zaiTeamProjectId !== undefined ? normalizeZaiTeamId(patch.zaiTeamProjectId) : (settings.zaiTeamProjectId || ''),
-      volcengineAccessKeyId: patch.volcengineAccessKeyId !== undefined ? normalizeSecretSetting(patch.volcengineAccessKeyId) : (settings.volcengineAccessKeyId || ''),
-      volcengineSecretAccessKey: patch.volcengineSecretAccessKey !== undefined ? normalizeSecretSetting(patch.volcengineSecretAccessKey) : (settings.volcengineSecretAccessKey || ''),
-      volcengineRegion: patch.volcengineRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineRegion) : (settings.volcengineRegion || ''),
-      volcengineAgentAccessKeyId: patch.volcengineAgentAccessKeyId !== undefined ? normalizeSecretSetting(patch.volcengineAgentAccessKeyId) : (settings.volcengineAgentAccessKeyId || ''),
-      volcengineAgentSecretAccessKey: patch.volcengineAgentSecretAccessKey !== undefined ? normalizeSecretSetting(patch.volcengineAgentSecretAccessKey) : (settings.volcengineAgentSecretAccessKey || ''),
-      volcengineAgentRegion: patch.volcengineAgentRegion !== undefined ? normalizeVolcengineRegion(patch.volcengineAgentRegion) : (settings.volcengineAgentRegion || ''),
-      qoderCookie: patch.qoderCookie !== undefined ? normalizeQoderCookie(patch.qoderCookie) : (settings.qoderCookie || ''),
-      qoderSite: patch.qoderSite !== undefined ? normalizeQoderSite(patch.qoderSite) : normalizeQoderSite(settings.qoderSite || 'global'),
-      devinBearerToken: patch.devinBearerToken !== undefined ? normalizeDevinBearerToken(patch.devinBearerToken) : (settings.devinBearerToken || ''),
-      devinOrganization: patch.devinOrganization !== undefined ? normalizeDevinOrganization(patch.devinOrganization) : (settings.devinOrganization || ''),
-      alibabaCookie: patch.alibabaCookie !== undefined ? normalizeAlibabaCookie(patch.alibabaCookie) : (settings.alibabaCookie || ''),
-      alibabaVariant: patch.alibabaVariant !== undefined ? normalizeAlibabaVariant(patch.alibabaVariant) : (settings.alibabaVariant || ''),
-      traeAccessToken: patch.traeAccessToken !== undefined ? normalizeTraeAccessToken(patch.traeAccessToken) : (settings.traeAccessToken || ''),
-      traeDeviceId: patch.traeDeviceId !== undefined ? normalizeTraeDeviceId(patch.traeDeviceId) : (settings.traeDeviceId || ''),
-      zedCookie: patch.zedCookie !== undefined ? normalizeZedCookie(patch.zedCookie) : (settings.zedCookie || ''),
-      commandcodeCookie: patch.commandcodeCookie !== undefined ? normalizeCommandcodeCookie(patch.commandcodeCookie) : (settings.commandcodeCookie || ''),
-      ollamaCookie: patch.ollamaCookie !== undefined ? normalizeOllamaCookie(patch.ollamaCookie) : (settings.ollamaCookie || ''),
+      ...finalAccountSettings(patch, settings),
       customModelPricing: patch.customModelPricing !== undefined
         ? normalizeCustomPricingSetting(patch.customModelPricing)
         : normalizeCustomPricingSetting(settings.customModelPricing)
@@ -7893,7 +7415,7 @@ app.whenReady().then(() => {
     }
     pushSettingsToRenderer();
     return settingsForRenderer();
-  });
+  }
   ipcMain.handle('appearance:preview', (_event, patch) => {
     applyNativeMaterial({ ...settings, ...patch });
     if (patch && patch.zoomFactor !== undefined && mainWindow && !mainWindow.isDestroyed()) {
@@ -8212,74 +7734,8 @@ app.whenReady().then(() => {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('claude:saveCookie', async (_event, raw) => {
-    const requestRevision = ++claudeWebCookieMutationRevision;
-    let cookie;
-    try {
-      cookie = normalizeClaudeWebCookie(raw);
-    } catch (error) {
-      return {
-        ok: false,
-        status: 'invalid',
-        errorCode: error?.code || 'INVALID_CLAUDE_WEB_SESSION_KEY'
-      };
-    }
-    if (!cookie) {
-      return {
-        ok: false,
-        status: 'notConfigured',
-        errorCode: 'INVALID_CLAUDE_WEB_SESSION_KEY'
-      };
-    }
-    try {
-      let cookieToPersist = cookie;
-      const provider = await fetchClaudeLimits(
-        { claudeWebCookie: cookie },
-        {
-          claudeWebFetch: electronClaudeWebFetch,
-          providerRuntimeState: new Map(),
-          onClaudeWebCookieRenewed: ({ cookie: renewedCookie }) => {
-            cookieToPersist = renewedCookie;
-          }
-        }
-      );
-      if (provider?.status !== 'ok') {
-        return {
-          ok: false,
-          status: provider?.status || 'error'
-        };
-      }
-      if (claudeWebCookieMutationRevision !== requestRevision) {
-        return {
-          ok: false,
-          status: 'superseded',
-          superseded: true
-        };
-      }
-      settings.claudeWebCookie = cookieToPersist;
-      saveSettings({ throwOnError: true });
-      void queueLimitInvalidation({ provider: 'claude' }, 'login', { clear: true });
-      return {
-        ok: true,
-        status: 'ok'
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        status: error?.status || 'error',
-        errorCode: error?.code || ''
-      };
-    }
-  });
-  ipcMain.handle('ollama:validateCookie', async (_event, raw) => {
-    const cookie = normalizeOllamaCookie(raw);
-    if (!cookie) return { ok: false, status: 'notConfigured' };
-    const provider = await fetchOllamaLimits({ ollamaCookie: cookie }, electronProviderDeps({ bypassValidationCache: true }));
-    rememberOllamaValidation(cookie, provider);
-    return { ok: provider.status === 'ok', status: provider.status };
-  });
-  ipcMain.handle('factory:validateApiKey', (_event, raw) => validateFactoryApiKey(raw));
-  ipcMain.handle('cline:validateApiKey', (_event, raw) => validateClineApiKey(raw));
+  ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
+  ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
     const cookie = opencodeWeb.sanitizeCookieHeader(raw);
     if (!cookie) {
@@ -9127,7 +8583,7 @@ app.whenReady().then(() => {
       if (copilotLoginController !== controller) {
         return { ok: false, error: copilotLoginErrorMessage({ status: 'cancelled' }), flowId };
       }
-      settings.copilotApiToken = normalizeCopilotApiToken(result.accessToken);
+      settings.copilotApiToken = normalizeAccountField('copilotApiToken', result.accessToken);
       saveSettings({ throwOnError: true });
       pushSettingsToRenderer();
       void queueLimitInvalidation({ provider: 'copilot' }, 'login', { clear: true });

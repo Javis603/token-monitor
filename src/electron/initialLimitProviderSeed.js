@@ -1,6 +1,6 @@
 'use strict';
 
-const { limitProvidersForDetectedClients } = require('../shared/limitProviders');
+const { limitProvidersForDetectedClients } = require('../shared/limits/providers');
 
 function applyInitialLimitProviderSeed(pending, summary, deps = {}) {
   const healthClients = summary?.clientHealth?.clients;

@@ -15,7 +15,6 @@ const TOKSCALE_CLIENT_ALIASES = new Map([
   // history record written before the rename still says.
   ['micode', 'mimo'],
   ['micode-desktop', 'mimo'],
-  ['omp', 'pi'],
   ['kilocode', 'kilo'],
   ['devin-cli', 'devin'],
   ['devin-desktop', 'devin']

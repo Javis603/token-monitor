@@ -9,8 +9,8 @@ const {
   normalizeLimitProviderSelection,
   orderedLimitProviders,
   reorderLimitProvider
-} = require('../../src/electron/renderer/limitProviderOrder');
-const { LIMIT_PROVIDER_CATALOG } = require('../../src/shared/limitProviders');
+} = require('../../src/electron/renderer/limits/providerOrder');
+const { LIMIT_PROVIDER_CATALOG } = require('../../src/shared/limits/providers');
 
 const providers = [
   { id: 'claude', label: 'Claude' },
@@ -49,6 +49,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'qoder',
     'deepseek',
     'devin',
+    'typesafe',
     'openrouter',
     'minimax',
     'volcengine',
@@ -119,8 +120,7 @@ test('provider registration and account layout order follows the catalog', () =>
   };
   for (const [file, names, indent] of [
     ['src/electron/renderer/app.js', ['LIMIT_PROVIDER_ACCOUNT_GROUP_IDS', 'LIMIT_PROVIDER_ACCOUNT_STATUS_IDS', 'externalLimitAccountConfig'], '  '],
-    ['src/electron/renderer/limitProviderPresentation.js', ['PROVIDER_SOURCE_LABELS', 'CAPABILITY_TAGS'], '    '],
-    ['src/electron/runtimeConfig.js', ['LIMIT_PROVIDER_SETTING_KEYS'], '  ']
+    ['src/electron/renderer/limits/providerPresentation.js', ['PROVIDER_SOURCE_LABELS', 'CAPABILITY_TAGS'], '    ']
   ]) {
     const source = read(file);
     for (const name of names) {
@@ -130,14 +130,16 @@ test('provider registration and account layout order follows the catalog', () =>
       check([...body.matchAll(new RegExp(`^${indent}(\\w+):`, 'gm'))].map((match) => match[1]), name);
     }
   }
+  const { LIMIT_PROVIDER_SETTING_KEYS } = require('../../src/electron/runtimeConfig');
+  check(Object.keys(LIMIT_PROVIDER_SETTING_KEYS), 'LIMIT_PROVIDER_SETTING_KEYS');
+  const { LIMIT_PROVIDER_REGISTRY, LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
+  assert.deepEqual(LIMIT_PROVIDER_REGISTRY.map(({ id }) => id), canonical, 'limits registry');
+  check(Object.keys(LIMIT_PROVIDER_FETCHERS), 'provider fetchers');
   const html = read('src/electron/renderer/index.html');
   check([...html.matchAll(/^ {12}<div id="(\w+)(?:AccountGroup|CookieGroup)"/gm)]
     .map((match) => match[1]).filter((id) => canonical.includes(id)), 'HTML account groups');
-  const swift = read('native/macos/TokenMonitorWidget/WidgetViewModel.swift');
-  const fallback = swift.slice(swift.indexOf('static func provider(')).split('default:')[0];
-  check([...fallback.matchAll(/case "(\w+)":/g)].map((match) => match[1])
-    .filter((id) => canonical.includes(id)), 'Widget provider labels');
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  check(limitAccountFormsForRenderer().map((form) => form.id), 'generated account forms');
   const collector = read('src/shared/limits/collector.js');
-  check([...collector.matchAll(/^ {4}(\w+): \(providerOptions, probeDeps\)/gm)]
-    .map((match) => match[1]), 'provider fetchers');
+  assert.match(collector, /\.\.\.LIMIT_PROVIDER_FETCHERS/);
 });

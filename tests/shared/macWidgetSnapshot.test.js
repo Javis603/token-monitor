@@ -10,6 +10,7 @@ const {
   resolveWidgetSourceFreshness,
   serializeMacWidgetSnapshot
 } = require('../../src/shared/macWidgetSnapshot');
+const { widgetVendorPalette } = require('../../src/shared/vendorPresentation');
 const { aggregateDevices } = require('../../src/shared/usage');
 const { localIso } = require('../helpers/localTime');
 
@@ -105,6 +106,12 @@ test('builds schema v10 periods, quota and presentation', () => {
   ]);
   assert.ok(Math.abs(snapshot.periods.day.tools[0].sharePercent - (100 / 1.2)) < Number.EPSILON * 100);
   assert.ok(Math.abs(snapshot.periods.day.tools[1].sharePercent - (100 / 6)) < Number.EPSILON * 100);
+  // Tool rows arrive named, and the palette is the vendor table's, so the
+  // widget keeps no label or colour table of its own.
+  assert.deepEqual(snapshot.periods.day.tools.map((tool) => tool.displayName), ['Codex', 'Claude']);
+  assert.deepEqual(snapshot.vendors, widgetVendorPalette());
+  assert.deepEqual(snapshot.vendors.doubao, { color: '#5064FF' });
+  assert.deepEqual(snapshot.vendors.factory, { ink: true, icon: 'droid' });
   assert.deepEqual(snapshot.quota[0].windows[0], {
     kind: 'weekly', label: 'Weekly', metric: null, showMeter: true,
     usedPercent: 35,

@@ -297,6 +297,8 @@ test('a stats update repaints main and the visible Settings overlay', () => {
     visibleStatsSurface: () => 'main',
     renderConnectionStatus: (surface) => calls.push(`connection:${surface}`),
     render: () => calls.push('main'),
+    state: { settings: { limitAccountForms: [{ id: 'typesafe' }] } },
+    limitProviderAccountGroup: () => true,
     isSettingsSurfaceVisible: () => true,
     renderFloatingBubbleContent: () => calls.push('bubble'),
     signalContentReady: () => calls.push('ready')

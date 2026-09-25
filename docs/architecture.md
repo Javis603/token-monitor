@@ -60,18 +60,18 @@ A failed usage reconfiguration rolls back to the last-known-good runtime and ret
 `src/shared/deviceRuntime.js` runs usage and limits independently: `UsageRuntime` owns the tokscale collector, `LimitsRuntime` owns refresh timing, bounded concurrency, per-provider latest-wins lanes, deadlines, retry/backoff and `lastGood`/`lastAttempt` retention. A credential change refreshes only its limits lane and never restarts usage, unless a provider note says otherwise (Cursor forces one targeted usage sync).
 
 - `limitsRefreshMode` (`fixed`/`adaptive`) is separate from `limitsRefreshMs`, so fixed intervals keep their meaning and nothing doing arithmetic on the interval handles a sentinel. The adaptive control law is in `limits/burnRate.js`; why `burn-rate` bypasses no cooldown and why local token usage never triggers a refresh is commented in `limits/runtime.js`.
-- Dispatch starts in `src/shared/limits/collector.js`; normalization lives in `src/shared/limits/core.js`. There is no `limits/index.js` because the Worker imports `core.js` as ESM, which does not resolve directories. `limitProviders.js` and `limitBalanceDisplay.js` stay top-level because the renderer loads them by `<script src>`.
+- Dispatch starts in `src/shared/limits/collector.js`; its fetchers come from the static registry in `limits/registry.js`. Each provider's require-free `account.js` declares credential and account metadata; `src/electron/limits/accountSettings.js` binds main-process normalization and renderer redaction without introducing a dependency from `credentialStore.js` back into provider probes. The renderer receives only a serializable form DTO; raw credentials stay in main. A form's credential saves through `limits:saveCredential`, which admits only registry entries that declare a form, probes the draft with the injected transport and no collector write-backs (`credentialProbeDeps()`), never persists a draft that is incomplete, fails normalization, or that the provider called `unauthorized`, stores a session the probe renewed in place of the pasted one, and persists everything else through the same `settings:update` body (`applySettingsPatch`) so it is reconfigured and invalidated like any other settings write. A per-provider revision drops a probe that a later write for the same form overtook. Normalization of quota results lives in `src/shared/limits/core.js`. There is no `limits/index.js` because the Worker imports `core.js` as ESM, which does not resolve directories. `limits/providers.js` and `limits/balanceDisplay.js` sit beside it; the renderer loads them by `<script src>` and Node consumers `require` them.
 
 ### Outbound transport
 
-`src/electron/limitsFetch.js` chooses the transport at the runtime boundary: `src/shared/outboundFetch.js` when a proxy env is set, Electron's `net.fetch` otherwise, so the OS proxy applies without setup. The collector and the account-settings probes both take it.
+`src/electron/limits/fetch.js` chooses the transport at the runtime boundary: `src/shared/outboundFetch.js` when a proxy env is set, Electron's `net.fetch` otherwise, so the OS proxy applies without setup. The collector and the account-settings probes both take it.
 
 - `probeLimitProvider` injects a resolved `fetch` and `createOutboundFetch` returns an injected one untouched, so a provider's own env-proxy call is dead unless its lane builds its own deps. A probe with its own transport (`node:https`, `claudeWebFetch`, a spawned CLI) inherits none of this and its note must say so.
 - Chromium is not undici: never send a `Host` header (the request is rejected), keep `credentials: 'omit'` so the session cookie jar cannot shadow a provider-managed `Cookie`, and expect a cross-origin `Referer` with a path to be cancelled unless the provider sets a looser `referrerPolicy`.
 
 ### Balance quotas
 
-`windows[].metric === 'credits'` marks a money quota (`remaining` + `currency`). `src/shared/limitBalanceDisplay.js` is the single display entry point for Home, the tray and the limits page: key off the marker, never a provider whitelist. The top-up meter percentage is a display derivation and stays out of the wire shape.
+`windows[].metric === 'credits'` marks a money quota (`remaining` + `currency`). `src/shared/limits/balanceDisplay.js` is the single display entry point for Home, the tray and the limits page: key off the marker, never a provider whitelist. The top-up meter percentage is a display derivation and stays out of the wire shape.
 
 ## Widget mode switching
 
@@ -83,7 +83,7 @@ A failed usage reconfiguration rolls back to the last-known-good runtime and ret
 - **Precedence** for agent and standalone Hub options with a CLI flag is `CLI flag → env (real or .env) → built-in default`; env-only settings have no CLI layer. There is no JSON config file.
 - **Widget storage** splits by sensitivity: `userData/settings.json` holds preferences and account metadata, `userData/credentials.json` holds raw GUI-managed credentials. The credential store is deliberately plaintext with POSIX `0600` (Windows relies on the `userData` ACL) rather than Keychain, to avoid OS prompts; it does not protect against processes running as the same user. The agent and standalone Hub never read it.
 - **Renderer redaction** is default-deny: raw credentials reach the renderer only through an explicit allowlist (currently the two Hub secrets the sync UI needs).
-- **New credentials** go in `CREDENTIAL_SETTING_PATHS` (`src/shared/credentialStore.js`), or a nested path in the same store for dynamic accounts — never a provider-specific store.
+- **New credentials** are declared as a field `storePath` in the provider's `src/shared/providers/<id>/account.js`; `CREDENTIAL_SETTING_PATHS` derives from those declarations, so a literal entry added to `credentialStore.js` would bypass the refresh-scope keys and renderer projection. Dynamic accounts use a nested path in the same store — never a provider-specific store.
 - **Migration** writes and verifies the new store before stripping the old source. Corrupt, unknown-version or symlinked stores are never replaced with an empty document.
 
 ## Data flow contract

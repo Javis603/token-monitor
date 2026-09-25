@@ -61,6 +61,11 @@
     { id: 'grok', label: 'Grok Build' },
     { id: 'copilot', label: 'GitHub Copilot' },
     { id: 'pi', label: 'Pi' },
+    // Oh My Pi was folded into the `pi` row until the two products were split
+    // apart (see clientIdentitySplits.js). Tokscale has always parsed its
+    // .omp/agent/sessions root as its own `omp` client, so the row is a real
+    // client, not a sub-source of Pi.
+    { id: 'omp', label: 'Oh My Pi' },
     { id: 'zed', label: 'Zed' },
     { id: 'kilo', label: 'Kilo' },
     { id: 'commandcode', label: 'Command Code' },

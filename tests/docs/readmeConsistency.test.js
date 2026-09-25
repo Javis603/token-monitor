@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
+const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
 
 const rootDir = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(rootDir, file), 'utf8');
@@ -65,7 +65,8 @@ const supportedToolOrder = [
   'Qwen CLI',
   'Grok Build',
   'GitHub Copilot',
-  'Pi / Oh My Pi',
+  'Pi',
+  'Oh My Pi',
   'Zed',
   'Kilo',
   'Command Code',
@@ -82,6 +83,7 @@ const supportedToolOrder = [
   'LM Studio',
   'Unsloth Studio',
   'Devin CLI / Devin Desktop',
+  'TypeSafe',
   'OpenRouter',
   'Minimax',
   'Volcengine',
@@ -107,6 +109,7 @@ const supportedToolIdOrder = [
   'xai',
   'copilot',
   'pi',
+  'omp',
   'zed',
   'kilo',
   'commandcode',
@@ -123,6 +126,7 @@ const supportedToolIdOrder = [
   'lmstudio',
   'unsloth',
   'devin',
+  'typesafe',
   'openrouter',
   'minimax',
   'volcengine',

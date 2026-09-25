@@ -107,7 +107,7 @@ unaffected — the Windows collector scans WSL distros for tokens.
 The endpoint answers one `five_hour`, `weekly` and `monthly` entry per account, each with `percentUsed`
 and an optional `resetsAt`, mapped to the shared `session`, `weekly` and `billing` windows. The rolling
 window is shown as **5-hour**, the vendor's own name for it (its ClinePass page lists "5-hour rolling
-window", "Weekly", "Monthly"), which is the rule `src/shared/limitWindowLabels.js` applies to a vendor
+window", "Weekly", "Monthly"), which is the rule `src/shared/limits/windowLabels.js` applies to a vendor
 that publishes its names. That mapping rests on two sources that agree: the public ClinePass clients,
 which name the request and the three window types, and the generated API client inside Cline's own
 dashboard bundle, whose limit entry carries exactly `percentUsed`, `resetsAt` and `type`. The path itself

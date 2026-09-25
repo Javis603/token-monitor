@@ -347,6 +347,10 @@
     handleBreakdownRowKeydown,
     sessionBreakdownIncomplete,
     sessionIdLabel,
+    // Exported for the edge dock's session rows: a card that shows the top
+    // model reads a different name than the list's "N models" for the same
+    // session, so both surfaces compose the label from this one helper.
+    sessionModelLabel,
     sessionRowsForPeriod
   };
 });
