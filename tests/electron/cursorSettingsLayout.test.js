@@ -850,7 +850,7 @@ test('Copilot account panel provides GitHub sign-in plus manual token fallback',
   assert.match(details, /<button id="copilotSignInButton"[\s\S]*data-i18n="settings\.copilot\.signIn">/);
   assert.match(details, /<button id="copilotCancelSignInButton" class="hidden" data-i18n="settings\.common\.cancel">/);
   assert.match(details, /<button id="copilotLogoutButton" class="hidden" data-i18n="settings\.copilot\.logout">/);
-  assert.match(details, /<pre id="copilotLoginStatus" class="codex-login-output hidden"><\/pre>/);
+  assert.match(details, /<pre id="copilotLoginStatus" class="codex-login-output hidden" role="status" aria-live="polite"><\/pre>/);
   assert.match(details, /<button id="copilotManualToggle"[\s\S]*aria-controls="copilotManualDetails"/);
   assert.match(details, /<div id="copilotManualDetails" class="opencode-add-details accordion-animated-container hidden">/);
   assert.match(details, /<input id="copilotApiTokenInput" type="password"[\s\S]*data-i18n-placeholder="settings\.copilot\.apiTokenPlaceholder"/);

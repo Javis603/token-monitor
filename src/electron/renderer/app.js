@@ -15046,6 +15046,7 @@ function renderCursorStatus() {
 }
 
 async function refreshCursorStatus({ force = false, discover = false } = {}) {
+  setAccountShellError('cursor', '');
   state.cursorAccount = { status: null, error: '', busy: true };
   renderCursorStatus();
   try {

@@ -112,6 +112,59 @@ test('profile list isolates providers and ignores stale failures and hidden resp
   assert.equal(harness.state.openrouterProfileCount, -1);
 });
 
+test('Cursor retires a failed manual login message when status is refreshed', async () => {
+  const errors = { textContent: '', classList: { toggle(name, hidden) { this.hidden = hidden; } } };
+  const statusPill = { textContent: '', title: '' };
+  const accountList = { children: [], replaceChildren() { this.children = []; }, append(node) { this.children.push(node); } };
+  const manualInput = { value: 'bad session' };
+  const manualSubmit = { addEventListener(type, handler) { if (type === 'click') this.click = handler; } };
+  const elements = {
+    cursorErrorMessage: errors,
+    cursorAccountStatus: statusPill,
+    cursorAccountList: accountList,
+    cursorManualSubmit: manualSubmit,
+    cursorManualInput: manualInput
+  };
+  const statusRequest = deferred();
+  const state = { cursorAccount: { status: null, error: '', busy: false } };
+  const context = {
+    state,
+    accountShellApi,
+    accountShellErrors: Object.create(null),
+    accountProfileSaves: accountShellApi.createBusyGuard(),
+    isSettingsSurfaceVisible: () => true,
+    setCursorStatusText: (element, value) => { element.textContent = value; element.title = value; },
+    setCursorCheckboxesEnabled() {},
+    renderSettingsSummaries() {},
+    t: (key, values) => values?.message ? `${key}: ${values.message}` : key,
+    document: {
+      getElementById: (id) => elements[id] || null,
+      createElement: () => ({ className: '', textContent: '', classList: { toggle() {} }, setAttribute() {}, addEventListener() {}, append() {} })
+    },
+    window: { tokenMonitor: { cursor: {
+      loginManual: async () => ({ ok: false, error: 'Invalid session' }),
+      status: () => statusRequest.promise
+    } } }
+  };
+  const shellErrorSource = app.slice(app.indexOf('function setAccountShellError('), app.indexOf('const reasonixSessionGuard'));
+  const renderSource = app.slice(app.indexOf('function renderCursorStatus('), app.indexOf('function setCursorCheckboxesEnabled('));
+  const submitSource = app.slice(app.indexOf('  const cursorManualSubmit ='), app.indexOf('  refreshCursorStatus({ discover: true });', app.indexOf('  const cursorManualSubmit =')));
+  vm.runInNewContext(`${shellErrorSource}\n${renderSource}\n${submitSource}\nthis.refreshCursorStatus = refreshCursorStatus; this.renderCursorStatus = renderCursorStatus;`, context);
+
+  await manualSubmit.click();
+  assert.equal(errors.textContent, 'settings.cursor.loginFailed: Invalid session');
+  context.renderCursorStatus();
+  assert.equal(errors.textContent, 'settings.cursor.loginFailed: Invalid session');
+
+  const refresh = context.refreshCursorStatus({ discover: true });
+  assert.equal(errors.textContent, '');
+  statusRequest.resolve({ accounts: [{ id: 'manual', email: 'user@example.com', enabled: true }], linkedCount: 1 });
+  await refresh;
+  assert.equal(statusPill.textContent, 'settings.cursor.connected');
+  assert.equal(errors.textContent, '');
+  assert.equal(errors.classList.hidden, true);
+});
+
 test('OpenCode status ignores an older probe after a newer status resolves', async () => {
   const source = app.slice(app.indexOf('async function updateOpenCodeProfilesStatus('), app.indexOf('function renderOpenCodeProfilesStatusSummary('));
   const requests = [];
