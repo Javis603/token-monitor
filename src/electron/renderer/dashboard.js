@@ -693,6 +693,9 @@ window.tokenMonitor.onSettingsPush?.((next) => {
     state.flat = next.dashboardFlat === true;
     els.body.classList.toggle('flat', state.flat);
   }
+  // applyAppearance applies the motion preference itself; remember the old one
+  // so a changed preference still repaints below.
+  const previousReduceMotion = state.reduceMotion;
   applyAppearance(state.settings);
   applyFontSettings(next);
   let needsRender = false;
@@ -719,11 +722,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
     state.currency = next.currency;
     needsRender = true;
   }
-  const reduceMotion = motionPreferenceApi.normalize(next.reduceMotion);
-  if (state.reduceMotion !== reduceMotion) {
-    applyReduceMotionPreference(reduceMotion);
-    needsRender = true;
-  }
+  if (state.reduceMotion !== previousReduceMotion) needsRender = true;
   const nextMetric = next.heatmapMetric || 'cost';
   if (state.heatmapMetric !== nextMetric) {
     state.heatmapMetric = nextMetric;
