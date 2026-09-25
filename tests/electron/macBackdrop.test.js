@@ -14,21 +14,21 @@ const i18n = fs.readFileSync(path.join(rendererDir, 'i18n.js'), 'utf8');
 const { normalizeMacBackdropMode, appearanceState } = require('../../src/electron/macBackdropMode');
 const { normalizeNativeMaterialState } = require('../../src/electron/renderer/glassRendering');
 
-test('macOS backdrop modes fail closed to Liquid Glass', () => {
-  for (const value of [undefined, null, '', 'hud', 'VIBRANCY', 'liquid-glass']) {
-    assert.equal(normalizeMacBackdropMode(value), 'liquid-glass');
+test('macOS backdrop modes default to the classic vibrancy; Liquid Glass is opt-in', () => {
+  for (const value of [undefined, null, '', 'hud', 'LIQUID-GLASS', 'vibrancy']) {
+    assert.equal(normalizeMacBackdropMode(value), 'vibrancy');
   }
-  assert.equal(normalizeMacBackdropMode('vibrancy'), 'vibrancy');
+  assert.equal(normalizeMacBackdropMode('liquid-glass'), 'liquid-glass');
 });
 
 test('the macOS style control appears only where Liquid Glass exists and System Glass is on', () => {
-  assert.deepEqual(appearanceState({ macBackdrop: 'vibrancy' }), {
+  assert.deepEqual(appearanceState({ macBackdrop: 'liquid-glass' }), {
     showBackdropControl: false,
-    backdropMode: 'vibrancy'
+    backdropMode: 'liquid-glass'
   });
   assert.deepEqual(appearanceState({}, { liquidGlassSupported: true }), {
     showBackdropControl: true,
-    backdropMode: 'liquid-glass'
+    backdropMode: 'vibrancy'
   });
   assert.equal(appearanceState({ systemGlass: false }, { liquidGlassSupported: true }).showBackdropControl, false);
   assert.equal(normalizeNativeMaterialState({ liquidGlassSupported: true }).liquidGlassSupported, true);
@@ -36,14 +36,15 @@ test('the macOS style control appears only where Liquid Glass exists and System 
 });
 
 test('main process persists the macOS style and feeds it to the native material', () => {
-  assert.match(main, /macBackdrop: 'liquid-glass',/);
+  assert.match(main, /macBackdrop: 'vibrancy',/);
+  assert.match(app, /macBackdrop: 'vibrancy', reduceMotion/);
   assert.match(main, /macBackdrop: normalizeMacBackdropMode\(patch\.macBackdrop \?\? settings\.macBackdrop\)/);
   assert.match(main, /liquidGlass: normalizeMacBackdropMode\(source\.macBackdrop\) === MAC_BACKDROP_LIQUID_GLASS/);
 });
 
 test('settings expose a localized macOS style selector wired to the saved preference', () => {
   assert.match(html, /id="macBackdropRow" class="settings-item hidden"/);
-  assert.match(html, /<select id="macBackdropInput"><option value="liquid-glass"[^>]*>[^<]*<\/option><option value="vibrancy"/);
+  assert.match(html, /<select id="macBackdropInput"><option value="vibrancy"[^>]*>[^<]*<\/option><option value="liquid-glass"/);
   assert.match(html, /<script src="\.\.\/macBackdropMode\.js"><\/script>[\s\S]*<script src="app\.js"><\/script>/);
   assert.match(app, /macBackdropRow\?\.classList\.toggle\('hidden', !macGlass\.showBackdropControl\)/);
   assert.match(app, /macBackdrop: macBackdropApi\.normalizeMacBackdropMode\(els\.macBackdropInput\?\.value\)/);

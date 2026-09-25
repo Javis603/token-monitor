@@ -72,10 +72,10 @@ test('an unchanged material preference does not recreate its native container', 
     }
   };
   win.setVisible(true);
-  syncNativeMaterialVisibility(win, { enabled: true }, 'darwin', deps);
-  syncNativeMaterialVisibility(win, { enabled: true, dark: false }, 'darwin', deps);
+  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true }, 'darwin', deps);
+  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true, dark: false }, 'darwin', deps);
   win.setVisible(false);
-  syncNativeMaterialVisibility(win, { enabled: true }, 'darwin', deps);
+  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true }, 'darwin', deps);
   assert.equal(creations, 1);
   assert.equal(getNativeMaterialState(win).type, 'liquid-glass');
   assert.equal(disposals, 0);
@@ -87,7 +87,7 @@ test('failed native initialization reports the fallback instead of claiming Liqu
   t.mock.method(console, 'warn', () => {});
   const win = fakeWindow();
   win.setVisible(true);
-  syncNativeMaterialVisibility(win, { enabled: true }, 'darwin', {
+  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true }, 'darwin', {
     osRelease: '25.0.0',
     createGlass() { throw new Error('bridge initialization failed'); }
   });
@@ -111,11 +111,11 @@ test('a throwing native cleanup still publishes the HUD fallback and keeps the o
     }
   };
   win.setVisible(true);
-  assert.doesNotThrow(() => syncNativeMaterialVisibility(win, { enabled: true }, 'darwin', deps));
+  assert.doesNotThrow(() => syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true }, 'darwin', deps));
   assert.deepEqual(win.materials, [null, 'hud']);
   assert.equal(getNativeMaterialState(win).type, 'vibrancy');
   assert.equal(getNativeMaterialState(win).fallbackReason, 'appearance update failed');
-  syncNativeMaterialVisibility(win, { enabled: true }, 'darwin', deps);
+  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true }, 'darwin', deps);
   assert.equal(creations, 1);
 });
 
@@ -131,10 +131,10 @@ test('a throwing cleanup on disable blocks recreation instead of stacking native
     }
   };
   win.setVisible(true);
-  syncNativeMaterialVisibility(win, { enabled: true }, 'darwin', deps);
-  assert.doesNotThrow(() => syncNativeMaterialVisibility(win, { enabled: true, opaque: true }, 'darwin', deps));
+  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true }, 'darwin', deps);
+  assert.doesNotThrow(() => syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true, opaque: true }, 'darwin', deps));
   assert.equal(getNativeMaterialState(win).type, 'opaque');
-  syncNativeMaterialVisibility(win, { enabled: true }, 'darwin', deps);
+  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true }, 'darwin', deps);
   assert.equal(creations, 1);
   assert.equal(getNativeMaterialState(win).type, 'vibrancy');
   assert.equal(getNativeMaterialState(win).fallbackReason, 'release failed');
@@ -150,7 +150,7 @@ test('closing a window contains a throwing native cleanup', (t) => {
     }
   };
   win.setVisible(true);
-  attachNativeMaterialVisibility(win, () => ({ enabled: true }), 'darwin', deps);
+  attachNativeMaterialVisibility(win, () => ({ enabled: true, liquidGlass: true }), 'darwin', deps);
   win.emit('show');
   assert.equal(getNativeMaterialState(win).type, 'liquid-glass');
   assert.doesNotThrow(() => win.emit('closed'));
@@ -164,12 +164,12 @@ test('Reduce Transparency replaces only the system material, not the CSS glass',
   syncNativeMaterialVisibility(win, { enabled: false, reducedTransparency: true }, 'darwin', deps);
   assert.equal(getNativeMaterialState(win).type, 'transparent');
   assert.equal(getNativeMaterialState(win).reducedTransparency, false);
-  syncNativeMaterialVisibility(win, { enabled: true, reducedTransparency: true }, 'darwin', deps);
+  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true, reducedTransparency: true }, 'darwin', deps);
   assert.equal(getNativeMaterialState(win).type, 'opaque');
   assert.equal(getNativeMaterialState(win).reducedTransparency, true);
 });
 
-test('the classic style swaps Liquid Glass for HUD vibrancy and back without a failure', () => {
+test('dropping the Liquid Glass opt-in swaps back to HUD vibrancy without a failure', () => {
   const win = fakeWindow();
   let creations = 0;
   let disposals = 0;
@@ -181,9 +181,9 @@ test('the classic style swaps Liquid Glass for HUD vibrancy and back without a f
     }
   };
   win.setVisible(true);
-  syncNativeMaterialVisibility(win, { enabled: true }, 'darwin', deps);
+  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true }, 'darwin', deps);
   assert.equal(getNativeMaterialState(win).type, 'liquid-glass');
-  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: false }, 'darwin', deps);
+  syncNativeMaterialVisibility(win, { enabled: true }, 'darwin', deps);
   assert.equal(disposals, 1);
   assert.deepEqual(win.materials, [null, 'hud']);
   assert.deepEqual(getNativeMaterialState(win), {

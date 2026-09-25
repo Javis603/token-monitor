@@ -8,10 +8,12 @@
   const MAC_BACKDROP_LIQUID_GLASS = 'liquid-glass';
   const MAC_BACKDROP_VIBRANCY = 'vibrancy';
 
+  // Classic vibrancy stays the default: the app's own tint keeps dense figures
+  // legible over any wallpaper, whereas the system-managed glass cannot be dimmed.
   function normalizeMacBackdropMode(value) {
-    return value === MAC_BACKDROP_VIBRANCY
-      ? MAC_BACKDROP_VIBRANCY
-      : MAC_BACKDROP_LIQUID_GLASS;
+    return value === MAC_BACKDROP_LIQUID_GLASS
+      ? MAC_BACKDROP_LIQUID_GLASS
+      : MAC_BACKDROP_VIBRANCY;
   }
 
   // The choice only exists where Liquid Glass does (macOS 26+); older systems

@@ -38,15 +38,15 @@ function syncNativeMaterialVisibility(win, options, platform = process.platform,
   if (!win || win.isDestroyed?.() || platform !== 'darwin') return;
   const entry = entryFor(win);
   const {
-    enabled, opaque, liquidGlass = true, reducedTransparency: systemReduced = false, highContrast = false, dark = true, radius = 14
+    enabled, opaque, liquidGlass = false, reducedTransparency: systemReduced = false, highContrast = false, dark = true, radius = 14
   } = typeof options === 'boolean' ? { enabled: options } : (options || {});
   // Reduce Transparency replaces only the system material. With System Glass
   // off, the CSS glass and background image stay under the user's sliders.
   const reducedTransparency = Boolean(enabled) && systemReduced;
   const visible = win.isVisible() && !win.isMinimized();
-  // Choosing the classic style is not a failure: it only skips Liquid Glass,
-  // so the HUD vibrancy below takes over exactly as on older macOS.
-  const wantsGlass = enabled && !opaque && !reducedTransparency && liquidGlass !== false;
+  // Liquid Glass is opt-in. The classic style is not a failure: it only skips
+  // the glass view, so the HUD vibrancy below takes over as on older macOS.
+  const wantsGlass = enabled && !opaque && !reducedTransparency && liquidGlass === true;
   const supported = Number.parseInt(deps.osRelease || os.release(), 10) >= 25;
   const setVibrancy = (material) => {
     if (entry.vibrancy === material) return;

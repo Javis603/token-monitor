@@ -530,7 +530,7 @@ function defaultSettings() {
     glassBlur: 32,
     systemGlass: true,
     windowsBackdrop: 'acrylic',
-    macBackdrop: 'liquid-glass',
+    macBackdrop: 'vibrancy',
     reduceMotion: 'system',
     showLiveDot: true,
     showToolIcons: true,
