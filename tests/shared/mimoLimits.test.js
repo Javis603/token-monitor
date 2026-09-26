@@ -9,7 +9,8 @@ const {
   parseMimoBalance,
   parseMimoPlanDetail,
   parseMimoPlanUsage,
-  parseMimoProfile
+  parseMimoProfile,
+  withDetectedMimoAccount
 } = require('../../src/shared/providers/mimo/limits');
 const { createLimitsCollector } = require('../../src/shared/limits/collector');
 const { hashKey } = require('../../src/shared/hashKey');
@@ -811,4 +812,53 @@ test('a membership row is never replaced by the not-configured row', async () =>
   assert.equal(rows.length, 1);
   assert.equal(rows[0].status, 'ok');
   assert.equal(rows[0].accountKey, hashKey('mimo', '123', 'membership'));
+});
+
+test('a signed-out MiMo Desktop is reported, and a missing one is not', async () => {
+  // The store reads and names an account but carries half a sign-in: an app the
+  // user is signed out of rather than a machine without one, so the console lane
+  // says so against that account instead of staying quiet. Both lanes agree on
+  // this, which is what makes the same machine read the same way twice.
+  const signedOut = await fetchMimoLimitsRaw({}, {
+    fetch: async () => response({ code: 0, data: null }),
+    readMimoDesktopAccount: () => ({ ok: false, reason: 'incomplete', userId: '123' })
+  });
+  const row = signedOut.find((entry) => entry.accountKey === hashKey('mimo:123'));
+  assert.equal(row.status, 'unauthorized');
+  assert.equal(signedOut.some((entry) => entry.accountKey === ''), false);
+
+  // The same store with nothing to name stays silent: a provider-wide row would
+  // be read as the whole provider's.
+  const unnamed = await fetchMimoLimitsRaw({}, {
+    fetch: async () => response({ code: 0, data: null }),
+    readMimoDesktopAccount: () => ({ ok: false, reason: 'incomplete', userId: '' })
+  });
+  assert.equal(unnamed.status, 'notConfigured');
+});
+
+// ---- the account panel -------------------------------------------------------
+
+test('a detected session is listed once, beside the pasted accounts', () => {
+  const stored = [{ id: 'a', accountKey: 'sha256:one', accountEmail: 'a@example.com' }];
+  const detected = { id: 'mimo-desktop', accountKey: 'sha256:desktop' };
+
+  // Pasted accounts are removable because Token Monitor stores them; the detected
+  // one is not, because it holds nothing but a session the app owns.
+  assert.deepEqual(withDetectedMimoAccount(stored, detected), [
+    { id: 'a', accountKey: 'sha256:one', accountEmail: 'a@example.com', removable: true },
+    { id: 'mimo-desktop', accountKey: 'sha256:desktop', removable: false }
+  ]);
+
+  // A stored account that already names the same account keeps the row — one
+  // account is one row on the panel as it is in the limits list.
+  assert.deepEqual(
+    withDetectedMimoAccount([{ id: 'a', accountKey: 'sha256:desktop' }], detected),
+    [{ id: 'a', accountKey: 'sha256:desktop', removable: true }]
+  );
+
+  // Nothing discovered leaves the list exactly as it was.
+  assert.deepEqual(withDetectedMimoAccount(stored, null), [
+    { id: 'a', accountKey: 'sha256:one', accountEmail: 'a@example.com', removable: true }
+  ]);
+  assert.deepEqual(withDetectedMimoAccount([], null), []);
 });

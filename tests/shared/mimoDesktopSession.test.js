@@ -93,8 +93,9 @@ test('a store whose rows arrive sealed is refused rather than read as signed out
 
   const read = readMimoDesktopAccount({ candidates: [path.join(dir, 'Cookies')], sqlite });
   // The at-rest key belongs to the app's own runtime; reporting this as a
-  // signed-out app would send the user to a sign-in that cannot change it.
-  assert.deepEqual(read, { ok: false, reason: MIMO_DESKTOP_READ_REASONS.encrypted });
+  // signed-out app would send the user to a sign-in that cannot change it. No
+  // account id survives a sealed read, which is why one is not carried here.
+  assert.deepEqual(read, { ok: false, reason: MIMO_DESKTOP_READ_REASONS.encrypted, userId: '' });
 });
 
 test('half a sign-in is a signed-out app and a missing store is nothing configured', { skip: !hasSqlite }, (t) => {
@@ -103,11 +104,21 @@ test('half a sign-in is a signed-out app and a missing store is nothing configur
 
   assert.deepEqual(
     readMimoDesktopAccount({ candidates: [path.join(dir, 'Cookies')], sqlite }),
-    { ok: false, reason: MIMO_DESKTOP_READ_REASONS.incomplete }
+    { ok: false, reason: MIMO_DESKTOP_READ_REASONS.incomplete, userId: '' }
   );
   assert.deepEqual(
     readMimoDesktopAccount({ candidates: [path.join(dir, 'missing', 'Cookies')], sqlite }),
     { ok: false, reason: MIMO_DESKTOP_READ_REASONS.absent }
+  );
+
+  // A refusal the store can name is one the lanes can attribute, so the account
+  // id travels with it. Without one the refusal could only be provider-wide, and
+  // a provider-wide row is read as the whole provider's.
+  const named = partitionDir(t);
+  writeCookieStore(named, PARTITION_ROWS.filter(([, name]) => name !== 'passToken'));
+  assert.deepEqual(
+    readMimoDesktopAccount({ candidates: [path.join(named, 'Cookies')], sqlite }),
+    { ok: false, reason: MIMO_DESKTOP_READ_REASONS.incomplete, userId: '1234567890' }
   );
 });
 

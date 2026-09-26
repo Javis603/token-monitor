@@ -159,7 +159,16 @@ function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
     const managed = Array.isArray(options.mimoManagedAccounts || deps.mimoManagedAccounts)
       ? (options.mimoManagedAccounts || deps.mimoManagedAccounts)
       : [];
-    jobs = options.limitRefreshScope?.provider === 'mimo' ? 1 : Math.max(1, managed.length);
+    if (options.limitRefreshScope?.provider === 'mimo') {
+      // A scoped refresh is one account and never the membership lane.
+      jobs = 1;
+    } else {
+      // `Math.max(1, …)` because a provider with nothing configured still has a
+      // job: the console session is minted from the machine's own account cookie
+      // on that path, and that walk is spent before any read happens. The
+      // membership lane is its own dispatch beside it, with its own chain.
+      jobs = Math.max(1, managed.length) + 1;
+    }
   }
   return base * jobs;
 }

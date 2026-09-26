@@ -6,7 +6,7 @@ const { normalizeLimitProvider } = require('../../limits/core');
 const { cleanSecret } = require('../../limits/providerHelpers');
 const { mimoEndpointIso } = require('./endpointTime');
 const { MIMO_EXCHANGE_STATUSES, exchangeMimoServiceSession } = require('./ssoExchange');
-const { readMimoDesktopAccount } = require('./desktopSession');
+const { MIMO_ACCOUNT_COOKIE_NAMES, MIMO_DESKTOP_READ_REASONS, readMimoDesktopAccount } = require('./desktopSession');
 
 // The membership base is the only host the app's region table carries; a region
 // it does not carry resolves no base URL there either, so there is nothing to
@@ -17,10 +17,6 @@ const MIMO_MEMBERSHIP_ACCOUNT = 'membership';
 
 // The app's own card is the weekly usage limit, reset by the plan's next reset.
 const MIMO_MEMBERSHIP_WINDOW_MINUTES = 7 * 24 * 60;
-
-// Only these two are load-bearing on the account cookie, the rule the partition
-// reader applies to the same store.
-const MIMO_ACCOUNT_COOKIE_NAMES = Object.freeze(['passToken', 'userId']);
 
 function cookiePairs(value) {
   const pairs = new Map();
@@ -144,9 +140,16 @@ function readMimoDesktopAccountCredential(deps = {}) {
   const read = deps.readMimoDesktopAccount || readMimoDesktopAccount;
   const result = read({ ...(deps.desktopSessionOptions || {}) });
   if (result?.ok) return { cookieHeader: result.cookieHeader, userId: result.userId };
-  if (result?.reason === 'incomplete') {
+  // A store that reads and carries half a sign-in is an app the user is signed
+  // out of, which is the distinction `readCodexOAuthAuth` draws: "MiMo Desktop
+  // is not installed here" and "it is installed and signed out" call for
+  // different answers, and only the store can tell them apart. The others
+  // (absent, unreadable, unsupported platform) are nothing configured. Both
+  // lanes read all of this the same way.
+  if (result?.reason === MIMO_DESKTOP_READ_REASONS.incomplete) {
     const error = new Error('MiMo Desktop session is incomplete');
     error.status = 'unauthorized';
+    error.userId = cleanSecret(result.userId);
     throw error;
   }
   return { cookieHeader: '' };
@@ -207,7 +210,12 @@ async function fetchMimoMembershipLimits(options = {}, deps = {}) {
     session = await resolveMimoMembershipSession(options, deps);
   } catch (error) {
     throwIfAborted(deps.signal);
-    return [membershipRow(error?.status || 'unavailable', updatedAt)];
+    const status = error?.status || 'unavailable';
+    const accountKey = error?.userId ? mimoMembershipAccountKey(error.userId) : '';
+    // Nothing to attribute it to: a provider-wide row would be read as the whole
+    // provider's and smeared onto the console lane's accounts.
+    if (status === 'unauthorized' && !accountKey) return [];
+    return [membershipRow(status, updatedAt, { accountKey })];
   }
 
   // No credential and nothing discoverable: the lane is simply not there, so it
@@ -264,13 +272,10 @@ async function fetchMimoMembershipLimits(options = {}, deps = {}) {
 }
 
 module.exports = {
-  MIMO_MEMBERSHIP_ACCOUNT,
   MIMO_MEMBERSHIP_BASE_URL,
-  MIMO_MEMBERSHIP_REGION,
   MIMO_MEMBERSHIP_WINDOW_MINUTES,
   fetchMimoMembershipLimits,
   mimoMembershipAccountKey,
   mimoMembershipBaseUrl,
-  readMimoMembershipPlan,
-  resolveMimoMembershipSession
+  readMimoMembershipPlan
 };

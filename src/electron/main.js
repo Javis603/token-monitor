@@ -259,8 +259,11 @@ const {
   MIMO_PLATFORM_CONSOLE_URL,
   createMimoManagedAccount,
   fetchMimoLimits,
-  normalizeMimoCookieHeader
+  mimoAccountKey,
+  normalizeMimoCookieHeader,
+  withDetectedMimoAccount
 } = require('../shared/providers/mimo/limits');
+const { readMimoDesktopAccount } = require('../shared/providers/mimo/desktopSession');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
@@ -1222,11 +1225,36 @@ function normalizeMimoManagedAccounts(value) {
   return accounts;
 }
 
+// The account a signed-in MiMo Desktop answers for, read here so the panel can
+// count it. The cookie it was read from is discarded: it is never part of this
+// projection and never part of settings.
+function mimoDetectedAccount() {
+  let read;
+  try {
+    read = readMimoDesktopAccount();
+  } catch {
+    return null;
+  }
+  if (!read?.ok) return null;
+  return {
+    id: MIMO_DETECTED_ACCOUNT_ID,
+    // The key the collector computes for the same account, so the panel names the
+    // account the rows are keyed by instead of a second identity for it.
+    accountKey: mimoAccountKey(read.cookieHeader, { userId: read.userId }),
+    accountEmail: '',
+    accountLabel: '',
+    enabled: true
+  };
+}
+
 function mimoAccountsForRenderer() {
-  return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map(({
+  const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map(({
     id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled
   }) => ({ id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled }));
+  return withDetectedMimoAccount(accounts, mimoDetectedAccount());
 }
+
+const MIMO_DETECTED_ACCOUNT_ID = 'mimo-desktop';
 
 function mimoManagedAccountsForCollector() {
   return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map((account) => ({

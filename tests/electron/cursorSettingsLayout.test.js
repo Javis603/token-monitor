@@ -3186,3 +3186,30 @@ test('a ZCode-discovered GLM login reads as connected, not API-key configured', 
   assert.equal((i18n.match(/'settings\.zai\.statusLinked'/g) || []).length, 5);
   assert.ok(/'settings\.zai\.statusLinked': 'Connected'/.test(i18n));
 });
+
+test('MiMo lists the detected Desktop session without controls the user does not own', () => {
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const render = app.match(/function renderMimoStatus\(\) \{[\s\S]*?\n\}/)?.[0] || '';
+
+  // The detected session is an account the provider answers for, so the panel
+  // counts it — `zaiApiKeyConfigured`'s rule, that a discovered sign-in counts as
+  // configured, or the pill reads "Not configured" on the machine the provider is
+  // built for.
+  assert.match(main, /withDetectedMimoAccount\(accounts, mimoDetectedAccount\(\)\)/);
+  assert.match(main, /function mimoDetectedAccount\(\)/);
+  assert.match(main, /mimoAccountKey\(read\.cookieHeader, \{ userId: read\.userId \}\)/);
+  // Its credential is read for the count and discarded, so nothing of it reaches
+  // the renderer projection.
+  assert.doesNotMatch(main, /mimoAccountsForRenderer[\s\S]{0,400}cookieHeader: read/);
+
+  // Nothing was pasted for it, so there is no stored preference to toggle and
+  // nothing here to remove — the rule Cursor's panel states for the accounts it
+  // detects, where removal is available only for manually added ones.
+  assert.match(render, /const detected = account\.removable === false;/);
+  assert.match(render, /const input = detected \? null : document\.createElement\('input'\)/);
+  assert.match(render, /const remove = detected \? null : document\.createElement\('button'\)/);
+  assert.match(render, /if \(input\) row\.append\(input\)/);
+  assert.match(render, /if \(remove\) right\.append\(remove\)/);
+  assert.match(app, /if \(account\?\.removable === false\) return t\('settings\.mimo\.desktopAccount'\)/);
+});

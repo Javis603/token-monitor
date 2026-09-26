@@ -6,7 +6,7 @@ const { normalizeLimitProvider } = require('../../limits/core');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { mimoEndpointTime } = require('./endpointTime');
 const { fetchMimoMembershipLimits } = require('./membership');
-const { readMimoDesktopAccount } = require('./desktopSession');
+const { MIMO_DESKTOP_READ_REASONS, readMimoDesktopAccount } = require('./desktopSession');
 const { exchangeMimoConsoleSession } = require('./ssoExchange');
 
 const MIMO_PLATFORM_CONSOLE_URL = 'https://platform.xiaomimimo.com/#/console/balance';
@@ -387,6 +387,20 @@ function scopedMimoManagedAccounts(value, scope) {
 // every identity the lane holds, so it may only be returned when *neither*
 // source has anything. Returning it because the console lane happens to be empty
 // would wipe a membership row that is working.
+// What an account panel should draw: the accounts the user pasted, plus the
+// session this machine's own MiMo Desktop is signed into. A discovered sign-in is
+// an account the provider answers for, so it is listed — `zaiApiKeyConfigured`'s
+// rule, that a discovered sign-in counts as configured, or the pill reads "Not
+// configured" on the machine the provider is built for. It is not removable
+// because Token Monitor never stored it, and it is left out when a stored account
+// already names the same account, so one account is one row here too.
+function withDetectedMimoAccount(storedAccounts = [], detected = null) {
+  const accounts = storedAccounts.map((account) => ({ ...account, removable: true }));
+  if (!detected?.accountKey) return accounts;
+  if (accounts.some((account) => account.accountKey === detected.accountKey)) return accounts;
+  return [...accounts, { ...detected, removable: false }];
+}
+
 async function fetchMimoLimits(options = {}, deps = {}) {
   const scope = options.limitRefreshScope?.provider === 'mimo'
     ? options.limitRefreshScope
@@ -427,10 +441,20 @@ async function mintMimoConsoleAccount(deps = {}) {
   } catch {
     return null;
   }
-  // No store, one this build cannot read, or a platform the app does not ship
-  // for: nothing to mint, and nothing to tell the user — the console lane's paste
-  // input is the path for a machine without MiMo Desktop.
-  if (!result?.ok) return null;
+  // A store that reads and carries half a sign-in is an app the user is signed
+  // out of rather than a machine without one, the distinction
+  // `readCodexOAuthAuth` draws. It is reported against the account the store
+  // names, so the row is attributable and does not have to be provider-wide.
+  if (!result?.ok) {
+    if (result?.reason === MIMO_DESKTOP_READ_REASONS.incomplete && cleanText(result.userId)) {
+      const refused = { id: 'mimo-oauth', userId: cleanText(result.userId), source: 'oauth', sourceDetail: 'app' };
+      return { ...refused, accountKey: mimoAccountKey('', refused), cookieHeader: '', mintStatus: 'unauthorized' };
+    }
+    // No store, one this build cannot read, or a platform the app does not ship
+    // for: nothing to mint, and nothing to tell the user — the console lane's
+    // paste input is the path for a machine without MiMo Desktop.
+    return null;
+  }
 
   const base = {
     id: 'mimo-oauth',
@@ -501,5 +525,6 @@ module.exports = {
   parseMimoProfile,
   parseMimoPlanDetail,
   parseMimoPlanUsage,
-  scopedMimoManagedAccounts
+  scopedMimoManagedAccounts,
+  withDetectedMimoAccount
 };

@@ -61,15 +61,6 @@ function mimoDesktopCookieCandidates(options = {}) {
   return [];
 }
 
-function loadSqlite(explicit) {
-  if (explicit !== undefined) return explicit;
-  try {
-    return require('node:sqlite');
-  } catch (_) {
-    return null;
-  }
-}
-
 function readCookieRows(dbPath, sqlite) {
   const database = new sqlite.DatabaseSync(dbPath, { readOnly: true });
   try {
@@ -92,7 +83,11 @@ function readCookieRows(dbPath, sqlite) {
 // half a sign-in is an app the user is signed out of.
 function readMimoDesktopAccount(options = {}) {
   const fsApi = options.fs || fs;
-  const sqlite = loadSqlite(options.sqlite);
+  // `node:sqlite` is absent on some runtimes (packaged Electron builds, older
+  // Node), and that is a state this reader reports rather than throws on.
+  const sqlite = options.sqlite !== undefined
+    ? options.sqlite
+    : (() => { try { return require('node:sqlite'); } catch { return null; } })();
   const candidates = options.candidates || mimoDesktopCookieCandidates(options);
   if (!candidates.length) return { ok: false, reason: MIMO_DESKTOP_READ_REASONS.unsupportedPlatform };
 
@@ -129,10 +124,14 @@ function readMimoDesktopAccount(options = {}) {
   }
 
   const missing = MIMO_ACCOUNT_COOKIE_NAMES.filter((name) => !values.has(name));
+  // The account id travels with every refusal it can: a refusal the lanes cannot
+  // attribute to an account would have to be reported provider-wide, and a
+  // provider-wide row is read as the whole provider's.
+  const userId = values.get('userId') || '';
   if (missing.length === MIMO_ACCOUNT_COOKIE_NAMES.length && sealed) {
-    return { ok: false, reason: MIMO_DESKTOP_READ_REASONS.encrypted };
+    return { ok: false, reason: MIMO_DESKTOP_READ_REASONS.encrypted, userId };
   }
-  if (missing.length) return { ok: false, reason: MIMO_DESKTOP_READ_REASONS.incomplete };
+  if (missing.length) return { ok: false, reason: MIMO_DESKTOP_READ_REASONS.incomplete, userId };
 
   return {
     ok: true,
@@ -142,7 +141,6 @@ function readMimoDesktopAccount(options = {}) {
 }
 
 module.exports = {
-  MIMO_ACCOUNT_COOKIE_HOST,
   MIMO_ACCOUNT_COOKIE_NAMES,
   MIMO_DESKTOP_READ_REASONS,
   mimoDesktopCookieCandidates,

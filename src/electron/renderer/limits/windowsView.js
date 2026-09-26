@@ -1054,6 +1054,16 @@
       }
     } else if (provider.provider === 'mimo') {
       windows.classList.add('limit-windows-mimo');
+      // A Desktop membership answers with a single weekly window and no balance.
+      // The arms below draw a Token Plan and a balance only, so without one of
+      // its own the membership row would render empty. It takes the full width
+      // for the reason Grok's single Monthly does.
+      const weekly = windowForKind(provider, 'weekly');
+      if (weekly) {
+        const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68);
+        node.classList.add('limit-window-wide');
+        windows.append(node);
+      }
       const balance = provider.balance || null;
       const tokenPlan = windowForKind(provider, 'billing') || mimoTokenPlanWindowFromBalance(balance);
       if (tokenPlan) {

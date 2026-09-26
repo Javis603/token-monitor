@@ -136,15 +136,26 @@ test('no plan is an answer, and only a real payload is read', () => {
 test('a configured cookie wins and is never exchanged away', async () => {
   const calls = [];
   const rows = await fetchMimoMembershipLimits({ mimoMembershipCookie: 'serviceToken=configured' }, {
-    fetch: routedFetch({ calls }),
+    // A session the service already minted does not need the local store, and
+    // must not be replaced by it — a credential the user configured is their
+    // instruction, while the store belongs to another application.
+    fetch: async (url, init = {}) => {
+      const href = String(url);
+      calls.push({ url: href, cookie: (init.headers || {}).Cookie || '' });
+      if (href.startsWith(ME_URL)) return jsonReply(200, { code: 0, data: { userId: 'configured-user' } });
+      if (href.startsWith(SUBSCRIPTION_URL)) return jsonReply(200, { code: 0, data: { current: plan() } });
+      return jsonReply(404, {});
+    },
     readMimoDesktopAccount: desktopSession(ACCOUNT_COOKIE)
   });
+
   assert.equal(rows[0].status, 'ok');
-  // The user's credential is their instruction: the local store is not consulted
-  // and the chain is not walked.
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, SUBSCRIPTION_URL);
-  assert.equal(calls[0].cookie, 'serviceToken=configured');
+  assert.equal(rows[0].sourceDetail, 'managed');
+  assert.equal(rows[0].accountKey, mimoMembershipAccountKey('configured-user'));
+  // One account call for the identity and one for the plan, both carrying the
+  // configured session and neither carrying the store's account cookie.
+  assert.deepEqual(calls.map((call) => call.url), [ME_URL, SUBSCRIPTION_URL]);
+  assert.ok(calls.every((call) => call.cookie === 'serviceToken=configured'));
 });
 
 test('a refused exchange is a credential problem and a failed one is not', async () => {
@@ -206,18 +217,34 @@ test('a machine with no MiMo Desktop gets no row, and a foreign region goes quie
   assert.deepEqual(foreign, []);
 });
 
-test('a half-written sign-in is a signed-out app, not an unconfigured one', async () => {
-  const rows = await fetchMimoMembershipLimits({}, {
+test('a half-written sign-in is a signed-out app, a missing one is neither', async () => {
+  // The store reads and names an account but carries half a sign-in: that is an
+  // app the user is signed out of, and it is reported against that account.
+  const signedOut = await fetchMimoMembershipLimits({}, {
     fetch: routedFetch(),
-    readMimoDesktopAccount: () => ({ ok: false, reason: 'incomplete' })
+    readMimoDesktopAccount: () => ({ ok: false, reason: 'incomplete', userId: '1234567890' })
   });
-  assert.equal(rows[0].status, 'unauthorized');
+  assert.equal(signedOut.length, 1);
+  assert.equal(signedOut[0].status, 'unauthorized');
+  assert.equal(signedOut[0].accountKey, mimoMembershipAccountKey('1234567890'));
 
-  const unreadable = await fetchMimoMembershipLimits({}, {
+  // Nothing to attribute it to, so nothing is reported: a provider-wide row would
+  // be read as the whole provider's and smeared onto the console lane.
+  const unnamed = await fetchMimoMembershipLimits({}, {
     fetch: routedFetch(),
-    readMimoDesktopAccount: () => ({ ok: false, reason: 'encrypted' })
+    readMimoDesktopAccount: () => ({ ok: false, reason: 'incomplete', userId: '' })
   });
-  assert.deepEqual(unreadable, []);
+  assert.deepEqual(unnamed, []);
+
+  // A store this build cannot read, or one that is not there, is nothing
+  // configured — and the paste input is the path for it.
+  for (const reason of ['encrypted', 'absent', 'unsupported-platform', 'sqlite-unavailable']) {
+    const other = await fetchMimoMembershipLimits({}, {
+      fetch: routedFetch(),
+      readMimoDesktopAccount: () => ({ ok: false, reason, userId: '1234567890' })
+    });
+    assert.deepEqual(other, [], reason);
+  }
 });
 
 test('an answer with no usable data is an outage, never a credential problem', async () => {

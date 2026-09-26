@@ -1790,6 +1790,17 @@ test('MiMo main Limits row falls back to balance plan fields for Token Plan', ()
   assert.match(tokenPlanFallback, /remainingPercent: resolvedPercent == null \? null : Math\.max\(0, Math\.min\(100, 100 - resolvedPercent\)\)/);
 });
 
+test('MiMo renders the membership weekly window instead of an empty row', () => {
+  // A Desktop membership has neither a Token Plan nor a balance, and the arms
+  // that draw those would leave its row with nothing on it. Grok's single
+  // Monthly takes the same shape for the same reason.
+  const renderProviderWindows = viewBody('renderProviderWindows');
+
+  assert.match(renderProviderWindows, /provider\.provider === 'mimo'/);
+  assert.match(renderProviderWindows, /windowForKind\(provider, 'weekly'\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, weekly\), weekly, color, 0\.68\)/);
+});
+
 test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', () => {
   const app = readRendererFile('app.js');
   const optionalNumber = functionBody(app, 'optionalFiniteNumber', 'formatHomeLimitWindowValue');
@@ -5459,4 +5470,43 @@ test('Z.ai token-pool windows print an absolute token pair through the detail sl
   // Shared compact formatting keeps its normal rounding and promotion rules.
   assert.equal(detail({ limit: 3_000_000, remaining: 2_578_372 }, false), '2.6M / 3M');
   assert.equal(detail({ limit: 999_950, remaining: 999_950 }, false), '1M / 1M');
+});
+
+test('every compact surface can draw a row that has only one window', () => {
+  // A MiMo Desktop membership answers with a single weekly window and no
+  // balance. Each surface selects windows its own way, and a selection that
+  // silently yields nothing leaves the row blank rather than showing a wrong
+  // number — which is what the MiMo render branch did before it had an arm.
+  const trayTextApi = require('../../src/shared/trayText');
+  const row = {
+    provider: 'mimo',
+    status: 'ok',
+    accountKey: 'sha256:membership',
+    source: 'oauth',
+    sourceDetail: 'app',
+    updatedAt: '2026-09-23T00:00:00.000Z',
+    windows: [{ kind: 'weekly', windowMinutes: 10080, usedPercent: 40, remainingPercent: 60, resetsAt: '2026-09-29T00:00:00.000Z' }]
+  };
+
+  // Home and the compact tray both read the shared picker, and the tray's kinds
+  // priority has to reach a provider whose only window is the weekly one.
+  const compact = presentation.limitProviderCompactWindows('mimo', row.windows);
+  assert.deepEqual(compact.map((window) => window.kind), ['weekly']);
+  assert.equal(compact[0].remainingPercent, 60);
+  const picked = trayTextApi.pickLimitProviderByKindPriority(
+    { limits: { providers: [row] } },
+    ['session', 'weekly']
+  );
+  assert.equal(picked?.selectedWindow?.kind, 'weekly');
+  assert.equal(picked?.remaining, 60);
+
+  // The native widget has its own case in its own suite; the name it paints is
+  // the shared one, so it is asserted here next to the other surfaces.
+  // The window carries no label of its own, so the kind names it — and MiMo is
+  // not one of the vendors whose rolling window is published as "5-hour".
+  assert.equal(limitWindowLabel('mimo', { kind: 'weekly' }), 'Weekly');
+
+  // The Limits page and the Edge Dock share one view, so this is the one arm that
+  // covers both.
+  assert.match(viewBody('renderProviderWindows'), /windowForKind\(provider, 'weekly'\)/);
 });

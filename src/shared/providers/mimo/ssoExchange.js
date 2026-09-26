@@ -23,6 +23,9 @@ function hostMatches(host, domain) {
   return host === domain || host.endsWith(`.${domain}`);
 }
 
+// `Domain` is the only attribute either chain's cookies actually carry that
+// changes what gets sent; every observed cookie is `Path=/` over https, so the
+// rest of the attribute grammar would be machinery this flow cannot exercise.
 function parseSetCookie(line) {
   const parts = String(line || '').split(';');
   const first = parts.shift() || '';
@@ -32,49 +35,30 @@ function parseSetCookie(line) {
     name: first.slice(0, separator).trim(),
     value: first.slice(separator + 1).trim(),
     domain: '',
-    path: '/',
-    hostOnly: true,
-    secure: false,
-    remove: false
+    hostOnly: true
   };
   for (const attribute of parts) {
     const trimmed = attribute.trim();
-    const attributeSeparator = trimmed.indexOf('=');
-    const key = (attributeSeparator < 0 ? trimmed : trimmed.slice(0, attributeSeparator)).trim().toLowerCase();
-    const value = attributeSeparator < 0 ? '' : trimmed.slice(attributeSeparator + 1).trim();
-    if (key === 'domain' && value) {
-      cookie.domain = value.replace(/^\./, '').toLowerCase();
-      cookie.hostOnly = false;
-    } else if (key === 'path' && value) {
-      cookie.path = value;
-    } else if (key === 'secure') {
-      cookie.secure = true;
-    } else if (key === 'max-age' && Number(value) <= 0) {
-      cookie.remove = true;
-    }
+    if (!/^domain=/i.test(trimmed)) continue;
+    const domain = trimmed.slice(trimmed.indexOf('=') + 1).trim().replace(/^\./, '').toLowerCase();
+    if (!domain) continue;
+    cookie.domain = domain;
+    cookie.hostOnly = false;
   }
   return cookie;
 }
 
-// A jar for one exchange, and only as much of one as the flow needs: domain,
-// path and Secure scoping, so a cookie minted for the service host is never
-// replayed at the account host or the other way round. It deliberately does not
-// model SameSite, public-suffix rules or expiry clocks — nothing in a single
-// redirect walk can observe them, and every cookie in it was set by that walk.
+// A jar for one exchange, and only as much of one as the flow needs: domain
+// scoping, so a cookie minted for the service host is never replayed at the
+// account host or the other way round. That is the one property the chains
+// depend on, and it is the one a browser's own jar would enforce here.
 function createMimoCookieJar() {
   const cookies = [];
 
   function store(cookie, url) {
-    const host = url.hostname.toLowerCase();
-    const domain = cookie.domain || host;
-    const index = cookies.findIndex((existing) => existing.name === cookie.name
-      && existing.domain === domain
-      && existing.path === cookie.path);
-    if (cookie.remove) {
-      if (index >= 0) cookies.splice(index, 1);
-      return;
-    }
-    const entry = { ...cookie, domain };
+    const domain = cookie.domain || url.hostname.toLowerCase();
+    const entry = { name: cookie.name, value: cookie.value, domain, hostOnly: cookie.hostOnly };
+    const index = cookies.findIndex((existing) => existing.name === entry.name && existing.domain === domain);
     if (index >= 0) cookies[index] = entry;
     else cookies.push(entry);
   }
@@ -84,7 +68,7 @@ function createMimoCookieJar() {
     // host-only to `url`, which is what the account cookie is in practice: the
     // chain only presents it to `.account.xiaomi.com` itself.
     set(name, value, url) {
-      store({ name, value, domain: '', path: '/', hostOnly: true, secure: true, remove: false }, url);
+      store({ name, value, domain: '', hostOnly: true }, url);
     },
     absorb(setCookieLines, url) {
       for (const line of setCookieLines || []) {
@@ -94,13 +78,9 @@ function createMimoCookieJar() {
     },
     headerFor(url) {
       const host = url.hostname.toLowerCase();
-      const path = url.pathname || '/';
-      const secure = url.protocol === 'https:';
       const sent = [];
       for (const cookie of cookies) {
-        if (cookie.secure && !secure) continue;
         if (cookie.hostOnly ? cookie.domain !== host : !hostMatches(host, cookie.domain)) continue;
-        if (!path.startsWith(cookie.path)) continue;
         sent.push(`${cookie.name}=${cookie.value}`);
       }
       return sent.join('; ');
@@ -214,6 +194,24 @@ async function walkMimoChain({ entryUrl, jar, fetchFn, signal, maxHops, nextHop 
   return { ok: false, status: MIMO_EXCHANGE_STATUSES.unavailable };
 }
 
+// Both chains end the same way, and these three rules are the whole of it. A
+// rejection is the credential being refused wherever the walk stopped — `46109`
+// is not an HTTP status, and an expired service session answers 401 from the
+// service host itself — and a walk that stopped somewhere other than where it
+// started never came back, which is what a refused account cookie looks like: it
+// lands on the account host's own login page rather than answering from the
+// service. Everything else is the answer, and reading it is the one part the two
+// chains do differently.
+function finishMimoChain(walked, entryUrl, readAnswer) {
+  if (mimoRejectionCode(walked.status, walked.text) || walked.status === 401) {
+    return { ok: false, status: MIMO_EXCHANGE_STATUSES.rejected };
+  }
+  if (walked.url.hostname.toLowerCase() !== entryUrl.hostname.toLowerCase()) {
+    return { ok: false, status: MIMO_EXCHANGE_STATUSES.rejected };
+  }
+  return readAnswer(walked) || { ok: false, status: MIMO_EXCHANGE_STATUSES.unavailable };
+}
+
 // The account's own verdict on the membership chain, taken the way the app takes
 // it. undici has no cookie jar and the app's own probe lets the transport follow,
 // so following is this function's job: a single hop would return the 302 as the
@@ -247,28 +245,12 @@ async function exchangeMimoServiceSession(options = {}) {
     maxHops
   });
   if (!walked.ok) return walked;
-
-  if (mimoRejectionCode(walked.status, walked.text) || walked.status === 401) {
-    return { ok: false, status: MIMO_EXCHANGE_STATUSES.rejected };
-  }
-  const verdict = readMimoAccountStatus(walked.status, walked.text);
-  if (verdict.ok) {
-    return {
-      ok: true,
-      userId: verdict.userId,
-      region: verdict.region,
-      cookieHeader: jar.headerFor(walked.url)
-    };
-  }
-  // A chain that stopped somewhere other than the service host never came back,
-  // and that is what a refused account cookie looks like: it lands on the account
-  // host's own login page rather than answering from the service. A miss on the
-  // service host is a different thing, and reads as one.
-  const stoppedAtService = walked.url.hostname.toLowerCase() === entryUrl.hostname.toLowerCase();
-  return {
-    ok: false,
-    status: stoppedAtService ? MIMO_EXCHANGE_STATUSES.unavailable : MIMO_EXCHANGE_STATUSES.rejected
-  };
+  return finishMimoChain(walked, entryUrl, (end) => {
+    const verdict = readMimoAccountStatus(end.status, end.text);
+    return verdict.ok
+      ? { ok: true, userId: verdict.userId, region: verdict.region, cookieHeader: jar.headerFor(end.url) }
+      : null;
+  });
 }
 
 // The console lane's chain does not redirect: the endpoint answers 401 and names
@@ -311,38 +293,20 @@ async function exchangeMimoConsoleSession(options = {}) {
     nextHop: consoleLoginHop
   });
   if (!walked.ok) return walked;
-
-  if (mimoRejectionCode(walked.status, walked.text)) {
-    return { ok: false, status: MIMO_EXCHANGE_STATUSES.rejected };
-  }
-  // The same structural rule the membership chain uses: a walk that did not come
-  // back to the console host was refused, and it ends on the account host's own
-  // login page when it is.
-  if (walked.url.hostname.toLowerCase() !== entryUrl.hostname.toLowerCase()) {
-    return { ok: false, status: MIMO_EXCHANGE_STATUSES.rejected };
-  }
-  if (walked.status !== 200) {
-    return { ok: false, status: MIMO_EXCHANGE_STATUSES.unavailable };
-  }
-  try {
-    const envelope = JSON.parse(walked.text);
-    if (!envelope || envelope.code !== 0) return { ok: false, status: MIMO_EXCHANGE_STATUSES.unavailable };
-  } catch {
-    return { ok: false, status: MIMO_EXCHANGE_STATUSES.unavailable };
-  }
-  return { ok: true, cookieHeader: jar.headerFor(walked.url) };
+  return finishMimoChain(walked, entryUrl, (end) => {
+    try {
+      const envelope = JSON.parse(end.text);
+      return envelope && envelope.code === 0 ? { ok: true, cookieHeader: jar.headerFor(end.url) } : null;
+    } catch {
+      return null;
+    }
+  });
 }
 
 module.exports = {
-  MIMO_EXCHANGE_MAX_HOPS,
   MIMO_EXCHANGE_STATUSES,
-  MIMO_REJECTED_CODES,
-  consoleLoginHop,
-  createAccountJar,
   createMimoCookieJar,
   exchangeMimoConsoleSession,
   exchangeMimoServiceSession,
-  mimoRejectionCode,
-  readMimoAccountStatus,
-  walkMimoChain
+  readMimoAccountStatus
 };

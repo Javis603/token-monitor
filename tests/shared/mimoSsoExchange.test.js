@@ -243,34 +243,29 @@ test('a cancellation rejects rather than becoming a status', async () => {
   );
 });
 
-test('the jar scopes by domain, path and Secure', () => {
+test('the jar scopes by domain and nothing reaches the other host', () => {
   const jar = createMimoCookieJar();
   const serviceUrl = new URL(`${BASE}/user/xiaomi/me`);
   const accountUrl = new URL('https://account.xiaomi.com/pass/serviceLogin');
   jar.absorb([
-    'serviceToken=svc; Domain=xiaomimimo.com; Path=/; Secure',
-    'scoped=/api-only; Path=/api',
-    'hostOnly=exact',
-    'insecure=plain'
+    // A domain cookie, as the chain's own service cookies are set.
+    'serviceToken=svc; Domain=xiaomimimo.com; Path=/',
+    // A host-only one, which is what the account cookie is when the caller holds
+    // it rather than the wire having set it.
+    'hostOnly=exact; Path=/'
   ], serviceUrl);
 
-  assert.deepEqual(jar.headerFor(serviceUrl).split('; '), [
-    'serviceToken=svc',
-    'scoped=/api-only',
-    'hostOnly=exact',
-    'insecure=plain'
-  ]);
+  assert.equal(jar.headerFor(serviceUrl), 'serviceToken=svc; hostOnly=exact');
+  // This is the property the chains depend on: nothing minted for the service is
+  // presented at the account host, and nothing held for the account host leaks
+  // the other way.
   assert.equal(jar.headerFor(accountUrl), '');
-  // Path scoping is what keeps a cookie off the requests it was not set for:
-  // `scoped` was set for `/api` and is absent here, while the domain cookie and
-  // the two host-only ones still apply.
-  assert.equal(
-    jar.headerFor(new URL('https://mimo-server-cn.xiaomimimo.com/other')),
-    'serviceToken=svc; hostOnly=exact; insecure=plain'
-  );
-  // A deletion takes the cookie out rather than leaving a stale value behind.
-  jar.absorb(['hostOnly=; Max-Age=0'], serviceUrl);
-  assert.equal(jar.headerFor(serviceUrl).includes('hostOnly'), false);
+  const subdomain = new URL('https://other.xiaomimimo.com/');
+  assert.equal(jar.headerFor(subdomain), 'serviceToken=svc');
+
+  // A later set replaces the value rather than leaving two of them behind.
+  jar.absorb(['hostOnly=rotated; Path=/'], serviceUrl);
+  assert.equal(jar.headerFor(serviceUrl), 'serviceToken=svc; hostOnly=rotated');
 });
 
 // Keeps the calls above readable: one entry point, the live base URL, and the
@@ -373,4 +368,22 @@ test('a console walk that never comes back is a refusal, and a bad envelope is n
     await exchangeMimoConsoleSession({ baseUrl: CONSOLE_BASE, accountCookie: ACCOUNT_COOKIE, fetch: notThePayload }),
     { ok: false, status: MIMO_EXCHANGE_STATUSES.unavailable }
   );
+});
+
+test('a 401 is a refusal wherever it lands', () => {
+  // An expired service session answers 401 from the service host itself — the
+  // signature the live probe recorded — so the status decides it rather than the
+  // host the walk stopped on. Without this the chain would read it as an outage
+  // and retry a session the user has to replace.
+  const calls = [];
+  return exchangeMimoServiceSession({
+    baseUrl: BASE,
+    accountCookie: '',
+    serviceCookie: 'serviceToken=expired',
+    fetch: recordingFetch(async () => reply(401, { body: '' }), calls)
+  }).then((result) => {
+    assert.deepEqual(result, { ok: false, status: MIMO_EXCHANGE_STATUSES.rejected });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].cookie, 'serviceToken=expired');
+  });
 });
