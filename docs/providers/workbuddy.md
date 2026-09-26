@@ -44,9 +44,9 @@ Non-obvious constraints that must survive refactors:
 
 ### Credential encryption
 
-WorkBuddy 5.6.0 and later seal individual credential fields with the at-rest key their own runtime holds, so `auth.accessToken` arrives as a `{$wbEncrypted: 1, envelope: …}` shell instead of a string. Token Monitor cannot open that envelope and must not try to: the key is loaded by the app's own native binding, and no supported surface exposes it.
+WorkBuddy 5.6.0 and later seal individual credential fields with the at-rest key their own runtime holds, so `auth.accessToken` arrives as a `{$wbEncrypted: 1, envelope: …}` shell instead of a string. On supported Windows desktop installs, Token Monitor passes that wrapper through a short-lived WorkBuddy-owned runtime helper. The helper keeps the runtime key inside that WorkBuddy process, invokes the bundled private codec interface verified with WorkBuddy 5.6.2, and never copies the key into Token Monitor, hard-codes it, stores it, logs the token, or exposes it to the renderer. The token exists only in memory for the allowlisted billing request. A future WorkBuddy change to that private interface fails closed with the encrypted read reason. macOS and unsupported platforms retain the encrypted read reason and fail closed.
 
-The reader therefore reports *why* a session is unusable rather than collapsing every failure into "not signed in". `WORKBUDDY_SESSION_READ_REASONS` names the states — `absent`, `unsupported`, `malformed`, `incomplete`, `encrypted`, `expired` — and `getSessionInfo()` carries the non-empty one on a failed read. Only the encrypted case changes the limits outcome, through `WORKBUDDY_SESSION_REASON_ENCRYPTED` in the shared module (the one value both layers agree on) becoming `actionRequired: appSessionEncrypted`.
+The reader therefore reports *why* a session is unusable rather than collapsing every failure into "not signed in". `WORKBUDDY_SESSION_READ_REASONS` names the states — `absent`, `unsupported`, `malformed`, `incomplete`, `encrypted`, `expired` — and `getSessionInfo()` carries the non-empty one on a failed read. A Windows encrypted metadata read is considered signed in, while a codec failure marks the request with the encrypted reason. That reason maps through `WORKBUDDY_SESSION_REASON_ENCRYPTED` in the shared module to `actionRequired: appSessionEncrypted`.
 
 That distinction is the whole point: an encrypted credential is not a signed-out app, and telling the user to sign in again sends them to a screen that cannot change the outcome. Keep the two apart when adding read states:
 
@@ -68,7 +68,7 @@ That distinction is the whole point: an encrypted credential is not a signed-out
 
 | Concern | Primary files |
 | --- | --- |
-| App session reading, encryption detection, read reasons | `src/electron/providers/workbuddy/localAuth.js` |
+| App session reading, encryption detection, read reasons | `src/electron/providers/workbuddy/localAuth.js`, `src/electron/providers/workbuddy/credentialDecoder.js` |
 | Billing request and response mapping | `src/shared/providers/workbuddy/limits.js` |
 | Widget lane configuration and reason plumbing | `src/electron/main.js`, `src/electron/runtimeConfig.js` |
 | Action hint bounds | `src/shared/limits/core.js`, generated `worker/src/shared/limits/core.js` |
@@ -79,7 +79,7 @@ That distinction is the whole point: an encrypted credential is not a signed-out
 
 - personal and enterprise billing mapping, including the unlimited enterprise plan;
 - an empty active-package list staying visible as configured;
-- a sealed credential reporting `encrypted` rather than a missing sign-in;
+- a sealed credential opening on supported Windows and retaining the `encrypted` action on unsupported platforms or codec failure;
 - the read reasons for absent, malformed, oversized, incomplete and expired sessions;
 - the widget lane refusing a legacy `.env` or settings token;
 - an explicit token outranking the local session;
