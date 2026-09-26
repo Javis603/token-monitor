@@ -28,6 +28,10 @@ const {
   createSessionUsageArchiveStore,
   readSessionUsageArchiveSnapshot
 } = require('../shared/sessionUsageArchiveStore');
+const {
+  applyDailyArchiveLifetimeFloor,
+  loadDailyArchiveLifetimeTotals
+} = require('../shared/dailyHistoryArchive');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 
 loadDotEnv();
@@ -135,6 +139,13 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
       now: archiveDate,
       canonical: !dryRun
     });
+    // Same floor the widget applies: the session archive only covers sessions
+    // captured since it first ran, so allTime also takes the daily archive's
+    // lifetime totals for usage that rotated off disk earlier still.
+    visibleSummary = applyDailyArchiveLifetimeFloor(
+      visibleSummary,
+      loadDailyArchiveLifetimeTotals()
+    );
   }
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
 }
