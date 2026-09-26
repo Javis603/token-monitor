@@ -3,8 +3,16 @@
 const fs = require('node:fs');
 const { cursorDesktopStateCandidates } = require('./desktopState');
 
-let defaultSqlite = null;
-try { defaultSqlite = require('node:sqlite'); } catch (_) { defaultSqlite = null; }
+// Deferred like auth.js: importing this resolver must not emit Node's
+// experimental node:sqlite warning for collectors that never see a Cursor row.
+let defaultSqlite;
+function resolveSqlite(deps) {
+  if (deps.sqlite !== undefined) return deps.sqlite;
+  if (defaultSqlite === undefined) {
+    try { defaultSqlite = require('node:sqlite'); } catch (_) { defaultSqlite = null; }
+  }
+  return defaultSqlite;
+}
 
 const titleCache = new Map();
 
@@ -52,7 +60,7 @@ function readTitles(dbPath, sqlite) {
 
 function resolveSessionMetadata(sessionIds, { deps = {}, home } = {}) {
   const result = new Map();
-  const sqlite = deps.sqlite !== undefined ? deps.sqlite : defaultSqlite;
+  const sqlite = resolveSqlite(deps);
   if (typeof sqlite?.DatabaseSync !== 'function') return result;
   const candidates = cursorDesktopStateCandidates({
     home,

@@ -13,11 +13,16 @@ try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
 
 test('Cursor joins desktop header names by conversation id and sees later renames', { skip: !sqlite }, (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-titles-'));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const dbPath = path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new sqlite.DatabaseSync(dbPath);
-  t.after(() => db.close());
+  // Windows cannot remove the temp dir while the handle is open, so one
+  // teardown closes before unlinking; separate t.after hooks would run the
+  // removal first.
+  t.after(() => {
+    db.close();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('CREATE TABLE composerHeaders (composerId TEXT PRIMARY KEY, value TEXT)');
   const put = db.prepare('INSERT OR REPLACE INTO composerHeaders (composerId, value) VALUES (?, ?)');
