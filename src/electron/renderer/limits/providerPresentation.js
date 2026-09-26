@@ -603,11 +603,15 @@
 
   function limitProviderSettingsRecord(providers, id) {
     const rows = (providers || []).filter((row) => row.provider === id);
-    // MiMo's console and membership are independent: one live lane means the
-    // provider is connected even if another lane needs its own recovery.
-    return id === 'mimo'
-      ? rows.findLast((row) => row.status === 'ok') || rows.at(-1)
-      : rows.at(-1);
+    if (id !== 'mimo') return rows.at(-1);
+    // MiMo's console and membership are independent products of one account, so
+    // one live product means the provider is connected even while the other needs
+    // its own recovery. With neither live, the row that speaks is the account's
+    // own product — the console, whose name the membership lane sets against its
+    // own — rather than whichever row the aggregate happened to sort last.
+    return rows.findLast((row) => row.status === 'ok')
+      || rows.find((row) => row.accountName !== 'Membership')
+      || rows.at(-1);
   }
 
   return {

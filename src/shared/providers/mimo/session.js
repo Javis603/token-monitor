@@ -2,7 +2,7 @@
 
 const { throwIfAborted } = require('../../abortSignal');
 const { errorWithStatus } = require('../../limits/providerHelpers');
-const { mimoRequestHeaders } = require('./browserHeaders');
+const { mimoExchangeRequestHeaders } = require('./browserHeaders');
 
 // Both chains observed live are four hops. The cap only stops a redirect loop
 // from holding a probe open; it is not a hop budget to spend.
@@ -146,7 +146,7 @@ function createJarExchange(fetchFn, seed = {}) {
         const cookieHeader = jar.headerFor(current);
         const response = await fetchFn(current.href, {
           method: 'GET',
-          headers: mimoRequestHeaders(cookieHeader),
+          headers: mimoExchangeRequestHeaders(cookieHeader, current),
           redirect: 'manual',
           // Every hop is the caller's to cancel: a device-runtime abort or a probe
           // deadline must stop the walk, not wait for it.

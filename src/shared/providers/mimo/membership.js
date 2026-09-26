@@ -3,7 +3,6 @@
 const { planLabelFromParts } = require('../../limits/providerHelpers');
 const { mimoEndpointIso } = require('./endpointTime');
 const { mintMimoServiceSession, mimoExchangeStatus } = require('./session');
-const { MIMO_ACCOUNT_COOKIE_NAMES } = require('./desktop');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 
 // The only host the app's region table carries; a region it does not carry
@@ -16,49 +15,17 @@ const MIMO_MEMBERSHIP_REGION = 'CN';
 // The app's own card is the weekly usage limit, reset by the plan's next reset.
 const MIMO_MEMBERSHIP_WINDOW_MINUTES = 7 * 24 * 60;
 
-// Xiaomi's own plan names, from the app's `billing.planTier` map — the map its
-// panel renders. The codes are internal (`mimo-cn-pro`), and a tier outside this
-// range has no name to give.
+// Xiaomi's own plan names, from the tier table the pricing page renders
+// (mimo.xiaomimimo.com/pricing, `planTier` 1..4, the same four names on the CN
+// and global variants) and from the app's billing card, which names a tier by
+// the same four. The codes behind them are internal (`mibi-sub-mimo-cn-pro`).
 const MIMO_MEMBERSHIP_TIERS = Object.freeze({ 1: 'Starter', 2: 'Plus', 3: 'Pro', 4: 'Ultra' });
 
-// What this lane is called when no plan names it: a product name in the plan
-// column, the shape opencode gives Go and Zen and volcengine its two plans.
+// What this lane is called when no plan names it. The pricing page sells the
+// products as "Xiaomi MiMo Desktop Membership Plans", so the row is named for
+// the membership itself, the way opencode names Go and Zen and volcengine its
+// two plans.
 const MIMO_MEMBERSHIP_LABEL = 'Membership';
-
-// What the exchange mints here; `mimopc` is the app's service id for this host.
-const MIMO_MEMBERSHIP_SERVICE_COOKIE_NAMES = Object.freeze(['serviceToken', 'mimopc_ph', 'userId']);
-
-function cookiePairs(value) {
-  const pairs = new Map();
-  for (const part of String(value || '').split(';')) {
-    const separator = part.indexOf('=');
-    if (separator <= 0) continue;
-    const name = part.slice(0, separator).trim();
-    const cookieValue = part.slice(separator + 1).trim();
-    if (name && cookieValue) pairs.set(name, cookieValue);
-  }
-  return pairs;
-}
-
-// Two credential shapes, and they are not interchangeable: an account cookie is
-// spent on the exchange, a service cookie is already the session it would have
-// minted. Anything else would let a console credential — a different service's —
-// read as a membership one. The service shape requires the `userId`, because it
-// is the only identity that shape carries and its endpoint does not report one.
-function mimoMembershipCredential(value) {
-  const pairs = cookiePairs(String(value || '').replace(/^cookie\s*:\s*/i, ''));
-  const userId = pairs.get('userId') || '';
-  const account = MIMO_ACCOUNT_COOKIE_NAMES.every((name) => pairs.has(name));
-  const service = pairs.has('serviceToken') && Boolean(userId);
-  if (!account && !service) return null;
-  const names = account ? MIMO_ACCOUNT_COOKIE_NAMES : MIMO_MEMBERSHIP_SERVICE_COOKIE_NAMES;
-  return {
-    kind: account ? 'account' : 'service',
-    userId,
-    cookieHeader: names.filter((name) => pairs.has(name))
-      .map((name) => `${name}=${pairs.get(name)}`).join('; ')
-  };
-}
 
 // The app's schema and its success condition. No `current` means no active
 // subscription, which is an answer rather than a failure, and `percent` is a
@@ -137,25 +104,18 @@ async function requestMimoMembership(pathname, cookieHeader, deps = {}) {
   return body;
 }
 
-// One membership account's answer, or the refusal that says which kind it was.
-async function fetchMimoMembershipAccount(credential, deps = {}) {
-  // A service cookie is already the session an exchange would mint, and it
-  // authorizes the data endpoints — but not the identity one: replaying one at
-  // `/user/xiaomi/me` answers 302 back to the SSO (measured), so routing a pasted
-  // service cookie through the exchange's own identity check would refuse a
-  // credential that works. It goes straight to the subscription read instead, and
-  // the `userId` the paste is required to carry is the identity.
-  if (credential.kind === 'service') {
-    return readMimoMembershipPlanFor(credential.cookieHeader, credential.userId, deps);
-  }
-
+// The membership lane's one credential: the account cookie the machine's own
+// MiMo Desktop holds. Membership is not sold on the developer platform, so the
+// console's service cookie cannot mint this session and there is no paste for
+// it — a machine with no Desktop session has no membership row at all.
+async function fetchMimoMembershipAccount(account, deps = {}) {
   const session = await mintMimoServiceSession({
     baseUrl: MIMO_MEMBERSHIP_BASE_URL,
     entry: MIMO_MEMBERSHIP_ENTRY,
-    accountCookie: credential.cookieHeader,
+    accountCookie: account.cookieHeader,
     deps
   });
-  if (!session.ok) return { ok: false, status: mimoExchangeStatus(session.status), userId: credential.userId };
+  if (!session.ok) return { ok: false, status: mimoExchangeStatus(session.status), userId: account.userId };
   // A region the app does not carry has no endpoint at all, so the lane goes
   // quiet rather than aiming at a host that belongs to someone else's account.
   // An *absent* region is not evidence of a foreign account — the call proceeds
@@ -167,9 +127,8 @@ async function fetchMimoMembershipAccount(credential, deps = {}) {
   return readMimoMembershipPlanFor(session.cookieHeader, session.userId, deps);
 }
 
-// The subscription read both credential shapes end at. An expired session
-// answers 401 here, which is this app's own auth-expired signal — so a pasted
-// credential that has gone stale still reaches the user as `unauthorized`.
+// The subscription read. An expired session answers 401 here, which is this
+// app's own auth-expired signal.
 async function readMimoMembershipPlanFor(cookieHeader, userId, deps = {}) {
   try {
     const body = await requestMimoMembership(MIMO_SUBSCRIPTION_ENTRY, cookieHeader, deps);
@@ -199,7 +158,6 @@ function mimoMembershipWindows(plan) {
 module.exports = {
   MIMO_MEMBERSHIP_LABEL,
   fetchMimoMembershipAccount,
-  mimoMembershipCredential,
   mimoMembershipPlanLabel,
   mimoMembershipWindows,
   readMimoMembershipPlan

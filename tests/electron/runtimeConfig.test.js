@@ -296,13 +296,6 @@ test('limits config resolves managed credentials at dispatch time through contex
   assert.deepEqual(limits.mimoManagedAccounts, [{ id: 'mimo', cookieHeader: 'allowlisted' }]);
 });
 
-test('a saved membership credential reaches only the MiMo limits lane', () => {
-  const settings = { mimoMembershipCookie: 'passToken=p; userId=u' };
-  const limits = limitsConfigFromSettings(settings, { env: {} });
-  assert.equal(limits.mimoMembershipCookie, 'passToken=p; userId=u');
-  assert.deepEqual(classifySettingsChange({}, settings).limitScopes, [{ provider: 'mimo' }]);
-});
-
 test('desktop WorkBuddy Local App monitoring stays inactive outside the selected provider lane', () => {
   const limits = limitsConfigFromSettings({}, { env: {}, workbuddyDesktopSessionOnly: true });
   assert.equal(limits.workbuddyDesktopSessionSupported, true);

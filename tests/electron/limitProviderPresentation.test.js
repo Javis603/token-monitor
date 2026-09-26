@@ -1874,7 +1874,7 @@ test('main Limits plan text shows failure status before account labels', () => {
   const planBody = viewBody('limitProviderPlan');
 
   assert.match(planBody, /if \(provider\?\.status && provider\.status !== 'ok' && !provider\.stale\) return providerStatusLabel\(provider\);/);
-  assert.match(planBody, /'limits\.mimo\.noMembership'/);
+  assert.match(planBody, /'limits\.mimo\.noPlan'/);
   assert.match(planBody, /const label = String\(provider\?\.planLabel \|\| provider\?\.accountLabel \|\| ''\)\.trim\(\);/);
 });
 
@@ -2825,6 +2825,36 @@ test('Antigravity account verification is shown as an actionable status', () => 
   );
 });
 
+test('a MiMo row whose recovery belongs to a sign-in says which sign-in it means', () => {
+  // The membership lane has one credential — the machine's own Desktop session —
+  // so a refusal there is always that sign-in's to fix. The pasted console
+  // credential is the user's, and the row says to replace it instead.
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({
+      provider: 'mimo',
+      status: 'unauthorized',
+      sourceDetail: 'app'
+    }),
+    {
+      label: 'Sign in to MiMo Desktop again',
+      key: 'settings.mimo.desktopRelogin',
+      tone: 'setup'
+    },
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({
+      provider: 'mimo',
+      status: 'unauthorized',
+      sourceDetail: 'managed'
+    }),
+    {
+      label: 'Paste MiMo Cookie again',
+      key: 'settings.mimo.repasteCookie',
+      tone: 'setup'
+    }
+  );
+});
+
 test('WorkBuddy sealed app credentials are shown as an actionable status', () => {
   assert.deepEqual(
     presentation.limitProviderStatusLabel({
@@ -2921,29 +2951,83 @@ test('MiMo status gives the correct recovery action for each credential source',
   );
 });
 
-test('MiMo settings stays connected while one independent lane is live', () => {
-  const live = { provider: 'mimo', status: 'ok', accountKey: 'console' };
-  const expired = { provider: 'mimo', status: 'unauthorized', accountKey: 'membership' };
+test('MiMo settings stays connected while one independent product is live', () => {
+  const live = { provider: 'mimo', status: 'ok', accountKey: 'console', accountName: 'Pay-as-you-go' };
+  const expired = { provider: 'mimo', status: 'unauthorized', accountKey: 'membership', accountName: 'Membership' };
   assert.equal(presentation.limitProviderSettingsRecord([live, expired], 'mimo'), live);
   assert.equal(presentation.limitProviderSettingsRecord([expired, live], 'mimo'), live);
   assert.equal(presentation.limitProviderSettingsRecord([live, expired], 'codex'), undefined);
+  // Neither live: the console product is the row the account is named by.
+  assert.equal(
+    presentation.limitProviderSettingsRecord([expired, { ...live, status: 'unauthorized' }], 'mimo').accountKey,
+    'console'
+  );
   assert.equal(presentation.limitProviderSettingsRecord([expired], 'mimo'), expired);
+});
+
+test('a grouped MiMo row prints its product once, and its plan beside it', () => {
+  const view = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'limitWindowsView.js'), 'utf8');
+  const start = view.indexOf('const LIMIT_ACCOUNT_ROW_POLICIES = {');
+  let depth = 0;
+  let end = start;
+  for (let i = view.indexOf('{', start); i < view.length; i += 1) {
+    if (view[i] === '{') depth += 1;
+    if (view[i] === '}') {
+      depth -= 1;
+      if (depth === 0) { end = i + 1; break; }
+    }
+  }
+  const policies = vm.runInNewContext(
+    `${view.slice(start, end)}\nLIMIT_ACCOUNT_ROW_POLICIES`,
+    { presentationApi: { thirdPartyAdapterVisual: () => ({ color: '#000' }), thirdPartyGroupPlanText: () => '' } }
+  );
+  const planTextFor = (row) => policies.mimo(row, '#000', { grouped: true, sharedFamily: null }).options.planText;
+
+  // The console row is titled by its product and has nothing else to say while
+  // it is healthy, so the cell stays empty instead of printing the same word
+  // twice — the rule the policy's `accountLabel === accountName` asks for.
+  assert.equal(planTextFor({ provider: 'mimo', status: 'ok', accountLabel: 'Pay-as-you-go', accountName: 'Pay-as-you-go', windows: [] }), '');
+  // The membership's tier is a plan of its own and keeps the cell.
+  assert.equal(planTextFor({ provider: 'mimo', status: 'ok', accountLabel: 'Pro', accountName: 'Membership', windows: [{ kind: 'weekly' }] }), undefined);
+  // Its no-plan answer is the exception: the cell is what says there is no plan.
+  assert.equal(planTextFor({ provider: 'mimo', status: 'ok', accountLabel: 'Membership', accountName: 'Membership', windows: [] }), undefined);
+  // A row that is not ok keeps the cell for its status.
+  assert.equal(planTextFor({ provider: 'mimo', status: 'unauthorized', accountLabel: 'Membership', accountName: 'Membership', windows: [] }), undefined);
 });
 
 test('MiMo Limits rows show the no-plan and source-specific recovery text', () => {
   const view = createLimitWindowsView({
     accountIdentity: require('../../src/electron/renderer/accountIdentity'),
     t: (key) => ({
-      'limits.mimo.noMembership': '未开通会员或会员已到期',
+      'limits.mimo.noPlan': '暂无套餐',
       'settings.mimo.desktopRelogin': '请重新登录 MiMo Desktop',
       'settings.mimo.repasteCookie': '请重新粘贴 MiMo Cookie'
     })[key] || key,
     presentation: presentation
   });
-  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Membership', windows: [] }), '未开通会员或会员已到期');
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Membership', windows: [] }), '暂无套餐');
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }), '请重新登录 MiMo Desktop');
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }), '请重新粘贴 MiMo Cookie');
   assert.equal(view.limitAccountTitle('mimo', { provider: 'mimo', accountLabel: 'Open Platform' }, 0), 'Open Platform');
+});
+
+test('a healthy MiMo row keeps its meta line free of recovery prompts', () => {
+  const view = createLimitWindowsView({
+    accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    t: (key) => ({ 'settings.mimo.desktopRelogin': '请重新登录 MiMo Desktop' })[key] || key,
+    presentation,
+    settings: () => ({})
+  });
+  // The membership's recovery lives on its own row now, so nothing has to be
+  // said beside a row that is fine: the wallet it carries is the whole line.
+  const row = {
+    provider: 'mimo',
+    status: 'ok',
+    accountLabel: 'Pay-as-you-go',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.96, currency: 'CNY' }]
+  };
+  assert.doesNotMatch(view.limitProviderMeta(row), /请重新登录/);
+  assert.equal(view.limitProviderPlan(row), 'Pay-as-you-go');
 });
 
 test('copilot setup status asks for sign-in instead of an API key', () => {

@@ -74,14 +74,21 @@ function readMimoDesktopAccount(options = {}) {
   const candidates = options.candidates || mimoDesktopCookieCandidates(options);
   if (!candidates.length) throw errorWithStatus('notConfigured', 'MiMo Desktop does not run on this platform');
 
+  let statFailure = null;
   const dbPath = candidates.find((candidate) => {
     try {
       return fsApi.statSync(candidate).isFile();
-    } catch (_) {
+    } catch (error) {
+      if (error?.code !== 'ENOENT') statFailure = error;
       return false;
     }
   });
-  if (!dbPath) throw errorWithStatus('notConfigured', 'MiMo Desktop cookie store not found');
+  if (!dbPath) {
+    // A store we cannot even look at is an outage, not a machine without the app:
+    // the first clears the previous reading, the second is a silent fallback.
+    if (statFailure) throw errorWithStatus('unavailable', 'MiMo Desktop cookie store could not be read');
+    throw errorWithStatus('notConfigured', 'MiMo Desktop cookie store not found');
+  }
   if (typeof sqlite?.DatabaseSync !== 'function') {
     throw errorWithStatus('notConfigured', 'node:sqlite is unavailable in this runtime');
   }
@@ -90,7 +97,9 @@ function readMimoDesktopAccount(options = {}) {
   try {
     rows = readAccountCookieRows(dbPath, sqlite);
   } catch (_) {
-    throw errorWithStatus('notConfigured', 'MiMo Desktop cookie store could not be read');
+    // The store is there and could not be read: a lock, a permission, a corrupt
+    // database. That keeps the previous reading rather than clearing it.
+    throw errorWithStatus('unavailable', 'MiMo Desktop cookie store could not be read');
   }
 
   const values = new Map();

@@ -286,6 +286,107 @@ test('an OpenRouter card carries the balance meter and its detail tooltip', () =
   assert.match(tooltip.text, /All time/);
 });
 
+test('a MiMo membership row meters like any percent quota, WorkBuddy included', () => {
+  // The membership lane answers with a percentage and nothing else — the app's
+  // own card prints "{{percent}}% remaining" from that field, and no endpoint
+  // reports an absolute used/limit pair for it. So the row is a percent window
+  // and draws the shared meter, the path every rate-limit window takes.
+  const membershipRow = {
+    provider: 'mimo',
+    source: 'local',
+    sourceDetail: 'app',
+    status: 'ok',
+    accountName: 'Membership',
+    accountLabel: 'Pro',
+    // What the collector's normalization produces from the vendor's percent.
+    windows: [{
+      kind: 'weekly',
+      windowMinutes: 10080,
+      usedPercent: 21.5,
+      remainingPercent: 78.5,
+      resetsAt: '2026-09-28T00:00:00.000Z'
+    }]
+  };
+  const card = dockView().renderProviderWindows(membershipRow, '#000000');
+  const fill = card.find('limit-meter-fill');
+  assert.ok(fill, 'the membership row should carry a bar, not only a number');
+  // "left" mode is the default, so the bar shows the share still available.
+  assert.equal(fill.style['--bar-scale'], '0.785');
+  assert.match(card.text, /79% left/);
+  assert.match(card.text, /Reset/);
+
+  // The used-mode flip is the shared one, so the same row read the other way
+  // fills to the consumed share.
+  const usedMode = dockView({ showLimitUsed: true }).renderProviderWindows(membershipRow, '#000000');
+  assert.equal(usedMode.find('limit-meter-fill').style['--bar-scale'], '0.215');
+  assert.match(usedMode.text, /22% used/);
+
+  // WorkBuddy meters a credits window the same way — its own branch only swaps
+  // the right-hand cell for the amount, so the two rows agree on the bar.
+  const workbuddyRow = {
+    provider: 'workbuddy',
+    status: 'ok',
+    windows: [{
+      kind: 'billing',
+      label: 'Credits',
+      metric: 'credits',
+      currency: 'CREDITS',
+      used: 215,
+      limit: 1000,
+      remaining: 785,
+      usedPercent: 21.5,
+      remainingPercent: 78.5,
+      showMeter: true
+    }],
+    balance: { amount: 785, currency: 'CREDITS' }
+  };
+  const workbuddyCard = dockView().renderProviderWindows(workbuddyRow, '#12B7F5');
+  assert.equal(workbuddyCard.find('limit-meter-fill').style['--bar-scale'], '0.785');
+
+  // A membership with no plan has no percentage to meter: the row carries no
+  // window, and the plan cell is what says there is no plan.
+  const noPlan = dockView().renderProviderWindows(
+    { ...membershipRow, accountLabel: 'Membership', windows: [] },
+    '#000000'
+  );
+  assert.equal(noPlan.find('limit-meter-fill'), null);
+});
+
+test('one MiMo product failing still leaves the other row and its quota on the card', () => {
+  const rows = [
+    {
+      provider: 'mimo',
+      status: 'ok',
+      source: 'web',
+      sourceDetail: 'managed',
+      accountKey: 'sha256:console',
+      accountLabel: 'Pay-as-you-go',
+      accountName: 'Pay-as-you-go',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY', showMeter: false }],
+      balance: { amount: 9.95, currency: 'CNY' }
+    },
+    {
+      provider: 'mimo',
+      status: 'unauthorized',
+      source: 'local',
+      sourceDetail: 'app',
+      accountKey: 'sha256:membership',
+      accountLabel: 'Membership',
+      accountName: 'Membership',
+      windows: []
+    }
+  ];
+  const group = dockView().renderLimitProviderGroup('mimo', 'Xiaomi MiMo', rows, '#000000');
+
+  // The lane that answered keeps its rows: the wallet is on the card...
+  assert.match(group.text, /9\.95/);
+  // ...and the lane that did not is a row of its own instead of taking the
+  // other product's place, so neither failure is silent and neither is a
+  // swallowed row.
+  assert.match(group.text, /Sign in to MiMo Desktop again/);
+  assert.equal(group.text.match(/Sign in to MiMo Desktop again/g).length, 1, 'one row asks, the healthy one does not');
+});
+
 test('a Devin card keeps Daily, Weekly, and the extra usage balance', () => {
   const card = dockView().renderProviderWindows({
     provider: 'devin',

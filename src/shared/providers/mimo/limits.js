@@ -12,7 +12,6 @@ const { mintMimoServiceSession, mimoExchangeStatus, readConsoleStatus } = requir
 const {
   MIMO_MEMBERSHIP_LABEL,
   fetchMimoMembershipAccount,
-  mimoMembershipCredential,
   mimoMembershipPlanLabel,
   mimoMembershipWindows
 } = require('./membership');
@@ -82,6 +81,16 @@ function mimoAccountKey(cookieHeader, account = {}) {
   return hashKey(`mimo:${identity}`);
 }
 
+// The membership is a second product of the same account, not a second account,
+// so its row is keyed by the same `userId` with the lane it came from appended.
+// One key for both would let the hub's collapse pass pick a single winner per
+// account key and drop one of the two rows. The lane rather than a counter keeps
+// the key stable across refreshes, which is what the runtime's identity and the
+// renderer's account grouping both need.
+function mimoMembershipAccountKey(userId) {
+  return hashKey(`mimo:membership:${cleanText(userId)}`);
+}
+
 function numberFrom(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim()) {
@@ -124,11 +133,9 @@ function parseMimoBalance(body) {
 function parseMimoProfile(body) {
   const data = unwrapApiBody(body);
   return {
-    email: cleanText(data.email ?? data.platformEmail).slice(0, 254),
-    userId: data.userId == null ? '' : String(data.userId).trim()
+    email: cleanText(data.email ?? data.platformEmail).slice(0, 254)
   };
 }
-
 
 function parseMimoPlanDetail(body, now = Date.now()) {
   const data = unwrapApiBody(body);
@@ -290,6 +297,16 @@ async function fetchMimoAccount(account, deps = {}) {
         currency: balance.currency
       });
     }
+    // The plan when there is one. Otherwise the product, named the way this
+    // repository names a prepaid wallet: deepseek's balance-only row is
+    // `Pay-as-you-go` too, and the wallet is what the console lane reads —
+    // `sk-` keys draw it down, while the Token Plan is the subscription beside
+    // it. `Token Plan` is the vendor's own name for that product (the app's
+    // sign-in card prints exactly that), and it doubles as the account name so
+    // the plan cell does not print the same word as the row's title.
+    const accountLabel = hasTokenPlan || hasExpiredTokenPlan
+      ? (detail.label || 'Token Plan')
+      : 'Pay-as-you-go';
     return normalizeLimitProvider({
       provider: 'mimo',
       source: cleanText(account.source) || 'web',
@@ -297,15 +314,9 @@ async function fetchMimoAccount(account, deps = {}) {
       status: 'ok',
       updatedAt,
       accountKey: cleanText(account.accountKey) || mimoAccountKey(cookieHeader),
-      accountName: '',
+      accountName: accountLabel,
       accountEmail,
-      // The plan when there is one. Otherwise the product, named the way this
-      // repository names a prepaid wallet: deepseek's balance-only row is
-      // `Pay-as-you-go` too, and the wallet is what the console lane reads —
-      // `sk-` keys draw it down, while the Token Plan is the subscription beside it.
-      accountLabel: hasTokenPlan || hasExpiredTokenPlan
-        ? (detail.label || 'Token Plan')
-        : 'Pay-as-you-go',
+      accountLabel,
       windows,
       balance: {
         ...balance,
@@ -360,8 +371,11 @@ function normalizeMimoManagedAccounts(value) {
   for (const item of value) {
     if (!item || typeof item !== 'object' || item.enabled === false) continue;
     const cookieHeader = normalizeMimoCookieHeader(item.cookieHeader);
-    if (!cookieHeader) continue;
-    const accountKey = cleanText(item.accountKey) || mimoAccountKey(cookieHeader);
+    // An account whose credential cannot be read is still an account: it keeps
+    // its saved key and answers for itself with a not-configured row, rather than
+    // disappearing and leaving the provider to answer for the whole lane.
+    const accountKey = cleanText(item.accountKey) || (cookieHeader ? mimoAccountKey(cookieHeader) : '');
+    if (!accountKey) continue;
     if (seen.has(accountKey)) continue;
     seen.add(accountKey);
     accounts.push({ ...item, accountKey, cookieHeader });
@@ -395,11 +409,6 @@ function withDetectedMimoAccount(storedAccounts = [], detected = null) {
   return [...accounts, { ...detected, removable: false }];
 }
 
-// A lane that failed is worth a row only while nothing else answered for the
-// account, and only for a status a user can act on — the rule opencode writes
-// down for the same two-lane shape.
-const MIMO_ACTIONABLE_STATUSES = ['unauthorized', 'sourceRateLimited', 'unavailable'];
-
 function readMimoDesktopSession(deps = {}) {
   try {
     const read = (deps.readMimoDesktopAccount || readMimoDesktopAccount)(
@@ -416,9 +425,24 @@ function readMimoDesktopSession(deps = {}) {
   }
 }
 
-// Every credential names one account, keyed as `mimo:<userId>`, so a pasted
-// credential, a saved console cookie and the session the machine's own MiMo
-// Desktop mints are three credentials for one identity — not three rows.
+// A scope names one row of one account. A console credential and a Desktop
+// session that report the same `userId` share an entry, so both of that entry's
+// keys match here — the console key is the account's, the membership key carries
+// its lane. Only a stored account carries the two names a scope can also match
+// on; a discovered one has no identity but the key the runtime scopes by.
+function entryMatchesScope(entry, scope) {
+  if (!scope) return true;
+  if (scope.accountKey) return scope.accountKey === entry.accountKey || scope.accountKey === entry.membershipKey;
+  const account = entry.console?.account;
+  if (scope.accountEmail) return Boolean(account) && account.accountEmail === scope.accountEmail;
+  if (scope.accountLabel) return Boolean(account) && account.accountLabel === scope.accountLabel;
+  return true;
+}
+
+// Every console credential names one account, keyed as `mimo:<userId>`, so a
+// pasted cookie, a saved account and the session the machine's own MiMo Desktop
+// mints are three credentials for one identity — not three rows. The membership
+// rides the same entry and keys its own row off the lane.
 //
 // Discovery needs no precedence rule: a credential the user entered occupies its
 // own account's entry and the machine's session fills only the entries still
@@ -432,8 +456,13 @@ function collectMimoCredentials(options, deps, scope, desktop) {
     if (identity && byUser.has(identity)) return byUser.get(identity);
     const accountKey = preferredKey || (identity ? mimoAccountKey('', { userId: identity }) : '');
     if (!accountKey) return null;
-    const entry = entries.get(accountKey)
-      || { accountKey, userId: identity, console: null, membership: null };
+    const entry = entries.get(accountKey) || {
+      accountKey,
+      membershipKey: identity ? mimoMembershipAccountKey(identity) : '',
+      userId: identity,
+      console: null,
+      membership: null
+    };
     entries.set(accountKey, entry);
     if (identity) byUser.set(identity, entry);
     return entry;
@@ -445,40 +474,19 @@ function collectMimoCredentials(options, deps, scope, desktop) {
     if (entry) entry.console = { account };
   }
 
-  const pasted = mimoMembershipCredential(options.mimoMembershipCookie || deps.mimoMembershipCookie);
-  if (pasted) {
-    const entry = entryFor(pasted.userId);
-    if (entry) entry.membership = { ...pasted, sourceDetail: 'managed' };
-  }
-
   if (desktop.userId) {
     const entry = entryFor(desktop.userId);
     if (entry && !entry.console) entry.console = { discovered: desktop };
-    if (entry && desktop.ok && !entry.membership) {
-      entry.membership = {
-        kind: 'account',
-        userId: desktop.userId,
-        cookieHeader: desktop.cookieHeader,
-        sourceDetail: 'app'
-      };
-    }
+    if (entry && desktop.ok) entry.membership = desktop;
   }
 
-  return [...entries.values()].filter((entry) => {
-    if (!scope) return true;
-    if (scope.accountKey) return entry.accountKey === scope.accountKey;
-    // Only a stored account carries the two names a scope can also match on; a
-    // discovered one has no identity but the key the runtime already scopes by.
-    const account = entry.console?.account;
-    if (scope.accountEmail) return Boolean(account) && account.accountEmail === scope.accountEmail;
-    if (scope.accountLabel) return Boolean(account) && account.accountLabel === scope.accountLabel;
-    return true;
-  });
+  return [...entries.values()].filter((entry) => entryMatchesScope(entry, scope));
 }
 
 // The console session the machine's own MiMo Desktop can mint, shaped as the
-// account the console reader already spends.
-async function mintMimoConsoleCredential(desktop, deps = {}) {
+// account the console reader already spends. A session read off this machine is
+// `local` + `app`, the pair workbuddy's own desktop session reports.
+async function mintMimoConsoleCredential(entry, desktop, deps = {}) {
   const exchanged = await mintMimoServiceSession({
     baseUrl: MIMO_API_BASE_URL,
     entry: MIMO_CONSOLE_ENTRY,
@@ -491,72 +499,105 @@ async function mintMimoConsoleCredential(desktop, deps = {}) {
     ok: true,
     account: {
       userId: desktop.userId,
-      source: 'oauth',
+      accountKey: entry.accountKey,
+      source: 'local',
       sourceDetail: 'app',
       cookieHeader: exchanged.cookieHeader
     }
   };
 }
 
-// What this account's console credential answers with. A pasted credential is
-// spent as it stands; the machine's own session is exchanged first.
+// What this account's console credential answers with. A credential the user
+// pasted is spent as it stands; the machine's own session is exchanged first.
 async function fetchMimoConsoleSide(entry, deps) {
   const account = entry.console?.account;
   if (account) return { consoleRow: await fetchMimoAccountWithTimeout(account, deps) };
   const discovered = entry.console?.discovered;
   if (!discovered) return {};
   const minted = discovered.ok
-    ? await mintMimoConsoleCredential(discovered, deps)
+    ? await mintMimoConsoleCredential(entry, discovered, deps)
     : { ok: false, status: discovered.status };
   if (!minted.ok) {
-    return { consoleFailure: { status: minted.status, source: 'oauth', sourceDetail: 'app' } };
+    return { consoleFailure: { status: minted.status, source: 'local', sourceDetail: 'app' } };
   }
   return { consoleRow: await fetchMimoAccountWithTimeout(minted.account, deps) };
 }
 
-// The console row is the base — it owns the wallet, the Token Plan and the plan
-// label — and the membership lane is supplemental, the shape opencode gives its
-// Go quota and its Zen balance: a lane that answered carries the row, and a lane
-// that failed speaks only when nothing did.
-function composeMimoRow(entry, { consoleRow, consoleFailure, membership }, updatedAt) {
-  const windows = membership?.ok ? mimoMembershipWindows(membership.plan) : [];
-  const label = membership?.ok ? mimoMembershipPlanLabel(membership.plan) : '';
+// One account, one row per product it holds: the platform console (wallet and
+// Token Plan) and the Desktop membership. They are separate rows rather than one
+// merged row because the aggregate collapses per account key — two products under
+// one key would come out as one — and because each product's own answer is what
+// the row above it should show: a membership lane that failed no longer has to
+// speak through the wallet's row, and the wallet it never touched stays.
+//
+// Each row also names itself in the plan column (`Pay-as-you-go` or the Token
+// Plan's name; `Membership` with its tier), which is how the Limits page tells
+// two products of one account apart without reading the same account twice. Both
+// rows carry the product as their account name for the same reason: the group
+// already names the provider, so the row's title is the product, and the plan
+// cell leaves it to the title unless it has a plan of its own to print.
+function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, updatedAt) {
+  const rows = [];
 
   if (consoleRow) {
-    return {
+    rows.push({
       ...consoleRow,
-      accountKey: consoleRow.accountKey || entry.accountKey,
-      // The membership tier is a plan; the console's own label is a product
-      // (`Pay-as-you-go`, or the Token Plan's name). The plan wins the column,
-      // and the product is what an account without one shows.
-      accountLabel: label || consoleRow.accountLabel,
-      windows: [...consoleRow.windows, ...windows],
-      updatedAt: consoleRow.updatedAt || updatedAt
-    };
-  }
-
-  if (membership?.ok) {
-    return normalizeLimitProvider({
-      provider: 'mimo',
-      source: 'oauth',
-      sourceDetail: entry.membership?.sourceDetail || 'app',
-      status: 'ok',
-      updatedAt,
       accountKey: entry.accountKey,
-      // A row with no console lane names its own product when it has no plan to
-      // name; a merged row is the console lane's and keeps whatever it had.
-      accountLabel: label || MIMO_MEMBERSHIP_LABEL,
-      windows
+      accountName: consoleRow.accountLabel || '',
+      updatedAt: consoleRow.updatedAt || updatedAt
     });
+  } else if (consoleFailure) {
+    rows.push(statusProvider(consoleFailure.status, updatedAt, {
+      accountKey: entry.accountKey,
+      source: consoleFailure.source || 'local',
+      sourceDetail: consoleFailure.sourceDetail || 'app'
+    }));
   }
 
-  const failure = consoleFailure || (membership ? { status: membership.status } : null);
-  if (!failure || !MIMO_ACTIONABLE_STATUSES.includes(failure.status)) return null;
-  return statusProvider(failure.status, updatedAt, {
-    accountKey: entry.accountKey,
-    source: failure.source || 'oauth',
-    sourceDetail: failure.sourceDetail || entry.membership?.sourceDetail || 'app'
-  });
+  if (!entry.membership) return rows;
+  // A region the app does not carry resolves no membership endpoint at all, so
+  // the row is absent rather than mislabelled: there is nothing for this account
+  // to sign in to.
+  if (membership?.status === 'notConfigured') return rows;
+
+  if (!membership?.ok) {
+    return [...rows, statusProvider(membership?.status || 'unavailable', updatedAt, {
+      accountKey: entry.membershipKey || entry.accountKey,
+      source: 'local',
+      sourceDetail: 'app'
+    })];
+  }
+
+  const label = mimoMembershipPlanLabel(membership.plan);
+  rows.push(normalizeLimitProvider({
+    provider: 'mimo',
+    source: 'local',
+    sourceDetail: 'app',
+    status: 'ok',
+    updatedAt,
+    accountKey: entry.membershipKey || entry.accountKey,
+    accountName: MIMO_MEMBERSHIP_LABEL,
+    // The tier is the plan, so it is what the plan column prints; an account
+    // with no active plan keeps the product name there and says so in the cell.
+    accountLabel: label || MIMO_MEMBERSHIP_LABEL,
+    windows: mimoMembershipWindows(membership.plan)
+  }));
+  return rows;
+}
+
+// A scoped refresh names one row, and the runtime writes every row a scoped
+// dispatch returns under that one identity — so this lane answers with that row
+// alone. An account the scope names but this tick cannot find is not an answer
+// either: publishing `not-configured` for it would blank a row that is still
+// there.
+function rowsForMimoScope(entry, rows, scope) {
+  if (!scope) return rows;
+  const key = cleanText(scope.accountKey);
+  if (key) return rows.filter((row) => row.accountKey === key);
+  // An email or label names the account rather than one of its products, and the
+  // console row is the one those two names belong to.
+  const consoleRow = rows.find((row) => row.accountKey === entry.accountKey);
+  return consoleRow ? [consoleRow] : rows.slice(0, 1);
 }
 
 async function fetchMimoLimits(options = {}, deps = {}) {
@@ -568,17 +609,19 @@ async function fetchMimoLimits(options = {}, deps = {}) {
   // One observation of the machine's own store per tick, spent by both lanes.
   const desktop = readMimoDesktopSession(deps);
   const entries = collectMimoCredentials(options, deps, scope, desktop);
-  if (!entries.length) return [statusProvider('notConfigured', updatedAt)];
+  if (!entries.length) return scope ? [] : [statusProvider('notConfigured', updatedAt)];
 
-  const rows = await Promise.all(entries.map(async (entry) => {
+  const perEntry = await Promise.all(entries.map(async (entry) => {
     const [consoleSide, membership] = await Promise.all([
       fetchMimoConsoleSide(entry, deps),
       entry.membership ? fetchMimoMembershipAccount(entry.membership, deps) : null
     ]);
-    return composeMimoRow(entry, { ...consoleSide, membership }, updatedAt);
+    return rowsForMimoScope(entry, mimoRowsForEntry(entry, { ...consoleSide, membership }, updatedAt), scope);
   }));
-  const answered = rows.filter(Boolean);
-  return answered.length ? answered : [statusProvider('notConfigured', updatedAt)];
+
+  const rows = perEntry.flat();
+  if (rows.length) return rows;
+  return scope ? [] : [statusProvider('notConfigured', updatedAt)];
 }
 
 function createMimoManagedAccount(cookieValue, existing = []) {
@@ -614,6 +657,7 @@ module.exports = {
   createMimoManagedAccount,
   fetchMimoLimits,
   mimoAccountKey,
+  mimoMembershipAccountKey,
   normalizeMimoCookieHeader,
   parseMimoBalance,
   parseMimoProfile,

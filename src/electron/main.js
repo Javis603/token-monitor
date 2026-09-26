@@ -274,7 +274,6 @@ const {
   normalizeMimoCookieHeader,
   withDetectedMimoAccount
 } = require('../shared/providers/mimo/limits');
-const { fetchMimoMembershipAccount, mimoMembershipCredential } = require('../shared/providers/mimo/membership');
 const { readMimoDesktopAccount } = require('../shared/providers/mimo/desktop');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
@@ -1274,58 +1273,17 @@ function mimoAccountsForRenderer() {
   return withDetectedMimoAccount(accounts, mimoDetectedAccount());
 }
 
+// Every saved account is handed over, including one whose credential cannot be
+// read right now: the provider answers that account with its own not-configured
+// row, which keeps the failure on the account it belongs to. Dropping it here
+// instead used to leave the provider with no accounts at all, and a provider with
+// no accounts answers once for the whole lane — which cleared every other
+// account's row with it.
 function mimoManagedAccountsForCollector() {
   return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map((account) => ({
     ...account,
     cookieHeader: readMimoCredential(account.id)
-  })).filter((account) => account.cookieHeader);
-}
-
-async function saveMimoMembershipCookie(value) {
-  const credential = mimoMembershipCredential(value);
-  if (String(value || '').trim() && !credential) return { ok: false, errorCode: 'missingRequiredCookies' };
-  const cookie = credential ? credential.cookieHeader : '';
-  if (credential) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 15_000);
-    let validation;
-    try {
-      validation = await fetchMimoMembershipAccount(credential, electronProviderDeps({ signal: controller.signal }));
-    } catch (_) {
-      return { ok: false, errorCode: 'validationUnavailable' };
-    } finally {
-      clearTimeout(timer);
-    }
-    if (!validation?.ok) {
-      return { ok: false, errorCode: validation?.status === 'unauthorized'
-        ? 'invalidCookie'
-        : validation?.status === 'sourceRateLimited' ? 'validationRateLimited' : 'validationUnavailable' };
-    }
-  }
-  const previous = settings;
-  settings = { ...settings, mimoMembershipCookie: cookie };
-  try {
-    saveSettings({ throwOnError: true });
-  } catch (_) {
-    settings = previous;
-    return { ok: false, errorCode: 'credentialStorageUnavailable' };
-  }
-  pushSettingsToRenderer();
-  const previousUserId = previous.mimoMembershipCookie?.match(/(?:^|;\s*)userId=([^;]+)/)?.[1] || '';
-  const previousKey = previousUserId ? mimoAccountKey('', { userId: previousUserId }) : '';
-  if (deviceRuntimeHandle && previousKey && previous.mimoMembershipCookie !== cookie) {
-    void queueLimitInvalidation({ provider: 'mimo', accountKey: previousKey }, 'credential-save', {
-      clear: true, refresh: false
-    });
-    void queueLimitInvalidation({ provider: 'mimo' }, 'credential-save');
-  } else {
-    // Before runtime startup, queue a provider clear so no old member identity
-    // survives when the pending full refresh is eventually drained.
-    void queueLimitInvalidation({ provider: 'mimo' }, 'credential-save', {
-      clear: !deviceRuntimeHandle && Boolean(previousKey)
-    });
-  }
-  return { ok: true, configured: Boolean(cookie) };
+  }));
 }
 
 function legacyMimoCredentialPath(id) {
@@ -7472,7 +7430,6 @@ app.whenReady().then(() => {
   ipcMain.handle('antigravity:removeAccount', (_event, id) => removeAntigravityManagedAccount(id));
   ipcMain.handle('mimo:accounts', () => mimoAccountsForRenderer());
   ipcMain.handle('mimo:addAccount', (_event, cookieHeader) => addMimoManagedAccount(cookieHeader));
-  ipcMain.handle('mimo:saveMembershipCookie', (_event, cookieHeader) => saveMimoMembershipCookie(cookieHeader));
   ipcMain.handle('mimo:openConsole', () => shell.openExternal(MIMO_PLATFORM_CONSOLE_URL)
     .then(() => ({ ok: true }))
     .catch((error) => ({ ok: false, error: error.message })));

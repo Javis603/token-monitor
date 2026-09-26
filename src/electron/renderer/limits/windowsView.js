@@ -1521,7 +1521,7 @@
   function limitProviderPlan(provider) {
     if (provider?.status && provider.status !== 'ok' && !provider.stale) return providerStatusLabel(provider);
     if (provider?.provider === 'mimo' && provider?.accountLabel === 'Membership'
-      && provider?.status === 'ok' && !provider?.windows?.length) return t('limits.mimo.noMembership');
+      && provider?.status === 'ok' && !provider?.windows?.length) return t('limits.mimo.noPlan');
     const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
     if (label) return presentationApi.limitProviderPlanDisplayLabel(provider, label);
     return provider?.status && provider.status !== 'ok' ? providerStatusLabel(provider) : '';
@@ -2042,9 +2042,13 @@
       : limitAccountDefaultTitle(provider, index, providerEntries);
   }
 
-  // Volcengine's two rows are one account's two subscriptions, so its header
-  // counts plans; every other group counts accounts.
-  const GROUP_COUNT_KEYS = { volcengine: 'settings.volcengine.nPlans' };
+  // Volcengine's two rows are one account's two subscriptions, and MiMo's are
+  // the platform console and the Desktop membership of one account, so both
+  // headers count plans; every other group counts accounts.
+  const GROUP_COUNT_KEYS = {
+    volcengine: 'settings.volcengine.nPlans',
+    mimo: 'settings.mimo.nPlans'
+  };
 
   // "4 accounts" on the group header. A caller that has a better phrase passes
   // one; leaving it to the caller is what let the dock card render a group with

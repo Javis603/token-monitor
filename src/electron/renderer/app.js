@@ -13666,13 +13666,9 @@ function renderMimoStatus() {
   const errorEl = document.getElementById('mimoAccountErrorMessage');
   if (!statusEl || !listEl || !emptyEl || !errorEl) return;
   const accounts = state.settings?.mimoManagedAccounts || [];
-  const clearMembership = document.getElementById('mimoClearMembershipCookieButton');
-  if (clearMembership) clearMembership.classList.toggle('hidden', !state.settings?.mimoMembershipCookieConfigured);
   const enabledCount = accounts.filter((account) => account.enabled !== false).length;
   const statusText = accounts.length === 0
-    ? (state.settings?.mimoMembershipCookieConfigured
-      ? t('settings.mimo.membershipConfigured')
-      : t('settings.mimo.notConfigured'))
+    ? t('settings.mimo.notConfigured')
     : t('settings.mimo.connected', { linked: enabledCount, total: accounts.length });
   accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.mimoAccountError });
   emptyEl.classList.toggle('hidden', accounts.length > 0);
@@ -16038,37 +16034,6 @@ function setupCursorAccountUI() {
       renderMimoStatus();
       setMimoAddExpanded(false);
       await refreshStats({ force: true });
-    });
-    document.getElementById('mimoSaveMembershipCookieButton').addEventListener('click', async () => {
-      const input = document.getElementById('mimoMembershipCookieInput');
-      const button = document.getElementById('mimoSaveMembershipCookieButton');
-      button.disabled = true;
-      let result;
-      try { result = await window.tokenMonitor.mimo.saveMembershipCookie(input.value); }
-      catch (_) { result = { ok: false, errorCode: 'validationUnavailable' }; }
-      button.disabled = false;
-      if (!result?.ok) {
-        const key = result?.errorCode === 'missingRequiredCookies'
-          ? 'settings.mimo.membershipMissingCookies'
-          : `settings.mimo.${result?.errorCode || 'validationUnavailable'}`;
-        state.mimoAccountError = t(key);
-      } else {
-        input.value = '';
-        state.mimoAccountError = '';
-        state.settings.mimoMembershipCookieConfigured = true;
-      }
-      renderMimoStatus();
-      if (result?.ok) await refreshStats({ force: true });
-    });
-    document.getElementById('mimoClearMembershipCookieButton').addEventListener('click', async () => {
-      const result = await window.tokenMonitor.mimo.saveMembershipCookie('');
-      if (!result?.ok) state.mimoAccountError = t('settings.mimo.credentialStorageUnavailable');
-      else {
-        state.mimoAccountError = '';
-        state.settings.mimoMembershipCookieConfigured = false;
-      }
-      renderMimoStatus();
-      if (result?.ok) await refreshStats({ force: true });
     });
   }
   const copilotToggle = document.getElementById('copilotSettingsToggle');

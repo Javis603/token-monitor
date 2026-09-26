@@ -1246,10 +1246,12 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(details, /id="mimoAddToggle"[\s\S]*aria-controls="mimoAddDetails"/);
   assert.match(details, /id="mimoAddDetails" class="opencode-add-details accordion-animated-container hidden"/);
   assert.match(details, /id="mimoSaveAccountButton"/);
-  assert.match(details, /id="mimoMembershipCookieInput"/);
-  assert.match(details, /id="mimoSaveMembershipCookieButton"/);
-  assert.match(details, /id="mimoClearMembershipCookieButton"/);
   assert.match(details, /id="mimoManualPanel"/);
+  // The membership is read from the machine's own MiMo Desktop session and is
+  // not sold on the developer platform, so the panel offers no paste for it —
+  // the console entry above is the only manual one this provider has.
+  assert.doesNotMatch(details, /mimoMembershipCookieInput|mimoSaveMembershipCookieButton|mimoClearMembershipCookieButton/);
+  assert.doesNotMatch(app, /mimoMembershipCookie|saveMembershipCookie/);
   assert.match(details, /<strong>1\.<\/strong>[\s\S]*<strong>4\.<\/strong>/);
   assert.match(details, /data-i18n="settings\.mimo\.step3Before">In Network, select<\/span> <code>balance<\/code>/);
   assert.match(details, /data-i18n="settings\.mimo\.step4">Paste it below, then click Save account\.<\/span>/);
@@ -1271,22 +1273,16 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(app, /function setMimoAddExpanded\(expanded\)/);
   assert.match(app, /setMimoAddExpanded\(false\)/);
   assert.match(preload, /addAccount: \(cookieHeader\) => ipcRenderer\.invoke\('mimo:addAccount', cookieHeader\)/);
-  assert.match(preload, /saveMembershipCookie: \(cookieHeader\) => ipcRenderer\.invoke\('mimo:saveMembershipCookie', cookieHeader\)/);
   assert.match(preload, /openConsole: \(\) => ipcRenderer\.invoke\('mimo:openConsole'\)/);
   assert.match(main, /ipcMain\.handle\('mimo:openConsole'/);
   assert.match(main, /ipcMain\.handle\('mimo:addAccount', \(_event, cookieHeader\) => addMimoManagedAccount\(cookieHeader\)\)/);
-  const saveMembership = functionBody(main, 'saveMimoMembershipCookie', 'legacyMimoCredentialPath');
-  assert.ok(saveMembership.indexOf('fetchMimoMembershipAccount') < saveMembership.indexOf('settings = { ...settings, mimoMembershipCookie: cookie }'));
-  assert.match(main, /delete normalizedPatch\.mimoMembershipCookie;/);
+  assert.doesNotMatch(main, /saveMimoMembershipCookie|mimoMembershipCookie/);
   // Limits rows mask through the shared resolver; the settings list stays readable.
   assert.match(readRendererFile('limits/windowsView.js'), /maskEmail: limitAccountEmailsMasked\(\)/);
   assert.match(app, /function mimoSettingsAccountTitle\(account, index\) \{[\s\S]*account\?\.accountEmail[\s\S]*`Account \$\{index \+ 1\}`/);
   assert.match(app, /const accountName = mimoSettingsAccountTitle\(account, index\);/);
   const addBody = functionBody(main, 'addMimoManagedAccount', 'removeMimoManagedAccount');
   assert.match(addBody, /limitRefreshScope: \{ provider: 'mimo', accountKey: result\.account\.accountKey \}/);
-  assert.match(saveMembership, /mimoAccountKey\('', \{ userId: previousUserId \}\)/);
-  assert.match(saveMembership, /queueLimitInvalidation\(\{ provider: 'mimo', accountKey: previousKey \}, 'credential-save', \{/);
-  assert.match(saveMembership, /clear: true, refresh: false/);
   assert.ok(addBody.indexOf('fetchMimoLimits') < addBody.indexOf('settings.mimoManagedAccounts ='), 'validation must happen before persistence');
   assert.match(addBody, /result\.account\.accountEmail = String\(validation\.accountEmail/);
   assert.doesNotMatch(main, /new BrowserWindow\([\s\S]{0,300}Sign in to MiMo/);
@@ -2775,7 +2771,7 @@ test('Limits groups the Volcengine Coding and Agent plans as rows of one card', 
   // plan — the plan cell hands back to the status label once the account is not
   // healthy — and the header counts plans rather than accounts.
   assert.match(view, /volcengine: \(provider, color, \{ grouped \}\) => \(\{\s*options: grouped \? \{ planText: provider\?\.status === 'ok' \? '' : undefined, showIcon: false \} : \{\}/);
-  assert.match(view, /GROUP_COUNT_KEYS = \{ volcengine: 'settings\.volcengine\.nPlans' \}/);
+  assert.match(view, /GROUP_COUNT_KEYS = \{[\s\S]*?volcengine: 'settings\.volcengine\.nPlans',[\s\S]*?\}/);
   assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
   assert.doesNotMatch(app, /renderVolcengineAccountGroup/);
   // Without an entry here the rows fall back to "Account 1"/"Account 2", since
@@ -2789,17 +2785,19 @@ test('Limits names the MiMo rows after their lane instead of their position', ()
   const limits = fs.readFileSync(path.join(rendererDir, '..', '..', 'shared', 'providers', 'mimo', 'limits.js'), 'utf8');
   const membership = fs.readFileSync(path.join(rendererDir, '..', '..', 'shared', 'providers', 'mimo', 'membership.js'), 'utf8');
 
-  // A MiMo row is titled by the account it answers for — the console lane's
-  // email, or `Account N` — and never by its plan: the rule Codex states, where a
-  // plan in the title column reads like an account name.
+  // A MiMo row is named after its account, and an account with several products
+  // is named after the product each row stands for — the lane's own name.
   assert.match(view, /mimo: \(provider, index, providers\) => mimoAccountTitle\(provider, index, providers\)/);
-  // The label is the plan the account has; a row with no console lane falls back
-  // to its own product name, the shape opencode gives Go and Zen.
+  assert.match(limits, /accountName: MIMO_MEMBERSHIP_LABEL/);
+  assert.match(limits, /accountName: accountLabel/);
+  // The console row's product name and the membership row's lane name are two
+  // different words, which is what keeps them from collapsing into one row's
+  // title with a fingerprint suffix.
   assert.match(membership, /MIMO_MEMBERSHIP_LABEL = 'Membership'/);
   assert.match(limits, /accountLabel: label \|\| MIMO_MEMBERSHIP_LABEL/);
-  // A plan cell is suppressed only if it repeats the lane's name; an actual
-  // tier remains visible beside the account identity, as for Codex.
-  assert.match(view, /mimo: \(provider, color, \{ grouped \}\) => \(\{[\s\S]*?planText: ''[\s\S]*?\}\)/);
+  // The plan cell is dropped when it would repeat the row's own name; a real
+  // tier, or the membership's no-plan answer, stays visible.
+  assert.match(view, /mimo: \(provider, color, \{ grouped \}\) => \(\{[\s\S]*?planText: provider\?\.status === 'ok' && !\([\s\S]*?provider\?\.accountLabel === provider\?\.accountName \? '' : undefined[\s\S]*?\}\)/);
 });
 
 // Re-saving with the Agent fields empty deliberately preserves the stored
