@@ -569,18 +569,49 @@ test('Qoder CN source health requires local.db, not only its watch parent', () =
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-qodercn-health-'));
   const dbPath = path.join(tempRoot, 'cache', 'db', 'local.db');
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  const previous = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+  const projectsPath = path.join(tempRoot, 'projects');
+  const previousDb = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+  const previousProjects = process.env.TOKEN_MONITOR_QODER_CN_PROJECTS_PATH;
   process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = dbPath;
+  process.env.TOKEN_MONITOR_QODER_CN_PROJECTS_PATH = projectsPath;
   try {
     const roots = clientSourceRoots('qodercn').qodercn;
     assert.equal(roots[0].dir, path.dirname(dbPath));
     assert.equal(roots[0].sourcePath, dbPath);
-    assert.deepEqual(clientSourceChecks('qodercn').qodercn, [{ id: 'qodercn-db', exists: false }]);
+    // The DB check keys on the file, not its watch parent, so an empty
+    // SharedClientCache tree is never mistaken for an install; the transcript
+    // tree is a second, alternative source for 2026-09+ builds.
+    assert.deepEqual(clientSourceChecks('qodercn').qodercn, [
+      { id: 'qodercn-db', exists: false },
+      { id: 'qodercn-projects', exists: false }
+    ]);
+    // A database-less build is still detected through its JSONL projects tree.
+    fs.mkdirSync(projectsPath, { recursive: true });
+    assert.deepEqual(clientSourceChecks('qodercn').qodercn, [
+      { id: 'qodercn-db', exists: false },
+      { id: 'qodercn-projects', exists: true }
+    ]);
   } finally {
-    if (previous === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
-    else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = previous;
+    if (previousDb === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+    else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = previousDb;
+    if (previousProjects === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_PROJECTS_PATH;
+    else process.env.TOKEN_MONITOR_QODER_CN_PROJECTS_PATH = previousProjects;
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
+});
+
+test('Qoder CN roots honor the injected environment over process globals', () => {
+  const roots = clientSourceRoots('qodercn', {
+    homeDir: '/inject',
+    platform: 'darwin',
+    env: {
+      TOKEN_MONITOR_QODER_CN_DB_PATH: '/inject/cn/local.db',
+      TOKEN_MONITOR_QODER_CN_PROJECTS_PATH: '/inject/cn/projects'
+    }
+  }).qodercn;
+  assert.equal(roots[0].sourcePath, path.resolve('/inject/cn/local.db'));
+  assert.equal(roots[1].id, 'qodercn-projects');
+  assert.equal(roots[1].dir, path.resolve('/inject/cn/projects'));
 });
 
 test('diagnostic roots expose antigravity native sources without treating them as watch roots', () => {

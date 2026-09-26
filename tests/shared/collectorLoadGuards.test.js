@@ -3280,7 +3280,9 @@ test('collector preserves Qoder CN while publishing other clients after a bounde
   const originalPeriods = qoderCnUsage.buildQoderCnPeriods;
   let failReads = false;
   let claudeTokens = 3;
-  qoderCnUsage.collectQoderCnRows = async () => {
+  const qoderCnReadOptions = [];
+  qoderCnUsage.collectQoderCnRows = async (options) => {
+    qoderCnReadOptions.push(options);
     if (failReads) {
       const error = new Error('qodercn sqlite read budget exceeded (rows limit 100000)');
       error.code = 'QODER_CN_READ_BUDGET_EXCEEDED';
@@ -3319,6 +3321,7 @@ test('collector preserves Qoder CN while publishing other clients after a bounde
     });
 
     await waitForCondition(() => updates.length === 1);
+    assert.equal(qoderCnReadOptions[0].includeJsonl, true, 'production collection includes current JSONL transcripts');
     const anchorPath = path.join(tmp, 'collector-anchor.json');
     const firstAnchor = JSON.parse(fs.readFileSync(anchorPath, 'utf8'));
     assert.equal(firstAnchor.qoderCnPeriods.today.clients.qodercn, 7);

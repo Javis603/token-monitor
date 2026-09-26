@@ -16,7 +16,8 @@ function freshCollector() {
 const {
   configFingerprint,
   collectUsageOnce,
-  localTodayKey
+  localTodayKey,
+  qoderCnSourcesForClients
 } = require('../../src/shared/collector');
 
 const { emptyPeriod } = require('../../src/shared/usage');
@@ -49,6 +50,40 @@ test('configFingerprint normalizes clients and includes allTimeSince and project
 
   const e = configFingerprint('claude,codex', '2024-01-01', false);
   assert.notEqual(a, e, 'project tracking changes should invalidate persisted anchors');
+});
+
+test('configFingerprint invalidates the anchor when the Qoder CN JSONL source moves', () => {
+  const legacy = configFingerprint('qodercn', '2024-01-01', true, '/cn/local.db');
+  assert.notEqual(
+    configFingerprint('qodercn', '2024-01-01', true, '/cn/local.db', '/home/.qoder-cn/projects'),
+    legacy,
+    'an anchor captured before the JSONL source existed must not be trusted for month/allTime'
+  );
+  assert.notEqual(
+    configFingerprint('qodercn', '2024-01-01', true, '/cn/local.db', '/moved/projects'),
+    configFingerprint('qodercn', '2024-01-01', true, '/cn/local.db', '/home/.qoder-cn/projects'),
+    'changing TOKEN_MONITOR_QODER_CN_PROJECTS_PATH must invalidate the anchor'
+  );
+  assert.equal(
+    configFingerprint('qodercn', '2024-01-01', true, '/cn/local.db', ''),
+    legacy,
+    'an empty projects source keeps the pre-JSONL fingerprint byte-identical'
+  );
+});
+
+test('qoderCnSourcesForClients resolves the JSONL projects dir alongside the legacy DB', () => {
+  const sources = qoderCnSourcesForClients('qodercn', {
+    homeDir: '/Users/test',
+    platform: 'darwin',
+    env: { TOKEN_MONITOR_QODER_CN_PROJECTS_PATH: '/custom/cn/projects' }
+  });
+  assert.equal(sources.projectsDir, path.resolve('/custom/cn/projects'));
+  assert.match(sources.dbPath, /QoderCN/);
+  assert.deepEqual(
+    qoderCnSourcesForClients('claude', { homeDir: '/Users/test', platform: 'darwin', env: {} }),
+    { dbPath: '', projectsDir: '' },
+    'clients without qodercn resolve no sources and keep the fingerprint unchanged'
+  );
 });
 
 test('configFingerprint handles undefined and empty clients', () => {
@@ -125,6 +160,57 @@ test('anchored tick with valid anchor runs todayOnly scan and derives month/allT
 
   // allTime = anchor allTime 5000 + (today 80 - anchor today 50) = 5030
   assert.equal(summary.allTime.totalTokens, 5030, 'allTime should be derived via applyPeriodDelta');
+});
+
+test('anchored tick replaces a stale anchor title with the freshly resolved rename', async () => {
+  const dateKey = localTodayKey();
+  const sessionKey = 'cursor:conv-1';
+  const makeSession = (title, totalTokens) => ({
+    client: 'cursor',
+    sessionId: 'conv-1',
+    totalTokens,
+    models: { 'cursor-model': totalTokens },
+    ...(title ? { title } : {})
+  });
+
+  const anchorToday = emptyPeriod();
+  anchorToday.totalTokens = 50;
+  anchorToday.clients = { cursor: 50 };
+  anchorToday.sessions = { [sessionKey]: makeSession('Old name', 50) };
+
+  const anchorMonth = emptyPeriod();
+  anchorMonth.totalTokens = 500;
+  anchorMonth.clients = { cursor: 500 };
+  anchorMonth.sessions = { [sessionKey]: makeSession('Old name', 500) };
+
+  const anchorAllTime = emptyPeriod();
+  anchorAllTime.totalTokens = 5000;
+  anchorAllTime.clients = { cursor: 5000 };
+  anchorAllTime.sessions = { [sessionKey]: makeSession('Old name', 5000) };
+
+  const summary = await collectUsageOnce({
+    clients: 'cursor',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'dev1',
+    limitsEnabled: false,
+    historyEnabled: false,
+    todayOnlyAnchor: { dateKey, today: anchorToday, month: anchorMonth, allTime: anchorAllTime },
+    runTokscale: async () => ({
+      entries: [{ client: 'cursor', sessionId: 'conv-1', model: 'cursor-model', input: 55, output: 0, cost: 0 }]
+    }),
+    sessionMetadataDeps: {
+      sessionMetadataResolvers: new Map([['cursor', (ids) => {
+        assert.ok(ids.has('conv-1'));
+        return new Map([['conv-1', { title: 'New name' }]]);
+      }]])
+    },
+    collectWslUsage: async () => ({ bundle: { today: null, month: null, allTime: null, detected: [], homes: [] }, detected: [] })
+  });
+
+  assert.equal(summary.today.sessions[sessionKey].title, 'New name');
+  assert.equal(summary.month.sessions[sessionKey].title, 'New name', 'a rename must reach the derived month window');
+  assert.equal(summary.allTime.sessions[sessionKey].title, 'New name', 'a rename must reach the derived all-time window');
 });
 
 test('full anchors persist local-only Reasonix native views alongside aggregate periods', async () => {
