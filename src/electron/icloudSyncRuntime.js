@@ -367,15 +367,25 @@ function createIcloudSyncRuntime(options = {}) {
     try {
       const written = await Promise.resolve(store.writeDevice(record));
       if (!active || expectedGeneration !== generation) return false;
+      const writeIsVisible = typeof store.isDeviceVisible === 'function'
+        ? store.isDeviceVisible(normalized.deviceId, written?.revision)
+        : written?.visible !== false;
+      if (!writeIsVisible) localRecordOverlayAllowed = false;
       if (written?.skipped !== true) {
         // Only a successful, non-deduplicated publish may lift a tombstone's
         // suppression. A failed or heartbeat-skipped write must stay hidden.
-        localRecordOverlayAllowed = true;
+        localRecordOverlayAllowed = writeIsVisible;
         lastWriteAt = new Date(now()).toISOString();
       }
-      lastErrorCategory = '';
-      await reconcile('write');
-      if (!active || expectedGeneration !== generation) return false;
+      // A device write does not revalidate remote files or subscriptions.
+      lastErrorCategory = lastReconcileErrorCategory || lastSubscriptionReconcileErrorCategory;
+      // The store has already cached this write and its known tombstones. Update
+      // the local aggregate now; watcher and periodic reconciliation discover
+      // remote records, subscriptions, and filesystem errors independently.
+      const nextRecords = localRecordOverlayAllowed
+        ? records
+        : records.filter((entry) => String(entry?.deviceId || entry?.id || '').trim() !== String(localRecord?.deviceId || '').trim());
+      updateRecords(nextRecords);
       return true;
     } catch (error) {
       if (!active || expectedGeneration !== generation) return false;

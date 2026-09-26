@@ -98,10 +98,16 @@ test('runtime watches, debounces, aggregates devices, and keeps iCloud state vis
     const otherWriter = createIcloudSyncStore({
       platform: 'darwin', home: fixture.root, cloudDocsRoot: path.join(fixture.root, 'CloudDocs'), writerId: 'writer-b'
     });
+    let deviceReads = 0;
+    let subscriptionReads = 0;
     let onWatch;
     const stats = [];
     const runtime = createIcloudSyncRuntime({
-      store: writer,
+      store: {
+        ...writer,
+        discoverDevices: async () => { deviceReads += 1; return writer.discoverDevices(); },
+        discoverSubscriptions: async () => { subscriptionReads += 1; return writer.discoverSubscriptions(); }
+      },
       debounceMs: 5,
       reconcileMs: 0,
       watchFactory: (_root, callback) => {
@@ -113,7 +119,12 @@ test('runtime watches, debounces, aggregates devices, and keeps iCloud state vis
     });
     await runtime.start();
     assert.equal(runtime.getStatus().state, 'available');
+    assert.equal(deviceReads, 1);
+    assert.equal(subscriptionReads, 1);
     await runtime.writeDevice(record('mac-a', 10));
+    assert.equal(runtime.getStats().periods.today.totalTokens, 10);
+    assert.equal(deviceReads, 1, 'a local write does not scan every device file');
+    assert.equal(subscriptionReads, 1, 'a local write does not rescan subscriptions');
     await otherWriter.writeDevice(record('mac-b', 20));
     onWatch();
     onWatch();
@@ -124,7 +135,43 @@ test('runtime watches, debounces, aggregates devices, and keeps iCloud state vis
     assert.deepEqual(runtime.getDevices().map((entry) => entry.deviceId), ['mac-a', 'mac-b']);
     assert.equal(runtime.getStats().periods.today.totalTokens, 30);
     assert.equal(runtime.getStats().historyPreview.daily.at(-1).tokens, 30);
+    assert.equal(deviceReads, 2, 'the watcher still discovers remote changes');
+    assert.equal(subscriptionReads, 2);
     assert.ok(stats.length >= 2);
+    await runtime.stop();
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test('a write below a cached deletion revision stays hidden without a full rescan', async () => {
+  const fixture = rootFixture();
+  try {
+    const cloudDocsRoot = path.join(fixture.root, 'CloudDocs');
+    const remote = createIcloudSyncStore({
+      platform: 'darwin', home: fixture.root, cloudDocsRoot, writerId: 'remote'
+    });
+    for (let tokens = 1; tokens <= 3; tokens += 1) {
+      await remote.writeDevice(record('shared-device', tokens));
+    }
+    await remote.deleteDevice('shared-device');
+    await fs.promises.unlink(path.join(remote.status().devicesRoot, deviceFilenameForId('shared-device')));
+
+    const local = createIcloudSyncStore({
+      platform: 'darwin', home: fixture.root, cloudDocsRoot, writerId: 'local'
+    });
+    const runtime = createIcloudSyncRuntime({
+      store: local,
+      reconcileMs: 0,
+      watchFactory: () => ({ close() {} })
+    });
+    await runtime.start();
+    assert.deepEqual(runtime.getDevices(), []);
+    const written = await local.writeDevice(record('shared-device', 4));
+    assert.equal(written.revision, 1);
+    assert.equal(written.visible, false);
+    await runtime.writeDevice(record('shared-device', 5));
+    assert.deepEqual(runtime.getDevices(), []);
     await runtime.stop();
   } finally {
     fixture.cleanup();
@@ -263,11 +310,14 @@ test('a successful reconciliation clears the current diagnostic error', async ()
       currentStoreError = '';
     },
     discoverDevices: async () => ({ records: [], errors: emitError ? [{ category: 'invalid-json' }] : [] }),
-    discoverSubscriptions: async () => ({ winner: null, revisionToken: '', errors: [] })
+    discoverSubscriptions: async () => ({ winner: null, revisionToken: '', errors: [] }),
+    writeDevice: async () => ({ revision: 1, skipped: false, visible: true })
   };
   const runtime = createIcloudSyncRuntime({ store, reconcileMs: 0, watchFactory: () => ({ close() {} }) });
   await runtime.start();
   assert.equal(runtime.getStatus().lastErrorCategory, 'invalid-json');
+  await runtime.writeDevice(record('local', 1));
+  assert.equal(runtime.getStatus().lastErrorCategory, 'invalid-json', 'a local write does not clear an unvalidated read error');
   emitError = false;
   await runtime.reconcile('recovered');
   assert.equal(runtime.getStatus().lastErrorCategory, '');

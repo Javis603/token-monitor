@@ -813,6 +813,11 @@ function createIcloudSyncStore(options = {}) {
     return effectiveStaleAfterMs > 0 ? Math.max(1_000, Math.floor(effectiveStaleAfterMs / 2)) : 0;
   }
 
+  function cachedDeviceIsVisible(deviceId, revision) {
+    const targetRevision = cacheRecordsForDeletionTargets().get(deviceId);
+    return !Number.isSafeInteger(targetRevision) || revision > targetRevision;
+  }
+
   async function writeDeviceNow(record) {
     const wire = toWireRecord(record);
     if (!wire) {
@@ -848,7 +853,10 @@ function createIcloudSyncStore(options = {}) {
       && (existingDocument || prior)
       && deviceHeartbeatMs(wire) > elapsedMs
     ) {
-      return { ...(existingDocument || prior?.document), skipped: true };
+      const cached = Number(prior?.document?.revision || 0) > Number(existingDocument?.revision || 0)
+        ? prior.document
+        : (existingDocument || prior.document);
+      return { ...cached, skipped: true, visible: cachedDeviceIsVisible(deviceId, cached.revision) };
     }
 
     const revision = await nextDeviceRevision(deviceId, observedRevision);
@@ -875,7 +883,7 @@ function createIcloudSyncStore(options = {}) {
     deviceCache.set(filename, { document: normalized, record: normalized.record });
     lastDeviceFingerprint = fingerprint;
     lastDeviceWriteAt = now();
-    return { ...normalized, skipped: false };
+    return { ...normalized, skipped: false, visible: cachedDeviceIsVisible(deviceId, revision) };
   }
 
   function writeDevice(record) {
@@ -1054,6 +1062,7 @@ function createIcloudSyncStore(options = {}) {
     discoverDevices,
     discoverSubscriptions,
     getLastGoodDevices: () => visibleDeviceEntries().map((entry) => entry.record),
+    isDeviceVisible: cachedDeviceIsVisible,
     whenIdle,
     paths,
     status,
