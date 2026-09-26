@@ -68,3 +68,14 @@ test('glass rendering helper loads before the renderer entry point', () => {
   const html = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/index.html'), 'utf8');
   assert.ok(html.indexOf('<script src="glassRendering.js"></script>') < html.indexOf('<script src="app.js"></script>'));
 });
+
+test('background image opacity falls back to 28 for anything that is not a number', () => {
+  const { normalizeBackgroundImageOpacity } = require('../../src/electron/renderer/glassRendering');
+  for (const value of ['abc', NaN, Infinity, undefined, null, {}]) {
+    assert.equal(normalizeBackgroundImageOpacity(value), 28, String(value));
+  }
+  assert.equal(normalizeBackgroundImageOpacity(0), 0);
+  assert.equal(normalizeBackgroundImageOpacity('70'), 70);
+  assert.equal(normalizeBackgroundImageOpacity(-5), 0);
+  assert.equal(normalizeBackgroundImageOpacity(250), 100);
+});
