@@ -82,7 +82,11 @@ function readTitles(dbPath, sqlite, wantedIds, cache) {
           let header;
           try { header = JSON.parse(row.value); } catch (_) { header = null; }
           const title = cleanTitle(header?.name);
-          if (title) titles.set(id, title);
+          // Only a usable title counts as the table's answer. A malformed or
+          // empty-named row stays unanswered so the legacy index — which may
+          // still carry this conversation's name — gets its turn below.
+          if (!title) continue;
+          titles.set(id, title);
           unanswered.delete(id);
         } catch (_) { /* A transient row read error: leave it unanswered, not cached. */ }
       }

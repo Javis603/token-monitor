@@ -73,3 +73,38 @@ test('Cursor falls back to the legacy ItemTable composer index for old schemas',
   const resolved = resolveSessionMetadata(new Set(['old-session', 'unnamed', 'missing']), { home, deps });
   assert.deepEqual([...resolved], [['old-session', { title: 'Legacy named chat' }]]);
 });
+
+test('Cursor legacy index fills ids the current table cannot answer', { skip: !sqlite }, (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-legacy-gap-'));
+  const dbPath = path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new sqlite.DatabaseSync(dbPath);
+  t.after(() => {
+    db.close();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  // A migrated install can hold both shapes. The current table's malformed or
+  // empty-named rows must not block the legacy index for the same id.
+  db.exec('CREATE TABLE composerHeaders (composerId TEXT PRIMARY KEY, value TEXT)');
+  db.exec('CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)');
+  const put = db.prepare('INSERT INTO composerHeaders (composerId, value) VALUES (?, ?)');
+  put.run('broken', '{malformed');
+  put.run('empty', JSON.stringify({ name: '' }));
+  put.run('modern', JSON.stringify({ name: 'Current title wins' }));
+  db.prepare('INSERT INTO ItemTable (key, value) VALUES (?, ?)').run(
+    'composer.composerHeaders',
+    JSON.stringify({ allComposers: [
+      { composerId: 'broken', name: 'Legacy broken name' },
+      { composerId: 'empty', name: 'Legacy empty-gap name' },
+      { composerId: 'modern', name: 'Legacy stale name' }
+    ] })
+  );
+
+  const deps = { platform: 'darwin', sqlite, cursorTitleCache: new Map() };
+  const resolved = resolveSessionMetadata(new Set(['broken', 'empty', 'modern']), { home, deps });
+  assert.deepEqual([...resolved], [
+    ['broken', { title: 'Legacy broken name' }],
+    ['empty', { title: 'Legacy empty-gap name' }],
+    ['modern', { title: 'Current title wins' }]
+  ]);
+});
