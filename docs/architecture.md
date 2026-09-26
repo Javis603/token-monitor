@@ -77,6 +77,11 @@ A failed usage reconfiguration rolls back to the last-known-good runtime and ret
 
 `settings.hubMode` selects the data path. `local` runs the local collector over IPC. `client` stops it, opens the Hub SSE stream and runs a sync collector for this device. `host` adds an embedded Hub (`startEmbeddedHub()`). A widget sync collector skips posting while the PID in `data/agent.pid` is alive — the only coordination between widget and headless agent.
 
+Every publish recomposes and ships the whole stats tree, so its cost is paid per event (`src/electron/statsPublisher.js`):
+
+- **Client mode batches publications.** Local ticks and Hub events, including the Hub's echo of this device's own upload, collapse into one publish per 1 s window that composes whatever is newest when it closes. A Hub reason outranks a local one in the batch, because the renderer reads `local` as saying nothing about the connection. `sendStatus()` flushes the batch first: a Hub event delivered after a disconnect status would mark the stream connected again.
+- **Published snapshots are immutable.** `electronPresentationStats()` caches its projection per snapshot object and settings key, and `composeLocalSyncStats()` caches the local record's normalization per record object. Mutating either in place serves a stale projection; replace the object instead.
+
 ## Settings and credentials
 
 - **`.env`** at the project root is loaded by `loadDotEnv()` without overriding existing process variables. Node entry points always load it; the Electron widget only when unpackaged; the Worker never (it uses deployment bindings). `.env.example` is the documented operator surface — keep it aligned, and treat additions or removals as compatibility changes.

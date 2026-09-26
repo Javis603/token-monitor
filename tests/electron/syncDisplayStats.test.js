@@ -332,3 +332,24 @@ test('composeLocalSyncStats preserves an incompatible legacy snapshot instead of
 
   assert.equal(composeLocalSyncStats(hubStats, device('local', 25)), hubStats);
 });
+
+test('composeLocalSyncStats recomposes an unchanged local record exactly like a fresh one', () => {
+  const nowMs = Date.parse('2026-07-16T10:05:00.000Z');
+  const shared = (totalTokens) => usagePeriod('codex', '2026-07-16T10:00:00.000Z', totalTokens);
+  const local = device('local', 10, { today: shared(10), month: shared(10), allTime: shared(10) });
+  const untouched = structuredClone(local);
+
+  // The remote device reports the same session key, so every recompose merges
+  // into it; a reused normalization must come out of that exactly as it went in.
+  for (const remoteTokens of [5, 7, 11]) {
+    const hubStats = aggregateDevices([
+      device('remote', remoteTokens, { today: shared(remoteTokens), month: shared(remoteTokens), allTime: shared(remoteTokens) })
+    ], 0, nowMs);
+    const reused = composeLocalSyncStats(hubStats, local, { nowMs });
+    const fresh = composeLocalSyncStats(hubStats, structuredClone(local), { nowMs });
+    assert.deepEqual(reused.periods, fresh.periods);
+    assert.deepEqual(reused.devices, fresh.devices);
+    assert.equal(Object.values(reused.periods.today.sessions)[0].totalTokens, 10 + remoteTokens);
+  }
+  assert.deepEqual(local, untouched);
+});

@@ -8,6 +8,7 @@ const test = require('node:test');
 const presentation = require('../../src/electron/modelAliasPresentation');
 const { inUseModelIds } = require('../../src/electron/renderer/customPricingForm');
 const { classifySettingsChange } = require('../../src/electron/runtimeConfig');
+const { createStatsPresentationCache } = require('../../src/electron/statsPublisher');
 
 const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 const aliases = { 'anthropic/claude-opus-5': 'claude-opus-5' };
@@ -25,10 +26,13 @@ test('Electron presentation applies aliases after limit projection without chang
     // The projection reads its own sync state now rather than the `mode`
     // variable, so the sandbox stands in for the helper instead.
     syncProvenanceActive: () => false,
-    projectLimitStatsForDisplay: (stats) => stats
+    projectLimitStatsForDisplay: (stats) => stats,
+    presentationCache: createStatsPresentationCache()
   });
   assert.deepEqual(project(raw).periods.today.models, { 'claude-opus-5': 50 });
   assert.equal(project(raw).periods.today.costUsd, 9);
+  // Every reader of one published snapshot shares a single projection.
+  assert.equal(project(raw), project(raw));
   settings.modelAliases = {};
   assert.deepEqual(project(raw).periods.today.models, { 'anthropic/claude-opus-5': 20, 'claude-opus-5': 30 });
   settings.modelAliasGrouping = 'duplicates';

@@ -319,6 +319,7 @@ const {
   attachLocalPresentationNativeViews,
   composeLocalSyncStats
 } = require('./syncDisplayStats');
+const { createStatsPresentationCache, createStatsPublicationBatcher } = require('./statsPublisher');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
 const {
@@ -2907,12 +2908,24 @@ function syncProvenanceActive() {
   return mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim());
 }
 
+const presentationCache = createStatsPresentationCache();
+
+// Every input besides `stats` belongs in the cache key, or a settings change
+// would keep serving the projection it replaced.
 function electronPresentationStats(stats) {
-  return projectModelAliasStats(projectLimitStatsForDisplay(stats, {
+  const limitOptions = {
     localDeviceId: settings?.deviceId,
     syncActive: syncProvenanceActive(),
     opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
-  }), settings?.modelAliases, { grouping: settings?.modelAliasGrouping });
+  };
+  const aliases = settings?.modelAliases;
+  const grouping = settings?.modelAliasGrouping;
+  const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null]);
+  return presentationCache.get(stats, key, () => projectModelAliasStats(
+    projectLimitStatsForDisplay(stats, limitOptions),
+    aliases,
+    { grouping }
+  ));
 }
 let codexPresentationPendingSince = 0;
 let trayCodexSwitchInFlight = false;
@@ -3800,6 +3813,29 @@ function stopSyncCollector(options = {}) {
   deviceRuntimeHandle = null;
 }
 
+// Well inside the 3–5 s update promise: a watch tick already waits out its own
+// debounce and scan before it gets here.
+const SYNC_STATS_PUBLISH_WINDOW_MS = 1000;
+const syncStatsPublication = createStatsPublicationBatcher({
+  windowMs: SYNC_STATS_PUBLISH_WINDOW_MS,
+  publish: publishSyncDisplayStats
+});
+
+// Client mode's local ticks and Hub events both land here. The composition reads
+// the newest Hub cache and local record when the window closes, so a request
+// only has to say why it was made.
+function requestSyncDisplayStats(request) {
+  syncStatsPublication.request(request);
+}
+
+function publishSyncDisplayStats({ reason, at, generation, widgetProducerOwner }) {
+  if (!hubModeRequestIsCurrent(generation, 'client')) return;
+  const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
+  if (!displayStats) return;
+  updateDiscordRpcDisplay(displayStats);
+  sendPush({ event: 'stats', data: { type: 'stats', reason, stats: displayStats, at } }, { widgetProducerOwner });
+}
+
 function startSyncCollector() {
   stopSyncCollector();
   if (!effectiveHubConfig().url) return;
@@ -3818,11 +3854,12 @@ function startSyncCollector() {
         syncUploadIntervalMs: syncUploadIntervalMs()
       };
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
-      const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
-      if (displayStats) {
-        updateDiscordRpcDisplay(displayStats);
-        sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats: displayStats, at: new Date().toISOString() } }, { widgetProducerOwner });
-      }
+      requestSyncDisplayStats({
+        reason: 'local',
+        at: new Date().toISOString(),
+        generation: hubModeGeneration,
+        widgetProducerOwner
+      });
       await syncUploadScheduler.enqueue(visibleSummary, revision);
     },
     flush: () => syncUploadScheduler.flush(),
@@ -4347,6 +4384,10 @@ function sendStatus(connected, extra) {
       });
     }
   }
+  // Hub events received before this status still have to reach the renderer
+  // ahead of it: a batched remote reason arriving after a disconnect would mark
+  // the stream connected again.
+  syncStatsPublication.flush();
   sendPush({ event: 'status', data: { connected: streamConnected, mode, ...(extra || {}) } });
 }
 
@@ -4512,25 +4553,19 @@ async function startStatsStream(options = {}) {
       while ((idx = buffer.indexOf('\n\n')) !== -1) {
         const chunk = buffer.slice(0, idx);
         buffer = buffer.slice(idx + 2);
-        let parsed = parseSseChunk(chunk);
+        const parsed = parseSseChunk(chunk);
         if (parsed) {
           if ((parsed.event === 'stats' || parsed.event === 'snapshot') && parsed.data?.stats) {
             setLatestHubStatsCache(parsed.data.stats, 'client', generation, cacheIdentity);
-            const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
-            parsed = { ...parsed, data: { ...parsed.data, stats: displayStats } };
-            updateDiscordRpcDisplay(displayStats);
+            requestSyncDisplayStats({ reason: parsed.data.reason, at: parsed.data.at, generation, widgetProducerOwner });
           } else if (parsed.event === 'freshness') {
             const refreshed = applyFreshnessEvent(latestHubStats, parsed.data);
             if (!refreshed) continue;
             setLatestHubStatsCache(refreshed, 'client', generation, cacheIdentity);
-            const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
-            parsed = {
-              event: 'stats',
-              data: { type: 'stats', reason: parsed.data?.reason || 'ingest', stats: displayStats, at: parsed.data?.at }
-            };
-            updateDiscordRpcDisplay(displayStats);
+            requestSyncDisplayStats({ reason: parsed.data?.reason || 'ingest', at: parsed.data?.at, generation, widgetProducerOwner });
+          } else {
+            sendPush(parsed, { widgetProducerOwner });
           }
-          sendPush(parsed, { widgetProducerOwner });
         }
       }
     }
@@ -5504,6 +5539,7 @@ function startMode() {
   stopStatsStream();
   stopHostStats();
   stopSyncCollector();
+  syncStatsPublication.cancel();
   // Serialize the hub-side work so rapid UI events (mode change immediately
   // followed by a port edit or secret regenerate) reconcile in order rather
   // than racing — otherwise an in-flight start could finish with the old
@@ -5613,6 +5649,7 @@ function stopAll() {
   stopStatsStream();
   stopHostStats();
   stopSyncCollector({ skipCloseWatchers: true });
+  syncStatsPublication.cancel();
   macWidgetSnapshotController?.stop();
   if (macWidgetDemand) {
     macWidgetDemand.stop();
