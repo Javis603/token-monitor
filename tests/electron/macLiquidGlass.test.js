@@ -11,7 +11,7 @@ const bounds = { origin: { x: 3, y: 7 }, size: { width: 360, height: 480 } };
 
 // Load the complete production bridge with only its foreign-function boundary
 // replaced. Each load has an independent API cache and architecture.
-function bridge(arch, { failAt, mainThread = true, available = true } = {}) {
+function bridge(arch, { failAt, mainThread = true, available = true, pathSupported = true } = {}) {
   const calls = [];
   const bindings = [];
   const structs = {};
@@ -24,6 +24,13 @@ function bridge(arch, { failAt, mainThread = true, available = true } = {}) {
         bindings.push({ symbol, result, args });
         if (symbol === 'objc_getClass') return (name) => name === 'NSGlassEffectView' && !available ? 0 : name;
         if (symbol === 'sel_registerName') return (name) => name;
+        if (symbol.startsWith('CGPath')) {
+          return (...values) => {
+            calls.push({ symbol, parameters: values });
+            if (symbol === failAt) throw new Error('injected native failure');
+            return symbol === 'CGPathCreateMutable' ? 99 : undefined;
+          };
+        }
         return (...values) => {
           if (symbol === 'objc_msgSend_stret') {
             assert.equal(arch, 'x64');
@@ -42,7 +49,11 @@ function bridge(arch, { failAt, mainThread = true, available = true } = {}) {
           if (selector === failAt) throw new Error('injected native failure');
           switch (selector) {
             case 'isMainThread': return mainThread;
-            case 'window': assert.equal(target, 10n); return 20;
+            case 'window':
+              if (target === 40) return 21; // the glass view's own window
+              assert.equal(target, 10n);
+              return 20;
+            case 'instancesRespondToSelector:': return pathSupported;
             case 'contentView': assert.equal(target, 20); return 30;
             case 'bounds':
               assert.equal(arch, 'arm64');
@@ -68,7 +79,7 @@ function bridge(arch, { failAt, mainThread = true, available = true } = {}) {
   handle.writeBigUInt64LE(10n);
   const win = { getNativeWindowHandle: () => handle, isDestroyed: () => false };
   // Normalize VM arrays/objects for strict comparisons across realms.
-  return { create: () => module.exports.createMacLiquidGlass(win), win,
+  return { create: (options) => module.exports.createMacLiquidGlass(win, options), win,
     calls: () => JSON.parse(JSON.stringify(calls, (_, value) => typeof value === 'bigint' ? String(value) : value)),
     bindings, structs };
 }
@@ -123,4 +134,48 @@ test('unsupported API and non-main-thread calls fail before allocating views', (
     assert.throws(native.create, /unavailable|main thread/);
     assert.equal(native.calls().some((call) => call.selector === 'alloc'), false);
   }
+});
+
+const railShape = {
+  commands: [['M', 64, 0], ['L', 0, 28], ['C', 0, 40, 10, 50, 20, 50], ['Z']],
+  width: 64,
+  height: 100
+};
+
+test('a shaped glass takes a bottom-up path, releases it and refreshes the shadow', () => {
+  const native = bridge('arm64');
+  const glass = native.create({ shaped: true });
+  glass.update({ dark: true, shape: railShape });
+  glass.update({ dark: true, shape: railShape });
+  glass.update({ dark: true, shape: { ...railShape, height: 120 } });
+  const calls = native.calls();
+  const path = calls.filter((call) => call.symbol?.startsWith('CGPath') && call.symbol !== 'CGPathCreateMutable');
+  assert.deepEqual(path.slice(0, 5).map((call) => [call.symbol, ...call.parameters]), [
+    ['CGPathMoveToPoint', 99, 0, 64, 100],
+    ['CGPathAddLineToPoint', 99, 0, 0, 72],
+    ['CGPathAddCurveToPoint', 99, 0, 0, 60, 10, 50, 20, 50],
+    ['CGPathCloseSubpath', 99],
+    ['CGPathRelease', 99]
+  ]);
+  assert.equal(path[5].parameters[3], 120, 'a new height re-flips the shape');
+  assert.deepEqual(calls.filter((call) => call.selector === '_setPath:').map((call) => call.parameters), [[99], [99]]);
+  assert.equal(calls.filter((call) => call.symbol === 'CGPathRelease').length, 2);
+  assert.deepEqual(calls.filter((call) => call.selector === 'invalidateShadow').map((call) => call.target), [21, 21]);
+  assert.equal(calls.some((call) => call.selector === 'setCornerRadius:'), false);
+});
+
+test('a rejected shape still releases its path and reports the failure', () => {
+  const native = bridge('arm64', { failAt: '_setPath:' });
+  const glass = native.create({ shaped: true });
+  assert.throws(() => glass.update({ dark: true, shape: railShape }), /injected native failure/);
+  const calls = native.calls();
+  assert.equal(calls.filter((call) => call.symbol === 'CGPathRelease').length, 1);
+  assert.equal(calls.some((call) => call.selector === 'invalidateShadow'), false);
+});
+
+test('a shaped glass fails before allocating when the shape setter is missing', () => {
+  const native = bridge('arm64', { pathSupported: false });
+  assert.throws(() => native.create({ shaped: true }), /custom shape/);
+  assert.equal(native.calls().some((call) => call.selector === 'alloc'), false);
+  assert.doesNotThrow(() => native.create());
 });

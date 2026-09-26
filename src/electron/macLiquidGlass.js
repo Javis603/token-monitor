@@ -38,8 +38,47 @@ function loadApi() {
   }
   const glassClass = cls('NSGlassEffectView');
   if (!glassClass) return (cachedApi = null);
+  const responds = objc.func('objc_msgSend', 'bool', ['uintptr_t', 'uintptr_t', 'uintptr_t']);
+  let pathApi;
+  function loadPathApi() {
+    if (pathApi !== undefined) return pathApi;
+    const cg = koffi.load('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics');
+    pathApi = {
+      cg,
+      create: cg.func('CGPathCreateMutable', 'uintptr_t', []),
+      moveTo: cg.func('CGPathMoveToPoint', 'void', ['uintptr_t', 'uintptr_t', 'double', 'double']),
+      lineTo: cg.func('CGPathAddLineToPoint', 'void', ['uintptr_t', 'uintptr_t', 'double', 'double']),
+      curveTo: cg.func('CGPathAddCurveToPoint', 'void', ['uintptr_t', 'uintptr_t', 'double', 'double', 'double', 'double', 'double', 'double']),
+      close: cg.func('CGPathCloseSubpath', 'void', ['uintptr_t']),
+      release: cg.func('CGPathRelease', 'void', ['uintptr_t'])
+    };
+    return pathApi;
+  }
   cachedApi = {
     appkit, objc, glassClass, getBounds,
+    // AppKit exposes only a corner radius publicly. The shape setter is the one
+    // the system's own glass uses for arbitrary outlines; probe it rather than
+    // assume it, so a macOS that drops it falls back instead of crashing.
+    supportsPath: responds(glassClass, sel('instancesRespondToSelector:'), sel('_setPath:')),
+    setPath(target, commands, height) {
+      const cg = loadPathApi();
+      const path = cg.create();
+      try {
+        // Shape commands are top-down points; the view's layer is bottom-up.
+        for (const [op, ...p] of commands) {
+          if (op === 'M') cg.moveTo(path, 0, p[0], height - p[1]);
+          else if (op === 'L') cg.lineTo(path, 0, p[0], height - p[1]);
+          else if (op === 'C') cg.curveTo(path, 0, p[0], height - p[1], p[2], height - p[3], p[4], height - p[5]);
+          else if (op === 'Z') cg.close(path);
+        }
+        put(target, sel('_setPath:'), path);
+      } finally {
+        cg.release(path); // the view retains its own reference
+      }
+      // The window shadow is computed from content alpha and cached.
+      const window = get(target, sel('window'));
+      if (window) release(window, sel('invalidateShadow'));
+    },
     get: (target, name) => get(target, sel(name)),
     call: (target, name) => release(target, sel(name)),
     addBelow: (parent, child) => addSubview(parent, sel('addSubview:positioned:relativeTo:'), child, -1, 0),
@@ -55,9 +94,10 @@ function loadApi() {
   return cachedApi;
 }
 
-function createMacLiquidGlass(win) {
+function createMacLiquidGlass(win, { shaped = false } = {}) {
   const api = loadApi();
   if (!api) throw new Error('NSGlassEffectView unavailable');
+  if (shaped && !api.supportsPath) throw new Error('NSGlassEffectView cannot take a custom shape');
   if (!api.isMainThread()) throw new Error('AppKit requires the main thread');
   const handle = win.getNativeWindowHandle();
   const view = handle.length >= 8 ? handle.readBigUInt64LE() : BigInt(handle.readUInt32LE());
@@ -88,14 +128,21 @@ function createMacLiquidGlass(win) {
     api.addBelow(original, glass);
     let lastDark;
     let lastRadius;
+    let lastShape;
     return {
-      update({ dark, radius }) {
+      update({ dark, radius, shape }) {
         if (disposed) return;
         if (dark !== lastDark) {
           api.put(glass, 'setAppearance:', api.appearance(dark));
           lastDark = dark;
         }
-        if (radius !== lastRadius) {
+        if (shape) {
+          const key = JSON.stringify(shape);
+          if (key !== lastShape) {
+            api.setPath(glass, shape.commands, shape.height);
+            lastShape = key;
+          }
+        } else if (radius !== lastRadius) {
           api.number(glass, 'setCornerRadius:', radius);
           lastRadius = radius;
         }
