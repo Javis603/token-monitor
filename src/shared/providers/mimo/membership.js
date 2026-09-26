@@ -14,6 +14,27 @@ const { MIMO_ACCOUNT_COOKIE_NAMES, MIMO_DESKTOP_READ_REASONS, readMimoDesktopAcc
 const MIMO_MEMBERSHIP_BASE_URL = 'https://mimo-server-cn.xiaomimimo.com/api';
 const MIMO_MEMBERSHIP_REGION = 'CN';
 const MIMO_MEMBERSHIP_ACCOUNT = 'membership';
+// What this lane is, for a row no plan names. Xiaomi's own word for it — the
+// app's own copy reads `未开通会员或会员已到期`.
+const MIMO_MEMBERSHIP_LABEL = 'Membership';
+
+// Xiaomi's own plan names, from the app's `billing.planTier` map, which is what
+// its own panel renders — `planTier` first and `planCode` only when the tier is
+// outside this range. The codes are internal (`mimo-cn-pro`), so a tier this map
+// does not know falls back to the lane name rather than to one.
+const MIMO_MEMBERSHIP_TIERS = Object.freeze({
+  1: 'Starter',
+  2: 'Plus',
+  3: 'Pro',
+  4: 'Ultra'
+});
+
+function mimoMembershipPlanLabel(plan) {
+  const tier = Number(plan?.tier);
+  return Number.isInteger(tier) && MIMO_MEMBERSHIP_TIERS[tier]
+    ? MIMO_MEMBERSHIP_TIERS[tier]
+    : MIMO_MEMBERSHIP_LABEL;
+}
 
 // The app's own card is the weekly usage limit, reset by the plan's next reset.
 const MIMO_MEMBERSHIP_WINDOW_MINUTES = 7 * 24 * 60;
@@ -61,7 +82,7 @@ function readMimoMembershipPlan(body) {
   return {
     ok: true,
     plan: {
-      label: typeof current.planCode === 'string' ? current.planCode.trim() : '',
+      tier: current.planTier,
       percent: Math.min(100, percent),
       resetsAt
     }
@@ -100,7 +121,7 @@ function membershipRow(status, updatedAt, extra = {}) {
     status,
     updatedAt,
     accountKey: extra.accountKey || '',
-    accountLabel: extra.accountLabel || '',
+    accountLabel: extra.accountLabel || MIMO_MEMBERSHIP_LABEL,
     windows: extra.windows || []
   });
 }
@@ -221,9 +242,6 @@ async function fetchMimoMembershipLimits(options = {}, deps = {}) {
   // No credential and nothing discoverable: the lane is simply not there, so it
   // reports no row at all rather than a not-configured one a machine with no MiMo
   // Desktop could not act on.
-  // No credential and nothing discoverable: the lane is simply not there, so it
-  // reports no row at all rather than a not-configured one a machine with no MiMo
-  // Desktop could not act on.
   if (!session.ok) {
     if (session.absent) return [];
     const accountKey = session.userId ? mimoMembershipAccountKey(session.userId) : '';
@@ -251,7 +269,7 @@ async function fetchMimoMembershipLimits(options = {}, deps = {}) {
     }
     return [membershipRow('ok', updatedAt, {
       accountKey,
-      accountLabel: read.plan.label,
+      accountLabel: mimoMembershipPlanLabel(read.plan),
       sourceDetail: session.sourceDetail,
       windows: [{
         kind: 'weekly',
@@ -273,6 +291,9 @@ async function fetchMimoMembershipLimits(options = {}, deps = {}) {
 
 module.exports = {
   MIMO_MEMBERSHIP_BASE_URL,
+  MIMO_MEMBERSHIP_LABEL,
+  MIMO_MEMBERSHIP_TIERS,
+  mimoMembershipPlanLabel,
   MIMO_MEMBERSHIP_WINDOW_MINUTES,
   fetchMimoMembershipLimits,
   mimoMembershipAccountKey,

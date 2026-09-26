@@ -3962,6 +3962,7 @@ function flushPendingLimitDetailTooltipRender() {
 
 const {
   creditsAmount,
+  creditsCurrency,
   creditsMeterPercent,
   formatCompactMoney,
   formatMoney,
@@ -4022,6 +4023,7 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   colorWithAlpha,
   applyBarScale,
   creditsAmount,
+  creditsCurrency,
   creditsMeterPercent,
   isCreditsWindow,
   spendWindow,

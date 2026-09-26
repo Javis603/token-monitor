@@ -15,6 +15,8 @@ const settingsListFilterApi = require('../../src/electron/renderer/settingsListF
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
 const { limitWindowLabel } = require('../../src/shared/limits/windowLabels');
 const { limitWindowText } = require('../../src/shared/limits/windowText');
+const { creditsAmount, creditsCurrency, isCreditsWindow, formatMoney } = require('../../src/shared/limits/balanceDisplay');
+
 
 const {
   antigravityQuotaWindow,
@@ -1776,7 +1778,11 @@ test('MiMo main Limits row falls back to balance plan fields for Token Plan', ()
   const tokenPlanFallback = viewBody('mimoTokenPlanWindowFromBalance', 'limitWindowNode');
 
   assert.match(renderProviderWindows, /const balance = provider\.balance \|\| null;/);
-  assert.match(renderProviderWindows, /const tokenPlan = windowForKind\(provider, 'billing'\) \|\| mimoTokenPlanWindowFromBalance\(balance\);/);
+  // The plan arm must skip a credits window: a balance is money with no
+  // percentage, and reading one as the plan draws a plan row at 0% beside the
+  // balance row showing the same money. Found live on a balance-only account.
+  assert.match(renderProviderWindows, /const tokenPlan = windowsForKind\(provider, 'billing'\)\.find\(\(window\) => window\.metric !== 'credits'\)/);
+  assert.match(renderProviderWindows, /\|\| mimoTokenPlanWindowFromBalance\(balance\);/);
   assert.match(renderProviderWindows, /limitWindowNode\(tokenPlan\.label \|\| 'Token Plan', tokenPlan, color, 0\.68\)/);
   assert.match(renderProviderWindows, /const giftBalance = optionalFiniteNumber\(balance\?\.giftBalance\);/);
   assert.match(renderProviderWindows, /const cashBalance = optionalFiniteNumber\(balance\?\.cashBalance\);/);
@@ -1788,6 +1794,40 @@ test('MiMo main Limits row falls back to balance plan fields for Token Plan', ()
   assert.match(tokenPlanFallback, /if \(!hasUsed && !hasLimit && !hasPercent\) return null;/);
   assert.match(tokenPlanFallback, /usedPercent: resolvedPercent/);
   assert.match(tokenPlanFallback, /remainingPercent: resolvedPercent == null \? null : Math\.max\(0, Math\.min\(100, 100 - resolvedPercent\)\)/);
+});
+
+test('MiMo Limits draws a credits balance when the provider balance object is absent', () => {
+  const render = viewBody('renderProviderWindows');
+  const makeNode = () => {
+    const node = { children: [], classes: new Set(), append(...children) { this.children.push(...children); } };
+    node.classList = { add(...classes) { classes.forEach((name) => node.classes.add(name)); } };
+    return node;
+  };
+  const context = {
+    document: { createElement: makeNode },
+    windowForKind: (provider, kind) => provider.windows.find((window) => window.kind === kind) || null,
+    windowsForKind: (provider, kind) => provider.windows.filter((window) => window.kind === kind),
+    isCreditsWindow,
+    creditsAmount,
+    creditsCurrency,
+    optionalFiniteNumber: (value) => value == null ? null : Number(value),
+    mimoTokenPlanWindowFromBalance: () => null,
+    formatMoney,
+    limitWindowNode: (label, window, _color, _tone, value, detail) => Object.assign(makeNode(), { label, window, value, detail }),
+    t: (key) => key,
+    provider: {
+      provider: 'mimo', accountLabel: 'Open Platform', status: 'ok',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }]
+    }
+  };
+
+  const windowOnly = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  assert.deepEqual(Array.from(windowOnly.children, (node) => [node.label, node.value]), [['Balance', '¥9.95']]);
+
+  context.provider.balance = { amount: 9.95, currency: 'CNY', giftBalance: 9.95, cashBalance: 0 };
+  const withBalance = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  assert.deepEqual(Array.from(withBalance.children, (node) => [node.label, node.value, node.detail]),
+    [['Balance', '¥9.95', 'Gift ¥9.95 · Cash ¥0.00']]);
 });
 
 test('MiMo renders the membership weekly window instead of an empty row', () => {

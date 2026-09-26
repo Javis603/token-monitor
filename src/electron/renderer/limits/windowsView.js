@@ -68,6 +68,7 @@
       colorWithAlpha,
       applyBarScale,
       creditsAmount,
+      creditsCurrency,
       creditsMeterPercent,
       isCreditsWindow,
       spendWindow,
@@ -1065,7 +1066,12 @@
         windows.append(node);
       }
       const balance = provider.balance || null;
-      const tokenPlan = windowForKind(provider, 'billing') || mimoTokenPlanWindowFromBalance(balance);
+      // A balance is money and carries no percentage, so it is never the plan:
+      // reading it as one draws a plan row at 0% beside the balance row that
+      // shows the same money. The provider marks it `metric: 'credits'`, and this
+      // is the branch that has to honour that mark.
+      const tokenPlan = windowsForKind(provider, 'billing').find((window) => window.metric !== 'credits')
+        || mimoTokenPlanWindowFromBalance(balance);
       if (tokenPlan) {
         const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
         node.classList.add('limit-window-wide');
@@ -1075,14 +1081,16 @@
         node.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(node);
       }
-      const amount = optionalFiniteNumber(balance?.amount);
+      const creditsWindow = (provider.windows || []).find(isCreditsWindow) || null;
+      const amount = creditsAmount(provider, creditsWindow);
+      const currency = creditsCurrency(provider, creditsWindow);
       const giftBalance = optionalFiniteNumber(balance?.giftBalance);
       const cashBalance = optionalFiniteNumber(balance?.cashBalance);
       if (amount !== null || giftBalance !== null || cashBalance !== null) {
         const detailParts = [];
-        if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, balance.currency)}`);
-        if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, balance.currency)}`);
-        const balanceText = formatMoney(amount, balance.currency) || '—';
+        if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, currency)}`);
+        if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, currency)}`);
+        const balanceText = formatMoney(amount, currency) || '—';
         const balanceNode = limitWindowNode(
           'Balance',
           { showMeter: false },
@@ -1458,7 +1466,8 @@
     opencode: opencodeAccountTitle,
     openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
     thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
-    volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers)
+    volcengine: (provider, index, providers) => planAccountTitle(provider, index, providers),
+    mimo: (provider, index, providers) => planAccountTitle(provider, index, providers)
   };
 
   // Fallback names for `provider.source`, used when the provider has no override
@@ -1849,7 +1858,14 @@
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
     }),
     mimo: (provider, color, { grouped }) => ({
-      options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
+      options: {
+        accountTitle: true,
+        // A grouped row is titled by `planAccountTitle`, which reads exactly the
+        // field the plan cell prints, so while the row is healthy the cell only
+        // repeats the title — whether that title is a lane name or a plan name.
+        // Unhealthy, the cell is where the row says what is wrong, so it stays.
+        ...(grouped ? { showIcon: false, planText: provider?.status === 'ok' ? '' : undefined } : {})
+      }
     }),
     cursor: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
@@ -1989,11 +2005,9 @@
     return accountName || `Account ${index + 1}`;
   }
 
-  // Both Volcengine plans sit on one account, so the row title carries the plan
-  // name from accountLabel. accountTitleLabel reads accountName/accountEmail,
-  // neither of which these rows have, so without this they would all render as
-  // "Account N".
-  function volcenginePlanAccountTitle(provider, index, providers) {
+  // Volcengine and MiMo carry the plan or lane in accountLabel; without it,
+  // their rows would all be named "Account N".
+  function planAccountTitle(provider, index, providers) {
     return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
   }
 

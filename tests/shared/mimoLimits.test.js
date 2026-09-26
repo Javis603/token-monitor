@@ -267,7 +267,10 @@ test('fetchMimoLimits does not activate a default plan with positive quota', asy
   assert.equal(provider.balance.planLimit, null);
   assert.equal(provider.balance.planPercent, null);
   assert.equal(provider.balance.planStatus, null);
-  assert.equal(provider.accountLabel, '');
+  // The row names its lane rather than claiming a plan — the assertions above are
+  // what says no plan was accepted, and the label must not be the rejected
+  // `default` plan code either.
+  assert.equal(provider.accountLabel, 'Open Platform');
 });
 
 test('MiMo no-plan code takes priority over active status', () => {

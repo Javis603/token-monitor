@@ -6,10 +6,12 @@ const test = require('node:test');
 const { hashKey } = require('../../src/shared/hashKey');
 const {
   MIMO_MEMBERSHIP_BASE_URL,
+  MIMO_MEMBERSHIP_LABEL,
   MIMO_MEMBERSHIP_WINDOW_MINUTES,
   fetchMimoMembershipLimits,
   mimoMembershipAccountKey,
   mimoMembershipBaseUrl,
+  mimoMembershipPlanLabel,
   readMimoMembershipPlan
 } = require('../../src/shared/providers/mimo/membership');
 
@@ -18,19 +20,27 @@ const ME_URL = `${MIMO_MEMBERSHIP_BASE_URL}/user/xiaomi/me`;
 const SSO_URL = 'https://account.xiaomi.com/pass/serviceLogin?sid=mimopc';
 const ACCOUNT_COOKIE = 'passToken=account-pass-token; userId=1234567890';
 
-// The live fixture's shape: the plan fields the app reads, and its `percent` is
-// a *remaining* share on a 0-100 scale.
+// The app's own E2E fixture for an active plan, field for field: the same object
+// its own panel renders. `planTier: 3` is the tier Xiaomi's panel names "Pro",
+// and the schema reads `percent` and `nextResetTime` from the same object — so
+// this is the shape a real plan arrives in, not one written to fit the parser.
+const MIMO_ACTIVE_PLAN = Object.freeze({
+  id: 12345,
+  planCode: 'mimo-cn-pro',
+  title: 'MiMo 高阶',
+  planTier: 3,
+  status: 'ACTIVE',
+  renewalMode: 'YEARLY',
+  source: 'ORDER_SUB',
+  bizNo: 'E2E-sub',
+  startTime: '2026-09-01T00:00:00',
+  endTime: '2026-10-01T00:00:00',
+  percent: 78.5,
+  nextResetTime: '2026-09-15T00:00:00'
+});
+
 function plan(overrides = {}) {
-  return {
-    planCode: 'mimo-cn-pro',
-    planTier: 3,
-    renewalMode: 'YEARLY',
-    endTime: '2026-10-01T00:00:00',
-    percent: 78.5,
-    nextResetTime: '2026-09-15T00:00:00',
-    source: 'ORDER_SUB',
-    ...overrides
-  };
+  return { ...MIMO_ACTIVE_PLAN, ...overrides };
 }
 
 function jsonReply(status, body) {
@@ -98,7 +108,9 @@ test('the plan renders as the weekly window with its remaining share inverted', 
   assert.equal(row.source, 'oauth');
   assert.equal(row.sourceDetail, 'app');
   assert.equal(row.accountKey, mimoMembershipAccountKey('1234567890'));
-  assert.equal(row.accountLabel, 'mimo-cn-pro');
+  // The vendor's own name for the tier, which is what its panel renders — not
+  // the internal `mimo-cn-pro` plan code.
+  assert.equal(row.accountLabel, 'Pro');
   assert.equal(row.windows.length, 1);
   const window = row.windows[0];
   // The app's card is the weekly usage limit, and its percent is what is LEFT.
@@ -286,4 +298,16 @@ test('a cancellation rejects instead of becoming a status', async () => {
     }),
     (error) => error.name === 'AbortError'
   );
+});
+
+test('the plan label is the vendor name for the tier, never the plan code', () => {
+  // Xiaomi's own `billing.planTier` map, which is what its panel renders; the
+  // codes (`mimo-cn-pro`) are internal and only reach its own fallback.
+  assert.equal(mimoMembershipPlanLabel({ tier: 1 }), 'Starter');
+  assert.equal(mimoMembershipPlanLabel({ tier: 3 }), 'Pro');
+  assert.equal(mimoMembershipPlanLabel({ tier: 4 }), 'Ultra');
+  // A tier the map does not know names the lane, not an internal code.
+  assert.equal(mimoMembershipPlanLabel({ tier: 9 }), MIMO_MEMBERSHIP_LABEL);
+  assert.equal(mimoMembershipPlanLabel({ tier: undefined }), MIMO_MEMBERSHIP_LABEL);
+  assert.equal(mimoMembershipPlanLabel(null), MIMO_MEMBERSHIP_LABEL);
 });

@@ -16,7 +16,7 @@ MiMo appears in Token Monitor in two independent planes. Keep them separate: the
 |---|---|---|---|
 | Token usage | Local `mimocode` SQLite via tokscale, reported under the `mimo` tracked client | collector | none (reads the engine's own store) |
 | Limits — platform console | Open-platform wallet balance and Token Plan credit | limits | console session, mintable from the machine's account cookie (or pasted by the user) |
-| Limits — Desktop membership | The Xiaomi-account membership quota (usage + subscription) — **not implemented yet** | limits | MiMo Desktop's own account cookie, exchanged on demand (below) |
+| Limits — Desktop membership | The Xiaomi-account membership quota from the current subscription | limits | MiMo Desktop's own account cookie, exchanged on demand (below) |
 
 The tracked client keeps its own identity rules: MiMo Code and MiMo Desktop are one row (`tokscaleClientMapping.js` maps `micode` and `micode-desktop` onto `mimo`), and the colour is black, not Xiaomi orange — both decided in upstream #772 / #775.
 
@@ -196,7 +196,7 @@ The rejected-account-cookie row is not hypothetical. It was first produced by ta
 - **Repeated minting is non-destructive to local state.** Around thirteen cycles left the partition byte-identical (same row count and value fingerprint), so nothing is written back and nothing is disturbed on disk. What minting does server-side is the previous bullet.
 - **Windows and Linux.** Everything above was observed on one macOS install.
 
-## 5. Design constraints for the pending source
+## 5. Limits source constraints
 
 - **The pasted-cookie console lane is the shipped path and its behaviour does not move.** `mimoManagedAccounts`, its settings panel, its cookie allowlist, its account keys and its windows are what users already have configured; minting is a new credential *source* beside it, never a replacement, a migration or a re-keying of what is already saved.
 - The membership lane belongs **under the existing `mimo` provider** — the maintainer ruled out a top-level `mimo-desktop` provider — and it must not collide with the platform console lane's credential namespace or `accountKey` (`hashKey("mimo:" + userId)`).
@@ -205,7 +205,24 @@ The rejected-account-cookie row is not hypothetical. It was first produced by ta
 - A sign-out must not silently trigger the app's interactive renewal. The exchange either succeeds silently or is reported as expired.
 - **A refused exchange is `auth-expired`, and that is the whole handling.** The remedy is one re-login in MiMo Desktop (or one re-paste), so nothing here needs to model a lifetime, refresh ahead of expiry, retry the walk repeatedly, or re-authenticate in the background. Treating it as a transient failure and retrying would only delay the prompt the user needs to see.
 
-### 5.1 Credential precedence: configured wins, minting fills the gap
+### 5.1 The two rows are named after the lanes, in Xiaomi's own words
+
+A row is titled by `planAccountTitle` (`LIMIT_ACCOUNT_TITLES.mimo`), which reads
+`accountLabel` — the same shape Volcengine's two plans use, and for the same
+reason: `accountTitleLabel` reads `accountName` and the email, and neither of
+these rows carries a name, so without the entry they render `Account 1` /
+`Account 2`. That is a position, not a name, and it moves when a row appears.
+
+Each lane therefore labels itself when no plan does, and both names are the
+vendor's rather than ours: `Open Platform` is the console's own page title
+(`Xiaomi MiMo 开放平台`), and `Membership` is the word the app's own copy uses
+(`未开通会员或会员已到期`). A plan name replaces either one when there is a plan,
+the rule zai's plan labels follow. The label is set whatever the row's status is,
+so a failed probe does not rename the row.
+
+The console balance is a `metric: 'credits'` window. The Limits row reads its amount and currency through `limitBalanceDisplay.js`, as Home and the tray do; `provider.balance` supplies the Gift/Cash breakdown and remains the fallback for older records. A record with only the credits window still draws `Balance`.
+
+### 5.2 Credential precedence: configured wins, minting fills the gap
 
 Both lanes resolve credentials in the same order, and it is the rule the provider code already states for Cline — "a key the user configured beats the sign-in Cline happens to have on this machine":
 

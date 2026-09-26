@@ -10,6 +10,10 @@ const { MIMO_DESKTOP_READ_REASONS, readMimoDesktopAccount } = require('./desktop
 const { exchangeMimoConsoleSession } = require('./ssoExchange');
 
 const MIMO_PLATFORM_CONSOLE_URL = MIMO_CONSOLE_URL;
+// What this lane is, for a row no plan names. Xiaomi's own name for it: the
+// console's page title is `Xiaomi MiMo 开放平台`, and the provider name in front
+// is the card's own heading already.
+const MIMO_CONSOLE_ACCOUNT_LABEL = 'Open Platform';
 const MIMO_API_BASE_URL = 'https://platform.xiaomimimo.com/api/v1';
 const MIMO_ACCOUNT_TIMEOUT_MS = 15_000;
 const MIMO_COOKIE_NAMES = new Set([
@@ -287,9 +291,12 @@ async function fetchMimoAccount(account, deps = {}) {
       accountKey: cleanText(account.accountKey) || mimoAccountKey(cookieHeader),
       accountName: '',
       accountEmail,
+      // The lane names itself when no plan does, which is what keeps the row
+      // titled: the title resolver reads a product name and falls back to
+      // `Account N` without one.
       accountLabel: hasTokenPlan || hasExpiredTokenPlan
         ? (detail.label || 'Token Plan')
-        : '',
+        : MIMO_CONSOLE_ACCOUNT_LABEL,
       windows,
       balance: {
         ...balance,

@@ -383,6 +383,7 @@ const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
   colorWithAlpha,
   applyBarScale,
   creditsAmount: balanceDisplay.creditsAmount,
+  creditsCurrency: balanceDisplay.creditsCurrency,
   creditsMeterPercent: balanceDisplay.creditsMeterPercent,
   isCreditsWindow: balanceDisplay.isCreditsWindow,
   spendWindow: balanceDisplay.spendWindow,

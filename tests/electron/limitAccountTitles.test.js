@@ -22,7 +22,7 @@ const TITLE_FUNCTIONS = [
   'codexAccountTitle',
   'opencodeAccountTitle',
   'namedApiAccountTitle',
-  'volcenginePlanAccountTitle'
+  'planAccountTitle'
 ];
 
 function readRendererFile(name) {
@@ -154,7 +154,7 @@ test('title resolution matches between the limits panel and Home', () => {
   assert.match(view, /limitAccountTitle\(providerId, provider, index, providers\)/);
   assert.match(app, /limitAccountTitle\(id, provider, index, providerEntries\)/);
   assert.equal(dock.match(/limitAccountTitle/g), null, 'the card titles accounts through the view');
-  for (const name of ['codexAccountTitle', 'opencodeAccountTitle', 'namedApiAccountTitle', 'volcenginePlanAccountTitle']) {
+  for (const name of ['codexAccountTitle', 'opencodeAccountTitle', 'namedApiAccountTitle', 'planAccountTitle']) {
     assert.doesNotMatch(app, new RegExp(`${name}\\(provider, index`), `${name} should not be called from the page`);
   }
   // The tray renders account text outside the title resolver, so it reads the

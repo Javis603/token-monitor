@@ -2734,7 +2734,15 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
   );
   assert.match(groupBody, /planText: limitGroupCountText\(providerId, providers\.length\)/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
-  assert.match(readRendererFile('limits/windowsView.js'), /mimo: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
+  // The row policy titles a grouped row by its account and drops the icon. The
+  // plan cell is suppressed only while the row is healthy: the title is resolved
+  // from the same field the cell prints, but an unhealthy row says what is wrong
+  // in that cell, so removing it there would leave the row with no status at all.
+  assert.match(
+    readRendererFile('limits/windowsView.js'),
+    /mimo: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{\s*accountTitle: true,[\s\S]*?showIcon: false, planText: provider\?\.status === 'ok' \? '' : undefined[\s\S]*?\}\)/
+  );
+
   // The page's dispatch is by account count with no provider branch left.
   assert.match(renderLimitsBody, /if \(Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
   assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
@@ -2763,7 +2771,29 @@ test('Limits groups the Volcengine Coding and Agent plans as rows of one card', 
   // Without an entry here the rows fall back to "Account 1"/"Account 2", since
   // accountTitleLabel reads accountName/accountEmail and these rows carry
   // neither — only accountLabel, which holds the plan name.
-  assert.match(view, /volcengine: \(provider, index, providers\) => volcenginePlanAccountTitle\(provider, index, providers\)/);
+  assert.match(view, /volcengine: \(provider, index, providers\) => planAccountTitle\(provider, index, providers\)/);
+});
+
+test('Limits names the MiMo rows after their lane instead of their position', () => {
+  const view = readRendererFile('limits/windowsView.js');
+  const limits = fs.readFileSync(path.join(rendererDir, '..', '..', 'shared', 'providers', 'mimo', 'limits.js'), 'utf8');
+  const membership = fs.readFileSync(path.join(rendererDir, '..', '..', 'shared', 'providers', 'mimo', 'membership.js'), 'utf8');
+
+  // The same shape as Volcengine's two plans: one account's several products,
+  // named after the product, because `accountTitleLabel` reads accountName and
+  // accountEmail and these rows carry neither — without an entry here they render
+  // "Account 1" / "Account 2", which is a position rather than a name.
+  assert.match(view, /mimo: \(provider, index, providers\) => planAccountTitle\(provider, index, providers\)/);
+  // Each lane therefore names itself, so the resolver has something to prefer.
+  assert.match(limits, /MIMO_CONSOLE_ACCOUNT_LABEL = 'Open Platform'/);
+  assert.match(membership, /MIMO_MEMBERSHIP_LABEL = 'Membership'/);
+  // And the lane name survives a failed probe: the title must not move with the
+  // row's health.
+  assert.match(membership, /accountLabel: extra\.accountLabel \|\| MIMO_MEMBERSHIP_LABEL/);
+  // The plan cell prints the same field the title is resolved from, so on a group
+  // row it is suppressed rather than repeating the title — the rule OpenCode's
+  // policy states for a profile name.
+  assert.match(view, /mimo: \(provider, color, \{ grouped \}\) => \(\{[\s\S]*?planText: ''[\s\S]*?\}\)/);
 });
 
 // Re-saving with the Agent fields empty deliberately preserves the stored
