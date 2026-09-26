@@ -403,6 +403,7 @@ const {
   syncNativeMaterialVisibility,
   getNativeMaterialState
 } = require('./nativeMaterialVisibility');
+const { createMacLiquidGlass } = require('./macLiquidGlass');
 const { isLightHex } = require('./renderer/themePresets');
 
 if (!app.isPackaged) loadDotEnv();
@@ -5079,6 +5080,15 @@ function ensureEdgeDockController() {
     preloadPath: path.join(__dirname, 'edgeDock', 'preload.js'),
     getSettings: () => settings,
     nativeGlass: () => nativeBlurEnabled(),
+    // The dock follows the widget's glass style, on the same terms as the
+    // main window: Reduce Transparency hands the surface back to the HUD material.
+    liquidGlass: () => {
+      const options = nativeMaterialOptions();
+      const wanted = process.platform === 'darwin' && options.enabled && options.liquidGlass
+        && !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25;
+      return wanted ? { dark: options.dark } : null;
+    },
+    createGlass: (win) => createMacLiquidGlass(win, { shaped: true }),
     // The renderer reads this preference through a media query, which works on both
     // platforms, but the dock's window fade is this process's own animation and can only
     // see it through Electron. Windows reports the same OS-level setting here as macOS, so
@@ -6661,6 +6671,8 @@ app.whenReady().then(() => {
   // it — nothing else in the app would notice the change.
   nativeTheme.on('updated', () => {
     applyNativeMaterial();
+    // Rebuilds the dock only when Reduce Transparency moved its material.
+    if (edgeDockController?.isRunning()) edgeDockController.sync();
     void pushSystemUiThemeAfterChange();
   });
   const widgetRuntime = macWidgetRuntimeSupport({

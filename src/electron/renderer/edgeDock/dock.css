@@ -64,6 +64,10 @@ html, body.edge-dock {
 html.edge-dock-no-material .edge-dock-shape-fill {
   fill: rgba(var(--glass-rgb), max(var(--glass-alpha), 0.9));
 }
+/* Liquid Glass draws its own tint, rim and highlights along the silhouette, as
+   it does behind the main window; painting ours on top would stack a second. */
+html.edge-dock-liquid-glass .edge-dock-shape-fill { fill: transparent; }
+html.edge-dock-liquid-glass .edge-dock-shape-line { stroke: transparent; }
 
 /* ---- Peek handle ------------------------------------------------------- */
 

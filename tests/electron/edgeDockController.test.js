@@ -129,6 +129,8 @@ function createFixture(options = {}) {
     preloadPath: '/preload.js',
     getSettings: () => settings,
     nativeGlass: () => options.nativeGlass === true,
+    liquidGlass: () => (typeof options.liquidGlass === 'function' ? options.liquidGlass() : options.liquidGlass || null),
+    createGlass: options.createGlass,
     prefersReducedMotion: () => true,
     applyShapeMask: (win) => {
       maskWindows.push(win);
@@ -364,6 +366,74 @@ test('macOS drops rectangular vibrancy when a surface mask cannot be applied', (
 
   fixture.controller.sync();
   assert.equal(fixture.maskWindows.length, attemptedMasks, 'the no-material fallback remains stable for this window');
+});
+
+function fakeGlassFactory({ failCreate = false, failShape = false } = {}) {
+  const glasses = [];
+  const create = (win) => {
+    if (failCreate) throw new Error('NSGlassEffectView unavailable');
+    const glass = { win, updates: [], disposed: null };
+    glass.update = (update) => {
+      if (update.shape && failShape) throw new Error('shape rejected');
+      glass.updates.push(update);
+    };
+    glass.dispose = (options = {}) => { glass.disposed = options; };
+    glasses.push(glass);
+    return glass;
+  };
+  return { create, glasses };
+}
+
+test('macOS Liquid Glass takes each surface silhouette instead of a vibrancy mask', (t) => {
+  const factory = fakeGlassFactory();
+  const fixture = createFixture({ platform: 'darwin', nativeGlass: true, liquidGlass: { dark: true }, createGlass: factory.create });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+
+  assert.equal(FakeBrowserWindow.instances.length, 3);
+  assert.ok(FakeBrowserWindow.instances.every((win) => win.options.vibrancy === undefined));
+  assert.equal(factory.glasses.length, 3);
+  assert.equal(fixture.maskWindows.length, 0);
+  const shaped = factory.glasses.find((glass) => glass.win === rail).updates.find((update) => update.shape);
+  assert.equal(shaped.dark, true);
+  assert.equal(shaped.shape.height, rail.bounds.height);
+  assert.equal(shaped.shape.commands[0][0], 'M');
+  const payload = sentPayload(rail, 'rail');
+  assert.equal(payload.glass, true);
+  assert.equal(payload.liquidGlass, true);
+});
+
+test('macOS falls back to the masked HUD material when Liquid Glass cannot be built or shaped', (t) => {
+  for (const failure of [{ failCreate: true }, { failShape: true }]) {
+    const factory = fakeGlassFactory(failure);
+    const fixture = createFixture({ platform: 'darwin', nativeGlass: true, liquidGlass: { dark: false }, createGlass: factory.create });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+
+    assert.deepEqual(rail.vibrancyCalls, ['hud'], JSON.stringify(failure));
+    assert.ok(fixture.maskWindows.includes(rail));
+    assert.ok(factory.glasses.filter((glass) => glass.win === rail).every((glass) => glass.disposed !== null));
+    const payload = sentPayload(rail, 'rail');
+    assert.equal(payload.glass, true);
+    assert.equal(payload.liquidGlass, false);
+  }
+});
+
+test('switching the glass style rebuilds the dock and releases its Liquid Glass', (t) => {
+  const factory = fakeGlassFactory();
+  let wanted = { dark: true };
+  const fixture = createFixture({ platform: 'darwin', nativeGlass: true, liquidGlass: () => wanted, createGlass: factory.create });
+  t.after(() => fixture.controller.stop());
+  const first = fixture.windowFor('rail');
+
+  wanted = null;
+  fixture.controller.sync();
+  const rebuilt = fixture.windowFor('rail');
+  assert.notEqual(rebuilt, first);
+  assert.equal(rebuilt.options.vibrancy, 'hud');
+  assert.equal(factory.glasses.length, 3);
+  assert.ok(factory.glasses.every((glass) => glass.disposed?.windowClosed !== true));
+  assert.ok(factory.glasses.every((glass) => glass.disposed !== null));
 });
 
 // The rail's entrance is keyed to the reveal rather than to the push, so the page
