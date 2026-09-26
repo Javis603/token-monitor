@@ -842,16 +842,19 @@ function createIcloudSyncStore(options = {}) {
     const prior = deviceCache.get(filename);
     const existing = await readJsonFile(fsApi, target, MAX_ICLOUD_DOCUMENT_BYTES, platform, hostPlatform);
     const existingDocument = existing.ok ? validDeviceDocument(existing.value, filename) : null;
-    const observedRevision = Math.max(
+    const publishedRevision = Math.max(
       Number(prior?.document?.revision || 0),
       Number(existingDocument?.revision || 0)
     );
+    const deletionTargetRevision = cacheRecordsForDeletionTargets().get(deviceId);
+    const observedRevision = Math.max(publishedRevision, deletionTargetRevision || 0);
     const fingerprint = semanticDeviceFingerprint(wire);
     const elapsedMs = lastDeviceWriteAt === null ? Number.POSITIVE_INFINITY : Math.max(0, now() - lastDeviceWriteAt);
     if (
       lastDeviceFingerprint === fingerprint
       && (existingDocument || prior)
       && deviceHeartbeatMs(wire) > elapsedMs
+      && (!Number.isSafeInteger(deletionTargetRevision) || publishedRevision > deletionTargetRevision)
     ) {
       const cached = Number(prior?.document?.revision || 0) > Number(existingDocument?.revision || 0)
         ? prior.document

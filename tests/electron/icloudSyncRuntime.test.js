@@ -144,7 +144,7 @@ test('runtime watches, debounces, aggregates devices, and keeps iCloud state vis
   }
 });
 
-test('a write below a cached deletion revision stays hidden without a full rescan', async () => {
+test('a cached tombstone makes the next local write publish above its revision', async () => {
   const fixture = rootFixture();
   try {
     const cloudDocsRoot = path.join(fixture.root, 'CloudDocs');
@@ -167,11 +167,13 @@ test('a write below a cached deletion revision stays hidden without a full resca
     });
     await runtime.start();
     assert.deepEqual(runtime.getDevices(), []);
-    const written = await local.writeDevice(record('shared-device', 4));
-    assert.equal(written.revision, 1);
-    assert.equal(written.visible, false);
-    await runtime.writeDevice(record('shared-device', 5));
-    assert.deepEqual(runtime.getDevices(), []);
+    await runtime.writeDevice(record('shared-device', 4));
+    assert.equal(runtime.getDevices()[0].periods.today.totalTokens, 4);
+    const written = JSON.parse(await fs.promises.readFile(
+      path.join(local.status().devicesRoot, deviceFilenameForId('shared-device')),
+      'utf8'
+    ));
+    assert.equal(written.revision, 4);
     await runtime.stop();
   } finally {
     fixture.cleanup();
@@ -207,11 +209,11 @@ test('a remote tombstone suppresses the local overlay until the next real publis
     await runtime.reconcile('tombstone');
     assert.deepEqual(runtime.getDevices(), []);
 
-    await runtime.writeDevice(record('shared-device', 11));
+    await runtime.writeDevice(record('shared-device', 10));
     assert.deepEqual(runtime.getDevices().map((entry) => ({
       deviceId: entry.deviceId,
       tokens: entry.periods.today.totalTokens
-    })), [{ deviceId: 'shared-device', tokens: 11 }]);
+    })), [{ deviceId: 'shared-device', tokens: 10 }]);
     const republished = await localStore.discoverDevices();
     assert.equal(republished.documents[0].revision, 2);
     await runtime.stop();
