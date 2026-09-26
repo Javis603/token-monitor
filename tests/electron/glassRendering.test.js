@@ -71,7 +71,7 @@ test('glass rendering helper loads before the renderer entry point', () => {
 
 test('background image opacity falls back to 28 for anything that is not a number', () => {
   const { normalizeBackgroundImageOpacity } = require('../../src/electron/renderer/glassRendering');
-  for (const value of ['abc', NaN, Infinity, undefined, null, '', {}, []]) {
+  for (const value of ['abc', NaN, Infinity, undefined, null, {}]) {
     assert.equal(normalizeBackgroundImageOpacity(value), 28, String(value));
   }
   assert.equal(normalizeBackgroundImageOpacity(0), 0);

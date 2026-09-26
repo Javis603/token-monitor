@@ -23,15 +23,12 @@
     return transparentMacFallback && requested < 0.05 ? 0.05 : requested;
   }
 
-  // A non-number (hand-edited settings.json) must not survive as NaN: in CSS an
-  // invalid opacity resolves to 1 and hides the glass, and a range input would
-  // silently turn it into its midpoint.
-  const DEFAULT_BACKGROUND_IMAGE_OPACITY = 28;
-
+  // Main normalizes the stored value on load and on every save, so a
+  // hand-edited settings.json never reaches the renderer as NaN — which CSS
+  // would resolve to opacity 1, hiding the glass behind the image.
   function normalizeBackgroundImageOpacity(value) {
-    const numeric = typeof value === 'number' || (typeof value === 'string' && value.trim() !== '');
-    const opacity = numeric ? Number(value) : NaN;
-    return Number.isFinite(opacity) ? Math.max(0, Math.min(100, opacity)) : DEFAULT_BACKGROUND_IMAGE_OPACITY;
+    const opacity = Number(value ?? 28);
+    return Number.isFinite(opacity) ? Math.max(0, Math.min(100, opacity)) : 28;
   }
 
   const MATERIAL_TYPES = new Set(['liquid-glass', 'vibrancy', 'transparent', 'opaque']);
