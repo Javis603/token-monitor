@@ -48,6 +48,7 @@
     { id: 'qwen', color: '#615ced', widgetColor: '#7771F4' },
     { id: 'grok', color: '#000000', mask: 'xai', widgetInk: true },
     { id: 'copilot', color: '#000000', widgetInk: true },
+    { id: 'gcmp', color: '#3B82F6' },
     { id: 'pi', color: '#000', widgetInk: true },
     { id: 'omp', color: '#ED4ABF' },
     { id: 'zed', color: '#4173e7', widgetColor: '#5C8BFF' },

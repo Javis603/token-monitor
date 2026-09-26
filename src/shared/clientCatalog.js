@@ -60,6 +60,7 @@
     { id: 'qwen', label: 'Qwen' },
     { id: 'grok', label: 'Grok Build' },
     { id: 'copilot', label: 'GitHub Copilot' },
+    { id: 'gcmp', label: 'AI Chat Models', defaultTracked: false, locallyParsed: true },
     { id: 'pi', label: 'Pi' },
     // Oh My Pi was folded into the `pi` row until the two products were split
     // apart (see clientIdentitySplits.js). Tokscale has always parsed its

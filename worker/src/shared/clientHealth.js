@@ -197,6 +197,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   DEVIN_DESKTOP_SOURCE_CHECK_ID,
   'droid-sessions',
   DSH_SOURCE_CHECK_ID,
+  'gcmp-usages',
   'grok-sessions',
   'grok-unified-log',
   'hermes-home',

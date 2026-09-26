@@ -51,6 +51,11 @@ const {
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
 const {
+  buildGcmpHistoryGraph,
+  buildGcmpPeriods,
+  collectGcmpRows
+} = require('./providers/gcmp/usage');
+const {
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
   collectQoderCnRows,
@@ -1034,6 +1039,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.promaGraph);
     histories.push(normalizeHistory(parseGraphResult(options.promaGraph), { capDays, todayKey }));
   }
+  if (options.gcmpGraph) {
+    rawGraphs.push(options.gcmpGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.gcmpGraph), { capDays, todayKey }));
+  }
   if (options.qoderCnGraph) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
@@ -1143,6 +1152,7 @@ async function collectUsageOnce(options) {
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
+  const includesGcmp = normalizedClients.split(',').includes('gcmp');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -1173,6 +1183,8 @@ async function collectUsageOnce(options) {
   let qoderCnRows = null;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
+  let gcmpPeriods = null;
+  let gcmpRows = null;
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     const progress = { ...periods };
@@ -1244,6 +1256,21 @@ async function collectUsageOnce(options) {
         qoderCnPeriods = options.qoderCnFallbackPeriods || null;
       }
     }
+    if (includesGcmp && (!targetRequested || targetClients.includes('gcmp'))) {
+      try {
+        const gcmpSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
+        gcmpRows = collectGcmpRows({ homeDir: options.homeDir, logger: options.logger, sinceMs: gcmpSinceMs });
+        const gcmpJson = buildGcmpPeriods({ now: collectedAt, allTimeSince, rows: gcmpRows });
+        gcmpPeriods = {
+          today: extractUsageFromTokscale(gcmpJson.today),
+          month: extractUsageFromTokscale(gcmpJson.month),
+          allTime: extractUsageFromTokscale(gcmpJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`gcmp parse failed: ${err.message}`);
+        gcmpPeriods = null;
+      }
+    }
     throwIfAborted(options.signal);
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
@@ -1290,6 +1317,7 @@ async function collectUsageOnce(options) {
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
       if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
+      if (gcmpPeriods) freshPartitions.gcmp = gcmpPeriods.today;
       if (qoderCnPeriodReadFailed && anchor.todayPartitions?.qodercn) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
@@ -1361,6 +1389,12 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, qoderCnPeriods.month);
       allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), qodercn: qoderCnPeriods.today };
+    }
+    if (gcmpPeriods && !anchorUsed) {
+      today = mergePeriods(today, gcmpPeriods.today);
+      month = mergePeriods(month, gcmpPeriods.month);
+      allTime = mergePeriods(allTime, gcmpPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), gcmp: gcmpPeriods.today };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1578,6 +1612,13 @@ async function collectUsageOnce(options) {
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
+      gcmpGraph: includesGcmp
+        ? buildGcmpHistoryGraph({
+          // Anchored ticks read only since local midnight, so the graph needs
+          // its own full read (mirrors the qodercn history block above).
+          rows: (!anchorUsed && gcmpRows) ? gcmpRows : collectGcmpRows({ homeDir: options.homeDir, logger: options.logger })
+        })
+        : null,
       qoderCnGraph: historyQoderCnGraph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
