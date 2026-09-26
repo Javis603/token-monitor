@@ -205,6 +205,22 @@ function parseMimoPlanUsage(body) {
   return { used, limit, usedPercent };
 }
 
+// The console's own usage summary: `costUsage` is provider-reported money spent,
+// all-time and for the current month. The API has no daily rollup — the per-call
+// ledger behind this is a paginated POST — so these two are what a row can state
+// without being tracked locally, and a spend figure that is not reported is left
+// absent rather than derived here.
+function parseMimoSpend(body) {
+  const data = unwrapApiBody(body);
+  const cost = data.costUsage ?? data.cost_usage ?? {};
+  const allTimeSpend = numberFrom(cost.totalCost ?? cost.total_cost);
+  const monthSpend = numberFrom(cost.currentMonthCost ?? cost.current_month_cost);
+  return {
+    ...(allTimeSpend === null ? {} : { allTimeSpend }),
+    ...(monthSpend === null ? {} : { monthSpend })
+  };
+}
+
 async function requestMimo(pathname, cookieHeader, deps = {}) {
   const fetchFn = deps.fetch || globalThis.fetch;
   const response = await fetchFn(`${MIMO_API_BASE_URL}${pathname}`, {
@@ -259,11 +275,13 @@ async function fetchMimoAccount(account, deps = {}) {
   const cookieHeader = normalizeMimoCookieHeader(account.cookieHeader);
   if (!cookieHeader) return statusProvider('notConfigured', updatedAt, account);
   try {
-    const [balanceBody, profileBody, detailBody, usageBody] = await Promise.all([
+    const [balanceBody, profileBody, detailBody, usageBody, spendBody] = await Promise.all([
       requestMimo('/balance', cookieHeader, deps),
       requestMimo('/userProfile', cookieHeader, deps).catch(() => null),
       requestMimo('/tokenPlan/detail', cookieHeader, deps).catch(() => null),
-      requestMimo('/tokenPlan/usage', cookieHeader, deps).catch(() => null)
+      requestMimo('/tokenPlan/usage', cookieHeader, deps).catch(() => null),
+      // Spend is enrichment: a console that does not answer it still has a wallet.
+      requestMimo('/usage', cookieHeader, deps).catch(() => null)
     ]);
     const balance = parseMimoBalance(balanceBody);
     if (balance.amount === null) throw new Error('MiMo balance response is missing a balance');
@@ -271,6 +289,7 @@ async function fetchMimoAccount(account, deps = {}) {
     const accountEmail = profile.email || cleanText(account.accountEmail);
     const detail = parseMimoPlanDetail(detailBody, (deps.now || Date.now)());
     const usage = parseMimoPlanUsage(usageBody);
+    const spend = parseMimoSpend(spendBody);
     const windows = [];
     const hasTokenPlan = detail.active && usage.limit !== null && usage.limit > 0;
     const hasExpiredTokenPlan = detail.expired && Boolean(detail.label || (usage.limit !== null && usage.limit > 0));
@@ -320,6 +339,10 @@ async function fetchMimoAccount(account, deps = {}) {
       windows,
       balance: {
         ...balance,
+        // What the console reports as spent. The row's meter percentage is
+        // derived from these at display time (`balance / (balance + monthSpend)`,
+        // the same rule deepseek's wallet follows) and never travels the wire.
+        ...spend,
         planStatus: hasExpiredTokenPlan ? 'expired' : null,
         planUsed: hasTokenPlan ? usage.used : null,
         planLimit: hasTokenPlan ? usage.limit : null,
@@ -661,6 +684,7 @@ module.exports = {
   normalizeMimoCookieHeader,
   parseMimoBalance,
   parseMimoProfile,
+  parseMimoSpend,
   parseMimoPlanDetail,
   parseMimoPlanUsage,
   scopedMimoManagedAccounts,

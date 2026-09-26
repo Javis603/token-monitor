@@ -15,8 +15,9 @@ const settingsListFilterApi = require('../../src/electron/renderer/settingsListF
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
 const { limitWindowLabel } = require('../../src/shared/limits/windowLabels');
 const { limitWindowText } = require('../../src/shared/limits/windowText');
-const { creditsAmount, creditsCurrency, isCreditsWindow, formatMoney } = require('../../src/shared/limits/balanceDisplay');
-const { createLimitWindowsView } = require('../../src/electron/renderer/limitWindowsView');
+const { creditsAmount, creditsCurrency, creditsMeterPercent, isCreditsWindow, formatMoney } = require('../../src/shared/limits/balanceDisplay');
+
+const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
 
 
 const {
@@ -1787,8 +1788,13 @@ test('MiMo main Limits row falls back to balance plan fields for Token Plan', ()
   assert.match(renderProviderWindows, /limitWindowNode\(tokenPlan\.label \|\| 'Token Plan', tokenPlan, color, 0\.68\)/);
   assert.match(renderProviderWindows, /const giftBalance = optionalFiniteNumber\(balance\?\.giftBalance\);/);
   assert.match(renderProviderWindows, /const cashBalance = optionalFiniteNumber\(balance\?\.cashBalance\);/);
-  assert.match(renderProviderWindows, /const balanceNode = limitWindowNode\(\s*'Balance',\s*\{ showMeter: false \},\s*color,\s*0\.68,\s*balanceText,\s*detailParts\.join\(' · '\)\s*\);/);
+  // The wallet's meter is derived at display time from the money and the month's
+  // reported spend — the top-up rule deepseek and openrouter follow — and the
+  // console's spend figures print on their own row beneath it.
+  assert.match(renderProviderWindows, /const balanceNode = limitWindowNode\(\s*'Balance',\s*\{ remainingPercent: creditsMeterPercent\(provider, creditsWindow\) \},\s*color,\s*0\.68,\s*balanceText,\s*detailParts\.join\(' · '\)\s*\);/);
   assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide', 'limit-window-no-reset'\);/);
+  assert.match(renderProviderWindows, /const spendNode = providerSpendNode\(balance\);/);
+  assert.match(renderProviderWindows, /if \(spendNode\) windows\.append\(spendNode\);/);
   assert.match(tokenPlanFallback, /const used = optionalFiniteNumber\(balance\.planUsed\);/);
   assert.match(tokenPlanFallback, /const limit = optionalFiniteNumber\(balance\.planLimit\);/);
   assert.match(tokenPlanFallback, /const percent = optionalFiniteNumber\(balance\.planPercent\);/);
@@ -1811,13 +1817,15 @@ test('MiMo Limits draws a credits balance when the provider balance object is ab
     isCreditsWindow,
     creditsAmount,
     creditsCurrency,
+    creditsMeterPercent,
+    providerSpendNode: () => null,
     optionalFiniteNumber: (value) => value == null ? null : Number(value),
     mimoTokenPlanWindowFromBalance: () => null,
     formatMoney,
     limitWindowNode: (label, window, _color, _tone, value, detail) => Object.assign(makeNode(), { label, window, value, detail }),
     t: (key) => key,
     provider: {
-      provider: 'mimo', accountLabel: 'Open Platform', status: 'ok',
+      provider: 'mimo', accountLabel: 'Pay-as-you-go', status: 'ok',
       windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }]
     }
   };
@@ -2848,7 +2856,7 @@ test('a MiMo row whose recovery belongs to a sign-in says which sign-in it means
       sourceDetail: 'managed'
     }),
     {
-      label: 'Paste MiMo Cookie again',
+      label: 'Update MiMo Cookie',
       key: 'settings.mimo.repasteCookie',
       tone: 'setup'
     }
@@ -2943,7 +2951,7 @@ test('MiMo status gives the correct recovery action for each credential source',
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }),
-    { label: 'Paste MiMo Cookie again', key: 'settings.mimo.repasteCookie', tone: 'setup' }
+    { label: 'Update MiMo Cookie', key: 'settings.mimo.repasteCookie', tone: 'setup' }
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'error' }),
@@ -3008,7 +3016,7 @@ test('MiMo Limits rows show the no-plan and source-specific recovery text', () =
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Membership', windows: [] }), '暂无套餐');
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }), '请重新登录 MiMo Desktop');
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }), '请重新粘贴 MiMo Cookie');
-  assert.equal(view.limitAccountTitle('mimo', { provider: 'mimo', accountLabel: 'Open Platform' }, 0), 'Open Platform');
+  assert.equal(view.limitAccountTitle('mimo', { provider: 'mimo', accountLabel: 'Pay-as-you-go' }, 0), 'Pay-as-you-go');
 });
 
 test('a healthy MiMo row keeps its meta line free of recovery prompts', () => {

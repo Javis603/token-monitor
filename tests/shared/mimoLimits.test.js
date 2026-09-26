@@ -14,6 +14,7 @@ const {
   parseMimoPlanDetail,
   parseMimoPlanUsage,
   parseMimoProfile,
+  parseMimoSpend,
   scopedMimoManagedAccounts,
   withDetectedMimoAccount
 } = require('../../src/shared/providers/mimo/limits');
@@ -121,6 +122,15 @@ function mimoWorld(options = {}) {
     if (href.startsWith(`${CONSOLE_BASE}/userProfile`)) {
       return reply(200, { code: 0, data: { email: 'user@example.com', userId: '42' } });
     }
+    if (href === `${CONSOLE_BASE}/usage`) {
+      if (options.spendStatus) return reply(options.spendStatus, { code: options.spendStatus });
+      return reply(200, {
+        code: 0,
+        data: {
+          costUsage: { totalCost: options.totalCost ?? '0.05', currentMonthCost: options.monthCost ?? '0.05' }
+        }
+      });
+    }
     if (href.startsWith(`${CONSOLE_BASE}/tokenPlan/`)) {
       return reply(200, { code: 0, data: options.tokenPlan || {} });
     }
@@ -185,6 +195,18 @@ test('the balance and profile parsers read the official shapes', () => {
     parseMimoProfile({ code: 0, data: { platformEmail: 'user@example.com' } }),
     { email: 'user@example.com' }
   );
+});
+
+test('the console spend is provider-reported money, and never a derived figure', () => {
+  assert.deepEqual(
+    parseMimoSpend({ code: 0, data: { costUsage: { totalCost: '0.05', currentMonthCost: '0.05' } } }),
+    { allTimeSpend: 0.05, monthSpend: 0.05 }
+  );
+  // Only what the summary states: a field the console does not report is left
+  // absent, so the row cannot print a number nobody measured.
+  assert.deepEqual(parseMimoSpend({ code: 0, data: { costUsage: { totalCost: '1.5' } } }), { allTimeSpend: 1.5 });
+  assert.deepEqual(parseMimoSpend({ code: 0, data: {} }), {});
+  assert.deepEqual(parseMimoSpend(null), {});
 });
 
 test('the usage parser prefers used/limit and reads an over-consumed plan as fully used', () => {
@@ -402,6 +424,28 @@ test('a refused exchange is a credential problem and a throttled one is not', as
   assert.equal(throttled[1].status, 'sourceRateLimited', 'a 429 is traffic, not a credential');
 });
 
+test('the console spend rides the wallet, and losing it never costs the wallet', async () => {
+  const world = mimoWorld({ totalCost: '32.85', monthCost: '9.30' });
+  const rows = await fetchMimoLimits({}, {
+    fetch: world.fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(rows[0].status, 'ok');
+  assert.equal(rows[0].balance.monthSpend, 9.3);
+  assert.equal(rows[0].balance.allTimeSpend, 32.85);
+  assert.equal(rows[0].balance.amount, 9.96, 'the wallet itself is untouched');
+
+  const degraded = await fetchMimoLimits({}, {
+    fetch: mimoWorld({ spendStatus: 500 }).fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(degraded[0].status, 'ok', 'a console that will not report spend still has a wallet');
+  assert.equal(degraded[0].balance.monthSpend, null, 'and the row says nothing it was not told');
+  assert.equal(degraded[0].balance.amount, 9.96);
+});
+
 test('a console lane that fails leaves the membership standing', async () => {
   const world = mimoWorld({ consoleRefused: true });
   const rows = await fetchMimoLimits({}, {
@@ -554,18 +598,27 @@ test('the walk sends the console’s origin headers only to the console', () => 
 test('the membership plan is read the way the app reads it', () => {
   assert.deepEqual(readMimoMembershipPlan(PLAN_BODY), {
     ok: true,
-    plan: { tier: 3, source: 'ORDER_SUB', percent: 78.5, resetsAt: '2026-09-15T00:00:00.000Z' }
+    plan: { tier: 3, code: 'mimo-cn-pro', source: 'ORDER_SUB', percent: 78.5, resetsAt: '2026-09-15T00:00:00.000Z' }
   });
   assert.deepEqual(readMimoMembershipPlan({ code: 0, data: { current: null } }), { ok: true, plan: null });
   assert.equal(readMimoMembershipPlan({ code: 0, data: { current: { planTier: 3 } } }).ok, false, 'a current missing its fields is not a plan');
   assert.equal(readMimoMembershipPlan({ code: 0, data: {} }).ok, true, 'an absent current is no plan, not a failure');
 });
 
-test('the plan label is the vendor’s name for the tier', () => {
+test('the plan label is the vendor’s name for the tier, or its own code', () => {
   assert.equal(mimoMembershipPlanLabel({ tier: 1 }), 'Starter');
   assert.equal(mimoMembershipPlanLabel({ tier: 3 }), 'Pro');
   assert.equal(mimoMembershipPlanLabel({ tier: 4 }), 'Ultra');
-  assert.equal(mimoMembershipPlanLabel({ tier: 9 }), '', 'a tier outside the map has no name to give');
+  // A tier outside the vendor's table has no name to take, so the vendor's own
+  // code stands in rather than nothing — the rule planLabelFromParts applies to
+  // every plan this repository cannot name.
+  assert.equal(
+    mimoMembershipPlanLabel({ tier: 9, code: 'mimo-cn-enterprise' }),
+    'Mimo Cn Enterprise',
+    'an unnamed tier prints what the vendor called it'
+  );
+  assert.equal(mimoMembershipPlanLabel({ tier: 9, code: 'enterprise' }), 'Enterprise', 'and still goes through the alias table');
+  assert.equal(mimoMembershipPlanLabel({ tier: 9 }), '', 'a plan with neither a known tier nor a code has nothing to print');
   assert.equal(mimoMembershipPlanLabel({ tier: 3, source: 'INVITE' }), 'INVITE', 'the app names an invited plan by its source');
   assert.equal(mimoMembershipPlanLabel(null), '');
 });

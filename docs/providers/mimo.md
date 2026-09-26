@@ -15,7 +15,7 @@ MiMo appears in Token Monitor in two independent planes. Keep them separate: the
 | Plane | What it measures | Runtime | Credential |
 |---|---|---|---|
 | Token usage | Local `mimocode` SQLite via tokscale, reported under the `mimo` tracked client | collector | none (reads the engine's own store) |
-| Limits — platform console | Open-platform wallet balance and Token Plan credit | limits | console session, mintable from the machine's account cookie (or pasted by the user) |
+| Limits — platform console | Open-platform wallet balance, Token Plan credit and reported spend | limits | console session, mintable from the machine's account cookie (or pasted by the user) |
 | Limits — Desktop membership | The Xiaomi-account membership quota from the current subscription | limits | MiMo Desktop's own account cookie, exchanged on demand (below) |
 
 The tracked client keeps its own identity rules: MiMo Code and MiMo Desktop are one row (`tokscaleClientMapping.js` maps both onto `mimo`), and the colour is black, not Xiaomi orange — both decided upstream (#772 / #775).
@@ -96,7 +96,21 @@ visit loginUrl
   -> 307 <the original endpoint>
 ```
 
-That mints `api-platform_serviceToken`, `api-platform_ph`, `api-platform_slh`, `deviceId`, `passInfo`, `pass_ua` and `ptn_count` — the first being one of the two names the console lane requires. With that session, all four console reads answer `code: 0`: `/balance`, `/userProfile`, `/tokenPlan/detail`, `/tokenPlan/usage`.
+That mints `api-platform_serviceToken`, `api-platform_ph`, `api-platform_slh`, `deviceId`, `passInfo`, `pass_ua` and `ptn_count` — the first being one of the two names the console lane requires. With that session, all five console reads answer `code: 0`: `/balance`, `/userProfile`, `/tokenPlan/detail`, `/tokenPlan/usage` and `/usage`.
+
+The last one is the console's own usage summary, and it is the only place spend exists:
+
+```json
+GET /api/v1/usage -> {"code":0,"data":{
+  "tokenUsage":{"inputToken":115244,"outputToken":159,"cacheToken":86272,"totalToken":115403,…},
+  "accountRateLimit":{"tpm":3000000,"rpm":1000,"queryTpm":10000000,"concurrency":100},
+  "costUsage":{"totalCost":"0.05","currentMonthCost":"0.05"},
+  "pluginUsage":{"totalRequestCount":"0","webSearchRequestCount":0}}}
+```
+
+`costUsage` is **provider-reported money**: `totalCost` all-time and `currentMonthCost` for the month, which is what the row's Spend line prints. There is no daily rollup — the per-call ledger behind it (`/usage/detail/list`) is a paginated POST — so a Today or Week figure is left absent rather than derived. `/usage/bill/monthly` exists too and reports one entry per month (`consumptionAmount`, split into `giftConsumption` and `cashConsumption`), which is a second source for the same month figure and unused here.
+
+The wallet itself reports money only: `{balance, frozenBalance, currency, overdraftLimit, remainingOverdraftLimit, giftBalance, cashBalance}` — no cap and no percentage of its own. The meter the row draws beside it is therefore **derived at display time** (`amount / (amount + monthSpend)`, `creditsMeterPercent` in `src/shared/limitBalanceDisplay.js`), the same display-layer rule deepseek's and openrouter's balances follow, and never a wire value.
 
 Both lanes therefore resolve the same way: an account cookie already on the machine, exchanged per refresh for a session that is never stored. The console lane keeps the manual paste as its fallback where no MiMo Desktop is signed in; the membership has none, because it is not sold on the developer platform.
 
@@ -195,7 +209,7 @@ The two rows read as one account because each names its own product rather than 
 | Row | `accountLabel` (the plan cell, and the title when no plan names it) | Source |
 |---|---|---|
 | Console | the Token Plan's name, else **`Pay-as-you-go`** — the name `providers/deepseek` gives its balance-only row, and Xiaomi's own term for the `sk-` API side | `web` + `managed` for a pasted credential, `local` + `app` for one minted from the machine |
-| Membership | the tier (**`Starter`** / **`Plus`** / **`Pro`** / **`Ultra`**, the four names the pricing page and the app's billing card both use), else `Membership`, the product word the pricing page sells ("Xiaomi MiMo Desktop Membership Plans") | `local` + `app` |
+| Membership | the tier (**`Starter`** / **`Plus`** / **`Pro`** / **`Ultra`**, the four names the pricing page and the app's billing card both use), else `Membership`, the product word the pricing page sells ("Xiaomi MiMo Desktop Membership Plans"). A tier outside that table prints the vendor's own `planCode` instead of nothing — the passthrough `planLabelFromParts` applies to every plan this repository cannot name | `local` + `app` |
 
 The membership has no plan to name when the subscription answers `current: null`; the row still appears, with no weekly window, and the plan cell says **`No active plan`** — the app's own string for that state.
 

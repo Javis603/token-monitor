@@ -51,6 +51,9 @@ function readMimoMembershipPlan(body) {
     ok: true,
     plan: {
       tier: current.planTier,
+      // Kept for the name a tier outside the vendor's table has none of: this is
+      // the vendor's own string, and printing it beats printing nothing.
+      code: current.planCode,
       source: typeof current.source === 'string' ? current.source : '',
       percent: Math.min(100, percent),
       resetsAt
@@ -59,11 +62,16 @@ function readMimoMembershipPlan(body) {
 }
 
 // The app's own plan name: an invited subscription is named `INVITE` rather than
-// by its tier — the literal the app prints for one — a tier inside the map is
-// named by it, and a tier outside it has no name.
+// by its tier — the literal the app prints for one — and a tier inside the
+// vendor's table is named by it. A tier outside that table has no name to take,
+// so the vendor's own `planCode` stands in, the rule this repository applies to
+// every plan it cannot name (`planLabelFromParts` aliases what it knows and
+// prints the rest; Zed's provider notes the same about custom plan names). The
+// app splits on this too — its settings card prints the raw code, its account
+// menu an error string — and the code is the more informative of the two.
 function mimoMembershipPlanLabel(plan) {
   if (plan?.source === 'INVITE') return 'INVITE';
-  return planLabelFromParts(MIMO_MEMBERSHIP_TIERS[plan?.tier]) || '';
+  return planLabelFromParts(MIMO_MEMBERSHIP_TIERS[plan?.tier], plan?.code) || '';
 }
 
 // 401 is this app's own auth-expired signal for these calls; anything else that

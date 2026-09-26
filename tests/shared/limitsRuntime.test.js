@@ -535,7 +535,7 @@ test('clearing an identity removes old windows synchronously and blocks late com
 
 test('replacing a MiMo membership clears only that member, not the console balance', () => {
   const member = providerRow('mimo', 'member-A', 'Membership');
-  const consoleAccount = providerRow('mimo', 'console-B', 'Open Platform', {
+  const consoleAccount = providerRow('mimo', 'console-B', 'Pay-as-you-go', {
     windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9, currency: 'CNY' }]
   });
   const runtime = createLimitsRuntime({

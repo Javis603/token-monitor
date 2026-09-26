@@ -1091,9 +1091,13 @@
         if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, currency)}`);
         if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, currency)}`);
         const balanceText = formatMoney(amount, currency) || '—';
+        // A wallet is money and carries no percentage of its own, so its meter is
+        // derived here from the console's reported month spend (`amount /
+        // (amount + monthSpend)`) — the display-only rule deepseek's and
+        // openrouter's balances follow, never a wire value.
         const balanceNode = limitWindowNode(
           'Balance',
-          { showMeter: false },
+          { remainingPercent: creditsMeterPercent(provider, creditsWindow) },
           color,
           0.68,
           balanceText,
@@ -1101,6 +1105,8 @@
         );
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(balanceNode);
+        const spendNode = providerSpendNode(balance);
+        if (spendNode) windows.append(spendNode);
       }
     } else if (provider.provider === 'grok') {
       // Grok exposes a single Monthly billing window (no session/weekly). Render it

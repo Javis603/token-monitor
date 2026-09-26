@@ -452,7 +452,7 @@
         return { label: 'Sign in to MiMo Desktop again', key: 'settings.mimo.desktopRelogin', tone: 'setup' };
       }
       if (providerName === 'mimo' && provider?.sourceDetail === 'managed') {
-        return { label: 'Paste MiMo Cookie again', key: 'settings.mimo.repasteCookie', tone: 'setup' };
+        return { label: 'Update MiMo Cookie', key: 'settings.mimo.repasteCookie', tone: 'setup' };
       }
       return providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
         ? { label: 'Update API key', tone: 'setup' }

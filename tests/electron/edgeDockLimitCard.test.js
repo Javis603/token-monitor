@@ -387,6 +387,46 @@ test('one MiMo product failing still leaves the other row and its quota on the c
   assert.equal(group.text.match(/Sign in to MiMo Desktop again/g).length, 1, 'one row asks, the healthy one does not');
 });
 
+test('a MiMo wallet meters against its month spend and carries the spend line', () => {
+  // The wallet has no percentage of its own: the console reports the money and
+  // the month's spend, and the bar is the display-layer derivation deepseek's and
+  // openrouter's balances use — current / (current + month spend).
+  const row = {
+    provider: 'mimo',
+    status: 'ok',
+    source: 'web',
+    sourceDetail: 'managed',
+    accountLabel: 'Pay-as-you-go',
+    accountName: 'Pay-as-you-go',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }],
+    balance: { amount: 9.95, currency: 'CNY', giftBalance: 9.95, cashBalance: 0, monthSpend: 9.3, allTimeSpend: 32.85 }
+  };
+  const card = dockView().renderProviderWindows(row, '#000000');
+  const labels = [...card.walk()].filter((n) => n.classNames?.has('limit-window')).map((n) => n.text.replace(/\s+/g, ' ').trim());
+
+  // 9.95 / (9.95 + 9.30) = 51.7% left.
+  assert.ok(
+    Math.abs(Number(card.find('limit-meter-fill').style['--bar-scale']) - 0.5169) < 0.001,
+    'the bar is the wallet against its month spend'
+  );
+  assert.match(labels[0], /Balance ¥9\.95 Gift ¥9\.95 · Cash ¥0\.00/);
+  // The Spend row states what the console reported, and nothing else: no Today or
+  // Week, because no endpoint reports them.
+  const spend = card.find('limit-spend');
+  assert.ok(spend, 'the card should carry the spend row the wallet providers have');
+  assert.match(spend.text, /Month ¥9\.30/);
+  assert.doesNotMatch(spend.text, /Today|Week/);
+
+  // A wallet with no reported spend reads as untouched — the shared rule for a
+  // positive top-up balance — and has no spend row to show.
+  const bare = dockView().renderProviderWindows(
+    { ...row, balance: { amount: 9.95, currency: 'CNY' } },
+    '#000000'
+  );
+  assert.equal(bare.find('limit-meter-fill').style['--bar-scale'], '1');
+  assert.equal(bare.find('limit-spend'), null);
+});
+
 test('a Devin card keeps Daily, Weekly, and the extra usage balance', () => {
   const card = dockView().renderProviderWindows({
     provider: 'devin',

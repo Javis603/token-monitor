@@ -279,8 +279,6 @@ async function mintMimoServiceSession(options = {}) {
   } catch (error) {
     throwIfAborted(options.deps?.signal);
     return { ok: false, status: MIMO_EXCHANGE_STATUSES.unavailable, error };
-  } finally {
-    if (typeof exchange.close === 'function') exchange.close();
   }
 }
 
