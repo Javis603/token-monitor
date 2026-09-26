@@ -487,13 +487,9 @@ function createTray({
   };
   refreshContextMenu();
 
-  // Electron fills the click event's `bounds` and `position` from the window that
-  // actually received the click, but the tray rectangle is not a reliable way to
-  // find the display on macOS: the status item is mirrored onto every menu bar
-  // while Tray.getBounds() resolves one fixed window (see popoverAnchor). The
-  // pointer is the one signal that survives that mirroring, so read it here,
-  // while the click is still what moved it.
-  tray.on('click', (_event, _bounds, position) => onToggle(tray, pointerPoint(position, electron)));
+  // On macOS the event position is window-relative, while the screen cursor is
+  // in the coordinates popoverBounds uses. Read it while handling the click.
+  tray.on('click', (_event, _bounds, position) => onToggle(tray, pointerPoint(position, electron, platform)));
   tray.on('right-click', () => {
     tray.popUpContextMenu(buildMenu());
   });
@@ -503,13 +499,12 @@ function createTray({
   return tray;
 }
 
-// The event's own position first, the live cursor second. Electron captures
-// `position` in native code when the click is dispatched — the same signal as
-// the cursor, but earlier, so it cannot be moved between the click and the
-// event reaching us. An activation that did not come from a click (VoiceOver,
-// for one) can carry an unusable position, so the cursor stays as fallback.
-function pointerPoint(position, electron = require('electron')) {
-  if (position && Number.isFinite(Number(position.x)) && Number.isFinite(Number(position.y))) {
+// Cocoa derives the tray click position from event.locationInWindow. Converting
+// that point without the tray window's origin cannot yield a screen location.
+// If the cursor is unavailable, return null so the popover uses its existing
+// tray-rectangle lookup instead of treating local coordinates as global ones.
+function pointerPoint(position, electron = require('electron'), platform = process.platform) {
+  if (platform !== 'darwin' && position && Number.isFinite(Number(position.x)) && Number.isFinite(Number(position.y))) {
     return { x: Number(position.x), y: Number(position.y) };
   }
   try {

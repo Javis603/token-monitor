@@ -48,7 +48,11 @@ test('pointInside treats bounds as half-open along both axes', () => {
 });
 
 test('popover opens on the display under the pointer, not on the tray rectangle', () => {
-  const clickPoint = { x: 1200, y: -1060 };
+  const clickPoint = pointerPoint(
+    { x: 12, y: 900 },
+    { screen: screenFor({ x: 1200, y: -1060 }) },
+    'darwin'
+  );
   const bounds = popoverBounds(mirroredTray, 340, 650, {
     screen: screenFor(clickPoint),
     clickPoint,
@@ -140,23 +144,22 @@ test('popoverAnchor reports whether it could use the tray rectangle', () => {
   assert.deepEqual(offDisplay, { x: 1200, top: -1060, onTray: false });
 });
 
-test('pointerPoint prefers the event position and falls back to the cursor', () => {
-  // Electron captures the event position natively at click time; the live
-  // cursor is only a fallback for activations without a usable position.
+test('pointerPoint uses the screen cursor on macOS, where the event position is window-relative', () => {
   const withScreen = { screen: { getCursorScreenPoint: () => ({ x: 5, y: 6 }) } };
-  assert.deepEqual(pointerPoint({ x: 1, y: 2 }, withScreen), { x: 1, y: 2 });
-  assert.deepEqual(pointerPoint(null, withScreen), { x: 5, y: 6 });
+  assert.deepEqual(pointerPoint({ x: 1, y: 2 }, withScreen, 'darwin'), { x: 5, y: 6 });
+  assert.deepEqual(pointerPoint(null, withScreen, 'darwin'), { x: 5, y: 6 });
 
   const noScreen = { screen: {} };
-  assert.deepEqual(pointerPoint({ x: 1, y: 2 }, noScreen), { x: 1, y: 2 });
+  assert.equal(pointerPoint({ x: 1, y: 2 }, noScreen, 'darwin'), null);
+  assert.deepEqual(pointerPoint({ x: 1, y: 2 }, noScreen, 'win32'), { x: 1, y: 2 });
 
-  assert.equal(pointerPoint(null, noScreen), null);
-  assert.equal(pointerPoint({ x: Number.NaN, y: 2 }, { screen: {} }), null);
+  assert.equal(pointerPoint(null, noScreen, 'darwin'), null);
+  assert.equal(pointerPoint({ x: Number.NaN, y: 2 }, noScreen, 'win32'), null);
 
   const throwing = {
     screen: {
       getCursorScreenPoint: () => { throw new Error('no display server'); }
     }
   };
-  assert.equal(pointerPoint(null, throwing), null);
+  assert.equal(pointerPoint({ x: 1, y: 2 }, throwing, 'darwin'), null);
 });
