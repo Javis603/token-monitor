@@ -100,6 +100,17 @@ input, textarea, [contenteditable="true"] {
   background-size: cover;
   opacity: var(--glass-alpha);
 }
+/* Keep the AppKit material visible through the selected image. Its opacity is
+   intentionally independent of the app glass slider; macOS owns the material. */
+html.native-liquid-glass .shell.has-custom-background::before,
+body.native-liquid-glass .shell.has-custom-background::before {
+  background-image: var(--custom-background-image);
+  opacity: 0.28;
+}
+html.native-material-opaque .shell.has-custom-background::before,
+html.native-reduced-transparency .shell.has-custom-background::before {
+  display: none;
+}
 .background-image-actions {
   display: flex;
   flex-wrap: wrap;
@@ -117,6 +128,43 @@ input, textarea, [contenteditable="true"] {
 }
 .background-image-actions button:hover { border-color: var(--line-strong); }
 .background-image-actions button:disabled { opacity: 0.5; cursor: default; }
+/* Native macOS material supplies the window backdrop. Keep the app's own
+   outer shell clear so it does not stack a second tint, blur, or shadow over it. */
+html.native-liquid-glass .shell,
+body.native-liquid-glass .shell,
+html.native-liquid-glass .floating-bubble-tab,
+body.native-liquid-glass .floating-bubble-tab {
+  background: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.native-material-opaque .shell,
+body.native-material-opaque .shell,
+html.native-material-opaque .floating-bubble-tab,
+body.native-material-opaque .floating-bubble-tab {
+  background: rgb(var(--glass-rgb));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.native-reduced-transparency .shell,
+body.native-reduced-transparency .shell,
+html.native-reduced-transparency .floating-bubble-tab,
+body.native-reduced-transparency .floating-bubble-tab {
+  background: rgb(var(--glass-rgb));
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.native-reduced-transparency body * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.native-high-contrast {
+  --line-alpha: 0.28 !important;
+  --line-strong-alpha: 0.48 !important;
+}
+html.native-high-contrast .shell { border: 1px solid var(--line-strong); }
 html.is-windows, html.is-windows body {
   border-radius: 8px;
 }

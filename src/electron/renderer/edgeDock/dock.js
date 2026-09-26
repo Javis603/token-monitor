@@ -119,7 +119,7 @@ function isMacLegacy(payload) {
 
 function applyAppearance(payload) {
   const appearance = payload?.appearance || {};
-  const key = JSON.stringify([appearance, payload?.platform, payload?.glass]);
+  const key = JSON.stringify([appearance, payload?.platform, payload?.glass, payload?.liquidGlass]);
   if (key === state.appearanceKey) return;
   state.appearanceKey = key;
 
@@ -142,6 +142,7 @@ function applyAppearance(payload) {
 
   docEl.classList.toggle('system-glass-disabled', appearance.systemGlass === false);
   docEl.classList.toggle('edge-dock-no-material', payload?.glass !== true);
+  docEl.classList.toggle('edge-dock-liquid-glass', payload?.glass === true && payload?.liquidGlass === true);
   docEl.classList.toggle('is-windows', payload?.platform === 'win32');
   docEl.classList.toggle('is-mac-legacy', isMacLegacy(payload));
   docEl.classList.toggle(
@@ -528,7 +529,11 @@ function providerCellNode(cell) {
   } else {
     value.textContent = percentText(cell.remainingPercent);
   }
-  value.dataset.severity = displaySeverity(cell.remainingPercent);
+  // Colour answers "how close is the closest quota to empty"; the figure itself
+  // answers "what does the primary window say" (0% when a quota is spent).
+  // Splitting the two lets a tight secondary window warn without turning the
+  // headline into whichever window is lowest this minute.
+  value.dataset.severity = displaySeverity(cell.severityPercent ?? cell.remainingPercent);
   node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider)), value);
   // The halo is decorative and carries no text, so the state it announces is
   // spoken here instead, from the same reading it is drawn from.

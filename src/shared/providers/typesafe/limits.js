@@ -4,7 +4,7 @@ const { normalizeLimitProvider } = require('../../limits/core');
 const { errorWithStatus, providerStatusFromError } = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { runWithProbeDeadline } = require('../../probeDeadline');
-const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
+const { BROWSER_USER_AGENT, BROWSER_CLIENT_HINTS } = require('../../browserUserAgent');
 
 const ORIGIN = 'https://console.typesafe.ai';
 const BILLING_URL = `${ORIGIN}/settings/billing`;
@@ -57,7 +57,10 @@ function typesafeCookie(env = process.env, options = {}) {
   return pairs.length && pairs.every(Boolean) ? pairs.join('; ') : '';
 }
 
-function responseError(response) {
+function responseError(response, body = '') {
+  if (isCloudflareResponse(response, body)) {
+    return cloudflareError();
+  }
   if (response.type === 'opaqueredirect' || response.status === 401 || response.status === 403 || (response.status >= 300 && response.status < 400)) {
     return errorWithStatus('unauthorized', 'TypeSafe session expired');
   }
@@ -65,9 +68,25 @@ function responseError(response) {
   return errorWithStatus('unavailable', `TypeSafe returned ${response.status}`);
 }
 
+// Cloudflare interstitials arrive as 403 with cf-mitigated: challenge or a
+// "Just a moment"/"Attention Required" HTML body. They are transport blocks —
+// not an expired session — so the credential stays put and the account reports
+// unavailable rather than claiming the cookie died.
+function isCloudflareResponse(response, body = '') {
+  if (response.status !== 403) return false;
+  if (String(response.headers?.get?.('cf-mitigated') || '').toLowerCase() === 'challenge') return true;
+  const server = String(response.headers?.get?.('server') || '').toLowerCase();
+  const sample = String(body).slice(0, 8000);
+  return server.includes('cloudflare') && /Just a moment|Attention Required|challenge-platform|cf-chl/i.test(sample);
+}
+
+function cloudflareError() {
+  return errorWithStatus('unavailable', 'TypeSafe blocked by Cloudflare');
+}
+
 async function readResponse(response, kind) {
-  if (!response.ok || response.type === 'opaqueredirect') throw responseError(response);
   const body = await response.text();
+  if (!response.ok || response.type === 'opaqueredirect') throw responseError(response, body);
   if ((/\b(?:sign in|log in)\b/i.test(body.slice(0, 5000)) && /<html/i.test(body.slice(0, 500)))
     || /\\?"\(auth\)\\?",\{\\?"children\\?":\[\\?"login\\?"/u.test(body)) {
     throw errorWithStatus('unauthorized', 'TypeSafe session expired');
@@ -84,7 +103,9 @@ function request(fetchImpl, url, cookie, options = {}) {
     ...options,
     credentials: 'omit',
     redirect: 'manual',
-    headers: { Cookie: cookie, 'User-Agent': BROWSER_USER_AGENT, ...options.headers }
+    // The Console's Cloudflare challenge refuses requests that only look like
+    // a browser in the User-Agent: the client hints have to ride along too.
+    headers: { Cookie: cookie, 'User-Agent': BROWSER_USER_AGENT, ...BROWSER_CLIENT_HINTS, ...options.headers }
   });
 }
 

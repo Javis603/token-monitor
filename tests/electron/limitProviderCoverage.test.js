@@ -4,10 +4,10 @@
 //
 // A limits provider is only usable once the settings page gives it somewhere to
 // go: an account group, whose state is reported by a status pill, or — for the
-// providers detected without a credential — a connection explainer. Both live in
-// hand-maintained maps in app.js keyed by provider id. Nothing asserted that a
-// catalog entry reached either, so a provider added without its settings wiring
-// shipped as a row that expands into nothing.
+// providers detected without a credential — a connection explainer. The static
+// account nodes and explainer keys live in app.js keyed by provider id. Nothing
+// asserted that a catalog entry reached either, so a provider added without its
+// settings wiring shipped as a row that expands into nothing.
 //
 // The direction matters, as in clientPresentationCoverage.test.js: the account
 // group check in limitProviderPresentation.test.js starts from a written-out
@@ -47,8 +47,9 @@ function providerMap(source, name) {
 }
 
 const app = read('app.js');
-const accountGroups = providerMap(app, 'LIMIT_PROVIDER_ACCOUNT_GROUP_IDS');
-const accountStatuses = providerMap(app, 'LIMIT_PROVIDER_ACCOUNT_STATUS_IDS');
+const accountNodes = providerMap(app, 'LIMIT_PROVIDER_ACCOUNT_NODES');
+const accountGroups = Object.fromEntries(Object.entries(accountNodes).map(([id, node]) => [id, node.group]));
+const accountStatuses = Object.fromEntries(Object.entries(accountNodes).map(([id, node]) => [id, node.status]));
 const connectionDetails = providerMap(app, 'LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS');
 
 test('every account group reports its state through a status pill', () => {
@@ -66,8 +67,8 @@ test('every catalog provider reaches an account group or a connection explainer'
   // a toggle would expand into options that cannot connect it. What is asserted
   // here is that every provider offers somewhere to put a credential, or an
   // explanation of how it connects without one.
-  // The two maps are deliberately not exclusive — antigravity carries an
-  // explainer above its account group — so this is a union, not a partition.
+  // Account nodes and explainers are deliberately not exclusive — antigravity
+  // carries an explainer above its account group — so this is a union.
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const configured = new Set([
     ...Object.keys(accountGroups), ...Object.keys(connectionDetails),
