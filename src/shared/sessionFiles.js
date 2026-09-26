@@ -3,6 +3,13 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { claudeSessionRoots } = require('./providers/claude/paths');
+const { codebuddyProjectsRoot } = require('./providers/codebuddy/paths');
+
+// 5.5 moved the WorkBuddy home to ~/.workbuddy-ai and tokscale still scans
+// both, so a session reported from either root resolves from either.
+function workbuddyProjectsRoots(home) {
+  return [path.join(home, '.workbuddy', 'projects'), path.join(home, '.workbuddy-ai', 'projects')];
+}
 
 function isSafeSessionId(sessionId) {
   const id = String(sessionId || '');
@@ -77,6 +84,16 @@ function resolveSessionFile(client, sessionId, home, options = {}) {
     const projectFile = findSessionFiles(projects, [id]).get(id);
     if (projectFile) return projectFile;
     return findSessionFiles(transcripts, [id]).get(id) || '';
+  }
+  if (client === 'codebuddy') {
+    return findSessionFiles(codebuddyProjectsRoot({ homeDir: home }), [id]).get(id) || '';
+  }
+  if (client === 'workbuddy') {
+    for (const root of workbuddyProjectsRoots(home)) {
+      const found = findSessionFiles(root, [id]).get(id);
+      if (found) return found;
+    }
+    return '';
   }
   if (client === 'codex') {
     const codexHome = options.codexHome || codexHomeDir(home, options);

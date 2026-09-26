@@ -112,10 +112,42 @@ test('resolves Codex sessions from CODEX_HOME and ignores it for a scoped home',
   } finally { cleanup(home); }
 });
 
+test('resolves a codebuddy session by walking the projects tree', () => {
+  // CodeBuddy stores one transcript per session in a directory named after the
+  // working directory it ran in, so the id alone does not say where it lives.
+  const home = tmpHome();
+  try {
+    const dir = path.join(home, '.codebuddy', 'projects', 'd-some-project');
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, '01a07fd0-dc59-7af6-afa5-ef402c7a91ff.jsonl');
+    fs.writeFileSync(file, '{}\n');
+    assert.equal(resolveSessionFile('codebuddy', '01a07fd0-dc59-7af6-afa5-ef402c7a91ff', home), file);
+  } finally { cleanup(home); }
+});
+
+test('ignores CODEBUDDY_CONFIG_DIR, which the scan does not read either', () => {
+  // The CLI itself honours the variable, but tokscale declares no override for
+  // this client. Following the client instead of the scan would let the readers
+  // answer for sessions nothing reported, so the scoped home stays
+  // authoritative and a relocated config directory resolves to nothing.
+  const home = tmpHome();
+  const configured = path.join(home, 'relocated-codebuddy');
+  try {
+    const dir = path.join(configured, 'projects', 'd-some-project');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'relocated-1.jsonl'), '{}\n');
+    assert.equal(resolveSessionFile('codebuddy', 'relocated-1', home, {
+      env: { CODEBUDDY_CONFIG_DIR: configured },
+      useEnvRoots: true
+    }), '');
+  } finally { cleanup(home); }
+});
+
 test('returns empty string when not found or unknown client', () => {
   const home = tmpHome();
   try {
     assert.equal(resolveSessionFile('claude', 'missing', home), '');
+    assert.equal(resolveSessionFile('codebuddy', 'missing', home), '');
     assert.equal(resolveSessionFile('hermes', 'whatever', home), '');
   } finally { cleanup(home); }
 });

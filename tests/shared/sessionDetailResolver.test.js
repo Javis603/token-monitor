@@ -176,7 +176,7 @@ test('resolves a Reasonix native detail through the same platform resolver', () 
   }
 });
 
-for (const client of ['claude', 'codex']) {
+for (const client of ['claude', 'codebuddy', 'codex']) {
   test(`falls back to running WSL homes for ${client} JSONL details on Windows`, () => {
     const homes = [];
     const detail = resolveSessionDetailForPlatform(
