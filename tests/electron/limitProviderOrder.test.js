@@ -119,7 +119,7 @@ test('provider registration and account layout order follows the catalog', () =>
     assert.deepEqual(ids, canonical.filter((id) => ids.includes(id)), label);
   };
   for (const [file, names, indent] of [
-    ['src/electron/renderer/app.js', ['LIMIT_PROVIDER_ACCOUNT_GROUP_IDS', 'LIMIT_PROVIDER_ACCOUNT_STATUS_IDS', 'externalLimitAccountConfig'], '  '],
+    ['src/electron/renderer/app.js', ['LIMIT_PROVIDER_ACCOUNT_NODES', 'externalLimitAccountConfig'], '  '],
     ['src/electron/renderer/limits/providerPresentation.js', ['PROVIDER_SOURCE_LABELS', 'CAPABILITY_TAGS'], '    ']
   ]) {
     const source = read(file);
@@ -139,7 +139,7 @@ test('provider registration and account layout order follows the catalog', () =>
   check([...html.matchAll(/^ {12}<div id="(\w+)(?:AccountGroup|CookieGroup)"/gm)]
     .map((match) => match[1]).filter((id) => canonical.includes(id)), 'HTML account groups');
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
-  assert.deepEqual(limitAccountFormsForRenderer().map((form) => form.id), ['cline', 'factory', 'zed', 'commandcode', 'typesafe']);
+  check(limitAccountFormsForRenderer().map((form) => form.id), 'generated account forms');
   const collector = read('src/shared/limits/collector.js');
   assert.match(collector, /\.\.\.LIMIT_PROVIDER_FETCHERS/);
 });

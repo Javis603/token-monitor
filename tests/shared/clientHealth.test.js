@@ -25,13 +25,15 @@ const {
 const { antigravitySyncLockPath } = require('../../src/shared/providers/antigravity/selfSync');
 const {
   clientActivityDaysFromHistory,
+  clientDataDirPresence,
   clientDiagnosticRoots,
   clientSourceChecks,
   clientSourceRoots,
   clientWatchCandidates,
   deriveClientHealth,
   deriveClientStatus,
-  mergeClientActivityDays
+  mergeClientActivityDays,
+  visibleDiagnosticRoots
 } = require('../../src/shared/collector');
 const { KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
 const { createSelfSyncThrottle } = require('../../src/shared/selfSyncThrottle');
@@ -335,6 +337,28 @@ test('every source-root id the collector emits is in the allowlist', () => {
   }
 });
 
+test('shared home-relative directories retain exact source roots, checks and watch candidates', () => {
+  const homeDir = path.join(path.sep, 'tmp', 'source-home');
+  const clients = 'droid,qwen,pi,omp,commandcode';
+  const expected = {
+    droid: [{ id: 'droid-sessions', dir: path.join(homeDir, '.factory', 'sessions') }],
+    qwen: [{ id: 'qwen-projects', dir: path.join(homeDir, '.qwen', 'projects') }],
+    pi: [{ id: 'pi-sessions', dir: path.join(homeDir, '.pi', 'agent', 'sessions') }],
+    omp: [{ id: 'omp-sessions', dir: path.join(homeDir, '.omp', 'agent', 'sessions') }],
+    commandcode: [{ id: 'commandcode-projects', dir: path.join(homeDir, '.commandcode', 'projects') }]
+  };
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    const options = { homeDir, platform, env: {} };
+    assert.deepEqual(clientSourceRoots(clients, options), expected);
+    const candidates = clientWatchCandidates(clients, options);
+    for (const [client, roots] of Object.entries(expected)) {
+      assert.deepEqual(candidates[client], roots.map(({ dir }) => dir));
+      assert.deepEqual(clientSourceChecks(client, options)[client].map(({ id }) => id), roots.map(({ id }) => id));
+      for (const { id } of roots) assert.ok(CLIENT_SOURCE_CHECK_IDS.includes(id));
+    }
+  }
+});
+
 test('Claude source roots follow CLAUDE_CONFIG_DIR like tokscale', () => {
   const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
   const originalHomedir = os.homedir;
@@ -408,6 +432,82 @@ test('the Cursor cache follows an absolute Windows HOME override', () => {
     id: 'tokscale-cursor-cache',
     dir: path.join('D:\\profiles\\alice', '.config', 'tokscale', 'cursor-cache')
   }]);
+});
+
+test('source resolution feeds watcher paths and exact-file diagnostics without changing the root contract', () => {
+  const homeDir = path.join(os.tmpdir(), 'source-resolution');
+  const env = { XDG_DATA_HOME: path.join(homeDir, 'xdg') };
+  const options = {
+    homeDir,
+    platform: process.platform,
+    env,
+    customScanPaths: { codex: [path.join(homeDir, 'extra-codex')] }
+  };
+  const roots = clientSourceRoots('copilot,codex,amp,zcode', options);
+  assert.deepEqual(roots.codex.slice(0, 2), [
+    { id: 'codex-sessions', dir: path.join(homeDir, '.codex', 'sessions') },
+    { id: 'codex-sessions', dir: path.join(homeDir, '.codex', 'archived_sessions') }
+  ]);
+  assert.deepEqual(roots.codex.at(-1), { id: 'custom-scan-path', dir: path.join(homeDir, 'extra-codex'), custom: true });
+  assert.deepEqual(roots.amp, [{ id: 'amp-threads', dir: path.join(homeDir, 'xdg', 'amp', 'threads') }]);
+  const zcodeDb = roots.zcode.find((root) => root.id === 'zcode-cli-db');
+  assert.deepEqual(zcodeDb, {
+    id: 'zcode-cli-db',
+    dir: path.join(homeDir, '.zcode', 'cli', 'db'),
+    sourcePath: path.join(homeDir, '.zcode', 'cli', 'db', 'db.sqlite')
+  });
+  assert.deepEqual(clientWatchCandidates('zcode,codex,amp', options).zcode, roots.zcode.map((root) => root.dir));
+  assert.deepEqual(clientSourceChecks('zcode', options).zcode.map((check) => check.id), ['zcode-projects', 'zcode-cli-db']);
+  assert.equal(clientDiagnosticRoots('zcode', options).zcode.find((root) => root.id === 'zcode-cli-db').dir, zcodeDb.sourcePath);
+});
+
+test('source observations keep exact files, optional roots and WSL health in sync with diagnostics', () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-source-observations-'));
+  const previousHome = os.homedir;
+  const previousGeminiHome = process.env.GEMINI_CLI_HOME;
+  os.homedir = () => homeDir;
+  delete process.env.GEMINI_CLI_HOME;
+  try {
+    const options = { homeDir, platform: process.platform, env: {}, wslDetected: ['hermes'] };
+    const dbDir = path.join(homeDir, '.zcode', 'cli', 'db');
+    const capture = path.join(homeDir, '.config', 'tokscale', 'headless', 'codex');
+    fs.mkdirSync(dbDir, { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.gemini', 'antigravity'), { recursive: true });
+    const observe = () => ({
+      checks: clientSourceChecks('zcode,codex,antigravity,hermes', options),
+      diagnostics: clientDiagnosticRoots('zcode,codex,antigravity,hermes', options),
+      visible: visibleDiagnosticRoots('zcode,codex,antigravity,hermes', options)
+    });
+    const missing = observe();
+    const zcode = missing.diagnostics.zcode.find((root) => root.id === 'zcode-cli-db');
+    assert.equal(zcode.dir, path.join(dbDir, 'db.sqlite'));
+    assert.equal(zcode.exists, false, 'a watch parent is not an existing database');
+    assert.deepEqual(missing.checks.zcode.find((check) => check.id === 'zcode-cli-db'), { id: 'zcode-cli-db', exists: false });
+    assert.equal(missing.visible.codex.some((root) => root.dir === capture), false);
+    assert.equal(missing.diagnostics.codex.find((root) => root.dir === capture).optional, true);
+    assert.equal(missing.checks.codex.some((check) => check.id === 'codex-sessions'), true);
+    assert.deepEqual(missing.checks.hermes.at(-1), { id: 'wsl-home', exists: true });
+    assert.equal(deriveClientHealth('hermes', { clients: {} }, { sourceChecks: missing.checks }).clients.hermes.overall, 'waiting');
+    assert.deepEqual(missing.checks.antigravity.map(({ id, exists }) => ({ id, exists })), [
+      { id: 'tokscale-antigravity-cache', exists: false },
+      { id: 'antigravity-ide-source', exists: true },
+      { id: 'antigravity-cli-data', exists: false }
+    ]);
+    assert.equal(clientDataDirPresence('antigravity', { sourceChecks: missing.checks }).antigravity, true);
+
+    fs.writeFileSync(path.join(dbDir, 'db.sqlite'), '');
+    fs.mkdirSync(capture, { recursive: true });
+    const present = observe();
+    assert.deepEqual(present.checks.zcode.find((check) => check.id === 'zcode-cli-db'), { id: 'zcode-cli-db', exists: true });
+    assert.equal(present.diagnostics.zcode.find((root) => root.id === 'zcode-cli-db').exists, true);
+    assert.equal(present.visible.codex.some((root) => root.dir === capture), true);
+    assert.equal(clientDataDirPresence('zcode', { sourceChecks: present.checks }).zcode, true);
+  } finally {
+    os.homedir = previousHome;
+    if (previousGeminiHome === undefined) delete process.env.GEMINI_CLI_HOME;
+    else process.env.GEMINI_CLI_HOME = previousGeminiHome;
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
 });
 
 test('labelling roots keeps diagnostics separate from watcher roots', () => {

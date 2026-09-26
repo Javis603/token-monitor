@@ -43,6 +43,12 @@ module.exports = {
       kimiCredentialSource: webTokenSource || apiKeySource
     };
   },
+  // Kimi keeps its own panel (a primary Code API key and a Web-token fallback,
+  // each saved on its own) and borrows only the shared save path.
+  form: {
+    kind: 'custom',
+    fields: [{ key: 'kimiApiKey' }, { key: 'kimiWebAccessToken' }]
+  },
   urlPolicy: [
     { hosts: ['kimi.com', 'www.kimi.com'], pathPrefixes: ['/code'] }
   ]

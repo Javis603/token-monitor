@@ -100,7 +100,8 @@ test('every widget provider probe takes the runtime transport', () => {
   for (const call of [
     /opencodeWeb\.fetchGoWeb\([^,]+, electronProviderDeps\(\)\)/,
     /opencodeWeb\.fetchZen\([^,]+, electronProviderDeps\(\)\)/,
-    /fetchOllamaLimits\([^,]+, electronProviderDeps\(/,
+    // Every account form's save-time probe (limits:saveCredential).
+    /function credentialProbeDeps\(renewed = \{\}\) \{\s*return electronProviderDeps\(/,
     /fetchMimoLimits\([^;]+electronProviderDeps\(\)\)/,
     /fetchOpenRouterAccount\([^,]+, [^,]+, electronProviderDeps\(/,
     /fetchThirdPartyAccount\(\{[^}]*\}, electronProviderDeps\(/,

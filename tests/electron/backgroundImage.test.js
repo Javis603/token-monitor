@@ -66,5 +66,11 @@ test('custom image layer is not covered by an opaque glass tint', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'styles.css'), 'utf8');
   assert.match(css, /[.]shell[.]has-custom-background\s*\{\s*background:\s*transparent;/);
   assert.match(css, /[.]shell[.]has-custom-background::before\s*\{[^}]*background-image:[^;]*var\(--custom-background-image\);[^}]*opacity:\s*var\(--glass-alpha\);/);
+  const nativeRule = css.match(/html[.]native-liquid-glass [.]shell[.]has-custom-background::before,[^{}]*\{([^}]*)\}/)?.[1];
+  assert.match(nativeRule, /background-image:\s*var\(--custom-background-image\);/);
+  assert.ok(Number(nativeRule.match(/opacity:\s*([\d.]+);/)?.[1]) > 0);
+  assert.ok(Number(nativeRule.match(/opacity:\s*([\d.]+);/)?.[1]) < 0.5);
+  assert.doesNotMatch(nativeRule, /display:\s*none|opacity:\s*var\(--glass-alpha\)/);
+  assert.match(css, /html[.]native-reduced-transparency [.]shell[.]has-custom-background::before\s*\{\s*display:\s*none;/);
   assert.doesNotMatch(css, /linear-gradient\(var\(--glass\), var\(--glass\)\), var\(--custom-background-image\)/);
 });

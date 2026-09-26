@@ -64,8 +64,21 @@
     return ordered;
   }
 
+  // The rail headline reads the primary window like before — the pool that
+  // resets soonest is the number a glance wants — except that an exhausted
+  // quota gates the account outright: a session bar at 100% beside a weekly or
+  // monthly pool at 0% still means unusable, so the cell prints 0% then.
+  function headlinePick(selection) {
+    if (!selection) return null;
+    if (selection.exhaustedWindow) return { window: selection.exhaustedWindow, remaining: 0 };
+    return selection.primaryWindow
+      ? { window: selection.primaryWindow, remaining: selection.primaryPercent }
+      : null;
+  }
+
   function accountSummary(provider) {
     const selection = trayText.compactLimitSelection(provider);
+    const headline = headlinePick(selection);
     return {
       status: provider?.status === 'ok' && !provider?.stale ? 'ok' : (provider?.stale ? 'stale' : 'error'),
       planLabel: String(provider?.planLabel || provider?.accountLabel || ''),
@@ -74,8 +87,12 @@
       accountEmail: String(provider?.accountEmail || ''),
       updatedAt: provider?.updatedAt || provider?.checkedAt || null,
       stale: provider?.stale === true,
-      primaryRemaining: selection ? selection.primaryPercent : null,
-      primaryWindow: selection ? selection.primaryWindow : null,
+      headlineRemaining: headline ? headline.remaining : null,
+      headlineWindow: headline ? headline.window : null,
+      // Severity is the tightest metered pool, not the headline: with the
+      // warn-colours toggle on, an account whose weekly runs out while its
+      // session still reads 100% flags before the number flips to 0%.
+      severityPercent: selection ? selection.tightestPercent : null,
       // The card renders its quota rows from the shared Limits view, which
       // reads the collector record itself. Projecting the windows here is what
       // made the card a second, less-informed implementation of the same rows:
@@ -345,14 +362,14 @@
     // tightest visible account rather than leaving the rail blank.
     let tightest = null;
     for (const account of projected) {
-      if (account.summary.primaryRemaining === null) continue;
-      if (!tightest || account.summary.primaryRemaining < tightest.summary.primaryRemaining) tightest = account;
+      if (account.summary.headlineRemaining === null) continue;
+      if (!tightest || account.summary.headlineRemaining < tightest.summary.headlineRemaining) tightest = account;
     }
     const activeHeadline = id === 'codex' && options.accountMode !== 'lowest'
-      ? projected.find((account) => account.summary.active && account.summary.primaryRemaining !== null) || null
+      ? projected.find((account) => account.summary.active && account.summary.headlineRemaining !== null) || null
       : null;
     const headline = activeHeadline || tightest;
-    const headlineWindow = headline?.summary.primaryWindow || null;
+    const headlineWindow = headline?.summary.headlineWindow || null;
     const headlineCredits = headlineWindow && balanceDisplay.isCreditsWindow(headlineWindow)
       ? {
         amount: balanceDisplay.creditsAmount(headline.record, headlineWindow),
@@ -371,7 +388,8 @@
       kind: 'provider',
       provider: id,
       status: headline ? 'ok' : (accounts.some((account) => account.summary.status === 'stale') ? 'stale' : 'error'),
-      remainingPercent: headline ? headline.summary.primaryRemaining : null,
+      remainingPercent: headline ? headline.summary.headlineRemaining : null,
+      severityPercent: headline ? headline.summary.severityPercent : null,
       windowKind: headlineWindow ? String(headlineWindow.kind || '') : '',
       credits: headlineCredits,
       accountCount: accounts.length,

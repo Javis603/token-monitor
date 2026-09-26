@@ -166,7 +166,7 @@ function classifyClientSyncDetailCode({ client = '', text = '' } = {}) {
 // several paths of the same kind — Copilot's workspaceStorage has a variant per
 // platform, Kiro's IDE globalStorage has four — because "the VS Code workspace
 // storage is missing" is the useful statement, not which spelling was tried.
-// clientSourceRoots() in collector.js is where they are assigned;
+// clientSourceRoots() in clientSources.js is where they are assigned;
 // tests/shared/clientHealth.test.js fails if the two lists drift apart.
 const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   // Not a host path: a marker found inside a running WSL distro. A client

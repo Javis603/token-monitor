@@ -246,6 +246,24 @@ test('Linux tray icon keeps the resized full-color app asset at the unchanged sq
   assert.deepEqual(calls.slice(1), [['resize', { width: 20, height: 20 }]]);
 });
 
+test('macOS tray click passes the screen cursor, not its window-relative event position', () => {
+  const calls = trayCalls();
+  const electron = fakeTrayElectron(calls);
+  electron.screen = { getCursorScreenPoint: () => ({ x: 1200, y: -1060 }) };
+  electron.nativeImage.createFromPath = () => ({
+    resize: () => ({ setTemplateImage() {} })
+  });
+  let clickPoint = null;
+  const tray = createTray({
+    electron,
+    onToggle: (_tray, point) => { clickPoint = point; },
+    platform: 'darwin'
+  });
+
+  tray.handlers.click({}, { x: 900, y: 0, width: 24, height: 24 }, { x: 12, y: 900 });
+  assert.deepEqual(clickPoint, { x: 1200, y: -1060 });
+});
+
 test('Linux tray exports current menu state and skips unchanged D-Bus rebuilds', () => {
   const calls = trayCalls();
   let state = {
@@ -1138,6 +1156,103 @@ test('kind-specific resolver can select billing from a mixed-window provider', (
 
   assert.equal(pick.selectedWindow, billing);
   assert.equal(pick.remaining, 9);
+});
+
+test('the exhaustion gate stays on the dock rail; tray picks keep their own windows', () => {
+  const monthly = { kind: 'billing', label: 'Monthly', remainingPercent: 0 };
+  const limitStats = {
+    limits: {
+      providers: [{
+        provider: 'opencode',
+        status: 'ok',
+        windows: [
+          { kind: 'session', remainingPercent: 80 },
+          monthly
+        ]
+      }]
+    }
+  };
+
+  // The selection still reports the gate — the dock rail reads it — but the
+  // default tray pick deliberately keeps its own primary/secondary reading:
+  // the two-lane icon cannot draw a billing gate, and the tray's job is the
+  // tightest headline pool, not the account verdict.
+  const pick = pickWorstLimitProvider(limitStats);
+  assert.equal(pick.exhaustedWindow, monthly);
+  assert.equal(pick.remaining, 80);
+
+  // A kind-pinned pick stays on its own pool — the pin is a request for that
+  // window's number, not for the account verdict.
+  const pinned = pickWorstLimitProvider(limitStats, { kind: 'session' });
+  assert.equal(pinned.remaining, 80);
+
+  // Scoped or money windows still never gate: a legacy spend row (no metric)
+  // and a model-scoped weekly at 0% both leave the default pick alone.
+  const legacySpend = pickWorstLimitProvider({
+    limits: {
+      providers: [{
+        provider: 'codex',
+        status: 'ok',
+        windows: [
+          { kind: 'session', remainingPercent: 80 },
+          { kind: 'billing', label: 'Usage credits', usedPercent: 100 }
+        ]
+      }]
+    }
+  });
+  assert.equal(legacySpend.remaining, 80);
+
+  const scoped = pickWorstLimitProvider({
+    limits: {
+      providers: [{
+        provider: 'claude',
+        status: 'ok',
+        windows: [
+          { kind: 'weekly', label: 'Weekly', remainingPercent: 80 },
+          { kind: 'weekly', label: 'Fable', remainingPercent: 0 }
+        ]
+      }]
+    }
+  });
+  assert.equal(scoped.remaining, 80);
+
+  // A lone scoped pool also cannot become the exhaustion gate — but note it
+  // still lands in the secondary slot, and the default pick reports the
+  // tighter of primary/secondary by design (pre-existing semantics, not the
+  // new gate), so the figure is 0% either way.
+  const scopedOnly = pickWorstLimitProvider({
+    limits: {
+      providers: [{
+        provider: 'claude',
+        status: 'ok',
+        windows: [
+          { kind: 'session', remainingPercent: 80 },
+          { kind: 'weekly', label: 'Fable', remainingPercent: 0 }
+        ]
+      }]
+    }
+  });
+  assert.equal(scopedOnly.remaining, 0);
+  assert.equal(scopedOnly.exhaustedWindow, null);
+
+  // Provider-declared additional pools (Factory Core/Premium) never gate,
+  // whatever their kind. The default pick stays on the session headline
+  // because billing windows never join the primary/secondary pair.
+  const additionalPool = pickWorstLimitProvider({
+    limits: {
+      providers: [{
+        provider: 'factory',
+        status: 'ok',
+        windows: [
+          { kind: 'session', remainingPercent: 80 },
+          { kind: 'billing', label: 'Monthly', remainingPercent: 50 },
+          { kind: 'billing', label: 'Core Monthly', remainingPercent: 0, additional: true }
+        ]
+      }]
+    }
+  });
+  assert.equal(additionalPool.remaining, 80);
+  assert.equal(additionalPool.exhaustedWindow, null);
 });
 
 test('tray session quota text keeps lowest-remaining account selection when showing used percent', () => {

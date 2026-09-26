@@ -13,11 +13,24 @@ module.exports = {
       resolveStyle: 'explicit'
     }
   ],
-  // DeepSeek keeps its own pending-check lane, so there is no pendingKey.
   status: {
     credential: 'deepseekApiKey',
     configuredKey: 'deepseekApiKeyConfigured',
-    sourceKey: 'deepseekApiKeySource'
+    sourceKey: 'deepseekApiKeySource',
+    pendingKey: 'deepseekPendingCheckSince'
+  },
+  form: {
+    field: 'deepseekApiKey',
+    input: 'input',
+    titleKey: 'settings.deepseek.title',
+    openKey: 'settings.deepseek.openBrowser',
+    clearKey: 'settings.deepseek.clearApiKey',
+    placeholderKey: 'settings.deepseek.apiKeyPlaceholder',
+    saveKey: 'settings.deepseek.saveApiKey',
+    emptyKey: 'settings.deepseek.statusNotSet',
+    failedKey: 'settings.deepseek.saveFailed',
+    noteKey: 'settings.deepseek.note',
+    url: 'https://platform.deepseek.com/api_keys'
   },
   urlPolicy: [
     { hosts: ['platform.deepseek.com'], pathPrefixes: ['/api_keys'] }

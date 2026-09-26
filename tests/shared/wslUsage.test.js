@@ -25,6 +25,30 @@ test('homeHasData returns the client ids whose markers are present', () => {
   assert.deepEqual([...ids].sort(), ['codex', 'hermes', 'opencode', 'zcode']);
 });
 
+test('each shared host directory discovers and attributes a WSL-only home', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\alice';
+  const entries = [
+    ['.factory/sessions', 'droid'],
+    ['.qwen/projects', 'qwen'],
+    ['.pi/agent/sessions', 'pi'],
+    ['.omp/agent/sessions', 'omp'],
+    ['.commandcode/projects', 'commandcode']
+  ];
+  for (const [marker, client] of entries) {
+    const markerPath = `${home}\\${marker.replace(/\//g, '\\')}`;
+    const deps = {
+      platform: 'win32',
+      exec: (cmd) => cmd === 'reg' ? 'Lxss' : 'Ubuntu\n',
+      readdirSync: (dir) => dir === '\\\\wsl$\\Ubuntu\\home' ? ['alice'] : [],
+      existsSync: (value) => value === markerPath
+    };
+    assert.deepEqual(homeHasData(home, deps.existsSync, deps.readdirSync), [client]);
+    assert.deepEqual(wslUsageHomes(deps), [home]);
+    const { detected } = await collectWslUsage({ clients: client, runTokscale: async () => ({ entries: [] }) }, deps);
+    assert.deepEqual(detected, [client]);
+  }
+});
+
 test('homeHasData maps an alternate-root marker to its client id', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const present = new Set([`${home}\\.kimi-code\\sessions`]);

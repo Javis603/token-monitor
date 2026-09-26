@@ -162,8 +162,13 @@ function limitProviderSettingKeys() {
 
 // The provider-owned slice of isAllowedExternalUrl: an allowlist of
 // host + path rules, one entry per console page a settings panel links to.
-function limitProviderUrlAllowed(hostname, pathname) {
-  for (const decl of LIMIT_PROVIDER_ACCOUNTS) {
+// `providerId` narrows the check to that provider's own policy, so a form can
+// prove its pages pass its own rules rather than the union of everyone's.
+function limitProviderUrlAllowed(hostname, pathname, providerId = '') {
+  const decls = providerId
+    ? LIMIT_PROVIDER_ACCOUNTS.filter((decl) => decl.id === providerId)
+    : LIMIT_PROVIDER_ACCOUNTS;
+  for (const decl of decls) {
     for (const rule of decl.urlPolicy || []) {
       if (!rule.hosts.includes(hostname)) continue;
       const noPathRule = !rule.pathPrefixes && !rule.exactPaths;

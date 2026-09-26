@@ -202,7 +202,7 @@ test('Cursor account header uses the shared linked-account summary', () => {
 
 test('Cursor settings use the shared multi-account rows and inline add flow', () => {
   const html = readRendererFile('index.html');
-  const details = html.match(/<div id="cursorSettingsDetails"[\s\S]*?<div id="cursorErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  const details = html.match(/<div id="cursorSettingsDetails"[\s\S]*?<div id="cursorErrorMessage" class="settings-note error hidden" role="alert"><\/div>/)?.[0] || '';
   assert.match(details, /id="cursorAddAccountButton" class="opencode-add-summary"[^>]*aria-expanded="false"[^>]*aria-controls="cursorManualDetails"/);
   assert.match(details, /<svg class="add-icon"/);
   assert.doesNotMatch(details, /cursorRefreshButton|>Refresh<|>重新整理</);
@@ -271,7 +271,7 @@ test('Cursor account discovery runs automatically without a separate refresh act
 
 test('OpenCode account panel provides multi-profile management', () => {
   const html = readRendererFile('index.html');
-  const details = html.match(/<div id="opencodeSettingsDetails"[\s\S]*?<div id="opencodeErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  const details = html.match(/<div id="opencodeSettingsDetails"[\s\S]*?<div id="opencodeErrorMessage" class="settings-note error hidden" role="alert"><\/div>/)?.[0] || '';
   assert.match(details, /<div id="opencodeProfileList" class="opencode-profile-list"><\/div>/);
   assert.match(details, /<div id="opencodeAddForm" class="opencode-add-form">/);
   assert.match(details, /<button id="opencodeAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="opencodeAddDetails">/);
@@ -298,7 +298,7 @@ test('OpenCode account panel provides multi-profile management', () => {
   // DevTools instructions.
   assert.match(details, /<div id="opencodeCookieFields" class="opencode-credential-fields hidden">/);
   assert.match(details, /<div class="settings-actions">\s*<button id="opencodeCookieSubmit" data-i18n="settings\.opencode\.saveProfile">/);
-  assert.match(details, /<div id="opencodeErrorMessage" class="settings-note error hidden"><\/div>/);
+  assert.match(details, /<div id="opencodeErrorMessage" class="settings-note error hidden" role="alert"><\/div>/);
 
   const app = readRendererFile('app.js');
   assert.match(app, /function renderOpenCodeProfiles\(\)/);
@@ -320,7 +320,7 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(setupBody, /window\.tokenMonitor\.opencode\.saveProfile\(\s*name,\s*cookie,\s*opencodeCredentialKind,\s*\{ merge \}\s*\)/);
   assert.match(setupBody, /await submit\(false\);/);
   assert.match(setupBody, /if \(result\.nameTaken && addMergeOffer\)/);
-  assert.match(setupBody, /confirmOpenCodeMerge = \(\) => submit\(true\);/);
+  assert.match(setupBody, /confirmOpenCodeMerge = \(\) => accountProfileSaves\.run\('opencode', addMergeButton, \(\) => submit\(true\)\);/);
   // `submit` closes over the name and credential captured when Save was pressed,
   // so any edit afterwards has to withdraw the offer: the backend still demands
   // `merge`, but the click it receives would otherwise be consent to a proposal
@@ -743,27 +743,45 @@ test('Codex system account switching is exposed from limits account rows', () =>
   assert.doesNotMatch(renderLimits, /codexSwitchPopoverRenderPending/);
 });
 
-test('DeepSeek account panel provides a first-class API key entry', () => {
+test('DeepSeek and MiniMax API key panels come from the generic account form', () => {
   const html = readRendererFile('index.html');
-  const details = html.match(/<div id="deepseekSettingsDetails"[\s\S]*?<div id="deepseekErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
-  assert.match(details, /<button id="deepseekOpenBrowser"[\s\S]*data-i18n="settings\.deepseek\.openBrowser">/);
-  assert.match(details, /<button id="deepseekLogoutButton" class="hidden" data-i18n="settings\.deepseek\.clearApiKey">/);
-  assert.match(details, /<input id="deepseekApiKeyInput" type="password"[\s\S]*data-i18n-placeholder="settings\.deepseek\.apiKeyPlaceholder"/);
-  assert.match(details, /<button id="deepseekApiKeySubmit"[\s\S]*data-i18n="settings\.deepseek\.saveApiKey">/);
+  const css = readRendererFile('styles.css');
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const forms = limitAccountFormsForRenderer();
+  for (const id of ['deepseek', 'minimax']) {
+    assert.doesNotMatch(html, new RegExp(`id="${id}(AccountGroup|ManualPanel|ApiKeyInput)"`), id);
+    assert.doesNotMatch(css, new RegExp(`#${id}ManualPanel`), id);
+    const form = forms.find((candidate) => candidate.id === id);
+    assert.equal(form.kind, 'credential', id);
+    assert.deepEqual(form.fields.map(({ key, input }) => [key, input]), [[`${id}ApiKey`, 'password']], id);
+    assert.deepEqual(form.manual[0], { note: `settings.${id}.note` }, id);
+    assert.deepEqual(form.status, {
+      configuredKey: `${id}ApiKeyConfigured`,
+      sourceKey: `${id}ApiKeySource`,
+      pendingKey: `${id}PendingCheckSince`
+    }, id);
+    for (const key of ['titleKey', 'openKey', 'clearKey', 'saveKey', 'emptyKey', 'failedKey']) {
+      assert.match(form[key], new RegExp(`^settings\\.${id}\\.`), `${id} ${key}`);
+    }
+    assert.match(form.fields[0].placeholderKey, new RegExp(`^settings\\.${id}\\.`), id);
+  }
+  assert.deepEqual(forms.find(({ id }) => id === 'deepseek').openUrl, { url: 'https://platform.deepseek.com/api_keys' });
 
+  // MiniMax keeps landing on the region its last successful poll resolved to;
+  // the form declares that, so the renderer has no MiniMax branch of its own.
   const app = readRendererFile('app.js');
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/platform\.deepseek\.com\/api_keys'\)/);
-  assert.match(setupBody, /saveSettings\(\{ deepseekApiKey: input\.value \}\)/);
-  assert.match(setupBody, /saveSettings\(\{ deepseekApiKey: '' \}\)/);
-  assert.match(setupBody, /refreshStats\(\{ force: true \}\)/);
-  const renderBody = functionBody(app, 'renderDeepseekStatus', 'renderOpenCodeProfiles');
-  assert.match(renderBody, /const openBtn = document\.getElementById\('deepseekOpenBrowser'\);/);
-  assert.match(renderBody, /const linked = deepseekAccountLinked\(\);/);
-  assert.match(renderBody, /manualPanel\.classList\.toggle\('hidden', linked\)/);
-  assert.match(renderBody, /openBtn\.classList\.toggle\('hidden', linked\)/);
-  assert.match(renderBody, /logoutBtn\.classList\.toggle\('hidden', !linked \|\| source !== 'settings'\)/);
-  assert.match(renderBody, /refreshBtn\.classList\.toggle\('hidden', !configured\)/);
+  assert.deepEqual(forms.find(({ id }) => id === 'minimax').openUrl, {
+    byStatus: 'region',
+    urls: { en: 'https://platform.minimax.io/user-center/payment/token-plan' },
+    default: 'https://platform.minimaxi.com/user-center/payment/token-plan'
+  });
+  assert.match(app, /limitAccountPanelsApi\.resolveOpenUrl\(form, \{\s*document,\s*provider: externalProviderForAccount\(form\.id\)/);
+  assert.doesNotMatch(app, /minimaxPlatformUrl|form\.id === 'minimax'/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  for (const host of ['platform.minimax.io', 'platform.minimaxi.com']) {
+    assert.equal(limitProviderUrlAllowed(host, '/user-center/payment/token-plan'), true, host);
+  }
+  assert.doesNotMatch(app, /render(Deepseek|Minimax)Status|set(Deepseek|Minimax)AccountExpanded|(deepseek|minimax)AccountLinked/);
 });
 
 test('API key account entries share styling and Copilot uses the folded token entry', () => {
@@ -785,36 +803,40 @@ test('API key account entries share styling and Copilot uses the folded token en
   const barePanels = [...html.matchAll(/<div id="([a-zA-Z]+ManualPanel)"([^>]*)>/g)]
     .filter(([, , attributes]) => !/opencode-add-form/.test(attributes))
     .map(([, id]) => id);
-  assert.ok(barePanels.length > 10, 'the manual panels should be found in index.html');
+  assert.ok(barePanels.includes('kimiManualPanel'), 'the manual panels should be found in index.html');
   for (const id of barePanels) {
     assert.ok(
       animationBody.includes(`'#${id}'`),
       `${id} is a plain panel and must be animated by initSettingsAnimationWrappers`
     );
   }
+  // Generated panels share one class, so the wrapper list names it once.
+  assert.ok(animationBody.includes("'.credential-manual-panel'"));
   assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
   assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
 
   // Each provider's error line starts hidden. Hiding itself is the stylesheet's
   // one blanket rule, so what is worth asserting here is that every provider has
   // such a line and that none of them ship visible.
-  for (const provider of ['deepseek', 'devin', 'minimax', 'zai', 'zaiteam', 'volcengine', 'qoder', 'trae', 'ollama', 'kimi', 'copilot']) {
+  for (const provider of ['volcengine', 'kimi', 'copilot']) {
     assert.match(html, new RegExp(`id="${provider}ErrorMessage"[^>]*class="[^"]*hidden"`), provider);
   }
-  assert.match(css, /#kimiManualPanel,\n#copilotManualPanel,\n.single-credential-manual-panel,\n#mimoManualPanel,\n#zaiManualPanel,\n#zaiteamManualPanel,\n#qoderManualPanel,\n#devinManualPanel,\n#deepseekManualPanel,\n#minimaxManualPanel,\n#volcengineManualPanel,\n#ollamaManualPanel,\n#traeManualPanel\s*\{\n\s*min-width: 0;/);
-  assert.match(css, /#kimiManualPanel > \.accordion-animation-inner,\n.single-credential-manual-panel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#zaiManualPanel > \.accordion-animation-inner,\n#zaiteamManualPanel > \.accordion-animation-inner,\n#qoderManualPanel > \.accordion-animation-inner,\n#devinManualPanel > \.accordion-animation-inner,\n#deepseekManualPanel > \.accordion-animation-inner,\n#minimaxManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner,\n#ollamaManualPanel > \.accordion-animation-inner,\n#traeManualPanel > \.accordion-animation-inner,\n#alibabaManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.match(css, /#kimiManualPanel,\n#copilotManualPanel,\n\.credential-manual-panel,\n#mimoManualPanel,\n#volcengineManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#kimiManualPanel > \.accordion-animation-inner,\n\.credential-manual-panel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
   assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
   {
-    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes(".single-credential-manual-panel input") && match[2].includes("font-size: 12px;"));
+    // Every generated control carries .credential-input wherever it is placed,
+    // so a region select above the paste panel is styled like the inputs in it.
+    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes(".credential-input,") && match[2].includes("font-size: 12px;"));
     assert.ok(rule, 'shared credential input style should exist');
-    for (const selector of [".single-credential-manual-panel input","#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", ".single-credential-manual-panel textarea", "#mimoManualPanel input", "#mimoManualPanel textarea", "#zaiManualPanel input", "#zaiApiRegionInput", "#zaiteamManualPanel input", "#qoderManualPanel textarea", "#qoderManualPanel select", "#deepseekManualPanel input", "#minimaxManualPanel input", "#volcengineManualPanel input", "#ollamaManualPanel textarea", "#traeManualPanel input", "#alibabaManualPanel textarea", "#alibabaManualPanel select"]) {
+    for (const selector of [".credential-input", "#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", "#mimoManualPanel input", "#mimoManualPanel textarea", "#volcengineManualPanel input"]) {
       assert.ok(rule[1].split(',').map((value) => value.trim()).includes(selector), selector);
     }
   }
   {
-    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes(".single-credential-manual-panel input") && match[2].includes("font-family: monospace;"));
+    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes(".credential-input:not(select)") && match[2].includes("font-family: monospace;"));
     assert.ok(rule, 'shared credential input style should exist');
-    for (const selector of [".single-credential-manual-panel input","#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", ".single-credential-manual-panel textarea", "#mimoManualPanel input", "#mimoManualPanel textarea", "#zaiManualPanel input", "#zaiteamManualPanel input", "#qoderManualPanel textarea", "#deepseekManualPanel input", "#minimaxManualPanel input", "#volcengineManualPanel input", "#ollamaManualPanel textarea", "#traeManualPanel input"]) {
+    for (const selector of [".credential-input:not(select)", "#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", "#mimoManualPanel input", "#mimoManualPanel textarea", "#volcengineManualPanel input"]) {
       assert.ok(rule[1].split(',').map((value) => value.trim()).includes(selector), selector);
     }
   }
@@ -824,11 +846,11 @@ test('API key account entries share styling and Copilot uses the folded token en
 
 test('Copilot account panel provides GitHub sign-in plus manual token fallback', () => {
   const html = readRendererFile('index.html');
-  const details = html.match(/<div id="copilotSettingsDetails"[\s\S]*?<div id="copilotErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
+  const details = html.match(/<div id="copilotSettingsDetails"[\s\S]*?<div id="copilotErrorMessage" class="settings-note error hidden" role="alert"><\/div>/)?.[0] || '';
   assert.match(details, /<button id="copilotSignInButton"[\s\S]*data-i18n="settings\.copilot\.signIn">/);
   assert.match(details, /<button id="copilotCancelSignInButton" class="hidden" data-i18n="settings\.common\.cancel">/);
   assert.match(details, /<button id="copilotLogoutButton" class="hidden" data-i18n="settings\.copilot\.logout">/);
-  assert.match(details, /<pre id="copilotLoginStatus" class="codex-login-output hidden"><\/pre>/);
+  assert.match(details, /<pre id="copilotLoginStatus" class="codex-login-output hidden" role="status" aria-live="polite"><\/pre>/);
   assert.match(details, /<button id="copilotManualToggle"[\s\S]*aria-controls="copilotManualDetails"/);
   assert.match(details, /<div id="copilotManualDetails" class="opencode-add-details accordion-animated-container hidden">/);
   assert.match(details, /<input id="copilotApiTokenInput" type="password"[\s\S]*data-i18n-placeholder="settings\.copilot\.apiTokenPlaceholder"/);
@@ -851,10 +873,10 @@ test('Copilot account panel provides GitHub sign-in plus manual token fallback',
   assert.match(setupBody, /saveSettings\(\{ copilotApiToken: input\.value \}\)/);
   assert.match(setupBody, /saveSettings\(\{ copilotApiToken: '' \}\)/);
 
-  const renderBody = functionBody(app, 'renderCopilotStatus', 'renderDeepseekStatus');
+  const renderBody = functionBody(app, 'renderCopilotStatus', 'renderOpenCodeProfiles');
   assert.match(renderBody, /cancelBtn\.classList\.toggle\('hidden', !state\.copilotSignInBusy \|\| !state\.copilotSignInCancelable \|\| linked\)/);
   assert.match(renderBody, /refreshBtn\.classList\.toggle\('hidden', !configured \|\| \(state\.copilotSignInBusy && !linked\)\)/);
-  assert.match(renderBody, /errorEl\.textContent = state\.copilotErrorMessage \|\| '';/);
+  assert.match(renderBody, /accountShellApi\.render\(\{[\s\S]*?error: errorEl,\s*errorText: state\.copilotErrorMessage/);
   assert.doesNotMatch(renderBody, /errorEl\.textContent = '';/);
 
   const statusBody = functionBody(app, 'copilotAccountStatusText', 'apiKeyAccountStatusText');
@@ -867,90 +889,78 @@ test('Copilot account panel provides GitHub sign-in plus manual token fallback',
   assert.match(flowBody, /return current && incoming === current;/);
 });
 
-test('Z.ai, Volcengine, Qoder, Trae, and Ollama account panels are exposed in settings', () => {
+test('Volcengine keeps its hand-built panel and saves through the shared credential path', () => {
   const html = readRendererFile('index.html');
-  assert.match(html, /<div id="zaiAccountGroup"[\s\S]*?<select id="zaiApiRegionInput">[\s\S]*?<input id="zaiApiKeyInput" type="password"[\s\S]*?<button id="zaiApiKeySubmit"[\s\S]*data-i18n="settings\.zai\.saveApiKey">/);
   assert.match(html, /<div id="volcengineAccountGroup"[\s\S]*?data-i18n="settings\.volcengine\.accessKeyId">Access key ID \/ API key[\s\S]*?<input id="volcengineAccessKeyInput" type="password"[\s\S]*placeholder="AKLT\.\.\. or ark-\.\.\."[\s\S]*?<input id="volcengineSecretAccessKeyInput" type="password"[\s\S]*?<input id="volcengineRegionInput" type="text"[\s\S]*?<button id="volcengineCredentialsSubmit"[\s\S]*data-i18n="settings\.volcengine\.saveCredentials">/);
-  assert.match(html, /<div id="qoderAccountGroup"[\s\S]*?<select id="qoderSiteInput">[\s\S]*?<textarea id="qoderCookieInput"[\s\S]*?<button id="qoderCookieSubmit"[\s\S]*data-i18n="settings\.qoder\.saveCookie">/);
-  assert.match(html, /<div id="traeAccountGroup"[\s\S]*?<input id="traeTokenInput" type="password"[\s\S]*?<input id="traeDeviceIdInput" type="text"[\s\S]*?data-i18n-placeholder="settings\.trae\.deviceIdPlaceholder"[\s\S]*?<button id="traeTokenSubmit"[\s\S]*data-i18n="settings\.trae\.saveCredentials">/);
-  const traeDetails = html.match(/<div id="traeSettingsDetails"[\s\S]*?<div id="traeErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
-  assert.match(traeDetails, /<strong>1\.<\/strong> <span data-i18n="settings\.trae\.step1">/);
-  assert.match(traeDetails, /<strong>2\.<\/strong> <span data-i18n="settings\.trae\.step2Before">[\s\S]*?> www\.trae\.cn\.<br>/);
-  assert.match(traeDetails, /<strong>3\.<\/strong> <span data-i18n="settings\.trae\.step3Before">[\s\S]*?<code>Cloud-IDE-Token<\/code>[\s\S]*?<span data-i18n="settings\.trae\.step3After">/);
-  assert.match(traeDetails, /<strong>4\.<\/strong> <span data-i18n="settings\.trae\.step4">/);
-  assert.match(traeDetails, /id="traeTokenInput"[^>]*placeholder="Cloud-IDE-Token"/);
-  assert.match(traeDetails, /id="traeDeviceIdInput"[^>]*placeholder="X-Device-Id"[^>]*data-i18n-placeholder="settings\.trae\.deviceIdPlaceholder"/);
-  assert.match(traeDetails, /data-i18n="settings\.trae\.deviceIdNote">[^<]*ide_user_ent_usage[^<]*X-Device-Id/);
-  assert.doesNotMatch(traeDetails, /settings\.trae\.note/);
-  assert.match(html, /<div id="ollamaAccountGroup"[\s\S]*?<textarea id="ollamaCookieInput"[\s\S]*?<button id="ollamaCookieSubmit"[\s\S]*data-i18n="settings\.ollama\.saveCookie">/);
-  const ollamaDetails = html.match(/<div id="ollamaSettingsDetails"[\s\S]*?<div id="ollamaErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
-  assert.match(ollamaDetails, /<strong>1\.<\/strong> <span data-i18n="settings\.ollama\.step1">/);
-  assert.match(ollamaDetails, /<strong>2\.<\/strong> <span data-i18n="settings\.ollama\.step2">/);
-  assert.match(ollamaDetails, /<strong>3\.<\/strong> <span data-i18n="settings\.ollama\.step3">/);
-  assert.match(ollamaDetails, /<strong>4\.<\/strong> <span data-i18n="settings\.ollama\.step4">/);
-  assert.match(ollamaDetails, /placeholder="wos-session=\.\.\."/);
-  assert.doesNotMatch(ollamaDetails, /settings\.ollama\.note/);
-  const qoderDetails = html.match(/<div id="qoderSettingsDetails"[\s\S]*?<div id="qoderErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
-  assert.match(qoderDetails, /<strong>1\.<\/strong> <span data-i18n="settings\.qoder\.step1Before">[\s\S]*?<code id="qoderUsagePageHint">qoder\.com\/account\/usage<\/code>[\s\S]*?<span data-i18n="settings\.qoder\.step1After">/);
-  assert.doesNotMatch(qoderDetails, /<\/code>\s*\/\s*<code>qoder\.com\.cn\/account\/usage<\/code>/);
-  assert.match(qoderDetails, /<strong>2\.<\/strong> <span data-i18n="settings\.qoder\.step2">/);
-  assert.match(qoderDetails, /<strong>3\.<\/strong> <span data-i18n="settings\.qoder\.step3">/);
-  assert.match(qoderDetails, /<strong>4\.<\/strong> <span data-i18n="settings\.qoder\.step4">/);
-  assert.doesNotMatch(qoderDetails, /settings\.qoder\.note/);
-  assert.doesNotMatch(qoderDetails, /mimoAccountGroup|copilotAccountGroup/);
-
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /saveSettings\(\{ zaiApiKey: input\.value, zaiApiRegion: regionInput\?\.value \|\| 'global' \}\)/);
-  assert.match(setupBody, /zaiApiRegionInput\?\.addEventListener\('change', \(\) => void saveSettings\(\{ zaiApiRegion: zaiApiRegionInput\.value \|\| 'global' \}\)\)/);
   assert.match(setupBody, /const accessKeyValue = String\(accessKeyInput\.value \|\| ''\)\.trim\(\);/);
   assert.match(setupBody, /\/\^AKLT\/i\.test\(accessKeyValue\) && !secretValue/);
-  assert.match(setupBody, /saveSettings\(\{\s*volcengineAccessKeyId: accessKeyInput\.value,[\s\S]*?volcengineSecretAccessKey: secretInput\.value,[\s\S]*?volcengineRegion: regionInput\.value \|\| 'cn-beijing'/);
-  assert.match(setupBody, /saveSettings\(\{ qoderCookie: input\.value, qoderSite: siteInput\?\.value \|\| 'global' \}\)/);
-  assert.match(setupBody, /qoderSiteInput\?\.addEventListener\('change', \(\) => \{[\s\S]*?updateQoderUsagePageHint\(\);[\s\S]*?void saveSettings\(\{ qoderSite: qoderSiteInput\.value \|\| 'global' \}\);[\s\S]*?\}\)/);
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(zaiPlatformUrl\(\)\)/);
+  assert.match(setupBody, /'settings\.volcengine\.secretRequired'/);
+  assert.match(setupBody, /submitAccountCredential\(event\.currentTarget, 'volcengine', \{\s*volcengineAccessKeyId: accessKeyInput\.value,[\s\S]*?volcengineSecretAccessKey: secretInput\.value,[\s\S]*?volcengineRegion: regionInput\.value \|\| 'cn-beijing'/);
+  assert.match(setupBody, /getElementById\('volcengineLogoutButton'\)\.addEventListener\('click', \(\) => clearAccountCredential\('volcengine'\)\)/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(volcenginePlatformUrl\(\)\)/);
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(qoderPlatformUrl\(\)\)/);
-  assert.match(setupBody, /const deviceIdInput = document\.getElementById\('traeDeviceIdInput'\);/);
-  assert.match(setupBody, /if \(!String\(tokenInput\.value \|\| ''\)\.trim\(\)\) \{[\s\S]*?settings\.trae\.missingAuthorization/);
-  assert.match(setupBody, /traeAccessToken: tokenInput\.value,[\s\S]*?traeDeviceId: deviceIdInput\.value,[\s\S]*?limitProviders: limitProviderSelectionIncluding\('trae'\)/);
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/www\.trae\.cn'\)/);
-  assert.match(setupBody, /ollamaCookie: input\.value/);
-  assert.match(setupBody, /const validation = await window\.tokenMonitor\.ollama\.validateCookie\(input\.value\);/);
-  assert.match(setupBody, /if \(!validation\?\.ok\) \{[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?ollamaValidationError\(validation\);[\s\S]*?return;/);
-  assert.match(setupBody, /limitProviders: limitProviderSelectionIncluding\('ollama'\)/);
-  assert.match(setupBody, /limitsEnabled: true/);
-  assert.match(setupBody, /clearExternalProviderCheckPending\('ollama'\);/);
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(ollamaPlatformUrl\(\)\)/);
+  const volcengineUrlBody = functionBody(app, 'volcenginePlatformUrl', 'kimiPlatformUrl');
+  assert.match(volcengineUrlBody, /console\.volcengine\.com\/ark\/region:ark\+cn-beijing\/openManagement/);
+  const { limitProviderEntry } = require('../../src/shared/limits/registry');
+  assert.equal(limitProviderEntry('volcengine').form.kind, 'custom');
+  for (const key of ['secretRequired', 'agentSecretRequired']) {
+    assert.equal(readRendererFile('i18n.js').split(`'settings.volcengine.${key}':`).length - 1, 5, key);
+  }
+});
+
+test('Z.ai, Qoder, Trae and Ollama panels are generated from their declared forms', () => {
+  const html = readRendererFile('index.html');
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const forms = Object.fromEntries(limitAccountFormsForRenderer().map((form) => [form.id, form]));
+  for (const id of ['zai', 'qoder', 'trae', 'ollama']) assert.doesNotMatch(html, new RegExp(`id="${id}AccountGroup"`), id);
+
+  // Z.ai: the region select sits above the paste panel and saves on change.
+  assert.deepEqual(forms.zai.top, [{ field: 'zaiApiRegion' }]);
+  const zaiRegion = forms.zai.fields.find(({ key }) => key === 'zaiApiRegion');
+  assert.deepEqual(zaiRegion.options.map(({ value }) => value), ['global', 'bigmodel-cn']);
+  assert.equal(zaiRegion.saveOnChange, true);
+  assert.equal(zaiRegion.secret, false, 'Clear keeps the region');
+  assert.deepEqual(forms.zai.openUrl.urls, {
+    global: 'https://z.ai/manage-apikey/coding-plan/personal/my-plan',
+    'bigmodel-cn': 'https://bigmodel.cn/coding-plan/personal/usage'
+  });
+
+  // Qoder: the site select changes both the step hint and the landing page.
+  const qoderStep = forms.qoder.manual.find((block) => block.steps).steps[0];
+  assert.deepEqual(qoderStep, ['settings.qoder.step1Before', {
+    code: { byField: 'qoderSite', values: { global: 'qoder.com/account/usage', cn: 'qoder.com.cn/account/usage' } }
+  }, 'settings.qoder.step1After']);
+  assert.deepEqual(forms.qoder.openUrl.urls, { global: 'https://qoder.com/account/usage', cn: 'https://qoder.com.cn/account/usage' });
+  assert.doesNotMatch(JSON.stringify(forms.qoder), /settings\.qoder\.note/);
+
+  // Trae: the optional device ID comes after the token, then its note.
+  assert.deepEqual(forms.trae.manual.slice(1), [
+    { field: 'traeAccessToken' }, { field: 'traeDeviceId' }, { note: 'settings.trae.deviceIdNote' }
+  ]);
+  assert.equal(forms.trae.fields[0].placeholder, 'Cloud-IDE-Token');
+  assert.equal(forms.trae.fields[1].required, false);
+  assert.deepEqual(forms.trae.manual[0].steps[2], ['settings.trae.step3Before', { code: 'Cloud-IDE-Token' }, 'settings.trae.step3After']);
+  assert.equal(forms.trae.messages.required, 'settings.trae.missingAuthorization');
+  assert.doesNotMatch(JSON.stringify(forms.trae), /settings\.trae\.note/);
+  assert.match(readRendererFile('i18n.js'), /'settings\.trae\.deviceIdNote': '[^']*ide_user_ent_usage[^']*X-Device-Id/);
+
+  // Ollama: numbered steps, the cookie textarea, and a validated save.
+  assert.equal(forms.ollama.manual[0].steps.length, 4);
+  assert.deepEqual(forms.ollama.fields.map(({ key, input }) => [key, input]), [['ollamaCookie', 'textarea']]);
+  assert.equal(forms.ollama.messages.rejected, 'settings.ollama.validationInvalid');
+  assert.match(readRendererFile('i18n.js'), /'settings\.ollama\.cookiePlaceholder': 'wos-session=\.\.\.'/);
 
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
-  assert.match(preload, /validateCookie: \(cookie\) => ipcRenderer\.invoke\('ollama:validateCookie', cookie\)/);
-
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
-  const validationHandler = main.slice(
-    main.indexOf("ipcMain.handle('ollama:validateCookie'"),
-    main.indexOf("ipcMain.handle('opencode:saveCookie'")
-  );
-  assert.match(validationHandler, /const cookie = normalizeAccountField\('ollamaCookie', raw\);/);
-  assert.match(validationHandler, /await fetchOllamaLimits\(\{ ollamaCookie: cookie \}, electronProviderDeps\(\{ bypassValidationCache: true \}\)\)/);
-  assert.match(validationHandler, /rememberOllamaValidation\(cookie, provider\);/);
-  assert.match(validationHandler, /return \{ ok: provider\.status === 'ok', status: provider\.status \};/);
-
-  const qoderSiteBody = functionBody(app, 'selectedQoderSite', 'qoderUsagePagePath');
-  assert.match(qoderSiteBody, /document\.getElementById\('qoderSiteInput'\)\?\.value/);
-  assert.match(qoderSiteBody, /state\.settings\?\.qoderSite === 'cn' \? 'cn' : 'global'/);
-  const qoderPathBody = functionBody(app, 'qoderUsagePagePath', 'qoderPlatformUrl');
-  assert.match(qoderPathBody, /selectedQoderSite\(\) === 'cn' \? 'qoder\.com\.cn\/account\/usage' : 'qoder\.com\/account\/usage'/);
-  const qoderUrlBody = functionBody(app, 'qoderPlatformUrl', 'updateQoderUsagePageHint');
-  assert.match(qoderUrlBody, /return `https:\/\/\$\{qoderUsagePagePath\(\)\}`;/);
-
-  const zaiUrlBody = functionBody(app, 'zaiPlatformUrl', 'volcenginePlatformUrl');
-  assert.match(zaiUrlBody, /document\.getElementById\('zaiApiRegionInput'\)\?\.value/);
-  assert.match(zaiUrlBody, /return region === 'bigmodel-cn'/);
-  assert.match(zaiUrlBody, /https:\/\/bigmodel\.cn\/coding-plan\/personal\/usage/);
-  assert.match(zaiUrlBody, /https:\/\/z\.ai\/manage-apikey\/coding-plan\/personal\/my-plan/);
-  const volcengineUrlBody = functionBody(app, 'volcenginePlatformUrl', 'qoderPlatformUrl');
-  assert.match(volcengineUrlBody, /console\.volcengine\.com\/ark\/region:ark\+cn-beijing\/openManagement/);
+  assert.doesNotMatch(preload + main, /ollama:validateCookie|claude:saveCookie/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  for (const form of Object.values(forms)) {
+    for (const url of form.openUrl.url ? [form.openUrl.url] : [...Object.values(form.openUrl.urls), form.openUrl.default]) {
+      const parsed = new URL(url);
+      assert.equal(limitProviderUrlAllowed(parsed.hostname, parsed.pathname), true, `${form.id} ${url}`);
+    }
+  }
 });
 
 test('Zed account panel follows the manual browser Cookie flow without exposing credentials', () => {
@@ -958,11 +968,10 @@ test('Zed account panel follows the manual browser Cookie flow without exposing 
   assert.doesNotMatch(html, /id="zedAccountGroup"/);
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'zed');
-  assert.equal(form.kind, 'singleCredential');
-  assert.equal(form.input, 'textarea');
-  assert.equal(form.field, 'zedCookie');
-  assert.equal(form.url, 'https://dashboard.zed.dev/');
-  assert.deepEqual(form.steps, [1, 2, 3, 4].map((step) => `settings.zed.step${step}`));
+  assert.equal(form.kind, 'credential');
+  assert.deepEqual(form.fields.map(({ key, input }) => [key, input]), [['zedCookie', 'textarea']]);
+  assert.deepEqual(form.openUrl, { url: 'https://dashboard.zed.dev/' });
+  assert.deepEqual(form.manual[0].steps, [1, 2, 3, 4].map((step) => `settings.zed.step${step}`));
   assert.doesNotMatch(JSON.stringify(form), /zedUserId|zedAccessToken|zedServerUrl|cloud.zed.dev/);
 
   const app = readRendererFile('app.js');
@@ -971,8 +980,8 @@ test('Zed account panel follows the manual browser Cookie flow without exposing 
     app.indexOf('const TRAY_ICON_VARIANTS = [')
   );
   assert.doesNotMatch(connectionDetailMap, /\bzed:/);
-  assert.match(app, /limitAccountPanelsApi\.createSingleCredentialPanel\(form/);
-  assert.match(app, /\[field\]: value,\n\s*limitProviders: limitProviderSelectionIncluding\(id\),\n\s*limitsEnabled: true/);
+  assert.match(app, /limitAccountPanelsApi\.createCredentialPanel\(form/);
+  assert.match(app, /window\.tokenMonitor\.limits\.saveCredential\(id, values\)/);
   assert.doesNotMatch(app, /window\.tokenMonitor\.zed|zedUserId|zedAccessToken|zedServerUrl/);
 
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
@@ -991,7 +1000,7 @@ test('Zed account panel follows the manual browser Cookie flow without exposing 
   assert.equal(limitProviderUrlAllowed('dashboard.zed.dev', '/'), true);
   const panel = readRendererFile('limits/accountPanels.js');
   assert.match(panel, /element\('div', 'ErrorMessage', 'settings-note error hidden'\)/);
-  assert.match(readRendererFile('styles.css'), /\.single-credential-manual-panel textarea,/);
+  assert.match(readRendererFile('styles.css'), /\.credential-input,/);
 
   const i18n = readRendererFile('i18n.js');
   assert.doesNotMatch(i18n, /settings\.limits\.connection\.zed/);
@@ -1011,16 +1020,18 @@ test('Command Code generic account panel saves a cookie and opens the allowliste
   assert.doesNotMatch(html, /id="commandcodeAccountGroup"/);
   const { limitAccountFormsForRenderer, accountFieldProjection, accountStatusProjection } = require('../../src/electron/limits/accountSettings');
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'commandcode');
-  assert.equal(form.field, 'commandcodeCookie');
-  assert.equal(form.input, 'textarea');
-  assert.equal(form.url, 'https://commandcode.ai/settings/usage');
-  assert.deepEqual(form.steps, [1, 2, 3, 4].map((step) => `settings.commandcode.step${step}`));
+  assert.deepEqual(form.fields.map(({ key, input }) => [key, input]), [['commandcodeCookie', 'textarea']]);
+  assert.deepEqual(form.openUrl, { url: 'https://commandcode.ai/settings/usage' });
+  assert.deepEqual(form.manual[0].steps, [1, 2, 3, 4].map((step) => `settings.commandcode.step${step}`));
   const panel = readRendererFile('limits/accountPanels.js');
-  assert.match(panel, /onSave\(form, input\.value, \(\) => \{ input\.value = ''; \}\)/);
+  assert.match(panel, /await onSave\(form, values, \(\) => \{/);
   assert.match(panel, /onClear\(form\)/);
   const app = readRendererFile('app.js');
-  assert.match(app, /\[field\]: value,\n\s*limitProviders: limitProviderSelectionIncluding\(id\),\n\s*limitsEnabled: true/);
-  assert.match(app, /saveSettings\(\{ \[field\]: '' \}\)/);
+  assert.match(app, /window\.tokenMonitor\.limits\.saveCredential\(id, values\)/);
+  assert.match(app, /window\.tokenMonitor\.limits\.clearCredential\(id\)/);
+  // Saving selects the provider in main, in the same write as the credential.
+  assert.match(fs.readFileSync(path.join(rendererDir, '..', 'limits', 'credentialCommands.js'), 'utf8'),
+    /limitProviders: providerSelectionIncluding\(getSettings\(\)\.limitProviders, entry\.id\),\n\s*limitsEnabled: true/);
   const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
   assert.equal(limitProviderUrlAllowed('commandcode.ai', '/settings/usage'), true);
   assert.equal(limitProviderUrlAllowed('www.commandcode.ai', '/settings/usage'), true);
@@ -1037,9 +1048,13 @@ test('Kimi account panel makes the Code API primary and keeps Web access as a fa
 
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /saveSettings\(\{ kimiApiKey: input\.value \}\)/);
-  assert.match(setupBody, /saveSettings\(\{ kimiWebAccessToken: input\.value \}\)/);
-  assert.match(setupBody, /saveSettings\(\{ kimiApiKey: '', kimiWebAccessToken: '' \}\)/);
+  // Each lane sends only its own credential through the shared save path, so
+  // saving one never blanks the other; Clear removes both.
+  assert.match(setupBody, /\['kimiApiKeySubmit', 'kimiApiKeyInput', 'kimiApiKey'\],\s*\['kimiWebAccessTokenSubmit', 'kimiWebAccessTokenInput', 'kimiWebAccessToken'\]/);
+  assert.match(setupBody, /submitAccountCredential\(event\.currentTarget, 'kimi', \{ \[field\]: input\.value \}/);
+  assert.match(setupBody, /getElementById\('kimiLogoutButton'\)\.addEventListener\('click', \(\) => clearAccountCredential\('kimi'\)\)/);
+  const { limitProviderEntry } = require('../../src/shared/limits/registry');
+  assert.deepEqual(limitProviderEntry('kimi').form, { kind: 'custom', fields: [{ key: 'kimiApiKey' }, { key: 'kimiWebAccessToken' }] });
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\(kimiPlatformUrl\(\)\)/);
   const urlBody = functionBody(app, 'kimiPlatformUrl', 'renderExternalProviderStatus');
   assert.match(urlBody, /return 'https:\/\/www\.kimi\.com\/code\/console';/);
@@ -1058,60 +1073,53 @@ test('Kimi account panel makes the Code API primary and keeps Web access as a fa
   }
 });
 
-test('Claude Web account panel stores a redacted cookie and opens only the usage page', () => {
+test('Claude Web account panel stores a redacted cookie and opens only the usage page', async () => {
   const html = readRendererFile('index.html');
-  const details = html.match(
-    /<div id="claudeAccountGroup"[\s\S]*?<div id="claudeErrorMessage" class="settings-note error hidden"><\/div>/
-  )?.[0] || '';
-  assert.match(details, /data-i18n="settings\.claude\.title">Claude Account<\/span>/);
-  assert.match(details, /data-i18n="settings\.claude\.openBrowser">Open Claude usage in browser<\/button>/);
-  assert.match(details, /settings\.claude\.note[\s\S]*detected automatically when Web login is not configured/);
-  assert.match(details, /settings\.claude\.step2[\s\S]*Application\/Storage[\s\S]*Cookies[\s\S]*https:\/\/claude\.ai/);
-  assert.match(details, /settings\.claude\.step3[\s\S]*Copy the sessionKey value/);
-  assert.match(details, /<textarea id="claudeWebCookieInput" rows="3" autocomplete="off"[\s\S]*placeholder="sessionKey=\.\.\."/);
-  assert.match(details, /<button id="claudeWebCookieSubmit"[\s\S]*data-i18n="settings\.claude\.saveCookie">/);
-  assert.ok(
-    html.indexOf('id="claudeAccountGroup"') < html.indexOf('id="codexAccountGroup"'),
-    'Claude should follow the AI Limits provider order and appear before Codex'
-  );
-
-  const app = readRendererFile('app.js');
-  const queriedDocument = {
-    selectors: '',
-    querySelectorAll(selectors) {
-      this.selectors = selectors;
-      return [];
-    }
-  };
-  runRendererFunctions(
-    app,
-    ['initSettingsAnimationWrappers'],
-    'initSettingsAnimationWrappers();',
-    { document: queriedDocument }
-  );
-  assert.ok(
-    queriedDocument.selectors.split(',').map(selector => selector.trim()).includes('#claudeManualPanel'),
-    'Claude manual panel should receive the shared accordion wrapper'
-  );
+  assert.doesNotMatch(html, /id="claudeAccountGroup"/);
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'claude');
+  assert.deepEqual(form.manual, [
+    { note: 'settings.claude.note' },
+    { steps: [1, 2, 3, 4].map((step) => `settings.claude.step${step}`) },
+    { field: 'claudeWebCookie' }
+  ]);
+  assert.deepEqual(form.fields.map(({ key, input, placeholderKey }) => [key, input, placeholderKey]), [
+    ['claudeWebCookie', 'textarea', 'settings.claude.cookiePlaceholder']
+  ]);
+  assert.deepEqual(form.openUrl, { url: 'https://claude.ai/settings/usage' });
+  assert.deepEqual(form.messages, {
+    required: 'settings.claude.cookieRequired',
+    invalidFormat: 'settings.claude.cookieInvalidFormat',
+    rejected: 'settings.claude.cookieRejected'
+  });
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  assert.equal(MESSAGES.en['settings.claude.title'], 'Claude Account');
+  assert.match(MESSAGES.en['settings.claude.note'], /detected automatically when Web login is not configured/);
+  assert.match(MESSAGES.en['settings.claude.step2'], /Application\/Storage[\s\S]*Cookies[\s\S]*https:\/\/claude\.ai/);
+  assert.match(MESSAGES.en['settings.claude.step3'], /Copy the sessionKey value/);
+  assert.equal(MESSAGES.en['settings.claude.cookiePlaceholder'], 'sessionKey=...');
+  // A generated panel is inserted before the next catalog provider's group, so
+  // Claude still leads the list ahead of Codex.
+  const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
+  assert.ok(LIMIT_PROVIDER_IDS.indexOf('claude') < LIMIT_PROVIDER_IDS.indexOf('codex'));
 
   const css = readRendererFile('styles.css');
   // The panel collapses through the shared accordion rather than disappearing:
-  // `.accordion-animated-container` carries `display: grid !important`, so the
-  // `#claudeManualPanel.hidden { display: none }` this used to assert never took
-  // effect. What the panel needs is the wrapper, asserted just above.
-  const panelRules = cssRulesForSelector(css, '#claudeManualPanel');
+  // `.accordion-animated-container` carries `display: grid !important`, so a
+  // `.hidden { display: none }` rule would never take effect. What the panel
+  // needs is the wrapper, which initSettingsAnimationWrappers gives the class.
+  const panelRules = cssRulesForSelector(css, '.credential-manual-panel');
   assert.ok(panelRules.some(rule => declaration(rule, 'min-width') === '0'));
-  const innerRules = cssRulesForSelector(css, '#claudeManualPanel > .accordion-animation-inner');
+  const innerRules = cssRulesForSelector(css, '.credential-manual-panel > .accordion-animation-inner');
   assert.ok(innerRules.some(rule => (
     declaration(rule, 'display') === 'grid'
       && declaration(rule, 'gap') === '8px'
   )));
-  const textareaRules = cssRulesForSelector(css, '#claudeManualPanel textarea');
-  assert.ok(textareaRules.some(rule => (
+  assert.ok(cssRulesForSelector(css, '.credential-input').some(rule => (
     declaration(rule, 'width') === '100%'
       && declaration(rule, 'font-size') === '12px'
   )));
-  assert.ok(textareaRules.some(rule => declaration(rule, 'font-family') === 'monospace'));
+  assert.ok(cssRulesForSelector(css, '.credential-input:not(select)').some(rule => declaration(rule, 'font-family') === 'monospace'));
   const textareaControlRules = cssRulesForSelector(css, '.settings-panel textarea');
   assert.ok(textareaControlRules.some(rule => (
     declaration(rule, 'height') === '54px'
@@ -1138,47 +1146,24 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   );
   assert.ok(collapsedInnerRules.some(rule => declaration(rule, 'opacity') === '0'));
 
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /if \(\/\[\\r\\n\]\/\.test\(input\.value\)\)[\s\S]*settings\.claude\.cookieInvalidFormat/);
-  assert.match(setupBody, /window\.tokenMonitor\.claude\.saveCookie\(input\.value\)/);
-  assert.match(setupBody, /if \(result\?\.superseded\) return;/);
-  assert.ok(
-    setupBody.indexOf('window.tokenMonitor.claude.saveCookie(input.value)')
-      < setupBody.indexOf("limitProviders: limitProviderSelectionIncluding('claude')"),
-    'Claude Web cookies must be validated before they are persisted'
-  );
-  assert.match(setupBody, /INVALID_CLAUDE_WEB_SESSION_KEY[\s\S]*settings\.claude\.cookieInvalidFormat/);
-  assert.match(setupBody, /CLAUDE_WEB_SOURCE_CHALLENGE[\s\S]*settings\.claude\.sourceChallenge/);
-  assert.match(setupBody, /result\?\.status === 'unauthorized'[\s\S]*settings\.claude\.cookieRejected/);
-  assert.match(setupBody, /saveSettings\(\{\s*limitProviders: limitProviderSelectionIncluding\('claude'\),[\s\S]*?limitsEnabled: true/);
-  assert.doesNotMatch(setupBody, /saveSettings\(\{\s*claudeWebCookie: input\.value/);
-  assert.match(setupBody, /saveSettings\(\{ claudeWebCookie: '' \}\)/);
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(claudePlatformUrl\(\)\)/);
-  const statusBody = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
+  const app = readRendererFile('app.js');
+  const statusBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
   assert.match(statusBody, /const canClearConfiguredCredential = source === 'settings' && configured;/);
   assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked\)/);
   assert.match(statusBody, /logoutBtn\.classList\.toggle\('hidden', !canClearConfiguredCredential\)/);
-  const urlBody = functionBody(app, 'claudePlatformUrl', 'selectedQoderSite');
-  assert.match(urlBody, /return 'https:\/\/claude\.ai\/settings\/usage';/);
 
-  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  // The cookie is checked in main before it can replace a working one: a paste
+  // that is not one sk-ant- sessionKey (a multi-line paste included) is refused
+  // as a format error.
   const { normalizeAccountField, accountFieldProjection, accountStatusProjection } = require('../../src/electron/limits/accountSettings');
   assert.throws(() => normalizeAccountField('claudeWebCookie', 'sessionKey=abc'), /sk-ant-/);
-  assert.match(main, /ipcMain\.handle\('claude:saveCookie'[\s\S]*fetchClaudeLimits\([\s\S]*providerRuntimeState: new Map\(\)/);
-  assert.match(main, /const requestRevision = \+\+claudeWebCookieMutationRevision;/);
-  assert.match(main, /claudeWebCookieMutationRevision !== requestRevision[\s\S]*superseded: true/);
-  assert.match(main, /settings\.claudeWebCookie = cookieToPersist;[\s\S]*saveSettings\(\{ throwOnError: true \}\)/);
-  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
-  assert.match(preload, /claude: \{\s*saveCookie: \(cookie\) => ipcRenderer\.invoke\('claude:saveCookie', cookie\)/);
-  const updateHandler = main.slice(
-    main.indexOf("ipcMain.handle('settings:update'"),
-    main.indexOf("ipcMain.handle('appearance:preview'")
-  );
-  assert.ok(
-    updateHandler.indexOf('normalizeAccountPatch(patch, normalizedPatch)')
-      < updateHandler.indexOf('saveSettings({ throwOnError: true })'),
-    'invalid Claude cookies must be rejected before the existing credential can be persisted over'
-  );
+  assert.throws(() => normalizeAccountField('claudeWebCookie', 'sk-ant-sid01-a\nsk-ant-sid01-b'), /sk-ant-/);
+  // Storing the rotated key is covered in credentialCommands.test.js.
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  assert.match(functionBody(main, 'credentialProbeDeps', 'electronLimitsDeps'),
+    /onClaudeWebCookieRenewed: \(\{ cookie \}\) => \{\s*renewed\.claudeWebCookie = cookie;/);
+  assert.doesNotMatch(main, /claudeWebCookieMutationRevision|ipcMain\.handle\('claude:saveCookie'/);
+
   const rendererSettings = functionBody(main, 'settingsForRenderer', 'pushSettingsToRenderer');
   assert.match(rendererSettings, /\.\.\.accountFieldProjection\(settings, process\.env\)/);
   assert.match(rendererSettings, /\.\.\.accountStatusProjection\(settings, process\.env\)/);
@@ -1193,90 +1178,58 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   assert.equal(limitProviderUrlAllowed('claude.ai', '/'), false);
 });
 
-test('DeepSeek account pill keeps its validated API key state after moving into Limits', () => {
+test('DeepSeek and MiniMax key changes invalidate stale provider status before re-checking', () => {
   const app = readRendererFile('app.js');
-  assert.match(app, /deepseek: 'deepseekAccountGroup'/);
-  assert.match(app, /deepseek: 'deepseekApiKeyStatus'/);
+  // Their pills and groups are generated from the form id, so the hand-kept id
+  // maps no longer name them.
+  assert.doesNotMatch(app, /deepseek: 'deepseek(AccountGroup|ApiKeyStatus)'/);
+  assert.doesNotMatch(app, /minimax: 'minimax(AccountGroup|ApiKeyStatus)'/);
+  assert.match(app, /deepseekPendingCheckSince: 0/);
+  assert.match(app, /minimaxPendingCheckSince: 0/);
 
-  const linkedBody = functionBody(app, 'deepseekAccountLinked', 'deepseekProviderStatus');
-  assert.match(linkedBody, /Boolean\(state\.settings\?\.deepseekApiKeyConfigured\)/);
-  assert.match(linkedBody, /deepseekProviderForAccount\(\)/);
-  assert.match(linkedBody, /provider\?\.status === 'ok'/);
+  const saveBody = functionBody(app, 'saveAccountCredential', 'submitAccountCredential');
+  assert.match(saveBody, /saveCredential\(id, values\)[\s\S]*markExternalProviderCheckPending\(id\);[\s\S]*renderExternalProviderStatus\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
+  const clearBody = functionBody(app, 'clearAccountCredential', 'commitAccountCredential');
+  assert.match(clearBody, /clearCredential\(id\)\);[\s\S]*clearExternalProviderCheckPending\(id\);[\s\S]*clearExternalProviderPendingStatus\(id\);[\s\S]*renderExternalProviderStatus\(id\);/);
+  assert.match(functionBody(app, 'setupLimitAccountPanels', 'limitProviderAccountGroup'), /onClear: \(\{ id \}\) => clearAccountCredential\(id\)/);
 
-  const renderBody = functionBody(app, 'renderDeepseekStatus', 'renderOpenCodeProfiles');
-  assert.match(renderBody, /const configured = Boolean\(state\.settings\?\.deepseekApiKeyConfigured\);/);
-  assert.match(renderBody, /apiKeyAccountStatusText\('deepseek', provider, configured, source, enabled\)/);
-});
+  const configLookup = /const config = externalLimitAccountConfig\[providerName\] \|\| limitAccountForm\(providerName\)\?\.status;/;
+  const pendingBody = functionBody(app, 'markExternalProviderCheckPending', 'clearExternalProviderCheckPending');
+  assert.match(pendingBody, configLookup);
+  assert.match(pendingBody, /state\[config\.pendingKey\] = Date\.now\(\);/);
+  assert.match(pendingBody, /clearExternalProviderPendingStatus\(providerName\);/);
 
-test('DeepSeek key changes invalidate stale provider status before re-checking', () => {
-  const app = readRendererFile('app.js');
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /markDeepseekKeyCheckPending\(\);[\s\S]*await saveSettings\(\{ deepseekApiKey: input\.value \}\);[\s\S]*renderDeepseekStatus\(\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
-  assert.match(setupBody, /await saveSettings\(\{ deepseekApiKey: '' \}\);[\s\S]*clearDeepseekPendingCheck\(\);[\s\S]*clearDeepseekProviderStatus\(\);[\s\S]*renderDeepseekStatus\(\);/);
-
-  const pendingBody = functionBody(app, 'markDeepseekKeyCheckPending', 'clearDeepseekPendingCheck');
-  assert.match(pendingBody, /state\.deepseekPendingCheckSince = Date\.now\(\);/);
-  assert.match(pendingBody, /clearDeepseekProviderStatus\(\);/);
-
-  const providerBody = functionBody(app, 'deepseekProviderForAccount', 'markDeepseekKeyCheckPending');
-  assert.match(providerBody, /const pendingSince = Number\(state\.deepseekPendingCheckSince \|\| 0\);/);
+  const providerBody = functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked');
+  assert.match(providerBody, configLookup);
   assert.match(providerBody, /Date\.parse\(provider\.updatedAt \|\| ''\)/);
   assert.match(providerBody, /updatedAt < pendingSince/);
-  assert.match(providerBody, /state\.deepseekPendingCheckSince = 0;/);
+  assert.match(providerBody, /state\[config\.pendingKey\] = 0;/);
 
-  const clearBody = functionBody(app, 'clearDeepseekProviderStatus', 'renderDeepseekStatus');
-  assert.match(clearBody, /state\.stats\.limits\.providers = state\.stats\.limits\.providers\.filter/);
-  assert.match(clearBody, /provider\.provider !== 'deepseek'/);
+  const linkedBody = functionBody(app, 'externalProviderAccountLinked', 'markExternalProviderCheckPending');
+  assert.match(linkedBody, /state\.settings\?\.\[config\.configuredKey\]/);
+  assert.match(linkedBody, /provider\?\.status === 'ok'/);
+
+  const pendingStatusBody = functionBody(app, 'clearExternalProviderPendingStatus', 'nextCopilotSignInFlowId');
+  assert.match(pendingStatusBody, /state\.stats\.limits\.providers = state\.stats\.limits\.providers\.filter/);
+  assert.match(pendingStatusBody, /provider\.provider !== providerName/);
 });
 
 test('disabled credential providers settle account status instead of checking forever', () => {
   const app = readRendererFile('app.js');
   const toggleBody = functionBody(app, 'onLimitProviderToggle', 'onLimitProviderMove');
   const clearBody = functionBody(app, 'clearDisabledLimitProviderPendingChecks', 'externalProviderForAccount');
-  const externalRenderBody = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
-  const deepseekRenderBody = functionBody(app, 'renderDeepseekStatus', 'renderOpenCodeProfiles');
-  const minimaxRenderBody = functionBody(app, 'renderMinimaxStatus', 'renderCopilotStatus');
-  const copilotRenderBody = functionBody(app, 'renderCopilotStatus', 'renderDeepseekStatus');
+  const externalRenderBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
+  const copilotRenderBody = functionBody(app, 'renderCopilotStatus', 'renderOpenCodeProfiles');
 
   assert.match(toggleBody, /clearDisabledLimitProviderPendingChecks\(new Set\(checked\)\)/);
-  assert.match(clearBody, /clearDeepseekPendingCheck\(\)/);
-  assert.match(clearBody, /clearMinimaxPendingCheck\(\)/);
   assert.match(clearBody, /clearCopilotPendingCheck\(\)/);
   assert.match(clearBody, /Object\.keys\(externalLimitAccountConfig\)/);
+  assert.match(clearBody, /\(state\.settings\?\.limitAccountForms \|\| \[\]\)\.map\(\(form\) => form\.id\)/);
   assert.match(clearBody, /clearExternalProviderCheckPending\(providerName\)/);
   assert.match(externalRenderBody, /const enabled = limitProviderEnabled\(providerName\);/);
   assert.match(externalRenderBody, /const pending = enabled &&/);
   assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, provider, configured, source, enabled\)/);
-  assert.match(deepseekRenderBody, /apiKeyAccountStatusText\('deepseek', provider, configured, source, enabled\)/);
-  assert.match(minimaxRenderBody, /apiKeyAccountStatusText\('minimax', provider, configured, source, enabled\)/);
   assert.match(copilotRenderBody, /copilotAccountStatusText\(provider, configured, source, enabled\)/);
-});
-
-test('MiniMax key changes invalidate stale provider status before re-checking', () => {
-  const app = readRendererFile('app.js');
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /markMinimaxKeyCheckPending\(\);[\s\S]*await saveSettings\(\{ minimaxApiKey: input\.value \}\);[\s\S]*renderMinimaxStatus\(\);[\s\S]*await refreshStats\(\{ force: true \}\);/);
-  assert.match(setupBody, /await saveSettings\(\{ minimaxApiKey: '' \}\);[\s\S]*clearMinimaxPendingCheck\(\);[\s\S]*clearMinimaxProviderStatus\(\);[\s\S]*renderMinimaxStatus\(\);/);
-
-  const linkedBody = functionBody(app, 'minimaxAccountLinked', 'apiKeyAccountStatusText');
-  assert.match(linkedBody, /minimaxProviderForAccount\(\)/);
-
-  const renderBody = functionBody(app, 'renderMinimaxStatus', 'renderDeepseekStatus');
-  assert.match(renderBody, /const provider = minimaxProviderForAccount\(\);/);
-
-  const pendingBody = functionBody(app, 'markMinimaxKeyCheckPending', 'clearMinimaxPendingCheck');
-  assert.match(pendingBody, /state\.minimaxPendingCheckSince = Date\.now\(\);/);
-  assert.match(pendingBody, /clearMinimaxProviderStatus\(\);/);
-
-  const providerBody = functionBody(app, 'minimaxProviderForAccount', 'markMinimaxKeyCheckPending');
-  assert.match(providerBody, /const pendingSince = Number\(state\.minimaxPendingCheckSince \|\| 0\);/);
-  assert.match(providerBody, /Date\.parse\(provider\.updatedAt \|\| ''\)/);
-  assert.match(providerBody, /updatedAt < pendingSince/);
-  assert.match(providerBody, /state\.minimaxPendingCheckSince = 0;/);
-
-  const clearBody = functionBody(app, 'clearMinimaxProviderStatus', 'apiKeyAccountStatusText');
-  assert.match(clearBody, /state\.stats\.limits\.providers = state\.stats\.limits\.providers\.filter/);
-  assert.match(clearBody, /provider\.provider !== 'minimax'/);
 });
 
 test('MiMo account panel matches the manual Cookie provider layout', () => {
@@ -1304,7 +1257,7 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.ok(details.indexOf('mimoOpenConsoleButton') < details.indexOf('mimoCookieInput'));
   assert.ok(details.indexOf('mimoCookieInput') < details.indexOf('mimoSaveAccountButton'));
   assert.match(css, /#mimoManualPanel textarea,[\s\S]*font-size: 12px/);
-  assert.match(css, /#qoderManualPanel textarea,[\s\S]*#mimoManualPanel textarea,[\s\S]*font-family: monospace/);
+  assert.match(css, /\.credential-input:not\(select\),[\s\S]*#mimoManualPanel textarea,[\s\S]*font-family: monospace/);
   assert.match(css, /\.managed-account-list:empty \{ display: none; \}/);
   assert.match(app, /getElementById\('mimoManualPanel'\)\?\.classList\.toggle\('expanded', next\)/);
   assert.doesNotMatch(app, /settings\.mimo\.empty/);
@@ -1331,9 +1284,9 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
 });
 
 test('DeepSeek account copy says browser and external URL is allowlisted', () => {
-  const html = readRendererFile('index.html');
-  const details = html.match(/<div id="deepseekSettingsDetails"[\s\S]*?<div id="deepseekErrorMessage" class="settings-note error hidden"><\/div>/)?.[0] || '';
-  assert.match(details, /<button id="deepseekOpenBrowser"[\s\S]*data-i18n="settings\.deepseek\.openBrowser">/);
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'deepseek');
+  assert.equal(form.openKey, 'settings.deepseek.openBrowser');
 
   const i18n = readRendererFile('i18n.js');
   assert.match(i18n, /'settings\.deepseek\.openBrowser': 'Open DeepSeek API keys in browser'/);
@@ -1346,19 +1299,18 @@ test('DeepSeek account copy says browser and external URL is allowlisted', () =>
   const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
   assert.equal(limitProviderUrlAllowed('platform.deepseek.com', '/api_keys'), true);
   assert.equal(limitProviderUrlAllowed('platform.deepseek.com', '/'), false);
-
-  const app = readRendererFile('app.js');
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/platform\.deepseek\.com\/api_keys'\)/);
+  assert.deepEqual(form.openUrl, { url: 'https://platform.deepseek.com/api_keys' });
 });
 
 test('Devin account panel uses the shared status label and opens the allowlisted usage page', () => {
-  const html = readRendererFile('index.html');
-  const details = html.match(
-    /<div id="devinSettingsDetails"[\s\S]*?<div id="devinErrorMessage" class="settings-note error hidden" role="alert"><\/div>/
-  )?.[0] || '';
-  assert.match(details, /<button id="devinOpenBrowser"[\s\S]*data-i18n="settings\.devin\.openBrowser">/);
-  assert.doesNotMatch(details, /settings\.devin\.note|Credentials stay on this device/);
+  assert.doesNotMatch(readRendererFile('index.html'), /id="devinAccountGroup"/);
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'devin');
+  assert.equal(form.openKey, 'settings.devin.openBrowser');
+  assert.deepEqual(form.openUrl, { url: 'https://app.devin.ai/settings/usage' });
+  assert.deepEqual(form.messages, { required: 'settings.devin.credentialsRequired' });
+  assert.deepEqual(form.fields.map(({ key, required }) => [key, required]), [['devinBearerToken', true], ['devinOrganization', true]]);
+  assert.equal(JSON.stringify(form).includes('settings.devin.note'), false);
 
   const i18n = readRendererFile('i18n.js');
   assert.match(i18n, /'settings\.devin\.statusNotSet': 'Not configured'/);
@@ -1367,12 +1319,6 @@ test('Devin account panel uses the shared status label and opens the allowlisted
     assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
   }
 
-  const app = readRendererFile('app.js');
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /window\.tokenMonitor\.openExternal\(devinPlatformUrl\(\)\)/);
-  assert.match(setupBody, /errorEl\.textContent = t\('settings\.devin\.credentialsRequired'\)/);
-  const urlBody = functionBody(app, 'devinPlatformUrl', 'updateQoderUsagePageHint');
-  assert.match(urlBody, /return 'https:\/\/app\.devin\.ai\/settings\/usage';/);
 
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
@@ -1395,76 +1341,37 @@ test('Z.ai global and BigModel CN browser links are allowlisted', () => {
 test('Factory account form keeps its setup copy and validates before saving', () => {
   const { limitAccountFormsForRenderer, accountStatusProjection, normalizeAccountField } = require('../../src/electron/limits/accountSettings');
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'factory');
-  assert.equal(form.input, 'input');
-  assert.equal(form.field, 'factoryApiKey');
-  assert.equal(form.noteKey, 'settings.factory.note');
-  assert.equal(form.url, 'https://app.factory.ai/settings/api-keys');
-  assert.equal(form.validation.invalidKey, 'settings.factory.validationInvalid');
+  assert.deepEqual(form.fields.map(({ key, input }) => [key, input]), [['factoryApiKey', 'password']]);
+  assert.deepEqual(form.manual, [{ note: 'settings.factory.note' }, { field: 'factoryApiKey' }]);
+  assert.deepEqual(form.openUrl, { url: 'https://app.factory.ai/settings/api-keys' });
+  assert.equal(form.messages.rejected, 'settings.factory.validationInvalid');
   assert.doesNotMatch(readRendererFile('index.html'), /id="factoryAccountGroup"/);
   const app = readRendererFile('app.js');
-  const setup = functionBody(app, 'setupLimitAccountPanels', 'limitProviderAccountGroup');
-  assert.match(setup, /const result = await window\.tokenMonitor\.limits\.validateCredential\(id, value\);[\s\S]*?if \(!result\?\.ok\)[\s\S]*?throw error;[\s\S]*?await saveSettings\(validation \? \{ \[field\]: value \}/);
+  const save = functionBody(app, 'saveAccountCredential', 'submitAccountCredential');
+  assert.match(save, /messages\.rejected \|\| 'settings\.common\.credentialRejected'/);
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
-  assert.match(preload, /validateCredential: \(providerId, credential\) => ipcRenderer\.invoke\('limits:validateCredential', providerId, credential\)/);
-  assert.match(main, /ipcMain\.handle\('limits:validateCredential', \(_event, providerId, raw\) => validateLimitCredential\(providerId, raw\)\)/);
+  assert.match(preload, /saveCredential: \(providerId, values\) => ipcRenderer\.invoke\('limits:saveCredential', providerId, values\)/);
+  assert.match(preload, /clearCredential: \(providerId\) => ipcRenderer\.invoke\('limits:clearCredential', providerId\)/);
+  assert.match(main, /ipcMain\.handle\('limits:saveCredential', \(_event, providerId, values\) => credentialCommands\.saveCredential\(providerId, values\)\)/);
+  assert.match(main, /ipcMain\.handle\('limits:clearCredential', \(_event, providerId\) => credentialCommands\.clearCredential\(providerId\)\)/);
+  assert.doesNotMatch(main + preload, /limits:validateCredential|validateLimitCredential/);
   assert.equal(normalizeAccountField('factoryApiKey', ' " fk-live " '), 'fk-live');
   const projected = accountStatusProjection({ factoryApiKey: '' }, { FACTORY_API_KEY: 'auto-detected-key' });
   assert.equal(projected.factoryCredentialConfigured, true);
   assert.equal(projected.factoryCredentialSource, 'env');
 });
 
-test('validated account probes use the chosen registry entry and reject unknown ids', async () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  const validate = (expression) => runMainFunction(main, 'validateLimitCredential', 'electronLimitsDeps', expression, {
-    limitProviderEntry: require('../../src/shared/limits/registry').limitProviderEntry
-  });
-  for (const [id, field, value] of [['factory', 'factoryApiKey', 'fk-live'], ['cline', 'clineApiKey', 'sk-live']]) {
-    const valid = await validate(`validateLimitCredential('${id}', ' ${value} ', {
-      normalizeCredential: value => value.trim(),
-      providerDeps: { transport: 'electron' },
-      fetchLimits: async (options, deps) => ({
-        status: options.${field} === '${value}' && deps.transport === 'electron' ? 'ok' : 'unavailable'
-      })
-    })`);
-    assert.equal(valid.ok, true);
-    assert.equal(valid.status, 'ok');
-    const invalid = await validate(`validateLimitCredential('${id}', '1', {
-      normalizeCredential: value => value.trim(), providerDeps: {},
-      fetchLimits: async () => { const error = new Error('rejected'); error.status = 'unauthorized'; throw error; }
-    })`);
-    assert.deepEqual({ ...invalid }, { ok: false, status: 'unauthorized' });
-    const empty = await validate(`validateLimitCredential('${id}', '  ', {
-      normalizeCredential: value => value.trim(), fetchLimits: async () => { throw new Error('must not probe'); }
-    })`);
-    assert.equal(empty.status, 'notConfigured');
-  }
-  for (const id of ['typesafe', 'unknown', '__proto__']) {
-    const result = await validate(`validateLimitCredential('${id}', 'secret', {
-      fetchLimits: async () => { throw new Error('must not probe'); }
-    })`);
-    assert.equal(result.ok, false);
-    assert.equal(result.status, 'notConfigured');
-  }
-});
-
-test('Factory API key validation keeps all translated failure messages', () => {
+test('Factory API key validation keeps its translated rejection message', () => {
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'factory');
-  assert.deepEqual(Object.values(form.validation), [
-    'settings.factory.validationInvalid',
-    'settings.factory.validationRateLimited',
-    'settings.factory.validationUnavailable'
-  ]);
+  // Throttled and unreachable checks now save and say so through the shared
+  // copy, so the rejection is the only outcome with Factory-specific guidance.
+  assert.deepEqual({ ...form.messages }, { rejected: 'settings.factory.validationInvalid' });
 
   const i18n = readRendererFile('i18n.js');
-  for (const key of [
-    'settings.factory.validationInvalid',
-    'settings.factory.validationRateLimited',
-    'settings.factory.validationUnavailable'
-  ]) {
-    assert.equal(i18n.match(new RegExp(`'${key.replaceAll('.', '\\.')}':`, 'g'))?.length, 5);
-  }
+  assert.equal(i18n.match(/'settings\.factory\.validationInvalid':/g)?.length, 5);
+  assert.doesNotMatch(i18n, /settings\.factory\.validation(RateLimited|Unavailable)/);
 });
 
 test('Factory identifies environment and Droid .env credentials separately', () => {
@@ -1496,14 +1403,14 @@ test('Cline account form keeps sign-in precedence, accessible input, and allowli
   assert.doesNotMatch(html, /id="clineAccountGroup"/);
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'cline');
-  assert.equal(form.input, 'input');
-  assert.equal(form.field, 'clineApiKey');
-  assert.equal(form.noteKey, 'settings.cline.note');
-  assert.equal(form.ariaLabelKey, 'settings.cline.apiKeyLabel');
-  assert.equal(form.url, 'https://app.cline.bot/dashboard/account');
-  assert.equal(form.validation.invalidKey, 'settings.cline.validationInvalid');
+  assert.deepEqual(form.fields.map(({ key, input, ariaLabelKey }) => [key, input, ariaLabelKey]), [
+    ['clineApiKey', 'password', 'settings.cline.apiKeyLabel']
+  ]);
+  assert.deepEqual(form.manual, [{ note: 'settings.cline.note' }, { field: 'clineApiKey' }]);
+  assert.deepEqual(form.openUrl, { url: 'https://app.cline.bot/dashboard/account' });
+  assert.equal(form.messages.rejected, 'settings.cline.validationInvalid');
   const panel = readRendererFile('limits/accountPanels.js');
-  assert.match(panel, /input\.setAttribute\('aria-label', translate\(form\.ariaLabelKey\)\)/);
+  assert.match(panel, /input\.setAttribute\('aria-label', translate\(field\.ariaLabelKey\)\)/);
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   // The panel's one outbound link has to survive the same allowlist as every other
   // provider console, which is what no assertion was checking when Cline shipped and
@@ -1539,21 +1446,17 @@ test('Cline account form keeps sign-in precedence, accessible input, and allowli
   assert.equal(currentAccountField('clineApiKey', { clineApiKey: '' }, { CLINE_API_KEY: 'auto-detected-key' }), 'auto-detected-key');
 });
 
-test('Cline API key validation errors distinguish invalid, limited, and unavailable checks', () => {
+test('Cline API key validation keeps its rejection copy in every locale', () => {
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'cline');
-  assert.deepEqual(Object.values(form.validation), [
-    'settings.cline.validationInvalid',
-    'settings.cline.validationRateLimited',
-    'settings.cline.validationUnavailable'
-  ]);
+  assert.deepEqual({ ...form.messages }, { rejected: 'settings.cline.validationInvalid' });
 
   // Every cline string the UI can render exists in all five locales — the same
   // completeness Antigravity copy is held to, derived here from the source of truth
   // rather than hand-listed so a key added later cannot skip a locale.
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
   const clineKeys = Object.keys(MESSAGES.en).filter((key) => key.startsWith('settings.cline.'));
-  assert.ok(clineKeys.length >= 16, `expected the Cline copy, found ${clineKeys.length} keys`);
+  assert.ok(clineKeys.includes('settings.cline.validationInvalid'), `expected the Cline copy, found ${clineKeys.length} keys`);
   for (const [locale, messages] of Object.entries(MESSAGES)) {
     const missing = clineKeys.filter((key) => typeof messages[key] !== 'string');
     assert.deepEqual(missing, [], `${locale} is missing Cline copy`);
@@ -1669,7 +1572,8 @@ test('Factory keeps a saved-key Clear action available after validation fails', 
           pendingKey: 'factoryPendingCheckSince'
         }
       },
-      state: { settings, factoryPendingCheckSince: 0 },
+      limitAccountForm: () => null,
+      state: { settings, factoryPendingCheckSince: 0, accountPanelMessages: {} },
       document: { getElementById: id => elements.get(id) || null },
       externalProviderForAccount: () => ({ provider: 'factory', status }),
       externalProviderAccountLinked: () => false,
@@ -1679,9 +1583,7 @@ test('Factory keeps a saved-key Clear action available after validation fails', 
       t: key => key,
       renderSettingsSummaries: () => {},
       setExternalAccountExpanded: () => {},
-      renderVolcengineAgentOverrideState: () => {},
-      updateQoderUsagePageHint: () => {},
-      alibabaSavedVariant: () => ''
+      renderVolcengineAgentOverrideState: () => {}
     }
   );
 
@@ -1695,6 +1597,81 @@ test('Factory keeps a saved-key Clear action available after validation fails', 
     render();
     assert.equal(elements.get('factoryLogoutButton').classList.contains('hidden'), true, `${source} credentials must not expose Clear`);
   }
+});
+
+test('an account message survives the stats re-renders until its own condition retires it', () => {
+  const app = readRendererFile('app.js');
+  const elements = new Map();
+  for (const suffix of ['AccountStatus', 'OpenBrowser', 'LogoutButton', 'RefreshButton', 'ManualPanel', 'ErrorMessage']) {
+    const classes = new Set(suffix === 'ErrorMessage' ? ['settings-note', 'error', 'hidden'] : []);
+    elements.set(`deepseek${suffix}`, {
+      classList: {
+        add: (...names) => names.forEach(name => classes.add(name)),
+        remove: (...names) => names.forEach(name => classes.delete(name)),
+        toggle: (name, force) => (force ? classes.add(name) : classes.delete(name)),
+        contains: name => classes.has(name)
+      },
+      textContent: ''
+    });
+  }
+  const state = {
+    settings: { deepseekApiKeyConfigured: true, deepseekApiKeySource: 'settings' },
+    deepseekPendingCheckSince: 0,
+    accountPanelMessages: {}
+  };
+  let provider = null;
+  const render = () => runRendererFunctions(app, ['renderExternalProviderStatus'], "renderExternalProviderStatus('deepseek')", {
+    externalLimitAccountConfig: {},
+    limitAccountForm: () => ({ status: { configuredKey: 'deepseekApiKeyConfigured', sourceKey: 'deepseekApiKeySource', pendingKey: 'deepseekPendingCheckSince' } }),
+    limitAccountPanelsApi: { syncCredentialFields: () => {} },
+    state,
+    document: { getElementById: id => elements.get(id) || null },
+    externalProviderForAccount: () => provider,
+    externalProviderAccountLinked: () => false,
+    limitProviderEnabled: () => true,
+    setCursorStatusText: () => {},
+    apiKeyAccountStatusText: () => '',
+    t: (key, params) => (params ? `${key}:${JSON.stringify(params)}` : key),
+    renderSettingsSummaries: () => {},
+    setExternalAccountExpanded: () => {},
+    renderVolcengineAgentOverrideState: () => {}
+  });
+  const line = elements.get('deepseekErrorMessage');
+
+  // A rejection stays on screen through any number of stats pushes.
+  state.accountPanelMessages.deepseek = { key: 'settings.common.credentialRejected', params: { provider: 'DeepSeek' } };
+  for (let push = 0; push < 3; push += 1) render();
+  assert.equal(line.textContent, 'settings.common.credentialRejected:{"provider":"DeepSeek"}');
+  assert.equal(line.classList.contains('hidden'), false);
+  assert.equal(line.classList.contains('error'), true);
+
+  // "Saved, not yet confirmed" reads as a notice and retires with the first
+  // record that answers for the saved key, because the pill then does.
+  state.accountPanelMessages.deepseek = { key: 'settings.common.credentialSavedUnconfirmed', tone: 'notice', untilChecked: true };
+  render();
+  assert.equal(line.classList.contains('error'), false);
+  assert.equal(line.classList.contains('hidden'), false);
+  provider = { provider: 'deepseek', status: 'ok' };
+  render();
+  assert.equal(line.classList.contains('hidden'), true);
+  assert.equal(line.textContent, '');
+  assert.equal(state.accountPanelMessages.deepseek, undefined);
+});
+
+test('account credentials persist through the settings:update body, not a second write path', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  assert.match(main, /ipcMain\.handle\('settings:update', \(_event, patch\) => applySettingsPatch\(patch\)\);/);
+  assert.match(main, /createCredentialCommands\(\{\s*getSettings: \(\) => settings,\s*applySettingsPatch,\s*probeDeps: credentialProbeDeps\s*\}\)/);
+  const body = main.slice(main.indexOf('function applySettingsPatch(patch) {'), main.indexOf("ipcMain.handle('appearance:preview'"));
+  assert.match(body, /credentialCommands\.noteSettingsPatch\(patch\);/);
+  assert.match(body, /normalizeAccountPatch\(patch, normalizedPatch\)/);
+  assert.match(body, /return settingsForRenderer\(\);\n {2}\}\n\s*$/);
+  const probe = functionBody(main, 'credentialProbeDeps', 'electronLimitsDeps');
+  assert.match(probe, /providerRuntimeState: new Map\(\)/);
+  assert.match(probe, /probe: true/);
+  // A renewal is captured for the save to store, never persisted from the probe.
+  assert.match(probe, /onClaudeWebCookieRenewed: \(\{ cookie \}\) => \{\s*renewed\.claudeWebCookie = cookie;\s*return true;\s*\}/);
+  assert.doesNotMatch(probe, /persistClaudeWebCookieRenewal|resolveConfigSnapshot|onThirdParty/);
 });
 
 test('opencode status env account avoids saved profile names', () => {
@@ -2713,7 +2690,7 @@ test('main collectors share one live GUI limit credential resolver in every widg
   const renewalPersistence = functionBody(
     main,
     'persistClaudeWebCookieRenewal',
-    'validateLimitCredential'
+    'credentialProbeDeps'
   );
   assert.match(renewalPersistence, /settings\.claudeWebCookie === renewed\) return true/);
   assert.match(renewalPersistence, /saveSettings\(\{ throwOnError: true \}\)/);
@@ -3196,7 +3173,7 @@ test('the row id is a pure function of the name, shared by both call sites', () 
 
 test('a ZCode-discovered GLM login reads as connected, not API-key configured', () => {
   const app = readRendererFile('app.js');
-  const statusBody = functionBody(app, 'apiKeyAccountStatusText', 'minimaxPlatformUrl');
+  const statusBody = functionBody(app, 'apiKeyAccountStatusText', 'setExternalAccountExpanded');
   // The linked pill picks the OAuth-style key only for a zcode-auto source;
   // pasted and env keys keep their existing API-key pills.
   assert.match(statusBody, /providerName === 'zai' && source === 'zcode-auto'[\s\S]*\? 'settings\.zai\.statusLinked'/);

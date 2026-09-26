@@ -67,7 +67,9 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
     const storePath = deps.deepseekStorePath || path.join(dataDir, 'deepseek-balance-v2.json');
     const legacyStorePath = deps.deepseekLegacyStorePath
       || (deps.deepseekStorePath ? null : path.join(dataDir, 'deepseek-balance.json'));
-    const spend = recordConsumption(
+    // A save-time probe checks a credential that is not stored yet, so it must
+    // not add a sample to the spend history the collector derives from.
+    const spend = deps.probe ? {} : recordConsumption(
       { accountKey, currency: row.currency, paid: row.paid, now, storePath, legacyStorePath },
       deps
     );

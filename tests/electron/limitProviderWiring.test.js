@@ -406,39 +406,54 @@ test('account projections redact secrets while preserving profile metadata and s
 
 test('the renderer receives serializable account forms but no credential declarations', () => {
   const forms = limitAccountFormsForRenderer();
-  assert.equal(forms.length, 5);
+  const generated = LIMIT_PROVIDER_IDS.filter((id) => forms.some((form) => form.id === id));
+  assert.deepEqual(forms.map(({ id }) => id), generated, 'forms arrive in catalog order');
   for (const candidate of forms) {
     assert.deepEqual(JSON.parse(JSON.stringify(candidate)), candidate);
-    assert.equal(JSON.stringify(candidate).includes('storePath'), false);
-    assert.equal(JSON.stringify(candidate).includes('envFallback'), false);
+    for (const secretShape of ['storePath', 'envFallback', 'resolve', 'rememberProbe']) {
+      assert.equal(JSON.stringify(candidate).includes(secretShape), false, `${candidate.id} ${secretShape}`);
+    }
+    assert.equal(candidate.kind, 'credential');
+  }
+  // Hand-built panels borrow only the save path; the renderer never gets a form.
+  for (const custom of ['kimi', 'volcengine']) {
+    assert.equal(forms.some(({ id }) => id === custom), false, custom);
+    assert.equal(require('../../src/shared/limits/registry').limitProviderEntry(custom).form.kind, 'custom');
   }
   const form = forms.find(({ id }) => id === 'typesafe');
-  assert.deepEqual(JSON.parse(JSON.stringify(form)), form);
-  assert.equal(form.id, 'typesafe');
-  assert.equal(form.field, 'typesafeCookie');
-  assert.equal(form.kind, 'singleCredential');
-  assert.equal(form.input, 'textarea');
+  assert.deepEqual(form.fields, [{
+    key: 'typesafeCookie', input: 'textarea', placeholderKey: 'settings.typesafe.cookiePlaceholder', required: true, secret: true
+  }]);
   assert.deepEqual(form.status, {
     configuredKey: 'typesafeCookieConfigured',
     sourceKey: 'typesafeCookieSource',
     pendingKey: 'typesafePendingCheckSince'
   });
-  assert.equal(JSON.stringify(form).includes('storePath'), false);
-  assert.equal(JSON.stringify(form).includes('envFallback'), false);
   assert.match(mainSource, /limitAccountForms: limitAccountFormsForRenderer\(\)/);
   assert.match(indexHtml, /<script src="limits\/accountPanels\.js"><\/script>/);
-  assert.doesNotMatch(indexHtml, /id="typesafeAccountGroup"/);
-  assert.match(appSource, /limitAccountPanelsApi\.createSingleCredentialPanel\(form/);
+  for (const { id } of forms) assert.doesNotMatch(indexHtml, new RegExp(`id="${id}AccountGroup"`), id);
+  assert.match(appSource, /limitAccountPanelsApi\.createCredentialPanel\(form/);
 });
+
+// Every string a generated panel can render, walked from the canonical shape so
+// a key added in a new block, option or message cannot skip a locale.
+function formMessageKeys(form) {
+  const stepKeys = (step) => (Array.isArray(step) ? step : [step]).filter((part) => typeof part === 'string');
+  return [
+    form.titleKey, form.openKey, form.clearKey, form.saveKey, form.emptyKey, form.failedKey,
+    ...form.fields.flatMap((field) => [
+      field.placeholderKey, field.ariaLabelKey, field.labelKey, ...(field.options || []).map((option) => option.labelKey)
+    ]),
+    ...[...form.top, ...form.manual].flatMap((block) => [block.note, ...(block.steps || []).flatMap(stepKeys)]),
+    ...Object.values(form.messages || {})
+  ].filter(Boolean);
+}
 
 test('every account form display key exists in each supported locale', () => {
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
   for (const form of limitAccountFormsForRenderer()) {
-    const keys = [
-      form.titleKey, form.openKey, form.clearKey, form.placeholderKey,
-      form.ariaLabelKey, form.saveKey, form.emptyKey, form.failedKey,
-      form.noteKey, ...(form.steps || []), ...Object.values(form.validation || {})
-    ].filter(Boolean);
+    const keys = formMessageKeys(form);
+    assert.ok(keys.length >= 8, `${form.id} should expose its copy`);
     for (const [locale, messages] of Object.entries(MESSAGES)) {
       for (const key of keys) {
         assert.ok(Object.hasOwn(messages, key), `${form.id}: ${key} missing in ${locale}`);
@@ -449,10 +464,8 @@ test('every account form display key exists in each supported locale', () => {
 
 test('the renderer account config names the settings keys main must project', () => {
   const config = evalTopLevel(appSource, 'const externalLimitAccountConfig = {', '\nfunction clearDisabledLimitProviderPendingChecks(');
-  assert.deepEqual(Object.keys(config).sort(), [
-    'alibaba', 'claude', 'devin', 'kimi',
-    'ollama', 'qoder', 'trae', 'volcengine', 'zai', 'zaiteam'
-  ].sort());
+  // Only the hand-built panels: generated ones read the same keys from their form.
+  assert.deepEqual(Object.keys(config).sort(), ['kimi', 'volcengine']);
   assert.match(mainSource, /\.\.\.accountStatusProjection\(settings, process\.env\)/);
   const projected = accountStatusProjection({}, {});
   for (const [provider, entry] of Object.entries(config)) {
@@ -476,21 +489,20 @@ test('static account statuses refresh in both paths while descriptor panels use 
 });
 
 test('every provider with an account panel has its group and status markup in index.html', () => {
-  const groupIds = evalTopLevel(appSource, 'const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {', '\nconst LIMIT_PROVIDER_ACCOUNT_STATUS_IDS');
-  // Not every catalog provider has a panel (grok, kiro and workbuddy take their
-  // credentials from the tool itself); the map is the list of those that do.
+  const nodes = evalTopLevel(appSource, 'const LIMIT_PROVIDER_ACCOUNT_NODES = {', '\nconst LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS');
+  const groupIds = Object.fromEntries(Object.entries(nodes).map(([provider, node]) => [provider, node.group]));
+  // Not every catalog provider has a hand-written panel: grok, kiro and workbuddy
+  // take their credentials from the tool itself, and the account-form providers
+  // get theirs generated. The map is the list of those whose markup is static.
   assert.deepEqual(
     LIMIT_PROVIDER_IDS.filter((provider) => !groupIds[provider]).sort(),
-    ['cline', 'commandcode', 'factory', 'grok', 'kiro', 'typesafe', 'workbuddy', 'zed']
+    ['grok', 'kiro', 'workbuddy', ...limitAccountFormsForRenderer().map(({ id }) => id)].sort()
   );
   for (const [provider, id] of Object.entries(groupIds)) {
     assert.ok(LIMIT_PROVIDER_IDS.includes(provider), `${provider} is a catalog id`);
     assert.match(indexHtml, new RegExp(`id="${id}"`), `${provider} group exists in index.html`);
   }
-  // The two id maps cover the same providers.
-  const statusIds = evalTopLevel(appSource, 'const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {', '\nconst LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS');
-  assert.deepEqual(Object.keys(statusIds).sort(), Object.keys(groupIds).sort());
-  for (const [provider, id] of Object.entries(statusIds)) {
-    assert.match(indexHtml, new RegExp(`id="${id}"`), `${provider} status pill exists in index.html`);
+  for (const [provider, { status }] of Object.entries(nodes)) {
+    assert.match(indexHtml, new RegExp(`id="${status}"`), `${provider} status pill exists in index.html`);
   }
 });

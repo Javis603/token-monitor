@@ -101,7 +101,6 @@ const { normalizeModelAliases, normalizeModelAliasGrouping, projectModelAliasSta
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
 const {
-  fetchClaudeLimits,
   normalizeLimitsRefreshMode,
   normalizeLimitsRefreshMs,
   parseBoolean,
@@ -110,7 +109,6 @@ const {
 } = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 const { limitProviderUrlAllowed } = require('../shared/limits/accounts');
-const { limitProviderEntry } = require('../shared/limits/registry');
 const {
   accountFieldProjection,
   accountStatusProjection,
@@ -123,7 +121,7 @@ const {
   redactThirdPartyProfilesForRenderer,
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
-const { fetchOllamaLimits, rememberOllamaValidation } = require('../shared/providers/ollama/limits');
+const { createCredentialCommands } = require('./limits/credentialCommands');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const {
   codexAuthIdentity,
@@ -399,10 +397,14 @@ const {
   normalizeWindowsBackdropMode
 } = require('./windowsBackdropMode');
 const { applyWindowsAccentBlur } = require('./windowsBackdrop');
+const { MAC_BACKDROP_LIQUID_GLASS, normalizeMacBackdropMode } = require('./macBackdropMode');
 const {
   attachNativeMaterialVisibility,
-  syncNativeMaterialVisibility
+  syncNativeMaterialVisibility,
+  getNativeMaterialState
 } = require('./nativeMaterialVisibility');
+const { createMacLiquidGlass } = require('./macLiquidGlass');
+const { isLightHex } = require('./renderer/themePresets');
 
 if (!app.isPackaged) loadDotEnv();
 
@@ -459,9 +461,7 @@ const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends']
 const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
 
 let mainWindow = null;
-let mainWindowNativeBlurEnabled = false;
 let dashboardWindow = null;
-let dashboardWindowNativeBlurEnabled = false;
 let settingsPath = null;
 let settings = null;
 let initialLimitProvidersPending = false;
@@ -470,7 +470,6 @@ let initialLimitProvidersPending = false;
 // settings are written through saveSettings() after the window exists, so the flag
 // carries the decision from the read to that first save.
 let seededClientSplitsPending = false;
-let claudeWebCookieMutationRevision = 0;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
@@ -532,6 +531,7 @@ function defaultSettings() {
     glassBlur: 32,
     systemGlass: true,
     windowsBackdrop: 'acrylic',
+    macBackdrop: 'vibrancy',
     reduceMotion: 'system',
     showLiveDot: true,
     showToolIcons: true,
@@ -808,23 +808,24 @@ function persistClaudeWebCookieRenewal({ previousCookie, cookie } = {}) {
   return true;
 }
 
-// Probe only explicitly validated account forms. The id is untrusted IPC input;
-// the registry supplies both the credential field and its fetcher.
-async function validateLimitCredential(providerId, raw, deps = {}) {
-  const entry = limitProviderEntry(providerId);
-  if (!entry?.form?.validation) return { ok: false, status: 'notConfigured' };
-  const { field } = entry.form;
-  const credential = (deps.normalizeCredential || ((value) => normalizeAccountField(field, value)))(raw);
-  if (!credential) return { ok: false, status: 'notConfigured' };
-  try {
-    const provider = await (deps.fetchLimits || entry.fetchLimits)(
-      { [field]: credential },
-      deps.providerDeps || electronProviderDeps()
-    );
-    return { ok: provider?.status === 'ok', status: provider?.status || 'unavailable' };
-  } catch (error) {
-    return { ok: false, status: error?.status || 'unavailable' };
-  }
+// A save-time probe gets the collector's transports but none of its write-backs:
+// a credential that has not been saved yet must not renew itself into
+// settings, so a rotation is reported into `renewed` and stored with the rest
+// of the draft. A fresh runtime state keeps the probe from reading or seeding
+// the collector's caches; `probe` tells fetchers with persistent bookkeeping
+// (the DeepSeek balance history) to skip it, and `bypassValidationCache` stops
+// Ollama answering from a cached check of a different save.
+function credentialProbeDeps(renewed = {}) {
+  return electronProviderDeps({
+    claudeWebFetch: electronClaudeWebFetch,
+    onClaudeWebCookieRenewed: ({ cookie }) => {
+      renewed.claudeWebCookie = cookie;
+      return true;
+    },
+    providerRuntimeState: new Map(),
+    bypassValidationCache: true,
+    probe: true
+  });
 }
 
 function electronLimitsDeps() {
@@ -2823,22 +2824,23 @@ function nativeBlurEnabled(source = settings) {
   return floatingBubbleNativeGlassEnabled(source);
 }
 
+function nativeMaterialOptions(source = settings, dashboard = false) {
+  return {
+    enabled: nativeBlurEnabled(source),
+    liquidGlass: normalizeMacBackdropMode(source.macBackdrop) === MAC_BACKDROP_LIQUID_GLASS,
+    opaque: dashboard && source.dashboardFlat === true,
+    reducedTransparency: nativeTheme.prefersReducedTransparency === true,
+    highContrast: nativeTheme.shouldUseHighContrastColors === true,
+    dark: !isLightHex(source.themeColors?.bg),
+    radius: !dashboard && floatingBubbleState.collapsed ? 17 : 14
+  };
+}
+
 function applyNativeMaterial(source = settings) {
-  const enabled = nativeBlurEnabled(source);
-  if (mainWindow && !mainWindow.isDestroyed() && mainWindowNativeBlurEnabled !== enabled) {
-    mainWindowNativeBlurEnabled = enabled;
-    syncNativeMaterialVisibility(mainWindow, enabled);
-  }
-  // This also runs for every appearance slider preview and floating-bubble
-  // transition, so re-applying an unchanged material would rebuild its native
-  // effect view for nothing.
-  if (dashboardWindow && !dashboardWindow.isDestroyed() && dashboardWindowNativeBlurEnabled !== enabled) {
-    dashboardWindowNativeBlurEnabled = enabled;
-    syncNativeMaterialVisibility(dashboardWindow, enabled);
-  }
-  // Windows: backgroundMaterial is locked in at window creation. setBackgroundMaterial('none')
-  // does not restore layered-window transparency once DWM SystemBackdrop has been engaged,
-  // so toggling is handled by rebuildWindow() instead.
+  syncNativeMaterialVisibility(mainWindow, nativeMaterialOptions(source));
+  syncNativeMaterialVisibility(dashboardWindow, nativeMaterialOptions(source, true));
+  // Windows' material is still construction-time; its existing rebuild path
+  // handles setting changes. The macOS manager avoids recreating stable views.
 }
 
 function withHistoryPreview(stats, devices) {
@@ -5078,6 +5080,15 @@ function ensureEdgeDockController() {
     preloadPath: path.join(__dirname, 'edgeDock', 'preload.js'),
     getSettings: () => settings,
     nativeGlass: () => nativeBlurEnabled(),
+    // The dock follows the widget's glass style, on the same terms as the
+    // main window: Reduce Transparency hands the surface back to the HUD material.
+    liquidGlass: () => {
+      const options = nativeMaterialOptions();
+      const wanted = process.platform === 'darwin' && options.enabled && options.liquidGlass
+        && !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25;
+      return wanted ? { dark: options.dark } : null;
+    },
+    createGlass: (win) => createMacLiquidGlass(win, { shaped: true }),
     // The renderer reads this preference through a media query, which works on both
     // platforms, but the dock's window fade is this process's own animation and can only
     // see it through Electron. Windows reports the same OS-level setting here as macOS, so
@@ -6359,12 +6370,8 @@ function createWindow(boundsOverride, options = {}) {
     // Keeps a popover unmaximizable across rebuilds, which never re-run enterTrayMode().
     ...(settings?.trayMode ? { maximizable: false } : {}),
     ...floatingBubbleWindowChrome(process.platform, collapsedFloatingBubble),
-    // visualEffectState is construction-time only — Electron exposes no setter for
-    // it (verified: BrowserWindow has setVibrancy but no setVisualEffectState), and
-    // it is what keeps the material vibrant while the window is not key. Without
-    // it macOS falls back to followWindow and the glass greys out on blur. The
-    // vibrancy here is immediately re-evaluated by applyNativeMaterial() below, so
-    // a window that is not on screen still ends up with no material attached.
+    // Seed the legacy fallback's construction-only active state. The material
+    // manager immediately replaces HUD with Liquid Glass when supported.
     ...(process.platform === 'darwin' ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     ...(process.platform === 'win32' && glass && !windowsAccent ? { backgroundMaterial: 'acrylic' } : {}),
     webPreferences: {
@@ -6374,7 +6381,6 @@ function createWindow(boundsOverride, options = {}) {
     }
   });
   mainWindow = win;
-  mainWindowNativeBlurEnabled = null;
   mainWindowChrome = { collapsedFloatingBubble };
   applyMacSpaceBehavior();
   applyWindowsChrome(win, { round: true });
@@ -6412,7 +6418,7 @@ function createWindow(boundsOverride, options = {}) {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
   });
   applyWindowSettings();
-  attachNativeMaterialVisibility(win, () => mainWindowNativeBlurEnabled);
+  attachNativeMaterialVisibility(win, () => nativeMaterialOptions());
   applyNativeMaterial();
   win.on('focus', () => {
     stopFloatingBubbleAutoCollapseTimer();
@@ -6549,10 +6555,9 @@ function createDashboardWindow() {
     }
   });
   dashboardWindow = win;
-  dashboardWindowNativeBlurEnabled = glass;
   applyWindowsChrome(win, { round: true });
-  attachNativeMaterialVisibility(win, () => dashboardWindowNativeBlurEnabled);
-  syncNativeMaterialVisibility(win, dashboardWindowNativeBlurEnabled);
+  attachNativeMaterialVisibility(win, () => nativeMaterialOptions(settings, true));
+  syncNativeMaterialVisibility(win, nativeMaterialOptions(settings, true));
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -6576,7 +6581,6 @@ function createDashboardWindow() {
   });
   win.on('closed', () => {
     dashboardWindow = null;
-    dashboardWindowNativeBlurEnabled = false;
   });
   win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
     .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
@@ -6665,7 +6669,12 @@ app.whenReady().then(() => {
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
   // it — nothing else in the app would notice the change.
-  nativeTheme.on('updated', () => { void pushSystemUiThemeAfterChange(); });
+  nativeTheme.on('updated', () => {
+    applyNativeMaterial();
+    // Rebuilds the dock only when Reduce Transparency moved its material.
+    if (edgeDockController?.isRunning()) edgeDockController.sync();
+    void pushSystemUiThemeAfterChange();
+  });
   const widgetRuntime = macWidgetRuntimeSupport({
     platform: process.platform,
     osRelease: process.platform === 'darwin' ? os.release() : ''
@@ -6789,8 +6798,16 @@ app.whenReady().then(() => {
       return { ok: false, error: error.message };
     }
   });
-  ipcMain.handle('settings:update', (_event, patch) => {
-    if (patch?.claudeWebCookie !== undefined) claudeWebCookieMutationRevision += 1;
+  const credentialCommands = createCredentialCommands({
+    getSettings: () => settings,
+    applySettingsPatch,
+    probeDeps: credentialProbeDeps
+  });
+  ipcMain.handle('settings:update', (_event, patch) => applySettingsPatch(patch));
+  // The settings:update body, named so a credential save persists through the
+  // exact same normalization, runtime reconfigure and limit invalidation.
+  function applySettingsPatch(patch) {
+    credentialCommands.noteSettingsPatch(patch);
     const previousSettingsState = settings;
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
     const previousNativeMaterial = nativeBlurEnabled();
@@ -6861,6 +6878,7 @@ app.whenReady().then(() => {
       glassBlur: Math.max(0, Math.min(100, Number(patch.glassBlur ?? settings.glassBlur ?? 32))),
       systemGlass: patch.systemGlass ?? settings.systemGlass ?? true,
       windowsBackdrop: normalizeWindowsBackdropMode(patch.windowsBackdrop ?? settings.windowsBackdrop),
+      macBackdrop: normalizeMacBackdropMode(patch.macBackdrop ?? settings.macBackdrop),
       reduceMotion: motionPreferenceApi.normalize(patch.reduceMotion ?? settings.reduceMotion),
       showLiveDot: patch.showLiveDot ?? settings.showLiveDot ?? true,
       showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
@@ -7089,9 +7107,12 @@ app.whenReady().then(() => {
     }
     pushSettingsToRenderer();
     return settingsForRenderer();
-  });
-  ipcMain.handle('appearance:preview', (_event, patch) => {
-    applyNativeMaterial({ ...settings, ...patch });
+  }
+  ipcMain.handle('appearance:preview', (event, patch) => {
+    // Preview only the requesting surface: another window still renders its
+    // saved theme until settings:update broadcasts the committed preference.
+    const win = BrowserWindow.fromWebContents(event.sender);
+    syncNativeMaterialVisibility(win, nativeMaterialOptions({ ...settings, ...patch }, win === dashboardWindow));
     if (patch && patch.zoomFactor !== undefined && mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.setZoomFactor(clampZoom(patch.zoomFactor));
     }
@@ -7253,6 +7274,10 @@ app.whenReady().then(() => {
     if (settings.hubMode === 'host') startMode();
     return getHubInfo();
   });
+  ipcMain.handle('appearance:getNativeMaterial', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return getNativeMaterialState(win);
+  });
   ipcMain.handle('app:getInfo', () => ({
     version: app.getVersion(),
     platform: process.platform,
@@ -7400,73 +7425,8 @@ app.whenReady().then(() => {
       return { ok: false, error: err.message };
     }
   });
-  ipcMain.handle('claude:saveCookie', async (_event, raw) => {
-    const requestRevision = ++claudeWebCookieMutationRevision;
-    let cookie;
-    try {
-      cookie = normalizeAccountField('claudeWebCookie', raw);
-    } catch (error) {
-      return {
-        ok: false,
-        status: 'invalid',
-        errorCode: error?.code || 'INVALID_CLAUDE_WEB_SESSION_KEY'
-      };
-    }
-    if (!cookie) {
-      return {
-        ok: false,
-        status: 'notConfigured',
-        errorCode: 'INVALID_CLAUDE_WEB_SESSION_KEY'
-      };
-    }
-    try {
-      let cookieToPersist = cookie;
-      const provider = await fetchClaudeLimits(
-        { claudeWebCookie: cookie },
-        {
-          claudeWebFetch: electronClaudeWebFetch,
-          providerRuntimeState: new Map(),
-          onClaudeWebCookieRenewed: ({ cookie: renewedCookie }) => {
-            cookieToPersist = renewedCookie;
-          }
-        }
-      );
-      if (provider?.status !== 'ok') {
-        return {
-          ok: false,
-          status: provider?.status || 'error'
-        };
-      }
-      if (claudeWebCookieMutationRevision !== requestRevision) {
-        return {
-          ok: false,
-          status: 'superseded',
-          superseded: true
-        };
-      }
-      settings.claudeWebCookie = cookieToPersist;
-      saveSettings({ throwOnError: true });
-      void queueLimitInvalidation({ provider: 'claude' }, 'login', { clear: true });
-      return {
-        ok: true,
-        status: 'ok'
-      };
-    } catch (error) {
-      return {
-        ok: false,
-        status: error?.status || 'error',
-        errorCode: error?.code || ''
-      };
-    }
-  });
-  ipcMain.handle('ollama:validateCookie', async (_event, raw) => {
-    const cookie = normalizeAccountField('ollamaCookie', raw);
-    if (!cookie) return { ok: false, status: 'notConfigured' };
-    const provider = await fetchOllamaLimits({ ollamaCookie: cookie }, electronProviderDeps({ bypassValidationCache: true }));
-    rememberOllamaValidation(cookie, provider);
-    return { ok: provider.status === 'ok', status: provider.status };
-  });
-  ipcMain.handle('limits:validateCredential', (_event, providerId, raw) => validateLimitCredential(providerId, raw));
+  ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
+  ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
     const cookie = opencodeWeb.sanitizeCookieHeader(raw);
     if (!cookie) {

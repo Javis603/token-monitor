@@ -19,7 +19,6 @@ module.exports = {
     pendingKey: 'factoryPendingCheckSince'
   },
   form: {
-    kind: 'singleCredential',
     field: 'factoryApiKey',
     input: 'input',
     titleKey: 'settings.factory.title',
@@ -30,10 +29,8 @@ module.exports = {
     emptyKey: 'settings.factory.statusNotSet',
     failedKey: 'settings.factory.saveFailed',
     noteKey: 'settings.factory.note',
-    validation: {
-      invalidKey: 'settings.factory.validationInvalid',
-      rateLimitedKey: 'settings.factory.validationRateLimited',
-      unavailableKey: 'settings.factory.validationUnavailable'
+    messages: {
+      rejected: 'settings.factory.validationInvalid'
     },
     url: 'https://app.factory.ai/settings/api-keys'
   },

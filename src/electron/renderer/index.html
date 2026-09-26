@@ -371,6 +371,7 @@
             <div class="settings-subgroup settings-appearance-group">
               <div class="settings-item"><span class="settings-item-text"><span id="windowGlassEffectLabel" class="settings-item-title" data-i18n="settings.appearance.systemGlass">Glass Backdrop</span></span><div class="inline-options" role="radiogroup" aria-labelledby="windowGlassEffectLabel"><label class="inline-option"><input type="radio" name="systemGlassOption" value="system" /><span data-i18n="settings.appearance.glassEffectSystem">System</span></label><label class="inline-option"><input type="radio" name="systemGlassOption" value="off" /><span data-i18n="settings.appearance.glassEffectTransparent">Transparent</span></label></div></div>
               <label id="windowsBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.windowsBackdrop">Windows Glass Style</span></span><select id="windowsBackdropInput"><option value="acrylic" data-i18n="settings.appearance.windowsBackdropAcrylic">Acrylic</option><option value="accent" data-i18n="settings.appearance.windowsBackdropAccent">Accent Blur (experimental)</option></select><span id="windowsBackdropNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.windowsBackdropNote">Keeps the background translucent and blurred, even when the window is not focused.</span></label>
+              <label id="macBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.macBackdrop">macOS Glass Style</span></span><select id="macBackdropInput"><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass</option></select></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveIndicator">Live Indicator</span></span><input id="liveDotInput" type="checkbox" /></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.toolIcons">Tool Icons</span></span><input id="toolIconsInput" type="checkbox" /></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.titleIcon">Use Title Icon</span></span><input id="titleIconInput" type="checkbox" /></label>
@@ -379,8 +380,8 @@
               <label id="liveTokenRateScopeRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveTokenRateScope">Live rate scope</span></span><select id="liveTokenRateScopeInput"><option value="all" data-i18n="settings.appearance.liveTokenRateScopeAll">All devices</option><option value="device" data-i18n="settings.appearance.liveTokenRateScopeDevice">This device</option></select></label>
               <label id="compactTokenUnitsRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTokenUnits">Compact token units</span></span><select id="compactTokenUnitsInput"><option value="western" data-i18n="settings.appearance.compactTokenUnitsWestern">International (K/M/B)</option><option value="localized" data-i18n="settings.appearance.compactTokenUnitsLocalized">East Asian (萬/億)</option></select></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.swapSettingsRefresh">Swap Settings and Refresh buttons</span></span><input id="swapSettingsRefreshInput" type="checkbox" /></label>
-              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="glassSliderLabel" class="settings-item-title" data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" title="Reset glass" data-i18n-title="settings.appearance.resetGlass">↺</button></span></span><input id="glassInput" type="range" min="0" max="100" step="1" aria-labelledby="glassSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
-              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="depthSliderLabel" class="settings-item-title" data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="reset-appearance-button reset-inline" title="Reset depth" data-i18n-title="settings.appearance.resetDepth">↺</button></span></span><input id="blurInput" type="range" min="0" max="100" step="1" aria-labelledby="depthSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="glassSliderLabel" class="settings-item-title" data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" title="Reset glass" data-i18n-title="settings.appearance.resetGlass">↺</button></span><span id="glassInputNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.nativeManaged">Managed by macOS</span></span><input id="glassInput" type="range" min="0" max="100" step="1" aria-labelledby="glassSliderLabel" aria-describedby="glassInputNote" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="depthSliderLabel" class="settings-item-title" data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="reset-appearance-button reset-inline" title="Reset depth" data-i18n-title="settings.appearance.resetDepth">↺</button></span><span id="blurInputNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.nativeManaged">Managed by macOS</span></span><input id="blurInput" type="range" min="0" max="100" step="1" aria-labelledby="depthSliderLabel" aria-describedby="blurInputNote" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="zoomSliderLabel" class="settings-item-title" data-i18n="settings.appearance.zoom">Zoom</span><button id="resetZoomButton" type="button" class="reset-appearance-button reset-inline" title="Reset zoom" data-i18n-title="settings.appearance.resetZoom">↺</button></span></span><input id="zoomInput" type="range" min="70" max="160" step="5" aria-labelledby="zoomSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-item background-image-setting">
                 <span class="settings-item-text">
@@ -709,36 +710,6 @@
         </div>
 
         <div id="accountsSettingsDetails" class="hidden" aria-hidden="true">
-            <div id="claudeAccountGroup" class="settings-group cursor-account-group">
-              <button id="claudeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="claudeSettingsDetails">
-                <span data-i18n="settings.claude.title">Claude Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="claudeAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="claudeSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="claudeOpenBrowser" data-i18n="settings.claude.openBrowser">Open Claude usage in browser</button>
-                  <button id="claudeLogoutButton" class="hidden" data-i18n="settings.claude.clearCookie">Clear cookie</button>
-                  <button id="claudeRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="claudeManualPanel">
-                  <p class="settings-note" data-i18n="settings.claude.note">Claude Code OAuth and CLI are detected automatically when Web login is not configured. Adding Web login makes it the local Claude source. The cookie stays on this device.</p>
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.claude.step1">Open Claude usage in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.claude.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -> https://claude.ai.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.claude.step3">Copy the sessionKey value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.claude.step4">Paste it below and click Save cookie.</span>
-                  </p>
-                  <textarea id="claudeWebCookieInput" rows="3" autocomplete="off" spellcheck="false" placeholder="sessionKey=..." data-i18n-placeholder="settings.claude.cookiePlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="claudeWebCookieSubmit" data-i18n="settings.claude.saveCookie">Save cookie</button>
-                  </div>
-                </div>
-                <div id="claudeErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
             <div id="codexAccountGroup" class="settings-group cursor-account-group">
               <button id="codexSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="codexSettingsDetails">
                 <span data-i18n="settings.codex.title">Codex Accounts</span>
@@ -771,7 +742,7 @@
                   <summary data-i18n="settings.codex.loginDetails">Details</summary>
                   <pre id="codexLoginOutput" class="codex-login-output"></pre>
                 </details>
-                <div id="codexAccountErrorMessage" class="settings-note error hidden"></div>
+                <div id="codexAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="opencodeCookieGroup" class="settings-group cursor-account-group">
@@ -859,7 +830,7 @@
                   </div>
                 </div>
 
-                <div id="opencodeErrorMessage" class="settings-note error hidden"></div>
+                <div id="opencodeErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="cursorAccountGroup" class="settings-group cursor-account-group">
@@ -899,7 +870,7 @@
                     </div>
                   </div>
                 </div>
-                <div id="cursorErrorMessage" class="settings-note error hidden"></div>
+                <div id="cursorErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="antigravityAccountGroup" class="settings-group cursor-account-group">
@@ -975,7 +946,7 @@
                   <button id="copilotLogoutButton" class="hidden" data-i18n="settings.copilot.logout">Sign out</button>
                   <button id="copilotRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
                 </div>
-                <pre id="copilotLoginStatus" class="codex-login-output hidden"></pre>
+                <pre id="copilotLoginStatus" class="codex-login-output hidden" role="status" aria-live="polite"></pre>
                 <div id="copilotManualPanel" class="opencode-add-form">
                   <button id="copilotManualToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="copilotManualDetails">
                     <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -993,7 +964,7 @@
                     </div>
                   </div>
                 </div>
-                <div id="copilotErrorMessage" class="settings-note error hidden"></div>
+                <div id="copilotErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="mimoAccountGroup" class="settings-group cursor-account-group">
@@ -1032,176 +1003,7 @@
                     </div>
                   </div>
                 </div>
-                <div id="mimoAccountErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="zaiAccountGroup" class="settings-group cursor-account-group">
-              <button id="zaiSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="zaiSettingsDetails">
-                <span data-i18n="settings.zai.title">Z.ai Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="zaiAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="zaiSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="zaiOpenBrowser" data-i18n="settings.zai.openBrowser">Open GLM Coding Plan</button>
-                  <button id="zaiLogoutButton" class="hidden" data-i18n="settings.zai.clearApiKey">Clear key</button>
-                  <button id="zaiRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div class="settings-row">
-                  <label for="zaiApiRegionInput" data-i18n="settings.zai.apiRegion">API region</label>
-                  <select id="zaiApiRegionInput">
-                    <option value="global" data-i18n="settings.zai.regionGlobal">Global (api.z.ai)</option>
-                    <option value="bigmodel-cn" data-i18n="settings.zai.regionBigmodelCn">BigModel CN (open.bigmodel.cn)</option>
-                  </select>
-                </div>
-                <div id="zaiManualPanel">
-                  <p class="settings-note" data-i18n="settings.zai.note">Paste a Z.ai API key for GLM Coding Plan quota lookup.</p>
-                  <input id="zaiApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.zai.apiKeyPlaceholder" />
-                  <div class="settings-actions">
-                    <button id="zaiApiKeySubmit" data-i18n="settings.zai.saveApiKey">Save API key</button>
-                  </div>
-                </div>
-                <div id="zaiErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="zaiteamAccountGroup" class="settings-group cursor-account-group">
-              <button id="zaiteamSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="zaiteamSettingsDetails">
-                <span data-i18n="settings.zaiteam.title">Z.ai Team Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="zaiteamAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="zaiteamSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="zaiteamOpenBrowser" data-i18n="settings.zaiteam.openBrowser">Open GLM Team Plan</button>
-                  <button id="zaiteamLogoutButton" class="hidden" data-i18n="settings.zaiteam.clearApiKey">Clear key</button>
-                  <button id="zaiteamRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <p class="settings-note" data-i18n="settings.zaiteam.regionNote">Team plan is available only on BigModel CN (open.bigmodel.cn).</p>
-                <div id="zaiteamManualPanel">
-                  <p class="settings-note" data-i18n="settings.zaiteam.note">Paste a Z.ai API key for GLM Team Coding Plan quota lookup.</p>
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.zaiteam.step1">Open BigModel in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.zaiteam.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Local Storage -> bigmodel.cn.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.zaiteam.step3">Copy the Bigmodel-Organization and Bigmodel-Project values.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.zaiteam.step4">Paste them below with your API key and click Save credentials.</span>
-                  </p>
-                  <div class="settings-row">
-                    <label for="zaiteamApiKeyInput" data-i18n="settings.zaiteam.apiKey">API key</label>
-                    <input id="zaiteamApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.zaiteam.apiKeyPlaceholder" />
-                  </div>
-                  <div class="settings-row">
-                    <label for="zaiteamOrganizationIdInput" data-i18n="settings.zaiteam.organizationId">Organization ID</label>
-                    <input id="zaiteamOrganizationIdInput" type="text" spellcheck="false" placeholder="org-xxx" data-i18n-placeholder="settings.zaiteam.organizationIdPlaceholder" />
-                  </div>
-                  <div class="settings-row">
-                    <label for="zaiteamProjectIdInput" data-i18n="settings.zaiteam.projectId">Project ID</label>
-                    <input id="zaiteamProjectIdInput" type="text" spellcheck="false" placeholder="proj_xxx" data-i18n-placeholder="settings.zaiteam.projectIdPlaceholder" />
-                  </div>
-                  <div class="settings-actions">
-                    <button id="zaiteamApiKeySubmit" data-i18n="settings.zaiteam.saveCredentials">Save credentials</button>
-                  </div>
-                </div>
-                <div id="zaiteamErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="qoderAccountGroup" class="settings-group cursor-account-group">
-              <button id="qoderSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="qoderSettingsDetails">
-                <span data-i18n="settings.qoder.title">Qoder Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="qoderAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="qoderSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="qoderOpenBrowser" data-i18n="settings.qoder.openBrowser">Open Qoder usage</button>
-                  <button id="qoderLogoutButton" class="hidden" data-i18n="settings.qoder.clearCookie">Clear cookie</button>
-                  <button id="qoderRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="qoderManualPanel">
-                  <div class="settings-row">
-                    <label for="qoderSiteInput" data-i18n="settings.qoder.site">Site</label>
-                    <select id="qoderSiteInput">
-                      <option value="global" data-i18n="settings.qoder.siteGlobal">qoder.com</option>
-                      <option value="cn" data-i18n="settings.qoder.siteCn">qoder.com.cn</option>
-                    </select>
-                  </div>
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.qoder.step1Before">Open the selected Qoder usage page</span> <code id="qoderUsagePageHint">qoder.com/account/usage</code> <span data-i18n="settings.qoder.step1After">in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.qoder.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the big_model_credits request.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.qoder.step3">In Headers -> Request Headers, copy the full Cookie value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.qoder.step4">Paste it below and click Save cookie.</span>
-                  </p>
-                  <textarea id="qoderCookieInput" rows="3" spellcheck="false" placeholder="session=..." data-i18n-placeholder="settings.qoder.cookiePlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="qoderCookieSubmit" data-i18n="settings.qoder.saveCookie">Save cookie</button>
-                  </div>
-                </div>
-                <div id="qoderErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="deepseekAccountGroup" class="settings-group cursor-account-group">
-              <button id="deepseekSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="deepseekSettingsDetails">
-                <span data-i18n="settings.deepseek.title">DeepSeek Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="deepseekApiKeyStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="deepseekSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="deepseekOpenBrowser" data-i18n="settings.deepseek.openBrowser">Open DeepSeek API keys</button>
-                  <button id="deepseekLogoutButton" class="hidden" data-i18n="settings.deepseek.clearApiKey">Clear key</button>
-                  <button id="deepseekRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="deepseekManualPanel">
-                  <p class="settings-note" data-i18n="settings.deepseek.note">Paste a DeepSeek API key. It stays on this device and is used only for the balance API.</p>
-                  <input id="deepseekApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.deepseek.apiKeyPlaceholder" />
-                  <div class="settings-actions">
-                    <button id="deepseekApiKeySubmit" data-i18n="settings.deepseek.saveApiKey">Save API key</button>
-                  </div>
-                </div>
-                <div id="deepseekErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="devinAccountGroup" class="settings-group cursor-account-group">
-              <button id="devinSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="devinSettingsDetails">
-                <span data-i18n="settings.devin.title">Devin Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="devinAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="devinSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="devinOpenBrowser" data-i18n="settings.devin.openBrowser">Open Devin usage</button>
-                  <button id="devinLogoutButton" class="hidden" data-i18n="settings.devin.clearCredentials">Clear credentials</button>
-                  <button id="devinRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="devinManualPanel">
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.devin.step1">Open Devin Usage &amp; Limits in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.devin.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the billing/quota/usage request.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.devin.step3">Copy the Authorization value and x-cog-org-id from Request Headers.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.devin.step4">Paste both values below and click Save credentials.</span>
-                  </p>
-                  <div class="settings-row">
-                    <label for="devinBearerTokenInput" data-i18n="settings.devin.bearerToken">Authorization</label>
-                    <input id="devinBearerTokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="Bearer auth1_..." data-i18n-placeholder="settings.devin.bearerTokenPlaceholder" />
-                  </div>
-                  <div class="settings-row">
-                    <label for="devinOrganizationInput" data-i18n="settings.devin.organization">Organization</label>
-                    <input id="devinOrganizationInput" type="text" autocomplete="off" spellcheck="false" placeholder="org_..." data-i18n-placeholder="settings.devin.organizationPlaceholder" />
-                  </div>
-                  <div class="settings-actions">
-                    <button id="devinCredentialSubmit" data-i18n="settings.devin.saveCredentials">Save credentials</button>
-                  </div>
-                </div>
-                <div id="devinErrorMessage" class="settings-note error hidden" role="alert"></div>
+                <div id="mimoAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="openrouterAccountGroup" class="settings-group cursor-account-group">
@@ -1238,31 +1040,7 @@
                     </div>
                   </div>
                 </div>
-                <div id="openrouterErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="minimaxAccountGroup" class="settings-group cursor-account-group">
-              <button id="minimaxSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="minimaxSettingsDetails">
-                <span data-i18n="settings.minimax.title">Minimax Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="minimaxApiKeyStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="minimaxSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="minimaxOpenBrowser" data-i18n="settings.minimax.openBrowser">Open Minimax Token Plan page</button>
-                  <button id="minimaxLogoutButton" class="hidden" data-i18n="settings.minimax.clearApiKey">Clear key</button>
-                  <button id="minimaxRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="minimaxManualPanel">
-                  <p class="settings-note" data-i18n="settings.minimax.note">Paste your Minimax API key. It stays on this device and is used only for the Token Plan quota API.</p>
-                  <input id="minimaxApiKeyInput" type="password" spellcheck="false" placeholder="sk-cp-..." data-i18n-placeholder="settings.minimax.apiKeyPlaceholder" />
-                  <div class="settings-actions">
-                    <button id="minimaxApiKeySubmit" data-i18n="settings.minimax.saveApiKey">Save API key</button>
-                  </div>
-                </div>
-                <div id="minimaxErrorMessage" class="settings-note error hidden"></div>
+                <div id="openrouterErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="volcengineAccountGroup" class="settings-group cursor-account-group">
@@ -1327,111 +1105,6 @@
                   </div>
                 </div>
                 <div id="volcengineErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="ollamaAccountGroup" class="settings-group cursor-account-group">
-              <button id="ollamaSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="ollamaSettingsDetails">
-                <span data-i18n="settings.ollama.title">Ollama Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="ollamaAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="ollamaSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="ollamaOpenBrowser" data-i18n="settings.ollama.openBrowser">Open Ollama settings</button>
-                  <button id="ollamaLogoutButton" class="hidden" data-i18n="settings.ollama.clearCookie">Clear cookie</button>
-                  <button id="ollamaRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="ollamaManualPanel">
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.ollama.step1">Open Ollama settings in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.ollama.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the settings document request.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.ollama.step3">In Headers -> Request Headers, copy the full Cookie value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.ollama.step4">Paste it below and click Save cookie.</span>
-                  </p>
-                  <textarea id="ollamaCookieInput" rows="3" spellcheck="false" placeholder="wos-session=..." data-i18n-placeholder="settings.ollama.cookiePlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="ollamaCookieSubmit" data-i18n="settings.ollama.saveCookie">Save cookie</button>
-                  </div>
-                </div>
-                <div id="ollamaErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="traeAccountGroup" class="settings-group cursor-account-group">
-              <button id="traeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="traeSettingsDetails">
-                <span data-i18n="settings.trae.title">Trae CN Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="traeAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="traeSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="traeOpenBrowser" data-i18n="settings.trae.openBrowser">Open Trae CN in browser</button>
-                  <button id="traeLogoutButton" class="hidden" data-i18n="settings.trae.clearCredentials">Clear credentials</button>
-                  <button id="traeRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="traeManualPanel">
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.trae.step1">Open Trae CN in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.trae.step2Before">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Local Storage -></span> www.trae.cn.<br>
-                    <strong>3.</strong> <span data-i18n="settings.trae.step3Before">Copy the</span> <code>Cloud-IDE-Token</code> <span data-i18n="settings.trae.step3After">value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.trae.step4">Paste it below and click Save credentials.</span>
-                  </p>
-                  <div class="settings-row">
-                    <label for="traeTokenInput" data-i18n="settings.trae.token">Access token</label>
-                    <input id="traeTokenInput" type="password" spellcheck="false" autocomplete="off" placeholder="Cloud-IDE-Token" />
-                  </div>
-                  <div class="settings-row">
-                    <label for="traeDeviceIdInput" data-i18n="settings.trae.deviceId">Device ID (optional)</label>
-                    <input id="traeDeviceIdInput" type="text" spellcheck="false" autocomplete="off" placeholder="X-Device-Id" data-i18n-placeholder="settings.trae.deviceIdPlaceholder" />
-                  </div>
-                  <p class="settings-note" data-i18n="settings.trae.deviceIdNote">Usually leave this blank. If the ide_user_ent_usage request includes X-Device-Id, copy that header value here.</p>
-                  <div class="settings-actions">
-                    <button id="traeTokenSubmit" data-i18n="settings.trae.saveCredentials">Save credentials</button>
-                  </div>
-                </div>
-                <div id="traeErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="alibabaAccountGroup" class="settings-group cursor-account-group">
-              <button id="alibabaSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="alibabaSettingsDetails">
-                <span data-i18n="settings.alibaba.title">Alibaba Cloud Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="alibabaAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="alibabaSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="alibabaOpenBrowser" data-i18n="settings.alibaba.openBrowser">Open Token Plan page</button>
-                  <button id="alibabaLogoutButton" class="hidden" data-i18n="settings.alibaba.clearCookie">Clear cookie</button>
-                  <button id="alibabaRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="alibabaManualPanel">
-                  <div class="settings-row">
-                    <label for="alibabaVariantInput" data-i18n="settings.alibaba.variant">Console</label>
-                    <select id="alibabaVariantInput">
-                      <option value="cn" data-i18n="settings.alibaba.variantCn">China mainland - Team</option>
-                      <option value="intl" data-i18n="settings.alibaba.variantIntl">International - Team</option>
-                      <option value="cn-personal" data-i18n="settings.alibaba.variantCnPersonal">China mainland - Personal/Solo</option>
-                      <option value="intl-personal" data-i18n="settings.alibaba.variantIntlPersonal">International - Personal/Solo</option>
-                    </select>
-                  </div>
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.alibaba.step1">Open the Token Plan page in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.alibaba.step2Before">Open DevTools (F12 or Cmd+Opt+I) -&gt; Network, reload the page, then select the</span> <code id="alibabaRequestHint">GetSubscriptionSummary</code> <span data-i18n="settings.alibaba.step2After">request.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.alibaba.step3">In Headers -&gt; Request Headers, copy the full Cookie value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.alibaba.step4">Paste it below and click Save cookie.</span>
-                  </p>
-                  <p id="alibabaPersonalNote" class="settings-note hidden" data-i18n="settings.alibaba.personalNote">Personal/Solo reads its quota from a different host than the dashboard, so the cookie has to come from that usage request rather than from the page itself.</p>
-                  <textarea id="alibabaCookieInput" rows="3" spellcheck="false" placeholder="login_aliyunid_pk=...; login_aliyunid_ticket=..." data-i18n-placeholder="settings.alibaba.cookiePlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="alibabaCookieSubmit" data-i18n="settings.alibaba.saveCookie">Save cookie</button>
-                  </div>
-                </div>
-                <div id="alibabaErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
             <div id="thirdpartyAccountGroup" class="settings-group cursor-account-group">
@@ -1554,7 +1227,7 @@
                     </div>
                   </div>
                 </div>
-                <div id="thirdpartyErrorMessage" class="settings-note error hidden"></div>
+                <div id="thirdpartyErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
         </div>
@@ -1823,6 +1496,7 @@
     <script src="trayProviderIcons.js"></script>
     <script src="limits/providerOrder.js"></script>
     <script src="limits/accountPanels.js"></script>
+    <script src="limits/accountShell.js"></script>
     <script src="accountIdentity.js"></script>
     <script src="appUpdatePresentation.js"></script>
     <script src="limits/providerPresentation.js"></script>
@@ -1874,6 +1548,7 @@
     <script src="../motionPreference.js"></script>
     <script src="../windowsBackdropMode.js"></script>
     <script src="windowsGlass.js"></script>
+    <script src="../macBackdropMode.js"></script>
     <script src="glassRendering.js"></script>
     <script src="trayComposer.js"></script>
     <script src="diagnosticsPanel.js"></script>

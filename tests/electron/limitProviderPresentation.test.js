@@ -7,6 +7,7 @@ const test = require('node:test');
 const { rendererStyles } = require('../helpers/rendererStyles');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
+const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
 const compactTokenApi = require('../../src/shared/compactTokens');
 const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
 const limitProviderOrderApi = require('../../src/electron/renderer/limits/providerOrder');
@@ -265,7 +266,7 @@ function viewTable(name) {
 
 function runLocalProviderStatus(source, state, providerName) {
   const localDeviceHelper = functionBody(source, 'localDeviceLimitsProviders', 'localProviderStatus');
-  const localProviderHelper = functionBody(source, 'localProviderStatus', 'deepseekAccountLinked');
+  const localProviderHelper = functionBody(source, 'localProviderStatus', 'renderAntigravityStatus');
   return vm.runInNewContext(
     `${localDeviceHelper}\n${localProviderHelper}\nlocalProviderStatus(${JSON.stringify(providerName)});`,
     { accountIdentityApi, state }
@@ -1848,65 +1849,38 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   // re-render them. Grok is automatic and belongs only to the generic provider
   // list, so it must not retain a separate account-card renderer.
   // Settings pushes route through syncSettingsForm (which init() also calls), so
-  // the two cards are re-rendered there and
-  // onSettingsPush itself does not duplicate the calls.
-  for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus']) {
-    assert.match(statsRender, new RegExp(`${fn}\\(\\);`), `${fn} missing from renderStatsUpdate`);
-    assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
-  }
-  for (const provider of ['claude', 'zai', 'volcengine', 'qoder', 'trae', 'kimi', 'ollama']) {
+  // the cards are re-rendered there and onSettingsPush itself does not duplicate
+  // the calls.
+  for (const provider of ['volcengine', 'kimi']) {
     assert.match(statsRender, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
   }
   assert.match(statsRender, /for \(const form of state\.settings\?\.limitAccountForms \|\| \[\]\)/);
   assert.match(syncSettings, /for \(const form of state\.settings\?\.limitAccountForms \|\| \[\]\)/);
-  for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus']) {
-    assert.doesNotMatch(settingsPush, new RegExp(`${fn}\\(\\);`), `${fn} should not be duplicated in onSettingsPush (syncSettingsForm covers it)`);
-  }
+  assert.doesNotMatch(settingsPush, /renderExternalProviderStatus\(/, 'syncSettingsForm covers account cards; onSettingsPush should not duplicate them');
   assert.doesNotMatch(app, /renderGrokStatus|grokAccountLinked|grokAccountExpanded/);
 });
 
-test('saving Ollama credentials enables its provider and always settles validation', () => {
+test('a saved credential folds its panel only once a fresh record confirms the account', () => {
   const app = readRendererFile('app.js');
-  const renderExternalStatus = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
-  const selection = functionBody(app, 'limitProviderSelectionIncluding', 'missingLimitProviderStatus');
-  const setup = functionBody(app, 'setupCursorAccountUI', 'initSettingsAnimationWrappers');
-  const ollamaSetup = setup.slice(
-    setup.indexOf("document.getElementById('ollamaCookieSubmit')"),
-    setup.indexOf('const kimiToggle')
-  );
-  assert.match(selection, /selected\.add\(providerName\)/);
-  assert.match(selection, /\.filter\(\(id\) => selected\.has\(id\)\)/);
-  assert.match(ollamaSetup, /limitProviders: limitProviderSelectionIncluding\('ollama'\)/);
-  assert.match(ollamaSetup, /limitsEnabled: true/);
-  assert.match(ollamaSetup, /await window\.tokenMonitor\.ollama\.validateCookie\(input\.value\)/);
-  assert.match(ollamaSetup, /if \(!validation\?\.ok\)/);
-  assert.doesNotMatch(ollamaSetup, /await refreshStats\(\{ force: true \}\);/);
-  assert.match(ollamaSetup, /clearExternalProviderCheckPending\('ollama'\);/);
+  const renderExternalStatus = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
+  const save = functionBody(app, 'saveAccountCredential', 'submitAccountCredential');
   assert.match(renderExternalStatus, /pending \? t\('settings\.common\.checking'\)/);
-  assert.match(
-    renderExternalStatus,
-    /providerName === 'ollama' && wasPending && !pending && linked[\s\S]*?setExternalAccountExpanded\('ollama', false\)/,
-    'Ollama should collapse only after a fresh provider confirms the account is linked'
-  );
-  assert.doesNotMatch(
-    ollamaSetup,
-    /input\.value = '';[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?setExternalAccountExpanded\('ollama', false\);/,
-    'a successful save must stay pending until the collector publishes a fresh provider'
-  );
-  assert.doesNotMatch(
-    ollamaSetup,
-    /input\.value = '';[\s\S]*?setExternalAccountExpanded\('ollama', false\);/,
-    'the setup panel must remain open while validation is pending'
-  );
-  assert.match(ollamaSetup, /catch \(err\) \{[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?renderExternalProviderStatus\('ollama'\);/);
-  assert.match(ollamaSetup, /ollamaValidationError\(validation\)/);
+  // The refresh after a save can return before the collector publishes the
+  // checked account, so the panel stays open and folds when that record lands.
+  assert.match(renderExternalStatus, /if \(wasPending && !pending && linked\) setExternalAccountExpanded\(providerName, false\);/);
+  assert.match(save, /markExternalProviderCheckPending\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);\n\s*setExternalAccountExpanded\(id, !externalProviderAccountLinked\(id\)\);/);
+  // Ollama answers its first poll from the save-time check instead of fetching
+  // the settings page twice in a row.
+  const { limitProviderEntry } = require('../../src/shared/limits/registry');
+  assert.deepEqual({ ...limitProviderEntry('ollama').form.rememberProbe }, { fn: 'rememberOllamaValidation', field: 'ollamaCookie' });
+  assert.equal(typeof limitProviderEntry('ollama').limits.rememberOllamaValidation, 'function');
 });
 
 test('account validation reads the local device raw limits, not the collapsed aggregate', () => {
   const app = readRendererFile('app.js');
   const rawHelper = functionBody(app, 'localDeviceLimitsProviders', 'localProviderStatus');
-  const helper = functionBody(app, 'localProviderStatus', 'deepseekAccountLinked');
+  const helper = functionBody(app, 'localProviderStatus', 'renderAntigravityStatus');
   // Sync-mode aggregateLimits() collapses a local `unauthorized` row out in favor
   // of a remote `ok` (providerCollapseKey for deepseek/minimax/grok is just the
   // provider name; pickBetterProvider keeps the higher statusRank). So the account
@@ -1923,8 +1897,8 @@ test('account validation reads the local device raw limits, not the collapsed ag
   // Falls back to the aggregate only for legacy/non-aggregated stats that do
   // not expose raw device rows at all.
   assert.match(helper, /state\.stats\?\.limits\?\.providers/);
-  assert.match(functionBody(app, 'deepseekProviderStatus', 'deepseekProviderForAccount'), /return localProviderStatus\('deepseek'\);/);
-  assert.match(functionBody(app, 'minimaxProviderStatus', 'minimaxAccountLinked'), /return localProviderStatus\('minimax'\);/);
+  // DeepSeek and MiniMax reach it through the shared account-form lane.
+  assert.match(functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked'), /const provider = localProviderStatus\(providerName\);/);
 });
 
 test('account validation does not treat a sole remote synced device as local', () => {
@@ -1986,14 +1960,14 @@ test('Cline exposes its API key through the settings and credential-store patter
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'cline');
   assert.doesNotMatch(html, /id="clineAccountGroup"/);
-  assert.equal(form.field, 'clineApiKey');
-  assert.equal(form.url, 'https://app.cline.bot/dashboard/account');
-  assert.equal(form.noteKey, 'settings.cline.note');
-  assert.equal(form.ariaLabelKey, 'settings.cline.apiKeyLabel');
+  assert.equal(form.fields[0].key, 'clineApiKey');
+  assert.equal(form.openUrl.url, 'https://app.cline.bot/dashboard/account');
+  assert.deepEqual(form.manual[0], { note: 'settings.cline.note' });
+  assert.equal(form.fields[0].ariaLabelKey, 'settings.cline.apiKeyLabel');
   assert.match(app, /clineAccountExpanded/);
   assert.equal(form.status.configuredKey, 'clineCredentialConfigured');
-  assert.match(app, /window\.tokenMonitor\.limits\.validateCredential\(id, value\)/);
-  assert.match(preload, /validateCredential: \(providerId, credential\) => ipcRenderer\.invoke\('limits:validateCredential'/);
+  assert.match(app, /window\.tokenMonitor\.limits\.saveCredential\(id, values\)/);
+  assert.match(preload, /saveCredential: \(providerId, values\) => ipcRenderer\.invoke\('limits:saveCredential'/);
   // The key itself never crosses to the renderer: the projection carries the
   // boolean and the source label only, never a `clineApiKey` field.
   const projection = main.slice(
@@ -2011,7 +1985,7 @@ test('Cline exposes its API key through the settings and credential-store patter
   assert.match(runtimeConfig, /limitProviderSettingKeys\(\)/);
   assert.deepEqual(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.cline, ['clineApiKey']);
   assert.deepEqual(CREDENTIAL_SETTING_PATHS.clineApiKey, ['providers', 'cline', 'apiKey']);
-  assert.match(main, /ipcMain\.handle\('limits:validateCredential'/);
+  assert.match(main, /ipcMain\.handle\('limits:saveCredential'/);
   assert.match(main, /\.\.\.finalAccountSettings\(patch, settings\)/);
   const clinePatch = { clineApiKey: ' " pasted " ' };
   const normalized = { ...clinePatch };
@@ -2083,42 +2057,33 @@ test('Copilot env token is documented in env example, not the README overview', 
 test('AI Tool Limits owns every live account group and its status pill', () => {
   const app = readRendererFile('app.js');
   const html = readRendererFile('index.html');
-  const groupMap = app.slice(
-    app.indexOf('const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {'),
-    app.indexOf('const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {')
-  );
-  const statusMap = app.slice(
-    app.indexOf('const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {'),
+  const accountNodes = app.slice(
+    app.indexOf('const LIMIT_PROVIDER_ACCOUNT_NODES = {'),
     app.indexOf('const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {')
   );
   const providers = [
-    ['claude', 'claudeAccountGroup', 'claudeAccountStatus'],
     ['codex', 'codexAccountGroup', 'codexAccountStatus'],
     ['opencode', 'opencodeCookieGroup', 'opencodeCookieStatus'],
     ['cursor', 'cursorAccountGroup', 'cursorAccountStatus'],
     ['kimi', 'kimiAccountGroup', 'kimiAccountStatus'],
     ['copilot', 'copilotAccountGroup', 'copilotApiTokenStatus'],
     ['mimo', 'mimoAccountGroup', 'mimoAccountStatus'],
-    ['zai', 'zaiAccountGroup', 'zaiAccountStatus'],
-    ['zaiteam', 'zaiteamAccountGroup', 'zaiteamAccountStatus'],
-    ['deepseek', 'deepseekAccountGroup', 'deepseekApiKeyStatus'],
     ['openrouter', 'openrouterAccountGroup', 'openrouterStatus'],
-    ['minimax', 'minimaxAccountGroup', 'minimaxApiKeyStatus'],
     ['volcengine', 'volcengineAccountGroup', 'volcengineAccountStatus'],
-    ['qoder', 'qoderAccountGroup', 'qoderAccountStatus'],
-    ['trae', 'traeAccountGroup', 'traeAccountStatus'],
-    ['ollama', 'ollamaAccountGroup', 'ollamaAccountStatus'],
     ['thirdparty', 'thirdpartyAccountGroup', 'thirdpartyStatus']
   ];
 
   for (const [provider, groupId, statusId] of providers) {
-    assert.match(groupMap, new RegExp(`${provider}: '${groupId}'`));
-    assert.match(statusMap, new RegExp(`${provider}: '${statusId}'`));
+    assert.match(accountNodes, new RegExp(`${provider}: \\{ group: '${groupId}', status: '${statusId}' \\}`));
     assert.match(html, new RegExp(`id="${groupId}"`));
     assert.match(html, new RegExp(`id="${statusId}"[^>]*class="cursor-status-pill`));
   }
   assert.match(html, /id="accountsSettingsDetails" class="hidden" aria-hidden="true"/);
   assert.doesNotMatch(html, /data-settings-section="accounts"/);
+  // Account-form providers have no static markup: their group and pill resolve
+  // by the generated `${id}AccountGroup` / `${id}AccountStatus` ids.
+  assert.match(functionBody(app, 'limitProviderAccountGroup', 'limitProviderAccountStatus'), /`\$\{providerId\}AccountGroup`/);
+  assert.match(functionBody(app, 'limitProviderAccountStatus', 'limitProviderConnectionDetail'), /`\$\{providerId\}AccountStatus`/);
 });
 
 test('provider rerenders preserve live account nodes and focused controls', () => {
@@ -2297,19 +2262,11 @@ renderLimitProviderCheckboxes();`,
 test('dynamic account summaries are never reset by the static translation pass', () => {
   const html = readRendererFile('index.html');
   const statusIds = [
-    'claudeAccountStatus',
     'codexAccountStatus',
     'cursorAccountStatus',
     'opencodeCookieStatus',
     'openrouterStatus',
-    'deepseekApiKeyStatus',
-    'minimaxApiKeyStatus',
-    'zaiAccountStatus',
-    'zaiteamAccountStatus',
     'volcengineAccountStatus',
-    'qoderAccountStatus',
-    'traeAccountStatus',
-    'ollamaAccountStatus',
     'kimiAccountStatus',
     'mimoAccountStatus',
     'copilotApiTokenStatus',
@@ -2321,6 +2278,10 @@ test('dynamic account summaries are never reset by the static translation pass',
     assert.ok(tag, `${id} should exist`);
     assert.doesNotMatch(tag, /data-i18n=/, `${id} is owned by its runtime status renderer`);
   }
+  // Generated account-form pills get their initial text directly, never a
+  // data-i18n key the translation pass would later write back over.
+  const panel = readRendererFile('limits/accountPanels.js');
+  assert.match(panel, /const status = element\('span', 'AccountStatus', 'cursor-status-pill'\);\n\s*status\.textContent = translate\(form\.emptyKey\);/);
 });
 
 test('provider toggles converge through the limits push without a forced refresh', () => {
@@ -2454,6 +2415,7 @@ test('empty OpenCode profiles render a localized summary before returning', () =
       }
     },
     state: { opencodeProfileCount: 0 },
+    accountShellApi,
     t: (key, params) => params ? `${key}:${params.linked}/${params.total}` : `localized:${key}`
   };
 
