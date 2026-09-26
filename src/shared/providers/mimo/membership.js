@@ -178,7 +178,7 @@ async function resolveMimoMembershipSession(options = {}, deps = {}) {
     baseUrl: MIMO_MEMBERSHIP_BASE_URL,
     accountCookie: pairs.has('passToken') ? accountCookie : '',
     serviceCookie: pairs.has('passToken') ? '' : cookieHeader,
-    fetch: deps.fetch,
+    request: deps.mimoRequest,
     signal: deps.signal,
     maxHops: deps.maxHops
   });

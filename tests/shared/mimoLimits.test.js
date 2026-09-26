@@ -627,13 +627,25 @@ test('MiMo without a token plan still exposes the balance window', async () => {
 });
 
 // ---- the two sources, together ----------------------------------------------
+// The lane resolves its session over one seam and reads its endpoints over the
+// other. A fixture that describes the whole lane therefore has to answer both —
+// otherwise the half it does not answer walks the real chain over the network and
+// the test passes on whatever happens to come back.
+function laneSeams(handler) {
+  return {
+    mimoRequest: async (url, init = {}) => handler(url, init),
+    fetch: async (url, init = {}) => handler(url, init)
+  };
+}
+
+
 // These use the raw fetcher: the rest of the file declares the membership lane
 // absent, and what is under test here is precisely that it is not.
 
 test('the membership lane is merged beside the console accounts', async () => {
   let membershipReads = 0;
   const rows = await fetchMimoLimitsRaw({ mimoManagedAccounts: [managed()] }, {
-    fetch: async (url) => {
+    ...laneSeams(async (url) => {
       const href = String(url);
       if (href.includes('/user/xiaomi/me')) {
         return { status: 200, headers: { get: () => null, getSetCookie: () => [] }, json: async () => ({ code: 0, data: { userId: '123', region: 'CN' } }), text: async () => JSON.stringify({ code: 0, data: { userId: '123', region: 'CN' } }) };
@@ -644,7 +656,7 @@ test('the membership lane is merged beside the console accounts', async () => {
       return url.endsWith('/balance')
         ? response({ code: 0, data: { balance: '9.95', currency: 'CNY' } })
         : response({ code: 0, data: null });
-    },
+    }),
     readMimoDesktopAccount: () => { membershipReads += 1; return { ok: true, cookieHeader: COOKIE, userId: '123' }; }
   });
 
@@ -673,7 +685,7 @@ test('the not-configured row is only for a provider with neither source', async 
   // provider-level row is among them — one would be read as the whole provider's
   // and would clear the identities these rows just established.
   const membershipOnly = await fetchMimoLimitsRaw({}, {
-    fetch: async (url) => {
+    ...laneSeams(async (url) => {
       const href = String(url);
       if (href.includes('/user/xiaomi/me')) {
         return {
@@ -687,7 +699,7 @@ test('the not-configured row is only for a provider with neither source', async 
         return response({ code: 0, data: { current: { planCode: 'mimo-cn-pro', percent: 60, nextResetTime: '2026-09-15T00:00:00' } } });
       }
       return response({ code: 0, data: { balance: '9.95', currency: 'CNY' } });
-    },
+    }),
     readMimoDesktopAccount: () => ({ ok: true, cookieHeader: COOKIE, userId: '123' })
   });
   assert.equal(membershipOnly.some((row) => row.accountKey === ''), false);
@@ -714,12 +726,12 @@ test('a refresh scoped to one console account does not spend the membership lane
 test('minting never shadows a configured account', async () => {
   const consoleCalls = [];
   const rows = await fetchMimoLimitsRaw({ mimoManagedAccounts: [managed()] }, {
-    fetch: async (url, init = {}) => {
+    ...laneSeams(async (url, init = {}) => {
       if (String(url).endsWith('/balance')) consoleCalls.push((init.headers || {}).Cookie || '');
       return url.endsWith('/balance')
         ? response({ code: 0, data: { balance: '1', currency: 'USD' } })
         : response({ code: 0, data: {} });
-    },
+    }),
     // The store names a different account. It is the membership lane's business
     // and must not become a second console account beside the configured one.
     readMimoDesktopAccount: () => ({ ok: true, cookieHeader: ACCOUNT_COOKIE, userId: '999' })
@@ -738,7 +750,7 @@ test('a minted session is the account a pasted cookie for it would be', async ()
   assert.equal(pastedAccount.accountKey, hashKey('mimo:123'));
 
   const minted = await fetchMimoLimitsRaw({}, {
-    fetch: async (url) => {
+    ...laneSeams(async (url) => {
       const href = String(url);
       if (href.includes('/user/xiaomi/me')) {
         return {
@@ -749,7 +761,7 @@ test('a minted session is the account a pasted cookie for it would be', async ()
         };
       }
       return response({ code: 0, data: { current: null } });
-    },
+    }),
     readMimoDesktopAccount: () => ({ ok: true, cookieHeader: COOKIE, userId: '123' })
   });
   assert.equal(minted.some((row) => row.accountKey === pastedAccount.accountKey), true);
@@ -759,7 +771,7 @@ test('a refused mint is a credential problem and still names the account', async
   const rows = await fetchMimoLimitsRaw({}, {
     // The refusal signature: the console chain lands on the account host's login
     // page and never comes back.
-    fetch: async (url) => {
+    ...laneSeams(async (url) => {
       const href = String(url);
       if (href.includes('/user/xiaomi/me')) {
         return {
@@ -774,7 +786,7 @@ test('a refused mint is a credential problem and still names the account', async
       }
       const refusal = JSON.stringify({ code: 401, loginUrl: 'https://account.xiaomi.com/pass/serviceLogin?sid=api-platform' });
       return { status: 401, headers: { get: () => null, getSetCookie: () => [] }, json: async () => JSON.parse(refusal), text: async () => refusal };
-    },
+    }),
     readMimoDesktopAccount: () => ({ ok: true, cookieHeader: COOKIE, userId: '123' })
   });
   // The console row is attributable — the partition already knows which account
@@ -794,7 +806,7 @@ test('a membership row is never replaced by the not-configured row', async () =>
   // established, so the early return may only fire when *neither* source has
   // anything.
   const rows = await fetchMimoLimitsRaw({ mimoMembershipCookie: 'serviceToken=configured' }, {
-    fetch: async (url) => {
+    ...laneSeams(async (url) => {
       const href = String(url);
       if (href.includes('/user/xiaomi/me')) {
         return {
@@ -805,7 +817,7 @@ test('a membership row is never replaced by the not-configured row', async () =>
         };
       }
       return response({ code: 0, data: { current: { planCode: 'mimo-cn-pro', percent: 60, nextResetTime: '2026-09-15T00:00:00' } } });
-    },
+    }),
     readMimoDesktopAccount: () => ({ ok: false, reason: 'absent' })
   });
   assert.equal(Array.isArray(rows), true);

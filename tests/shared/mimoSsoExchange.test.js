@@ -61,9 +61,12 @@ function liveChain(overrides = {}) {
   };
 }
 
-function recordingFetch(handler, calls = []) {
+// The exchange owns its transport, so the seam is a single-hop request rather
+// than a fetch: it is the one thing that hands back both the Location and the
+// hop's own Set-Cookie lines, which is what the walk is made of.
+function recordingRequest(handler, calls = []) {
   const fn = async (url, init = {}) => {
-    calls.push({ url: String(url), cookie: (init.headers || {}).Cookie || '', redirect: init.redirect });
+    calls.push({ url: String(url), cookie: (init.headers || {}).Cookie || '' });
     return handler(url, init);
   };
   return fn;
@@ -71,7 +74,7 @@ function recordingFetch(handler, calls = []) {
 
 test('the chain is walked to the account answer and the minted cookies are carried', async () => {
   const calls = [];
-  const result = await exchangeForTest(recordingFetch(liveChain(), calls));
+  const result = await exchangeForTest(recordingRequest(liveChain(), calls));
 
   assert.equal(result.ok, true);
   assert.equal(result.userId, '1234567890');
@@ -81,9 +84,6 @@ test('the chain is walked to the account answer and the minted cookies are carri
   assert.ok(calls[1].url.startsWith('https://account.xiaomi.com/pass/serviceLogin'));
   assert.ok(calls[2].url.startsWith(`${BASE}/sts`));
   assert.ok(calls[3].url.startsWith(`${BASE}/user/xiaomi/me`));
-
-  // Every hop is manual: the transport must not swallow the chain we are here to walk.
-  assert.ok(calls.every((call) => call.redirect === 'manual'));
 
   // The account cookie is presented to the account host, which is the hop that
   // needs it, and the first call leaves without it.
@@ -96,7 +96,7 @@ test('the chain is walked to the account answer and the minted cookies are carri
 
 test('a cookie minted for the service host is never replayed at the account host', async () => {
   const calls = [];
-  await exchangeForTest(recordingFetch(liveChain({
+  await exchangeForTest(recordingRequest(liveChain({
     // A second pass through the account host, after the minted cookies exist.
     serviceLogin: () => reply(302, { location: `${BASE}/user/xiaomi/me` })
   }), calls));
@@ -109,7 +109,7 @@ test('a cookie minted for the service host is never replayed at the account host
 
 test('a refusal arrives as an ordinary 200 carrying the rejection code', async () => {
   const refusal = JSON.stringify({ code: 46109, message: 'not logged in' });
-  const result = await exchangeForTest(recordingFetch(liveChain({
+  const result = await exchangeForTest(recordingRequest(liveChain({
     me: () => reply(200, { body: refusal })
   })));
   // 46109 is not an HTTP status: the account was refused on an answer the status
@@ -117,13 +117,13 @@ test('a refusal arrives as an ordinary 200 carrying the rejection code', async (
   assert.deepEqual(result, { ok: false, status: MIMO_EXCHANGE_STATUSES.rejected });
 
   assert.deepEqual(
-    await exchangeForTest(recordingFetch(liveChain({
+    await exchangeForTest(recordingRequest(liveChain({
       me: () => reply(200, { body: JSON.stringify({ code: 403 }) })
     }))),
     { ok: false, status: MIMO_EXCHANGE_STATUSES.rejected }
   );
   assert.deepEqual(
-    await exchangeForTest(recordingFetch(liveChain({
+    await exchangeForTest(recordingRequest(liveChain({
       me: () => reply(403, { body: JSON.stringify({ code: 0, data: { userId: 1 } }) })
     }))),
     { ok: false, status: MIMO_EXCHANGE_STATUSES.rejected }
@@ -134,7 +134,7 @@ test('a chain that never comes back to the service host is the refusal signature
   // This is what a refused account cookie actually looks like: the walk lands on
   // the account host's own login page and mints nothing. It is a refusal, not an
   // outage — retrying it would only delay the prompt the user needs.
-  const loginPage = recordingFetch(liveChain({
+  const loginPage = recordingRequest(liveChain({
     serviceLogin: () => reply(200, { body: '<html><form action="/fe/service/login"></form></html>' })
   }));
   assert.deepEqual(
@@ -145,7 +145,7 @@ test('a chain that never comes back to the service host is the refusal signature
   // The same body answered by the service host is a different thing: the chain
   // came back, so nothing says the credential was refused and the attempt reads
   // as one that failed.
-  const notTheApiPayload = recordingFetch(liveChain({
+  const notTheApiPayload = recordingRequest(liveChain({
     me: () => reply(200, { body: '<html>proxy</html>' })
   }));
   assert.deepEqual(
@@ -168,13 +168,13 @@ test('a 200 that is not the account envelope is not a session', () => {
 });
 
 test('a redirect loop and a location-less redirect are both stopped', async () => {
-  const looping = recordingFetch(() => reply(302, { location: `${BASE}/user/xiaomi/me` }));
+  const looping = recordingRequest(() => reply(302, { location: `${BASE}/user/xiaomi/me` }));
   assert.deepEqual(
     await exchangeForTest(looping),
     { ok: false, status: MIMO_EXCHANGE_STATUSES.unavailable }
   );
 
-  const stuck = recordingFetch(() => reply(302, {}));
+  const stuck = recordingRequest(() => reply(302, {}));
   assert.deepEqual(
     await exchangeForTest(stuck),
     { ok: false, status: MIMO_EXCHANGE_STATUSES.unavailable }
@@ -182,7 +182,7 @@ test('a redirect loop and a location-less redirect are both stopped', async () =
 });
 
 test('a transport failure is not a refusal', async () => {
-  const failing = recordingFetch(() => { throw new TypeError('fetch failed'); });
+  const failing = recordingRequest(() => { throw new TypeError('fetch failed'); });
   assert.deepEqual(
     await exchangeForTest(failing),
     { ok: false, status: MIMO_EXCHANGE_STATUSES.unavailable }
@@ -200,7 +200,7 @@ test('a cancellation rejects rather than becoming a status', async () => {
       baseUrl: BASE,
       accountCookie: ACCOUNT_COOKIE,
       signal: before.signal,
-      fetch: async () => { called += 1; return reply(200, {}); }
+      request: async () => { called += 1; return reply(200, {}); }
     }),
     (error) => error.name === 'AbortError'
   );
@@ -213,7 +213,7 @@ test('a cancellation rejects rather than becoming a status', async () => {
       baseUrl: BASE,
       accountCookie: ACCOUNT_COOKIE,
       signal: betweenHops.signal,
-      fetch: async () => {
+      request: async () => {
         betweenHops.abort();
         return reply(302, { location: 'https://account.xiaomi.com/pass/serviceLogin' });
       }
@@ -230,7 +230,7 @@ test('a cancellation rejects rather than becoming a status', async () => {
       baseUrl: BASE,
       accountCookie: ACCOUNT_COOKIE,
       signal: whileReading.signal,
-      fetch: async () => ({
+      request: async () => ({
         status: 200,
         headers: { get: () => null, getSetCookie: () => [] },
         text: async () => {
@@ -274,7 +274,7 @@ function exchangeForTest(fetchFn, options = {}) {
   return exchangeMimoServiceSession({
     baseUrl: BASE,
     accountCookie: ACCOUNT_COOKIE,
-    fetch: fetchFn,
+    request: fetchFn,
     ...options
   });
 }
@@ -328,7 +328,7 @@ test('the console chain follows the login URL the endpoint names', async () => {
   const result = await exchangeMimoConsoleSession({
     baseUrl: CONSOLE_BASE,
     accountCookie: ACCOUNT_COOKIE,
-    fetch: recordingFetch(consoleChain(), calls)
+    request: recordingRequest(consoleChain(), calls)
   });
 
   assert.equal(result.ok, true);
@@ -343,29 +343,29 @@ test('the console chain follows the login URL the endpoint names', async () => {
 });
 
 test('a console walk that never comes back is a refusal, and a bad envelope is not', async () => {
-  const abandoned = recordingFetch(consoleChain({
+  const abandoned = recordingRequest(consoleChain({
     login: () => reply(200, { body: '<html><form action="/fe/service/login"></form></html>' })
   }));
   assert.deepEqual(
-    await exchangeMimoConsoleSession({ baseUrl: CONSOLE_BASE, accountCookie: ACCOUNT_COOKIE, fetch: abandoned }),
+    await exchangeMimoConsoleSession({ baseUrl: CONSOLE_BASE, accountCookie: ACCOUNT_COOKIE, request: abandoned }),
     { ok: false, status: MIMO_EXCHANGE_STATUSES.rejected }
   );
 
-  const rejectedCode = recordingFetch(consoleChain({
+  const rejectedCode = recordingRequest(consoleChain({
     balance: () => reply(200, { body: JSON.stringify({ code: 46109 }) })
   }));
   assert.deepEqual(
-    await exchangeMimoConsoleSession({ baseUrl: CONSOLE_BASE, accountCookie: ACCOUNT_COOKIE, fetch: rejectedCode }),
+    await exchangeMimoConsoleSession({ baseUrl: CONSOLE_BASE, accountCookie: ACCOUNT_COOKIE, request: rejectedCode }),
     { ok: false, status: MIMO_EXCHANGE_STATUSES.rejected }
   );
 
   // Back on the console host, but not the envelope: an attempt that failed, not a
   // credential the user has to replace.
-  const notThePayload = recordingFetch(consoleChain({
+  const notThePayload = recordingRequest(consoleChain({
     balance: () => reply(200, { body: '<html>proxy</html>' })
   }));
   assert.deepEqual(
-    await exchangeMimoConsoleSession({ baseUrl: CONSOLE_BASE, accountCookie: ACCOUNT_COOKIE, fetch: notThePayload }),
+    await exchangeMimoConsoleSession({ baseUrl: CONSOLE_BASE, accountCookie: ACCOUNT_COOKIE, request: notThePayload }),
     { ok: false, status: MIMO_EXCHANGE_STATUSES.unavailable }
   );
 });
@@ -380,7 +380,7 @@ test('a 401 is a refusal wherever it lands', () => {
     baseUrl: BASE,
     accountCookie: '',
     serviceCookie: 'serviceToken=expired',
-    fetch: recordingFetch(async () => reply(401, { body: '' }), calls)
+    request: recordingRequest(async () => reply(401, { body: '' }), calls)
   }).then((result) => {
     assert.deepEqual(result, { ok: false, status: MIMO_EXCHANGE_STATUSES.rejected });
     assert.equal(calls.length, 1);

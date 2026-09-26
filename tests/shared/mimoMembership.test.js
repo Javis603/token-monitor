@@ -50,12 +50,13 @@ function redirectReply(location, setCookie = []) {
   };
 }
 
-// Routes the SSO chain and the one call this lane makes, so a fixture cannot
-// answer both with one payload and hide which request carried what. The chain
-// visits the me path twice with different answers, as the live one does.
-function routedFetch({ subscription = jsonReply(200, { code: 0, data: { current: plan() } }), calls = [] } = {}) {
+// The lane resolves a session over one seam and reads the subscription over the
+// other, so a fixture cannot answer both with one payload and hide which request
+// carried what. The chain visits the me path twice with different answers, as the
+// live one does.
+function laneDeps({ subscription = jsonReply(200, { code: 0, data: { current: plan() } }), calls = [], ...rest } = {}) {
   let meVisits = 0;
-  return async (url, init = {}) => {
+  const mimoRequest = async (url, init = {}) => {
     const href = String(url);
     calls.push({ url: href, cookie: (init.headers || {}).Cookie || '' });
     if (href.startsWith(ME_URL)) {
@@ -67,9 +68,13 @@ function routedFetch({ subscription = jsonReply(200, { code: 0, data: { current:
     if (href.startsWith(`${MIMO_MEMBERSHIP_BASE_URL}/sts`)) {
       return redirectReply(ME_URL, ['serviceToken=svc-token; Domain=xiaomimimo.com; Path=/; Secure']);
     }
-    if (href.startsWith(SUBSCRIPTION_URL)) return subscription;
     return jsonReply(404, {});
   };
+  const fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), cookie: (init.headers || {}).Cookie || '' });
+    return String(url).startsWith(SUBSCRIPTION_URL) ? subscription : jsonReply(404, {});
+  };
+  return { mimoRequest, fetch, calls, ...rest };
 }
 
 function desktopSession(cookieHeader) {
@@ -79,7 +84,7 @@ function desktopSession(cookieHeader) {
 test('the plan renders as the weekly window with its remaining share inverted', async () => {
   const calls = [];
   const rows = await fetchMimoMembershipLimits({}, {
-    fetch: routedFetch({ calls }),
+    ...laneDeps({ calls }),
     readMimoDesktopAccount: desktopSession(ACCOUNT_COOKIE),
     now: () => Date.UTC(2026, 8, 23)
   });
@@ -117,10 +122,10 @@ test('the membership row is its own identity, never the console lane', async () 
   // same row: the key follows the server-issued user id, not the rotating
   // credential that carried it.
   const first = await fetchMimoMembershipLimits({}, {
-    fetch: routedFetch(), readMimoDesktopAccount: desktopSession(ACCOUNT_COOKIE)
+    ...laneDeps(), readMimoDesktopAccount: desktopSession(ACCOUNT_COOKIE)
   });
   const second = await fetchMimoMembershipLimits({}, {
-    fetch: routedFetch(), readMimoDesktopAccount: desktopSession('passToken=other; userId=1234567890')
+    ...laneDeps(), readMimoDesktopAccount: desktopSession('passToken=other; userId=1234567890')
   });
   assert.equal(first[0].accountKey, second[0].accountKey);
 });
@@ -139,12 +144,15 @@ test('a configured cookie wins and is never exchanged away', async () => {
     // A session the service already minted does not need the local store, and
     // must not be replaced by it — a credential the user configured is their
     // instruction, while the store belongs to another application.
+    mimoRequest: async (url, init = {}) => {
+      const href = String(url);
+      calls.push({ url: href, cookie: (init.headers || {}).Cookie || '' });
+      return href.startsWith(ME_URL) ? jsonReply(200, { code: 0, data: { userId: 'configured-user' } }) : jsonReply(404, {});
+    },
     fetch: async (url, init = {}) => {
       const href = String(url);
       calls.push({ url: href, cookie: (init.headers || {}).Cookie || '' });
-      if (href.startsWith(ME_URL)) return jsonReply(200, { code: 0, data: { userId: 'configured-user' } });
-      if (href.startsWith(SUBSCRIPTION_URL)) return jsonReply(200, { code: 0, data: { current: plan() } });
-      return jsonReply(404, {});
+      return href.startsWith(SUBSCRIPTION_URL) ? jsonReply(200, { code: 0, data: { current: plan() } }) : jsonReply(404, {});
     },
     readMimoDesktopAccount: desktopSession(ACCOUNT_COOKIE)
   });
@@ -169,13 +177,14 @@ test('a refused exchange is a credential problem and a failed one is not', async
     return jsonReply(404, {});
   };
   const refusedRows = await fetchMimoMembershipLimits({}, {
-    fetch: refused, readMimoDesktopAccount: desktopSession(ACCOUNT_COOKIE)
+    mimoRequest: refused, readMimoDesktopAccount: desktopSession(ACCOUNT_COOKIE)
   });
   // Terminal: the remedy is a sign-in, and retrying it would only delay the
   // prompt the user needs to see.
   assert.equal(refusedRows[0].status, 'unauthorized');
 
   const offline = await fetchMimoMembershipLimits({}, {
+    mimoRequest: async () => { throw new TypeError('fetch failed'); },
     fetch: async () => { throw new TypeError('fetch failed'); },
     readMimoDesktopAccount: desktopSession(ACCOUNT_COOKIE)
   });
@@ -184,7 +193,7 @@ test('a refused exchange is a credential problem and a failed one is not', async
 
 test('a machine with no MiMo Desktop gets no row, and a foreign region goes quiet', async () => {
   const absent = await fetchMimoMembershipLimits({}, {
-    fetch: routedFetch(), readMimoDesktopAccount: desktopSession('')
+    fetch: async () => jsonReply(404, {}), readMimoDesktopAccount: desktopSession('')
   });
   assert.deepEqual(absent, []);
 
@@ -199,7 +208,7 @@ test('a machine with no MiMo Desktop gets no row, and a foreign region goes quie
   // never reach the account answer it is here to carry.
   let meVisits = 0;
   const foreign = await fetchMimoMembershipLimits({}, {
-    fetch: async (url) => {
+    mimoRequest: async (url) => {
       const href = String(url);
       if (href.startsWith(ME_URL)) {
         meVisits += 1;
@@ -221,7 +230,7 @@ test('a half-written sign-in is a signed-out app, a missing one is neither', asy
   // The store reads and names an account but carries half a sign-in: that is an
   // app the user is signed out of, and it is reported against that account.
   const signedOut = await fetchMimoMembershipLimits({}, {
-    fetch: routedFetch(),
+    ...laneDeps(),
     readMimoDesktopAccount: () => ({ ok: false, reason: 'incomplete', userId: '1234567890' })
   });
   assert.equal(signedOut.length, 1);
@@ -231,7 +240,7 @@ test('a half-written sign-in is a signed-out app, a missing one is neither', asy
   // Nothing to attribute it to, so nothing is reported: a provider-wide row would
   // be read as the whole provider's and smeared onto the console lane.
   const unnamed = await fetchMimoMembershipLimits({}, {
-    fetch: routedFetch(),
+    ...laneDeps(),
     readMimoDesktopAccount: () => ({ ok: false, reason: 'incomplete', userId: '' })
   });
   assert.deepEqual(unnamed, []);
@@ -240,7 +249,7 @@ test('a half-written sign-in is a signed-out app, a missing one is neither', asy
   // configured — and the paste input is the path for it.
   for (const reason of ['encrypted', 'absent', 'unsupported-platform', 'sqlite-unavailable']) {
     const other = await fetchMimoMembershipLimits({}, {
-      fetch: routedFetch(),
+      ...laneDeps(),
       readMimoDesktopAccount: () => ({ ok: false, reason, userId: '1234567890' })
     });
     assert.deepEqual(other, [], reason);
@@ -254,14 +263,14 @@ test('an answer with no usable data is an outage, never a credential problem', a
     jsonReply(500, {})
   ]) {
     const rows = await fetchMimoMembershipLimits({ mimoMembershipCookie: 'serviceToken=configured' }, {
-      fetch: routedFetch({ subscription })
+      ...laneDeps({ subscription })
     });
     assert.equal(rows[0].status, 'unavailable');
     assert.deepEqual(rows[0].windows, []);
   }
 
   const throttled = await fetchMimoMembershipLimits({ mimoMembershipCookie: 'serviceToken=configured' }, {
-    fetch: routedFetch({ subscription: jsonReply(429, {}) })
+    ...laneDeps({ subscription: jsonReply(429, {}) })
   });
   assert.equal(throttled[0].status, 'sourceRateLimited');
 });
@@ -272,7 +281,8 @@ test('a cancellation rejects instead of becoming a status', async () => {
   await assert.rejects(
     () => fetchMimoMembershipLimits({ mimoMembershipCookie: 'serviceToken=configured' }, {
       signal: controller.signal,
-      fetch: async () => { throw new Error('must not reach the network'); }
+      fetch: async () => { throw new Error('must not reach the network'); },
+      mimoRequest: async () => { throw new Error('must not reach the network'); }
     }),
     (error) => error.name === 'AbortError'
   );

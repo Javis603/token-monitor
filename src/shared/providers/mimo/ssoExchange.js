@@ -1,6 +1,7 @@
 'use strict';
 
 const { throwIfAborted } = require('../../abortSignal');
+const { createMimoHttpRequest } = require('./httpRequest');
 
 // Both chains observed live are four hops. The cap is here so a server answering
 // a redirect loop cannot hold a probe open; it is not a hop budget to spend.
@@ -139,15 +140,14 @@ function mimoRejectionCode(status, text) {
 // redirects, the console one answers 401 and names a login URL in the body — so
 // how to take the next hop is the caller's rule and this loop owns only the
 // walking, the cookie jar and the cancellation.
-async function walkMimoChain({ entryUrl, jar, fetchFn, signal, maxHops, nextHop }) {
+async function walkMimoChain({ entryUrl, jar, requestFn, signal, maxHops, nextHop }) {
   let url = entryUrl;
   for (let hop = 0; hop < maxHops; hop += 1) {
     const cookieHeader = jar.headerFor(url);
     let response;
     try {
-      response = await fetchFn(url.href, {
+      response = await requestFn(url.href, {
         method: 'GET',
-        redirect: 'manual',
         headers: cookieHeader ? { Cookie: cookieHeader } : {},
         signal
       });
@@ -240,7 +240,7 @@ async function exchangeMimoServiceSession(options = {}) {
   const walked = await walkMimoChain({
     entryUrl,
     jar,
-    fetchFn: options.fetch,
+    requestFn: options.request || createMimoHttpRequest(),
     signal: options.signal,
     maxHops
   });
@@ -287,7 +287,7 @@ async function exchangeMimoConsoleSession(options = {}) {
   const walked = await walkMimoChain({
     entryUrl,
     jar,
-    fetchFn: options.fetch,
+    requestFn: options.request || createMimoHttpRequest(),
     signal: options.signal,
     maxHops,
     nextHop: consoleLoginHop

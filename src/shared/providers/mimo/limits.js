@@ -3,13 +3,13 @@
 const crypto = require('node:crypto');
 const { hashKey } = require('../../hashKey');
 const { normalizeLimitProvider } = require('../../limits/core');
-const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
+const { MIMO_CONSOLE_URL, mimoRequestHeaders } = require('./browserHeaders');
 const { mimoEndpointTime } = require('./endpointTime');
 const { fetchMimoMembershipLimits } = require('./membership');
 const { MIMO_DESKTOP_READ_REASONS, readMimoDesktopAccount } = require('./desktopSession');
 const { exchangeMimoConsoleSession } = require('./ssoExchange');
 
-const MIMO_PLATFORM_CONSOLE_URL = 'https://platform.xiaomimimo.com/#/console/balance';
+const MIMO_PLATFORM_CONSOLE_URL = MIMO_CONSOLE_URL;
 const MIMO_API_BASE_URL = 'https://platform.xiaomimimo.com/api/v1';
 const MIMO_ACCOUNT_TIMEOUT_MS = 15_000;
 const MIMO_COOKIE_NAMES = new Set([
@@ -186,21 +186,10 @@ function parseMimoPlanUsage(body) {
   return { used, limit, usedPercent };
 }
 
-function requestHeaders(cookieHeader) {
-  return {
-    Accept: 'application/json, text/plain, */*',
-    'Accept-Language': 'en-US,en;q=0.9',
-    Cookie: cookieHeader,
-    Origin: 'https://platform.xiaomimimo.com',
-    Referer: MIMO_PLATFORM_CONSOLE_URL,
-    'User-Agent': BROWSER_USER_AGENT
-  };
-}
-
 async function requestMimo(pathname, cookieHeader, deps = {}) {
   const fetchFn = deps.fetch || globalThis.fetch;
   const response = await fetchFn(`${MIMO_API_BASE_URL}${pathname}`, {
-    headers: requestHeaders(cookieHeader),
+    headers: mimoRequestHeaders(cookieHeader),
     redirect: 'manual',
     signal: deps.signal
   });
@@ -469,7 +458,7 @@ async function mintMimoConsoleAccount(deps = {}) {
     exchanged = await exchangeMimoConsoleSession({
       baseUrl: MIMO_API_BASE_URL,
       accountCookie: result.cookieHeader,
-      fetch: deps.fetch,
+      request: deps.mimoRequest,
       signal: deps.signal,
       maxHops: deps.maxHops
     });
