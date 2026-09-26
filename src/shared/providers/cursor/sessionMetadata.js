@@ -43,19 +43,21 @@ function cleanTitle(value) {
 // for rows the table does not cover, and it is read at most once per database
 // fingerprint through cache.legacyTitles.
 function legacyTitlesFor(db, cache) {
-  if (!cache.legacyTitles) {
-    cache.legacyTitles = new Map();
-    try {
-      const row = db.prepare('SELECT value FROM ItemTable WHERE key = ?').get('composer.composerHeaders');
-      const parsed = JSON.parse(row?.value || 'null');
-      for (const header of Array.isArray(parsed?.allComposers) ? parsed.allComposers : []) {
-        const id = String(header?.composerId || '').trim();
-        const title = cleanTitle(header?.name);
-        if (id && title) cache.legacyTitles.set(id, title);
-      }
-    } catch (_) { /* Missing table/key or malformed payload: no legacy answer. */ }
-  }
-  return cache.legacyTitles;
+  if (cache.legacyTitles) return cache.legacyTitles;
+  const titles = new Map();
+  try {
+    const row = db.prepare('SELECT value FROM ItemTable WHERE key = ?').get('composer.composerHeaders');
+    const parsed = JSON.parse(row?.value || 'null');
+    for (const header of Array.isArray(parsed?.allComposers) ? parsed.allComposers : []) {
+      const id = String(header?.composerId || '').trim();
+      const title = cleanTitle(header?.name);
+      if (id && title) titles.set(id, title);
+    }
+    // Cache only a successful read — including an empty answer. A transient
+    // failure leaves legacyTitles unset so the next lookup retries.
+    cache.legacyTitles = titles;
+  } catch (_) { /* Missing table/key or malformed payload: retry next lookup. */ }
+  return titles;
 }
 
 function readTitles(dbPath, sqlite, wantedIds, cache) {
