@@ -66,37 +66,66 @@ function readTitles(dbPath, sqlite, wantedIds, cache) {
     db = new sqlite.DatabaseSync(dbPath, { readOnly: true });
     try { db.exec('PRAGMA busy_timeout = 250'); } catch (_) { /* Read-only WAL reads still benefit on newer builds. */ }
     const titles = new Map();
-    let headerById = null;
+    // Legacy answers for ids whose modern read failed this call: they may be
+    // returned to the caller but must never enter the cached title map.
+    const retries = new Map();
+    // Three distinct outcomes per id: a usable modern title wins outright;
+    // a definitive non-answer (missing, malformed or empty-named row) is
+    // legacy-eligible and cacheable; a read failure is retry-only.
+    const eligible = new Set();
+    const failed = new Set();
+    let hasHeaderTable;
     try {
-      headerById = db.prepare('SELECT value FROM composerHeaders WHERE composerId = ?');
+      hasHeaderTable = Boolean(
+        db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'composerHeaders'").get()
+      );
     } catch (_) {
-      // Older databases have no composerHeaders table at all: every id falls
-      // through to the legacy ItemTable key below.
+      // Cannot even introspect the database: treat the whole read as transient
+      // so nothing is cached and every id is retried on the next lookup.
+      return null;
     }
-    const unanswered = new Set(wantedIds);
-    if (headerById) {
-      for (const id of wantedIds) {
-        try {
-          const row = headerById.get(id);
-          if (row === undefined) continue;
-          let header;
-          try { header = JSON.parse(row.value); } catch (_) { header = null; }
-          const title = cleanTitle(header?.name);
-          // Only a usable title counts as the table's answer. A malformed or
-          // empty-named row stays unanswered so the legacy index — which may
-          // still carry this conversation's name — gets its turn below.
-          if (!title) continue;
-          titles.set(id, title);
-          unanswered.delete(id);
-        } catch (_) { /* A transient row read error: leave it unanswered, not cached. */ }
+    if (!hasHeaderTable) {
+      // Older databases genuinely lack the table: every id falls through to
+      // the legacy ItemTable key below.
+      for (const id of wantedIds) eligible.add(id);
+    } else {
+      let headerById = null;
+      try {
+        headerById = db.prepare('SELECT value FROM composerHeaders WHERE composerId = ?');
+      } catch (_) {
+        // The table exists but the prepare failed: a transient error, not an
+        // old schema, so nothing becomes legacy-eligible this call.
+        for (const id of wantedIds) failed.add(id);
+      }
+      if (headerById) {
+        for (const id of wantedIds) {
+          try {
+            const row = headerById.get(id);
+            if (row === undefined) { eligible.add(id); continue; }
+            let header;
+            try { header = JSON.parse(row.value); } catch (_) { header = null; }
+            const title = cleanTitle(header?.name);
+            // Only a usable title counts as the table's answer. A malformed or
+            // empty-named row stays unanswered so the legacy index — which may
+            // still carry this conversation's name — gets its turn below.
+            if (!title) { eligible.add(id); continue; }
+            titles.set(id, title);
+          } catch (_) { failed.add(id); }
+        }
       }
     }
-    const legacy = legacyTitlesFor(db, cache);
-    for (const id of unanswered) {
-      const title = legacy.get(id);
-      if (title) titles.set(id, title);
+    if (eligible.size > 0 || failed.size > 0) {
+      const legacy = legacyTitlesFor(db, cache);
+      for (const id of eligible) {
+        const title = legacy.get(id);
+        if (title) titles.set(id, title);
+      }
+      for (const id of failed) {
+        const title = legacy.get(id);
+        if (title) retries.set(id, title);
+      }
     }
-    return titles;
+    return { titles, retries };
   } catch (_) {
     return null;
   } finally {
@@ -114,6 +143,7 @@ function resolveSessionMetadata(sessionIds, { deps = {}, home } = {}) {
     env: deps.scopedHome ? {} : (deps.env || process.env)
   });
   const cache = deps.cursorTitleCache || titleCache;
+  const retries = new Map();
   for (const dbPath of candidates) {
     const stamp = databaseStamp(dbPath);
     if (!stamp) continue;
@@ -125,11 +155,14 @@ function resolveSessionMetadata(sessionIds, { deps = {}, home } = {}) {
     const wanted = new Set([...sessionIds].filter((id) => !cached.titles.has(id)));
     if (wanted.size > 0) {
       const read = readTitles(dbPath, sqlite, wanted, cached);
-      if (read) for (const [id, title] of read) cached.titles.set(id, title);
+      if (read) {
+        for (const [id, title] of read.titles) cached.titles.set(id, title);
+        for (const [id, title] of read.retries) retries.set(id, title);
+      }
     }
     cache.set(dbPath, cached);
     for (const sessionId of sessionIds) {
-      const title = cached.titles.get(sessionId);
+      const title = cached.titles.get(sessionId) || retries.get(sessionId);
       if (title && !result.has(sessionId)) result.set(sessionId, { title });
     }
   }

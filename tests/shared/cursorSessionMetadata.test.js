@@ -108,3 +108,41 @@ test('Cursor legacy index fills ids the current table cannot answer', { skip: !s
     ['modern', { title: 'Current title wins' }]
   ]);
 });
+
+test('Cursor retries a failed header read instead of pinning the legacy title', () => {
+  // First lookup: the current-table row read throws; the legacy index still
+  // answers so this call may show the old name, but it must not be cached.
+  // Second lookup (same DB stamp): the row read succeeds and the current
+  // title wins.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-retry-'));
+  const dbDir = path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage');
+  fs.mkdirSync(dbDir, { recursive: true });
+  const dbPath = path.join(dbDir, 'state.vscdb');
+  fs.writeFileSync(dbPath, 'stub');
+  const legacyValue = JSON.stringify({ allComposers: [{ composerId: 's1', name: 'Old name' }] });
+  let failGets = true;
+  const fakeSqlite = {
+    DatabaseSync: class {
+      prepare(sql) {
+        if (sql.includes('sqlite_master')) return { get: () => ({ 1: 1 }) };
+        if (sql.includes('ItemTable')) return { get: () => ({ value: legacyValue }) };
+        return {
+          get: () => {
+            if (failGets) throw new Error('SQLITE_BUSY');
+            return { value: JSON.stringify({ name: 'New name' }) };
+          }
+        };
+      }
+      exec() {}
+      close() {}
+    }
+  };
+
+  const deps = { platform: 'darwin', sqlite: fakeSqlite, cursorTitleCache: new Map() };
+  const first = resolveSessionMetadata(new Set(['s1']), { home, deps });
+  assert.equal(first.get('s1')?.title, 'Old name', 'a failed modern read may show the legacy title once');
+
+  failGets = false;
+  const second = resolveSessionMetadata(new Set(['s1']), { home, deps });
+  assert.equal(second.get('s1')?.title, 'New name', 'the legacy title must not pin the id against a later modern read');
+});
