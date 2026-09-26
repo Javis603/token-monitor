@@ -22,6 +22,7 @@ function createCursorSelfSync({ selfSyncThrottle }) {
     if (!enabled.has('cursor')) return;
     if (!selfSyncThrottle.claim('cursor', options.minIntervalMs)) return;
     const attempt = selfSyncThrottle.beginAttempt('cursor');
+    try { options.onAttempt?.('cursor'); } catch (_) {}
     const cancelAttempt = () => selfSyncThrottle.cancelAttempt('cursor', attempt);
     options.signal?.addEventListener('abort', cancelAttempt, { once: true });
     if (options.signal?.aborted) cancelAttempt();
