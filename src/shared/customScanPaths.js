@@ -135,23 +135,21 @@ function canonicalDir(dir, options = {}) {
   return platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
-// One directory walk covers the other when either is an ancestor: Tokscale
-// scans extra roots recursively, so containment in either direction duplicates
-// the enclosed files.
-function dirsOverlap(first, second, mod) {
-  const via = (root, leaf) => {
-    const rel = mod.relative(root, leaf);
-    return rel === '' || (!rel.startsWith('..') && !mod.isAbsolute(rel));
-  };
-  return via(first, second) || via(second, first);
+// Tokscale walks every scan root recursively, so a root already covers any
+// directory inside it. `..` needs the separator suffix: a child literally named
+// `..cache` is still inside the root, while `..` alone or `../x` escapes it.
+function dirContains(root, leaf, mod) {
+  const rel = mod.relative(root, leaf);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${mod.sep}`) && !mod.isAbsolute(rel));
 }
 
 // Persisted Antigravity roots may name the built-in extension directory: before
 // the IDE extension source existed, that was the workaround for reading its
 // generation databases through the CLI parser. The built-in scan now covers it,
-// so the CLI leg is suppressed whenever a custom root contains that directory
-// (or is contained by it); dropping it entirely would still count rows without
-// response IDs twice.
+// so the CLI leg is suppressed only when the built-in root already contains the
+// custom one. The reverse containment must keep the leg: a custom root holding
+// the extension directory may also hold databases elsewhere under it, and
+// dropping the leg would silently lose that usage.
 function suppressedCustomScanIds(client, dir, options = {}) {
   const ids = tokscaleCustomScanClientIds(client);
   if (client !== 'antigravity') return ids;
@@ -160,7 +158,7 @@ function suppressedCustomScanIds(client, dir, options = {}) {
   const home = options.home || os.homedir();
   const extensionDir = canonicalDir(join(home, '.gemini', 'antigravity', 'conversations'), options);
   const mod = platformPath(platform);
-  if (!dirsOverlap(canonicalDir(dir, options), extensionDir, mod)) return ids;
+  if (!dirContains(extensionDir, canonicalDir(dir, options), mod)) return ids;
   return ids.filter((id) => id !== 'antigravity-cli');
 }
 

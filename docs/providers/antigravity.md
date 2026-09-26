@@ -37,7 +37,7 @@ The normalized client id is `antigravity`. The tokscale aliases `antigravity-cli
 
 The parse-local CLI source lives under `${GEMINI_CLI_HOME || ~/.gemini}/antigravity-cli/conversations`. The IDE extension's generation databases are read directly from `~/.gemini/antigravity/conversations/*.db`; this source follows the home directory and not `GEMINI_CLI_HOME`. Neither source depends on a successful `antigravity sync`. The extension directory is already inside a watched native root, while the CLI directory is watched separately.
 
-Normal scans include both database identities. A custom Antigravity root is passed only to `antigravity` and `antigravity-cli`: the CLI and extension use the same `*.db` parser, so passing one custom directory to both would count rows without response IDs twice. When a persisted custom root already contains the built-in extension directory — the pre-upgrade workaround for reading it — the `antigravity-cli` leg is dropped for that root so its files are not parsed a second time.
+Normal scans include both database identities. A custom Antigravity root is passed only to `antigravity` and `antigravity-cli`: the CLI and extension use the same `*.db` parser, so passing one custom directory to both would count rows without response IDs twice. When a persisted custom root is inside the built-in extension directory — the pre-upgrade workaround for reading it — the `antigravity-cli` leg is dropped for that root so its files are not parsed a second time. A custom root that contains the extension directory keeps the leg because it may hold databases outside it; the shared subtree can still count rows without response IDs twice until Tokscale dedupes on canonical file paths.
 
 ### Watch behavior
 

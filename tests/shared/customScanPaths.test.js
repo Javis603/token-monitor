@@ -148,10 +148,17 @@ test('an Antigravity custom root overlapping the built-in extension dir drops on
     tokscaleExtraDirsEnv({ antigravity: [`${home}/.gemini/antigravity/conversations`] }, '', options),
     `antigravity:${home}/.gemini/antigravity/conversations`
   );
-  // An ancestor root recursively re-reads the same databases.
+  // A nested custom root is also already inside the built-in extension walk,
+  // including a child whose name merely starts with '..'.
+  assert.equal(
+    tokscaleExtraDirsEnv({ antigravity: [`${home}/.gemini/antigravity/conversations/..cache`] }, '', options),
+    `antigravity:${home}/.gemini/antigravity/conversations/..cache`
+  );
+  // An ancestor root keeps the CLI leg: it may hold databases outside the
+  // extension directory that nothing else would scan.
   assert.equal(
     tokscaleExtraDirsEnv({ antigravity: [`${home}/.gemini`] }, '', options),
-    `antigravity:${home}/.gemini`
+    `antigravity:${home}/.gemini,antigravity-cli:${home}/.gemini`
   );
   // Disjoint roots still take both legs.
   assert.equal(
