@@ -15,6 +15,10 @@ const settingsListFilterApi = require('../../src/electron/renderer/settingsListF
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
 const { limitWindowLabel } = require('../../src/shared/limits/windowLabels');
 const { limitWindowText } = require('../../src/shared/limits/windowText');
+const { creditsAmount, creditsCurrency, creditsMeterPercent, isCreditsWindow, formatMoney } = require('../../src/shared/limits/balanceDisplay');
+const limitWindowLabels = require('../../src/shared/limits/windowLabels');
+
+const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
 
 const {
   antigravityQuotaWindow,
@@ -1771,23 +1775,40 @@ test('Balance and token quota values omit the redundant left suffix', () => {
   assert.doesNotMatch(renderProviderWindows, /`\$\{balanceValue\} left`/);
 });
 
-test('MiMo main Limits row falls back to balance plan fields for Token Plan', () => {
-  const renderProviderWindows = viewBody('renderProviderWindows');
-  const tokenPlanFallback = viewBody('mimoTokenPlanWindowFromBalance', 'limitWindowNode');
+test('MiMo Limits draws a credits balance when the provider balance object is absent', () => {
+  const render = viewBody('renderProviderWindows');
+  const makeNode = () => {
+    const node = { children: [], classes: new Set(), append(...children) { this.children.push(...children); } };
+    node.classList = { add(...classes) { classes.forEach((name) => node.classes.add(name)); } };
+    return node;
+  };
+  const context = {
+    document: { createElement: makeNode },
+    windowForKind: (provider, kind) => provider.windows.find((window) => window.kind === kind) || null,
+    windowsForKind: (provider, kind) => provider.windows.filter((window) => window.kind === kind),
+    isCreditsWindow,
+    creditsAmount,
+    creditsCurrency,
+    creditsMeterPercent,
+    providerSpendNode: () => null,
+    optionalFiniteNumber: (value) => value == null ? null : Number(value),
+    mimoTokenPlanWindowFromBalance: () => null,
+    formatMoney,
+    limitWindowNode: (label, window, _color, _tone, value, detail) => Object.assign(makeNode(), { label, window, value, detail }),
+    t: (key) => key,
+    provider: {
+      provider: 'mimo', accountLabel: 'Pay-as-you-go', status: 'ok',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }]
+    }
+  };
 
-  assert.match(renderProviderWindows, /const balance = provider\.balance \|\| null;/);
-  assert.match(renderProviderWindows, /const tokenPlan = windowForKind\(provider, 'billing'\) \|\| mimoTokenPlanWindowFromBalance\(balance\);/);
-  assert.match(renderProviderWindows, /limitWindowNode\(tokenPlan\.label \|\| 'Token Plan', tokenPlan, color, 0\.68\)/);
-  assert.match(renderProviderWindows, /const giftBalance = optionalFiniteNumber\(balance\?\.giftBalance\);/);
-  assert.match(renderProviderWindows, /const cashBalance = optionalFiniteNumber\(balance\?\.cashBalance\);/);
-  assert.match(renderProviderWindows, /const balanceNode = limitWindowNode\(\s*'Balance',\s*\{ showMeter: false \},\s*color,\s*0\.68,\s*balanceText,\s*detailParts\.join\(' · '\)\s*\);/);
-  assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide', 'limit-window-no-reset'\);/);
-  assert.match(tokenPlanFallback, /const used = optionalFiniteNumber\(balance\.planUsed\);/);
-  assert.match(tokenPlanFallback, /const limit = optionalFiniteNumber\(balance\.planLimit\);/);
-  assert.match(tokenPlanFallback, /const percent = optionalFiniteNumber\(balance\.planPercent\);/);
-  assert.match(tokenPlanFallback, /if \(!hasUsed && !hasLimit && !hasPercent\) return null;/);
-  assert.match(tokenPlanFallback, /usedPercent: resolvedPercent/);
-  assert.match(tokenPlanFallback, /remainingPercent: resolvedPercent == null \? null : Math\.max\(0, Math\.min\(100, 100 - resolvedPercent\)\)/);
+  const windowOnly = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  assert.deepEqual(Array.from(windowOnly.children, (node) => [node.label, node.value]), [['Balance', '¥9.95']]);
+
+  context.provider.balance = { amount: 9.95, currency: 'CNY', giftBalance: 9.95, cashBalance: 0 };
+  const withBalance = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  assert.deepEqual(Array.from(withBalance.children, (node) => [node.label, node.value, node.detail]),
+    [['Balance', '¥9.95', 'Gift ¥9.95 · Cash ¥0.00']]);
 });
 
 test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', () => {
@@ -1802,27 +1823,6 @@ test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', (
     planStatus: null
   });`, context);
   assert.equal(context.result, null);
-});
-
-test('MiMo expired Token Plan renders a localized status without a meter', () => {
-  const i18n = readRendererFile('i18n.js');
-  const renderProviderWindows = viewBody('renderProviderWindows');
-  const tokenPlanFallback = viewBody('mimoTokenPlanWindowFromBalance', 'limitWindowNode');
-
-  assert.match(renderProviderWindows, /balance\?\.planStatus === 'expired'/);
-  assert.match(renderProviderWindows, /\{ showMeter: false \}, color, 0\.68, t\('limits\.mimo\.planExpired'\)/);
-  assert.match(tokenPlanFallback, /if \(balance\.planStatus === 'expired'\) return null;/);
-  assert.match(i18n, /'limits\.mimo\.planExpired': 'Expired'/);
-  assert.match(i18n, /'limits\.mimo\.planExpired': '已过期'/);
-  assert.match(i18n, /'limits\.mimo\.planExpired': '만료됨'/);
-  assert.match(i18n, /'limits\.mimo\.planExpired': '期限切れ'/);
-});
-
-test('main Limits plan text shows failure status before account labels', () => {
-  const planBody = viewBody('limitProviderPlan');
-
-  assert.match(planBody, /if \(provider\?\.status && provider\.status !== 'ok' && !provider\.stale\) return limitStatusLabel\(provider\.status, false\);/);
-  assert.match(planBody, /const label = String\(provider\?\.planLabel \|\| provider\?\.accountLabel \|\| ''\)\.trim\(\);/);
 });
 
 test('settings provider status waits for stats and refreshes when stats arrive', () => {
@@ -2772,6 +2772,36 @@ test('Antigravity account verification is shown as an actionable status', () => 
   );
 });
 
+test('a MiMo row whose recovery belongs to a sign-in says which sign-in it means', () => {
+  // The membership lane has one credential — the machine's own Desktop session —
+  // so a refusal there is always that sign-in's to fix. The pasted console
+  // credential is the user's, and the row says to replace it instead.
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({
+      provider: 'mimo',
+      status: 'unauthorized',
+      sourceDetail: 'app'
+    }),
+    {
+      label: 'Sign in to MiMo Desktop again',
+      key: 'settings.mimo.desktopRelogin',
+      tone: 'setup'
+    },
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({
+      provider: 'mimo',
+      status: 'unauthorized',
+      sourceDetail: 'managed'
+    }),
+    {
+      label: 'Update MiMo Cookie',
+      key: 'settings.mimo.repasteCookie',
+      tone: 'setup'
+    }
+  );
+});
+
 test('WorkBuddy sealed app credentials are shown as an actionable status', () => {
   assert.deepEqual(
     presentation.limitProviderStatusLabel({
@@ -2845,7 +2875,7 @@ test('minimax status copy uses the same API key wording as CodexBar', () => {
   );
 });
 
-test('mimo setup status uses the generic not configured and sign-in-again copy', () => {
+test('MiMo status gives the correct recovery action for each credential source', () => {
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'notConfigured' }),
     { label: 'Not set up', tone: 'setup' }
@@ -2855,9 +2885,95 @@ test('mimo setup status uses the generic not configured and sign-in-again copy',
     { label: 'Sign in again', tone: 'setup' }
   );
   assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }),
+    { label: 'Sign in to MiMo Desktop again', key: 'settings.mimo.desktopRelogin', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }),
+    { label: 'Update MiMo Cookie', key: 'settings.mimo.repasteCookie', tone: 'setup' }
+  );
+  assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'error' }),
     { label: 'Unavailable', tone: 'warn' }
   );
+});
+
+test('MiMo settings stays connected while one independent product is live', () => {
+  const live = { provider: 'mimo', status: 'ok', accountKey: 'console', accountLabel: 'Console' };
+  const expired = { provider: 'mimo', status: 'unauthorized', accountKey: 'membership', accountLabel: 'Desktop Membership' };
+  assert.equal(presentation.limitProviderSettingsRecord([live, expired], 'mimo'), live);
+  assert.equal(presentation.limitProviderSettingsRecord([expired, live], 'mimo'), live);
+  assert.equal(presentation.limitProviderSettingsRecord([live, expired], 'codex'), undefined);
+  // Neither live: the console product is the row the account is named by.
+  assert.equal(
+    presentation.limitProviderSettingsRecord([expired, { ...live, status: 'unauthorized' }], 'mimo').accountKey,
+    'console'
+  );
+  assert.equal(presentation.limitProviderSettingsRecord([expired], 'mimo'), expired);
+});
+
+test('MiMo Limits rows show the no-plan and source-specific recovery text', () => {
+  const view = createLimitWindowsView({
+    isMimoMembershipProduct: limitWindowLabels.isMimoMembershipProduct,
+    mimoProductLabel: limitWindowLabels.mimoProductLabel,
+    accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    settings: () => ({}),
+    t: (key) => ({
+      'limits.mimo.noPlan': '暂无套餐',
+      'settings.mimo.desktopRelogin': '请重新登录 MiMo Desktop',
+      'settings.mimo.repasteCookie': '请重新粘贴 MiMo Cookie'
+    })[key] || key,
+    presentation: presentation
+  });
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', windows: [] }), '暂无套餐');
+  assert.equal(
+    view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', windows: [{ kind: 'weekly' }] }),
+    '',
+    'an invited quota keeps the product in the title without inventing a plan name'
+  );
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [] }), 'Pro');
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }), '请重新登录 MiMo Desktop');
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }), '请重新粘贴 MiMo Cookie');
+  assert.equal(view.limitAccountTitle('mimo', { provider: 'mimo', accountName: 'MiMo account', accountLabel: 'Console' }, 0), 'MiMo account · Console');
+});
+
+test('MiMo product rows name the shared account and the product when both are known', () => {
+  const view = createLimitWindowsView({
+    isMimoMembershipProduct: limitWindowLabels.isMimoMembershipProduct,
+    mimoProductLabel: limitWindowLabels.mimoProductLabel,
+    accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    settings: () => ({}),
+    t: (key) => key,
+    presentation
+  });
+  const rows = [
+    { provider: 'mimo', accountKey: 'console', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Console' },
+    { provider: 'mimo', accountKey: 'membership', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Desktop Membership' }
+  ];
+  assert.equal(view.limitAccountTitle('mimo', rows[0], 0, rows), 'user@example.com · MiMo account · Console');
+  assert.equal(view.limitAccountTitle('mimo', rows[1], 1, rows), 'user@example.com · MiMo account · Desktop Membership');
+});
+
+test('a healthy MiMo row keeps its meta line free of recovery prompts', () => {
+  const view = createLimitWindowsView({
+    isMimoMembershipProduct: limitWindowLabels.isMimoMembershipProduct,
+    mimoProductLabel: limitWindowLabels.mimoProductLabel,
+    accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    t: (key) => ({ 'settings.mimo.desktopRelogin': '请重新登录 MiMo Desktop' })[key] || key,
+    presentation,
+    settings: () => ({})
+  });
+  // The membership's recovery lives on its own row now, so nothing has to be
+  // said beside a row that is fine: the wallet it carries is the whole line.
+  const row = {
+    provider: 'mimo',
+    status: 'ok',
+    accountLabel: 'Console',
+    planLabel: 'Pay-as-you-go',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.96, currency: 'CNY' }]
+  };
+  assert.doesNotMatch(view.limitProviderMeta(row), /请重新登录/);
+  assert.equal(view.limitProviderPlan(row), 'Pay-as-you-go');
 });
 
 test('copilot setup status asks for sign-in instead of an API key', () => {
@@ -2959,13 +3075,20 @@ test('Kimi credential statuses are localized in settings', () => {
 
 test('Kimi, Droid and MiMo limits reuse their tracked-client colors', () => {
   const app = readRendererFile('app.js');
+  const dock = readRendererFile('edgeDock/dock.js');
   assert.equal(LIMIT_PROVIDER_LABELS.kimi, 'Kimi');
   // `factory` is the last remaining bridge: its tracked client is named
   // `droid`. MiMo needs none — the client and the provider are both `mimo`, so
-  // the generic lookup below already finds clientColors.mimo.
+  // the generic lookup below already finds clientColors.mimo on both surfaces.
   assert.match(app, /if \(providerId === 'factory'\) return clientColors\.droid;/);
   assert.doesNotMatch(app, /providerId === 'mimo'/);
   assert.match(app, /const color = limitProviderColor\(id\);/);
+  const dockColor = vm.runInNewContext(
+    `(${functionBody(dock, 'limitProviderColor', 'providerColor')})`,
+    { clientColors: { mimo: '#111111', xiaomi: '#222222', droid: '#333333', default: '#444444' } }
+  );
+  assert.equal(dockColor('mimo'), '#111111');
+  assert.equal(dockColor('factory'), '#333333');
 });
 
 // A value produced inside a vm realm carries that realm's prototypes, which
@@ -5459,4 +5582,42 @@ test('Z.ai token-pool windows print an absolute token pair through the detail sl
   // Shared compact formatting keeps its normal rounding and promotion rules.
   assert.equal(detail({ limit: 3_000_000, remaining: 2_578_372 }, false), '2.6M / 3M');
   assert.equal(detail({ limit: 999_950, remaining: 999_950 }, false), '1M / 1M');
+});
+
+test('every compact surface can draw a row that has only one window', () => {
+  // A MiMo Desktop membership answers with a single weekly window and no
+  // balance. Each surface selects windows its own way, and a selection that
+  // silently yields nothing leaves the row blank rather than showing a wrong
+  // number — which is what the MiMo render branch did before it had an arm.
+  const trayTextApi = require('../../src/shared/trayText');
+  const row = {
+    provider: 'mimo',
+    status: 'ok',
+    accountKey: 'sha256:membership',
+    source: 'oauth',
+    sourceDetail: 'app',
+    updatedAt: '2026-09-23T00:00:00.000Z',
+    windows: [{ kind: 'weekly', windowMinutes: 10080, usedPercent: 40, remainingPercent: 60, resetsAt: '2026-09-29T00:00:00.000Z' }]
+  };
+
+  // Home and the compact tray both read the shared picker, and the tray's kinds
+  // priority has to reach a provider whose only window is the weekly one.
+  const compact = presentation.limitProviderCompactWindows('mimo', row.windows);
+  assert.deepEqual(compact.map((window) => window.kind), ['weekly']);
+  assert.equal(compact[0].remainingPercent, 60);
+  const picked = trayTextApi.pickLimitProviderByKindPriority(
+    { limits: { providers: [row] } },
+    ['session', 'weekly']
+  );
+  assert.equal(picked?.selectedWindow?.kind, 'weekly');
+  assert.equal(picked?.remaining, 60);
+
+  // The native widget has its own case in its own suite; the name it paints is
+  // the shared one, so it is asserted here next to the other surfaces.
+  // The window carries no label of its own, so the kind names it — and MiMo is
+  // not one of the vendors whose rolling window is published as "5-hour".
+  assert.equal(limitWindowLabel('mimo', { kind: 'weekly' }), 'Weekly');
+
+  // The Limits page and Edge Dock share the same renderer; the DOM behavior is
+  // covered in edgeDockLimitCard.test.js rather than by matching source text.
 });

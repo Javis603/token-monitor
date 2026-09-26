@@ -14,6 +14,7 @@ const {
   codexAccountDisplayLabel,
   maskEmailAddress
 } = require('../../src/electron/renderer/accountIdentity');
+const limitWindowLabels = require('../../src/shared/limits/windowLabels');
 
 const TITLE_FUNCTIONS = [
   'limitAccountTitle',
@@ -22,7 +23,8 @@ const TITLE_FUNCTIONS = [
   'codexAccountTitle',
   'opencodeAccountTitle',
   'namedApiAccountTitle',
-  'volcenginePlanAccountTitle'
+  'planAccountTitle',
+  'mimoAccountTitle'
 ];
 
 function readRendererFile(name) {
@@ -70,6 +72,10 @@ function runTitle(source, expression, context = {}) {
 function titleContext(maskLimitAccountEmails) {
   return {
     accountIdentity: { accountEmailLabel, accountTitleLabel, codexAccountDisplayLabel, maskEmailAddress },
+    // MiMo's title path takes the product words from the shared display
+    // vocabulary, the way the view receives them from its host.
+    mimoProductLabel: limitWindowLabels.mimoProductLabel,
+    isMimoMembershipProduct: limitWindowLabels.isMimoMembershipProduct,
     settings: () => ({ maskLimitAccountEmails }),
     t: (key) => (key === 'settings.codex.personalWorkspace' ? 'Personal' : key)
   };
@@ -154,7 +160,7 @@ test('title resolution matches between the limits panel and Home', () => {
   assert.match(view, /limitAccountTitle\(providerId, provider, index, providers\)/);
   assert.match(app, /limitAccountTitle\(id, provider, index, providerEntries\)/);
   assert.equal(dock.match(/limitAccountTitle/g), null, 'the card titles accounts through the view');
-  for (const name of ['codexAccountTitle', 'opencodeAccountTitle', 'namedApiAccountTitle', 'volcenginePlanAccountTitle']) {
+  for (const name of ['codexAccountTitle', 'opencodeAccountTitle', 'namedApiAccountTitle', 'planAccountTitle']) {
     assert.doesNotMatch(app, new RegExp(`${name}\\(provider, index`), `${name} should not be called from the page`);
   }
   // The tray renders account text outside the title resolver, so it reads the
@@ -256,6 +262,29 @@ test('accounts sharing a visible email are disambiguated', () => {
     'j***s@example.com · Acme · #1',
     'j***s@example.com · Acme · #2'
   ]);
+});
+
+test('MiMo products keep their shared account identity in the title', () => {
+  const view = readRendererFile('limits/windowsView.js');
+  const peers = [
+    { provider: 'mimo', accountName: 'MiMo account', accountLabel: 'Console', accountKey: 'sha256:abcdef123456' },
+    { provider: 'mimo', accountName: 'MiMo account', accountLabel: 'Desktop Membership', accountKey: 'sha256:abcdef654321' }
+  ];
+  assert.deepEqual(peers.map((peer, index) => runTitle(
+    view,
+    `limitAccountTitle('mimo', ${JSON.stringify(peer)}, ${index}, ${JSON.stringify(peers)})`,
+    titleContext(true)
+  )), ['MiMo account · Console', 'MiMo account · Desktop Membership']);
+  assert.equal(runTitle(
+    view,
+    `limitAccountTitle('mimo', ${JSON.stringify(peers[0])}, 0)`,
+    titleContext(true)
+  ), 'MiMo account · Console');
+  assert.equal(runTitle(
+    view,
+    "limitAccountTitle('mimo', { accountName: 'Membership', accountLabel: 'Pro', accountKey: 'sha256:abcdef123456' }, 0)",
+    titleContext(true)
+  ), 'Membership');
 });
 
 test('accountEmailLabel keeps duplicate addresses apart regardless of masking', () => {

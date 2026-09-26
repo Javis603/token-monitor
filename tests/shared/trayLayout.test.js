@@ -953,6 +953,19 @@ test('provider account and window choices expose live data for visual pickers', 
   ]);
 });
 
+test('MiMo account choices distinguish two products of the same account', () => {
+  const mimoStats = {
+    limits: { providers: [
+      { provider: 'mimo', status: 'ok', accountKey: 'console', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Console', windows: [] },
+      { provider: 'mimo', status: 'ok', accountKey: 'membership', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Desktop Membership', windows: [] }
+    ] }
+  };
+  assert.deepEqual(accountOptions(mimoStats, 'mimo').map((option) => option.label), [
+    'user@example.com · MiMo account · Console',
+    'user@example.com · MiMo account · Desktop Membership'
+  ]);
+});
+
 test('source window choices show each real provider window once and prioritize the current selection', () => {
   const primary = sourceWindowOptions(stats, {
     provider: 'claude',

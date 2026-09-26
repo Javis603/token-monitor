@@ -1247,6 +1247,11 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(details, /id="mimoAddDetails" class="opencode-add-details accordion-animated-container hidden"/);
   assert.match(details, /id="mimoSaveAccountButton"/);
   assert.match(details, /id="mimoManualPanel"/);
+  // The membership is read from the machine's own MiMo Desktop session and is
+  // not sold on the developer platform, so the panel offers no paste for it —
+  // the console entry above is the only manual one this provider has.
+  assert.doesNotMatch(details, /mimoMembershipCookieInput|mimoSaveMembershipCookieButton|mimoClearMembershipCookieButton/);
+  assert.doesNotMatch(app, /mimoMembershipCookie|saveMembershipCookie/);
   assert.match(details, /<strong>1\.<\/strong>[\s\S]*<strong>4\.<\/strong>/);
   assert.match(details, /data-i18n="settings\.mimo\.step3Before">In Network, select<\/span> <code>balance<\/code>/);
   assert.match(details, /data-i18n="settings\.mimo\.step4">Paste it below, then click Save account\.<\/span>/);
@@ -1271,12 +1276,13 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(preload, /openConsole: \(\) => ipcRenderer\.invoke\('mimo:openConsole'\)/);
   assert.match(main, /ipcMain\.handle\('mimo:openConsole'/);
   assert.match(main, /ipcMain\.handle\('mimo:addAccount', \(_event, cookieHeader\) => addMimoManagedAccount\(cookieHeader\)\)/);
+  assert.doesNotMatch(main, /saveMimoMembershipCookie|mimoMembershipCookie/);
   // Limits rows mask through the shared resolver; the settings list stays readable.
   assert.match(readRendererFile('limits/windowsView.js'), /maskEmail: limitAccountEmailsMasked\(\)/);
   assert.match(app, /function mimoSettingsAccountTitle\(account, index\) \{[\s\S]*account\?\.accountEmail[\s\S]*`Account \$\{index \+ 1\}`/);
   assert.match(app, /const accountName = mimoSettingsAccountTitle\(account, index\);/);
   const addBody = functionBody(main, 'addMimoManagedAccount', 'removeMimoManagedAccount');
-  assert.match(addBody, /const \[validation\] = await fetchMimoLimits\(\{ mimoManagedAccounts: \[result\.account\] \}, electronProviderDeps\(\)\)/);
+  assert.match(addBody, /limitRefreshScope: \{ provider: 'mimo', accountKey: result\.account\.accountKey \}/);
   assert.ok(addBody.indexOf('fetchMimoLimits') < addBody.indexOf('settings.mimoManagedAccounts ='), 'validation must happen before persistence');
   assert.match(addBody, /result\.account\.accountEmail = String\(validation\.accountEmail/);
   assert.doesNotMatch(main, /new BrowserWindow\([\s\S]{0,300}Sign in to MiMo/);
@@ -2734,7 +2740,7 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
   );
   assert.match(groupBody, /planText: limitGroupCountText\(providerId, providers\.length\)/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
-  assert.match(readRendererFile('limits/windowsView.js'), /mimo: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
+
   // The page's dispatch is by account count with no provider branch left.
   assert.match(renderLimitsBody, /if \(Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
   assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
@@ -2757,13 +2763,13 @@ test('Limits groups the Volcengine Coding and Agent plans as rows of one card', 
   // plan — the plan cell hands back to the status label once the account is not
   // healthy — and the header counts plans rather than accounts.
   assert.match(view, /volcengine: \(provider, color, \{ grouped \}\) => \(\{\s*options: grouped \? \{ planText: provider\?\.status === 'ok' \? '' : undefined, showIcon: false \} : \{\}/);
-  assert.match(view, /GROUP_COUNT_KEYS = \{ volcengine: 'settings\.volcengine\.nPlans' \}/);
+  assert.match(view, /GROUP_COUNT_KEYS = \{[\s\S]*?volcengine: 'settings\.volcengine\.nPlans',[\s\S]*?\}/);
   assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
   assert.doesNotMatch(app, /renderVolcengineAccountGroup/);
   // Without an entry here the rows fall back to "Account 1"/"Account 2", since
   // accountTitleLabel reads accountName/accountEmail and these rows carry
   // neither — only accountLabel, which holds the plan name.
-  assert.match(view, /volcengine: \(provider, index, providers\) => volcenginePlanAccountTitle\(provider, index, providers\)/);
+  assert.match(view, /volcengine: \(provider, index, providers\) => planAccountTitle\(provider, index, providers\)/);
 });
 
 // Re-saving with the Agent fields empty deliberately preserves the stored
@@ -3185,4 +3191,31 @@ test('a ZCode-discovered GLM login reads as connected, not API-key configured', 
   // missing entry would surface as literal text on the pill.
   assert.equal((i18n.match(/'settings\.zai\.statusLinked'/g) || []).length, 5);
   assert.ok(/'settings\.zai\.statusLinked': 'Connected'/.test(i18n));
+});
+
+test('MiMo lists the detected Desktop session without controls the user does not own', () => {
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const render = app.match(/function renderMimoStatus\(\) \{[\s\S]*?\n\}/)?.[0] || '';
+
+  // The detected session is an account the provider answers for, so the panel
+  // counts it — `zaiApiKeyConfigured`'s rule, that a discovered sign-in counts as
+  // configured, or the pill reads "Not configured" on the machine the provider is
+  // built for.
+  assert.match(main, /withDetectedMimoAccount\(accounts, mimoDetectedAccount\(\)\)/);
+  assert.match(main, /function mimoDetectedAccount\(\)/);
+  assert.match(main, /mimoAccountKey\('', \{ userId: read\.userId \}\)/);
+  // Its credential is read for the count and discarded, so nothing of it reaches
+  // the renderer projection.
+  assert.doesNotMatch(main, /mimoAccountsForRenderer[\s\S]{0,400}cookieHeader: read/);
+
+  // Nothing was pasted for it, so there is no stored preference to toggle and
+  // nothing here to remove — the rule Cursor's panel states for the accounts it
+  // detects, where removal is available only for manually added ones.
+  assert.match(render, /const detected = account\.removable === false;/);
+  assert.match(render, /const input = detected \? null : document\.createElement\('input'\)/);
+  assert.match(render, /const remove = detected \? null : document\.createElement\('button'\)/);
+  assert.match(render, /if \(input\) row\.append\(input\)/);
+  assert.match(render, /if \(remove\) right\.append\(remove\)/);
+  assert.match(app, /if \(account\?\.removable === false\) return t\('settings\.mimo\.desktopAccount'\)/);
 });

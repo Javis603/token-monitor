@@ -38,8 +38,39 @@
     billing: 'Monthly'
   });
 
+  // The products one MiMo account can answer for, and the word each row carries
+  // in `accountLabel`. Every surface that names or routes a MiMo row reads them
+  // here — the Limits title and plan cells, the settings record, the tray and the
+  // macOS widget — instead of repeating the literal, which is how the two
+  // spellings below drifted apart in the first place. `Membership` is the short
+  // form rows recorded before the rename still carry.
+  const MIMO_CONSOLE_PRODUCT = 'Console';
+  const MIMO_DESKTOP_MEMBERSHIP_PRODUCT = 'Desktop Membership';
+  const MIMO_LEGACY_MEMBERSHIP_PRODUCT = 'Membership';
+
   function normalizedId(value) {
     return String(value || '').trim().toLowerCase();
+  }
+
+  // The product this row stands for, or `''` for a row that names none — a
+  // provider other than MiMo, or a MiMo row recorded before products were
+  // labelled.
+  function mimoProductLabel(provider) {
+    const label = String(provider?.accountLabel || '').trim();
+    return label === MIMO_CONSOLE_PRODUCT
+      || label === MIMO_DESKTOP_MEMBERSHIP_PRODUCT
+      || label === MIMO_LEGACY_MEMBERSHIP_PRODUCT
+      ? label
+      : '';
+  }
+
+  function isMimoConsoleProduct(provider) {
+    return mimoProductLabel(provider) === MIMO_CONSOLE_PRODUCT;
+  }
+
+  function isMimoMembershipProduct(provider) {
+    const label = mimoProductLabel(provider);
+    return label === MIMO_DESKTOP_MEMBERSHIP_PRODUCT || label === MIMO_LEGACY_MEMBERSHIP_PRODUCT;
   }
 
   // The name this provider gives a window of that kind when the window itself
@@ -64,7 +95,12 @@
 
   return {
     FIVE_HOUR_WINDOW_PROVIDERS,
+    MIMO_CONSOLE_PRODUCT,
+    MIMO_DESKTOP_MEMBERSHIP_PRODUCT,
+    isMimoConsoleProduct,
+    isMimoMembershipProduct,
     limitWindowKindLabel,
-    limitWindowLabel
+    limitWindowLabel,
+    mimoProductLabel
   };
 });

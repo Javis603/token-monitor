@@ -68,11 +68,14 @@
       colorWithAlpha,
       applyBarScale,
       creditsAmount,
+      creditsCurrency,
       creditsMeterPercent,
       isCreditsWindow,
       spendWindow,
       limitWindowLabel,
       limitWindowText,
+      isMimoMembershipProduct,
+      mimoProductLabel,
       accountIdentity,
       accountControl,
       codexAccounts,
@@ -1054,8 +1057,23 @@
       }
     } else if (provider.provider === 'mimo') {
       windows.classList.add('limit-windows-mimo');
+      // A Desktop membership answers with a single weekly window and no balance.
+      // The arms below draw a Token Plan and a balance only, so without one of
+      // its own the membership row would render empty. It takes the full width
+      // for the reason Grok's single Monthly does.
+      const weekly = windowForKind(provider, 'weekly');
+      if (weekly) {
+        const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68);
+        node.classList.add('limit-window-wide');
+        windows.append(node);
+      }
       const balance = provider.balance || null;
-      const tokenPlan = windowForKind(provider, 'billing') || mimoTokenPlanWindowFromBalance(balance);
+      // A balance is money and carries no percentage, so it is never the plan:
+      // reading it as one draws a plan row at 0% beside the balance row that
+      // shows the same money. The provider marks it `metric: 'credits'`, and this
+      // is the branch that has to honour that mark.
+      const tokenPlan = windowsForKind(provider, 'billing').find((window) => window.metric !== 'credits')
+        || mimoTokenPlanWindowFromBalance(balance);
       if (tokenPlan) {
         const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
         node.classList.add('limit-window-wide');
@@ -1065,17 +1083,23 @@
         node.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(node);
       }
-      const amount = optionalFiniteNumber(balance?.amount);
+      const creditsWindow = (provider.windows || []).find(isCreditsWindow) || null;
+      const amount = creditsAmount(provider, creditsWindow);
+      const currency = creditsCurrency(provider, creditsWindow);
       const giftBalance = optionalFiniteNumber(balance?.giftBalance);
       const cashBalance = optionalFiniteNumber(balance?.cashBalance);
       if (amount !== null || giftBalance !== null || cashBalance !== null) {
         const detailParts = [];
-        if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, balance.currency)}`);
-        if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, balance.currency)}`);
-        const balanceText = formatMoney(amount, balance.currency) || '—';
+        if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, currency)}`);
+        if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, currency)}`);
+        const balanceText = formatMoney(amount, currency) || '—';
+        // A wallet is money and carries no percentage of its own, so its meter is
+        // derived here from the console's reported month spend (`amount /
+        // (amount + monthSpend)`) — the display-only rule deepseek's and
+        // openrouter's balances follow, never a wire value.
         const balanceNode = limitWindowNode(
           'Balance',
-          { showMeter: false },
+          { remainingPercent: creditsMeterPercent(provider, creditsWindow) },
           color,
           0.68,
           balanceText,
@@ -1083,6 +1107,8 @@
         );
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(balanceNode);
+        const spendNode = providerSpendNode(balance);
+        if (spendNode) windows.append(spendNode);
       }
     } else if (provider.provider === 'grok') {
       // Grok exposes a single Monthly billing window (no session/weekly). Render it
@@ -1448,7 +1474,8 @@
     opencode: opencodeAccountTitle,
     openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
     thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
-    volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers)
+    volcengine: (provider, index, providers) => planAccountTitle(provider, index, providers),
+    mimo: (provider, index, providers) => mimoAccountTitle(provider, index, providers)
   };
 
   // Fallback names for `provider.source`, used when the provider has no override
@@ -1465,6 +1492,16 @@
     if (status === 'sourceRateLimited') return 'Usage API limited';
     if (status === 'unavailable') return 'Unavailable';
     return 'Error';
+  }
+
+  function providerStatusLabel(provider) {
+    if (provider?.provider === 'mimo' && provider?.sourceDetail === 'app' && provider?.status === 'unauthorized') {
+      return t('settings.mimo.desktopRelogin');
+    }
+    if (provider?.provider === 'mimo' && provider?.sourceDetail === 'managed' && provider?.status === 'unauthorized') {
+      return t('settings.mimo.repasteCookie');
+    }
+    return limitStatusLabel(provider?.status);
   }
 
   function limitProviderMeta(provider, provenance = null) {
@@ -1486,14 +1523,26 @@
       if (sourceDevice) parts.push(sourceDevice);
       return `${freshness.text}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
     }
-    return limitStatusLabel(provider.status, false);
+    return providerStatusLabel(provider);
   }
 
   function limitProviderPlan(provider) {
-    if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
+    if (provider?.status && provider.status !== 'ok' && !provider.stale) return providerStatusLabel(provider);
+    const mimoProduct = provider?.provider === 'mimo' ? mimoProductLabel(provider) : '';
+    if (mimoProduct) {
+      const plan = String(provider?.planLabel || '').trim();
+      if (isMimoMembershipProduct(provider)
+        && provider?.status === 'ok'
+        && !plan && !provider?.windows?.length) return t('limits.mimo.noPlan');
+      // Current MiMo rows keep the product in accountLabel and the plan in
+      // planLabel. Falling back to accountLabel would repeat the product in the
+      // plan cell when the app deliberately has no plan name. Legacy rows take
+      // the generic path below.
+      return plan ? presentationApi.limitProviderPlanDisplayLabel(provider, plan) : '';
+    }
     const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
     if (label) return presentationApi.limitProviderPlanDisplayLabel(provider, label);
-    return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
+    return provider?.status && provider.status !== 'ok' ? providerStatusLabel(provider) : '';
   }
 
   function renderLimitProviderMark(id, color) {
@@ -1839,7 +1888,10 @@
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
     }),
     mimo: (provider, color, { grouped }) => ({
-      options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
+      options: {
+        accountTitle: true,
+        ...(grouped ? { showIcon: false } : {})
+      }
     }),
     cursor: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
@@ -1979,12 +2031,31 @@
     return accountName || `Account ${index + 1}`;
   }
 
-  // Both Volcengine plans sit on one account, so the row title carries the plan
-  // name from accountLabel. accountTitleLabel reads accountName/accountEmail,
-  // neither of which these rows have, so without this they would all render as
-  // "Account N".
-  function volcenginePlanAccountTitle(provider, index, providers) {
+  // Volcengine carries the plan in accountLabel; without it, both rows would
+  // be named "Account N".
+  function planAccountTitle(provider, index, providers) {
     return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
+  }
+
+  function mimoAccountTitle(provider, index, providers) {
+    const product = mimoProductLabel(provider);
+    if (product) {
+      const identity = accountIdentity.accountEmailLabel(provider, providers || [provider], {
+        maskEmail: limitAccountEmailsMasked(),
+        suffix: String(provider?.accountName || '').trim()
+      }) || String(provider?.accountName || '').trim();
+      return [identity, product].filter(Boolean).join(' · ') || `Account ${index + 1}`;
+    }
+    // Compatibility for rows from versions that put the product in accountName
+    // and the plan in accountLabel.
+    const peers = (providers || [provider]).map((row) => ({
+      ...row,
+      accountName: String(row?.accountName || row?.accountLabel || '').trim()
+    }));
+    return accountIdentity.accountTitleLabel(peers[index], peers, {
+      maskEmail: limitAccountEmailsMasked(),
+      index
+    }) || `Account ${index + 1}`;
   }
 
   function limitAccountTitle(id, provider, index, providerEntries = [provider]) {
@@ -1994,9 +2065,13 @@
       : limitAccountDefaultTitle(provider, index, providerEntries);
   }
 
-  // Volcengine's two rows are one account's two subscriptions, so its header
-  // counts plans; every other group counts accounts.
-  const GROUP_COUNT_KEYS = { volcengine: 'settings.volcengine.nPlans' };
+  // Volcengine's two rows are one account's two subscriptions, and MiMo's are
+  // the platform console and the Desktop membership of one account, so both
+  // headers count plans; every other group counts accounts.
+  const GROUP_COUNT_KEYS = {
+    volcengine: 'settings.volcengine.nPlans',
+    mimo: 'settings.mimo.nProducts'
+  };
 
   // "4 accounts" on the group header. A caller that has a better phrase passes
   // one; leaving it to the caller is what let the dock card render a group with

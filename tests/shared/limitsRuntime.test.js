@@ -499,6 +499,22 @@ test('a mixed full result marks an expected missing identity unavailable without
   runtime.stop();
 });
 
+test('an explicit identity removal drops a disappeared automatic account without publishing a marker', async () => {
+  const results = [
+    [providerRow('mimo', 'A', 'Account A'), providerRow('mimo', 'B', 'Account B')],
+    [providerRow('mimo', 'A', 'Account A'), { provider: 'mimo', accountKey: 'B', removed: true }]
+  ];
+  const runtime = createLimitsRuntime({ limitProviders: ['mimo'] }, runtimeDeps({
+    probeProvider: async () => results.shift()
+  }));
+
+  await runtime.refresh({ provider: 'mimo' }, 'startup');
+  await runtime.refresh({ provider: 'mimo' }, 'interval');
+  assert.deepEqual(runtime.getSnapshot().providers.map((row) => row.accountKey), ['A']);
+  assert.equal(JSON.stringify(runtime.getSnapshot()).includes('removed'), false);
+  runtime.stop();
+});
+
 test('a new identity failure never retains the removed identity windows', async () => {
   const results = [
     [providerRow('mimo', 'A', 'Account A')],
@@ -530,6 +546,22 @@ test('clearing an identity removes old windows synchronously and blocks late com
   job.resolve([providerRow('mimo', 'A', 'Old account')]);
   assert.equal((await pending).superseded, true);
   assert.deepEqual(runtime.getSnapshot().providers, []);
+  runtime.stop();
+});
+
+test('replacing a MiMo membership clears only that member, not the console balance', () => {
+  const member = providerRow('mimo', 'member-A', 'Membership');
+  const consoleAccount = providerRow('mimo', 'console-B', 'Pay-as-you-go', {
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9, currency: 'CNY' }]
+  });
+  const runtime = createLimitsRuntime({
+    limitProviders: ['mimo'],
+    previousLimits: { providers: [member, consoleAccount] }
+  }, runtimeDeps());
+
+  runtime.clear({ provider: 'mimo', accountKey: 'member-A' }, 'credential-save');
+  assert.deepEqual(runtime.getSnapshot().providers.map((row) => row.accountKey), ['console-B']);
+  assert.equal(runtime.getSnapshot().providers[0].windows[0].remaining, 9);
   runtime.stop();
 });
 

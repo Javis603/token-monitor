@@ -549,7 +549,15 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     }
 
     const attemptAt = new Date(now()).toISOString();
-    const normalizedRows = (Array.isArray(rawRows) ? rawRows : rawRows?.providers || [])
+    const inputRows = Array.isArray(rawRows) ? rawRows : rawRows?.providers || [];
+    // A provider that discovers identities locally can see one disappear while
+    // other identities from the same provider still answer. Missing rows are
+    // normally retained as transient (a partial response must not erase good
+    // data), so an explicit removal is the narrow way to delete that identity.
+    // It is consumed here and never enters the normalized or synced wire shape.
+    const removals = inputRows.filter((row) => row?.removed === true);
+    const normalizedRows = inputRows
+      .filter((row) => row?.removed !== true)
       .map((row) => normalizeLimitProvider({ ...row, provider: lane.provider }))
       .filter(Boolean);
     const expected = new Set(dispatch.expectedIdentityKeys);
@@ -573,6 +581,15 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       && !TRANSIENT_STATUSES.has(normalizedRows[0].status)
       && normalizedRows[0].status !== 'ok';
     if (genericTerminal && !dispatch.accountScoped) lane.identities.clear();
+
+    for (const removal of removals) {
+      let identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
+      if (identityKey === `${lane.provider}:*`) continue;
+      if (dispatch.accountScoped && identityKey !== dispatch.identityKey) continue;
+      if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
+      represented.add(identityKey);
+      lane.identities.delete(identityKey);
+    }
 
     for (const row of normalizedRows) {
       let identityKey = rowIdentityKey(row);

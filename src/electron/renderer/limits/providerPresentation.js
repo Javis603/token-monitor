@@ -4,10 +4,14 @@
   const accountIdentityApi = typeof module === 'object' && module.exports
     ? require('../accountIdentity')
     : root?.TokenMonitorAccountIdentity;
-  const api = factory(accountIdentityApi);
+  const limitWindowLabelsApi = typeof module === 'object' && module.exports
+    ? require('../../../shared/limits/windowLabels')
+    : root?.TokenMonitorLimitWindowLabels;
+  const api = factory(accountIdentityApi, limitWindowLabelsApi || {});
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorLimitProviderPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi(accountIdentityApi) {
+})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi(accountIdentityApi, limitWindowLabelsApi) {
+  const { isMimoMembershipProduct } = limitWindowLabelsApi;
   const SOURCE_LABELS = {
     oauth: 'OAuth',
     cli: 'CLI',
@@ -66,7 +70,7 @@
     copilot: ['Manual login', 'API'],
     zed: ['Manual login', 'Web'],
     commandcode: ['Manual login', 'Web'],
-    mimo: ['Token Plan', 'Web'],
+    mimo: ['Auto', 'Desktop app', 'Token Plan', 'Web'],
     zai: ['Auto', 'Coding Plan', 'API key'],
     zaiteam: ['Team Plan', 'API key'],
     kiro: ['Auto', 'CLI'],
@@ -448,6 +452,12 @@
           ? { label: 'Update API key', tone: 'setup' }
           : { label: 'Open Cline', tone: 'setup' };
       }
+      if (providerName === 'mimo' && provider?.sourceDetail === 'app') {
+        return { label: 'Sign in to MiMo Desktop again', key: 'settings.mimo.desktopRelogin', tone: 'setup' };
+      }
+      if (providerName === 'mimo' && provider?.sourceDetail === 'managed') {
+        return { label: 'Update MiMo Cookie', key: 'settings.mimo.repasteCookie', tone: 'setup' };
+      }
       return providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
         ? { label: 'Update API key', tone: 'setup' }
         : providerName === 'qoder' || providerName === 'trae'
@@ -595,6 +605,19 @@
     return tags;
   }
 
+  function limitProviderSettingsRecord(providers, id) {
+    const rows = (providers || []).filter((row) => row.provider === id);
+    if (id !== 'mimo') return rows.at(-1);
+    // MiMo's console and membership are independent products of one account, so
+    // one live product means the provider is connected even while the other needs
+    // its own recovery. With neither live, the row that speaks is the account's
+    // own product — the console, whose name the membership lane sets against its
+    // own — rather than whichever row the aggregate happened to sort last.
+    return rows.findLast((row) => row.status === 'ok')
+      || rows.find((row) => !isMimoMembershipProduct(row))
+      || rows.at(-1);
+  }
+
   return {
     antigravityQuotaWindow,
     apiKeyAccountStatus,
@@ -616,6 +639,7 @@
     limitProviderSourceLabel,
     limitProviderStatusLabel,
     limitProviderSettingsTags,
+    limitProviderSettingsRecord,
     thirdPartyAdapterFamily,
     thirdPartyAdapterVisual,
     thirdPartyGroupPlanText,

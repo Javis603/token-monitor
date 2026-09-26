@@ -155,7 +155,15 @@ test('MiMo sends the shared agent on the wire', async () => {
         enabled: true
       }]
     },
-    { fetch }
+    // The membership lane is declared absent: this case is about the header the
+    // console calls carry, and without this it would read this machine's real
+    // MiMo Desktop partition.
+    {
+      fetch,
+      readMimoDesktopAccount: () => {
+        throw Object.assign(new Error('no Desktop session'), { status: 'notConfigured' });
+      }
+    }
   ));
   assert.deepEqual([...new Set(sent)], [BROWSER_USER_AGENT]);
 });

@@ -876,3 +876,37 @@ test('the Widget presentation accepts exactly the shipped UI locales', () => {
     assert.equal(snapshot.presentation.locale, 'auto');
   }
 });
+
+test('a row whose only window is the weekly one still reaches the widget', () => {
+  // A MiMo Desktop membership answers with one weekly window and no balance.
+  // Every surface selects and caps windows its own way, so this pins that the
+  // widget's own cap keeps a single-window row rather than dropping it.
+  const snapshot = buildSnapshot({
+    limits: { providers: [{
+      provider: 'mimo',
+      status: 'ok',
+      accountKey: 'sha256:membership',
+      source: 'oauth',
+      sourceDetail: 'app',
+      windows: [{ kind: 'weekly', windowMinutes: 10080, usedPercent: 40, remainingPercent: 60, resetsAt: '2026-07-20T00:00:00Z' }]
+    }] }
+  }, { now: NOW });
+
+  const row = snapshot.quota.find((entry) => entry.provider === 'mimo');
+  assert.deepEqual(row.windows.map((window) => window.kind), ['weekly']);
+  assert.equal(row.windows[0].remainingPercent, 60);
+  assert.equal(row.windows[0].label, 'Weekly');
+});
+
+test('MiMo widget rows keep the account and product distinguishable', () => {
+  const snapshot = buildSnapshot({
+    limits: { providers: [
+      { provider: 'mimo', status: 'ok', accountKey: 'console', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Console', windows: [] },
+      { provider: 'mimo', status: 'ok', accountKey: 'membership', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Desktop Membership', windows: [] }
+    ] }
+  }, { now: NOW });
+  assert.deepEqual(snapshot.quota.map((row) => row.accountLabel).sort(), [
+    'u***r@example.com · MiMo account · Console',
+    'u***r@example.com · MiMo account · Desktop Membership'
+  ]);
+});
