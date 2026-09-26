@@ -4,6 +4,10 @@ const crypto = require('node:crypto');
 const { hashKey } = require('../../hashKey');
 const { normalizeLimitProvider } = require('../../limits/core');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
+const { mimoEndpointTime } = require('./endpointTime');
+const { fetchMimoMembershipLimits } = require('./membership');
+const { readMimoDesktopAccount } = require('./desktopSession');
+const { exchangeMimoConsoleSession } = require('./ssoExchange');
 
 const MIMO_PLATFORM_CONSOLE_URL = 'https://platform.xiaomimimo.com/#/console/balance';
 const MIMO_API_BASE_URL = 'https://platform.xiaomimimo.com/api/v1';
@@ -113,6 +117,7 @@ function parseMimoProfile(body) {
   };
 }
 
+
 function parseMimoPlanDetail(body, now = Date.now()) {
   const data = unwrapApiBody(body);
   const label = cleanText(
@@ -131,12 +136,7 @@ function parseMimoPlanDetail(body, now = Date.now()) {
     ?? data.state
   );
   const rawEnd = data.currentPeriodEnd ?? data.current_period_end;
-  const parsedEnd = rawEnd
-    ? Date.parse(
-      String(rawEnd).replace(' ', 'T')
-      + (/Z$|[+-]\d\d:?\d\d$/.test(String(rawEnd)) ? '' : 'Z')
-    )
-    : NaN;
+  const parsedEnd = rawEnd ? mimoEndpointTime(rawEnd) : NaN;
   const hasFuturePeriod = Number.isFinite(parsedEnd) && parsedEnd > now;
   const hasExpiredPeriod = Number.isFinite(parsedEnd) && parsedEnd <= now;
   const isKnownNoPlan = MIMO_NO_PLAN_CODES.has(normalizedLabel)
@@ -231,8 +231,8 @@ async function requestMimo(pathname, cookieHeader, deps = {}) {
 function statusProvider(status, updatedAt, account = {}) {
   return normalizeLimitProvider({
     provider: 'mimo',
-    source: 'web',
-    sourceDetail: 'managed',
+    source: cleanText(account.source) || 'web',
+    sourceDetail: cleanText(account.sourceDetail) || 'managed',
     status,
     updatedAt,
     accountKey: account.accountKey,
@@ -244,6 +244,10 @@ function statusProvider(status, updatedAt, account = {}) {
 
 async function fetchMimoAccount(account, deps = {}) {
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
+  // A session that could not be minted has nothing to ask with, and its refusal
+  // is already classified — asking anyway would spend a request to learn what the
+  // chain just said.
+  if (account.mintStatus) return statusProvider(account.mintStatus, updatedAt, account);
   const cookieHeader = normalizeMimoCookieHeader(account.cookieHeader);
   if (!cookieHeader) return statusProvider('notConfigured', updatedAt, account);
   try {
@@ -287,8 +291,8 @@ async function fetchMimoAccount(account, deps = {}) {
     }
     return normalizeLimitProvider({
       provider: 'mimo',
-      source: 'web',
-      sourceDetail: 'managed',
+      source: cleanText(account.source) || 'web',
+      sourceDetail: cleanText(account.sourceDetail) || 'managed',
       status: 'ok',
       updatedAt,
       accountKey: cleanText(account.accountKey) || mimoAccountKey(cookieHeader),
@@ -372,18 +376,91 @@ function scopedMimoManagedAccounts(value, scope) {
   });
 }
 
+// The provider answers from two independent sources: the console accounts the
+// user configured, and the Desktop membership this machine may hold a session
+// for. They are separate rows by design — one is money and a Token Plan credit,
+// the other a weekly percentage — so this function's only job is to ask both and
+// hand back what each found.
+//
+// The early return is the part that has to stay right: a provider-level
+// `notConfigured` row is read by the runtime as the whole provider's and clears
+// every identity the lane holds, so it may only be returned when *neither*
+// source has anything. Returning it because the console lane happens to be empty
+// would wipe a membership row that is working.
 async function fetchMimoLimits(options = {}, deps = {}) {
   const scope = options.limitRefreshScope?.provider === 'mimo'
     ? options.limitRefreshScope
     : null;
-  const accounts = scopedMimoManagedAccounts(
+  const updatedAt = new Date((deps.now || Date.now)()).toISOString();
+  let accounts = scopedMimoManagedAccounts(
     options.mimoManagedAccounts || deps.mimoManagedAccounts,
     scope
   );
-  if (!accounts.length) {
-    return statusProvider('notConfigured', new Date((deps.now || Date.now)()).toISOString());
+  // Scoped to nothing configured, and never on a scoped refresh: that refresh is
+  // about one stored account, not about discovering another.
+  if (!accounts.length && !scope) {
+    const minted = await mintMimoConsoleAccount(deps);
+    if (minted) accounts = [minted];
   }
-  return Promise.all(accounts.map((account) => fetchMimoAccountWithTimeout(account, deps)));
+  const [consoleRows, membershipRows] = await Promise.all([
+    accounts.length
+      ? Promise.all(accounts.map((account) => fetchMimoAccountWithTimeout(account, deps)))
+      : Promise.resolve([]),
+    // A refresh scoped to one console account is not a refresh of the membership
+    // lane, and must not spend its requests on one.
+    scope ? Promise.resolve([]) : fetchMimoMembershipLimits(options, deps)
+  ]);
+  const rows = [...consoleRows, ...membershipRows];
+  if (!rows.length) return statusProvider('notConfigured', updatedAt);
+  return rows;
+}
+
+// The console session the machine's own MiMo Desktop can mint, used only when
+// nothing is configured: a credential the user set is their instruction, and
+// minting must never shadow it. The credential is spent here and the session it
+// produces lives only in memory for the calls it feeds.
+async function mintMimoConsoleAccount(deps = {}) {
+  const read = deps.readMimoDesktopAccount || readMimoDesktopAccount;
+  let result;
+  try {
+    result = read({ ...(deps.desktopSessionOptions || {}) });
+  } catch {
+    return null;
+  }
+  // No store, one this build cannot read, or a platform the app does not ship
+  // for: nothing to mint, and nothing to tell the user — the console lane's paste
+  // input is the path for a machine without MiMo Desktop.
+  if (!result?.ok) return null;
+
+  const base = {
+    id: 'mimo-oauth',
+    userId: cleanText(result.userId),
+    source: 'oauth',
+    sourceDetail: 'app'
+  };
+  const accountKey = mimoAccountKey('', base);
+
+  let exchanged;
+  try {
+    exchanged = await exchangeMimoConsoleSession({
+      baseUrl: MIMO_API_BASE_URL,
+      accountCookie: result.cookieHeader,
+      fetch: deps.fetch,
+      signal: deps.signal,
+      maxHops: deps.maxHops
+    });
+  } catch {
+    return { ...base, accountKey, cookieHeader: '', mintStatus: 'unavailable' };
+  }
+  if (!exchanged.ok) {
+    return {
+      ...base,
+      accountKey,
+      cookieHeader: '',
+      mintStatus: exchanged.status === 'rejected' ? 'unauthorized' : 'unavailable'
+    };
+  }
+  return { ...base, accountKey, cookieHeader: exchanged.cookieHeader };
 }
 
 function createMimoManagedAccount(cookieValue, existing = []) {

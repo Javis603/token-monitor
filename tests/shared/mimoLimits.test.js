@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const {
   createMimoManagedAccount,
-  fetchMimoLimits,
+  fetchMimoLimits: fetchMimoLimitsRaw,
   normalizeMimoCookieHeader,
   parseMimoBalance,
   parseMimoPlanDetail,
@@ -12,8 +12,21 @@ const {
   parseMimoProfile
 } = require('../../src/shared/providers/mimo/limits');
 const { createLimitsCollector } = require('../../src/shared/limits/collector');
+const { hashKey } = require('../../src/shared/hashKey');
 
 const COOKIE = 'unrelated=drop; userId=123; api-platform_serviceToken=secret; api-platform_ph=optional';
+const ACCOUNT_COOKIE = 'passToken=account-pass-token; userId=999';
+
+// Every case below is about the console lane, so the membership lane is declared
+// absent for the whole file: without that these would reach for this machine's
+// real MiMo Desktop partition and pick up a row that has nothing to do with what
+// they assert. The membership lane has its own suite.
+function fetchMimoLimits(options, deps = {}) {
+  return fetchMimoLimitsRaw(options, {
+    readMimoDesktopAccount: () => ({ ok: false, reason: 'absent' }),
+    ...deps
+  });
+}
 
 function response(body, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
@@ -483,6 +496,9 @@ test('LimitsRuntime compatibility distinguishes provider-wide and account-scoped
       }))
     }
   }, {
+    // This drives the real collector, which resolves the real fetcher, so the
+    // membership lane is declared absent here too.
+    readMimoDesktopAccount: () => ({ ok: false, reason: 'absent' }),
     fetch: async (url, init) => {
       fetchCalls += 1;
       cookies.push(init.headers.Cookie);
@@ -607,4 +623,192 @@ test('MiMo without a token plan still exposes the balance window', async () => {
   assert.equal(provider.windows.length, 1);
   assert.equal(provider.windows[0].metric, 'credits');
   assert.equal(provider.windows[0].remaining, 7.51);
+});
+
+// ---- the two sources, together ----------------------------------------------
+// These use the raw fetcher: the rest of the file declares the membership lane
+// absent, and what is under test here is precisely that it is not.
+
+test('the membership lane is merged beside the console accounts', async () => {
+  let membershipReads = 0;
+  const rows = await fetchMimoLimitsRaw({ mimoManagedAccounts: [managed()] }, {
+    fetch: async (url) => {
+      const href = String(url);
+      if (href.includes('/user/xiaomi/me')) {
+        return { status: 200, headers: { get: () => null, getSetCookie: () => [] }, json: async () => ({ code: 0, data: { userId: '123', region: 'CN' } }), text: async () => JSON.stringify({ code: 0, data: { userId: '123', region: 'CN' } }) };
+      }
+      if (href.includes('/user/xiaomi/subscription/self')) {
+        return response({ code: 0, data: { current: { planCode: 'mimo-cn-pro', percent: 60, nextResetTime: '2026-09-15T00:00:00' } } });
+      }
+      return url.endsWith('/balance')
+        ? response({ code: 0, data: { balance: '9.95', currency: 'CNY' } })
+        : response({ code: 0, data: null });
+    },
+    readMimoDesktopAccount: () => { membershipReads += 1; return { ok: true, cookieHeader: COOKIE, userId: '123' }; }
+  });
+
+  assert.equal(membershipReads, 1);
+  // One console row keyed by the console lane's identity, one membership row
+  // keyed by its own — two products of one account are two rows.
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => row.accountKey), [
+    'sha256:mimo-1',
+    hashKey('mimo', '123', 'membership')
+  ]);
+});
+
+test('the not-configured row is only for a provider with neither source', async () => {
+  const neither = await fetchMimoLimitsRaw({}, {
+    fetch: async () => response({ code: 0, data: null }),
+    readMimoDesktopAccount: () => ({ ok: false, reason: 'absent' })
+  });
+  // The early return stays what it always was — one provider-level row, not an
+  // array — because that is the shape its callers already handle.
+  assert.equal(neither.status, 'notConfigured');
+  assert.deepEqual(neither.windows, []);
+
+  // No console account configured, but a Desktop session: both lanes mint from
+  // the same account cookie, so both come up. What matters is that no
+  // provider-level row is among them — one would be read as the whole provider's
+  // and would clear the identities these rows just established.
+  const membershipOnly = await fetchMimoLimitsRaw({}, {
+    fetch: async (url) => {
+      const href = String(url);
+      if (href.includes('/user/xiaomi/me')) {
+        return {
+          status: 200,
+          headers: { get: () => null, getSetCookie: () => [] },
+          json: async () => ({ code: 0, data: { userId: '123', region: 'CN' } }),
+          text: async () => JSON.stringify({ code: 0, data: { userId: '123', region: 'CN' } })
+        };
+      }
+      if (href.includes('/user/xiaomi/subscription/self')) {
+        return response({ code: 0, data: { current: { planCode: 'mimo-cn-pro', percent: 60, nextResetTime: '2026-09-15T00:00:00' } } });
+      }
+      return response({ code: 0, data: { balance: '9.95', currency: 'CNY' } });
+    },
+    readMimoDesktopAccount: () => ({ ok: true, cookieHeader: COOKIE, userId: '123' })
+  });
+  assert.equal(membershipOnly.some((row) => row.accountKey === ''), false);
+  assert.deepEqual(membershipOnly.map((row) => row.accountKey).sort(), [
+    hashKey('mimo:123'),
+    hashKey('mimo', '123', 'membership')
+  ].sort());
+});
+
+test('a refresh scoped to one console account does not spend the membership lane', async () => {
+  let membershipReads = 0;
+  await fetchMimoLimitsRaw({
+    mimoManagedAccounts: [managed()],
+    limitRefreshScope: { provider: 'mimo', accountKey: 'sha256:mimo-1' }
+  }, {
+    fetch: async () => response({ code: 0, data: { balance: '1', currency: 'USD' } }),
+    readMimoDesktopAccount: () => { membershipReads += 1; return { ok: false, reason: 'absent' }; }
+  });
+  assert.equal(membershipReads, 0);
+});
+
+// ---- the minting source ------------------------------------------------------
+
+test('minting never shadows a configured account', async () => {
+  const consoleCalls = [];
+  const rows = await fetchMimoLimitsRaw({ mimoManagedAccounts: [managed()] }, {
+    fetch: async (url, init = {}) => {
+      if (String(url).endsWith('/balance')) consoleCalls.push((init.headers || {}).Cookie || '');
+      return url.endsWith('/balance')
+        ? response({ code: 0, data: { balance: '1', currency: 'USD' } })
+        : response({ code: 0, data: {} });
+    },
+    // The store names a different account. It is the membership lane's business
+    // and must not become a second console account beside the configured one.
+    readMimoDesktopAccount: () => ({ ok: true, cookieHeader: ACCOUNT_COOKIE, userId: '999' })
+  });
+  assert.equal(consoleCalls.length, 1);
+  assert.equal(consoleCalls[0].includes('secret'), true, 'the configured cookie is the one that goes out');
+  assert.equal(rows.some((row) => row.accountKey === hashKey('mimo:999')), false);
+  assert.equal(rows.some((row) => row.accountKey === 'sha256:mimo-1'), true);
+});
+
+test('a minted session is the account a pasted cookie for it would be', async () => {
+  // Both routes end on the server-issued user id, so one account reached either
+  // way is one row rather than two. The pasted side is built the way the settings
+  // path builds it, which is what computes the key from the cookie.
+  const pastedAccount = createMimoManagedAccount(COOKIE).account;
+  assert.equal(pastedAccount.accountKey, hashKey('mimo:123'));
+
+  const minted = await fetchMimoLimitsRaw({}, {
+    fetch: async (url) => {
+      const href = String(url);
+      if (href.includes('/user/xiaomi/me')) {
+        return {
+          status: 200,
+          headers: { get: () => null, getSetCookie: () => [] },
+          json: async () => ({ code: 0, data: { userId: '123', region: 'CN' } }),
+          text: async () => JSON.stringify({ code: 0, data: { userId: '123', region: 'CN' } })
+        };
+      }
+      return response({ code: 0, data: { current: null } });
+    },
+    readMimoDesktopAccount: () => ({ ok: true, cookieHeader: COOKIE, userId: '123' })
+  });
+  assert.equal(minted.some((row) => row.accountKey === pastedAccount.accountKey), true);
+});
+
+test('a refused mint is a credential problem and still names the account', async () => {
+  const rows = await fetchMimoLimitsRaw({}, {
+    // The refusal signature: the console chain lands on the account host's login
+    // page and never comes back.
+    fetch: async (url) => {
+      const href = String(url);
+      if (href.includes('/user/xiaomi/me')) {
+        return {
+          status: 200,
+          headers: { get: () => null, getSetCookie: () => [] },
+          json: async () => ({ code: 0, data: { userId: '123', region: 'CN' } }),
+          text: async () => JSON.stringify({ code: 0, data: { userId: '123', region: 'CN' } })
+        };
+      }
+      if (href.startsWith('https://account.xiaomi.com')) {
+        return { status: 200, headers: { get: () => null, getSetCookie: () => [] }, json: async () => ({}), text: async () => '<html>login</html>' };
+      }
+      const refusal = JSON.stringify({ code: 401, loginUrl: 'https://account.xiaomi.com/pass/serviceLogin?sid=api-platform' });
+      return { status: 401, headers: { get: () => null, getSetCookie: () => [] }, json: async () => JSON.parse(refusal), text: async () => refusal };
+    },
+    readMimoDesktopAccount: () => ({ ok: true, cookieHeader: COOKIE, userId: '123' })
+  });
+  // The console row is attributable — the partition already knows which account
+  // it belongs to — so the refusal is reported against that account rather than
+  // as a bare provider-level row the runtime would spread across every account.
+  const consoleRow = rows.find((row) => row.accountKey === hashKey('mimo:123'));
+  assert.equal(consoleRow.status, 'unauthorized');
+  assert.equal(consoleRow.source, 'oauth');
+  assert.equal(consoleRow.sourceDetail, 'app');
+  assert.ok(rows.every((row) => row.accountKey));
+});
+
+test('a membership row is never replaced by the not-configured row', async () => {
+  // No console accounts and nothing to mint, but the membership lane has a
+  // credential the user configured. A provider-level row here would be read as
+  // the whole provider's and would clear the identity the membership just
+  // established, so the early return may only fire when *neither* source has
+  // anything.
+  const rows = await fetchMimoLimitsRaw({ mimoMembershipCookie: 'serviceToken=configured' }, {
+    fetch: async (url) => {
+      const href = String(url);
+      if (href.includes('/user/xiaomi/me')) {
+        return {
+          status: 200,
+          headers: { get: () => null, getSetCookie: () => [] },
+          json: async () => ({ code: 0, data: { userId: '123' } }),
+          text: async () => JSON.stringify({ code: 0, data: { userId: '123' } })
+        };
+      }
+      return response({ code: 0, data: { current: { planCode: 'mimo-cn-pro', percent: 60, nextResetTime: '2026-09-15T00:00:00' } } });
+    },
+    readMimoDesktopAccount: () => ({ ok: false, reason: 'absent' })
+  });
+  assert.equal(Array.isArray(rows), true);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, 'ok');
+  assert.equal(rows[0].accountKey, hashKey('mimo', '123', 'membership'));
 });
