@@ -246,6 +246,24 @@ test('Linux tray icon keeps the resized full-color app asset at the unchanged sq
   assert.deepEqual(calls.slice(1), [['resize', { width: 20, height: 20 }]]);
 });
 
+test('macOS tray click passes the screen cursor, not its window-relative event position', () => {
+  const calls = trayCalls();
+  const electron = fakeTrayElectron(calls);
+  electron.screen = { getCursorScreenPoint: () => ({ x: 1200, y: -1060 }) };
+  electron.nativeImage.createFromPath = () => ({
+    resize: () => ({ setTemplateImage() {} })
+  });
+  let clickPoint = null;
+  const tray = createTray({
+    electron,
+    onToggle: (_tray, point) => { clickPoint = point; },
+    platform: 'darwin'
+  });
+
+  tray.handlers.click({}, { x: 900, y: 0, width: 24, height: 24 }, { x: 12, y: 900 });
+  assert.deepEqual(clickPoint, { x: 1200, y: -1060 });
+});
+
 test('Linux tray exports current menu state and skips unchanged D-Bus rebuilds', () => {
   const calls = trayCalls();
   let state = {
