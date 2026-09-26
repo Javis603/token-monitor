@@ -5338,15 +5338,19 @@ html.is-windows .limit-live-badge {
    shapes and a specular top edge. The highlight stays white on light themes
    too — it is reflected light, not an overlay tint. Chromium's backdrop blur has
    nothing but transparent pixels to sample here, so it is dropped. Fills and
-   borders are left to the base rules so their hover/active states still win. */
+   borders are left to the base rules so their hover/active states still win,
+   and the refresh button's state glows keep their own shadow (each already
+   carries a top edge of its own). */
 html.native-liquid-glass {
   --liquid-glass-specular: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.035);
 }
 html.native-liquid-glass :is(.tabs, .tab, .tab-indicator, .tool-detail-footer, #utilityActions button) {
   border-radius: 999px;
 }
-html.native-liquid-glass :is(.tabs, .tab-indicator, .tool-detail-footer, #utilityActions button, .view-switcher-current, .view-switcher-disclosure) {
+html.native-liquid-glass :is(.tabs, .tab-indicator, .tool-detail-footer, #utilityActions button:not(.is-refreshing, .is-refreshed, .is-refresh-error), .view-switcher-current, .view-switcher-disclosure) {
   box-shadow: var(--liquid-glass-specular);
+}
+html.native-liquid-glass :is(.tabs, .tab-indicator, .tool-detail-footer, #utilityActions button, .view-switcher-current, .view-switcher-disclosure) {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
