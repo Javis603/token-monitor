@@ -67,6 +67,7 @@ function createIcloudSyncRuntime(options = {}) {
   let reconcileAgain = false;
   let localRecord = null;
   let localRecordOverlayAllowed = true;
+  let successfulDeviceWrites = 0;
   let records = [];
   let stats = null;
   let subscriptionDocument = null;
@@ -218,6 +219,7 @@ function createIcloudSyncRuntime(options = {}) {
       return reconcilePromise;
     }
     const expectedGeneration = generation;
+    const writesAtStart = successfulDeviceWrites;
     reconcileState = 'running';
     publishStatus();
     let runPromise;
@@ -254,7 +256,8 @@ function createIcloudSyncRuntime(options = {}) {
       // not resurrect the record. An errored/unavailable discovery still keeps
       // the overlay because iCloud invisibility is not deletion.
       if (localDeviceId && discoverySucceeded && !discoveredLocalRecord) {
-        localRecordOverlayAllowed = false;
+        if (writesAtStart === successfulDeviceWrites) localRecordOverlayAllowed = false;
+        else reconcileAgain = true;
       }
       updateRecords(discovered.records, { publish: false });
       const winnerToken = subscriptions?.revisionToken || '';
@@ -376,6 +379,7 @@ function createIcloudSyncRuntime(options = {}) {
         // suppression. A failed or heartbeat-skipped write must stay hidden.
         localRecordOverlayAllowed = writeIsVisible;
         lastWriteAt = new Date(now()).toISOString();
+        if (writeIsVisible) successfulDeviceWrites += 1;
       }
       // A device write does not revalidate remote files or subscriptions.
       lastErrorCategory = lastReconcileErrorCategory || lastSubscriptionReconcileErrorCategory;

@@ -180,6 +180,49 @@ test('a cached tombstone makes the next local write publish above its revision',
   }
 });
 
+test('an older reconciliation cannot hide a device published while subscriptions were loading', async () => {
+  let reads = 0;
+  let localPublished = false;
+  let releaseSubscriptions;
+  const publishedDeviceCounts = [];
+  const local = record('local', 7);
+  const noSubscriptions = { winner: null, revisionToken: '', errors: [] };
+  const store = {
+    paths: () => ({ syncRoot: '/tmp/icloud-test-root' }),
+    status: () => ({ supported: true, available: true, state: 'available' }),
+    discoverDevices: async () => {
+      reads += 1;
+      return { records: localPublished ? [local] : [], errors: [] };
+    },
+    discoverSubscriptions: () => reads === 2
+      ? new Promise((resolve) => { releaseSubscriptions = () => resolve(noSubscriptions); })
+      : Promise.resolve(noSubscriptions),
+    writeDevice: async () => {
+      localPublished = true;
+      return { revision: 1, skipped: false, visible: true };
+    }
+  };
+  const runtime = createIcloudSyncRuntime({
+    store,
+    reconcileMs: 0,
+    watchFactory: () => ({ close() {} }),
+    onStats: (stats) => { publishedDeviceCounts.push(stats.devices.length); }
+  });
+  await runtime.start();
+  const publishedBeforeWrite = publishedDeviceCounts.length;
+  const olderReconciliation = runtime.reconcile('watch');
+  await waitFor(() => typeof releaseSubscriptions === 'function', 'subscription read to block');
+  await runtime.writeDevice(local);
+  assert.equal(runtime.getDevices()[0].deviceId, 'local');
+  releaseSubscriptions();
+  await olderReconciliation;
+  assert.equal(runtime.getDevices()[0].deviceId, 'local');
+  await waitFor(() => reads === 3, 'fresh reconciliation to run');
+  assert.equal(runtime.getDevices()[0].deviceId, 'local');
+  assert.ok(publishedDeviceCounts.slice(publishedBeforeWrite).every((count) => count === 1));
+  await runtime.stop();
+});
+
 test('a remote tombstone suppresses the local overlay until the next real publish', async () => {
   const fixture = rootFixture();
   try {
