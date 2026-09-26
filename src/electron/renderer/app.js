@@ -6675,8 +6675,7 @@ function applyAppearanceSettings(settings) {
     liquidGlassSupported: nativeMaterialState.liquidGlassSupported
   });
   document.documentElement.style.setProperty('--glass-alpha', opacity.toFixed(2));
-  const requestedImageOpacity = Number(settings?.backgroundImageOpacity ?? defaultAppearance.backgroundImageOpacity);
-  const imageOpacity = clamp(Number.isFinite(requestedImageOpacity) ? requestedImageOpacity : defaultAppearance.backgroundImageOpacity, 0, 100) / 100;
+  const imageOpacity = glassRenderingApi.normalizeBackgroundImageOpacity(settings?.backgroundImageOpacity) / 100;
   document.documentElement.style.setProperty('--background-image-alpha', imageOpacity.toFixed(2));
   document.documentElement.style.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
   document.documentElement.style.setProperty('--line-strong-alpha', (0.18 + depth * 0.14).toFixed(3));
@@ -8085,7 +8084,7 @@ function syncSettingsForm() {
   }
   els.glassInput.value = String(state.settings.glassOpacity ?? 68);
   els.blurInput.value = String(state.settings.glassBlur ?? 32);
-  if (els.backgroundImageOpacityInput) els.backgroundImageOpacityInput.value = String(state.settings.backgroundImageOpacity ?? defaultAppearance.backgroundImageOpacity);
+  if (els.backgroundImageOpacityInput) els.backgroundImageOpacityInput.value = String(glassRenderingApi.normalizeBackgroundImageOpacity(state.settings.backgroundImageOpacity));
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
   syncSliderRows();
   renderExternalProviderStatus('volcengine');

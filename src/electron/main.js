@@ -385,6 +385,7 @@ const {
 const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
 const { DERIVED_PERIODS: EDGE_DOCK_DERIVED_PERIODS, normalizeEdgeDockItems } = require('./renderer/edgeDock/items');
 const fixedPeriodRangesApi = require('./renderer/fixedPeriodRanges');
+const { normalizeBackgroundImageOpacity } = require('./renderer/glassRendering');
 const tokenRateApi = require('./renderer/tokenRatePresentation');
 const { toPolygons } = require('./renderer/edgeDock/shapes');
 const { rasterizeMask } = require('./edgeDock/mask');
@@ -2407,6 +2408,7 @@ function readSettings() {
       seededClientSplitsPending = true;
     }
     merged.customScanPaths = normalizeCustomScanPaths(merged.customScanPaths);
+    merged.backgroundImageOpacity = normalizeBackgroundImageOpacity(merged.backgroundImageOpacity);
     // A missing settings file is the only reliable fresh-install signal: a
     // missing limitProviders field also occurs when an existing installation
     // upgrades, where changing the user's effective defaults would be wrong.
@@ -4680,13 +4682,6 @@ function thirdPartyProfileWithCanonicalIdentity(profile, provider) {
     ...profile,
     canonicalAccountKey: provider?.accountKey
   });
-}
-
-// A non-number (hand-edited settings.json) must not survive as NaN: it reaches
-// CSS as an invalid opacity, which falls back to 1 and hides the glass entirely.
-function normalizeBackgroundImageOpacity(value) {
-  const opacity = Number(value ?? 28);
-  return Number.isFinite(opacity) ? Math.max(0, Math.min(100, opacity)) : 28;
 }
 
 function settingsForRenderer() {

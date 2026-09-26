@@ -86,11 +86,14 @@ test('image opacity has its own slider, shown only while an image is set', () =>
   assert.match(html, /id="backgroundImageOpacityInput" type="range" min="0" max="100"/);
   assert.match(app, /backgroundImageOpacityRow\?[.]classList[.]toggle\('hidden', !backgroundImageActive\)/);
   assert.match(app, /setProperty\('--background-image-alpha'/);
-  // An invalid opacity in CSS resolves to 1, so NaN must fall back before it gets there.
-  assert.match(app, /Number[.]isFinite\(requestedImageOpacity\) \? requestedImageOpacity : defaultAppearance[.]backgroundImageOpacity/);
+  // Both the CSS variable and the slider go through the shared normalizer: a raw
+  // invalid value would make CSS opacity 1, or the range input its midpoint (50),
+  // which the next appearance save would then persist.
+  assert.match(app, /imageOpacity = glassRenderingApi[.]normalizeBackgroundImageOpacity\(settings\?[.]backgroundImageOpacity\)/);
+  assert.match(app, /backgroundImageOpacityInput[.]value = String\(glassRenderingApi[.]normalizeBackgroundImageOpacity\(state[.]settings[.]backgroundImageOpacity\)\)/);
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  assert.match(main, /backgroundImageOpacity: normalizeBackgroundImageOpacity\(/);
-  assert.match(main, /function normalizeBackgroundImageOpacity\(value\) \{[^}]*Number[.]isFinite\(opacity\) \? Math[.]max\(0, Math[.]min\(100, opacity\)\) : 28;/);
+  assert.match(main, /merged[.]backgroundImageOpacity = normalizeBackgroundImageOpacity\(merged[.]backgroundImageOpacity\)/);
+  assert.match(main, /backgroundImageOpacity: normalizeBackgroundImageOpacity\(patch[.]backgroundImageOpacity \?\? settings[.]backgroundImageOpacity\)/);
   // Native material locks the glass sliders; the image slider must stay usable.
   const locked = app.match(/for \(const control of \[([^\]]*)\]\) \{\n\s*if \(control\) control[.]disabled = nativeMaterial;/)?.[1];
   assert.ok(locked, 'native-material lock loop should exist');
