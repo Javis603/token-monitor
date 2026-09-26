@@ -589,6 +589,16 @@ test('normalizeQoderCnJsonlRow resolves internal codes and passes unknown ones t
   assert.equal(known.model, QODER_CN_MODEL_DISPLAY_NAMES.mmodel);
 });
 
+test('normalizeQoderCnJsonlRow preserves slash-qualified custom model ids', () => {
+  // The custom-profile prefix wraps the real model id, which may itself be
+  // provider/model namespaced (OpenRouter-style); only the
+  // qoder-custom-<id>/ prefix comes off, never the inner separator.
+  const row = normalizeQoderCnJsonlRow(JSON.parse(jsonlAssistant({
+    model: 'qoder-custom-0c4327ab-a1f2-4cf6-9fc8-728a0da810a0/openrouter/anthropic/claude-sonnet-4'
+  })), 's');
+  assert.equal(row.model, 'openrouter/anthropic/claude-sonnet-4');
+});
+
 test('normalizeQoderCnJsonlRow rejects non-assistant lines and zero-token usage', () => {
   assert.equal(normalizeQoderCnJsonlRow({ type: 'user', message: { usage: { input_tokens: 1 } } }, 's'), null);
   assert.equal(normalizeQoderCnJsonlRow({ type: 'assistant' }, 's'), null);
@@ -669,6 +679,20 @@ test('collectQoderCnJsonlRows fails loudly instead of publishing partial totals'
   await assert.rejects(() => collectQoderCnJsonlRows({ homeDir: home, maxLineBytes: 50 }), isBudgetError);
   const complete = await collectQoderCnJsonlRows({ homeDir: home });
   assert.equal(complete.length, 2, 'the same tree reads fully within the default budgets');
+});
+
+test('collectQoderCnJsonlRows fails closed when the tree exceeds the depth budget', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-depth-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const deep = path.join(home, '.qoder-cn', 'projects', 'proj', 'sess-1', 'subagents', 'nested');
+  fs.mkdirSync(deep, { recursive: true });
+  fs.writeFileSync(path.join(deep, 'a.jsonl'), jsonlAssistant({ sessionId: 'a', messageId: 'a1' }) + '\n');
+  // A deeper-than-expected tree fails closed like the byte/row/file budgets
+  // instead of surfacing as an incomplete snapshot.
+  await assert.rejects(
+    () => collectQoderCnJsonlRows({ homeDir: home, maxDepth: 3 }),
+    (error) => error.code === 'QODER_CN_READ_BUDGET_EXCEEDED'
+  );
 });
 
 test('collectQoderCnJsonlRows treats only an absent root as an empty source', async () => {

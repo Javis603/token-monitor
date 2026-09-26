@@ -447,9 +447,10 @@ function qoderCnJsonlModelName(rawModel) {
   const model = String(rawModel || '').trim();
   if (!model) return '';
   // Custom-provider rows carry `qoder-custom-<profile-uuid>/<real model>`; the
-  // trailing segment is the actual model name and the only part a price
-  // catalog can resolve.
-  const slash = model.lastIndexOf('/');
+  // prefix wraps the real model name, which may itself be slash-qualified
+  // (OpenRouter/OpenAI-style provider/model), so only the first separator
+  // after the fixed prefix is stripped.
+  const slash = model.indexOf('/');
   const key = model.startsWith('qoder-custom-') && slash > 0 ? model.slice(slash + 1) : model;
   return Object.prototype.hasOwnProperty.call(QODER_CN_MODEL_DISPLAY_NAMES, key)
     ? QODER_CN_MODEL_DISPLAY_NAMES[key]
@@ -505,7 +506,9 @@ function normalizeQoderCnJsonlRow(obj, source = 'local') {
 }
 
 function listQoderCnJsonlFiles(dir, depth, found, maxFiles = QODER_CN_JSONL_MAX_FILES, maxDepth = QODER_CN_JSONL_MAX_DEPTH, fsImpl = fs) {
-  if (depth > maxDepth) return;
+  // Depth overflow must fail like the other budgets: silently stopping here
+  // would publish an incomplete file list as if the tree were complete.
+  if (depth > maxDepth) throw readBudgetError('depth', maxDepth);
   let entries;
   try {
     entries = fsImpl.readdirSync(dir, { withFileTypes: true });
@@ -587,7 +590,7 @@ async function collectQoderCnJsonlRows(options = {}) {
   const sinceMs = options.sinceMs;
   const fsImpl = options.fs || fs;
   const files = [];
-  listQoderCnJsonlFiles(projectsDir, 0, files, positiveInteger(options.maxFiles, QODER_CN_JSONL_MAX_FILES), QODER_CN_JSONL_MAX_DEPTH, fsImpl);
+  listQoderCnJsonlFiles(projectsDir, 0, files, positiveInteger(options.maxFiles, QODER_CN_JSONL_MAX_FILES), positiveInteger(options.maxDepth, QODER_CN_JSONL_MAX_DEPTH), fsImpl);
   files.sort();
   const budget = {
     bytes: 0,
