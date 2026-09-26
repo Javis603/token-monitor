@@ -533,6 +533,22 @@ test('clearing an identity removes old windows synchronously and blocks late com
   runtime.stop();
 });
 
+test('replacing a MiMo membership clears only that member, not the console balance', () => {
+  const member = providerRow('mimo', 'member-A', 'Membership');
+  const consoleAccount = providerRow('mimo', 'console-B', 'Open Platform', {
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9, currency: 'CNY' }]
+  });
+  const runtime = createLimitsRuntime({
+    limitProviders: ['mimo'],
+    previousLimits: { providers: [member, consoleAccount] }
+  }, runtimeDeps());
+
+  runtime.clear({ provider: 'mimo', accountKey: 'member-A' }, 'credential-save');
+  assert.deepEqual(runtime.getSnapshot().providers.map((row) => row.accountKey), ['console-B']);
+  assert.equal(runtime.getSnapshot().providers[0].windows[0].remaining, 9);
+  runtime.stop();
+});
+
 test('a never-resolving adapter times out logically and receives an aborted signal', async () => {
   let signal;
   const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({

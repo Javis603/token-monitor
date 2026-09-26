@@ -1,20 +1,27 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { throwIfAborted } = require('../../abortSignal');
 const { hashKey } = require('../../hashKey');
 const { normalizeLimitProvider } = require('../../limits/core');
+const { nowIso, providerStatusFromError } = require('../../limits/providerHelpers');
 const { MIMO_CONSOLE_URL, mimoRequestHeaders } = require('./browserHeaders');
 const { mimoEndpointTime } = require('./endpointTime');
-const { fetchMimoMembershipLimits } = require('./membership');
-const { MIMO_DESKTOP_READ_REASONS, readMimoDesktopAccount } = require('./desktopSession');
-const { exchangeMimoConsoleSession } = require('./ssoExchange');
+const { readMimoDesktopAccount } = require('./desktop');
+const { mintMimoServiceSession, mimoExchangeStatus, readConsoleStatus } = require('./session');
+const {
+  MIMO_MEMBERSHIP_LABEL,
+  fetchMimoMembershipAccount,
+  mimoMembershipCredential,
+  mimoMembershipPlanLabel,
+  mimoMembershipWindows
+} = require('./membership');
 
 const MIMO_PLATFORM_CONSOLE_URL = MIMO_CONSOLE_URL;
-// What this lane is, for a row no plan names. Xiaomi's own name for it: the
-// console's page title is `Xiaomi MiMo 开放平台`, and the provider name in front
-// is the card's own heading already.
-const MIMO_CONSOLE_ACCOUNT_LABEL = 'Open Platform';
 const MIMO_API_BASE_URL = 'https://platform.xiaomimimo.com/api/v1';
+// The endpoint the console exchange asks first. With no session it answers 401
+// and names the login URL to visit; with one it answers the wallet.
+const MIMO_CONSOLE_ENTRY = '/balance';
 const MIMO_ACCOUNT_TIMEOUT_MS = 15_000;
 const MIMO_COOKIE_NAMES = new Set([
   'api-platform_serviceToken',
@@ -117,7 +124,8 @@ function parseMimoBalance(body) {
 function parseMimoProfile(body) {
   const data = unwrapApiBody(body);
   return {
-    email: cleanText(data.email ?? data.platformEmail).slice(0, 254)
+    email: cleanText(data.email ?? data.platformEmail).slice(0, 254),
+    userId: data.userId == null ? '' : String(data.userId).trim()
   };
 }
 
@@ -195,6 +203,7 @@ async function requestMimo(pathname, cookieHeader, deps = {}) {
   const response = await fetchFn(`${MIMO_API_BASE_URL}${pathname}`, {
     headers: mimoRequestHeaders(cookieHeader),
     redirect: 'manual',
+    credentials: 'omit',
     signal: deps.signal
   });
   if (response.status === 401 || response.status === 403 || (response.status >= 300 && response.status < 400)) {
@@ -224,6 +233,9 @@ async function requestMimo(pathname, cookieHeader, deps = {}) {
 function statusProvider(status, updatedAt, account = {}) {
   return normalizeLimitProvider({
     provider: 'mimo',
+    // A credential the user entered is `managed`; a session the machine's own
+    // MiMo Desktop mints is `app` — the split codex and workbuddy draw, and what
+    // tells the renderer whether the row is backed by a live local login.
     source: cleanText(account.source) || 'web',
     sourceDetail: cleanText(account.sourceDetail) || 'managed',
     status,
@@ -236,11 +248,7 @@ function statusProvider(status, updatedAt, account = {}) {
 }
 
 async function fetchMimoAccount(account, deps = {}) {
-  const updatedAt = new Date((deps.now || Date.now)()).toISOString();
-  // A session that could not be minted has nothing to ask with, and its refusal
-  // is already classified — asking anyway would spend a request to learn what the
-  // chain just said.
-  if (account.mintStatus) return statusProvider(account.mintStatus, updatedAt, account);
+  const updatedAt = nowIso((deps.now || Date.now)());
   const cookieHeader = normalizeMimoCookieHeader(account.cookieHeader);
   if (!cookieHeader) return statusProvider('notConfigured', updatedAt, account);
   try {
@@ -291,12 +299,13 @@ async function fetchMimoAccount(account, deps = {}) {
       accountKey: cleanText(account.accountKey) || mimoAccountKey(cookieHeader),
       accountName: '',
       accountEmail,
-      // The lane names itself when no plan does, which is what keeps the row
-      // titled: the title resolver reads a product name and falls back to
-      // `Account N` without one.
+      // The plan when there is one. Otherwise the product, named the way this
+      // repository names a prepaid wallet: deepseek's balance-only row is
+      // `Pay-as-you-go` too, and the wallet is what the console lane reads —
+      // `sk-` keys draw it down, while the Token Plan is the subscription beside it.
       accountLabel: hasTokenPlan || hasExpiredTokenPlan
         ? (detail.label || 'Token Plan')
-        : MIMO_CONSOLE_ACCOUNT_LABEL,
+        : 'Pay-as-you-go',
       windows,
       balance: {
         ...balance,
@@ -307,6 +316,7 @@ async function fetchMimoAccount(account, deps = {}) {
       }
     });
   } catch (error) {
+    throwIfAborted(deps.signal);
     const status = error?.code === 'MIMO_UNAUTHORIZED'
       ? 'unauthorized'
       : error?.code === 'MIMO_RATE_LIMITED' ? 'sourceRateLimited' : 'unavailable';
@@ -319,6 +329,10 @@ async function fetchMimoAccountWithTimeout(account, deps = {}) {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return fetchMimoAccount(account, deps);
   const AbortControllerImpl = deps.AbortController || globalThis.AbortController;
   const controller = AbortControllerImpl ? new AbortControllerImpl() : null;
+  const signal = controller?.signal && deps.signal
+    ? AbortSignal.any([controller.signal, deps.signal])
+    : controller?.signal || deps.signal;
+  throwIfAborted(signal);
   const setTimer = deps.setTimeout || setTimeout;
   const clearTimer = deps.clearTimeout || clearTimeout;
   let timer;
@@ -331,7 +345,7 @@ async function fetchMimoAccountWithTimeout(account, deps = {}) {
   });
   try {
     return await Promise.race([
-      fetchMimoAccount(account, { ...deps, signal: controller?.signal || deps.signal }),
+      fetchMimoAccount(account, { ...deps, signal }),
       timeout
     ]);
   } finally {
@@ -372,24 +386,8 @@ function scopedMimoManagedAccounts(value, scope) {
   });
 }
 
-// The provider answers from two independent sources: the console accounts the
-// user configured, and the Desktop membership this machine may hold a session
-// for. They are separate rows by design — one is money and a Token Plan credit,
-// the other a weekly percentage — so this function's only job is to ask both and
-// hand back what each found.
-//
-// The early return is the part that has to stay right: a provider-level
-// `notConfigured` row is read by the runtime as the whole provider's and clears
-// every identity the lane holds, so it may only be returned when *neither*
-// source has anything. Returning it because the console lane happens to be empty
-// would wipe a membership row that is working.
-// What an account panel should draw: the accounts the user pasted, plus the
-// session this machine's own MiMo Desktop is signed into. A discovered sign-in is
-// an account the provider answers for, so it is listed — `zaiApiKeyConfigured`'s
-// rule, that a discovered sign-in counts as configured, or the pill reads "Not
-// configured" on the machine the provider is built for. It is not removable
-// because Token Monitor never stored it, and it is left out when a stored account
-// already names the same account, so one account is one row here too.
+// Show a discovered console account beside saved accounts, unless its identity
+// is already saved. The discovered account is never removable here.
 function withDetectedMimoAccount(storedAccounts = [], detected = null) {
   const accounts = storedAccounts.map((account) => ({ ...account, removable: true }));
   if (!detected?.accountKey) return accounts;
@@ -397,90 +395,191 @@ function withDetectedMimoAccount(storedAccounts = [], detected = null) {
   return [...accounts, { ...detected, removable: false }];
 }
 
+// A lane that failed is worth a row only while nothing else answered for the
+// account, and only for a status a user can act on — the rule opencode writes
+// down for the same two-lane shape.
+const MIMO_ACTIONABLE_STATUSES = ['unauthorized', 'sourceRateLimited', 'unavailable'];
+
+function readMimoDesktopSession(deps = {}) {
+  try {
+    const read = (deps.readMimoDesktopAccount || readMimoDesktopAccount)(
+      { ...(deps.desktopSessionOptions || {}) }
+    );
+    return { ok: true, userId: cleanText(read.userId), cookieHeader: read.cookieHeader };
+  } catch (error) {
+    return {
+      ok: false,
+      status: providerStatusFromError(error),
+      userId: cleanText(error?.userId),
+      cookieHeader: ''
+    };
+  }
+}
+
+// Every credential names one account, keyed as `mimo:<userId>`, so a pasted
+// credential, a saved console cookie and the session the machine's own MiMo
+// Desktop mints are three credentials for one identity — not three rows.
+//
+// Discovery needs no precedence rule: a credential the user entered occupies its
+// own account's entry and the machine's session fills only the entries still
+// empty, which is what keeps a saved account's credential and puts a *different*
+// Desktop account beside it rather than behind it.
+function collectMimoCredentials(options, deps, scope, desktop) {
+  const entries = new Map();
+  const byUser = new Map();
+  const entryFor = (userId, preferredKey = '') => {
+    const identity = cleanText(userId);
+    if (identity && byUser.has(identity)) return byUser.get(identity);
+    const accountKey = preferredKey || (identity ? mimoAccountKey('', { userId: identity }) : '');
+    if (!accountKey) return null;
+    const entry = entries.get(accountKey)
+      || { accountKey, userId: identity, console: null, membership: null };
+    entries.set(accountKey, entry);
+    if (identity) byUser.set(identity, entry);
+    return entry;
+  };
+
+  const stored = options.mimoManagedAccounts || deps.mimoManagedAccounts;
+  for (const account of scopedMimoManagedAccounts(stored, scope)) {
+    const entry = entryFor(new Map(cookiePairs(account.cookieHeader)).get('userId'), cleanText(account.accountKey));
+    if (entry) entry.console = { account };
+  }
+
+  const pasted = mimoMembershipCredential(options.mimoMembershipCookie || deps.mimoMembershipCookie);
+  if (pasted) {
+    const entry = entryFor(pasted.userId);
+    if (entry) entry.membership = { ...pasted, sourceDetail: 'managed' };
+  }
+
+  if (desktop.userId) {
+    const entry = entryFor(desktop.userId);
+    if (entry && !entry.console) entry.console = { discovered: desktop };
+    if (entry && desktop.ok && !entry.membership) {
+      entry.membership = {
+        kind: 'account',
+        userId: desktop.userId,
+        cookieHeader: desktop.cookieHeader,
+        sourceDetail: 'app'
+      };
+    }
+  }
+
+  return [...entries.values()].filter((entry) => {
+    if (!scope) return true;
+    if (scope.accountKey) return entry.accountKey === scope.accountKey;
+    // Only a stored account carries the two names a scope can also match on; a
+    // discovered one has no identity but the key the runtime already scopes by.
+    const account = entry.console?.account;
+    if (scope.accountEmail) return Boolean(account) && account.accountEmail === scope.accountEmail;
+    if (scope.accountLabel) return Boolean(account) && account.accountLabel === scope.accountLabel;
+    return true;
+  });
+}
+
+// The console session the machine's own MiMo Desktop can mint, shaped as the
+// account the console reader already spends.
+async function mintMimoConsoleCredential(desktop, deps = {}) {
+  const exchanged = await mintMimoServiceSession({
+    baseUrl: MIMO_API_BASE_URL,
+    entry: MIMO_CONSOLE_ENTRY,
+    accountCookie: desktop.cookieHeader,
+    readAnswer: readConsoleStatus,
+    deps
+  });
+  if (!exchanged.ok) return { ok: false, status: mimoExchangeStatus(exchanged.status) };
+  return {
+    ok: true,
+    account: {
+      id: 'mimo-oauth',
+      userId: desktop.userId,
+      source: 'oauth',
+      sourceDetail: 'app',
+      cookieHeader: exchanged.cookieHeader
+    }
+  };
+}
+
+// What this account's console credential answers with. A pasted credential is
+// spent as it stands; the machine's own session is exchanged first.
+async function fetchMimoConsoleSide(entry, deps) {
+  const account = entry.console?.account;
+  if (account) return { consoleRow: await fetchMimoAccountWithTimeout(account, deps) };
+  const discovered = entry.console?.discovered;
+  if (!discovered) return {};
+  const minted = discovered.ok
+    ? await mintMimoConsoleCredential(discovered, deps)
+    : { ok: false, status: discovered.status };
+  if (!minted.ok) {
+    return { consoleFailure: { status: minted.status, source: 'oauth', sourceDetail: 'app' } };
+  }
+  return { consoleRow: await fetchMimoAccountWithTimeout(minted.account, deps) };
+}
+
+// The console row is the base — it owns the wallet, the Token Plan and the plan
+// label — and the membership lane is supplemental, the shape opencode gives its
+// Go quota and its Zen balance: a lane that answered carries the row, and a lane
+// that failed speaks only when nothing did.
+function composeMimoRow(entry, { consoleRow, consoleFailure, membership }, updatedAt) {
+  const windows = membership?.ok ? mimoMembershipWindows(membership.plan) : [];
+  const label = membership?.ok ? mimoMembershipPlanLabel(membership.plan) : '';
+
+  if (consoleRow) {
+    return {
+      ...consoleRow,
+      accountKey: consoleRow.accountKey || entry.accountKey,
+      // The membership tier is a plan; the console's own label is a product
+      // (`Pay-as-you-go`, or the Token Plan's name). The plan wins the column,
+      // and the product is what an account without one shows.
+      accountLabel: label || consoleRow.accountLabel,
+      windows: [...consoleRow.windows, ...windows],
+      updatedAt: consoleRow.updatedAt || updatedAt
+    };
+  }
+
+  if (membership?.ok) {
+    return normalizeLimitProvider({
+      provider: 'mimo',
+      source: 'oauth',
+      sourceDetail: entry.membership?.sourceDetail || 'app',
+      status: 'ok',
+      updatedAt,
+      accountKey: entry.accountKey,
+      // A row with no console lane names its own product when it has no plan to
+      // name; a merged row is the console lane's and keeps whatever it had.
+      accountLabel: label || MIMO_MEMBERSHIP_LABEL,
+      windows
+    });
+  }
+
+  const failure = consoleFailure || (membership ? { status: membership.status } : null);
+  if (!failure || !MIMO_ACTIONABLE_STATUSES.includes(failure.status)) return null;
+  return statusProvider(failure.status, updatedAt, {
+    accountKey: entry.accountKey,
+    source: failure.source || 'oauth',
+    sourceDetail: failure.sourceDetail || entry.membership?.sourceDetail || 'app'
+  });
+}
+
 async function fetchMimoLimits(options = {}, deps = {}) {
+  const updatedAt = nowIso((deps.now || Date.now)());
   const scope = options.limitRefreshScope?.provider === 'mimo'
     ? options.limitRefreshScope
     : null;
-  const updatedAt = new Date((deps.now || Date.now)()).toISOString();
-  let accounts = scopedMimoManagedAccounts(
-    options.mimoManagedAccounts || deps.mimoManagedAccounts,
-    scope
-  );
-  // Scoped to nothing configured, and never on a scoped refresh: that refresh is
-  // about one stored account, not about discovering another.
-  if (!accounts.length && !scope) {
-    const minted = await mintMimoConsoleAccount(deps);
-    if (minted) accounts = [minted];
-  }
-  const [consoleRows, membershipRows] = await Promise.all([
-    accounts.length
-      ? Promise.all(accounts.map((account) => fetchMimoAccountWithTimeout(account, deps)))
-      : Promise.resolve([]),
-    // A refresh scoped to one console account is not a refresh of the membership
-    // lane, and must not spend its requests on one.
-    scope ? Promise.resolve([]) : fetchMimoMembershipLimits(options, deps)
-  ]);
-  const rows = [...consoleRows, ...membershipRows];
-  if (!rows.length) return statusProvider('notConfigured', updatedAt);
-  return rows;
-}
 
-// The console session the machine's own MiMo Desktop can mint, used only when
-// nothing is configured: a credential the user set is their instruction, and
-// minting must never shadow it. The credential is spent here and the session it
-// produces lives only in memory for the calls it feeds.
-async function mintMimoConsoleAccount(deps = {}) {
-  const read = deps.readMimoDesktopAccount || readMimoDesktopAccount;
-  let result;
-  try {
-    result = read({ ...(deps.desktopSessionOptions || {}) });
-  } catch {
-    return null;
-  }
-  // A store that reads and carries half a sign-in is an app the user is signed
-  // out of rather than a machine without one, the distinction
-  // `readCodexOAuthAuth` draws. It is reported against the account the store
-  // names, so the row is attributable and does not have to be provider-wide.
-  if (!result?.ok) {
-    if (result?.reason === MIMO_DESKTOP_READ_REASONS.incomplete && cleanText(result.userId)) {
-      const refused = { id: 'mimo-oauth', userId: cleanText(result.userId), source: 'oauth', sourceDetail: 'app' };
-      return { ...refused, accountKey: mimoAccountKey('', refused), cookieHeader: '', mintStatus: 'unauthorized' };
-    }
-    // No store, one this build cannot read, or a platform the app does not ship
-    // for: nothing to mint, and nothing to tell the user — the console lane's
-    // paste input is the path for a machine without MiMo Desktop.
-    return null;
-  }
+  // One observation of the machine's own store per tick, spent by both lanes.
+  const desktop = readMimoDesktopSession(deps);
+  const entries = collectMimoCredentials(options, deps, scope, desktop);
+  if (!entries.length) return [statusProvider('notConfigured', updatedAt)];
 
-  const base = {
-    id: 'mimo-oauth',
-    userId: cleanText(result.userId),
-    source: 'oauth',
-    sourceDetail: 'app'
-  };
-  const accountKey = mimoAccountKey('', base);
-
-  let exchanged;
-  try {
-    exchanged = await exchangeMimoConsoleSession({
-      baseUrl: MIMO_API_BASE_URL,
-      accountCookie: result.cookieHeader,
-      request: deps.mimoRequest,
-      signal: deps.signal,
-      maxHops: deps.maxHops
-    });
-  } catch {
-    return { ...base, accountKey, cookieHeader: '', mintStatus: 'unavailable' };
-  }
-  if (!exchanged.ok) {
-    return {
-      ...base,
-      accountKey,
-      cookieHeader: '',
-      mintStatus: exchanged.status === 'rejected' ? 'unauthorized' : 'unavailable'
-    };
-  }
-  return { ...base, accountKey, cookieHeader: exchanged.cookieHeader };
+  const rows = await Promise.all(entries.map(async (entry) => {
+    const [consoleSide, membership] = await Promise.all([
+      fetchMimoConsoleSide(entry, deps),
+      entry.membership ? fetchMimoMembershipAccount(entry.membership, deps) : null
+    ]);
+    return composeMimoRow(entry, { ...consoleSide, membership }, updatedAt);
+  }));
+  const answered = rows.filter(Boolean);
+  return answered.length ? answered : [statusProvider('notConfigured', updatedAt)];
 }
 
 function createMimoManagedAccount(cookieValue, existing = []) {

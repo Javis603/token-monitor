@@ -66,7 +66,7 @@
     copilot: ['Manual login', 'API'],
     zed: ['Manual login', 'Web'],
     commandcode: ['Manual login', 'Web'],
-    mimo: ['Token Plan', 'Web'],
+    mimo: ['Auto', 'Desktop app', 'Token Plan', 'Web'],
     zai: ['Auto', 'Coding Plan', 'API key'],
     zaiteam: ['Team Plan', 'API key'],
     kiro: ['Auto', 'CLI'],
@@ -448,6 +448,12 @@
           ? { label: 'Update API key', tone: 'setup' }
           : { label: 'Open Cline', tone: 'setup' };
       }
+      if (providerName === 'mimo' && provider?.sourceDetail === 'app') {
+        return { label: 'Sign in to MiMo Desktop again', key: 'settings.mimo.desktopRelogin', tone: 'setup' };
+      }
+      if (providerName === 'mimo' && provider?.sourceDetail === 'managed') {
+        return { label: 'Paste MiMo Cookie again', key: 'settings.mimo.repasteCookie', tone: 'setup' };
+      }
       return providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
         ? { label: 'Update API key', tone: 'setup' }
         : providerName === 'qoder' || providerName === 'trae'
@@ -595,6 +601,15 @@
     return tags;
   }
 
+  function limitProviderSettingsRecord(providers, id) {
+    const rows = (providers || []).filter((row) => row.provider === id);
+    // MiMo's console and membership are independent: one live lane means the
+    // provider is connected even if another lane needs its own recovery.
+    return id === 'mimo'
+      ? rows.findLast((row) => row.status === 'ok') || rows.at(-1)
+      : rows.at(-1);
+  }
+
   return {
     antigravityQuotaWindow,
     apiKeyAccountStatus,
@@ -616,6 +631,7 @@
     limitProviderSourceLabel,
     limitProviderStatusLabel,
     limitProviderSettingsTags,
+    limitProviderSettingsRecord,
     thirdPartyAdapterFamily,
     thirdPartyAdapterVisual,
     thirdPartyGroupPlanText,

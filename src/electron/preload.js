@@ -110,6 +110,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   mimo: {
     accounts: () => ipcRenderer.invoke('mimo:accounts'),
     addAccount: (cookieHeader) => ipcRenderer.invoke('mimo:addAccount', cookieHeader),
+    saveMembershipCookie: (cookieHeader) => ipcRenderer.invoke('mimo:saveMembershipCookie', cookieHeader),
     openConsole: () => ipcRenderer.invoke('mimo:openConsole'),
     removeAccount: (id) => ipcRenderer.invoke('mimo:removeAccount', id),
     setAccountEnabled: (id, enabled) => ipcRenderer.invoke('mimo:setAccountEnabled', id, enabled),

@@ -1467,7 +1467,7 @@
     openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
     thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
     volcengine: (provider, index, providers) => planAccountTitle(provider, index, providers),
-    mimo: (provider, index, providers) => planAccountTitle(provider, index, providers)
+    mimo: (provider, index, providers) => mimoAccountTitle(provider, index, providers)
   };
 
   // Fallback names for `provider.source`, used when the provider has no override
@@ -1484,6 +1484,16 @@
     if (status === 'sourceRateLimited') return 'Usage API limited';
     if (status === 'unavailable') return 'Unavailable';
     return 'Error';
+  }
+
+  function providerStatusLabel(provider) {
+    if (provider?.provider === 'mimo' && provider?.sourceDetail === 'app' && provider?.status === 'unauthorized') {
+      return t('settings.mimo.desktopRelogin');
+    }
+    if (provider?.provider === 'mimo' && provider?.sourceDetail === 'managed' && provider?.status === 'unauthorized') {
+      return t('settings.mimo.repasteCookie');
+    }
+    return limitStatusLabel(provider?.status);
   }
 
   function limitProviderMeta(provider, provenance = null) {
@@ -1505,14 +1515,16 @@
       if (sourceDevice) parts.push(sourceDevice);
       return `${freshness.text}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
     }
-    return limitStatusLabel(provider.status, false);
+    return providerStatusLabel(provider);
   }
 
   function limitProviderPlan(provider) {
-    if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
+    if (provider?.status && provider.status !== 'ok' && !provider.stale) return providerStatusLabel(provider);
+    if (provider?.provider === 'mimo' && provider?.accountLabel === 'Membership'
+      && provider?.status === 'ok' && !provider?.windows?.length) return t('limits.mimo.noMembership');
     const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
     if (label) return presentationApi.limitProviderPlanDisplayLabel(provider, label);
-    return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
+    return provider?.status && provider.status !== 'ok' ? providerStatusLabel(provider) : '';
   }
 
   function renderLimitProviderMark(id, color) {
@@ -1860,11 +1872,14 @@
     mimo: (provider, color, { grouped }) => ({
       options: {
         accountTitle: true,
-        // A grouped row is titled by `planAccountTitle`, which reads exactly the
-        // field the plan cell prints, so while the row is healthy the cell only
-        // repeats the title — whether that title is a lane name or a plan name.
-        // Unhealthy, the cell is where the row says what is wrong, so it stays.
-        ...(grouped ? { showIcon: false, planText: provider?.status === 'ok' ? '' : undefined } : {})
+        // Account identity stays in the title; a distinct plan still belongs in
+        // the plan cell, as on Codex. Suppress only a repeated lane label.
+        ...(grouped ? {
+          showIcon: false,
+          planText: provider?.status === 'ok' && !(
+            provider?.provider === 'mimo' && provider?.accountLabel === 'Membership' && !provider?.windows?.length
+          ) && provider?.accountLabel === provider?.accountName ? '' : undefined
+        } : {})
       }
     }),
     cursor: (provider, color, { grouped }) => ({
@@ -2005,10 +2020,19 @@
     return accountName || `Account ${index + 1}`;
   }
 
-  // Volcengine and MiMo carry the plan or lane in accountLabel; without it,
-  // their rows would all be named "Account N".
+  // Volcengine carries the plan in accountLabel; without it, both rows would
+  // be named "Account N".
   function planAccountTitle(provider, index, providers) {
     return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
+  }
+
+  function mimoAccountTitle(provider, index, providers) {
+    const peers = (providers || [provider]).map((row) => ({
+      accountKey: row.accountKey,
+      accountName: String(row.accountName || row.accountLabel || '').trim()
+    }));
+    return accountIdentity.accountTitleLabel(peers[index], peers, { index })
+      || limitAccountDefaultTitle(provider, index, providers);
   }
 
   function limitAccountTitle(id, provider, index, providerEntries = [provider]) {

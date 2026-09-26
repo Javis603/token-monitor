@@ -22,7 +22,8 @@ const TITLE_FUNCTIONS = [
   'codexAccountTitle',
   'opencodeAccountTitle',
   'namedApiAccountTitle',
-  'planAccountTitle'
+  'planAccountTitle',
+  'mimoAccountTitle'
 ];
 
 function readRendererFile(name) {
@@ -256,6 +257,29 @@ test('accounts sharing a visible email are disambiguated', () => {
     'j***s@example.com · Acme · #1',
     'j***s@example.com · Acme · #2'
   ]);
+});
+
+test('MiMo members with the same plan get Codex-style stable account suffixes', () => {
+  const view = readRendererFile('limitWindowsView.js');
+  const peers = [
+    { provider: 'mimo', accountLabel: 'Membership', accountKey: 'sha256:abcdef123456', sourceDetail: 'managed' },
+    { provider: 'mimo', accountLabel: 'Membership', accountKey: 'sha256:abcdef654321', sourceDetail: 'app' }
+  ];
+  assert.deepEqual(peers.map((peer, index) => runTitle(
+    view,
+    `limitAccountTitle('mimo', ${JSON.stringify(peer)}, ${index}, ${JSON.stringify(peers)})`,
+    titleContext(true)
+  )), ['Membership · #abcdef1', 'Membership · #abcdef6']);
+  assert.equal(runTitle(
+    view,
+    `limitAccountTitle('mimo', ${JSON.stringify(peers[0])}, 0)`,
+    titleContext(true)
+  ), 'Membership');
+  assert.equal(runTitle(
+    view,
+    "limitAccountTitle('mimo', { accountName: 'Membership', accountLabel: 'Pro', accountKey: 'sha256:abcdef123456' }, 0)",
+    titleContext(true)
+  ), 'Membership');
 });
 
 test('accountEmailLabel keeps duplicate addresses apart regardless of masking', () => {

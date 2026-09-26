@@ -134,6 +134,7 @@ function dockView(appearance = {}, overrides = {}) {
     colorWithAlpha: (color, alpha) => `rgba(0, 0, 0, ${alpha})${color}`,
     applyBarScale: (fill, scale) => fill.style.setProperty('--bar-scale', String(scale)),
     creditsAmount: balanceDisplay.creditsAmount,
+    creditsCurrency: balanceDisplay.creditsCurrency,
     creditsMeterPercent: balanceDisplay.creditsMeterPercent,
     isCreditsWindow: balanceDisplay.isCreditsWindow,
     spendWindow: balanceDisplay.spendWindow,
@@ -501,6 +502,21 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
       assert.equal(row.find('limit-icon'), null, `${id}: an account row is named by its own title`);
     }
   }
+});
+
+test('MiMo member rows distinguish accounts and keep the tier beside the identity', () => {
+  const view = dockView();
+  const rows = [
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef123456', accountName: 'Membership', accountLabel: 'Pro', windows: [] },
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef654321', accountName: 'Membership', accountLabel: 'Membership', windows: [] }
+  ];
+  const group = view.renderLimitProviderGroup('mimo', 'MiMo', rows, '#ff6900');
+  const accounts = group.find('limit-account-list').children;
+  assert.deepEqual(accounts.map((row) => row.find('limit-name-title').textContent), [
+    'Membership · #abcdef1', 'Membership · #abcdef6'
+  ]);
+  assert.equal(accounts[0].find('limit-plan').textContent, 'Pro');
+  assert.notEqual(accounts[1].find('limit-plan').textContent, 'Membership');
 });
 
 test('a group-only plan replacement leaves a solo row its plan', () => {

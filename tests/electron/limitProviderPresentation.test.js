@@ -16,6 +16,7 @@ const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
 const { limitWindowLabel } = require('../../src/shared/limits/windowLabels');
 const { limitWindowText } = require('../../src/shared/limits/windowText');
 const { creditsAmount, creditsCurrency, isCreditsWindow, formatMoney } = require('../../src/shared/limits/balanceDisplay');
+const { createLimitWindowsView } = require('../../src/electron/renderer/limitWindowsView');
 
 
 const {
@@ -1872,7 +1873,8 @@ test('MiMo expired Token Plan renders a localized status without a meter', () =>
 test('main Limits plan text shows failure status before account labels', () => {
   const planBody = viewBody('limitProviderPlan');
 
-  assert.match(planBody, /if \(provider\?\.status && provider\.status !== 'ok' && !provider\.stale\) return limitStatusLabel\(provider\.status, false\);/);
+  assert.match(planBody, /if \(provider\?\.status && provider\.status !== 'ok' && !provider\.stale\) return providerStatusLabel\(provider\);/);
+  assert.match(planBody, /'limits\.mimo\.noMembership'/);
   assert.match(planBody, /const label = String\(provider\?\.planLabel \|\| provider\?\.accountLabel \|\| ''\)\.trim\(\);/);
 });
 
@@ -2896,7 +2898,7 @@ test('minimax status copy uses the same API key wording as CodexBar', () => {
   );
 });
 
-test('mimo setup status uses the generic not configured and sign-in-again copy', () => {
+test('MiMo status gives the correct recovery action for each credential source', () => {
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'notConfigured' }),
     { label: 'Not set up', tone: 'setup' }
@@ -2906,9 +2908,42 @@ test('mimo setup status uses the generic not configured and sign-in-again copy',
     { label: 'Sign in again', tone: 'setup' }
   );
   assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }),
+    { label: 'Sign in to MiMo Desktop again', key: 'settings.mimo.desktopRelogin', tone: 'setup' }
+  );
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }),
+    { label: 'Paste MiMo Cookie again', key: 'settings.mimo.repasteCookie', tone: 'setup' }
+  );
+  assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'error' }),
     { label: 'Unavailable', tone: 'warn' }
   );
+});
+
+test('MiMo settings stays connected while one independent lane is live', () => {
+  const live = { provider: 'mimo', status: 'ok', accountKey: 'console' };
+  const expired = { provider: 'mimo', status: 'unauthorized', accountKey: 'membership' };
+  assert.equal(presentation.limitProviderSettingsRecord([live, expired], 'mimo'), live);
+  assert.equal(presentation.limitProviderSettingsRecord([expired, live], 'mimo'), live);
+  assert.equal(presentation.limitProviderSettingsRecord([live, expired], 'codex'), undefined);
+  assert.equal(presentation.limitProviderSettingsRecord([expired], 'mimo'), expired);
+});
+
+test('MiMo Limits rows show the no-plan and source-specific recovery text', () => {
+  const view = createLimitWindowsView({
+    accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    t: (key) => ({
+      'limits.mimo.noMembership': '未开通会员或会员已到期',
+      'settings.mimo.desktopRelogin': '请重新登录 MiMo Desktop',
+      'settings.mimo.repasteCookie': '请重新粘贴 MiMo Cookie'
+    })[key] || key,
+    presentation: presentation
+  });
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Membership', windows: [] }), '未开通会员或会员已到期');
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }), '请重新登录 MiMo Desktop');
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }), '请重新粘贴 MiMo Cookie');
+  assert.equal(view.limitAccountTitle('mimo', { provider: 'mimo', accountLabel: 'Open Platform' }, 0), 'Open Platform');
 });
 
 test('copilot setup status asks for sign-in instead of an API key', () => {

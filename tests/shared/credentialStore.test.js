@@ -122,7 +122,8 @@ test('renderer redaction defaults new credential fields to hidden with explicit 
     openrouterProfiles: { personal: { apiKey: 'sk-or-secret' } },
     thirdPartyProfiles: {
       relay: { adapter: 'newapi-token', baseUrl: 'https://api.example.com', apiKey: 'sk-newapi-secret' }
-    }
+    },
+    mimoMembershipCookie: 'passToken=membership-secret; userId=123'
   };
   const redacted = credentialSettingsForRenderer(settings, { expose: ['hubHostSecret', 'secret'] });
   assert.equal(redacted.hubHostSecret, 'host-secret');
@@ -134,6 +135,17 @@ test('renderer redaction defaults new credential fields to hidden with explicit 
   assert.equal(redacted.thirdPartyProfiles, '');
   assert.equal(redacted.kimiApiKey, '');
   assert.equal(redacted.kimiWebAccessToken, '');
+  assert.equal(redacted.mimoMembershipCookie, '');
+});
+
+test('membership fallback persists in the shared credential store, not settings', (t) => {
+  const dataDir = tempDataDir(t);
+  const store = new CredentialStore(dataDir);
+  const cookie = 'passToken=membership-secret; userId=123';
+  store.replaceSettingsCredentials({ mimoMembershipCookie: cookie });
+  assert.equal(store.settingsCredentials().mimoMembershipCookie, cookie);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir, 'credentials.json'), 'utf8')).credentials.providers.mimo.membershipCookie, cookie);
+  assert.equal(stripCredentialSettings({ mimoMembershipCookie: cookie }).mimoMembershipCookie, undefined);
 });
 
 test('migrates legacy settings once and keeps an existing credential authoritative', (t) => {

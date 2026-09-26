@@ -23,17 +23,18 @@ test('account-based serial probes scale their physical bound by dispatched jobs'
   }, { providerPhysicalBounds: { codex: 10 } }), 30);
   // One job per console account, plus the membership lane's own dispatch: it
   // mints a session and reads the subscription beside them.
+  // One account is two probes: the console wallet and the membership, each of
+  // which may have to be exchanged for a session first.
   assert.equal(providerPhysicalBoundMs('mimo', {
     mimoManagedAccounts: [{ id: 'one' }, { id: 'two' }]
-  }, { providerPhysicalBounds: { mimo: 10 } }), 30);
-  // Nothing configured is not nothing to do: the console session is minted from
-  // the machine's own account cookie on that path, and the membership lane runs
-  // as well.
+  }, { providerPhysicalBounds: { mimo: 10 } }), 40);
+  // Nothing configured is not nothing to do: the account comes from the
+  // machine's own MiMo Desktop, and both its lanes still run.
   assert.equal(providerPhysicalBoundMs('mimo', {}, { providerPhysicalBounds: { mimo: 10 } }), 20);
   assert.equal(providerPhysicalBoundMs('mimo', {
     mimoManagedAccounts: [{ id: 'one' }, { id: 'two' }],
     limitRefreshScope: { provider: 'mimo', accountId: 'two' }
-  }, { providerPhysicalBounds: { mimo: 10 } }), 10);
+  }, { providerPhysicalBounds: { mimo: 10 } }), 20);
   assert.equal(providerPhysicalBoundMs('codex', {
     codexManagedAccounts: [{ id: 'one' }, { id: 'two' }],
     limitRefreshScope: { provider: 'codex', accountId: 'two' }

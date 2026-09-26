@@ -263,7 +263,8 @@ const {
   normalizeMimoCookieHeader,
   withDetectedMimoAccount
 } = require('../shared/providers/mimo/limits');
-const { readMimoDesktopAccount } = require('../shared/providers/mimo/desktopSession');
+const { fetchMimoMembershipAccount, mimoMembershipCredential } = require('../shared/providers/mimo/membership');
+const { readMimoDesktopAccount } = require('../shared/providers/mimo/desktop');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
@@ -1225,6 +1226,8 @@ function normalizeMimoManagedAccounts(value) {
   return accounts;
 }
 
+const MIMO_DETECTED_ACCOUNT_ID = 'mimo-desktop';
+
 // The account a signed-in MiMo Desktop answers for, read here so the panel can
 // count it. The cookie it was read from is discarded: it is never part of this
 // projection and never part of settings.
@@ -1232,15 +1235,16 @@ function mimoDetectedAccount() {
   let read;
   try {
     read = readMimoDesktopAccount();
-  } catch {
+  } catch (_) {
+    // Signed out, sealed, never signed in, and no store at all arrive as one
+    // refusal; none of them is an account this panel can list.
     return null;
   }
-  if (!read?.ok) return null;
   return {
     id: MIMO_DETECTED_ACCOUNT_ID,
     // The key the collector computes for the same account, so the panel names the
     // account the rows are keyed by instead of a second identity for it.
-    accountKey: mimoAccountKey(read.cookieHeader, { userId: read.userId }),
+    accountKey: mimoAccountKey('', { userId: read.userId }),
     accountEmail: '',
     accountLabel: '',
     enabled: true
@@ -1254,13 +1258,58 @@ function mimoAccountsForRenderer() {
   return withDetectedMimoAccount(accounts, mimoDetectedAccount());
 }
 
-const MIMO_DETECTED_ACCOUNT_ID = 'mimo-desktop';
-
 function mimoManagedAccountsForCollector() {
   return normalizeMimoManagedAccounts(settings?.mimoManagedAccounts).map((account) => ({
     ...account,
     cookieHeader: readMimoCredential(account.id)
   })).filter((account) => account.cookieHeader);
+}
+
+async function saveMimoMembershipCookie(value) {
+  const credential = mimoMembershipCredential(value);
+  if (String(value || '').trim() && !credential) return { ok: false, errorCode: 'missingRequiredCookies' };
+  const cookie = credential ? credential.cookieHeader : '';
+  if (credential) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    let validation;
+    try {
+      validation = await fetchMimoMembershipAccount(credential, electronProviderDeps({ signal: controller.signal }));
+    } catch (_) {
+      return { ok: false, errorCode: 'validationUnavailable' };
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!validation?.ok) {
+      return { ok: false, errorCode: validation?.status === 'unauthorized'
+        ? 'invalidCookie'
+        : validation?.status === 'sourceRateLimited' ? 'validationRateLimited' : 'validationUnavailable' };
+    }
+  }
+  const previous = settings;
+  settings = { ...settings, mimoMembershipCookie: cookie };
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (_) {
+    settings = previous;
+    return { ok: false, errorCode: 'credentialStorageUnavailable' };
+  }
+  pushSettingsToRenderer();
+  const previousUserId = previous.mimoMembershipCookie?.match(/(?:^|;\s*)userId=([^;]+)/)?.[1] || '';
+  const previousKey = previousUserId ? mimoAccountKey('', { userId: previousUserId }) : '';
+  if (deviceRuntimeHandle && previousKey && previous.mimoMembershipCookie !== cookie) {
+    void queueLimitInvalidation({ provider: 'mimo', accountKey: previousKey }, 'credential-save', {
+      clear: true, refresh: false
+    });
+    void queueLimitInvalidation({ provider: 'mimo' }, 'credential-save');
+  } else {
+    // Before runtime startup, queue a provider clear so no old member identity
+    // survives when the pending full refresh is eventually drained.
+    void queueLimitInvalidation({ provider: 'mimo' }, 'credential-save', {
+      clear: !deviceRuntimeHandle && Boolean(previousKey)
+    });
+  }
+  return { ok: true, configured: Boolean(cookie) };
 }
 
 function legacyMimoCredentialPath(id) {
@@ -1298,7 +1347,10 @@ async function addMimoManagedAccount(cookieValue) {
   const accounts = normalizeMimoManagedAccounts(settings?.mimoManagedAccounts);
   const result = createMimoManagedAccount(cookieValue, accounts);
   if (!result.ok) return result;
-  const [validation] = await fetchMimoLimits({ mimoManagedAccounts: [result.account] }, electronProviderDeps());
+  const [validation] = await fetchMimoLimits({
+    mimoManagedAccounts: [result.account],
+    limitRefreshScope: { provider: 'mimo', accountKey: result.account.accountKey }
+  }, electronProviderDeps());
   if (validation?.status !== 'ok') {
     const errorCode = validation?.status === 'unauthorized'
       ? 'invalidCookie'
@@ -7404,6 +7456,7 @@ app.whenReady().then(() => {
   ipcMain.handle('antigravity:removeAccount', (_event, id) => removeAntigravityManagedAccount(id));
   ipcMain.handle('mimo:accounts', () => mimoAccountsForRenderer());
   ipcMain.handle('mimo:addAccount', (_event, cookieHeader) => addMimoManagedAccount(cookieHeader));
+  ipcMain.handle('mimo:saveMembershipCookie', (_event, cookieHeader) => saveMimoMembershipCookie(cookieHeader));
   ipcMain.handle('mimo:openConsole', () => shell.openExternal(MIMO_PLATFORM_CONSOLE_URL)
     .then(() => ({ ok: true }))
     .catch((error) => ({ ok: false, error: error.message })));
