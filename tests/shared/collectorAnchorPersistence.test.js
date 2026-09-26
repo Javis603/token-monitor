@@ -127,6 +127,57 @@ test('anchored tick with valid anchor runs todayOnly scan and derives month/allT
   assert.equal(summary.allTime.totalTokens, 5030, 'allTime should be derived via applyPeriodDelta');
 });
 
+test('anchored tick replaces a stale anchor title with the freshly resolved rename', async () => {
+  const dateKey = localTodayKey();
+  const sessionKey = 'cursor:conv-1';
+  const makeSession = (title, totalTokens) => ({
+    client: 'cursor',
+    sessionId: 'conv-1',
+    totalTokens,
+    models: { 'cursor-model': totalTokens },
+    ...(title ? { title } : {})
+  });
+
+  const anchorToday = emptyPeriod();
+  anchorToday.totalTokens = 50;
+  anchorToday.clients = { cursor: 50 };
+  anchorToday.sessions = { [sessionKey]: makeSession('Old name', 50) };
+
+  const anchorMonth = emptyPeriod();
+  anchorMonth.totalTokens = 500;
+  anchorMonth.clients = { cursor: 500 };
+  anchorMonth.sessions = { [sessionKey]: makeSession('Old name', 500) };
+
+  const anchorAllTime = emptyPeriod();
+  anchorAllTime.totalTokens = 5000;
+  anchorAllTime.clients = { cursor: 5000 };
+  anchorAllTime.sessions = { [sessionKey]: makeSession('Old name', 5000) };
+
+  const summary = await collectUsageOnce({
+    clients: 'cursor',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'dev1',
+    limitsEnabled: false,
+    historyEnabled: false,
+    todayOnlyAnchor: { dateKey, today: anchorToday, month: anchorMonth, allTime: anchorAllTime },
+    runTokscale: async () => ({
+      entries: [{ client: 'cursor', sessionId: 'conv-1', model: 'cursor-model', input: 55, output: 0, cost: 0 }]
+    }),
+    sessionMetadataDeps: {
+      sessionMetadataResolvers: new Map([['cursor', (ids) => {
+        assert.ok(ids.has('conv-1'));
+        return new Map([['conv-1', { title: 'New name' }]]);
+      }]])
+    },
+    collectWslUsage: async () => ({ bundle: { today: null, month: null, allTime: null, detected: [], homes: [] }, detected: [] })
+  });
+
+  assert.equal(summary.today.sessions[sessionKey].title, 'New name');
+  assert.equal(summary.month.sessions[sessionKey].title, 'New name', 'a rename must reach the derived month window');
+  assert.equal(summary.allTime.sessions[sessionKey].title, 'New name', 'a rename must reach the derived all-time window');
+});
+
 test('full anchors persist local-only Reasonix native views alongside aggregate periods', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-anchor-'));
   const nativeView = {

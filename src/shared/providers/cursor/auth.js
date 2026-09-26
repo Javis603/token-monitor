@@ -12,6 +12,7 @@ const {
 } = require('../../subprocessTermination');
 const { classifyClientSyncDetailCode } = require('../../clientHealth');
 const { withCursorLifecycle } = require('./lifecycle');
+const { cursorDesktopStateCandidates } = require('./desktopState');
 
 const MAX_SYNC_EXIT_CODE = 2 ** 31 - 1;
 const MAX_TOKSCALE_STDERR_LENGTH = 64 * 1024;
@@ -30,20 +31,6 @@ function annotateSyncError(error, failureStage, exitCode = null) {
 
 function credentialsPath(home = os.homedir()) {
   return path.join(home, '.config', 'tokscale', 'cursor-credentials.json');
-}
-
-function cursorDesktopStateCandidates({ home = os.homedir(), platform = process.platform, env = process.env } = {}) {
-  if (platform === 'darwin') {
-    return [path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb')];
-  }
-  if (platform === 'win32') {
-    const candidates = [];
-    const appData = String(env?.APPDATA || '').trim();
-    if (appData) candidates.push(path.join(appData, 'Cursor', 'User', 'globalStorage', 'state.vscdb'));
-    candidates.push(path.join(home, 'AppData', 'Roaming', 'Cursor', 'User', 'globalStorage', 'state.vscdb'));
-    return candidates;
-  }
-  return [path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb')];
 }
 
 function readCursorDesktopAccessToken(options = {}) {
@@ -419,6 +406,7 @@ module.exports = {
   CURSOR_EXPLICIT_SYNC_TIMEOUT_MS,
   canonicalCursorUserId,
   credentialsPath,
+  cursorDesktopStateCandidates,
   listAccounts,
   normalizeCursorSessionToken,
   readActiveAccount,
