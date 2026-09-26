@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { CLIENT_IDS, LOCALLY_PARSED_CLIENT_IDS } = require('./clientCatalog');
 const { LEGACY_CLIENT_ID_ALIASES } = require('./clientTracking');
@@ -111,9 +113,55 @@ function customScanPathEntries(value, options = {}) {
 
 function tokscaleExtraDirsEnv(value, inherited = '', options = {}) {
   const additions = customScanPathEntries(value, options).flatMap(({ client, dir }) => (
-    tokscaleCustomScanClientIds(client).map((scanId) => `${scanId}:${dir}`)
+    suppressedCustomScanIds(client, dir, options)
+      .map((scanId) => `${scanId}:${dir}`)
   ));
   return [String(inherited || '').trim(), ...additions].filter(Boolean).join(',');
+}
+
+function platformPath(platform) {
+  return platform === 'win32' ? path.win32 : path.posix;
+}
+
+function canonicalDir(dir, options = {}) {
+  const platform = options.platform || process.platform;
+  const mod = platformPath(platform);
+  // realpathSync resolves on the host's actual filesystem, so only apply it when
+  // the target platform is the host; a Windows path cannot be resolved here.
+  let resolved = platform === process.platform
+    ? (() => { try { return fs.realpathSync(dir); } catch { return dir; } })()
+    : dir;
+  resolved = mod.normalize(mod.resolve(resolved));
+  return platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+// One directory walk covers the other when either is an ancestor: Tokscale
+// scans extra roots recursively, so containment in either direction duplicates
+// the enclosed files.
+function dirsOverlap(first, second, mod) {
+  const via = (root, leaf) => {
+    const rel = mod.relative(root, leaf);
+    return rel === '' || (!rel.startsWith('..') && !mod.isAbsolute(rel));
+  };
+  return via(first, second) || via(second, first);
+}
+
+// Persisted Antigravity roots may name the built-in extension directory: before
+// the IDE extension source existed, that was the workaround for reading its
+// generation databases through the CLI parser. The built-in scan now covers it,
+// so the CLI leg is suppressed whenever a custom root contains that directory
+// (or is contained by it); dropping it entirely would still count rows without
+// response IDs twice.
+function suppressedCustomScanIds(client, dir, options = {}) {
+  const ids = tokscaleCustomScanClientIds(client);
+  if (client !== 'antigravity') return ids;
+  const platform = options.platform || process.platform;
+  const join = platform === 'win32' ? path.win32.join : path.posix.join;
+  const home = options.home || os.homedir();
+  const extensionDir = canonicalDir(join(home, '.gemini', 'antigravity', 'conversations'), options);
+  const mod = platformPath(platform);
+  if (!dirsOverlap(canonicalDir(dir, options), extensionDir, mod)) return ids;
+  return ids.filter((id) => id !== 'antigravity-cli');
 }
 
 module.exports = {

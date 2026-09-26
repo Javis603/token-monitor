@@ -217,7 +217,7 @@ function tokscaleCommand(options = {}) {
   const customExtraDirs = tokscaleExtraDirsEnv(
     options.customScanPaths,
     process.env.TOKSCALE_EXTRA_DIRS,
-    { platform: options.platform || process.platform }
+    { platform: options.platform || process.platform, home: options.homeDir }
   );
   const extraDirsEnv = customExtraDirs
     ? { ...process.env, TOKSCALE_EXTRA_DIRS: customExtraDirs }
@@ -509,10 +509,11 @@ function runTokscale({
   terminationOptions,
   onTerminationUnconfirmed,
   customScanPaths,
+  homeDir,
   workspaces = true
 }) {
   throwIfAborted(signal);
-  const command = tokscaleCommand({ customScanPaths });
+  const command = tokscaleCommand({ customScanPaths, homeDir });
   const requested = tokscaleClientFilter(clients);
   if (!requested) return Promise.resolve({ entries: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
@@ -564,9 +565,9 @@ function runTokscale({
   ), signal);
 }
 
-function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths }) {
+function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir }) {
   throwIfAborted(signal);
-  const command = tokscaleCommand({ customScanPaths });
+  const command = tokscaleCommand({ customScanPaths, homeDir });
   const requested = tokscaleClientFilter(clients);
   if (!requested) return Promise.resolve({ contributions: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
@@ -1095,6 +1096,7 @@ async function collectUsageOnce(options) {
     ...input,
     workspaces: projectsEnabled,
     customScanPaths: options.customScanPaths,
+    homeDir: options.homeDir,
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
@@ -1106,6 +1108,7 @@ async function collectUsageOnce(options) {
   const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
     ...input,
     customScanPaths: options.customScanPaths,
+    homeDir: options.homeDir,
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-graph')
   }));
