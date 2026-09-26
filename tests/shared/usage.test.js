@@ -886,11 +886,14 @@ test('extractUsageFromTokscale normalizes MiMo and ZCode client ids', () => {
   assert.equal(period.clients.zcode, 29);
 });
 
-test('extractUsageFromTokscale passes zcode input straight through (tokscale normalizes cache upstream)', () => {
+test('extractUsageFromTokscale passes zcode input straight through and folds disjoint reasoning into output', () => {
   // tokscale >= 4.0.11 emits zcode rows whose `input` already excludes cache
   // overlap (junhoyeo/tokscale#825), so zcode is aggregated like any other
   // client with no local subtraction. If the removed workaround still ran it
   // would subtract cache a second time (200 - 800 clamped to 0) and under-count.
+  // tokscale 4.17.0 also emits zcode `reasoning` as a disjoint bucket subtracted
+  // out of `output`, so it is added back into the reasoning-inclusive output
+  // family: output 50 + reasoning 10 = 60, total 200 + 60 + 800 = 1060 (#797).
   const period = extractUsageFromTokscale({
     groupBy: 'client,session,model',
     entries: [
@@ -911,19 +914,19 @@ test('extractUsageFromTokscale passes zcode input straight through (tokscale nor
     ]
   });
 
-  assert.equal(period.clients.zcode, 1050);
-  assert.equal(period.totalTokens, 1050);
+  assert.equal(period.clients.zcode, 1060);
+  assert.equal(period.totalTokens, 1060);
   assert.equal(period.cacheReadTokens, 800);
   assert.equal(period.clientCacheReads.zcode, 800);
-  assert.equal(period.clientOutputs.zcode, 50);
+  assert.equal(period.clientOutputs.zcode, 60);
 
   const session = period.sessions['zcode:sess-z1'];
-  assert.equal(session.totalTokens, 1050);
+  assert.equal(session.totalTokens, 1060);
   assert.equal(session.inputTokens, 200);
   assert.equal(session.cacheReadTokens, 800);
-  assert.equal(session.outputTokens, 50);
+  assert.equal(session.outputTokens, 60);
   assert.equal(session.reasoningTokens, 10);
-  assert.equal(session.models['glm-5.2'], 1050);
+  assert.equal(session.models['glm-5.2'], 1060);
 });
 
 test('extractUsageFromTokscale normalizes Kiro client ids', () => {

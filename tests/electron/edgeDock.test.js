@@ -129,7 +129,7 @@ const {
   railLength
 } = require('../../src/electron/edgeDock/geometry');
 const { canUseEdgeDock } = require('../../src/electron/edgeDock/controller');
-const { bubbleCommands, railCommands, toPolygons, toSvgPath } = require('../../src/electron/renderer/edgeDock/shapes');
+const { bubbleCommands, peekCommands, railCommands, toPolygons, toSvgPath } = require('../../src/electron/renderer/edgeDock/shapes');
 const { rasterizeMask, shapeRectsFromPolygons } = require('../../src/electron/edgeDock/mask');
 const { DEFAULT_LIMIT_COUNT, normalizeEdgeDockItems, reorderEdgeDockItems } = require('../../src/electron/renderer/edgeDock/items');
 const { SESSIONS_METRIC } = require('../../src/electron/renderer/edgeDock/presentation');
@@ -1074,6 +1074,7 @@ test('rail hugs the chosen edge and its peek handle is flush with it', () => {
   assert.equal(right.height, railLength(3));
   const peek = edgeDockPeekBounds({ workArea, side: 'right', railBounds: right });
   assert.equal(peek.x + peek.width, workArea.width);
+  assert.equal(peek.height, 48);
 
   const left = edgeDockRailBounds({ workArea, side: 'left', offset: 1, cellCount: 3 });
   assert.equal(left.x, EDGE_DOCK_METRICS.edgeInset);
@@ -1190,6 +1191,21 @@ test('rail silhouette starts and ends on the screen edge and mirrors for the lef
   const left = railCommands({ width: 64, height: 300, side: 'left', shoulder: 28, radius: 20 });
   assert.deepEqual(left[0], ['M', 0, 0]);
   assert.match(toSvgPath(right), /^M64 0 C/);
+});
+
+test('peek handle curves into either screen edge without a visible tip', () => {
+  const right = peekCommands({ width: 7, height: 48 });
+  assert.deepEqual(right[0], ['M', 11, 0]);
+  assert.deepEqual(right.at(-2).slice(-2), [11, 48]);
+  assert.equal(right[3][2] - right[2][6], 27, 'the visible straight section keeps its original length');
+  assert.deepEqual(right.at(-1), ['Z']);
+  assert.notDeepEqual(peekCommands({ width: 7, height: 48, open: true }).at(-1), ['Z']);
+  const left = peekCommands({ width: 7, height: 48, side: 'left' });
+  assert.deepEqual(left[0], ['M', -4, 0]);
+  const { buffer, pixelWidth } = rasterizeMask(toPolygons(right), 7, 48);
+  const alpha = (x, y) => buffer[(y * pixelWidth + x) * 4 + 3];
+  assert.equal(alpha(6, 0), 0, 'the hidden curve tip does not touch the screen corner');
+  assert.equal(alpha(6, 24), 255, 'the handle remains flush along the screen edge');
 });
 
 test('bubble tail tip lands on tailY and stays clear of the corners', () => {
