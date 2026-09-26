@@ -36,19 +36,59 @@ function cleanTitle(value) {
     : '';
 }
 
-function readTitles(dbPath, sqlite) {
+// Older Cursor releases kept the sidebar index in the shared key/value store
+// under 'composer.composerHeaders' (an {allComposers:[...]} list); current
+// releases promote it to a first-class composerHeaders table. The table is the
+// live schema and wins when both answer — the legacy key is only a fallback
+// for rows the table does not cover, and it is read at most once per database
+// fingerprint through cache.legacyTitles.
+function legacyTitlesFor(db, cache) {
+  if (!cache.legacyTitles) {
+    cache.legacyTitles = new Map();
+    try {
+      const row = db.prepare('SELECT value FROM ItemTable WHERE key = ?').get('composer.composerHeaders');
+      const parsed = JSON.parse(row?.value || 'null');
+      for (const header of Array.isArray(parsed?.allComposers) ? parsed.allComposers : []) {
+        const id = String(header?.composerId || '').trim();
+        const title = cleanTitle(header?.name);
+        if (id && title) cache.legacyTitles.set(id, title);
+      }
+    } catch (_) { /* Missing table/key or malformed payload: no legacy answer. */ }
+  }
+  return cache.legacyTitles;
+}
+
+function readTitles(dbPath, sqlite, wantedIds, cache) {
   let db;
   try {
     db = new sqlite.DatabaseSync(dbPath, { readOnly: true });
     try { db.exec('PRAGMA busy_timeout = 250'); } catch (_) { /* Read-only WAL reads still benefit on newer builds. */ }
-    const rows = db.prepare('SELECT composerId, value FROM composerHeaders').all();
     const titles = new Map();
-    for (const row of rows) {
-      let header;
-      try { header = JSON.parse(row.value); } catch (_) { continue; }
-      const id = String(row.composerId || '').trim();
-      const title = cleanTitle(header?.name);
-      if (id && title) titles.set(id, title);
+    let headerById = null;
+    try {
+      headerById = db.prepare('SELECT value FROM composerHeaders WHERE composerId = ?');
+    } catch (_) {
+      // Older databases have no composerHeaders table at all: every id falls
+      // through to the legacy ItemTable key below.
+    }
+    const unanswered = new Set(wantedIds);
+    if (headerById) {
+      for (const id of wantedIds) {
+        try {
+          const row = headerById.get(id);
+          if (row === undefined) continue;
+          let header;
+          try { header = JSON.parse(row.value); } catch (_) { header = null; }
+          const title = cleanTitle(header?.name);
+          if (title) titles.set(id, title);
+          unanswered.delete(id);
+        } catch (_) { /* A transient row read error: leave it unanswered, not cached. */ }
+      }
+    }
+    const legacy = legacyTitlesFor(db, cache);
+    for (const id of unanswered) {
+      const title = legacy.get(id);
+      if (title) titles.set(id, title);
     }
     return titles;
   } catch (_) {
@@ -71,12 +111,19 @@ function resolveSessionMetadata(sessionIds, { deps = {}, home } = {}) {
   for (const dbPath of candidates) {
     const stamp = databaseStamp(dbPath);
     if (!stamp) continue;
-    const cached = cache.get(dbPath);
-    const titles = cached?.stamp === stamp ? cached.titles : readTitles(dbPath, sqlite);
-    if (!titles) continue;
-    if (titles !== cached?.titles) cache.set(dbPath, { stamp, titles });
+    let cached = cache.get(dbPath);
+    if (cached?.stamp !== stamp) cached = { stamp, titles: new Map(), legacyTitles: null };
+    // Ask only for ids without a known answer on this fingerprint. A miss is
+    // never cached as an answer, so a late-landing header or a transient read
+    // error still resolves on the next lookup without waiting for the WAL.
+    const wanted = new Set([...sessionIds].filter((id) => !cached.titles.has(id)));
+    if (wanted.size > 0) {
+      const read = readTitles(dbPath, sqlite, wanted, cached);
+      if (read) for (const [id, title] of read) cached.titles.set(id, title);
+    }
+    cache.set(dbPath, cached);
     for (const sessionId of sessionIds) {
-      const title = titles.get(sessionId);
+      const title = cached.titles.get(sessionId);
       if (title && !result.has(sessionId)) result.set(sessionId, { title });
     }
   }

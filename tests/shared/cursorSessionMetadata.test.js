@@ -49,3 +49,27 @@ test('Cursor joins desktop header names by conversation id and sees later rename
   applySessionMetadata(periods, home, sharedDeps);
   assert.equal(periods.today.sessions['cursor:session-1'].title, 'Renamed conversation with a longer title');
 });
+
+test('Cursor falls back to the legacy ItemTable composer index for old schemas', { skip: !sqlite }, (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-legacy-titles-'));
+  const dbPath = path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new sqlite.DatabaseSync(dbPath);
+  t.after(() => {
+    db.close();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+  // Old schema: no composerHeaders table, only the ItemTable index key.
+  db.exec('CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)');
+  db.prepare('INSERT INTO ItemTable (key, value) VALUES (?, ?)').run(
+    'composer.composerHeaders',
+    JSON.stringify({ allComposers: [
+      { composerId: 'old-session', name: 'Legacy named chat' },
+      { composerId: 'unnamed', name: '' }
+    ] })
+  );
+
+  const deps = { platform: 'darwin', sqlite, cursorTitleCache: new Map() };
+  const resolved = resolveSessionMetadata(new Set(['old-session', 'unnamed', 'missing']), { home, deps });
+  assert.deepEqual([...resolved], [['old-session', { title: 'Legacy named chat' }]]);
+});

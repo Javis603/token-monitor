@@ -932,7 +932,12 @@ function propagateTodayProjects(today, periods) {
         target.projectId = session.projectId;
         target.projectLabel = session.projectLabel;
       }
-      if (session.title && !target.title) target.title = session.title;
+      // The fresh scan's title is authoritative and replaces the anchor's, like
+      // the context pair below: a Cursor rename arrives only through this path
+      // on watch ticks, so gap-filling would leave derived periods showing the
+      // old name until the hourly full scan. A fresh miss keeps the old title —
+      // a transient reader failure is not a deletion.
+      if (session.title) target.title = session.title;
       if (session.sessionKind && !target.sessionKind) target.sessionKind = session.sessionKind;
       // Context occupancy is replaced rather than gap-filled: the derived
       // periods carry the last full scan's reading, which is older than this
