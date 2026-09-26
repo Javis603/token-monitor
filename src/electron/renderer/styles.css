@@ -5333,6 +5333,44 @@ html.is-windows .limit-live-badge {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* On Liquid Glass the controls sit straight on the AppKit surface, so they read
+   as lensed edges of that one sheet rather than slabs stacked on it: capsule
+   shapes and a specular top edge. The highlight stays white on light themes
+   too — it is reflected light, not an overlay tint. Chromium's backdrop blur has
+   nothing but transparent pixels to sample here, so it is dropped. Fills and
+   borders are left to the base rules so their hover/active states still win,
+   and the refresh button's state glows keep their own shadow (each already
+   carries a top edge of its own). */
+html.native-liquid-glass {
+  --liquid-glass-specular: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.035);
+}
+html.native-liquid-glass :is(.tabs, .tab, .tab-indicator, .tool-detail-footer, #utilityActions button) {
+  border-radius: 999px;
+}
+html.native-liquid-glass :is(.tabs, .tab-indicator, .tool-detail-footer, #utilityActions button:not(.is-refreshing, .is-refreshed, .is-refresh-error), .view-switcher-current, .view-switcher-disclosure) {
+  box-shadow: var(--liquid-glass-specular);
+}
+html.native-liquid-glass :is(.tabs, .tab-indicator, .tool-detail-footer, #utilityActions button, .view-switcher-current, .view-switcher-disclosure) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.native-liquid-glass .tab-indicator { background: rgba(var(--overlay-rgb), 0.11); }
+html.native-liquid-glass .view-switcher-current { border-radius: 999px 0 0 999px; padding-left: 11px; }
+html.native-liquid-glass .view-switcher-disclosure { width: 28px; flex-basis: 28px; padding-right: 3px; border-radius: 0 999px 999px 0; }
+/* The menu is the one layer that floats over content, and the page is drawn
+   above the native glass, so nothing but its own fill can hide the rows it
+   covers. It stays a dense frosted plate; only its shape and edge follow the
+   glass controls. */
+html.native-liquid-glass .view-switcher-menu {
+  padding: 5px;
+  border-color: rgba(var(--line-rgb), 0.16);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.07), rgba(var(--overlay-rgb), 0.02)),
+    rgba(var(--glass-rgb), 0.86);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24), var(--liquid-glass-specular);
+}
+html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .period-menu {
   -webkit-app-region: no-drag;
   top: 34px;
