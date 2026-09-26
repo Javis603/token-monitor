@@ -4469,6 +4469,7 @@ test('a refused write says which problem it was', () => {
   const key = (message) => vm.runInNewContext(`${mapKey}\nsubscriptionWriteErrorKey({ message });`, { message });
   assert.match(key("Error invoking remote method 'subscriptions:save': Error: hub_rejected"), /errorHubRejected$/);
   assert.match(key('Error: write_failed'), /errorWriteFailed$/);
+  assert.match(key('Error: icloud_write_failed'), /errorIcloudWrite$/);
   assert.match(key('Error: stale_write'), /errorStaleWrite$/);
   assert.match(key('Error: hub_unreachable'), /errorHubWrite$/);
 

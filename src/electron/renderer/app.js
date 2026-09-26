@@ -3431,11 +3431,11 @@ function subscriptionWriteErrorKey(error) {
   const message = error?.message || '';
   if (/stale_write/.test(message)) return 'settings.subscriptions.errorStaleWrite';
   if (/hub_rejected/.test(message)) return 'settings.subscriptions.errorHubRejected';
-  if (/write_failed/.test(message)) return 'settings.subscriptions.errorWriteFailed';
-  if (/hub_changed/.test(message)) return 'settings.subscriptions.errorHubChanged';
   if (/icloud_(?:unavailable|stopped)|icloud_write_failed|root-create-failed|subscription-write-failed/.test(message)) {
     return 'settings.subscriptions.errorIcloudWrite';
   }
+  if (/write_failed/.test(message)) return 'settings.subscriptions.errorWriteFailed';
+  if (/hub_changed/.test(message)) return 'settings.subscriptions.errorHubChanged';
   return 'settings.subscriptions.errorHubWrite';
 }
 
