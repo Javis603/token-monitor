@@ -375,6 +375,8 @@ Object.assign(els, {
   edgeDockHapticRow: document.getElementById('edgeDockHapticRow'),
   edgeDockHapticInput: document.getElementById('edgeDockHapticInput'),
   edgeDockWarnColorsInput: document.getElementById('edgeDockWarnColorsInput'),
+  edgeDockMacBackdropRow: document.getElementById('edgeDockMacBackdropRow'),
+  edgeDockMacBackdropInput: document.getElementById('edgeDockMacBackdropInput'),
   edgeDockComposer: document.getElementById('edgeDockComposer'),
   trayIconOptions: document.getElementById('trayIconOptions'),
   trayOptions: document.getElementById('trayOptions'),
@@ -6695,6 +6697,8 @@ function applyAppearanceSettings(settings) {
     els.windowsBackdropNote.classList.toggle('hidden', !windowsGlass.showAccentNote);
   }
   els.macBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
+  // Same terms as the widget's own selector; material pushes land here too.
+  els.edgeDockMacBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
   if (els.macBackdropInput) els.macBackdropInput.value = macGlass.backdropMode;
   applyReduceMotionPreference(settings?.reduceMotion);
   applyFontSettings(settings);
@@ -11582,6 +11586,9 @@ function syncEdgeDockControls() {
   els.edgeDockHapticRow?.classList.toggle('hidden', state.appInfo?.platform !== 'darwin');
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
   if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
+  if (els.edgeDockMacBackdropInput) {
+    els.edgeDockMacBackdropInput.value = macBackdropApi.normalizeEdgeDockBackdropMode(state.settings?.edgeDockMacBackdrop);
+  }
   if (enabled) edgeDockComposer?.render();
 }
 
@@ -11621,6 +11628,9 @@ for (const input of els.edgeDockSideInputs || []) {
 }
 els.edgeDockWarnColorsInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockWarnColors: els.edgeDockWarnColorsInput.checked });
+});
+els.edgeDockMacBackdropInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockMacBackdrop: macBackdropApi.normalizeEdgeDockBackdropMode(els.edgeDockMacBackdropInput.value) });
 });
 els.edgeDockHapticInput?.addEventListener('change', () => {
   void saveSettings({ edgeDockHaptic: els.edgeDockHapticInput.checked });

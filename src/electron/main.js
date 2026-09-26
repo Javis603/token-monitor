@@ -397,7 +397,12 @@ const {
   normalizeWindowsBackdropMode
 } = require('./windowsBackdropMode');
 const { applyWindowsAccentBlur } = require('./windowsBackdrop');
-const { MAC_BACKDROP_LIQUID_GLASS, normalizeMacBackdropMode } = require('./macBackdropMode');
+const {
+  MAC_BACKDROP_LIQUID_GLASS,
+  normalizeMacBackdropMode,
+  normalizeEdgeDockBackdropMode,
+  edgeDockBackdropMode
+} = require('./macBackdropMode');
 const {
   attachNativeMaterialVisibility,
   syncNativeMaterialVisibility,
@@ -563,6 +568,7 @@ function defaultSettings() {
     edgeDockMode: 'autoHide',
     edgeDockHaptic: true,
     edgeDockWarnColors: false,
+    edgeDockMacBackdrop: 'inherit',
     edgeDockSide: 'right',
     edgeDockOffset: null,
     edgeDockDisplayId: null,
@@ -2524,6 +2530,7 @@ function readSettings() {
     merged.edgeDockMode = merged.edgeDockMode === 'always' ? 'always' : 'autoHide';
     merged.edgeDockHaptic = parseBoolean(merged.edgeDockHaptic, true);
     merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
+    merged.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode(merged.edgeDockMacBackdrop);
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
     merged.trayCustomLayout = normalizeTrayLayout(merged.trayCustomLayout);
     merged.showTrayProviderBadge = parseBoolean(merged.showTrayProviderBadge, false);
@@ -5080,11 +5087,13 @@ function ensureEdgeDockController() {
     preloadPath: path.join(__dirname, 'edgeDock', 'preload.js'),
     getSettings: () => settings,
     nativeGlass: () => nativeBlurEnabled(),
-    // The dock follows the widget's glass style, on the same terms as the
-    // main window: Reduce Transparency hands the surface back to the HUD material.
+    // The dock follows the widget's glass style unless it has its own, on the
+    // same terms as the main window: Reduce Transparency hands the surface back
+    // to the HUD material.
     liquidGlass: () => {
       const options = nativeMaterialOptions();
-      const wanted = process.platform === 'darwin' && options.enabled && options.liquidGlass
+      const wanted = process.platform === 'darwin' && options.enabled
+        && edgeDockBackdropMode(settings) === MAC_BACKDROP_LIQUID_GLASS
         && !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25;
       return wanted ? { dark: options.dark } : null;
     },
@@ -6904,6 +6913,7 @@ app.whenReady().then(() => {
       edgeDockMode: (patch.edgeDockMode ?? settings.edgeDockMode) === 'always' ? 'always' : 'autoHide',
       edgeDockHaptic: parseBoolean(patch.edgeDockHaptic ?? settings.edgeDockHaptic, true),
       edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
+      edgeDockMacBackdrop: normalizeEdgeDockBackdropMode(patch.edgeDockMacBackdrop ?? settings.edgeDockMacBackdrop),
       // `null` is a real value here (back to the automatic default), so the
       // patch is checked for presence rather than coalesced.
       edgeDockItems: normalizeEdgeDockItems('edgeDockItems' in (patch || {}) ? patch.edgeDockItems : settings.edgeDockItems),
