@@ -94,7 +94,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 
 Qoder CN 的 Token 用量來自應用程式本機資料，而非 API —— 在 Settings → tools 中啟用（選用，預設關閉）。目前版本使用 Qoder 設定目錄內的 `projects` JSONL 記錄（通常為 `~/.qoder-cn/projects`），舊版本則使用 SQLite；介接器會同時讀取兩者。JSONL 路徑依序使用 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`、預設路徑；舊資料庫可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆寫。詳見 [Qoder 資料來源說明](docs/providers/qodercn.md)。
 
-這是進階本機整合：JSONL 不需要額外執行環境；舊 SQLite 讀取需要 PATH 上的 `sqlite3` CLI，或內建免 flag 即可用 `node:sqlite` 的 Node 執行環境（Node ≥ 23.4；Electron 元件可能需要 CLI）。讀取失敗會保留上一次完整快照。只統計有實際 Token 欄位的 JSONL 記錄；目前第一方方案模型可能只有 credits 與 context 使用比例，欠缺可靠的每 session context window，因此不會猜測 Token。Credits 仍會顯示於 AI Tool Limits，含實際 Token 的 BYOK／自訂模型會正常統計。
+這是進階本機整合：JSONL 不需要額外執行環境；舊 SQLite 讀取需要 PATH 上的 `sqlite3` CLI，或內建免 flag 即可用 `node:sqlite` 的 Node 執行環境（Node ≥ 22.15；Electron 元件可能需要 CLI）。讀取失敗會保留上一次完整快照。只統計有實際 Token 欄位的 JSONL 記錄；目前第一方方案模型可能只有 credits 與 context 使用比例，欠缺可靠的每 session context window，因此不會猜測 Token。Credits 仍會顯示於 AI Tool Limits，含實際 Token 的 BYOK／自訂模型會正常統計。
 </details>
 
 ## 介面展示

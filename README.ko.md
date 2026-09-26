@@ -94,7 +94,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 
 Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습니다. Settings → tools에서 활성화합니다(옵트인, 기본 꺼짐). 현재 버전은 Qoder 설정 디렉터리의 `projects` JSONL(보통 `~/.qoder-cn/projects`)을, 이전 버전은 SQLite를 사용하며 어댑터는 둘 다 읽습니다. JSONL 경로 우선순위는 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, `QODERCN_CONFIG_DIR/projects`, 기본 경로 순입니다. 이전 데이터베이스는 `TOKEN_MONITOR_QODER_CN_DB_PATH`로 재정의할 수 있습니다. [Qoder 데이터 소스 설명](docs/providers/qodercn.md)을 참고하세요.
 
-고급 로컬 통합입니다. JSONL에는 추가 런타임이 필요 없지만 이전 SQLite를 읽으려면 PATH의 `sqlite3` CLI 또는 플래그 없는 `node:sqlite`를 갖춘 Node 런타임(Node ≥ 23.4, Electron에서는 CLI가 필요할 수 있음)이 필요합니다. 읽기 실패 시 마지막 완전한 스냅샷을 유지합니다. 실제 토큰 필드가 있는 JSONL 행만 집계합니다. 현재 자사 플랜 행은 credits와 context 비율만 기록할 수 있고 신뢰할 수 있는 세션별 context window가 없으므로 토큰을 추측하지 않습니다. Credits는 AI Tool Limits에 표시되며 실제 토큰이 있는 BYOK/사용자 지정 모델은 정상 집계됩니다.
+고급 로컬 통합입니다. JSONL에는 추가 런타임이 필요 없지만 이전 SQLite를 읽으려면 PATH의 `sqlite3` CLI 또는 플래그 없는 `node:sqlite`를 갖춘 Node 런타임(Node ≥ 22.15, Electron에서는 CLI가 필요할 수 있음)이 필요합니다. 읽기 실패 시 마지막 완전한 스냅샷을 유지합니다. 실제 토큰 필드가 있는 JSONL 행만 집계합니다. 현재 자사 플랜 행은 credits와 context 비율만 기록할 수 있고 신뢰할 수 있는 세션별 context window가 없으므로 토큰을 추측하지 않습니다. Credits는 AI Tool Limits에 표시되며 실제 토큰이 있는 BYOK/사용자 지정 모델은 정상 집계됩니다.
 </details>
 
 ## 쇼케이스
