@@ -6675,7 +6675,8 @@ function applyAppearanceSettings(settings) {
     liquidGlassSupported: nativeMaterialState.liquidGlassSupported
   });
   document.documentElement.style.setProperty('--glass-alpha', opacity.toFixed(2));
-  const imageOpacity = clamp(Number(settings?.backgroundImageOpacity ?? defaultAppearance.backgroundImageOpacity), 0, 100) / 100;
+  const requestedImageOpacity = Number(settings?.backgroundImageOpacity ?? defaultAppearance.backgroundImageOpacity);
+  const imageOpacity = clamp(Number.isFinite(requestedImageOpacity) ? requestedImageOpacity : defaultAppearance.backgroundImageOpacity, 0, 100) / 100;
   document.documentElement.style.setProperty('--background-image-alpha', imageOpacity.toFixed(2));
   document.documentElement.style.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
   document.documentElement.style.setProperty('--line-strong-alpha', (0.18 + depth * 0.14).toFixed(3));

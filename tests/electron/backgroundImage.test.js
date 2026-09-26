@@ -86,6 +86,11 @@ test('image opacity has its own slider, shown only while an image is set', () =>
   assert.match(html, /id="backgroundImageOpacityInput" type="range" min="0" max="100"/);
   assert.match(app, /backgroundImageOpacityRow\?[.]classList[.]toggle\('hidden', !backgroundImageActive\)/);
   assert.match(app, /setProperty\('--background-image-alpha'/);
+  // An invalid opacity in CSS resolves to 1, so NaN must fall back before it gets there.
+  assert.match(app, /Number[.]isFinite\(requestedImageOpacity\) \? requestedImageOpacity : defaultAppearance[.]backgroundImageOpacity/);
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  assert.match(main, /backgroundImageOpacity: normalizeBackgroundImageOpacity\(/);
+  assert.match(main, /function normalizeBackgroundImageOpacity\(value\) \{[^}]*Number[.]isFinite\(opacity\) \? Math[.]max\(0, Math[.]min\(100, opacity\)\) : 28;/);
   // Native material locks the glass sliders; the image slider must stay usable.
   const locked = app.match(/for \(const control of \[([^\]]*)\]\) \{\n\s*if \(control\) control[.]disabled = nativeMaterial;/)?.[1];
   assert.ok(locked, 'native-material lock loop should exist');

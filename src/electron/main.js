@@ -4682,6 +4682,13 @@ function thirdPartyProfileWithCanonicalIdentity(profile, provider) {
   });
 }
 
+// A non-number (hand-edited settings.json) must not survive as NaN: it reaches
+// CSS as an invalid opacity, which falls back to 1 and hides the glass entirely.
+function normalizeBackgroundImageOpacity(value) {
+  const opacity = Number(value ?? 28);
+  return Number.isFinite(opacity) ? Math.max(0, Math.min(100, opacity)) : 28;
+}
+
 function settingsForRenderer() {
   // Default-deny every credential field added to the canonical store. The two
   // hub secrets remain explicit exceptions because the existing sync UI must
@@ -6886,7 +6893,7 @@ app.whenReady().then(() => {
       refreshMs: Math.max(5000, Number(patch.refreshMs ?? settings.refreshMs ?? 15000)),
       glassOpacity: Math.max(0, Math.min(100, Number(patch.glassOpacity ?? settings.glassOpacity ?? 68))),
       glassBlur: Math.max(0, Math.min(100, Number(patch.glassBlur ?? settings.glassBlur ?? 32))),
-      backgroundImageOpacity: Math.max(0, Math.min(100, Number(patch.backgroundImageOpacity ?? settings.backgroundImageOpacity ?? 28))),
+      backgroundImageOpacity: normalizeBackgroundImageOpacity(patch.backgroundImageOpacity ?? settings.backgroundImageOpacity),
       systemGlass: patch.systemGlass ?? settings.systemGlass ?? true,
       windowsBackdrop: normalizeWindowsBackdropMode(patch.windowsBackdrop ?? settings.windowsBackdrop),
       macBackdrop: normalizeMacBackdropMode(patch.macBackdrop ?? settings.macBackdrop),
