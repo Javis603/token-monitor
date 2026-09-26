@@ -490,7 +490,6 @@ async function mintMimoConsoleCredential(desktop, deps = {}) {
   return {
     ok: true,
     account: {
-      id: 'mimo-oauth',
       userId: desktop.userId,
       source: 'oauth',
       sourceDetail: 'app',

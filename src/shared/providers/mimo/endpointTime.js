@@ -1,14 +1,11 @@
 'use strict';
 
-// MiMo's payloads carry wall-clock timestamps with no zone (`2026-10-01T00:00:00`).
-// Reading one through `Date` would make the answer depend on the machine's
-// locale, which is a different value on every device and is not what the server
-// said. The zone is therefore pinned: a value that states one keeps it, and one
-// that does not is read as UTC.
-//
-// Both MiMo lanes answer to this, the console lane's `currentPeriodEnd` and the
-// membership lane's `nextResetTime`, so it is one function rather than two
-// copies of the same expression.
+// MiMo's payloads carry wall-clock timestamps with no zone
+// (`2026-10-01T00:00:00`). `Date` would read one in the machine's locale — a
+// different value on every device, and not what the server said — so a value that
+// states a zone keeps it and one that does not is read as UTC. Both lanes answer
+// to this: the console lane's `currentPeriodEnd` and the membership lane's
+// `nextResetTime`.
 function mimoEndpointTime(value) {
   const raw = String(value ?? '').trim();
   if (!raw) return NaN;

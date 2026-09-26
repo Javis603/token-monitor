@@ -7,14 +7,12 @@ const path = require('node:path');
 const { errorWithStatus } = require('../../limits/providerHelpers');
 
 // The app's own Electron session partition: `persist:xiaomi-account` is a literal
-// in its bundle, `Partitions/<name>/` under userData is Electron's rule for it,
-// and the root is `<appData>/Xiaomi MiMo` from the app's declared `productName`.
-// All three platforms are shipped — its `optionalDependencies` carry darwin,
-// linux and win32 natives and its package.json declares a `.desktop` entry — so
-// each root is Electron's rule for that platform: APPDATA/`~/.config`
-// (`XDG_CONFIG_HOME` when set)/Application Support. macOS is the one measured on
-// disk; the other two follow the same rule, and a wrong path can only ever read
-// nothing.
+// in its bundle, and `Partitions/<name>/` under userData is Electron's rule for
+// one. The app ships on all three desktop platforms, so each root is Electron's
+// rule for that platform rather than a guess — `%APPDATA%` (then Roaming under
+// the home directory), `$XDG_CONFIG_HOME` or `~/.config`, Application Support —
+// under the `Xiaomi MiMo` root its `productName` gives. macOS is the one measured
+// on disk; elsewhere a wrong path reads nothing, the same answer as no store.
 const MIMO_PARTITION_DIR = path.join('Partitions', 'xiaomi-account');
 const MIMO_COOKIE_FILE = 'Cookies';
 

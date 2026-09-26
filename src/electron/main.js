@@ -1238,7 +1238,11 @@ function normalizeMimoManagedAccounts(value) {
   return accounts;
 }
 
-const MIMO_DETECTED_ACCOUNT_ID = 'mimo-desktop';
+// The id of the settings row that stands for the session this machine's own MiMo
+// Desktop holds. It is deliberately not `mimo-desktop`: the maintainer ruled out a
+// provider by that name, and a constant that looks like one invites the reader to
+// think we created it anyway.
+const MIMO_DETECTED_ACCOUNT_ID = 'mimo-local-session';
 
 // The account a signed-in MiMo Desktop answers for, read here so the panel can
 // count it. The cookie it was read from is discarded: it is never part of this

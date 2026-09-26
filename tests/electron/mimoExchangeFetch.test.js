@@ -17,6 +17,9 @@ test('a PAC result is read as the proxy Chromium resolved, or as nothing at all'
   assert.deepEqual(parseProxyResolveResult('PROXY 127.0.0.1:7890; DIRECT'), { kind: 'http', proxyUrl: 'http://127.0.0.1:7890' });
   assert.deepEqual(parseProxyResolveResult(''), { kind: 'direct', proxyUrl: '' });
   assert.equal(parseProxyResolveResult('SOCKS5 127.0.0.1:1080').kind, 'unsupported');
+  // TLS to the proxy is a different scheme, not a different host.
+  assert.deepEqual(parseProxyResolveResult('HTTPS proxy.example:8443'), { kind: 'http', proxyUrl: 'https://proxy.example:8443' });
+  assert.deepEqual(parseProxyResolveResult('HTTP proxy.example:8080'), { kind: 'http', proxyUrl: 'http://proxy.example:8080' });
 });
 
 test('a direct resolution reaches the origin without a dispatcher', async () => {

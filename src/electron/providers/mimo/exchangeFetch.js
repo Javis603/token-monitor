@@ -3,16 +3,21 @@
 const { ProxyAgent, fetch: undiciFetch } = require('undici');
 
 // Chromium's answer for the proxy it would use for a host is a PAC result:
-// `DIRECT`, or `PROXY host:port` — `session.resolveProxy` on the machine this was
-// written on answers `PROXY 127.0.0.1:7890`. Only the first entry is taken, since
-// Chromium lists its fallbacks after it. A proxy type undici cannot speak is
-// reported rather than skipped: falling back to a direct request would violate
-// what the configured proxy is there for, the rule `createOutboundFetch` states.
+// `DIRECT`, or `PROXY host:port` (e.g. `PROXY 127.0.0.1:7890`). Only the first
+// entry is taken, Chromium listing its fallbacks after it. A proxy type undici
+// cannot speak is reported rather than skipped: falling back to a direct request
+// would violate what the configured proxy is there for, the rule
+// `createOutboundFetch` states.
 function parseProxyResolveResult(value) {
   const first = String(value || '').split(';').map((entry) => entry.trim()).find(Boolean) || '';
   if (!first || /^DIRECT$/i.test(first)) return { kind: 'direct', proxyUrl: '' };
-  const match = /^(?:PROXY|HTTP|HTTPS)\s+(\S+)$/i.exec(first);
-  return match ? { kind: 'http', proxyUrl: `http://${match[1]}` } : { kind: 'unsupported', proxyUrl: '' };
+  const match = /^(PROXY|HTTP|HTTPS)\s+(\S+)$/i.exec(first);
+  if (!match) return { kind: 'unsupported', proxyUrl: '' };
+  // `HTTPS host:port` means TLS to the proxy itself, which undici spells with an
+  // `https://` proxy URL. Reading it as plain `http://` would fail against a
+  // TLS-only proxy and look like an outage rather than a proxy problem.
+  const scheme = /^HTTPS$/i.test(match[1]) ? 'https' : 'http';
+  return { kind: 'http', proxyUrl: `${scheme}://${match[2]}` };
 }
 
 // The exchange's transport in the widget. It cannot be the runtime's own fetch:

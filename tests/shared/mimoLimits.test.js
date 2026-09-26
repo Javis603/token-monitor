@@ -46,6 +46,9 @@ function reply(status, body, headers = {}) {
   };
 }
 
+// The vendor's own E2E fixture, verbatim from the app bundle — planCode, tier,
+// renewal mode, wall-clock times and source included. Live responses were only
+// ever observed for the no-subscription branch, so this sample is the contract.
 const PLAN_BODY = {
   code: 0,
   data: {
@@ -55,7 +58,8 @@ const PLAN_BODY = {
       renewalMode: 'MONTHLY',
       endTime: '2026-10-01T00:00:00',
       percent: 78.5,
-      nextResetTime: '2026-09-15T00:00:00'
+      nextResetTime: '2026-09-15T00:00:00',
+      source: 'ORDER_SUB'
     }
   }
 };
@@ -399,7 +403,7 @@ test('a cancelled refresh rejects instead of publishing an outage', async () => 
 test('the membership plan is read the way the app reads it', () => {
   assert.deepEqual(readMimoMembershipPlan(PLAN_BODY), {
     ok: true,
-    plan: { tier: 3, source: '', percent: 78.5, resetsAt: '2026-09-15T00:00:00.000Z' }
+    plan: { tier: 3, source: 'ORDER_SUB', percent: 78.5, resetsAt: '2026-09-15T00:00:00.000Z' }
   });
   assert.deepEqual(readMimoMembershipPlan({ code: 0, data: { current: null } }), { ok: true, plan: null });
   assert.equal(readMimoMembershipPlan({ code: 0, data: { current: { planTier: 3 } } }).ok, false, 'a current missing its fields is not a plan');
