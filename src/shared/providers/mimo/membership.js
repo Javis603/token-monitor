@@ -43,7 +43,8 @@ function cookiePairs(value) {
 // Two credential shapes, and they are not interchangeable: an account cookie is
 // spent on the exchange, a service cookie is already the session it would have
 // minted. Anything else would let a console credential — a different service's —
-// read as a membership one.
+// read as a membership one. The service shape requires the `userId`, because it
+// is the only identity that shape carries and its endpoint does not report one.
 function mimoMembershipCredential(value) {
   const pairs = cookiePairs(String(value || '').replace(/^cookie\s*:\s*/i, ''));
   const userId = pairs.get('userId') || '';
@@ -138,30 +139,49 @@ async function requestMimoMembership(pathname, cookieHeader, deps = {}) {
 
 // One membership account's answer, or the refusal that says which kind it was.
 async function fetchMimoMembershipAccount(credential, deps = {}) {
+  // A service cookie is already the session an exchange would mint, and it
+  // authorizes the data endpoints — but not the identity one: replaying one at
+  // `/user/xiaomi/me` answers 302 back to the SSO (measured), so routing a pasted
+  // service cookie through the exchange's own identity check would refuse a
+  // credential that works. It goes straight to the subscription read instead, and
+  // the `userId` the paste is required to carry is the identity.
+  if (credential.kind === 'service') {
+    return readMimoMembershipPlanFor(credential.cookieHeader, credential.userId, deps);
+  }
+
   const session = await mintMimoServiceSession({
     baseUrl: MIMO_MEMBERSHIP_BASE_URL,
     entry: MIMO_MEMBERSHIP_ENTRY,
-    accountCookie: credential.kind === 'account' ? credential.cookieHeader : '',
-    serviceCookie: credential.kind === 'service' ? credential.cookieHeader : '',
+    accountCookie: credential.cookieHeader,
     deps
   });
   if (!session.ok) return { ok: false, status: mimoExchangeStatus(session.status), userId: credential.userId };
-  // A region the app does not carry has no endpoint, so the lane goes quiet.
-  if (String(session.region || '').trim().toUpperCase() !== MIMO_MEMBERSHIP_REGION) {
-    return { ok: false, status: 'unavailable', userId: session.userId };
+  // A region the app does not carry has no endpoint at all, so the lane goes
+  // quiet rather than aiming at a host that belongs to someone else's account.
+  // An *absent* region is not evidence of a foreign account — the call proceeds
+  // and the endpoint answers for itself.
+  const region = String(session.region || '').trim().toUpperCase();
+  if (region && region !== MIMO_MEMBERSHIP_REGION) {
+    return { ok: false, status: 'notConfigured', userId: session.userId };
   }
+  return readMimoMembershipPlanFor(session.cookieHeader, session.userId, deps);
+}
 
+// The subscription read both credential shapes end at. An expired session
+// answers 401 here, which is this app's own auth-expired signal — so a pasted
+// credential that has gone stale still reaches the user as `unauthorized`.
+async function readMimoMembershipPlanFor(cookieHeader, userId, deps = {}) {
   try {
-    const body = await requestMimoMembership(MIMO_SUBSCRIPTION_ENTRY, session.cookieHeader, deps);
+    const body = await requestMimoMembership(MIMO_SUBSCRIPTION_ENTRY, cookieHeader, deps);
     const read = readMimoMembershipPlan(body);
     if (!read.ok) {
       const error = new Error('MiMo membership payload is unreadable');
       error.status = 'unavailable';
       throw error;
     }
-    return { ok: true, userId: session.userId, plan: read.plan };
+    return { ok: true, userId, plan: read.plan };
   } catch (error) {
-    return { ok: false, status: error?.status || 'unavailable', userId: session.userId };
+    return { ok: false, status: error?.status || 'unavailable', userId };
   }
 }
 

@@ -9,8 +9,12 @@ const { errorWithStatus } = require('../../limits/providerHelpers');
 // The app's own Electron session partition: `persist:xiaomi-account` is a literal
 // in its bundle, `Partitions/<name>/` under userData is Electron's rule for it,
 // and the root is `<appData>/Xiaomi MiMo` from the app's declared `productName`.
-// macOS is the one measured on disk; Windows follows from the same rule; Linux
-// resolves nothing, because a wrong path would only read another install's cookies.
+// All three platforms are shipped — its `optionalDependencies` carry darwin,
+// linux and win32 natives and its package.json declares a `.desktop` entry — so
+// each root is Electron's rule for that platform: APPDATA/`~/.config`
+// (`XDG_CONFIG_HOME` when set)/Application Support. macOS is the one measured on
+// disk; the other two follow the same rule, and a wrong path can only ever read
+// nothing.
 const MIMO_PARTITION_DIR = path.join('Partitions', 'xiaomi-account');
 const MIMO_COOKIE_FILE = 'Cookies';
 
@@ -40,7 +44,8 @@ function mimoDesktopCookieCandidates(options = {}) {
     candidates.push(path.join(home, 'AppData', 'Roaming', 'Xiaomi MiMo', MIMO_PARTITION_DIR, MIMO_COOKIE_FILE));
     return candidates;
   }
-  return [];
+  const configHome = String(env?.XDG_CONFIG_HOME || '').trim() || path.join(home, '.config');
+  return [path.join(configHome, 'Xiaomi MiMo', MIMO_PARTITION_DIR, MIMO_COOKIE_FILE)];
 }
 
 function readAccountCookieRows(dbPath, sqlite) {

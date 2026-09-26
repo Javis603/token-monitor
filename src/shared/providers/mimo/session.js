@@ -147,7 +147,10 @@ function createJarExchange(fetchFn, seed = {}) {
         const response = await fetchFn(current.href, {
           method: 'GET',
           headers: mimoRequestHeaders(cookieHeader),
-          redirect: 'manual'
+          redirect: 'manual',
+          // Every hop is the caller's to cancel: a device-runtime abort or a probe
+          // deadline must stop the walk, not wait for it.
+          signal: seed.signal
         });
         const headers = response.headers || {};
         const setCookie = typeof headers.getSetCookie === 'function' ? headers.getSetCookie() : [];
@@ -242,7 +245,8 @@ async function mintMimoServiceSession(options = {}) {
   const exchange = openMimoExchange(options.deps, {
     accountCookie: options.accountCookie,
     serviceCookie: options.serviceCookie,
-    serviceUrl: entryUrl.href
+    serviceUrl: entryUrl.href,
+    signal: options.deps?.signal
   });
   try {
     let walked = await exchange.request(entryUrl.href);

@@ -316,7 +316,7 @@ test('a refused exchange is a credential problem and a throttled one is not', as
 
   // The throttled lane is the only one here: with a console lane answering as
   // well the row stays `ok`, which is the composition rule the next test pins.
-  const throttled = await fetchMimoLimits({ mimoMembershipCookie: 'serviceToken=pasted; userId=42' }, {
+  const throttled = await fetchMimoLimits({ mimoMembershipCookie: 'passToken=own; userId=42' }, {
     fetch: mimoWorld({ membershipStatus: 429 }).fetch,
     readMimoDesktopAccount: absentDesktop,
     now: () => Date.UTC(2026, 8, 24)
@@ -346,6 +346,17 @@ test('a console lane that answers alone still publishes the account', async () =
   assert.equal(rows[0].status, 'ok', 'a region the app does not carry silences the membership lane, not the provider');
   assert.equal(rows[0].windows.some((window) => window.metric === 'credits'), true);
   assert.equal(rows[0].windows.some((window) => window.kind === 'weekly'), false);
+});
+
+test('an absent region is not evidence of a foreign account', async () => {
+  const world = mimoWorld({ region: '' });
+  const rows = await fetchMimoLimits({ mimoMembershipCookie: 'passToken=own; userId=42' }, {
+    fetch: world.fetch,
+    readMimoDesktopAccount: absentDesktop,
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(rows[0].status, 'ok', 'the endpoint is asked and answers for itself');
+  assert.equal(rows[0].windows.some((window) => window.kind === 'weekly'), true);
 });
 
 test('a 200 without a balance is an outage, never a credential problem', async () => {
@@ -432,6 +443,37 @@ test('a refusal may arrive as an ordinary 200 carrying the vendor’s code', asy
   assert.equal(rows[0].status, 'unauthorized', 'a body-level rejection is a credential problem');
 });
 
+test('a pasted service cookie skips the identity walk its endpoint refuses', async () => {
+  const world = mimoWorld();
+  const calls = [];
+  const fetch = async (url, init) => {
+    calls.push(new URL(String(url)).pathname);
+    return world.fetch(url, init);
+  };
+  const rows = await fetchMimoLimits({ mimoMembershipCookie: 'serviceToken=pasted; userId=42' }, {
+    fetch,
+    readMimoDesktopAccount: absentDesktop,
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(rows[0].status, 'ok');
+  assert.equal(calls.includes('/api/user/xiaomi/me'), false, 'a service cookie is not replayed at the identity endpoint');
+  assert.equal(calls.includes('/api/user/xiaomi/subscription/self'), true);
+});
+
+test('a pasted service cookie that has expired is a credential problem, not an outage', async () => {
+  const rows = await fetchMimoLimits({ mimoMembershipCookie: 'serviceToken=stale; userId=42' }, {
+    fetch: async (url) => {
+      const href = String(url);
+      if (href.endsWith('/user/xiaomi/subscription/self')) return reply(401, { code: 401 });
+      throw new Error(`unexpected request ${href}`);
+    },
+    readMimoDesktopAccount: absentDesktop,
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(rows[0].status, 'unauthorized');
+  assert.equal(rows[0].accountKey, mimoAccountKey('', { userId: '42' }));
+});
+
 test('a membership credential the user pasted is spent, and a signed-out machine does not shadow it', async () => {
   const world = mimoWorld();
   const rows = await fetchMimoLimits({ mimoMembershipCookie: 'statusless=1; serviceToken=pasted; userId=42' }, {
@@ -488,7 +530,12 @@ test('the partition resolves on macOS and Windows and nowhere else', () => {
     path.join(home, 'Library', 'Application Support', 'Xiaomi MiMo', 'Partitions', 'xiaomi-account', 'Cookies')
   ]);
   assert.equal(mimoDesktopCookieCandidates({ platform: 'win32', home, env: {} }).length, 1);
-  assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'linux', home }), []);
+  assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'linux', home, env: {} }), [
+    path.join(home, '.config', 'Xiaomi MiMo', 'Partitions', 'xiaomi-account', 'Cookies')
+  ]);
+  assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'linux', home, env: { XDG_CONFIG_HOME: '/xdg' } }), [
+    path.join('/xdg', 'Xiaomi MiMo', 'Partitions', 'xiaomi-account', 'Cookies')
+  ]);
 });
 
 test('a store that never held a cookie, a sealed store and no store are all nothing to discover', () => {

@@ -54,6 +54,7 @@ The hop through `/api/sts` is what **mints the service session**, and the cookie
 Consequences worth keeping:
 
 - **Exchange-minted service cookies stay in memory.** They are this exchange's output; the account cookie already on the machine is read again on refresh. A service cookie pasted explicitly by the user is a separate fallback credential, saved in the shared credential store until cleared.
+- **A service cookie is not a substitute for the identity hop.** Measured: a freshly minted `serviceToken` set answers `/user/xiaomi/subscription/self` and `/user/usage` with `code: 0`, and is answered by `/user/xiaomi/me` with a **302 back to the SSO**. A pasted service cookie therefore goes straight to the subscription read, and the `userId` the paste carries is its identity — routing it through the exchange's own identity check would refuse a credential that works.
 - **The exchange is silent while the account cookie is valid.** When it is rejected the chain stops at `account.xiaomi.com/fe/service/login` and **no service cookies are minted** — that is the refusal signature, and it needs no interactive step to detect.
 - The observed final followup is `http://` and answers 200, and its `/sts` token was not marked `Secure`. Do not force HTTPS on the callback; a cookie marked `Secure` is withheld from an `http:` hop.
 - **The account session is one named partition**, `persist:xiaomi-account`. The app sets `X-Client-Version` and `X-Mimo-Source` on those requests and **neither is required by these endpoints** — identical results were observed with them, without them, and with a browser UA, so nothing may key on them.
@@ -63,6 +64,8 @@ Consequences worth keeping:
 ### 1.2 Where the account cookie lives
 
 `~/Library/Application Support/Xiaomi MiMo/Partitions/xiaomi-account/Cookies` — the app's own Electron partition, the same one its login window uses. It is a Chromium SQLite cookie store, so the read is a read-only `DatabaseSync` open, the shape `readCursorDesktopAccessToken` already establishes for another app's store.
+
+The app ships on all three desktop platforms: its `optionalDependencies` carry `darwin-arm64`, `linux-x64` (glibc and musl) and `win32-x64` natives, it declares a `xiaomi-mimo.desktop` entry, and its Linux-only switches (`ozone-platform`, `disable-dev-shm-usage`, `no-zygote`) exist for one platform only. Each candidate is therefore Electron's rule for that platform rather than a guess — `%APPDATA%` (then the Roaming path under the home directory) on Windows, `$XDG_CONFIG_HOME` or `~/.config` on Linux, Application Support on macOS — all under the `Xiaomi MiMo` root the app's `productName` gives. macOS is the one measured; a wrong path elsewhere can only read nothing, which is the same silent answer as no store.
 
 Two facts about its **contents** are load-bearing, both measured:
 
@@ -155,7 +158,7 @@ Success is exactly `code === 0` **and** a non-empty `String(data.userId)`. Anyth
 | any other non-200 status | not logged in |
 | 200 with `code !== 0`, or with an empty/absent `data.userId` | not logged in |
 
-`46109` is Xiaomi's own auth code and is not an HTTP status — it is why a MiMo refusal can arrive as a perfectly ordinary 200 and still mean the session is gone. The classifier also carries the account's `region`; the region is what selects the base URL, and with only CN in that table a non-CN account has none.
+`46109` is Xiaomi's own auth code and is not an HTTP status — it is why a MiMo refusal can arrive as a perfectly ordinary 200 and still mean the session is gone. The classifier also carries the account's `region`, which is what selects the base URL. A region the app does not carry has no host at all, so the membership lane goes quiet for one; an **absent** region is not evidence of a foreign account — there the call proceeds and the endpoint answers for itself.
 
 **The account id must come from the server-issued `userId`, never from a rotating token.** A minted console session's fresh cookies do not include one, so the id the account cookie already carries is passed through — the same value `/userProfile` reports.
 
@@ -175,7 +178,7 @@ The rejected-account-cookie row is not hypothetical: it was first produced by ta
 - **An active membership payload.** No plan was available, so only the no-subscription branch above is real. The *direction* of `percent` is settled (§2.1), but not the values or extra fields a live plan returns.
 - **A request that does not look like a MiMo client costs the user their session.** A freshly signed-in session was lost the first time a request went out with no `User-Agent` at all, after which the same cookie answered the login page to every client until the user signed in again — while thirteen consecutive well-shaped exchanges were harmless. Volume is not the variable; the shape of the request is.
 - **Repeated minting is non-destructive to local state.** Around thirteen cycles left the partition byte-identical, so nothing is written back. Whether the app must be running is likewise irrelevant: the cookie is on disk and the exchange is an HTTP walk.
-- **Windows and Linux.** Everything above was observed on one macOS install. Windows discovery checks `%APPDATA%\Xiaomi MiMo\Partitions\xiaomi-account\Cookies` (then the equivalent Roaming path under the home directory), inferred from Electron's rule but unverified there; Linux discovery is unsupported. Windows ACL and unlock behaviour are unverified.
+- **Windows and Linux on disk.** Everything above was observed on one macOS install, where the cookie rows are plaintext. Neither platform was measured, and Chromium seals its cookie store by default on both (DPAPI on Windows, the OS keyring on Linux). Nothing in the app's bundle disables that, so the rows there may arrive sealed — which this provider reports as `notConfigured` and falls back from silently. Which way it goes needs a machine.
 
 ## 5. How the provider is wired
 
@@ -203,15 +206,16 @@ At-rest encryption is a property of the store, never evidence that the user sign
 
 `deps.fetch` walks the chain hop by hop, which needs a fetch that can read a redirect's `Location` and its `Set-Cookie` without following it. undici can, on every runtime the headless agent and the hub use and in the widget when a proxy environment variable is configured. Chromium's `net.fetch` cannot — it answers a `redirect: 'manual'` request with `net::ERR_ABORTED` — and that is the widget's transport whenever no proxy environment variable is set, which is the normal case for a GUI app.
 
-So the walk takes `deps.mimoExchangeFetch` when a runtime supplies one, and the widget supplies the same request shape routed through whatever Chromium resolved for that host (`session.resolveProxy`, which on a machine with a system proxy answers e.g. `PROXY 127.0.0.1:7890`). The cookie jar stays this module's either way — a Chromium *session* is not an alternative: it owns the cookie policy, and that policy withholds every cookie on the https→http hop this chain's callback makes.
+So the walk takes `deps.mimoExchangeFetch` when a runtime supplies one, and the widget supplies the same request shape routed through whatever Chromium resolved for that host (`session.resolveProxy`, which on a machine with a system proxy answers e.g. `PROXY 127.0.0.1:7890`). That adapter is `src/electron/providers/mimo/exchangeFetch.js`, injected beside `claudeWebFetch` into both the collector's deps and the settings probes'. A proxy type undici cannot speak is refused rather than skipped, so a configured proxy is never silently bypassed; every hop is cancellable, so a probe deadline stops the walk instead of waiting for it.
 
-**Not built yet.** The widget has no `deps.mimoExchangeFetch`, so on its Chromium branch a discovered account reports the exchange as temporarily unavailable and the manual inputs stay the way in.
+The cookie jar stays this module's either way. A Chromium *session* is not an alternative: it owns the cookie policy, and that policy withholds every cookie on the https→http hop this chain's callback makes, so it cannot walk the chain at all.
 
 ### 5.4 The pasted console lane does not move
 
 `mimoManagedAccounts`, its settings panel, its cookie allowlist, its account keys and its windows are what users already have configured; minting is a new credential *source* beside it, never a replacement, a migration or a re-keying of what is already saved. The membership lane belongs **under the existing `mimo` provider** — the maintainer ruled out a top-level `mimo-desktop` provider.
 
-- **Membership credential.** Either shape is accepted, in this order of preference: the **account cookie** (`passToken` + `userId`), which the exchange spends on every refresh and which does not rotate; or a **service cookie set** (`serviceToken` + optional `mimopc_ph` + `userId`), usable directly but short-lived, so it needs re-pasting. Anything else — including the console's `api-platform_serviceToken`, which is another service's — is refused at save time.
+- **Console credential.** One paste covers both products: the wallet and the Token Plan answer to the same session, which is why the four console endpoints share one cookie allowlist. There is nothing separate to paste for a Token Plan, and nothing a `sk-` or `tp-` key could add — keys read no quota (§1.5).
+- **Membership credential.** Either shape is accepted, in this order of preference: the **account cookie** (`passToken` + `userId`), which the exchange spends on every refresh and which does not rotate; or a **service cookie set** (`serviceToken` + optional `mimopc_ph` + `userId`), short-lived and read directly (§1.1). Anything else — including the console's `api-platform_serviceToken`, which is another service's — is refused at save time. Both shapes, and the console paste, were verified live against sessions minted on the machine.
 - The paste input validates with a read-only probe before saving, keeps only the allowlisted names, stores under `providers.mimo.membershipCookie` in `credentials.json`, is shown to the renderer only as a configured flag, and can be cleared from the same panel. Discovered credentials and minted sessions are never saved.
 - A refused exchange is `unauthorized`, not a transient retry. The row sends an automatically discovered account back to MiMo Desktop; a pasted credential stays for the user to replace or clear.
 
