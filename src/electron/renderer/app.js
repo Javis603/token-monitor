@@ -877,7 +877,7 @@ function liveTokenRateSourceKey(periodSource) {
 
 function effectiveLiveTokenRateScope() {
   const hubMode = state.settings?.hubMode;
-  const syncMode = hubMode === 'client' || hubMode === 'host';
+  const syncMode = tokenRateApi.isSharedSyncMode(hubMode);
   return syncMode && state.settings?.liveTokenRateScope !== 'device' ? 'all' : 'device';
 }
 
@@ -912,7 +912,7 @@ function displayLiveTokenRateItems() {
 
 function effectiveDisplayLiveTokenRateScope(scope) {
   const hubMode = state.settings?.hubMode;
-  const syncMode = hubMode === 'client' || hubMode === 'host';
+  const syncMode = tokenRateApi.isSharedSyncMode(hubMode);
   return syncMode && scope === 'all' ? 'all' : 'device';
 }
 
@@ -8120,7 +8120,7 @@ function syncSettingsForm() {
     els.liveTokenRateScopeInput.value = state.settings.liveTokenRateScope === 'device' ? 'device' : 'all';
   }
   const liveRateHasScope = state.settings.showLiveTokenRate === true
-    && (state.settings.hubMode === 'client' || state.settings.hubMode === 'host');
+    && tokenRateApi.isSharedSyncMode(state.settings.hubMode);
   els.liveTokenRateScopeRow?.classList.toggle('hidden', !liveRateHasScope);
   if (els.compactTokenUnitsInput) {
     els.compactTokenUnitsInput.value = state.settings.compactTokenUnits === 'localized' ? 'localized' : 'western';
@@ -11600,7 +11600,7 @@ els.showCompactTotalTokensInput.addEventListener('change', async () => {
 els.showLiveTokenRateInput.addEventListener('change', async () => {
   state.settings.showLiveTokenRate = els.showLiveTokenRateInput.checked;
   const liveRateHasScope = state.settings.showLiveTokenRate
-    && (state.settings.hubMode === 'client' || state.settings.hubMode === 'host');
+    && tokenRateApi.isSharedSyncMode(state.settings.hubMode);
   els.liveTokenRateScopeRow?.classList.toggle('hidden', !liveRateHasScope);
   if (state.settings.showLiveTokenRate) observeLiveTokenRate(state.stats);
   renderLiveTokenRate();

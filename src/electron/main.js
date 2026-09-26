@@ -5156,7 +5156,7 @@ function edgeDockLiveRateSample(visibleStats) {
     return null;
   }
   const hubMode = settings?.hubMode;
-  const syncMode = hubMode === 'client' || hubMode === 'host';
+  const syncMode = tokenRateApi.isSharedSyncMode(hubMode);
   const scope = syncMode && settings?.liveTokenRateScope !== 'device' ? 'all' : 'device';
   const selection = tokenRateApi.selectLiveTokenRatePeriods(visibleStats, settings?.deviceId, hubMode, scope);
   const context = [mode, hubMode || '', settings?.hubUrl || '', settings?.deviceId || '', scope, selection.source].join('|');

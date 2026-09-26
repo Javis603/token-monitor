@@ -361,11 +361,22 @@ test('live rate selects every active hub device or only this device by scope', (
     ],
     source: 'devices:all'
   });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'icloud', 'all'), {
+    entries: [
+      { id: 'device:other', period: other },
+      { id: 'device:this-device', period: local }
+    ],
+    source: 'devices:all'
+  });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'client', 'device'), {
     entries: [{ id: 'device:this-device', period: local }],
     source: 'device:this-device'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'missing', 'client', 'device'), {
+    entries: [],
+    source: 'device:missing'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'missing', 'icloud', 'device'), {
     entries: [],
     source: 'device:missing'
   });
@@ -395,6 +406,22 @@ test('live rate selects every active hub device or only this device by scope', (
     entries: [],
     source: 'device:this-device'
   });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods({
+    periods: { today: aggregate },
+    devices: [{ deviceId: 'old-device', periods: { today: other } }]
+  }, 'this-device', 'icloud', 'device'), {
+    entries: [],
+    source: 'device:this-device'
+  });
+});
+
+test('all live-rate surfaces use shared scope for iCloud', () => {
+  assert.equal(tokenRateApi.isSharedSyncMode('icloud'), true);
+  assert.equal(tokenRateApi.isSharedSyncMode('local'), false);
+  assert.match(app, /function effectiveLiveTokenRateScope\(\)[\s\S]*?tokenRateApi\.isSharedSyncMode\(hubMode\)/);
+  assert.match(app, /function effectiveDisplayLiveTokenRateScope\(scope\)[\s\S]*?tokenRateApi\.isSharedSyncMode\(hubMode\)/);
+  assert.match(app, /const liveRateHasScope = state\.settings\.showLiveTokenRate === true\s*&& tokenRateApi\.isSharedSyncMode\(state\.settings\.hubMode\)/);
+  assert.match(main, /function edgeDockLiveRateSample\(visibleStats\)[\s\S]*?tokenRateApi\.isSharedSyncMode\(hubMode\)/);
 });
 
 test('holding the title mark accelerates from the real rate and keeps rising', () => {
