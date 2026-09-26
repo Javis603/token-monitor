@@ -411,6 +411,7 @@ test('macOS falls back to the masked HUD material when Liquid Glass cannot be bu
     const rail = fixture.windowFor('rail');
 
     assert.deepEqual(rail.vibrancyCalls, ['hud'], JSON.stringify(failure));
+    assert.equal(rail.options.visualEffectState, 'active');
     assert.ok(fixture.maskWindows.includes(rail));
     assert.ok(factory.glasses.filter((glass) => glass.win === rail).every((glass) => glass.disposed !== null));
     const payload = sentPayload(rail, 'rail');

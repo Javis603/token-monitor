@@ -305,8 +305,10 @@ function createEdgeDockController(deps) {
       ...(mac ? { type: 'panel', acceptFirstMouse: true, roundedCorners: false } : {}),
       // The macOS material stays attached for the window's lifetime rather than
       // being detached while hidden: re-attaching builds a new effect view,
-      // which would silently drop the shape mask.
-      ...(macMaterial && !macGlass ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
+      // which would silently drop the shape mask. The active state is set even
+      // for Liquid Glass, so a HUD fallback on these never-focused panels
+      // does not dim as an inactive window.
+      ...(macMaterial ? { visualEffectState: 'active', ...(macGlass ? {} : { vibrancy: 'hud' }) } : {}),
       webPreferences: {
         preload: preloadPath,
         contextIsolation: true,

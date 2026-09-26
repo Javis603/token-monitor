@@ -63,15 +63,21 @@ function loadApi() {
     setPath(target, commands, height) {
       const cg = loadPathApi();
       const path = cg.create();
-      // Shape commands are top-down points; the view's layer is bottom-up.
-      for (const [op, ...p] of commands) {
-        if (op === 'M') cg.moveTo(path, 0, p[0], height - p[1]);
-        else if (op === 'L') cg.lineTo(path, 0, p[0], height - p[1]);
-        else if (op === 'C') cg.curveTo(path, 0, p[0], height - p[1], p[2], height - p[3], p[4], height - p[5]);
-        else if (op === 'Z') cg.close(path);
+      try {
+        // Shape commands are top-down points; the view's layer is bottom-up.
+        for (const [op, ...p] of commands) {
+          if (op === 'M') cg.moveTo(path, 0, p[0], height - p[1]);
+          else if (op === 'L') cg.lineTo(path, 0, p[0], height - p[1]);
+          else if (op === 'C') cg.curveTo(path, 0, p[0], height - p[1], p[2], height - p[3], p[4], height - p[5]);
+          else if (op === 'Z') cg.close(path);
+        }
+        put(target, sel('_setPath:'), path);
+      } finally {
+        cg.release(path); // the view retains its own reference
       }
-      put(target, sel('_setPath:'), path);
-      cg.release(path); // the view retains its own reference
+      // The window shadow is computed from content alpha and cached.
+      const window = get(target, sel('window'));
+      if (window) release(window, sel('invalidateShadow'));
     },
     get: (target, name) => get(target, sel(name)),
     call: (target, name) => release(target, sel(name)),
