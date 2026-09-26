@@ -402,6 +402,27 @@ test('a half sign-in is one attributed unauthorized row, and no store at all is 
   assert.equal(spent, 0);
 });
 
+test('an unattributed half sign-in still asks for a Desktop login, while an unreadable store is transient', async () => {
+  const half = await fetchMimoLimits({}, {
+    fetch: async () => { throw new Error('no request should be spent'); },
+    readMimoDesktopAccount: () => { throw Object.assign(new Error('half'), { status: 'unauthorized' }); },
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(half.length, 1);
+  assert.equal(half[0].status, 'unauthorized');
+  assert.equal(half[0].source, 'local');
+  assert.equal(half[0].sourceDetail, 'app');
+
+  const unreadable = await fetchMimoLimits({}, {
+    fetch: async () => { throw new Error('no request should be spent'); },
+    readMimoDesktopAccount: () => { throw Object.assign(new Error('locked'), { status: 'unavailable' }); },
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(unreadable.length, 1);
+  assert.equal(unreadable[0].status, 'unavailable', 'the runtime can retain the previous good rows');
+  assert.equal(unreadable[0].sourceDetail, 'app');
+});
+
 test('a refused exchange is a credential problem and a throttled one is not', async () => {
   const refused = await fetchMimoLimits({}, {
     fetch: mimoWorld({ accountRefused: true }).fetch,
@@ -539,29 +560,32 @@ test('a scoped refresh spends only the account it names', async () => {
 });
 
 test('a scoped refresh of one product does not answer for the other', async () => {
-  const world = mimoWorld();
+  const consoleWorld = mimoWorld();
   const accountKey = mimoAccountKey('', { userId: '42' });
   const scoped = { provider: 'mimo', accountKey };
   const rows = await fetchMimoLimits({
     mimoManagedAccounts: [{ id: 'mimo-1', accountKey, cookieHeader: CONSOLE_COOKIE }],
     limitRefreshScope: scoped
   }, {
-    fetch: world.fetch,
+    fetch: consoleWorld.fetch,
     readMimoDesktopAccount: signedInDesktop(),
     now: () => Date.UTC(2026, 8, 24)
   });
   // The runtime writes every row a scoped dispatch returns under the scope's own
   // identity, so answering with both would overwrite one row with the other.
   assert.deepEqual(rows.map((row) => row.accountKey), [accountKey]);
+  assert.deepEqual(consoleWorld.mints(), { console: 0, membership: 0 }, 'the unselected membership lane does no work');
 
+  const membershipWorld = mimoWorld();
   const membershipRows = await fetchMimoLimits({
     limitRefreshScope: { provider: 'mimo', accountKey: mimoMembershipAccountKey('42') }
   }, {
-    fetch: world.fetch,
+    fetch: membershipWorld.fetch,
     readMimoDesktopAccount: signedInDesktop(),
     now: () => Date.UTC(2026, 8, 24)
   });
   assert.deepEqual(membershipRows.map((row) => row.accountKey), [mimoMembershipAccountKey('42')]);
+  assert.deepEqual(membershipWorld.mints(), { console: 0, membership: 1 }, 'the unselected console lane does no work');
 });
 
 test('a cancelled refresh rejects instead of publishing an outage', async () => {
@@ -573,6 +597,24 @@ test('a cancelled refresh rejects instead of publishing an outage', async () => 
     signal: controller.signal,
     now: () => Date.UTC(2026, 8, 24)
   }));
+});
+
+test('cancellation during the subscription read is not turned into an unavailable row', async () => {
+  const world = mimoWorld();
+  const controller = new AbortController();
+  const fetch = async (url, init) => {
+    if (String(url) === `${MEMBERSHIP_BASE}/user/xiaomi/subscription/self`) {
+      controller.abort(new Error('cancelled during subscription'));
+      throw controller.signal.reason;
+    }
+    return world.fetch(url, init);
+  };
+  await assert.rejects(fetchMimoLimits({}, {
+    fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    signal: controller.signal,
+    now: () => Date.UTC(2026, 8, 24)
+  }), /cancelled during subscription/u);
 });
 
 // --- the exchange ------------------------------------------------------------
@@ -593,6 +635,54 @@ test('the walk sends the console’s origin headers only to the console', () => 
   }
   // The console lane keeps the page-shaped set it has always sent.
   assert.equal(mimoRequestHeaders('a=b').Origin, 'https://platform.xiaomimimo.com');
+});
+
+test('the exchange refuses an off-list redirect without requesting it', async () => {
+  const world = mimoWorld();
+  let escaped = false;
+  const fetch = async (url, init) => {
+    const href = String(url);
+    if (href.startsWith(`${MEMBERSHIP_BASE}/user/xiaomi/me`) && !String(init?.headers?.Cookie || '').includes('serviceToken=')) {
+      return reply(302, '', { location: 'https://example.com/collect' });
+    }
+    if (href.startsWith('https://example.com/')) escaped = true;
+    return world.fetch(url, init);
+  };
+  const rows = await fetchMimoLimits({}, {
+    fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(escaped, false);
+  assert.equal(rows[0].status, 'ok');
+  assert.equal(rows[1].status, 'unavailable');
+});
+
+test('the service host may use its observed HTTP callback without receiving Secure cookies', async () => {
+  const world = mimoWorld();
+  let callbackCookie = null;
+  const fetch = async (url, init) => {
+    const href = String(url);
+    const parsed = new URL(href);
+    if (parsed.hostname === 'account.xiaomi.com' && parsed.searchParams.get('sid') === 'mimopc') {
+      return reply(302, '', { location: `http://mimo-server-cn.xiaomimimo.com/api/sts?sign=1` });
+    }
+    if (href.startsWith('http://mimo-server-cn.xiaomimimo.com/api/sts')) {
+      callbackCookie = String(init?.headers?.Cookie || '');
+      return reply(307, '', {
+        location: `${MEMBERSHIP_BASE}/user/xiaomi/me`,
+        'set-cookie': ['serviceToken=minted; Path=/', 'userId=42; Path=/']
+      });
+    }
+    return world.fetch(url, init);
+  };
+  const rows = await fetchMimoLimits({}, {
+    fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(callbackCookie, '', 'the account cookie is Secure and stays off HTTP');
+  assert.equal(rows[1].status, 'ok');
 });
 
 test('the membership plan is read the way the app reads it', () => {
@@ -737,7 +827,7 @@ test('a half sign-in is a signed-out app, and it names the account it was read f
   );
 });
 
-test('the partition resolves on macOS and Windows and nowhere else', () => {
+test('the partition resolves on the three desktop platforms and nowhere else', () => {
   const home = path.join(path.sep, 'Users', 'u');
   assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'darwin', home }), [
     path.join(home, 'Library', 'Application Support', 'Xiaomi MiMo', 'Partitions', 'xiaomi-account', 'Cookies')
@@ -749,6 +839,7 @@ test('the partition resolves on macOS and Windows and nowhere else', () => {
   assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'linux', home, env: { XDG_CONFIG_HOME: '/xdg' } }), [
     path.join('/xdg', 'Xiaomi MiMo', 'Partitions', 'xiaomi-account', 'Cookies')
   ]);
+  assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'freebsd', home, env: {} }), []);
 });
 
 test('a store that is there but cannot be read keeps the previous reading', () => {

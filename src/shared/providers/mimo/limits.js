@@ -283,6 +283,7 @@ async function fetchMimoAccount(account, deps = {}) {
       // Spend is enrichment: a console that does not answer it still has a wallet.
       requestMimo('/usage', cookieHeader, deps).catch(() => null)
     ]);
+    throwIfAborted(deps.signal);
     const balance = parseMimoBalance(balanceBody);
     if (balance.amount === null) throw new Error('MiMo balance response is missing a balance');
     const profile = parseMimoProfile(profileBody);
@@ -561,6 +562,7 @@ async function fetchMimoConsoleSide(entry, deps) {
 // cell leaves it to the title unless it has a plan of its own to print.
 function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, updatedAt) {
   const rows = [];
+  const accountEmail = cleanText(consoleRow?.accountEmail || entry.console?.account?.accountEmail);
 
   if (consoleRow) {
     rows.push({
@@ -586,6 +588,8 @@ function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, upd
   if (!membership?.ok) {
     return [...rows, statusProvider(membership?.status || 'unavailable', updatedAt, {
       accountKey: entry.membershipKey || entry.accountKey,
+      accountName: MIMO_MEMBERSHIP_LABEL,
+      accountEmail,
       source: 'local',
       sourceDetail: 'app'
     })];
@@ -600,12 +604,28 @@ function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, upd
     updatedAt,
     accountKey: entry.membershipKey || entry.accountKey,
     accountName: MIMO_MEMBERSHIP_LABEL,
+    accountEmail,
     // The tier is the plan, so it is what the plan column prints; an account
     // with no active plan keeps the product name there and says so in the cell.
     accountLabel: label || MIMO_MEMBERSHIP_LABEL,
     windows: mimoMembershipWindows(membership.plan)
   }));
   return rows;
+}
+
+function mimoLanesForScope(entry, scope) {
+  if (!scope) return { console: true, membership: true };
+  const key = cleanText(scope.accountKey);
+  if (key) {
+    return {
+      console: key === entry.accountKey,
+      membership: key === entry.membershipKey
+    };
+  }
+  // Email and label are console-account selectors. A product row is scoped by
+  // its stable accountKey, which is what the Limits UI and runtime emit.
+  if (scope.accountEmail || scope.accountLabel) return { console: true, membership: false };
+  return { console: true, membership: true };
 }
 
 // A scoped refresh names one row, and the runtime writes every row a scoped
@@ -632,12 +652,18 @@ async function fetchMimoLimits(options = {}, deps = {}) {
   // One observation of the machine's own store per tick, spent by both lanes.
   const desktop = readMimoDesktopSession(deps);
   const entries = collectMimoCredentials(options, deps, scope, desktop);
-  if (!entries.length) return scope ? [] : [statusProvider('notConfigured', updatedAt)];
+  if (!entries.length) {
+    if (desktop.status === 'unavailable' || desktop.status === 'unauthorized') {
+      return [statusProvider(desktop.status, updatedAt, { source: 'local', sourceDetail: 'app' })];
+    }
+    return scope ? [] : [statusProvider('notConfigured', updatedAt)];
+  }
 
   const perEntry = await Promise.all(entries.map(async (entry) => {
+    const lanes = mimoLanesForScope(entry, scope);
     const [consoleSide, membership] = await Promise.all([
-      fetchMimoConsoleSide(entry, deps),
-      entry.membership ? fetchMimoMembershipAccount(entry.membership, deps) : null
+      lanes.console ? fetchMimoConsoleSide(entry, deps) : {},
+      lanes.membership && entry.membership ? fetchMimoMembershipAccount(entry.membership, deps) : null
     ]);
     return rowsForMimoScope(entry, mimoRowsForEntry(entry, { ...consoleSide, membership }, updatedAt), scope);
   }));

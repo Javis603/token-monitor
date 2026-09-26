@@ -1,6 +1,7 @@
 'use strict';
 
 const { planLabelFromParts } = require('../../limits/providerHelpers');
+const { throwIfAborted } = require('../../abortSignal');
 const { mimoEndpointIso } = require('./endpointTime');
 const { mintMimoServiceSession, mimoExchangeStatus } = require('./session');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
@@ -148,6 +149,7 @@ async function readMimoMembershipPlanFor(cookieHeader, userId, deps = {}) {
     }
     return { ok: true, userId, plan: read.plan };
   } catch (error) {
+    throwIfAborted(deps.signal);
     return { ok: false, status: error?.status || 'unavailable', userId };
   }
 }

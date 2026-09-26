@@ -259,9 +259,11 @@ function buildQuota(limits, activeCodexAccount) {
         : window
     ));
     const accountKey = String(provider.accountKey || '').trim();
-    const accountLabel = maskedWidgetEmail(provider.accountEmail)
-      || safeDisplayName(provider.accountName)
-      || safeDisplayName(provider.accountLabel);
+    const accountEmail = maskedWidgetEmail(provider.accountEmail);
+    const accountName = safeDisplayName(provider.accountName);
+    const accountLabel = providerId === 'mimo' && accountEmail && accountName
+      ? `${accountEmail} · ${accountName}`
+      : accountEmail || accountName || safeDisplayName(provider.accountLabel);
     const source = String(provider.source || '').trim().toLowerCase();
     const sourceDetail = String(provider.sourceDetail || '').trim().toLowerCase();
     const stableRecord = {

@@ -2034,11 +2034,13 @@
 
   function mimoAccountTitle(provider, index, providers) {
     const peers = (providers || [provider]).map((row) => ({
-      accountKey: row.accountKey,
-      accountName: String(row.accountName || row.accountLabel || '').trim()
+      ...row,
+      accountName: String(row?.accountName || row?.accountLabel || '').trim()
     }));
-    return accountIdentity.accountTitleLabel(peers[index], peers, { index })
-      || limitAccountDefaultTitle(provider, index, providers);
+    return accountIdentity.accountTitleLabel(peers[index], peers, {
+      maskEmail: limitAccountEmailsMasked(),
+      index
+    }) || `Account ${index + 1}`;
   }
 
   function limitAccountTitle(id, provider, index, providerEntries = [provider]) {

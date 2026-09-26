@@ -42,8 +42,11 @@ function mimoDesktopCookieCandidates(options = {}) {
     candidates.push(path.join(home, 'AppData', 'Roaming', 'Xiaomi MiMo', MIMO_PARTITION_DIR, MIMO_COOKIE_FILE));
     return candidates;
   }
-  const configHome = String(env?.XDG_CONFIG_HOME || '').trim() || path.join(home, '.config');
-  return [path.join(configHome, 'Xiaomi MiMo', MIMO_PARTITION_DIR, MIMO_COOKIE_FILE)];
+  if (platform === 'linux') {
+    const configHome = String(env?.XDG_CONFIG_HOME || '').trim() || path.join(home, '.config');
+    return [path.join(configHome, 'Xiaomi MiMo', MIMO_PARTITION_DIR, MIMO_COOKIE_FILE)];
+  }
+  return [];
 }
 
 function readAccountCookieRows(dbPath, sqlite) {

@@ -159,14 +159,12 @@ function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
     const managed = Array.isArray(options.mimoManagedAccounts || deps.mimoManagedAccounts)
       ? (options.mimoManagedAccounts || deps.mimoManagedAccounts)
       : [];
-    const accounts = options.limitRefreshScope?.provider === 'mimo'
+    // A scoped refresh executes exactly its selected product. A full refresh has
+    // one console job per saved account plus, in the largest case, a different
+    // discovered account's console and membership jobs.
+    jobs = options.limitRefreshScope?.provider === 'mimo'
       ? 1
-      : Math.max(1, managed.length);
-    // Each account answers for two products — the console wallet and the
-    // membership — and either may have to be exchanged for a session first, so
-    // one account is two probes. A machine with nothing stored is not nothing to
-    // do: the account it answers for comes from the machine's own MiMo Desktop.
-    jobs = accounts * 2;
+      : Math.max(2, managed.length + 2);
   }
   return base * jobs;
 }

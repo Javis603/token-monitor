@@ -1,6 +1,7 @@
 'use strict';
 
 const { ProxyAgent, fetch: undiciFetch } = require('undici');
+const { createOutboundFetch, resolveProxyConfig } = require('../../../shared/outboundFetch');
 
 // Chromium's answer for the proxy it would use for a host is a PAC result:
 // `DIRECT`, or `PROXY host:port` (e.g. `PROXY 127.0.0.1:7890`). Only the first
@@ -27,7 +28,16 @@ function parseProxyResolveResult(value) {
 // chain at all (measured). The walk therefore keeps its own jar in shared code and
 // takes its requests from here, routed the way every other widget call is: through
 // whatever Chromium resolved for that host.
-function createMimoExchangeFetch({ session, fetch: fetchImpl = undiciFetch } = {}) {
+function createMimoExchangeFetch({
+  session,
+  fetch: fetchImpl = undiciFetch,
+  env = process.env,
+  envFetch
+} = {}) {
+  const configured = resolveProxyConfig(env);
+  if (configured.httpProxy || configured.httpsProxy) {
+    return envFetch || createOutboundFetch(env);
+  }
   const agents = new Map();
   const agentFor = (proxyUrl) => {
     if (!agents.has(proxyUrl)) agents.set(proxyUrl, new ProxyAgent(proxyUrl));

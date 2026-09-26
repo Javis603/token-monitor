@@ -52,6 +52,28 @@ function allowedLoginUrl(value, base) {
   return MIMO_LOGIN_DOMAINS.some((domain) => hostMatches(host, domain)) ? url : null;
 }
 
+// Every redirect stays inside the service that started the exchange or Xiaomi's
+// login domains. The one protocol exception is the service host's observed HTTP
+// callback; account cookies are Secure and the jar therefore sends none on it.
+function allowedExchangeUrl(value, base, serviceUrl) {
+  let url;
+  try {
+    url = new URL(String(value || ''), base);
+  } catch (_) {
+    return null;
+  }
+  if (url.username || url.password || url.port) return null;
+  const host = url.hostname.toLowerCase();
+  const serviceHost = serviceUrl?.hostname?.toLowerCase() || '';
+  if (host === serviceHost) {
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url : null;
+  }
+  return url.protocol === 'https:'
+    && MIMO_LOGIN_DOMAINS.some((domain) => hostMatches(host, domain))
+    ? url
+    : null;
+}
+
 // A jar for one exchange, enforcing host, Domain and Secure on every hop.
 function createMimoCookieJar() {
   const cookies = [];
@@ -134,6 +156,7 @@ function createMimoCookieJar() {
 function createJarExchange(fetchFn, seed = {}) {
   const jar = createMimoCookieJar();
   const entryUrl = new URL(seed.accountHost || 'https://account.xiaomi.com/');
+  const serviceUrl = seed.serviceUrl ? new URL(seed.serviceUrl) : null;
   jar.seed(seed.accountCookie, entryUrl);
   if (seed.serviceUrl) jar.seed(seed.serviceCookie, new URL(seed.serviceUrl));
 
@@ -159,7 +182,9 @@ function createJarExchange(fetchFn, seed = {}) {
         if (status >= 300 && status < 400) {
           const location = typeof headers.get === 'function' ? headers.get('location') : '';
           if (!location) throw errorWithStatus('unavailable', 'MiMo exchange answered a redirect with no target');
-          current = new URL(location, current);
+          const next = allowedExchangeUrl(location, current, serviceUrl);
+          if (!next) throw errorWithStatus('unavailable', 'MiMo exchange redirected outside its allowed hosts');
+          current = next;
           continue;
         }
         return { status, text: await response.text(), url: current };

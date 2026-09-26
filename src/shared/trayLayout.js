@@ -649,9 +649,12 @@
   }
 
   function accountLabel(provider) {
+    const email = clean(provider?.accountEmail);
+    const name = clean(provider?.accountName);
+    if (providerId(provider) === 'mimo' && email && name) return `${email} · ${name}`;
     return clean(
-      provider?.accountEmail
-      || provider?.accountName
+      email
+      || name
       || provider?.accountLabel
       || provider?.planLabel
       || provider?.accountKey

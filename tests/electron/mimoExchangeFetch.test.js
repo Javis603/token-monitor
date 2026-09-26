@@ -34,6 +34,20 @@ test('a direct resolution reaches the origin without a dispatcher', async () => 
   assert.equal(seen[0].redirect, 'manual', 'the walk’s own request options survive');
 });
 
+test('an explicit proxy environment wins before Chromium proxy resolution', async () => {
+  let resolutions = 0;
+  const seen = [];
+  const fetch = createMimoExchangeFetch({
+    session: { resolveProxy: async () => { resolutions += 1; return 'DIRECT'; } },
+    env: { HTTPS_PROXY: 'http://env-proxy.example:8080' },
+    envFetch: async (url, init) => { seen.push({ url, init }); return { status: 200 }; }
+  });
+  await fetch('https://platform.xiaomimimo.com/api/v1/balance', { redirect: 'manual' });
+  assert.equal(resolutions, 0);
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].init.redirect, 'manual');
+});
+
 test('a resolved proxy becomes a dispatcher on the request', async () => {
   const seen = [];
   const fetch = createMimoExchangeFetch({

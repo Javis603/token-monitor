@@ -897,3 +897,16 @@ test('a row whose only window is the weekly one still reaches the widget', () =>
   assert.equal(row.windows[0].remainingPercent, 60);
   assert.equal(row.windows[0].label, 'Weekly');
 });
+
+test('MiMo widget rows keep the account and product distinguishable', () => {
+  const snapshot = buildSnapshot({
+    limits: { providers: [
+      { provider: 'mimo', status: 'ok', accountKey: 'console', accountEmail: 'user@example.com', accountName: 'Pay-as-you-go', windows: [] },
+      { provider: 'mimo', status: 'ok', accountKey: 'membership', accountEmail: 'user@example.com', accountName: 'Membership', windows: [] }
+    ] }
+  }, { now: NOW });
+  assert.deepEqual(snapshot.quota.map((row) => row.accountLabel).sort(), [
+    'u***r@example.com · Membership',
+    'u***r@example.com · Pay-as-you-go'
+  ]);
+});

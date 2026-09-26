@@ -55,17 +55,19 @@ Consequences worth keeping:
 
 - **Exchange-minted service cookies stay in memory.** They are this exchange's output, and the membership lane's only credential is the account cookie it was minted from: the account cookie is read again on every refresh, and nothing minted here is stored.
 - **A service cookie is not a substitute for the identity hop.** Measured: a freshly minted `serviceToken` set answers `/user/xiaomi/subscription/self` and `/user/usage` with `code: 0`, and is answered by `/user/xiaomi/me` with a **302 back to the SSO**, so it carries no identity and no region reading. Nothing else needs that distinction today — the lane has no paste — but the console lane's service cookie is a different service's and would not work here either.
+- **The account cookie's life is a server-side sliding window, 30 days at a time.** Measured on live exchanges: every accepted exchange re-issues `passToken` (`Max-Age=2592000`, `Secure`, `HttpOnly`, `Domain=.account.xiaomi.com`) with a fresh 30-day expiry — two exchanges four seconds apart advanced its `Expires` by exactly four seconds — while the minted service cookies (`serviceToken`, `mimopc_ph`, `mimopc_slh`) carry no expiry attributes at all and are therefore session cookies. Three things follow. The credential is kept alive by *use*, and our own exchanges count as that use even though the refreshed value is discarded. **We never write the refreshed value back**: the store file is byte-identical after repeated exchanges, the reader opens it read-only, and only the app updates the copy it owns. And the stored row's own `expires_utc` is not what gates this provider — the walk sets its own `Cookie` header instead of asking Chromium to apply it — so a row that Chromium has finally purged arrives here as *no credential at all*, which is the silent fallback, not an error. Not established: whether the server also enforces an absolute idle limit; measuring that needs a month of idleness.
 - **The exchange is silent while the account cookie is valid.** When it is rejected, the chain stops at `account.xiaomi.com/fe/service/login` and **mints nothing** — the refusal signature, detectable with no interactive step.
 - The final followup was observed as `http://`, answering 200 with a `/sts` token not marked `Secure`. Do not force HTTPS on it: a `Secure` cookie is withheld from an `http:` hop.
 - **The account session is one named partition**, `persist:xiaomi-account`. The app sets `X-Client-Version` and `X-Mimo-Source` on those requests; **neither is required and nothing may key on either** — their values vary by build.
 - **Every request the walk makes is shaped like a MiMo client** — the header set `providers/mimo/browserHeaders.js` defines. Its `Origin` and `Referer` go to the console host alone: those name the console page, the console's own web UI sends them and the app's calls send neither, so a hop to the SSO carrying them is a shape no real client has. See §4: getting the client shape wrong does not merely fail the request.
+- **Redirects are allowlisted per hop.** HTTPS may stay on the original service host or move through Xiaomi login domains; HTTP is accepted only for the original service host's observed callback. Cookies remain host/domain scoped and `Secure` cookies are withheld from HTTP.
 - The walk's transport is chosen at the **runtime boundary** like every other provider call; see §5.3.
 
 ### 1.2 Where the account cookie lives
 
 `~/Library/Application Support/Xiaomi MiMo/Partitions/xiaomi-account/Cookies` — the app's own Electron partition, the one its login window uses. A Chromium SQLite cookie store, so the read is a read-only `DatabaseSync` open, the shape `readCursorDesktopAccessToken` already establishes for another app's store.
 
-The app ships on all three desktop platforms, so each candidate is Electron's rule for that platform rather than a guess: `%APPDATA%` (then Roaming under the home directory) on Windows, `$XDG_CONFIG_HOME` or `~/.config` on Linux, Application Support on macOS — all under the `Xiaomi MiMo` root the app's `productName` gives. macOS is the one measured; a wrong path elsewhere reads nothing, the same silent answer as no store.
+macOS is measured. Windows uses Electron's documented `%APPDATA%` location under the same `Xiaomi MiMo` product root, but remains unverified on disk. Linux discovery is disabled until a shipped storage layout is verified; it falls back to the existing manual console-cookie flow.
 
 Two facts about its **contents** are load-bearing, both measured:
 
@@ -148,10 +150,10 @@ A `current` that is an array is invalid, the envelope's `groupCode` and `subscri
 
 Token Monitor reports no current plan as an `ok` membership row with no quota window. That clears a previous meter without putting a normal no-plan answer into the transient retry path.
 
-**Plan names are the app's own mapping**, from the same pass over `current`:
+Plan names follow the app's current-plan card:
 
 ```
-source === 'INVITE'   -> "INVITE"
+source === 'INVITE'   -> no current-plan label; usage still renders
 planTier ∈ [1, 4]     -> the tier name from the app's billing.planTier map
 otherwise             -> no name
 ```
@@ -191,10 +193,11 @@ The rejected-account-cookie row is not hypothetical. Both lanes fail the same wa
 ## 4. Not verified
 
 - **An active membership payload.** No plan was available, so only the no-subscription branch above is real. The *direction* of `percent` is settled (§2.1), but not the values or extra fields a live plan returns.
+- **The timezone of zoneless membership timestamps.** The app fixture carries no offset. Token Monitor keeps the console provider's existing UTC normalization so synced devices agree; a live active-membership response is still needed to confirm that instant.
 - **A request that does not look like a MiMo client costs the user their session.** A request with no `User-Agent` was followed by the same cookie answering the login page to every client until the user signed in again. A refused credential is not what ends one: exchanging an empty `passToken` was followed by a refresh with the real cookie answering as usual.
-- **How much exchanging a session tolerates is not established.** One long run of well-shaped exchanges was harmless, and session losses have also coincided with heavy exchange traffic — including a widget left running, which spends the account cookie on both lanes every refresh (`limitsRefreshMs`, 5 minutes by default). A controlled sample since then — nineteen refreshes at twelve-second and five-minute spacing, in two request shapes — was tolerated end to end, and the server rotates the account cookie on every exchange without invalidating the copy on disk. So count, rate, rotation and header shape do not explain the losses; the volume stays a cost to watch, and the lever if it ever needs to come down is to cache the minted session in memory and re-mint when it answers 401 instead of minting on every tick.
+- **How much exchanging a session tolerates is not established, but rates well above the shipped one are clean.** One long run of well-shaped exchanges was harmless, and session losses have also coincided with heavy exchange traffic — including a widget left running, which spends the account cookie on both lanes every refresh (`limitsRefreshMs`, 5 minutes by default). Three controlled samples since then were tolerated end to end: nineteen refreshes at twelve-second and five-minute spacing in two request shapes, then 24 refreshes at five-second spacing (two exchanges each, 48 chains, 115 s, none failing), then 20 at two-second spacing (40 chains, 38 s, none failing, per-tick latency flat at 160–360 ms and both account keys identical across every tick). The server rotates the account cookie on every exchange without invalidating the copy on disk — the store's copy was byte-identical before and after the fastest sample. So count, rate, rotation and header shape do not explain the losses; the volume stays a cost to watch, and the lever if it ever needs to come down is to cache the minted session in memory and re-mint when it answers 401 instead of minting on every tick.
 - **Repeated minting is non-destructive to local state.** Repeat cycles leave the partition byte-identical, so nothing is written back. Whether the app is running is likewise irrelevant: the cookie is on disk and the exchange is an HTTP walk.
-- **Windows and Linux on disk.** The measured install is macOS, where the cookie rows are plaintext. Chromium seals its cookie store by default on the other two (DPAPI, the OS keyring) and nothing in the app's bundle disables that, so their rows may arrive sealed — which this provider reports as `notConfigured` and falls back from silently. Which way it goes needs a machine.
+- **Windows on disk.** The measured install is macOS, where the cookie rows are plaintext. Chromium normally seals Windows cookies with DPAPI, so those rows may arrive sealed; the provider reports that as `notConfigured` and falls back silently. Linux discovery is intentionally unsupported until its packaged path and cookie representation are verified.
 
 ## 5. How the provider is wired
 
@@ -204,12 +207,12 @@ Every console credential names one account, keyed as `hashKey("mimo:" + userId)`
 
 The membership is that account's **second product**, so it gets a second row, keyed `hashKey("mimo:membership:" + userId)`. The two keys must differ: the hub collapses rows per account key (`aggregateLimits` → `pickBetterProvider`), so one key would publish one of the two products and drop the other — the reason `alibaba` separates its Team and Personal rows by variant. The row exists only when the machine has a Desktop session (see §5.1.1); a machine with none shows the console product alone.
 
-The two rows read as one account because each names its own product rather than repeating the account: the row title is the product (the group header already names the provider), and the plan cell is dropped when it would print that same word again. So:
+The two rows carry one account identity: the console profile name plus a short opaque suffix derived from the account key, or that suffix alone when the profile has no name. The console email is retained with that identity in the limits runtime's in-memory provider state, so a membership-only scoped refresh does not lose the association. Limits, tray selectors and the native widget render `account · product`; multiple Xiaomi accounts remain distinguishable even when the profile endpoint has no email.
 
-| Row | `accountLabel` (the plan cell, and the title when no plan names it) | Source |
-|---|---|---|
-| Console | the Token Plan's name, else **`Pay-as-you-go`** — the name `providers/deepseek` gives its balance-only row, and Xiaomi's own term for the `sk-` API side | `web` + `managed` for a pasted credential, `local` + `app` for one minted from the machine |
-| Membership | the tier (**`Starter`** / **`Plus`** / **`Pro`** / **`Ultra`**, the four names the pricing page and the app's billing card both use), else `Membership`, the product word the pricing page sells ("Xiaomi MiMo Desktop Membership Plans"). A tier outside that table prints the vendor's own `planCode` instead of nothing — the passthrough `planLabelFromParts` applies to every plan this repository cannot name | `local` + `app` |
+| Row | `accountLabel` (product) | `planLabel` | Source |
+|---|---|---|---|
+| Console | `Console` | the Token Plan name, else `Pay-as-you-go` | `web` + `managed` for a pasted credential, `local` + `app` for one minted from the machine |
+| Membership | `Membership` | `Starter` / `Plus` / `Pro` / `Ultra`; an unknown tier uses the vendor's `planCode` | `local` + `app` |
 
 The membership has no plan to name when the subscription answers `current: null`; the row still appears, with no weekly window, and the plan cell says **`No active plan`** — the app's own string for that state.
 
@@ -225,8 +228,9 @@ The shape `readClineSession` establishes, and the fallback the owner asked for:
 
 | Store state | Answer |
 |---|---|
-| Unsupported platform, no store, unreadable, no `node:sqlite`, **sealed rows** | `notConfigured` — silence, and the user pastes instead |
-| Readable and carrying **one** of the two cookies | `unauthorized`, attributed to the `userId` it found, telling the user to sign in to MiMo Desktop again |
+| Unsupported platform, no store, no `node:sqlite`, **sealed rows** | `notConfigured` — silence, and the user pastes instead |
+| Store exists but cannot be inspected or opened | `unavailable` — transient, so the Limits runtime retains last-good automatic rows |
+| Readable and carrying **one** of the two cookies | `unauthorized`, attributed to `userId` when present and otherwise provider-scoped, telling the user to sign in to MiMo Desktop again |
 | Readable and carrying **neither** | `notConfigured` — an app nobody has signed into is the same answer as no app |
 
 At-rest encryption is a property of the store, never evidence that the user signed out.
@@ -235,7 +239,7 @@ At-rest encryption is a property of the store, never evidence that the user sign
 
 `deps.fetch` walks the chain hop by hop, which needs a fetch that can read a redirect's `Location` and its `Set-Cookie` without following it. undici can — on every runtime the headless agent and the hub use, and in the widget when a proxy environment variable is set. Chromium's `net.fetch` cannot: it answers a `redirect: 'manual'` request with `net::ERR_ABORTED`, and it is the widget's transport whenever no proxy environment variable is set, which is the normal case for a GUI app.
 
-The walk therefore takes `deps.mimoExchangeFetch` when a runtime supplies one, and the widget supplies the same request shape routed through whatever Chromium resolved for that host (`session.resolveProxy`, e.g. `PROXY 127.0.0.1:7890`). That adapter is `src/electron/providers/mimo/exchangeFetch.js`, injected beside `claudeWebFetch` into both the collector's deps and the settings probes'. A proxy type undici cannot speak is refused, not skipped; every hop is cancellable, so a probe deadline stops the walk instead of waiting for it.
+The walk therefore takes `deps.mimoExchangeFetch` when a runtime supplies one. In the widget, an explicit `HTTP(S)_PROXY`/`ALL_PROXY` environment keeps the same precedence and `NO_PROXY` behavior as every other limits request; otherwise the adapter asks Chromium what the OS/PAC configuration resolved for each host (`session.resolveProxy`, e.g. `PROXY 127.0.0.1:7890`) and routes undici through that proxy. The adapter is `src/electron/providers/mimo/exchangeFetch.js`, injected beside `claudeWebFetch` into both the collector's deps and the settings probes'. A proxy type undici cannot speak is refused, not skipped; every hop is cancellable, so a probe deadline stops the walk instead of waiting for it.
 
 The cookie jar stays this module's either way. A Chromium *session* is not an alternative: it owns the cookie policy, and that policy withholds every cookie on the https→http hop this chain's callback makes.
 
@@ -246,6 +250,7 @@ The cookie jar stays this module's either way. A Chromium *session* is not an al
 - **Console credential.** One paste covers the wallet and the Token Plan: both answer to the same session, which is why the four console endpoints share one allowlist. Nothing separate is needed for a Token Plan, and no `sk-` or `tp-` key could add it (§1.5).
 - **Membership credential.** The machine's own Desktop session, read on every refresh and never stored. No shape of it is accepted from the settings panel.
 - Saving validates with a read-only probe and keeps only allowlisted names. Discovered credentials and minted sessions are never saved, and nothing is written back to MiMo Desktop.
+- A scoped refresh executes only the selected product lane. Saving or refreshing a console credential therefore does not spend the Desktop account cookie on an unrelated membership exchange; a membership refresh likewise does not call the console.
 
 ## Verification
 

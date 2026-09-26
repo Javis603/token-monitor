@@ -3006,6 +3006,7 @@ test('a grouped MiMo row prints its product once, and its plan beside it', () =>
 test('MiMo Limits rows show the no-plan and source-specific recovery text', () => {
   const view = createLimitWindowsView({
     accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    settings: () => ({}),
     t: (key) => ({
       'limits.mimo.noPlan': '暂无套餐',
       'settings.mimo.desktopRelogin': '请重新登录 MiMo Desktop',
@@ -3017,6 +3018,21 @@ test('MiMo Limits rows show the no-plan and source-specific recovery text', () =
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }), '请重新登录 MiMo Desktop');
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }), '请重新粘贴 MiMo Cookie');
   assert.equal(view.limitAccountTitle('mimo', { provider: 'mimo', accountLabel: 'Pay-as-you-go' }, 0), 'Pay-as-you-go');
+});
+
+test('MiMo product rows name the shared account and the product when both are known', () => {
+  const view = createLimitWindowsView({
+    accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    settings: () => ({}),
+    t: (key) => key,
+    presentation
+  });
+  const rows = [
+    { provider: 'mimo', accountKey: 'console', accountEmail: 'user@example.com', accountName: 'Pay-as-you-go' },
+    { provider: 'mimo', accountKey: 'membership', accountEmail: 'user@example.com', accountName: 'Membership' }
+  ];
+  assert.equal(view.limitAccountTitle('mimo', rows[0], 0, rows), 'user@example.com · Pay-as-you-go');
+  assert.equal(view.limitAccountTitle('mimo', rows[1], 1, rows), 'user@example.com · Membership');
 });
 
 test('a healthy MiMo row keeps its meta line free of recovery prompts', () => {
