@@ -149,7 +149,7 @@ Qoder CN 的 Token 用量來自應用程式本機資料，而非 API —— 在 
 
 ### 多裝置與部署
 
-- **多裝置即時同步**：透過 Server-Sent Events 推送，一台裝置的更新數秒內出現在其他裝置
+- **多裝置同步**：Hub 同步透過 Server-Sent Events 在數秒內推送更新；iCloud Drive 同步具有最終一致性
 - **本地優先**：單裝置使用完全不需伺服器
 - **自架同步後端**：小工具內 hub、Node CLI hub 或 Cloudflare Worker，任你選
 - **iOS 小工具支援**：透過 Worker hub 搭配 Widgy、Scriptable
@@ -191,7 +191,7 @@ brew install --cask token-monitor
 
 ## 多裝置同步
 
-挑一個所有裝置（與任何無頭代理）都連得到的 hub 後端。在每台裝置上打開小工具，在 設定 → 多裝置同步 選一個模式。小工具會自動回報本機用量；只在沒有小工具的機器上跑 `npm run agent`。
+挑一個供裝置（與任何無頭代理）使用的多裝置同步後端。在每台裝置上打開小工具，在 設定 → 多裝置同步 選一個模式。小工具會自動回報本機用量；只在沒有小工具的機器上跑 `npm run agent`。iCloud Drive 僅供 macOS 小工具使用，不支援無頭代理。
 
 #### 選項 A——直接在小工具內開 hub（最簡單，無需命令列）
 
@@ -223,6 +223,10 @@ npx wrangler deploy
 ```
 
 把部署 URL 貼到每台裝置的小工具 設定 → 多裝置同步。iOS 小工具設定步驟與端點參考請見 [worker/README.md](worker/README.md)，hub HTTP API 請見 [docs/API.md](docs/API.md)。
+
+#### 選項 D——iCloud Drive（macOS，不需要 Hub Server）
+
+在每台登入同一 Apple ID 的 Mac 上，進入 設定 → 多裝置同步並選 **iCloud Drive**。這是選擇性、僅限 macOS 的模式：Token Monitor 會在 iCloud Drive 的 `Token Monitor/sync-v1/` 下為每台裝置與每個寫入者保存原子快照，再由各台 Mac 聚合有效檔案。不使用 Token Monitor 伺服器、CloudKit 或憑證；供應商 API key、Cookie 與 token 留在本機。iCloud Drive 具最終一致性，其他 Mac 的更新可能需要一點時間才會出現，損壞或暫時缺失的檔案也不會清空最後一次有效的聚合結果。
 
 ## App 資料
 
@@ -263,7 +267,7 @@ Runtime 與打包腳本會在四個 vendored 目標上明確確保使用 pinned 
     裝置 C agent ──▶
 ```
 
-小工具會根據 設定 → 多裝置同步 決定走本地或同步模式。hub 本身可以是獨立的 `npm run hub` 程序、Cloudflare Worker，或直接跑在某一個小工具裡（Host 模式）。同步模式下，hub 透過 Server-Sent Events 把彙總後的統計推送給每個連線中的小工具，所以一台裝置上的更新會在數秒內出現在其他裝置上。
+小工具會根據 設定 → 多裝置同步 決定走本地或同步模式。hub 本身可以是獨立的 `npm run hub` 程序、Cloudflare Worker，或直接跑在某一個小工具裡（Host 模式）。在 Hub Client 和 Host 模式下，hub 透過 Server-Sent Events 把彙總後的統計推送給每個連線中的小工具，所以一台裝置上的更新通常會在數秒內出現在其他裝置上。iCloud Drive 模式直接同步檔案，具有最終一致性，更新可能需要更長時間才會出現。
 
 ## 會話資料保留期
 

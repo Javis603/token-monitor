@@ -446,6 +446,7 @@ test('startCollector retains a transformed watch total until the next history ti
 
   try {
     await waitForCondition(() => updates.length >= 1);
+    await runtime.whenIdle();
     await runtime.tick('watch', { todayOnly: true });
     await runtime.tick('manual', { forceHistory: true });
 

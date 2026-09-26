@@ -39,6 +39,10 @@ function historyFrom(graphValue, todayKey = '2026-07-18') {
   return normalizeHistory(parseGraphResult(graphValue), { todayKey, capDays: 370 });
 }
 
+function inMemoryArchiveOptions(options) {
+  return options;
+}
+
 function livePeriod(totalTokens, costUsd = 0) {
   return {
     totalTokens,
@@ -385,12 +389,12 @@ function dayObservation(archive, date) {
   return Object.values(archive.liveDays[date].observations)[0];
 }
 
-function withArchiveFile(content, callback) {
+async function withArchiveFile(content, callback) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-archive-'));
   const archivePath = path.join(directory, 'daily-history-archive.json');
   fs.writeFileSync(archivePath, content, 'utf8');
   try {
-    return callback(archivePath);
+    return await callback(archivePath);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
@@ -402,8 +406,8 @@ for (const [name, retain] of [
   ]), options)],
   ['retainLiveDailyHistory', (options) => retainLiveDailyHistory(livePeriod(120, 1.2), options)]
 ]) {
-  test(`${name} treats only a missing archive as empty`, () => {
-    withArchiveFile('   \n', (archivePath) => {
+  test(`${name} treats only a missing archive as empty`, async () => {
+    await withArchiveFile('   \n', async (archivePath) => {
       assert.throws(
         () => retain({ path: archivePath, todayKey: '2026-08-05' }),
         (error) => error.message.includes(archivePath) && error.message.includes('empty')
@@ -411,7 +415,7 @@ for (const [name, retain] of [
       assert.equal(fs.readFileSync(archivePath, 'utf8'), '   \n');
     });
 
-    withArchiveFile('{"days":', (archivePath) => {
+    await withArchiveFile('{"days":', async (archivePath) => {
       assert.throws(
         () => retain({ path: archivePath, todayKey: '2026-08-05' }),
         (error) => error.message.includes(archivePath) && error.cause instanceof SyntaxError
@@ -422,7 +426,7 @@ for (const [name, retain] of [
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-archive-'));
     const archivePath = path.join(directory, 'missing.json');
     try {
-      assert.doesNotThrow(() => retain({ path: archivePath, todayKey: '2026-08-05' }));
+      await retain({ path: archivePath, todayKey: '2026-08-05' });
       assert.equal(fs.existsSync(archivePath), true);
       const created = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
       assert.ok(created.days?.['2026-08-05'] || created.liveDays?.['2026-08-05']);
@@ -438,11 +442,11 @@ for (const [name, retain] of [
   ]), options)],
   ['retainLiveDailyHistory', (options) => retainLiveDailyHistory(livePeriod(120, 1.2), options)]
 ]) {
-  test(`${name} leaves the archive untouched when the prewrite rebase read fails`, () => {
+  test(`${name} leaves the archive untouched when the prewrite rebase read fails`, async () => {
     const initial = captureDailyHistoryArchive({}, graph('2026-08-04', [
       client('codex', 'gpt', 50, 2, 3)
     ]), { todayKey: '2026-08-05' });
-    withArchiveFile(`${JSON.stringify(initial)}\n`, (archivePath) => {
+    await withArchiveFile(`${JSON.stringify(initial)}\n`, async (archivePath) => {
       const before = fs.readFileSync(archivePath);
       const beforeMtime = fs.statSync(archivePath).mtimeMs;
       let writeChecks = 0;
@@ -474,7 +478,7 @@ for (const [name, retain] of [
         client('codex', 'gpt', 50, 2, 3)
       ]), { todayKey: '2026-08-05' });
       fs.writeFileSync(archivePath, `${JSON.stringify(repaired)}\n`, 'utf8');
-      assert.doesNotThrow(() => retain({ path: archivePath, todayKey: '2026-08-05' }));
+      await retain({ path: archivePath, todayKey: '2026-08-05' });
       const recovered = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
       assert.ok(recovered.days['2026-08-04']);
       assert.ok(recovered.days['2026-08-05'] || recovered.liveDays?.['2026-08-05']);
@@ -482,14 +486,14 @@ for (const [name, retain] of [
   });
 }
 
-test('strict archive reader rejects invalid container shapes while preserving compatibility', () => {
-  withArchiveFile('null', (archivePath) => {
+test('strict archive reader rejects invalid container shapes while preserving compatibility', async () => {
+  await withArchiveFile('null', async (archivePath) => {
     assert.throws(() => retainDailyHistory([], { path: archivePath }), (error) => error.message.includes('root'));
   });
-  withArchiveFile('{"days":[]}', (archivePath) => {
+  await withArchiveFile('{"days":[]}', async (archivePath) => {
     assert.throws(() => retainDailyHistory([], { path: archivePath }), (error) => error.message.includes('days'));
   });
-  assert.doesNotThrow(() => retainDailyHistory([], { readJson: () => ({}) }));
+  await retainDailyHistory([], inMemoryArchiveOptions({ readJson: () => ({}) }));
 });
 
 const ioRetainCases = [
@@ -502,7 +506,7 @@ const ioRetainCases = [
 for (const [name, retain] of ioRetainCases) {
   for (const [phase, failingRead] of [['initial', 1], ['prewrite rebase', 2]]) {
     for (const code of ['EACCES', 'EBUSY', 'EPERM']) {
-      test(`${name} propagates ${code} from the ${phase} archive read`, (t) => {
+      test(`${name} propagates ${code} from the ${phase} archive read`, async (t) => {
         const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-archive-'));
         const archivePath = path.join(directory, 'daily-history-archive.json');
         const initial = captureDailyHistoryArchive({}, graph('2026-08-04', [
@@ -532,7 +536,7 @@ for (const [name, retain] of ioRetainCases) {
           assert.deepEqual(originalReadFileSync(archivePath), before);
           assert.equal(fs.statSync(archivePath).mtimeMs, beforeMtime);
           t.mock.restoreAll();
-          assert.doesNotThrow(() => retain({ path: archivePath, todayKey: '2026-08-05' }));
+          await retain({ path: archivePath, todayKey: '2026-08-05' });
           const recovered = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
           assert.deepEqual(recovered.days['2026-08-04'], initial.days['2026-08-04']);
           assert.ok(recovered.days?.['2026-08-05'] || recovered.liveDays?.['2026-08-05']);
@@ -544,17 +548,17 @@ for (const [name, retain] of ioRetainCases) {
   }
 }
 
-test('retainLiveDailyHistory persists only a higher live snapshot', () => {
+test('retainLiveDailyHistory persists only a higher live snapshot', async () => {
   let stored = {};
   let writes = 0;
-  const options = {
+  const options = inMemoryArchiveOptions({
     todayKey: '2026-08-05',
     readJson: () => stored,
     writeJsonAtomic: (_path, value) => { stored = value; writes += 1; }
-  };
+  });
 
-  retainLiveDailyHistory(livePeriod(645_957_554), options);
-  retainLiveDailyHistory(livePeriod(507_800_000), options);
+  await retainLiveDailyHistory(livePeriod(645_957_554), options);
+  await retainLiveDailyHistory(livePeriod(507_800_000), options);
 
   assert.equal(writes, 1);
   assert.equal(dayObservation(stored, '2026-08-05').tokens, 645_957_554);
@@ -582,22 +586,22 @@ test('graph reconstruction exposes the rolling daily window but keeps older roll
   assert.equal(normalized.summary.totalTokens, 125);
 });
 
-test('retainDailyHistory persists only changes and can serve the archive when a scan is empty', () => {
+test('retainDailyHistory persists only changes and can serve the archive when a scan is empty', async () => {
   let stored = {};
   let writes = 0;
-  const options = {
+  const options = inMemoryArchiveOptions({
     todayKey: '2026-07-18',
     readJson: () => stored,
     writeJsonAtomic: (_path, value) => { stored = value; writes += 1; }
-  };
-  retainDailyHistory(graph('2026-07-17', [client('claude', 'opus', 100, 4, 5)]), options);
-  retainDailyHistory(graph('2026-07-17', [client('claude', 'opus', 100, 4, 5)]), options);
-  const restored = historyFrom(retainDailyHistory([], options));
+  });
+  await retainDailyHistory(graph('2026-07-17', [client('claude', 'opus', 100, 4, 5)]), options);
+  await retainDailyHistory(graph('2026-07-17', [client('claude', 'opus', 100, 4, 5)]), options);
+  const restored = historyFrom(await retainDailyHistory([], options));
   assert.equal(writes, 1);
   assert.equal(restored.daily[0].tokens, 100);
 });
 
-test('retainDailyHistory rebases on archive changes made during the graph scan', () => {
+test('retainDailyHistory rebases on archive changes made during the graph scan', async () => {
   const initial = captureDailyHistoryArchive({}, graph('2026-07-17', [
     client('claude', 'opus', 100, 4, 5)
   ]), { todayKey: '2026-07-18' });
@@ -606,13 +610,13 @@ test('retainDailyHistory rebases on archive changes made during the graph scan',
   ]), { todayKey: '2026-07-18' });
   let reads = 0;
   let stored;
-  const retained = retainDailyHistory(graph('2026-07-17', [
+  const retained = await retainDailyHistory(graph('2026-07-17', [
     client('claude', 'opus', 120, 4.8, 6)
-  ]), {
+  ]), inMemoryArchiveOptions({
     todayKey: '2026-07-18',
     readJson: () => (++reads === 1 ? initial : handedOff),
     writeJsonAtomic: (_path, value) => { stored = value; }
-  });
+  }));
 
   assert.equal(reads, 2);
   assert.deepEqual(
@@ -628,20 +632,20 @@ test('captureLiveDailyHistory prunes future snapshots even when today has no usa
   assert.equal(pruned.liveDays?.['2026-08-06'], undefined);
 });
 
-test('widget stays read-only while a headless agent owns the shared archive', () => {
+test('widget stays read-only while a headless agent owns the shared archive', async () => {
   let stored = {};
   let writes = 0;
-  const storage = {
+  const storage = inMemoryArchiveOptions({
     todayKey: '2026-07-18',
     readJson: () => stored,
     writeJsonAtomic: (_path, value) => { stored = value; writes += 1; }
-  };
+  });
 
-  retainDailyHistory(graph('2026-07-17', [
+  await retainDailyHistory(graph('2026-07-17', [
     client('claude', 'opus', 100, 4, 5)
   ]), { ...storage, writeEnabled: true });
 
-  const widgetGraph = retainDailyHistory(graph('2026-07-17', [
+  const widgetGraph = await retainDailyHistory(graph('2026-07-17', [
     client('codex', 'gpt', 50, 2, 3)
   ]), { ...storage, writeEnabled: () => false });
   const widgetHistory = historyFrom(widgetGraph);
@@ -650,7 +654,7 @@ test('widget stays read-only while a headless agent owns the shared archive', ()
   assert.deepEqual(Object.values(stored.days['2026-07-17'].observations).map((item) => item.client), ['claude']);
   assert.equal(widgetHistory.daily[0].tokens, 150);
 
-  retainDailyHistory(graph('2026-07-17', [
+  await retainDailyHistory(graph('2026-07-17', [
     client('claude', 'opus', 100, 4, 5),
     client('codex', 'gpt', 50, 2, 3)
   ]), { ...storage, writeEnabled: true });
@@ -662,15 +666,15 @@ test('widget stays read-only while a headless agent owns the shared archive', ()
   );
 });
 
-test('lazy write ownership is checked after the archive read', () => {
+test('lazy write ownership is checked after the archive read', async () => {
   let canWrite = true;
   let writes = 0;
-  retainDailyHistory(graph('2026-07-17', [client('claude', 'opus', 100, 4, 5)]), {
+  await retainDailyHistory(graph('2026-07-17', [client('claude', 'opus', 100, 4, 5)]), inMemoryArchiveOptions({
     todayKey: '2026-07-18',
     readJson: () => { canWrite = false; return {}; },
     writeJsonAtomic: () => { writes += 1; },
     writeEnabled: () => canWrite
-  });
+  }));
   assert.equal(writes, 0);
 });
 
@@ -758,15 +762,15 @@ test('durable reconstruction preserves client-specific reasoning output without 
   assert.equal(restored.daily[0].perClient.claude.outputTokens, undefined);
 });
 
-test('clearDailyHistoryArchive removes persisted data and accepts a missing file', () => {
+test('clearDailyHistoryArchive removes persisted data and accepts a missing file', async () => {
   let calls = 0;
-  assert.equal(clearDailyHistoryArchive({ unlinkSync: () => { calls += 1; } }), true);
+  assert.equal(await clearDailyHistoryArchive(inMemoryArchiveOptions({ unlinkSync: () => { calls += 1; } })), true);
   assert.equal(calls, 1);
-  assert.equal(clearDailyHistoryArchive({ unlinkSync: () => {
+  assert.equal(await clearDailyHistoryArchive(inMemoryArchiveOptions({ unlinkSync: () => {
     const error = new Error('missing');
     error.code = 'ENOENT';
     throw error;
-  } }), false);
+  } })), false);
 });
 
 // The rule that keeps a post-split day from being absorbed into Pi forever.

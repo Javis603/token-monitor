@@ -15,6 +15,7 @@ const settingsListFilterApi = require('../../src/electron/renderer/settingsListF
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
 const { limitWindowLabel } = require('../../src/shared/limits/windowLabels');
 const { limitWindowText } = require('../../src/shared/limits/windowText');
+const mainProcessSource = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
 
 const {
   antigravityQuotaWindow,
@@ -4465,6 +4466,7 @@ test('a refused write says which problem it was', () => {
   const key = (message) => vm.runInNewContext(`${mapKey}\nsubscriptionWriteErrorKey({ message });`, { message });
   assert.match(key("Error invoking remote method 'subscriptions:save': Error: hub_rejected"), /errorHubRejected$/);
   assert.match(key('Error: write_failed'), /errorWriteFailed$/);
+  assert.match(key('Error: icloud_write_failed'), /errorIcloudWrite$/);
   assert.match(key('Error: stale_write'), /errorStaleWrite$/);
   assert.match(key('Error: hub_unreachable'), /errorHubWrite$/);
 
@@ -4474,6 +4476,15 @@ test('a refused write says which problem it was', () => {
   for (const k of ['errorHubRejected', 'errorWriteFailed', 'orphanNotice', 'orphanAdopt', 'orphanDiscard']) {
     assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${k}':`).length - 1, 5);
   }
+});
+
+test('iCloud startup lets local subscription ownership reach the seed reconcile', () => {
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const start = main.indexOf('onSubscriptions: (document) => {');
+  assert.ok(start >= 0);
+  const body = main.slice(start, main.indexOf('\n    onError:', start));
+  assert.match(body, /localOwnedSubscriptions = !settings\.subscriptionsCacheHub/);
+  assert.match(body, /if \(localOwnedSubscriptions\) return;/);
 });
 
 test('a device with no limits of its own can still name the accounts on the hub', () => {
@@ -5434,6 +5445,137 @@ test('switching hubs does not wait out the old hub request before starting', () 
   // Nothing awaits it any more, so it has to keep its own failures rather than
   // surface them as an unhandled rejection.
   assert.match(functionBody(main, 'reconcileSharedSubscriptions', 'restartDeviceRuntimeForMode'), /\} catch \(error\) \{/);
+});
+
+test('iCloud subscription writes discard results from a replaced runtime', async () => {
+  const source = [
+    functionBody(mainProcessSource, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(mainProcessSource, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(mainProcessSource, 'hubChangedError', 'subscriptionsEndpoint'),
+    functionBody(mainProcessSource, 'currentHubIdentity', 'subscriptionDocumentVersion'),
+    `async ${functionBody(mainProcessSource, 'saveSubscriptions', 'stopSyncCollector')}`
+  ].join('\n');
+  let resolveSave;
+  let saveCalls = 0;
+  const pendingSave = new Promise((resolve) => { resolveSave = resolve; });
+  const runtime = {
+    saveSubscriptions: () => { saveCalls += 1; return pendingSave; }
+  };
+  const context = vm.createContext({
+    settings: { hubMode: 'icloud' },
+    subscriptionQueues: new Map(),
+    icloudRuntimeHandle: runtime,
+    effectiveHubConfig: () => ({ url: '' }),
+    subscriptionsAreShared: () => true,
+    cacheCalls: [],
+    cacheSharedSubscriptions: (...args) => { context.cacheCalls.push(args); },
+    pushCalls: 0,
+    pushSettingsToRenderer: () => { context.pushCalls += 1; },
+    settingsForRenderer: () => ({ ok: true }),
+    Promise,
+    String,
+    Object
+  });
+  vm.runInContext(source, context);
+
+  const saving = vm.runInContext("saveSubscriptions([{ id: 'mine' }], { hub: 'icloud', updatedAt: 'v1' });", context);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(saveCalls, 1);
+  context.icloudRuntimeHandle = { saveSubscriptions: async () => ({}) };
+  resolveSave({ winner: { updatedAt: 'v2', subscriptions: [{ id: 'mine' }] }, revisionToken: 'v2' });
+
+  await assert.rejects(() => saving, (error) => error.code === 'hub_changed');
+  assert.deepEqual(plain(context.cacheCalls), []);
+  assert.equal(context.pushCalls, 0);
+});
+
+test('iCloud adoption keeps orphan records when the saving runtime is replaced', async () => {
+  const source = [
+    functionBody(mainProcessSource, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(mainProcessSource, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(mainProcessSource, 'hubChangedError', 'subscriptionsEndpoint'),
+    functionBody(mainProcessSource, 'currentHubIdentity', 'subscriptionDocumentVersion'),
+    functionBody(mainProcessSource, 'orphanedSubscriptions', 'pendingOrphanedSubscriptions'),
+    functionBody(mainProcessSource, 'pendingOrphanedSubscriptions', 'adoptOrphanedSubscriptions'),
+    `async ${functionBody(mainProcessSource, 'adoptOrphanedSubscriptions', 'subscriptionWriteFailureCode')}`
+  ].join('\n');
+  let resolveSave;
+  const pendingSave = new Promise((resolve) => { resolveSave = resolve; });
+  const runtime = {
+    getSubscriptions: () => ({ subscriptions: [], revisionToken: 'v1' }),
+    saveSubscriptions: () => pendingSave
+  };
+  const context = vm.createContext({
+    settings: { hubMode: 'icloud', subscriptionsOrphaned: { hubUrl: 'icloud', records: [{ id: 'mine' }] } },
+    subscriptionQueues: new Map(),
+    icloudRuntimeHandle: runtime,
+    effectiveHubConfig: () => ({ url: '' }),
+    subscriptionsAreShared: () => true,
+    cacheCalls: [],
+    cacheSharedSubscriptions: (...args) => { context.cacheCalls.push(args); },
+    saveSettings: () => { context.saved = true; return true; },
+    settingsForRenderer: () => ({ ok: true }),
+    Promise,
+    String,
+    Object
+  });
+  vm.runInContext(source, context);
+
+  const adopting = vm.runInContext('adoptOrphanedSubscriptions();', context);
+  await new Promise((resolve) => setImmediate(resolve));
+  context.icloudRuntimeHandle = {};
+  resolveSave({ winner: { updatedAt: 'v2', subscriptions: [{ id: 'mine' }] }, revisionToken: 'v2' });
+
+  await assert.rejects(() => adopting, (error) => error.code === 'hub_changed');
+  assert.deepEqual(plain(context.cacheCalls), []);
+  assert.deepEqual(plain(context.settings.subscriptionsOrphaned.records), [{ id: 'mine' }]);
+  assert.equal(context.saved, undefined);
+});
+
+test('iCloud local seeding does not cache a result from a replaced runtime', async () => {
+  const source = [
+    functionBody(mainProcessSource, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(mainProcessSource, 'currentHubIdentity', 'subscriptionDocumentVersion'),
+    `async ${functionBody(mainProcessSource, 'refreshSharedSubscriptionsNow', 'maybeAdoptSharedSubscriptionRevision')}`
+  ].join('\n');
+  let resolveSave;
+  const pendingSave = new Promise((resolve) => { resolveSave = resolve; });
+  const runtime = {
+    reconcile: async () => {},
+    getSubscriptions: () => null,
+    saveSubscriptions: () => pendingSave
+  };
+  const context = vm.createContext({
+    settings: {
+      hubMode: 'icloud',
+      subscriptions: [{ id: 'local' }],
+      subscriptionsCacheHub: '',
+      subscriptionsOrphaned: { hubUrl: '', records: [] }
+    },
+    hubSubscriptions: null,
+    hubSubscriptionsHub: '',
+    icloudRuntimeHandle: runtime,
+    effectiveHubConfig: () => ({ url: '' }),
+    subscriptionsAreShared: () => true,
+    cacheCalls: [],
+    cacheSharedSubscriptions: (...args) => { context.cacheCalls.push(args); return true; },
+    rememberCalls: 0,
+    rememberOrphanedSubscriptions: () => { context.rememberCalls += 1; },
+    persistSubscriptionState: () => true,
+    Promise,
+    String,
+    Object
+  });
+  vm.runInContext(source, context);
+
+  const refreshing = vm.runInContext('refreshSharedSubscriptionsNow({ seedFromLocal: true });', context);
+  await new Promise((resolve) => setImmediate(resolve));
+  context.icloudRuntimeHandle = {};
+  resolveSave({ winner: { updatedAt: 'v2', subscriptions: [{ id: 'local' }] }, revisionToken: 'v2' });
+
+  assert.equal(await refreshing, false);
+  assert.deepEqual(plain(context.cacheCalls), []);
+  assert.equal(context.rememberCalls, 0);
 });
 
 test('GLM Home daily windows retain returned model names instead of the generic daily label', () => {

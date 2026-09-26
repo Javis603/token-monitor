@@ -40,11 +40,15 @@ test('targeted rescans stay strict while Cursor credential refresh is best effor
   );
   assert.match(
     main,
-    /function bestEffortTrackedUsageRefresh[\s\S]*!canRefreshUsageRuntime\(mode, isExternalAgentActive\)/
+    /function bestEffortTrackedUsageRefresh[\s\S]*settings\?\.hubMode !== 'icloud'[\s\S]*!canRefreshUsageRuntime\(mode, isExternalAgentActive\)/
   );
   assert.match(
     main,
-    /function drainPendingUsageClientRefreshes[\s\S]*enabled: canRefreshUsageRuntime\(mode, isExternalAgentActive\)/
+    /function drainPendingUsageClientRefreshes[\s\S]*enabled: settings\?\.hubMode === 'icloud' \|\| canRefreshUsageRuntime\(mode, isExternalAgentActive\)/
+  );
+  assert.match(
+    main,
+    /function ownsUsageRuntime[\s\S]*settings\?\.hubMode === 'icloud'[\s\S]*canRefreshUsageRuntime\(mode, isExternalAgentActive\)/
   );
 });
 

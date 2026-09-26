@@ -41,6 +41,16 @@ test('the source key identifies the Hub data store, not its bearer secret', () =
   );
 });
 
+test('iCloud is an in-process Widget history source with its own cache identity', () => {
+  const { completeHistorySource } = require('../../src/electron/historySource');
+  const icloud = { mode: 'sync', hubMode: 'icloud', icloudSync: { getHistory() {} } };
+  assert.equal(completeHistorySource(icloud), 'icloud');
+  assert.notEqual(
+    macWidgetHistorySourceKey(icloud),
+    macWidgetHistorySourceKey({ ...icloud, hubMode: 'client', hubUrl: 'http://hub' })
+  );
+});
+
 test('an unchanged revision is served from cache without refetching', async () => {
   let calls = 0;
   const fetchHistory = () => { calls += 1; return history('a'); };
