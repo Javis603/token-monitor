@@ -1,6 +1,6 @@
 'use strict';
 
-const { aggregateDevices } = require('../shared/usage');
+const { aggregateDevices, normalizeDeviceRecord } = require('../shared/usage');
 const { deviceHistoryRevision } = require('../shared/history');
 const { pickRecentUsageActivity } = require('../shared/trayText');
 
@@ -46,6 +46,20 @@ function attachLocalPresentationNativeViews(stats, options = {}) {
   return attachLocalNativeViews(stats, localDevice);
 }
 
+// Each local collection replaces the record rather than mutating it, and every
+// Hub event in between recomposes it again. Normalizing it once per record takes
+// the largest share of a recompose off the main thread.
+const normalizedLocalRecords = new WeakMap();
+
+function normalizedLocalRecord(localDevice) {
+  let normalized = normalizedLocalRecords.get(localDevice);
+  if (!normalized) {
+    normalized = normalizeDeviceRecord(localDevice);
+    normalizedLocalRecords.set(localDevice, normalized);
+  }
+  return normalized;
+}
+
 function composeLocalSyncStats(hubStats, localDevice, options = {}) {
   if (!localDevice?.deviceId) return hubStats;
   if (hubStats && !Array.isArray(hubStats.devices)) return hubStats;
@@ -58,7 +72,9 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     .concat(localDevice);
   const hubStaleAfterMs = nonNegativeNumber(hubStats?.staleAfterMs);
   const hasHubStaleAfterMs = hubStaleAfterMs !== null;
-  const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs);
+  const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs, {
+    normalizeRecord: (record) => (record === localDevice ? normalizedLocalRecord(localDevice) : normalizeDeviceRecord(record))
+  });
 
   aggregate.devices = aggregate.devices.map((device) => {
     const previous = previousDevices.get(device.deviceId);
