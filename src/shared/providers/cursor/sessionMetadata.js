@@ -43,7 +43,9 @@ function cleanTitle(value) {
 // for rows the table does not cover, and it is read at most once per database
 // fingerprint through cache.legacyTitles.
 function legacyTitlesFor(db, cache) {
-  if (cache.legacyTitles) return cache.legacyTitles;
+  // null distinguishes a failed read from a successful-but-empty index: the
+  // former is retried, the latter is a definitive answer.
+  if (cache.legacyTitles !== null && cache.legacyTitles !== undefined) return cache.legacyTitles;
   const titles = new Map();
   try {
     const row = db.prepare('SELECT value FROM ItemTable WHERE key = ?').get('composer.composerHeaders');
@@ -56,8 +58,10 @@ function legacyTitlesFor(db, cache) {
     // Cache only a successful read — including an empty answer. A transient
     // failure leaves legacyTitles unset so the next lookup retries.
     cache.legacyTitles = titles;
-  } catch (_) { /* Missing table/key or malformed payload: retry next lookup. */ }
-  return titles;
+    return titles;
+  } catch (_) {
+    return null;
+  }
 }
 
 function readTitles(dbPath, sqlite, wantedIds, cache) {
@@ -74,6 +78,7 @@ function readTitles(dbPath, sqlite, wantedIds, cache) {
     // legacy-eligible and cacheable; a read failure is retry-only.
     const eligible = new Set();
     const failed = new Set();
+    const misses = new Set();
     let hasHeaderTable;
     try {
       hasHeaderTable = Boolean(
@@ -117,15 +122,16 @@ function readTitles(dbPath, sqlite, wantedIds, cache) {
     if (eligible.size > 0 || failed.size > 0) {
       const legacy = legacyTitlesFor(db, cache);
       for (const id of eligible) {
-        const title = legacy.get(id);
+        const title = legacy?.get(id);
         if (title) titles.set(id, title);
+        else if (legacy) misses.add(id); // both stores definitively answered nothing
       }
       for (const id of failed) {
-        const title = legacy.get(id);
+        const title = legacy?.get(id);
         if (title) retries.set(id, title);
       }
     }
-    return { titles, retries };
+    return { titles, retries, misses };
   } catch (_) {
     return null;
   } finally {
@@ -148,16 +154,19 @@ function resolveSessionMetadata(sessionIds, { deps = {}, home } = {}) {
     const stamp = databaseStamp(dbPath);
     if (!stamp) continue;
     let cached = cache.get(dbPath);
-    if (cached?.stamp !== stamp) cached = { stamp, titles: new Map(), legacyTitles: null };
-    // Ask only for ids without a known answer on this fingerprint. A miss is
-    // never cached as an answer, so a late-landing header or a transient read
-    // error still resolves on the next lookup without waiting for the WAL.
-    const wanted = new Set([...sessionIds].filter((id) => !cached.titles.has(id)));
+    if (cached?.stamp !== stamp) cached = { stamp, titles: new Map(), misses: new Set(), legacyTitles: null };
+    // Ask only for ids this fingerprint has not definitively answered. A
+    // cached miss is a real answer (no open/query per tick for a header-less
+    // session); only ids that failed to read are asked again, so a
+    // late-landing header or transient error still resolves on the next
+    // lookup without waiting for the WAL.
+    const wanted = new Set([...sessionIds].filter((id) => !cached.titles.has(id) && !cached.misses.has(id)));
     if (wanted.size > 0) {
       const read = readTitles(dbPath, sqlite, wanted, cached);
       if (read) {
         for (const [id, title] of read.titles) cached.titles.set(id, title);
         for (const [id, title] of read.retries) retries.set(id, title);
+        for (const id of read.misses) cached.misses.add(id);
       }
     }
     cache.set(dbPath, cached);

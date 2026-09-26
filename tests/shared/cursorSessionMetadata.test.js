@@ -146,3 +146,43 @@ test('Cursor retries a failed header read instead of pinning the legacy title', 
   const second = resolveSessionMetadata(new Set(['s1']), { home, deps });
   assert.equal(second.get('s1')?.title, 'New name', 'the legacy title must not pin the id against a later modern read');
 });
+
+test('Cursor does not reopen the database for sessions the fingerprint already missed', () => {
+  // A header-less session used to pay open + sqlite_master + per-id SELECT +
+  // legacy check on every watch tick even while the database sat unchanged.
+  // A definitive miss is an answer too, so the second lookup on the same DB
+  // stamp must never touch SQLite — only failed reads retry.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cursor-miss-'));
+  const dbDir = path.join(home, 'Library', 'Application Support', 'Cursor', 'User', 'globalStorage');
+  fs.mkdirSync(dbDir, { recursive: true });
+  const dbPath = path.join(dbDir, 'state.vscdb');
+  fs.writeFileSync(dbPath, 'stub');
+  let opens = 0;
+  let queries = 0;
+  const fakeSqlite = {
+    DatabaseSync: class {
+      constructor() { opens += 1; }
+      prepare(sql) {
+        return {
+          get: () => {
+            queries += 1;
+            if (sql.includes('sqlite_master')) return { 1: 1 };
+            return undefined;
+          }
+        };
+      }
+      exec() {}
+      close() {}
+    }
+  };
+
+  const deps = { platform: 'darwin', sqlite: fakeSqlite, cursorTitleCache: new Map() };
+  const first = resolveSessionMetadata(new Set(['no-header']), { home, deps });
+  assert.equal(first.size, 0);
+  assert.equal(opens, 1);
+
+  const second = resolveSessionMetadata(new Set(['no-header']), { home, deps });
+  assert.equal(second.size, 0);
+  assert.equal(opens, 1, 'a definitive miss is cached per fingerprint, so the DB is not reopened');
+  assert.ok(queries > 0);
+});
