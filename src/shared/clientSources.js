@@ -353,9 +353,14 @@ function clientSourceRoots(clientsCsv, options = {}) {
   );
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
-  // Qoder CN — SQLite DB under the platform Application Support dir.
-  const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform: process.platform, env: process.env });
-  add('qodercn', ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]));
+  // Qoder CN — legacy SQLite DB under the platform Application Support dir,
+  // or the JSONL transcript tree used by current builds.
+  const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform, env });
+  add(
+    'qodercn',
+    ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]),
+    ['qodercn-projects', qoderCnPaths.projectsDir]
+  );
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
     resolveReasonixStatsDir({ env: process.env, homeDir: home, platform: process.platform, cwdDir: process.cwd() })

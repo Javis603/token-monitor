@@ -1227,7 +1227,14 @@ async function collectUsageOnce(options) {
     if (includesQoderCn && (!targetRequested || targetClients.includes('qodercn'))) {
       try {
         const qoderCnSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
-        qoderCnRows = await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger, sinceMs: qoderCnSinceMs });
+        qoderCnRows = await collectQoderCnRows({
+          homeDir: options.homeDir,
+          platform: platformValue,
+          env: options.env,
+          logger: options.logger,
+          sinceMs: qoderCnSinceMs,
+          includeJsonl: true
+        });
         qoderCnPricing = await resolveQoderCnPricing(qoderCnRows, {
           lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
           commandTimeoutMs: options.pricingTimeoutMs,
@@ -1562,7 +1569,13 @@ async function collectUsageOnce(options) {
         // Reuse the scan's full rows on non-anchored ticks; anchored ticks read
         // only since local midnight, so the graph needs its own full read there.
         // resolveQoderCnPricing is cached (6h TTL), so the second pass is cheap.
-        const rows = (!anchorUsed && qoderCnRows) ? qoderCnRows : await collectQoderCnRows({ homeDir: options.homeDir, logger: options.logger });
+        const rows = (!anchorUsed && qoderCnRows) ? qoderCnRows : await collectQoderCnRows({
+          homeDir: options.homeDir,
+          platform: platformValue,
+          env: options.env,
+          logger: options.logger,
+          includeJsonl: true
+        });
         const pricing = (!anchorUsed && qoderCnPricing) ? qoderCnPricing : await resolveQoderCnPricing(rows, {
           lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
           commandTimeoutMs: options.pricingTimeoutMs,
@@ -2288,21 +2301,32 @@ function canTargetTodayPartitions(anchor, targetClients) {
   );
 }
 
-function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '') {
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '') {
   // Deterministic string that captures the config inputs anchor correctness
   // depends on. When this changes, the persisted anchor is invalidated.
   const qoderCn = String(qoderCnDbPath || '').trim();
   const qoderCnPart = qoderCn ? `|qodercn:${path.resolve(qoderCn)}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}`;
+  const qoderCnProjects = String(qoderCnProjectsDir || '').trim();
+  const qoderCnProjectsPart = qoderCnProjects ? `|qodercnProjects:${path.resolve(qoderCnProjects)}` : '';
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}`;
 }
 
-function qoderCnDbPathForClients(clientsCsv, options = {}) {
-  if (!normalizeClientsCsv(clientsCsv).split(',').includes('qodercn')) return '';
-  return qoderCnDataPaths({
+function qoderCnSourcesForClients(clientsCsv, options = {}) {
+  if (!normalizeClientsCsv(clientsCsv).split(',').includes('qodercn')) return { dbPath: '', projectsDir: '' };
+  const paths = qoderCnDataPaths({
     homeDir: options.homeDir,
     platform: options.platform || process.platform,
     env: options.env || process.env
-  }).dbPaths[0] || '';
+  });
+  return { dbPath: paths.dbPaths[0] || '', projectsDir: paths.projectsDir || '' };
+}
+
+function qoderCnDbPathForClients(clientsCsv, options = {}) {
+  return qoderCnSourcesForClients(clientsCsv, options).dbPath;
+}
+
+function qoderCnProjectsDirForClients(clientsCsv, options = {}) {
+  return qoderCnSourcesForClients(clientsCsv, options).projectsDir;
 }
 
 // The one place that decides whether a persisted anchor may be reused, shared by
@@ -2315,10 +2339,10 @@ function qoderCnDbPathForClients(clientsCsv, options = {}) {
 // collector still reuses the periods then and simply forces a full scan, while
 // a seed has nothing to stand on and declines.
 function collectorAnchorTrust(saved, options = {}) {
-  const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', now = new Date() } = options;
+  const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
-  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath)) return null;
+  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir)) return null;
   const parsed = Date.parse(saved.fullScanAt || '');
   const capturedAtMs = Number.isFinite(parsed) && parsed <= now.getTime() ? parsed : null;
   return { capturedAtMs };
@@ -2454,11 +2478,13 @@ function startCollector(options) {
     homeDir: options.homeDir,
     platform: options.platform
   };
-  const qoderCnDbPath = qoderCnDbPathForClients(normalizedClients, {
+  const qoderCnSources = qoderCnSourcesForClients(normalizedClients, {
     homeDir: options.homeDir,
-    platform: process.platform,
-    env: process.env
+    platform: options.platform,
+    env: options.env
   });
+  const qoderCnDbPath = qoderCnSources.dbPath;
+  const qoderCnProjectsDir = qoderCnSources.projectsDir;
   let tickInFlight = false;
   let idleWaiters = [];
   let tickPending = false;
@@ -2595,7 +2621,8 @@ function startCollector(options) {
         clients,
         allTimeSince,
         projectsEnabled: options.projectsEnabled,
-        qoderCnDbPath
+        qoderCnDbPath,
+        qoderCnProjectsDir
       });
       if (trust) {
         anchor = {
@@ -2823,7 +2850,7 @@ function startCollector(options) {
               wslStatus: wslStatusAnchor,
               ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
               ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
-              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath),
+              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir),
               fullScanAt: new Date(lastFullScanAt).toISOString()
             }));
           } catch (_) {}
@@ -3347,6 +3374,8 @@ module.exports = {
   collectorAnchorTrust,
   configFingerprint,
   qoderCnDbPathForClients,
+  qoderCnProjectsDirForClients,
+  qoderCnSourcesForClients,
   deriveClientHealth,
   deriveClientStatus,
   mergeClientActivityDays,
