@@ -342,6 +342,10 @@ const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpac
 let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
 let nativeMaterialRevision = 0;
 let appearancePreview = {};
+// Writes still in flight. Main applies the native material before it broadcasts
+// the saved settings, so a material push landing in between must not repaint
+// the appearance controls from the settings that write is replacing.
+const pendingSettingsPatches = new Set();
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
@@ -10844,9 +10848,11 @@ async function saveSettings(patch) {
   for (const key of Object.keys(patch)) delete appearancePreview[key];
   const settingsPushRevision = state.settingsPushRevision;
   let next;
+  pendingSettingsPatches.add(patch);
   try {
     next = await window.tokenMonitor.updateSettings(patch);
   } catch (error) {
+    pendingSettingsPatches.delete(patch);
     console.error('Could not persist settings:', error);
     try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
     applyEffectiveCurrencyRates();
@@ -10856,6 +10862,7 @@ async function saveSettings(patch) {
     maybeUpdateBarsIcon();
     throw error;
   }
+  pendingSettingsPatches.delete(patch);
   applyPersistedSettings(next, settingsPushRevision);
   if (patch.showTrayProviderBadge !== undefined) {
     await deliverTrayProviderIcons(patch.showTrayProviderBadge === true);
@@ -10930,7 +10937,7 @@ async function init() {
       nativeMaterialRevision += 1;
       nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState(next);
       glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
-      applyAppearanceSettings({ ...(state.settings || {}), ...appearancePreview });
+      applyAppearanceSettings(Object.assign({}, state.settings, ...pendingSettingsPatches, appearancePreview));
     });
   }
   const materialQueryRevision = nativeMaterialRevision;
