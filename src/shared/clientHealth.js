@@ -175,6 +175,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'wsl-home',
   'amp-threads',
   'antigravity-cli-data',
+  'antigravity-extension-data',
   'antigravity-ide-source',
   'cherrystudio-transcripts',
   'claude-projects',
