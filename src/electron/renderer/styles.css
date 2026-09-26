@@ -86,9 +86,9 @@ input, textarea, [contenteditable="true"] {
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
 }
-.shell.has-custom-background {
-  background: transparent;
-}
+/* The image is its own layer over the glass, never a replacement for it: the
+   shell keeps its glass (or the native material below it) and the image's
+   opacity is a separate setting, so either can be tuned without the other. */
 .shell.has-custom-background::before {
   content: "";
   position: absolute;
@@ -98,14 +98,7 @@ input, textarea, [contenteditable="true"] {
   background-image: linear-gradient(rgba(var(--glass-rgb), 0.18), rgba(var(--glass-rgb), 0.18)), var(--custom-background-image);
   background-position: center;
   background-size: cover;
-  opacity: var(--glass-alpha);
-}
-/* Keep the AppKit material visible through the selected image. Its opacity is
-   intentionally independent of the app glass slider; macOS owns the material. */
-html.native-liquid-glass .shell.has-custom-background::before,
-body.native-liquid-glass .shell.has-custom-background::before {
-  background-image: var(--custom-background-image);
-  opacity: 0.28;
+  opacity: var(--background-image-alpha, 0.28);
 }
 html.native-material-opaque .shell.has-custom-background::before,
 html.native-reduced-transparency .shell.has-custom-background::before {
