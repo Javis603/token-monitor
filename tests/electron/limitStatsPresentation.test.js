@@ -8,7 +8,7 @@ const test = require('node:test');
 const {
   projectLimitProviderForDisplay,
   projectLimitStatsForDisplay
-} = require('../../src/electron/limitStatsPresentation');
+} = require('../../src/electron/limits/statsPresentation');
 const { homeLimitAccountsForProviders } = require('../../src/electron/renderer/homeOverview');
 const { collectLimitsOnce: collectLimitsOnceRaw } = require('../../src/shared/limits/collector');
 const { aggregateLimits } = require('../../src/shared/limits/core');

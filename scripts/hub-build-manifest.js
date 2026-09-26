@@ -13,13 +13,14 @@ const BUILD_ID_PATTERN = /^sha256:[a-f0-9]{64}$/;
 // Hash the canonical src/shared files, not their generated Worker copies, so a
 // generated header or line-ending change cannot create a false deployment alert.
 const WORKER_SHARED_MODULES = Object.freeze([
-  'limitProviders.js',
+  'limits/providers.js',
   'limits/core.js',
   'usage.js',
   'history.js',
   'providers/reasonix/paths.js',
   'providers/reasonix/sessionGuard.js',
   'providers/dsh/paths.js',
+  'providers/devin/paths.js',
   'projectKey.js',
   'syncUploadInterval.js',
   'subscriptionDisplay.js',

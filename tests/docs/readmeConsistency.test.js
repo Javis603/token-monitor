@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
+const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
 
 const rootDir = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(rootDir, file), 'utf8');
@@ -65,11 +65,12 @@ const supportedToolOrder = [
   'Qwen CLI',
   'Grok Build',
   'GitHub Copilot',
-  'Pi / Oh My Pi',
+  'Pi',
+  'Oh My Pi',
   'Zed',
   'Kilo',
   'Command Code',
-  'MiMo Code',
+  'MiMo Code / MiMo Desktop',
   'ZCode / GLM',
   'Kiro',
   'CodeBuddy',
@@ -81,6 +82,8 @@ const supportedToolOrder = [
   'Cherry Studio',
   'LM Studio',
   'Unsloth Studio',
+  'Devin CLI / Devin Desktop',
+  'TypeSafe',
   'OpenRouter',
   'Minimax',
   'Volcengine',
@@ -106,10 +109,11 @@ const supportedToolIdOrder = [
   'xai',
   'copilot',
   'pi',
+  'omp',
   'zed',
   'kilo',
   'commandcode',
-  'mimo-code',
+  'mimo',
   'zcode',
   'kiro',
   'codebuddy',
@@ -121,6 +125,8 @@ const supportedToolIdOrder = [
   'cherrystudio',
   'lmstudio',
   'unsloth',
+  'devin',
+  'typesafe',
   'openrouter',
   'minimax',
   'volcengine',
@@ -220,7 +226,6 @@ test('localized READMEs disclose the LM Studio server-log tracking boundary', ()
 const README_ICON_TO_LIMIT_PROVIDERS = {
   droid: ['factory'],
   xai: ['grok'],
-  'mimo-code': ['mimo'],
   zcode: ['zai', 'zaiteam']
 };
 
@@ -230,6 +235,18 @@ test('localized READMEs disclose the Unsloth database and inference scope', () =
     assert.match(text, /Unsloth Studio \| `~\/\.unsloth\/studio\/studio\.db` \| ✅ \| — \| — \|/, file);
     assert.ok(text.includes('`$UNSLOTH_STUDIO_HOME`'), file);
     assert.ok(text.includes('(docs/providers/unsloth.md)'), file);
+  }
+});
+
+// Devin's ✅ means a local source exists, not that a default install produces
+// numbers: Desktop only counts agents that write `usage_update` locally, and the
+// stock `devin-cloud` agent meters server-side. Without this note a reader sees
+// the ✅ and a discovered acp-events directory reporting zero tokens.
+test('localized READMEs disclose the Devin Desktop agent boundary', () => {
+  for (const file of localizedReadmes) {
+    const text = read(file);
+    assert.ok(text.includes('`devin-cloud`'), file);
+    assert.ok(text.includes('(docs/providers/devin.md)'), file);
   }
 });
 

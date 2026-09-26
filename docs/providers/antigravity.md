@@ -1,5 +1,6 @@
 ---
 summary: "Antigravity provider notes: token/session tracking, local RPC quota probing, standalone OAuth, identity, and aggregation."
+ids: [antigravity]
 read_when:
   - Adding or changing Antigravity token or session tracking
   - Changing Antigravity local RPC or standalone OAuth quota collection
@@ -137,13 +138,13 @@ Token/session tracking remains dependent on local source data. OAuth does not ma
 
 | Concern | Primary files |
 | --- | --- |
-| Usage source roots and watch mapping | `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/clientHealth.js`, `src/shared/usage.js` |
+| Usage source roots, health and watch mapping | `src/shared/clientSources.js`, `src/shared/clientSourceObservations.js`, `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/clientHealth.js`, `src/shared/usage.js` |
 | Self-sync and the tokscale sync lock | `src/shared/providers/antigravity/selfSync.js`, `src/shared/selfSyncThrottle.js` |
 | Local RPC and remote quota requests | `src/shared/providers/antigravity/probe.js`, `src/shared/providers/antigravity/oauth.js`, `src/shared/providers/antigravity/limits.js` |
 | Browser OAuth lifecycle | `src/electron/providers/antigravity/oauthLogin.js`, `src/electron/main.js`, `src/electron/preload.js` |
 | Account settings and credentials | `src/shared/credentialStore.js`, `src/electron/main.js`, renderer settings files |
 | Normalization and cross-device aggregation | `src/shared/limits/core.js`, generated `worker/src/shared/limits/core.js` |
-| Limits presentation | `src/electron/renderer/limitProviderPresentation.js`, `src/electron/renderer/app.js`, localized strings |
+| Limits presentation | `src/electron/renderer/limits/providerPresentation.js`, `src/electron/renderer/app.js`, localized strings |
 | Hub build identity after shared changes | `src/shared/hubBuildRegistry.json`, generated Worker registry |
 
 ## Verification checklist

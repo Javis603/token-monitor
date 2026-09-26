@@ -2,9 +2,11 @@
 
 // Catalog → limits presentation completeness.
 //
-// A limits provider renders as a mark through three hand-maintained surfaces:
-// the icon set the Limits list picks a mark from, the tray set whose artwork is
-// rasterized and handed to the OS, and the CSS mask that paints both. Each fails
+// A limits provider renders as a mark through three surfaces: the icon set the
+// Limits list picks a mark from, the tray set whose artwork is rasterized and
+// handed to the OS, and the CSS mask that paints both. The mark set and the
+// masks now derive from the vendor presentation table, and the tray set from
+// the catalog, but each still fails
 // differently and none of them fails loudly — a missing mark draws a bare dot, a
 // missing tray id draws the provider's first letter, and a missing mask rule
 // draws a solid square. This file asserts each covers every
@@ -16,9 +18,14 @@
 // that list is invisible to it. Starting from the catalog is what catches the
 // entry that reached none of these surfaces.
 //
+// The row's status pill is the same contract one layer up: a label the list can
+// draw has to resolve to copy, and a label missing from the renderer's translation
+// map renders as raw English in every non-English locale without failing anything.
+// That is asserted here too, from the catalog.
+//
 // The catalog's other hand-wired presentation surfaces are already guarded from
 // the catalog elsewhere and are deliberately not repeated here: the Swift
-// WidgetFormat.provider mirror in macWidgetProviderLabels.test.js, the README
+// widget snapshot's labels and palette in macWidgetProviderLabels.test.js, the README
 // tables in readmeConsistency.test.js, and account settings in
 // limitProviderCoverage.test.js.
 
@@ -28,14 +35,19 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
+const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
+const vendorPresentationApi = require('../../src/shared/vendorPresentation');
+const { STYLES_PATH: stylesPath, rendererStyles } = require('../helpers/rendererStyles');
 const { trayProviderIconSources } = require('../../src/electron/renderer/trayProviderIcons');
-const { limitProviderCapabilityTags } = require('../../src/electron/renderer/limitProviderPresentation');
+const { MESSAGES } = require('../../src/electron/renderer/i18n');
+const {
+  limitProviderCapabilityTags,
+  limitProviderStatusLabel
+} = require('../../src/electron/renderer/limits/providerPresentation');
 
 const rootDir = path.join(__dirname, '..', '..');
 const rendererDir = path.join(rootDir, 'src/electron/renderer');
 const rendererPath = path.join(rendererDir, 'app.js');
-const stylesPath = path.join(rendererDir, 'styles.css');
 
 // Read the Sets the renderer actually builds, by evaluating their declarations
 // rather than pattern-matching entries. Both are derived from the catalog now,
@@ -46,8 +58,8 @@ const stylesPath = path.join(rendererDir, 'styles.css');
 // inside app.js; when the renderer boundary is split this can require a module
 // instead, without the invariant changing.
 const ICON_SET_DECLARATIONS = [
-  ['clientsWithIcon', 'new Set([', ']);'],
-  ['limitMarksWithIcon', 'new Set([', ']);'],
+  ['clientsWithIcon', 'new Set(', ');'],
+  ['limitMarksWithIcon', 'new Set(', ');'],
   ['TRAY_ICON_VARIANTS', '[', '];'],
   ['trayIconProviderIds', 'new Set([', ']);']
 ];
@@ -65,7 +77,7 @@ function rendererIconSets() {
   // declarations never become properties of a contextified global.
   return vm.runInNewContext(
     `${declarations.join('\n')}\n({ limitMarksWithIcon, trayIconProviderIds })`,
-    { LIMIT_PROVIDER_IDS }
+    { LIMIT_PROVIDER_IDS, vendorPresentationApi }
   );
 }
 
@@ -76,7 +88,7 @@ test('every catalog provider has a limits icon mark', () => {
   // entries that are correctly there.
   const { limitMarksWithIcon } = rendererIconSets();
   for (const id of LIMIT_PROVIDER_IDS) {
-    assert.ok(limitMarksWithIcon.has(id), `${id} needs a limitMarksWithIcon entry in app.js`);
+    assert.ok(limitMarksWithIcon.has(id), `${id} needs an entry in src/shared/vendorPresentation.js`);
   }
 });
 
@@ -114,21 +126,21 @@ test('every catalog provider resolves to a mark asset through its CSS rule', () 
   // why the call site is asserted here, next to the table it depends on. The
   // builder lives in the shared limits view, which both limits surfaces render
   // their rows from.
-  const source = fs.readFileSync(path.join(rendererDir, 'limitWindowsView.js'), 'utf8');
+  const source = fs.readFileSync(path.join(rendererDir, 'limits/windowsView.js'), 'utf8');
   assert.match(
     source,
     /mark\.className = `limit-icon row-icon-\$\{id\}`;/,
     'renderLimitProviderMark should draw its mark from the shared .row-icon-<id> table'
   );
 
-  const styles = fs.readFileSync(stylesPath, 'utf8');
+  const styles = rendererStyles();
   for (const id of LIMIT_PROVIDER_IDS) {
     // The class must be terminated by a selector separator: the renderer applies
     // exactly `row-icon-${id}`, so neither a suffixed rule (.row-icon-<id>-sm)
     // nor a descendant rule (.row-icon-<id> .child) paints the element this
     // guard is about, and both would otherwise satisfy it.
     const rule = styles.match(new RegExp(`^\\.row-icon-${id}(?=\\s*[,{])[^{}]*\\{([^}]*)\\}`, 'm'));
-    assert.ok(rule, `${id} needs a .row-icon-${id} rule in styles.css`);
+    assert.ok(rule, `${id} needs a .row-icon-${id} mask (a vendor table entry)`);
     // The invariant is that a provider resolves to a mark, not that the mark is
     // named after it — zaiteam masks with zai.svg, mimo with xiaomi.svg — so the
     // rule is the mapping and the asset is checked through it. Resolve the URL
@@ -149,12 +161,12 @@ test('sharing one mask table keeps Grok the mark that differs between the two', 
   // the tracked client reuses the vendor mask while the limits provider has its
   // own, and collapsing the two tables is exactly the change that would quietly
   // give the provider the vendor mark.
-  const styles = fs.readFileSync(stylesPath, 'utf8');
+  const styles = rendererStyles();
   const override = styles.match(/\.limit-icon\.row-icon-grok(?=\s*[,{])[^{}]*\{([^}]*)\}/);
   assert.ok(override, 'the Limits list needs a .limit-icon.row-icon-grok override');
   assert.match(override[1], /icons\/grok\.svg/, 'the Limits mark should stay the Grok mark');
   const shared = styles.match(/^\.row-icon-grok(?=\s*[,{])[^{}]*\{([^}]*)\}/m);
-  assert.ok(shared, 'the shared table needs a .row-icon-grok rule in styles.css');
+  assert.ok(shared, 'the vendor table needs a .row-icon-grok mask');
   assert.match(shared[1], /icons\/xai\.svg/, 'the client row should stay the vendor mark');
 });
 
@@ -167,7 +179,67 @@ test('every catalog provider has capability tags', () => {
     const tags = limitProviderCapabilityTags(id);
     assert.ok(
       Array.isArray(tags) && tags.length > 0,
-      `${id} needs a CAPABILITY_TAGS entry in limitProviderPresentation.js`
+      `${id} needs a CAPABILITY_TAGS entry in limits/providerPresentation.js`
     );
+  }
+});
+
+// The renderer's label → copy table, read the way rendererIconSets reads its Sets:
+// evaluated out of app.js instead of pattern-matched, so a comment or a differently
+// quoted entry cannot make the guard pass on a table it did not read.
+function rendererStatusTagKeys() {
+  const source = fs.readFileSync(rendererPath, 'utf8');
+  const start = source.indexOf('const LIMIT_CAPABILITY_TAG_KEYS = {');
+  assert.notEqual(start, -1, 'LIMIT_CAPABILITY_TAG_KEYS should be declared in app.js');
+  const end = source.indexOf('};', start);
+  assert.notEqual(end, -1, 'LIMIT_CAPABILITY_TAG_KEYS should be a closed literal');
+  return vm.runInNewContext(`${source.slice(start, end + 2)}\nLIMIT_CAPABILITY_TAG_KEYS`, {});
+}
+
+test('every status label the Limits list can draw is translated in every locale', () => {
+  // The silent failure the capability tags above have, one step further out: a
+  // label with no LIMIT_CAPABILITY_TAG_KEYS entry is not an error —
+  // translatedLimitCapabilityTag returns the label itself — so a provider-specific
+  // pill renders as raw English in all five locales while the labels beside it are
+  // translated. The table is read only by app.js and its keys are checked against
+  // no locale anywhere, so both halves are asserted here: every label this accessor
+  // can return resolves to a key, and every key resolves to copy in every locale.
+  // A tag carrying its own `key` is exempt — Antigravity's verification label, whose
+  // copy is asserted where it is defined.
+  //
+  // The status vocabulary is written out rather than derived from the branches the
+  // accessor reads, because a status missing from this list is exactly the one that
+  // would escape the sweep.
+  const tagKeys = rendererStatusTagKeys();
+  const statuses = [
+    'ok',
+    'disabled',
+    'noSyncedData',
+    'unauthorized',
+    'rateLimited',
+    'sourceRateLimited',
+    'unavailable',
+    'notConfigured',
+    'error'
+  ];
+  const labels = new Set();
+  for (const id of LIMIT_PROVIDER_IDS) {
+    for (const status of statuses) {
+      const tag = limitProviderStatusLabel({ provider: id, status });
+      if (tag && !tag.key) labels.add(tag.label);
+    }
+  }
+  // One label comes from state rather than a status, and every provider can show it.
+  labels.add(limitProviderStatusLabel({ provider: LIMIT_PROVIDER_IDS[0], status: 'ok', stale: true }).label);
+  for (const label of labels) {
+    const key = tagKeys[label];
+    assert.ok(key, `${JSON.stringify(label)} needs a LIMIT_CAPABILITY_TAG_KEYS entry in app.js`);
+    for (const [locale, messages] of Object.entries(MESSAGES)) {
+      assert.equal(
+        typeof messages[key],
+        'string',
+        `${JSON.stringify(label)} maps to ${key}, which ${locale} does not define`
+      );
+    }
   }
 });

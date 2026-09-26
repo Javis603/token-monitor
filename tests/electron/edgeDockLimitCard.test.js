@@ -14,18 +14,18 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const balanceDisplay = require('../../src/shared/limitBalanceDisplay');
+const balanceDisplay = require('../../src/shared/limits/balanceDisplay');
 const currencyApi = require('../../src/shared/currency');
 const subscriptionApi = require('../../src/shared/subscriptionDisplay');
 const subscriptionText = require('../../src/shared/subscriptionText');
-const limitDisplayMode = require('../../src/electron/renderer/limitDisplayMode');
-const limitPresentationApi = require('../../src/electron/renderer/limitProviderPresentation');
-const limitResetMotionApi = require('../../src/electron/renderer/limitResetMotion');
-const limitWindowLabels = require('../../src/shared/limitWindowLabels');
-const limitWindowTextApi = require('../../src/shared/limitWindowText');
+const limitDisplayMode = require('../../src/electron/renderer/limits/displayMode');
+const limitPresentationApi = require('../../src/electron/renderer/limits/providerPresentation');
+const limitResetMotionApi = require('../../src/electron/renderer/limits/resetMotion');
+const limitWindowLabels = require('../../src/shared/limits/windowLabels');
+const limitWindowTextApi = require('../../src/shared/limits/windowText');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 const i18n = require('../../src/electron/renderer/i18n');
-const { createLimitWindowsView } = require('../../src/electron/renderer/limitWindowsView');
+const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
 const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
 
 const root = path.join(__dirname, '../..');
@@ -116,8 +116,11 @@ function dockView(appearance = {}, overrides = {}) {
     motion: limitResetMotionApi,
     tooltip: { hasOpened: () => false, markOpened() {}, release() {} },
     formatCompact: (value) => `${value}`,
+    compactTokenThreshold: () => 1e3,
     formatMoney: balanceDisplay.formatMoney,
-    formatCompactMoney: balanceDisplay.formatCompactMoney,
+    formatCompactMoney: (value, currency) => balanceDisplay.formatCompactMoney(
+      value, currency, settings.compactTokenUnits, 'en-US'
+    ),
     formatPercent: (value) => (Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'),
     formatDuration: limitPresentationApi.limitDurationText,
     formatLimitBoundary: limitPresentationApi.limitBoundaryText,
@@ -161,7 +164,7 @@ function dockView(appearance = {}, overrides = {}) {
 }
 
 test('the dock hands the shared view every dependency it destructures', () => {
-  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limitWindowsView.js'), 'utf8');
+  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
   const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
   const required = view
     .slice(view.indexOf('const {'), view.indexOf('} = deps;'))
@@ -190,7 +193,7 @@ test('the dock hands the shared view every dependency it destructures', () => {
 // omissions this guards against (`showLimitSource`, `codexResetForecastEnabled`)
 // shipped as exactly that: a card that stayed silent where the page spoke.
 test('every preference the shared view reads reaches the dock through the appearance projection', () => {
-  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limitWindowsView.js'), 'utf8');
+  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
   const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'src/electron/main.js'), 'utf8');
   const projection = main.slice(
@@ -227,6 +230,48 @@ test('a DeepSeek card shows the spend row the projection used to drop', () => {
   assert.match(card.text, /\$4\.20/);
 });
 
+test('a TypeSafe card shows the next credit expiry without calling it a reset', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'typesafe',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 5, currency: 'USD',
+      resetsAt: '2099-01-02T00:00:00Z', boundaryKind: 'expiry' }],
+    balance: { amount: 5, currency: 'USD', tranches: [
+      { amount: 2, currency: 'USD', expiresAt: '2099-01-02T00:00:00Z' },
+      { amount: 3, currency: 'USD', expiresAt: '2099-02-02T00:00:00Z' }
+    ] }
+  }, '#59A4D0');
+
+  assert.match(card.text, /Expires \d+d \d+h/);
+  assert.match(card.text, /\$2\.00/);
+  assert.doesNotMatch(card.text, /Reset/);
+  assert.equal(card.find('limit-window').classNames.has('limit-window-no-reset'), false);
+});
+
+test('a TypeSafe card does not repeat the full balance beside its expiry', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'typesafe',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 5, currency: 'USD',
+      resetsAt: '2099-01-02T00:00:00Z', boundaryKind: 'expiry' }],
+    balance: { amount: 5, currency: 'USD', tranches: [
+      { amount: 5, currency: 'USD', expiresAt: '2099-01-02T00:00:00Z' }
+    ] }
+  }, '#59A4D0');
+
+  assert.match(card.text, /Expires \d+d \d+h/);
+  assert.equal(card.text.match(/\$5\.00/g)?.length, 1);
+});
+
+test('a TypeSafe card omits expiry when the billing response has no valid grants', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'typesafe',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 5, currency: 'USD' }],
+    balance: { amount: 5, currency: 'USD' }
+  }, '#59A4D0');
+
+  assert.doesNotMatch(card.text, /expiry|Reset/);
+  assert.equal(card.find('limit-window').classNames.has('limit-window-no-reset'), true);
+});
+
 test('an OpenRouter card carries the balance meter and its detail tooltip', () => {
   const card = dockView().renderProviderWindows({
     provider: 'openrouter',
@@ -238,6 +283,47 @@ test('an OpenRouter card carries the balance meter and its detail tooltip', () =
   assert.ok(tooltip, 'the card should carry the ⓘ tooltip, not only the page');
   assert.match(card.find('limit-detail-tooltip-trigger').textContent, /i/);
   assert.match(tooltip.text, /All time/);
+});
+
+test('a Devin card keeps Daily, Weekly, and the extra usage balance', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'devin',
+    windows: [
+      { kind: 'daily', label: 'Daily', remainingPercent: 100, resetsAt: '2026-09-24T00:00:00.000Z' },
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 100, resetsAt: '2026-09-28T00:00:00.000Z' },
+      { kind: 'billing', metric: 'credits', label: 'Extra usage balance', remaining: 10, currency: 'USD', showMeter: false }
+    ],
+    balance: { amount: 10, currency: 'USD' }
+  }, '#46B482');
+
+  const windows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.deepEqual(
+    windows.map((node) => node.children[0].children[0].textContent),
+    ['Daily', 'Weekly', 'Extra usage balance']
+  );
+  assert.match(windows[2].text, /\$10\.00/);
+  assert.equal(windows[2].classNames.has('limit-window-wide'), true);
+  assert.equal(windows[2].classNames.has('limit-window-no-reset'), true);
+});
+
+test('a Cline card folds month spend into the credit detail tooltip', () => {
+  const card = dockView().renderProviderWindows({
+    provider: 'cline',
+    windows: [
+      { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 0.5, currency: 'CREDITS', showMeter: false },
+      { kind: 'billing', metric: 'spend', label: 'Usage credits', used: 0.13, limit: null, currency: 'USD', showMeter: false }
+    ]
+  }, '#9D4EDD');
+
+  const rows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  const tooltip = card.find('limit-detail-tooltip');
+  assert.equal(rows.length, 1, 'credits and month spend should share one presentation row');
+  assert.match(card.text, /Credits/);
+  assert.match(card.text, /0\.50/);
+  assert.ok(tooltip, 'the month spend should remain available from the credit row');
+  assert.match(tooltip.text, /Month spent/);
+  assert.match(tooltip.text, /\$0\.13/);
+  assert.match(rows[0].attributes['aria-label'], /Month spent \$0\.13/);
 });
 
 test('a Codex card keeps the page ordering and the banked resets', () => {
@@ -511,6 +597,45 @@ test('a recorded subscription decorates the card plan cell with the page hover c
   }, '#10A37F');
   assert.equal(bare.find('subscription-tooltip'), null);
   assert.equal(bare.find('limit-plan').textContent, 'Plus');
+});
+
+// The usage figure is keyed by client, and a provider is not always named after
+// the client whose tokens it bills. Read as a same-named key, a Factory Droid
+// subscription found nothing at `factory` while the month's cost sat under
+// `droid`, so the card stopped at the price and never showed what those tokens
+// would have cost instead.
+test('a subscription is compared against usage recorded under a differently named client', () => {
+  const account = { provider: 'factory', accountKey: 'k1', accountName: 'demo@example.com' };
+  const row = dockView({
+    subscriptions: [{
+      id: 'sub-1',
+      provider: 'factory',
+      kind: 'subscription',
+      planName: 'Pro',
+      amountMinor: 2000,
+      currency: 'USD',
+      intervalCount: 1,
+      interval: 'month',
+      startDate: '2026-08-01',
+      autoRenew: true,
+      nextRenewalOverride: '',
+      endDate: null,
+      topUps: []
+    }],
+    accounts: [account],
+    monthClientCosts: { droid: 12, codex: 99 }
+  }).renderLimitProviderRow('factory', 'Factory Droid', {
+    ...account,
+    status: 'ok',
+    planLabel: 'Pro',
+    updatedAt: new Date().toISOString(),
+    windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }]
+  }, '#10A37F');
+
+  const card = row.find('subscription-tooltip');
+  assert.ok(card, 'the recorded plan still draws its card');
+  assert.match(card.text, /12\.00/, "Droid's tokens are Factory's usage");
+  assert.doesNotMatch(card.text, /99/, 'and another client\'s tokens stay out of it');
 });
 
 // The row is drawn from the aggregate's copy of an account, while the matcher

@@ -870,13 +870,19 @@ test('extractUsageFromTokscale normalizes Pi, Zed, and Kilo, keeping Copilot dis
   assert.equal(period.clients.kilo, 19);
 });
 
-test('extractUsageFromTokscale normalizes MiMo Code and ZCode client ids', () => {
+test('extractUsageFromTokscale normalizes MiMo and ZCode client ids', () => {
+  // `micode` is tokscale's id for MiMo — a fossil of the path typo upstream
+  // fixed in its PR #784, which left the id behind. Token Monitor's id is
+  // `mimo`, shared with the limits provider for the same product, so both
+  // upstream spellings have to land there.
   const period = extractUsageFromTokscale([
     { client: 'micode', model: 'mimo-v2.5-pro', totalTokens: 23 },
+    { client: 'micode-desktop', model: 'mimo-v2.5-pro', totalTokens: 5 },
     { client: 'ZCode', model: 'glm-4.7', totalTokens: 29 }
   ]);
 
-  assert.equal(period.clients.micode, 23);
+  assert.equal(period.clients.mimo, 28);
+  assert.equal(period.clients.micode, undefined);
   assert.equal(period.clients.zcode, 29);
 });
 
@@ -947,7 +953,7 @@ test('extractUsageFromTokscale keeps the canonical Command Code client id', () =
   assert.equal(period.clients.commandcode, 19);
 });
 
-test('normalizeClientName folds both Kilo sources together and maps both Oh My Pi ids to pi', () => {
+test('normalizeClientName folds both Kilo sources together and keeps Oh My Pi separate from Pi', () => {
   const period = extractUsageFromTokscale([
     { client: 'kilo', model: 'x', totalTokens: 5 },
     { client: 'kilocode', model: 'x', totalTokens: 13 },
@@ -956,7 +962,11 @@ test('normalizeClientName folds both Kilo sources together and maps both Oh My P
   ]);
 
   assert.equal(period.clients.kilo, 18);
-  assert.equal(period.clients.pi, 18);
+  // Oh My Pi and Pi are two products with two roots. Both of its spellings
+  // resolve to the `omp` id, which must stay distinct from `pi` so the two rows
+  // do not silently re-merge on the way to the dashboard.
+  assert.equal(period.clients.omp, 18);
+  assert.equal(period.clients.pi, undefined);
   assert.ok(!('kilocode' in period.clients));
 });
 
@@ -1150,6 +1160,82 @@ test('aggregateDevices keeps a zero-usage live session unarchived in either merg
 
   assert.equal(aggregateDevices([live, archived], 0).periods.allTime.sessions['codex:s1'].archived, undefined);
   assert.equal(aggregateDevices([archived, live], 0).periods.allTime.sessions['codex:s1'].archived, undefined);
+});
+
+// aggregateDevices() adds each device's periods exactly as normalizeDeviceRecord()
+// left them. It used to normalize them a second time with default options, so
+// this is the property that makes dropping that pass output-preserving.
+test('normalizePeriod is idempotent, including under default options on a second pass', () => {
+  const legacyAndRich = {
+    total_tokens: 1000.6,
+    cost_usd: 1.25,
+    cache_read_tokens: 400,
+    cache_write_tokens: 100,
+    output_tokens: 300,
+    unclassified_tokens: 101,
+    timed_tokens: 200,
+    timed_output_tokens: 900,
+    timed_duration_ms: 4000,
+    clients: { 'Claude Code': 600, codex: 400.4, '': 5 },
+    clientCacheReads: { 'Claude Code': 300 },
+    clientOutputs: { codex: 150 },
+    clientCosts: { 'Claude Code': 1, codex: 0.25 },
+    models: { 'GPT-5': 400, 'claude-sonnet-4': 600 },
+    modelCacheReads: { 'claude-sonnet-4': 300 },
+    modelCosts: { 'GPT-5': 0.25 },
+    clientModels: { codex: { 'GPT-5': 400 } },
+    clientModelCosts: { codex: { 'GPT-5': 0.25 } },
+    projects: { '/work/app': { label: ' app ', tokens: 700, costUsd: 1, clients: { codex: 400 } } },
+    sessions: {
+      'codex:live': {
+        client: 'codex',
+        session_id: 'live',
+        total_tokens: 400,
+        input_tokens: 100,
+        output_tokens: 150,
+        cache_read_tokens: 150,
+        cost_usd: 0.25,
+        startedAt: '2026-05-30T00:00:00Z',
+        lastUsedAt: '2026-05-30T01:00:00Z',
+        contextTokens: 50000,
+        contextWindow: 200000,
+        turnEnded: true,
+        projectLabel: 'app',
+        title: '  Fix   the build  ',
+        models: { 'GPT-5': 400 },
+        providers: { OpenAI: 400 }
+      },
+      'claude:gone': {
+        client: 'Claude Code',
+        sessionId: 'gone',
+        totalTokens: 600,
+        archived: true,
+        turnEnded: false,
+        projectLabel: 'app'
+      },
+      'claude:gone-again': { client: 'claude', sessionId: 'gone', totalTokens: 1, deleted: true }
+    }
+  };
+  const aggregateOnly = { totalTokens: 50, costUsd: 0.1, unclassifiedTokens: 50, capabilities: { tokenComponents: false, throughput: false } };
+
+  for (const input of [legacyAndRich, aggregateOnly, undefined]) {
+    for (const options of [{}, { projectsEnabled: true }, { projectsEnabled: false }]) {
+      const once = normalizePeriod(input, options);
+      assert.deepEqual(normalizePeriod(once, options), once);
+      assert.deepEqual(normalizePeriod(once), once);
+    }
+  }
+  // The fixture has to exercise what normalization actually changes, or the
+  // equalities above hold trivially.
+  const once = normalizePeriod(legacyAndRich);
+  assert.equal(once.capabilities.tokenComponents, false);
+  assert.equal(once.capabilities.throughput, true);
+  assert.equal(once.timedOutputTokens, 300);
+  assert.ok(once.models['gpt-5']);
+  assert.equal(once.sessions['codex:live'].title, 'Fix the build');
+  assert.equal(once.sessions['claude:gone'].archived, true);
+  assert.ok(Object.keys(once.projects).length > 0);
+  assert.equal(Object.keys(normalizePeriod(legacyAndRich, { projectsEnabled: false }).projects).length, 0);
 });
 
 const { normalizeDeviceRecord, aggregateHistory, carryDeviceHistory } = require('../../src/shared/usage');
@@ -1437,4 +1523,31 @@ test('merging a session keeps one source occupancy rather than summing two', () 
   });
   assert.equal(unknown.periods.today.sessions[key].contextTokens, 140);
   assert.equal(unknown.periods.today.sessions[key].contextWindow, 200_000);
+});
+
+test('aggregateDevices folds a pre-rename micode device into the mimo row', () => {
+  // The tracked-client id was renamed from tokscale's `micode` to `mimo`. A hub
+  // outlives any single device update, so it holds records posted by agents on
+  // both sides of that rename — and aggregateDevices normalizes on *read*, not
+  // only on ingest, so a record already sitting in data/devices.json folds too.
+  // Without that the same tool would show as two rows until every device
+  // upgraded.
+  const now = Date.parse('2026-09-23T00:00:00.000Z');
+  const deviceAt = (deviceId, client, tokens, cost) => ({
+    deviceId,
+    hostname: deviceId,
+    updatedAt: '2026-09-23T00:00:00.000Z',
+    receivedAt: '2026-09-23T00:00:00.000Z',
+    today: { totalTokens: tokens, costUsd: cost, clients: { [client]: tokens }, clientCosts: { [client]: cost } }
+  });
+
+  const aggregate = aggregateDevices(
+    [deviceAt('old-agent', 'micode', 100, 1.5), deviceAt('new-agent', 'mimo', 40, 0.5)],
+    0,
+    now
+  );
+
+  assert.equal(aggregate.periods.today.clients.mimo, 140);
+  assert.equal(aggregate.periods.today.clients.micode, undefined);
+  assert.equal(aggregate.periods.today.clientCosts.mimo, 2);
 });

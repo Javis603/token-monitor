@@ -1,0 +1,624 @@
+'use strict';
+
+(function exposeLimitProviderPresentation(root, factory) {
+  const accountIdentityApi = typeof module === 'object' && module.exports
+    ? require('../accountIdentity')
+    : root?.TokenMonitorAccountIdentity;
+  const api = factory(accountIdentityApi);
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  if (root) root.TokenMonitorLimitProviderPresentation = api;
+})(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi(accountIdentityApi) {
+  const SOURCE_LABELS = {
+    oauth: 'OAuth',
+    cli: 'CLI',
+    web: 'Web',
+    rpc: 'RPC',
+    local: 'Local',
+    api: 'API'
+  };
+
+  const PROVIDER_SOURCE_LABELS = {
+    claude: { oauth: 'OAuth', cli: 'CLI', web: 'Web' },
+    codex: { rpc: 'RPC' },
+    opencode: { local: 'Local', web: 'Web', api: 'API' },
+    cursor: { web: 'Web' },
+    antigravity: { oauth: 'OAuth', rpc: 'RPC' },
+    factory: { api: 'API' },
+    kimi: { api: 'API', web: 'Web' },
+    grok: { rpc: 'CLI', web: 'Web' },
+    copilot: { api: 'API' },
+    zed: { web: 'Web' },
+    commandcode: { web: 'Web' },
+    mimo: { web: 'Web' },
+    zai: { api: 'API' },
+    zaiteam: { api: 'API' },
+    kiro: { cli: 'CLI' },
+    workbuddy: { local: 'Local', api: 'API' },
+    qoder: { web: 'Web' },
+    deepseek: { api: 'API' },
+    devin: { web: 'Web' },
+    openrouter: { api: 'API' },
+    minimax: { api: 'API' },
+    volcengine: { api: 'API', cli: 'arkcli' },
+    ollama: { web: 'Web' },
+    trae: { api: 'Web' },
+    alibaba: { web: 'Web' },
+    thirdparty: { api: 'API' }
+  };
+
+  const CODEX_RPC_DETAIL_LABELS = {
+    app: 'App',
+    cli: 'CLI',
+    managed: 'Managed',
+    unknown: 'RPC'
+  };
+
+  const CAPABILITY_TAGS = {
+    claude: ['Auto', 'OAuth/CLI', 'Web'],
+    codex: ['Auto', 'OAuth/App/CLI'],
+    opencode: ['Auto', 'API/Web'],
+    cursor: ['Auto', 'Web'],
+    antigravity: ['Auto', 'OAuth/App/CLI'],
+    cline: ['Auto', 'Desktop app', 'CLI'],
+    factory: ['Auto', 'API key'],
+    kimi: ['Coding Plan', 'Web/API'],
+    grok: ['Auto', 'CLI/Web'],
+    copilot: ['Manual login', 'API'],
+    zed: ['Manual login', 'Web'],
+    commandcode: ['Manual login', 'Web'],
+    mimo: ['Token Plan', 'Web'],
+    zai: ['Auto', 'Coding Plan', 'API key'],
+    zaiteam: ['Team Plan', 'API key'],
+    kiro: ['Auto', 'CLI'],
+    workbuddy: ['Auto', 'Desktop app'],
+    qoder: ['Manual login', 'Web'],
+    deepseek: ['Pay-as-you-go', 'API key'],
+    devin: ['Manual login', 'Web'],
+    typesafe: ['Manual login', 'Web'],
+    openrouter: ['Pay-as-you-go', 'API key'],
+    minimax: ['Token Plan', 'API key'],
+    volcengine: ['Auto', 'API key', 'CLI'],
+    ollama: ['Manual login', 'Web'],
+    trae: ['Manual login', 'Web'],
+    alibaba: ['Token Plan', 'Web'],
+    thirdparty: ['Relay', 'API']
+  };
+
+  const COMPACT_LIMIT_CRITICAL_PERCENT = 20;
+
+  function normalizeId(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function providerId(value) {
+    return normalizeId(typeof value === 'object' && value ? value.provider : value);
+  }
+
+  function sourceId(value, fallback = '') {
+    return normalizeId(typeof value === 'object' && value ? (value.source || fallback) : (value || fallback));
+  }
+
+  function sourceDetailId(value) {
+    return normalizeId(typeof value === 'object' && value ? value.sourceDetail : '');
+  }
+
+  function deviceKey(value) {
+    return String(value || '').trim();
+  }
+
+  function deviceLabel(deviceOrId) {
+    if (typeof deviceOrId === 'string') return deviceOrId.trim();
+    const id = String(deviceOrId?.deviceId || '').trim();
+    if (id) return id;
+    return String(deviceOrId?.hostname || '').trim();
+  }
+
+  function statusId(provider, fallback = '') {
+    return String(provider?.status || fallback).trim();
+  }
+
+  function limitProviderSourceLabel(providerOrId, sourceFallback = '') {
+    const provider = providerId(providerOrId);
+    const source = sourceId(providerOrId, sourceFallback);
+    const sourceDetail = sourceDetailId(providerOrId);
+    if (provider === 'codex' && source === 'rpc' && CODEX_RPC_DETAIL_LABELS[sourceDetail]) {
+      return CODEX_RPC_DETAIL_LABELS[sourceDetail];
+    }
+    return PROVIDER_SOURCE_LABELS[provider]?.[source] || SOURCE_LABELS[source] || '';
+  }
+
+  function limitProviderCapabilityTags(providerOrId) {
+    return (CAPABILITY_TAGS[providerId(providerOrId)] || []).slice();
+  }
+
+  function limitProviderDisplayLabel(value) {
+    const label = String(value || '').trim();
+    if (!label || label.includes('@')) return label;
+    return label.replace(/^[a-z]/, (letter) => letter.toUpperCase());
+  }
+
+  function limitProviderPlanDisplayLabel(providerOrId, value) {
+    const label = limitProviderDisplayLabel(value);
+    if (providerId(providerOrId) === 'zai') {
+      // Subscription names arrive as "GLM Coding Lite/Pro/Max" (ZCode's own
+      // formatPlanName concatenates exactly this). The provider heading
+      // already supplies "GLM", so only the tier remains. Z.ai-prefixed
+      // names and the ZCode plan names pass through untouched — the prefix
+      // is only stripped when it repeats the heading.
+      return label.replace(/^GLM\s+Coding\s+/iu, '').trim() || label;
+    }
+    if (providerId(providerOrId) !== 'zed') return label;
+    // Zed's API returns canonical names such as "Zed Student" and "Zed Pro".
+    // The provider heading already supplies "Zed", so keep only the meaningful
+    // plan portion in both the Limits card and managed-account row. Unknown
+    // custom plan names pass through untouched.
+    return label.replace(/^Zed\s+/iu, '').trim() || label;
+  }
+
+  function codexAdditionalQuotaDisplayName(value) {
+    const name = String(value || '').trim();
+    return normalizeId(name) === 'gpt-reserve' ? 'Luna Reserve' : name;
+  }
+
+  // One "Third-party APIs" group can hold New API, Sub2API and Custom rows at
+  // once, and each of those is a different product: they get their own mark and
+  // colour rather than all reading as one anonymous integration. The adapter id
+  // is what the user picked, so it is also the only thing that can name the row's
+  // plan — these adapters report no plan of their own.
+  const THIRD_PARTY_ADAPTER_VISUALS = {
+    'newapi-account': { color: '#C738FB', markId: 'newapi' },
+    'newapi-token': { color: '#C738FB', markId: 'newapi' },
+    sub2api: { color: '#39D9E7', markId: 'sub2api' },
+    custom: { color: '#8A96A8', markId: 'thirdparty' }
+  };
+
+  function thirdPartyAdapterVisual(provider, fallbackColor) {
+    return THIRD_PARTY_ADAPTER_VISUALS[normalizeId(provider?.adapterId)]
+      || { color: fallbackColor, markId: 'thirdparty' };
+  }
+
+  function thirdPartyAdapterFamily(provider) {
+    const adapterId = normalizeId(provider?.adapterId);
+    if (adapterId === 'newapi-account' || adapterId === 'newapi-token') return 'newapi';
+    if (adapterId === 'sub2api') return 'sub2api';
+    if (adapterId === 'custom') return 'thirdparty';
+    return '';
+  }
+
+  // The family every account in a group shares, or null when they differ. A
+  // shared family moves up to the group header; a mixed one stays per row.
+  function thirdPartySharedAdapterFamily(providers) {
+    const families = new Set((providers || []).map(thirdPartyAdapterFamily));
+    return families.size === 1 ? [...families][0] : null;
+  }
+
+  // The account row's plan text. Each adapter is one product and the adapter id
+  // is what the user picked, so it is the only thing that can name the row —
+  // these adapters report no plan of their own. undefined hands the cell back to
+  // the provider's own plan label.
+  function thirdPartyGroupPlanText(provider) {
+    if (provider?.status !== 'ok') return undefined;
+    const adapterId = normalizeId(provider?.adapterId);
+    if (adapterId === 'newapi-account') return 'New API · Account';
+    if (adapterId === 'newapi-token') return 'New API · API key';
+    if (adapterId === 'sub2api') return 'Sub2API · Account';
+    if (adapterId === 'custom') return 'Custom';
+    const planLabel = String(provider?.planLabel || '').toLowerCase();
+    if (planLabel === 'account') return 'Account';
+    if (planLabel === 'api key') return 'API key';
+    if (planLabel === 'custom') return 'Custom';
+    return undefined;
+  }
+
+  function antigravityQuotaWindow(window) {
+    const kind = normalizeId(window?.kind);
+    const suffix = kind === 'session'
+      ? /\s+5-hour$/i
+      : kind === 'weekly'
+        ? /\s+weekly$/i
+        : null;
+    const label = String(window?.label || '').trim();
+    if (!suffix || !suffix.test(label)) return null;
+    const groupLabel = label.replace(suffix, '').trim();
+    if (!groupLabel) return null;
+    return { groupLabel, windowLabel: kind === 'session' ? '5-hour' : 'Weekly' };
+  }
+
+  function isCanonicalCodexWindow(window) {
+    return window?.additional !== true;
+  }
+
+  function compactWindowRemaining(window) {
+    const rawRemaining = window?.remainingPercent;
+    const remaining = rawRemaining == null || String(rawRemaining).trim() === '' ? null : Number(rawRemaining);
+    if (remaining != null && Number.isFinite(remaining)) return Math.max(0, Math.min(100, remaining));
+    const rawUsed = window?.usedPercent;
+    const used = rawUsed == null || String(rawUsed).trim() === '' ? null : Number(rawUsed);
+    return used != null && Number.isFinite(used)
+      ? Math.max(0, Math.min(100, 100 - used))
+      : Number.POSITIVE_INFINITY;
+  }
+
+  function limitProviderCompactWindows(providerOrId, windows = []) {
+    const provider = providerId(providerOrId);
+    if (provider === 'codex') return (windows || []).filter(isCanonicalCodexWindow);
+    if (provider === 'zed') {
+      return (windows || []).map((window) => (
+        window?.limitId === 'zed.edit-predictions'
+          && normalizeId(window?.detail) === 'unlimited'
+          ? { ...window, value: 'Unlimited', resetDescription: '' }
+          : window
+      ));
+    }
+    if (provider !== 'antigravity') return windows;
+    const entries = (windows || []).map((window, index) => ({
+      window,
+      index,
+      groupLabel: antigravityQuotaWindow(window)?.groupLabel || ''
+    }));
+    if (entries.length === 0 || entries.some((entry) => !entry.groupLabel)) return windows;
+    const groups = new Map();
+    for (const entry of entries) {
+      if (!groups.has(entry.groupLabel)) groups.set(entry.groupLabel, []);
+      groups.get(entry.groupLabel).push(entry);
+    }
+    const selected = [...groups.values()].map((groupEntries, groupIndex) => {
+      const tightest = (entries) => entries.slice().sort((a, b) => {
+        const aRemaining = compactWindowRemaining(a.window);
+        const bRemaining = compactWindowRemaining(b.window);
+        if (aRemaining !== bRemaining) return aRemaining - bRemaining;
+        return a.index - b.index;
+      })[0] || null;
+      const session = tightest(groupEntries.filter((entry) => normalizeId(entry.window?.kind) === 'session'));
+      const weekly = tightest(groupEntries.filter((entry) => normalizeId(entry.window?.kind) === 'weekly'));
+      const sessionRemaining = compactWindowRemaining(session?.window);
+      const weeklyRemaining = compactWindowRemaining(weekly?.window);
+      const weeklyIsCritical = weeklyRemaining < COMPACT_LIMIT_CRITICAL_PERCENT;
+      const entry = !session
+        ? weekly
+        : !weekly
+          ? session
+          : weeklyRemaining < sessionRemaining && (weeklyIsCritical || !Number.isFinite(sessionRemaining))
+            ? weekly
+            : session;
+      return { ...entry, groupIndex, remaining: compactWindowRemaining(entry.window) };
+    });
+    return selected
+      .sort((a, b) => a.remaining - b.remaining || a.groupIndex - b.groupIndex)
+      .slice(0, 2)
+      .sort((a, b) => a.groupIndex - b.groupIndex)
+      .map((entry) => entry.window);
+  }
+
+  function limitProviderCompactWindowLabel(providerOrId, window, visibleWindows = []) {
+    if (providerId(providerOrId) === 'zai' && normalizeId(window?.kind) === 'daily') {
+      return String(window?.label || '').trim();
+    }
+    if (providerId(providerOrId) !== 'antigravity') return '';
+    const labels = (visibleWindows || []).map((candidate) => antigravityQuotaWindow(candidate)?.groupLabel || '');
+    const currentLabel = antigravityQuotaWindow(window)?.groupLabel || '';
+    if (labels.length < 2 || !currentLabel || labels.some((label) => !label)) return '';
+    return new Set(labels).size === labels.length ? currentLabel : '';
+  }
+
+  function limitProviderCompactWindowPeriodLabel(providerOrId, window, visibleWindows = []) {
+    if (!limitProviderCompactWindowLabel(providerOrId, window, visibleWindows)) return '';
+    const kind = normalizeId(window?.kind);
+    if (kind === 'session') return '5-hour';
+    if (kind === 'weekly') return 'Weekly';
+    return '';
+  }
+
+  function limitResetRemainingMs(value, nowMs = Date.now(), resetNowGraceMs = 60 * 1000) {
+    if (!value) return null;
+    const resetMs = new Date(value).getTime();
+    const currentMs = Number(nowMs);
+    if (!Number.isFinite(resetMs) || !Number.isFinite(currentMs)) return null;
+    const remainingMs = resetMs - currentMs;
+    if (remainingMs > 0) return remainingMs;
+    return remainingMs >= -Math.max(0, Number(resetNowGraceMs) || 0) ? 0 : null;
+  }
+
+  // "4h 26m" — coarse enough that a row does not rewrite itself every second,
+  // which is what a quota meter wants and a stopwatch does not.
+  function limitDurationText(ms) {
+    const totalMinutes = Math.max(0, Math.round(Number(ms || 0) / 60000));
+    const days = Math.floor(totalMinutes / 1440);
+    const hours = Math.floor((totalMinutes % 1440) / 60);
+    const minutes = totalMinutes % 60;
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m`;
+    return '<1m';
+  }
+
+  // The line under a quota meter: when the window turns over, or when the thing
+  // it measures expires. Shared rather than re-derived per surface — the Limits
+  // page and the edge dock render the same meters, and a window that says
+  // "Expires" on one and "Reset" on the other is describing two different
+  // products.
+  function limitBoundaryText(window) {
+    const diffMs = limitResetRemainingMs(window?.resetsAt);
+    if (diffMs === null) return '';
+    const mixed = window?.boundaryKind === 'mixed';
+    const prefix = window?.boundaryKind === 'expiry'
+      ? 'Expires'
+      : mixed
+        ? 'Changes in'
+        : 'Reset';
+    if (diffMs === 0) return mixed ? 'Changes now' : `${prefix} now`;
+    return `${prefix} ${limitDurationText(diffMs)}`;
+  }
+
+  // The "live" Codex account is the one THIS device's Codex app/CLI is currently
+  // signed into (sourceDetail app/cli/unknown). Managed accounts added inside
+  // Token Monitor report sourceDetail 'managed' and are NOT live. A remote
+  // device's live login (selectedIsRemote) is also not "live" from here — across
+  // synced devices, "Live" only ever points at the local account.
+  function isCodexLiveAccount(provider, provenance) {
+    if (!accountIdentityApi?.isCodexLiveAccount(provider)) return false;
+    // "Active" means this device is signed into the account — not that the shown
+    // quota came from here. So hide it only when the selected record is remote
+    // AND this device has no login of its own for the account; when both devices
+    // are signed in, the remote record is selected but the badge still belongs.
+    if (provenance && provenance.selectedIsRemote && !provenance.hasLocalCandidate) return false;
+    return true;
+  }
+
+  function isLinkedStatus(provider) {
+    const providerName = providerId(provider);
+    const source = sourceId(provider);
+    return (providerName === 'claude' && source === 'web')
+      || providerName === 'cursor'
+      || (providerName === 'opencode' && source === 'web')
+      || (providerName === 'mimo' && source === 'web')
+      || (providerName === 'zed' && source === 'web');
+  }
+
+  // How long ago a provider row was refreshed, and whether that reading is
+  // still trusted. One function because the Limits view and the edge dock used
+  // to word this differently off the same `provider.stale` flag — the page said
+  // "Stale · 55m ago" while the card said "Updated 54m ago" and added a
+  // separate warning line, which read like two different conditions.
+  //
+  // `tone` is what a surface decorates with; the words do not change with it.
+  function limitProviderFreshness(provider, options = {}) {
+    const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
+    const at = Date.parse(provider?.updatedAt || provider?.checkedAt || '');
+    if (!Number.isFinite(at)) {
+      return { text: provider?.stale ? 'Stale' : 'Update unknown', age: '', tone: provider?.stale ? 'stale' : 'unknown' };
+    }
+    const diffMs = Math.max(0, nowMs - at);
+    let age;
+    if (diffMs < 45_000) {
+      age = 'just now';
+    } else {
+      const minutes = Math.round(diffMs / 60000);
+      if (minutes < 60) {
+        age = `${minutes}m ago`;
+      } else {
+        const hours = Math.round(minutes / 60);
+        age = hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
+      }
+    }
+    return provider?.stale
+      ? { text: `Stale · ${age}`, age, tone: 'stale' }
+      : { text: `Updated ${age}`, age, tone: 'ok' };
+  }
+
+  function limitProviderStatusLabel(provider = {}) {
+    const providerName = providerId(provider);
+    const status = statusId(provider);
+
+    if (provider?.stale) return { label: 'Stale', tone: 'stale' };
+    if (providerName === 'antigravity' && provider?.actionRequired === 'accountVerification') {
+      return {
+        label: 'Open Antigravity to verify',
+        key: 'settings.antigravity.verificationRequired',
+        tone: 'setup'
+      };
+    }
+    if (providerName === 'workbuddy' && provider?.actionRequired === 'appSessionEncrypted') {
+      return {
+        label: 'Encrypted by app',
+        key: 'settings.limits.status.appSessionEncrypted',
+        tone: 'warn'
+      };
+    }
+    if (status === 'ok') return { label: isLinkedStatus(provider) ? 'Linked' : 'Live', tone: 'ok' };
+    if (status === 'disabled') return { label: 'Disabled', tone: 'muted' };
+    if (status === 'noSyncedData') return { label: 'No synced data', tone: 'sync' };
+    if (status === 'unauthorized') {
+      if (providerName === 'kimi') return { label: 'Update credential', tone: 'setup' };
+      if (providerName === 'thirdparty') return { label: 'Update credential', tone: 'setup' };
+      // Cline owns its credential lifecycle — it refreshes the stored token
+      // whenever the app or the CLI runs, and only it persists a rotated one — so
+      // this provider reads that sign-in read-only. The two lanes it accepts refuse
+      // in different places: a rejected key is replaced in Token Monitor's own
+      // settings field, while a stale sign-in only opening Cline fixes. The shared
+      // vocabulary carries one `unauthorized` for both, so the label reads the lane
+      // off the row: providers/cline/limits.js reports `api` for a configured key
+      // and `oauth` for the discovered sign-in. This is the one provider whose
+      // status branches on source, and it does so because both causes are reachable
+      // with neither of them rarer than the other — the file lane is the discovery
+      // default and its access token expires hourly. Grok and kiro name the vendor's
+      // own action here for the same reason, without needing the split.
+      if (providerName === 'cline') {
+        return sourceId(provider) === 'api'
+          ? { label: 'Update API key', tone: 'setup' }
+          : { label: 'Open Cline', tone: 'setup' };
+      }
+      return providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'copilot' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi'
+        ? { label: 'Update API key', tone: 'setup' }
+        : providerName === 'qoder' || providerName === 'trae'
+          ? { label: 'Sign in again', tone: 'setup' }
+          : providerName === 'grok'
+          ? { label: 'Re-login', tone: 'setup' }
+          : { label: 'Sign in again', tone: 'setup' };
+    }
+    if (status === 'rateLimited') return { label: 'Limited', tone: 'warn' };
+    if (status === 'sourceRateLimited') return { label: 'Usage API limited', tone: 'warn' };
+    if (status === 'unavailable') return { label: 'Unavailable', tone: 'warn' };
+    if (providerName === 'mimo' && status === 'error') return { label: 'Unavailable', tone: 'warn' };
+    if (status === 'notConfigured') {
+      if (providerName === 'kimi') return { label: 'Add credential', tone: 'setup' };
+      if (providerName === 'antigravity') return { label: 'Not set up', tone: 'setup' };
+      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'typesafe' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'ollama' || providerName === 'alibaba') return { label: 'Sign in', tone: 'setup' };
+      if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
+      // Cline joins the key-configured family: with neither a key nor a stored
+      // sign-in, the one thing this application can be told is a key (the sign-in
+      // belongs to Cline, and its own row explains that).
+      if (providerName === 'openrouter' || providerName === 'deepseek' || providerName === 'minimax' || providerName === 'factory' || providerName === 'zai' || providerName === 'zaiteam' || providerName === 'volcengine' || providerName === 'kimi' || providerName === 'cline') return { label: 'Add API key', tone: 'setup' };
+      if (providerName === 'grok') return { label: 'Run grok login', tone: 'setup' };
+      if (providerName === 'kiro') return { label: 'Run kiro-cli login', tone: 'setup' };
+      return { label: 'Not set up', tone: 'setup' };
+    }
+    return status ? { label: 'Error', tone: 'warn' } : null;
+  }
+
+  function apiKeyAccountStatus(provider, configured, enabled = true) {
+    if (!configured) return 'notConfigured';
+    if (!enabled) return 'disabled';
+    const status = statusId(provider);
+    if (!status) return 'checking';
+    if (status === 'ok') return 'linked';
+    if (status === 'unauthorized') return 'invalid';
+    if (status === 'rateLimited' || status === 'sourceRateLimited') return 'limited';
+    if (status === 'unavailable') return 'unavailable';
+    if (status === 'disabled' || status === 'noSyncedData') return 'notChecked';
+    if (status === 'notConfigured') return 'notConfigured';
+    return 'error';
+  }
+
+  function namedApiProfileStatus(provider, options = {}) {
+    const providerEnabled = options.providerEnabled !== false;
+    const profileEnabled = options.profileEnabled !== false;
+    if (!profileEnabled) return 'disabled';
+    if (!providerEnabled) return 'hidden';
+    return apiKeyAccountStatus(provider, true, true);
+  }
+
+  function usableProviderCandidate(provider) {
+    const status = statusId(provider);
+    return status !== 'disabled' && status !== 'notConfigured';
+  }
+
+  // The key family is read from accountIdentity.js rather than built again here:
+  // it is the same rule the subscription matcher binds with, and a second copy of
+  // it is a second answer to "which account is this" waiting to drift.
+  function providerMatchesTarget(candidate, target) {
+    if (providerId(candidate) !== providerId(target)) return false;
+    const targetAccountKeys = accountIdentityApi.accountKeyFamily(target);
+    if (targetAccountKeys.size === 0) return true;
+    return [...accountIdentityApi.accountKeyFamily(candidate)].some((key) => targetAccountKeys.has(key));
+  }
+
+  function deviceProviderCandidate(device, target) {
+    const providers = Array.isArray(device?.limits?.providers) ? device.limits.providers : [];
+    return providers.find((provider) => providerMatchesTarget(provider, target) && usableProviderCandidate(provider)) || null;
+  }
+
+  function limitProviderProvenance(providerOrId, options = {}) {
+    const provider = typeof providerOrId === 'object' && providerOrId ? providerOrId : { provider: providerOrId };
+    const providerName = providerId(provider);
+    const localKey = deviceKey(options.localDeviceId);
+    const selectedKey = deviceKey(provider?.sourceDeviceId);
+    const devices = Array.isArray(options.devices) ? options.devices : [];
+    const selectedDevice = devices.find((device) => deviceKey(device?.deviceId) === selectedKey) || null;
+    const candidates = devices.filter((device) => deviceProviderCandidate(device, providerName ? provider : providerName));
+    const localCandidate = candidates.find((device) => localKey && deviceKey(device?.deviceId) === localKey) || null;
+    const remoteCandidates = candidates.filter((device) => !localKey || deviceKey(device?.deviceId) !== localKey);
+    const selectedIsLocal = Boolean(selectedKey && localKey && selectedKey === localKey);
+    const selectedIsRemote = Boolean(selectedKey && localKey && selectedKey !== localKey);
+
+    return {
+      syncActive: Boolean(options.syncActive),
+      selectedDeviceId: selectedKey,
+      selectedDeviceLabel: deviceLabel(selectedDevice) || String(provider?.sourceDeviceId || '').trim(),
+      selectedIsLocal,
+      selectedIsRemote,
+      hasLocalCandidate: Boolean(localCandidate),
+      remoteCount: remoteCandidates.length,
+      candidateCount: candidates.length
+    };
+  }
+
+  function limitProviderProvenanceTags(provenance) {
+    if (!provenance?.syncActive) return [];
+    if (provenance.selectedIsRemote && provenance.selectedDeviceLabel) {
+      const tags = [{
+        key: 'settings.limits.device.from',
+        values: { device: provenance.selectedDeviceLabel },
+        deviceLabel: provenance.selectedDeviceLabel,
+        kind: 'device',
+        tone: 'remote'
+      }];
+      if (provenance.hasLocalCandidate) {
+        tags.push({ key: 'settings.limits.device.localAlso', kind: 'device', tone: 'multi' });
+      }
+      return tags;
+    }
+    if (provenance.selectedIsLocal) {
+      if (provenance.remoteCount > 0) {
+        return [{
+          key: 'settings.limits.device.localAndSynced',
+          values: { count: provenance.remoteCount },
+          count: provenance.remoteCount,
+          kind: 'device',
+          tone: 'multi'
+        }];
+      }
+      return [{ key: 'settings.limits.device.local', kind: 'device', tone: 'local' }];
+    }
+    return [];
+  }
+
+  function limitProviderMainDeviceLabel(provenance, options = {}) {
+    if (!options.showSource || !provenance?.syncActive || !provenance.selectedIsRemote) return '';
+    return provenance.selectedDeviceLabel || '';
+  }
+
+  function limitProviderSettingsTags(providerOrId, provenance = null) {
+    const tags = [];
+    const provider = typeof providerOrId === 'object' && providerOrId ? providerOrId : { provider: providerOrId };
+    const status = limitProviderStatusLabel(provider);
+    if (status) tags.push({ ...status, kind: 'status' });
+    if (status && (provider.status === 'ok' || provider.stale)) {
+      const sourceLabel = limitProviderSourceLabel(provider);
+      if (sourceLabel) tags.push({ label: sourceLabel, kind: 'source' });
+      tags.push(...limitProviderProvenanceTags(provenance));
+      return tags;
+    }
+    for (const label of limitProviderCapabilityTags(provider)) {
+      tags.push({ label, kind: 'capability' });
+    }
+    return tags;
+  }
+
+  return {
+    antigravityQuotaWindow,
+    apiKeyAccountStatus,
+    codexAdditionalQuotaDisplayName,
+    isCodexLiveAccount,
+    limitProviderCapabilityTags,
+    limitProviderCompactWindowLabel,
+    limitProviderCompactWindowPeriodLabel,
+    limitProviderCompactWindows,
+    limitProviderFreshness,
+    limitProviderDisplayLabel,
+    limitProviderPlanDisplayLabel,
+    limitProviderMainDeviceLabel,
+    namedApiProfileStatus,
+    limitProviderProvenance,
+    limitBoundaryText,
+    limitDurationText,
+    limitResetRemainingMs,
+    limitProviderSourceLabel,
+    limitProviderStatusLabel,
+    limitProviderSettingsTags,
+    thirdPartyAdapterFamily,
+    thirdPartyAdapterVisual,
+    thirdPartyGroupPlanText,
+    thirdPartySharedAdapterFamily
+  };
+});

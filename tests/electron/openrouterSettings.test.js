@@ -4,11 +4,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { rendererStyles } = require('../helpers/rendererStyles');
 const vm = require('node:vm');
 
 const root = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
-const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
+const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
 
 function functionBody(source, name, nextName) {
   const start = source.indexOf(`function ${name}(`);
@@ -18,11 +19,11 @@ function functionBody(source, name, nextName) {
   return source.slice(start, end);
 }
 
-// The Limits rows moved to limitWindowsView.js, which the edge dock renders
+// The Limits rows moved to limits/windowsView.js, which the edge dock renders
 // from too, so a provider's markup is built once rather than twice. These read
 // whichever file now holds the function.
 function limitsViewSource() {
-  return read('src/electron/renderer/limitWindowsView.js');
+  return read('src/electron/renderer/limits/windowsView.js');
 }
 
 function viewBody(name, nextName = '') {
@@ -77,12 +78,18 @@ test('OpenRouter account statuses settle when refreshed stats arrive', () => {
 test('OpenRouter credentials stay in the main process and renderer receives configured state only', () => {
   const app = read('src/electron/renderer/app.js');
   const main = read('src/electron/main.js');
-  const credentials = read('src/shared/credentialStore.js');
+  const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
+  const { accountFieldProjection, normalizeAccountPatch } = require('../../src/electron/limits/accountSettings');
+  const accountSettings = read('src/electron/limits/accountSettings.js');
 
-  assert.match(credentials, /openrouterProfiles: \['providers', 'openrouter', 'profiles'\]/);
-  assert.match(main, /function redactOpenRouterProfilesForRenderer/);
-  assert.match(main, /apiKey: profile\?\.apiKey \? 'set' : ''/);
-  assert.match(main, /delete normalizedPatch\.openrouterProfiles/);
+  assert.deepEqual(CREDENTIAL_SETTING_PATHS.openrouterProfiles, ['providers', 'openrouter', 'profiles']);
+  assert.match(accountSettings, /function redactOpenRouterProfilesForRenderer/);
+  assert.match(accountSettings, /apiKey: profile\?\.apiKey \? 'set' : ''/);
+  assert.equal(accountFieldProjection({ openrouterProfiles: { example: { apiKey: 'private' } } }).openrouterProfiles.example.apiKey, 'set');
+  assert.match(main, /normalizeAccountPatch\(patch, normalizedPatch\)/);
+  const patch = { openrouterProfiles: { example: { apiKey: 'private' } } };
+  normalizeAccountPatch(patch, patch);
+  assert.equal(Object.hasOwn(patch, 'openrouterProfiles'), false);
   assert.match(main, /ipcMain\.handle\('openrouter:saveProfile'/);
   assert.match(main, /ipcMain\.handle\('openrouter:deleteProfile'/);
   assert.match(main, /ipcMain\.handle\('openrouter:renameProfile'/);
@@ -97,9 +104,9 @@ test('OpenRouter credentials stay in the main process and renderer receives conf
 
 test('OpenRouter Limits presentation shows a real balance meter and compact spend tooltip', () => {
   const app = read('src/electron/renderer/app.js');
-  const presentation = read('src/electron/renderer/limitProviderPresentation.js');
-  const styles = read('src/electron/renderer/styles.css');
-  const colors = read('src/electron/renderer/usageCharts.js');
+  const presentation = read('src/electron/renderer/limits/providerPresentation.js');
+  const styles = rendererStyles();
+  const { clientColors } = require('../../src/electron/renderer/usageCharts');
 
   assert.equal(LIMIT_PROVIDER_LABELS.openrouter, 'OpenRouter');
   assert.match(limitsViewSource(), /provider\.provider === 'openrouter'/);
@@ -133,7 +140,7 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   assert.match(presentation, /openrouter: \['Pay-as-you-go', 'API key'\]/);
   assert.match(styles, /^\.row-icon-openrouter/m);
   assert.match(styles, /\.limit-spend-summary\s*\{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
-  assert.match(colors, /openrouter: '#6566F1'/);
+  assert.equal(clientColors.openrouter, '#6566F1');
 });
 
 test('OpenRouter credits lookup keeps the mixed-version label fallback', () => {
@@ -171,5 +178,8 @@ test('OpenRouter settings status uses collision-free row identity and a stable e
 
 test('OpenRouter key page is narrowly allowlisted', () => {
   const main = read('src/electron/main.js');
-  assert.match(main, /parsed\.hostname === 'openrouter\.ai' && parsed\.pathname\.startsWith\('\/settings\/keys'\)/);
+  assert.match(main, /limitProviderUrlAllowed\(parsed\.hostname, parsed\.pathname\)/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  assert.equal(limitProviderUrlAllowed('openrouter.ai', '/settings/keys'), true);
+  assert.equal(limitProviderUrlAllowed('openrouter.ai', '/settings'), false);
 });

@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const { claudeSessionRoots } = require('./paths');
 const { findSessionFiles } = require('../../sessionFiles');
+const { normalizeSessionContext, shouldReadSessionContext } = require('../../sessionContext');
 
 const TITLE_MAX_CODE_POINTS = 96;
 const TITLE_READ_CHUNK_BYTES = 256 * 1024;
@@ -17,6 +18,175 @@ const MAX_METADATA_LINE_BYTES = 64 * 1024;
 const LONG_LINE_HEAD_BYTES = 64 * 1024;
 const LONG_LINE_TAIL_BYTES = 8 * 1024;
 const titleCache = new Map();
+const MODEL_VERSION_END = '(?:$|[-@:\\[])';
+const CLAUDE_NATIVE_ONE_MILLION_MODEL = new RegExp(
+  `^claude-(?:opus-(?:5${MODEL_VERSION_END}|4-(?:7|8)${MODEL_VERSION_END})`
+  + `|sonnet-5${MODEL_VERSION_END}`
+  + `|fable-5(?:[.-]1)?${MODEL_VERSION_END}`
+  + `|mythos-(?:5(?:[.-]1)?${MODEL_VERSION_END}|preview${MODEL_VERSION_END}))`
+);
+const CLAUDE_PROVIDER_SONNET_FIVE_MODEL = new RegExp(
+  `^(?:(?:global|us|eu|apac|au|jp)\\.)?anthropic\\.claude-sonnet-5${MODEL_VERSION_END}`
+);
+
+function claudeContextWindow(model) {
+  const value = String(model || '').toLowerCase();
+  if (!value) return 0;
+  // Claude Code treats an explicit [1m] model option as extended context even
+  // for a custom provider spelling. The suffix is normally stripped before the
+  // request reaches the provider, but preserve the exact answer when a bridge
+  // records it in the response model.
+  if (value.includes('[1m]')) return 1_000_000;
+  // The bare Anthropic API ids below have a native 1M window. Provider
+  // spellings stay excluded except for Claude Code's recognized Sonnet 5 ids;
+  // other provider models use 200K unless launch configuration selected
+  // extended context, which the response model usually cannot prove after
+  // Claude Code strips the suffix.
+  if (CLAUDE_NATIVE_ONE_MILLION_MODEL.test(value)
+    || CLAUDE_PROVIDER_SONNET_FIVE_MODEL.test(value)) return 1_000_000;
+  // Claude Code's default assumption for standard and unrecognized model ids is
+  // 200K. Keep a best-effort gauge for third-party bridges (for example a
+  // DeepSeek model) instead of dropping the reading solely because its model id
+  // is not a Claude family.
+  return 200_000;
+}
+
+function reportedTokenCount(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : null;
+}
+
+function tokenCount(value) {
+  return reportedTokenCount(value) ?? 0;
+}
+
+function clearContextUsage(state) {
+  state.contextObserved = true;
+  state.contextTokens = 0;
+  state.contextWindow = 0;
+}
+
+function currentContextUsage(usage) {
+  if (!usage || typeof usage !== 'object') return null;
+  // Claude Code rolls the top-level counters up across every message iteration
+  // in one request. Each iteration carries the context again, so that total is
+  // cost/accounting data rather than the context held after the response. The
+  // final serving iteration is the request's current state. A server-side
+  // fallback labels the terminal iteration `fallback_message` instead of
+  // `message`; the preceding `message` is the primary attempt that declined.
+  // Some real records also zero the rollup while retaining the only usable
+  // reading here.
+  if (Array.isArray(usage.iterations)) {
+    for (let index = usage.iterations.length - 1; index >= 0; index -= 1) {
+      const iteration = usage.iterations[index];
+      if (iteration?.type === 'message' || iteration?.type === 'fallback_message') return iteration;
+    }
+  }
+  return usage;
+}
+
+function applyContextUsage(state, model, usage) {
+  const measurement = currentContextUsage(usage);
+  if (!measurement) return;
+  const inputTokens = reportedTokenCount(measurement.input_tokens);
+  // `input_tokens` is required by Claude's usage shape. Treat a record without
+  // it as incomplete rather than replacing the last valid reading with zero.
+  if (inputTokens === null) return;
+  const optionalTokenCount = (key) => {
+    if (!Object.prototype.hasOwnProperty.call(measurement, key)) return 0;
+    return reportedTokenCount(measurement[key]);
+  };
+  const cacheCreationTokens = optionalTokenCount('cache_creation_input_tokens');
+  const cacheReadTokens = optionalTokenCount('cache_read_input_tokens');
+  // Cache counters are optional, but a counter that is present and malformed
+  // makes the whole measurement incomplete. Preserve the last valid reading.
+  if (cacheCreationTokens === null || cacheReadTokens === null) return;
+  const total = inputTokens + cacheCreationTokens + cacheReadTokens;
+  // A present `usage` object does not guarantee a measurement. Claude writes
+  // its own turns as assistant records too, with every counter zeroed: the
+  // session-limit notice, an API error, and the "No response requested."
+  // acknowledgement. Accepting one as a reading blanks a gauge whose window
+  // still holds the previous turn, so treat zero occupancy as unreported.
+  if (total === 0) return;
+  state.contextObserved = true;
+  // Match Claude Code's status-line `used_percentage`: it is the current API
+  // input occupancy and deliberately excludes this response's output_tokens.
+  state.contextTokens = total;
+  state.contextWindow = claudeContextWindow(model);
+}
+
+// Return the complete message-level `usage` object once it has been written.
+// `usage` is the last field of `message`, so a tail that stops inside it is a
+// record still being appended. Reading it then would publish a partial
+// occupancy, because a cache counter the writer has not reached yet is
+// indistinguishable from the optional one a complete response may legitimately
+// omit. Counting brace depth from the opening brace proves closure on the
+// bytes alone, so a complete final record is still read when the writer never
+// emitted its trailing newline.
+function closedUsageObject(text) {
+  const header = /"usage"\s*:\s*\{/.exec(text);
+  if (!header) return '';
+  const start = header.index + header[0].length - 1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === '{') depth += 1;
+    else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, index + 1);
+    }
+  }
+  return '';
+}
+
+function contextUsageFromFragments(head, tail) {
+  // Tool inputs are arbitrary JSON and may contain their own `model` and
+  // `usage` fields. Claude writes the message-level usage after content, so
+  // the final occurrence is the delimiter for the response measurement.
+  const usageAt = tail.lastIndexOf('"usage"');
+  if (usageAt < 0) return null;
+  const usageText = tail.slice(usageAt);
+  // A record still being written has not closed its usage object yet, so the
+  // counters that are present measure only part of the next request.
+  const usageJson = closedUsageObject(usageText);
+  if (!usageJson) return null;
+  let usage;
+  try {
+    usage = JSON.parse(usageJson);
+  } catch (_) {
+    return null;
+  }
+  const contentAt = head.indexOf('"content"');
+  const headModelAt = head.indexOf('"model"');
+  let model = '';
+  // Trust a model in the head only when it precedes top-level message content.
+  // Otherwise a huge content value could contain an unrelated nested field.
+  if (headModelAt >= 0 && (contentAt < 0 || headModelAt < contentAt)) {
+    model = /"model"\s*:\s*"([^"]+)"/.exec(head.slice(headModelAt))?.[1] || '';
+  }
+  if (!model) {
+    // In Claude Code's usual ordering the top-level model follows content and
+    // is the last model field before usage. This also avoids a nested model in
+    // an earlier content block winning over the assistant message's model.
+    const matches = [...tail.slice(0, usageAt).matchAll(/"model"\s*:\s*"([^"]+)"/g)];
+    model = matches.length ? matches[matches.length - 1][1] : '';
+  }
+  return {
+    model,
+    usage
+  };
+}
 
 function cleanTitle(value) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
@@ -64,10 +234,21 @@ function applyMetadataLine(state, line) {
       // being generated. Titles and this boundary ride one pass, so the turn
       // state costs no extra read.
       const stopReason = entry.message?.stop_reason;
-      if (typeof stopReason === 'string' && stopReason) state.stopReason = stopReason;
-      // The assistant answered, so any prompt the user sent before it belongs to
-      // the turn this record closes.
-      state.userSinceStop = false;
+      if (typeof stopReason === 'string' && stopReason) {
+        state.stopReason = stopReason;
+        // Only a record that states why it stopped retires the prompt it
+        // answered. A null or missing reason is a streamed or aborted record
+        // whose turn state is unknown, and the oversized path already reads it
+        // that way; clearing the flag regardless would report the same record
+        // as finished at normal size and active past the head budget.
+        state.userSinceStop = false;
+      }
+      applyContextUsage(state, entry.message?.model, entry.message?.usage);
+    } else if (entry?.subtype === 'compact_boundary' || entry?.isCompactSummary === true) {
+      // Claude Code clears current_usage after compaction until the next API
+      // response. State the same absence so an old pre-compact gauge cannot
+      // survive while the compacted conversation is waiting for that response.
+      clearContextUsage(state);
     } else if (isUserPrompt(entry)) {
       // A prompt accepted after the last completion means that completion no
       // longer describes the current turn: the old `end_turn` would otherwise
@@ -167,7 +348,10 @@ function emptyIndex() {
     trailing: Buffer.alloc(0),
     droppingLongLine: false,
     longLineHead: Buffer.alloc(0),
-    longLineTail: Buffer.alloc(0)
+    longLineTail: Buffer.alloc(0),
+    contextObserved: false,
+    contextTokens: 0,
+    contextWindow: 0
   };
 }
 
@@ -182,8 +366,24 @@ function keepLongLineTail(state, remainder) {
     : Buffer.from(combined);
 }
 
+// Which record an oversized line is cannot be read from the head alone. Claude
+// writes a record's `message` before its root `type`, so an oversized `content`
+// pushes `"type":"assistant"` past the head budget and leaves the root
+// discriminator in the tail. The message-level `role` is the reliable in-head
+// signal, because `message` precedes its own `content` and the first `"role"`
+// is therefore the message's own rather than text quoted inside it. The root
+// discriminator stays as a fallback for a record whose message carries no role,
+// accepted from either retained fragment.
+function oversizedRecordKind(head, tail) {
+  const role = /"role"\s*:\s*"(user|assistant)"/.exec(head);
+  if (role) return role[1];
+  if (/"type"\s*:\s*"assistant"/.test(head) || /"type"\s*:\s*"assistant"/.test(tail)) return 'assistant';
+  if (/"type"\s*:\s*"user"/.test(head) || /"type"\s*:\s*"user"/.test(tail)) return 'user';
+  return '';
+}
+
 // The boundary inside a record too large to parse. The fragments are partial
-// JSON by construction, so the two fields are matched on the raw text: a user
+// JSON by construction, so the fields are matched on the raw text: a user
 // record is a real prompt when its content opens with text or an image rather
 // than a tool_result, and an assistant record reports the stop_reason it ends
 // with. Anything else leaves the state untouched, exactly as a full parse of an
@@ -193,7 +393,19 @@ function applyLongLineFragments(state) {
   const tail = (state.longLineTail || Buffer.alloc(0)).toString('utf8');
   state.longLineHead = Buffer.alloc(0);
   state.longLineTail = Buffer.alloc(0);
-  if (/"type"\s*:\s*"assistant"/.test(head)) {
+  const kind = oversizedRecordKind(head, tail);
+  if (kind === 'assistant') {
+    // The usage reading is taken before the stop_reason guard below, matching
+    // the ordinary path, which applies usage whether or not stop_reason states
+    // anything. Claude persists `stop_reason: null` on some assistant records
+    // while still writing valid counters, and the quoted-value match below
+    // cannot see an unquoted null, so guarding first skipped a real reading on
+    // an oversized record that the same response would have updated at normal
+    // size. It cannot apply a half-written record instead: `stop_reason`
+    // precedes `usage` in `message`, so a tail carrying usage has already
+    // written the statement, and a record still being written yields no usage.
+    const contextUsage = contextUsageFromFragments(head, tail);
+    if (contextUsage) applyContextUsage(state, contextUsage.model, contextUsage.usage);
     // stop_reason is the last occurrence, and it trails the assistant text.
     const matches = [...tail.matchAll(/"stop_reason"\s*:\s*"([^"]*)"/g)];
     const reason = matches.length ? matches[matches.length - 1][1] : '';
@@ -207,8 +419,16 @@ function applyLongLineFragments(state) {
     state.userSinceStop = false;
     return;
   }
-  if (!/"type"\s*:\s*"user"/.test(head)) return;
-  if (/"isMeta"\s*:\s*true/.test(head) || /"isCompactSummary"\s*:\s*true/.test(head)) return;
+  if (kind !== 'user') return;
+  // The bookkeeping flags also trail `message` on disk, so they can land in the
+  // tail of an oversized record. Both fragments are searched for the same
+  // reason the record type is: the field order puts them after the content.
+  const flags = `${head}\n${tail}`;
+  if (/"isMeta"\s*:\s*true/.test(flags)) return;
+  if (/"isCompactSummary"\s*:\s*true/.test(flags)) {
+    clearContextUsage(state);
+    return;
+  }
   // This has to agree with what isUserPrompt() accepts, or the same record is a
   // prompt when it fits in one line and not one when it does not. That function
   // takes a plain string content as a real prompt, so this path does too; the
@@ -261,7 +481,10 @@ function readSessionTitle(filePath, deps = {}) {
         // Carried across the append resume: a scan that stopped mid-record has
         // to finish reading that record's boundary from the fragments it kept.
         longLineHead: Buffer.isBuffer(cached.longLineHead) ? Buffer.from(cached.longLineHead) : Buffer.alloc(0),
-        longLineTail: Buffer.isBuffer(cached.longLineTail) ? Buffer.from(cached.longLineTail) : Buffer.alloc(0)
+        longLineTail: Buffer.isBuffer(cached.longLineTail) ? Buffer.from(cached.longLineTail) : Buffer.alloc(0),
+        contextObserved: cached.contextObserved === true,
+        contextTokens: tokenCount(cached.contextTokens),
+        contextWindow: tokenCount(cached.contextWindow)
       }
       : emptyIndex();
     const start = appendOnly ? cached.size : 0;
@@ -311,6 +534,16 @@ function readSessionTurnEnded(filePath, deps = {}) {
   return stopReason !== 'tool_use' && cached?.userSinceStop !== true;
 }
 
+function readSessionContext(filePath, deps = {}) {
+  const file = String(filePath || '');
+  if (!file) return undefined;
+  const cache = deps.cache || titleCache;
+  readSessionTitle(file, deps);
+  const cached = cache.get(file);
+  if (!cached?.contextObserved) return undefined;
+  return normalizeSessionContext(cached) || { contextTokens: 0, contextWindow: 0 };
+}
+
 function resolveSessionMetadata(sessionIds, context) {
   const { deps, home, metadata } = context;
   const result = new Map();
@@ -337,10 +570,14 @@ function resolveSessionMetadata(sessionIds, context) {
     // left the stale completion in place and the row read Finished while the
     // model was generating. `undefined` is reserved for "no evidence".
     const turnEnded = readSessionTurnEnded(filePath, deps.claudeMetadataDeps);
+    const sessionContext = shouldReadSessionContext(meta.lastUsedAt, context.now)
+      ? readSessionContext(filePath, deps.claudeMetadataDeps)
+      : undefined;
     result.set(sessionId, {
       ...meta,
       ...(title ? { title } : {}),
-      ...(turnEnded === undefined ? {} : { turnEnded })
+      ...(turnEnded === undefined ? {} : { turnEnded }),
+      ...(sessionContext || {})
     });
   };
   const projectFiles = findSessionFiles(roots.projects, sessionIds);
@@ -354,7 +591,9 @@ function resolveSessionMetadata(sessionIds, context) {
 module.exports = {
   TITLE_MAX_CODE_POINTS,
   TITLE_READ_CHUNK_BYTES,
+  claudeContextWindow,
   cleanTitle,
+  readSessionContext,
   readSessionTitle,
   readSessionTurnEnded,
   resolveSessionMetadata

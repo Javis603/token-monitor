@@ -9,15 +9,11 @@ const {
 } = require('../shared/limits/collector');
 const { normalizeSyncUploadIntervalMs } = require('../shared/syncUploadInterval');
 const { normalizeCustomScanPaths } = require('../shared/customScanPaths');
+const { limitProviderSettingKeys } = require('../shared/limits/accounts');
+const { normalizeCursorAccountIds } = require('../shared/providers/cursor/account');
+const { limitsAccountConfig } = require('./limits/accountSettings');
 
 const DEFAULT_ALL_TIME_SINCE = '2024-01-01';
-
-function normalizeCursorAccountIds(value) {
-  if (!Array.isArray(value)) return [];
-  return [...new Set(value
-    .map((id) => String(id || '').trim())
-    .filter((id) => id && id.length <= 256))];
-}
 
 const normalizeCursorDisabledAccountIds = normalizeCursorAccountIds;
 
@@ -69,35 +65,9 @@ const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'opencodeLocalLimitsEnabled'
 ]);
 const SINK_STRUCTURAL_KEYS = Object.freeze(['syncUploadIntervalMs']);
-const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze({
-  claude: ['claudeWebCookie'],
-  codex: ['codexManagedAccounts'],
-  opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
-  cursor: ['cursorDisabledAccountIds'],
-  factory: ['factoryApiKey'],
-  kimi: ['kimiApiKey', 'kimiWebAccessToken'],
-  copilot: ['copilotApiToken', 'copilotEnterpriseHost'],
-  zed: ['zedCookie'],
-  commandcode: ['commandcodeCookie'],
-  mimo: ['mimoManagedAccounts'],
-  zai: ['zaiApiKey', 'zaiApiRegion'],
-  zaiteam: ['zaiTeamApiKey', 'zaiTeamOrganizationId', 'zaiTeamProjectId'],
-  // The desktop widget auto-detects WorkBuddy when the provider itself is
-  // enabled. Token and metadata fields remain available to headless/CLI deployments.
-  workbuddy: ['workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo'],
-  qoder: ['qoderCookie', 'qoderSite'],
-  deepseek: ['deepseekApiKey'],
-  openrouter: ['openrouterProfiles'],
-  minimax: ['minimaxApiKey'],
-  volcengine: [
-    'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
-    'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'
-  ],
-  ollama: ['ollamaCookie'],
-  trae: ['traeAccessToken', 'traeDeviceId'],
-  alibaba: ['alibabaCookie', 'alibabaVariant'],
-  thirdparty: ['thirdPartyProfiles']
-});
+// Derived from the account declarations: every watched field plus a
+// provider's extraSettingKeys scopes a limits refresh to that provider.
+const LIMIT_PROVIDER_SETTING_KEYS = Object.freeze(limitProviderSettingKeys());
 
 function equalSetting(left, right) {
   if (left === right) return true;
@@ -166,49 +136,13 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     limitProviders: settings.limitProviders ?? context.defaultLimitProviders,
     limitsRefreshMode: normalizeLimitsRefreshMode(settings.limitsRefreshMode),
     limitsRefreshMs: normalizeLimitsRefreshMs(settings.limitsRefreshMs),
-    cursorDisabledAccountIds: normalizeCursorDisabledAccountIds(settings.cursorDisabledAccountIds),
-    claudeWebCookie: settings.claudeWebCookie
-      || env.CLAUDE_WEB_COOKIE
-      || '',
     claudePrepaidBalanceEnabled: settings.claudePrepaidBalanceEnabled !== false,
     opencodeLocalLimitsEnabled: settings.opencodeLocalLimitsEnabled === true,
     opencodeAmbientEnabled: settings.opencodeAmbientEnabled !== false,
-    opencodeCookie: settings.opencodeCookie || env.TOKEN_MONITOR_OPENCODE_COOKIE || '',
-    opencodeProfiles: settings.opencodeProfiles || {},
-    openrouterProfiles: settings.openrouterProfiles || {},
-    deepseekApiKey: settings.deepseekApiKey || '',
-    minimaxApiKey: settings.minimaxApiKey || '',
-    copilotApiToken: settings.copilotApiToken || '',
-    copilotEnterpriseHost: settings.copilotEnterpriseHost || '',
-    factoryApiKey: settings.factoryApiKey || '',
-    zaiApiKey: settings.zaiApiKey || '',
-    zaiApiRegion: settings.zaiApiRegion || 'global',
-    zaiTeamApiKey: settings.zaiTeamApiKey || '',
-    zaiTeamOrganizationId: settings.zaiTeamOrganizationId || '',
-    zaiTeamProjectId: settings.zaiTeamProjectId || '',
-    volcengineAccessKeyId: settings.volcengineAccessKeyId || '',
-    volcengineSecretAccessKey: settings.volcengineSecretAccessKey || '',
-    volcengineRegion: settings.volcengineRegion || '',
-    volcengineAgentAccessKeyId: settings.volcengineAgentAccessKeyId || '',
-    volcengineAgentSecretAccessKey: settings.volcengineAgentSecretAccessKey || '',
-    volcengineAgentRegion: settings.volcengineAgentRegion || '',
-    alibabaCookie: settings.alibabaCookie || '',
-    alibabaVariant: settings.alibabaVariant || '',
-    qoderCookie: settings.qoderCookie || '',
-    qoderSite: settings.qoderSite || 'global',
-    traeAccessToken: settings.traeAccessToken
-      || env.TOKEN_MONITOR_TRAE_ACCESS_TOKEN
-      || env.TRAE_ACCESS_TOKEN
-      || '',
-    traeDeviceId: settings.traeDeviceId
-      || env.TOKEN_MONITOR_TRAE_DEVICE_ID
-      || env.TRAE_DEVICE_ID
-      || '',
-    zedCookie: settings.zedCookie
-      || env.TOKEN_MONITOR_ZED_COOKIE
-      || env.ZED_COOKIE
-      || '',
-    commandcodeCookie: settings.commandcodeCookie || '',
+    // Every declared account field: settings lane, declared env fallbacks,
+    // declared default. The workbuddy fields below stay hand-written because
+    // the desktop session rewrites their lanes entirely.
+    ...limitsAccountConfig(settings, context),
     workbuddyAccessToken: workbuddySettings.workbuddyAccessToken
       || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN
       || workbuddyEnv.WORKBUDDY_ACCESS_TOKEN
@@ -236,19 +170,18 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     workbuddyAccountType: context.workbuddyDesktopSessionEnabled === true
       ? workbuddyLocalSession.accountType || ''
       : '',
+    // Why the app-owned session is unusable, when it is. An encrypted or
+    // otherwise unreadable credential is not a signed-out app, and the limits
+    // layer needs that difference to stop asking the user to sign in again.
+    workbuddyLocalSessionReason: context.workbuddyDesktopSessionEnabled === true
+      ? String(workbuddyLocalSession.reason || '').trim()
+      : '',
     workbuddyLocale: workbuddySettings.workbuddyLocale
       || workbuddyEnv.TOKEN_MONITOR_WORKBUDDY_LOCALE
       || workbuddyEnv.WORKBUDDY_LOCALE
       || '',
     workbuddyDesktopSessionSupported: context.workbuddyDesktopSessionSupported !== false,
-    workbuddyDesktopSessionEnabled: context.workbuddyDesktopSessionEnabled === true,
-    kimiApiKey: settings.kimiApiKey || '',
-    kimiWebAccessToken: settings.kimiWebAccessToken || '',
-    ollamaCookie: settings.ollamaCookie || '',
-    codexManagedAccounts: context.codexManagedAccounts ?? settings.codexManagedAccounts ?? [],
-    antigravityManagedAccounts: context.antigravityManagedAccounts ?? settings.antigravityManagedAccounts ?? [],
-    mimoManagedAccounts: context.mimoManagedAccounts ?? settings.mimoManagedAccounts ?? [],
-    thirdPartyProfiles: settings.thirdPartyProfiles || {}
+    workbuddyDesktopSessionEnabled: context.workbuddyDesktopSessionEnabled === true
   };
 }
 

@@ -29,33 +29,6 @@ const QODER_CN_JSONL_MAX_ROWS = 100_000;
 // could still be tens of megabytes, so a single line larger than this aborts
 // the read before JSON.parse instead of buffering it whole.
 const QODER_CN_JSONL_MAX_LINE_BYTES = 32 * 1024 * 1024;
-// Internal-model rows report `input_tokens: 0` and carry billing only in
-// `credits`, but every assistant row also carries `context_usage_ratio` — the
-// client's own context occupancy. On rows with real token counts the identity
-// `input_tokens / context_usage_ratio == context window` holds EXACTLY (100%
-// of observed rows), so for internal codes with a published window the ratio
-// reconstructs the true per-call prompt size rather than estimating it.
-// Windows come from the app's `chat_model_preferences.context_window`. Codes
-// absent here (routing tiers like `auto`, or models whose window the app does
-// not publish) are deliberately never reconstructed: their occupancy
-// denominator is unknown and a fabricated token count is worse than none.
-// Opt-in via TOKEN_MONITOR_QODER_CN_ESTIMATE_PROMPT_TOKENS=1.
-const QODER_CN_INTERNAL_MODEL_WINDOWS = Object.freeze({
-  dfmodel: 1_000_000,
-  dmodel: 1_000_000,
-  gfmodel: 1_000_000,
-  gm51model: 1_000_000,
-  gmodel: 1_000_000,
-  kmodel: 1_000_000,
-  kmodel_latest: 1_000_000,
-  q37fmodel: 1_000_000,
-  qfmodel: 1_000_000,
-  qmodel: 1_000_000,
-  qmodel_38max: 1_000_000,
-  qmodel_latest: 1_000_000
-});
-const QODER_CN_ESTIMATE_ENV = 'TOKEN_MONITOR_QODER_CN_ESTIMATE_PROMPT_TOKENS';
-const QODER_CN_MODEL_WINDOWS_ENV = 'TOKEN_MONITOR_QODER_CN_MODEL_WINDOWS';
 // Qoder CN stores internal model codes (model_info.model_key) instead of real
 // model names. Official display names come from the app's bundled i18n keys
 // `modelSelector.item.<code>` (Qoder CN.app, 2026-07 build); the codes change
@@ -228,10 +201,6 @@ function isQoderCnRoutingTier(value) {
 }
 
 function estimatedQoderCnRowCost(row, pricingByModel) {
-  // Reconstructed prompt-only rows mix cache reads into `input` (the ratio
-  // does not record the split), so any per-token price would inflate the
-  // estimate by the cache discount — keep them cost-unavailable.
-  if (row?.estimatedPrompt) return null;
   // Qoder CN stores routing tiers without the model selected behind them. Do
   // not let an unrelated catalog/custom-pricing entry supply a false price.
   const modelId = String(row?.model || '').trim().toLowerCase();
@@ -351,6 +320,7 @@ function qoderCnDataPaths(options = {}) {
 
   const explicitDb = String(env.TOKEN_MONITOR_QODER_CN_DB_PATH || '').trim();
   const explicitProjects = String(env.TOKEN_MONITOR_QODER_CN_PROJECTS_PATH || '').trim();
+  const qoderConfigDir = String(env.QODERCN_CONFIG_DIR || '').trim();
   return {
     dbPaths: explicitDb
       ? [path.resolve(explicitDb)]
@@ -360,7 +330,9 @@ function qoderCnDataPaths(options = {}) {
     // legacy database lived under.
     projectsDir: explicitProjects
       ? path.resolve(explicitProjects)
-      : path.join(home, QODER_CN_PROJECTS_SUFFIX)
+      : qoderConfigDir
+        ? path.resolve(qoderConfigDir, 'projects')
+        : path.join(home, QODER_CN_PROJECTS_SUFFIX)
   };
 }
 
@@ -495,47 +467,6 @@ function qoderCnJsonlProjectLabel(cwd) {
   return normalizeQoderCnProjectLabel(label);
 }
 
-// `TOKEN_MONITOR_QODER_CN_MODEL_WINDOWS=code=tokens,code=tokens` extends the
-// built-in map (e.g. for a model whose window the local app never registered).
-function qoderCnModelWindows(options = {}) {
-  const env = options.env || process.env;
-  const map = { ...QODER_CN_INTERNAL_MODEL_WINDOWS };
-  for (const pair of String(env[QODER_CN_MODEL_WINDOWS_ENV] || '').split(',')) {
-    const [code, tokens] = pair.split('=').map((part) => part.trim());
-    const window = Number(tokens);
-    if (code && Number.isSafeInteger(window) && window > 0) map[code] = window;
-  }
-  return map;
-}
-
-// Reconstruct the prompt size of a zero-token internal-model row from the
-// client's own occupancy ratio. Returns null when reconstruction is disabled,
-// the row carries no usable ratio, or the model's window is not published.
-function qoderCnReconstructedPromptRow(obj, source, window) {
-  const ratio = Number(obj.message?.usage?.context_usage_ratio);
-  // (0,1] only: an occupancy above the window or a non-finite value would
-  // reconstruct more tokens than exist, and Infinity would poison totals.
-  if (!Number.isFinite(ratio) || ratio <= 0 || ratio > 1 || !window) return null;
-  const session = String(obj.sessionId || 'unknown');
-  const message = String(obj.message?.id || obj.uuid || `${obj.timestamp || 0}`);
-  return {
-    sessionId: `qodercn:jsonl:${source}:${session}`,
-    messageId: `qodercn:jsonl:${source}:${session}:${message}`,
-    model: qoderCnJsonlModelName(obj.message?.model) || 'qoder-agent',
-    projectLabel: qoderCnJsonlProjectLabel(obj.cwd),
-    // The ratio covers the whole prompt; how much of it was a cache read is
-    // not recorded on these rows, so the reconstructed count stays `input`
-    // and estimatedRowCost refuses to price it (see the estimated flag).
-    input: Math.round(ratio * window),
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    createdAt: timestampMs(obj.timestamp),
-    messages: 1,
-    estimatedPrompt: true
-  };
-}
-
 // One JSONL line -> a normalized usage row, or null. Transcripts share the
 // Claude message envelope but NOT its token semantics: Qoder CN's
 // `input_tokens` is the full prompt INCLUDING the cached prefix (verified
@@ -544,7 +475,7 @@ function qoderCnReconstructedPromptRow(obj, source, window) {
 // subset of it — the same shape the legacy DB's `prompt_tokens`/
 // `cached_tokens` pair has, so the cached split below mirrors
 // normalizeQoderCnDbRow rather than the Anthropic convention.
-function normalizeQoderCnJsonlRow(obj, source = 'local', options = {}) {
+function normalizeQoderCnJsonlRow(obj, source = 'local') {
   if (!obj || obj.type !== 'assistant') return null;
   const usage = obj.message && obj.message.usage;
   if (!usage) return null;
@@ -552,11 +483,11 @@ function normalizeQoderCnJsonlRow(obj, source = 'local', options = {}) {
   const cached = numeric(usage.cache_read_input_tokens ?? 0);
   const output = numeric(usage.output_tokens);
   if (prompt === null || cached === null || output === null) return null;
-  if (prompt + output === 0) {
-    if (!options.estimatePromptTokens) return null;
-    const modelKey = String((obj.message && obj.message.model) || '').trim();
-    return qoderCnReconstructedPromptRow(obj, source, options.modelWindows?.[modelKey]);
-  }
+  // Plan-billed first-party rows currently record credits and a context ratio,
+  // but no active per-session context window. A model-wide denominator would
+  // overcount sessions configured for smaller windows, so only measured token
+  // rows enter token history.
+  if (prompt + output === 0) return null;
   const session = String(obj.sessionId || 'unknown');
   const message = String((obj.message && obj.message.id) || obj.uuid || `${obj.timestamp || 0}`);
   return {
@@ -573,17 +504,25 @@ function normalizeQoderCnJsonlRow(obj, source = 'local', options = {}) {
   };
 }
 
-function listQoderCnJsonlFiles(dir, depth, found, maxFiles = QODER_CN_JSONL_MAX_FILES, maxDepth = QODER_CN_JSONL_MAX_DEPTH) {
+function listQoderCnJsonlFiles(dir, depth, found, maxFiles = QODER_CN_JSONL_MAX_FILES, maxDepth = QODER_CN_JSONL_MAX_DEPTH, fsImpl = fs) {
   if (depth > maxDepth) return;
   let entries;
-  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+  try {
+    entries = fsImpl.readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    // A machine with only the legacy SQLite source legitimately has no JSONL
+    // root. Once an enumerated subtree is involved, any error would make the
+    // result partial and must reach the collector's last-good fallback.
+    if (depth === 0 && error?.code === 'ENOENT') return;
+    throw error;
+  }
   // Sorted traversal: when the file budget below trips, the reported failure
   // describes the same tree to every observer instead of whichever order the
   // filesystem happened to return.
   entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) listQoderCnJsonlFiles(full, depth + 1, found, maxFiles, maxDepth);
+    if (entry.isDirectory()) listQoderCnJsonlFiles(full, depth + 1, found, maxFiles, maxDepth, fsImpl);
     else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
       found.push(full);
       if (found.length > maxFiles) throw readBudgetError('files', maxFiles);
@@ -610,7 +549,8 @@ async function readQoderCnJsonlFileRows(filePath, source, budget, options = {}) 
     budget.rows += 1;
     if (budget.rows > budget.maxRows) throw readBudgetError('rows', budget.maxRows);
   };
-  const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
+  const fsImpl = options.fs || fs;
+  const stream = fsImpl.createReadStream(filePath, { encoding: 'utf8' });
   let pending = '';
   try {
     for await (const chunk of stream) {
@@ -645,11 +585,9 @@ async function readQoderCnJsonlFileRows(filePath, source, budget, options = {}) 
 async function collectQoderCnJsonlRows(options = {}) {
   const projectsDir = options.projectsDir || qoderCnDataPaths(options).projectsDir;
   const sinceMs = options.sinceMs;
-  const env = options.env || process.env;
-  const estimatePromptTokens = options.estimatePromptTokens ?? ['1', 'true'].includes(String(env[QODER_CN_ESTIMATE_ENV] || '').trim().toLowerCase());
-  const readOptions = { ...options, estimatePromptTokens, modelWindows: options.modelWindows || qoderCnModelWindows({ env }) };
+  const fsImpl = options.fs || fs;
   const files = [];
-  listQoderCnJsonlFiles(projectsDir, 0, files, positiveInteger(options.maxFiles, QODER_CN_JSONL_MAX_FILES));
+  listQoderCnJsonlFiles(projectsDir, 0, files, positiveInteger(options.maxFiles, QODER_CN_JSONL_MAX_FILES), QODER_CN_JSONL_MAX_DEPTH, fsImpl);
   files.sort();
   const budget = {
     bytes: 0,
@@ -664,18 +602,8 @@ async function collectQoderCnJsonlRows(options = {}) {
     // A transcript cannot contain usage newer than its own mtime, so an
     // anchored (today-only) tick can skip every file untouched since the
     // window opened — real trees hold multi-megabyte session files.
-    try {
-      if (sinceMs && fs.statSync(filePath).mtimeMs < sinceMs) continue;
-    } catch (_) { continue; }
-    try {
-      rows.push(...(await readQoderCnJsonlFileRows(filePath, sourceId(filePath), budget, readOptions)));
-    } catch (err) {
-      // A budget breach means the totals would be silently incomplete; fail
-      // the whole read so the collector keeps its last complete snapshot,
-      // exactly like the SQLite reader's budget does.
-      if (isReadBudgetError(err)) throw err;
-      if (typeof options.logger === 'function') options.logger(`qodercn jsonl file read failed: ${err.message}`);
-    }
+    if (sinceMs && fsImpl.statSync(filePath).mtimeMs < sinceMs) continue;
+    rows.push(...(await readQoderCnJsonlFileRows(filePath, sourceId(filePath), budget, options)));
   }
   return rows;
 }
@@ -699,11 +627,12 @@ async function collectQoderCnRows(options = {}) {
 
   // The JSONL tree is opt-in at the call site so DB-only unit tests keep their
   // exact fixtures; the collector enables it in production, where a machine
-  // has either the legacy database, the new transcripts, or (after a storage
-  // migration) one historical and one current — never the same message in
-  // both, since they are different product surfaces. Read errors propagate
-  // like the database reader's do, so the collector's existing handler keeps
-  // the last complete snapshot instead of publishing partial totals.
+  // can have either layout or retain historical SQLite data beside current
+  // transcripts. Source-qualified ids keep their independent identities;
+  // there is no verified cross-format key on which to join them. Read errors
+  // propagate like the database reader's do, so the collector's existing
+  // handler keeps the last complete snapshot instead of publishing partial
+  // totals.
   if (options.includeJsonl) {
     rows.push(...(await collectQoderCnJsonlRows({ ...options, projectsDir: options.projectsDir || paths.projectsDir })));
   }

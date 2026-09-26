@@ -238,11 +238,15 @@ function normalizeClientName(value) {
   if (raw.includes('grok')) return 'grok';
   if (raw === 'droid') return 'droid';
   if (raw.includes('copilot')) return 'copilot';
+  // Oh My Pi before the generic Pi test: its display name contains "Pi" as a
+  // word, so the Pi heuristic would otherwise capture it. Tokscale reports the
+  // id `omp`; these spellings only appear when a caller passes a display name.
+  if (raw === 'omp' || /^oh[\s_-]*my[\s_-]*pi$/.test(raw)) return 'omp';
   if (/\bpi\b/.test(raw)) return 'pi';
   if (raw.includes('zed')) return 'zed';
   if (/^kilo[\s_-]*code$/.test(raw)) return 'kilo';
   if (/command[\s_-]*code/.test(raw)) return 'commandcode';
-  if (raw.includes('micode')) return 'micode';
+  if (raw.includes('micode') || raw.includes('mimo')) return 'mimo';
   if (raw.includes('zcode')) return 'zcode';
   if (raw.includes('kiro')) return 'kiro';
   if (raw.includes('codebuddy')) return 'codebuddy';
@@ -254,6 +258,7 @@ function normalizeClientName(value) {
   if (/lm[\s_-]*studio/.test(raw)) return 'lmstudio';
   if (/^unsloth(?:[\s_-]+(?:studio|api))?$/.test(raw)) return 'unsloth';
   if (raw.includes('dsh')) return 'dsh';
+  if (raw.includes('devin')) return 'devin';
   if (raw.includes('opencode')) return 'opencode';
   if (raw.includes('openclaw') || raw.includes('clawd') || raw.includes('moltbot') || raw.includes('moldbot')) return 'openclaw';
   return raw.replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || null;
@@ -966,14 +971,38 @@ function normalizeDeviceOsName(value) {
   return String(value || '').trim().slice(0, 64);
 }
 
+// The fields History aggregation reads from a device record, normalized exactly
+// as normalizeDeviceRecord() does. aggregateHistory() used to normalize the whole
+// record for these, which also walks every session of every period: on a long
+// history that was most of its cost and none of its output.
+function normalizeRecordHistoryFields(record, nowIso = new Date().toISOString()) {
+  const fields = {
+    updatedAt: record.updatedAt || nowIso,
+    receivedAt: record.receivedAt || nowIso
+  };
+  if (hasOwn(record, 'historyAvailable')) fields.historyAvailable = record.historyAvailable === true;
+  if (hasOwn(record, 'history')) {
+    // An explicit null means History is disabled/unavailable. Preserve that
+    // wire distinction; an omitted field means "no History update this tick"
+    // and an object is the retained History payload.
+    fields.history = record.history === null ? null : coerceHistory(record.history);
+  }
+  if (hasOwn(record, 'periodWindows')) {
+    const windows = normalizePeriodWindows(record.periodWindows);
+    if (windows) fields.periodWindows = windows;
+  }
+  return fields;
+}
+
 function normalizeDeviceRecord(record) {
   const nowIso = new Date().toISOString();
+  const historyFields = normalizeRecordHistoryFields(record, nowIso);
   const normalized = {
     deviceId: String(record.deviceId || record.id || 'unknown'),
     hostname: record.hostname ? String(record.hostname) : '',
     platform: record.platform ? String(record.platform) : '',
-    updatedAt: record.updatedAt || nowIso,
-    receivedAt: record.receivedAt || nowIso,
+    updatedAt: historyFields.updatedAt,
+    receivedAt: historyFields.receivedAt,
     agentVersion: record.agentVersion || '',
     agentRuntime: record.agentRuntime ? String(record.agentRuntime) : '',
     periods: {},
@@ -1003,17 +1032,9 @@ function normalizeDeviceRecord(record) {
     if (omitted) normalized.periodProjectsOmitted = omitted;
   }
   if (hasOwn(record, 'syncUploadIntervalMs')) normalized.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(record.syncUploadIntervalMs);
-  if (hasOwn(record, 'historyAvailable')) normalized.historyAvailable = record.historyAvailable === true;
-  if (hasOwn(record, 'history')) {
-    // An explicit null means History is disabled/unavailable. Preserve that
-    // wire distinction; an omitted field means "no History update this tick"
-    // and an object is the retained History payload.
-    normalized.history = record.history === null ? null : coerceHistory(record.history);
-  }
-  if (hasOwn(record, 'periodWindows')) {
-    const windows = normalizePeriodWindows(record.periodWindows);
-    if (windows) normalized.periodWindows = windows;
-  }
+  if (hasOwn(historyFields, 'historyAvailable')) normalized.historyAvailable = historyFields.historyAvailable;
+  if (hasOwn(historyFields, 'history')) normalized.history = historyFields.history;
+  if (hasOwn(historyFields, 'periodWindows')) normalized.periodWindows = historyFields.periodWindows;
   for (const periodName of PERIODS) {
     normalized.periods[periodName] = normalizePeriod(record[periodName] || record.periods?.[periodName], {
       projectsEnabled: normalized.projectsEnabled !== false
@@ -1337,7 +1358,7 @@ function aggregateHistory(devices, options = {}) {
   const histories = [];
   let reportedToday = '';
   for (const record of devices) {
-    const normalized = normalizeDeviceRecord(record);
+    const normalized = normalizeRecordHistoryFields(record);
     if (!hasOwn(normalized, 'history') || normalized.history === null) continue;
     histories.push(normalized.history);
     if (!normalized.history.daily.length) continue;
@@ -1487,9 +1508,12 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
       if (isPeriodExpired(normalized, periodName, now)) continue;
       periodProjectsOmitted[periodName] = (periodProjectsOmitted[periodName] || 0) + count;
     }
+    // normalizeDeviceRecord() has already normalized each period, and
+    // normalizePeriod() is idempotent (see the test that pins it), so a second
+    // pass here only re-walked every session again.
     for (const periodName of PERIODS) {
       if (isPeriodExpired(normalized, periodName, now)) continue;
-      addPeriodInto(aggregate.periods[periodName], normalizePeriod(normalized.periods[periodName]));
+      addPeriodInto(aggregate.periods[periodName], normalized.periods[periodName]);
     }
   }
   aggregate.limits = aggregateLimits(aggregate.devices, staleAfterMs, now);

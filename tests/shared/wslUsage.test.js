@@ -25,6 +25,30 @@ test('homeHasData returns the client ids whose markers are present', () => {
   assert.deepEqual([...ids].sort(), ['codex', 'hermes', 'opencode', 'zcode']);
 });
 
+test('each shared host directory discovers and attributes a WSL-only home', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\alice';
+  const entries = [
+    ['.factory/sessions', 'droid'],
+    ['.qwen/projects', 'qwen'],
+    ['.pi/agent/sessions', 'pi'],
+    ['.omp/agent/sessions', 'omp'],
+    ['.commandcode/projects', 'commandcode']
+  ];
+  for (const [marker, client] of entries) {
+    const markerPath = `${home}\\${marker.replace(/\//g, '\\')}`;
+    const deps = {
+      platform: 'win32',
+      exec: (cmd) => cmd === 'reg' ? 'Lxss' : 'Ubuntu\n',
+      readdirSync: (dir) => dir === '\\\\wsl$\\Ubuntu\\home' ? ['alice'] : [],
+      existsSync: (value) => value === markerPath
+    };
+    assert.deepEqual(homeHasData(home, deps.existsSync, deps.readdirSync), [client]);
+    assert.deepEqual(wslUsageHomes(deps), [home]);
+    const { detected } = await collectWslUsage({ clients: client, runTokscale: async () => ({ entries: [] }) }, deps);
+    assert.deepEqual(detected, [client]);
+  }
+});
+
 test('homeHasData maps an alternate-root marker to its client id', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const present = new Set([`${home}\\.kimi-code\\sessions`]);
@@ -158,11 +182,11 @@ test('wslUsageHomes returns [] when no distro is running', () => {
 });
 
 // A WSL home that only holds a new A-class client's data (pi, Oh My Pi, zed,
-// Kilo, Command Code, DSH, micode, zcode, kiro, LM Studio) must still be discovered — mirroring the sync
-// point each new tracked client adds (see AGENTS.md "Tracked-client list must
-// stay in sync"). Zed's marker is the threads.db file, not the directory
+// Kilo, Command Code, DSH, mimo, zcode, kiro, LM Studio) must still be discovered — mirroring the sync
+// point each new tracked client adds (see docs/providers/README.md "Adding a tracked
+// client"). Zed's marker is the threads.db file, not the directory
 // (tokscale checks is_file()).
-test('wslUsageHomes keeps a home whose only tracked-client data is pi, zed, Kilo, Command Code, DSH, micode, zcode, kiro, or LM Studio', () => {
+test('wslUsageHomes keeps a home whose only tracked-client data is pi, zed, Kilo, Command Code, DSH, mimo, zcode, kiro, or LM Studio', () => {
   function homesFor(markerRel) {
     return wslUsageHomes({
       platform: 'win32',

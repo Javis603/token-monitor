@@ -9,13 +9,14 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..', '..');
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), 'utf8');
 const { VENDOR_LABELS, VENDOR_ORDER } = require('../../src/electron/renderer/themePresets');
-const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
+const { rendererStyles } = require('../helpers/rendererStyles');
+const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
 
 test('third-party settings separate presets, scope, and safe custom mappings', () => {
   const html = read('src/electron/renderer/index.html');
   const app = read('src/electron/renderer/app.js');
   const preload = read('src/electron/preload.js');
-  const styles = read('src/electron/renderer/styles.css');
+  const styles = rendererStyles();
 
   assert.match(html, /id="thirdpartyAccountGroup"/);
   assert.match(html, /id="thirdpartyProfileList"/);
@@ -69,17 +70,23 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
 });
 
 test('third-party credentials stay local while renderer metadata is redacted', () => {
-  const credentials = read('src/shared/credentialStore.js');
   const main = read('src/electron/main.js');
+  const accountSettings = read('src/electron/limits/accountSettings.js');
+  const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
+  const { accountFieldProjection, normalizeAccountPatch } = require('../../src/electron/limits/accountSettings');
 
-  assert.match(credentials, /thirdPartyProfiles: \['providers', 'thirdparty', 'profiles'\]/);
-  assert.match(main, /function redactThirdPartyProfilesForRenderer/);
-  assert.match(main, /function redactThirdPartyProfilesForRenderer[\s\S]*?const out = Object\.create\(null\)/);
-  assert.match(main, /const adapter = thirdPartyLimits\.normalizeAdapterId\(profile\?\.adapter\)/);
-  assert.match(main, /baseUrl: thirdPartyLimits\.normalizeThirdPartyBaseUrl\(profile\?\.baseUrl, \{/);
-  assert.match(main, /accessToken: profile\?\.accessToken \? 'set' : ''/);
-  assert.match(main, /apiKey: profile\?\.apiKey \? 'set' : ''/);
-  assert.match(main, /refreshToken: profile\?\.refreshToken \? 'set' : ''/);
+  assert.deepEqual(CREDENTIAL_SETTING_PATHS.thirdPartyProfiles, ['providers', 'thirdparty', 'profiles']);
+  assert.match(main, /\.\.\.accountFieldProjection\(settings, process\.env\)/);
+  assert.match(accountSettings, /function redactThirdPartyProfilesForRenderer[\s\S]*?const out = Object\.create\(null\)/);
+  assert.match(accountSettings, /const adapter = thirdPartyLimits\.normalizeAdapterId\(profile\?\.adapter\)/);
+  assert.match(accountSettings, /baseUrl: thirdPartyLimits\.normalizeThirdPartyBaseUrl\(profile\?\.baseUrl, \{/);
+  assert.match(accountSettings, /accessToken: profile\?\.accessToken \? 'set' : ''/);
+  assert.match(accountSettings, /apiKey: profile\?\.apiKey \? 'set' : ''/);
+  assert.match(accountSettings, /refreshToken: profile\?\.refreshToken \? 'set' : ''/);
+  const projected = accountFieldProjection({ thirdPartyProfiles: { example: { accessToken: 'secret', apiKey: 'secret', refreshToken: 'secret' } } });
+  assert.equal(projected.thirdPartyProfiles.example.accessToken, 'set');
+  assert.equal(projected.thirdPartyProfiles.example.apiKey, 'set');
+  assert.equal(projected.thirdPartyProfiles.example.refreshToken, 'set');
   assert.match(main, /function persistThirdPartyCredentialsRenewal\(renewal = \{\}\)/);
   assert.match(main, /function persistThirdPartyAccountKey\(update = \{\}\)/);
   assert.match(main, /onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal/);
@@ -88,9 +95,12 @@ test('third-party credentials stay local while renderer metadata is redacted', (
   assert.match(main, /canonicalAccountKey: provider\?\.accountKey/);
   assert.doesNotMatch(main, /persistThirdPartyCredentialsRenewal\(renewal, profile\)/);
   assert.doesNotMatch(main, /profiles\[accountName\] \|\| fallbackProfile/);
-  assert.match(main, /endpointPath: thirdPartyLimits\.normalizeCustomEndpointPath\(profile\?\.endpointPath\)/);
-  assert.match(main, /remainingPath: thirdPartyLimits\.normalizeCustomJsonPath\(profile\?\.remainingPath\)/);
-  assert.match(main, /delete normalizedPatch\.thirdPartyProfiles/);
+  assert.match(accountSettings, /endpointPath: thirdPartyLimits\.normalizeCustomEndpointPath\(profile\?\.endpointPath\)/);
+  assert.match(accountSettings, /remainingPath: thirdPartyLimits\.normalizeCustomJsonPath\(profile\?\.remainingPath\)/);
+  assert.match(main, /normalizeAccountPatch\(patch, normalizedPatch\)/);
+  const normalized = { thirdPartyProfiles: { example: { apiKey: 'secret' } } };
+  normalizeAccountPatch(normalized, normalized);
+  assert.equal(Object.hasOwn(normalized, 'thirdPartyProfiles'), false);
   assert.match(main, /ipcMain\.handle\('thirdparty:saveProfile'/);
   assert.match(main, /ipcMain\.handle\('thirdparty:deleteProfile'/);
   assert.match(main, /ipcMain\.handle\('thirdparty:renameProfile'/);
@@ -117,17 +127,17 @@ test('third-party profile rows share the named-account component with OpenRouter
 test('third-party Limits presentation uses compact scope labels and a details tooltip', () => {
   const app = read('src/electron/renderer/app.js');
   const i18n = read('src/electron/renderer/i18n.js');
-  const presentation = read('src/electron/renderer/limitProviderPresentation.js');
-  const balanceDisplay = read('src/shared/limitBalanceDisplay.js');
-  const styles = read('src/electron/renderer/styles.css');
-  const colors = read('src/electron/renderer/usageCharts.js');
+  const presentation = read('src/electron/renderer/limits/providerPresentation.js');
+  const balanceDisplay = read('src/shared/limits/balanceDisplay.js');
+  const styles = rendererStyles();
+  const { clientColors } = require('../../src/electron/renderer/usageCharts');
 
   assert.equal(LIMIT_PROVIDER_LABELS.thirdparty, 'Third-party APIs');
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /provider\.provider === 'thirdparty'/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /function thirdPartyQuotaWindow/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /quotaWindow\?\.label \|\| 'Balance'/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /const meterPercent = creditsMeterPercent\(provider, quotaWindow\)/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /\.\.\.\(meterPercent !== null \? \{ remainingPercent: meterPercent, showMeter: true \} : \{\}\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /provider\.provider === 'thirdparty'/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /function thirdPartyQuotaWindow/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /quotaWindow\?\.label \|\| 'Balance'/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /const meterPercent = creditsMeterPercent\(provider, quotaWindow\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /\.\.\.\(meterPercent !== null \? \{ remainingPercent: meterPercent, showMeter: true \} : \{\}\)/);
   // The adapter's own name, mark and colour are provider presentation, so they
   // live in the module both surfaces load rather than in the page that happened
   // to need them first. The dock card renders the same rows and cannot reach
@@ -140,23 +150,23 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(presentation, /if \(planLabel === 'api key'\) return 'API key'/);
   assert.match(presentation, /if \(planLabel === 'custom'\) return 'Custom'/);
   assert.doesNotMatch(presentation, /planLabel\.includes\('token'\) \|\| quotaLabel\.includes\('token'\)/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /function thirdPartySpendNode/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /balance\?\.requestCount/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /settings\.thirdparty\.requests/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /if \(allTimeSpend === null && monthSpend === null && entries\.length === 0\) return null/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /monthSpend !== null[\s\S]*?`Month \$\{formatMoney\(monthSpend, currency\)\}`/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /allTimeSpend !== null[\s\S]*?`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /\]\.join\(' · '\)/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /settings\.thirdparty\.monthTokens/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /settings\.thirdparty\.avgResponse/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /label: summary \? 'Spend' : 'Details'/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /function thirdPartySpendNode/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /balance\?\.requestCount/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /settings\.thirdparty\.requests/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /if \(allTimeSpend === null && monthSpend === null && entries\.length === 0\) return null/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /monthSpend !== null[\s\S]*?`Month \$\{formatMoney\(monthSpend, currency\)\}`/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /allTimeSpend !== null[\s\S]*?`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /\]\.join\(' · '\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /settings\.thirdparty\.monthTokens/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /settings\.thirdparty\.avgResponse/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /label: summary \? 'Spend' : 'Details'/);
   assert.match(balanceDisplay, /return symbol \? `\$\{symbol\}\$\{number\.toFixed\(2\)\}` : `\$\{code\} \$\{number\.toFixed\(2\)\}`/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /`All time \$\{formatMoney\(allTimeSpend, currency\)\}`/);
   // The group builder is the shared view's, and it now derives the adapter
   // decorations itself: a host that passes nothing — the dock card — still gets
   // each row's own mark, colour and adapter name, and a header that wears the
   // family they share.
-  const view = read('src/electron/renderer/limitWindowsView.js');
+  const view = read('src/electron/renderer/limits/windowsView.js');
   assert.match(view, /function renderLimitProviderGroup\(providerId, label, providers, color\)/);
   assert.match(view, /planText: limitGroupCountText\(providerId, providers\.length\)/);
   assert.match(view, /thirdparty: \(providers\) => \{[\s\S]*?markId: family \|\| 'thirdparty', sharedFamily: family/);
@@ -166,7 +176,7 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(app, /renderLimitProviderGroup\(id, label, visibleProviders, color\)/);
   assert.doesNotMatch(app, /groupPlanText|markIdForProvider|colorForProvider/);
   assert.doesNotMatch(i18n, /settings\.thirdparty\.(?:spend|allTime)/);
-  assert.match(read('src/electron/renderer/limitWindowsView.js'), /limitDetailInfoNode\(detailEntries, 'limit-spend-info-wrap'\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /limitDetailInfoNode\(detailEntries, 'limit-spend-info-wrap'\)/);
   assert.match(presentation, /thirdparty: \['Relay', 'API'\]/);
   assert.match(styles, /^\.row-icon-sub2api/m);
   assert.match(styles, /assets\/icons\/sub2api\.svg/);
@@ -174,11 +184,11 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.doesNotMatch(styles, /customapi\.svg/);
   assert.match(presentation, /custom: \{ color: '#8A96A8', markId: 'thirdparty' \}/);
   assert.doesNotMatch(app, /mark\.style\.color/);
-  assert.match(colors, /thirdparty: '#8090A6'/);
+  assert.equal(clientColors.thirdparty, '#8090A6');
 });
 
 test('third-party money formatting preserves supported custom units', () => {
-  const { formatMoney, formatCompactMoney } = require('../../src/shared/limitBalanceDisplay');
+  const { formatMoney, formatCompactMoney } = require('../../src/shared/limits/balanceDisplay');
   assert.deepEqual([
     formatMoney(12.5, 'USD'),
     formatMoney(12.5, 'USDT'),
@@ -195,7 +205,7 @@ test('third-party money formatting preserves supported custom units', () => {
 });
 
 test('third-party scope labels do not infer adapters from display text', () => {
-  const presentation = read('src/electron/renderer/limitProviderPresentation.js');
+  const presentation = read('src/electron/renderer/limits/providerPresentation.js');
   const source = thirdPartyPresentationSource(presentation);
   const result = vm.runInNewContext(
     `${source}
@@ -224,7 +234,7 @@ function thirdPartyPresentationSource(presentation) {
 }
 
 test('third-party group icon represents a shared adapter family', () => {
-  const presentation = read('src/electron/renderer/limitProviderPresentation.js');
+  const presentation = read('src/electron/renderer/limits/providerPresentation.js');
   const source = thirdPartyPresentationSource(presentation);
   const result = vm.runInNewContext(
     `${source}
@@ -249,7 +259,7 @@ test('third-party group icon represents a shared adapter family', () => {
 
 test('third-party profile rows keep metadata on line two and rename on line one', () => {
   const html = read('src/electron/renderer/index.html');
-  const styles = read('src/electron/renderer/styles.css');
+  const styles = rendererStyles();
   const app = read('src/electron/renderer/app.js');
 
   assert.match(html, /id="thirdpartyProfileList" class="opencode-profile-list thirdparty-profile-list"/);
@@ -267,7 +277,7 @@ test('third-party profile rows keep metadata on line two and rename on line one'
   assert.match(app, /new URL\(String\(profile\?\.baseUrl \|\| ''\)\)\.host/);
   assert.match(app, /settings\.thirdparty\.detailCustom/);
   assert.match(app, /formatCompactMoney,?[\s\S]{0,120}?\} = window\.TokenMonitorLimitBalanceDisplay/);
-  assert.match(app, /formatCompactMoney\(balance, provider\.balance\?\.currency \|\| 'USD'\)/);
+  assert.match(app, /formatCompactMoney\(balance, provider\.balance\?\.currency \|\| 'USD', state\.settings\?\.compactTokenUnits, currentLocale\(\)\)/);
 });
 
 test('third-party status settles after refresh and pushed stats', () => {
@@ -306,14 +316,9 @@ test('third-party fallback stays last after named providers across product surfa
   const html = read('src/electron/renderer/index.html');
   assert.ok(html.indexOf('id="thirdpartyAccountGroup"') > html.indexOf('id="copilotAccountGroup"'));
 
-  const app = read('src/electron/renderer/app.js');
   const providerOrder = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
   assert.ok(providerOrder.indexOf('thirdparty') > providerOrder.indexOf('ollama'));
-  const iconProviders = app.slice(
-    app.indexOf('const clientsWithIcon = new Set(['),
-    app.indexOf('function osIconFor')
-  );
-  assert.ok(iconProviders.lastIndexOf("'thirdparty'") > iconProviders.lastIndexOf("'ollama'"));
+  // clientsWithIcon is VENDOR_ORDER now, so this covers the icon set too.
   assert.equal(VENDOR_ORDER.at(-1), 'thirdparty');
   assert.ok(
     Object.keys(VENDOR_LABELS).indexOf('thirdparty') > Object.keys(VENDOR_LABELS).indexOf('ollama')

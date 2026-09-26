@@ -4,14 +4,17 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { rendererStyles } = require('../helpers/rendererStyles');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
+const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
 const compactTokenApi = require('../../src/shared/compactTokens');
-const limitProviderOrderApi = require('../../src/electron/renderer/limitProviderOrder');
+const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
+const limitProviderOrderApi = require('../../src/electron/renderer/limits/providerOrder');
 const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
-const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limitProviders');
-const { limitWindowLabel } = require('../../src/shared/limitWindowLabels');
-const { limitWindowText } = require('../../src/shared/limitWindowText');
+const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
+const { limitWindowLabel } = require('../../src/shared/limits/windowLabels');
+const { limitWindowText } = require('../../src/shared/limits/windowText');
 
 const {
   antigravityQuotaWindow,
@@ -27,11 +30,12 @@ const {
   limitProviderCompactWindows,
   limitProviderMainDeviceLabel,
   limitProviderPlanDisplayLabel,
+  limitProviderStatusLabel,
   namedApiProfileStatus,
   limitProviderProvenance,
   limitResetRemainingMs,
   limitProviderSettingsTags
-} = require('../../src/electron/renderer/limitProviderPresentation');
+} = require('../../src/electron/renderer/limits/providerPresentation');
 
 test('isCodexLiveAccount marks the live system login but not managed-added accounts', () => {
   assert.equal(isCodexLiveAccount({ provider: 'codex', status: 'ok', sourceDetail: 'app' }), true);
@@ -224,11 +228,11 @@ function functionBody(source, name, nextName) {
   return source.slice(start, endLineStart);
 }
 
-// The Limits rows moved to limitWindowsView.js, which the edge dock renders
+// The Limits rows moved to limits/windowsView.js, which the edge dock renders
 // from too, so a provider's markup is built once rather than twice. These read
 // whichever file now holds the function.
 function limitsViewSource() {
-  return readRendererFile('limitWindowsView.js');
+  return readRendererFile('limits/windowsView.js');
 }
 
 function viewBody(name, nextName = '') {
@@ -262,7 +266,7 @@ function viewTable(name) {
 
 function runLocalProviderStatus(source, state, providerName) {
   const localDeviceHelper = functionBody(source, 'localDeviceLimitsProviders', 'localProviderStatus');
-  const localProviderHelper = functionBody(source, 'localProviderStatus', 'deepseekAccountLinked');
+  const localProviderHelper = functionBody(source, 'localProviderStatus', 'renderAntigravityStatus');
   return vm.runInNewContext(
     `${localDeviceHelper}\n${localProviderHelper}\nlocalProviderStatus(${JSON.stringify(providerName)});`,
     { accountIdentityApi, state }
@@ -277,24 +281,37 @@ function runLocalLiveCodexProvider(source, state) {
   );
 }
 
-function runProviderSpendNode(source, balance) {
+function runProviderSpendNode(source, balance, provider = null) {
   const optionalNumber = functionBody(source, 'optionalFiniteNumber', 'formatHomeLimitWindowValue');
   const spendEntries = viewBody('providerSpendEntries', 'limitNoteRowNode');
   const spendNode = viewBody('providerSpendNode', 'thirdPartySpendNode');
   const context = {
     formatMoney: (value, currency) => `${currency} ${Number(value).toFixed(2)}`,
     formatBalanceSpendAmount: (value, balance) => `${balance?.currency || ''} ${Number(value).toFixed(2)}`.trim(),
+    currentLocale: () => 'en-US',
+    formatCompact: (value) => compactTokenApi.formatCompactTokens(value, 'western', 'en-US'),
+    compactTokenThreshold: () => compactTokenApi.compactTokenUnitThreshold('western', 'en-US'),
+    t: (key) => ({
+      'settings.typesafe.estimatedSpend': 'Estimated spend',
+      'settings.typesafe.today': 'Today',
+      'settings.typesafe.lastSevenDays': 'Last 7 days',
+      'settings.typesafe.month': 'Month',
+      'settings.typesafe.tokens': 'Tokens',
+      'settings.thirdparty.inputTokens': 'Input tokens',
+      'settings.thirdparty.outputTokens': 'Output tokens',
+      'settings.thirdparty.requests': 'Requests'
+    })[key] || key,
     limitNoteRowNode: (options) => options
   };
   vm.runInNewContext(
     `${optionalNumber}\n${spendEntries}\n${spendNode}\n`
-      + `result = providerSpendNode(${JSON.stringify(balance)});`,
+      + `result = providerSpendNode(${JSON.stringify(balance)}, ${JSON.stringify(provider)});`,
     context
   );
   return JSON.parse(JSON.stringify(context.result));
 }
 
-// Window wording now lives in src/shared/limitWindowText.js, painted by both
+// Window wording now lives in src/shared/limits/windowText.js, painted by both
 // the Limits view and the edge dock, so these assert the module's output rather
 // than the shape of the renderer's source.
 function windowText(providerId, window, options = {}) {
@@ -820,7 +837,7 @@ test('Claude limits render as one provider group with account subrows', () => {
 });
 
 test('every multi-account Limits group uses its provider-localized account count', () => {
-  const view = readRendererFile('limitWindowsView.js');
+  const view = readRendererFile('limits/windowsView.js');
   const i18n = readRendererFile('i18n.js');
   // One derivation instead of one string per wrapper: a provider that has a key
   // gets its own phrase, and one that does not renders no count rather than the
@@ -1006,7 +1023,7 @@ test('Grok renders its single Monthly billing window full-width instead of an em
 
 test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with a Limits icon', () => {
   const renderProviderWindows = viewBody('renderProviderWindows');
-  const css = readRendererFile('styles.css');
+  const css = rendererStyles();
 
   assert.match(renderProviderWindows, /provider\.provider === 'zed'/);
   assert.match(renderProviderWindows, /windowsForKind\(provider, 'billing'\)/);
@@ -1379,8 +1396,12 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(codexResetCreditsNode, /summaryParts\.push\(`\+\$\{hiddenExpirationCount\}`\)/);
   // The expiry tooltip is the shared builder, not a second copy of its
   // hover/focus wiring that has to be kept in step by hand. It is useful for a
-  // single reset too, not only when several dates are present.
-  assert.match(codexResetCreditsNode, /expiryGroup\.append\(timeline\);\s*if \(expirationDates\.length > 0\) \{/);
+  // single reset too, not only when several dates are present — and Claude's
+  // grants can supply the tooltip rows when plain expiry dates cannot.
+  assert.match(codexResetCreditsNode, /if \(expirationDates\.length > 0 \|\| detailEntries\) \{/);
+  assert.match(codexResetCreditsNode, /if \(expirationDates\.length > 0\) \{\s*const timeline/);
+  assert.match(codexResetCreditsNode, /expiryGroup\.append\(timeline\);/);
+  assert.match(codexResetCreditsNode, /limitDetailInfoNode\(detailEntries, '', detail\?\.ariaLabel \|\| ''\)/);
   assert.match(
     codexResetCreditsNode,
     /expirationDates\.map\(\(date\) => \[expiryDateLabel\(date\), codexResetCreditExpiryLabel\(date\)\]\)/
@@ -1497,17 +1518,105 @@ test('The detail tooltip widens its grid and pads short rows for three-column en
   const grantRows = viewBody('claudePrepaidGrantRows', 'claudeBalanceNode');
   const balanceNode = viewBody('claudeBalanceNode', 'providerWindowText');
 
-  assert.match(infoNode, /const columns = entries\.reduce\(\(widest, entry\) => Math\.max\(widest, entry\.length\), 0\);/);
+  assert.match(infoNode, /Math\.max\(widest, Array\.isArray\(entry\) \? entry\.length : 0\)/);
   assert.match(infoNode, /columns > 2 \? 'limit-detail-tooltip-triple' : ''/);
   assert.match(infoNode, /for \(let column = 0; column < columns; column \+= 1\)/);
   assert.match(infoNode, /cell\.textContent = entry\[column\] \?\? '';/);
-  assert.match(infoNode, /entries\.map\(\(\[entryLabel, \.\.\.rest\]\) => `\$\{entryLabel\}: \$\{rest\.filter\(Boolean\)\.join\(' '\)\}`\)/);
+  assert.match(infoNode, /entries\s*\.filter\(Array\.isArray\)\s*\.map\(\(\[entryLabel, \.\.\.rest\]\) => `\$\{entryLabel\}: \$\{rest\.filter\(Boolean\)\.join\(' '\)\}`\)/);
   assert.match(balanceNode, /const grants = claudePrepaidGrantRows\(tranches, currency\);/);
   assert.match(balanceNode, /\.\.\.grants\.map\(\(grant\) => grant\.aria\)/);
   // The wording belongs to the spoken label now, never to a rendered cell.
   assert.doesNotMatch(grantRows, /cells: \[[^\]]*Expires in/);
   assert.match(styles, /\.limit-detail-tooltip-triple\s*\{[^}]*grid-template-columns: max-content max-content max-content;/s);
   assert.match(styles, /\.limit-detail-tooltip-row span:nth-child\(2\):not\(:last-child\)\s*\{[^}]*text-align: right;/s);
+});
+
+function runClaudeResetGrantRows(app, grants, now) {
+  const dateLabel = viewBody('expiryDateLabel', 'codexResetCreditsNode');
+  const clearLabel = viewBody('claudeResetClearLabel', 'claudeResetGrantRows');
+  const grantRows = viewBody('claudeResetGrantRows', 'claudeResetCreditsNode');
+  const context = {
+    Date: class FrozenDate extends Date {
+      constructor(...args) {
+        super(...(args.length === 0 ? [now] : args));
+      }
+
+      static now() {
+        return now;
+      }
+    },
+    Intl,
+    currentLocale: () => 'en-US',
+    formatDuration: limitDurationText
+  };
+  vm.runInNewContext(
+    `${dateLabel}\n${clearLabel}\n${grantRows}\n`
+      + `result = claudeResetGrantRows(${JSON.stringify(grants)});`,
+    context
+  );
+  return JSON.parse(JSON.stringify(context.result));
+}
+
+test('Claude reset grants wrap their label and clears as full-width lines', () => {
+  const app = readRendererFile('app.js');
+  const styles = readRendererFile('styles.css');
+  const renderProviderWindows = viewBody('renderProviderWindows');
+  const claudeNode = viewBody('claudeResetCreditsNode', 'providerSpendEntries');
+  const infoNode = viewBody('limitDetailInfoNode', 'providerSpendNode');
+  const now = new Date(2026, 6, 28, 0, 0, 0, 0).getTime();
+  const rows = runClaudeResetGrantRows(app, [
+    {
+      label: 'Launch promo reset',
+      resetsLeft: 1,
+      endsAt: localIso(2026, 8, 20, 17),
+      clears: ['five_hour', 'seven_day', 'seven_day_overage_included'],
+      usableNow: true
+    },
+    {
+      label: 'Second promo',
+      resetsLeft: 1,
+      endsAt: localIso(2026, 9, 1, 12),
+      clears: ['seven_day_opus'],
+      useRequiresLimit: true
+    },
+    {
+      label: 'Fable-only promo',
+      resetsLeft: 1,
+      endsAt: localIso(2026, 9, 5, 12),
+      clears: ['seven_day_overage_included'],
+      usableNow: true
+    }
+  ], now);
+
+  // Anthropic labels arrive as full sentences — they wrap on their own line
+  // instead of widening the popover past a narrow card edge.
+  assert.deepEqual(rows, [
+    { full: 'Launch promo reset', caption: true, separated: false },
+    ['Expires', '8/20, 5:00 PM · 23d 17h'],
+    ['Clears', 'Session · Weekly'],
+    { full: 'Second promo', caption: true, separated: true },
+    ['Expires', '9/1, 12:00 PM · 35d 12h'],
+    ['Clears', 'Opus weekly'],
+    ['Usable', 'at a limit only'],
+    { full: 'Fable-only promo', caption: true, separated: true },
+    ['Expires', '9/5, 12:00 PM · 39d 12h'],
+    // The Fable bucket still lists when it is the only weekly coverage —
+    // it folds away only next to the general weekly clear.
+    ['Clears', 'Fable weekly']
+  ]);
+
+  assert.match(renderProviderWindows, /claudeResetCreditsNode\(provider\.resetCredits\)/);
+  assert.match(claudeNode, /if \(grants\.length === 0\) return codexResetCreditsNode\(resetCredits\);/);
+  // The spoken label must carry the same rows the tooltip shows — expiry,
+  // cleared windows, usability — so grant restrictions are not silent.
+  assert.match(claudeNode, /claudeResetGrantRows\(\[grant\]\)/);
+  assert.match(infoNode, /!Array\.isArray\(entry\)/);
+  assert.match(infoNode, /entry\?\.caption === true \? 'is-caption' : ''/);
+  assert.match(infoNode, /entry\?\.separated === true \? 'is-separated' : ''/);
+  assert.match(styles, /\.limit-detail-tooltip-full\s*\{[^}]*grid-column: 1 \/ -1;/s);
+  assert.match(styles, /\.limit-detail-tooltip-full\s*\{[^}]*white-space: normal;/s);
+  assert.match(styles, /\.limit-detail-tooltip-full\.is-separated\s*\{[^}]*border-top:/s);
+  assert.match(styles, /\.limit-detail-tooltip-full\.is-caption\s*\{[^}]*font-size: 8px;/s);
 });
 
 test('Home uses explicit billing labels so Copilot Premium and Chat stay distinct', () => {
@@ -1533,7 +1642,7 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   assert.match(homeModule, /limitProviderCompactWindowPeriodLabel\(row\.providerId, window, row\.windows\)/);
   assert.match(homeModule, /`\$\{periodLabel\} · \$\{resetLabel\}`/);
   assert.match(valueFormatter, /if \(isCreditsWindow\(window\)\) \{/);
-  assert.match(valueFormatter, /formatCompactMoney\(window\.remaining, window\.currency\)/);
+  assert.match(valueFormatter, /formatCompactMoney\(window\.remaining, window\.currency, state\.settings\?\.compactTokenUnits, currentLocale\(\)\)/);
   assert.match(valueFormatter, /`\$\{formatPercent\(percent\)\} \$\{limitModeSuffix\(showUsed\)\}`/);
   assert.doesNotMatch(i18n, /home\.limit\.(balance|leftPercent|leftAmount)/);
 });
@@ -1553,12 +1662,15 @@ test('tray bars draw the resolved primary window on top and preserve an empty lo
 
 test('DeepSeek main Limits row preserves the intentional month-spend balance meter', () => {
   const renderProviderWindows = viewBody('renderProviderWindows');
-  const balanceWindow = readSharedFile('limitBalanceDisplay.js');
+  const balanceWindow = readSharedFile('limits/balanceDisplay.js');
   const styles = readRendererFile('styles.css');
 
-  assert.match(renderProviderWindows, /\{ remainingPercent: creditsMeterPercent\(provider, null\) \},/);
-  assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide', 'limit-window-no-reset'\);/);
-  assert.match(renderProviderWindows, /const spendNode = providerSpendNode\(balance\);/);
+  // The two providers share the balance meter; TypeSafe adds a grant expiry
+  // only when the billing response contains one.
+  assert.match(renderProviderWindows, /creditsMeterPercent\(provider, creditsWindow\)/);
+  assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide'\);/);
+  assert.match(renderProviderWindows, /if \(!boundaryAt\) balanceNode\.classList\.add\('limit-window-no-reset'\);/);
+  assert.match(renderProviderWindows, /const spendNode = providerSpendNode\(balance, provider\);/);
   assert.match(limitsViewSource(), /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
   assert.match(limitsViewSource(), /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
   assert.doesNotMatch(renderProviderWindows, /Month \(since tracking\)/);
@@ -1606,6 +1718,45 @@ test('shared spend presentation preserves zeroes and omits missing periods', () 
   assert.deepEqual(missingWeek.detailEntries.map(([label]) => label), ['Today', 'Month', 'All time']);
   assert.equal(missingWeek.ariaParts.some((part) => part.startsWith('Week ')), false);
 
+});
+
+test('TypeSafe row mirrors the Spend row with token totals and keeps the month breakdown in the tooltip', () => {
+  const row = runProviderSpendNode(readRendererFile('app.js'), {
+    currency: 'USD'
+  }, {
+    provider: 'typesafe',
+    usageSummary: { period: 'month', todayTokens: 0, weekTokens: 2137, totalTokens: 3147, inputTokens: 2888, outputTokens: 259, requests: 8, standardCost: 0.000121296 }
+  });
+  assert.equal(row.label, 'Tokens');
+  assert.equal(row.summary, 'Today 0 · Month 3.1K');
+  assert.deepEqual(row.detailEntries, [
+    ['Today', '0'],
+    ['Last 7 days', '2,137'],
+    { full: 'Month', caption: true, separated: true },
+    ['Tokens', '3,147'],
+    ['Input tokens', '2,888'],
+    ['Output tokens', '259'],
+    ['Requests', '8'],
+    ['Estimated spend', '$0.0001']
+  ]);
+
+  const large = runProviderSpendNode(readRendererFile('app.js'), {
+    currency: 'USD'
+  }, {
+    provider: 'typesafe',
+    usageSummary: { period: 'month', todayTokens: 1234567, weekTokens: 2137, totalTokens: 123456789, inputTokens: 2888, outputTokens: 259, requests: 8, standardCost: 0.000121296 }
+  });
+  assert.equal(large.summary, 'Today 1.2M · Month 123.5M');
+  assert.deepEqual(large.detailEntries[0], ['Today', '1,234,567']);
+  assert.deepEqual(large.detailEntries[3], ['Tokens', '123,456,789']);
+
+  const small = runProviderSpendNode(readRendererFile('app.js'), {
+    currency: 'USD'
+  }, {
+    provider: 'typesafe',
+    usageSummary: { period: 'month', todayTokens: 0, weekTokens: 999, totalTokens: 999, inputTokens: 900, outputTokens: 99, requests: 3, standardCost: 0 }
+  });
+  assert.equal(small.summary, 'Today 0 · Month 999');
 });
 
 test('Balance and token quota values omit the redundant left suffix', () => {
@@ -1698,63 +1849,38 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   // re-render them. Grok is automatic and belongs only to the generic provider
   // list, so it must not retain a separate account-card renderer.
   // Settings pushes route through syncSettingsForm (which init() also calls), so
-  // the two cards are re-rendered there and
-  // onSettingsPush itself does not duplicate the calls.
-  for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus']) {
-    assert.match(statsRender, new RegExp(`${fn}\\(\\);`), `${fn} missing from renderStatsUpdate`);
-    assert.match(syncSettings, new RegExp(`${fn}\\(\\);`), `${fn} missing from syncSettingsForm`);
-  }
-  for (const provider of ['claude', 'factory', 'zai', 'volcengine', 'qoder', 'trae', 'commandcode', 'kimi', 'ollama']) {
+  // the cards are re-rendered there and onSettingsPush itself does not duplicate
+  // the calls.
+  for (const provider of ['volcengine', 'kimi']) {
     assert.match(statsRender, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from renderStatsUpdate`);
     assert.match(syncSettings, new RegExp(`renderExternalProviderStatus\\('${provider}'\\);`), `${provider} missing from syncSettingsForm`);
   }
-  for (const fn of ['renderDeepseekStatus', 'renderMinimaxStatus']) {
-    assert.doesNotMatch(settingsPush, new RegExp(`${fn}\\(\\);`), `${fn} should not be duplicated in onSettingsPush (syncSettingsForm covers it)`);
-  }
+  assert.match(statsRender, /for \(const form of state\.settings\?\.limitAccountForms \|\| \[\]\)/);
+  assert.match(syncSettings, /for \(const form of state\.settings\?\.limitAccountForms \|\| \[\]\)/);
+  assert.doesNotMatch(settingsPush, /renderExternalProviderStatus\(/, 'syncSettingsForm covers account cards; onSettingsPush should not duplicate them');
   assert.doesNotMatch(app, /renderGrokStatus|grokAccountLinked|grokAccountExpanded/);
 });
 
-test('saving Ollama credentials enables its provider and always settles validation', () => {
+test('a saved credential folds its panel only once a fresh record confirms the account', () => {
   const app = readRendererFile('app.js');
-  const renderExternalStatus = functionBody(app, 'renderExternalProviderStatus', 'setMinimaxAccountExpanded');
-  const selection = functionBody(app, 'limitProviderSelectionIncluding', 'missingLimitProviderStatus');
-  const setup = functionBody(app, 'setupCursorAccountUI', 'initSettingsAnimationWrappers');
-  const ollamaSetup = setup.slice(
-    setup.indexOf("document.getElementById('ollamaCookieSubmit')"),
-    setup.indexOf('const kimiToggle')
-  );
-  assert.match(selection, /selected\.add\(providerName\)/);
-  assert.match(selection, /\.filter\(\(id\) => selected\.has\(id\)\)/);
-  assert.match(ollamaSetup, /limitProviders: limitProviderSelectionIncluding\('ollama'\)/);
-  assert.match(ollamaSetup, /limitsEnabled: true/);
-  assert.match(ollamaSetup, /await window\.tokenMonitor\.ollama\.validateCookie\(input\.value\)/);
-  assert.match(ollamaSetup, /if \(!validation\?\.ok\)/);
-  assert.doesNotMatch(ollamaSetup, /await refreshStats\(\{ force: true \}\);/);
-  assert.match(ollamaSetup, /clearExternalProviderCheckPending\('ollama'\);/);
+  const renderExternalStatus = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
+  const save = functionBody(app, 'saveAccountCredential', 'submitAccountCredential');
   assert.match(renderExternalStatus, /pending \? t\('settings\.common\.checking'\)/);
-  assert.match(
-    renderExternalStatus,
-    /providerName === 'ollama' && wasPending && !pending && linked[\s\S]*?setExternalAccountExpanded\('ollama', false\)/,
-    'Ollama should collapse only after a fresh provider confirms the account is linked'
-  );
-  assert.doesNotMatch(
-    ollamaSetup,
-    /input\.value = '';[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?setExternalAccountExpanded\('ollama', false\);/,
-    'a successful save must stay pending until the collector publishes a fresh provider'
-  );
-  assert.doesNotMatch(
-    ollamaSetup,
-    /input\.value = '';[\s\S]*?setExternalAccountExpanded\('ollama', false\);/,
-    'the setup panel must remain open while validation is pending'
-  );
-  assert.match(ollamaSetup, /catch \(err\) \{[\s\S]*?clearExternalProviderCheckPending\('ollama'\);[\s\S]*?renderExternalProviderStatus\('ollama'\);/);
-  assert.match(ollamaSetup, /ollamaValidationError\(validation\)/);
+  // The refresh after a save can return before the collector publishes the
+  // checked account, so the panel stays open and folds when that record lands.
+  assert.match(renderExternalStatus, /if \(wasPending && !pending && linked\) setExternalAccountExpanded\(providerName, false\);/);
+  assert.match(save, /markExternalProviderCheckPending\(id\);[\s\S]*await refreshStats\(\{ force: true \}\);\n\s*setExternalAccountExpanded\(id, !externalProviderAccountLinked\(id\)\);/);
+  // Ollama answers its first poll from the save-time check instead of fetching
+  // the settings page twice in a row.
+  const { limitProviderEntry } = require('../../src/shared/limits/registry');
+  assert.deepEqual({ ...limitProviderEntry('ollama').form.rememberProbe }, { fn: 'rememberOllamaValidation', field: 'ollamaCookie' });
+  assert.equal(typeof limitProviderEntry('ollama').limits.rememberOllamaValidation, 'function');
 });
 
 test('account validation reads the local device raw limits, not the collapsed aggregate', () => {
   const app = readRendererFile('app.js');
   const rawHelper = functionBody(app, 'localDeviceLimitsProviders', 'localProviderStatus');
-  const helper = functionBody(app, 'localProviderStatus', 'deepseekAccountLinked');
+  const helper = functionBody(app, 'localProviderStatus', 'renderAntigravityStatus');
   // Sync-mode aggregateLimits() collapses a local `unauthorized` row out in favor
   // of a remote `ok` (providerCollapseKey for deepseek/minimax/grok is just the
   // provider name; pickBetterProvider keeps the higher statusRank). So the account
@@ -1771,8 +1897,8 @@ test('account validation reads the local device raw limits, not the collapsed ag
   // Falls back to the aggregate only for legacy/non-aggregated stats that do
   // not expose raw device rows at all.
   assert.match(helper, /state\.stats\?\.limits\?\.providers/);
-  assert.match(functionBody(app, 'deepseekProviderStatus', 'deepseekProviderForAccount'), /return localProviderStatus\('deepseek'\);/);
-  assert.match(functionBody(app, 'minimaxProviderStatus', 'minimaxAccountLinked'), /return localProviderStatus\('minimax'\);/);
+  // DeepSeek and MiniMax reach it through the shared account-form lane.
+  assert.match(functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked'), /const provider = localProviderStatus\(providerName\);/);
 });
 
 test('account validation does not treat a sole remote synced device as local', () => {
@@ -1813,6 +1939,108 @@ test('Grok is automatic provider UI, while env token remains documented for head
   assert.match(i18n, /'settings\.limits\.status\.runGrokLogin': '运行 grok login'/);
 });
 
+// Cline's credential belongs to Cline, and this provider reads it without ever
+// writing — but a machine with no Cline installed has nothing to read, so the API
+// key is configurable here too. It goes through the same settings + credential
+// store pattern every key-configured provider uses; factory is the one with the
+// same shape (a settings key beside a discovered sign-in).
+test('Cline exposes its API key through the settings and credential-store pattern', () => {
+  const html = readRendererFile('index.html');
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
+  const runtimeConfig = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'runtimeConfig.js'), 'utf8');
+  const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
+  const clineLimits = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'src', 'shared', 'providers', 'cline', 'limits.js'),
+    'utf8'
+  );
+
+  // Cline's account panel is built from the redacted form DTO.
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'cline');
+  assert.doesNotMatch(html, /id="clineAccountGroup"/);
+  assert.equal(form.fields[0].key, 'clineApiKey');
+  assert.equal(form.openUrl.url, 'https://app.cline.bot/dashboard/account');
+  assert.deepEqual(form.manual[0], { note: 'settings.cline.note' });
+  assert.equal(form.fields[0].ariaLabelKey, 'settings.cline.apiKeyLabel');
+  assert.match(app, /clineAccountExpanded/);
+  assert.equal(form.status.configuredKey, 'clineCredentialConfigured');
+  assert.match(app, /window\.tokenMonitor\.limits\.saveCredential\(id, values\)/);
+  assert.match(preload, /saveCredential: \(providerId, values\) => ipcRenderer\.invoke\('limits:saveCredential'/);
+  // The key itself never crosses to the renderer: the projection carries the
+  // boolean and the source label only, never a `clineApiKey` field.
+  const projection = main.slice(
+    main.indexOf('function settingsForRenderer'),
+    main.indexOf('function pushSettingsToRenderer')
+  );
+  assert.doesNotMatch(projection, /clineApiKey:/);
+  assert.match(projection, /\.\.\.accountStatusProjection\(settings, process\.env\)/);
+  const { accountStatusProjection, finalAccountSettings, normalizeAccountPatch } = require('../../src/electron/limits/accountSettings');
+  const clineStatus = accountStatusProjection({ clineApiKey: 'stored' }, {});
+  assert.equal(clineStatus.clineCredentialConfigured, true);
+  assert.equal(clineStatus.clineCredentialSource, 'settings');
+  // Settings + credential store + IPC, the pattern the pattern-bound test above
+  // asserts for the catalog; the path is what keeps the key out of settings.json.
+  assert.match(runtimeConfig, /limitProviderSettingKeys\(\)/);
+  assert.deepEqual(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.cline, ['clineApiKey']);
+  assert.deepEqual(CREDENTIAL_SETTING_PATHS.clineApiKey, ['providers', 'cline', 'apiKey']);
+  assert.match(main, /ipcMain\.handle\('limits:saveCredential'/);
+  assert.match(main, /\.\.\.finalAccountSettings\(patch, settings\)/);
+  const clinePatch = { clineApiKey: ' " pasted " ' };
+  const normalized = { ...clinePatch };
+  normalizeAccountPatch(clinePatch, normalized);
+  assert.equal(normalized.clineApiKey, 'pasted');
+  assert.equal(finalAccountSettings(clinePatch, {}).clineApiKey, 'pasted');
+  assert.match(envExample, /CLINE_API_KEY=/);
+  assert.match(clineLimits, /CLINE_API_KEY/);
+  assert.match(clineLimits, /CLINEPASS_API_KEY/);
+  // A refused credential recovers where that credential lives, and this provider is
+  // the only one whose status reads `source` to tell its two lanes apart: a rejected
+  // key is replaced in Token Monitor's own field, while the discovered sign-in is
+  // Cline's to fix — it refreshes the stored token when it runs, and only it can
+  // persist a rotated one — so that lane points back at Cline. A row with no source
+  // is the sign-in lane, the one a local install is in by default.
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'unauthorized' }),
+    { label: 'Open Cline', tone: 'setup' }
+  );
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'unauthorized', source: 'oauth' }),
+    { label: 'Open Cline', tone: 'setup' }
+  );
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'unauthorized', source: 'api' }),
+    { label: 'Update API key', tone: 'setup' }
+  );
+  // Both tags are strings other providers already use, so no new chip text is
+  // introduced for a provider whose surfaces are the same class as workbuddy's
+  // desktop app and kiro's CLI.
+  // With neither a key nor a stored sign-in, the one thing this application can be
+  // told is a key — the same label the other key-configured providers use.
+  assert.deepEqual(
+    limitProviderStatusLabel({ provider: 'cline', status: 'notConfigured' }),
+    { label: 'Add API key', tone: 'setup' }
+  );
+  assert.deepEqual(limitProviderCapabilityTags({ provider: 'cline' }), ['Auto', 'Desktop app', 'CLI']);
+  // The list renders per provider, and its default branch draws session and weekly
+  // only — a three-window provider needs its own branch or the monthly window never
+  // appears. Guarded by source patterns because the view module builds DOM and this
+  // repository has no DOM harness; the branch was also confirmed by driving the
+  // running widget (a mocked row renders Session, Weekly and a full-width Monthly).
+  const windowsView = readRendererFile('limits/windowsView.js');
+  assert.match(windowsView, /provider\.provider === 'cline'/);
+  // The account credit shares the `billing` kind with the monthly quota, so the
+  // branch tells them apart by metric and renders the credit through the panel's own
+  // balance path, the way WorkBuddy's and Trae's balance is rendered.
+  assert.match(windowsView, /const clineMonthly = clineBilling\.find\(\(window\) => !isCreditsWindow\(window\) && window\.metric !== 'spend'\)/);
+  assert.match(windowsView, /const clineCredits = clineBilling\.find\(\(window\) => isCreditsWindow\(window\)\)/);
+  assert.match(windowsView, /const clineSpend = clineBilling\.find\(\(window\) => window\.metric === 'spend'\)/);
+  assert.match(windowsView, /clineCredits[\s\S]{0,200}clineCreditsNode\(provider, clineCredits, clineSpend\)/);
+  assert.match(windowsView, /function clineCreditsNode[\s\S]{0,500}\[\['Month spent', spendValue\]\]/);
+  assert.match(windowsView, /clineMonthly[\s\S]{0,200}limit-window-wide/);
+});
+
 test('Copilot env token is documented in env example, not the README overview', () => {
   const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
   const readme = fs.readFileSync(path.join(__dirname, '..', '..', 'README.md'), 'utf8');
@@ -1829,42 +2057,33 @@ test('Copilot env token is documented in env example, not the README overview', 
 test('AI Tool Limits owns every live account group and its status pill', () => {
   const app = readRendererFile('app.js');
   const html = readRendererFile('index.html');
-  const groupMap = app.slice(
-    app.indexOf('const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {'),
-    app.indexOf('const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {')
-  );
-  const statusMap = app.slice(
-    app.indexOf('const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {'),
+  const accountNodes = app.slice(
+    app.indexOf('const LIMIT_PROVIDER_ACCOUNT_NODES = {'),
     app.indexOf('const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {')
   );
   const providers = [
-    ['claude', 'claudeAccountGroup', 'claudeAccountStatus'],
     ['codex', 'codexAccountGroup', 'codexAccountStatus'],
     ['opencode', 'opencodeCookieGroup', 'opencodeCookieStatus'],
     ['cursor', 'cursorAccountGroup', 'cursorAccountStatus'],
     ['kimi', 'kimiAccountGroup', 'kimiAccountStatus'],
     ['copilot', 'copilotAccountGroup', 'copilotApiTokenStatus'],
     ['mimo', 'mimoAccountGroup', 'mimoAccountStatus'],
-    ['zai', 'zaiAccountGroup', 'zaiAccountStatus'],
-    ['zaiteam', 'zaiteamAccountGroup', 'zaiteamAccountStatus'],
-    ['deepseek', 'deepseekAccountGroup', 'deepseekApiKeyStatus'],
     ['openrouter', 'openrouterAccountGroup', 'openrouterStatus'],
-    ['minimax', 'minimaxAccountGroup', 'minimaxApiKeyStatus'],
     ['volcengine', 'volcengineAccountGroup', 'volcengineAccountStatus'],
-    ['qoder', 'qoderAccountGroup', 'qoderAccountStatus'],
-    ['trae', 'traeAccountGroup', 'traeAccountStatus'],
-    ['ollama', 'ollamaAccountGroup', 'ollamaAccountStatus'],
     ['thirdparty', 'thirdpartyAccountGroup', 'thirdpartyStatus']
   ];
 
   for (const [provider, groupId, statusId] of providers) {
-    assert.match(groupMap, new RegExp(`${provider}: '${groupId}'`));
-    assert.match(statusMap, new RegExp(`${provider}: '${statusId}'`));
+    assert.match(accountNodes, new RegExp(`${provider}: \\{ group: '${groupId}', status: '${statusId}' \\}`));
     assert.match(html, new RegExp(`id="${groupId}"`));
     assert.match(html, new RegExp(`id="${statusId}"[^>]*class="cursor-status-pill`));
   }
   assert.match(html, /id="accountsSettingsDetails" class="hidden" aria-hidden="true"/);
   assert.doesNotMatch(html, /data-settings-section="accounts"/);
+  // Account-form providers have no static markup: their group and pill resolve
+  // by the generated `${id}AccountGroup` / `${id}AccountStatus` ids.
+  assert.match(functionBody(app, 'limitProviderAccountGroup', 'limitProviderAccountStatus'), /`\$\{providerId\}AccountGroup`/);
+  assert.match(functionBody(app, 'limitProviderAccountStatus', 'limitProviderConnectionDetail'), /`\$\{providerId\}AccountStatus`/);
 });
 
 test('provider rerenders preserve live account nodes and focused controls', () => {
@@ -2043,19 +2262,11 @@ renderLimitProviderCheckboxes();`,
 test('dynamic account summaries are never reset by the static translation pass', () => {
   const html = readRendererFile('index.html');
   const statusIds = [
-    'claudeAccountStatus',
     'codexAccountStatus',
     'cursorAccountStatus',
     'opencodeCookieStatus',
     'openrouterStatus',
-    'deepseekApiKeyStatus',
-    'minimaxApiKeyStatus',
-    'zaiAccountStatus',
-    'zaiteamAccountStatus',
     'volcengineAccountStatus',
-    'qoderAccountStatus',
-    'traeAccountStatus',
-    'ollamaAccountStatus',
     'kimiAccountStatus',
     'mimoAccountStatus',
     'copilotApiTokenStatus',
@@ -2067,6 +2278,10 @@ test('dynamic account summaries are never reset by the static translation pass',
     assert.ok(tag, `${id} should exist`);
     assert.doesNotMatch(tag, /data-i18n=/, `${id} is owned by its runtime status renderer`);
   }
+  // Generated account-form pills get their initial text directly, never a
+  // data-i18n key the translation pass would later write back over.
+  const panel = readRendererFile('limits/accountPanels.js');
+  assert.match(panel, /const status = element\('span', 'AccountStatus', 'cursor-status-pill'\);\n\s*status\.textContent = translate\(form\.emptyKey\);/);
 });
 
 test('provider toggles converge through the limits push without a forced refresh', () => {
@@ -2200,6 +2415,7 @@ test('empty OpenCode profiles render a localized summary before returning', () =
       }
     },
     state: { opencodeProfileCount: 0 },
+    accountShellApi,
     t: (key, params) => params ? `${key}:${params.linked}/${params.total}` : `localized:${key}`
   };
 
@@ -2530,7 +2746,7 @@ test('account validation keeps aggregate fallback for legacy stats without devic
   assert.equal(provider.sourceDeviceId, 'this-mac');
 });
 
-const presentation = require('../../src/electron/renderer/limitProviderPresentation');
+const presentation = require('../../src/electron/renderer/limits/providerPresentation');
 
 test('Antigravity uses the shared OAuth source label', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'antigravity', source: 'oauth' }), 'OAuth');
@@ -2553,6 +2769,26 @@ test('Antigravity account verification is shown as an actionable status', () => 
       key: 'settings.antigravity.verificationRequired',
       tone: 'setup'
     }
+  );
+});
+
+test('WorkBuddy sealed app credentials are shown as an actionable status', () => {
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({
+      provider: 'workbuddy',
+      status: 'notConfigured',
+      actionRequired: 'appSessionEncrypted'
+    }),
+    {
+      label: 'Encrypted by app',
+      key: 'settings.limits.status.appSessionEncrypted',
+      tone: 'warn'
+    }
+  );
+  // Without the hint the row keeps the existing sign-in prompt.
+  assert.deepEqual(
+    presentation.limitProviderStatusLabel({ provider: 'workbuddy', status: 'notConfigured' }),
+    { label: 'Sign in', tone: 'setup' }
   );
 });
 
@@ -2721,11 +2957,14 @@ test('Kimi credential statuses are localized in settings', () => {
   assert.match(i18n, /'settings\.limits\.status\.updateCredential': '更新憑證'/);
 });
 
-test('Kimi and Droid limits reuse their tracked-client colors', () => {
+test('Kimi, Droid and MiMo limits reuse their tracked-client colors', () => {
   const app = readRendererFile('app.js');
   assert.equal(LIMIT_PROVIDER_LABELS.kimi, 'Kimi');
+  // `factory` is the last remaining bridge: its tracked client is named
+  // `droid`. MiMo needs none — the client and the provider are both `mimo`, so
+  // the generic lookup below already finds clientColors.mimo.
   assert.match(app, /if \(providerId === 'factory'\) return clientColors\.droid;/);
-  assert.match(app, /if \(providerId === 'mimo'\) return clientColors\.xiaomi;/);
+  assert.doesNotMatch(app, /providerId === 'mimo'/);
   assert.match(app, /const color = limitProviderColor\(id\);/);
 });
 

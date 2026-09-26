@@ -297,6 +297,8 @@ test('a stats update repaints main and the visible Settings overlay', () => {
     visibleStatsSurface: () => 'main',
     renderConnectionStatus: (surface) => calls.push(`connection:${surface}`),
     render: () => calls.push('main'),
+    state: { settings: { limitAccountForms: [{ id: 'typesafe' }] } },
+    limitProviderAccountGroup: () => true,
     isSettingsSurfaceVisible: () => true,
     renderFloatingBubbleContent: () => calls.push('bubble'),
     signalContentReady: () => calls.push('ready')
@@ -354,8 +356,8 @@ test('heavy render roots reject work for an inactive surface', () => {
     assert.match(body(name, next), new RegExp(`function ${name}\\([^)]*\\) \\{\\n {2}if \\(!isSettingsSurfaceVisible\\(\\)\\) return;`));
   }
 
-  assert.match(body('renderOpenCodeProfiles', '\nfunction normalizeProfileName('), /\.then\(\([^)]*\) => \{\n {4}if \(!isSettingsSurfaceVisible\(\)\) return;/);
-  assert.match(body('renderNamedApiProfiles', '\nfunction renderOpenRouterProfiles('), /\.then\(\([^)]*\) => \{\n {4}if \(!isSettingsSurfaceVisible\(\)\) return;/);
+  assert.match(body('renderOpenCodeProfiles', '\nfunction normalizeProfileName('), /\.then\(\([^)]*\) => \{\n {4}if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
+  assert.match(body('renderNamedApiProfiles', '\nfunction renderOpenRouterProfiles('), /\.then\(\([^)]*\) => \{\n {4}if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
 });
 
 test('entering Status does not depend on the panel class from the previous render', () => {

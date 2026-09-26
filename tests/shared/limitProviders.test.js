@@ -10,12 +10,29 @@ const {
   LIMIT_PROVIDER_CATALOG,
   LIMIT_PROVIDER_IDS,
   LIMIT_PROVIDER_LABELS,
+  limitProviderForClient,
   limitProvidersForDetectedClients
-} = require('../../src/shared/limitProviders');
+} = require('../../src/shared/limits/providers');
 const { parseLimitProviders, providerFetchers } = require('../../src/shared/limits/collector');
 
 const rootDir = path.join(__dirname, '..', '..');
 const read = (...parts) => fs.readFileSync(path.join(rootDir, ...parts), 'utf8');
+
+// Usage attribution asks this directly: given a client key out of a usage
+// period, whose quota do those tokens belong to. Both halves of the answer
+// matter — the identity case carries most clients, and a client with no Limits
+// side must come back as nothing rather than as itself, or every surface
+// resolving a provider this way would invent one.
+test('a client resolves to the provider its tokens belong to', () => {
+  assert.equal(limitProviderForClient('droid'), 'factory');
+  assert.equal(limitProviderForClient('dsh'), 'deepseek');
+  assert.equal(limitProviderForClient('CODEX'), 'codex');
+  assert.equal(limitProviderForClient(' zcode '), 'zai');
+  assert.equal(limitProviderForClient('qwen'), null);
+  assert.equal(limitProviderForClient('nonesuch'), null);
+  assert.equal(limitProviderForClient(''), null);
+  assert.equal(limitProviderForClient(undefined), null);
+});
 
 test('initial limit providers follow detected clients in stable provider order', () => {
   assert.deepEqual(
@@ -36,13 +53,28 @@ test('initial limit providers map only corresponding Collection client aliases',
   assert.deepEqual(
     limitProvidersForDetectedClients({
       clients: {
-        dsh: { source: { state: 'detected' } },
+        hermes: { source: { state: 'detected' } },
         qodercn: { source: { state: 'detected' } },
         zcode: { source: { state: 'detected' } },
-        micode: { source: { state: 'detected' } }
+        mimo: { source: { state: 'detected' } },
+        dsh: { source: { state: 'detected' } }
       }
     }),
-    ['mimo', 'zai', 'qoder']
+    ['mimo', 'zai', 'qoder', 'deepseek']
+  );
+});
+
+// This table is read twice — for Edge Dock usage attribution and for the
+// seeding above — so mapping a client here also enables that provider on a
+// fresh install. Qwen is a tracked client whose Limits side is the Alibaba
+// Cloud Token Plan, but binding the two would make every new Qwen install
+// persist an Alibaba provider it has no credential for, which is a product
+// decision the attribution fix does not get to make on its own. Pinned so the
+// mapping is not added as an obvious-looking one-liner.
+test('a tracked client with no Limits support of its own seeds nothing', () => {
+  assert.deepEqual(
+    limitProvidersForDetectedClients({ clients: { qwen: { source: { state: 'detected' } } } }),
+    []
   );
 });
 
@@ -122,7 +154,7 @@ test('the renderer derives its provider list from this catalog', () => {
   assert.doesNotMatch(app, /const LIMIT_PROVIDERS = \[/);
 
   const html = read('src', 'electron', 'renderer', 'index.html');
-  const tag = html.indexOf('<script src="../../shared/limitProviders.js"></script>');
+  const tag = html.indexOf('<script src="../../shared/limits/providers.js"></script>');
   assert.notEqual(tag, -1, 'index.html should load the provider catalog');
   assert.ok(tag < html.indexOf('<script src="app.js"></script>'), 'it must load before app.js');
 });

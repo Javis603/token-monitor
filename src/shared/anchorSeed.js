@@ -26,13 +26,15 @@ function deviceRecordFromAnchor(saved, options = {}) {
     qoderCnDbPath: qoderCnDbPathOption,
     qoderCnProjectsDir: qoderCnProjectsDirOption,
     homeDir,
+    env,
+    sourcePlatform,
     wslScanEnabled = true,
     wslSupported = false,
     hostname = '',
     platform = '',
     now = new Date()
   } = options;
-  const qoderCnSources = qoderCnSourcesForClients(clients, { homeDir });
+  const qoderCnSources = qoderCnSourcesForClients(clients, { homeDir, env, platform: sourcePlatform });
   const qoderCnDbPath = qoderCnDbPathOption === undefined ? qoderCnSources.dbPath : qoderCnDbPathOption;
   const qoderCnProjectsDir = qoderCnProjectsDirOption === undefined ? qoderCnSources.projectsDir : qoderCnProjectsDirOption;
   const trust = collectorAnchorTrust(saved, { clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, now });

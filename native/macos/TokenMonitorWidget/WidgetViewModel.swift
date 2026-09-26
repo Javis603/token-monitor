@@ -473,44 +473,10 @@ enum WidgetFormat {
         return "\(presentation.currencySymbol)\(String(format: "%.2f", converted))"
     }
 
-    // Mirrors LIMIT_PROVIDERS in src/electron/renderer/app.js — the widget must
-    // name a provider exactly the way the app does. Kept complete rather than
-    // leaning on the `default` branch: `.capitalized` happens to be right for a
-    // few ids and silently wrong for the rest, and it collapsed zai/zaiteam
-    // onto one label. tests/electron/macWidgetProviderLabels.test.js fails when
-    // this list and the renderer's drift apart.
+    // Only for a row the snapshot did not name. The app stamps displayName on
+    // every tool and quota row, so this is never what a current snapshot shows.
     static func provider(_ value: String) -> String {
-        switch value.lowercased() {
-        case "claude": "Claude"
-        case "codex": "Codex"
-        case "opencode": "OpenCode"
-        case "hermes": "Hermes Agent"
-        case "cursor": "Cursor"
-        case "antigravity": "Antigravity"
-        case "factory": "Factory Droid"
-        case "kimi": "Kimi"
-        case "grok": "Grok"
-        case "copilot": "GitHub Copilot"
-        case "zed": "Zed"
-        case "commandcode": "Command Code"
-        case "mimo": "MiMo"
-        case "micode": "MiMo Code"
-        case "zai": "GLM"
-        case "zaiteam": "GLM Team"
-        case "kiro": "Kiro"
-        case "workbuddy": "WorkBuddy"
-        case "qoder": "Qoder"
-        case "deepseek": "DeepSeek"
-        case "lmstudio": "LM Studio"
-        case "openrouter": "OpenRouter"
-        case "minimax": "Minimax"
-        case "volcengine": "Volcengine"
-        case "ollama": "Ollama"
-        case "trae": "Trae CN"
-        case "alibaba": "Alibaba Cloud"
-        case "thirdparty": "Third-party APIs"
-        default: value.capitalized
-        }
+        value.capitalized
     }
 
     static func quotaValue(_ provider: WidgetQuotaProvider) -> String {

@@ -86,16 +86,16 @@ function isCodingPlanProviderId(providerId) {
   return providerId === ZCODE_PROVIDER_IDS.codingPlan.zai || providerId === ZCODE_PROVIDER_IDS.codingPlan.bigmodel;
 }
 
-// ZCode 3.12.3+ keeps the live session credentials in credentials.json,
-// encrypted with AES-256-GCM under a key derived from machine-local values
-// (no user secret, no OS keychain — the envelope keeps a synced or backed-up
-// file from leaking, it does not gate a same-machine reader). The plaintext
-// mirror this lane used to rely on stopped being refreshed with that release
-// (the layout, entry naming and secret derivation are verified against 3.12.3
-// and 3.14.0), so the billing credential is decrypted from the store on every
-// call:
-// in memory only, never logged, persisted, or handed to the renderer, and any
-// failure falls back to the mirror a 3.11.x install still carries.
+// ZCode keeps the live session credentials in credentials.json, encrypted with
+// AES-256-GCM under a key derived from machine-local values (no user secret, no
+// OS keychain — the envelope keeps a synced or backed-up file from leaking, it
+// does not gate a same-machine reader). The plaintext mirror this lane falls
+// back to is not guaranteed to track the current login (the store layout, entry
+// naming and secret derivation are verified against 3.12.3 and 3.14.0), so the
+// billing credential is decrypted from the store on every call:
+// in memory only, never logged, persisted, or handed to the renderer. The mirror
+// stands in where the store cannot name the account, and where the account's own
+// entry exists but will not decrypt — the lane comments below carry each arm.
 const ZCODE_CREDENTIAL_ENVELOPE = 'enc:v1:';
 
 // Same derivation as ZCode's own defaultCredentialSecret: an explicit
@@ -153,26 +153,19 @@ function storedZcodeJwtCredential(store, env) {
   return token ? { token, source: 'zcode-auto' } : null;
 }
 
-// The selected account's own coding key, mirrored by ZCode into the credential
-// store under a name built from the provider id and the logged-in identity
-// (its accountProviderCredentialKey). That identity is what ZCode's
+// The logged-in identity as the family's stored profile carries it, or null when
+// none can be established (no store, no profile, a profile that does not decrypt
+// or parse, or one whose shape has no identity field). This is what ZCode's own
 // loadAccountIdentity hands the key builder — loadUserProfile()?.id — and the
 // field carrying it depends on the family, because saveUserProfile unwraps a
 // zai profile down to its raw user-info document: zai keeps it in `user_id`,
 // every other family stores the normalized profile where it is `id`. Reading
 // one spelling and not the other would leave that family's accounts on the
-// mirror forever; no third spelling is consulted, so a machine that has held
-// several accounts can never surface a previous one's key by accident.
-// An unknown identity (no store, unreadable profile, no usable identity field)
-// resolves to null and the caller falls back to the mirror. An identity that is
-// established while its entry is absent is reported instead, because a mirror
-// there may still name a previous account; an entry that is present but cannot
-// be decrypted stays a null, which is the decrypt-failure degradation.
-function storedAccountKeyCredential(store, env, { family, selectionKind }) {
-  if (!store || !family || !selectionKind) return null;
+// mirror forever; no third spelling is consulted.
+function storedProfileIdentity(store, env, family) {
+  if (!store || !family) return null;
   const profileJson = decryptZcodeCredential(store[`oauth:${family}:user_info`], env);
   if (!profileJson) return null;
-  let identity;
   try {
     const profile = JSON.parse(profileJson);
     // Reads the document the way ZCode's own loadUserProfileFromKey does: a
@@ -185,10 +178,25 @@ function storedAccountKeyCredential(store, env, { family, selectionKind }) {
       && typeof profile?.username === 'string'
       && typeof profile?.displayName === 'string';
     const identityField = normalizedProfile ? profile.id : (family === 'zai' ? profile?.user_id : '');
-    identity = typeof identityField === 'string' ? identityField.trim() : '';
+    const identity = typeof identityField === 'string' ? identityField.trim() : '';
+    return identity || null;
   } catch (_) {
     return null;
   }
+}
+
+// The selected account's own coding key, mirrored by ZCode into the credential
+// store under a name built from the provider id and the logged-in identity (its
+// accountProviderCredentialKey), so a machine that has held several accounts can
+// never surface a previous one's key by accident.
+// An unknown identity resolves to null and the caller falls back to the mirror.
+// An identity that is established while its entry is absent is reported
+// instead, because a mirror there may still name a previous account; an entry
+// that is present but cannot be decrypted stays a null, which is the
+// decrypt-failure degradation.
+function storedAccountKeyCredential(store, env, { family, selectionKind }) {
+  if (!selectionKind) return null;
+  const identity = storedProfileIdentity(store, env, family);
   if (!identity) return null;
   // Mirrors ZCode's accountProviderCredentialKey: `account:${providerId}` for
   // the plan kind, then the identity percent-encoded the way it writes it.
@@ -271,11 +279,17 @@ function discoverZcodeConnection(options = {}, deps = {}) {
     // (validateStartPlanAvailability). So the coding shape carries a billing
     // credential alongside its own quota query — the live store's JWT first,
     // the start entry's mirror as the 3.11.x fallback — and that leg resolves
-    // on its own credential, never on the quota half's.
+    // on its own credential, never on the quota half's. The mirror is usable
+    // only while no identity is established: an entry that names the account
+    // makes it unattributable — it may carry whoever wrote it before a switch,
+    // and a query that succeeds cannot prove otherwise — so the leg resolves
+    // nothing there.
     const codingBillingLeg = () => {
-      const startCredential = liveBillingCredential()
-        || billingCredential(registry.provider?.[ZCODE_PROVIDER_IDS.startPlan[family]] || null);
-      return startCredential ? { credential: startCredential } : null;
+      const live = liveBillingCredential();
+      if (live) return { credential: live };
+      const mirror = billingCredential(registry.provider?.[ZCODE_PROVIDER_IDS.startPlan[family]] || null);
+      if (!mirror || storedProfileIdentity(readStore(), env, family)) return null;
+      return { credential: mirror };
     };
     // The account key is looked up only for the quota lane: a start-plan
     // selection needs the account-level JWT alone, so it must not touch the
@@ -290,15 +304,27 @@ function discoverZcodeConnection(options = {}, deps = {}) {
     // to belong to that account.
     let credential;
     if (kind === 'start-billing') {
-      credential = liveBillingCredential() || billingCredential(provider);
+      const live = liveBillingCredential();
+      const mirror = billingCredential(provider);
+      // The identity alone decides this branch: a mirror's presence changes
+      // nothing, because neither it nor its absence can supply a credential the
+      // account can be shown to own.
+      if (!live && storedProfileIdentity(readStore(), env, family)) {
+        // The live JWT is unreadable while the store names the account. Reported
+        // rather than resolved: the lane runs and finds nothing it can vouch for,
+        // which reads as unavailable instead of "not configured" beside a stored
+        // login.
+        return { kind, family, providerId, entitled: false, reason: 'billing_jwt_unavailable' };
+      }
+      credential = live || mirror;
     } else {
       const accountKey = storedAccountKeyCredential(readStore(), env, { family, selectionKind });
       if (accountKey?.identityWithoutKey) {
         // The account is known but its own key is absent, so the quota half
         // must not ride a mirror that may belong to the previous account. The
         // billing credential is a different one — the account-level JWT, which
-        // ZCode maintains on login — so that leg keeps resolving here: refusing
-        // the quota credential must not take Start/Weekend down with it.
+        // ZCode maintains on login — so that leg keeps resolving here,
+        // independently of the refused quota credential.
         const billing = codingBillingLeg();
         return {
           kind, family, providerId, entitled: false, reason: 'coding_plan_key_missing',

@@ -7,6 +7,9 @@ const { sharedDataDir, writeJsonAtomic } = require('./config');
 const {
   normalizeTokscaleClientName, num, sumOutputTokens, sumTokens
 } = require('./history');
+const {
+  CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry
+} = require('./clientIdentitySplits');
 
 const ARCHIVE_VERSION = 1;
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -185,6 +188,12 @@ function normalizeDay(value, fallbackDate = '') {
   return {
     date,
     activeTimeMs: Math.max(0, Math.round(num(value?.activeTimeMs))),
+    // Provenance travels with the day. An archive written before the split has
+    // no marker, which is what makes it recognizable as merged-era; a day this
+    // version writes carries the current generation and is taken at face value.
+    ...(value?.clientIdentityGeneration !== undefined
+      ? { clientIdentityGeneration: num(value.clientIdentityGeneration) }
+      : {}),
     observations,
     ...(componentSummary ? { componentSummary } : {})
   };
@@ -211,7 +220,28 @@ function graphsArray(graphs) {
   return (Array.isArray(graphs) ? graphs : [graphs]).filter((graph) => graph && typeof graph === 'object');
 }
 
-function observationsFromGraphs(graphs) {
+// A day that was first observed while two clients shared one row keeps that
+// merged identity: the archived row already contains both products' usage, so
+// replaying a post-split scan of the same day as two rows would count the split
+// client twice. Folding is decided by the day's own provenance rather than by
+// its current contents, because "holds the merged id and not the split id" is a
+// legal post-split state: a day whose first scan sees only Pi looks exactly like
+// a merged-era day, and folding it would permanently absorb Oh My Pi into Pi for
+// every later scan of that day. A day with no generation marker predates the
+// split and is the only kind that may be folded; a day this version wrote carries
+// the current generation and is taken at face value.
+function foldClientForDate(client, date, options = {}) {
+  if (!client) return client;
+  const day = options.archive?.days?.[date];
+  if (!day || !isPreSplitEntry(day)) return client;
+  for (const { merged, split } of CLIENT_IDENTITY_SPLITS) {
+    if (client !== split) continue;
+    return merged;
+  }
+  return client;
+}
+
+function observationsFromGraphs(graphs, options = {}) {
   const days = new Map();
   for (const graph of graphsArray(graphs)) {
     for (const row of (Array.isArray(graph.contributions) ? graph.contributions : [])) {
@@ -220,7 +250,7 @@ function observationsFromGraphs(graphs) {
       const day = days.get(date) || { date, activeTimeMs: 0, observations: {} };
       day.activeTimeMs += Math.max(0, Math.round(num(row.activeTimeMs ?? row.active_time_ms)));
       for (const raw of (Array.isArray(row?.clients) ? row.clients : [])) {
-        const client = normalizeTokscaleClientName(raw?.client) || 'unknown';
+        const client = foldClientForDate(normalizeTokscaleClientName(raw?.client), date, options) || 'unknown';
         const candidate = normalizeObservation({
           ...raw,
           client,
@@ -254,14 +284,22 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
   const archive = normalizeDailyHistoryArchive(existingArchive);
   const todayKey = String(options.todayKey || '').slice(0, 10);
   const hasTodayKey = DAY_KEY_RE.test(todayKey);
-  const incomingDays = observationsFromGraphs(graphs);
+  const incomingDays = observationsFromGraphs(graphs, { archive });
 
   for (const [date, incoming] of incomingDays) {
     if (hasTodayKey && date > todayKey) continue;
-    const previous = archive.days[date] || { date, activeTimeMs: 0, observations: {} };
+    const existing = archive.days[date] || null;
+    const previous = existing || { date, activeTimeMs: 0, observations: {} };
+    // A day already stored without a marker predates the split, so it keeps that
+    // status: its observations genuinely span both products and must keep folding.
+    // Anything else is written at the current generation, which is what stops a
+    // post-split day from being absorbed into the merged id when Pi happens to be
+    // scanned first.
+    const legacy = existing !== null && isPreSplitEntry(existing);
     const next = {
       date,
       activeTimeMs: Math.max(previous.activeTimeMs, incoming.activeTimeMs),
+      ...(legacy ? {} : { clientIdentityGeneration: CLIENT_IDENTITY_GENERATION }),
       observations: { ...previous.observations }
     };
     for (const [key, observation] of Object.entries(incoming.observations)) {
@@ -518,8 +556,8 @@ function graphTimeMetrics(graphs, activeTimeMs) {
 }
 
 function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
-  const currentDays = observationsFromGraphs(graphs);
   const normalizedArchive = normalizeDailyHistoryArchive(archive);
+  const currentDays = observationsFromGraphs(graphs, { archive: normalizedArchive });
   const todayKey = String(options.todayKey || '').slice(0, 10);
   const hasTodayKey = DAY_KEY_RE.test(todayKey);
 

@@ -1014,3 +1014,124 @@ test('fetchZaiLimits keeps the live billing leg when the account\'s own key is m
   assert.ok(calls.every((call) => !call.authorization.includes('previous-account-mirror')), 'the mirror is never carried');
   assert.ok(provider.windows.some((window) => window.limitId), 'the Start/Weekend bucket is rendered');
 });
+
+test('fetchZaiLimits refuses the start-plan mirror once the identity is known and the JWT is gone', async () => {
+  // The live JWT is the only credential that can be attributed to the account,
+  // so the mirror cannot carry the lane: the attempt is reported and the row
+  // reads unavailable rather than notConfigured beside a stored login.
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'start-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-start-plan': { enabled: true, options: { apiKey: 'previous-account-mirror' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: 'known-account-id' }))
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  const urls = [];
+  const provider = await fetchZaiLimits({}, {
+    env: { ZCODE_CREDENTIAL_SECRET: FIXTURE_CREDENTIAL_SECRET },
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url) => {
+      urls.push(String(url));
+      throw new Error('the mirror must not be queried');
+    }
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'oauth');
+  assert.deepEqual(provider.windows, []);
+  assert.deepEqual(urls, []);
+});
+
+test('fetchZaiLimits reports the refused billing attempt with no mirror to fall back on either', async () => {
+  // The identity decides it on its own: the entry carries no mirror at all, so
+  // what the lane needs is the same attempted-but-empty answer rather than the
+  // "not configured" a missing credential would otherwise produce.
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'start-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-start-plan': { enabled: true, options: { apiKey: '' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: 'known-account-id' }))
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  const urls = [];
+  const provider = await fetchZaiLimits({}, {
+    env: { ZCODE_CREDENTIAL_SECRET: FIXTURE_CREDENTIAL_SECRET },
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url) => {
+      urls.push(String(url));
+      throw new Error('there is no credential to query with');
+    }
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'oauth');
+  assert.deepEqual(provider.windows, []);
+  assert.deepEqual(urls, []);
+});
+
+test('fetchZaiLimits keeps the quota half when the billing mirror is refused', async () => {
+  // A coding-plan selection: the account's own key still resolves, so the same
+  // refusal drops only the billing leg, and no request carries the start mirror.
+  const identity = 'known-account-id';
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'coding-mirror' } },
+      'builtin:zai-start-plan': { enabled: false, systemDisabledReason: 'coding_plan_not_entitled', options: { apiKey: 'previous-account-mirror' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: identity })),
+      [`account-provider:coding-plan:account:zai-individual-coding-plan:account:${identity}:api-key`]:
+        encryptStoreValue('account-key')
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  const calls = [];
+  const provider = await fetchZaiLimits({}, {
+    env: { ZCODE_CREDENTIAL_SECRET: FIXTURE_CREDENTIAL_SECRET },
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url, options) => {
+      const target = String(url);
+      calls.push({ url: target, authorization: String(options?.headers?.Authorization || '').replace(/^Bearer /, '') });
+      if (target.includes('/quota/limit')) {
+        return { ok: true, status: 200, json: async () => ({ data: { planName: 'GLM Coding Pro', limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }] } }) };
+      }
+      if (target.includes('subscription/list')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ product_name: 'GLM Coding Pro' }] }) };
+      }
+      throw new Error(`unexpected url ${url}`);
+    }
+  });
+  assert.equal(provider.status, 'ok');
+  assert.ok(provider.windows.some((window) => window.kind === 'session'), 'the quota half rendered');
+  assert.ok(calls.every((call) => !call.url.includes('billing')), 'no billing request');
+  assert.ok(calls.every((call) => call.authorization === 'account-key'), 'only the account key was carried');
+});

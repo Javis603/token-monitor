@@ -542,14 +542,21 @@ function jsonlAssistant(overrides = {}) {
   });
 }
 
-test('qoderCnDataPaths exposes the home-relative JSONL projects dir on every platform', () => {
+test('qoderCnDataPaths resolves JSONL projects overrides before Qoder config and home defaults', () => {
   const darwin = qoderCnDataPaths({ homeDir: '/Users/test', platform: 'darwin', env: {} });
   assert.equal(darwin.projectsDir, path.join('/Users/test', '.qoder-cn', 'projects'));
   const win = qoderCnDataPaths({ homeDir: 'C:\\Users\\test', platform: 'win32', env: {} });
   assert.equal(win.projectsDir, path.join('C:\\Users\\test', '.qoder-cn', 'projects'));
+  const configDir = qoderCnDataPaths({
+    homeDir: '/Users/test', platform: 'darwin', env: { QODERCN_CONFIG_DIR: '/qoder/config' }
+  });
+  assert.equal(configDir.projectsDir, path.resolve('/qoder/config', 'projects'));
   const override = qoderCnDataPaths({
     homeDir: '/Users/test', platform: 'darwin',
-    env: { TOKEN_MONITOR_QODER_CN_PROJECTS_PATH: '/custom/cn/projects' }
+    env: {
+      TOKEN_MONITOR_QODER_CN_PROJECTS_PATH: '/custom/cn/projects',
+      QODERCN_CONFIG_DIR: '/qoder/config'
+    }
   });
   assert.equal(override.projectsDir, path.resolve('/custom/cn/projects'));
 });
@@ -664,6 +671,64 @@ test('collectQoderCnJsonlRows fails loudly instead of publishing partial totals'
   assert.equal(complete.length, 2, 'the same tree reads fully within the default budgets');
 });
 
+test('collectQoderCnJsonlRows treats only an absent root as an empty source', async () => {
+  const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
+  const denied = Object.assign(new Error('denied'), { code: 'EACCES' });
+  assert.deepEqual(await collectQoderCnJsonlRows({
+    projectsDir: '/missing',
+    fs: { readdirSync() { throw missing; } }
+  }), []);
+  await assert.rejects(
+    () => collectQoderCnJsonlRows({ projectsDir: '/denied', fs: { readdirSync() { throw denied; } } }),
+    (error) => error.code === 'EACCES'
+  );
+});
+
+test('collectQoderCnJsonlRows fails closed on traversal, stat, and stream errors', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-errors-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const projectsDir = path.join(home, 'projects');
+  const projectDir = path.join(projectsDir, 'project');
+  const filePath = path.join(projectDir, 'session.jsonl');
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(filePath, jsonlAssistant() + '\n');
+
+  const failingFs = (overrides) => new Proxy(fs, {
+    get(target, key) { return Object.prototype.hasOwnProperty.call(overrides, key) ? overrides[key] : target[key]; }
+  });
+  const fsError = (code) => Object.assign(new Error(code), { code });
+
+  await assert.rejects(() => collectQoderCnJsonlRows({
+    projectsDir,
+    fs: failingFs({
+      readdirSync(dir, options) {
+        if (dir === projectDir) throw fsError('ENOENT');
+        return fs.readdirSync(dir, options);
+      }
+    })
+  }), (error) => error.code === 'ENOENT');
+
+  await assert.rejects(() => collectQoderCnJsonlRows({
+    projectsDir,
+    sinceMs: 1,
+    fs: failingFs({ statSync() { throw fsError('EACCES'); } })
+  }), (error) => error.code === 'EACCES');
+
+  await assert.rejects(() => collectQoderCnJsonlRows({
+    projectsDir,
+    fs: failingFs({
+      createReadStream() {
+        return {
+          [Symbol.asyncIterator]() {
+            return { next() { return Promise.reject(fsError('EIO')); } };
+          },
+          destroy() {}
+        };
+      }
+    })
+  }), (error) => error.code === 'EIO');
+});
+
 test('collectQoderCnRows propagates JSONL budget failures rather than merging partials', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-propagate-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
@@ -700,84 +765,4 @@ test('JSONL rows flow through buildQoderCnPeriods as qodercn entries', () => {
   assert.ok(periods.allTime.entries.every((entry) => entry.client === 'qodercn'));
   assert.equal(periods.allTime.totalInput, 23852 * 2);
   assert.equal(periods.allTime.totalMessages, 2);
-});
-
-// --- Zero-token internal rows: prompt reconstruction from context_usage_ratio ---
-
-function zeroTokenRow(overrides = {}) {
-  return jsonlAssistant({
-    model: overrides.model || 'qfmodel',
-    messageId: overrides.messageId || 'z1',
-    usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, context_usage_ratio: overrides.ratio ?? 0.02654, credits: 0.19 }
-  });
-}
-
-test('prompt reconstruction is opt-in and mirrors the ratio-window identity', () => {
-  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow()), 'src'), null, 'off by default keeps the token-only contract');
-  const row = normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow()), 'src', {
-    estimatePromptTokens: true,
-    modelWindows: { qfmodel: 1_000_000 }
-  });
-  assert.equal(row.input, 26_540, 'ratio 0.02654 of a 1M window');
-  assert.equal(row.output, 0);
-  assert.equal(row.cacheRead, 0, 'the ratio does not record the cache split');
-  assert.equal(row.estimatedPrompt, true);
-});
-
-test('prompt reconstruction refuses rows without a usable ratio or published window', () => {
-  const opts = { estimatePromptTokens: true, modelWindows: { qfmodel: 1_000_000 } };
-  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ model: 'auto' })), 'src', opts), null, 'routing tiers have an unknown denominator');
-  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: 0 })), 'src', opts), null);
-  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow()), 'src', { ...opts, modelWindows: {} }), null);
-  // Non-finite and above-window occupancies must never reconstruct more
-  // tokens than the context window holds (Infinity > 0 passes a naive guard).
-  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: 1.5 })), 'src', opts), null);
-  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: 'Infinity' })), 'src', opts), null);
-  assert.equal(normalizeQoderCnJsonlRow({
-    type: 'assistant', uuid: 'n1', timestamp: '2026-09-15T03:07:23.628Z', sessionId: 's',
-    message: { id: 'z9', model: 'qfmodel', usage: { input_tokens: 0, output_tokens: 0, credits: 0.1 } }
-  }, 'src', opts), null, 'a missing ratio is NaN, never reconstructable');
-  const full = normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: 1 })), 'src', opts);
-  assert.equal(full.input, 1_000_000, 'a full window is the boundary, inclusive');
-});
-
-test('collectQoderCnJsonlRows gates reconstruction on the env flag and merges window overrides', async (t) => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-estimate-'));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
-  const project = path.join(home, '.qoder-cn', 'projects', '-Users-test-e');
-  fs.mkdirSync(project, { recursive: true });
-  fs.writeFileSync(path.join(project, 'a.jsonl'), [
-    zeroTokenRow({ messageId: 'z1' }),
-    zeroTokenRow({ messageId: 'z2', model: 'mymodel', ratio: 0.25 })
-  ].join('\n') + '\n');
-
-  const off = await collectQoderCnJsonlRows({ homeDir: home, env: {} });
-  assert.equal(off.length, 0, 'no fabricated tokens unless enabled');
-  const on = await collectQoderCnJsonlRows({ homeDir: home, env: { TOKEN_MONITOR_QODER_CN_ESTIMATE_PROMPT_TOKENS: '1' } });
-  assert.equal(on.length, 1, 'only the built-in-window model reconstructs');
-  assert.equal(on[0].input, 26_540);
-  const widened = await collectQoderCnJsonlRows({
-    homeDir: home,
-    env: {
-      TOKEN_MONITOR_QODER_CN_ESTIMATE_PROMPT_TOKENS: '1',
-      TOKEN_MONITOR_QODER_CN_MODEL_WINDOWS: 'mymodel=200000'
-    }
-  });
-  assert.equal(widened.length, 2);
-  assert.equal(widened.find((row) => row.model === 'mymodel').input, 50_000, '0.25 of the env-declared 200k window');
-});
-
-test('reconstructed prompt rows never receive a fabricated cost', () => {
-  const row = normalizeQoderCnJsonlRow(JSON.parse(zeroTokenRow({ ratio: 0.1 })), 'src', {
-    estimatePromptTokens: true,
-    modelWindows: { qfmodel: 1_000_000 }
-  });
-  const periods = buildQoderCnPeriods({
-    now: '2026-09-15T12:00:00.000Z',
-    allTimeSince: '2026-01-01',
-    rows: [row],
-    pricingByModel: { qfmodel: { inputCostPerToken: 1, outputCostPerToken: 1 } }
-  });
-  assert.equal(periods.allTime.totalInput, 100_000);
-  assert.equal(periods.allTime.totalCost, 0, 'reconstructed input mixes cache reads; pricing it would inflate');
 });

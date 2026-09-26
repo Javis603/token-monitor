@@ -26,7 +26,7 @@ test('usageCharts exports every symbol app.js destructures from it', () => {
 test('clientColors carries the known palette and a default', () => {
   assert.equal(clientColors.claude, '#cc7c5e');
   assert.equal(clientColors.codex, '#49a3b0');
-  assert.equal(clientColors.cline, '#323B43');
+  assert.equal(clientColors.cline, '#9D4EDD');
   assert.equal(clientColors.cherrystudio, '#EA5E5D');
   assert.equal(clientColors.commandcode, '#8C4EDD');
   assert.equal(clientColors.volcengine, '#006EFF');
@@ -73,6 +73,15 @@ test('modelVendorFor maps families and modelColor falls back deterministically',
   assert.equal(modelVendorFor('step-2'), 'stepfun');
   assert.equal(modelVendorFor('step-1-flash'), 'stepfun');
   assert.equal(modelColor('step-2'), clientColors.stepfun);
+  // Kimi's coding-plan catalog serves bare `k2`/`k3` ids with no `kimi` prefix,
+  // and the token has to stay delimited so a name that merely contains one is
+  // left unclassified.
+  assert.equal(modelVendorFor('k3'), 'kimi');
+  assert.equal(modelVendorFor('k3-256k'), 'kimi');
+  assert.equal(modelVendorFor('kimi/k3-256k'), 'kimi');
+  assert.equal(modelVendorFor('kimi-for-coding'), 'kimi');
+  assert.equal(modelVendorFor('sk3-256k'), null);
+  assert.equal(modelVendorFor('k3flash'), null);
   assert.equal(modelVendorFor('doubao-seed-1.6'), 'doubao');
   assert.equal(modelVendorFor('hy3'), 'hunyuan');
   assert.equal(modelVendorFor('hy4-preview'), 'hunyuan');

@@ -11,7 +11,7 @@ const {
   formatMoney,
   isCreditsWindow,
   spendWindow
-} = require('../../src/shared/limitBalanceDisplay');
+} = require('../../src/shared/limits/balanceDisplay');
 
 test('isCreditsWindow keys off the metric tag only', () => {
   assert.equal(isCreditsWindow({ metric: 'credits' }), true);
@@ -80,6 +80,15 @@ test('formatCompactMoney only abbreviates at or above 100k', () => {
   assert.equal(formatCompactMoney(1_250_000, 'USD'), '$1.25M');
   assert.equal(formatCompactMoney(1_250_000, 'CREDITS'), '1.25M');
   assert.equal(formatCompactMoney(null, 'USD'), '');
+});
+
+test('formatCompactMoney follows the localized token unit system', () => {
+  assert.equal(formatCompactMoney(1_250_000, 'USD', 'localized', 'zh-TW'), '$125萬');
+  assert.equal(formatCompactMoney(123_456_789, 'USD', 'localized', 'zh-TW'), '$1.23億');
+  assert.equal(formatCompactMoney(1_250_000, 'CREDITS', 'localized', 'zh-TW'), '125萬');
+  assert.equal(formatCompactMoney(12.5, 'USD', 'localized', 'zh-TW'), '$12.50');
+  // A locale without localized units keeps the western reading even when asked.
+  assert.equal(formatCompactMoney(1_250_000, 'USD', 'localized', 'en'), '$1.25M');
 });
 
 test('spendWindow finds the usage-credit meter by its metric', () => {

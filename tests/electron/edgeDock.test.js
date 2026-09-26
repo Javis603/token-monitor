@@ -12,6 +12,105 @@ function readRendererFile(name) {
   return fs.readFileSync(path.join(rendererDir, name), 'utf8');
 }
 
+test('detail cards keep an exact headline while the rail and list rows stay compact', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const formatCardTokens = Function(`return (${dock.match(/function formatCardTokens\(value\) \{[^}]+\}/)[0]})`)();
+  assert.equal(formatCardTokens(216_935_653), '216,935,653');
+  assert.equal(formatCardTokens(162_821_017), '162,821,017');
+  // The breakdown rows read like the widget's home list: one-decimal compact
+  // tokens with trailing zeros stripped, not the rail's two-decimal tray style.
+  const breakdownSource = dock.slice(
+    dock.indexOf('function formatBreakdownTokens('),
+    dock.indexOf('function compactCardTotal(')
+  ).trim();
+  const formatBreakdownTokens = Function('appearance', 'state', 'compactTokenApi', 'return (' + breakdownSource + ')')(
+    () => ({ compactTokenUnits: 'western' }), { locale: 'en' }, require('../../src/shared/compactTokens')
+  );
+  assert.equal(formatBreakdownTokens(216_935_653), '216.9M');
+  assert.equal(formatBreakdownTokens(1_234_567_890), '1.2B');
+  assert.equal(formatBreakdownTokens(512), '512');
+  assert.match(dock, /edge-dock-stat-value', formatTokens\(cell\.totalTokens\)/);
+  assert.match(dock, /edge-dock-total-row'[\s\S]*?formatCardTokens\(cell\.totalTokens\)/);
+  assert.match(dock, /edge-dock-client-tokens', formatBreakdownTokens\(entry\.tokens\)/);
+  // Session rows and the period tiles read compact like the breakdown rows —
+  // the exact-count rule from #784 covers the headline only.
+  assert.match(dock, /edge-dock-session-tokens', formatBreakdownTokens\(session\.totalTokens\)/);
+  assert.match(dock, /edge-dock-usage-tokens', usage \? formatBreakdownTokens\(usage\.tokens\) : '—'/);
+});
+
+test('rail money compacts through the shared helper so it follows the token units', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  assert.match(dock, /const compactMoneyApi = window\.TokenMonitorCompactMoney;/);
+  const source = dock.slice(
+    dock.indexOf('function formatRailCost('),
+    dock.indexOf('function statShortLabel(')
+  ).trim();
+  const build = () => Function(
+    'appearance', 'state', 'currencyApi', 'compactMoneyApi', 'return (' + source + ')'
+  );
+  const currency = require('../../src/shared/currency');
+  const compactMoney = require('../../src/shared/compactMoney');
+  const localized = build()(
+    () => ({ currency: 'HKD', compactTokenUnits: 'localized' }),
+    { locale: 'zh-TW' },
+    currency,
+    compactMoney
+  );
+  assert.equal(localized(15_846), 'HK$12.4萬');
+  const western = build()(
+    () => ({ currency: 'HKD', compactTokenUnits: 'western' }),
+    { locale: 'zh-TW' },
+    currency,
+    compactMoney
+  );
+  assert.equal(western(15_846), 'HK$123.6K');
+  assert.equal(western(72.697), 'HK$567'); // sub-10k keeps the fixed-digit path
+});
+
+test('the detail total follows the main app compact toggle and unit threshold', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const source = dock.slice(dock.indexOf('function compactCardTotal('), dock.indexOf('function formatCost(')).trim();
+  const appearance = { showCompactTotalTokens: false, compactTokenUnits: 'western' };
+  const state = { locale: 'zh-TW' };
+  const compactCardTotal = Function('appearance', 'state', 'compactTokenApi', `return (${source})`)(
+    () => appearance, state, require('../../src/shared/compactTokens')
+  );
+  assert.equal(compactCardTotal(223_451_737), '');
+  appearance.showCompactTotalTokens = true;
+  assert.equal(compactCardTotal(223_451_737), '≈ 223.5M');
+  assert.equal(compactCardTotal(999), '');
+  appearance.compactTokenUnits = 'localized';
+  assert.equal(compactCardTotal(9_999), '');
+  assert.equal(compactCardTotal(223_451_737), '≈ 2.23億');
+  assert.match(main, /function edgeDockAppearance\([\s\S]*?showCompactTotalTokens: source\.showCompactTotalTokens/);
+  assert.match(dock, /if \(compact\) \{[\s\S]*?el\('span', 'edge-dock-total-compact', compact\)[\s\S]*?totalRow\.append\(compactNode\)/);
+});
+
+test('a long detail total shrinks beside its compact reading instead of wrapping', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
+  const source = dock.slice(dock.indexOf('function fitCardTotal('), dock.indexOf('function renderBubble(')).trim();
+  const fitCardTotal = Function('getComputedStyle', `return (${source})`)((node) => (
+    node.columnGap === undefined ? { fontSize: '30px' } : { columnGap: '8px' }
+  ));
+  const number = { style: {}, getBoundingClientRect: () => ({ width: 236 }) };
+  const compact = { getBoundingClientRect: () => ({ width: 47 }) };
+  const row = {
+    clientWidth: 252,
+    columnGap: '8px',
+    querySelector: (selector) => selector === 'strong' ? number : compact
+  };
+  fitCardTotal({ querySelector: () => row });
+  assert.equal(number.style.fontSize, '24px');
+  number.style = {};
+  row.querySelector = (selector) => selector === 'strong' ? number : null;
+  fitCardTotal({ querySelector: () => row });
+  assert.equal(number.style.fontSize, undefined);
+  assert.match(css, /\.edge-dock-total-row \{[^}]*white-space: nowrap/);
+  assert.ok(dock.indexOf('fitCardTotal(card);') < dock.indexOf('const height = Math.ceil(card.getBoundingClientRect().height)'));
+});
+
 const {
   EDGE_DOCK_METRICS,
   EDGE_DOCK_TIMING,
@@ -163,11 +262,14 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   const app = readRendererFile('app.js');
   // The token total must survive: headroom is additional, not a replacement for
   // the figure the row already carried.
-  assert.match(dock, /el\('span', 'edge-dock-session-tokens', formatTokens\(session\.totalTokens\)\)/);
+  assert.match(dock, /el\('span', 'edge-dock-session-tokens', formatBreakdownTokens\(session\.totalTokens\)\)/);
   // ...and both live on the same row, with the context reading appended to the
   // meta line rather than taking the token column.
   const sessions = dock.slice(dock.indexOf('function sessionsNode('), dock.indexOf('function providerCard('));
   assert.match(sessions, /edge-dock-session-meta/);
+  // The meta line must compose through the shared helper — a projection that
+  // still handed the card a flattened top model would pass the map assertions.
+  assert.match(sessions, /sessionRowsApi\.sessionModelLabel\(session\)/);
   assert.match(sessions, /if \(context\) meta\.append\(context\)/);
   // Running is a dot beside the name, not a recoloured title.
   assert.match(sessions, /nameNode\.append\(stateMark\(session, key, state\)\)/);
@@ -1212,6 +1314,143 @@ test('automatic items follow the limits order and enabled set, capped at the def
   assert.equal(edgeDockCellSignature(buildEdgeDockCells(stats, { limitsEnabled: false })), '');
 });
 
+test('the rail headline reports the pool that gates the account, not just the session', () => {
+  const exhausted = provider('codex', {
+    windows: [
+      { kind: 'session', label: '', remainingPercent: 100 },
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 0 }
+    ]
+  });
+  const stats = { limits: { providers: [exhausted] } };
+  const cells = buildEdgeDockCells(stats, { limitProviders: 'codex' });
+  // A full session bar beside an empty weekly pool is still a blocked account:
+  // the rail must say so, the way the tray's worst-window headline does.
+  assert.equal(cells[0].remainingPercent, 0);
+  assert.equal(cells[0].windowKind, 'weekly');
+  assert.equal(cells[0].severityPercent, 0);
+
+  const drained = provider('codex', {
+    windows: [
+      { kind: 'session', label: '', remainingPercent: 90 },
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 30 }
+    ]
+  });
+  const cells2 = buildEdgeDockCells({ limits: { providers: [drained] } }, { limitProviders: 'codex' });
+  // A partially-used weekly pool does not gate the account, so the rail keeps
+  // reading the primary session window; only an empty pool overrides it.
+  assert.equal(cells2[0].remainingPercent, 90);
+  assert.equal(cells2[0].windowKind, 'session');
+  // ...but the warn colour follows the tightest window, so an almost-gated
+  // account still flags before its headline flips to 0%.
+  assert.equal(cells2[0].severityPercent, 30);
+
+  const drainedMonthly = provider('codex', {
+    windows: [
+      { kind: 'session', label: '', remainingPercent: 80 },
+      { kind: 'billing', label: 'Monthly', remainingPercent: 0 }
+    ]
+  });
+  const cells3 = buildEdgeDockCells({ limits: { providers: [drainedMonthly] } }, { limitProviders: 'codex' });
+  assert.equal(cells3[0].remainingPercent, 0);
+  assert.equal(cells3[0].windowKind, 'billing');
+
+  // A spent money figure is not a spent quota: balances can bill past zero or
+  // share funding with a top-up pool, so credits windows never exhaust the
+  // headline even when their meter reads 0%.
+  const brokeBalance = provider('codex', {
+    windows: [
+      { kind: 'session', label: '', remainingPercent: 80 },
+      { kind: 'billing', metric: 'credits', label: 'Balance', remainingPercent: 0, showMeter: true }
+    ]
+  });
+  const cells4 = buildEdgeDockCells({ limits: { providers: [brokeBalance] } }, { limitProviders: 'codex' });
+  assert.equal(cells4[0].remainingPercent, 80);
+  assert.equal(cells4[0].windowKind, 'session');
+  // The warn colour still follows the tightest pool, money included.
+  assert.equal(cells4[0].severityPercent, 0);
+
+  // A scoped or model-specific pool is not the account gate: Claude's Fable
+  // weekly at 0% leaves every other Claude model usable, so the canonical
+  // weekly stays the headline. The tightest-pool severity still sees it.
+  const scopedOut = provider('claude', {
+    windows: [
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 80 },
+      { kind: 'weekly', label: 'Fable', remainingPercent: 0 }
+    ]
+  });
+  const cells5 = buildEdgeDockCells({ limits: { providers: [scopedOut] } }, { limitProviders: 'claude' });
+  assert.equal(cells5[0].remainingPercent, 80);
+  assert.equal(cells5[0].windowKind, 'weekly');
+  assert.equal(cells5[0].severityPercent, 0);
+
+  // The same scoped pool is still not a gate when it has no aggregate sibling:
+  // preferredWindow() returns a lone window without checking its label, so
+  // gatingWindow() re-checks canonical labels for the single-window case.
+  const fableOnly = provider('claude', {
+    windows: [
+      { kind: 'session', label: '', remainingPercent: 80 },
+      { kind: 'weekly', label: 'Fable', remainingPercent: 0 }
+    ]
+  });
+  const cells5b = buildEdgeDockCells({ limits: { providers: [fableOnly] } }, { limitProviders: 'claude' });
+  assert.equal(cells5b[0].remainingPercent, 80);
+  assert.equal(cells5b[0].windowKind, 'session');
+
+  // Provider-declared additional pools never gate either: Factory's Core
+  // Monthly carries additional: true, so a drained Core pool beside a live
+  // aggregate Monthly leaves the headline at the aggregate's figure.
+  const factoryAdditional = provider('factory', {
+    windows: [
+      { kind: 'billing', label: 'Monthly', remainingPercent: 50 },
+      { kind: 'billing', label: 'Core Monthly', remainingPercent: 0, additional: true }
+    ]
+  });
+  const cells5c = buildEdgeDockCells({ limits: { providers: [factoryAdditional] } }, { limitProviders: 'factory' });
+  assert.equal(cells5c[0].remainingPercent, 50);
+  assert.equal(cells5c[0].severityPercent, 0);
+
+  // Several same-kind pools with no canonical sibling can also hide a scoped
+  // 0%: per-model pools (Antigravity's Gemini/Claude weeklies) have no
+  // aggregate, and the tightest one must not be read as the account gate.
+  const modelPools = provider('antigravity', {
+    windows: [
+      { kind: 'session', label: 'Gemini', remainingPercent: 80 },
+      { kind: 'weekly', label: 'Gemini Pro', remainingPercent: 72 },
+      { kind: 'weekly', label: 'Gemini Flash', remainingPercent: 0 },
+      { kind: 'weekly', label: 'Claude', remainingPercent: 35 }
+    ]
+  });
+  const cells5d = buildEdgeDockCells({ limits: { providers: [modelPools] } }, { limitProviders: 'antigravity' });
+  assert.equal(cells5d[0].remainingPercent, 80);
+  assert.equal(cells5d[0].severityPercent, 0);
+
+  // Codex additional pools are invisible to the headline entirely, but the
+  // warn colour still sees a drained one — the same contract Factory's
+  // additional pools get.
+  const codexAdditional = provider('codex', {
+    windows: [
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 70 },
+      { kind: 'weekly', label: 'GPT reserve', remainingPercent: 0, additional: true }
+    ]
+  });
+  const cells5e = buildEdgeDockCells({ limits: { providers: [codexAdditional] } }, { limitProviders: 'codex' });
+  assert.equal(cells5e[0].remainingPercent, 70);
+  assert.equal(cells5e[0].severityPercent, 0);
+
+  // A hub older than the spend metric strips it but keeps the window, so the
+  // same money figure arrives unlabeled. It must still not read as an
+  // exhausted quota — identity, not the metric flag, is what excludes it.
+  const legacySpend = provider('codex', {
+    windows: [
+      { kind: 'session', label: '', remainingPercent: 80 },
+      { kind: 'billing', label: 'Usage credits', usedPercent: 100 }
+    ]
+  });
+  const cells6 = buildEdgeDockCells({ limits: { providers: [legacySpend] } }, { limitProviders: 'codex' });
+  assert.equal(cells6[0].remainingPercent, 80);
+  assert.equal(cells6[0].windowKind, 'session');
+});
+
 test('explicit items keep their order, their empty providers, and add usage readouts', () => {
   const stats = {
     periods: {
@@ -1246,6 +1485,66 @@ test('explicit items keep their order, their empty providers, and add usage read
   assert.equal(claude.usage, null);
 });
 
+test('period cells carry model rows without dropping unattributed usage', () => {
+  const stats = {
+    periods: {
+      today: {
+        totalTokens: 100,
+        costUsd: 1,
+        clients: { codex: 100 },
+        models: { 'gpt-5': 60, 'claude-sonnet-4': 20 },
+        modelCosts: { 'gpt-5': 0.6, 'claude-sonnet-4': 0.2 }
+      }
+    },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: 'today' }] });
+  assert.deepEqual(cell.models, [
+    { model: 'gpt-5', tokens: 60, costUsd: 0.6, unattributed: false },
+    { model: 'claude-sonnet-4', tokens: 20, costUsd: 0.2, unattributed: false },
+    { model: '__unattributed', tokens: 20, costUsd: 0.2, unattributed: true }
+  ]);
+  assert.deepEqual(cell.clients, [
+    { client: 'codex', tokens: 100, costUsd: 0, unattributed: false }
+  ]);
+});
+
+test('period cells keep rows beyond the six-row card viewport', () => {
+  const clients = Object.fromEntries(Array.from({ length: 8 }, (_, index) => [`tool-${index + 1}`, index + 1]));
+  const models = Object.fromEntries(Array.from({ length: 8 }, (_, index) => [`model-${index + 1}`, index + 1]));
+  const stats = {
+    periods: { today: { totalTokens: 36, costUsd: 0, clients, models } },
+    limits: { providers: [] }
+  };
+  const [cell] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: 'today' }] });
+  assert.deepEqual(cell.clients.map((row) => row.client), [
+    'tool-8', 'tool-7', 'tool-6', 'tool-5', 'tool-4', 'tool-3', 'tool-2', 'tool-1'
+  ]);
+  assert.deepEqual(cell.models.map((row) => row.model), [
+    'model-8', 'model-7', 'model-6', 'model-5', 'model-4', 'model-3', 'model-2', 'model-1'
+  ]);
+});
+
+test('period cards expose an accessible tools and models switch', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const card = dock.slice(dock.indexOf('function statCard('), dock.indexOf('function sessionsCard('));
+  assert.match(card, /for \(const mode of \['tools', 'models'\]\)/);
+  assert.match(card, /button\.setAttribute\('aria-pressed', String\(breakdownMode === mode\)\)/);
+  // The card is rebuilt on every repaint, so a click-only listener loses the
+  // activation when a rebuild lands between press and release. The switch goes
+  // through the shared press-activation helper instead.
+  assert.match(card, /activateOnPress\(button, \(\) => \{/);
+  assert.doesNotMatch(card, /button\.addEventListener\('click'/);
+  assert.match(card, /state\.breakdownMode = mode;\s+renderBubble\(state\.payload\);/);
+  assert.match(card, /modelVendorFor\(model\.model\) \|\| 'token-monitor'/);
+  assert.match(card, /t\('dashboard\.tooltip\.unclassified'\)/);
+  assert.doesNotMatch(card, /edgeDock\.more(?:Models|Clients)/);
+  const bubble = dock.slice(dock.indexOf('function clampBreakdownList('), dock.indexOf('// ---- Wiring'));
+  assert.match(bubble, /rows\[BREAKDOWN_VISIBLE_ROWS - 1\]\.getBoundingClientRect\(\)/);
+  assert.match(bubble, /list\.style\.maxHeight = `\$\{height\}px`/);
+  assert.match(bubble, /stagingLayer\.replaceChildren\(card\);\s+fitCardTotal\(card\);\s+clampBreakdownList\(card\);/);
+});
+
 test('provider cards list the newest sessions of their own clients this month', () => {
   const session = (client, id, lastUsedAt, extra = {}) => ({ client, sessionId: id, lastUsedAt, totalTokens: 10, models: { 'gpt-5': 10 }, ...extra });
   const stats = {
@@ -1254,7 +1553,7 @@ test('provider cards list the newest sessions of their own clients this month', 
         sessions: {
           'codex:a': session('codex', 'a', '2026-09-10T00:00:00Z'),
           'codex:b': session('codex', 'b', '2026-09-16T00:00:00Z', { projectLabel: 'token-monitor' }),
-          'claude:c': session('claude', 'c', '2026-09-17T00:00:00Z'),
+          'claude:c': session('claude', 'c', '2026-09-17T00:00:00Z', { models: { 'claude-opus-5-5': 8, 'swe-2': 2 } }),
           'codex:r': session('codex', 'r', '2026-09-17T01:00:00Z', { sessionKind: 'background-review' }),
           'codex:d': session('codex', 'd', '2026-09-15T00:00:00Z'),
           'codex:e': session('codex', 'e', '2026-09-01T00:00:00Z')
@@ -1268,7 +1567,12 @@ test('provider cards list the newest sessions of their own clients this month', 
   assert.deepEqual(codex.sessions.map((entry) => entry.sessionId), ['t', 'b', 'd']);
   assert.equal(codex.sessions[0].title, 'Fix dock');
   assert.equal(codex.sessions[1].projectLabel, 'token-monitor');
-  assert.equal(codex.sessions[1].model, 'gpt-5');
+  // The whole model map rides the row: the card labels it with the Sessions
+  // list's own sessionModelLabel(), which a flattened top-model string could
+  // never reproduce ("N models" for a multi-model session).
+  assert.deepEqual(codex.sessions[1].models, { 'gpt-5': 10 });
+  const [claude] = buildEdgeDockCells({ ...stats, limits: { providers: [provider('claude')] } }, {});
+  assert.deepEqual(claude.sessions[0].models, { 'claude-opus-5-5': 8, 'swe-2': 2 });
   // The rows are the rail's activity reading as well as this card's list, so hiding
   // the list is a choice the cell carries rather than one it applies: the rows stay.
   const [hidden] = buildEdgeDockCells(stats, { items: [{ type: 'limit', provider: 'codex', showSessions: false }] });

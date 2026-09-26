@@ -629,6 +629,91 @@ test('the billing credential prefers the live credential store over the mirror',
   }).credential.token, 'stale-mirror');
 });
 
+test('a known account refuses the entry mirror once the live billing JWT cannot be read', () => {
+  // The billing leg's own boundary, the rule the quota credential already
+  // follows: with an identity established the entry's mirror cannot be shown to
+  // belong to it, so the lane resolves nothing and reports the refused attempt.
+  const identity = 'a1b2c3d4-5555-6666-7777-888899990000';
+  const files = (credentials) => ({
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'start-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-start-plan': { enabled: true, options: { apiKey: 'previous-account-mirror' } }
+    } }),
+    'credentials.json': JSON.stringify(credentials)
+  });
+  const deps = (credentials) => ({
+    readFileSync: fileSystem(files(credentials)),
+    homeDir: '/home/test',
+    env: { ZCODE_CREDENTIAL_SECRET: TEST_CREDENTIAL_SECRET }
+  });
+  const profile = {
+    'oauth:zai:user_info': encryptCredential(JSON.stringify({ user_id: identity }), TEST_CREDENTIAL_SECRET)
+  };
+
+  const refused = discoverZcodeConnection({}, deps(profile));
+  assert.equal(refused.kind, 'start-billing');
+  assert.equal(refused.entitled, false);
+  assert.equal(refused.reason, 'billing_jwt_unavailable');
+  assert.equal(refused.credential, undefined);
+  const brokenJwt = discoverZcodeConnection({}, deps({
+    ...profile,
+    zcodejwttoken: encryptCredential('jwt', 'another-machine-secret')
+  }));
+  assert.equal(brokenJwt.reason, 'billing_jwt_unavailable');
+
+  // The mirror's presence is not part of the rule: with the identity established
+  // and no mirror to fall back on either, the same refusal is what lets the lane
+  // report an attempt instead of "not configured".
+  const noMirror = discoverZcodeConnection({}, {
+    readFileSync: fileSystem({
+      ...files(profile),
+      'config.json': JSON.stringify({ provider: {
+        'builtin:zai-start-plan': { enabled: true, options: { apiKey: '' } }
+      } })
+    }),
+    homeDir: '/home/test',
+    env: { ZCODE_CREDENTIAL_SECRET: TEST_CREDENTIAL_SECRET }
+  });
+  assert.equal(noMirror.reason, 'billing_jwt_unavailable');
+  assert.equal(noMirror.credential, undefined);
+
+  // A readable JWT still wins outright, and an unknown identity keeps the
+  // #718 mirror fallback.
+  assert.equal(discoverZcodeConnection({}, deps({
+    ...profile,
+    zcodejwttoken: encryptCredential('live-jwt', TEST_CREDENTIAL_SECRET)
+  })).credential.token, 'live-jwt');
+  assert.equal(discoverZcodeConnection({}, deps({})).credential.token, 'previous-account-mirror');
+});
+
+test('the coding-plan billing leg refuses the mirror while its quota half still resolves', () => {
+  const identity = 'b2c3d4e5-6666-7777-8888-999900001111';
+  const discovery = discoverZcodeConnection({}, {
+    readFileSync: fileSystem({
+      'setting.json': JSON.stringify({
+        providerFamilyDomain: 'zai',
+        providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
+      }),
+      'config.json': JSON.stringify({ provider: {
+        'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'coding-mirror' } },
+        'builtin:zai-start-plan': { enabled: false, systemDisabledReason: 'coding_plan_not_entitled', options: { apiKey: 'previous-account-mirror' } }
+      } }),
+      'credentials.json': JSON.stringify({
+        'oauth:zai:user_info': encryptCredential(JSON.stringify({ user_id: identity }), TEST_CREDENTIAL_SECRET),
+        [`account-provider:coding-plan:account:zai-individual-coding-plan:account:${identity}:api-key`]:
+          encryptCredential('account-key', TEST_CREDENTIAL_SECRET)
+      })
+    }),
+    homeDir: '/home/test',
+    env: { ZCODE_CREDENTIAL_SECRET: TEST_CREDENTIAL_SECRET }
+  });
+  assert.equal(discovery.credential.token, 'account-key');
+  assert.equal(discovery.billing, undefined);
+});
+
 test('a coding-quota selection takes the live billing credential for its billing lane', () => {
   const discovery = discoverZcodeConnection({}, {
     readFileSync: fileSystem({

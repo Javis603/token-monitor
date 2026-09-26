@@ -2,6 +2,9 @@
 
 const { PERIODS, normalizeClientName, normalizePeriod } = require('./usage');
 const {
+  CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry
+} = require('./clientIdentitySplits');
+const {
   cloneJson,
   hasSummaryPeriod,
   localDay,
@@ -69,6 +72,15 @@ function clientUsageFromPeriod(period, client) {
   });
 }
 
+// The session id half of a `client:sessionId` key, preferring the session's own
+// field. The id is written by the client that produced the session, so the bare
+// id is what lets a merged `pi` row and a split `omp` row name the same session.
+function sessionIdFromKey(key, session) {
+  const raw = String(key || '');
+  const separator = raw.indexOf(':');
+  return String(session?.sessionId || (separator >= 0 ? raw.slice(separator + 1) : raw)).trim();
+}
+
 function normalizeArchivedClientUsage(value) {
   const source = value?.clients && typeof value.clients === 'object' ? value.clients : value;
   const normalized = { version: 1, clients: {} };
@@ -84,6 +96,12 @@ function normalizeArchivedClientUsage(value) {
       capturedAt: capturedAt.toISOString(),
       day: String(rawEntry.day || localDay(capturedAt)),
       month: String(rawEntry.month || localMonth(capturedAt)),
+      // Provenance survives normalization. An entry with no generation predates
+      // the split, which is the only thing that lets a merged snapshot be told
+      // from a genuinely single-client one written afterwards.
+      ...(rawEntry.clientIdentityGeneration !== undefined
+        ? { clientIdentityGeneration: numberValue(rawEntry.clientIdentityGeneration) }
+        : {}),
       periods: {}
     };
     let includesUsage = false;
@@ -112,16 +130,108 @@ function captureArchivedClientUsage(existingArchive, deviceRecord, clients, capt
       includesUsage = includesUsage || hasUsage(usage);
     }
     if (!includesUsage) continue;
-    archive.clients[client] = {
+    const previous = archive.clients[client];
+    const entry = {
       client,
       capturedAt: captureDate.toISOString(),
       day: localDay(captureDate),
       month: localMonth(captureDate),
+      // Written by this version, so the client id means what it says.
+      clientIdentityGeneration: CLIENT_IDENTITY_GENERATION,
       periods
     };
+    // Recapturing a merged id must not discard the half of the snapshot the new
+    // capture does not contain: an untracked split client's residue exists only
+    // in this entry. Sessions the capture reports again are replaced; the rest
+    // carry forward, and an entry still holding two products stays unmarked so
+    // net-out keeps reconciling it against the split id on every apply.
+    if (previous && mergedSnapshotFor(client, previous)) {
+      let carriesResidue = false;
+      for (const periodName of PERIODS) {
+        const oldPeriod = previous.periods?.[periodName];
+        if (!hasUsage(oldPeriod) || !samePeriodWindow(periodName, previous, entry)) continue;
+        const merged = mergeResidueIntoPeriod(oldPeriod, periods[periodName]);
+        if (!merged) continue;
+        periods[periodName] = merged;
+        carriesResidue = true;
+      }
+      if (carriesResidue) delete entry.clientIdentityGeneration;
+    }
+    archive.clients[client] = entry;
   }
 
   return archive;
+}
+
+// A rolling-window period only carries residue inside the window it was captured
+// for: yesterday's `today` residue is not today's. `allTime` never expires.
+function samePeriodWindow(periodName, oldEntry, newEntry) {
+  if (periodName === 'today') return oldEntry.day === newEntry.day;
+  if (periodName === 'month') return oldEntry.month === newEntry.month;
+  return true;
+}
+
+// The residue of a merged snapshot is what the new capture does not contain:
+// the sessions the live scan no longer reports under this id, which are the
+// split client's only copy. Sessions the capture reports again are replaced
+// rather than summed, or the same usage would count twice.
+function mergeResidueIntoPeriod(oldPeriod, newPeriod) {
+  const oldSessions = Object.entries(oldPeriod?.sessions || {});
+  // An aggregate-only snapshot cannot be decomposed at all: no session id says
+  // which part the new capture replaces. The old period stands whole and the
+  // aggregate fallback in netOutLiveUsage reconciles it at apply time.
+  if (oldSessions.length === 0) return oldPeriod;
+  const newSessionIds = new Set();
+  for (const [key, session] of Object.entries(newPeriod?.sessions || {})) {
+    const id = sessionIdFromKey(key, session);
+    if (id) newSessionIds.add(id);
+  }
+  const sessions = { ...(newPeriod?.sessions || {}) };
+  const matchedModels = {};
+  const matchedModelCosts = {};
+  let matchedTokens = 0;
+  let matchedCost = 0;
+  let residue = false;
+  for (const [key, session] of oldSessions) {
+    const id = sessionIdFromKey(key, session);
+    if (id && newSessionIds.has(id)) {
+      matchedTokens += Math.max(0, Math.round(numberValue(session?.totalTokens)));
+      matchedCost += numberValue(session?.costUsd);
+      for (const [model, tokens] of Object.entries(session?.models || {})) {
+        matchedModels[model] = (matchedModels[model] || 0) + numberValue(tokens);
+      }
+      for (const [model, cost] of Object.entries(session?.modelCosts || {})) {
+        matchedModelCosts[model] = (matchedModelCosts[model] || 0) + numberValue(cost);
+      }
+      continue;
+    }
+    sessions[key] = session;
+    residue = true;
+  }
+  if (!residue) return null;
+  // The matched sessions' share of the old totals is replaced by the new
+  // capture; everything else — residue sessions plus any unattributed remainder
+  // — carries. Model rows shrink by the same rule so the breakdown cannot count
+  // what the totals no longer do.
+  const models = { ...(newPeriod?.models || {}) };
+  for (const [model, tokens] of Object.entries(oldPeriod?.models || {})) {
+    const carried = Math.max(0, Math.round(numberValue(tokens) - numberValue(matchedModels[model])));
+    if (carried > 0) models[model] = (models[model] || 0) + carried;
+  }
+  const modelCosts = { ...(newPeriod?.modelCosts || {}) };
+  for (const [model, cost] of Object.entries(oldPeriod?.modelCosts || {})) {
+    const carried = Math.max(0, numberValue(cost) - numberValue(matchedModelCosts[model]));
+    if (carried > 0) modelCosts[model] = (modelCosts[model] || 0) + carried;
+  }
+  return {
+    totalTokens: Math.max(0, Math.round(numberValue(newPeriod?.totalTokens)))
+      + Math.max(0, Math.round(numberValue(oldPeriod?.totalTokens)) - matchedTokens),
+    costUsd: numberValue(newPeriod?.costUsd)
+      + Math.max(0, numberValue(oldPeriod?.costUsd) - matchedCost),
+    models,
+    modelCosts,
+    sessions
+  };
 }
 
 function addClientUsage(period, client, usage) {
@@ -220,19 +330,164 @@ function shouldApplyPeriod(periodName, entry, now) {
   return periodName === 'allTime';
 }
 
+// An entry recorded under a merged id on or after the day the two ids began
+// resolving to one row. Its numbers may include the split client, which is what
+// makes it different from every other entry here: an ordinary archived client is
+// wholly that client, while a merged snapshot cannot be decomposed from its own
+// contents.
+//
+// Decided by the entry's own generation, not by its client id. Tokscale has
+// scanned `.omp/agent/sessions` under `pi` since v2.0.19 and Token Monitor has
+// shipped that scanner continuously since these archives existed, so every `pi`
+// snapshot written before the split covers both products. That says nothing about
+// a `pi` snapshot written after it: a user who untracks Pi today stores a
+// genuinely Pi-only entry, and treating that as merged would subtract the live
+// split client from usage which never contained it.
+function mergedSnapshotFor(client, entry) {
+  for (const splitDef of CLIENT_IDENTITY_SPLITS) {
+    if (client !== splitDef.merged) continue;
+    if (!isPreSplitEntry(entry)) continue;
+    return splitDef;
+  }
+  return null;
+}
+
+// Drop the archived sessions the live scan is now reporting, and keep the rest.
+//
+// A merged-window snapshot cannot be divided into "this much was Pi, this much was
+// Oh My Pi", so subtracting a live aggregate is not an option: live usage grows
+// while the snapshot is frozen, and subtracting the current total would keep
+// eating into the half only the archive still holds. A session id is different -
+// it is written by the client that produced the session, so the same id appearing
+// on either side of a pair names the same session. Matching by id removes exactly
+// the overlap and leaves the residue with the merged id, which is the only owner
+// that data actually has. A live session that has since grown past its archived
+// size still removes only its own archived contribution, so the growth survives.
+function netOutLiveUsage(usage, livePeriod, splitDef) {
+  const archivedSessions = Object.entries(usage?.sessions || {});
+  const liveSessionIds = new Set();
+  // Only the pair's own sessions can overlap the snapshot. Matching on the bare
+  // session id against every client in the period would let an unrelated client
+  // that happens to mint the same id erase archived usage it never contained.
+  const pairIds = new Set([splitDef.merged, splitDef.split]);
+  for (const [key, session] of Object.entries(livePeriod?.sessions || {})) {
+    const separator = key.indexOf(':');
+    const client = normalizeClientId(session?.client || (separator >= 0 ? key.slice(0, separator) : ''));
+    if (!pairIds.has(client)) continue;
+    const sessionId = sessionIdFromKey(key, session);
+    if (sessionId) liveSessionIds.add(sessionId);
+  }
+
+  // Without session detail on either side there is no identity to match on, so
+  // fall back to subtracting the live total. That is exact at the moment of the
+  // split and decays toward the live figure as live usage grows, which
+  // under-reports rather than inflates: the archive exists to stop usage from
+  // disappearing, and a figure that is too low is a smaller error than one that
+  // counts the same tokens twice. Real captures carry session detail for every
+  // period, so this path is a guard rather than the normal route.
+  if (archivedSessions.length === 0 || liveSessionIds.size === 0) {
+    let liveTokens = 0;
+    let liveCost = 0;
+    const models = { ...(usage?.models || {}) };
+    const modelCosts = { ...(usage?.modelCosts || {}) };
+    for (const liveClientId of [splitDef.merged, splitDef.split]) {
+      liveTokens += Math.max(0, Math.round(numberValue(livePeriod?.clients?.[liveClientId])));
+      liveCost += numberValue(livePeriod?.clientCosts?.[liveClientId]);
+      // The model breakdown has to shrink with the totals or the summary would
+      // add back usage the aggregate just removed. Without session detail the
+      // live client's own model map is the closest answer to which models left.
+      for (const [model, tokens] of Object.entries(livePeriod?.clientModels?.[liveClientId] || {})) {
+        if (models[model] === undefined) continue;
+        models[model] = Math.max(0, Math.round(numberValue(models[model]) - numberValue(tokens)));
+        if (models[model] === 0) delete models[model];
+      }
+      for (const [model, cost] of Object.entries(livePeriod?.clientModelCosts?.[liveClientId] || {})) {
+        if (modelCosts[model] === undefined) continue;
+        modelCosts[model] = Math.max(0, numberValue(modelCosts[model]) - numberValue(cost));
+        if (modelCosts[model] === 0) delete modelCosts[model];
+      }
+    }
+    if (liveTokens === 0 && liveCost === 0) return usage;
+    return {
+      ...usage,
+      totalTokens: Math.max(0, Math.round(numberValue(usage?.totalTokens)) - liveTokens),
+      costUsd: Math.max(0, numberValue(usage?.costUsd) - liveCost),
+      models,
+      modelCosts
+    };
+  }
+
+  const sessions = {};
+  const models = { ...(usage?.models || {}) };
+  const modelCosts = { ...(usage?.modelCosts || {}) };
+  let removedTokens = 0;
+  let removedCost = 0;
+  for (const [key, session] of archivedSessions) {
+    const sessionId = sessionIdFromKey(key, session);
+    if (sessionId && liveSessionIds.has(sessionId)) {
+      removedTokens += Math.max(0, Math.round(numberValue(session?.totalTokens)));
+      removedCost += numberValue(session?.costUsd);
+      // Removing the session but not its model rows would leave the breakdown
+      // counting usage the totals no longer do — the live scan adds the same
+      // models back under the split id.
+      for (const [model, tokens] of Object.entries(session?.models || {})) {
+        if (models[model] === undefined) continue;
+        models[model] = Math.max(0, Math.round(numberValue(models[model]) - numberValue(tokens)));
+        if (models[model] === 0) delete models[model];
+      }
+      for (const [model, cost] of Object.entries(session?.modelCosts || {})) {
+        if (modelCosts[model] === undefined) continue;
+        modelCosts[model] = Math.max(0, numberValue(modelCosts[model]) - numberValue(cost));
+        if (modelCosts[model] === 0) delete modelCosts[model];
+      }
+      continue;
+    }
+    sessions[key] = session;
+  }
+  if (removedTokens === 0 && removedCost === 0) return usage;
+  return {
+    ...usage,
+    totalTokens: Math.max(0, Math.round(numberValue(usage?.totalTokens)) - removedTokens),
+    costUsd: Math.max(0, numberValue(usage?.costUsd) - removedCost),
+    sessions,
+    models,
+    modelCosts
+  };
+}
+
 function applyArchivedClientUsage(summary, archive, options = {}) {
   const normalizedArchive = normalizeArchivedClientUsage(archive);
   const activeClients = clientSet(options.activeClients);
   const now = toDate(options.now);
   const next = cloneJson(summary);
 
-  for (const [client, entry] of Object.entries(normalizedArchive.clients)) {
-    if (activeClients.has(client)) continue;
+  // Merged snapshots replay after every ordinary entry. An archived split-id
+  // entry and a merged snapshot can hold the same session under two ids, and
+  // the snapshot recognises that overlap only once the split id's rows are in
+  // the period — insertion order puts the older merged entry first.
+  const orderedEntries = Object.entries(normalizedArchive.clients)
+    .map(([client, entry]) => [client, entry, mergedSnapshotFor(client, entry)])
+    .sort((left, right) => Number(Boolean(left[2])) - Number(Boolean(right[2])));
+  for (const [client, entry, splitDef] of orderedEntries) {
+    // An ordinary entry is skipped once its client is tracked: the live scan now
+    // reports it, so adding the archived copy back would double count. A merged
+    // snapshot cannot be skipped that way, because becoming tracked covers only
+    // part of it — the live scan reports whichever of the pair is on disk today,
+    // while the snapshot holds both products. Netting the live rows out is what
+    // leaves the remainder, and that remainder belongs to the merged id whether
+    // or not that id is tracked. When the pair is fully live the remainder is
+    // empty and the entry contributes nothing, which is the correct answer rather
+    // than a special case.
+    if (activeClients.has(client) && !splitDef) continue;
     for (const periodName of PERIODS) {
       const usage = entry.periods?.[periodName];
       if (!hasUsage(usage) || !shouldApplyPeriod(periodName, entry, now)) continue;
       if (!hasSummaryPeriod(next, periodName)) continue;
-      addClientUsage(targetPeriod(next, periodName), client, usage);
+      const effective = splitDef
+        ? netOutLiveUsage(usage, periodFor(next, periodName), splitDef)
+        : usage;
+      if (!hasUsage(effective)) continue;
+      addClientUsage(targetPeriod(next, periodName), client, effective);
     }
   }
 
@@ -241,7 +496,17 @@ function applyArchivedClientUsage(summary, archive, options = {}) {
 
 function pruneArchivedClientUsage(archive, activeClients) {
   const normalizedArchive = normalizeArchivedClientUsage(archive);
-  for (const client of clientSet(activeClients)) delete normalizedArchive.clients[client];
+  const active = clientSet(activeClients);
+  for (const client of active) {
+    // Pruning is per-client and means "the live scan owns this id now". That is
+    // true of an ordinary client but not of a merged snapshot, which holds two
+    // products under one id: pruning it would discard whatever the live scan does
+    // not report, and the archive is the only place that usage exists. A merged
+    // entry is left in place and nets itself out against the live rows on every
+    // apply instead, which is also what keeps a later untrack from resurfacing it.
+    if (mergedSnapshotFor(client, normalizedArchive.clients[client])) continue;
+    delete normalizedArchive.clients[client];
+  }
   return normalizedArchive;
 }
 
