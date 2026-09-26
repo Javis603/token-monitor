@@ -934,9 +934,9 @@ test('the service host may use its observed HTTP callback without receiving Secu
     const href = String(url);
     const parsed = new URL(href);
     if (parsed.hostname === 'account.xiaomi.com' && parsed.searchParams.get('sid') === 'mimopc') {
-      return reply(302, '', { location: `http://mimo-server-cn.xiaomimimo.com/api/sts?sign=1` });
+      return reply(302, '', { location: `http://mimo-server-cn.xiaomimimo.com/api/user/xiaomi/me` });
     }
-    if (href.startsWith('http://mimo-server-cn.xiaomimimo.com/api/sts')) {
+    if (href.startsWith('http://mimo-server-cn.xiaomimimo.com/api/user/xiaomi/me')) {
       callbackCookie = String(init?.headers?.Cookie || '');
       return reply(307, '', {
         location: `${MEMBERSHIP_BASE}/user/xiaomi/me`,
@@ -954,26 +954,49 @@ test('the service host may use its observed HTTP callback without receiving Secu
   assert.equal(rows[1].status, 'ok');
 });
 
-test('the HTTP callback exception does not allow arbitrary service-host paths', async () => {
+test('the plain-HTTP exception is the service host, not any host', async () => {
+  // The callback returns to the entry endpoint over plain HTTP, so a service-host
+  // path is followed whatever it is; the exception does not extend to another
+  // host, and the account cookies never travel over it (they are `Secure`).
   const world = mimoWorld();
   let escaped = false;
   const fetch = async (url, init) => {
     const href = String(url);
     const parsed = new URL(href);
     if (parsed.hostname === 'account.xiaomi.com' && parsed.searchParams.get('sid') === 'mimopc') {
-      return reply(302, '', { location: 'http://mimo-server-cn.xiaomimimo.com/api/collect' });
+      return reply(302, '', { location: 'http://account.xiaomi.com/pass/serviceLogin?sid=mimopc' });
     }
-    if (href === 'http://mimo-server-cn.xiaomimimo.com/api/collect') escaped = true;
+    if (parsed.protocol === 'http:' && parsed.hostname === 'account.xiaomi.com') escaped = true;
     return world.fetch(url, init);
+
   };
   const rows = await fetchMimoLimits({}, {
     fetch,
     readMimoDesktopAccount: signedInDesktop(),
     now: () => Date.UTC(2026, 8, 24)
   });
-  assert.equal(escaped, false);
+  assert.equal(escaped, false, 'a login domain is never followed over plain HTTP');
   assert.equal(rows[0].status, 'ok');
   assert.equal(rows[1].status, 'unavailable');
+
+  const serviceHost = mimoWorld();
+  const followed = [];
+  const serviceFetch = async (url, init) => {
+    const href = String(url);
+    const parsed = new URL(href);
+    if (parsed.hostname === 'account.xiaomi.com' && parsed.searchParams.get('sid') === 'mimopc') {
+      return reply(302, '', { location: 'http://mimo-server-cn.xiaomimimo.com/api/user/xiaomi/me?userId=42' });
+    }
+    if (parsed.protocol === 'http:') followed.push(href);
+    return serviceHost.fetch(url, init);
+  };
+  const serviceRows = await fetchMimoLimits({}, {
+    fetch: serviceFetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(followed.length > 0, true, 'the service host answers its own plain-HTTP callback and is followed');
+  assert.equal(serviceRows[0].status, 'ok');
 });
 
 test('the membership plan is read the way the app reads it', () => {

@@ -1,7 +1,7 @@
 'use strict';
 
 const { planLabelFromParts } = require('../../limits/providerHelpers');
-const { MIMO_DESKTOP_MEMBERSHIP_PRODUCT } = require('../../limitWindowLabels');
+const { MIMO_DESKTOP_MEMBERSHIP_PRODUCT } = require('../../limits/windowLabels');
 const { throwIfAborted } = require('../../abortSignal');
 const { mimoEndpointIso } = require('./endpointTime');
 const { mintMimoServiceSession, mimoExchangeStatus } = require('./session');

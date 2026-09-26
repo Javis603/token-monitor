@@ -5,7 +5,7 @@
     ? require('../accountIdentity')
     : root?.TokenMonitorAccountIdentity;
   const limitWindowLabelsApi = typeof module === 'object' && module.exports
-    ? require('../../shared/limitWindowLabels')
+    ? require('../../../shared/limits/windowLabels')
     : root?.TokenMonitorLimitWindowLabels;
   const api = factory(accountIdentityApi, limitWindowLabelsApi || {});
   if (typeof module === 'object' && module.exports) module.exports = api;

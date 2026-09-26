@@ -3,7 +3,7 @@
 const crypto = require('node:crypto');
 const { throwIfAborted } = require('../../abortSignal');
 const { hashKey } = require('../../hashKey');
-const { MIMO_CONSOLE_PRODUCT } = require('../../limitWindowLabels');
+const { MIMO_CONSOLE_PRODUCT } = require('../../limits/windowLabels');
 const { normalizeLimitProvider } = require('../../limits/core');
 const { nowIso, providerStatusFromError } = require('../../limits/providerHelpers');
 const { MIMO_CONSOLE_URL, mimoRequestHeaders } = require('./browserHeaders');

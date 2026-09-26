@@ -53,8 +53,12 @@ function allowedLoginUrl(value, base) {
 }
 
 // Every redirect stays inside the service that started the exchange or Xiaomi's
-// login domains. The one protocol exception is the service host's observed HTTP
-// callback; account cookies are Secure and the jar therefore sends none on it.
+// login domains. The service host may answer over plain HTTP on any path: the
+// callback returns to the endpoint that started the walk, which is the entry
+// (`/api/v1/balance?userId=…` for the console, `/user/xiaomi/me` for the
+// membership) rather than a `/sts` path. That hop carries no account cookie —
+// they are `Secure` — so only the service session it mints travels over it.
+// Login domains have no such exception.
 function allowedExchangeUrl(value, base, serviceUrl) {
   let url;
   try {
@@ -66,9 +70,7 @@ function allowedExchangeUrl(value, base, serviceUrl) {
   const host = url.hostname.toLowerCase();
   const serviceHost = serviceUrl?.hostname?.toLowerCase() || '';
   if (host === serviceHost) {
-    if (url.protocol === 'https:') return url;
-    if (url.protocol === 'http:' && (url.pathname === '/sts' || url.pathname === '/api/sts')) return url;
-    return null;
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url : null;
   }
   return url.protocol === 'https:'
     && MIMO_LOGIN_DOMAINS.some((domain) => hostMatches(host, domain))

@@ -11,7 +11,7 @@
       ? require('./compactMoney')
       : root?.TokenMonitorCompactMoney,
     typeof module === 'object' && module.exports
-      ? require('./limitWindowLabels')
+      ? require('./limits/windowLabels')
       : root?.TokenMonitorLimitWindowLabels
   );
   if (typeof module === 'object' && module.exports) module.exports = api;

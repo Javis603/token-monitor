@@ -14,7 +14,7 @@ const {
   codexAccountDisplayLabel,
   maskEmailAddress
 } = require('../../src/electron/renderer/accountIdentity');
-const limitWindowLabels = require('../../src/shared/limitWindowLabels');
+const limitWindowLabels = require('../../src/shared/limits/windowLabels');
 
 const TITLE_FUNCTIONS = [
   'limitAccountTitle',
@@ -265,7 +265,7 @@ test('accounts sharing a visible email are disambiguated', () => {
 });
 
 test('MiMo products keep their shared account identity in the title', () => {
-  const view = readRendererFile('limitWindowsView.js');
+  const view = readRendererFile('limits/windowsView.js');
   const peers = [
     { provider: 'mimo', accountName: 'MiMo account', accountLabel: 'Console', accountKey: 'sha256:abcdef123456' },
     { provider: 'mimo', accountName: 'MiMo account', accountLabel: 'Desktop Membership', accountKey: 'sha256:abcdef654321' }

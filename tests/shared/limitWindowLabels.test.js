@@ -81,8 +81,8 @@ test('every surface that paints a window label routes through the helper', () =>
   for (const file of [
     'src/shared/trayLayout.js',
     'src/shared/macWidgetSnapshot.js',
-    'src/electron/renderer/limitWindowsView.js',
-    'src/electron/renderer/limitProviderPresentation.js',
+    'src/electron/renderer/limits/windowsView.js',
+    'src/electron/renderer/limits/providerPresentation.js',
     'src/shared/providers/mimo/limits.js',
     'src/shared/providers/mimo/membership.js'
   ]) {
