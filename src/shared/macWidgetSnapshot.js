@@ -3,7 +3,7 @@
 const { CLIENT_LABELS } = require('./clientCatalog');
 const { KNOWN_CLIENTS } = require('./clientTracking');
 const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } = require('./limits/providers');
-const { limitWindowKindLabel } = require('./limits/windowLabels');
+const { limitWindowKindLabel, mimoProductLabel } = require('./limits/windowLabels');
 const { widgetVendorPalette } = require('./vendorPresentation');
 
 const MAC_WIDGET_SCHEMA_VERSION = 10;
@@ -261,8 +261,9 @@ function buildQuota(limits, activeCodexAccount) {
     const accountKey = String(provider.accountKey || '').trim();
     const accountEmail = maskedWidgetEmail(provider.accountEmail);
     const accountName = safeDisplayName(provider.accountName);
-    const accountLabel = providerId === 'mimo' && accountEmail && accountName
-      ? `${accountEmail} · ${accountName}`
+    const product = providerId === 'mimo' ? mimoProductLabel(provider) : '';
+    const accountLabel = product
+      ? [accountEmail, accountName, product].filter(Boolean).join(' · ')
       : accountEmail || accountName || safeDisplayName(provider.accountLabel);
     const source = String(provider.source || '').trim().toLowerCase();
     const sourceDetail = String(provider.sourceDetail || '').trim().toLowerCase();

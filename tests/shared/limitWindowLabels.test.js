@@ -60,7 +60,7 @@ test('every surface that paints a window label routes through the helper', () =>
   const dock = read('src/electron/renderer/edgeDock/dock.js');
   const widget = read('src/shared/macWidgetSnapshot.js');
 
-  assert.match(app, /const \{ limitWindowLabel \} = window\.TokenMonitorLimitWindowLabels;/);
+  assert.match(app, /const \{[^}]*limitWindowLabel[^}]*\} = window\.TokenMonitorLimitWindowLabels;/);
   assert.match(dock, /const limitWindowLabels = window\.TokenMonitorLimitWindowLabels;/);
   assert.match(widget, /require\('\.\/limits\/windowLabels'\)/);
 
@@ -74,6 +74,21 @@ test('every surface that paints a window label routes through the helper', () =>
   for (const page of ['src/electron/renderer/index.html', 'src/electron/renderer/edgeDock/index.html']) {
     assert.match(read(page), /limits\/windowLabels\.js/, `${page} should load the helper`);
   }
+
+  // The MiMo product words are the second piece of per-provider vocabulary this
+  // helper owns, and they were typed into five files before it did. Nothing
+  // outside it may name them again.
+  for (const file of [
+    'src/shared/trayLayout.js',
+    'src/shared/macWidgetSnapshot.js',
+    'src/electron/renderer/limitWindowsView.js',
+    'src/electron/renderer/limitProviderPresentation.js',
+    'src/shared/providers/mimo/limits.js',
+    'src/shared/providers/mimo/membership.js'
+  ]) {
+    assert.doesNotMatch(read(file), /'(?:Desktop )?Membership'/, `${file} should take the word from the helper`);
+  }
+  assert.match(read('src/shared/providers/mimo/membership.js'), /MIMO_MEMBERSHIP_LABEL = MIMO_DESKTOP_MEMBERSHIP_PRODUCT;/);
 });
 
 test('the default is display-only and never written onto the wire', () => {

@@ -8,11 +8,8 @@ const { errorWithStatus } = require('../../limits/providerHelpers');
 
 // The app's own Electron session partition: `persist:xiaomi-account` is a literal
 // in its bundle, and `Partitions/<name>/` under userData is Electron's rule for
-// one. The app ships on all three desktop platforms, so each root is Electron's
-// rule for that platform rather than a guess — `%APPDATA%` (then Roaming under
-// the home directory), `$XDG_CONFIG_HOME` or `~/.config`, Application Support —
-// under the `Xiaomi MiMo` root its `productName` gives. macOS is the one measured
-// on disk; elsewhere a wrong path reads nothing, the same answer as no store.
+// one. macOS is measured on disk. Windows follows Electron's `%APPDATA%` rule;
+// Linux discovery remains disabled until its shipped storage shape is verified.
 const MIMO_PARTITION_DIR = path.join('Partitions', 'xiaomi-account');
 const MIMO_COOKIE_FILE = 'Cookies';
 
@@ -42,10 +39,6 @@ function mimoDesktopCookieCandidates(options = {}) {
     candidates.push(path.join(home, 'AppData', 'Roaming', 'Xiaomi MiMo', MIMO_PARTITION_DIR, MIMO_COOKIE_FILE));
     return candidates;
   }
-  if (platform === 'linux') {
-    const configHome = String(env?.XDG_CONFIG_HOME || '').trim() || path.join(home, '.config');
-    return [path.join(configHome, 'Xiaomi MiMo', MIMO_PARTITION_DIR, MIMO_COOKIE_FILE)];
-  }
   return [];
 }
 
@@ -61,13 +54,10 @@ function readAccountCookieRows(dbPath, sqlite) {
   }
 }
 
-// The signed-in MiMo Desktop's account cookie, or the refusal that says which of
-// two situations this is — the shape `readClineSession` establishes: a store that
-// cannot be read is `notConfigured`, a store that reads and carries half a
-// sign-in is `unauthorized`. A sealed row is the first case, never the second:
-// at-rest encryption is a property of the store, and reading it as a signed-out
-// app would tell a user with a working login to sign in again. Nothing is written
-// back, and no value leaves here but the two allowlisted cookies.
+// The signed-in MiMo Desktop's account cookie. Missing or sealed storage falls
+// back silently; an incomplete plaintext session is unauthorized; an I/O or
+// SQLite failure is transient so the runtime can retain the last good reading.
+// Nothing is written back, and only the two allowlisted cookies leave this file.
 function readMimoDesktopAccount(options = {}) {
   const fsApi = options.fs || fs;
   // `node:sqlite` is absent on some runtimes (packaged Electron, older Node).
@@ -87,8 +77,7 @@ function readMimoDesktopAccount(options = {}) {
     }
   });
   if (!dbPath) {
-    // A store we cannot even look at is an outage, not a machine without the app:
-    // the first clears the previous reading, the second is a silent fallback.
+    // A store we cannot even inspect may still exist, so retain last-good data.
     if (statFailure) throw errorWithStatus('unavailable', 'MiMo Desktop cookie store could not be read');
     throw errorWithStatus('notConfigured', 'MiMo Desktop cookie store not found');
   }
@@ -106,23 +95,26 @@ function readMimoDesktopAccount(options = {}) {
   }
 
   const values = new Map();
-  let sealed = false;
+  const sealedNames = new Set();
   for (const row of rows || []) {
     const value = typeof row?.value === 'string' ? row.value.trim() : '';
     if (value) {
       values.set(row.name, value);
       continue;
     }
-    if (row?.encrypted_value && row.encrypted_value.length > 0) sealed = true;
+    if (row?.encrypted_value && row.encrypted_value.length > 0) sealedNames.add(row.name);
   }
-  if (sealed) throw errorWithStatus('notConfigured', 'MiMo Desktop stores this cookie encrypted');
+  const missingNames = MIMO_ACCOUNT_COOKIE_NAMES.filter((name) => !values.has(name));
+  if (missingNames.some((name) => sealedNames.has(name))) {
+    throw errorWithStatus('notConfigured', 'MiMo Desktop stores this cookie encrypted');
+  }
 
   const userId = values.get('userId') || '';
   // Never carrying either cookie is an app nobody signed into — the same answer
   // as no store. Half of one is a session that ended, and the account id travels
   // with the refusal so the caller can attribute the row.
   if (!values.size) throw errorWithStatus('notConfigured', 'MiMo Desktop has never been signed in');
-  if (values.size < MIMO_ACCOUNT_COOKIE_NAMES.length) {
+  if (missingNames.length) {
     const refused = errorWithStatus('unauthorized', 'MiMo Desktop session is incomplete');
     refused.userId = userId;
     throw refused;

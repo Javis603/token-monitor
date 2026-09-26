@@ -499,6 +499,22 @@ test('a mixed full result marks an expected missing identity unavailable without
   runtime.stop();
 });
 
+test('an explicit identity removal drops a disappeared automatic account without publishing a marker', async () => {
+  const results = [
+    [providerRow('mimo', 'A', 'Account A'), providerRow('mimo', 'B', 'Account B')],
+    [providerRow('mimo', 'A', 'Account A'), { provider: 'mimo', accountKey: 'B', removed: true }]
+  ];
+  const runtime = createLimitsRuntime({ limitProviders: ['mimo'] }, runtimeDeps({
+    probeProvider: async () => results.shift()
+  }));
+
+  await runtime.refresh({ provider: 'mimo' }, 'startup');
+  await runtime.refresh({ provider: 'mimo' }, 'interval');
+  assert.deepEqual(runtime.getSnapshot().providers.map((row) => row.accountKey), ['A']);
+  assert.equal(JSON.stringify(runtime.getSnapshot()).includes('removed'), false);
+  runtime.stop();
+});
+
 test('a new identity failure never retains the removed identity windows', async () => {
   const results = [
     [providerRow('mimo', 'A', 'Account A')],

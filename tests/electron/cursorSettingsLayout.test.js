@@ -2740,14 +2740,6 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
   );
   assert.match(groupBody, /planText: limitGroupCountText\(providerId, providers\.length\)/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
-  // The row policy titles a grouped row by its account and drops the icon. The
-  // A healthy grouped row normally has no plan cell; the MiMo no-membership
-  // answer is the exception because it needs its no-plan copy to stay visible.
-  assert.match(
-    readRendererFile('limits/windowsView.js'),
-    /mimo: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{\s*accountTitle: true,[\s\S]*?planText: provider\?\.status === 'ok' && !\([\s\S]*?provider\?\.accountLabel === 'Membership' && !provider\?\.windows\?\.length[\s\S]*?provider\?\.accountLabel === provider\?\.accountName \? '' : undefined[\s\S]*?\}\)/
-
-  );
 
   // The page's dispatch is by account count with no provider branch left.
   assert.match(renderLimitsBody, /if \(Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
@@ -2778,26 +2770,6 @@ test('Limits groups the Volcengine Coding and Agent plans as rows of one card', 
   // accountTitleLabel reads accountName/accountEmail and these rows carry
   // neither — only accountLabel, which holds the plan name.
   assert.match(view, /volcengine: \(provider, index, providers\) => planAccountTitle\(provider, index, providers\)/);
-});
-
-test('Limits names the MiMo rows after their lane instead of their position', () => {
-  const view = readRendererFile('limits/windowsView.js');
-  const limits = fs.readFileSync(path.join(rendererDir, '..', '..', 'shared', 'providers', 'mimo', 'limits.js'), 'utf8');
-  const membership = fs.readFileSync(path.join(rendererDir, '..', '..', 'shared', 'providers', 'mimo', 'membership.js'), 'utf8');
-
-  // A MiMo row is named after its account, and an account with several products
-  // is named after the product each row stands for — the lane's own name.
-  assert.match(view, /mimo: \(provider, index, providers\) => mimoAccountTitle\(provider, index, providers\)/);
-  assert.match(limits, /accountName: MIMO_MEMBERSHIP_LABEL/);
-  assert.match(limits, /accountName: accountLabel/);
-  // The console row's product name and the membership row's lane name are two
-  // different words, which is what keeps them from collapsing into one row's
-  // title with a fingerprint suffix.
-  assert.match(membership, /MIMO_MEMBERSHIP_LABEL = 'Membership'/);
-  assert.match(limits, /accountLabel: label \|\| MIMO_MEMBERSHIP_LABEL/);
-  // The plan cell is dropped when it would repeat the row's own name; a real
-  // tier, or the membership's no-plan answer, stays visible.
-  assert.match(view, /mimo: \(provider, color, \{ grouped \}\) => \(\{[\s\S]*?planText: provider\?\.status === 'ok' && !\([\s\S]*?provider\?\.accountLabel === provider\?\.accountName \? '' : undefined[\s\S]*?\}\)/);
 });
 
 // Re-saving with the Agent fields empty deliberately preserves the stored

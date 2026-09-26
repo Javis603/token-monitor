@@ -66,7 +66,9 @@ function allowedExchangeUrl(value, base, serviceUrl) {
   const host = url.hostname.toLowerCase();
   const serviceHost = serviceUrl?.hostname?.toLowerCase() || '';
   if (host === serviceHost) {
-    return url.protocol === 'https:' || url.protocol === 'http:' ? url : null;
+    if (url.protocol === 'https:') return url;
+    if (url.protocol === 'http:' && (url.pathname === '/sts' || url.pathname === '/api/sts')) return url;
+    return null;
   }
   return url.protocol === 'https:'
     && MIMO_LOGIN_DOMAINS.some((domain) => hostMatches(host, domain))

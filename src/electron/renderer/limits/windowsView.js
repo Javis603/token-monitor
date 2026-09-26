@@ -74,6 +74,8 @@
       spendWindow,
       limitWindowLabel,
       limitWindowText,
+      isMimoMembershipProduct,
+      mimoProductLabel,
       accountIdentity,
       accountControl,
       codexAccounts,
@@ -1526,8 +1528,18 @@
 
   function limitProviderPlan(provider) {
     if (provider?.status && provider.status !== 'ok' && !provider.stale) return providerStatusLabel(provider);
-    if (provider?.provider === 'mimo' && provider?.accountLabel === 'Membership'
-      && provider?.status === 'ok' && !provider?.windows?.length) return t('limits.mimo.noPlan');
+    const mimoProduct = provider?.provider === 'mimo' ? mimoProductLabel(provider) : '';
+    if (mimoProduct) {
+      const plan = String(provider?.planLabel || '').trim();
+      if (isMimoMembershipProduct(provider)
+        && provider?.status === 'ok'
+        && !plan && !provider?.windows?.length) return t('limits.mimo.noPlan');
+      // Current MiMo rows keep the product in accountLabel and the plan in
+      // planLabel. Falling back to accountLabel would repeat the product in the
+      // plan cell when the app deliberately has no plan name. Legacy rows take
+      // the generic path below.
+      return plan ? presentationApi.limitProviderPlanDisplayLabel(provider, plan) : '';
+    }
     const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
     if (label) return presentationApi.limitProviderPlanDisplayLabel(provider, label);
     return provider?.status && provider.status !== 'ok' ? providerStatusLabel(provider) : '';
@@ -1878,14 +1890,7 @@
     mimo: (provider, color, { grouped }) => ({
       options: {
         accountTitle: true,
-        // Account identity stays in the title; a distinct plan still belongs in
-        // the plan cell, as on Codex. Suppress only a repeated lane label.
-        ...(grouped ? {
-          showIcon: false,
-          planText: provider?.status === 'ok' && !(
-            provider?.provider === 'mimo' && provider?.accountLabel === 'Membership' && !provider?.windows?.length
-          ) && provider?.accountLabel === provider?.accountName ? '' : undefined
-        } : {})
+        ...(grouped ? { showIcon: false } : {})
       }
     }),
     cursor: (provider, color, { grouped }) => ({
@@ -2033,6 +2038,16 @@
   }
 
   function mimoAccountTitle(provider, index, providers) {
+    const product = mimoProductLabel(provider);
+    if (product) {
+      const identity = accountIdentity.accountEmailLabel(provider, providers || [provider], {
+        maskEmail: limitAccountEmailsMasked(),
+        suffix: String(provider?.accountName || '').trim()
+      }) || String(provider?.accountName || '').trim();
+      return [identity, product].filter(Boolean).join(' · ') || `Account ${index + 1}`;
+    }
+    // Compatibility for rows from versions that put the product in accountName
+    // and the plan in accountLabel.
     const peers = (providers || [provider]).map((row) => ({
       ...row,
       accountName: String(row?.accountName || row?.accountLabel || '').trim()
@@ -2055,7 +2070,7 @@
   // headers count plans; every other group counts accounts.
   const GROUP_COUNT_KEYS = {
     volcengine: 'settings.volcengine.nPlans',
-    mimo: 'settings.mimo.nPlans'
+    mimo: 'settings.mimo.nProducts'
   };
 
   // "4 accounts" on the group header. A caller that has a better phrase passes

@@ -30,6 +30,10 @@ const CONSOLE_COOKIE = 'unrelated=drop; userId=42; api-platform_serviceToken=sec
 const CONSOLE_BASE = 'https://platform.xiaomimimo.com/api/v1';
 const MEMBERSHIP_BASE = 'https://mimo-server-cn.xiaomimimo.com/api';
 const LOGIN_URL = 'https://account.xiaomi.com/pass/serviceLogin';
+const CONSOLE_ACCOUNT_KEY_42 = 'sha256:9c59f5aa7d0dcd4428d62a0b03a13d9a345dbf2fc965e91bf8383f3206c0004d';
+const MEMBERSHIP_ACCOUNT_KEY_42 = 'sha256:0cf3bae7981a1796fe99f80a20111408ff58f977b8a2c464939de0a404aced46';
+const CONSOLE_ACCOUNT_KEY_7 = 'sha256:cd264e505d86d6fb49c1aeefd277324e93b4ddd34e31a7e743412daeb474670a';
+const MEMBERSHIP_ACCOUNT_KEY_7 = 'sha256:b41179974aa7a240cd799f1548fea3a86d4dd618d77979b770f19cd958f1984d';
 
 const absentDesktop = () => { throw Object.assign(new Error('no store'), { status: 'notConfigured' }); };
 const signedInDesktop = (userId = '42') => () => ({ userId, cookieHeader: `passToken=p; userId=${userId}` });
@@ -131,8 +135,13 @@ function mimoWorld(options = {}) {
         }
       });
     }
-    if (href.startsWith(`${CONSOLE_BASE}/tokenPlan/`)) {
-      return reply(200, { code: 0, data: options.tokenPlan || {} });
+    if (href === `${CONSOLE_BASE}/tokenPlan/detail`) {
+      if (options.tokenPlanDetailStatus) return reply(options.tokenPlanDetailStatus, { code: options.tokenPlanDetailStatus });
+      return reply(200, { code: 0, data: options.tokenPlanDetail || {} });
+    }
+    if (href === `${CONSOLE_BASE}/tokenPlan/usage`) {
+      if (options.tokenPlanUsageStatus) return reply(options.tokenPlanUsageStatus, { code: options.tokenPlanUsageStatus });
+      return reply(200, { code: 0, data: options.tokenPlanUsage || {} });
     }
 
     if (href === `${MEMBERSHIP_BASE}/user/xiaomi/me`) {
@@ -161,7 +170,7 @@ function mimoWorld(options = {}) {
   return { fetch, calls, mints: () => ({ console: consoleMints, membership: membershipMints }) };
 }
 
-// --- the console lane the owner's code owns ----------------------------------
+// --- console lane ------------------------------------------------------------
 
 test('normalizeMimoCookieHeader keeps only the allowlisted session cookies', () => {
   assert.equal(
@@ -172,6 +181,12 @@ test('normalizeMimoCookieHeader keeps only the allowlisted session cookies', () 
   assert.equal(normalizeMimoCookieHeader('userId=42'), '', 'a missing service token is not a session');
 });
 
+test('MiMo account keys pin the account namespace and the independent membership lane', () => {
+  assert.equal(mimoAccountKey('', { userId: '42' }), CONSOLE_ACCOUNT_KEY_42);
+  assert.equal(mimoMembershipAccountKey('42'), MEMBERSHIP_ACCOUNT_KEY_42);
+  assert.notEqual(CONSOLE_ACCOUNT_KEY_42, MEMBERSHIP_ACCOUNT_KEY_42);
+});
+
 test('createMimoManagedAccount rejects an incomplete paste and preserves identity on reimport', () => {
   const rejected = createMimoManagedAccount('userId=42');
   assert.equal(rejected.ok, false);
@@ -179,7 +194,7 @@ test('createMimoManagedAccount rejects an incomplete paste and preserves identit
 
   const first = createMimoManagedAccount(CONSOLE_COOKIE);
   assert.equal(first.ok, true);
-  assert.equal(first.account.accountKey, mimoAccountKey('', { userId: '42' }));
+  assert.equal(first.account.accountKey, CONSOLE_ACCOUNT_KEY_42);
 
   const again = createMimoManagedAccount(CONSOLE_COOKIE, [first.account]);
   assert.equal(again.account.id, first.account.id, 'the same account keeps its id');
@@ -193,7 +208,7 @@ test('the balance and profile parsers read the official shapes', () => {
   );
   assert.deepEqual(
     parseMimoProfile({ code: 0, data: { platformEmail: 'user@example.com' } }),
-    { email: 'user@example.com' }
+    { email: 'user@example.com', name: '' }
   );
 });
 
@@ -252,7 +267,7 @@ test('a membership lane that needs a re-login says so on its own row, beside the
   assert.equal(console.windows.some((window) => window.kind === 'weekly'), false, 'the membership is not merged into it');
   assert.equal(membership.status, 'unauthorized', 'the refusal is the membership row’s own status');
   assert.equal(membership.sourceDetail, 'app', 'a machine-backed credential sends the user back to the app');
-  assert.equal(membership.accountKey, mimoMembershipAccountKey('42'));
+  assert.equal(membership.accountKey, MEMBERSHIP_ACCOUNT_KEY_42);
 });
 
 test('a membership lane that is merely throttled is not the user’s to fix', async () => {
@@ -277,6 +292,23 @@ test('an account whose credential cannot be read answers for itself, not for the
   assert.equal(rows.length, 1);
   assert.equal(rows[0].status, 'notConfigured');
   assert.equal(rows[0].accountKey, key, 'the failure stays on the account it belongs to');
+});
+
+test('Desktop completes the membership identity of a saved account whose credential is unreadable', async () => {
+  const accountKey = mimoAccountKey('', { userId: '42' });
+  const rows = await fetchMimoLimits({
+    mimoManagedAccounts: [{ id: 'mimo-1', accountKey, cookieHeader: '' }]
+  }, {
+    fetch: mimoWorld().fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.deepEqual(rows.map((row) => row.accountKey), [
+    accountKey,
+    mimoMembershipAccountKey('42')
+  ]);
+  assert.equal(rows[0].status, 'notConfigured');
+  assert.equal(rows[1].status, 'ok');
 });
 
 test('a stored account is spent only with an allowlisted cookie, and scope narrows to one account', () => {
@@ -318,23 +350,25 @@ test('a discovered session mints two rows: the console product and the membershi
   assert.equal(rows.length, 2, 'one account, one row per product');
   const [console, membership] = rows;
 
-  assert.equal(console.accountKey, mimoAccountKey('', { userId: '42' }));
+  assert.equal(console.accountKey, CONSOLE_ACCOUNT_KEY_42);
   assert.equal(console.status, 'ok');
   assert.equal(console.source, 'local', 'a session read off this machine is a local source');
   assert.equal(console.sourceDetail, 'app', 'backed by the machine’s own login');
-  assert.equal(console.accountLabel, 'Pay-as-you-go', 'the wallet is named the way this repository names one');
-  assert.equal(console.accountName, 'Pay-as-you-go', 'and the row is titled by that product, not by its tier');
+  assert.equal(console.accountLabel, 'Console');
+  assert.equal(console.planLabel, 'Pay-as-you-go', 'the wallet plan is named the way this repository names one');
+  assert.match(console.accountName, /^MiMo [a-f0-9]{7}$/u, 'an account without a public profile name gets an opaque label');
   assert.equal(console.accountEmail, 'user@example.com', 'the console lane names the account');
   const credits = console.windows.find((window) => window.metric === 'credits');
   assert.equal(credits.remaining, 9.96, 'the wallet rides the credits window');
 
-  assert.equal(membership.accountKey, mimoMembershipAccountKey('42'), 'the lane, not the account, is the identity');
+  assert.equal(membership.accountKey, MEMBERSHIP_ACCOUNT_KEY_42, 'the lane, not the account, is the identity');
   assert.notEqual(membership.accountKey, console.accountKey, 'sharing one key would collapse the two rows in the hub');
   assert.equal(membership.status, 'ok');
   assert.equal(membership.source, 'local');
   assert.equal(membership.sourceDetail, 'app');
-  assert.equal(membership.accountLabel, 'Pro', 'the vendor’s name for the tier is the plan');
-  assert.equal(membership.accountName, 'Membership', 'while the row itself is titled for the product');
+  assert.equal(membership.accountLabel, 'Desktop Membership');
+  assert.equal(membership.planLabel, 'Pro', 'the vendor’s name for the tier is the plan');
+  assert.equal(membership.accountName, console.accountName, 'both products retain the same account identity');
   assert.deepEqual(membership.windows.map((window) => window.kind), ['weekly']);
   assert.equal(membership.windows[0].usedPercent, 21.5, 'the app reports what is left, so the meter is inverted once');
   assert.deepEqual(world.mints(), { console: 1, membership: 1 }, 'each lane mints its own service session once');
@@ -352,12 +386,37 @@ test('a pasted console cookie and the machine’s session share the account, not
 
   assert.equal(rows.length, 2);
   const [console, membership] = rows;
-  assert.equal(console.accountKey, mimoAccountKey('', { userId: '42' }), 'a saved credential answers for the account identity');
+  assert.equal(console.accountKey, CONSOLE_ACCOUNT_KEY_42, 'a saved credential answers for the account identity');
   assert.equal(console.source, 'web', 'a console credential the user pasted is a web source');
   assert.equal(console.sourceDetail, 'managed', 'and it is the user’s own credential');
-  assert.equal(membership.accountKey, mimoMembershipAccountKey('42'));
+  assert.equal(membership.accountKey, MEMBERSHIP_ACCOUNT_KEY_42);
   assert.equal(membership.sourceDetail, 'app', 'the membership is still the machine’s session');
   assert.equal(world.mints().console, 0, 'a saved credential is never exchanged away');
+});
+
+test('a disabled manual console is not revived by discovery, while membership stays independent', async () => {
+  const world = mimoWorld();
+  const providerRuntimeState = new Map();
+  const options = {
+    mimoManagedAccounts: [{
+      id: 'mimo-1',
+      accountKey: mimoAccountKey('', { userId: '42' }),
+      cookieHeader: CONSOLE_COOKIE,
+      enabled: false
+    }]
+  };
+  const deps = {
+    fetch: world.fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    providerRuntimeState,
+    now: () => Date.UTC(2026, 8, 24)
+  };
+  const rows = await fetchMimoLimits(options, deps);
+  assert.deepEqual(rows.map((row) => row.accountLabel), ['Desktop Membership']);
+  assert.equal(rows[0].accountKey, MEMBERSHIP_ACCOUNT_KEY_42);
+  assert.deepEqual(world.mints(), { console: 0, membership: 1 });
+  const nextRows = await fetchMimoLimits(options, deps);
+  assert.equal(nextRows.some((row) => row.removed), false, 'a disabled product is not tracked as an automatic row to remove every tick');
 });
 
 test('a saved account and a different Desktop account land beside each other', async () => {
@@ -372,24 +431,29 @@ test('a saved account and a different Desktop account land beside each other', a
   assert.deepEqual(
     rows.map((row) => row.accountKey).sort(),
     [
-      mimoAccountKey('', { userId: '7' }),
-      mimoAccountKey('', { userId: '42' }),
-      mimoMembershipAccountKey('42')
+      CONSOLE_ACCOUNT_KEY_7,
+      CONSOLE_ACCOUNT_KEY_42,
+      MEMBERSHIP_ACCOUNT_KEY_42
     ].sort(),
     'the saved account, the Desktop account and that account’s membership'
   );
 });
 
-test('a half sign-in is one attributed unauthorized row, and no store at all is silent', async () => {
+test('a half sign-in reports both automatic products, and no store at all is silent', async () => {
   const signedOut = await fetchMimoLimits({}, {
     fetch: async () => { throw new Error('no request should be spent'); },
     readMimoDesktopAccount: () => { throw Object.assign(new Error('half'), { status: 'unauthorized', userId: '42' }); },
     now: () => Date.UTC(2026, 8, 24)
   });
-  assert.equal(signedOut.length, 1);
-  assert.equal(signedOut[0].status, 'unauthorized');
-  assert.equal(signedOut[0].accountKey, mimoAccountKey('', { userId: '42' }), 'reported against the account the store names');
-  assert.equal(signedOut[0].sourceDetail, 'app');
+  assert.equal(signedOut.length, 2);
+  assert.deepEqual(signedOut.map((row) => [row.accountLabel, row.status, row.sourceDetail]), [
+    ['Console', 'unauthorized', 'app'],
+    ['Desktop Membership', 'unauthorized', 'app']
+  ]);
+  assert.deepEqual(signedOut.map((row) => row.accountKey), [
+    mimoAccountKey('', { userId: '42' }),
+    mimoMembershipAccountKey('42')
+  ], 'each product reports against its own stable row');
 
   let spent = 0;
   const absent = await fetchMimoLimits({}, {
@@ -402,16 +466,151 @@ test('a half sign-in is one attributed unauthorized row, and no store at all is 
   assert.equal(spent, 0);
 });
 
+test('a half Desktop sign-in does not hide membership behind a healthy manual console', async () => {
+  const rows = await fetchMimoLimits({
+    mimoManagedAccounts: [{
+      id: 'mimo-1',
+      accountKey: mimoAccountKey('', { userId: '42' }),
+      cookieHeader: CONSOLE_COOKIE
+    }]
+  }, {
+    fetch: mimoWorld().fetch,
+    readMimoDesktopAccount: () => {
+      throw Object.assign(new Error('half'), { status: 'unauthorized', userId: '42' });
+    },
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].status, 'ok');
+  assert.equal(rows[0].accountLabel, 'Console');
+  assert.equal(rows[0].sourceDetail, 'managed');
+  assert.equal(rows[1].status, 'unauthorized');
+  assert.equal(rows[1].accountLabel, 'Desktop Membership');
+  assert.equal(rows[1].sourceDetail, 'app');
+  assert.equal(rows[1].accountName, rows[0].accountName);
+});
+
+test('a Desktop logout removes the old membership while a manual console keeps answering', async () => {
+  const providerRuntimeState = new Map();
+  await fetchMimoLimits({}, {
+    fetch: mimoWorld().fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    providerRuntimeState,
+    now: () => Date.UTC(2026, 8, 24)
+  });
+
+  const rows = await fetchMimoLimits({
+    mimoManagedAccounts: [{
+      id: 'mimo-1',
+      accountKey: mimoAccountKey('', { userId: '42' }),
+      cookieHeader: CONSOLE_COOKIE
+    }]
+  }, {
+    fetch: mimoWorld().fetch,
+    readMimoDesktopAccount: absentDesktop,
+    providerRuntimeState,
+    now: () => Date.UTC(2026, 8, 24)
+  });
+
+  assert.equal(rows.find((row) => row.accountLabel === 'Console')?.status, 'ok');
+  assert.deepEqual(
+    rows.filter((row) => row.removed).map((row) => row.accountKey),
+    [mimoMembershipAccountKey('42')],
+    'the runtime clears only the vanished automatic product'
+  );
+});
+
+test('switching the Desktop account removes both automatic rows from the previous account', async () => {
+  const providerRuntimeState = new Map();
+  await fetchMimoLimits({}, {
+    fetch: mimoWorld().fetch,
+    readMimoDesktopAccount: signedInDesktop('42'),
+    providerRuntimeState,
+    now: () => Date.UTC(2026, 8, 24)
+  });
+
+  const rows = await fetchMimoLimits({}, {
+    fetch: mimoWorld().fetch,
+    readMimoDesktopAccount: signedInDesktop('7'),
+    providerRuntimeState,
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.deepEqual(rows.filter((row) => !row.removed).map((row) => row.accountKey), [
+    CONSOLE_ACCOUNT_KEY_7,
+    MEMBERSHIP_ACCOUNT_KEY_7
+  ]);
+  assert.deepEqual(new Set(rows.filter((row) => row.removed).map((row) => row.accountKey)), new Set([
+    CONSOLE_ACCOUNT_KEY_42,
+    MEMBERSHIP_ACCOUNT_KEY_42
+  ]));
+});
+
+test('a restart seeds automatic identity removal from the previous limits snapshot', async () => {
+  const consoleKey = mimoAccountKey('', { userId: '42' });
+  const membershipKey = mimoMembershipAccountKey('42');
+  const rows = await fetchMimoLimits({
+    previousLimits: {
+      providers: [
+        { provider: 'mimo', sourceDetail: 'app', accountKey: consoleKey },
+        { provider: 'mimo', sourceDetail: 'app', accountKey: membershipKey }
+      ]
+    },
+    mimoManagedAccounts: [{ id: 'mimo-1', accountKey: consoleKey, cookieHeader: CONSOLE_COOKIE }]
+  }, {
+    fetch: mimoWorld().fetch,
+    readMimoDesktopAccount: absentDesktop,
+    providerRuntimeState: new Map(),
+    now: () => Date.UTC(2026, 8, 24)
+  });
+
+  assert.equal(rows.some((row) => row.accountKey === consoleKey && !row.removed), true);
+  assert.deepEqual(rows.filter((row) => row.removed).map((row) => row.accountKey), [membershipKey]);
+});
+
 test('an unattributed half sign-in still asks for a Desktop login, while an unreadable store is transient', async () => {
+  const providerRuntimeState = new Map();
   const half = await fetchMimoLimits({}, {
     fetch: async () => { throw new Error('no request should be spent'); },
     readMimoDesktopAccount: () => { throw Object.assign(new Error('half'), { status: 'unauthorized' }); },
+    providerRuntimeState,
     now: () => Date.UTC(2026, 8, 24)
   });
   assert.equal(half.length, 1);
   assert.equal(half[0].status, 'unauthorized');
   assert.equal(half[0].source, 'local');
   assert.equal(half[0].sourceDetail, 'app');
+  assert.equal(half[0].accountLabel, 'Desktop Membership');
+
+  const alongsideManual = await fetchMimoLimits({
+    mimoManagedAccounts: [{
+      id: 'mimo-1',
+      accountKey: CONSOLE_ACCOUNT_KEY_42,
+      cookieHeader: CONSOLE_COOKIE
+    }]
+  }, {
+    fetch: mimoWorld().fetch,
+    readMimoDesktopAccount: () => { throw Object.assign(new Error('half'), { status: 'unauthorized' }); },
+    providerRuntimeState,
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.deepEqual(alongsideManual.map((row) => [row.accountLabel, row.status]), [
+    ['Console', 'ok'],
+    ['Desktop Membership', 'unauthorized']
+  ], 'a healthy pasted wallet must not hide an unattributed Desktop login failure');
+
+  const recovered = await fetchMimoLimits({
+    mimoManagedAccounts: [{
+      id: 'mimo-1',
+      accountKey: CONSOLE_ACCOUNT_KEY_42,
+      cookieHeader: CONSOLE_COOKIE
+    }]
+  }, {
+    fetch: mimoWorld().fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    providerRuntimeState,
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(recovered.filter((row) => row.removed).length, 1, 'the unattributed status is explicitly removed after login recovers');
 
   const unreadable = await fetchMimoLimits({}, {
     fetch: async () => { throw new Error('no request should be spent'); },
@@ -430,11 +629,11 @@ test('a refused exchange is a credential problem and a throttled one is not', as
     now: () => Date.UTC(2026, 8, 24)
   });
   assert.equal(refused[0].status, 'unauthorized', 'the account cookie the service no longer takes ends on the login page');
-  assert.equal(refused[0].accountKey, mimoAccountKey('', { userId: '42' }));
+  assert.equal(refused[0].accountKey, CONSOLE_ACCOUNT_KEY_42);
 
   assert.equal(refused.length, 2, 'the console lane still mints, so its row survives the refusal');
   assert.equal(refused[1].status, 'unauthorized');
-  assert.equal(refused[1].accountKey, mimoMembershipAccountKey('42'));
+  assert.equal(refused[1].accountKey, MEMBERSHIP_ACCOUNT_KEY_42);
 
   const throttled = await fetchMimoLimits({}, {
     fetch: mimoWorld({ membershipStatus: 429 }).fetch,
@@ -467,6 +666,32 @@ test('the console spend rides the wallet, and losing it never costs the wallet',
   assert.equal(degraded[0].balance.amount, 9.96);
 });
 
+test('an active Token Plan keeps its name when the optional usage meter is unavailable', async () => {
+  const rows = await fetchMimoLimits({
+    mimoManagedAccounts: [{
+      id: 'mimo-1',
+      accountKey: mimoAccountKey('', { userId: '42' }),
+      cookieHeader: CONSOLE_COOKIE
+    }]
+  }, {
+    fetch: mimoWorld({
+      tokenPlanDetail: {
+        planCode: 'mimo-cn-pro',
+        planStatus: 'active',
+        currentPeriodEnd: '2026-10-01T00:00:00Z'
+      },
+      tokenPlanUsageStatus: 500
+    }).fetch,
+    readMimoDesktopAccount: absentDesktop,
+    now: () => Date.UTC(2026, 8, 24)
+  });
+
+  assert.equal(rows[0].status, 'ok', 'the wallet and plan identity still answered');
+  assert.equal(rows[0].planLabel, 'mimo-cn-pro');
+  assert.equal(rows[0].windows.some((window) => window.label === 'Token Plan'), false, 'no quota meter is invented');
+  assert.equal(rows[0].windows.some((window) => window.metric === 'credits'), true);
+});
+
 test('a console lane that fails leaves the membership standing', async () => {
   const world = mimoWorld({ consoleRefused: true });
   const rows = await fetchMimoLimits({}, {
@@ -477,10 +702,10 @@ test('a console lane that fails leaves the membership standing', async () => {
 
   assert.equal(rows.length, 2, 'the product that answered is still a row of its own');
   assert.equal(rows[0].status, 'unauthorized', 'the console credential is the one the SSO refused');
-  assert.equal(rows[0].accountKey, mimoAccountKey('', { userId: '42' }));
+  assert.equal(rows[0].accountKey, CONSOLE_ACCOUNT_KEY_42);
   assert.equal(rows[0].sourceDetail, 'app', 'and the row names the sign-in that fixes it');
   assert.equal(rows[1].status, 'ok', 'the membership is not the lane that failed');
-  assert.equal(rows[1].accountKey, mimoMembershipAccountKey('42'));
+  assert.equal(rows[1].accountKey, MEMBERSHIP_ACCOUNT_KEY_42);
   assert.equal(rows[1].windows.some((window) => window.kind === 'weekly'), true);
 });
 
@@ -496,6 +721,28 @@ test('a membership payload the reader cannot use is an outage, not a refusal', a
   assert.equal(rows[1].windows.length, 0);
 });
 
+test('a stalled membership read times out without discarding the Console result', async () => {
+  const world = mimoWorld();
+  const fetch = (url, init) => {
+    if (String(url).endsWith('/user/xiaomi/subscription/self')) {
+      return new Promise((resolve, reject) => {
+        init.signal?.addEventListener('abort', () => reject(init.signal.reason || new Error('aborted')), { once: true });
+      });
+    }
+    return world.fetch(url, init);
+  };
+  const rows = await fetchMimoLimits({}, {
+    fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    accountTimeoutMs: 5,
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.deepEqual(rows.map((row) => [row.accountLabel, row.status]), [
+    ['Console', 'ok'],
+    ['Desktop Membership', 'unavailable']
+  ]);
+});
+
 test('no membership plan is an answer, and it neither hides the wallet nor invents a window', async () => {
   const world = mimoWorld({ subscription: { code: 0, data: { current: null } } });
   const rows = await fetchMimoLimits({}, {
@@ -505,9 +752,10 @@ test('no membership plan is an answer, and it neither hides the wallet nor inven
   });
   assert.equal(rows.length, 2);
   assert.equal(rows[0].status, 'ok');
-  assert.equal(rows[0].accountLabel, 'Pay-as-you-go', 'the wallet is named the way this repository names one');
+  assert.equal(rows[0].accountLabel, 'Console');
+  assert.equal(rows[0].planLabel, 'Pay-as-you-go');
   assert.equal(rows[1].status, 'ok', 'a machine with no plan is still a membership the user can be told about');
-  assert.equal(rows[1].accountLabel, 'Membership', 'the product names the row where no plan does');
+  assert.equal(rows[1].accountLabel, 'Desktop Membership', 'the product names the row where no plan does');
   assert.deepEqual(rows[1].windows, [], 'no plan means no weekly window');
 });
 
@@ -584,8 +832,29 @@ test('a scoped refresh of one product does not answer for the other', async () =
     readMimoDesktopAccount: signedInDesktop(),
     now: () => Date.UTC(2026, 8, 24)
   });
-  assert.deepEqual(membershipRows.map((row) => row.accountKey), [mimoMembershipAccountKey('42')]);
+  assert.deepEqual(membershipRows.map((row) => row.accountKey), [MEMBERSHIP_ACCOUNT_KEY_42]);
   assert.deepEqual(membershipWorld.mints(), { console: 0, membership: 1 }, 'the unselected console lane does no work');
+});
+
+test('a scoped membership refresh keeps the account identity learned by the full refresh', async () => {
+  const providerRuntimeState = new Map();
+  const fullRows = await fetchMimoLimits({}, {
+    fetch: mimoWorld().fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    providerRuntimeState,
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(fullRows[1].accountEmail, 'user@example.com');
+
+  const scopedRows = await fetchMimoLimits({
+    limitRefreshScope: { provider: 'mimo', accountKey: mimoMembershipAccountKey('42') }
+  }, {
+    fetch: mimoWorld().fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    providerRuntimeState,
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(scopedRows[0].accountEmail, 'user@example.com');
 });
 
 test('a cancelled refresh rejects instead of publishing an outage', async () => {
@@ -685,6 +954,28 @@ test('the service host may use its observed HTTP callback without receiving Secu
   assert.equal(rows[1].status, 'ok');
 });
 
+test('the HTTP callback exception does not allow arbitrary service-host paths', async () => {
+  const world = mimoWorld();
+  let escaped = false;
+  const fetch = async (url, init) => {
+    const href = String(url);
+    const parsed = new URL(href);
+    if (parsed.hostname === 'account.xiaomi.com' && parsed.searchParams.get('sid') === 'mimopc') {
+      return reply(302, '', { location: 'http://mimo-server-cn.xiaomimimo.com/api/collect' });
+    }
+    if (href === 'http://mimo-server-cn.xiaomimimo.com/api/collect') escaped = true;
+    return world.fetch(url, init);
+  };
+  const rows = await fetchMimoLimits({}, {
+    fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(escaped, false);
+  assert.equal(rows[0].status, 'ok');
+  assert.equal(rows[1].status, 'unavailable');
+});
+
 test('the membership plan is read the way the app reads it', () => {
   assert.deepEqual(readMimoMembershipPlan(PLAN_BODY), {
     ok: true,
@@ -693,6 +984,10 @@ test('the membership plan is read the way the app reads it', () => {
   assert.deepEqual(readMimoMembershipPlan({ code: 0, data: { current: null } }), { ok: true, plan: null });
   assert.equal(readMimoMembershipPlan({ code: 0, data: { current: { planTier: 3 } } }).ok, false, 'a current missing its fields is not a plan');
   assert.equal(readMimoMembershipPlan({ code: 0, data: {} }).ok, true, 'an absent current is no plan, not a failure');
+  assert.equal(readMimoMembershipPlan({
+    code: 0,
+    data: { current: { ...PLAN_BODY.data.current, percent: 101 } }
+  }).plan.percent, 100, 'the app caps the displayed remaining percentage at 100');
 });
 
 test('the plan label is the vendor’s name for the tier, or its own code', () => {
@@ -709,19 +1004,19 @@ test('the plan label is the vendor’s name for the tier, or its own code', () =
   );
   assert.equal(mimoMembershipPlanLabel({ tier: 9, code: 'enterprise' }), 'Enterprise', 'and still goes through the alias table');
   assert.equal(mimoMembershipPlanLabel({ tier: 9 }), '', 'a plan with neither a known tier nor a code has nothing to print');
-  assert.equal(mimoMembershipPlanLabel({ tier: 3, source: 'INVITE' }), 'INVITE', 'the app names an invited plan by its source');
+  assert.equal(mimoMembershipPlanLabel({ tier: 3, source: 'INVITE' }), '', 'the app excludes an invited subscription from its current-plan card');
   assert.equal(mimoMembershipPlanLabel(null), '');
 });
 
 test('the hub keeps both products of one account, from one device or two', async () => {
   const consoleRow = {
     provider: 'mimo', status: 'ok', accountKey: mimoAccountKey('', { userId: '42' }),
-    accountLabel: 'Pay-as-you-go', accountName: 'Pay-as-you-go',
+    accountLabel: 'Console', planLabel: 'Pay-as-you-go', accountName: 'MiMo account',
     windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.96, currency: 'CNY' }]
   };
   const membershipRow = {
     provider: 'mimo', status: 'ok', accountKey: mimoMembershipAccountKey('42'),
-    accountLabel: 'Pro', accountName: 'Membership',
+    accountLabel: 'Desktop Membership', planLabel: 'Pro', accountName: 'MiMo account',
     windows: [{ kind: 'weekly', usedPercent: 21.5, resetsAt: '2026-09-28T00:00:00.000Z' }]
   };
   const summary = normalizeLimitsSummary({ providers: [consoleRow, membershipRow], refreshMs: 300000 });
@@ -752,7 +1047,7 @@ test('a membership session that ends is a credential problem, not an outage', as
   assert.equal(rows.length, 2, 'the console lane is untouched by the membership’s expiry');
   assert.equal(rows[0].status, 'ok');
   assert.equal(rows[1].status, 'unauthorized');
-  assert.equal(rows[1].accountKey, mimoMembershipAccountKey('42'));
+  assert.equal(rows[1].accountKey, MEMBERSHIP_ACCOUNT_KEY_42);
 });
 
 test('a refusal may arrive as an ordinary 200 carrying the vendor’s code', async () => {
@@ -827,18 +1122,13 @@ test('a half sign-in is a signed-out app, and it names the account it was read f
   );
 });
 
-test('the partition resolves on the three desktop platforms and nowhere else', () => {
+test('the partition resolves on verified or documented platforms only', () => {
   const home = path.join(path.sep, 'Users', 'u');
   assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'darwin', home }), [
     path.join(home, 'Library', 'Application Support', 'Xiaomi MiMo', 'Partitions', 'xiaomi-account', 'Cookies')
   ]);
   assert.equal(mimoDesktopCookieCandidates({ platform: 'win32', home, env: {} }).length, 1);
-  assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'linux', home, env: {} }), [
-    path.join(home, '.config', 'Xiaomi MiMo', 'Partitions', 'xiaomi-account', 'Cookies')
-  ]);
-  assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'linux', home, env: { XDG_CONFIG_HOME: '/xdg' } }), [
-    path.join('/xdg', 'Xiaomi MiMo', 'Partitions', 'xiaomi-account', 'Cookies')
-  ]);
+  assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'linux', home, env: {} }), []);
   assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'freebsd', home, env: {} }), []);
 });
 
@@ -892,4 +1182,17 @@ test('a store that never held a cookie, a sealed store and no store are all noth
     (error) => error.status === 'notConfigured',
     'a runtime without node:sqlite has nothing to read with'
   );
+});
+
+test('a usable plaintext cookie wins over a sealed duplicate row', () => {
+  const read = readMimoDesktopAccount({
+    candidates: ['/x/Cookies'],
+    fs: presentFile,
+    sqlite: sqliteReturning([
+      { name: 'passToken', value: '', encrypted_value: Buffer.from('sealed-stale-copy') },
+      { name: 'passToken', value: 'p', encrypted_value: null },
+      { name: 'userId', value: '42', encrypted_value: null }
+    ])
+  });
+  assert.deepEqual(read, { userId: '42', cookieHeader: 'passToken=p; userId=42' });
 });

@@ -14,6 +14,7 @@ const {
   codexAccountDisplayLabel,
   maskEmailAddress
 } = require('../../src/electron/renderer/accountIdentity');
+const limitWindowLabels = require('../../src/shared/limitWindowLabels');
 
 const TITLE_FUNCTIONS = [
   'limitAccountTitle',
@@ -71,6 +72,10 @@ function runTitle(source, expression, context = {}) {
 function titleContext(maskLimitAccountEmails) {
   return {
     accountIdentity: { accountEmailLabel, accountTitleLabel, codexAccountDisplayLabel, maskEmailAddress },
+    // MiMo's title path takes the product words from the shared display
+    // vocabulary, the way the view receives them from its host.
+    mimoProductLabel: limitWindowLabels.mimoProductLabel,
+    isMimoMembershipProduct: limitWindowLabels.isMimoMembershipProduct,
     settings: () => ({ maskLimitAccountEmails }),
     t: (key) => (key === 'settings.codex.personalWorkspace' ? 'Personal' : key)
   };
@@ -259,22 +264,22 @@ test('accounts sharing a visible email are disambiguated', () => {
   ]);
 });
 
-test('MiMo members with the same plan get Codex-style stable account suffixes', () => {
+test('MiMo products keep their shared account identity in the title', () => {
   const view = readRendererFile('limitWindowsView.js');
   const peers = [
-    { provider: 'mimo', accountLabel: 'Membership', accountKey: 'sha256:abcdef123456', sourceDetail: 'managed' },
-    { provider: 'mimo', accountLabel: 'Membership', accountKey: 'sha256:abcdef654321', sourceDetail: 'app' }
+    { provider: 'mimo', accountName: 'MiMo account', accountLabel: 'Console', accountKey: 'sha256:abcdef123456' },
+    { provider: 'mimo', accountName: 'MiMo account', accountLabel: 'Desktop Membership', accountKey: 'sha256:abcdef654321' }
   ];
   assert.deepEqual(peers.map((peer, index) => runTitle(
     view,
     `limitAccountTitle('mimo', ${JSON.stringify(peer)}, ${index}, ${JSON.stringify(peers)})`,
     titleContext(true)
-  )), ['Membership · #abcdef1', 'Membership · #abcdef6']);
+  )), ['MiMo account · Console', 'MiMo account · Desktop Membership']);
   assert.equal(runTitle(
     view,
     `limitAccountTitle('mimo', ${JSON.stringify(peers[0])}, 0)`,
     titleContext(true)
-  ), 'Membership');
+  ), 'MiMo account · Console');
   assert.equal(runTitle(
     view,
     "limitAccountTitle('mimo', { accountName: 'Membership', accountLabel: 'Pro', accountKey: 'sha256:abcdef123456' }, 0)",

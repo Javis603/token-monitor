@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const { throwIfAborted } = require('../../abortSignal');
 const { hashKey } = require('../../hashKey');
+const { MIMO_CONSOLE_PRODUCT } = require('../../limitWindowLabels');
 const { normalizeLimitProvider } = require('../../limits/core');
 const { nowIso, providerStatusFromError } = require('../../limits/providerHelpers');
 const { MIMO_CONSOLE_URL, mimoRequestHeaders } = require('./browserHeaders');
@@ -18,10 +19,16 @@ const {
 
 const MIMO_PLATFORM_CONSOLE_URL = MIMO_CONSOLE_URL;
 const MIMO_API_BASE_URL = 'https://platform.xiaomimimo.com/api/v1';
+// The console product's word, from the shared display vocabulary: the renderer,
+// the tray and the macOS widget all route on it.
+const MIMO_CONSOLE_LABEL = MIMO_CONSOLE_PRODUCT;
 // The endpoint the console exchange asks first. With no session it answers 401
 // and names the login URL to visit; with one it answers the wallet.
 const MIMO_CONSOLE_ENTRY = '/balance';
 const MIMO_ACCOUNT_TIMEOUT_MS = 15_000;
+const MIMO_ACCOUNT_METADATA_STATE_KEY = 'mimo.account-metadata';
+const MIMO_DESKTOP_ROWS_STATE_KEY = 'mimo.desktop-rows';
+const MIMO_UNATTRIBUTED_DESKTOP_KEY = hashKey('mimo:desktop-membership:unattributed');
 const MIMO_COOKIE_NAMES = new Set([
   'api-platform_serviceToken',
   'userId',
@@ -133,7 +140,8 @@ function parseMimoBalance(body) {
 function parseMimoProfile(body) {
   const data = unwrapApiBody(body);
   return {
-    email: cleanText(data.email ?? data.platformEmail).slice(0, 254)
+    email: cleanText(data.email ?? data.platformEmail).slice(0, 254),
+    name: cleanText(data.nickName ?? data.userName).slice(0, 128)
   };
 }
 
@@ -266,6 +274,8 @@ function statusProvider(status, updatedAt, account = {}) {
     accountKey: account.accountKey,
     accountName: account.accountName,
     accountEmail: account.accountEmail,
+    accountLabel: account.accountLabel,
+    planLabel: account.planLabel,
     windows: []
   });
 }
@@ -292,9 +302,10 @@ async function fetchMimoAccount(account, deps = {}) {
     const usage = parseMimoPlanUsage(usageBody);
     const spend = parseMimoSpend(spendBody);
     const windows = [];
-    const hasTokenPlan = detail.active && usage.limit !== null && usage.limit > 0;
+    const hasActiveTokenPlan = detail.active;
+    const hasTokenPlanQuota = hasActiveTokenPlan && usage.limit !== null && usage.limit > 0;
     const hasExpiredTokenPlan = detail.expired && Boolean(detail.label || (usage.limit !== null && usage.limit > 0));
-    if (hasTokenPlan) {
+    if (hasTokenPlanQuota) {
       windows.push({
         kind: 'billing',
         label: 'Token Plan',
@@ -317,14 +328,7 @@ async function fetchMimoAccount(account, deps = {}) {
         currency: balance.currency
       });
     }
-    // The plan when there is one. Otherwise the product, named the way this
-    // repository names a prepaid wallet: deepseek's balance-only row is
-    // `Pay-as-you-go` too, and the wallet is what the console lane reads —
-    // `sk-` keys draw it down, while the Token Plan is the subscription beside
-    // it. `Token Plan` is the vendor's own name for that product (the app's
-    // sign-in card prints exactly that), and it doubles as the account name so
-    // the plan cell does not print the same word as the row's title.
-    const accountLabel = hasTokenPlan || hasExpiredTokenPlan
+    const planLabel = hasActiveTokenPlan || hasExpiredTokenPlan
       ? (detail.label || 'Token Plan')
       : 'Pay-as-you-go';
     return normalizeLimitProvider({
@@ -334,9 +338,10 @@ async function fetchMimoAccount(account, deps = {}) {
       status: 'ok',
       updatedAt,
       accountKey: cleanText(account.accountKey) || mimoAccountKey(cookieHeader),
-      accountName: accountLabel,
+      accountName: profile.name || cleanText(account.accountName),
       accountEmail,
-      accountLabel,
+      accountLabel: MIMO_CONSOLE_LABEL,
+      planLabel,
       windows,
       balance: {
         ...balance,
@@ -345,9 +350,9 @@ async function fetchMimoAccount(account, deps = {}) {
         // the same rule deepseek's wallet follows) and never travels the wire.
         ...spend,
         planStatus: hasExpiredTokenPlan ? 'expired' : null,
-        planUsed: hasTokenPlan ? usage.used : null,
-        planLimit: hasTokenPlan ? usage.limit : null,
-        planPercent: hasTokenPlan ? usage.usedPercent : null
+        planUsed: hasTokenPlanQuota ? usage.used : null,
+        planLimit: hasTokenPlanQuota ? usage.limit : null,
+        planPercent: hasTokenPlanQuota ? usage.usedPercent : null
       }
     });
   } catch (error) {
@@ -359,9 +364,9 @@ async function fetchMimoAccount(account, deps = {}) {
   }
 }
 
-async function fetchMimoAccountWithTimeout(account, deps = {}) {
+async function runMimoAccountTaskWithTimeout(run, fallback, deps = {}) {
   const timeoutMs = Number(deps.accountTimeoutMs ?? MIMO_ACCOUNT_TIMEOUT_MS);
-  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return fetchMimoAccount(account, deps);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return run(deps.signal);
   const AbortControllerImpl = deps.AbortController || globalThis.AbortController;
   const controller = AbortControllerImpl ? new AbortControllerImpl() : null;
   const signal = controller?.signal && deps.signal
@@ -374,18 +379,25 @@ async function fetchMimoAccountWithTimeout(account, deps = {}) {
   const timeout = new Promise((resolve) => {
     timer = setTimer(() => {
       controller?.abort();
-      const updatedAt = new Date((deps.now || Date.now)()).toISOString();
-      resolve(statusProvider('unavailable', updatedAt, account));
+      resolve(fallback());
     }, timeoutMs);
   });
   try {
     return await Promise.race([
-      fetchMimoAccount(account, { ...deps, signal }),
+      run(signal),
       timeout
     ]);
   } finally {
     if (timer) clearTimer(timer);
   }
+}
+
+async function fetchMimoAccountWithTimeout(account, deps = {}) {
+  return runMimoAccountTaskWithTimeout(
+    (signal) => fetchMimoAccount(account, { ...deps, signal }),
+    () => statusProvider('unavailable', new Date((deps.now || Date.now)()).toISOString(), account),
+    deps
+  );
 }
 
 function normalizeMimoManagedAccounts(value) {
@@ -487,12 +499,32 @@ function collectMimoCredentials(options, deps, scope, desktop) {
       console: null,
       membership: null
     };
+    // A saved account can reach here with only its stable key when the
+    // credential store is temporarily unreadable. If Desktop identifies that
+    // same key later in the tick, complete the lane identity instead of reusing
+    // the console key for membership and letting aggregation collapse a row.
+    if (identity && !entry.userId) {
+      entry.userId = identity;
+      entry.membershipKey = mimoMembershipAccountKey(identity);
+    }
     entries.set(accountKey, entry);
     if (identity) byUser.set(identity, entry);
     return entry;
   };
 
   const stored = options.mimoManagedAccounts || deps.mimoManagedAccounts;
+  // Disabling a saved console credential is an explicit choice for that
+  // product. Automatic discovery may still supply the account's independent
+  // membership row, but it must not silently turn the console row back on.
+  const disabledConsoleKeys = new Set();
+  const disabledConsoleUsers = new Set();
+  for (const account of Array.isArray(stored) ? stored : []) {
+    if (!account || account.enabled !== false) continue;
+    const key = cleanText(account.accountKey);
+    const userId = cleanText(new Map(cookiePairs(account.cookieHeader)).get('userId'));
+    if (key) disabledConsoleKeys.add(key);
+    if (userId) disabledConsoleUsers.add(userId);
+  }
   for (const account of scopedMimoManagedAccounts(stored, scope)) {
     const entry = entryFor(new Map(cookiePairs(account.cookieHeader)).get('userId'), cleanText(account.accountKey));
     if (entry) entry.console = { account };
@@ -500,8 +532,13 @@ function collectMimoCredentials(options, deps, scope, desktop) {
 
   if (desktop.userId) {
     const entry = entryFor(desktop.userId);
-    if (entry && !entry.console) entry.console = { discovered: desktop };
-    if (entry && desktop.ok) entry.membership = desktop;
+    const consoleDisabled = disabledConsoleKeys.has(entry?.accountKey)
+      || disabledConsoleUsers.has(desktop.userId);
+    if (entry && !entry.console && !consoleDisabled) entry.console = { discovered: desktop };
+    // A readable-but-incomplete Desktop session is still an attributed local
+    // account. Keep the membership lane so it can carry its own unauthorized
+    // state beside a healthy manually configured console row.
+    if (entry) entry.membership = desktop;
   }
 
   return [...entries.values()].filter((entry) => entryMatchesScope(entry, scope));
@@ -547,6 +584,19 @@ async function fetchMimoConsoleSide(entry, deps) {
   return { consoleRow: await fetchMimoAccountWithTimeout(minted.account, deps) };
 }
 
+async function fetchMimoMembershipSide(entry, deps) {
+  const membership = entry.membership;
+  if (!membership) return null;
+  if (!membership.ok) {
+    return { ok: false, status: membership.status || 'unavailable', userId: entry.userId };
+  }
+  return runMimoAccountTaskWithTimeout(
+    (signal) => fetchMimoMembershipAccount(membership, { ...deps, signal }),
+    () => ({ ok: false, status: 'unavailable', userId: entry.userId }),
+    deps
+  );
+}
+
 // One account, one row per product it holds: the platform console (wallet and
 // Token Plan) and the Desktop membership. They are separate rows rather than one
 // merged row because the aggregate collapses per account key — two products under
@@ -554,26 +604,98 @@ async function fetchMimoConsoleSide(entry, deps) {
 // the row above it should show: a membership lane that failed no longer has to
 // speak through the wallet's row, and the wallet it never touched stays.
 //
-// Each row also names itself in the plan column (`Pay-as-you-go` or the Token
-// Plan's name; `Membership` with its tier), which is how the Limits page tells
-// two products of one account apart without reading the same account twice. Both
-// rows carry the product as their account name for the same reason: the group
-// already names the provider, so the row's title is the product, and the plan
-// cell leaves it to the title unless it has a plan of its own to print.
-function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, updatedAt) {
+// Both rows carry one display identity for the Xiaomi account. The product and
+// plan stay in their own fields, so every limits surface can render
+// `account · product` without guessing from a plan name.
+function mimoAccountMetadata(deps = {}) {
+  if (!(deps.providerRuntimeState instanceof Map)) return null;
+  let cache = deps.providerRuntimeState.get(MIMO_ACCOUNT_METADATA_STATE_KEY);
+  if (!(cache instanceof Map)) {
+    cache = new Map();
+    deps.providerRuntimeState.set(MIMO_ACCOUNT_METADATA_STATE_KEY, cache);
+  }
+  return cache;
+}
+
+function previousMimoDesktopKeys(options = {}, deps = {}) {
+  if (!(deps.providerRuntimeState instanceof Map)) return null;
+  let keys = deps.providerRuntimeState.get(MIMO_DESKTOP_ROWS_STATE_KEY);
+  if (!(keys instanceof Set)) {
+    keys = new Set(
+      (options.previousLimits?.providers || [])
+        .filter((row) => row?.provider === 'mimo' && row?.sourceDetail === 'app' && cleanText(row.accountKey))
+        .map((row) => cleanText(row.accountKey))
+    );
+    deps.providerRuntimeState.set(MIMO_DESKTOP_ROWS_STATE_KEY, keys);
+  }
+  return keys;
+}
+
+// Automatic rows may disappear while a pasted Console row still answers. The
+// runtime deliberately treats an omitted identity as a transient partial read,
+// so name the exact automatic identities that disappeared; its internal removal
+// marker clears them without publishing a fake status row.
+function appendMimoDesktopRemovals(rows, desktop, options, deps, scope) {
+  if (scope) return rows;
+  const previous = previousMimoDesktopKeys(options, deps);
+  if (!previous) return rows;
+  const terminalRead = desktop.ok || desktop.status === 'notConfigured' || desktop.status === 'unauthorized';
+  if (!terminalRead) return rows;
+
+  const represented = new Set(rows.map((row) => cleanText(row?.accountKey)).filter(Boolean));
+  const next = new Set(rows
+    .filter((row) => row?.sourceDetail === 'app' && row?.removed !== true)
+    .map((row) => cleanText(row.accountKey))
+    .filter(Boolean));
+  const removals = [...previous]
+    .filter((accountKey) => !represented.has(accountKey))
+    .map((accountKey) => ({ provider: 'mimo', accountKey, removed: true }));
+  deps.providerRuntimeState.set(MIMO_DESKTOP_ROWS_STATE_KEY, next);
+  return removals.length ? [...rows, ...removals] : rows;
+}
+
+function mimoAccountSuffix(accountKey) {
+  const fingerprint = cleanText(accountKey).replace(/^sha256:/i, '').replace(/[^a-z0-9]/gi, '');
+  return fingerprint ? `MiMo ${fingerprint.slice(0, 7)}` : '';
+}
+
+function mimoEntryIdentity(entry, consoleRow, deps = {}) {
+  const email = cleanText(consoleRow?.accountEmail || entry.console?.account?.accountEmail);
+  const rawName = cleanText(consoleRow?.accountName || entry.console?.account?.accountName);
+  const suffix = mimoAccountSuffix(entry.accountKey);
+  const name = rawName ? [rawName, suffix].filter(Boolean).join(' · ') : suffix;
+  const cache = mimoAccountMetadata(deps);
+  const remembered = cache?.get(entry.accountKey);
+  const identity = {
+    email: email || cleanText(remembered?.email),
+    name: rawName ? name : cleanText(remembered?.name) || suffix
+  };
+  if (identity.email || identity.name) cache?.set(entry.accountKey, identity);
+  return identity;
+}
+
+function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, updatedAt, deps = {}) {
   const rows = [];
-  const accountEmail = cleanText(consoleRow?.accountEmail || entry.console?.account?.accountEmail);
+  // A membership-scoped refresh intentionally skips the console lane. Retain the
+  // non-secret display identity learned by a prior full refresh so the product
+  // remains visibly attached to the same Xiaomi account.
+  const identity = mimoEntryIdentity(entry, consoleRow, deps);
 
   if (consoleRow) {
     rows.push({
       ...consoleRow,
       accountKey: entry.accountKey,
-      accountName: consoleRow.accountLabel || '',
+      accountName: identity.name,
+      accountEmail: identity.email,
+      accountLabel: MIMO_CONSOLE_LABEL,
       updatedAt: consoleRow.updatedAt || updatedAt
     });
   } else if (consoleFailure) {
     rows.push(statusProvider(consoleFailure.status, updatedAt, {
       accountKey: entry.accountKey,
+      accountName: identity.name,
+      accountEmail: identity.email,
+      accountLabel: MIMO_CONSOLE_LABEL,
       source: consoleFailure.source || 'local',
       sourceDetail: consoleFailure.sourceDetail || 'app'
     }));
@@ -588,8 +710,9 @@ function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, upd
   if (!membership?.ok) {
     return [...rows, statusProvider(membership?.status || 'unavailable', updatedAt, {
       accountKey: entry.membershipKey || entry.accountKey,
-      accountName: MIMO_MEMBERSHIP_LABEL,
-      accountEmail,
+      accountName: identity.name,
+      accountEmail: identity.email,
+      accountLabel: MIMO_MEMBERSHIP_LABEL,
       source: 'local',
       sourceDetail: 'app'
     })];
@@ -603,11 +726,10 @@ function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, upd
     status: 'ok',
     updatedAt,
     accountKey: entry.membershipKey || entry.accountKey,
-    accountName: MIMO_MEMBERSHIP_LABEL,
-    accountEmail,
-    // The tier is the plan, so it is what the plan column prints; an account
-    // with no active plan keeps the product name there and says so in the cell.
-    accountLabel: label || MIMO_MEMBERSHIP_LABEL,
+    accountName: identity.name,
+    accountEmail: identity.email,
+    accountLabel: MIMO_MEMBERSHIP_LABEL,
+    planLabel: label,
     windows: mimoMembershipWindows(membership.plan)
   }));
   return rows;
@@ -654,23 +776,50 @@ async function fetchMimoLimits(options = {}, deps = {}) {
   const entries = collectMimoCredentials(options, deps, scope, desktop);
   if (!entries.length) {
     if (desktop.status === 'unavailable' || desktop.status === 'unauthorized') {
-      return [statusProvider(desktop.status, updatedAt, { source: 'local', sourceDetail: 'app' })];
+      return appendMimoDesktopRemovals(
+        [statusProvider(desktop.status, updatedAt, {
+          accountKey: desktop.status === 'unauthorized' ? MIMO_UNATTRIBUTED_DESKTOP_KEY : '',
+          accountLabel: desktop.status === 'unauthorized' ? MIMO_MEMBERSHIP_LABEL : '',
+          source: 'local',
+          sourceDetail: 'app'
+        })],
+        desktop, options, deps, scope
+      );
     }
-    return scope ? [] : [statusProvider('notConfigured', updatedAt)];
+    return appendMimoDesktopRemovals(
+      scope ? [] : [statusProvider('notConfigured', updatedAt)],
+      desktop, options, deps, scope
+    );
   }
 
   const perEntry = await Promise.all(entries.map(async (entry) => {
     const lanes = mimoLanesForScope(entry, scope);
     const [consoleSide, membership] = await Promise.all([
       lanes.console ? fetchMimoConsoleSide(entry, deps) : {},
-      lanes.membership && entry.membership ? fetchMimoMembershipAccount(entry.membership, deps) : null
+      lanes.membership ? fetchMimoMembershipSide(entry, deps) : null
     ]);
-    return rowsForMimoScope(entry, mimoRowsForEntry(entry, { ...consoleSide, membership }, updatedAt), scope);
+    return rowsForMimoScope(entry, mimoRowsForEntry(entry, { ...consoleSide, membership }, updatedAt, deps), scope);
   }));
 
   const rows = perEntry.flat();
-  if (rows.length) return rows;
-  return scope ? [] : [statusProvider('notConfigured', updatedAt)];
+  // A plaintext passToken without userId proves that Desktop needs a login but
+  // cannot name the Xiaomi account. Keep that recovery row beside unrelated
+  // manual Console accounts; otherwise a healthy wallet would hide the only
+  // actionable membership failure. Transient store failures stay omitted so
+  // they cannot mark healthy account rows unavailable in the shared runtime.
+  if (!scope && !desktop.ok && desktop.status === 'unauthorized' && !desktop.userId) {
+    rows.push(statusProvider('unauthorized', updatedAt, {
+      accountKey: MIMO_UNATTRIBUTED_DESKTOP_KEY,
+      accountLabel: MIMO_MEMBERSHIP_LABEL,
+      source: 'local',
+      sourceDetail: 'app'
+    }));
+  }
+  if (rows.length) return appendMimoDesktopRemovals(rows, desktop, options, deps, scope);
+  return appendMimoDesktopRemovals(
+    scope ? [] : [statusProvider('notConfigured', updatedAt)],
+    desktop, options, deps, scope
+  );
 }
 
 function createMimoManagedAccount(cookieValue, existing = []) {

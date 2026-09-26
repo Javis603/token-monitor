@@ -139,6 +139,8 @@ function dockView(appearance = {}, overrides = {}) {
     isCreditsWindow: balanceDisplay.isCreditsWindow,
     spendWindow: balanceDisplay.spendWindow,
     limitWindowLabel: limitWindowLabels.limitWindowLabel,
+    isMimoMembershipProduct: limitWindowLabels.isMimoMembershipProduct,
+    mimoProductLabel: limitWindowLabels.mimoProductLabel,
     limitWindowText: limitWindowTextApi.limitWindowText,
     accountIdentity: accountIdentityApi,
     // Mirrored from the dock's own wiring: the device context rides the cell
@@ -296,8 +298,9 @@ test('a MiMo membership row meters like any percent quota, WorkBuddy included', 
     source: 'local',
     sourceDetail: 'app',
     status: 'ok',
-    accountName: 'Membership',
-    accountLabel: 'Pro',
+    accountName: 'MiMo abcdef1',
+    accountLabel: 'Desktop Membership',
+    planLabel: 'Pro',
     // What the collector's normalization produces from the vendor's percent.
     windows: [{
       kind: 'weekly',
@@ -346,7 +349,7 @@ test('a MiMo membership row meters like any percent quota, WorkBuddy included', 
   // A membership with no plan has no percentage to meter: the row carries no
   // window, and the plan cell is what says there is no plan.
   const noPlan = dockView().renderProviderWindows(
-    { ...membershipRow, accountLabel: 'Membership', windows: [] },
+    { ...membershipRow, planLabel: '', windows: [] },
     '#000000'
   );
   assert.equal(noPlan.find('limit-meter-fill'), null);
@@ -360,8 +363,9 @@ test('one MiMo product failing still leaves the other row and its quota on the c
       source: 'web',
       sourceDetail: 'managed',
       accountKey: 'sha256:console',
-      accountLabel: 'Pay-as-you-go',
-      accountName: 'Pay-as-you-go',
+      accountLabel: 'Console',
+      accountName: 'MiMo console',
+      planLabel: 'Pay-as-you-go',
       windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY', showMeter: false }],
       balance: { amount: 9.95, currency: 'CNY' }
     },
@@ -371,8 +375,8 @@ test('one MiMo product failing still leaves the other row and its quota on the c
       source: 'local',
       sourceDetail: 'app',
       accountKey: 'sha256:membership',
-      accountLabel: 'Membership',
-      accountName: 'Membership',
+      accountLabel: 'Desktop Membership',
+      accountName: 'MiMo member',
       windows: []
     }
   ];
@@ -396,8 +400,9 @@ test('a MiMo wallet meters against its month spend and carries the spend line', 
     status: 'ok',
     source: 'web',
     sourceDetail: 'managed',
-    accountLabel: 'Pay-as-you-go',
-    accountName: 'Pay-as-you-go',
+    accountLabel: 'Console',
+    accountName: 'MiMo console',
+    planLabel: 'Pay-as-you-go',
     windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }],
     balance: { amount: 9.95, currency: 'CNY', giftBalance: 9.95, cashBalance: 0, monthSpend: 9.3, allTimeSpend: 32.85 }
   };
@@ -425,6 +430,46 @@ test('a MiMo wallet meters against its month spend and carries the spend line', 
   );
   assert.equal(bare.find('limit-meter-fill').style['--bar-scale'], '1');
   assert.equal(bare.find('limit-spend'), null);
+});
+
+test('a MiMo Console card renders Token Plan states from normalized and persisted rows', () => {
+  const active = dockView().renderProviderWindows({
+    provider: 'mimo',
+    status: 'ok',
+    accountLabel: 'Console',
+    planLabel: 'Pro',
+    windows: [
+      { kind: 'billing', label: 'Token Plan', used: 25, limit: 100, usedPercent: 25, remainingPercent: 75 },
+      { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }
+    ],
+    balance: { amount: 9.95, currency: 'CNY' }
+  }, '#000000');
+  const activeRows = [...active.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.deepEqual(activeRows.map((node) => node.children[0].children[0].textContent), ['Token Plan', 'Balance']);
+  assert.equal(activeRows[0].find('limit-meter-fill').style['--bar-scale'], '0.75');
+
+  const persisted = dockView().renderProviderWindows({
+    provider: 'mimo',
+    status: 'ok',
+    accountLabel: 'Console',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }],
+    balance: { amount: 9.95, currency: 'CNY', planUsed: 25, planLimit: 100, planPercent: 25 }
+  }, '#000000');
+  const persistedRows = [...persisted.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.deepEqual(persistedRows.map((node) => node.children[0].children[0].textContent), ['Token Plan', 'Balance']);
+  assert.equal(persistedRows[0].find('limit-meter-fill').style['--bar-scale'], '0.75');
+
+  const expired = dockView().renderProviderWindows({
+    provider: 'mimo',
+    status: 'ok',
+    accountLabel: 'Console',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }],
+    balance: { amount: 9.95, currency: 'CNY', planStatus: 'expired' }
+  }, '#000000');
+  const expiredRows = [...expired.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.deepEqual(expiredRows.map((node) => node.children[0].children[0].textContent), ['Token Plan', 'Balance']);
+  assert.match(expiredRows[0].text, /Expired/);
+  assert.equal(expiredRows[0].find('limit-meter-fill'), null);
 });
 
 test('a Devin card keeps Daily, Weekly, and the extra usage balance', () => {
@@ -645,19 +690,20 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
   }
 });
 
-test('MiMo member rows distinguish accounts and keep the tier beside the identity', () => {
+test('MiMo membership rows distinguish accounts and keep the tier beside the product', () => {
   const view = dockView();
   const rows = [
-    { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef123456', accountName: 'Membership', accountLabel: 'Pro', windows: [] },
-    { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef654321', accountName: 'Membership', accountLabel: 'Membership', windows: [] }
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef123456', accountName: 'MiMo abcdef1', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [] },
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef654321', accountName: 'MiMo abcdef6', accountLabel: 'Desktop Membership', windows: [] }
   ];
   const group = view.renderLimitProviderGroup('mimo', 'MiMo', rows, '#ff6900');
   const accounts = group.find('limit-account-list').children;
   assert.deepEqual(accounts.map((row) => row.find('limit-name-title').textContent), [
-    'Membership · #abcdef1', 'Membership · #abcdef6'
+    'MiMo abcdef1 · Desktop Membership', 'MiMo abcdef6 · Desktop Membership'
   ]);
+  assert.equal(group.find('limit-plan').textContent, '2 products');
   assert.equal(accounts[0].find('limit-plan').textContent, 'Pro');
-  assert.notEqual(accounts[1].find('limit-plan').textContent, 'Membership');
+  assert.equal(accounts[1].find('limit-plan').textContent, 'No active plan');
 });
 
 test('a group-only plan replacement leaves a solo row its plan', () => {

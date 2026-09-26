@@ -1,6 +1,7 @@
 'use strict';
 
 const { planLabelFromParts } = require('../../limits/providerHelpers');
+const { MIMO_DESKTOP_MEMBERSHIP_PRODUCT } = require('../../limitWindowLabels');
 const { throwIfAborted } = require('../../abortSignal');
 const { mimoEndpointIso } = require('./endpointTime');
 const { mintMimoServiceSession, mimoExchangeStatus } = require('./session');
@@ -25,8 +26,9 @@ const MIMO_MEMBERSHIP_TIERS = Object.freeze({ 1: 'Starter', 2: 'Plus', 3: 'Pro',
 // What this lane is called when no plan names it. The pricing page sells the
 // products as "Xiaomi MiMo Desktop Membership Plans", so the row is named for
 // the membership itself, the way opencode names Go and Zen and volcengine its
-// two plans.
-const MIMO_MEMBERSHIP_LABEL = 'Membership';
+// two plans. The word itself lives with the other display vocabulary
+// (`limitWindowLabels`), because five surfaces route on it.
+const MIMO_MEMBERSHIP_LABEL = MIMO_DESKTOP_MEMBERSHIP_PRODUCT;
 
 // The app's schema and its success condition. No `current` means no active
 // subscription, which is an answer rather than a failure, and `percent` is a
@@ -62,16 +64,12 @@ function readMimoMembershipPlan(body) {
   };
 }
 
-// The app's own plan name: an invited subscription is named `INVITE` rather than
-// by its tier — the literal the app prints for one — and a tier inside the
-// vendor's table is named by it. A tier outside that table has no name to take,
-// so the vendor's own `planCode` stands in, the rule this repository applies to
-// every plan it cannot name (`planLabelFromParts` aliases what it knows and
-// prints the rest; Zed's provider notes the same about custom plan names). The
-// app splits on this too — its settings card prints the raw code, its account
-// menu an error string — and the code is the more informative of the two.
+// The app excludes an invited subscription from the current-plan card while it
+// still renders that subscription's usage. Mirror that split: the quota window
+// remains, but no plan name is invented. A regular tier outside the known table
+// falls back to the vendor's own planCode.
 function mimoMembershipPlanLabel(plan) {
-  if (plan?.source === 'INVITE') return 'INVITE';
+  if (plan?.source === 'INVITE') return '';
   return planLabelFromParts(MIMO_MEMBERSHIP_TIERS[plan?.tier], plan?.code) || '';
 }
 

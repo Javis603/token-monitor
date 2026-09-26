@@ -3970,7 +3970,7 @@ const {
   spendWindow
 } = window.TokenMonitorLimitBalanceDisplay;
 
-const { limitWindowLabel } = window.TokenMonitorLimitWindowLabels;
+const { limitWindowLabel, isMimoMembershipProduct, mimoProductLabel } = window.TokenMonitorLimitWindowLabels;
 const { limitWindowText } = window.TokenMonitorLimitWindowText;
 
 // The Limits rows are built by the shared view, which the edge dock also calls
@@ -4029,6 +4029,8 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   spendWindow,
   limitWindowLabel,
   limitWindowText,
+  isMimoMembershipProduct,
+  mimoProductLabel,
   accountIdentity: accountIdentityApi,
   accountControl: codexAccountControl,
   codexAccounts: {

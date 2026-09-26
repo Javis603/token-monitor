@@ -1,11 +1,9 @@
 'use strict';
 
-// MiMo's payloads carry wall-clock timestamps with no zone
-// (`2026-10-01T00:00:00`). `Date` would read one in the machine's locale — a
-// different value on every device, and not what the server said — so a value that
-// states a zone keeps it and one that does not is read as UTC. Both lanes answer
-// to this: the console lane's `currentPeriodEnd` and the membership lane's
-// `nextResetTime`.
+// MiMo's payloads can carry wall-clock timestamps with no zone. The existing
+// console provider normalized those as UTC; keep that compatibility rule for
+// both lanes so synced devices agree. The membership timezone remains unverified
+// until an active live response supplies one.
 function mimoEndpointTime(value) {
   const raw = String(value ?? '').trim();
   if (!raw) return NaN;

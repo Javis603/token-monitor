@@ -7,14 +7,18 @@ const test = require('node:test');
 
 const {
   createMimoExchangeFetch,
-  parseProxyResolveResult
+  parseProxyResolveResult,
+  parseProxyResolveResults
 } = require('../../src/electron/providers/mimo/exchangeFetch');
 
 test('a PAC result is read as the proxy Chromium resolved, or as nothing at all', () => {
   assert.deepEqual(parseProxyResolveResult('DIRECT'), { kind: 'direct', proxyUrl: '' });
   assert.deepEqual(parseProxyResolveResult('PROXY 127.0.0.1:7890'), { kind: 'http', proxyUrl: 'http://127.0.0.1:7890' });
-  // Chromium lists its fallbacks after the first entry; only the first is taken.
   assert.deepEqual(parseProxyResolveResult('PROXY 127.0.0.1:7890; DIRECT'), { kind: 'http', proxyUrl: 'http://127.0.0.1:7890' });
+  assert.deepEqual(parseProxyResolveResults('PROXY 127.0.0.1:7890; DIRECT'), [
+    { kind: 'http', proxyUrl: 'http://127.0.0.1:7890' },
+    { kind: 'direct', proxyUrl: '' }
+  ]);
   assert.deepEqual(parseProxyResolveResult(''), { kind: 'direct', proxyUrl: '' });
   assert.equal(parseProxyResolveResult('SOCKS5 127.0.0.1:1080').kind, 'unsupported');
   // TLS to the proxy is a different scheme, not a different host.
@@ -66,6 +70,20 @@ test('a proxy undici cannot speak fails closed instead of going direct', async (
   });
   await assert.rejects(fetch('https://platform.xiaomimimo.com/api/v1/balance', {}), /cannot use the resolved proxy/u);
   assert.equal(fetched, false, 'a configured proxy is never silently skipped');
+});
+
+test('a failed PAC proxy advances to Chromium’s direct fallback', async () => {
+  const attempts = [];
+  const fetch = createMimoExchangeFetch({
+    session: { resolveProxy: async () => 'PROXY 127.0.0.1:1; DIRECT' },
+    fetch: async (url, init) => {
+      attempts.push(Boolean(init.dispatcher));
+      if (init.dispatcher) throw new Error('proxy unavailable');
+      return { status: 200 };
+    }
+  });
+  assert.equal((await fetch('https://platform.xiaomimimo.com/api/v1/balance', {})).status, 200);
+  assert.deepEqual(attempts, [true, false]);
 });
 
 // A CONNECT proxy in twenty lines, so the routing above is verified against a

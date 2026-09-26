@@ -9,11 +9,15 @@
       : root?.TokenMonitorLimitBalanceDisplay,
     typeof module === 'object' && module.exports
       ? require('./compactMoney')
-      : root?.TokenMonitorCompactMoney
+      : root?.TokenMonitorCompactMoney,
+    typeof module === 'object' && module.exports
+      ? require('./limitWindowLabels')
+      : root?.TokenMonitorLimitWindowLabels
   );
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorTrayLayout = api;
-})(typeof window !== 'undefined' ? window : globalThis, function createTrayLayoutApi(currencyApi, trayTextApi, balanceDisplay, compactMoneyApi) {
+})(typeof window !== 'undefined' ? window : globalThis, function createTrayLayoutApi(currencyApi, trayTextApi, balanceDisplay, compactMoneyApi, limitWindowLabelsApi) {
+  const { mimoProductLabel } = limitWindowLabelsApi;
   const VERSION = 3;
   const MAX_ITEMS = 12;
   const STYLE_IDS = Object.freeze([
@@ -651,7 +655,8 @@
   function accountLabel(provider) {
     const email = clean(provider?.accountEmail);
     const name = clean(provider?.accountName);
-    if (providerId(provider) === 'mimo' && email && name) return `${email} · ${name}`;
+    const product = providerId(provider) === 'mimo' ? mimoProductLabel(provider) : '';
+    if (product) return [email, name, product].filter(Boolean).join(' · ');
     return clean(
       email
       || name

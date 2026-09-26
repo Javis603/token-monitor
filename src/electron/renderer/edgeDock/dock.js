@@ -22,6 +22,7 @@ const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const limitPresentationApi = window.TokenMonitorLimitProviderPresentation;
 const limitWindowLabels = window.TokenMonitorLimitWindowLabels;
+const { isMimoMembershipProduct, mimoProductLabel } = limitWindowLabels;
 const limitWindowTextApi = window.TokenMonitorLimitWindowText;
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
 const limitWindowsViewApi = window.TokenMonitorLimitWindowsView;
@@ -191,7 +192,6 @@ function readableColor(color) {
 // The provider's own colour, as the Limits view resolves it.
 function limitProviderColor(id) {
   if (id === 'factory') return clientColors.droid;
-  if (id === 'mimo') return clientColors.xiaomi;
   return clientColors[id] || clientColors.default;
 }
 
@@ -388,6 +388,8 @@ const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
   isCreditsWindow: balanceDisplay.isCreditsWindow,
   spendWindow: balanceDisplay.spendWindow,
   limitWindowLabel: limitWindowLabels.limitWindowLabel,
+  isMimoMembershipProduct,
+  mimoProductLabel,
   limitWindowText: limitWindowTextApi.limitWindowText,
   accountIdentity: accountIdentityApi,
   accountControl: codexAccountControl,

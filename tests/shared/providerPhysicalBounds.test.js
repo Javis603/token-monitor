@@ -17,21 +17,19 @@ test('every supported limits provider declares a finite physical whole-dispatch 
   }
 });
 
-test('account-based serial probes scale their physical bound by dispatched jobs', () => {
+test('provider physical bounds follow whether account jobs run serially or concurrently', () => {
   assert.equal(providerPhysicalBoundMs('codex', {
     codexManagedAccounts: [{ id: 'one', homePath: '/tmp/one' }, { id: 'two', homePath: '/tmp/two' }]
   }, { providerPhysicalBounds: { codex: 10 } }), 30);
-  // Two saved console accounts plus, in the largest case, a different discovered
-  // account's console and membership jobs.
+  // MiMo accounts and the Console/Membership lanes run concurrently inside one
+  // provider probe, so they share one physical deadline.
   assert.equal(providerPhysicalBoundMs('mimo', {
     mimoManagedAccounts: [{ id: 'one' }, { id: 'two' }]
-  }, { providerPhysicalBounds: { mimo: 10 } }), 40);
-  // Nothing configured is not nothing to do: the account comes from the
-  // machine's own MiMo Desktop, and both its lanes still run.
-  assert.equal(providerPhysicalBoundMs('mimo', {}, { providerPhysicalBounds: { mimo: 10 } }), 20);
+  }, { providerPhysicalBounds: { mimo: 10 } }), 10);
+  assert.equal(providerPhysicalBoundMs('mimo', {}, { providerPhysicalBounds: { mimo: 10 } }), 10);
   assert.equal(providerPhysicalBoundMs('mimo', {
     mimoManagedAccounts: [{ id: 'one' }]
-  }, { providerPhysicalBounds: { mimo: 10 } }), 30);
+  }, { providerPhysicalBounds: { mimo: 10 } }), 10);
   assert.equal(providerPhysicalBoundMs('mimo', {
     mimoManagedAccounts: [{ id: 'one' }, { id: 'two' }],
     limitRefreshScope: { provider: 'mimo', accountId: 'two' }

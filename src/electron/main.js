@@ -1237,10 +1237,8 @@ function normalizeMimoManagedAccounts(value) {
   return accounts;
 }
 
-// The id of the settings row that stands for the session this machine's own MiMo
-// Desktop holds. It is deliberately not `mimo-desktop`: the maintainer ruled out a
-// provider by that name, and a constant that looks like one invites the reader to
-// think we created it anyway.
+// Synthetic settings-row id for the session discovered from MiMo Desktop. It is
+// local UI state, not a provider id.
 const MIMO_DETECTED_ACCOUNT_ID = 'mimo-local-session';
 
 // The account a signed-in MiMo Desktop answers for, read here so the panel can
