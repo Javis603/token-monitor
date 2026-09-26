@@ -4039,45 +4039,57 @@ async function startIcloudCollector() {
     }
   });
   icloudRuntimeHandle = runtime;
-  mode = 'sync';
-  sendStatus(false, { provider: 'icloud', reason: 'icloud-initializing', icloud: runtime.getStatus() });
-  await runtime.start();
-  if (!icloudRequestIsCurrent()) {
-    await runtime.stop();
-    if (icloudRuntimeHandle === runtime) icloudRuntimeHandle = null;
-    return;
+  let createdDeviceRuntime = null;
+  try {
+    mode = 'sync';
+    sendStatus(false, { provider: 'icloud', reason: 'icloud-initializing', icloud: runtime.getStatus() });
+    await runtime.start();
+    if (!icloudRequestIsCurrent()) {
+      await runtime.stop();
+      if (icloudRuntimeHandle === runtime) icloudRuntimeHandle = null;
+      return;
+    }
+    const sink = {
+      async enqueue(summary) {
+        seedInitialLimitProviders(summary);
+        // The headless agent has no iCloud sink. The widget still publishes
+        // this device's record while the agent owns the local history archive.
+        const visibleSummary = {
+          ...summary,
+          syncUploadIntervalMs: 0
+        };
+        lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
+        await runtime.writeDevice(visibleSummary);
+      },
+      flush: () => runtime.flush(),
+      stop: () => runtime.stop()
+    };
+    const usageOptions = electronUsageConfig('icloud-collector');
+    createdDeviceRuntime = createDeviceRuntime({
+      envelope: electronDeviceEnvelope(),
+      initialLimits: lastCollectedDevice?.limits,
+      limitsOptions: electronLimitsConfig(),
+      transformUsage: summaryWithArchivedClientUsage,
+      usageOptions,
+      sink,
+      onDiagnosticEvent: recordDiagnosticEvent,
+      onError: (error, reason) => console.log(`[icloud-collector] ${reason}: ${error.message}`)
+    }, {
+      limitsDeps: electronLimitsDeps()
+    });
+    deviceRuntimeHandle = createdDeviceRuntime;
+    usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
+    drainPendingRuntimeActions(createdDeviceRuntime);
+  } catch (error) {
+    if (icloudRuntimeHandle === runtime) {
+      if (createdDeviceRuntime && deviceRuntimeHandle === createdDeviceRuntime) stopSyncCollector();
+      icloudRuntimeHandle = null;
+    }
+    try { await runtime.stop(); } catch (stopError) {
+      console.log(`[icloud] failed-start teardown failed: ${stopError?.message || stopError}`);
+    }
+    throw error;
   }
-  const sink = {
-    async enqueue(summary) {
-      seedInitialLimitProviders(summary);
-      // The headless agent intentionally has no iCloud sink. In iCloud mode the
-      // widget remains this device's authoritative DeviceRecord producer even
-      // when an external agent happens to be alive for another mode.
-      const visibleSummary = {
-        ...summary,
-        syncUploadIntervalMs: syncUploadIntervalMs()
-      };
-      lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
-      await runtime.writeDevice(visibleSummary);
-    },
-    flush: () => runtime.flush(),
-    stop: () => runtime.stop()
-  };
-  const usageOptions = electronUsageConfig('icloud-collector');
-  deviceRuntimeHandle = createDeviceRuntime({
-    envelope: electronDeviceEnvelope(),
-    initialLimits: lastCollectedDevice?.limits,
-    limitsOptions: electronLimitsConfig(),
-    transformUsage: summaryWithArchivedClientUsage,
-    usageOptions,
-    sink,
-    onDiagnosticEvent: recordDiagnosticEvent,
-    onError: (error, reason) => console.log(`[icloud-collector] ${reason}: ${error.message}`)
-  }, {
-    limitsDeps: electronLimitsDeps()
-  });
-  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
-  drainPendingRuntimeActions(deviceRuntimeHandle);
 }
 
 function startSyncCollector() {
@@ -5854,7 +5866,10 @@ function restartDeviceRuntimeForMode() {
     return;
   }
   if (settings.hubMode === 'icloud') {
-    return startIcloudCollector();
+    return startIcloudCollector().catch((error) => {
+      console.log(`[icloud] collector restart failed: ${error?.message || error}`);
+      recordDiagnosticEvent({ subsystem: 'icloud', code: 'icloud-start-failed' });
+    });
   }
   if (effectiveHubConfig().url) startSyncCollector();
   else startLocalCollector();

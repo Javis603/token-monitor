@@ -414,7 +414,10 @@ test('main awaits old iCloud runtime teardown before mode or sink replacement', 
   );
   assert.match(startIcloud, /await stopIcloudRuntime\(\)/);
   assert.match(startMode, /const icloudStop = stopIcloudRuntime\(\);[\s\S]*await icloudStop[\s\S]*await stopIcloudRuntime\(\)/);
-  assert.match(restart, /if \(settings\.hubMode === 'icloud'\) \{\s*return startIcloudCollector\(\);/);
+  assert.match(restart, /if \(settings\.hubMode === 'icloud'\) \{\s*return startIcloudCollector\(\)\.catch\(\(error\) => \{/);
+  assert.match(restart, /recordDiagnosticEvent\(\{ subsystem: 'icloud', code: 'icloud-start-failed' \}\)/);
+  assert.match(startIcloud, /catch \(error\) \{[\s\S]*if \(icloudRuntimeHandle === runtime\)[\s\S]*icloudRuntimeHandle = null;[\s\S]*await runtime\.stop\(\)/);
+  assert.match(startIcloud, /syncUploadIntervalMs: 0/);
   assert.doesNotMatch(main, /void icloudRuntimeHandle\.stop\(\)/);
 });
 
