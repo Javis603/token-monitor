@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
-  sumTokens, num, parseGraphResult, computeIntensities, localDayKey,
+  sumTokens, sumOutputTokens, num, parseGraphResult, computeIntensities, localDayKey,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories
 } = require('../../src/shared/history');
 
@@ -41,9 +41,19 @@ test('sumTokens adds disjoint Tokscale reasoning only for opted-in clients', () 
   assert.equal(sumTokens(b, 'codex'), 1134);
   assert.equal(sumTokens(b, 'dsh'), 1134);
   assert.equal(sumTokens(b, 'reasonix'), 1134);
+  assert.equal(sumTokens(b, 'zcode'), 1134);
+  assert.equal(sumTokens(b, 'opencode'), 1134);
   assert.equal(sumTokens(b, 'claude'), 135);
   assert.equal(sumTokens({}), 0);
   assert.equal(sumTokens(null), 0);
+});
+
+test('sumOutputTokens folds disjoint reasoning into output only for opted-in clients', () => {
+  const b = { input: 10, output: 20, cacheRead: 100, cacheWrite: 5, reasoning: 999 };
+  assert.equal(sumOutputTokens(b), 20);
+  assert.equal(sumOutputTokens(b, 'zcode'), 1019);
+  assert.equal(sumOutputTokens(b, 'opencode'), 1019);
+  assert.equal(sumOutputTokens(b, 'claude'), 20);
 });
 
 const SAMPLE = {
