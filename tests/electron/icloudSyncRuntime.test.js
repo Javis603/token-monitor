@@ -337,6 +337,26 @@ test('runtime retains the last-good aggregate when iCloud Drive disappears', asy
   }
 });
 
+test('an unavailable iCloud root does not hide a collected record after its first write fails', async () => {
+  const fixture = rootFixture();
+  try {
+    const store = createIcloudSyncStore({
+      platform: 'darwin', home: fixture.root, cloudDocsRoot: path.join(fixture.root, 'CloudDocs'), writerId: 'writer-a'
+    });
+    const runtime = createIcloudSyncRuntime({ store, reconcileMs: 0, watchFactory: () => ({ close() {} }) });
+    await runtime.start();
+    fs.rmSync(path.join(fixture.root, 'CloudDocs'), { recursive: true, force: true });
+    assert.equal(await runtime.writeDevice(record('mac-a', 42)), false);
+    assert.equal(runtime.getStats().periods.today.totalTokens, 42);
+    await runtime.reconcile('periodic');
+    assert.equal(runtime.getStatus().availability, 'unavailable');
+    assert.equal(runtime.getStats().periods.today.totalTokens, 42);
+    await runtime.stop();
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test('a successful reconciliation clears the current diagnostic error', async () => {
   let emitError = true;
   let currentStoreError = 'invalid-json';

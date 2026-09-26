@@ -248,7 +248,8 @@ function createIcloudSyncRuntime(options = {}) {
       const discoveredLocalRecord = localDeviceId
         && Array.isArray(discovered.records)
         && discovered.records.some((record) => String(record?.deviceId || record?.id || '').trim() === localDeviceId);
-      const discoverySucceeded = Array.isArray(discovered.records)
+      const discoverySucceeded = discovered.status?.available !== false
+        && Array.isArray(discovered.records)
         && Array.isArray(discovered.errors)
         && discovered.errors.length === 0;
       // A clean discovery that omits this writer's device is authoritative: the
