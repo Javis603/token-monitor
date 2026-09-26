@@ -39,12 +39,12 @@ test('every Electron collector mode follows the retained-session setting for dai
 });
 
 test('every Electron collector mode yields daily-history writes to an external agent', () => {
-  assert.match(main, /dailyHistoryArchiveWriteEnabled:\s*\(\) => settings\?\.hubMode === 'icloud' \|\| !isExternalAgentActive\(\)/);
+  assert.match(main, /dailyHistoryArchiveWriteEnabled:\s*\(\) => !isExternalAgentActive\(\)/);
   assertEveryCollectorModeUsesUsageConfig();
 });
 
 test('clearing retained session usage also clears retained daily history', () => {
-  assert.match(main, /sessionUsageArchiveStore\.clear\(\);\s*await clearDailyHistoryArchive\(\);/);
+  assert.match(main, /sessionUsageArchiveStore\.clear\(\);\s*clearDailyHistoryArchive\(\);/);
 });
 
 test('the headless agent retains daily history without mutating storage in dry-run mode', () => {

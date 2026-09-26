@@ -1,7 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -41,7 +40,7 @@ function historyFrom(graphValue, todayKey = '2026-07-18') {
 }
 
 function inMemoryArchiveOptions(options) {
-  return { ...options, withArchiveLock: (operation) => operation() };
+  return options;
 }
 
 function livePeriod(totalTokens, costUsd = 0) {
@@ -409,7 +408,7 @@ for (const [name, retain] of [
 ]) {
   test(`${name} treats only a missing archive as empty`, async () => {
     await withArchiveFile('   \n', async (archivePath) => {
-      await assert.rejects(
+      assert.throws(
         () => retain({ path: archivePath, todayKey: '2026-08-05' }),
         (error) => error.message.includes(archivePath) && error.message.includes('empty')
       );
@@ -417,7 +416,7 @@ for (const [name, retain] of [
     });
 
     await withArchiveFile('{"days":', async (archivePath) => {
-      await assert.rejects(
+      assert.throws(
         () => retain({ path: archivePath, todayKey: '2026-08-05' }),
         (error) => error.message.includes(archivePath) && error.cause instanceof SyntaxError
       );
@@ -466,7 +465,7 @@ for (const [name, retain] of [
         },
         writeJsonAtomic: () => { writes += 1; }
       };
-      await assert.rejects(() => retain(options), (error) => error.cause instanceof SyntaxError);
+      assert.throws(() => retain(options), (error) => error.cause instanceof SyntaxError);
       const failedBytes = fs.readFileSync(archivePath, 'utf8');
       assert.equal(failedBytes, '{"days":');
       assert.notEqual(failedBytes, before.toString('utf8'));
@@ -489,10 +488,10 @@ for (const [name, retain] of [
 
 test('strict archive reader rejects invalid container shapes while preserving compatibility', async () => {
   await withArchiveFile('null', async (archivePath) => {
-    await assert.rejects(() => retainDailyHistory([], { path: archivePath }), (error) => error.message.includes('root'));
+    assert.throws(() => retainDailyHistory([], { path: archivePath }), (error) => error.message.includes('root'));
   });
   await withArchiveFile('{"days":[]}', async (archivePath) => {
-    await assert.rejects(() => retainDailyHistory([], { path: archivePath }), (error) => error.message.includes('days'));
+    assert.throws(() => retainDailyHistory([], { path: archivePath }), (error) => error.message.includes('days'));
   });
   await retainDailyHistory([], inMemoryArchiveOptions({ readJson: () => ({}) }));
 });
@@ -525,7 +524,7 @@ for (const [name, retain] of ioRetainCases) {
           return originalReadFileSync(filePath, encoding);
         });
         try {
-          await assert.rejects(
+          assert.throws(
             () => retain({
               path: archivePath,
               todayKey: '2026-08-05',
@@ -625,76 +624,6 @@ test('retainDailyHistory rebases on archive changes made during the graph scan',
     ['claude', 'codex']
   );
   assert.equal(historyFrom(retained).daily[0].tokens, 170);
-});
-
-test('separate collectors serialize archive read-merge-write operations', async () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-archive-processes-'));
-  const archivePath = path.join(directory, 'daily-history-archive.json');
-  const gatePath = path.join(directory, 'start');
-  const archiveModule = require.resolve('../../src/shared/dailyHistoryArchive');
-  const configModule = require.resolve('../../src/shared/config');
-  const writers = [];
-
-  function launchWriter(clientId) {
-    const readyPath = path.join(directory, `${clientId}.ready`);
-    const script = `
-      const fs = require('node:fs');
-      const { retainDailyHistory } = require(${JSON.stringify(archiveModule)});
-      const { writeJsonAtomic } = require(${JSON.stringify(configModule)});
-      const pause = new Int32Array(new SharedArrayBuffer(4));
-      fs.writeFileSync(${JSON.stringify(readyPath)}, 'ready');
-      while (!fs.existsSync(${JSON.stringify(gatePath)})) Atomics.wait(pause, 0, 0, 10);
-      retainDailyHistory([{
-        contributions: [{
-          date: '2026-08-05', activeTimeMs: 0,
-          clients: [{
-            client: ${JSON.stringify(clientId)}, modelId: 'test-model',
-            tokens: { input: 100, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
-            cost: 1, messages: 1
-          }]
-        }]
-      }], {
-        path: ${JSON.stringify(archivePath)},
-        todayKey: '2026-08-05',
-        writeJsonAtomic: (filePath, value) => {
-          Atomics.wait(pause, 0, 0, 100);
-          writeJsonAtomic(filePath, value);
-        }
-      }).catch((error) => { console.error(error.stack || error); process.exitCode = 1; });
-    `;
-    const child = spawn(process.execPath, ['-e', script], { stdio: ['ignore', 'ignore', 'pipe'] });
-    let stderr = '';
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk) => { stderr += chunk; });
-    const result = new Promise((resolve, reject) => {
-      child.once('error', reject);
-      child.once('close', (code) => code === 0
-        ? resolve()
-        : reject(new Error(`archive writer exited ${code}: ${stderr}`)));
-    });
-    return { readyPath, result };
-  }
-
-  try {
-    writers.push(launchWriter('claude'), launchWriter('codex'));
-    const readyDeadline = Date.now() + 5_000;
-    while (writers.some(({ readyPath }) => !fs.existsSync(readyPath)) && Date.now() < readyDeadline) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    assert.ok(writers.every(({ readyPath }) => fs.existsSync(readyPath)), 'both archive writers should reach the start gate');
-    fs.writeFileSync(gatePath, 'go');
-    await Promise.all(writers.map(({ result }) => result));
-
-    const stored = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
-    assert.deepEqual(
-      Object.values(stored.days['2026-08-05'].observations).map((item) => item.client).sort(),
-      ['claude', 'codex']
-    );
-  } finally {
-    fs.writeFileSync(gatePath, 'go');
-    await Promise.allSettled(writers.map(({ result }) => result));
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
 });
 
 test('captureLiveDailyHistory prunes future snapshots even when today has no usage', () => {

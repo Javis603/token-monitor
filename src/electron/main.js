@@ -750,7 +750,7 @@ function electronUsageConfig(errorPrefix) {
     watchTriggersCollection: collectorWatchTriggersCollection(),
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
-    dailyHistoryArchiveWriteEnabled: () => settings?.hubMode === 'icloud' || !isExternalAgentActive(),
+    dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
     logger: (message) => console.log(`[${errorPrefix}] ${message}`)
   });
@@ -7088,7 +7088,7 @@ app.whenReady().then(() => {
     if (isExternalAgentActive()) return { ok: false, error: 'agentActive' };
     try {
       sessionUsageArchiveStore.clear();
-      await clearDailyHistoryArchive();
+      clearDailyHistoryArchive();
       sessionUsageArchive = normalizeSessionUsageArchive({});
       return { ok: true };
     } catch (error) {

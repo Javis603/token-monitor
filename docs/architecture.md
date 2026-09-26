@@ -75,7 +75,7 @@ A failed usage reconfiguration rolls back to the last-known-good runtime and ret
 
 ## Widget mode switching
 
-`settings.hubMode` selects the data path. `local` runs the local collector over IPC. `client` stops it, opens the Hub SSE stream and runs a sync collector for this device. `host` adds an embedded Hub (`startEmbeddedHub()`). A widget sync collector skips posting while the PID in `data/agent.pid` is alive — the only coordination between widget and headless agent.
+`settings.hubMode` selects the data path. `local` runs the local collector over IPC. `client` stops it, opens the Hub SSE stream and runs a sync collector for this device. `host` adds an embedded Hub (`startEmbeddedHub()`). `icloud` runs the macOS widget collector and writes this device's record to iCloud Drive; its file reconciliation supplies the shared aggregate without Hub SSE. A Hub sync collector skips posting while the PID in `data/agent.pid` is alive. In iCloud mode the widget remains the sole producer of its iCloud DeviceRecord even while an external headless agent is active, because the agent has no iCloud sink. The agent owns the local daily-history archive while active; the widget reads it and continues producing its iCloud record without writing the archive.
 
 ## Settings and credentials
 
@@ -94,9 +94,9 @@ Settings keys, env vars, CLI flags, Hub endpoints and this wire shape have exter
 
 A device older than `staleAfterMs` (default 10 min) stays in `/api/stats` with `stale: true` and is greyed out — intentional, not a bug.
 
-## Subscriptions are hub-scoped
+## Shared subscriptions
 
-Manually recorded subscriptions (`src/shared/subscriptionDisplay.js`) are the one Hub document that is not per device. `accountKey` differs across platforms for the same login, so per-device copies could not be deduped and two machines would double the monthly total. `GET`/`PUT /api/subscriptions` read and write one list per Hub.
+Manually recorded subscriptions (`src/shared/subscriptionDisplay.js`) are shared within the selected sync backend. `accountKey` differs across platforms for the same login, so per-device copies could not be deduped and two machines would double the monthly total. Hub modes use one list per Hub through `GET`/`PUT /api/subscriptions`; iCloud mode selects a revisioned per-writer snapshot by counter and writer ID, and rejects edits based on a stale revision.
 
 - `PUT` carries `baseUpdatedAt` and gets `409` on mismatch, because this data exists nowhere else. The token is the version the renderer's edit was made on, never re-derived at write time; a write queued behind a refresh that pulled other devices' records is refused, not retargeted.
 - In `client`/`host` mode the local copy is only a cache, and writes while the Hub is unreachable are refused rather than forking the list.

@@ -1055,7 +1055,7 @@ async function collectHistoryOnce(options) {
   }
   if (options.dailyHistoryArchiveEnabled) {
     try {
-      const retainedGraph = await retainDailyHistory(rawGraphs, {
+      const retainedGraph = retainDailyHistory(rawGraphs, {
         ...(options.dailyHistoryArchiveOptions || {}),
         liveDays: options.dailyHistoryLiveDays,
         todayKey,
@@ -1455,7 +1455,7 @@ async function collectUsageOnce(options) {
     && options.deferLiveHistoryCapture !== true
   ) {
     try {
-      const retainedLive = await retainLiveDailyHistory(today, {
+      const retainedLive = retainLiveDailyHistory(today, {
         ...(options.dailyHistoryArchiveOptions || {}),
         liveDays: dailyHistoryLiveDays,
         todayKey: localTodayKey(collectedAt),
@@ -3445,7 +3445,7 @@ function startCollector(options) {
           const visibleDateKey = Number.isFinite(visibleDate.getTime())
             ? localTodayKey(visibleDate)
             : todayKey;
-          const retainedLive = await retainLiveDailyHistory(visibleSummary.today, {
+          const retainedLive = retainLiveDailyHistory(visibleSummary.today, {
             ...(options.dailyHistoryArchiveOptions || {}),
             liveDays: liveDailyHistoryDays,
             todayKey: visibleDateKey,
