@@ -256,6 +256,28 @@
     return homeLimitAccounts(accounts, limit, { sort });
   }
 
+  // True when at least one enabled, unhidden limit provider has no entry yet in
+  // `providers` (the composed device record's `limits.providers`). Distinguishes
+  // "nothing is configured" from "configured, but the first probe/usage baseline
+  // has not landed yet" (DeviceState buffers both usage previews and limits until
+  // a complete usage baseline exists, so a provider can stay absent for minutes
+  // after cold start even though it is enabled and will report shortly).
+  function homeLimitsAwaitingFirstData({
+    providers = [],
+    providerOptions = [],
+    enabledProviderIds = [],
+    hiddenProviderIds = []
+  } = {}) {
+    const enabled = new Set((enabledProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
+    const hidden = new Set((hiddenProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
+    const byId = providerEntriesById(providers);
+    return (providerOptions || []).some(({ id: rawId }) => {
+      const id = String(rawId || '').trim().toLowerCase();
+      if (!id || hidden.has(id) || (enabled.size > 0 && !enabled.has(id))) return false;
+      return !byId.has(id);
+    });
+  }
+
   function homeTrendSummary(points) {
     const visible = Array.isArray(points) ? points : [];
     const peak = Math.max(0, ...visible.map((point) => Math.max(0, Number(point?.tokens || 0))));
@@ -456,6 +478,7 @@
   return {
     homeLimitAccounts,
     homeLimitAccountsForProviders,
+    homeLimitsAwaitingFirstData,
     homeModelRows,
     longRangePeakDayTokens,
     homeToolRows,
