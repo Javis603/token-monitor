@@ -852,7 +852,7 @@ function createIcloudSyncStore(options = {}) {
     const elapsedMs = lastDeviceWriteAt === null ? Number.POSITIVE_INFINITY : Math.max(0, now() - lastDeviceWriteAt);
     if (
       lastDeviceFingerprint === fingerprint
-      && (existingDocument || prior)
+      && existingDocument
       && deviceHeartbeatMs(wire) > elapsedMs
       && (!Number.isSafeInteger(deletionTargetRevision) || publishedRevision > deletionTargetRevision)
     ) {
@@ -889,8 +889,18 @@ function createIcloudSyncStore(options = {}) {
     return { ...normalized, skipped: false, visible: cachedDeviceIsVisible(deviceId, revision) };
   }
 
-  function writeDevice(record) {
-    return enqueueDeviceMutation(() => writeDeviceNow(record));
+  function writeDevice(record, { retiredDeviceIds = [] } = {}) {
+    return enqueueDeviceMutation(async () => {
+      const written = await writeDeviceNow(record);
+      // The replacement must exist before hiding any former identity. Keep this
+      // in the device mutation lane so shutdown drains the entire handoff.
+      if (written.visible !== false) {
+        for (const id of new Set(retiredDeviceIds)) {
+          if (id && id !== written.deviceId) await deleteDeviceNow(id);
+        }
+      }
+      return written;
+    });
   }
 
   async function deleteDeviceNow(deviceId) {
@@ -918,7 +928,9 @@ function createIcloudSyncStore(options = {}) {
       hostPlatform
     );
     const existingDocument = existingDevice.ok ? validDeviceDocument(existingDevice.value, filename) : null;
+    const ledger = await refreshRevisionLedger();
     const targetDeviceRevision = Math.max(
+      Number(ledger.devices[id] || 0),
       Number(deviceCache.get(filename)?.document?.revision || 0),
       Number(existingDocument?.revision || 0)
     );

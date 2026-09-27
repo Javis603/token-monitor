@@ -822,3 +822,139 @@ test('a stale subscription save refreshes the deterministic winner before reject
     fixture.cleanup();
   }
 });
+
+function retainIdentity(previous, next) {
+  const vm = require('node:vm');
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const source = main.slice(main.indexOf('function retainIcloudDeviceIdentity('), main.indexOf('async function startIcloudCollector()'));
+  vm.runInNewContext(`${source}\nretainIcloudDeviceIdentity(previous, next);`, { previous, next });
+  return next;
+}
+
+test('settings identity handoff survives restart and hides a temporarily missing former record', async () => {
+  const fixture = rootFixture();
+  let runtime;
+  try {
+    const options = {
+      platform: 'darwin', home: fixture.root, cloudDocsRoot: path.join(fixture.root, 'CloudDocs'),
+      revisionLedgerPath: path.join(fixture.root, 'revisions.json')
+    };
+    const firstStore = createIcloudSyncStore({ ...options, writerId: 'mac-a' });
+    await firstStore.writeDevice(record('mac-a', 42));
+    const oldPath = path.join(firstStore.paths().devicesRoot, deviceFilenameForId('mac-a'));
+    const oldDocument = fs.readFileSync(oldPath);
+    await firstStore.close();
+    const settings = JSON.parse(JSON.stringify(retainIdentity(
+      { hubMode: 'icloud', deviceId: 'mac-a' },
+      { hubMode: 'icloud', deviceId: 'mac-b', icloudRetiredDeviceIds: ['untrusted'] }
+    )));
+    assert.deepEqual(settings.icloudRetiredDeviceIds, ['mac-a']);
+    fs.unlinkSync(oldPath);
+    const store = createIcloudSyncStore({ ...options, writerId: 'mac-b' });
+    runtime = createIcloudSyncRuntime({ store, reconcileMs: 0, watchFactory: () => null });
+    await runtime.start();
+    assert.equal(await runtime.writeDevice(record('mac-b', 42), { retiredDeviceIds: settings.icloudRetiredDeviceIds }), true);
+    fs.writeFileSync(oldPath, oldDocument);
+    await runtime.reconcile('old-file-reappears');
+    assert.deepEqual(runtime.getDevices().map((entry) => entry.deviceId), ['mac-b']);
+    assert.equal(runtime.getStats().periods.today.totalTokens, 42);
+    assert.equal(runtime.getStats().periods.allTime.totalTokens, 42);
+    const reader = createIcloudSyncStore({ ...options, writerId: 'remote' });
+    assert.deepEqual((await reader.discoverDevices()).records.map((entry) => entry.deviceId), ['mac-b']);
+  } finally {
+    await runtime?.stop();
+    fixture.cleanup();
+  }
+});
+
+test('failed replacement keeps the old cloud record and failed cleanup retries on an unchanged publish', async () => {
+  const fixture = rootFixture();
+  let runtime;
+  try {
+    const cloudDocsRoot = path.join(fixture.root, 'CloudDocs');
+    let failure = '';
+    const store = createIcloudSyncStore({
+      platform: 'darwin', home: fixture.root, cloudDocsRoot, writerId: 'writer', staleAfterMs: 600_000,
+      fsApi: { ...fs.promises, rename: async (from, to) => {
+        if ((failure === 'publish' && to.endsWith(deviceFilenameForId('mac-b')))
+          || (failure === 'cleanup' && path.dirname(to).endsWith('deletions'))) {
+          throw Object.assign(new Error('test write failure'), { code: 'EIO' });
+        }
+        return fs.promises.rename(from, to);
+      } }
+    });
+    await store.writeDevice(record('mac-a', 42));
+    runtime = createIcloudSyncRuntime({ store, reconcileMs: 0, watchFactory: () => null });
+    await runtime.start();
+    const snapshot = record('mac-b', 42);
+    const options = { retiredDeviceIds: ['mac-a'] };
+    failure = 'publish';
+    assert.equal(await runtime.writeDevice(snapshot, options), false);
+    assert.deepEqual((await store.discoverDevices()).records.map((entry) => entry.deviceId), ['mac-a']);
+    assert.equal(runtime.getStats().periods.allTime.totalTokens, 42);
+    failure = 'cleanup';
+    assert.equal(await runtime.writeDevice(snapshot, options), false);
+    assert.equal((await store.discoverDevices()).records.length, 2);
+    failure = '';
+    assert.equal(await runtime.writeDevice(snapshot, options), true);
+    assert.deepEqual(runtime.getDevices().map((entry) => entry.deviceId), ['mac-b']);
+    assert.equal(runtime.getStats().periods.allTime.totalTokens, 42);
+  } finally {
+    await runtime?.stop();
+    fixture.cleanup();
+  }
+});
+
+test('successive settings edits retain all former identities and ignore renderer cleanup state', () => {
+  const a = { hubMode: 'icloud', deviceId: 'mac-a' };
+  const b = retainIdentity(a, { hubMode: 'icloud', deviceId: 'mac-b' });
+  const c = retainIdentity(b, { hubMode: 'icloud', deviceId: 'mac-c', icloudRetiredDeviceIds: [] });
+  assert.deepEqual(Array.from(c.icloudRetiredDeviceIds), ['mac-a', 'mac-b']);
+  const reverted = retainIdentity(c, { hubMode: 'icloud', deviceId: 'mac-a' });
+  assert.deepEqual(Array.from(reverted.icloudRetiredDeviceIds), ['mac-a', 'mac-b', 'mac-c']);
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const handler = main.slice(main.indexOf('function applySettingsPatch(patch)'));
+  assert.ok(handler.indexOf('retainIcloudDeviceIdentity(previousSettingsState, settings)') < handler.indexOf('saveSettings({ throwOnError: true })'));
+  assert.match(main, /runtime.writeDevice\(visibleSummary, \{ retiredDeviceIds \}\)/);
+});
+
+test('a reconciliation started before identity cleanup cannot resurrect the retired record', async () => {
+  const fixture = rootFixture();
+  let runtime;
+  let release = () => {};
+  try {
+    const store = createIcloudSyncStore({
+      platform: 'darwin', home: fixture.root, cloudDocsRoot: path.join(fixture.root, 'CloudDocs'), writerId: 'writer'
+    });
+    await store.writeDevice(record('mac-a', 42));
+    let blocked = false;
+    let entered = false;
+    const gate = new Promise((resolve) => { release = resolve; });
+    runtime = createIcloudSyncRuntime({
+      store: { ...store, discoverSubscriptions: async () => {
+        if (blocked) { entered = true; await gate; }
+        return store.discoverSubscriptions();
+      } },
+      reconcileMs: 0, watchFactory: () => null
+    });
+    await runtime.start();
+    blocked = true;
+    const pending = runtime.reconcile('before-handoff');
+    await waitFor(() => entered);
+    assert.equal(await runtime.writeDevice(record('mac-b', 42), { retiredDeviceIds: ['mac-a'] }), true);
+    assert.equal(runtime.getStats().periods.allTime.totalTokens, 42);
+    release();
+    await pending;
+    assert.deepEqual(runtime.getDevices().map((entry) => entry.deviceId), ['mac-b']);
+    assert.equal(runtime.getStats().periods.allTime.totalTokens, 42);
+    // Reverting the setting must publish above the old tombstone and must never
+    // delete the current ID even if it is still in the persisted cleanup list.
+    assert.equal(await runtime.writeDevice(record('mac-a', 42), { retiredDeviceIds: ['mac-a', 'mac-b'] }), true);
+    assert.deepEqual(runtime.getDevices().map((entry) => entry.deviceId), ['mac-a']);
+    assert.equal(runtime.getStats().periods.allTime.totalTokens, 42);
+  } finally {
+    release();
+    await runtime?.stop();
+    fixture.cleanup();
+  }
+});

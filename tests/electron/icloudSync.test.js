@@ -692,3 +692,26 @@ test('identical semantic device snapshots skip writes while meaningful changes a
     root.cleanup();
   }
 });
+
+test('an unchanged device is republished when its cloud file disappears or becomes invalid', async () => {
+  const fixture = makeRoot();
+  try {
+    const cloudDocsRoot = path.join(fixture.root, 'CloudDocs');
+    fs.mkdirSync(cloudDocsRoot);
+    const store = createIcloudSyncStore({ platform: 'darwin', home: fixture.root, cloudDocsRoot, staleAfterMs: 600_000 });
+    const snapshot = device('mac-a', 42);
+    let published = await store.writeDevice(snapshot);
+    const target = path.join(store.paths().devicesRoot, deviceFilenameForId('mac-a'));
+    for (const corrupt of [false, true]) {
+      if (corrupt) fs.writeFileSync(target, '{}');
+      else fs.unlinkSync(target);
+      const replacement = await store.writeDevice(snapshot);
+      assert.equal(replacement.skipped, false);
+      assert.ok(replacement.revision > published.revision);
+      assert.equal(JSON.parse(fs.readFileSync(target, 'utf8')).revision, replacement.revision);
+      published = replacement;
+    }
+  } finally {
+    fixture.cleanup();
+  }
+});

@@ -260,7 +260,7 @@ function createIcloudSyncRuntime(options = {}) {
         if (writesAtStart === successfulDeviceWrites) localRecordOverlayAllowed = false;
         else reconcileAgain = true;
       }
-      updateRecords(discovered.records, { publish: false });
+      updateRecords(store.getLastGoodDevices?.() || discovered.records, { publish: false });
       const winnerToken = subscriptions?.revisionToken || '';
       if (winnerToken !== lastSubscriptionRevision) {
         lastSubscriptionRevision = winnerToken;
@@ -363,18 +363,23 @@ function createIcloudSyncRuntime(options = {}) {
     return stopPromise;
   }
 
-  async function writeDevice(record) {
+  async function writeDevice(record, options = {}) {
     const normalized = normalizeDeviceRecord(record);
     if (!active) return false;
     const expectedGeneration = generation;
     localRecord = normalized;
+    const replacingIdentity = options.retiredDeviceIds?.some((id) => id !== normalized.deviceId);
+    // Until the handoff succeeds, the former published identity supplies usage.
+    // Overlaying the new ID after a failed publish would count the same Mac twice.
+    if (replacingIdentity) localRecordOverlayAllowed = false;
     try {
-      const written = await Promise.resolve(store.writeDevice(record));
+      const written = await Promise.resolve(store.writeDevice(record, options));
       if (!active || expectedGeneration !== generation) return false;
       const writeIsVisible = typeof store.isDeviceVisible === 'function'
         ? store.isDeviceVisible(normalized.deviceId, written?.revision)
         : written?.visible !== false;
       if (!writeIsVisible) localRecordOverlayAllowed = false;
+      else if (replacingIdentity) localRecordOverlayAllowed = true;
       if (written?.skipped !== true) {
         // Only a successful, non-deduplicated publish may lift a tombstone's
         // suppression. A failed or heartbeat-skipped write must stay hidden.
@@ -387,17 +392,18 @@ function createIcloudSyncRuntime(options = {}) {
       // The store has already cached this write and its known tombstones. Update
       // the local aggregate now; watcher and periodic reconciliation discover
       // remote records, subscriptions, and filesystem errors independently.
+      const cachedRecords = store.getLastGoodDevices?.() || records;
       const nextRecords = localRecordOverlayAllowed
-        ? records
-        : records.filter((entry) => String(entry?.deviceId || entry?.id || '').trim() !== String(localRecord?.deviceId || '').trim());
+        ? cachedRecords
+        : cachedRecords.filter((entry) => String(entry?.deviceId || entry?.id || '').trim() !== String(localRecord?.deviceId || '').trim());
       updateRecords(nextRecords);
-      return true;
+      return writeIsVisible;
     } catch (error) {
       if (!active || expectedGeneration !== generation) return false;
       reportError(error, error?.code || 'device-write-failed');
       // The just-collected local record remains visible while iCloud is down;
       // a failed write never turns the last good aggregate into zero.
-      updateRecords(records, { publish: true });
+      updateRecords(store.getLastGoodDevices?.() || records, { publish: true });
       return false;
     }
   }

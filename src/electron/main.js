@@ -3976,6 +3976,14 @@ async function stopIcloudRuntime() {
   return icloudRuntimeStopPromise;
 }
 
+function retainIcloudDeviceIdentity(previous, next) {
+  const retired = new Set(previous.icloudRetiredDeviceIds || []);
+  if (previous.hubMode === 'icloud' && previous.deviceId !== next.deviceId) {
+    retired.add(previous.deviceId);
+  }
+  next.icloudRetiredDeviceIds = [...retired].filter(Boolean);
+}
+
 // iCloud mode keeps the normal Electron collector and limits runtime, but its
 // sink is a local, atomic file write rather than an HTTP upload.  The runtime
 // below owns reconciliation and aggregation, so a temporarily absent iCloud
@@ -4086,7 +4094,13 @@ async function startIcloudCollector() {
           syncUploadIntervalMs: 0
         };
         lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
-        await runtime.writeDevice(visibleSummary);
+        const retiredDeviceIds = settings.icloudRetiredDeviceIds || [];
+        const written = await runtime.writeDevice(visibleSummary, { retiredDeviceIds });
+        if (written && icloudRequestIsCurrent() && settings.deviceId === visibleSummary.deviceId) {
+          settings.icloudRetiredDeviceIds = (settings.icloudRetiredDeviceIds || [])
+            .filter((id) => !retiredDeviceIds.includes(id));
+          if (retiredDeviceIds.length) saveSettings();
+        }
       },
       flush: () => runtime.flush(),
       stop: () => runtime.stop()
@@ -5034,6 +5048,7 @@ function settingsForRenderer() {
     expose: ['hubHostSecret', 'secret']
   });
   const rendererSettings = { ...settings };
+  delete rendererSettings.icloudRetiredDeviceIds;
   for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
   return {
     ...rendererSettings,
@@ -7373,6 +7388,7 @@ app.whenReady().then(() => {
         ? normalizeCustomPricingSetting(patch.customModelPricing)
         : normalizeCustomPricingSetting(settings.customModelPricing)
     }, windowBehaviorSelection(normalizedPatch));
+    retainIcloudDeviceIdentity(previousSettingsState, settings);
     settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
     if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
     delete settings.edgeDrawerEnabled;
