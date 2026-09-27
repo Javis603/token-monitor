@@ -77,7 +77,8 @@ function readMimoDesktopAccount(options = {}) {
     }
   });
   if (!dbPath) {
-    // A store we cannot even inspect may still exist, so retain last-good data.
+    // A store that cannot even be inspected may still exist, so the failure is
+    // an outage: the previous reading is retained rather than cleared.
     if (statFailure) throw errorWithStatus('unavailable', 'MiMo Desktop cookie store could not be read');
     throw errorWithStatus('notConfigured', 'MiMo Desktop cookie store not found');
   }
