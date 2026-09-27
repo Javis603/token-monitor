@@ -97,7 +97,13 @@ const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
-const { normalizeModelAliases, normalizeModelAliasGrouping, projectModelAliasStats, projectModelAliasHistory } = require('./modelAliasPresentation');
+const {
+  normalizeModelAliases,
+  normalizeModelAliasGrouping,
+  projectModelAliasStats,
+  projectModelAliasSessions,
+  projectModelAliasHistory
+} = require('./modelAliasPresentation');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
 const {
@@ -317,9 +323,15 @@ const { classifyStreamFailure } = require('./syncConnection');
 const {
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
-  composeLocalSyncStats
+  completeLocalSyncStats,
+  composeLocalSyncSummary
 } = require('./syncDisplayStats');
-const { createStatsPresentationCache, createStatsPublicationBatcher, rendererStats } = require('./statsPublisher');
+const {
+  createRendererSnapshots,
+  createStatsPresentationCache,
+  createStatsPublicationBatcher,
+  rendererStats
+} = require('./statsPublisher');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
 const { createIcloudSyncStore } = require('./icloudSync');
@@ -2936,6 +2948,33 @@ function electronPresentationStats(stats) {
     { grouping }
   ));
 }
+
+const allTimeSessionsCache = createStatsPresentationCache();
+const rendererSnapshots = createRendererSnapshots({ source: () => hubModeGeneration });
+// The local record each Hub snapshot was shown with, captured where the
+// snapshot was built. The collector replaces the live one between publishes.
+const snapshotLocalDevices = new WeakMap();
+
+// The renderer's all-time session list, which rendererStats() keeps out of every
+// push, for the snapshot the renderer is showing. A Hub aggregate carries no
+// all-time session detail (syncPayload drops it from uploads, #118), so a Hub
+// snapshot rebuilds the list: the Hub's cross-device month sessions, then this
+// machine's own full all-time list as it stood when the snapshot was built.
+function rendererAllTimeSessions(stats) {
+  if (!stats) return null;
+  const aliases = settings?.modelAliases;
+  const grouping = settings?.modelAliasGrouping;
+  const key = JSON.stringify([aliases ?? null, grouping ?? null]);
+  return allTimeSessionsCache.get(stats, key, () => {
+    const complete = completeLocalSyncStats(stats);
+    const hubSnapshot = snapshotLocalDevices.get(stats);
+    const sessions = hubSnapshot
+      ? mergedLocalAllTimeSessions(complete.periods, hubSnapshot.localDevice)
+      : complete.periods?.allTime?.sessions || {};
+    return projectModelAliasSessions(stats, sessions, aliases, { grouping });
+  });
+}
+
 let codexPresentationPendingSince = 0;
 let trayCodexSwitchInFlight = false;
 const DEFAULT_EXPORT_INTERVAL_MS = 60 * 1000;
@@ -4153,7 +4192,7 @@ function requestSyncDisplayStats(request) {
 
 function publishSyncDisplayStats({ reason, at, generation, widgetProducerOwner }) {
   if (!hubModeRequestIsCurrent(generation, 'client')) return;
-  const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
+  const displayStats = composeLocalSyncSummary(latestHubStats, lastCollectedDevice);
   if (!displayStats) return;
   updateDiscordRpcDisplay(displayStats);
   sendPush({ event: 'stats', data: { type: 'stats', reason, stats: displayStats, at } }, { widgetProducerOwner });
@@ -4301,19 +4340,7 @@ function injectLocalDeviceStatus(stats) {
       if (lastCollectedDevice.wslStatus) device.wslStatus = lastCollectedDevice.wslStatus;
     }
   }
-  // syncPayload drops the unbounded allTime.sessions from uploads (#118), so a hub
-  // aggregate carries no all-time session detail and the TOTAL session view would fall back
-  // to a model list. Rebuild the list — the hub's cross-device month sessions as the
-  // immediate baseline (present on the first frame, before this restart's first local scan),
-  // then this machine's own full all-time sessions once collected (free, in-process). Carry
-  // it as a display-only sibling instead of mutating periods.allTime.sessions: the exporter
-  // writes periods verbatim under a lossless contract, so the export must keep the true
-  // aggregate. rendererStats() swaps it in for periods.allTime.sessions on the renderer's copy.
-  // Only sync/host mode needs this: in local mode periods.allTime.sessions already holds the
-  // full native list, so building the sibling there would just ship the unbounded map twice.
-  if (mode !== 'local' && stats.periods?.allTime) {
-    stats.allTimeSessionsView = mergedLocalAllTimeSessions(stats.periods, lastCollectedDevice);
-  }
+  if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
   return stats;
 }
 
@@ -4556,7 +4583,7 @@ function sendPush(payload, options = {}) {
     const visibleStats = electronPresentationStats(latestStats);
     rendererPayload = {
       ...payload,
-      data: { ...payload.data, stats: rendererStats(visibleStats) }
+      data: { ...payload.data, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
     };
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
     updateEdgeDockCells(visibleStats);
@@ -4564,7 +4591,7 @@ function sendPush(payload, options = {}) {
     updateTrayDisplay();
     if (!options.skipExport && settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
       lastExportAt = Date.now();
-      writeExportTo(settings.exportDir, payload.data.stats.periods, { skipUnchanged: true })
+      writeExportTo(settings.exportDir, completeLocalSyncStats(payload.data.stats).periods, { skipUnchanged: true })
         .catch((err) => console.warn(`[export] auto-export failed: ${err.message}`));
     }
   }
@@ -4741,6 +4768,7 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
       clients: usageOptions.clients,
       allTimeSince: usageOptions.allTimeSince,
       projectsEnabled: usageOptions.projectsEnabled,
+      customScanPaths: usageOptions.customScanPaths,
       wslScanEnabled: usageOptions.wslScanEnabled,
       wslSupported: process.platform === 'win32',
       hostname: os.hostname(),
@@ -5533,7 +5561,7 @@ function refreshLimitStatsPresentation() {
     try {
       mainWindow.webContents.send('stats:push', {
         event: 'stats',
-        data: { type: 'stats', reason: 'presentation', mode, stats: rendererStats(visibleStats) }
+        data: { type: 'stats', reason: 'presentation', mode, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
       });
     } catch (_) {}
   }
@@ -6173,7 +6201,7 @@ async function fetchStats(options = {}) {
     });
   }
   setLatestHubStatsCache(stats, 'client', requestGeneration, requestHubIdentity);
-  return injectLocalDeviceStatus(composeLocalSyncStats(stats, lastCollectedDevice));
+  return injectLocalDeviceStatus(composeLocalSyncSummary(stats, lastCollectedDevice));
 }
 
 function managedPricingSidecarPath() {
@@ -7635,7 +7663,7 @@ app.whenReady().then(() => {
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);
-    return rendererStats(electronPresentationStats(stats));
+    return rendererSnapshots.stamp(stats, rendererStats(electronPresentationStats(stats)));
   });
   ipcMain.handle('devices:delete', async (_event, deviceId) => {
     try {
@@ -7645,6 +7673,7 @@ app.whenReady().then(() => {
       throw new Error(error.code || error.message, { cause: error });
     }
   });
+  ipcMain.handle('stats:allTimeSessions', (_event, snapshotId) => rendererAllTimeSessions(rendererSnapshots.get(snapshotId)));
   ipcMain.handle('export:now', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
@@ -7652,7 +7681,7 @@ app.whenReady().then(() => {
     });
     if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
     const stats = await fetchStats();
-    const written = await writeExportTo(result.filePaths[0], stats.periods);
+    const written = await writeExportTo(result.filePaths[0], completeLocalSyncStats(stats).periods);
     if (!written.ok) return { ok: false, dir: result.filePaths[0], reason: written.reason || 'write-failed' };
     return { ok: true, dir: result.filePaths[0] };
   });

@@ -89,19 +89,16 @@ function withoutSessionDetail(period) {
 // - Device records keep their period totals and breakdowns but not their
 //   sessions and projects. The renderer only reads those aggregated, from
 //   `periods`, and the local device's copy alone repeats all of them.
-// - Sync modes build the TOTAL session list as the `allTimeSessionsView`
-//   sibling so the aggregate `periods.allTime.sessions` stays lossless for the
-//   exporter. The renderer only ever shows the view, so it replaces the
-//   aggregate's list here instead of travelling beside it.
+// - The all-time session list is pulled, not pushed (`stats:allTimeSessions`).
+//   It is most of the payload and only one view shows it, so shipping it on
+//   every publish would clone it for nothing nearly every time.
 function rendererStats(stats) {
   if (!stats || typeof stats !== 'object') return stats;
   const result = { ...stats };
-  delete result.allTimeSessionsView;
-  if (stats.allTimeSessionsView && stats.periods?.allTime) {
-    result.periods = {
-      ...stats.periods,
-      allTime: { ...stats.periods.allTime, sessions: stats.allTimeSessionsView }
-    };
+  const allTime = stats.periods?.allTime;
+  if (allTime && typeof allTime === 'object' && 'sessions' in allTime) {
+    const { sessions: _sessions, ...summary } = allTime;
+    result.periods = { ...stats.periods, allTime: summary };
   }
   if (Array.isArray(stats.devices)) {
     result.devices = stats.devices.map((device) => {
@@ -114,4 +111,45 @@ function rendererStats(stats) {
   return result;
 }
 
-module.exports = { createStatsPresentationCache, createStatsPublicationBatcher, rendererStats };
+// A detail the renderer pulls has to belong to the stats it is showing, not to
+// whatever main published since. Every snapshot handed to the renderer is
+// stamped with an id it can pull by, and with the source generation it came
+// from, so a list pulled under one Hub is never shown under another. Only the
+// most recently stamped snapshots stay addressable: the renderer only ever
+// pulls for the one it holds, and a newer push brings a newer id. Stamping an
+// older snapshot again (a presentation refresh re-sends `latestStats`) makes it
+// recent again under its original id and source, so the id handed out always
+// resolves.
+function createRendererSnapshots(options = {}) {
+  const source = options.source;
+  if (typeof source !== 'function') throw new TypeError('source must be a function');
+  const limit = Math.max(1, Number(options.limit) || 8);
+  const tags = new WeakMap();
+  const byId = new Map();
+  let nextId = 1;
+
+  function register(stats) {
+    let tag = tags.get(stats);
+    if (!tag) {
+      tag = { id: nextId, source: source() };
+      nextId += 1;
+      tags.set(stats, tag);
+    }
+    byId.delete(tag.id);
+    byId.set(tag.id, stats);
+    if (byId.size > limit) byId.delete(byId.keys().next().value);
+    return tag;
+  }
+
+  return {
+    stamp(stats, copy) {
+      if (!stats || typeof stats !== 'object' || !copy || typeof copy !== 'object') return copy;
+      return { ...copy, snapshot: { ...register(stats) } };
+    },
+    get(id) {
+      return byId.get(id) || null;
+    }
+  };
+}
+
+module.exports = { createRendererSnapshots, createStatsPresentationCache, createStatsPublicationBatcher, rendererStats };

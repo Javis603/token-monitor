@@ -111,6 +111,18 @@ function customScanPathEntries(value, options = {}) {
   ));
 }
 
+// Stable key for the collector-anchor config fingerprint. Custom scan paths
+// change which files Tokscale reads (through TOKSCALE_EXTRA_DIRS), so an anchor
+// captured before a path was added must not be trusted for month/allTime. Empty
+// when no paths are configured, so the fingerprint of the common no-paths case
+// is unchanged and existing anchors stay valid across upgrade. normalizeCustomScanPaths
+// already emits catalog-ordered keys and deduped paths, so JSON.stringify is
+// deterministic for a given configuration.
+function customScanPathsFingerprint(value, options = {}) {
+  const normalized = normalizeCustomScanPaths(value, options);
+  return Object.keys(normalized).length > 0 ? JSON.stringify(normalized) : '';
+}
+
 function tokscaleExtraDirsEnv(value, inherited = '', options = {}) {
   const additions = customScanPathEntries(value, options).flatMap(({ client, dir }) => (
     suppressedCustomScanIds(client, dir, options)
@@ -169,6 +181,7 @@ module.exports = {
   MAX_CUSTOM_SCAN_PATHS_PER_CLIENT,
   customScanPathLimitError,
   customScanPathEntries,
+  customScanPathsFingerprint,
   normalizeCustomScanPaths,
   tokscaleExtraDirsEnv
 };
