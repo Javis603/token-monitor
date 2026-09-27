@@ -645,6 +645,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       configSnapshot.limitProviders = [lane.provider];
       if (intent.accountScoped) configSnapshot.limitRefreshScope = cloneValue(intent.scope);
       else delete configSnapshot.limitRefreshScope;
+      // A provider that must remove a vanished local identity compares against
+      // the rows this runtime actually accepted, not a mutable probe-side cache.
+      // A superseded probe therefore cannot consume a removal before commit.
+      configSnapshot.previousLimits = { providers: providerRows(lane.provider) };
       const physicalMs = Number(physicalBound(lane.provider, configSnapshot, deps));
       const deadlineMs = physicalMs + cleanupGraceMs;
       const rows = await runWithProbeDeadline(

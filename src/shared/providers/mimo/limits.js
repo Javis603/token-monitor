@@ -27,7 +27,6 @@ const MIMO_CONSOLE_LABEL = MIMO_CONSOLE_PRODUCT;
 const MIMO_CONSOLE_ENTRY = '/balance';
 const MIMO_ACCOUNT_TIMEOUT_MS = 15_000;
 const MIMO_ACCOUNT_METADATA_STATE_KEY = 'mimo.account-metadata';
-const MIMO_DESKTOP_ROWS_STATE_KEY = 'mimo.desktop-rows';
 const MIMO_UNATTRIBUTED_DESKTOP_KEY = hashKey('mimo:desktop-membership:unattributed');
 const MIMO_COOKIE_NAMES = new Set([
   'api-platform_serviceToken',
@@ -617,40 +616,28 @@ function mimoAccountMetadata(deps = {}) {
   return cache;
 }
 
-function previousMimoDesktopKeys(options = {}, deps = {}) {
-  if (!(deps.providerRuntimeState instanceof Map)) return null;
-  let keys = deps.providerRuntimeState.get(MIMO_DESKTOP_ROWS_STATE_KEY);
-  if (!(keys instanceof Set)) {
-    keys = new Set(
-      (options.previousLimits?.providers || [])
-        .filter((row) => row?.provider === 'mimo' && row?.sourceDetail === 'app' && cleanText(row.accountKey))
-        .map((row) => cleanText(row.accountKey))
-    );
-    deps.providerRuntimeState.set(MIMO_DESKTOP_ROWS_STATE_KEY, keys);
-  }
-  return keys;
+function previousMimoDesktopKeys(options = {}) {
+  return new Set(
+    (options.previousLimits?.providers || [])
+      .filter((row) => row?.provider === 'mimo' && row?.sourceDetail === 'app' && cleanText(row.accountKey))
+      .map((row) => cleanText(row.accountKey))
+  );
 }
 
 // Automatic rows may disappear while a pasted Console row still answers. The
 // runtime deliberately treats an omitted identity as a transient partial read,
 // so name the exact automatic identities that disappeared; its internal removal
 // marker clears them without publishing a fake status row.
-function appendMimoDesktopRemovals(rows, desktop, options, deps, scope) {
+function appendMimoDesktopRemovals(rows, desktop, options, scope) {
   if (scope) return rows;
-  const previous = previousMimoDesktopKeys(options, deps);
-  if (!previous) return rows;
+  const previous = previousMimoDesktopKeys(options);
   const terminalRead = desktop.ok || desktop.status === 'notConfigured' || desktop.status === 'unauthorized';
   if (!terminalRead) return rows;
 
   const represented = new Set(rows.map((row) => cleanText(row?.accountKey)).filter(Boolean));
-  const next = new Set(rows
-    .filter((row) => row?.sourceDetail === 'app' && row?.removed !== true)
-    .map((row) => cleanText(row.accountKey))
-    .filter(Boolean));
   const removals = [...previous]
     .filter((accountKey) => !represented.has(accountKey))
     .map((accountKey) => ({ provider: 'mimo', accountKey, removed: true }));
-  deps.providerRuntimeState.set(MIMO_DESKTOP_ROWS_STATE_KEY, next);
   return removals.length ? [...rows, ...removals] : rows;
 }
 
@@ -783,12 +770,12 @@ async function fetchMimoLimits(options = {}, deps = {}) {
           source: 'local',
           sourceDetail: 'app'
         })],
-        desktop, options, deps, scope
+        desktop, options, scope
       );
     }
     return appendMimoDesktopRemovals(
       scope ? [] : [statusProvider('notConfigured', updatedAt)],
-      desktop, options, deps, scope
+      desktop, options, scope
     );
   }
 
@@ -815,10 +802,10 @@ async function fetchMimoLimits(options = {}, deps = {}) {
       sourceDetail: 'app'
     }));
   }
-  if (rows.length) return appendMimoDesktopRemovals(rows, desktop, options, deps, scope);
+  if (rows.length) return appendMimoDesktopRemovals(rows, desktop, options, scope);
   return appendMimoDesktopRemovals(
     scope ? [] : [statusProvider('notConfigured', updatedAt)],
-    desktop, options, deps, scope
+    desktop, options, scope
   );
 }
 

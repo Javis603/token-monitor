@@ -24,6 +24,8 @@ const {
 } = require('../../src/shared/providers/mimo/membership');
 const { mimoDesktopCookieCandidates, readMimoDesktopAccount } = require('../../src/shared/providers/mimo/desktop');
 const { aggregateLimits, normalizeLimitsSummary } = require('../../src/shared/limits/core');
+const { probeLimitProvider } = require('../../src/shared/limits/collector');
+const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
 const { mimoExchangeRequestHeaders, mimoRequestHeaders } = require('../../src/shared/providers/mimo/browserHeaders');
 
 const CONSOLE_COOKIE = 'unrelated=drop; userId=42; api-platform_serviceToken=secret; api-platform_ph=optional';
@@ -37,6 +39,12 @@ const MEMBERSHIP_ACCOUNT_KEY_7 = 'sha256:b41179974aa7a240cd799f1548fea3a86d4dd61
 
 const absentDesktop = () => { throw Object.assign(new Error('no store'), { status: 'notConfigured' }); };
 const signedInDesktop = (userId = '42') => () => ({ userId, cookieHeader: `passToken=p; userId=${userId}` });
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 function reply(status, body, headers = {}) {
   const map = new Map(Object.entries(headers).map(([key, value]) => [key.toLowerCase(), value]));
@@ -327,7 +335,7 @@ test('a stored account is spent only with an allowlisted cookie, and scope narro
   );
 });
 
-test('the detected session is listed beside stored accounts and never as a duplicate', () => {
+test('the detected session is listed beside stored accounts and dedupes an enabled matching account', () => {
   const key = mimoAccountKey('', { userId: '42' });
   assert.deepEqual(withDetectedMimoAccount([{ id: 'mimo-1', accountKey: key }], null), [{ id: 'mimo-1', accountKey: key, removable: true }]);
   const other = { id: 'mimo-desktop', accountKey: mimoAccountKey('', { userId: '99' }) };
@@ -491,15 +499,14 @@ test('a half Desktop sign-in does not hide membership behind a healthy manual co
 });
 
 test('a Desktop logout removes the old membership while a manual console keeps answering', async () => {
-  const providerRuntimeState = new Map();
-  await fetchMimoLimits({}, {
+  const previous = await fetchMimoLimits({}, {
     fetch: mimoWorld().fetch,
     readMimoDesktopAccount: signedInDesktop(),
-    providerRuntimeState,
     now: () => Date.UTC(2026, 8, 24)
   });
 
   const rows = await fetchMimoLimits({
+    previousLimits: { providers: previous },
     mimoManagedAccounts: [{
       id: 'mimo-1',
       accountKey: mimoAccountKey('', { userId: '42' }),
@@ -508,7 +515,6 @@ test('a Desktop logout removes the old membership while a manual console keeps a
   }, {
     fetch: mimoWorld().fetch,
     readMimoDesktopAccount: absentDesktop,
-    providerRuntimeState,
     now: () => Date.UTC(2026, 8, 24)
   });
 
@@ -520,19 +526,68 @@ test('a Desktop logout removes the old membership while a manual console keeps a
   );
 });
 
+test('a superseded Desktop removal is emitted again on the next committed refresh', { timeout: 7000 }, async () => {
+  let readDesktop = signedInDesktop();
+  let removalProbes = 0;
+  // The gate hangs on the probe itself rather than on the removal it produces:
+  // a regression that stops the removal from being emitted must fail the
+  // assertions below, not stall this test until its timeout.
+  let holdStaleProbe = false;
+  const staleProbeStarted = deferred();
+  const releaseStaleProbe = deferred();
+  const runtime = createLimitsRuntime({
+    limitProviders: ['mimo'],
+    mimoManagedAccounts: [{ id: 'mimo-1', accountKey: CONSOLE_ACCOUNT_KEY_42, cookieHeader: CONSOLE_COOKIE }]
+  }, {
+    autoStart: false,
+    cleanupGraceMs: 0,
+    providerPhysicalBoundMs: () => 5_000,
+    fetch: mimoWorld().fetch,
+    readMimoDesktopAccount: () => readDesktop(),
+    now: () => Date.UTC(2026, 8, 24),
+    probeProvider: async (provider, options, context, deps) => {
+      const rows = await probeLimitProvider(provider, options, context, deps);
+      if (rows.some((row) => row.removed)) removalProbes += 1;
+      if (holdStaleProbe) {
+        holdStaleProbe = false;
+        staleProbeStarted.resolve();
+        await releaseStaleProbe.promise;
+      }
+      return rows;
+    }
+  });
+
+  try {
+    await runtime.refresh({ provider: 'mimo' }, 'startup');
+    assert.equal(runtime.getSnapshot().providers.some((row) => row.accountKey === MEMBERSHIP_ACCOUNT_KEY_42), true);
+
+    readDesktop = absentDesktop;
+    holdStaleProbe = true;
+    const stale = runtime.refresh({ provider: 'mimo' }, 'manual');
+    await staleProbeStarted.promise;
+    const current = runtime.refresh({ provider: 'mimo' }, 'manual');
+    releaseStaleProbe.resolve();
+    assert.equal((await stale).superseded, true);
+    await current;
+
+    assert.equal(removalProbes, 2, 'the superseded probe must not consume the removal');
+    assert.deepEqual(runtime.getSnapshot().providers.map((row) => row.accountKey), [CONSOLE_ACCOUNT_KEY_42]);
+  } finally {
+    releaseStaleProbe.resolve();
+    runtime.stop();
+  }
+});
+
 test('switching the Desktop account removes both automatic rows from the previous account', async () => {
-  const providerRuntimeState = new Map();
-  await fetchMimoLimits({}, {
+  const previous = await fetchMimoLimits({}, {
     fetch: mimoWorld().fetch,
     readMimoDesktopAccount: signedInDesktop('42'),
-    providerRuntimeState,
     now: () => Date.UTC(2026, 8, 24)
   });
 
-  const rows = await fetchMimoLimits({}, {
+  const rows = await fetchMimoLimits({ previousLimits: { providers: previous } }, {
     fetch: mimoWorld().fetch,
     readMimoDesktopAccount: signedInDesktop('7'),
-    providerRuntimeState,
     now: () => Date.UTC(2026, 8, 24)
   });
   assert.deepEqual(rows.filter((row) => !row.removed).map((row) => row.accountKey), [
@@ -599,6 +654,7 @@ test('an unattributed half sign-in still asks for a Desktop login, while an unre
   ], 'a healthy pasted wallet must not hide an unattributed Desktop login failure');
 
   const recovered = await fetchMimoLimits({
+    previousLimits: { providers: alongsideManual },
     mimoManagedAccounts: [{
       id: 'mimo-1',
       accountKey: CONSOLE_ACCOUNT_KEY_42,
