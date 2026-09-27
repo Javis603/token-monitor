@@ -27,6 +27,14 @@ function normalizeTokscaleClientName(value) {
   return TOKSCALE_CLIENT_ALIASES.get(raw) || raw;
 }
 
+function normalizeTokscaleModelNameForClient(value, client) {
+  const model = String(value ?? '').trim();
+  if (normalizeTokscaleClientName(client) === 'cursor' && /^(?:auto|default)$/i.test(model)) {
+    return 'cursor-auto';
+  }
+  return model;
+}
+
 function num(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '') {
@@ -125,7 +133,7 @@ function parseGraphResult(raw) {
     for (const c of clientRows) {
       if (!c || typeof c !== 'object') continue;
       const client = normalizeTokscaleClientName(c.client) || 'unknown';
-      const model = String(c.modelId || c.model || c.model_id || 'unknown');
+      const model = normalizeTokscaleModelNameForClient(c.modelId || c.model || c.model_id || 'unknown', client);
       const t = sumTokens(c.tokens, client);
       const cst = num(c.cost);
       const cacheRead = num(c.tokens?.cacheRead ?? c.tokens?.cache_read);
@@ -556,7 +564,7 @@ function deviceHistoryRevision(devices) {
 }
 
 module.exports = {
-  hasDisjointReasoning, num, normalizeTokscaleClientName, sumOutputTokens, sumTokens,
+  hasDisjointReasoning, num, normalizeTokscaleClientName, normalizeTokscaleModelNameForClient, sumOutputTokens, sumTokens,
   parseGraphResult, computeIntensities, localDayKey, dayKeyAddDays,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
   coerceHistory, historyPreview, historyRevision, deviceHistoryRevision

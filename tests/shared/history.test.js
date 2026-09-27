@@ -111,6 +111,21 @@ test('parseGraphResult folds client rows into perClient/perModel and derives day
   });
 });
 
+test('Cursor Auto and default graph rows share one model without renaming other clients', () => {
+  const rows = [
+    { client: 'cursor', modelId: 'auto', tokens: { input: 3 }, cost: 0.01 },
+    { client: 'cursor', modelId: 'default', tokens: { input: 7 }, cost: 0.02 },
+    { client: 'claude', modelId: 'default', tokens: { input: 11 }, cost: 0.03 }
+  ];
+  const graph = { contributions: [{ date: '2026-09-27', clients: rows }] };
+  const day = normalizeHistory(parseGraphResult(graph), { todayKey: '2026-09-28' }).daily[0];
+
+  assert.equal(day.perModel['cursor-auto'].tokens, 10);
+  assert.equal(day.perModel.default.tokens, 11);
+  assert.equal(day.perModel['cursor-auto'].cost, 0.03);
+  assert.equal(day.tokens, 21);
+});
+
 test('parseGraphResult keeps Oh My Pi and Pi as separate history identities', () => {
   const { contributions } = parseGraphResult({
     contributions: [{

@@ -1094,6 +1094,8 @@ test('extractUsageFromTokscale maps Cursor `default` to cursor-auto without touc
   assert.equal(period.sessions['cursor:c-auto'].models['cursor-auto'], 7);
   assert.equal(period.sessions['claude:x-default'].models.default, 11);
   assert.equal(period.sessions['claude:x-default'].models['cursor-auto'], undefined);
+  assert.equal(period.models['cursor-auto'], 10);
+  assert.equal(period.models.default, 11);
 });
 
 test('extractUsageFromTokscale folds disjoint DSH reasoning into totals and output', () => {

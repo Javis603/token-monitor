@@ -5,7 +5,7 @@ const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
   coerceHistory, dayKeyAddDays, hasDisjointReasoning, localDayKey, mergeHistories,
-  normalizeTokscaleClientName
+  normalizeTokscaleClientName, normalizeTokscaleModelNameForClient
 } = require('./history');
 const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
@@ -275,7 +275,7 @@ function normalizeModelName(value) {
 }
 
 function normalizeModelNameForClient(value, client) {
-  const normalized = normalizeModelName(value);
+  const normalized = normalizeModelName(normalizeTokscaleModelNameForClient(value, client));
   if (!normalized || normalizeClientName(client) !== REASONIX_CLIENT) return normalized;
   const qualified = normalized.match(/^(?:deepseek|deepseek-flash)\/(.+)$/);
   return qualified?.[1] || normalized;
@@ -622,8 +622,7 @@ function sessionFromRow(row) {
   session.projectLabel = String(row.projectLabel || row.project_label || '').trim();
   session.title = normalizeSessionTitle(firstString(row, SESSION_TITLE_KEYS));
   session.sessionKind = normalizeSessionKind(row.sessionKind || row.session_kind);
-  let model = detectModel(row, client);
-  if (client === 'cursor' && (model === 'auto' || model === 'default')) model = 'cursor-auto';
+  const model = detectModel(row, client);
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
   if (model && session.costUsd > 0) session.modelCosts[model] = (session.modelCosts[model] || 0) + session.costUsd;
   const provider = normalizeProviderName(row.provider);
@@ -869,8 +868,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   // the denominator. Gating rather than scaling by tokscale's `tokenCoverage` keeps this a
   // plain counter, which is what lets it merge and delta like every other token field.
   const timedOutputTokens = timedDurationMs > 0 ? output : 0;
-  let model = detectModel(row, client);
-  if (client === 'cursor' && (model === 'auto' || model === 'default')) model = 'cursor-auto';
+  const model = detectModel(row, client);
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;
   period.cacheReadTokens += cacheRead;
