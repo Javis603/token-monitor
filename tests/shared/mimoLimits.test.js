@@ -1285,3 +1285,64 @@ test('a usable plaintext cookie wins over a sealed duplicate row', () => {
   });
   assert.deepEqual(read, { userId: '42', cookieHeader: 'passToken=p; userId=42' });
 });
+
+test('today and week are the console total’s own deltas, and a drop only rebases', () => {
+  const { recordMimoCumulativeSpend } = require('../../src/shared/providers/mimo/spendHistory');
+  let store = null;
+  const io = { readJson: () => store, writeJsonAtomic: (_path, next) => { store = next; } };
+  const call = (totalCost, at) => recordMimoCumulativeSpend({ accountKey: 'sha256:a', totalCost, now: at, storePath: '/x/mimo-spend.json', ...io });
+
+  const first = call(1.5, Date.UTC(2026, 8, 27, 6));
+  assert.equal(first.todaySpend, 0, 'a first observation is a baseline, not a day of spending');
+  assert.equal(first.weekSpend, 0);
+  assert.equal(first.trackingSince, Date.UTC(2026, 8, 27, 6));
+
+  const second = call(1.8, Date.UTC(2026, 8, 27, 7));
+  assert.equal(second.todaySpend, 0.3);
+  assert.equal(second.weekSpend, 0.3);
+  assert.equal('monthSinceTracking' in second, false, 'the month is the console’s, so no tracking caveat belongs on it');
+
+  const dropped = call(0.2, Date.UTC(2026, 8, 27, 8));
+  assert.equal(dropped.todaySpend, 0.3, 'a refund moves the baseline without recording negative spend');
+  const after = call(0.5, Date.UTC(2026, 8, 27, 9));
+  assert.equal(after.todaySpend, 0.6);
+
+  assert.equal(call(null, Date.UTC(2026, 8, 27, 10)), null, 'an omitted total is not a zero');
+  assert.equal(call(undefined, Date.UTC(2026, 8, 27, 10)), null);
+});
+
+test('the console row states the console’s own month and all time beside a locally tracked day', async () => {
+  let store = null;
+  const io = { readJson: () => store, writeJsonAtomic: (_path, next) => { store = next; } };
+  const options = {
+    mimoManagedAccounts: [{
+      id: 'mimo-1',
+      accountKey: mimoAccountKey('', { userId: '42' }),
+      cookieHeader: CONSOLE_COOKIE
+    }]
+  };
+  const probeAt = (totalCost, hour) => ({
+    fetch: mimoWorld({ totalCost }).fetch,
+    readMimoDesktopAccount: absentDesktop,
+    now: () => Date.UTC(2026, 8, 27, hour),
+    mimoStorePath: '/x/mimo-spend.json',
+    ...io
+  });
+
+  const first = await fetchMimoLimits(options, probeAt('1.50', 6));
+  assert.equal(first[0].balance.allTimeSpend, 1.5, 'all time stays the console’s own figure');
+  assert.equal(first[0].balance.monthSpend, 0.05, 'and so does the month');
+  assert.equal(first[0].balance.todaySpend, 0);
+
+  const second = await fetchMimoLimits(options, probeAt('1.80', 7));
+  assert.equal(second[0].balance.todaySpend, 0.3, 'the day is what the total moved by');
+  assert.equal(second[0].balance.weekSpend, 0.3);
+  assert.equal(second[0].balance.monthSpend, 0.05, 'the local ledger never replaces the console’s month');
+  assert.equal(second[0].balance.monthSinceTracking, false);
+  assert.equal(typeof second[0].balance.trackingSince, 'string', 'the ledger states when it began observing');
+
+  const probed = await fetchMimoLimits(options, { ...probeAt('9.00', 8), probe: true });
+  assert.equal(probed[0].balance.todaySpend, null, 'a credential probe does not write history');
+  const afterProbe = await fetchMimoLimits(options, probeAt('1.90', 9));
+  assert.equal(afterProbe[0].balance.todaySpend, 0.4, 'and the baseline is the one the collector left');
+});

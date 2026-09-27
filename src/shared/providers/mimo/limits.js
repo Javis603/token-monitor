@@ -1,7 +1,9 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const path = require('node:path');
 const { throwIfAborted } = require('../../abortSignal');
+const { readJson, sharedDataDir, writeJsonAtomic } = require('../../config');
 const { hashKey } = require('../../hashKey');
 const { MIMO_CONSOLE_PRODUCT } = require('../../limits/windowLabels');
 const { normalizeLimitProvider } = require('../../limits/core');
@@ -10,6 +12,7 @@ const { MIMO_CONSOLE_URL, mimoRequestHeaders } = require('./browserHeaders');
 const { mimoEndpointTime } = require('./endpointTime');
 const { readMimoDesktopAccount } = require('./desktop');
 const { mintMimoServiceSession, mimoExchangeStatus, readConsoleStatus } = require('./session');
+const { recordMimoCumulativeSpend } = require('./spendHistory');
 const {
   MIMO_MEMBERSHIP_LABEL,
   fetchMimoMembershipAccount,
@@ -300,6 +303,18 @@ async function fetchMimoAccount(account, deps = {}) {
     const detail = parseMimoPlanDetail(detailBody, (deps.now || Date.now)());
     const usage = parseMimoPlanUsage(usageBody);
     const spend = parseMimoSpend(spendBody);
+    // What the account spent between two observations of the console's own
+    // cumulative total — the only way to state Today and Week on an API with no
+    // daily rollup. A probe does not write history: it is the user checking the
+    // credential they just pasted, not the collector's own cadence.
+    const trackedSpend = deps.probe ? null : recordMimoCumulativeSpend({
+      accountKey: account.accountKey,
+      totalCost: spend.allTimeSpend ?? null,
+      now: (deps.now || Date.now)(),
+      storePath: deps.mimoStorePath || path.join(sharedDataDir({ env: deps.env }), 'mimo-spend.json'),
+      readJson: deps.readJson || readJson,
+      writeJsonAtomic: deps.writeJsonAtomic || writeJsonAtomic
+    });
     const windows = [];
     const hasActiveTokenPlan = detail.active;
     const hasTokenPlanQuota = hasActiveTokenPlan && usage.limit !== null && usage.limit > 0;
@@ -348,6 +363,9 @@ async function fetchMimoAccount(account, deps = {}) {
         // derived from these at display time (`balance / (balance + monthSpend)`,
         // the same rule deepseek's wallet follows) and never travels the wire.
         ...spend,
+        // Today and Week, plus the honest `trackingSince` marker: the console
+        // states neither period, so they are this machine's observations.
+        ...(trackedSpend || {}),
         planStatus: hasExpiredTokenPlan ? 'expired' : null,
         planUsed: hasTokenPlanQuota ? usage.used : null,
         planLimit: hasTokenPlanQuota ? usage.limit : null,
