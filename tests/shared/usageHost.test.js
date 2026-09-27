@@ -443,6 +443,35 @@ test('a settings change is confirmed only after the capture the worker was alrea
   assert.equal(readSessionUsageArchiveSnapshot().sessions['codex:in-flight'].periods.allTime.totalTokens, 120);
 });
 
+test('a settings change during a replacement is confirmed only once the previous worker has exited', async () => {
+  const coordinator = createUsageHostCoordinator({ workerPath: SCRIPTED_WORKER });
+  const host = { transformSettings: { sessionUsageArchiveEnabled: true }, agentPidPath: path.join(sharedDir, 'no-agent.pid') };
+  const previous = coordinator.create({ ...recorder().options, scriptedSessionId: 'handover-a' }, host);
+  await previous.tick('watch');
+
+  // The previous worker is inside a tick's synchronous work when it is replaced
+  // and the archive is paused; its replacement has not started yet.
+  const busy = previous.tick('busy');
+  previous.stop();
+  const next = coordinator.create({ ...recorder().options, scriptedSessionId: 'handover-b' }, host);
+  next.updateTransformSettings({ sessionUsageArchiveEnabled: false });
+  let confirmed = false;
+  const applied = next.transformSettingsApplied().then(() => { confirmed = true; });
+  await flush();
+  assert.equal(confirmed, false);
+
+  await applied;
+  assert.equal(await busy, true);
+  assert.equal(await next.tick('watch'), true);
+  next.stop();
+  await next.whenIdle();
+  const archive = readSessionUsageArchiveSnapshot();
+  // The previous worker's in-flight capture landed before the confirmation;
+  // the replacement started paused.
+  assert.equal(archive.sessions['codex:handover-a'].periods.allTime.totalTokens, 120);
+  assert.equal(archive.sessions['codex:handover-b'], undefined);
+});
+
 test('a real worker that crashes hands its pending call to this thread', async () => {
   const inProcess = fakeInProcessCollector();
   const coordinator = createUsageHostCoordinator({ workerPath: SCRIPTED_WORKER, startCollector: inProcess.startCollector });

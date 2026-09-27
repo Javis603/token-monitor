@@ -271,12 +271,21 @@ function createUsageHostCoordinator(deps = {}) {
       // fallback the owner's own transform reads its settings live, so there is
       // nothing to send.
       updateTransformSettings(next = {}) {
-        if (collector || stopped) return;
+        if (collector) return;
         const serialized = JSON.stringify(next);
         if (serialized === sentTransformSettings) return;
         sentTransformSettings = serialized;
+        // A worker asked to stop can still be finishing a capture, so only its
+        // exit confirms that nothing more is written under the old settings.
+        if (stopped) {
+          settingsApplied = exit;
+          return;
+        }
+        // Not started yet: the predecessor it waits for is the writer that can
+        // still capture under the old settings.
         if (!worker) {
           workerData.transformSettings = next;
+          settingsApplied = gate;
           return;
         }
         worker.postMessage({ type: 'transformSettings', settings: next });
