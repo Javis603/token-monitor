@@ -332,6 +332,7 @@ const {
   createStatsPublicationBatcher,
   rendererStats
 } = require('./statsPublisher');
+const { createSseBlockReader, parseSseBlock } = require('./sseEventReader');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
 const {
@@ -4525,18 +4526,6 @@ function stopStatsStream() {
   if (sseRetryTimer) { clearTimeout(sseRetryTimer); sseRetryTimer = null; }
 }
 
-function parseSseChunk(chunk) {
-  let event = 'message';
-  const dataLines = [];
-  for (const line of chunk.split('\n')) {
-    if (!line || line.startsWith(':')) continue;
-    if (line.startsWith('event:')) event = line.slice(6).trim();
-    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
-  }
-  if (dataLines.length === 0) return null;
-  try { return { event, data: JSON.parse(dataLines.join('\n')) }; } catch (_) { return null; }
-}
-
 async function startStatsStream(options = {}) {
   stopStatsStream();
   const generation = hubModeGeneration;
@@ -4570,18 +4559,14 @@ async function startStatsStream(options = {}) {
     sendStatus(true);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let buffer = '';
+    const blocks = createSseBlockReader();
     for (;;) {
       if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
       const { value, done } = await reader.read();
       if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
       if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let idx;
-      while ((idx = buffer.indexOf('\n\n')) !== -1) {
-        const chunk = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        const parsed = parseSseChunk(chunk);
+      for (const block of blocks.push(decoder.decode(value, { stream: true }))) {
+        const parsed = parseSseBlock(block);
         if (parsed) {
           if ((parsed.event === 'stats' || parsed.event === 'snapshot') && parsed.data?.stats) {
             setLatestHubStatsCache(parsed.data.stats, 'client', generation, cacheIdentity);
