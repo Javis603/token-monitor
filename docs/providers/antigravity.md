@@ -41,7 +41,7 @@ Normal scans include both database identities. A custom Antigravity root is pass
 
 ### Watch behavior
 
-The native roots are watched because tokscale reads them without writing back to them. A change can therefore trigger an Antigravity-targeted refresh safely.
+The native roots are watched so that a change there triggers an Antigravity-targeted refresh. Reading them is not quite write-free: the extension keeps one SQLite database per conversation in WAL mode, and each read-only scan rewrites every conversation's `*.db-shm` wal-index. The collector therefore drops `-shm` events for Antigravity (`SELF_WATCHED_SQLITE_SIDECAR_CLIENTS`); otherwise every scan would schedule the next one, about every 2 s, with nothing new to collect. Real activity still arrives through the `*.db` and `*.db-wal` files.
 
 The generated `antigravity-cache` directory is deliberately not watched. Token Monitor's own sync writes it, so watching it would create a refresh loop.
 

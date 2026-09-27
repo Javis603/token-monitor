@@ -3157,11 +3157,18 @@ test('self-watch db-shm events are ignored for every client whose scan recreates
   const { isSelfWatchSqliteSidecarEvent } = freshCollector();
   const qoderRoot = path.join(os.tmpdir(), 'QoderCN', 'db');
   const zcodeRoot = path.join(os.tmpdir(), 'zcode', 'cli', 'db');
-  const roots = { qodercn: [qoderRoot], zcode: [zcodeRoot] };
+  const antigravityRoot = path.join(os.tmpdir(), '.gemini', 'antigravity');
+  const antigravityConversation = path.join(antigravityRoot, 'conversations');
+  const roots = { antigravity: [antigravityRoot], qodercn: [qoderRoot], zcode: [zcodeRoot] };
 
   // Each client keeps its own database basename: Qoder CN names it local.db,
-  // ZCode names it db.sqlite.
-  for (const [root, base] of [[qoderRoot, 'local.db'], [zcodeRoot, 'db.sqlite']]) {
+  // ZCode names it db.sqlite, Antigravity names one per conversation, below its
+  // watch root.
+  for (const [root, base] of [
+    [qoderRoot, 'local.db'],
+    [zcodeRoot, 'db.sqlite'],
+    [antigravityConversation, '1f17ba78-fe78-4ed6-9f69-07387625fdad.db']
+  ]) {
     assert.equal(isSelfWatchSqliteSidecarEvent(path.join(root, base + '-shm'), roots), true);
     assert.equal(isSelfWatchSqliteSidecarEvent(path.join(root, base + '-wal'), roots), false,
       'the -wal carries real data and must still trigger a scan');

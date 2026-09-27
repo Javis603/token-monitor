@@ -2423,13 +2423,17 @@ function watcherOptions(usePolling, ignored) {
 // event, forever. Measured on darwin for zcode: 0 shm changes while idle over
 // 40s, then 20 of 20 consecutive tokscale zcode --today scans rewrote
 // db.sqlite-shm. The same shape was already fixed for Qoder CN (#301), where it
-// was 142 events/5min with the client stopped.
+// was 142 events/5min with the client stopped. Antigravity keeps one database
+// per conversation, so each scan rewrites every one of their sidecars: with the
+// app closed, 0 changes over 15s idle, then 37 of 37 conversations' .db-shm on
+// each of 5 consecutive scans. A widget that uploads every tick then republished
+// its unchanged record to the Hub about every 2 s.
 //
 // Only the sidecar is dropped. The real data signal lives in the database and
 // its -wal, so a genuine change still produces an event; a client whose scan was
 // measured NOT to rewrite its sidecar (mimo) is deliberately absent here, and
 // adding a client to this list asserts a measurement rather than a hunch.
-const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['qodercn', 'zcode']);
+const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'qodercn', 'zcode']);
 
 function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
   // Match SQLite's wal-index suffix, not one client's database basename: ZCode's
