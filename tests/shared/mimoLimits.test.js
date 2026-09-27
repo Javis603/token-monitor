@@ -1316,30 +1316,34 @@ test('today and week are the console total’s own deltas, and a drop only rebas
   const { recordMimoCumulativeSpend } = require('../../src/shared/providers/mimo/spendHistory');
   let store = null;
   const io = { readJson: () => store, writeJsonAtomic: (_path, next) => { store = next; } };
+  // Days are local to the ledger, so these stamps are built in local time: a
+  // UTC literal would land on a different local day at another offset (the
+  // suite runs at several), splitting one day's bucket in two.
+  const at = (dayOfMonth, hour) => new Date(2026, 8, dayOfMonth, hour).getTime();
   const call = (totalCost, at) => recordMimoCumulativeSpend({ accountKey: 'sha256:a', currency: 'CNY', totalCost, now: at, storePath: '/x/mimo-spend.json', ...io });
 
-  const first = call(1.5, Date.UTC(2026, 8, 27, 6));
+  const first = call(1.5, at(27, 6));
   assert.equal(first.todaySpend, 0, 'a first observation is a baseline, not a day of spending');
   assert.equal(first.weekSpend, 0);
-  assert.equal(first.trackingSince, Date.UTC(2026, 8, 27, 6));
+  assert.equal(first.trackingSince, at(27, 6));
 
-  const second = call(1.8, Date.UTC(2026, 8, 27, 7));
+  const second = call(1.8, at(27, 7));
   assert.equal(second.todaySpend, 0.3);
   assert.equal(second.weekSpend, 0.3);
   assert.equal('monthSinceTracking' in second, false, 'the month is the console’s, so no tracking caveat belongs on it');
 
-  const dropped = call(0.2, Date.UTC(2026, 8, 27, 8));
+  const dropped = call(0.2, at(27, 8));
   assert.equal(dropped.todaySpend, 0.3, 'a refund moves the baseline without recording negative spend');
-  const after = call(0.5, Date.UTC(2026, 8, 27, 9));
+  const after = call(0.5, at(27, 9));
   assert.equal(after.todaySpend, 0.6);
 
   // The rolling seven days the other two providers keep: a bucket older than
   // that stays out of `weekSpend` while today's own bucket is counted. The
   // deltas here are +0.5 into the 17th and +0.5 into the 27th, on top of the
   // 0.6 the 27th already holds.
-  const oldDay = call(1.0, Date.UTC(2026, 8, 17, 9));
+  const oldDay = call(1.0, at(17, 9));
   assert.equal(oldDay.todaySpend, 0.5, 'a delta lands on the day it was observed');
-  const back = call(1.5, Date.UTC(2026, 8, 27, 10));
+  const back = call(1.5, at(27, 10));
   assert.equal(back.todaySpend, 1.1, 'today counts only its own bucket');
   assert.equal(back.weekSpend, 1.1, 'the week is the last seven days, not everything the store keeps');
   assert.equal(back.trackingSince, first.trackingSince, 'the ledger states when observation began once, and that does not move');
@@ -1347,13 +1351,13 @@ test('today and week are the console total’s own deltas, and a drop only rebas
   // A ledger only compares like with like: switching the console's currency
   // rebases it rather than subtracting one currency's total from another's.
   const otherCurrency = recordMimoCumulativeSpend({
-    accountKey: 'sha256:a', currency: 'USD', totalCost: 5, now: Date.UTC(2026, 8, 27, 11), storePath: '/x/mimo-spend.json', ...io
+    accountKey: 'sha256:a', currency: 'USD', totalCost: 5, now: at(27, 11), storePath: '/x/mimo-spend.json', ...io
   });
   assert.equal(otherCurrency.todaySpend, 0, 'a currency change starts a new baseline');
-  assert.equal(otherCurrency.trackingSince, Date.UTC(2026, 8, 27, 11));
+  assert.equal(otherCurrency.trackingSince, at(27, 11));
 
-  assert.equal(call(null, Date.UTC(2026, 8, 27, 10)), null, 'an omitted total is not a zero');
-  assert.equal(call(undefined, Date.UTC(2026, 8, 27, 10)), null);
+  assert.equal(call(null, at(27, 10)), null, 'an omitted total is not a zero');
+  assert.equal(call(undefined, at(27, 10)), null);
 });
 
 test('the console row states the console’s own month and all time beside a locally tracked day', async () => {
