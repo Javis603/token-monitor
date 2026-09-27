@@ -74,7 +74,6 @@
       spendWindow,
       limitWindowLabel,
       limitWindowText,
-      isMimoMembershipProduct,
       mimoProductLabel,
       accountIdentity,
       accountControl,
