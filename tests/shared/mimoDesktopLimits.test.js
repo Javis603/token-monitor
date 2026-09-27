@@ -751,6 +751,43 @@ test('a stalled membership read times out without discarding the Console result'
   ]);
 });
 
+test('a stalled Desktop console exchange times out without discarding other rows', { timeout: 1000 }, async () => {
+  const world = mimoWorld();
+  let exchangeAborted = false;
+  const fetch = (url, init) => {
+    if (String(url) === `${CONSOLE_BASE}/userProfile` && init.headers?.Cookie?.includes('userId=7')) {
+      return Promise.resolve(reply(200, { code: 0, data: { userId: '7' } }));
+    }
+    if (String(url) === `${CONSOLE_BASE}/balance` && !init.headers?.Cookie?.includes('api-platform_serviceToken=')) {
+      return new Promise((resolve, reject) => {
+        init.signal?.addEventListener('abort', () => {
+          exchangeAborted = true;
+          reject(init.signal.reason || new Error('aborted'));
+        }, { once: true });
+      });
+    }
+    return world.fetch(url, init);
+  };
+  const rows = await fetchMimoLimits({
+    mimoManagedAccounts: [{
+      id: 'mimo-7',
+      accountKey: CONSOLE_ACCOUNT_KEY_7,
+      cookieHeader: CONSOLE_COOKIE.replace('userId=42', 'userId=7')
+    }]
+  }, {
+    fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    accountTimeoutMs: 5,
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(exchangeAborted, true, 'the stalled exchange receives the account timeout');
+  assert.deepEqual(rows.map((row) => [row.accountKey, row.status]), [
+    [CONSOLE_ACCOUNT_KEY_7, 'ok'],
+    [CONSOLE_ACCOUNT_KEY_42, 'unavailable'],
+    [MEMBERSHIP_ACCOUNT_KEY_42, 'ok']
+  ]);
+});
+
 test('a membership the account does not have is not a row, and the wallet is untouched', async () => {
   const world = mimoWorld({ subscription: { code: 0, data: { current: null } } });
   const rows = await fetchMimoLimits({}, {

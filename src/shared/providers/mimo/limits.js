@@ -593,13 +593,15 @@ async function fetchMimoConsoleSide(entry, deps) {
   if (account) return { consoleRow: await fetchMimoAccountWithTimeout(account, deps) };
   const discovered = entry.console?.discovered;
   if (!discovered) return {};
-  const minted = discovered.ok
-    ? await mintMimoConsoleCredential(entry, discovered, deps)
-    : { ok: false, status: discovered.status };
-  if (!minted.ok) {
-    return { consoleFailure: { status: minted.status, source: 'local', sourceDetail: 'app' } };
-  }
-  return { consoleRow: await fetchMimoAccountWithTimeout(minted.account, deps) };
+  if (!discovered.ok) return { consoleFailure: { status: discovered.status, source: 'local', sourceDetail: 'app' } };
+  return runMimoAccountTaskWithTimeout(async (signal) => {
+    const scopedDeps = { ...deps, signal };
+    const minted = await mintMimoConsoleCredential(entry, discovered, scopedDeps);
+    if (!minted.ok) {
+      return { consoleFailure: { status: minted.status, source: 'local', sourceDetail: 'app' } };
+    }
+    return { consoleRow: await fetchMimoAccount(minted.account, scopedDeps) };
+  }, () => ({ consoleFailure: { status: 'unavailable', source: 'local', sourceDetail: 'app' } }), deps);
 }
 
 async function fetchMimoMembershipSide(entry, deps) {
