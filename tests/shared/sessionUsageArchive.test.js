@@ -354,6 +354,56 @@ test('canonical capture updates only changed rows in place', () => {
   assert.equal(result.archive.sessions['opencode:o1'].periods.allTime.totalTokens, 101);
 });
 
+// The shape the archive store hands over: periods already normalized, which is
+// what lets capture read sessions without normalizing them again.
+function canonicalLiveSummary() {
+  const summary = liveSummary();
+  for (const periodName of ['today', 'month', 'allTime']) summary[periodName] = normalizePeriod(summary[periodName]);
+  return summary;
+}
+
+test('canonical capture does not copy a session that has not changed', () => {
+  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  const summary = canonicalLiveSummary();
+  let copies = 0;
+  // Invisible to the comparison, which reads enumerable keys only, but called
+  // by every JSON round-trip of the session.
+  Object.defineProperty(summary.allTime.sessions['opencode:o1'], 'toJSON', {
+    enumerable: false,
+    value() {
+      copies += 1;
+      return { ...this };
+    }
+  });
+
+  const result = updateSessionUsageArchive(archive, summary, new Date('2026-07-09T08:30:00.000Z'), { canonicalSummary: true });
+
+  assert.deepEqual([...result.changedKeys], []);
+  assert.equal(copies, 0);
+});
+
+test('canonical capture ignores a difference the stored copy could not hold', () => {
+  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  const summary = canonicalLiveSummary();
+  summary.allTime.sessions['opencode:o1'].unset = undefined;
+
+  const result = updateSessionUsageArchive(archive, summary, new Date('2026-07-09T08:30:00.000Z'), { canonicalSummary: true });
+
+  assert.deepEqual([...result.changedKeys], []);
+});
+
+test('canonical capture stores a changed session as its own copy', () => {
+  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  const summary = canonicalLiveSummary();
+  summary.allTime.sessions['opencode:o1'].totalTokens = 101;
+
+  const result = updateSessionUsageArchive(archive, summary, new Date('2026-07-09T08:30:00.000Z'), { canonicalSummary: true });
+  summary.allTime.sessions['opencode:o1'].totalTokens = 999;
+
+  assert.deepEqual([...result.changedKeys], ['opencode:o1']);
+  assert.equal(archive.sessions['opencode:o1'].periods.allTime.totalTokens, 101);
+});
+
 test('canonical capture safely prunes malformed entries without period windows', () => {
   const archive = {
     version: 1,
