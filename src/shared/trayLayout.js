@@ -1085,6 +1085,7 @@
               }, stats, options, recentProvider);
               return {
                 source,
+                metric: source.metric,
                 available: resolved.available,
                 text: resolved.text,
                 provider: resolved.provider || null,
