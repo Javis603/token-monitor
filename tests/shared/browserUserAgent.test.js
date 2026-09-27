@@ -19,6 +19,13 @@ const root = path.join(__dirname, '..', '..');
 
 const SHARED_AGENT_FILE = 'src/shared/browserUserAgent.js';
 
+// These cases reach the MiMo provider, whose console ledger defaults to the
+// app's own data directory; a test must never write there. The same isolation
+// the archive tests make with this variable, for the whole file (node runs each
+// test file in its own process).
+process.env.TOKEN_MONITOR_SHARED_DIR = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'mimo-ledger-tests-'));
+
+
 function jsFilesUnder(dir) {
   const out = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

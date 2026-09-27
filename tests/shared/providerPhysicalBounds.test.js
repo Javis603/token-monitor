@@ -1,7 +1,16 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
+
+// These cases reach the MiMo provider, whose console ledger defaults to the
+// app's own data directory; a test must never write there. The same isolation
+// the archive tests make with this variable, for the whole file (node runs each
+// test file in its own process).
+process.env.TOKEN_MONITOR_SHARED_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'mimo-ledger-tests-'));
 
 const {
   collectLimitsOnce,

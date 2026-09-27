@@ -15,6 +15,13 @@ const { collectLimitsOnce } = require('../../src/shared/limits/collector');
 const { codexAccountKey } = require('../../src/shared/providers/codex/auth');
 const { hashKey } = require('../../src/shared/hashKey');
 
+// These cases reach the MiMo provider, whose console ledger defaults to the
+// app's own data directory; a test must never write there. The same isolation
+// the archive tests make with this variable, for the whole file (node runs each
+// test file in its own process).
+process.env.TOKEN_MONITOR_SHARED_DIR = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'mimo-ledger-tests-'));
+
+
 function codexProvider(accountKey, accountEmail, remainingPercent, updatedAt) {
   return {
     provider: 'codex',

@@ -1,8 +1,16 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+
+// The console's spend ledger defaults to the app's own data directory, which a
+// test must never write: the same isolation the archive tests make with this
+// variable, applied for the whole file (node runs each test file in its own
+// process). Tests that assert on the ledger still inject their own store.
+process.env.TOKEN_MONITOR_SHARED_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'mimo-limits-tests-'));
 
 const {
   createMimoManagedAccount,
