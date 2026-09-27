@@ -48,16 +48,38 @@ function attachLocalPresentationNativeViews(stats, options = {}) {
 
 // Each local collection replaces the record rather than mutating it, and every
 // Hub event in between recomposes it again. Normalizing it once per record takes
-// the largest share of a recompose off the main thread.
+// the largest share of a recompose off the main thread. A summary normalizes the
+// record with its all-time session list already emptied: those sessions are
+// most of the normalization, and a summary would only drop them afterwards.
 const normalizedLocalRecords = new WeakMap();
+const normalizedLocalSummaries = new WeakMap();
 
-function normalizedLocalRecord(localDevice) {
-  let normalized = normalizedLocalRecords.get(localDevice);
+function cachedNormalization(cache, record, prepare) {
+  let normalized = cache.get(record);
   if (!normalized) {
-    normalized = normalizeDeviceRecord(localDevice);
-    normalizedLocalRecords.set(localDevice, normalized);
+    normalized = normalizeDeviceRecord(prepare(record));
+    cache.set(record, normalized);
   }
   return normalized;
+}
+
+function normalizedLocalRecord(localDevice) {
+  return cachedNormalization(normalizedLocalRecords, localDevice, (record) => record);
+}
+
+// A local record carries its periods at the top level, a wire record under
+// `periods`; normalizeDeviceRecord() reads either.
+function withoutRawAllTimeSessions(record) {
+  const stripped = { ...record };
+  if (record.allTime?.sessions) stripped.allTime = { ...record.allTime, sessions: {} };
+  if (record.periods?.allTime?.sessions) {
+    stripped.periods = { ...record.periods, allTime: { ...record.periods.allTime, sessions: {} } };
+  }
+  return stripped;
+}
+
+function normalizedLocalSummary(localDevice) {
+  return cachedNormalization(normalizedLocalSummaries, localDevice, withoutRawAllTimeSessions);
 }
 
 const summaryRecords = new WeakMap();
@@ -86,8 +108,11 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
   const hubStaleAfterMs = nonNegativeNumber(hubStats?.staleAfterMs);
   const hasHubStaleAfterMs = hubStaleAfterMs !== null;
   const normalize = (record) => (record === localDevice ? normalizedLocalRecord(localDevice) : normalizeDeviceRecord(record));
+  const summarize = (record) => (record === localDevice
+    ? normalizedLocalSummary(localDevice)
+    : withoutAllTimeSessions(normalizeDeviceRecord(record)));
   const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs, {
-    normalizeRecord: options.allTimeSessions === false ? (record) => withoutAllTimeSessions(normalize(record)) : normalize
+    normalizeRecord: options.allTimeSessions === false ? summarize : normalize
   });
 
   aggregate.devices = aggregate.devices.map((device) => {
@@ -138,7 +163,20 @@ const completions = new WeakMap();
 function composeLocalSyncSummary(hubStats, localDevice, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
   const summary = composeLocalSyncStats(hubStats, localDevice, { nowMs, allTimeSessions: false });
-  if (summary && summary !== hubStats) completions.set(summary, { hubStats, localDevice, nowMs, complete: null });
+  if (summary && summary !== hubStats) {
+    completions.set(summary, { compose: () => composeLocalSyncStats(hubStats, localDevice, { nowMs }), complete: null });
+  }
+  return summary;
+}
+
+// Local mode's publish: this machine's record alone, summarised the same way.
+// `finish` adds what main layers on top of the aggregate, to the summary now and
+// to its completion when that is asked for.
+function composeLocalOnlySummary(localDevice, finish, options = {}) {
+  const nowMs = options.nowMs ?? Date.now();
+  const compose = (normalizeRecord) => finish(aggregateDevices([localDevice], 0, nowMs, { normalizeRecord }));
+  const summary = compose(normalizedLocalSummary);
+  completions.set(summary, { compose: () => compose(normalizedLocalRecord), complete: null });
   return summary;
 }
 
@@ -146,7 +184,7 @@ function composeLocalSyncSummary(hubStats, localDevice, options = {}) {
 function completeLocalSyncStats(stats) {
   const entry = stats && typeof stats === 'object' ? completions.get(stats) : null;
   if (!entry) return stats;
-  if (!entry.complete) entry.complete = composeLocalSyncStats(entry.hubStats, entry.localDevice, { nowMs: entry.nowMs });
+  if (!entry.complete) entry.complete = entry.compose();
   return entry.complete;
 }
 
@@ -154,6 +192,7 @@ module.exports = {
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
+  composeLocalOnlySummary,
   composeLocalSyncStats,
   composeLocalSyncSummary
 };
