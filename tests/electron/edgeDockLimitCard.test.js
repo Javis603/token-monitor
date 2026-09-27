@@ -703,7 +703,9 @@ test('MiMo membership rows distinguish accounts and keep the tier beside the pro
   ]);
   assert.equal(group.find('limit-plan').textContent, '2 products');
   assert.equal(accounts[0].find('limit-plan').textContent, 'Pro');
-  assert.equal(accounts[1].find('limit-plan').textContent, 'No active plan');
+  // No plan and no window: the product name already says which row it is, so the
+  // plan cell is empty rather than stating that the app has no plan right now.
+  assert.equal(accounts[1].find('limit-plan')?.textContent ?? '', '');
 });
 
 test('a group-only plan replacement leaves a solo row its plan', () => {

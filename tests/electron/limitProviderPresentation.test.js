@@ -2919,13 +2919,14 @@ test('MiMo Limits rows show the no-plan and source-specific recovery text', () =
     accountIdentity: require('../../src/electron/renderer/accountIdentity'),
     settings: () => ({}),
     t: (key) => ({
-      'limits.mimo.noPlan': '暂无套餐',
       'settings.mimo.desktopRelogin': '请重新登录 MiMo Desktop',
       'settings.mimo.repasteCookie': '请重新粘贴 MiMo Cookie'
     })[key] || key,
     presentation: presentation
   });
-  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', windows: [] }), '暂无套餐');
+  // No plan and no window is a product row with nothing to meter; its plan cell
+  // stays empty rather than stating that the app has no plan right now.
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', windows: [] }), '');
   assert.equal(
     view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', windows: [{ kind: 'weekly' }] }),
     '',

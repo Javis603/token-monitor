@@ -1531,9 +1531,6 @@
     const mimoProduct = provider?.provider === 'mimo' ? mimoProductLabel(provider) : '';
     if (mimoProduct) {
       const plan = String(provider?.planLabel || '').trim();
-      if (isMimoMembershipProduct(provider)
-        && provider?.status === 'ok'
-        && !plan && !provider?.windows?.length) return t('limits.mimo.noPlan');
       // Current MiMo rows keep the product in accountLabel and the plan in
       // planLabel. Falling back to accountLabel would repeat the product in the
       // plan cell when the app deliberately has no plan name. Legacy rows take
