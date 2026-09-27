@@ -1,5 +1,7 @@
 'use strict';
 
+const { readJson, writeJsonAtomic } = require('../../config');
+
 // The console reports cumulative money spent and the current month, and nothing
 // finer: the per-call ledger behind it is a paginated POST, so Today and Week are
 // not questions this API answers. They are what the account spent between two
@@ -25,18 +27,21 @@ function localDayKey(ms) {
 // A cumulative total only ever grows in normal use, so consumption is the
 // positive delta between observations. A drop (refund, plan reset) moves the
 // baseline without recording negative spend — the same rule Z.ai documents.
-function recordMimoCumulativeSpend({ accountKey, currency, totalCost, now, storePath, readJson, writeJsonAtomic }) {
+function recordMimoCumulativeSpend({ accountKey, currency, totalCost, now, storePath, readJson: readOverride, writeJsonAtomic: writeOverride }) {
   // A null total is a report that omitted the field, not a zero: Number(null)
   // is 0, so the check must come before the finite one or a missing field would
   // rebase the tracked total to zero.
   if (!accountKey || totalCost === null || !Number.isFinite(totalCost) || !storePath) return null;
   const nowMs = Number(now);
   const total = Math.max(0, totalCost);
+  const read = readOverride || readJson;
+  const write = writeOverride || writeJsonAtomic;
   let store;
   try {
-    // config.readJson returns null on ENOENT instead of throwing, so the null
-    // check — not only this try/catch — is what makes a fresh store.
-    store = readJson(storePath, 'utf8');
+    // config.readJson answers null for a missing or unparsable file instead of
+    // throwing, so the shape check below — not only this try/catch — is what
+    // makes a fresh store.
+    store = read(storePath);
   } catch (_) {}
   if (!store || typeof store !== 'object' || Array.isArray(store)
     || !store.accounts || typeof store.accounts !== 'object' || Array.isArray(store.accounts)) {
@@ -88,7 +93,7 @@ function recordMimoCumulativeSpend({ accountKey, currency, totalCost, now, store
   // baseline and its delta still lands.
   if (changed) {
     try {
-      writeJsonAtomic(storePath, store);
+      write(storePath, store);
     } catch (_) {}
   }
 

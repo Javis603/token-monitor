@@ -3,7 +3,7 @@
 const crypto = require('node:crypto');
 const path = require('node:path');
 const { throwIfAborted } = require('../../abortSignal');
-const { readJson, sharedDataDir, writeJsonAtomic } = require('../../config');
+const { sharedDataDir } = require('../../config');
 const { hashKey } = require('../../hashKey');
 const { MIMO_CONSOLE_PRODUCT } = require('../../limits/windowLabels');
 const { normalizeLimitProvider } = require('../../limits/core');
@@ -313,8 +313,8 @@ async function fetchMimoAccount(account, deps = {}) {
       totalCost: spend.allTimeSpend ?? null,
       now: (deps.now || Date.now)(),
       storePath: deps.mimoStorePath || path.join(sharedDataDir({ env: deps.env }), 'mimo-spend.json'),
-      readJson: deps.readJson || readJson,
-      writeJsonAtomic: deps.writeJsonAtomic || writeJsonAtomic
+      readJson: deps.readJson,
+      writeJsonAtomic: deps.writeJsonAtomic
     });
     const windows = [];
     const hasActiveTokenPlan = detail.active;
