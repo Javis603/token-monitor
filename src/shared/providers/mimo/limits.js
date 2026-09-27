@@ -435,12 +435,12 @@ function scopedMimoManagedAccounts(value, scope) {
   });
 }
 
-// Show a discovered console account beside saved accounts, unless its identity
-// is already saved. The discovered account is never removable here.
+// List the detected Desktop source beside saved Console sources. An enabled
+// saved source for the same account already represents it in Settings.
 function withDetectedMimoAccount(storedAccounts = [], detected = null) {
   const accounts = storedAccounts.map((account) => ({ ...account, removable: true }));
   if (!detected?.accountKey) return accounts;
-  if (accounts.some((account) => account.accountKey === detected.accountKey)) return accounts;
+  if (accounts.some((account) => account.accountKey === detected.accountKey && account.enabled !== false)) return accounts;
   return [...accounts, { ...detected, removable: false }];
 }
 

@@ -422,6 +422,16 @@ test('a disabled manual console is not revived by discovery, while membership st
   const rows = await fetchMimoLimits(options, deps);
   assert.deepEqual(rows.map((row) => row.accountLabel), ['Desktop Membership']);
   assert.equal(rows[0].accountKey, MEMBERSHIP_ACCOUNT_KEY_42);
+  const listed = withDetectedMimoAccount(
+    [{ id: 'mimo-1', accountKey: CONSOLE_ACCOUNT_KEY_42, enabled: false }],
+    { id: 'mimo-local-session', accountKey: CONSOLE_ACCOUNT_KEY_42, enabled: true }
+  );
+  assert.deepEqual(listed.map(({ id, enabled, removable }) => ({ id, enabled, removable })), [
+    { id: 'mimo-1', enabled: false, removable: true },
+    { id: 'mimo-local-session', enabled: true, removable: false }
+  ]);
+  assert.equal(listed.filter((account) => account.enabled !== false).length, 1,
+    'settings must count the Desktop membership that the provider still reports');
   assert.deepEqual(world.mints(), { console: 0, membership: 1 });
   const nextRows = await fetchMimoLimits(options, deps);
   assert.equal(nextRows.some((row) => row.removed), false, 'a disabled product is not tracked as an automatic row to remove every tick');
