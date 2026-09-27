@@ -136,7 +136,7 @@ source         string | null                              optional
 
 A `current` that is an array is invalid, the envelope's `groupCode` and `subscriptions` are read nowhere, and only `current` matters. The bundle's own fixture also carries `id`, `title`, `status`, `startTime` and `bizNo`; nothing reads them, so nothing should depend on them.
 
-Token Monitor reports no current plan as an `ok` membership row with no quota window. That clears a previous meter without putting a normal no-plan answer into the transient retry path.
+Token Monitor treats no current plan as a successful no-subscription answer and omits the membership row. If a previous membership row existed, the runtime-only removal marker clears it without putting a normal no-plan answer into the transient retry path.
 
 Plan names follow the app's current-plan card:
 
@@ -194,7 +194,7 @@ Every console credential names one account, keyed as `hashKey("mimo:" + userId)`
 
 In Settings, a disabled saved Console credential does not hide a detected Desktop session for the same account: the disabled manual source and active local source are listed separately, while Limits still reports only the membership product.
 
-The membership is that account's **second product**, so it gets a second row, keyed `hashKey("mimo:membership:" + userId)`. The two keys must differ: the hub collapses rows per account key (`aggregateLimits` → `pickBetterProvider`), so one key would publish one of the two products and drop the other — the reason `alibaba` separates its Team and Personal rows by variant. The row exists only when the machine has a Desktop session (see Failure isolation); a machine with none shows the console product alone.
+The membership is that account's **second product**, so it gets a second row, keyed `hashKey("mimo:membership:" + userId)`. The two keys must differ: the hub collapses rows per account key (`aggregateLimits` → `pickBetterProvider`), so one key would publish one of the two products and drop the other — the reason `alibaba` separates its Team and Personal rows by variant. A Desktop session can publish this row for a current plan or a lane-specific failure; a successful no-plan answer omits it, and a machine with no Desktop session shows the console product alone.
 
 If the Desktop account signs out or changes while a pasted Console account still answers, the provider explicitly removes the vanished automatic row identities. Omitting them is insufficient because the limits runtime treats a missing identity in a mixed response as transient and retains its last good quota. The removal is a **control row** — `{ provider, accountKey, removed: true }`, carrying no reading — that `collectLimitsOnce` and the runtime's `commitRows` consume and that is stripped before normalization, so it never reaches a device record or the wire. The provider compares with the runtime's last accepted rows, so a superseded probe cannot consume a removal before it commits. It is the one row this provider emits that is an instruction rather than a reading.
 
@@ -251,4 +251,4 @@ Run the MiMo limits, credential and presentation tests when changing this note's
 node --test tests/shared/mimo*.test.js tests/electron/mimoExchangeFetch.test.js
 ```
 
-`tests/shared/mimoLimits.test.js` is the provider's suite — the console lane's parsers and allowlist, the two-lane composition, the exchange's classification and the local reader's refusals — run against an injected world that walks both real chains, so nothing in it reaches MiMo. `tests/electron/mimoExchangeFetch.test.js` covers the widget's transport, including a real CONNECT proxy.
+`tests/shared/mimoLimits.test.js` covers the existing console contract; `tests/shared/mimoDesktopLimits.test.js` covers the two-lane composition, exchange classification and local reader against an injected world, so neither test reaches MiMo. `tests/electron/mimoExchangeFetch.test.js` covers the widget's transport, including a real CONNECT proxy.
