@@ -1,9 +1,11 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
-const { createStatsPresentationCache, createStatsPublicationBatcher } = require('../../src/electron/statsPublisher');
+const { createStatsPresentationCache, createStatsPublicationBatcher, rendererStats } = require('../../src/electron/statsPublisher');
 
 function fakeTimers() {
   const timers = [];
@@ -130,4 +132,60 @@ test('cancel drops the pending batch', () => {
   assert.equal(clock.timers[0].cleared, true);
   batcher.flush();
   assert.deepEqual(published, []);
+});
+
+function syncModeStats() {
+  const localToday = { totalTokens: 10, clients: { claude: 10 }, sessions: { 'claude:a': { totalTokens: 10 } }, projects: { p: { totalTokens: 10 } } };
+  const localAllTime = { totalTokens: 90, clients: { claude: 90 }, sessions: { 'claude:a': { totalTokens: 90 } }, projects: { p: { totalTokens: 90 } } };
+  return {
+    periods: {
+      today: { totalTokens: 10, sessions: { 'claude:a': { totalTokens: 10 } } },
+      allTime: { totalTokens: 90, sessions: { 'claude:month-only': { totalTokens: 5 } } }
+    },
+    allTimeSessionsView: { 'claude:a': { totalTokens: 90 }, 'claude:month-only': { totalTokens: 5 } },
+    devices: [
+      { deviceId: 'local', history: { daily: [] }, periods: { today: localToday, allTime: localAllTime } },
+      { deviceId: 'legacy', today: { totalTokens: 1 } }
+    ],
+    limits: { providers: [] }
+  };
+}
+
+test('the renderer copy drops device sessions and projects but keeps their totals', () => {
+  const stats = syncModeStats();
+  const snapshot = structuredClone(stats);
+  const result = rendererStats(stats);
+
+  const local = result.devices[0];
+  assert.deepEqual(local.periods.today, { totalTokens: 10, clients: { claude: 10 } });
+  assert.deepEqual(local.periods.allTime, { totalTokens: 90, clients: { claude: 90 } });
+  assert.equal(local.history, stats.devices[0].history);
+  assert.equal(result.devices[1], stats.devices[1], 'a record without periods passes through');
+  assert.equal(result.limits, stats.limits);
+  assert.deepEqual(stats, snapshot, 'the published snapshot main keeps is not mutated');
+});
+
+test('the TOTAL session view replaces the aggregate list instead of travelling beside it', () => {
+  const stats = syncModeStats();
+  const result = rendererStats(stats);
+
+  assert.equal(Object.hasOwn(result, 'allTimeSessionsView'), false);
+  assert.equal(result.periods.allTime.sessions, stats.allTimeSessionsView);
+  assert.equal(result.periods.allTime.totalTokens, 90);
+  assert.equal(result.periods.today, stats.periods.today);
+  // The exporter reads main's copy, which keeps the lossless aggregate.
+  assert.deepEqual(stats.periods.allTime.sessions, { 'claude:month-only': { totalTokens: 5 } });
+});
+
+test('local mode, which builds no session view, keeps its aggregate periods as they are', () => {
+  const stats = { periods: { allTime: { sessions: { 'claude:a': {} } } }, devices: [] };
+  assert.equal(rendererStats(stats).periods, stats.periods);
+  assert.equal(rendererStats(null), null);
+});
+
+test('every stats payload sent to the renderer goes through rendererStats', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  assert.equal((main.match(/stats: rendererStats\(visibleStats\)/g) || []).length, 2, 'stats push and presentation refresh');
+  assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*?return rendererStats\(electronPresentationStats\(stats\)\);/);
+  assert.doesNotMatch(main, /stats: visibleStats\b/);
 });

@@ -28,7 +28,6 @@ function renderAccountShellError(id) {
     errorText: accountShellErrors[id] || ''
   });
 }
-const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
@@ -6579,22 +6578,6 @@ function settleRefreshButtonState(status) {
   }, REFRESH_BUTTON_FEEDBACK_MS);
 }
 
-// The main process rebuilds the TOTAL session list for display but ships it as a
-// display-only sibling (`allTimeSessionsView`) so it never pollutes the lossless
-// period export. Overlay it onto periods.allTime here, on the renderer's own copy, so
-// every session-view reader (list, archived count, detail lookup) sees it. See
-// injectLocalDeviceStatus in main.js.
-function overlayAllTimeSessions(stats) {
-  if (stats && stats.allTimeSessionsView && stats.periods?.allTime) {
-    const sessions = reasonixSessionGuard?.filterReasonixSyntheticSessions
-      ? reasonixSessionGuard.filterReasonixSyntheticSessions(stats.allTimeSessionsView)
-      : stats.allTimeSessionsView;
-    stats.allTimeSessionsView = sessions;
-    stats.periods.allTime.sessions = sessions;
-  }
-  return stats;
-}
-
 async function refreshStats(options = {}) {
   const feedback = options.feedback === true;
   if (feedback) {
@@ -6604,7 +6587,7 @@ async function refreshStats(options = {}) {
     setRefreshButtonState('refreshing');
   }
   try {
-    const nextStats = overlayAllTimeSessions(await window.tokenMonitor.getStats(options));
+    const nextStats = await window.tokenMonitor.getStats(options);
     observeLiveTokenRate(nextStats);
     state.stats = nextStats;
     observeDisplayLiveTokenRates(nextStats);
@@ -12131,7 +12114,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     }
     if (payload.data?.mode) state.mode = payload.data.mode;
     if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
-    state.stats = overlayAllTimeSessions(payload.data.stats);
+    state.stats = payload.data.stats;
     observeLiveTokenRate(state.stats);
     observeDisplayLiveTokenRates(state.stats);
     applyCodexActiveAccountFromStats();

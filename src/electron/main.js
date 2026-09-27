@@ -319,7 +319,7 @@ const {
   attachLocalPresentationNativeViews,
   composeLocalSyncStats
 } = require('./syncDisplayStats');
-const { createStatsPresentationCache, createStatsPublicationBatcher } = require('./statsPublisher');
+const { createStatsPresentationCache, createStatsPublicationBatcher, rendererStats } = require('./statsPublisher');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
 const { createIcloudSyncStore } = require('./icloudSync');
@@ -4305,7 +4305,7 @@ function injectLocalDeviceStatus(stats) {
   // then this machine's own full all-time sessions once collected (free, in-process). Carry
   // it as a display-only sibling instead of mutating periods.allTime.sessions: the exporter
   // writes periods verbatim under a lossless contract, so the export must keep the true
-  // aggregate. The renderer overlays this onto periods.allTime for the session view.
+  // aggregate. rendererStats() swaps it in for periods.allTime.sessions on the renderer's copy.
   // Only sync/host mode needs this: in local mode periods.allTime.sessions already holds the
   // full native list, so building the sibling there would just ship the unbounded map twice.
   if (mode !== 'local' && stats.periods?.allTime) {
@@ -4553,7 +4553,7 @@ function sendPush(payload, options = {}) {
     const visibleStats = electronPresentationStats(latestStats);
     rendererPayload = {
       ...payload,
-      data: { ...payload.data, stats: visibleStats }
+      data: { ...payload.data, stats: rendererStats(visibleStats) }
     };
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
     updateEdgeDockCells(visibleStats);
@@ -5530,7 +5530,7 @@ function refreshLimitStatsPresentation() {
     try {
       mainWindow.webContents.send('stats:push', {
         event: 'stats',
-        data: { type: 'stats', reason: 'presentation', mode, stats: visibleStats }
+        data: { type: 'stats', reason: 'presentation', mode, stats: rendererStats(visibleStats) }
       });
     } catch (_) {}
   }
@@ -7632,7 +7632,7 @@ app.whenReady().then(() => {
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);
-    return electronPresentationStats(stats);
+    return rendererStats(electronPresentationStats(stats));
   });
   ipcMain.handle('devices:delete', async (_event, deviceId) => {
     try {
