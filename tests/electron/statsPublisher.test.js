@@ -5,7 +5,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { createStatsPresentationCache, createStatsPublicationBatcher, rendererStats } = require('../../src/electron/statsPublisher');
+const {
+  createRendererSnapshots,
+  createStatsPresentationCache,
+  createStatsPublicationBatcher,
+  rendererStats
+} = require('../../src/electron/statsPublisher');
 
 function fakeTimers() {
   const timers = [];
@@ -179,10 +184,55 @@ test('the all-time session list stays out of the renderer copy in every mode', (
   assert.equal(rendererStats(null), null);
 });
 
-test('every stats payload sent to the renderer goes through rendererStats', () => {
+test('every stats payload sent to the renderer goes through rendererStats and names its snapshot', () => {
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
-  assert.equal((main.match(/stats: rendererStats\(visibleStats\)/g) || []).length, 2, 'stats push and presentation refresh');
-  assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*?return rendererStats\(electronPresentationStats\(stats\)\);/);
+  assert.equal(
+    (main.match(/stats: rendererSnapshots\.stamp\(latestStats, rendererStats\(visibleStats\)\)/g) || []).length,
+    2,
+    'stats push and presentation refresh'
+  );
+  assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*?return rendererSnapshots\.stamp\(stats, rendererStats\(electronPresentationStats\(stats\)\)\);/);
   assert.doesNotMatch(main, /stats: visibleStats\b/);
-  assert.match(main, /ipcMain\.handle\('stats:allTimeSessions', \(\) => rendererAllTimeSessions\(latestStats\)\)/);
+  assert.match(
+    main,
+    /ipcMain\.handle\('stats:allTimeSessions', \(_event, snapshotId\) => rendererAllTimeSessions\(rendererSnapshots\.get\(snapshotId\)\)\)/
+  );
+  assert.match(main, /createRendererSnapshots\(\{ source: \(\) => hubModeGeneration \}\)/);
+});
+
+test('the pulled list completes its snapshot with the local record that snapshot was built with', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const pull = main.match(/function rendererAllTimeSessions\(stats\) \{([\s\S]*?)\n\}\n/);
+  assert.ok(pull, 'rendererAllTimeSessions exists');
+  // The live record moves on between publishes; reading it here would show a
+  // newer local list under the older snapshot's totals.
+  assert.doesNotMatch(pull[1], /lastCollectedDevice/);
+  assert.match(pull[1], /snapshotLocalDevices\.get\(stats\)/);
+  const inject = main.match(/function injectLocalDeviceStatus\(stats\) \{([\s\S]*?)\n\}\n/);
+  assert.match(inject[1], /if \(mode !== 'local'\) snapshotLocalDevices\.set\(stats, \{ localDevice: lastCollectedDevice \}\);\s*return stats;\s*$/);
+});
+
+test('a snapshot stays addressable after newer ones are published', () => {
+  let source = 3;
+  const snapshots = createRendererSnapshots({ source: () => source, limit: 2 });
+  const first = { periods: {} };
+  const copy = { periods: {}, limits: {} };
+  const stamped = snapshots.stamp(first, copy);
+  assert.deepEqual(stamped.snapshot, { id: 1, source: 3 });
+  assert.equal(stamped.limits, copy.limits);
+  assert.equal(Object.hasOwn(copy, 'snapshot'), false, 'the copy passed in is not mutated');
+  assert.deepEqual(snapshots.stamp(first, {}).snapshot, { id: 1, source: 3 }, 'one id per snapshot object');
+
+  // The renderer adopted `first` through stats:get; a later push must not
+  // redirect a pull for it to the newer snapshot.
+  source = 4;
+  const second = { periods: {} };
+  assert.deepEqual(snapshots.stamp(second, {}).snapshot, { id: 2, source: 4 });
+  assert.equal(snapshots.get(1), first);
+  assert.equal(snapshots.get(2), second);
+
+  snapshots.stamp({ periods: {} }, {});
+  assert.equal(snapshots.get(1), null, 'only the most recent snapshots stay addressable');
+  assert.equal(snapshots.get(undefined), null);
+  assert.equal(snapshots.stamp(null, null), null);
 });

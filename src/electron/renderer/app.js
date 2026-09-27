@@ -11951,7 +11951,8 @@ function allTimeSessionsNeeded() {
   return state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');
 }
 const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
-  fetchSessions: () => window.tokenMonitor.getAllTimeSessions(),
+  fetchSessions: (snapshotId) => window.tokenMonitor.getAllTimeSessions(snapshotId),
+  currentSnapshot: () => state.stats?.snapshot,
   needed: allTimeSessionsNeeded,
   onLoaded: () => {
     if (state.stats) state.stats = allTimeSessions.attach(state.stats);

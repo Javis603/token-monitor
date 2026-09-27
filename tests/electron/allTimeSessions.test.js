@@ -17,17 +17,27 @@ function harness(options = {}) {
   const loaded = [];
   const errors = [];
   let needed = options.needed ?? true;
+  let current = { id: 1, source: 0 };
   const loader = createAllTimeSessionsLoader({
-    fetchSessions: () => new Promise((resolve, reject) => calls.push({ resolve, reject })),
+    fetchSessions: (id) => new Promise((resolve, reject) => calls.push({ id, resolve, reject })),
+    currentSnapshot: () => current,
     needed: () => needed,
-    onLoaded: () => loaded.push(loader.attach(stats())),
+    onLoaded: () => loaded.push(loader.attach(stats(current))),
     onError: (error) => errors.push(error)
   });
-  return { loader, calls, loaded, errors, setNeeded: (value) => { needed = value; } };
+  return {
+    loader,
+    calls,
+    loaded,
+    errors,
+    setNeeded: (value) => { needed = value; },
+    // A new snapshot is adopted: the renderer's stats change, then invalidate.
+    adopt: (snapshot) => { current = snapshot; loader.invalidate(); }
+  };
 }
 
-function stats() {
-  return { periods: { today: { sessions: {} }, allTime: { totalTokens: 9 } }, limits: {} };
+function stats(snapshot = { id: 1, source: 0 }) {
+  return { periods: { today: { sessions: {} }, allTime: { totalTokens: 9 } }, limits: {}, snapshot };
 }
 
 test('attaching copies the pulled list onto new stats without touching them', () => {
@@ -46,7 +56,7 @@ test('attaching copies the pulled list onto new stats without touching them', ()
 });
 
 test('a pull starts only when the list is stale and something shows it', async () => {
-  const { loader, calls, loaded, setNeeded } = harness({ needed: false });
+  const { loader, calls, loaded, setNeeded, adopt } = harness({ needed: false });
   loader.ensure();
   await settle();
   assert.equal(calls.length, 0, 'not needed');
@@ -64,19 +74,19 @@ test('a pull starts only when the list is stale and something shows it', async (
   loader.ensure();
   await settle();
   assert.equal(calls.length, 1, 'fresh until new stats arrive');
-  loader.invalidate();
+  adopt({ id: 2, source: 0 });
   loader.ensure();
   await settle();
-  assert.equal(calls.length, 2);
+  assert.deepEqual(calls.map((call) => call.id), [1, 2], 'each pull names the snapshot on screen');
 });
 
 test('stats that arrive during a pull are read by one more pull, not by parallel ones', async () => {
-  const { loader, calls } = harness();
+  const { loader, calls, adopt } = harness();
   loader.ensure();
   await settle();
-  loader.invalidate();
+  adopt({ id: 2, source: 0 });
   loader.ensure();
-  loader.invalidate();
+  adopt({ id: 3, source: 0 });
   loader.ensure();
   await settle();
   assert.equal(calls.length, 1, 'one pull in flight');
@@ -84,10 +94,50 @@ test('stats that arrive during a pull are read by one more pull, not by parallel
   calls[0].resolve({ old: {} });
   await settle();
   assert.equal(calls.length, 2, 'the newer stats are pulled once');
+  assert.equal(calls[1].id, 3);
   calls[1].resolve({ fresh: {} });
   await settle();
   assert.equal(calls.length, 2);
-  assert.deepEqual(Object.keys(loader.attach(stats()).periods.allTime.sessions), ['fresh']);
+  assert.deepEqual(Object.keys(loader.attach(stats({ id: 3, source: 0 })).periods.allTime.sessions), ['fresh']);
+});
+
+test('a list never crosses to another source, even when it lands after the switch', async () => {
+  const { loader, calls, loaded, adopt } = harness();
+  loader.ensure();
+  await settle();
+  calls[0].resolve({ 'hub-a': {} });
+  await settle();
+  assert.ok(loader.attach(stats({ id: 2, source: 0 })).periods.allTime.sessions, 'same source: kept until the next pull');
+  const otherHub = stats({ id: 5, source: 1 });
+  assert.equal(loader.attach(otherHub), otherHub, 'another source gets nothing attached');
+
+  adopt({ id: 2, source: 0 });
+  loader.ensure();
+  await settle();
+  adopt({ id: 5, source: 1 });
+  calls[1].resolve({ 'hub-a-late': {} });
+  await settle();
+  assert.equal(loaded.length, 1, 'the late list from the old source is dropped');
+  assert.equal(loader.loaded(), false);
+  assert.equal(calls.length, 3, 'and the new source is pulled instead');
+  assert.equal(calls[2].id, 5);
+  calls[2].resolve({ 'hub-b': {} });
+  await settle();
+  assert.deepEqual(Object.keys(loader.attach(otherHub).periods.allTime.sessions), ['hub-b']);
+});
+
+test('nothing is pulled before the renderer holds a stamped snapshot', async () => {
+  const calls = [];
+  const loader = createAllTimeSessionsLoader({
+    fetchSessions: (id) => { calls.push(id); return {}; },
+    currentSnapshot: () => undefined,
+    needed: () => true,
+    onLoaded: () => {}
+  });
+  loader.ensure();
+  await settle();
+  assert.deepEqual(calls, []);
+  assert.equal(loader.loaded(), false);
 });
 
 test('a hidden list is only marked stale, and pulled once it shows again', async () => {
@@ -136,7 +186,8 @@ test('the renderer attaches the pulled list to every stats it adopts and pulls f
   const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
 
   assert.ok(html.indexOf('<script src="allTimeSessions.js">') < html.indexOf('<script src="app.js">'));
-  assert.match(preload, /getAllTimeSessions: \(\) => ipcRenderer\.invoke\('stats:allTimeSessions'\)/);
+  assert.match(preload, /getAllTimeSessions: \(snapshotId\) => ipcRenderer\.invoke\('stats:allTimeSessions', snapshotId\)/);
+  assert.match(app, /fetchSessions: \(snapshotId\) => window\.tokenMonitor\.getAllTimeSessions\(snapshotId\),\s*currentSnapshot: \(\) => state\.stats\?\.snapshot,/);
   assert.equal((app.match(/allTimeSessions\.invalidate\(\);\s*state\.stats = allTimeSessions\.attach\(/g) || []).length, 2, 'push and refresh');
   assert.doesNotMatch(app, /state\.stats = (payload\.data\.stats|nextStats);/);
   assert.match(app, /function render\(\) \{[\s\S]*?if \(!state\.stats\) return;\s*allTimeSessions\.ensure\(\);/);

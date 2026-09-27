@@ -111,4 +111,41 @@ function rendererStats(stats) {
   return result;
 }
 
-module.exports = { createStatsPresentationCache, createStatsPublicationBatcher, rendererStats };
+// A detail the renderer pulls has to belong to the stats it is showing, not to
+// whatever main published since. Every snapshot handed to the renderer is
+// stamped with an id it can pull by, and with the source generation it came
+// from, so a list pulled under one Hub is never shown under another. Only the
+// most recent snapshots stay addressable: the renderer only ever pulls for the
+// one it holds, and a newer push brings a newer id.
+function createRendererSnapshots(options = {}) {
+  const source = options.source;
+  if (typeof source !== 'function') throw new TypeError('source must be a function');
+  const limit = Math.max(1, Number(options.limit) || 8);
+  const tags = new WeakMap();
+  const byId = new Map();
+  let nextId = 1;
+
+  function register(stats) {
+    let tag = tags.get(stats);
+    if (!tag) {
+      tag = { id: nextId, source: source() };
+      nextId += 1;
+      tags.set(stats, tag);
+      byId.set(tag.id, stats);
+      if (byId.size > limit) byId.delete(byId.keys().next().value);
+    }
+    return tag;
+  }
+
+  return {
+    stamp(stats, copy) {
+      if (!stats || typeof stats !== 'object' || !copy || typeof copy !== 'object') return copy;
+      return { ...copy, snapshot: { ...register(stats) } };
+    },
+    get(id) {
+      return byId.get(id) || null;
+    }
+  };
+}
+
+module.exports = { createRendererSnapshots, createStatsPresentationCache, createStatsPublicationBatcher, rendererStats };

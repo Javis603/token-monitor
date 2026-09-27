@@ -326,7 +326,12 @@ const {
   completeLocalSyncStats,
   composeLocalSyncSummary
 } = require('./syncDisplayStats');
-const { createStatsPresentationCache, createStatsPublicationBatcher, rendererStats } = require('./statsPublisher');
+const {
+  createRendererSnapshots,
+  createStatsPresentationCache,
+  createStatsPublicationBatcher,
+  rendererStats
+} = require('./statsPublisher');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
 const {
@@ -2936,24 +2941,31 @@ function electronPresentationStats(stats) {
 }
 
 const allTimeSessionsCache = createStatsPresentationCache();
+const rendererSnapshots = createRendererSnapshots({ source: () => hubModeGeneration });
+// The local record each Hub snapshot was shown with, captured where the
+// snapshot was built. The collector replaces the live one between publishes.
+const snapshotLocalDevices = new WeakMap();
 
 // The renderer's all-time session list, which rendererStats() keeps out of every
-// push. A Hub aggregate carries no all-time session detail (syncPayload drops it
-// from uploads, #118), so sync and host mode rebuild the list: the Hub's
-// cross-device month sessions, then this machine's own full all-time list.
+// push, for the snapshot the renderer is showing. A Hub aggregate carries no
+// all-time session detail (syncPayload drops it from uploads, #118), so a Hub
+// snapshot rebuilds the list: the Hub's cross-device month sessions, then this
+// machine's own full all-time list as it stood when the snapshot was built.
 function rendererAllTimeSessions(stats) {
   if (!stats) return null;
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
-  const key = JSON.stringify([mode, aliases ?? null, grouping ?? null]);
+  const key = JSON.stringify([aliases ?? null, grouping ?? null]);
   return allTimeSessionsCache.get(stats, key, () => {
     const complete = completeLocalSyncStats(stats);
-    const sessions = mode === 'local'
-      ? complete.periods?.allTime?.sessions || {}
-      : mergedLocalAllTimeSessions(complete.periods, lastCollectedDevice);
+    const hubSnapshot = snapshotLocalDevices.get(stats);
+    const sessions = hubSnapshot
+      ? mergedLocalAllTimeSessions(complete.periods, hubSnapshot.localDevice)
+      : complete.periods?.allTime?.sessions || {};
     return projectModelAliasSessions(stats, sessions, aliases, { grouping });
   });
 }
+
 let codexPresentationPendingSince = 0;
 let trayCodexSwitchInFlight = false;
 const DEFAULT_EXPORT_INTERVAL_MS = 60 * 1000;
@@ -4005,6 +4017,7 @@ function injectLocalDeviceStatus(stats) {
       if (lastCollectedDevice.wslStatus) device.wslStatus = lastCollectedDevice.wslStatus;
     }
   }
+  if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
   return stats;
 }
 
@@ -4246,7 +4259,7 @@ function sendPush(payload, options = {}) {
     const visibleStats = electronPresentationStats(latestStats);
     rendererPayload = {
       ...payload,
-      data: { ...payload.data, stats: rendererStats(visibleStats) }
+      data: { ...payload.data, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
     };
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
     updateEdgeDockCells(visibleStats);
@@ -5222,7 +5235,7 @@ function refreshLimitStatsPresentation() {
     try {
       mainWindow.webContents.send('stats:push', {
         event: 'stats',
-        data: { type: 'stats', reason: 'presentation', mode, stats: rendererStats(visibleStats) }
+        data: { type: 'stats', reason: 'presentation', mode, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
       });
     } catch (_) {}
   }
@@ -7295,9 +7308,9 @@ app.whenReady().then(() => {
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);
-    return rendererStats(electronPresentationStats(stats));
+    return rendererSnapshots.stamp(stats, rendererStats(electronPresentationStats(stats)));
   });
-  ipcMain.handle('stats:allTimeSessions', () => rendererAllTimeSessions(latestStats));
+  ipcMain.handle('stats:allTimeSessions', (_event, snapshotId) => rendererAllTimeSessions(rendererSnapshots.get(snapshotId)));
   ipcMain.handle('export:now', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
