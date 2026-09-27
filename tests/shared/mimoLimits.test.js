@@ -817,20 +817,38 @@ test('a stalled membership read times out without discarding the Console result'
   ]);
 });
 
-test('no membership plan is an answer, and it neither hides the wallet nor invents a window', async () => {
+test('a membership the account does not have is not a row, and the wallet is untouched', async () => {
   const world = mimoWorld({ subscription: { code: 0, data: { current: null } } });
   const rows = await fetchMimoLimits({}, {
     fetch: world.fetch,
     readMimoDesktopAccount: signedInDesktop(),
     now: () => Date.UTC(2026, 8, 24)
   });
-  assert.equal(rows.length, 2);
+  // The console lane states the wallet and its plan; a membership with no
+  // subscription is what the Token Plan with no plan is — nothing to show, so
+  // nothing is drawn rather than an empty row carrying a product name.
+  assert.equal(rows.length, 1);
   assert.equal(rows[0].status, 'ok');
   assert.equal(rows[0].accountLabel, 'Console');
   assert.equal(rows[0].planLabel, 'Pay-as-you-go');
-  assert.equal(rows[1].status, 'ok', 'a machine with no plan is still a membership the user can be told about');
-  assert.equal(rows[1].accountLabel, 'Desktop Membership', 'the product names the row where no plan does');
-  assert.deepEqual(rows[1].windows, [], 'no plan means no weekly window');
+  assert.deepEqual(rows.filter((row) => row.accountLabel === 'Desktop Membership'), []);
+});
+
+test('a membership that ends clears the row it used to publish', async () => {
+  const active = await fetchMimoLimits({}, {
+    fetch: mimoWorld({ subscription: { code: 0, data: { current: { planTier: 3, percent: 65, nextResetTime: '2026-10-01T00:00:00Z' } } } }).fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.equal(active.some((row) => row.accountLabel === 'Desktop Membership'), true);
+
+  const ended = await fetchMimoLimits({ previousLimits: { providers: active } }, {
+    fetch: mimoWorld({ subscription: { code: 0, data: { current: null } } }).fetch,
+    readMimoDesktopAccount: signedInDesktop(),
+    now: () => Date.UTC(2026, 8, 24)
+  });
+  assert.deepEqual(ended.filter((row) => row.removed).map((row) => row.accountKey), [MEMBERSHIP_ACCOUNT_KEY_42],
+    'the identity the ended subscription published is removed, not retained as a transient miss');
 });
 
 test('a console lane that answers alone still publishes the account', async () => {

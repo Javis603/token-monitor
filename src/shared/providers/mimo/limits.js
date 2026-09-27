@@ -725,6 +725,13 @@ function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, upd
   }
 
   const label = mimoMembershipPlanLabel(membership.plan);
+  const membershipWindows = mimoMembershipWindows(membership.plan);
+  // A subscription the account does not have is not a row: the same rule the
+  // console lane follows for a Token Plan it cannot find, and the reason a row
+  // would otherwise be left on screen with nothing in it but its product name.
+  // An account that *had* one and no longer does drops out of the response, and
+  // the removal pass below clears the identity it used to publish.
+  if (!label && !membershipWindows.length) return rows;
   rows.push(normalizeLimitProvider({
     provider: 'mimo',
     source: 'local',
@@ -736,7 +743,7 @@ function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, upd
     accountEmail: identity.email,
     accountLabel: MIMO_MEMBERSHIP_LABEL,
     planLabel: label,
-    windows: mimoMembershipWindows(membership.plan)
+    windows: membershipWindows
   }));
   return rows;
 }

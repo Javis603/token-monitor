@@ -205,7 +205,7 @@ The two rows carry one account identity: the console profile name plus a short o
 | Console | `Console` | the Token Plan name, else `Pay-as-you-go` | `web` + `managed` for a pasted credential, `local` + `app` for one minted from the machine |
 | Desktop membership | `Desktop Membership` | `Starter` / `Plus` / `Pro` / `Ultra`; an unknown tier uses the vendor's `planCode` | `local` + `app` |
 
-The membership has no plan to name when the subscription answers `current: null`; the row still appears, with no weekly window, and its plan cell stays empty. That is the repository's own rule read to the end rather than an exception to it: `limitProviderPlan()` states the plan, and falls back to the row's account label when there is none — a fallback that exists so a row whose identity lives in that label still says what it is. MiMo's identity is already in the row title (`MiMo 95a1ab4 · Desktop Membership`, the product word carried by `accountLabel`), so the fallback has nothing left to say and the cell stays empty instead of repeating the product.
+The membership has no plan to name when the subscription answers `current: null`, and the row is then **absent rather than empty** — a subscription the account does not have is not a row, which is the same rule the console lane follows for a Token Plan it cannot find (no plan, no window, nothing drawn). When a subscription ends, the row drops out of the response and the removal pass clears the identity it had published, so the last reading does not linger.
 
 ### Failure isolation
 
