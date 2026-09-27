@@ -8,8 +8,9 @@ const { errorWithStatus } = require('../../limits/providerHelpers');
 
 // The app's own Electron session partition: `persist:xiaomi-account` is a literal
 // in its bundle, and `Partitions/<name>/` under userData is Electron's rule for
-// one. macOS is measured on disk. Windows follows Electron's `%APPDATA%` rule;
-// Linux discovery remains disabled until its shipped storage shape is verified.
+// one. macOS is measured on disk; Windows is not measured at all, so its root
+// follows Electron's `%APPDATA%` rule without confirmation. MiMo Desktop has no
+// Linux build, so Linux has no store to read.
 const MIMO_PARTITION_DIR = path.join('Partitions', 'xiaomi-account');
 const MIMO_COOKIE_FILE = 'Cookies';
 

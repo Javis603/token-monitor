@@ -65,7 +65,7 @@ The hop through `/api/sts` is what **mints the service session**, and the cookie
 
 `~/Library/Application Support/Xiaomi MiMo/Partitions/xiaomi-account/Cookies` — the app's own Electron partition, the one its login window uses. A Chromium SQLite cookie store, so the read is a read-only `DatabaseSync` open, the shape `readCursorDesktopAccessToken` already establishes for another app's store.
 
-macOS is measured. Windows uses Electron's documented `%APPDATA%` location under the same `Xiaomi MiMo` product root, but remains unverified on disk. MiMo Desktop ships for macOS and Windows only, so Linux has no store to read and falls back to the existing manual console-cookie flow.
+macOS is measured. Windows is unverified: the path follows Electron's documented `%APPDATA%` rule under the same `Xiaomi MiMo` product root, and nothing about that store has been observed on a Windows install. MiMo Desktop ships for macOS and Windows only, so Linux has no store to read and falls back to the existing manual console-cookie flow.
 
 Two facts about its **contents** are load-bearing, both measured:
 
@@ -184,7 +184,7 @@ The rejected-account-cookie row is not hypothetical. Both lanes fail the same wa
 - **The timezone of zoneless membership timestamps.** The app fixture carries no offset. Token Monitor keeps the console provider's existing UTC normalization so synced devices agree; a live active-membership response is still needed to confirm that instant.
 - **A request with the wrong client headers may invalidate the account session.** This was observed after omitting `User-Agent`, so the exchange keeps the measured header shape. A normally rejected credential did not have the same effect.
 - **The long-term exchange tolerance is unknown.** Controlled bursts well above the shipped five-minute cadence completed cleanly and left the partition byte-identical. If production evidence later justifies fewer exchanges, cache minted sessions in memory and re-mint on 401; do not persist them.
-- **Windows on disk.** The measured install is macOS, where the cookie rows are plaintext. Chromium normally seals Windows cookies with DPAPI, so those rows may arrive sealed; the provider reports that as `notConfigured` and falls back silently. Linux is intentionally unsupported because MiMo Desktop has no Linux build.
+- **Windows on disk is unverified.** The measured install is macOS, where the cookie rows are plaintext. Whether a Windows install stores them in the clear or sealed is not known here — nothing about MiMo Desktop's Windows store has been observed. What the code does is fixed either way: a required cookie that arrives sealed is refused as `notConfigured` (fixture-covered), an unreadable store keeps the last reading instead of clearing it, and the manual paste stays available. Linux has no local source because MiMo Desktop has no Linux build.
 
 ## Wiring
 
