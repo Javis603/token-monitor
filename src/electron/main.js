@@ -235,23 +235,18 @@ const { normalizeCurrency, resolveEffectiveRates, configureRates } = require('..
 const { normalizeCompactTokenUnits } = require('../shared/compactTokens');
 const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
 const {
-  applyArchivedClientUsage,
   captureArchivedClientUsage,
   normalizeArchivedClientUsage,
   pruneArchivedClientUsage
 } = require('../shared/clientUsageArchive');
-const {
-  applySessionUsageArchive,
-  normalizeSessionUsageArchive,
-  sessionUsageArchiveDate
-} = require('../shared/sessionUsageArchive');
+const { sessionUsageArchiveDate } = require('../shared/sessionUsageArchive');
 const {
   createSessionUsageArchiveStore,
-  readSessionUsageArchiveSnapshot,
   sessionUsageArchiveDatabasePath
 } = require('../shared/sessionUsageArchiveStore');
+const { createUsageTransform } = require('../shared/usageTransform');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
-const { aggregateDevices, aggregateHistory, applyProjectRollups } = require('../shared/usage');
+const { aggregateDevices, aggregateHistory } = require('../shared/usage');
 const {
   HUB_RESPONSE_HEADER,
   HUB_RESPONSE_MINIMAL,
@@ -494,13 +489,7 @@ let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
 let antigravityOAuthLoginController = null;
-let sessionUsageArchive = null;
 const sessionUsageArchiveStore = createSessionUsageArchiveStore({ cursorUsageEvents: createCursorUsageEventIndex() });
-let lastSessionUsageArchiveUpdate = {
-  at: null,
-  durationMs: null,
-  failureCode: null
-};
 let rendererViewState = normalizeInitialRendererViewState();
 const serviceStatusClient = createServiceStatusClient();
 const codexResetForecastClient = createCodexResetForecastClient({
@@ -2664,78 +2653,12 @@ function updateArchivedClientUsage(previousClients, nextClients) {
   settings.archivedClientUsage = archive;
 }
 
-function ensureSessionUsageArchiveLoaded() {
-  if (sessionUsageArchive) return sessionUsageArchive;
-  try {
-    // The headless agent owns migration and pruning while its PID is active.
-    // Anchor projection must not turn Electron into a second archive writer.
-    sessionUsageArchive = isExternalAgentActive()
-      ? readSessionUsageArchiveSnapshot()
-      : sessionUsageArchiveStore.read();
-  } catch (error) {
-    console.log(`[session-archive] read failed: ${error.message}`);
-    sessionUsageArchive = normalizeSessionUsageArchive({});
-  }
-  return sessionUsageArchive;
-}
-
-function updateSessionUsageArchive(summary, now) {
-  const startedAt = Date.now();
-  const finish = (failureCode = null) => {
-    lastSessionUsageArchiveUpdate = {
-      at: new Date().toISOString(),
-      durationMs: Math.max(0, Date.now() - startedAt),
-      failureCode
-    };
-  };
-  try {
-    const result = sessionUsageArchiveStore.capture(summary, now);
-    sessionUsageArchive = result.archive;
-    if (result.error) throw result.error;
-  } catch (error) {
-    finish('archive-write-failed');
-    diagnosticJournal.record({ subsystem: 'storage', code: 'storage-archive-update-failed' });
-    console.log(`[session-archive] write failed: ${error.message}`);
-    return sessionUsageArchive || ensureSessionUsageArchiveLoaded();
-  }
-  finish();
-  return sessionUsageArchive;
-}
-
-// Read-only projection of both archives onto a summary. Un-tracked clients and
-// retained sessions add to the period totals, not just to the breakdowns, so
-// anything rendered without this reads low. Takes the session archive as an
-// argument because capturing into it is a separate decision, see below.
-function summaryWithArchivesApplied(summary, sessionArchive, now) {
-  const withArchivedClients = applyArchivedClientUsage(summary, settings?.archivedClientUsage, {
-    activeClients: settings?.clients,
-    now
-  });
-  const visibleSummary = settings?.sessionUsageArchiveEnabled === false
-    ? withArchivedClients
-    : applySessionUsageArchive(withArchivedClients, sessionArchive, {
-        now,
-        canonical: true,
-        canonicalSummary: true,
-        mutate: true
-      });
-  return settings?.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
-}
-
-function summaryWithArchivedClientUsage(summary) {
-  const now = sessionUsageArchiveDate(summary);
-  if (settings?.sessionUsageArchiveEnabled === false) return summaryWithArchivesApplied(summary, null, now);
-  if (isExternalAgentActive()) {
-    try {
-      sessionUsageArchive = sessionUsageArchiveStore.refresh(now);
-    } catch (error) {
-      console.log(`[session-archive] refresh failed: ${error.message}`);
-      sessionUsageArchive = sessionUsageArchive || normalizeSessionUsageArchive({});
-    }
-    return summaryWithArchivesApplied(summary, sessionUsageArchive, now);
-  }
-  return summaryWithArchivesApplied(summary, updateSessionUsageArchive(summary, now), now);
-}
+const usageTransform = createUsageTransform({
+  store: sessionUsageArchiveStore,
+  getSettings: () => settings,
+  isExternalAgentActive,
+  onCaptureFailure: () => diagnosticJournal.record({ subsystem: 'storage', code: 'storage-archive-update-failed' })
+});
 
 function applyMacActivationPolicy(state = {}) {
   if (process.platform !== 'darwin') return;
@@ -3075,13 +2998,13 @@ const diagnosticSnapshotBuilder = createDiagnosticSnapshotBuilder({
   getJournalSnapshot: () => diagnosticJournal.getSnapshot(),
   getArchiveState: () => {
     const enabled = settings?.sessionUsageArchiveEnabled !== false;
-    const loaded = sessionUsageArchive !== null;
+    const { loaded, sessionCount, lastUpdate } = usageTransform.getState();
     return {
       enabled,
       loaded,
-      sessionCount: loaded ? Object.keys(sessionUsageArchive?.sessions || {}).length : null,
+      sessionCount,
       countSource: loaded ? 'loaded-memory' : enabled ? 'not-loaded' : 'not-enabled',
-      lastUpdate: lastSessionUsageArchiveUpdate
+      lastUpdate
     };
   },
   getAppVersion: appVersion,
@@ -3888,7 +3811,7 @@ function startSyncCollector() {
   const sink = {
     async enqueue(summary, revision) {
       seedInitialLimitProviders(summary);
-      if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
+      if (isExternalAgentActive()) { usageTransform.forget(); return; }
       const visibleSummary = {
         ...summary,
         syncUploadIntervalMs: syncUploadIntervalMs()
@@ -3910,7 +3833,7 @@ function startSyncCollector() {
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
-    transformUsage: summaryWithArchivedClientUsage,
+    transformUsage: usageTransform.transform,
     usageOptions,
     sink,
     onDiagnosticEvent: recordDiagnosticEvent,
@@ -3930,7 +3853,7 @@ function startHostCollector() {
   const sink = {
     enqueue(summary) {
       seedInitialLimitProviders(summary);
-      if (isExternalAgentActive()) { sessionUsageArchive = null; return; }
+      if (isExternalAgentActive()) { usageTransform.forget(); return; }
       const visibleSummary = summary;
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       if (!embeddedHub) return;
@@ -3958,7 +3881,7 @@ function startHostCollector() {
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
-    transformUsage: summaryWithArchivedClientUsage,
+    transformUsage: usageTransform.transform,
     usageOptions,
     sink,
     onDiagnosticEvent: recordDiagnosticEvent,
@@ -4458,9 +4381,9 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
   // reads low for anyone with an un-tracked client or retained sessions, and then
   // jumps when the first scan lands. Read-only on purpose: the capture step
   // records a fresh observation, and an anchor from hours ago is not one.
-  const visible = summaryWithArchivesApplied(
+  const visible = usageTransform.project(
     deviceRecord,
-    settings?.sessionUsageArchiveEnabled === false ? null : ensureSessionUsageArchiveLoaded(),
+    settings?.sessionUsageArchiveEnabled === false ? null : usageTransform.ensureLoaded(),
     sessionUsageArchiveDate(deviceRecord)
   );
   localDevice = visible;
@@ -4491,7 +4414,7 @@ function startLocalCollector() {
     envelope: electronDeviceEnvelope(),
     initialLimits: lastCollectedDevice?.limits,
     limitsOptions: electronLimitsConfig(),
-    transformUsage: summaryWithArchivedClientUsage,
+    transformUsage: usageTransform.transform,
     usageOptions,
     progressive: true,
     onRecord: (summary, meta) => {
@@ -6844,7 +6767,7 @@ app.whenReady().then(() => {
     try {
       sessionUsageArchiveStore.clear();
       clearDailyHistoryArchive();
-      sessionUsageArchive = normalizeSessionUsageArchive({});
+      usageTransform.reset();
       return { ok: true };
     } catch (error) {
       return { ok: false, error: error.message };
