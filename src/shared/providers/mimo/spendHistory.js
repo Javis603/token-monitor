@@ -12,7 +12,8 @@
 // ledger adds is the two periods the console cannot state, plus `trackingSince`
 // so a reader can tell a quiet day from a ledger that began today.
 const MIMO_SPEND_STORE_VERSION = 1;
-const MIMO_SPEND_RETENTION_MS = 35 * 24 * 60 * 60 * 1000;
+// 40 days, the window DeepSeek's history and Z.ai's report both keep.
+const MIMO_SPEND_RETENTION_MS = 40 * 24 * 60 * 60 * 1000;
 
 function localDayKey(ms) {
   const date = new Date(ms);
@@ -24,7 +25,7 @@ function localDayKey(ms) {
 // A cumulative total only ever grows in normal use, so consumption is the
 // positive delta between observations. A drop (refund, plan reset) moves the
 // baseline without recording negative spend — the same rule Z.ai documents.
-function recordMimoCumulativeSpend({ accountKey, totalCost, now, storePath, readJson, writeJsonAtomic }) {
+function recordMimoCumulativeSpend({ accountKey, currency, totalCost, now, storePath, readJson, writeJsonAtomic }) {
   // A null total is a report that omitted the field, not a zero: Number(null)
   // is 0, so the check must come before the finite one or a missing field would
   // rebase the tracked total to zero.
@@ -41,10 +42,18 @@ function recordMimoCumulativeSpend({ accountKey, totalCost, now, storePath, read
     || !store.accounts || typeof store.accounts !== 'object' || Array.isArray(store.accounts)) {
     store = { version: MIMO_SPEND_STORE_VERSION, accounts: {} };
   }
+  const wanted = String(currency || '').trim();
   let entry = store.accounts[accountKey];
   let changed = false;
+  // A ledger only compares like with like: the console states its spend in the
+  // account's own currency, so a change of currency rebases the ledger instead
+  // of subtracting one currency's total from another's — DeepSeek's rule.
+  if (entry && wanted && String(entry.currency || '') !== wanted) {
+    entry = null;
+    changed = true;
+  }
   if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-    entry = { lastTotal: null, dailySpend: {}, trackingSince: nowMs };
+    entry = { lastTotal: null, currency: wanted, dailySpend: {}, trackingSince: nowMs };
     changed = true;
   }
   if (!entry.dailySpend || typeof entry.dailySpend !== 'object' || Array.isArray(entry.dailySpend)) {

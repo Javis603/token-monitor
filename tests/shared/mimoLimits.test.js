@@ -1290,7 +1290,7 @@ test('today and week are the console total’s own deltas, and a drop only rebas
   const { recordMimoCumulativeSpend } = require('../../src/shared/providers/mimo/spendHistory');
   let store = null;
   const io = { readJson: () => store, writeJsonAtomic: (_path, next) => { store = next; } };
-  const call = (totalCost, at) => recordMimoCumulativeSpend({ accountKey: 'sha256:a', totalCost, now: at, storePath: '/x/mimo-spend.json', ...io });
+  const call = (totalCost, at) => recordMimoCumulativeSpend({ accountKey: 'sha256:a', currency: 'CNY', totalCost, now: at, storePath: '/x/mimo-spend.json', ...io });
 
   const first = call(1.5, Date.UTC(2026, 8, 27, 6));
   assert.equal(first.todaySpend, 0, 'a first observation is a baseline, not a day of spending');
@@ -1306,6 +1306,14 @@ test('today and week are the console total’s own deltas, and a drop only rebas
   assert.equal(dropped.todaySpend, 0.3, 'a refund moves the baseline without recording negative spend');
   const after = call(0.5, Date.UTC(2026, 8, 27, 9));
   assert.equal(after.todaySpend, 0.6);
+
+  // A ledger only compares like with like: switching the console's currency
+  // rebases it rather than subtracting one currency's total from another's.
+  const otherCurrency = recordMimoCumulativeSpend({
+    accountKey: 'sha256:a', currency: 'USD', totalCost: 5, now: Date.UTC(2026, 8, 27, 11), storePath: '/x/mimo-spend.json', ...io
+  });
+  assert.equal(otherCurrency.todaySpend, 0, 'a currency change starts a new baseline');
+  assert.equal(otherCurrency.trackingSince, Date.UTC(2026, 8, 27, 11));
 
   assert.equal(call(null, Date.UTC(2026, 8, 27, 10)), null, 'an omitted total is not a zero');
   assert.equal(call(undefined, Date.UTC(2026, 8, 27, 10)), null);

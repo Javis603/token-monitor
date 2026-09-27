@@ -309,6 +309,7 @@ async function fetchMimoAccount(account, deps = {}) {
     // credential they just pasted, not the collector's own cadence.
     const trackedSpend = deps.probe ? null : recordMimoCumulativeSpend({
       accountKey: account.accountKey,
+      currency: balance.currency,
       totalCost: spend.allTimeSpend ?? null,
       now: (deps.now || Date.now)(),
       storePath: deps.mimoStorePath || path.join(sharedDataDir({ env: deps.env }), 'mimo-spend.json'),
