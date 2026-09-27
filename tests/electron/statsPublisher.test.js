@@ -235,4 +235,11 @@ test('a snapshot stays addressable after newer ones are published', () => {
   assert.equal(snapshots.get(1), null, 'only the most recent snapshots stay addressable');
   assert.equal(snapshots.get(undefined), null);
   assert.equal(snapshots.stamp(null, null), null);
+
+  // A presentation refresh re-sends an evicted `latestStats`: the id it hands
+  // out must resolve, and keep the source the snapshot was built under.
+  source = 5;
+  assert.deepEqual(snapshots.stamp(first, {}).snapshot, { id: 1, source: 3 });
+  assert.equal(snapshots.get(1), first);
+  assert.equal(snapshots.get(2), null, 'the re-stamped snapshot counts as recent');
 });

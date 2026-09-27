@@ -115,8 +115,11 @@ function rendererStats(stats) {
 // whatever main published since. Every snapshot handed to the renderer is
 // stamped with an id it can pull by, and with the source generation it came
 // from, so a list pulled under one Hub is never shown under another. Only the
-// most recent snapshots stay addressable: the renderer only ever pulls for the
-// one it holds, and a newer push brings a newer id.
+// most recently stamped snapshots stay addressable: the renderer only ever
+// pulls for the one it holds, and a newer push brings a newer id. Stamping an
+// older snapshot again (a presentation refresh re-sends `latestStats`) makes it
+// recent again under its original id and source, so the id handed out always
+// resolves.
 function createRendererSnapshots(options = {}) {
   const source = options.source;
   if (typeof source !== 'function') throw new TypeError('source must be a function');
@@ -131,9 +134,10 @@ function createRendererSnapshots(options = {}) {
       tag = { id: nextId, source: source() };
       nextId += 1;
       tags.set(stats, tag);
-      byId.set(tag.id, stats);
-      if (byId.size > limit) byId.delete(byId.keys().next().value);
     }
+    byId.delete(tag.id);
+    byId.set(tag.id, stats);
+    if (byId.size > limit) byId.delete(byId.keys().next().value);
     return tag;
   }
 
