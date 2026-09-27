@@ -98,11 +98,11 @@ test('targetPeriod normalizes in place for both summary shapes', () => {
 // shows up as archived usage that stops restoring.
 test('neither usage archive re-declares a helper this module owns', () => {
   const owned = ['cloneJson', 'hasSummaryPeriod', 'localDay', 'localMonth', 'numberValue', 'periodFor', 'targetPeriod', 'toDate', 'pad2'];
-  const shared = path.join(__dirname, '..', '..', 'src', 'shared');
+  const usageDir = path.join(__dirname, '..', '..', 'src', 'shared', 'usage');
 
   for (const file of ['clientUsageArchive.js', 'sessionUsageArchive.js']) {
-    const source = fs.readFileSync(path.join(shared, file), 'utf8');
-    assert.match(source, /require\('\.\/archiveHelpers'\)/, `${file} must take the helpers from archiveHelpers.js`);
+    const source = fs.readFileSync(path.join(usageDir, file), 'utf8');
+    assert.match(source, /require\('\.\.\/archiveHelpers'\)/, `${file} must take the helpers from archiveHelpers.js`);
     const redeclared = owned.filter((name) => new RegExp(`function\\s+${name}\\s*\\(`).test(source));
     assert.deepEqual(redeclared, [], `${file} re-declares ${redeclared.join(', ')} instead of importing it`);
   }

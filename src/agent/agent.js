@@ -23,11 +23,11 @@ const {
   applySessionUsageArchive,
   sessionUsageArchiveDate,
   updateSessionUsageArchive
-} = require('../shared/sessionUsageArchive');
+} = require('../shared/usage/sessionUsageArchive');
 const {
   createSessionUsageArchiveStore,
   readSessionUsageArchiveSnapshot
-} = require('../shared/sessionUsageArchiveStore');
+} = require('../shared/usage/sessionUsageArchiveStore');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 
 loadDotEnv();

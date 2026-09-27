@@ -7,7 +7,7 @@ const test = require('node:test');
 
 let archiveApi = {};
 try {
-  archiveApi = require('../../src/shared/sessionUsageArchive');
+  archiveApi = require('../../src/shared/usage/sessionUsageArchive');
 } catch (_) {}
 
 const {

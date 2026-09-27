@@ -37,7 +37,7 @@ const {
 } = require('../../src/shared/collector');
 const { KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
 const { createSelfSyncThrottle } = require('../../src/shared/selfSyncThrottle');
-const { applySessionUsageArchive } = require('../../src/shared/sessionUsageArchive');
+const { applySessionUsageArchive } = require('../../src/shared/usage/sessionUsageArchive');
 const { aggregateDevices, mergeDeviceRecord, normalizeDeviceRecord } = require('../../src/shared/usage');
 
 installSourceEnvGuard(test);

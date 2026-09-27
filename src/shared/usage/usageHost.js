@@ -30,8 +30,8 @@
 //
 // On by default. TOKEN_MONITOR_USAGE_WORKER=0 pins the in-process collector.
 
-const { startCollector } = require('./collector');
-const { createLiveSubprocessTable, signalLiveSubprocesses } = require('./subprocessTermination');
+const { startCollector } = require('../collector');
+const { createLiveSubprocessTable, signalLiveSubprocesses } = require('../subprocessTermination');
 
 const WORKER_PATH = require.resolve('./usageWorker');
 // How long a stopping worker gets to stop its collector (which terminates its

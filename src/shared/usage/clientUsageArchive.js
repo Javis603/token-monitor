@@ -1,9 +1,9 @@
 'use strict';
 
-const { PERIODS, normalizeClientName, normalizePeriod } = require('./usage');
+const { PERIODS, normalizeClientName, normalizePeriod } = require('../usage');
 const {
   CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry
-} = require('./clientIdentitySplits');
+} = require('../clientIdentitySplits');
 const {
   cloneJson,
   hasSummaryPeriod,
@@ -13,7 +13,7 @@ const {
   periodFor,
   targetPeriod,
   toDate
-} = require('./archiveHelpers');
+} = require('../archiveHelpers');
 
 function normalizeClientId(value) {
   return normalizeClientName(value);

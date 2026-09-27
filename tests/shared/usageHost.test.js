@@ -15,8 +15,8 @@ const {
   createUsageHost,
   createUsageHostCoordinator,
   usageWorkerRequested
-} = require('../../src/shared/usageHost');
-const { readSessionUsageArchiveSnapshot } = require('../../src/shared/sessionUsageArchiveStore');
+} = require('../../src/shared/usage/usageHost');
+const { readSessionUsageArchiveSnapshot } = require('../../src/shared/usage/sessionUsageArchiveStore');
 
 const SCRIPTED_WORKER = path.join(__dirname, '..', 'fixtures', 'usageWorkerScriptedCollector.js');
 

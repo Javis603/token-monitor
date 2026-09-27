@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createDeviceRuntime } = require('../../src/shared/deviceRuntime');
+const { createDeviceRuntime } = require('../../src/shared/usage/deviceRuntime');
 
 function harness(options = {}) {
   const {
