@@ -26,6 +26,9 @@ const keepAlive = setInterval(() => {}, 1000);
 runtime.tick('spawn').then(() => {
   clearInterval(keepAlive);
   process.stdout.write(`${pid}\n`);
+  // Keeps the worker's thread busy past the exit, so the stop that follows is
+  // certainly not handled in time.
+  void runtime.tick('busy');
   runtime.stop({ skipCloseWatchers: true });
   if (process.argv[2] !== 'without-terminate') coordinator.terminateSubprocesses();
   process.exit(0);

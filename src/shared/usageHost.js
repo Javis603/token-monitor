@@ -218,6 +218,11 @@ function createUsageHostCoordinator(deps = {}) {
     function onExit(code) {
       if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
       worker = null;
+      // A worker that finished its stop has already terminated its
+      // subprocesses. One that crashed, or was terminated after the grace,
+      // leaves them running and unowned, so this is the last chance to reach
+      // them.
+      signalLiveSubprocesses(workerData.liveSubprocesses, 'SIGTERM', killSubprocess);
       liveSubprocessTables.delete(workerData.liveSubprocesses);
       // A worker that is gone captures nothing more under any settings.
       for (const resolve of settingsAcks.splice(0)) resolve();

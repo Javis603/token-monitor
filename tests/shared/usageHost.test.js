@@ -286,6 +286,38 @@ test('the quit path signals the subprocesses of every worker that has not exited
   assert.deepEqual(killed, []);
 });
 
+test('a worker that exits without finishing its stop has its subprocesses terminated', async () => {
+  FakeWorker.reset();
+  const killed = [];
+  const inProcess = fakeInProcessCollector();
+  const coordinator = createUsageHostCoordinator({
+    Worker: FakeWorker,
+    startCollector: inProcess.startCollector,
+    stopGraceMs: 5,
+    killSubprocess: (pid, signal) => killed.push([pid, signal])
+  });
+
+  const crashed = coordinator.create(recorder().options);
+  await flush();
+  Atomics.store(FakeWorker.last().workerData.liveSubprocesses, 0, 4301);
+  FakeWorker.last().emit('exit', 1);
+  assert.deepEqual(killed, [[4301, 'SIGTERM']]);
+  crashed.stop();
+
+  // Past the stop grace: terminated before its collector stopped anything.
+  killed.length = 0;
+  const hung = createUsageHostCoordinator({
+    Worker: FakeWorker,
+    stopGraceMs: 5,
+    killSubprocess: (pid, signal) => killed.push([pid, signal])
+  }).create(recorder().options);
+  await flush();
+  Atomics.store(FakeWorker.last().workerData.liveSubprocesses, 2, 4302);
+  hung.stop();
+  await hung.whenIdle();
+  assert.deepEqual(killed, [[4302, 'SIGTERM']]);
+});
+
 test('a replacement worker starts only after the previous one has exited', async () => {
   FakeWorker.reset();
   const coordinator = createUsageHostCoordinator({ Worker: FakeWorker });
@@ -516,6 +548,38 @@ async function subprocessAfterQuit(mode, waitMs) {
   if (survived) process.kill(pid);
   return survived;
 }
+
+// Running, as opposed to gone or a zombie: a subprocess of a worker that has
+// died is never reaped, because the loop that would reap it is gone with it.
+function subprocessRunning(pid) {
+  const { execFileSync } = require('node:child_process');
+  try {
+    return !execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' }).trim().startsWith('Z');
+  } catch (_) {
+    return false;
+  }
+}
+
+// Windows has no ps; the lifecycle test above covers the logic there.
+test('a real worker that crashes does not leave its subprocess running', { skip: process.platform === 'win32' }, async () => {
+  const inProcess = fakeInProcessCollector();
+  const coordinator = createUsageHostCoordinator({ workerPath: SCRIPTED_WORKER, startCollector: inProcess.startCollector });
+  const { events, options } = recorder();
+  const runtime = coordinator.create(options, { agentPidPath: path.join(sharedDir, 'no-agent.pid') });
+
+  assert.equal(await runtime.tick('spawn'), true);
+  const spawned = events.find(([kind, message]) => kind === 'log' && /spawned$/.test(message));
+  const pid = Number(/^child (\d+) spawned$/.exec(spawned[1])[1]);
+  await runtime.tick('crash');
+  assert.equal(inProcess.started.length, 1, 'fell back to this thread');
+
+  const deadline = Date.now() + 5000;
+  while (subprocessRunning(pid) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+  const survived = subprocessRunning(pid);
+  if (survived) process.kill(pid);
+  assert.equal(survived, false);
+  runtime.stop();
+});
 
 test('a subprocess on the worker does not outlive a process that exits right after stopping it', async () => {
   // The stop message alone does not reach the worker before the exit. Windows
