@@ -31,8 +31,7 @@ const EDGE_DOCK_METRICS = Object.freeze({
   hitRadius: 28,
   edgeInset: 0,
   peekWidth: 7,
-  peekLength: 34,
-  peekShoulder: 12,
+  peekLength: 48,
   bubbleWidth: 280,
   bubbleTail: 12,
   bubbleNeck: 18,
@@ -164,7 +163,7 @@ function edgeDockPeekBounds({ workArea, side, railBounds, metrics = EDGE_DOCK_ME
   const x = normalizeEdgeDockSide(side) === 'left'
     ? workArea.x
     : workArea.x + workArea.width - metrics.peekWidth;
-  const height = metrics.peekLength + metrics.peekShoulder * 2;
+  const height = metrics.peekLength;
   const y = railBounds.y + Math.round((railBounds.height - height) / 2);
   return { x: Math.round(x), y, width: metrics.peekWidth, height };
 }

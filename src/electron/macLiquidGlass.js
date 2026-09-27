@@ -60,6 +60,7 @@ function loadApi() {
     // the system's own glass uses for arbitrary outlines; probe it rather than
     // assume it, so a macOS that drops it falls back instead of crashing.
     supportsPath: responds(glassClass, sel('instancesRespondToSelector:'), sel('_setPath:')),
+    supportsSubdued: responds(glassClass, sel('instancesRespondToSelector:'), sel('set_subduedState:')),
     setPath(target, commands, height) {
       const cg = loadPathApi();
       const path = cg.create();
@@ -125,6 +126,12 @@ function createMacLiquidGlass(win, { shaped = false } = {}) {
     api.setFrame(glass, bounds);
     api.put(glass, 'setAutoresizingMask:', 2 | 16); // width + height
     api.put(glass, 'setStyle:', 0); // NSGlassEffectViewStyleRegular
+    // In a key window the glass blurs far more heavily and adds a brightening
+    // layer, which washes the whole surface out behind dense figures. The
+    // subdued state drops that layer and most of the blur while the window
+    // keeps its active shadow; unfocused, it matches the default glass.
+    // Private, so probed: without it the glass keeps the system behaviour.
+    if (api.supportsSubdued) api.put(glass, 'set_subduedState:', 1);
     api.addBelow(original, glass);
     let lastDark;
     let lastRadius;

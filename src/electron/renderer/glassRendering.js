@@ -23,6 +23,14 @@
     return transparentMacFallback && requested < 0.05 ? 0.05 : requested;
   }
 
+  // Main normalizes the stored value on load and on every save, so a
+  // hand-edited settings.json never reaches the renderer as NaN — which CSS
+  // would resolve to opacity 1, hiding the glass behind the image.
+  function normalizeBackgroundImageOpacity(value) {
+    const opacity = Number(value ?? 28);
+    return Number.isFinite(opacity) ? Math.max(0, Math.min(100, opacity)) : 28;
+  }
+
   const MATERIAL_TYPES = new Set(['liquid-glass', 'vibrancy', 'transparent', 'opaque']);
 
   function normalizeNativeMaterialState(value) {
@@ -52,5 +60,5 @@
     return material;
   }
 
-  return { renderedGlassOpacity, normalizeNativeMaterialState, usesNativeMaterial, applyNativeMaterialClasses };
+  return { renderedGlassOpacity, normalizeBackgroundImageOpacity, normalizeNativeMaterialState, usesNativeMaterial, applyNativeMaterialClasses };
 });

@@ -5,7 +5,12 @@
 // source cannot be counted by a normal scan but silently skipped by an extra
 // directory scan.
 const TOKSCALE_CLIENT_GROUPS = Object.freeze({
-  antigravity: Object.freeze({ aliases: Object.freeze(['antigravity-cli']) }),
+  antigravity: Object.freeze({
+    aliases: Object.freeze(['antigravity-cli', 'antigravity-extension']),
+    // CLI and extension parse the same *.db format. Hand each custom root to
+    // one parser so generations without responseId cannot be counted twice.
+    customScanIds: Object.freeze(['antigravity', 'antigravity-cli'])
+  }),
   // Xiaomi MiMo Desktop and the MiMo Code CLI share one `mimocode` SQLite
   // store; tokscale re-stamps a row as `micode-desktop` when its
   // `session.version` starts with `desktop-`. Both surfaces are one Token

@@ -48,6 +48,26 @@
     return side === 'left' ? mirrorX(commands, w) : commands;
   }
 
+  // Curve the handle into the display edge. The curve's ends live just beyond
+  // the window, so neither its fill nor its outline exposes a pointed tip.
+  function peekCommands({ width, height, side = 'right', open = false }) {
+    const w = width;
+    const h = height;
+    const edge = w + 4;
+    const shoulder = 7;
+    const r = 3.5;
+    const commands = [
+      ['M', edge, 0],
+      ['C', edge, shoulder * 0.76, w + 1.5, shoulder, r, shoulder],
+      ['C', r * ARC, shoulder, 0, shoulder + r * ARC, 0, shoulder + r],
+      ['L', 0, h - shoulder - r],
+      ['C', 0, h - shoulder - r * ARC, r * ARC, h - shoulder, r, h - shoulder],
+      ['C', w + 1.5, h - shoulder, edge, h - shoulder * 0.76, edge, h]
+    ];
+    if (!open) commands.push(['Z']);
+    return side === 'left' ? mirrorX(commands, w) : commands;
+  }
+
   // A rounded card with a broad-necked tail pointing at the rail. `tailY` is the
   // tip's offset from the top; it is clamped so the neck never runs into a
   // corner. Drawn with the tail on the right and mirrored for a left rail.
@@ -118,6 +138,7 @@
 
   return {
     bubbleCommands,
+    peekCommands,
     railCommands,
     toPolygons,
     toSvgPath

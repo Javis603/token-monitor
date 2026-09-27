@@ -25,6 +25,8 @@ Cursor is self-synced: the collector supplies its one `SelfSyncThrottle` and tok
 
 The generated tokscale Cursor cache is not watched because Token Monitor's own sync writes it. `usageEvents.js` indexes live and archived cache events by account and conversation, invalidating only changed files. `sessionGuard.js` uses that index to retire legacy synthetic event ids when a canonical session supersedes them; ambiguous events do not guess.
 
+The usage events carry conversation ids but no names. Session titles come from the local Cursor desktop `composerHeaders` table, joined by conversation id; releases predating that table are read through the legacy `composer.composerHeaders` key instead. The reader opens the database read-only, queries only the requested ids, and refreshes its title cache when the database or WAL changes. Sessions without a local header retain the normal client/model fallback.
+
 ## Limits
 
 Every enabled saved account is probed independently. Stable identity prefers the canonical API subject; opaque local fallback ids remain distinct rather than merging unrelated accounts. API email is presentation metadata, not the only identity key.

@@ -11,7 +11,7 @@ const bounds = { origin: { x: 3, y: 7 }, size: { width: 360, height: 480 } };
 
 // Load the complete production bridge with only its foreign-function boundary
 // replaced. Each load has an independent API cache and architecture.
-function bridge(arch, { failAt, mainThread = true, available = true, pathSupported = true } = {}) {
+function bridge(arch, { failAt, mainThread = true, available = true, pathSupported = true, subduedSupported = true } = {}) {
   const calls = [];
   const bindings = [];
   const structs = {};
@@ -53,7 +53,10 @@ function bridge(arch, { failAt, mainThread = true, available = true, pathSupport
               if (target === 40) return 21; // the glass view's own window
               assert.equal(target, 10n);
               return 20;
-            case 'instancesRespondToSelector:': return pathSupported;
+            case 'instancesRespondToSelector:':
+              if (parameters[0] === '_setPath:') return pathSupported;
+              if (parameters[0] === 'set_subduedState:') return subduedSupported;
+              throw new Error(`unexpected probe ${parameters[0]}`);
             case 'contentView': assert.equal(target, 20); return 30;
             case 'bounds':
               assert.equal(arch, 'arm64');
@@ -127,6 +130,20 @@ for (const arch of ['arm64', 'x64']) {
       [[40, 'removeFromSuperview'], [40, 'release']]);
   });
 }
+
+test('the glass is subdued before it joins the window, and skips the state when missing', () => {
+  const native = bridge('arm64');
+  native.create();
+  const selectors = native.calls().map((call) => call.selector);
+  assert.deepEqual(native.calls().filter((call) => call.selector === 'set_subduedState:').map((call) => [call.target, ...call.parameters]),
+    [[40, 1]]);
+  assert.ok(selectors.indexOf('set_subduedState:') < selectors.indexOf('addSubview:positioned:relativeTo:'));
+
+  const unsupported = bridge('arm64', { subduedSupported: false });
+  assert.doesNotThrow(() => unsupported.create());
+  assert.equal(unsupported.calls().some((call) => call.selector === 'set_subduedState:'), false);
+  assert.ok(unsupported.calls().some((call) => call.selector === 'addSubview:positioned:relativeTo:'));
+});
 
 test('unsupported API and non-main-thread calls fail before allocating views', () => {
   for (const options of [{ available: false }, { mainThread: false }]) {

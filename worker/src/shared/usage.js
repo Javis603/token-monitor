@@ -1457,14 +1457,17 @@ function isPeriodExpired(record, periodName, nowMs) {
   return false;
 }
 
-function aggregateDevices(devices, staleAfterMs, nowMs = Date.now()) {
+// `options.normalizeRecord` lets a caller that re-aggregates an unchanged record
+// many times reuse its normalization. Whatever it returns is read, never mutated.
+function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {}) {
+  const normalizeRecord = options.normalizeRecord || normalizeDeviceRecord;
   const aggregate = { updatedAt: new Date().toISOString(), periods: {}, devices: [], projectsIncomplete: false };
   const sessionDetailsOmitted = {};
   const periodProjectsOmitted = {};
   for (const periodName of PERIODS) aggregate.periods[periodName] = emptyPeriod();
   const now = nowMs;
   for (const record of devices) {
-    const normalized = normalizeDeviceRecord(record);
+    const normalized = normalizeRecord(record);
     const ageMs = now - Date.parse(normalized.receivedAt || normalized.updatedAt || 0);
     const deviceStaleAfterMs = staleAfterMsForSyncUpload(normalized.syncUploadIntervalMs, staleAfterMs);
     const stale = Number.isFinite(ageMs) && deviceStaleAfterMs > 0 ? ageMs > deviceStaleAfterMs : false;

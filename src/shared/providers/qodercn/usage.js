@@ -9,6 +9,26 @@ const { promisify } = require('node:util');
 const execFileAsync = promisify(execFile);
 const { customPricingPath } = require('../../tokscaleConfig');
 const QODER_CN_DB_SUFFIX = path.join('SharedClientCache', 'cache', 'db', 'local.db');
+// Qoder CN builds from ~2026-09 dropped the SharedClientCache SQLite database
+// and persist sessions as Claude-compatible JSONL transcripts under the
+// home-relative `.qoder-cn/projects` tree (one directory per workspace, a
+// `<sessionId>.jsonl` per session, plus `<sessionId>/subagents/agent-*.jsonl`
+// for side-chain agents). This is the storage backend the database path can no
+// longer see, so the adapter reads both.
+const QODER_CN_PROJECTS_SUFFIX = path.join('.qoder-cn', 'projects');
+const QODER_CN_JSONL_MAX_DEPTH = 6;
+const QODER_CN_JSONL_MAX_FILES = 5000;
+// Streaming budgets for one full JSONL read. Memory is bounded by line
+// streaming; the byte budget bounds the tick's duration (real trees hold
+// hundreds of megabytes of sessions). Exceeding any budget throws the same
+// controlled read-budget error the SQLite reader uses, so the collector keeps
+// its last complete snapshot instead of publishing silently truncated totals.
+const QODER_CN_JSONL_MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
+const QODER_CN_JSONL_MAX_ROWS = 100_000;
+// One assistant line is one JSON message; a pathological tool-payload turn
+// could still be tens of megabytes, so a single line larger than this aborts
+// the read before JSON.parse instead of buffering it whole.
+const QODER_CN_JSONL_MAX_LINE_BYTES = 32 * 1024 * 1024;
 // Qoder CN stores internal model codes (model_info.model_key) instead of real
 // model names. Official display names come from the app's bundled i18n keys
 // `modelSelector.item.<code>` (Qoder CN.app, 2026-07 build); the codes change
@@ -299,10 +319,20 @@ function qoderCnDataPaths(options = {}) {
   }
 
   const explicitDb = String(env.TOKEN_MONITOR_QODER_CN_DB_PATH || '').trim();
+  const explicitProjects = String(env.TOKEN_MONITOR_QODER_CN_PROJECTS_PATH || '').trim();
+  const qoderConfigDir = String(env.QODERCN_CONFIG_DIR || '').trim();
   return {
     dbPaths: explicitDb
       ? [path.resolve(explicitDb)]
-      : [path.join(appSupport, 'QoderCN', QODER_CN_DB_SUFFIX)]
+      : [path.join(appSupport, 'QoderCN', QODER_CN_DB_SUFFIX)],
+    // The transcript home is a dot-directory in the user's home on every
+    // platform (like ~/.proma), not the platform Application Support root the
+    // legacy database lived under.
+    projectsDir: explicitProjects
+      ? path.resolve(explicitProjects)
+      : qoderConfigDir
+        ? path.resolve(qoderConfigDir, 'projects')
+        : path.join(home, QODER_CN_PROJECTS_SUFFIX)
   };
 }
 
@@ -411,6 +441,176 @@ async function readQoderCnDbRows(dbPath, options = {}) {
   }
 }
 
+// --- JSONL transcript source (Qoder CN 2026-09+ storage) ---
+
+function qoderCnJsonlModelName(rawModel) {
+  const model = String(rawModel || '').trim();
+  if (!model) return '';
+  // Custom-provider rows carry `qoder-custom-<profile-uuid>/<real model>`; the
+  // prefix wraps the real model name, which may itself be slash-qualified
+  // (OpenRouter/OpenAI-style provider/model), so only the first separator
+  // after the fixed prefix is stripped.
+  const slash = model.indexOf('/');
+  const key = model.startsWith('qoder-custom-') && slash > 0 ? model.slice(slash + 1) : model;
+  return Object.prototype.hasOwnProperty.call(QODER_CN_MODEL_DISPLAY_NAMES, key)
+    ? QODER_CN_MODEL_DISPLAY_NAMES[key]
+    : key;
+}
+
+function qoderCnJsonlProjectLabel(cwd) {
+  const dir = String(cwd || '').replace(/[\\/]+$/, '');
+  if (!dir) return '';
+  // Remote-control sessions run inside the app data dir; their basename is a
+  // session hash, not a project name — leave them unattributed, same intent
+  // as the '.' sentinel handled by normalizeQoderCnProjectLabel.
+  if (/[\\/]remote-control[\\/]|com\.qodercn\.app\.stable/.test(dir)) return '';
+  const label = dir.slice(Math.max(dir.lastIndexOf('/'), dir.lastIndexOf('\\')) + 1);
+  return normalizeQoderCnProjectLabel(label);
+}
+
+// One JSONL line -> a normalized usage row, or null. Transcripts share the
+// Claude message envelope but NOT its token semantics: Qoder CN's
+// `input_tokens` is the full prompt INCLUDING the cached prefix (verified
+// against `context_usage_ratio`: input/ratio equals the model's context
+// window exactly on every real row), and `cache_read_input_tokens` is a
+// subset of it — the same shape the legacy DB's `prompt_tokens`/
+// `cached_tokens` pair has, so the cached split below mirrors
+// normalizeQoderCnDbRow rather than the Anthropic convention.
+function normalizeQoderCnJsonlRow(obj, source = 'local') {
+  if (!obj || obj.type !== 'assistant') return null;
+  const usage = obj.message && obj.message.usage;
+  if (!usage) return null;
+  const prompt = numeric(usage.input_tokens);
+  const cached = numeric(usage.cache_read_input_tokens ?? 0);
+  const output = numeric(usage.output_tokens);
+  if (prompt === null || cached === null || output === null) return null;
+  // Plan-billed first-party rows currently record credits and a context ratio,
+  // but no active per-session context window. A model-wide denominator would
+  // overcount sessions configured for smaller windows, so only measured token
+  // rows enter token history.
+  if (prompt + output === 0) return null;
+  const session = String(obj.sessionId || 'unknown');
+  const message = String((obj.message && obj.message.id) || obj.uuid || `${obj.timestamp || 0}`);
+  return {
+    sessionId: `qodercn:jsonl:${source}:${session}`,
+    messageId: `qodercn:jsonl:${source}:${session}:${message}`,
+    model: qoderCnJsonlModelName(obj.message && obj.message.model) || 'qoder-agent',
+    projectLabel: qoderCnJsonlProjectLabel(obj.cwd),
+    input: Math.max(0, prompt - cached),
+    output,
+    cacheRead: Math.min(prompt, cached),
+    cacheWrite: 0,
+    createdAt: timestampMs(obj.timestamp),
+    messages: 1
+  };
+}
+
+function listQoderCnJsonlFiles(dir, depth, found, maxFiles = QODER_CN_JSONL_MAX_FILES, maxDepth = QODER_CN_JSONL_MAX_DEPTH, fsImpl = fs) {
+  // Depth overflow must fail like the other budgets: silently stopping here
+  // would publish an incomplete file list as if the tree were complete.
+  if (depth > maxDepth) throw readBudgetError('depth', maxDepth);
+  let entries;
+  try {
+    entries = fsImpl.readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    // A machine with only the legacy SQLite source legitimately has no JSONL
+    // root. Once an enumerated subtree is involved, any error would make the
+    // result partial and must reach the collector's last-good fallback.
+    if (depth === 0 && error?.code === 'ENOENT') return;
+    throw error;
+  }
+  // Sorted traversal: when the file budget below trips, the reported failure
+  // describes the same tree to every observer instead of whichever order the
+  // filesystem happened to return.
+  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) listQoderCnJsonlFiles(full, depth + 1, found, maxFiles, maxDepth, fsImpl);
+    else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
+      found.push(full);
+      if (found.length > maxFiles) throw readBudgetError('files', maxFiles);
+    }
+  }
+}
+
+// Stream one transcript with a bounded line accumulator. readline assembles a
+// complete line before any budget can see it, so a single oversized line was
+// buffered whole (and copied again by trim) before being rejected; counting
+// raw chunk bytes and capping the pending line bounds memory before
+// JSON.parse. Real trees hold 65 MB session files.
+async function readQoderCnJsonlFileRows(filePath, source, budget, options = {}) {
+  const out = [];
+  const handleLine = (rawLine) => {
+    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
+    if (!line) return;
+    let obj;
+    try { obj = JSON.parse(line); } catch (_) { return; }
+    const row = normalizeQoderCnJsonlRow(obj, source, options);
+    if (!row) return;
+    if (budget.sinceMs && (!row.createdAt || row.createdAt < budget.sinceMs)) return;
+    out.push(row);
+    budget.rows += 1;
+    if (budget.rows > budget.maxRows) throw readBudgetError('rows', budget.maxRows);
+  };
+  const fsImpl = options.fs || fs;
+  const stream = fsImpl.createReadStream(filePath, { encoding: 'utf8' });
+  let pending = '';
+  try {
+    for await (const chunk of stream) {
+      budget.bytes += Buffer.byteLength(chunk, 'utf8');
+      if (budget.bytes > budget.maxBytes) throw readBudgetError('bytes', budget.maxBytes);
+      let start = 0;
+      let nl = chunk.indexOf('\n');
+      while (nl !== -1) {
+        const segment = chunk.slice(start, nl);
+        const line = pending ? pending + segment : segment;
+        pending = '';
+        if (Buffer.byteLength(line, 'utf8') > budget.maxLineBytes) throw readBudgetError('line', budget.maxLineBytes);
+        handleLine(line);
+        start = nl + 1;
+        nl = chunk.indexOf('\n', start);
+      }
+      if (start < chunk.length) {
+        pending += chunk.slice(start);
+        if (Buffer.byteLength(pending, 'utf8') > budget.maxLineBytes) throw readBudgetError('line', budget.maxLineBytes);
+      }
+    }
+    if (pending) {
+      if (Buffer.byteLength(pending, 'utf8') > budget.maxLineBytes) throw readBudgetError('line', budget.maxLineBytes);
+      handleLine(pending);
+    }
+  } finally {
+    stream.destroy();
+  }
+  return out;
+}
+
+async function collectQoderCnJsonlRows(options = {}) {
+  const projectsDir = options.projectsDir || qoderCnDataPaths(options).projectsDir;
+  const sinceMs = options.sinceMs;
+  const fsImpl = options.fs || fs;
+  const files = [];
+  listQoderCnJsonlFiles(projectsDir, 0, files, positiveInteger(options.maxFiles, QODER_CN_JSONL_MAX_FILES), positiveInteger(options.maxDepth, QODER_CN_JSONL_MAX_DEPTH), fsImpl);
+  files.sort();
+  const budget = {
+    bytes: 0,
+    rows: 0,
+    sinceMs: sinceMs || 0,
+    maxBytes: positiveInteger(options.maxReadBytes, QODER_CN_JSONL_MAX_TOTAL_BYTES),
+    maxRows: positiveInteger(options.maxReadRows, QODER_CN_JSONL_MAX_ROWS),
+    maxLineBytes: positiveInteger(options.maxLineBytes, QODER_CN_JSONL_MAX_LINE_BYTES)
+  };
+  const rows = [];
+  for (const filePath of files) {
+    // A transcript cannot contain usage newer than its own mtime, so an
+    // anchored (today-only) tick can skip every file untouched since the
+    // window opened — real trees hold multi-megabyte session files.
+    if (sinceMs && fsImpl.statSync(filePath).mtimeMs < sinceMs) continue;
+    rows.push(...(await readQoderCnJsonlFileRows(filePath, sourceId(filePath), budget, options)));
+  }
+  return rows;
+}
+
 async function collectQoderCnRows(options = {}) {
   const paths = qoderCnDataPaths(options);
   const dbPaths = Array.isArray(options.dbPaths) ? options.dbPaths : paths.dbPaths;
@@ -426,6 +626,18 @@ async function collectQoderCnRows(options = {}) {
       const row = normalizeQoderCnDbRow(dbRow, source);
       if (row) rows.push(row);
     }
+  }
+
+  // The JSONL tree is opt-in at the call site so DB-only unit tests keep their
+  // exact fixtures; the collector enables it in production, where a machine
+  // can have either layout or retain historical SQLite data beside current
+  // transcripts. Source-qualified ids keep their independent identities;
+  // there is no verified cross-format key on which to join them. Read errors
+  // propagate like the database reader's do, so the collector's existing
+  // handler keeps the last complete snapshot instead of publishing partial
+  // totals.
+  if (options.includeJsonl) {
+    rows.push(...(await collectQoderCnJsonlRows({ ...options, projectsDir: options.projectsDir || paths.projectsDir })));
   }
 
   const unique = new Map();
@@ -516,8 +728,10 @@ module.exports = {
   QODER_CN_MODEL_DISPLAY_NAMES,
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
+  collectQoderCnJsonlRows,
   collectQoderCnRows,
   normalizeQoderCnDbRow,
+  normalizeQoderCnJsonlRow,
   qoderCnDataPaths,
   readQoderCnDbRows,
   resolveQoderCnPricing,

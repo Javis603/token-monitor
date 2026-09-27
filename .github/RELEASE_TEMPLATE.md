@@ -4,31 +4,29 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Oh My Pi usage:** Tracks Oh My Pi separately from Pi, including on existing installs that tracked Pi. (#701)
-- **TypeSafe limits:** Shows credit balance, plan, expiring credits, and token usage after connecting a TypeSafe account with a Cookie. (#794)
-- **Background image:** Choose a local image in Appearance and adjust its opacity with Glass. (#785)
-- **Claude reset counts:** Shows available usage-limit resets and their details when the account has grants. (#780)
-- **Kimi Code session titles:** Shows generated or custom titles in Sessions. (#726)
+- **macOS Liquid Glass:** On macOS 26+, choose Liquid Glass in Appearance → macOS Glass Style for the main window and Dashboard. (#705, #816)
+- **Edge Dock glass style:** On macOS 26+, choose a separate glass style for Edge Dock or have it follow the main window. (#825)
+- **Cursor conversation titles:** Shows desktop conversation titles in Sessions. (#819)
 
 ### Improved
-- **Edge Dock usage cards:** Shows the exact headline token count, with compact figures in session, period, and breakdown rows. (#784, #787)
+- **Background image opacity:** Adjust the image separately from Glass; the image stays layered over the glass. (#826)
+- **Limits account setup:** Checks pasted credentials when saved and enables the selected limits source. (#803)
 
 ### Fixed
-- **Alibaba Bailian Personal quota:** Shows the monthly quota when the plan no longer reports weekly limits. (#791)
-- **Devin plan:** Shows the subscription plan on the Limits card when available. (#788)
-- **WorkBuddy sign-in:** Identifies app-encrypted credentials instead of asking you to sign in again. (#738)
-- **macOS tray popover:** Opens on the display whose menu bar icon you clicked. (#714)
-- **Kimi Code projects:** Restores project attribution for newer sessions. (#726)
-- **Kimi K3 models:** Recognizes K3 model IDs in usage views. (#726)
-- **Compact money figures:** Follows the selected number-unit setting in Edge Dock balances and costs. (#787)
+- **Qoder CN custom-model usage:** Reads measured tokens from newer desktop transcripts; plan-billed built-in models still do not report token counts. (#753)
+- **Antigravity IDE usage:** Restores usage from IDE extension sessions. (#821)
+- **TypeSafe limits:** Stops treating a Cloudflare challenge as an expired Cookie. (#814)
+- **Edge Dock limits:** Shows 0% when an account-level quota is exhausted, even if its session quota remains. (#804)
+- **macOS tray popover:** No longer jumps to the left edge of the primary display. (#818)
+- **Edge Dock session models:** Labels sessions with multiple models consistently with Sessions. (#799)
 <!-- app-update-notes:en:end -->
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.62.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.62.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-Setup-0.62.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.62.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.63.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.63.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-Setup-0.63.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.63.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -66,32 +64,30 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **Oh My Pi 用量：** 与 Pi 分开追踪；此前追踪 Pi 的安装也会加入 Oh My Pi。（#701）
-- **TypeSafe 额度：** 使用 Cookie 连接账号后，显示余额、方案、即将到期的额度及 Tokens 用量。（#794）
-- **背景图片：** 可在“外观”中选择本机图片，并通过“玻璃”调整透明度。（#785）
-- **Claude 重置次数：** 账号有可用重置次数时，显示次数及详情。（#780）
-- **Kimi Code 会话标题：** 在“会话”中显示自动生成或自定义的标题。（#726）
+- **macOS Liquid Glass：** 在 macOS 26 及以上版本，可于“外观”→“macOS 玻璃样式”选择 Liquid Glass，应用于主窗口和仪表盘。（#705, #816）
+- **侧边栏玻璃样式：** 在 macOS 26 及以上版本，可单独选择样式，或跟随主窗口。（#825）
+- **Cursor 会话标题：** 在“会话”中显示桌面版对话标题。（#819）
 
 ### 改进
-- **侧边栏用量卡片：** 主数字显示精确 Tokens 数量；会话、时段和分解行使用简写数字。（#784, #787）
+- **背景图片透明度：** 可独立于“玻璃”调整，图片叠加显示在玻璃之上。（#826）
+- **额度账号设置：** 保存粘贴的凭据时会检查连接，并启用所选额度来源。（#803）
 
 ### 修复
-- **阿里云百炼个人版额度：** 不再提供每周额度的方案可正确显示每月额度。（#791）
-- **Devin 方案：** 可读取订阅方案时，在额度卡片显示方案名称。（#788）
-- **WorkBuddy 登录：** 凭据被应用加密时显示对应状态，不再误提示重新登录。（#738）
-- **macOS 托盘弹窗：** 从哪个显示器的菜单栏图标打开，就显示在哪个显示器。（#714）
-- **Kimi Code 项目归属：** 修复新版本会话无法归入项目的问题。（#726）
-- **Kimi K3 模型：** 用量视图可识别 K3 模型编号。（#726）
-- **侧边栏金额：** 余额与费用简写遵循所选数字单位。（#787）
+- **Qoder CN 自定义模型用量：** 可读取新版桌面端实际记录的 Tokens；按方案计费的内置模型仍未提供 Tokens 数量。（#753）
+- **Antigravity IDE 用量：** 修复 IDE 扩展会话的用量漏计。（#821）
+- **TypeSafe 额度：** Cloudflare 验证不再被误判为 Cookie 过期。（#814）
+- **侧边栏额度：** 账号级额度耗尽时显示 0%，即使会话额度仍有剩余。（#804）
+- **macOS 菜单栏弹窗：** 修复弹窗跳到主显示器左边缘的问题。（#818）
+- **侧边栏会话模型：** 使用多个模型的会话与“会话”列表显示一致。（#799）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.62.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.62.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-Setup-0.62.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.62.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.63.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.63.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-Setup-0.63.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.63.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -124,7 +120,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.61.0...v0.62.0">v0.61.0...v0.62.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.62.0...v0.63.0">v0.62.0...v0.63.0</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -142,32 +138,30 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **Oh My Pi 用量：** 與 Pi 分開追蹤；原本追蹤 Pi 的安裝也會加入 Oh My Pi。（#701）
-- **TypeSafe 額度：** 使用 Cookie 連接帳號後，顯示餘額、方案、即將到期的額度及 Tokens 用量。（#794）
-- **背景圖片：** 可在「外觀」選擇本機圖片，並透過「玻璃」調整透明度。（#785）
-- **Claude 重置次數：** 帳號有可用重置次數時，顯示次數及詳情。（#780）
-- **Kimi Code 會話標題：** 在「會話」中顯示自動產生或自訂的標題。（#726）
+- **macOS Liquid Glass：** macOS 26 或更新版本可在「外觀」→「macOS 玻璃樣式」選用 Liquid Glass，套用至主視窗和儀表板。（#705, #816）
+- **側邊欄玻璃樣式：** macOS 26 或更新版本可獨立選擇樣式，或跟隨主視窗。（#825）
+- **Cursor 會話標題：** 在「會話」顯示桌面版對話標題。（#819）
 
 ### 改進
-- **側邊欄用量卡片：** 主數字顯示精確 Tokens 數量；會話、時段和分解列使用簡寫數字。（#784, #787）
+- **背景圖片不透明度：** 可獨立於「玻璃」調整，圖片疊在玻璃之上。（#826）
+- **額度帳號設定：** 儲存貼上的憑證時會檢查連線，並啟用所選額度來源。（#803）
 
 ### 修復
-- **阿里雲百煉個人版額度：** 不再提供每週額度的方案可正確顯示每月額度。（#791）
-- **Devin 方案：** 可讀取訂閱方案時，在額度卡片顯示方案名稱。（#788）
-- **WorkBuddy 登入：** 憑證被應用程式加密時顯示對應狀態，不再誤提示重新登入。（#738）
-- **macOS 選單列彈窗：** 從哪個顯示器的圖示開啟，就顯示在哪個顯示器。（#714）
-- **Kimi Code 專案歸屬：** 修復新版會話無法歸入專案的問題。（#726）
-- **Kimi K3 模型：** 用量畫面可識別 K3 模型 ID。（#726）
-- **側邊欄金額：** 餘額與費用簡寫遵循所選數字單位。（#787）
+- **Qoder CN 自訂模型用量：** 可讀取新版桌面版實際記錄的 Tokens；按方案計費的內建模型仍未提供 Tokens 數量。（#753）
+- **Antigravity IDE 用量：** 修復 IDE 擴充功能會話的用量漏計。（#821）
+- **TypeSafe 額度：** Cloudflare 驗證不再被誤判為 Cookie 過期。（#814）
+- **側邊欄額度：** 帳號層級額度用盡時顯示 0%，即使會話額度仍有餘額。（#804）
+- **macOS 選單列彈窗：** 修復彈窗跳到主要顯示器左側邊緣的問題。（#818）
+- **側邊欄會話模型：** 使用多個模型的會話與「會話」清單顯示一致。（#799）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.62.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.62.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-Setup-0.62.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.62.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.63.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.63.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-Setup-0.63.0.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.63.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.AppImage)
 
 </details>
 
@@ -180,32 +174,30 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ko:start -->
 ### 추가
-- **Oh My Pi 사용량:** Pi와 분리해 추적합니다. 기존에 Pi를 추적하던 설치에도 Oh My Pi가 추가됩니다. (#701)
-- **TypeSafe 한도:** Cookie로 계정을 연결하면 잔액, 요금제, 만료 예정 크레딧과 토큰 사용량을 표시합니다. (#794)
-- **배경 이미지:** 모양 설정에서 로컬 이미지를 선택하고 글래스로 투명도를 조절할 수 있습니다. (#785)
-- **Claude 재설정 횟수:** 계정에 사용 가능한 재설정 혜택이 있으면 남은 횟수와 세부 정보를 표시합니다. (#780)
-- **Kimi Code 세션 제목:** 세션 화면에서 자동 생성 또는 사용자 지정 제목을 표시합니다. (#726)
+- **macOS Liquid Glass:** macOS 26 이상에서 모양 → macOS 글래스 스타일에서 Liquid Glass를 선택하면 기본 창과 대시보드에 적용됩니다. (#705, #816)
+- **가장자리 도크 글래스 스타일:** macOS 26 이상에서 별도 스타일을 선택하거나 기본 창과 동일하게 설정할 수 있습니다. (#825)
+- **Cursor 대화 제목:** 세션 화면에 데스크톱 대화 제목을 표시합니다. (#819)
 
 ### 개선
-- **가장자리 도크 사용량 카드:** 주요 토큰 수는 정확히 표시하고 세션, 기간, 분류 행은 축약해 표시합니다. (#784, #787)
+- **배경 이미지 불투명도:** 글래스와 별도로 조절할 수 있으며 이미지가 글래스 위에 표시됩니다. (#826)
+- **한도 계정 설정:** 붙여 넣은 인증 정보를 저장할 때 연결을 확인하고 선택한 한도 제공원을 활성화합니다. (#803)
 
 ### 수정
-- **Alibaba Bailian Personal 한도:** 주간 한도를 더 이상 제공하지 않는 요금제의 월간 한도를 표시합니다. (#791)
-- **Devin 요금제:** 구독 정보를 읽을 수 있으면 한도 카드에 요금제 이름을 표시합니다. (#788)
-- **WorkBuddy 로그인:** 앱에서 자격 증명을 암호화한 경우 다시 로그인하라는 안내 대신 해당 상태를 표시합니다. (#738)
-- **macOS 메뉴 막대 팝오버:** 클릭한 메뉴 막대 아이콘이 있는 디스플레이에서 열립니다. (#714)
-- **Kimi Code 프로젝트 연결:** 최신 세션이 프로젝트에 연결되지 않던 문제를 수정했습니다. (#726)
-- **Kimi K3 모델:** 사용량 화면에서 K3 모델 ID를 인식합니다. (#726)
-- **가장자리 도크 금액:** 잔액과 비용의 축약 표기에 선택한 숫자 단위를 적용합니다. (#787)
+- **Qoder CN 사용자 지정 모델 사용량:** 새 데스크톱 버전의 기록에서 실제 토큰 수를 읽습니다. 요금제에 포함된 기본 모델은 여전히 토큰 수를 기록하지 않습니다. (#753)
+- **Antigravity IDE 사용량:** IDE 확장 프로그램 세션의 사용량 누락을 수정했습니다. (#821)
+- **TypeSafe 한도:** Cloudflare 확인 절차를 Cookie 만료로 잘못 판단하지 않습니다. (#814)
+- **가장자리 도크 한도:** 계정 전체 한도가 소진되면 세션 한도가 남아 있어도 0%를 표시합니다. (#804)
+- **macOS 메뉴 막대 팝오버:** 주 디스플레이의 왼쪽 끝으로 이동하던 문제를 수정했습니다. (#818)
+- **가장자리 도크 세션 모델:** 여러 모델을 사용한 세션을 세션 목록과 동일하게 표시합니다. (#799)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.62.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.62.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-Setup-0.62.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.62.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.63.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.63.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-Setup-0.63.0.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.63.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.AppImage)
 
 </details>
 
@@ -218,32 +210,30 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **Oh My Pi の使用量：** Pi と分けて追跡します。従来 Pi を追跡していた環境にも Oh My Pi が追加されます。（#701）
-- **TypeSafe の上限：** Cookie でアカウントを接続すると、残高、プラン、期限が近いクレジット、トークン使用量を表示します。（#794）
-- **背景画像：** 外観設定でローカル画像を選び、ガラスで透明度を調整できます。（#785）
-- **Claude のリセット回数：** 利用可能なリセット特典がある場合、残り回数と詳細を表示します。（#780）
-- **Kimi Code のセッションタイトル：** セッション画面に自動生成またはカスタムのタイトルを表示します。（#726）
+- **macOS Liquid Glass：** macOS 26 以降では、外観 → macOS ガラススタイルから Liquid Glass を選ぶとメインウィンドウとダッシュボードに適用されます。（#705、#816）
+- **エッジドックのガラススタイル：** macOS 26 以降では個別に選ぶか、メインウィンドウに合わせられます。（#825）
+- **Cursor の会話タイトル：** セッション画面にデスクトップ版の会話タイトルを表示します。（#819）
 
 ### 改善
-- **エッジドックの使用量カード：** メインのトークン数は正確に表示し、セッション、期間、内訳の行は短縮表記にします。（#784、#787）
+- **背景画像の不透明度：** ガラスとは別に調整でき、画像をガラスの上に重ねて表示します。（#826）
+- **上限アカウントの設定：** 貼り付けた認証情報を保存するときに接続を確認し、選択した上限の取得元を有効にします。（#803）
 
 ### 修正
-- **Alibaba Bailian Personal の上限：** 週次上限が廃止されたプランでも月次上限を表示します。（#791）
-- **Devin のプラン：** サブスクリプション情報を取得できる場合、上限カードにプラン名を表示します。（#788）
-- **WorkBuddy のログイン：** 認証情報がアプリで暗号化されている場合、再ログインを促さず状態を表示します。（#738）
-- **macOS メニューバーのポップオーバー：** クリックしたアイコンがあるディスプレイで開きます。（#714）
-- **Kimi Code のプロジェクト：** 新しい形式のセッションがプロジェクトに紐付かない問題を修正しました。（#726）
-- **Kimi K3 モデル：** 使用量画面で K3 モデル ID を認識します。（#726）
-- **エッジドックの金額：** 残高と費用の短縮表記に選択した数値単位を適用します。（#787）
+- **Qoder CN のカスタムモデル使用量：** 新しいデスクトップ版の記録から実測のトークン数を読み取ります。プラン課金の内蔵モデルは引き続きトークン数を記録しません。（#753）
+- **Antigravity IDE の使用量：** IDE 拡張機能のセッションで使用量が計上されない問題を修正しました。（#821）
+- **TypeSafe の上限：** Cloudflare の確認画面を Cookie の期限切れと誤判定しなくなりました。（#814）
+- **エッジドックの上限：** アカウント全体の上限が尽きた場合、セッション枠が残っていても 0% と表示します。（#804）
+- **macOS メニューバーのポップオーバー：** メインディスプレイの左端に飛ぶ問題を修正しました。（#818）
+- **エッジドックのセッションモデル：** 複数のモデルを使ったセッションを、セッション一覧と同じ表記で表示します。（#799）
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.62.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.62.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-Setup-0.62.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.62.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.62.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.62.0/Token-Monitor-0.62.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.63.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.63.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-Setup-0.63.0.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.63.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.AppImage)
 
 </details>
 

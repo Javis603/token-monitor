@@ -62,15 +62,32 @@ test('invalid replacement preserves the previous background', async (t) => {
   assert.deepEqual(await fs.promises.readFile(backgroundImagePath(userData)), Buffer.from('first'));
 });
 
-test('custom image layer is not covered by an opaque glass tint', () => {
+test('custom image layers over the glass instead of replacing it', () => {
   const css = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'styles.css'), 'utf8');
-  assert.match(css, /[.]shell[.]has-custom-background\s*\{\s*background:\s*transparent;/);
-  assert.match(css, /[.]shell[.]has-custom-background::before\s*\{[^}]*background-image:[^;]*var\(--custom-background-image\);[^}]*opacity:\s*var\(--glass-alpha\);/);
-  const nativeRule = css.match(/html[.]native-liquid-glass [.]shell[.]has-custom-background::before,[^{}]*\{([^}]*)\}/)?.[1];
-  assert.match(nativeRule, /background-image:\s*var\(--custom-background-image\);/);
-  assert.ok(Number(nativeRule.match(/opacity:\s*([\d.]+);/)?.[1]) > 0);
-  assert.ok(Number(nativeRule.match(/opacity:\s*([\d.]+);/)?.[1]) < 0.5);
-  assert.doesNotMatch(nativeRule, /display:\s*none|opacity:\s*var\(--glass-alpha\)/);
+  // The shell keeps its own glass while an image is set. Clearing it made the
+  // image stand in for the glass, so the glass slider ended up driving the image.
+  assert.doesNotMatch(css, /[.]shell[.]has-custom-background\s*\{/);
+  const layer = css.match(/[.]shell[.]has-custom-background::before\s*\{([^}]*)\}/)?.[1];
+  assert.match(layer, /z-index:\s*-1;/);
+  assert.match(layer, /background-image:[^;]*var\(--custom-background-image\);/);
+  assert.match(layer, /opacity:\s*var\(--background-image-alpha, 0[.]28\);/);
+  // One rule for every material, so the image slider means the same thing under
+  // native Liquid Glass as it does over the app's own glass.
+  assert.doesNotMatch(css, /native-liquid-glass [.]shell[.]has-custom-background::before/);
   assert.match(css, /html[.]native-reduced-transparency [.]shell[.]has-custom-background::before\s*\{\s*display:\s*none;/);
   assert.doesNotMatch(css, /linear-gradient\(var\(--glass\), var\(--glass\)\), var\(--custom-background-image\)/);
+});
+
+test('image opacity has its own slider, shown only while an image is set', () => {
+  const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
+  const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  assert.match(html, /id="backgroundImageOpacityRow" class="[^"]*\bhidden\b/);
+  assert.match(html, /id="backgroundImageOpacityInput" type="range" min="0" max="100"/);
+  assert.match(app, /backgroundImageOpacityRow\?[.]classList[.]toggle\('hidden', !backgroundImageActive\)/);
+  assert.match(app, /setProperty\('--background-image-alpha'/);
+  // Native material locks the glass sliders; the image slider must stay usable.
+  const locked = app.match(/for \(const control of \[([^\]]*)\]\) \{\n\s*if \(control\) control[.]disabled = nativeMaterial;/)?.[1];
+  assert.ok(locked, 'native-material lock loop should exist');
+  assert.doesNotMatch(locked, /backgroundImageOpacity/);
 });

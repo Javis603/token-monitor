@@ -218,7 +218,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
   //                    the sync cache too.
   const tokscaleConfigRoot = tokscaleConfigDir({ env, platform, homeDir: home });
   add('cursor', ['tokscale-cursor-cache', path.join(tokscaleHome, '.config', 'tokscale', 'cursor-cache')]);
-  add('antigravity', ['tokscale-antigravity-cache', path.join(tokscaleConfigRoot, 'antigravity-cache')]);
+  add('antigravity',
+    ['tokscale-antigravity-cache', path.join(tokscaleConfigRoot, 'antigravity-cache')],
+    ['antigravity-extension-data', path.join(home, '.gemini', 'antigravity', 'conversations')]);
   // A whitespace-only KIMI_CODE_HOME counts as unset, matching tokscale: it
   // joins `sessions` onto the raw value, so a blank export would resolve to the
   // root-level /sessions and hide the real one.
@@ -353,9 +355,14 @@ function clientSourceRoots(clientsCsv, options = {}) {
   );
   // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
   add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
-  // Qoder CN — SQLite DB under the platform Application Support dir.
-  const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform: process.platform, env: process.env });
-  add('qodercn', ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]));
+  // Qoder CN — legacy SQLite DB under the platform Application Support dir,
+  // or the JSONL transcript tree used by current builds.
+  const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform, env });
+  add(
+    'qodercn',
+    ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]),
+    ['qodercn-projects', qoderCnPaths.projectsDir]
+  );
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
     resolveReasonixStatsDir({ env: process.env, homeDir: home, platform: process.platform, cwdDir: process.cwd() })

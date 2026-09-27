@@ -384,16 +384,20 @@ function fakeGlassFactory({ failCreate = false, failShape = false } = {}) {
   return { create, glasses };
 }
 
-test('macOS Liquid Glass takes each surface silhouette instead of a vibrancy mask', (t) => {
+test('macOS Liquid Glass shapes the rail and card while the peek keeps its masked HUD grip', (t) => {
   const factory = fakeGlassFactory();
   const fixture = createFixture({ platform: 'darwin', nativeGlass: true, liquidGlass: { dark: true }, createGlass: factory.create });
   t.after(() => fixture.controller.stop());
   const rail = fixture.windowFor('rail');
 
   assert.equal(FakeBrowserWindow.instances.length, 3);
-  assert.ok(FakeBrowserWindow.instances.every((win) => win.options.vibrancy === undefined));
-  assert.equal(factory.glasses.length, 3);
-  assert.equal(fixture.maskWindows.length, 0);
+  const peek = fixture.windowFor('peek');
+  assert.equal(peek.options.vibrancy, 'hud');
+  assert.ok(fixture.maskWindows.includes(peek));
+  assert.equal(sentPayload(peek, 'peek').liquidGlass, false);
+  assert.ok(['rail', 'bubble'].every((surface) => fixture.windowFor(surface).options.vibrancy === undefined));
+  assert.equal(factory.glasses.length, 2);
+  assert.equal(fixture.maskWindows.length, 1);
   const shaped = factory.glasses.find((glass) => glass.win === rail).updates.find((update) => update.shape);
   assert.equal(shaped.dark, true);
   assert.equal(shaped.shape.height, rail.bounds.height);
@@ -432,7 +436,7 @@ test('switching the glass style rebuilds the dock and releases its Liquid Glass'
   const rebuilt = fixture.windowFor('rail');
   assert.notEqual(rebuilt, first);
   assert.equal(rebuilt.options.vibrancy, 'hud');
-  assert.equal(factory.glasses.length, 3);
+  assert.equal(factory.glasses.length, 2);
   assert.ok(factory.glasses.every((glass) => glass.disposed?.windowClosed !== true));
   assert.ok(factory.glasses.every((glass) => glass.disposed !== null));
 });
