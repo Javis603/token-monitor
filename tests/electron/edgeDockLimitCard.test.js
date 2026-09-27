@@ -696,7 +696,7 @@ test('MiMo membership rows distinguish accounts and keep the tier beside the pro
     { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef123456', accountName: 'MiMo abcdef1', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [] },
     { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef654321', accountName: 'MiMo abcdef6', accountLabel: 'Desktop Membership', windows: [] }
   ];
-  const group = view.renderLimitProviderGroup('mimo', 'MiMo', rows, '#ff6900');
+  const group = view.renderLimitProviderGroup('mimo', 'MiMo', rows, '#000000');
   const accounts = group.find('limit-account-list').children;
   assert.deepEqual(accounts.map((row) => row.find('limit-name-title').textContent), [
     'MiMo abcdef1 · Desktop Membership', 'MiMo abcdef6 · Desktop Membership'

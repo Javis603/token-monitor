@@ -886,7 +886,7 @@ test('a row whose only window is the weekly one still reaches the widget', () =>
       provider: 'mimo',
       status: 'ok',
       accountKey: 'sha256:membership',
-      source: 'oauth',
+      source: 'local',
       sourceDetail: 'app',
       windows: [{ kind: 'weekly', windowMinutes: 10080, usedPercent: 40, remainingPercent: 60, resetsAt: '2026-07-20T00:00:00Z' }]
     }] }
