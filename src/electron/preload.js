@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     return () => ipcRenderer.removeListener('appearance:nativeMaterial', listener);
   },
   getStats: (options) => ipcRenderer.invoke('stats:get', options),
+  getAllTimeSessions: () => ipcRenderer.invoke('stats:allTimeSessions'),
   getSessionDetail: (args) => ipcRenderer.invoke('session:getDetail', args),
   getStreamStatus: () => ipcRenderer.invoke('stream:status'),
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),

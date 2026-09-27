@@ -89,19 +89,16 @@ function withoutSessionDetail(period) {
 // - Device records keep their period totals and breakdowns but not their
 //   sessions and projects. The renderer only reads those aggregated, from
 //   `periods`, and the local device's copy alone repeats all of them.
-// - Sync modes build the TOTAL session list as the `allTimeSessionsView`
-//   sibling so the aggregate `periods.allTime.sessions` stays lossless for the
-//   exporter. The renderer only ever shows the view, so it replaces the
-//   aggregate's list here instead of travelling beside it.
+// - The all-time session list is pulled, not pushed (`stats:allTimeSessions`).
+//   It is most of the payload and only one view shows it, so shipping it on
+//   every publish would clone it for nothing nearly every time.
 function rendererStats(stats) {
   if (!stats || typeof stats !== 'object') return stats;
   const result = { ...stats };
-  delete result.allTimeSessionsView;
-  if (stats.allTimeSessionsView && stats.periods?.allTime) {
-    result.periods = {
-      ...stats.periods,
-      allTime: { ...stats.periods.allTime, sessions: stats.allTimeSessionsView }
-    };
+  const allTime = stats.periods?.allTime;
+  if (allTime && typeof allTime === 'object' && 'sessions' in allTime) {
+    const { sessions: _sessions, ...summary } = allTime;
+    result.periods = { ...stats.periods, allTime: summary };
   }
   if (Array.isArray(stats.devices)) {
     result.devices = stats.devices.map((device) => {

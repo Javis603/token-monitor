@@ -97,7 +97,13 @@ const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
-const { normalizeModelAliases, normalizeModelAliasGrouping, projectModelAliasStats, projectModelAliasHistory } = require('./modelAliasPresentation');
+const {
+  normalizeModelAliases,
+  normalizeModelAliasGrouping,
+  projectModelAliasStats,
+  projectModelAliasSessions,
+  projectModelAliasHistory
+} = require('./modelAliasPresentation');
 const { createHub } = require('../hub/server');
 const { probeHubBuild } = require('./hubBuildStatus');
 const {
@@ -317,7 +323,8 @@ const { classifyStreamFailure } = require('./syncConnection');
 const {
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
-  composeLocalSyncStats
+  completeLocalSyncStats,
+  composeLocalSyncSummary
 } = require('./syncDisplayStats');
 const { createStatsPresentationCache, createStatsPublicationBatcher, rendererStats } = require('./statsPublisher');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
@@ -2927,6 +2934,26 @@ function electronPresentationStats(stats) {
     { grouping }
   ));
 }
+
+const allTimeSessionsCache = createStatsPresentationCache();
+
+// The renderer's all-time session list, which rendererStats() keeps out of every
+// push. A Hub aggregate carries no all-time session detail (syncPayload drops it
+// from uploads, #118), so sync and host mode rebuild the list: the Hub's
+// cross-device month sessions, then this machine's own full all-time list.
+function rendererAllTimeSessions(stats) {
+  if (!stats) return null;
+  const aliases = settings?.modelAliases;
+  const grouping = settings?.modelAliasGrouping;
+  const key = JSON.stringify([mode, aliases ?? null, grouping ?? null]);
+  return allTimeSessionsCache.get(stats, key, () => {
+    const complete = completeLocalSyncStats(stats);
+    const sessions = mode === 'local'
+      ? complete.periods?.allTime?.sessions || {}
+      : mergedLocalAllTimeSessions(complete.periods, lastCollectedDevice);
+    return projectModelAliasSessions(stats, sessions, aliases, { grouping });
+  });
+}
 let codexPresentationPendingSince = 0;
 let trayCodexSwitchInFlight = false;
 const DEFAULT_EXPORT_INTERVAL_MS = 60 * 1000;
@@ -3830,7 +3857,7 @@ function requestSyncDisplayStats(request) {
 
 function publishSyncDisplayStats({ reason, at, generation, widgetProducerOwner }) {
   if (!hubModeRequestIsCurrent(generation, 'client')) return;
-  const displayStats = composeLocalSyncStats(latestHubStats, lastCollectedDevice);
+  const displayStats = composeLocalSyncSummary(latestHubStats, lastCollectedDevice);
   if (!displayStats) return;
   updateDiscordRpcDisplay(displayStats);
   sendPush({ event: 'stats', data: { type: 'stats', reason, stats: displayStats, at } }, { widgetProducerOwner });
@@ -3977,19 +4004,6 @@ function injectLocalDeviceStatus(stats) {
       if (lastCollectedDevice.clientHealth) device.clientHealth = lastCollectedDevice.clientHealth;
       if (lastCollectedDevice.wslStatus) device.wslStatus = lastCollectedDevice.wslStatus;
     }
-  }
-  // syncPayload drops the unbounded allTime.sessions from uploads (#118), so a hub
-  // aggregate carries no all-time session detail and the TOTAL session view would fall back
-  // to a model list. Rebuild the list — the hub's cross-device month sessions as the
-  // immediate baseline (present on the first frame, before this restart's first local scan),
-  // then this machine's own full all-time sessions once collected (free, in-process). Carry
-  // it as a display-only sibling instead of mutating periods.allTime.sessions: the exporter
-  // writes periods verbatim under a lossless contract, so the export must keep the true
-  // aggregate. rendererStats() swaps it in for periods.allTime.sessions on the renderer's copy.
-  // Only sync/host mode needs this: in local mode periods.allTime.sessions already holds the
-  // full native list, so building the sibling there would just ship the unbounded map twice.
-  if (mode !== 'local' && stats.periods?.allTime) {
-    stats.allTimeSessionsView = mergedLocalAllTimeSessions(stats.periods, lastCollectedDevice);
   }
   return stats;
 }
@@ -4240,7 +4254,7 @@ function sendPush(payload, options = {}) {
     updateTrayDisplay();
     if (!options.skipExport && settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
       lastExportAt = Date.now();
-      writeExportTo(settings.exportDir, payload.data.stats.periods, { skipUnchanged: true })
+      writeExportTo(settings.exportDir, completeLocalSyncStats(payload.data.stats).periods, { skipUnchanged: true })
         .catch((err) => console.warn(`[export] auto-export failed: ${err.message}`));
     }
   }
@@ -5822,7 +5836,7 @@ async function fetchStats(options = {}) {
     });
   }
   setLatestHubStatsCache(stats, 'client', requestGeneration, requestHubIdentity);
-  return injectLocalDeviceStatus(composeLocalSyncStats(stats, lastCollectedDevice));
+  return injectLocalDeviceStatus(composeLocalSyncSummary(stats, lastCollectedDevice));
 }
 
 function managedPricingSidecarPath() {
@@ -7283,6 +7297,7 @@ app.whenReady().then(() => {
     maybeAdoptSharedSubscriptionRevision(stats);
     return rendererStats(electronPresentationStats(stats));
   });
+  ipcMain.handle('stats:allTimeSessions', () => rendererAllTimeSessions(latestStats));
   ipcMain.handle('export:now', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
@@ -7290,7 +7305,7 @@ app.whenReady().then(() => {
     });
     if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
     const stats = await fetchStats();
-    const written = await writeExportTo(result.filePaths[0], stats.periods);
+    const written = await writeExportTo(result.filePaths[0], completeLocalSyncStats(stats).periods);
     if (!written.ok) return { ok: false, dir: result.filePaths[0], reason: written.reason || 'write-failed' };
     return { ok: true, dir: result.filePaths[0] };
   });

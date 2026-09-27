@@ -36,6 +36,7 @@ const glassRenderingApi = window.TokenMonitorGlassRendering;
 const fontSettingsApi = window.TokenMonitorFontSettings;
 const wslStatusPresentationApi = window.TokenMonitorWslStatusPresentation;
 const statsRenderSchedulerApi = window.TokenMonitorStatsRenderScheduler;
+const allTimeSessionsApi = window.TokenMonitorAllTimeSessions;
 const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
@@ -6238,6 +6239,7 @@ function render() {
     return;
   }
   if (!state.stats) return;
+  allTimeSessions.ensure();
   els.toolDetailFooter.classList.add('hidden');
   syncLiveTokenRateFooterState();
   renderSessionUsageArchiveStatus();
@@ -6500,7 +6502,8 @@ async function refreshStats(options = {}) {
   try {
     const nextStats = await window.tokenMonitor.getStats(options);
     observeLiveTokenRate(nextStats);
-    state.stats = nextStats;
+    allTimeSessions.invalidate();
+    state.stats = allTimeSessions.attach(nextStats);
     observeDisplayLiveTokenRates(nextStats);
     if (options.forceHistory === true) {
       // A manual history rescan is an explicit retry boundary. Let Home request the
@@ -7996,6 +7999,7 @@ function syncSettingsForm() {
   if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled !== false;
   if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
   renderAutomaticAppUpdateControl();
+  allTimeSessions.ensure();
   renderSessionUsageArchiveStatus();
   const exportAutoOn = Boolean(state.settings.exportAutoEnabled);
   const exportDir = state.settings.exportDir || '';
@@ -11940,6 +11944,21 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
   isHidden: isRendererWindowHidden,
   render: renderStatsUpdate
 });
+// Pulled once up front, then only while something on screen reads it: the
+// archived count in Settings, or the TOTAL session and project lists.
+function allTimeSessionsNeeded() {
+  if (!allTimeSessions.loaded() || isSettingsPanelOpen()) return true;
+  return state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');
+}
+const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
+  fetchSessions: () => window.tokenMonitor.getAllTimeSessions(),
+  needed: allTimeSessionsNeeded,
+  onLoaded: () => {
+    if (state.stats) state.stats = allTimeSessions.attach(state.stats);
+    statsRenderScheduler.request();
+  },
+  onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
+});
 function handleWindowVisibilityChange() {
   if (!statsRenderScheduler.visibilityChanged()) return;
   if (isRendererWindowHidden()) cancelTokenRateBoost();
@@ -11980,7 +11999,8 @@ window.tokenMonitor.onStatsPush?.((payload) => {
       state.streamFailure = null;
     }
     if (payload.data?.mode) state.mode = payload.data.mode;
-    state.stats = payload.data.stats;
+    allTimeSessions.invalidate();
+    state.stats = allTimeSessions.attach(payload.data.stats);
     observeLiveTokenRate(state.stats);
     observeDisplayLiveTokenRates(state.stats);
     applyCodexActiveAccountFromStats();

@@ -2,7 +2,13 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { normalizeModelAliases, createModelAliasResolver, projectModelAliasStats, projectModelAliasHistory } = require('../../src/electron/modelAliasPresentation');
+const {
+  normalizeModelAliases,
+  createModelAliasResolver,
+  projectModelAliasStats,
+  projectModelAliasSessions,
+  projectModelAliasHistory
+} = require('../../src/electron/modelAliasPresentation');
 
 const aliases = { 'anthropic/claude-opus-5': 'claude-opus-5' };
 const period = {
@@ -43,7 +49,7 @@ test('explicit aliases match case and separators once, without stripping version
 });
 
 test('projection conserves priced totals and components in every period, client, session and device', () => {
-  const stats = { periods: { today: period, month: period, allTime: period }, devices: [{ deviceId: 'one', periods: { today: period } }], allTimeSessionsView: period.sessions, nativeSessions: { today: period.sessions }, nativeProjects: { today: period.projects }, limits: { providers: [{ provider: 'anthropic', model: 'anthropic/claude-opus-5' }] } };
+  const stats = { periods: { today: period, month: period, allTime: period }, devices: [{ deviceId: 'one', periods: { today: period } }], nativeSessions: { today: period.sessions }, nativeProjects: { today: period.projects }, limits: { providers: [{ provider: 'anthropic', model: 'anthropic/claude-opus-5' }] } };
   const before = structuredClone(stats);
   const projected = projectModelAliasStats(stats, aliases);
   for (const row of [...Object.values(projected.periods), projected.devices[0].periods.today]) {
@@ -56,13 +62,25 @@ test('projection conserves priced totals and components in every period, client,
     assert.deepEqual(row.projects.p1.models, { 'claude-opus-5': 70 });
     assert.deepEqual([row.totalTokens, row.costUsd, row.clients, row.clientCosts], [100, 7, period.clients, period.clientCosts]);
   }
-  assert.deepEqual(projected.allTimeSessionsView.s1.models, { 'claude-opus-5': 40 });
   assert.deepEqual(projected.nativeSessions.today.s1.models, { 'claude-opus-5': 40 });
   assert.deepEqual(projected.nativeProjects.today.p1.models, { 'claude-opus-5': 70 });
   assert.deepEqual(projected.limits, stats.limits);
   assert.deepEqual(stats, before);
   assert.deepEqual(projectModelAliasStats(stats, {}, { grouping: 'duplicates' }).periods.today.models, { 'claude-opus-5': 70, 'gpt-5.5-pro': 30 });
   assert.deepEqual(projectModelAliasStats(stats, { 'anthropic/claude-opus-5': 'separate' }).periods.today.models, { separate: 40, 'claude-opus-5': 30, 'gpt-5.5-pro': 30 });
+});
+
+test('a pulled session list is grouped by the same plan as the stats it belongs to', () => {
+  const sessions = structuredClone(period.sessions);
+  const before = structuredClone(sessions);
+  assert.deepEqual(projectModelAliasSessions({}, sessions, aliases).s1.models, { 'claude-opus-5': 40 });
+  assert.deepEqual(sessions, before);
+  assert.strictEqual(projectModelAliasSessions({}, sessions, undefined), sessions);
+  // Only the stats hold the second spelling, so grouping the list alone would
+  // leave its provider-qualified name standing.
+  const stats = { periods: { allTime: { models: { 'claude-opus-5': 30 } } } };
+  assert.deepEqual(projectModelAliasSessions(stats, sessions, {}, { grouping: 'duplicates' }).s1.models, { 'claude-opus-5': 40 });
+  assert.strictEqual(projectModelAliasSessions({}, sessions, {}, { grouping: 'duplicates' }), sessions);
 });
 
 test('historical daily/monthly/device buckets and favorite model are regrouped without repricing', () => {
@@ -178,14 +196,12 @@ test('an alias that matches nothing in the payload copies no part of the stats t
   const stats = {
     periods: { today: unaliased, allTime: unaliased },
     devices: [{ deviceId: 'one', periods: { today: unaliased }, history }],
-    allTimeSessionsView: { s1: { models: { 'gpt-5.5-pro': 10 } } },
     nativeSessions: { today: { s1: { models: { 'gpt-5.5-pro': 10 } } } },
     historyRevision: 'raw'
   };
   const projected = projectModelAliasStats(stats, { 'anthropic/claude-opus-5': 'claude-opus-5' });
   assert.strictEqual(projected.periods, stats.periods);
   assert.strictEqual(projected.devices, stats.devices);
-  assert.strictEqual(projected.allTimeSessionsView, stats.allTimeSessionsView);
   assert.strictEqual(projected.nativeSessions, stats.nativeSessions);
   // The root is the one object the projection must rebuild: it carries the
   // pricing-picker inventory and the decorated revision.

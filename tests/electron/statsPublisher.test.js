@@ -142,7 +142,6 @@ function syncModeStats() {
       today: { totalTokens: 10, sessions: { 'claude:a': { totalTokens: 10 } } },
       allTime: { totalTokens: 90, sessions: { 'claude:month-only': { totalTokens: 5 } } }
     },
-    allTimeSessionsView: { 'claude:a': { totalTokens: 90 }, 'claude:month-only': { totalTokens: 5 } },
     devices: [
       { deviceId: 'local', history: { daily: [] }, periods: { today: localToday, allTime: localAllTime } },
       { deviceId: 'legacy', today: { totalTokens: 1 } }
@@ -165,21 +164,18 @@ test('the renderer copy drops device sessions and projects but keeps their total
   assert.deepEqual(stats, snapshot, 'the published snapshot main keeps is not mutated');
 });
 
-test('the TOTAL session view replaces the aggregate list instead of travelling beside it', () => {
+test('the all-time session list stays out of the renderer copy in every mode', () => {
   const stats = syncModeStats();
   const result = rendererStats(stats);
 
-  assert.equal(Object.hasOwn(result, 'allTimeSessionsView'), false);
-  assert.equal(result.periods.allTime.sessions, stats.allTimeSessionsView);
+  assert.equal(Object.hasOwn(result.periods.allTime, 'sessions'), false);
   assert.equal(result.periods.allTime.totalTokens, 90);
-  assert.equal(result.periods.today, stats.periods.today);
+  assert.equal(result.periods.today, stats.periods.today, 'today and month keep their sessions');
   // The exporter reads main's copy, which keeps the lossless aggregate.
   assert.deepEqual(stats.periods.allTime.sessions, { 'claude:month-only': { totalTokens: 5 } });
-});
 
-test('local mode, which builds no session view, keeps its aggregate periods as they are', () => {
-  const stats = { periods: { allTime: { sessions: { 'claude:a': {} } } }, devices: [] };
-  assert.equal(rendererStats(stats).periods, stats.periods);
+  const withoutList = { periods: { allTime: { totalTokens: 1 } }, devices: [] };
+  assert.equal(rendererStats(withoutList).periods, withoutList.periods);
   assert.equal(rendererStats(null), null);
 });
 
@@ -188,4 +184,5 @@ test('every stats payload sent to the renderer goes through rendererStats', () =
   assert.equal((main.match(/stats: rendererStats\(visibleStats\)/g) || []).length, 2, 'stats push and presentation refresh');
   assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*?return rendererStats\(electronPresentationStats\(stats\)\);/);
   assert.doesNotMatch(main, /stats: visibleStats\b/);
+  assert.match(main, /ipcMain\.handle\('stats:allTimeSessions', \(\) => rendererAllTimeSessions\(latestStats\)\)/);
 });
