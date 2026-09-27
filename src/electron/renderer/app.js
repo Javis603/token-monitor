@@ -2053,6 +2053,7 @@ function rowTemplate(rowData) {
 
 const DEVICE_DELETE_CONFIRMATION_MS = 3000;
 const armedDeviceDeleteButtons = new Set();
+const devicesBeingDeleted = new Set();
 const deviceDeleteConfirmationTimers = new WeakMap();
 
 function clearDeviceDeleteConfirmationTimer(remove) {
@@ -2139,6 +2140,7 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
     deviceDetail.metaParts,
     deviceDetail.canDelete,
     deviceDetail.deviceId,
+    devicesBeingDeleted.has(deviceDetail.deviceId),
     deviceDetail.tools.map((tool) => [
       tool.key,
       tool.value,
@@ -2216,24 +2218,35 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
     const remove = document.createElement('button');
     remove.type = 'button';
     remove.className = 'device-delete-button';
+    remove.dataset.deviceId = deviceDetail.deviceId;
+    remove.disabled = devicesBeingDeleted.has(deviceDetail.deviceId);
     const deleteText = t('settings.sync.icloudDelete');
     const deleteConfirmText = t('settings.sync.icloudDeleteConfirm');
     remove.textContent = deleteText;
     const resetConfirmation = () => resetDeviceDeleteConfirmation(remove, deleteText);
     remove.addEventListener('blur', resetConfirmation);
     remove.addEventListener('click', async () => {
+      if (devicesBeingDeleted.has(deviceDetail.deviceId)) return;
       if (remove.dataset.confirm !== 'true') {
         armDeviceDeleteConfirmation(remove, deleteText, deleteConfirmText);
         return;
       }
       remove.disabled = true;
+      devicesBeingDeleted.add(deviceDetail.deviceId);
       try {
         await window.tokenMonitor.deleteDevice(deviceDetail.deviceId);
         resetConfirmation();
         await refreshStats();
       } catch (_) {
-        remove.disabled = false;
         resetConfirmation();
+      } finally {
+        devicesBeingDeleted.delete(deviceDetail.deviceId);
+        // Stats may have replaced the original button while IPC was pending.
+        for (const current of [remove, ...document.querySelectorAll('.device-delete-button')]) {
+          if (current.dataset.deviceId !== deviceDetail.deviceId) continue;
+          current.disabled = false;
+          resetDeviceDeleteConfirmation(current, deleteText);
+        }
       }
     });
     content.append(remove);

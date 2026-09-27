@@ -895,6 +895,10 @@ test('failed replacement keeps the old cloud record and failed cleanup retries o
     failure = 'cleanup';
     assert.equal(await runtime.writeDevice(snapshot, options), false);
     assert.equal((await store.discoverDevices()).records.length, 2);
+    assert.equal(runtime.getStats().periods.allTime.totalTokens, 42);
+    await runtime.reconcile('cleanup-still-failing');
+    assert.equal(runtime.getStats().periods.today.totalTokens, 42);
+    assert.equal(runtime.getStats().periods.allTime.totalTokens, 42);
     failure = '';
     assert.equal(await runtime.writeDevice(snapshot, options), true);
     assert.deepEqual(runtime.getDevices().map((entry) => entry.deviceId), ['mac-b']);
@@ -954,6 +958,34 @@ test('a reconciliation started before identity cleanup cannot resurrect the reti
     assert.equal(runtime.getStats().periods.allTime.totalTokens, 42);
   } finally {
     release();
+    await runtime?.stop();
+    fixture.cleanup();
+  }
+});
+
+test('restart keeps an unfinished multi-ID handoff out of the aggregate until matching cleanup', async () => {
+  const fixture = rootFixture();
+  let runtime;
+  try {
+    const store = createIcloudSyncStore({
+      platform: 'darwin', home: fixture.root, cloudDocsRoot: path.join(fixture.root, 'CloudDocs'), writerId: 'writer'
+    });
+    for (const id of ['mac-a', 'mac-b', 'mac-c']) await store.writeDevice(record(id, 42));
+    runtime = createIcloudSyncRuntime({
+      store, deviceId: 'mac-c', retiredDeviceIds: ['mac-a', 'mac-b'],
+      reconcileMs: 0, watchFactory: () => null
+    });
+    await runtime.start();
+    assert.equal(runtime.getStats().periods.today.totalTokens, 42);
+    assert.equal(runtime.getStats().periods.allTime.totalTokens, 42);
+    // A write without the matching cleanup is not proof the handoff completed.
+    await runtime.writeDevice(record('mac-c', 42));
+    await runtime.reconcile('still-pending');
+    assert.equal(runtime.getStats().periods.allTime.totalTokens, 42);
+    await runtime.writeDevice(record('mac-c', 42), { retiredDeviceIds: ['mac-a', 'mac-b'] });
+    assert.deepEqual(runtime.getDevices().map((entry) => entry.deviceId), ['mac-c']);
+    assert.equal(runtime.getStats().periods.allTime.totalTokens, 42);
+  } finally {
     await runtime?.stop();
     fixture.cleanup();
   }

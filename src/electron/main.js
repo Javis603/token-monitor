@@ -4011,6 +4011,8 @@ async function startIcloudCollector() {
   });
   const runtime = createIcloudSyncRuntime({
     store,
+    deviceId: settings.deviceId,
+    retiredDeviceIds: settings.icloudRetiredDeviceIds || [],
     historyEnabled: () => settings?.historyEnabled !== false,
     staleAfterMs: 10 * 60 * 1000,
     onStats: (stats) => {

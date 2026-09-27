@@ -72,8 +72,14 @@ class FakeNode {
 
 function createHarness() {
   const documentListeners = new Map();
+  const createdNodes = [];
   const document = {
-    createElement: (tagName) => new FakeNode(tagName),
+    createElement: (tagName) => {
+      const node = new FakeNode(tagName);
+      createdNodes.push(node);
+      return node;
+    },
+    querySelectorAll: () => createdNodes.filter((node) => node.className === 'device-delete-button'),
     addEventListener(type, listener) {
       const listeners = documentListeners.get(type) || [];
       listeners.push(listener);
@@ -266,4 +272,38 @@ test('main process deletion abandons eligibility checks after a mode switch', as
 
   await assert.rejects(deleting, (error) => error.code === 'hub_changed');
   assert.equal(context.deleted, undefined);
+});
+
+test('pending deletion survives a stats redraw and releases the replacement button on completion', async () => {
+  for (const failure of [false, true]) {
+    const harness = createHarness();
+    let finish;
+    harness.setDeleteImplementation(() => new Promise((resolve, reject) => {
+      finish = () => failure ? reject(new Error('delete failed')) : resolve();
+    }));
+    const accordion = harness.createNode('div');
+    const detail = deviceDetail();
+    harness.render(accordion, detail);
+    const original = accordion.querySelector('.device-delete-button');
+    await original.dispatch('click');
+    const pending = original.dispatch('click');
+    assert.equal(original.disabled, true);
+    harness.render(accordion, { ...detail, metaParts: ['new timestamp'] });
+    const replacement = accordion.querySelector('.device-delete-button');
+    assert.notEqual(replacement, original);
+    assert.equal(replacement.disabled, true);
+    await replacement.dispatch('click');
+    await replacement.dispatch('click');
+    assert.equal(harness.getDeleteCalls(), 1);
+    const recreatedAccordion = harness.createNode('div');
+    harness.render(recreatedAccordion, detail);
+    const recreated = recreatedAccordion.querySelector('.device-delete-button');
+    assert.equal(recreated.disabled, true);
+    finish();
+    await pending;
+    assert.equal(recreated.disabled, false);
+    assert.equal(replacement.disabled, false);
+    assert.equal(replacement.dataset.confirm, '');
+    assert.equal(harness.getRefreshCalls(), failure ? 0 : 1);
+  }
 });

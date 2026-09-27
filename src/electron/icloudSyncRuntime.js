@@ -66,6 +66,7 @@ function createIcloudSyncRuntime(options = {}) {
   let reconcileGeneration = null;
   let reconcileAgain = false;
   let localRecord = null;
+  let pendingHandoff = null;
   let localRecordOverlayAllowed = true;
   let successfulDeviceWrites = 0;
   let records = [];
@@ -133,6 +134,15 @@ function createIcloudSyncRuntime(options = {}) {
 
   function updateRecords(nextRecords, { publish = true, includeLocalRecord = localRecordOverlayAllowed } = {}) {
     records = mergeByDeviceId(nextRecords, localRecord, { includeLocalRecord });
+    if (pendingHandoff) {
+      const former = records.find((entry) => pendingHandoff.retiredIds.has(entry.deviceId));
+      if (former) {
+        // A partially completed handoff can leave several former IDs on disk.
+        // Use one former record until cleanup succeeds, even across reconciles.
+        records = records.filter((entry) => entry.deviceId === former.deviceId
+          || (entry.deviceId !== pendingHandoff.newId && !pendingHandoff.retiredIds.has(entry.deviceId)));
+      }
+    }
     stats = buildStats(records);
     if (publish) publishStats();
     publishStatus();
@@ -309,6 +319,12 @@ function createIcloudSyncRuntime(options = {}) {
     if (stopPromise) await stopPromise;
     if (active) return publicStatus();
     needsTeardown = true;
+    if (options.deviceId && options.retiredDeviceIds?.length) {
+      pendingHandoff = {
+        newId: options.deviceId,
+        retiredIds: new Set(options.retiredDeviceIds.filter((id) => id !== options.deviceId))
+      };
+    }
     active = true;
     generation += 1;
     const expectedGeneration = generation;
@@ -351,6 +367,7 @@ function createIcloudSyncRuntime(options = {}) {
       // on a later start of this runtime. Last-good discovered records remain in
       // `records`; only the in-memory writer overlay belongs to the old lifetime.
       localRecord = null;
+      pendingHandoff = null;
       localRecordOverlayAllowed = true;
       publishStatus();
       // Store close rejects new mutations and resolves only after all accepted
@@ -371,7 +388,13 @@ function createIcloudSyncRuntime(options = {}) {
     const replacingIdentity = options.retiredDeviceIds?.some((id) => id !== normalized.deviceId);
     // Until the handoff succeeds, the former published identity supplies usage.
     // Overlaying the new ID after a failed publish would count the same Mac twice.
-    if (replacingIdentity) localRecordOverlayAllowed = false;
+    if (replacingIdentity) {
+      localRecordOverlayAllowed = false;
+      pendingHandoff = {
+        newId: normalized.deviceId,
+        retiredIds: new Set(options.retiredDeviceIds.filter((id) => id !== normalized.deviceId))
+      };
+    }
     try {
       const written = await Promise.resolve(store.writeDevice(record, options));
       if (!active || expectedGeneration !== generation) return false;
@@ -386,6 +409,10 @@ function createIcloudSyncRuntime(options = {}) {
         localRecordOverlayAllowed = writeIsVisible;
         lastWriteAt = new Date(now()).toISOString();
         if (writeIsVisible) successfulDeviceWrites += 1;
+      }
+      if (writeIsVisible && pendingHandoff?.newId === normalized.deviceId
+        && [...pendingHandoff.retiredIds].every((id) => options.retiredDeviceIds?.includes(id))) {
+        pendingHandoff = null;
       }
       // A device write does not revalidate remote files or subscriptions.
       lastErrorCategory = lastReconcileErrorCategory || lastSubscriptionReconcileErrorCategory;
