@@ -81,6 +81,7 @@ Every publish recomposes and ships the whole stats tree, so its cost is paid per
 
 - **Client mode batches publications.** Local ticks and Hub events, including the Hub's echo of this device's own upload, collapse into one publish per 1 s window that composes whatever is newest when it closes. A Hub reason outranks a local one in the batch, because the renderer reads `local` as saying nothing about the connection. `sendStatus()` flushes the batch first: a Hub event delivered after a disconnect status would mark the stream connected again.
 - **Published snapshots are immutable.** `electronPresentationStats()` caches its projection per snapshot object and settings key, and `composeLocalSyncStats()` caches the local record's normalization per record object. Mutating either in place serves a stale projection; replace the object instead.
+- **The renderer gets a slimmer copy.** Every stats payload crossing IPC goes through `rendererStats()`: device records lose their sessions and projects, and in sync modes the `allTimeSessionsView` sibling replaces `periods.allTime.sessions` rather than travelling beside it. Main keeps the full snapshot, because the exporter needs the lossless aggregate. A renderer feature that needs per-device sessions must ask for them, not widen this copy.
 
 ## Settings and credentials
 

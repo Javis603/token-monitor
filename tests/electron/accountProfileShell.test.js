@@ -53,7 +53,7 @@ function namedProfilesHarness() {
       createElement() { return { className: '', textContent: '' }; }
     }
   };
-  const shellErrorSource = app.slice(app.indexOf('function setAccountShellError('), app.indexOf('const reasonixSessionGuard'));
+  const shellErrorSource = app.slice(app.indexOf('function setAccountShellError('), app.indexOf('const { clientColors, fallbackModelColors'));
   vm.runInNewContext(`${shellErrorSource}\n${source}\nthis.renderNamedApiProfiles = renderNamedApiProfiles;`, context);
   const render = (providerId) => context.renderNamedApiProfiles({
     providerId,
@@ -146,7 +146,7 @@ test('Cursor retires a failed manual login message when status is refreshed', as
       status: () => statusRequest.promise
     } } }
   };
-  const shellErrorSource = app.slice(app.indexOf('function setAccountShellError('), app.indexOf('const reasonixSessionGuard'));
+  const shellErrorSource = app.slice(app.indexOf('function setAccountShellError('), app.indexOf('const { clientColors, fallbackModelColors'));
   const renderSource = app.slice(app.indexOf('function renderCursorStatus('), app.indexOf('function setCursorCheckboxesEnabled('));
   const submitSource = app.slice(app.indexOf('  const cursorManualSubmit ='), app.indexOf('  refreshCursorStatus({ discover: true });', app.indexOf('  const cursorManualSubmit =')));
   vm.runInNewContext(`${shellErrorSource}\n${renderSource}\n${submitSource}\nthis.refreshCursorStatus = refreshCursorStatus; this.renderCursorStatus = renderCursorStatus;`, context);
