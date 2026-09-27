@@ -246,7 +246,7 @@ const {
   sessionUsageArchiveDatabasePath
 } = require('../shared/sessionUsageArchiveStore');
 const { createUsageTransform, usageTransformSettings } = require('../shared/usageTransform');
-const { createUsageHost, whenUsageHostsIdle } = require('../shared/usageHost');
+const { createUsageHost, terminateUsageHostSubprocesses, whenUsageHostsIdle } = require('../shared/usageHost');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
 const { aggregateDevices, aggregateHistory } = require('../shared/usage');
 const {
@@ -5597,6 +5597,10 @@ function stopAll() {
   stopStatsStream();
   stopHostStats();
   stopSyncCollector({ skipCloseWatchers: true });
+  // A collector on the usage worker stops by message, which nothing guarantees
+  // the worker handles before the exit below; its tokscale subprocesses would
+  // outlive us.
+  terminateUsageHostSubprocesses();
   syncStatsPublication.cancel();
   macWidgetSnapshotController?.stop();
   if (macWidgetDemand) {

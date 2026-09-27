@@ -31,6 +31,7 @@
 // On by default. TOKEN_MONITOR_USAGE_WORKER=0 pins the in-process collector.
 
 const { startCollector } = require('./collector');
+const { createLiveSubprocessTable, signalLiveSubprocesses } = require('./subprocessTermination');
 
 const WORKER_PATH = require.resolve('./usageWorker');
 // How long a stopping worker gets to stop its collector (which terminates its
@@ -67,7 +68,10 @@ function createUsageHostCoordinator(deps = {}) {
   const workerPath = deps.workerPath || WORKER_PATH;
   const startInProcess = deps.startCollector || startCollector;
   const stopGraceMs = deps.stopGraceMs ?? STOP_GRACE_MS;
+  const killSubprocess = deps.killSubprocess;
   let workerDisabled = false;
+  // The subprocess tables of workers that have not exited yet.
+  const liveSubprocessTables = new Set();
   // Settles once the most recently created runtime's worker has exited, or once
   // that runtime has given up on starting one.
   let previousExit = Promise.resolve();
@@ -92,6 +96,7 @@ function createUsageHostCoordinator(deps = {}) {
       transformSettings: host.transformSettings || {},
       agentPidPath: host.agentPidPath,
       archiveWritesYieldToAgent,
+      liveSubprocesses: createLiveSubprocessTable(),
       callbacks: {
         preview: typeof options.onPreview === 'function',
         error: typeof options.onError === 'function',
@@ -213,6 +218,7 @@ function createUsageHostCoordinator(deps = {}) {
     function onExit(code) {
       if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
       worker = null;
+      liveSubprocessTables.delete(workerData.liveSubprocesses);
       // A worker that is gone captures nothing more under any settings.
       for (const resolve of settingsAcks.splice(0)) resolve();
       if (stopped) settleRemaining();
@@ -242,6 +248,7 @@ function createUsageHostCoordinator(deps = {}) {
       // Listeners first: attaching 'message' refs the port again.
       spawned.unref?.();
       worker = spawned;
+      liveSubprocessTables.add(workerData.liveSubprocesses);
       for (const message of queued.splice(0)) worker.postMessage(message);
     });
 
@@ -336,6 +343,13 @@ function createUsageHostCoordinator(deps = {}) {
     create,
     // Settles once no worker created so far is still running.
     whenIdle: () => previousExit,
+    // For the quit path, which exits right after stopping its runtimes without
+    // waiting: nothing guarantees a worker handles its stop before the process
+    // is gone, so its subprocesses are sent the same SIGTERM the in-process
+    // collector's stop() sends, from this thread and synchronously.
+    terminateSubprocesses() {
+      for (const table of liveSubprocessTables) signalLiveSubprocesses(table, 'SIGTERM', killSubprocess);
+    },
     inspect: () => ({ workerDisabled })
   };
 }
@@ -352,9 +366,14 @@ function whenUsageHostsIdle(coordinator = defaultCoordinator) {
   return coordinator.whenIdle();
 }
 
+function terminateUsageHostSubprocesses(coordinator = defaultCoordinator) {
+  coordinator.terminateSubprocesses();
+}
+
 module.exports = {
   createUsageHost,
   createUsageHostCoordinator,
+  terminateUsageHostSubprocesses,
   usageWorkerRequested,
   whenUsageHostsIdle
 };

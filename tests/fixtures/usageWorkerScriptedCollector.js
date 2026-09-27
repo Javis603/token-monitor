@@ -6,7 +6,10 @@
 // Everything past the collector — the transform, the session archive store and
 // the message protocol — is the production code.
 
+const { spawn } = require('node:child_process');
+
 const collector = require('../../src/shared/collector');
+const { createSubprocessTermination } = require('../../src/shared/subprocessTermination');
 const { normalizePeriod } = require('../../src/shared/usage');
 
 collector.startCollector = (options) => {
@@ -39,6 +42,18 @@ collector.startCollector = (options) => {
       if (reason === 'fail') {
         options.onError?.(new Error('scripted failure'), reason);
         return false;
+      }
+      if (reason === 'spawn') {
+        // A subprocess that outlives the tick, registered the way the
+        // collector's tokscale spawns are. Its end is reported as a log.
+        const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+        const termination = createSubprocessTermination(child);
+        child.on('close', () => {
+          termination.confirmClosed();
+          options.logger?.(`child ${child.pid} closed`);
+        });
+        options.logger?.(`child ${child.pid} spawned`);
+        return true;
       }
       if (reason === 'preview') options.onPreview?.(summary(), 'progress');
       if (reason === 'busy') {

@@ -16,9 +16,13 @@ const { startCollector } = require('./collector');
 const { externalAgentActive } = require('./agentPid');
 const { createCursorUsageEventIndex } = require('./providers/cursor/usageEvents');
 const { createSessionUsageArchiveStore } = require('./sessionUsageArchiveStore');
+const { trackLiveSubprocesses } = require('./subprocessTermination');
 const { createUsageTransform } = require('./usageTransform');
 
 const config = workerData || {};
+// Lists this thread's subprocesses where the owner can signal them if the
+// process exits before this thread handles its stop.
+trackLiveSubprocesses(config.liveSubprocesses);
 const callbacks = config.callbacks || {};
 const isExternalAgentActive = () => externalAgentActive(config.agentPidPath);
 const store = createSessionUsageArchiveStore({ cursorUsageEvents: createCursorUsageEventIndex() });
