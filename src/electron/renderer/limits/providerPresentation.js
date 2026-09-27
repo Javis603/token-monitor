@@ -70,7 +70,7 @@
     copilot: ['Manual login', 'API'],
     zed: ['Manual login', 'Web'],
     commandcode: ['Manual login', 'Web'],
-    mimo: ['Auto', 'Desktop app', 'Token Plan', 'Web'],
+    mimo: ['Auto', 'Desktop app', 'Token Plan'],
     zai: ['Auto', 'Coding Plan', 'API key'],
     zaiteam: ['Team Plan', 'API key'],
     kiro: ['Auto', 'CLI'],
