@@ -67,6 +67,28 @@ const OPENCODE_AMBIENT_ACCOUNT_NAME = 'Auto-detected';
 // rather than against one candidate source: Go quota resolves api → web → local,
 // so naming a single source there leaves the other two unguarded and the account
 // reports one window kind twice, from two sources and with two different numbers.
+// Zen's prepaid balance as a window, alongside the `balanceUsd` field it has
+// always shipped in. The field stays for hubs and renderers that predate this;
+// the window is what the surfaces other than the Limits view read, since none
+// of them know a provider-level balance exists — it is why the edge dock had no
+// Balance row for OpenCode while every other balance provider had one.
+//
+// Appended last, and only ever as a `credits` window: a `billing` window is how
+// the Go monthly grant is spelled, and a renderer picking "the billing window"
+// off the front of the list would otherwise meter the money as a quota.
+function openCodeZenBalanceWindow(balanceUsd) {
+  if (typeof balanceUsd !== 'number' || !Number.isFinite(balanceUsd)) return null;
+  return {
+    kind: 'billing',
+    metric: 'credits',
+    label: 'Balance',
+    remaining: balanceUsd,
+    currency: 'USD',
+    // No fixed denominator: Zen tops up rather than granting a monthly pool.
+    showMeter: false
+  };
+}
+
 function openCodeSupplementalZenWindows(takenWindows, zen) {
   const takenKeys = new Set(
     (Array.isArray(takenWindows) ? takenWindows : [])
@@ -228,6 +250,8 @@ async function fetchOpenCodeLimits(options = {}, deps = {}) {
       // that stronger claim instead of being flattened to 'web' by a Zen window.
       if (source !== 'api' && !windows.some((window) => window.source === 'local')) source = 'web';
       if (typeof zen.balanceUsd === 'number' && Number.isFinite(zen.balanceUsd)) balanceUsd = zen.balanceUsd;
+      const balanceWindow = openCodeZenBalanceWindow(balanceUsd);
+      if (balanceWindow) windows.push({ ...balanceWindow, source: 'web' });
       if (!accountLabel) accountLabel = 'Zen';
       if (!accountKey) accountKey = hashKey('opencode', `zen:${zen.workspaceId || ''}`);
     } else if (status !== 'ok') {
@@ -360,6 +384,8 @@ async function fetchOpenCodeProfile(name, cookie, fetchGoWeb, fetchZen, nowMs, u
       status = 'ok';
       if (!planLabel) planLabel = 'Zen';
       if (typeof zen.balanceUsd === 'number' && Number.isFinite(zen.balanceUsd)) balanceUsd = zen.balanceUsd;
+      const balanceWindow = openCodeZenBalanceWindow(balanceUsd);
+      if (balanceWindow) windows.push({ ...balanceWindow, source: 'web' });
     }
 
     if (status !== 'ok') {

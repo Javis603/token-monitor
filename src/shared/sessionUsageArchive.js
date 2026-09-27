@@ -16,13 +16,36 @@ const {
 } = require('./archiveHelpers');
 const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
+const { splitClientIdFor } = require('./clientIdentitySplits');
+const {
+  isLegacyCursorEntry,
+  legacyCursorLookup,
+  supersedingCursorSessionId
+} = require('./providers/cursor/sessionGuard');
 
 function sessionUsageArchiveDate(deviceRecord, fallback = new Date()) {
   const collectedAt = new Date(deviceRecord?.updatedAt || '');
   return Number.isNaN(collectedAt.getTime()) ? toDate(fallback) : collectedAt;
 }
 
+// A capture asks for the key of every session in the tick, and building it
+// means normalizing a one-session period. The answer depends on nothing but the
+// two strings, so it is kept; the bound only matters to a process that runs for
+// months without restarting.
+const SESSION_KEY_CACHE_LIMIT = 50000;
+const sessionKeyCache = new Map();
+
 function sessionKey(client, sessionId) {
+  if (typeof client !== 'string' || typeof sessionId !== 'string') return computeSessionKey(client, sessionId);
+  const cacheKey = `${client}\u0000${sessionId}`;
+  if (sessionKeyCache.has(cacheKey)) return sessionKeyCache.get(cacheKey);
+  const key = computeSessionKey(client, sessionId);
+  if (sessionKeyCache.size >= SESSION_KEY_CACHE_LIMIT) sessionKeyCache.clear();
+  sessionKeyCache.set(cacheKey, key);
+  return key;
+}
+
+function computeSessionKey(client, sessionId) {
   const normalized = normalizePeriod({
     sessions: {
       candidate: { client, sessionId, totalTokens: 1 }
@@ -84,19 +107,72 @@ function normalizeSessionUsageArchive(value) {
     }
 
     if (!entry.client || !entry.sessionId || Object.keys(entry.periods).length === 0) continue;
+    const supersededBy = sessionKey('cursor', String(rawEntry.supersededBy || '').replace(/^cursor:/, ''));
+    if (rawEntry.supersededBy && supersededBy && isLegacyCursorEntry(entry)) entry.supersededBy = supersededBy;
     normalized.sessions[`${entry.client}:${entry.sessionId}`] = entry;
   }
 
   return normalized;
 }
 
-function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = new Date()) {
-  const archive = normalizeSessionUsageArchive(existingArchive);
-  if (!deviceRecord || typeof deviceRecord !== 'object') return archive;
+function canonicalSessionUsageArchive(value) {
+  if (value?.version === 1 && value.sessions && typeof value.sessions === 'object') return value;
+  return normalizeSessionUsageArchive(value);
+}
 
+function pruneExpiredSessionUsagePeriods(archive, capturedAt, changedKeys) {
+  const day = localDay(capturedAt);
+  const month = localMonth(capturedAt);
+  // Collector snapshots can finish out of order across processes. A stale
+  // snapshot must never move the pruning frontier backwards.
+  const pruneDay = !archive.prunedDay || archive.prunedDay < day;
+  const pruneMonth = !archive.prunedMonth || archive.prunedMonth < month;
+  if (!pruneDay && !pruneMonth) return;
+
+  for (const [key, entry] of Object.entries(archive.sessions)) {
+    let changed = false;
+    entry.periodWindows = entry.periodWindows || {};
+    const todayWindow = entry.periodWindows?.today;
+    const retainedDay = todayWindow?.day || entry.day;
+    if (pruneDay && entry.periods?.today && (!retainedDay || retainedDay < day)) {
+      delete entry.periods.today;
+      delete entry.periodWindows.today;
+      changed = true;
+    }
+    const monthWindow = entry.periodWindows?.month;
+    const retainedMonth = monthWindow?.month || entry.month;
+    if (pruneMonth && entry.periods?.month && (!retainedMonth || retainedMonth < month)) {
+      delete entry.periods.month;
+      delete entry.periodWindows.month;
+      changed = true;
+    }
+    if (changed) changedKeys.add(key);
+  }
+  if (pruneDay) archive.prunedDay = day;
+  if (pruneMonth) archive.prunedMonth = month;
+}
+
+// The caller owns the canonical in-memory archive. Updating it in place keeps a
+// watch tick proportional to the sessions in that tick instead of cloning and
+// normalizing every retained session. Persistence receives only changed keys.
+function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = new Date(), options = {}) {
+  const archive = canonicalSessionUsageArchive(existingArchive);
+  const changedKeys = new Set();
   const captureDate = toDate(capturedAt);
+  const captureTime = captureDate.getTime();
+  pruneExpiredSessionUsagePeriods(archive, captureDate, changedKeys);
+  if (!deviceRecord || typeof deviceRecord !== 'object') return { archive, changedKeys };
+
+  const capturedAtIso = captureDate.toISOString();
+  const day = localDay(captureDate);
+  const month = localMonth(captureDate);
   for (const periodName of PERIODS) {
-    const period = periodFor(deviceRecord, periodName);
+    if (periodName === 'today' && archive.prunedDay && day < archive.prunedDay) continue;
+    if (periodName === 'month' && archive.prunedMonth && month < archive.prunedMonth) continue;
+    const rawPeriod = deviceRecord?.periods?.[periodName] || deviceRecord?.[periodName];
+    const period = options.canonicalSummary === true
+      ? (rawPeriod && typeof rawPeriod === 'object' ? rawPeriod : { sessions: {} })
+      : periodFor(deviceRecord, periodName);
     for (const session of Object.values(period.sessions || {})) {
       if (isReasonixSyntheticSession(session) || !hasSessionUsage(session)) continue;
       const archiveKey = sessionKey(session.client, session.sessionId);
@@ -104,35 +180,78 @@ function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = 
       const entry = archive.sessions[archiveKey] || {
         client: session.client,
         sessionId: session.sessionId,
-        capturedAt: captureDate.toISOString(),
-        day: localDay(captureDate),
-        month: localMonth(captureDate),
+        capturedAt: capturedAtIso,
+        day,
+        month,
         periodWindows: {},
         periods: {}
       };
-      const nextSession = cloneJson(session);
       const window = entry.periodWindows?.[periodName] || {};
+      const retainedCaptureTime = Date.parse(window.capturedAt || '');
+      // SQLite serializes commits, not collection time. Keep the newest event
+      // for each period when two collectors finish in the opposite order.
+      if (Number.isFinite(retainedCaptureTime) && retainedCaptureTime > captureTime) continue;
       const sameWindow = periodName === 'today'
-        ? window.day === localDay(captureDate)
+        ? window.day === day
         : periodName === 'month'
-          ? window.month === localMonth(captureDate)
+          ? window.month === month
           : true;
-      if (sameJson(entry.periods[periodName], nextSession) && sameWindow) continue;
+      // Every tick carries every session of all three periods, and nearly all of
+      // them are unchanged, so compare before copying. A session equal to the
+      // stored copy would also be equal after the round-trip; one that differs
+      // only in what the round-trip drops is caught by the second comparison.
+      if (sameWindow && sameJson(entry.periods[periodName], session)) continue;
+      const nextSession = cloneJson(session);
+      if (sameWindow && sameJson(entry.periods[periodName], nextSession)) continue;
       entry.client = session.client;
       entry.sessionId = session.sessionId;
-      entry.capturedAt = captureDate.toISOString();
-      entry.day = localDay(captureDate);
-      entry.month = localMonth(captureDate);
+      entry.capturedAt = capturedAtIso;
+      entry.day = day;
+      entry.month = month;
       entry.periods[periodName] = nextSession;
       entry.periodWindows = entry.periodWindows || {};
-      entry.periodWindows[periodName] = { capturedAt: captureDate.toISOString() };
-      if (periodName === 'today') entry.periodWindows[periodName].day = localDay(captureDate);
-      if (periodName === 'month') entry.periodWindows[periodName].month = localMonth(captureDate);
+      entry.periodWindows[periodName] = { capturedAt: capturedAtIso };
+      if (periodName === 'today') entry.periodWindows[periodName].day = day;
+      if (periodName === 'month') entry.periodWindows[periodName].month = month;
       archive.sessions[archiveKey] = entry;
+      changedKeys.add(archiveKey);
     }
   }
 
-  return archive;
+  if (options.cursorUsageEvents) linkLegacyCursorEvents(archive, changedKeys, options.cursorUsageEvents);
+  return { archive, changedKeys };
+}
+
+// Every capture asks the Cursor JSON cache about the legacy rows that still
+// have no link, and a link, once written, is never revisited. A legacy row is
+// one CSV event, keyed on that event's full timestamp, so its tokens can only
+// change if tokscale folds a second event carrying the very same timestamp into
+// it: that event is either in the conversation the link already names, or in a
+// second one, in which case no single event ever matched the row and there was
+// no link to invalidate. Deriving the work from the archive on each pass is
+// also what makes a row another writer added arrive on its own.
+function linkLegacyCursorEvents(archive, changedKeys, readCursorUsageEvents) {
+  const pending = [];
+  for (const [key, entry] of Object.entries(archive.sessions)) {
+    if (entry.supersededBy || !isLegacyCursorEntry(entry)) continue;
+    const lookup = legacyCursorLookup(entry);
+    if (lookup) pending.push([key, entry, lookup]);
+  }
+  if (pending.length === 0) return;
+
+  const usageEvents = readCursorUsageEvents();
+  if (!usageEvents) return;
+  for (const [key, entry, lookup] of pending) {
+    const sessionId = supersedingCursorSessionId(lookup, usageEvents);
+    if (!sessionId) continue;
+    entry.supersededBy = sessionKey('cursor', sessionId);
+    changedKeys.add(key);
+  }
+}
+
+function captureSessionUsageArchive(existingArchive, deviceRecord, capturedAt = new Date()) {
+  const archive = normalizeSessionUsageArchive(existingArchive);
+  return updateSessionUsageArchive(archive, deviceRecord, capturedAt).archive;
 }
 
 function addSessionBreakdown(period, session) {
@@ -173,9 +292,9 @@ function addSessionBreakdown(period, session) {
   }
 }
 
-function addArchivedSession(period, session) {
+function addArchivedSession(period, session, archiveKey = null) {
   if (isReasonixSyntheticSession(session)) return;
-  const key = sessionKey(session.client, session.sessionId);
+  const key = archiveKey || sessionKey(session.client, session.sessionId);
   if (!key || period.sessions[key]) return;
 
   const archived = { ...cloneJson(session), archived: true };
@@ -218,6 +337,17 @@ function addArchivedSession(period, session) {
   addSessionBreakdown(period, archived);
 }
 
+// The session id is product-owned: the Pi-format header id is written by the
+// client that produced the file, so one id belongs to exactly one product. That
+// is what makes this an identity question rather than a heuristic.
+function isLiveUnderSplitId(period, entry, session) {
+  const split = splitClientIdFor(session?.client);
+  if (!split) return false;
+  const sessionId = String(session?.sessionId || entry?.sessionId || '').trim();
+  if (!sessionId) return false;
+  return Boolean(period?.sessions?.[`${split}:${sessionId}`]);
+}
+
 function shouldApplyPeriod(periodName, entry, now) {
   const window = entry?.periodWindows?.[periodName] || {};
   if (periodName === 'today') return (window.day || entry.day) === localDay(now);
@@ -226,9 +356,11 @@ function shouldApplyPeriod(periodName, entry, now) {
 }
 
 function applySessionUsageArchive(summary, archive, options = {}) {
-  const normalizedArchive = normalizeSessionUsageArchive(archive);
+  const normalizedArchive = options.canonical === true
+    ? canonicalSessionUsageArchive(archive)
+    : normalizeSessionUsageArchive(archive);
   const now = toDate(options.now);
-  const next = cloneJson(summary);
+  const next = options.mutate === true ? summary : cloneJson(summary);
   const periodContainer = next.periods && typeof next.periods === 'object' ? next.periods : next;
   for (const periodName of PERIODS) {
     const period = periodContainer?.[periodName];
@@ -238,11 +370,18 @@ function applySessionUsageArchive(summary, archive, options = {}) {
   }
   const targetPeriods = new Map();
   const targetFor = (periodName) => {
-    if (!targetPeriods.has(periodName)) targetPeriods.set(periodName, targetPeriod(next, periodName));
+    if (!targetPeriods.has(periodName)) {
+      const period = options.canonicalSummary === true
+        ? (next.periods && typeof next.periods === 'object' ? next.periods[periodName] : next[periodName])
+        : targetPeriod(next, periodName);
+      targetPeriods.set(periodName, period);
+    }
     return targetPeriods.get(periodName);
   };
 
-  for (const entry of Object.values(normalizedArchive.sessions)) {
+  const supersededRows = [];
+  const mergedRows = [];
+  for (const [archiveKey, entry] of Object.entries(normalizedArchive.sessions)) {
     for (const periodName of PERIODS) {
       const session = entry.periods?.[periodName];
       if (!session || !hasSessionUsage(session) || !shouldApplyPeriod(periodName, entry, now)) continue;
@@ -251,8 +390,46 @@ function applySessionUsageArchive(summary, archive, options = {}) {
       // omits, and a partial that looks complete loses the attribution fields
       // deviceState would otherwise carry forward.
       if (!hasSummaryPeriod(next, periodName)) continue;
-      addArchivedSession(targetFor(periodName), session);
+      const period = targetFor(periodName);
+      if (period.sessions[archiveKey]) continue;
+      // A row keyed under a merged id replays only after every other row: an
+      // archived split-id copy of the same session is the same usage twice, and
+      // the merged row can only see that overlap once the split row is already
+      // in the period. Insertion order puts the older merged row first, so
+      // deferring by identity is what makes the replay order-independent.
+      if (splitClientIdFor(session.client || entry.client)) {
+        mergedRows.push([period, archiveKey, entry, session]);
+        continue;
+      }
+      if (entry.supersededBy) {
+        supersededRows.push([period, archiveKey, session, entry.supersededBy]);
+        continue;
+      }
+      addArchivedSession(period, session, archiveKey);
     }
+  }
+
+  for (const [period, archiveKey, entry, session] of mergedRows) {
+    if (period.sessions[archiveKey]) continue;
+    // An archived session captured while two clients shared one row is keyed
+    // under the merged id, so the live split-id copy of the same session is a
+    // different key. The split id's own scan is the authoritative source now —
+    // it reports the same bytes the merged row was built from — so skip the
+    // archived copy rather than adding it on top. The check runs late enough to
+    // also see the split id's *archived* rows, which the first pass applied.
+    if (isLiveUnderSplitId(period, entry, session)) continue;
+    if (entry.supersededBy) {
+      supersededRows.push([period, archiveKey, session, entry.supersededBy]);
+      continue;
+    }
+    addArchivedSession(period, session, archiveKey);
+  }
+
+  // A legacy Cursor row whose event now belongs to another session is judged
+  // after every other row has replayed, so that session counts whether it is
+  // live or only archived. Without it the row is still the only record.
+  for (const [period, archiveKey, session, supersededBy] of supersededRows) {
+    if (!period.sessions[supersededBy]) addArchivedSession(period, session, archiveKey);
   }
 
   return next;
@@ -291,5 +468,6 @@ module.exports = {
   readSessionUsageArchive,
   sessionUsageArchiveDate,
   sessionUsageArchivePath,
+  updateSessionUsageArchive,
   writeSessionUsageArchive
 };

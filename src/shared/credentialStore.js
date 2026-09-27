@@ -3,39 +3,21 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { providerCredentialSettingPaths } = require('./limits/accounts');
 
 const CREDENTIALS_VERSION = 1;
 const SETTINGS_MIGRATION_VERSION = 1;
 const MIMO_MIGRATION_VERSION = 1;
 
+// Provider-owned keys come from the account declarations (each field's
+// storePath), so adding a provider credential never edits this file. The two
+// hub secrets stay literal — they are not provider account fields. The
+// declarations are leaf modules, which is what lets this file sit inside the
+// require cycle providers/factory/limits.js → credentialStore creates.
 const CREDENTIAL_SETTING_PATHS = Object.freeze({
   hubHostSecret: ['hub', 'hostSecret'],
   secret: ['hub', 'clientSecret'],
-  claudeWebCookie: ['providers', 'claude', 'webCookie'],
-  opencodeCookie: ['providers', 'opencode', 'cookie'],
-  opencodeProfiles: ['providers', 'opencode', 'profiles'],
-  openrouterProfiles: ['providers', 'openrouter', 'profiles'],
-  deepseekApiKey: ['providers', 'deepseek', 'apiKey'],
-  minimaxApiKey: ['providers', 'minimax', 'apiKey'],
-  copilotApiToken: ['providers', 'copilot', 'apiToken'],
-  zaiApiKey: ['providers', 'zai', 'apiKey'],
-  zaiTeamApiKey: ['providers', 'zaiTeam', 'apiKey'],
-  zaiTeamOrganizationId: ['providers', 'zaiTeam', 'organizationId'],
-  zaiTeamProjectId: ['providers', 'zaiTeam', 'projectId'],
-  volcengineAccessKeyId: ['providers', 'volcengine', 'accessKeyId'],
-  volcengineSecretAccessKey: ['providers', 'volcengine', 'secretAccessKey'],
-  volcengineAgentAccessKeyId: ['providers', 'volcengine', 'agentAccessKeyId'],
-  volcengineAgentSecretAccessKey: ['providers', 'volcengine', 'agentSecretAccessKey'],
-  alibabaCookie: ['providers', 'alibaba', 'cookie'],
-  qoderCookie: ['providers', 'qoder', 'cookie'],
-  traeAccessToken: ['providers', 'trae', 'accessToken'],
-  traeDeviceId: ['providers', 'trae', 'deviceId'],
-  zedCookie: ['providers', 'zed', 'cookie'],
-  commandcodeCookie: ['providers', 'commandcode', 'cookie'],
-  kimiApiKey: ['providers', 'kimi', 'apiKey'],
-  kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
-  ollamaCookie: ['providers', 'ollama', 'cookie'],
-  thirdPartyProfiles: ['providers', 'thirdparty', 'profiles']
+  ...providerCredentialSettingPaths()
 });
 
 function emptyDocument() {

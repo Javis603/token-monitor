@@ -4,37 +4,50 @@
 // catalog (loaded as a script before this file). Destructured to the bare
 // names the call sites below already use.
 const {
-  CLIENT_IDS,
   CLIENT_LABELS: clientLabels,
   KNOWN_CLIENT_LIST: KNOWN_CLIENTS
 } = window.TokenMonitorClientCatalog;
 // Limits provider identity comes from its own shared catalog, bound here rather
 // than at its first use below because the icon tables are derived from it.
 const { LIMIT_PROVIDER_CATALOG: LIMIT_PROVIDERS, LIMIT_PROVIDER_IDS } = window.TokenMonitorLimitProviders;
-const reasonixSessionGuard = window.TokenMonitorReasonixSessionGuard;
+const limitAccountPanelsApi = window.TokenMonitorLimitAccountPanels;
+const accountShellApi = window.TokenMonitorAccountShell;
+const accountProfileRequests = accountShellApi.createRequestGuard();
+const accountProfileStatuses = accountShellApi.createRequestGuard();
+const accountProfileSaves = accountShellApi.createBusyGuard();
+const accountShellErrors = Object.create(null);
+
+function setAccountShellError(id, message) {
+  accountShellErrors[id] = message || '';
+  renderAccountShellError(id);
+}
+
+function renderAccountShellError(id) {
+  accountShellApi.render({
+    error: document.getElementById(`${id}ErrorMessage`),
+    errorText: accountShellErrors[id] || ''
+  });
+}
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
 const motionPreferenceApi = window.TokenMonitorMotionPreference;
 const usageCostPolicyApi = window.TokenMonitorUsageCostPolicy;
 const windowsGlassApi = window.TokenMonitorWindowsGlass;
+const macBackdropApi = window.TokenMonitorMacBackdropMode;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const fontSettingsApi = window.TokenMonitorFontSettings;
 const wslStatusPresentationApi = window.TokenMonitorWslStatusPresentation;
 const statsRenderSchedulerApi = window.TokenMonitorStatsRenderScheduler;
+const allTimeSessionsApi = window.TokenMonitorAllTimeSessions;
 const tokenRateApi = window.TokenMonitorTokenRate;
 const { tokenRatePerSecond, tokenBurnPerMinute } = tokenRateApi;
 const reducedMotionMedia = window.matchMedia?.('(prefers-reduced-motion: reduce)');
-const clientsWithIcon = new Set([
-  'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'micode', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth',
-  'gemini', 'xai', 'openrouter', 'deepseek', 'meta', 'mistral', 'moonshot', 'zai', 'zaiteam', 'cohere', 'xiaomi', 'mimo', 'minimax', 'doubao', 'volcengine', 'qoder', 'trae', 'ollama', 'thirdparty', 'hunyuan'
-]);
-// Limits rows mark more ids than there are tracked clients: every provider, plus
-// relay ids that only ever appear as a limits row and have no catalog entry.
-// Derived rather than listed, because a provider whose id is missing here is
-// drawn as a bare dot — a defect nothing about adding a provider points at. The
-// mask rule behind each id is asserted from the same catalog in
-// limitProviderPresentationCoverage.test.js, which is what makes deriving safe:
-// an id in this set with no rule paints a solid square instead.
-const limitMarksWithIcon = new Set([...clientsWithIcon, ...LIMIT_PROVIDER_IDS, 'newapi', 'sub2api']);
+const vendorPresentationApi = window.TokenMonitorVendorPresentation;
+// Marks come from the vendor presentation table, which is also what installs
+// the .row-icon-<id> masks, so a listed id always has a mask behind it. Usage
+// rows (clients, sessions, models) carry the coloured vendors; Limits rows can
+// also show the marks that have no colour of their own (Factory, the relays).
+const clientsWithIcon = new Set(vendorPresentationApi.VENDOR_IDS);
+const limitMarksWithIcon = new Set(vendorPresentationApi.MARK_IDS);
 
 function osIconFor(platform) {
   const prefix = String(platform || '').toLowerCase().split('-')[0];
@@ -68,54 +81,21 @@ function iconKindFor(rowData, breakdown) {
     : { kind: 'dot' };
 }
 
-const LIMIT_PROVIDER_ACCOUNT_GROUP_IDS = {
-  claude: 'claudeAccountGroup',
-  codex: 'codexAccountGroup',
-  opencode: 'opencodeCookieGroup',
-  cursor: 'cursorAccountGroup',
-  antigravity: 'antigravityAccountGroup',
-  kimi: 'kimiAccountGroup',
-  zed: 'zedAccountGroup',
-  copilot: 'copilotAccountGroup',
-  mimo: 'mimoAccountGroup',
-  zai: 'zaiAccountGroup',
-  zaiteam: 'zaiteamAccountGroup',
-  deepseek: 'deepseekAccountGroup',
-  openrouter: 'openrouterAccountGroup',
-  minimax: 'minimaxAccountGroup',
-  volcengine: 'volcengineAccountGroup',
-  qoder: 'qoderAccountGroup',
-  trae: 'traeAccountGroup',
-  commandcode: 'commandcodeAccountGroup',
-  ollama: 'ollamaAccountGroup',
-  alibaba: 'alibabaAccountGroup',
-  thirdparty: 'thirdpartyAccountGroup'
-};
-const LIMIT_PROVIDER_ACCOUNT_STATUS_IDS = {
-  claude: 'claudeAccountStatus',
-  codex: 'codexAccountStatus',
-  opencode: 'opencodeCookieStatus',
-  cursor: 'cursorAccountStatus',
-  antigravity: 'antigravityAccountStatus',
-  kimi: 'kimiAccountStatus',
-  zed: 'zedAccountStatus',
-  copilot: 'copilotApiTokenStatus',
-  mimo: 'mimoAccountStatus',
-  zai: 'zaiAccountStatus',
-  zaiteam: 'zaiteamAccountStatus',
-  deepseek: 'deepseekApiKeyStatus',
-  openrouter: 'openrouterStatus',
-  minimax: 'minimaxApiKeyStatus',
-  volcengine: 'volcengineAccountStatus',
-  qoder: 'qoderAccountStatus',
-  trae: 'traeAccountStatus',
-  commandcode: 'commandcodeAccountStatus',
-  ollama: 'ollamaAccountStatus',
-  alibaba: 'alibabaAccountStatus',
-  thirdparty: 'thirdpartyStatus'
+const LIMIT_PROVIDER_ACCOUNT_NODES = {
+  codex: { group: 'codexAccountGroup', status: 'codexAccountStatus' },
+  opencode: { group: 'opencodeCookieGroup', status: 'opencodeCookieStatus' },
+  cursor: { group: 'cursorAccountGroup', status: 'cursorAccountStatus' },
+  antigravity: { group: 'antigravityAccountGroup', status: 'antigravityAccountStatus' },
+  kimi: { group: 'kimiAccountGroup', status: 'kimiAccountStatus' },
+  copilot: { group: 'copilotAccountGroup', status: 'copilotApiTokenStatus' },
+  mimo: { group: 'mimoAccountGroup', status: 'mimoAccountStatus' },
+  openrouter: { group: 'openrouterAccountGroup', status: 'openrouterStatus' },
+  volcengine: { group: 'volcengineAccountGroup', status: 'volcengineAccountStatus' },
+  thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
 };
 const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   antigravity: 'settings.limits.connection.antigravity',
+  cline: 'settings.limits.connection.cline',
   grok: 'settings.limits.connection.grok',
   kiro: 'settings.limits.connection.kiro',
   workbuddy: 'settings.limits.connection.workbuddy'
@@ -147,6 +127,12 @@ const TRAY_ICON_PROVIDERS = [
 const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.id).join(',');
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
 const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentation;
+const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
+
+function limitProviderColor(providerId) {
+  if (providerId === 'factory') return clientColors.droid;
+  return clientColors[providerId] || clientColors.default;
+}
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
 const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
@@ -169,14 +155,17 @@ const { limitFillPercent, limitModeSuffix } = window.TokenMonitorLimitDisplayMod
 const i18n = window.TokenMonitorI18n;
 const currencyApi = window.TokenMonitorCurrency;
 const subscriptionApi = window.TokenMonitorSubscriptionDisplay;
+// What a recorded subscription reads. Shared with the Limits view, which builds
+// the same sentences into the plan cell's tooltip — so this page and that one
+// cannot describe one record two ways.
+const subscriptionText = window.TokenMonitorSubscriptionText;
 const compactTokenApi = window.TokenMonitorCompactTokens;
 const trayLayoutApi = window.TokenMonitorTrayLayout;
 const sessionRowsApi = window.TokenMonitorSessionRows;
 const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
 const {
   barScaleMax,
-  createAfterLayoutScheduler,
-  isLargeSessionBreakdown,
+  breakdownPage,
   rowRenderFingerprint,
   rowWidth,
   shouldAnimateBreakdownRows,
@@ -191,7 +180,6 @@ const windowShortcutApi = window.TokenMonitorWindowShortcut;
 const LIMIT_REFRESH_OPTIONS = [60000, 120000, 300000, 900000, 1800000];
 const WINDOW_BEHAVIOR_VALUES = ['floating', 'normal', 'desktop'];
 const WINDOW_BEHAVIOR_ICONS = { floating: '⇧', normal: '○', desktop: '⇩' };
-const LIMIT_SOURCE_LABELS = { oauth: 'OAuth', cli: 'CLI', web: 'Web', rpc: 'RPC', local: 'Local', api: 'API' };
 const LIMIT_CAPABILITY_TAG_KEYS = {
   Auto: 'settings.limits.capability.auto',
   'OAuth/CLI': 'settings.limits.capability.oauthCli',
@@ -228,6 +216,7 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   'Sign in again': 'settings.limits.status.signInAgain',
   'Run grok login': 'settings.limits.status.runGrokLogin',
   'Run kiro-cli login': 'settings.limits.status.runKiroLogin',
+  'Open Cline': 'settings.limits.status.openCline',
   'Re-login': 'settings.limits.status.relogin',
   Limited: 'settings.limits.status.limited',
   'Usage API limited': 'settings.limits.status.usageApiLimited',
@@ -300,7 +289,9 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, codexSystemSwitchingAccountId: '', codexSystemSwitchErrorAccountId: '', codexSystemSwitchError: '', codexSwitchPopoverHasOpened: false, codexSwitchPopoverActive: false, codexSwitchPopoverRenderPending: false, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, commandcodeAccountExpanded: false, commandcodePendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '' };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+state.devinAccountExpanded = false;
+state.devinPendingCheckSince = 0;
 state.zedAccountExpanded = false;
 state.zedPendingCheckSince = 0;
 state.toolDetailMode = 'tokens';
@@ -341,19 +332,34 @@ state.fixedPeriodHistoryPromise = null;
 state.fixedPeriodHistoryCoordinator = null;
 state.fixedPeriodSnapshot = null;
 state.periodMenuOpen = false;
+state.sessionPage = 0;
+state.sessionPagerSignature = '';
 let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
+state.sessionSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
-const defaultAppearance = { glassOpacity: 68, glassBlur: 32, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
+let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
+let nativeMaterialRevision = 0;
+let appearancePreview = {};
+// Writes still in flight. Main applies the native material before it broadcasts
+// the saved settings, so a material push landing in between must not repaint
+// the appearance controls from the settings that write is replacing.
+const pendingSettingsPatches = new Set();
 let viewSwitcherLongPressTimer = null;
 let viewSwitcherLongPressTriggered = false;
 let viewSwitcherHoverCloseTimer = null;
 const els = {
-  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), liveTokenRate: document.getElementById('liveTokenRate'), liveTokenRateValue: document.getElementById('liveTokenRateValue'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
+  shell: document.querySelector('.shell'), status: document.getElementById('status'), liveDot: document.getElementById('liveDot'), tokenRateReveal: document.getElementById('tokenRateReveal'), liveTokenRate: document.getElementById('liveTokenRate'), liveTokenRateValue: document.getElementById('liveTokenRateValue'), totalTokens: document.getElementById('totalTokens'), totalTokensCompact: document.getElementById('totalTokensCompact'), cost: document.getElementById('cost'), homePanel: document.getElementById('homePanel'), breakdown: document.getElementById('breakdown'), sessionPagerHost: document.getElementById('sessionPagerHost'), serviceStatusPanel: document.getElementById('serviceStatusPanel'), limitsPanel: document.getElementById('limitsPanel'), trendsPanel: document.getElementById('trendsPanel'), viewSwitcher: document.getElementById('viewSwitcher'), pinButton: document.getElementById('pinButton'), utilityActions: document.getElementById('utilityActions'), settingsButton: document.getElementById('settingsButton'), settingsPanel: document.getElementById('settingsPanel'), languageInput: document.getElementById('languageInput'), currencyInput: document.getElementById('currencyInput'), currencyRateRow: document.getElementById('currencyRateRow'), currencyRateModeAuto: document.getElementById('currencyRateModeAuto'), currencyRateModeManual: document.getElementById('currencyRateModeManual'), currencyRateManualField: document.getElementById('currencyRateManualField'), currencyRateOverrideInput: document.getElementById('currencyRateOverrideInput'), currencyRateStatus: document.getElementById('currencyRateStatus'), hubUrlInput: document.getElementById('hubUrlInput'), secretInput: document.getElementById('secretInput'), deviceIdInput: document.getElementById('deviceIdInput'), limitProviderCheckboxes: document.getElementById('limitProviderCheckboxes'), limitsRefreshInput: document.getElementById('limitsRefreshInput'), limitsRefreshAdaptiveNote: document.getElementById('limitsRefreshAdaptiveNote'), showLimitSourceInput: document.getElementById('showLimitSourceInput'), maskLimitAccountEmailsInput: document.getElementById('maskLimitAccountEmailsInput'), showLimitUsedInputs: Array.from(document.querySelectorAll('input[name="showLimitUsed"]')), liveDotInput: document.getElementById('liveDotInput'), toolIconsInput: document.getElementById('toolIconsInput'), floatingBubbleInput: document.getElementById('floatingBubbleInput'), floatingBubbleTriggerInputs: Array.from(document.querySelectorAll('input[name="floatingBubbleTrigger"]')), floatingBubbleTriggerRow: document.getElementById('floatingBubbleTriggerRow'), floatingBubbleContentInput: document.getElementById('floatingBubbleContentInput'), floatingBubbleContentRow: document.getElementById('floatingBubbleContentRow'), floatingBubbleComposer: document.getElementById('floatingBubbleComposer'), floatingBubbleContent: document.getElementById('floatingBubbleContent'), discordRpcInput: document.getElementById('discordRpcInput'), windowBehaviorInput: document.getElementById('windowBehaviorInput'), keepAboveTaskbarInput: document.getElementById('keepAboveTaskbarInput'), keepAboveTaskbarRow: document.getElementById('keepAboveTaskbarRow'), showTrayIconInput: document.getElementById('showTrayIconInput'), showTrayProviderBadgeInput: document.getElementById('showTrayProviderBadgeInput'), hideAppIconInput: document.getElementById('hideAppIconInput'), hideAppIconRow: document.getElementById('hideAppIconRow'), hideAppIconOptions: document.getElementById('hideAppIconOptions'), trayModeInput: document.getElementById('trayModeInput'), trayContentInput: document.getElementById('trayContentInput'), trayComposer: document.getElementById('trayComposer'), windowToggleShortcutValue: document.getElementById('windowToggleShortcutValue'), windowToggleShortcutClearButton: document.getElementById('windowToggleShortcutClearButton'), windowToggleShortcutNote: document.getElementById('windowToggleShortcutNote'), glassInput: document.getElementById('glassInput'), blurInput: document.getElementById('blurInput'), zoomInput: document.getElementById('zoomInput'), resetGlassButton: document.getElementById('resetGlassButton'), resetDepthButton: document.getElementById('resetDepthButton'), resetZoomButton: document.getElementById('resetZoomButton'), saveSettingsButton: document.getElementById('saveSettingsButton'), clientDisplayList: document.getElementById('clientDisplayList'), wslScanInput: document.getElementById('wslScanInput'), wslScanRow: document.getElementById('wslScanRow'), wslPanel: document.getElementById('wslPanel'), openConfigButton: document.getElementById('openConfigButton'), exportAutoInput: document.getElementById('exportAutoInput'), exportAutoDetails: document.getElementById('exportAutoDetails'), exportAutoStatus: document.getElementById('exportAutoStatus'), exportDirLabel: document.getElementById('exportDirLabel'), exportPickDirButton: document.getElementById('exportPickDirButton'), exportIntervalInput: document.getElementById('exportIntervalInput'), exportNowButton: document.getElementById('exportNowButton'), refreshButton: document.getElementById('refreshButton'), minButton: document.getElementById('minButton'), closeButton: document.getElementById('closeButton'), floatingBubbleTab: document.getElementById('floatingBubbleTab'),
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
+  glassInputNote: document.getElementById('glassInputNote'),
+  backgroundImageOpacityRow: document.getElementById('backgroundImageOpacityRow'),
+  backgroundImageOpacityInput: document.getElementById('backgroundImageOpacityInput'),
+  resetBackgroundImageOpacityButton: document.getElementById('resetBackgroundImageOpacityButton'),
+  blurInputNote: document.getElementById('blurInputNote'),
   fixedPeriodMessage: document.getElementById('fixedPeriodMessage'),
   toolDetailFooter: document.getElementById('toolDetailFooter'),
   toolDetailFooterTokens: document.getElementById('toolDetailFooterTokens'),
@@ -369,6 +375,17 @@ Object.assign(els, {
   backHomeButton: document.getElementById('backHomeButton'),
   systemGlassInputs: Array.from(document.querySelectorAll('input[name="systemGlassOption"]')),
   floatingBubbleOptions: document.getElementById('floatingBubbleOptions'),
+  edgeDockFeature: document.getElementById('edgeDockFeature'),
+  edgeDockInput: document.getElementById('edgeDockInput'),
+  edgeDockOptions: document.getElementById('edgeDockOptions'),
+  edgeDockSideInputs: Array.from(document.querySelectorAll('input[name="edgeDockSide"]')),
+  edgeDockModeInputs: Array.from(document.querySelectorAll('input[name="edgeDockMode"]')),
+  edgeDockHapticRow: document.getElementById('edgeDockHapticRow'),
+  edgeDockHapticInput: document.getElementById('edgeDockHapticInput'),
+  edgeDockWarnColorsInput: document.getElementById('edgeDockWarnColorsInput'),
+  edgeDockMacBackdropRow: document.getElementById('edgeDockMacBackdropRow'),
+  edgeDockMacBackdropInput: document.getElementById('edgeDockMacBackdropInput'),
+  edgeDockComposer: document.getElementById('edgeDockComposer'),
   trayIconOptions: document.getElementById('trayIconOptions'),
   trayOptions: document.getElementById('trayOptions'),
   hubModeOptions: document.getElementById('hubModeOptions'),
@@ -392,6 +409,8 @@ Object.assign(els, {
   windowsBackdropRow: document.getElementById('windowsBackdropRow'),
   windowsBackdropInput: document.getElementById('windowsBackdropInput'),
   windowsBackdropNote: document.getElementById('windowsBackdropNote'),
+  macBackdropRow: document.getElementById('macBackdropRow'),
+  macBackdropInput: document.getElementById('macBackdropInput'),
   clearSessionUsageArchiveButton: document.getElementById('clearSessionUsageArchiveButton'),
   startupGroup: document.getElementById('startupGroup'),
   startAtLoginInput: document.getElementById('startAtLoginInput'),
@@ -462,6 +481,9 @@ Object.assign(els, {
   mainSettingsSummary: document.getElementById('mainSettingsSummary'),
   windowSettingsSummary: document.getElementById('windowSettingsSummary'),
   appearanceSettingsSummary: document.getElementById('appearanceSettingsSummary'),
+  backgroundImageStatus: document.getElementById('backgroundImageStatus'),
+  chooseBackgroundImageButton: document.getElementById('chooseBackgroundImageButton'),
+  clearBackgroundImageButton: document.getElementById('clearBackgroundImageButton'),
   subscriptionsSettingsSummary: document.getElementById('subscriptionsSettingsSummary'),
   themePresetChips: document.getElementById('themePresetChips'),
   themeColorGrid: document.getElementById('themeColorGrid'),
@@ -573,6 +595,29 @@ function compactTokenDisplayOptions() {
 function t(key, params) {
   return i18n.translate(currentLocale(), key, params);
 }
+
+const codexAccountControl = codexAccountControlApi.createCodexAccountControl({
+  document,
+  requestAnimationFrame,
+  translate: t,
+  switchAccount: (accountId) => window.tokenMonitor.codex.switchSystemAccount(accountId),
+  requestRender: () => {
+    renderLimits();
+    renderCodexAccounts();
+    renderSettingsSummaries();
+  },
+  onSwitchFailure: (message) => {
+    state.codexAccountError = message;
+  },
+  onSwitchSuccess: (result, _accountId) => {
+    state.codexAccountError = '';
+    state.settings.codexManagedAccounts = result.accounts || state.settings.codexManagedAccounts || [];
+    applyCodexOptimisticActiveAccount(result.activeAccount);
+  },
+  onPostSwitchError: (error) => {
+    console.log(`[codex] post-switch update failed: ${error?.message || error}`);
+  }
+});
 
 const diagnosticsPanel = window.TokenMonitorDiagnosticsPanel?.createDiagnosticsPanel({
   api: window.tokenMonitor,
@@ -1206,28 +1251,10 @@ function syncCurrencyRateControls() {
 }
 function formatTime(value) { const date = value ? new Date(value) : new Date(); return Number.isNaN(date.getTime()) ? '--:--:--' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
 function formatPercent(value) { return Number.isFinite(Number(value)) ? `${Math.round(Number(value))}%` : '--'; }
-function formatLimitBoundary(window) {
-  const diffMs = limitProviderPresentationApi.limitResetRemainingMs(window?.resetsAt);
-  if (diffMs === null) return '';
-  const mixed = window?.boundaryKind === 'mixed';
-  const prefix = window?.boundaryKind === 'expiry'
-    ? 'Expires'
-    : mixed
-      ? 'Changes in'
-      : 'Reset';
-  if (diffMs === 0) return mixed ? 'Changes now' : `${prefix} now`;
-  return `${prefix} ${formatDuration(diffMs)}`;
-}
-function formatDuration(ms) {
-  const totalMinutes = Math.max(0, Math.round(ms / 60000));
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  const minutes = totalMinutes % 60;
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m`;
-  return '<1m';
-}
+// The quota-boundary wording lives beside the reset arithmetic it reads, so the
+// edge dock renders the same line from the same function rather than its own.
+const formatLimitBoundary = limitProviderPresentationApi.limitBoundaryText;
+const formatDuration = limitProviderPresentationApi.limitDurationText;
 function formatActiveDuration(ms) {
   const totalMinutes = Math.max(0, Math.round(Number(ms || 0) / 60000));
   const hours = Math.floor(totalMinutes / 60);
@@ -1235,17 +1262,6 @@ function formatActiveDuration(ms) {
   if (hours > 0) return `${hours}h ${minutes}m`;
   if (minutes > 0) return `${minutes}m`;
   return '0m';
-}
-function formatUpdatedAge(value) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return 'Update unknown';
-  const diffMs = Math.max(0, Date.now() - date.getTime());
-  if (diffMs < 45_000) return 'Updated just now';
-  const minutes = Math.round(diffMs / 60000);
-  if (minutes < 60) return `Updated ${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `Updated ${hours}h ago`;
-  return `Updated ${Math.round(hours / 24)}d ago`;
 }
 function versionText(value) {
   return value ? `v${value}` : 'unknown';
@@ -1675,32 +1691,6 @@ const rowBarAnimations = new Map();
 const limitResetNumberAnimations = new Map();
 const rowRenderFingerprints = new WeakMap();
 const toolDetailData = new WeakMap();
-const largeSessionContainmentScheduler = createAfterLayoutScheduler(
-  typeof requestAnimationFrame === 'function' ? requestAnimationFrame : null,
-  typeof cancelAnimationFrame === 'function' ? cancelAnimationFrame : null
-);
-
-function updateLargeSessionContainment(enabled, { remeasure = false } = {}) {
-  els.breakdown.classList.toggle('large-session-list', enabled);
-  if (!enabled) {
-    largeSessionContainmentScheduler.cancel();
-    els.breakdown.classList.remove('large-session-list-ready');
-    return;
-  }
-  if (remeasure) {
-    largeSessionContainmentScheduler.cancel();
-    els.breakdown.classList.remove('large-session-list-ready');
-  }
-  if (largeSessionContainmentScheduler.pending() || els.breakdown.classList.contains('large-session-list-ready')) return;
-  // Let Chromium lay out every new row without size containment first. The
-  // `auto` intrinsic size can then retain each row's real block size before
-  // off-screen rendering is enabled, avoiding scroll-geometry corrections.
-  largeSessionContainmentScheduler.schedule(() => {
-    if (els.breakdown.classList.contains('large-session-list')) {
-      els.breakdown.classList.add('large-session-list-ready');
-    }
-  });
-}
 
 function prefersReducedMotion() {
   return motionPreferenceApi.shouldReduceMotion(state.settings?.reduceMotion, reducedMotionMedia?.matches);
@@ -2044,7 +2034,10 @@ function rowTemplate(rowData) {
   if (platform) row.dataset.platform = platform;
   if (client) row.dataset.client = client;
   if (kind) row.dataset.kind = kind;
-  row.innerHTML = '<div class="row-head"><div class="row-name"><span class="row-mark"></span><div class="row-label"><span class="row-title"></span><span class="row-subtitle"></span><span class="row-activity"></span><span class="row-detail"></span></div></div><div class="row-metrics"><div class="row-value"></div><div class="row-cost"></div></div></div><div class="row-body"><div class="bar"><div class="bar-fill"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>';
+  // `.row-live` is absolutely positioned over the mark's corner and `.row-context`
+  // is the third metrics line; both stay empty and hidden on every row that is
+  // not a live session, so the shared template keeps building one shape.
+  row.innerHTML = `<div class="row-head"><div class="row-name"><span class="row-mark"></span><span class="row-live" aria-hidden="true">${rowLiveMarkup}</span><div class="row-label"><span class="row-title"></span><span class="row-subtitle"></span><span class="row-activity"></span><span class="row-detail"></span></div></div><div class="row-metrics"><div class="row-value"></div><div class="row-cost"></div><div class="row-context hidden"><span class="row-context-meter"><span class="row-context-fill"></span></span><span class="row-context-value"></span></div></div></div><div class="row-body"><div class="bar"><div class="bar-fill"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>`;
   row.querySelector('.row-title').textContent = name;
   row.querySelector('.row-subtitle').textContent = subtitle || '';
   row.querySelector('.row-activity').textContent = activity || '';
@@ -2296,10 +2289,80 @@ function setActiveToolDetailMode(mode) {
   renderToolDetailFooter();
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable, reviewGroup }) {
+// The live-session pair: a dot on the tool mark for "this is being written to
+// right now", and a fuel gauge for how much of its context window is left. The
+// dot is drawn only while the agent is working and the gauge only while the
+// session is recent, so a list of several hundred past sessions is untouched.
+function updateRowContext(row, context) {
+  const gauge = row.querySelector('.row-context');
+  if (!gauge) return;
+  const percentLeft = context ? Number(context.percentLeft) : NaN;
+  if (!Number.isFinite(percentLeft)) {
+    gauge.classList.add('hidden');
+    gauge.removeAttribute('title');
+    return;
+  }
+  gauge.classList.remove('hidden');
+  // Headroom is what decides the colour whichever way the number is written:
+  // a gauge reading "93% used" is the same emergency as one reading "7% left".
+  gauge.dataset.tone = String(context.tone || '');
+  // The session gauge has its own Remaining/Used preference rather than
+  // following AI Tool Limits: that setting describes provider quota meters,
+  // where the number a plan is sold on is what is left, while a context
+  // window is a budget being spent and the clients themselves show used.
+  // Default is used, matching Codex and Claude Code's own readouts.
+  const showUsed = state.settings?.sessionContextMetric !== 'remaining';
+  const percent = showUsed ? Number(context.percentUsed) : percentLeft;
+  gauge.title = t(showUsed ? 'session.contextUsed' : 'session.contextLeft', { percent }) || `${percent}%`;
+  gauge.querySelector('.row-context-value').textContent = `${percent}%`;
+  gauge.querySelector('.row-context-fill').style.setProperty('--bar-scale', String(percent / 100));
+}
+
+// Flare the row's live dot once when that session's transcript actually moved,
+// reusing the titlebar dot's one-shot pattern (remove, reflow, re-add) rather
+// than running a perpetual pulse: a session that is open but idle should look
+// different from one that is generating right now, and an `infinite` animation
+// in an always-open widget never lets the compositor idle. The reduced-motion
+// rules already neutralise every animation, so this needs no guard of its own.
+// A session row already leads with the client's own icon, so its state mark is a
+// small dot at the icon's corner rather than the dock card's glyph stack: a
+// spinner or a check drawn over a vendor logo reads as part of the logo and
+// muddies it, and the card has no such icon to compete with.
+//
+// The old idiom is kept - a green dot means "active right now" - with the dot
+// simply not drawn once the transcript says the turn is over. No spinner, no
+// check, no idle placeholder: a quiet row shows nothing, exactly as before.
+const rowLiveMarkup = '<span class="row-live-dot"></span>';
+
+function updateRowLive(row, activityState, activityAt) {
+  const dot = row.querySelector('.row-live');
+  if (!dot) return;
+  // Only one thing is drawn here, and only while the agent is working: the dot
+  // is absent for every other state, which is what a session list full of past
+  // sessions should look like. The turn-end boundary is still read, so the dot
+  // clears the moment the transcript says the answer is finished rather than
+  // holding green until the recency window expires.
+  const active = activityState === 'running';
+  dot.classList.toggle('is-active', active);
+  dot.title = active ? (t('session.running') || 'Running') : '';
+  const previous = Number(row.dataset.activityAt || 0);
+  const next = Number(activityAt) || 0;
+  if (next > 0) row.dataset.activityAt = String(next);
+  // Never on a first render: a list that flashes every dot as it arrives says
+  // nothing about which session just moved.
+  if (!active || !previous || next <= previous) return;
+  dot.classList.remove('pulse');
+  void dot.offsetWidth;
+  dot.classList.add('pulse');
+}
+
+function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
-  row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}`;
+  // `running` still drives the row class for layout, but the mark's own state
+  // comes from `activityState`, which is what reads the transcript's turn-end
+  // boundary rather than only the recency window.
+  row.className = `row${kind ? ` ${kind}-row` : ''}${stale ? ' stale' : ''}${local ? ' local' : ''}${running ? ' running' : ''}`;
   row.title = local ? 'This device' : '';
   
   if (cacheReadTokens !== undefined || outputTokens !== undefined || unclassifiedTokens !== undefined) {
@@ -2354,6 +2417,12 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
   row.querySelector('.row-cost').textContent = tokenDataUnavailable === true ? '' : formatCost(cost || 0);
+  // The row builder already applied the shared gate (recent enough to have a
+  // reading), so this draws whatever arrived rather than re-deciding from
+  // `running` - that second gate is exactly what made the dock card and this
+  // list disagree about whether a session still had a gauge.
+  updateRowContext(row, context);
+  updateRowLive(row, activityState || (running === true ? 'running' : 'idle'), sortTime);
   const fill = row.querySelector('.bar-fill');
   fill.style.background = barBackground || color;
   applyBarScale(fill, width / 100);
@@ -2443,40 +2512,117 @@ function applyHomeListMark(mark, iconKind, color) {
   mark.style.background = color;
 }
 
+function sessionPageButton(direction) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `session-page-button session-page-${direction}`;
+  const icon = document.createElement('span');
+  icon.className = 'session-page-icon';
+  icon.setAttribute('aria-hidden', 'true');
+  button.append(icon);
+  button.addEventListener('click', () => {
+    state.sessionPage += direction === 'previous' ? -1 : 1;
+    state.rowSignature = '';
+    els.breakdown.scrollTop = 0;
+    render();
+  });
+  return button;
+}
+
+function sessionPager() {
+  const pager = document.createElement('nav');
+  pager.className = 'session-pager';
+  const status = document.createElement('span');
+  status.className = 'session-page-status';
+  pager.append(
+    sessionPageButton('previous'),
+    status,
+    sessionPageButton('next')
+  );
+  return pager;
+}
+
+function renderSessionPager(page) {
+  const visible = page?.paginated === true;
+  els.sessionPagerHost.classList.toggle('hidden', !visible);
+  const signature = visible
+    ? JSON.stringify([currentLocale(), page.page, page.pageCount, page.start, page.end, page.total])
+    : '';
+  if (signature === state.sessionPagerSignature) return;
+  state.sessionPagerSignature = signature;
+  if (!visible) {
+    els.sessionPagerHost.replaceChildren();
+    return;
+  }
+  let pager = els.sessionPagerHost.querySelector('.session-pager');
+  if (!pager) {
+    pager = sessionPager();
+    els.sessionPagerHost.append(pager);
+  }
+  pager.setAttribute('aria-label', t('sessions.pagination'));
+  const previous = pager.querySelector('.session-page-previous');
+  const next = pager.querySelector('.session-page-next');
+  for (const [button, labelKey] of [
+    [previous, 'sessions.pagePrevious'],
+    [next, 'sessions.pageNext']
+  ]) {
+    button.setAttribute('aria-label', t(labelKey));
+    button.title = t(labelKey);
+  }
+  previous.disabled = page.page === 0;
+  next.disabled = page.page >= page.pageCount - 1;
+  pager.querySelector('.session-page-status').textContent = t('sessions.pageRange', page);
+}
+
 function renderRows(rows, { incompleteHint = '' } = {}) {
-  const largeSessionList = isLargeSessionBreakdown(state.breakdown, rows.length);
   if (rows.length === 0 && !incompleteHint) {
-    updateLargeSessionContainment(false);
     els.breakdown.replaceChildren();
+    renderSessionPager(null);
     state.rowSignature = '';
     return;
   }
+  const page = breakdownPage(rows, { breakdown: state.breakdown, page: state.sessionPage });
+  state.sessionPage = page.page;
+  renderSessionPager(page);
+  const visibleRows = page.rows;
   const max = barScaleMax(rows);
   const hintText = incompleteHint ? t(incompleteHint) : '';
-  const signature = JSON.stringify([state.breakdown, hintText, rows.map((row) => row.key)]);
+  const signature = JSON.stringify([
+    state.breakdown,
+    hintText,
+    page.page,
+    page.total,
+    visibleRows.map((row) => row.key)
+  ]);
   const children = Array.from(els.breakdown.children);
   const existingHint = children.find((child) => child.classList.contains('breakdown-incomplete-hint'));
-  const existing = new Map(children.filter((child) => child !== existingHint).map((child) => [child.dataset.key, child]));
+  const existing = new Map(children
+    .filter((child) => child !== existingHint)
+    .map((child) => [child.dataset.key, child]));
   const structureChanged = signature !== state.rowSignature;
   const renderContext = {
     breakdown: state.breakdown,
     currency: currentCurrency(),
     currencyRatesEffective: state.settings?.currencyRatesEffective || null,
     locale: currentLocale(),
-    showToolIcons: toolIconsEnabled(state.settings?.showToolIcons)
+    showToolIcons: toolIconsEnabled(state.settings?.showToolIcons),
+    // The context gauge carries its own Remaining/Used preference, so flipping
+    // either it or the limits meters has to invalidate these rows.
+    showLimitUsed: state.settings?.showLimitUsed === true,
+    sessionContextMetric: state.settings?.sessionContextMetric === 'remaining' ? 'remaining' : 'used'
   };
-  const nextFingerprints = new Map(rows.map((row) => [
+  const nextFingerprints = new Map(visibleRows.map((row) => [
     row.key,
     rowRenderFingerprint(row, max, renderContext)
   ]));
-  const rowsChanged = structureChanged || rows.some((row) => (
+  const rowsChanged = structureChanged || visibleRows.some((row) => (
     rowRenderFingerprints.get(existing.get(row.key)) !== nextFingerprints.get(row.key)
   ));
   const liveMotionSnapshot = rowsChanged && !state.periodMotionActive && !state.animateBarsFromZero
     ? captureBreakdownMotion()
     : null;
   if (structureChanged) {
-    const nodes = rows.map((row) => existing.get(row.key) || rowTemplate(row));
+    const nodes = visibleRows.map((row) => existing.get(row.key) || rowTemplate(row));
     if (incompleteHint) {
       const hint = existingHint || document.createElement('p');
       hint.className = 'breakdown-incomplete-hint';
@@ -2487,11 +2633,10 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
     els.breakdown.replaceChildren(...nodes);
     state.rowSignature = signature;
   }
-  updateLargeSessionContainment(largeSessionList, { remeasure: structureChanged });
   const current = new Map(Array.from(els.breakdown.children)
     .filter((child) => !child.classList.contains('breakdown-incomplete-hint'))
     .map((child) => [child.dataset.key, child]));
-  for (const rowData of rows) {
+  for (const rowData of visibleRows) {
     const row = current.get(rowData.key);
     if (!row) continue;
     const fingerprint = nextFingerprints.get(rowData.key);
@@ -2750,18 +2895,6 @@ function ensureBreakdownVisible() {
   if (next !== state.breakdown) setBreakdown(next);
 }
 
-function limitStatusLabel(status) {
-  if (status === 'ok') return 'Live';
-  if (status === 'disabled') return 'Disabled';
-  if (status === 'notConfigured') return 'Not signed in';
-  if (status === 'noSyncedData') return 'No synced data';
-  if (status === 'unauthorized') return 'Sign in again';
-  if (status === 'rateLimited') return 'Limited';
-  if (status === 'sourceRateLimited') return 'Usage API limited';
-  if (status === 'unavailable') return 'Unavailable';
-  return 'Error';
-}
-
 function syncProvenanceActive() {
   return state.mode === 'sync' || Boolean(String(state.settings?.hubUrl || '').trim());
 }
@@ -2774,32 +2907,6 @@ function limitProviderProvenance(provider) {
   });
 }
 
-function limitProviderMeta(provider, provenance = null) {
-  const sourceDevice = limitProviderPresentationApi.limitProviderMainDeviceLabel(provenance, { showSource: Boolean(state.settings?.showLimitSource) });
-  if (provider.stale) {
-    const parts = ['Stale', formatUpdatedAge(provider.updatedAt).replace('Updated ', '')];
-    if (sourceDevice) parts.push(sourceDevice);
-    return parts.join(' · ');
-  }
-  if (provider.status === 'ok') {
-    const parts = [];
-    if (state.settings?.showLimitSource) {
-      const sourceLabel = limitProviderPresentationApi.limitProviderSourceLabel(provider) || LIMIT_SOURCE_LABELS[provider.source];
-      if (sourceLabel) parts.push(sourceLabel);
-    }
-    if (sourceDevice) parts.push(sourceDevice);
-    return `${formatUpdatedAge(provider.updatedAt)}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
-  }
-  return limitStatusLabel(provider.status, false);
-}
-
-function limitProviderPlan(provider) {
-  if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitStatusLabel(provider.status, false);
-  const label = String(provider?.planLabel || provider?.accountLabel || '').trim();
-  if (label) return limitProviderPresentationApi.limitProviderPlanDisplayLabel(provider, label);
-  return provider?.status && provider.status !== 'ok' ? limitStatusLabel(provider.status, false) : '';
-}
-
 // ---------------------------------------------------------------------------
 // Subscriptions
 //
@@ -2810,11 +2917,6 @@ function limitProviderPlan(provider) {
 
 function subscriptionList() {
   return subscriptionApi.normalizeSubscriptions(state.settings?.subscriptions, { currencyApi });
-}
-
-function subscriptionProviderLabel(providerId) {
-  const entry = LIMIT_PROVIDERS.find((provider) => provider.id === providerId);
-  return entry?.settingsLabel || entry?.label || providerId;
 }
 
 // Keyed off the same list the label comes from, because a `.row-icon-<id>` with
@@ -2835,16 +2937,19 @@ function isCreditsProvider(provider) {
 // local account as the only candidate: matchProviderAccount()'s sole-account
 // fallback would then bind a remote subscription to whatever is signed in here.
 // Local entries come first so this device wins a tie on identical accounts.
+// The two copies are compared with the matcher's own identity rule
+// (accountIdentity.sameAccount), not with a value built out of the record: the
+// aggregate's copy of this device's account is a different object, and it is not
+// the same record down to the fields a value would have read.
 function limitProvidersForSubscriptions() {
-  const seen = new Set();
-  const merged = [];
-  for (const provider of [...(localDeviceLimitsProviders() || []), ...(state.stats?.limits?.providers || [])]) {
-    const key = subscriptionAccountValue(provider);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    merged.push(provider);
-  }
-  return merged;
+  // This device's own records first, so they win a tie with the aggregate's copy
+  // of one account. Which records are distinct accounts is decided over the whole
+  // list, not pair by pair: a keyless copy carries an address instead of a key,
+  // and an address is not enough to answer that question about one pair at a time.
+  return accountIdentityApi.dedupeAccounts([
+    ...(localDeviceLimitsProviders() || []),
+    ...(state.stats?.limits?.providers || [])
+  ]);
 }
 
 // Every configured account, balance ones included. They used to be hidden behind
@@ -2860,12 +2965,23 @@ function subscriptionAccountChoices() {
     label: accountIdentityApi.accountTitleLabel(provider, visible, {
       maskEmail: state.settings?.maskLimitAccountEmails === true,
       index
-    }) || subscriptionProviderLabel(provider.provider)
+    }) || subscriptionText.providerLabel(provider.provider)
   }));
 }
 
+// The picker's value for one choice, which is only ever compared against another
+// choice from the same freshly built list: distinct per account, stable for one
+// record. It carries the address as well, so the two accounts a provider reports
+// by address alone are two choices rather than one — while "is this the same
+// account?" stays with accountIdentity.sameAccount(), where the matcher's rule
+// lives.
 function subscriptionAccountValue(provider) {
-  return [provider?.provider || '', provider?.accountKey || '', provider?.accountName || ''].join('\0');
+  return [
+    String(provider?.provider || '').trim().toLowerCase(),
+    String(provider?.accountKey || '').trim(),
+    String(provider?.accountEmail || provider?.email || '').trim(),
+    String(provider?.accountName || '').trim()
+  ].join('\0');
 }
 
 // The plan the account already reports ("Pro", "Plus") is nearly always what the
@@ -2883,442 +2999,18 @@ function subscriptionSelectedAccount() {
   return subscriptionAccountChoices().find((choice) => choice.value === value)?.provider || null;
 }
 
-function subscriptionAmountText(subscription) {
-  const code = currencyApi.normalizeCurrency(subscription?.currency);
-  const symbol = currencyApi.CURRENCY_RATES[code]?.symbol || `${code} `;
-  return `${symbol}${subscriptionApi.amountUnits(subscription).toFixed(2)}`;
-}
-
-function subscriptionCadenceText(subscription) {
-  const count = Number(subscription?.intervalCount) || 1;
-  const unit = subscription?.interval === 'year'
-    ? t('settings.subscriptions.unitYear')
-    : t('settings.subscriptions.unitMonth');
-  return count === 1 ? unit : t('settings.subscriptions.everyN', { count, unit });
-}
-
-function subscriptionPriceText(subscription) {
-  return `${subscriptionAmountText(subscription)} / ${subscriptionCadenceText(subscription)}`;
-}
-
-// "0 days left" reads like a bug on the day itself, which is exactly the day the
-// user is most likely to be looking.
-function subscriptionDaysText(days) {
-  return days === 0
-    ? t('subscription.tooltip.today')
-    : t('subscription.tooltip.daysLeft', { days });
-}
-
-function subscriptionDateText(dateString) {
-  if (!dateString) return '';
-  // Construct in local time from the calendar parts so the rendered day always
-  // matches the stored one, whatever the timezone.
-  return subscriptionLocalDate(dateString)?.toLocaleDateString(currentLocale(), {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  }) || '';
-}
-
-// The settings rows are two dense lines inside a ~300px panel and the date is the
-// longest thing on the second one, so there it is the numeric short form the
-// locale itself defines. Everywhere with room to spell it out — the tooltip
-// above all — still uses subscriptionDateText().
-function subscriptionShortDateText(dateString) {
-  if (!dateString) return '';
-  return subscriptionLocalDate(dateString)?.toLocaleDateString(currentLocale(), { dateStyle: 'short' }) || '';
-}
-
-function subscriptionLocalDate(dateString) {
-  const [year, month, day] = String(dateString).split('-').map(Number);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
-  return new Date(year, month - 1, day);
-}
-
-// Usage cost is keyed by client, and every provider whose id names a tracked
-// client can be compared against it. Providers with no same-named client
-// (openrouter, deepseek, thirdparty, zai…) simply produce nothing, which is the
-// correct answer: their spend is either pay-as-you-go or spread across clients
-// with no way to attribute it.
-//
-// Membership comes from the catalog rather than from clientLabels. That map is a
-// display lookup and deliberately carries ids that are not tracked clients, so
-// keying off it would let "we can render a name for this" stand in for "this
-// provider names a client we count tokens for". The two happen to agree today
-// only because the one label-only id is not a limits provider.
-const catalogClientIds = new Set(CLIENT_IDS);
-
-function subscriptionUsageCostUsd(providerId) {
-  if (!catalogClientIds.has(providerId)) return null;
-  const month = state.stats?.periods?.month;
-  const cost = Number(month?.clientCosts?.[providerId] || 0);
-  return cost > 0 ? cost : null;
-}
-
-// Matched against every account the provider has, never against a one-element
-// list of the row being rendered: matchProviderAccount() falls back to "the
-// provider has exactly one account, so there is no ambiguity", and a single-row
-// universe makes that fallback true for every sibling. That is what put one
-// Codex subscription's card on all three Codex accounts.
-function subscriptionForProvider(provider) {
-  const id = String(provider?.provider || '').toLowerCase();
-  const accounts = limitProvidersForSubscriptions();
-  const identity = subscriptionAccountValue(provider);
-  for (const subscription of subscriptionList()) {
-    if (subscription.provider !== id) continue;
-    const account = subscriptionApi.matchProviderAccount(subscription, accounts);
-    if (account && subscriptionAccountValue(account) === identity) return subscription;
-  }
-  return null;
-}
-
-// Every subscription recorded against a provider, paired with the account it
-// resolves to. Drives the group header, which stands for all of them at once.
-function subscriptionsForProviderGroup(providerId) {
-  const id = String(providerId || '').toLowerCase();
-  const accounts = limitProvidersForSubscriptions();
-  return subscriptionList()
-    .filter((subscription) => subscription.provider === id)
-    .map((subscription) => ({
-      subscription,
-      account: subscriptionApi.matchProviderAccount(subscription, accounts)
-    }));
-}
-
 // The record already held against an account, if any. One account holds one
 // record: a second one saved without complaint and then never appeared — the
 // card resolves the first match and stops — which read as the new entry having
 // replaced the old one.
-function subscriptionForAccountValue(list, providerId, accountValue, excludeId) {
+function subscriptionForAccount(list, providerId, account, excludeId) {
+  if (!account) return null;
   const accounts = limitProvidersForSubscriptions();
   return list.find((entry) => {
     if (entry.id === excludeId || entry.provider !== providerId) return false;
     const bound = subscriptionApi.matchProviderAccount(entry, accounts);
-    return Boolean(bound) && subscriptionAccountValue(bound) === accountValue;
+    return Boolean(bound) && accountIdentityApi.sameAccount(bound, account);
   }) || null;
-}
-
-// Rows are {label, value} pairs so the tooltip stays a table and the caller does
-// not have to know which shape it is looking at.
-// Keyed off what the user recorded, never off the account's balance marker: the
-// marker only seeds the choice, and reading it here would show subscription rows
-// for a ledger the moment a provider started reporting a balance.
-function subscriptionTooltipRows(subscription, provider, includeRollup) {
-  const today = subscriptionApi.todayString();
-  return subscriptionApi.isTopUp(subscription)
-    ? topUpTooltipRows(subscription, provider, today, includeRollup)
-    : subscriptionPlanTooltipRows(subscription, provider, today, includeRollup);
-}
-
-// How long the user has been paying, plus what that adds up to. Months is the
-// unit people quote a subscription in, but it rounds a three-week-old plan down
-// to "0 months" — which reads as a bug beside a non-zero total, and does so for
-// most of the first month of every subscription anyone records. Below a month
-// the honest unit is days. A start date that has not arrived yet has no elapsed
-// time and nothing paid, so it says so instead of reporting zero of both.
-//
-// Once coverage has lapsed the clock stops there: a plan bought for one month
-// and never renewed stays "1 month", it does not keep ageing after it ended.
-function subscriptionElapsedText(subscription, today) {
-  const stop = subscriptionApi.coverageStopDate(subscription);
-  const asOf = stop && stop < today ? stop : today;
-  const daysSinceStart = subscriptionApi.daysBetween(subscription.startDate, asOf);
-  if (daysSinceStart !== null && daysSinceStart < 0) return t('subscription.tooltip.notStarted');
-
-  const months = subscriptionApi.subscribedMonths(subscription, asOf);
-  const elapsed = months >= 1
-    ? t('subscription.tooltip.months', { months })
-    : t('subscription.tooltip.daysCount', { days: Math.max(0, daysSinceStart || 0) });
-  const code = currencyApi.normalizeCurrency(subscription.currency);
-  const symbol = currencyApi.CURRENCY_RATES[code]?.symbol || `${code} `;
-  const paid = subscriptionApi.paidToDateMinor(subscription, today) / 100;
-  return `${elapsed} · ${t('subscription.tooltip.paidTotal', { total: `${symbol}${paid.toFixed(2)}` })}`;
-}
-
-function subscriptionPlanTooltipRows(subscription, provider, today, includeRollup) {
-  const rows = [];
-  rows.push({ label: t('subscription.tooltip.price'), value: subscriptionPriceText(subscription) });
-
-  const endDate = subscriptionApi.coverageEndDate(subscription, today);
-  const daysLeft = subscriptionApi.daysUntilRenewal(subscription, today);
-  const whenLabel = subscription.autoRenew
-    ? t('subscription.tooltip.nextCharge')
-    : t('subscription.tooltip.validUntil');
-  // A lapsed plan has no days left to count down. Saying so beats a negative
-  // number, and beats the silent roll-forward that used to keep a cancelled
-  // plan permanently four days from renewing.
-  const whenSuffix = daysLeft === null
-    ? ''
-    : ` · ${daysLeft < 0 ? t('subscription.tooltip.expired') : subscriptionDaysText(daysLeft)}`;
-  rows.push({ label: whenLabel, value: `${subscriptionDateText(endDate)}${whenSuffix}` });
-  if (!subscription.autoRenew) {
-    rows.push({ label: t('subscription.tooltip.autoRenew'), value: t('subscription.tooltip.autoRenewOff') });
-  }
-
-  rows.push({
-    label: t('subscription.tooltip.subscribed'),
-    value: subscriptionElapsedText(subscription, today)
-  });
-
-  // The rollup covers every account of the provider at once, so it belongs on
-  // whichever row stands for the provider as a whole. When a group header is
-  // rendered that is the header, and repeating the same three lines under each
-  // member is the noise the header exists to avoid.
-  if (!includeRollup) return rows;
-
-  // tokscale records which client produced the tokens, never which signed-in
-  // account did, so three logins share one usage figure. Charging that figure
-  // against a single account would claim it three times over; the rollup is the
-  // only honest denominator.
-  const usageCostUsd = subscriptionUsageCostUsd(subscription.provider);
-  if (usageCostUsd === null) return rows;
-  const rollup = subscriptionApi.providerRollup(subscriptionList(), subscription.provider, currencyApi, today);
-  const multiple = subscriptionApi.valueMultiple(rollup.monthlyUsd, usageCostUsd);
-  if (multiple === null) return rows;
-
-  rows.push({ separator: true });
-  if (rollup.count > 1) {
-    rows.push({
-      label: t('subscription.tooltip.providerTotal', { provider: subscriptionProviderLabel(subscription.provider) }),
-      value: t('subscription.tooltip.providerTotalValue', {
-        count: rollup.count,
-        total: formatCost(rollup.monthlyUsd)
-      })
-    });
-  }
-  rows.push({
-    label: t('subscription.tooltip.monthUsage'),
-    // Prefixed with "≈" and titled below: this is tokscale's equivalent API
-    // pricing, not money owed. Under a subscription nothing is billed per token.
-    value: `≈ ${formatCost(usageCostUsd)}${rollup.count > 1 ? ` · ${t('subscription.tooltip.allAccounts')}` : ''}`,
-    title: t('subscription.tooltip.monthUsageNote')
-  });
-  rows.push({
-    label: t('subscription.tooltip.valueMultiple'),
-    value: `${multiple.toFixed(1)}×`
-  });
-  return rows;
-}
-
-// The group header stands for every account at once, so it summarises rather
-// than picking one of them. Usage and the value multiple are already provider
-// level on the per-account card; here the price is too.
-function subscriptionGroupTooltipRows(providerId, today) {
-  const rollup = subscriptionApi.providerRollup(subscriptionList(), providerId, currencyApi, today);
-  const rows = [{
-    label: t('subscription.tooltip.providerTotal', { provider: subscriptionProviderLabel(providerId) }),
-    value: t('subscription.tooltip.providerTotalValue', {
-      count: rollup.count,
-      total: formatCost(rollup.monthlyUsd)
-    })
-  }];
-
-  const usageCostUsd = subscriptionUsageCostUsd(providerId);
-  if (usageCostUsd === null) return rows;
-  rows.push({ separator: true });
-  rows.push({
-    label: t('subscription.tooltip.monthUsage'),
-    value: `≈ ${formatCost(usageCostUsd)} · ${t('subscription.tooltip.allAccounts')}`,
-    title: t('subscription.tooltip.monthUsageNote')
-  });
-  const multiple = subscriptionApi.valueMultiple(rollup.monthlyUsd, usageCostUsd);
-  if (multiple !== null) {
-    rows.push({ label: t('subscription.tooltip.valueMultiple'), value: `${multiple.toFixed(1)}×` });
-  }
-  return rows;
-}
-
-function topUpMinorText(subscription, amountMinor) {
-  const code = currencyApi.normalizeCurrency(subscription?.currency);
-  const symbol = currencyApi.CURRENCY_RATES[code]?.symbol || `${code} `;
-  return `${symbol}${(amountMinor / 100).toFixed(2)}`;
-}
-
-function topUpTooltipRows(subscription, provider, today, includeRollup) {
-  const rows = [];
-  const last = subscriptionApi.lastTopUp(subscription);
-  if (last) {
-    rows.push({
-      label: t('subscription.tooltip.lastTopUp'),
-      value: `${subscriptionDateText(last.date)} · ${topUpMinorText(subscription, last.amountMinor)}`
-    });
-  }
-  const monthMinor = subscriptionApi.topUpMonthMinor(subscription, today);
-  if (monthMinor > 0) {
-    rows.push({
-      label: t('subscription.tooltip.topUpMonth'),
-      value: topUpMinorText(subscription, monthMinor)
-    });
-  }
-  const entries = subscriptionApi.topUpEntries(subscription);
-  if (entries.length > 1) {
-    rows.push({
-      label: t('subscription.tooltip.topUpTotal'),
-      value: `${topUpMinorText(subscription, subscriptionApi.topUpTotalMinor(subscription))} · ${t('subscription.tooltip.topUpCount', { count: entries.length })}`
-    });
-  }
-
-  const creditsWindow = (provider?.windows || []).find(isCreditsWindow) || null;
-  const balance = creditsAmount(provider, creditsWindow);
-  if (balance === null) return topUpRollupRows(rows, subscription, today, includeRollup);
-  const balanceCurrency = String(creditsWindow?.currency || provider?.balance?.currency || subscription.currency);
-  rows.push({ label: t('subscription.tooltip.balance'), value: formatMoney(balance, balanceCurrency) });
-
-  const projection = subscriptionApi.topUpProjection(subscription, balance, today, {
-    currencyApi,
-    balanceCurrency
-  });
-  if (!projection || projection.dailyBurn <= 0) return topUpRollupRows(rows, subscription, today, includeRollup);
-  rows.push({
-    label: t('subscription.tooltip.burnRate'),
-    value: t('subscription.tooltip.perDay', { amount: formatMoney(projection.dailyBurn, balanceCurrency) })
-  });
-  if (projection.exhaustDate) {
-    rows.push({
-      label: t('subscription.tooltip.exhausts'),
-      value: `${subscriptionDateText(projection.exhaustDate)} · ${subscriptionDaysText(projection.daysRemaining)}`
-    });
-  }
-  return topUpRollupRows(rows, subscription, today, includeRollup);
-}
-
-// A ledger earns the same provider-level comparison a plan gets: what went in
-// this month against what the month's tokens would have cost.
-function topUpRollupRows(rows, subscription, today, includeRollup) {
-  if (!includeRollup) return rows;
-  const usageCostUsd = subscriptionUsageCostUsd(subscription.provider);
-  if (usageCostUsd === null) return rows;
-  const rollup = subscriptionApi.providerRollup(subscriptionList(), subscription.provider, currencyApi, today);
-  const multiple = subscriptionApi.valueMultiple(rollup.monthlyUsd, usageCostUsd);
-  if (multiple === null) return rows;
-  rows.push({ separator: true });
-  rows.push({
-    label: t('subscription.tooltip.monthUsage'),
-    value: `≈ ${formatCost(usageCostUsd)}`,
-    title: t('subscription.tooltip.monthUsageNote')
-  });
-  rows.push({ label: t('subscription.tooltip.valueMultiple'), value: `${multiple.toFixed(1)}×` });
-  return rows;
-}
-
-// No heading. The card is already reached by hovering a plan label, and every
-// row names itself — a "Subscription" line above them only repeats what the
-// gesture said, and the other tooltips in this panel carry no title either.
-function subscriptionCardNode(rows) {
-  if (rows.length === 0) return null;
-  const card = document.createElement('span');
-  card.className = 'limit-detail-tooltip subscription-tooltip';
-  for (const row of rows) {
-    if (row.separator) {
-      const rule = document.createElement('span');
-      rule.className = 'subscription-tooltip-rule';
-      card.append(rule);
-      continue;
-    }
-    // display:contents on the row lets label and value land directly in the
-    // card's two-column grid, so the existing tooltip cell styling applies.
-    const line = document.createElement('span');
-    line.className = 'limit-detail-tooltip-row';
-    const label = document.createElement('span');
-    label.textContent = row.label;
-    const value = document.createElement('span');
-    if (row.warn) value.className = 'subscription-tooltip-warn';
-    value.textContent = row.value;
-    if (row.title) {
-      label.title = row.title;
-      value.title = row.title;
-    }
-    line.append(label, value);
-    card.append(line);
-  }
-  return card;
-}
-
-// A group header is rendered whenever a provider has more than one account, and
-// it is the row that stands for the provider as a whole — which is what decides
-// where the provider-wide rollup goes.
-//
-// Counted from the list renderLimits() groups on, deliberately not from
-// limitProvidersForSubscriptions(): that one narrows to this device so a
-// subscription binds to an account you actually hold, while the question here is
-// only what the panel drew. In sync mode the two lists differ, and answering
-// from the wrong one puts the rollup on every member row of a group.
-function subscriptionProviderHasGroupHeader(providerId) {
-  const id = String(providerId || '').toLowerCase();
-  return (state.stats?.limits?.providers || [])
-    .filter((account) => String(account?.provider || '').toLowerCase() === id).length > 1;
-}
-
-// An account row shows its own subscription and nothing else. A group header
-// stands for all of them, so it summarises — except when only one account is
-// recorded, where the summary would just restate that one card with less in it.
-function subscriptionCardForRow(provider) {
-  if (provider?.accountGroup === true) {
-    const entries = subscriptionsForProviderGroup(provider.provider);
-    if (entries.length === 0) return null;
-    if (entries.length === 1) {
-      return subscriptionCardNode(
-        subscriptionTooltipRows(entries[0].subscription, entries[0].account || provider, true)
-      );
-    }
-    return subscriptionCardNode(
-      subscriptionGroupTooltipRows(provider.provider, subscriptionApi.todayString())
-    );
-  }
-  const subscription = subscriptionForProvider(provider);
-  if (!subscription) return null;
-  return subscriptionCardNode(
-    subscriptionTooltipRows(subscription, provider, !subscriptionProviderHasGroupHeader(provider.provider))
-  );
-}
-
-// The card opens upward, but the limits list scrolls inside a clipping panel, so
-// on the topmost row every pixel of it landed outside that panel and vanished.
-// Measured on open rather than on render: the row's offset within the panel
-// changes as the user scrolls. Kept to a class flip so the card's own placement
-// stays declarative.
-function positionSubscriptionTooltip(wrap, card) {
-  const clip = wrap.closest('.limits-panel');
-  if (!clip) return;
-  const roomAbove = wrap.getBoundingClientRect().top - clip.getBoundingClientRect().top;
-  card.classList.toggle('is-below', roomAbove < card.offsetHeight + 5);
-}
-
-// Wraps the plan label so hovering it reveals the subscription card. Reuses the
-// limit-detail tooltip plumbing, which already holds off the six-second list
-// re-render while the pointer is inside (limitDetailTooltipShouldHoldRender).
-//
-// Deliberately not behind a preference: an account with no record decorates
-// nothing, so having recorded one IS the switch. A separate toggle only made it
-// possible to enter the data and see nothing happen.
-function decoratePlanWithSubscription(plan, provider) {
-  const card = subscriptionCardForRow(provider);
-  if (!card) return plan;
-
-  const wrap = document.createElement('div');
-  wrap.className = 'limit-plan limit-detail-tooltip-wrap subscription-plan-wrap';
-  wrap.classList.toggle('has-opened', state.limitDetailTooltipHasOpened);
-  wrap.tabIndex = 0;
-  const trigger = document.createElement('span');
-  trigger.className = 'subscription-plan-trigger';
-  trigger.textContent = plan.textContent;
-  wrap.append(trigger, card);
-
-  const markOpened = () => {
-    state.limitDetailTooltipHasOpened = true;
-    state.limitDetailTooltipActive = true;
-    wrap.classList.add('has-opened');
-    positionSubscriptionTooltip(wrap, card);
-  };
-  const release = () => {
-    state.limitDetailTooltipActive = false;
-    flushPendingLimitDetailTooltipRender();
-  };
-  wrap.addEventListener('pointerenter', markOpened);
-  wrap.addEventListener('focusin', markOpened);
-  wrap.addEventListener('pointerleave', release);
-  wrap.addEventListener('focusout', release);
-  return wrap;
 }
 
 // The title's job is to say WHICH record this is, so it names the account. The
@@ -3330,7 +3022,7 @@ function decoratePlanWithSubscription(plan, provider) {
 // picked, it survives the provider being signed out or still loading, and it
 // keeps sibling rows distinct in exactly the moment the plan name could not.
 function subscriptionRowTitle(subscription, account) {
-  const providerLabel = subscriptionProviderLabel(subscription.provider);
+  const providerLabel = subscriptionText.providerLabel(subscription.provider);
   return [providerLabel, subscriptionRowAccountLabel(subscription, account) || subscription.planName]
     .filter(Boolean)
     .join(' · ');
@@ -3358,18 +3050,18 @@ function subscriptionRowMeta(subscription, account) {
   if (subscriptionApi.isTopUp(subscription)) {
     const monthMinor = subscriptionApi.topUpMonthMinor(subscription, today);
     parts.push(t('settings.subscriptions.topUpMonthMeta', {
-      total: topUpMinorText(subscription, monthMinor)
+      total: subscriptionText.topUpMinorText(currencyApi, subscription, monthMinor)
     }));
     const last = subscriptionApi.lastTopUp(subscription);
     if (last) {
-      parts.push(t('settings.subscriptions.topUpLastMeta', { date: subscriptionShortDateText(last.date) }));
+      parts.push(t('settings.subscriptions.topUpLastMeta', { date: subscriptionText.shortDateText(currentLocale(), last.date) }));
     }
     return parts.join(' · ');
   }
-  parts.push(subscriptionPriceText(subscription));
+  parts.push(subscriptionText.priceText(t, currencyApi, subscription));
   const endDate = subscriptionApi.coverageEndDate(subscription, today);
   if (endDate) {
-    const date = subscriptionShortDateText(endDate);
+    const date = subscriptionText.shortDateText(currentLocale(), endDate);
     parts.push(t(subscription.autoRenew ? 'settings.subscriptions.renewsOn' : 'settings.subscriptions.endsOn', { date }));
   }
   return parts.join(' · ');
@@ -3574,7 +3266,7 @@ function renderSubscriptionPickers() {
   for (const id of providerIds) {
     const option = document.createElement('option');
     option.value = id;
-    option.textContent = subscriptionProviderLabel(id);
+    option.textContent = subscriptionText.providerLabel(id);
     providerSelect.append(option);
   }
   if (providerIds.includes(previousProvider)) providerSelect.value = previousProvider;
@@ -3972,7 +3664,7 @@ function renderSubscriptionTopUpEntries() {
     row.className = 'subscription-topup-row';
     const date = document.createElement('span');
     date.className = 'subscription-topup-date';
-    date.textContent = subscriptionDateText(entry.date);
+    date.textContent = subscriptionText.dateText(currentLocale(), entry.date);
     const amount = document.createElement('span');
     amount.className = 'subscription-topup-amount';
     amount.textContent = `${symbol}${(entry.amountMinor / 100).toFixed(2)}`;
@@ -4181,7 +3873,7 @@ async function submitSubscription() {
     ? list.find((entry) => entry.id === state.subscriptionEditingId)
     : null;
 
-  if (subscriptionForAccountValue(list, providerId, accountValue, editing?.id)) {
+  if (subscriptionForAccount(list, providerId, account, editing?.id)) {
     setSubscriptionError(t('settings.subscriptions.errorDuplicate'));
     return;
   }
@@ -4247,208 +3939,24 @@ function limitProviderEnabled(providerName) {
   return enabledLimitProviderSet().has(providerName);
 }
 
-function limitProviderSelectionIncluding(providerName) {
-  const selected = new Set(configuredLimitProviderSelection());
-  selected.add(providerName);
-  return LIMIT_PROVIDERS
-    .map((provider) => provider.id)
-    .filter((id) => selected.has(id))
-    .join(',');
-}
-
 function missingLimitProviderStatus() {
   return state.mode === 'sync' || String(state.settings?.hubUrl || '').trim() ? 'noSyncedData' : 'notConfigured';
 }
 
-function windowForKind(provider, kind) {
-  return (provider?.windows || []).find((window) => window.kind === kind) || null;
-}
 
-function windowsForKind(provider, kind) {
-  return (provider?.windows || []).filter((window) => window.kind === kind);
-}
 
-function codexCanonicalWindow(provider, kind) {
-  return windowsForKind(provider, kind).find((window) => window?.additional !== true) || null;
-}
 
-function codexAdditionalWindowLabel(window, siblingWindows = []) {
-  const name = String(window?.label || '').trim();
-  const period = codexAdditionalWindowPeriodLabel(window);
-  if (!name) return period || 'Additional limit';
-  const normalizedName = name.toLowerCase();
-  const matchingWindowCount = siblingWindows.filter((candidate) => (
-    String(candidate?.label || '').trim().toLowerCase() === normalizedName
-  )).length;
-  const displayName = limitProviderPresentationApi.codexAdditionalQuotaDisplayName(name);
-  return matchingWindowCount > 1 && period ? `${displayName} · ${period}` : displayName;
-}
 
-function codexAdditionalWindowPeriodLabel(window) {
-  const minutes = Number(window?.windowMinutes);
-  if (Number.isFinite(minutes) && minutes > 0 && Number.isInteger(minutes)) {
-    if (minutes === 30 * 24 * 60) return 'Monthly';
-    if (minutes % (7 * 24 * 60) === 0) {
-      const weeks = minutes / (7 * 24 * 60);
-      return weeks === 1 ? 'Weekly' : `${weeks}-week`;
-    }
-    if (minutes % (24 * 60) === 0) {
-      const days = minutes / (24 * 60);
-      return days === 1 ? 'Daily' : `${days}-day`;
-    }
-    if (minutes % 60 === 0) return `${minutes / 60}-hour`;
-    return `${minutes}-minute`;
-  }
-  if (window?.kind === 'daily') return 'Daily';
-  if (window?.kind === 'weekly') return 'Weekly';
-  if (window?.kind === 'billing') return 'Monthly';
-  if (window?.kind === 'session') return 'Session';
-  return '';
-}
 
-function antigravityQuotaGroups(provider) {
-  const entries = (provider?.windows || [])
-    .filter((window) => window.kind === 'session' || window.kind === 'weekly')
-    .map((window) => {
-      const presentation = limitProviderPresentationApi.antigravityQuotaWindow(window);
-      return presentation ? { ...presentation, window } : null;
-    });
-  // Legacy GetUserStatus pools have model names rather than group + period
-  // labels. Keep their existing flat layout instead of guessing a hierarchy.
-  if (entries.length === 0 || entries.some((entry) => entry === null)) return [];
-  const groups = new Map();
-  for (const entry of entries) {
-    if (!groups.has(entry.groupLabel)) groups.set(entry.groupLabel, []);
-    groups.get(entry.groupLabel).push(entry);
-  }
-  return [...groups].map(([label, windows]) => ({ label, windows }));
-}
 
-function formatLimitAmount(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return '';
-  return `$${number.toFixed(2)}`;
-}
 
-function formatCursorSpendValue(window) {
-  const used = optionalFiniteNumber(window?.used);
-  const limit = optionalFiniteNumber(window?.limit);
-  if (used === null) return '';
-  const usedText = formatMoney(used, window?.currency || 'USD');
-  return limit !== null && limit > 0
-    ? `${usedText} / ${formatMoney(limit, window?.currency || 'USD')}`
-    : usedText;
-}
 
-// Zed's billing rows follow the Command Code shape: the headline and bar carry
-// the percentage, and the absolute figure sits under the bar — money for Token
-// Spend, a raw count for metered Edit Predictions. Both follow showLimitUsed,
-// so the number under the bar can never contradict the bar's own direction.
-// Unlimited Edit Predictions have no numbers at all; formatLimitWindowValue
-// already turns their `detail` into the translated headline.
-function formatZedBillingDetail(window) {
-  const used = optionalFiniteNumber(window?.used);
-  const limit = optionalFiniteNumber(window?.limit);
-  if (used === null || limit === null || limit <= 0) return '';
-  const showUsed = Boolean(state.settings?.showLimitUsed);
-  if (window?.limitId === 'zed.edit-predictions') return formatLimitCount(window, showUsed);
-  const currency = window?.currency || 'USD';
-  return `${formatMoney(showUsed ? used : Math.max(0, limit - used), currency)} / ${formatMoney(limit, currency)}`;
-}
 
-function formatBalanceAmount(value, source) {
-  return formatMoney(value, source?.currency);
-}
 
-function formatBalanceSpendAmount(value, balance) {
-  return formatBalanceAmount(value, balance);
-}
 
-// Absolute count for windows that expose units (credits). It follows the same
-// display mode as percent bars: remaining/total in quota mode, used/total in
-// used mode.
-function formatLimitCount(window, showUsed = false) {
-  const used = Number(window?.used);
-  const limit = Number(window?.limit);
-  if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return '';
-  const trim = (n) => Number(Math.max(0, n).toFixed(2)).toString();
-  return `${trim(showUsed ? used : limit - used)}/${trim(limit)}`;
-}
 
-// Command Code credits are USD, so the count under the bar is money rather than
-// the raw units formatLimitCount prints: "$8.78 / $10.00", or nothing at all for
-// a pool with no allowance (the headline already carries its amount).
-function formatCommandcodeCreditsDetail(window) {
-  const remaining = Number(window?.remaining);
-  const limit = Number(window?.limit);
-  if (!Number.isFinite(remaining) || !Number.isFinite(limit) || limit <= 0) return '';
-  const showUsed = Boolean(state.settings?.showLimitUsed);
-  const value = showUsed ? Math.max(0, limit - remaining) : remaining;
-  return `${formatMoney(value, window?.currency)} / ${formatMoney(limit, window?.currency)}`;
-}
 
-// ZCode plan buckets are token pools, so their detail counts tokens: "124M /
-// 305M" (remaining mode) or "181M / 305M" (used mode), from the same values
-// the meter derives from. Nothing when either side is missing — a bucket
-// without absolute units keeps its percentage-only look.
-function formatZcodeTokensDetail(window) {
-  const remaining = optionalFiniteNumber(window?.remaining);
-  const limit = optionalFiniteNumber(window?.limit);
-  if (remaining === null || limit === null || limit <= 0) return '';
-  const showUsed = Boolean(state.settings?.showLimitUsed);
-  const value = showUsed ? Math.max(0, limit - remaining) : remaining;
-  return `${formatCompact(value)} / ${formatCompact(limit)}`;
-}
 
-// One-line Overage value: "12.5 credits · $3.20" (credits used, then est. cost).
-// Either piece may be absent; the row only renders when at least one is present.
-function formatKiroOverageValue(window) {
-  const parts = [];
-  const credits = Number(window?.used);
-  if (Number.isFinite(credits)) parts.push(`${Number(credits.toFixed(2))} credits`);
-  const cost = Number(window?.remaining);
-  if (Number.isFinite(cost)) parts.push(formatLimitAmount(cost));
-  return parts.join(' · ');
-}
-
-function formatCodexResetCreditsValue(resetCredits) {
-  const available = Number(resetCredits?.availableCount);
-  if (!Number.isFinite(available)) return '';
-  const count = Math.max(0, Math.floor(available));
-  if (count <= 0) return '';
-  return `${count} reset${count === 1 ? '' : 's'}`;
-}
-
-function codexResetCreditExpirationDates(resetCredits) {
-  const values = Array.isArray(resetCredits?.expirations) ? resetCredits.expirations : [];
-  const dates = values
-    .map((value) => new Date(value))
-    .filter((date) => !Number.isNaN(date.getTime()))
-    .sort((a, b) => a.getTime() - b.getTime());
-  if (dates.length > 0) return dates;
-  const fallback = resetCredits?.nextExpiresAt ? new Date(resetCredits.nextExpiresAt) : null;
-  return fallback && !Number.isNaN(fallback.getTime()) ? [fallback] : [];
-}
-
-function codexResetCreditExpiryLabel(date) {
-  const diffMs = date.getTime() - Date.now();
-  return diffMs <= 0 ? 'now' : formatDuration(diffMs);
-}
-
-function codexResetCreditExpiryDetailLabel(date) {
-  const diffMs = date.getTime() - Date.now();
-  return diffMs <= 0 ? 'Expires now' : `Expires in ${formatDuration(diffMs)}`;
-}
-
-// Shared by Codex reset credits and Claude prepaid grants.
-function expiryDateLabel(date) {
-  return new Intl.DateTimeFormat(currentLocale(), {
-    month: 'numeric',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit'
-  }).format(date);
-}
 
 function limitDetailTooltipShouldHoldRender() {
   if (!state.limitDetailTooltipActive || !els.limitsPanel) return false;
@@ -4461,280 +3969,13 @@ function flushPendingLimitDetailTooltipRender() {
   renderLimits();
 }
 
-function codexSwitchPopoverShouldHoldRender() {
-  if (!state.codexSwitchPopoverActive || !els.limitsPanel) return false;
-  return Boolean(els.limitsPanel.querySelector(
-    '.limit-account-switch-zone:hover, .limit-account-switch-zone:focus-within, .limit-account-active-zone:hover, .limit-account-active-zone:focus-within'
-  ));
-}
 
-function flushPendingCodexSwitchPopoverRender() {
-  if (!state.codexSwitchPopoverRenderPending || state.breakdown !== 'limits') return;
-  state.codexSwitchPopoverRenderPending = false;
-  renderLimits();
-}
 
-function codexResetCreditsNode(resetCredits) {
-  const valueText = formatCodexResetCreditsValue(resetCredits);
-  if (!valueText) return null;
-  const expirationDates = codexResetCreditExpirationDates(resetCredits);
-  const item = document.createElement('div');
-  item.className = 'limit-window limit-window-wide limit-window-note limit-reset-credits';
-  const line = document.createElement('div');
-  line.className = 'limit-reset-credits-line';
-  const value = document.createElement('span');
-  value.className = 'limit-reset-credits-value';
-  value.textContent = valueText;
-  line.append(value);
-  if (expirationDates.length > 0) {
-    const expiryGroup = document.createElement('span');
-    expiryGroup.className = 'limit-reset-credits-expiry-group';
-    const timeline = document.createElement('span');
-    timeline.className = 'limit-reset-credits-timeline';
-    const summaryParts = expirationDates.slice(0, 3).map(codexResetCreditExpiryLabel);
-    const hiddenExpirationCount = expirationDates.length - summaryParts.length;
-    if (hiddenExpirationCount > 0) summaryParts.push(`+${hiddenExpirationCount}`);
-    summaryParts.forEach((text, index) => {
-      const time = document.createElement('span');
-      time.className = 'limit-reset-credits-time';
-      if (index > 0) {
-        const separator = document.createElement('span');
-        separator.className = 'limit-reset-credits-separator';
-        separator.textContent = '·';
-        separator.setAttribute('aria-hidden', 'true');
-        time.append(separator);
-      }
-      time.append(document.createTextNode(text));
-      timeline.append(time);
-    });
-    expiryGroup.append(timeline);
-    if (expirationDates.length > 0) {
-      // A date paired with a bare duration doesn't read as `<name>: <value>`, so
-      // the spoken label is supplied rather than derived from the cells. Keep
-      // this detail available for a single reset as well as multiple resets.
-      const infoNode = limitDetailInfoNode(
-        expirationDates.map((date) => [expiryDateLabel(date), codexResetCreditExpiryLabel(date)]),
-        '',
-        expirationDates.map((date, index) => `Reset ${index + 1}: ${codexResetCreditExpiryDetailLabel(date)}`).join(', ')
-      );
-      if (infoNode) expiryGroup.append(infoNode);
-    }
-    line.append(expiryGroup);
-  }
-  item.append(line);
-  item.setAttribute('aria-label', ['Reset credits', valueText, expirationDates.map(codexResetCreditExpiryDetailLabel).join(', ')].filter(Boolean).join(', '));
-  return item;
-}
 
-function providerSpendEntries(balance) {
-  return [
-    ['Today', optionalFiniteNumber(balance?.todaySpend)],
-    ['Week', optionalFiniteNumber(balance?.weekSpend)],
-    ['Month', optionalFiniteNumber(balance?.monthSpend)],
-    ['All time', optionalFiniteNumber(balance?.allTimeSpend)]
-  ].filter(([, value]) => value !== null);
-}
 
-// The meter-less note row every balance/spend provider draws: a label on the
-// left, then an optional summary and an optional ⓘ tooltip on the right. The
-// wording stays with the callers — each provider says something different about
-// the same layout — so the spoken label is `label` plus whatever parts they pass.
-function limitNoteRowNode({ label, summary = '', detailEntries = null, ariaParts = [] }) {
-  const item = document.createElement('div');
-  item.className = 'limit-window limit-window-wide limit-window-note limit-spend';
-  const line = document.createElement('div');
-  line.className = 'limit-window-text limit-spend-line';
-  const labelNode = document.createElement('span');
-  labelNode.textContent = label;
-  const right = document.createElement('span');
-  right.className = 'limit-spend-right';
-  if (summary) {
-    const summaryNode = document.createElement('span');
-    summaryNode.className = 'limit-spend-summary';
-    summaryNode.textContent = summary;
-    right.append(summaryNode);
-  }
-  const infoNode = detailEntries ? limitDetailInfoNode(detailEntries, 'limit-spend-info-wrap') : null;
-  if (infoNode) right.append(infoNode);
-  line.append(labelNode, right);
-  item.append(line);
-  item.setAttribute('aria-label', [label, ...ariaParts].join(', '));
-  return item;
-}
 
-// Entries are rows of cells: `[label, value]`, or `[label, middle, value]` when
-// a row carries an extra field. Rows are grid cells (`display: contents`), so a
-// short row would slide into the next row's columns — pad every row to the
-// widest one and widen the grid to match. `ariaLabel` overrides the spoken label
-// for callers whose cells don't read as `<name>: <value>` on their own.
-function limitDetailInfoNode(entries, extraClass = '', ariaLabel = '') {
-  if (!Array.isArray(entries) || entries.length === 0) return null;
-  const columns = entries.reduce((widest, entry) => Math.max(widest, entry.length), 0);
-  const infoWrap = document.createElement('span');
-  infoWrap.className = ['limit-detail-tooltip-wrap', extraClass].filter(Boolean).join(' ');
-  infoWrap.classList.toggle('has-opened', state.limitDetailTooltipHasOpened);
-  const info = document.createElement('span');
-  info.className = 'limit-detail-tooltip-trigger';
-  info.textContent = 'i';
-  info.tabIndex = 0;
-  info.setAttribute(
-    'aria-label',
-    ariaLabel || entries.map(([entryLabel, ...rest]) => `${entryLabel}: ${rest.filter(Boolean).join(' ')}`).join(', ')
-  );
-  const tooltip = document.createElement('span');
-  tooltip.className = ['limit-detail-tooltip', columns > 2 ? 'limit-detail-tooltip-triple' : '']
-    .filter(Boolean).join(' ');
-  tooltip.setAttribute('role', 'tooltip');
-  entries.forEach((entry) => {
-    const row = document.createElement('span');
-    row.className = 'limit-detail-tooltip-row';
-    for (let column = 0; column < columns; column += 1) {
-      const cell = document.createElement('span');
-      cell.textContent = entry[column] ?? '';
-      row.append(cell);
-    }
-    tooltip.append(row);
-  });
-  const markOpened = () => {
-    state.limitDetailTooltipHasOpened = true;
-    state.limitDetailTooltipActive = true;
-    infoWrap.classList.add('has-opened');
-  };
-  const release = () => {
-    requestAnimationFrame(() => {
-      if (limitDetailTooltipShouldHoldRender()) return;
-      state.limitDetailTooltipActive = false;
-      flushPendingLimitDetailTooltipRender();
-    });
-  };
-  infoWrap.addEventListener('pointerenter', markOpened);
-  infoWrap.addEventListener('focusin', markOpened);
-  infoWrap.addEventListener('pointerleave', release);
-  infoWrap.addEventListener('focusout', release);
-  infoWrap.append(info, tooltip);
-  return infoWrap;
-}
 
-function providerSpendNode(balance) {
-  const entries = providerSpendEntries(balance);
-  if (entries.length === 0) return null;
-  const preferredSummary = entries.filter(([label]) => label === 'Today' || label === 'Month');
-  const summaryEntries = preferredSummary.length > 0 ? preferredSummary : entries.slice(0, 2);
-  const formatted = entries.map(([entryLabel, value]) => [entryLabel, formatBalanceSpendAmount(value, balance)]);
-  return limitNoteRowNode({
-    label: 'Spend',
-    summary: summaryEntries
-      .map(([label, value]) => `${label} ${formatBalanceSpendAmount(value, balance)}`)
-      .join(' · '),
-    // Only worth a tooltip when it would say more than the summary already does.
-    detailEntries: entries.length > summaryEntries.length ? formatted : null,
-    ariaParts: formatted.map(([entryLabel, value]) => `${entryLabel} ${value}`)
-  });
-}
 
-function thirdPartySpendNode(provider, quotaWindow) {
-  const balance = provider?.balance || null;
-  const usage = provider?.usageSummary || null;
-  const currency = balance?.currency || 'USD';
-  const allTimeSpend = optionalFiniteNumber(balance?.allTimeSpend);
-  const monthSpend = optionalFiniteNumber(balance?.monthSpend);
-  const entries = [];
-  const total = optionalFiniteNumber(quotaWindow?.limit);
-  const requestCount = optionalFiniteNumber(balance?.requestCount);
-  const quotaGroup = String(balance?.quotaGroup || '').trim();
-  const expiresAt = balance?.expiresAt ? new Date(balance.expiresAt) : null;
-  if (total !== null) entries.push([t('settings.thirdparty.totalQuota'), formatMoney(total, currency)]);
-  if (requestCount !== null) {
-    entries.push([t('settings.thirdparty.requests'), Math.max(0, Math.trunc(requestCount)).toLocaleString()]);
-  }
-  if (quotaGroup) entries.push([t('settings.thirdparty.group'), quotaGroup]);
-  if (expiresAt && !Number.isNaN(expiresAt.getTime())) {
-    entries.push([t('settings.thirdparty.expires'), expiresAt.toLocaleDateString()]);
-  }
-  const usageCountEntry = (key, value) => {
-    const number = optionalFiniteNumber(value);
-    if (number !== null) entries.push([t(key), Math.max(0, Math.trunc(number)).toLocaleString()]);
-  };
-  if (usage) {
-    usageCountEntry('settings.thirdparty.monthRequests', usage.requests);
-    usageCountEntry('settings.thirdparty.monthTokens', usage.totalTokens);
-    usageCountEntry('settings.thirdparty.inputTokens', usage.inputTokens);
-    usageCountEntry('settings.thirdparty.outputTokens', usage.outputTokens);
-    const cacheTokens = [usage.cacheReadTokens, usage.cacheCreationTokens]
-      .map(optionalFiniteNumber)
-      .filter((value) => value !== null)
-      .reduce((sum, value) => sum + value, 0);
-    if (cacheTokens > 0) usageCountEntry('settings.thirdparty.cacheTokens', cacheTokens);
-    const averageDurationMs = optionalFiniteNumber(usage.averageDurationMs);
-    if (averageDurationMs !== null) {
-      const duration = averageDurationMs < 1000
-        ? `${Math.round(averageDurationMs)} ms`
-        : `${(averageDurationMs / 1000).toFixed(averageDurationMs < 10000 ? 1 : 0)} s`;
-      entries.push([t('settings.thirdparty.avgResponse'), duration]);
-    }
-    const standardCost = optionalFiniteNumber(usage.standardCost);
-    if (standardCost !== null) entries.push([t('settings.thirdparty.standardCost'), formatMoney(standardCost, currency)]);
-  }
-  if (allTimeSpend === null && monthSpend === null && entries.length === 0) return null;
-  // Without a spend figure the row has nothing to summarize, so it retitles
-  // itself and leans entirely on the tooltip.
-  const summary = [
-    ...(monthSpend !== null ? [`Month ${formatMoney(monthSpend, currency)}`] : []),
-    ...(allTimeSpend !== null ? [`All time ${formatMoney(allTimeSpend, currency)}`] : [])
-  ].join(' · ');
-  return limitNoteRowNode({
-    label: summary ? 'Spend' : 'Details',
-    summary,
-    detailEntries: entries,
-    ariaParts: [
-      ...(summary ? [summary] : []),
-      ...entries.map(([entryLabel, value]) => `${entryLabel} ${value}`)
-    ]
-  });
-}
-
-// One tooltip row per prepaid grant: amount, expiry date, time left, the same
-// shape Codex's reset credits use. `aria` spells the expiry out, since the
-// terse columns no longer say what the date and duration mean.
-function claudePrepaidGrantRows(tranches, currency) {
-  return tranches
-    .filter((tranche) => optionalFiniteNumber(tranche?.amount) !== null)
-    .map((tranche) => {
-      const money = formatMoney(tranche.amount, tranche.currency || currency);
-      const expiresAt = tranche.expiresAt ? new Date(tranche.expiresAt) : null;
-      if (!expiresAt || Number.isNaN(expiresAt.getTime())) {
-        return { cells: [money, '', 'No expiry'], aria: `${money} no expiry` };
-      }
-      const diffMs = expiresAt.getTime() - Date.now();
-      const remaining = diffMs <= 0 ? 'Expired' : formatDuration(diffMs);
-      return {
-        cells: [money, expiryDateLabel(expiresAt), remaining],
-        aria: diffMs <= 0 ? `${money} expired` : `${money} expires in ${remaining}`
-      };
-    });
-}
-
-// Claude's prepaid credits. Deliberately meter-less: the headline is a sum of
-// grants whose expiries belong to its parts, so a bar would need a denominator
-// this pool doesn't report. Expiries live in the tooltip instead.
-function claudeBalanceNode(provider) {
-  // Also checked here, not just in the collector: a record collected before the
-  // setting was switched off is still in state, and the row should disappear on
-  // the toggle rather than on the next refresh.
-  if (state.settings?.claudePrepaidBalanceEnabled === false) return null;
-  const balance = provider?.balance || null;
-  const amount = optionalFiniteNumber(balance?.amount);
-  if (amount === null) return null;
-  const currency = balance?.currency || 'USD';
-  const tranches = Array.isArray(balance.tranches) ? balance.tranches : [];
-  const grants = claudePrepaidGrantRows(tranches, currency);
-  return limitNoteRowNode({
-    label: 'Balance',
-    summary: formatMoney(amount, currency),
-    detailEntries: grants.map((grant) => grant.cells),
-    ariaParts: [formatMoney(amount, currency), ...grants.map((grant) => grant.aria)]
-  });
-}
 
 const {
   creditsAmount,
@@ -4745,38 +3986,104 @@ const {
   spendWindow
 } = window.TokenMonitorLimitBalanceDisplay;
 
+const { limitWindowLabel } = window.TokenMonitorLimitWindowLabels;
+const { limitWindowText } = window.TokenMonitorLimitWindowText;
+
+// The Limits rows are built by the shared view, which the edge dock also calls
+// so its card is the same DOM rather than a second rendering of the same data.
+// Everything the builder needs from this page is handed over here; it reads no
+// globals of its own.
+const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsView({
+  document,
+  t,
+  settings: () => state.settings,
+  currentLocale,
+  presentation: limitProviderPresentationApi,
+  // The row's "· imac-m1" needs this device's id, whether sync is on and the
+  // device list to name a reading's source against — the page's own context,
+  // which the shared view cannot read for itself.
+  provenanceContext: () => ({
+    localDeviceId: state.settings?.deviceId || '',
+    syncActive: syncProvenanceActive(),
+    devices: state.stats?.devices || []
+  }),
+  motion: limitResetMotionApi,
+  tooltip: {
+    hasOpened: () => state.limitDetailTooltipHasOpened,
+    markOpened() {
+      state.limitDetailTooltipHasOpened = true;
+      state.limitDetailTooltipActive = true;
+    },
+    release() {
+      requestAnimationFrame(() => {
+        if (limitDetailTooltipShouldHoldRender()) return;
+        state.limitDetailTooltipActive = false;
+        flushPendingLimitDetailTooltipRender();
+      });
+    }
+  },
+  formatCompact,
+  compactTokenThreshold: () => compactTokenApi.compactTokenUnitThreshold(
+    effectiveCompactTokenUnits(), currentLocale()
+  ),
+  formatMoney,
+  formatCompactMoney: (value, currency) => formatCompactMoney(
+    value, currency, state.settings?.compactTokenUnits, currentLocale()
+  ),
+  formatPercent,
+  formatDuration,
+  formatLimitBoundary,
+  limitFillPercent,
+  limitModeSuffix,
+  optionalFiniteNumber,
+  colorWithAlpha,
+  applyBarScale,
+  creditsAmount,
+  creditsMeterPercent,
+  isCreditsWindow,
+  spendWindow,
+  limitWindowLabel,
+  limitWindowText,
+  accountIdentity: accountIdentityApi,
+  accountControl: codexAccountControl,
+  codexAccounts: {
+    matchesActive: (provider) => codexActiveAccountMatchesProvider(provider),
+    switchTarget: (provider) => codexSwitchAccountForProvider(provider),
+    canSwitchSystemAccount: () => Boolean(window.tokenMonitor?.codex?.switchSystemAccount)
+  },
+  hasMark: (id) => limitMarksWithIcon.has(id),
+  formatAgo: (ms) => formatAgo(ms),
+  openExternal: (url) => window.tokenMonitor.openExternal?.(url),
+  // The subscription side of the plan cell. The records are the user's own, so
+  // they are read at paint time rather than captured; the tooltip's own rows are
+  // built by the view from these.
+  subscriptionApi,
+  subscriptionText,
+  currencyApi,
+  formatCost,
+  subscriptions: () => state.settings?.subscriptions,
+  subscriptionAccounts: () => limitProvidersForSubscriptions(),
+  monthClientCosts: () => state.stats?.periods?.month?.clientCosts,
+  resetForecast: () => ({ busy: state.codexResetForecastBusy, forecast: state.codexResetForecast })
+});
+
+const {
+  codexResetForecastExpired,
+  limitAccountTitle,
+  limitProviderPlan,
+  renderLimitProviderGroup,
+  renderLimitProviderSolo
+} = limitWindowsView;
+
+
 function optionalFiniteNumber(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
 
-function openrouterCreditsWindow(provider) {
-  const windows = Array.isArray(provider?.windows) ? provider.windows : [];
-  // Older hubs normalized windows before `metric` existed. Keep the label
-  // fallback only for those mixed-version payloads.
-  return windows.find((window) => window?.metric === 'credits')
-    || windows.find((window) => !window?.metric && window?.label === 'Credits')
-    || null;
-}
 
-function thirdPartyQuotaWindow(provider) {
-  const windows = Array.isArray(provider?.windows) ? provider.windows : [];
-  return windows.find((window) => window?.metric === 'credits') || null;
-}
 
-function formatLimitWindowValue(window, fillPercent, hasPercent, showUsed) {
-  if (hasPercent) return `${formatPercent(fillPercent)} ${limitModeSuffix(showUsed)}`;
-  if (!window) return '--';
-  if (String(window.detail || '').toLowerCase() === 'unlimited') return t('settings.thirdparty.unlimited');
-  const remaining = optionalFiniteNumber(window?.remaining);
-  if (remaining !== null) {
-    return window?.showMeter === false ? formatLimitAmount(remaining) : `${formatLimitAmount(remaining)} left`;
-  }
-  const limit = optionalFiniteNumber(window?.limit);
-  if (limit !== null) return `${formatLimitAmount(limit)} cap`;
-  return window.detail || '';
-}
 
 function formatHomeLimitWindowValue(window, showUsed) {
   if (window?.planStatus === 'expired') return t('limits.mimo.planExpired');
@@ -4787,120 +4094,15 @@ function formatHomeLimitWindowValue(window, showUsed) {
         ? t('settings.thirdparty.unlimited')
         : (window.detail || '--');
     }
-    return formatCompactMoney(window.remaining, window.currency);
+    return formatCompactMoney(window.remaining, window.currency, state.settings?.compactTokenUnits, currentLocale());
   }
   const percent = limitFillPercent(window?.remainingPercent, window?.usedPercent, showUsed);
   return `${formatPercent(percent)} ${limitModeSuffix(showUsed)}`;
 }
 
-function creditsBalanceValue(provider, credits) {
-  const amount = creditsAmount(provider, credits);
-  if (amount !== null) {
-    return formatCompactMoney(amount, credits?.currency || provider?.balance?.currency);
-  }
-  return String(credits?.detail || '').toLowerCase() === 'unlimited'
-    ? t('settings.thirdparty.unlimited')
-    : '';
-}
 
-function mimoTokenPlanWindowFromBalance(balance) {
-  if (!balance) return null;
-  if (balance.planStatus === 'expired') return null;
-  const used = optionalFiniteNumber(balance.planUsed);
-  const limit = optionalFiniteNumber(balance.planLimit);
-  const percent = optionalFiniteNumber(balance.planPercent);
-  const hasUsed = used !== null;
-  const hasLimit = limit !== null;
-  const hasPercent = percent !== null;
-  if (!hasUsed && !hasLimit && !hasPercent) return null;
-  const resolvedPercent = hasPercent
-    ? Math.max(0, Math.min(100, percent))
-    : (hasUsed && hasLimit && limit > 0 ? Math.max(0, Math.min(100, (used / limit) * 100)) : null);
-  return {
-    kind: 'billing',
-    label: 'Token Plan',
-    used: hasUsed ? used : null,
-    limit: hasLimit ? limit : null,
-    remaining: hasUsed && hasLimit ? Math.max(0, limit - used) : null,
-    usedPercent: resolvedPercent,
-    remainingPercent: resolvedPercent == null ? null : Math.max(0, Math.min(100, 100 - resolvedPercent)),
-    showMeter: true
-  };
-}
 
-function limitMeterNode(color, percent, tone = 1) {
-  const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
-  const meter = document.createElement('div');
-  meter.className = 'limit-meter';
-  meter.style.background = colorWithAlpha(color, 0.16);
-  const fill = document.createElement('div');
-  fill.className = 'limit-meter-fill';
-  applyBarScale(fill, safePercent / 100);
-  fill.style.background = color;
-  fill.style.opacity = tone;
-  meter.append(fill);
-  return meter;
-}
 
-function limitWindowNode(label, window, color, tone = 1, valueOverride = null, detailText = '') {
-  const remaining = Number(window?.remainingPercent);
-  const used = Number(window?.usedPercent);
-  const motionRemaining = limitResetMotionApi.remainingPercent(window);
-  const showMeter = window?.showMeter !== false;
-  const hasPercent = showMeter && (Number.isFinite(remaining) || Number.isFinite(used));
-  // valueOverride windows carry a fixed (money/amount) label — keep their meter
-  // on "remaining" so bar and label stay consistent; only percent-labelled
-  // windows honour the used-mode flip.
-  const showUsed = Boolean(state.settings?.showLimitUsed) && valueOverride == null;
-  const fillPercent = limitResetMotionApi.displayPercent(
-    limitFillPercent(remaining, used, showUsed)
-  );
-  const item = document.createElement('div');
-  item.className = 'limit-window';
-  item.dataset.limitMotionKey = limitResetMotionApi.windowKey(label, window);
-  item.dataset.limitRemainingPercent = hasPercent && motionRemaining !== null
-    ? String(Math.max(0, Math.min(100, motionRemaining)))
-    : '';
-  item.dataset.limitDisplayPercent = hasPercent && fillPercent !== null ? String(fillPercent) : '';
-  item.dataset.limitResetAt = window?.resetsAt || '';
-  const text = document.createElement('div');
-  text.className = 'limit-window-text';
-  const name = document.createElement('span');
-  name.textContent = window?.label || label;
-  const value = document.createElement('span');
-  value.textContent = valueOverride != null ? valueOverride : formatLimitWindowValue(window, fillPercent, hasPercent, showUsed);
-  if (valueOverride == null && hasPercent && fillPercent !== null) {
-    value.dataset.limitMotionValue = String(fillPercent);
-    value.dataset.limitMotionSuffix = limitModeSuffix(showUsed);
-  }
-  text.append(name, value);
-  const meter = limitMeterNode(color, fillPercent, tone);
-  const reset = document.createElement('div');
-  reset.className = 'limit-reset';
-  const resetText = window?.resetsAt
-    ? formatLimitBoundary(window)
-    : window?.resetDescription || '';
-  if (detailText) {
-    // Keep the reset text left-aligned (consistent with every other provider)
-    // and add the absolute count on the right, under the top-line percentage.
-    reset.classList.add('limit-reset-split');
-    const resetSpan = document.createElement('span');
-    resetSpan.textContent = resetText;
-    const detailSpan = document.createElement('span');
-    detailSpan.className = 'limit-detail';
-    detailSpan.textContent = detailText;
-    reset.append(resetSpan, detailSpan);
-  } else {
-    reset.textContent = resetText;
-  }
-  if (showMeter) {
-    item.append(text, meter, reset);
-  } else {
-    item.classList.add('limit-window-note');
-    item.append(text, reset);
-  }
-  return item;
-}
 
 function providersByLimitProviderId(providers) {
   const byId = new Map();
@@ -4913,19 +4115,6 @@ function providersByLimitProviderId(providers) {
   return byId;
 }
 
-function renderLimitProviderMark(id, color) {
-  const mark = document.createElement('span');
-  if (limitMarksWithIcon.has(id)) {
-    // .limit-icon sizes the mark, .row-icon-<id> supplies the mask: one table,
-    // shared with the breakdown rows, instead of a second copy per provider.
-    mark.className = `limit-icon row-icon-${id}`;
-  } else {
-    mark.className = 'dot';
-    mark.style.background = color;
-  }
-  return mark;
-}
-
 function codexSwitchAccountForProvider(provider) {
   if (!provider || provider.provider !== 'codex') return null;
   if (!provider.accountKey && !provider.accountEmail) return null;
@@ -4933,16 +4122,6 @@ function codexSwitchAccountForProvider(provider) {
     if (account.enabled === false) return false;
     return accountIdentityApi.codexAccountMatchesProvider(account, provider);
   }) || null;
-}
-
-function codexProviderMatchesProvider(left, right) {
-  if (!left || !right || left.provider !== 'codex' || right.provider !== 'codex') return false;
-  const leftKey = String(left.accountKey || '').trim();
-  const rightKey = String(right.accountKey || '').trim();
-  if (leftKey && rightKey && leftKey === rightKey) return true;
-  const leftEmail = String(left.accountEmail || '').trim().toLowerCase();
-  const rightEmail = String(right.accountEmail || '').trim().toLowerCase();
-  return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
 }
 
 function codexActiveAccountMatchesProvider(provider) {
@@ -5001,6 +4180,7 @@ function scheduleCodexPendingActiveAccountExpiry() {
     renderLimits();
     renderCodexAccounts();
     renderSettingsSummaries();
+    maybeUpdateBarsIcon();
   }, delay);
 }
 
@@ -5012,6 +4192,12 @@ function setCodexPendingActiveAccount(account) {
   state.codexPendingActiveAccount = account;
   state.codexPendingActiveAccountUntil = Date.now() + CODEX_PENDING_ACTIVE_GRACE_MS;
   scheduleCodexPendingActiveAccountExpiry();
+}
+
+function applyCodexOptimisticActiveAccount(account) {
+  if (!account) return;
+  setCodexPendingActiveAccount(account);
+  state.codexActiveAccount = account;
 }
 
 function applyCodexActiveAccountFromStats() {
@@ -5030,966 +4216,6 @@ function applyCodexActiveAccountFromStats() {
     clearCodexPendingActiveAccount();
   }
   state.codexActiveAccount = activeAccount;
-}
-
-function applyCodexAccountLimitsRefresh(providers) {
-  const refreshed = (providers || []).filter((provider) => provider?.provider === 'codex');
-  if (!refreshed.length || !state.stats?.limits) return;
-  const used = new Set();
-  const existingProviders = state.stats.limits.providers || [];
-  const nextProviders = existingProviders.map((provider) => {
-    if (provider?.provider !== 'codex') return provider;
-    const index = refreshed.findIndex((candidate, candidateIndex) => (
-      !used.has(candidateIndex) && codexProviderMatchesProvider(candidate, provider)
-    ));
-    if (index === -1) return provider;
-    used.add(index);
-    return refreshed[index];
-  });
-  refreshed.forEach((provider, index) => {
-    if (!used.has(index)) nextProviders.push(provider);
-  });
-  state.stats = {
-    ...state.stats,
-    limits: {
-      ...state.stats.limits,
-      providers: nextProviders
-    }
-  };
-  applyCodexActiveAccountFromStats();
-  renderLimits();
-  maybeUpdateBarsIcon();
-}
-
-function renderLimitProviderHead(id, label, provider, color, options = {}) {
-  const head = document.createElement('div');
-  head.className = 'limit-head';
-  const titleBlock = document.createElement('div');
-  titleBlock.className = 'limit-title';
-  const name = document.createElement('div');
-  name.className = 'limit-name';
-  if (options.showIcon !== false) name.append(renderLimitProviderMark(options.markId || id, color));
-  const title = document.createElement('span');
-  title.className = 'limit-name-title';
-  title.textContent = options.title || label;
-  const provenance = limitProviderProvenance(provider);
-  // The ✓ marks the account THIS device's Codex is signed into
-  // (state.codexActiveAccount, derived locally by codexActiveAccountFromStats).
-  // It only disambiguates rows in the multi-account group, so it's gated on
-  // showActiveBadge. Never re-derive "live" from the row being rendered — in
-  // sync mode that row can be a remote device's record for a different account,
-  // which would move the ✓ onto the wrong one.
-  const activeCodexAccount = options.showActiveBadge && codexActiveAccountMatchesProvider(provider);
-  const switchAccount = options.allowSystemSwitch && !activeCodexAccount ? codexSwitchAccountForProvider(provider) : null;
-  if (switchAccount && window.tokenMonitor?.codex?.switchSystemAccount) {
-    const switchZone = document.createElement('span');
-    const switchPopover = document.createElement('span');
-    const switchButton = document.createElement('button');
-    const switching = state.codexSystemSwitchingAccountId === switchAccount.id;
-    const failed = state.codexSystemSwitchErrorAccountId === switchAccount.id && state.codexSystemSwitchError;
-    switchZone.className = 'limit-account-switch-zone';
-    switchZone.classList.toggle('has-opened', state.codexSwitchPopoverHasOpened);
-    switchZone.classList.toggle('is-switching', Boolean(switching));
-    switchZone.classList.toggle('is-error', Boolean(failed));
-    switchPopover.className = 'limit-account-switch-popover';
-    switchButton.type = 'button';
-    switchButton.className = 'limit-account-switch-button';
-    switchButton.disabled = Boolean(state.codexSystemSwitchingAccountId);
-    switchButton.title = failed || t('limits.codex.switchAccountTitle', {
-      account: switchAccount.email || t('settings.codex.unnamedAccount')
-    });
-    switchButton.setAttribute('aria-label', switchButton.title);
-    switchButton.textContent = switching
-      ? t('limits.codex.switching')
-      : failed
-        ? t('limits.codex.switchFailedShort')
-        : t('limits.codex.switchAccount');
-    const markCodexSwitchPopoverOpened = () => {
-      state.codexSwitchPopoverHasOpened = true;
-      state.codexSwitchPopoverActive = true;
-      switchZone.classList.add('has-opened');
-    };
-    const releaseCodexSwitchPopover = () => {
-      requestAnimationFrame(() => {
-        if (switchZone.matches(':hover, :focus-within')) return;
-        state.codexSwitchPopoverActive = false;
-        flushPendingCodexSwitchPopoverRender();
-      });
-    };
-    switchZone.addEventListener('pointerenter', markCodexSwitchPopoverOpened);
-    switchZone.addEventListener('focusin', markCodexSwitchPopoverOpened);
-    switchZone.addEventListener('pointerleave', releaseCodexSwitchPopover);
-    switchZone.addEventListener('focusout', releaseCodexSwitchPopover);
-    switchButton.addEventListener('click', async (event) => {
-      event.stopPropagation();
-      if (state.codexSystemSwitchingAccountId) return;
-      state.codexSystemSwitchingAccountId = switchAccount.id;
-      state.codexSystemSwitchErrorAccountId = '';
-      state.codexSystemSwitchError = '';
-      state.codexSwitchPopoverActive = false;
-      renderLimits();
-      try {
-        const result = await window.tokenMonitor.codex.switchSystemAccount(switchAccount.id);
-        if (!result?.ok) {
-          const message = result?.error || t('limits.codex.switchFailed');
-          state.codexSystemSwitchErrorAccountId = switchAccount.id;
-          state.codexSystemSwitchError = message;
-          state.codexAccountError = message;
-        } else {
-          state.codexAccountError = '';
-          state.settings.codexManagedAccounts = result.accounts || state.settings.codexManagedAccounts || [];
-          setCodexPendingActiveAccount(result.activeAccount || null);
-          state.codexActiveAccount = result.activeAccount;
-          renderLimits();
-          window.tokenMonitor.codex.refreshAccountLimits(switchAccount.id).then((refreshResult) => {
-            if (refreshResult?.ok) applyCodexAccountLimitsRefresh(refreshResult.providers || []);
-            else if (refreshResult?.error) console.log(`[codex] refresh account limits failed: ${refreshResult.error}`);
-          }).catch((refreshError) => {
-            console.log(`[codex] refresh account limits failed: ${refreshError?.message || refreshError}`);
-          });
-        }
-      } catch (error) {
-        const message = error?.message || t('limits.codex.switchFailed');
-        state.codexSystemSwitchErrorAccountId = switchAccount.id;
-        state.codexSystemSwitchError = message;
-        state.codexAccountError = message;
-      } finally {
-        state.codexSystemSwitchingAccountId = '';
-        renderLimits();
-        renderCodexAccounts();
-        renderSettingsSummaries();
-      }
-    });
-    switchPopover.append(switchButton);
-    switchZone.append(title, switchPopover);
-    name.append(switchZone);
-  } else if (activeCodexAccount) {
-    const activeZone = document.createElement('span');
-    const badge = document.createElement('span');
-    const activePopover = document.createElement('span');
-    const activeHint = t('limits.codex.activeAccountHint');
-    activeZone.className = 'limit-account-active-zone';
-    activeZone.tabIndex = 0;
-    activeZone.setAttribute('aria-label', activeHint);
-    badge.className = 'limit-live-badge';
-    badge.textContent = '\u2713';
-    activePopover.className = 'limit-account-active-popover';
-    activePopover.textContent = activeHint;
-    const markCodexActiveHintOpened = () => {
-      state.codexSwitchPopoverActive = true;
-    };
-    const releaseCodexActiveHint = () => {
-      requestAnimationFrame(() => {
-        if (activeZone.matches(':hover, :focus-within')) return;
-        state.codexSwitchPopoverActive = false;
-        flushPendingCodexSwitchPopoverRender();
-      });
-    };
-    activeZone.addEventListener('pointerenter', markCodexActiveHintOpened);
-    activeZone.addEventListener('focusin', markCodexActiveHintOpened);
-    activeZone.addEventListener('pointerleave', releaseCodexActiveHint);
-    activeZone.addEventListener('focusout', releaseCodexActiveHint);
-    activeZone.append(title, badge, activePopover);
-    name.append(activeZone);
-  } else {
-    name.append(title);
-  }
-  titleBlock.append(name);
-  // The multi-account group header has no quota of its own, and its accounts can
-  // update at different times (different devices too), so it omits the meta line
-  // entirely — each account row below shows its own "Updated" time.
-  if (!options.hideMeta) {
-    const meta = document.createElement('div');
-    meta.className = 'limit-meta';
-    const metaParts = [];
-    // A single Codex account stays clean like every other provider (just the
-    // "Updated" line). The email only matters when several accounts share the
-    // group, where it's each subrow's title (options.accountTitle) — not here.
-    if (provider.status === 'ok' || provider.stale) metaParts.push(limitProviderMeta(provider, provenance));
-    const metaText = metaParts.filter(Boolean).join(' · ');
-    if (metaText) meta.append(document.createTextNode(metaText));
-    titleBlock.append(meta);
-  }
-  const plan = document.createElement('div');
-  plan.className = 'limit-plan';
-  plan.textContent = options.planText ?? limitProviderPlan(provider);
-  head.append(titleBlock, decoratePlanWithSubscription(plan, provider));
-  return head;
-}
-
-function renderProviderWindows(provider, color) {
-  const windows = document.createElement('div');
-  windows.className = 'limit-windows';
-  if (provider.provider === 'codex') {
-    const session = codexCanonicalWindow(provider, 'session');
-    const weekly = codexCanonicalWindow(provider, 'weekly');
-    const monthly = codexCanonicalWindow(provider, 'billing');
-    const additionalWindows = state.settings?.showCodexAdditionalLimits === false
-      ? []
-      : (provider.windows || []).filter((window) => window?.additional === true);
-    if (session) {
-      const sessionNode = limitWindowNode(session.label || 'Session', session, color, 0.95);
-      if (!weekly && !monthly) sessionNode.classList.add('limit-window-wide');
-      windows.append(sessionNode);
-    }
-    if (weekly) {
-      const weeklyNode = limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68);
-      if (!session && !monthly) weeklyNode.classList.add('limit-window-wide');
-      windows.append(weeklyNode);
-    }
-    if (monthly) {
-      const monthlyNode = limitWindowNode(monthly.label || 'Monthly', monthly, color, 0.68);
-      monthlyNode.classList.add('limit-window-wide');
-      windows.append(monthlyNode);
-    }
-    for (const additional of additionalWindows) {
-      const additionalNode = limitWindowNode(
-        codexAdditionalWindowLabel(additional, additionalWindows),
-        { ...additional, label: '' },
-        color,
-        0.78
-      );
-      additionalNode.classList.add('limit-window-wide');
-      windows.append(additionalNode);
-    }
-    const resetNode = codexResetCreditsNode(provider.resetCredits);
-    if (resetNode) windows.append(resetNode);
-  } else if (provider.provider === 'cursor') {
-    windows.classList.add('limit-windows-cursor');
-    for (const quotaWindow of provider.windows || []) {
-      const valueOverride = quotaWindow.metric === 'spend'
-        ? formatCursorSpendValue(quotaWindow)
-        : null;
-      const node = limitWindowNode(quotaWindow.label || 'Quota', quotaWindow, color, 0.68, valueOverride);
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'antigravity') {
-    windows.classList.add('limit-windows-antigravity');
-    const quotaGroups = antigravityQuotaGroups(provider);
-    if (quotaGroups.length > 0) {
-      windows.classList.add('limit-windows-antigravity-grouped');
-      for (const group of quotaGroups) {
-        const groupNode = document.createElement('div');
-        groupNode.className = 'limit-window-group';
-        groupNode.setAttribute('role', 'group');
-        groupNode.setAttribute('aria-label', group.label);
-        const title = document.createElement('div');
-        title.className = 'limit-window-group-title';
-        title.textContent = group.label;
-        const groupWindows = document.createElement('div');
-        groupWindows.className = 'limit-window-group-items';
-        for (const entry of group.windows) {
-          const opacity = entry.window.kind === 'session' ? 0.95 : 0.78;
-          groupWindows.append(limitWindowNode(
-            entry.windowLabel,
-            { ...entry.window, label: entry.windowLabel },
-            color,
-            opacity
-          ));
-        }
-        groupNode.append(title, groupWindows);
-        windows.append(groupNode);
-      }
-    } else {
-      const weeklyWindows = windowsForKind(provider, 'weekly');
-      const visibleWindows = weeklyWindows.length > 0 ? weeklyWindows : [null];
-      for (const quotaWindow of visibleWindows) {
-        const node = limitWindowNode(quotaWindow?.label || 'Weekly', quotaWindow, color, 0.78);
-        node.classList.add('limit-window-wide');
-        windows.append(node);
-      }
-    }
-  } else if (provider.provider === 'opencode') {
-    // Go reports session/weekly/monthly windows ($12/$30/$60); Zen reports a prepaid balance (and,
-    // when the account is active, rolling/weekly). The monthly window normalizes to kind 'billing'
-    // (see normalizeWindowKind). Show only the windows that exist — no empty `--` placeholders — and
-    // surface the Zen balance as a full-width, no-meter note when present.
-    const session = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    const monthly = windowForKind(provider, 'billing');
-    if (session) windows.append(limitWindowNode('Session', session, color, 0.95));
-    if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
-    // Monthly spans the full row (like Balance) so it never leaves a half-empty grid cell.
-    if (monthly) {
-      const node = limitWindowNode('Monthly', monthly, color, 0.5);
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    // Balance is a Zen-only concept. Show it only when a real balance number came
-    // back (incl. $0.00). It can't key off `source === 'web'` anymore — Go usage is
-    // now fetched over the web too, so a pure-Go account (no Zen, balanceUsd null)
-    // must not get a phantom `Balance —` line.
-    const hasBalance = typeof provider.balanceUsd === 'number' && Number.isFinite(provider.balanceUsd);
-    if (hasBalance) {
-      const node = limitWindowNode('Balance', { showMeter: false }, color, 0.68, formatLimitAmount(provider.balanceUsd));
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'openrouter') {
-    windows.classList.add('limit-windows-openrouter');
-    const balance = provider.balance || null;
-    const currency = balance?.currency || 'USD';
-    const balanceAmount = optionalFiniteNumber(balance?.amount);
-    const creditsWindow = openrouterCreditsWindow(provider);
-    if (balanceAmount !== null) {
-      const balanceWindow = creditsWindow || (balanceAmount === 0
-        ? { usedPercent: 100, remainingPercent: 0, showMeter: true }
-        : { showMeter: false });
-      const balanceNode = limitWindowNode(
-        'Balance',
-        { ...balanceWindow, label: 'Balance' },
-        color,
-        0.95,
-        formatMoney(balanceAmount, currency)
-      );
-      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(balanceNode);
-    }
-    for (const quotaWindow of (provider.windows || []).filter((window) => window !== creditsWindow)) {
-      const hasMeter = quotaWindow?.showMeter !== false;
-      const remaining = optionalFiniteNumber(quotaWindow?.remaining);
-      const limit = optionalFiniteNumber(quotaWindow?.limit);
-      const absoluteDetail = hasMeter && remaining !== null && limit !== null
-        ? `${formatMoney(remaining, 'USD')} left · ${formatMoney(limit, 'USD')} total`
-        : '';
-      const valueOverride = hasMeter ? null : (quotaWindow?.detail || '—');
-      const node = limitWindowNode(
-        quotaWindow?.label || 'Usage',
-        quotaWindow,
-        color,
-        hasMeter ? 0.85 : 0.6,
-        valueOverride,
-        absoluteDetail
-      );
-      node.classList.add('limit-window-wide');
-      if (!hasMeter) node.classList.add('limit-window-no-reset');
-      windows.append(node);
-    }
-    const spendNode = providerSpendNode(balance);
-    if (spendNode) windows.append(spendNode);
-  } else if (provider.provider === 'thirdparty') {
-    windows.classList.add('limit-windows-thirdparty');
-    const balance = provider.balance || null;
-    const currency = balance?.currency || 'USD';
-    const balanceAmount = optionalFiniteNumber(balance?.amount);
-    const quotaWindow = thirdPartyQuotaWindow(provider);
-    const balanceLabel = quotaWindow?.label || 'Balance';
-    if (balanceAmount !== null) {
-      const balanceValue = formatMoney(balanceAmount, currency);
-      // Balance presets without a fixed quota denominator (Sub2API reports the
-      // remaining USD balance plus an observed monthSpend) get the same
-      // display-layer meter DeepSeek uses: balance / (balance + month spend).
-      // Windows that already carry provider percentages pass through unchanged.
-      const meterPercent = creditsMeterPercent(provider, quotaWindow);
-      const balanceNode = limitWindowNode(
-        balanceLabel,
-        {
-          ...(quotaWindow || { showMeter: false }),
-          label: balanceLabel,
-          ...(meterPercent !== null ? { remainingPercent: meterPercent, showMeter: true } : {})
-        },
-        color,
-        0.95,
-        balanceValue
-      );
-      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(balanceNode);
-    } else if (quotaWindow?.showMeter === false && quotaWindow.detail) {
-      const value = String(quotaWindow.detail).toLowerCase() === 'unlimited'
-        ? t('settings.thirdparty.unlimited')
-        : quotaWindow.detail;
-      const balanceNode = limitWindowNode(
-        balanceLabel,
-        { ...quotaWindow, label: balanceLabel },
-        color,
-        0.95,
-        value
-      );
-      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(balanceNode);
-    }
-    const spendNode = thirdPartySpendNode(provider, quotaWindow);
-    if (spendNode) windows.append(spendNode);
-  } else if (provider.provider === 'deepseek') {
-    // DeepSeek does not expose a fixed quota denominator. This intentionally
-    // visualizes the balance relative to this month's inferred starting funds:
-    // current / (current + observed month spend).
-    windows.classList.add('limit-windows-deepseek');
-    const balance = provider.balance || null;
-    if (balance) {
-      const currency = balance.currency;
-      const balanceNode = limitWindowNode(
-        'Balance',
-        { remainingPercent: creditsMeterPercent(provider, null) },
-        color,
-        0.95,
-        formatMoney(balance.amount, currency)
-      );
-      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(balanceNode);
-
-      const spendNode = providerSpendNode(balance);
-      if (spendNode) windows.append(spendNode);
-    }
-  } else if (provider.provider === 'mimo') {
-    windows.classList.add('limit-windows-mimo');
-    const balance = provider.balance || null;
-    const tokenPlan = windowForKind(provider, 'billing') || mimoTokenPlanWindowFromBalance(balance);
-    if (tokenPlan) {
-      const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    } else if (balance?.planStatus === 'expired') {
-      const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
-      node.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(node);
-    }
-    const amount = optionalFiniteNumber(balance?.amount);
-    const giftBalance = optionalFiniteNumber(balance?.giftBalance);
-    const cashBalance = optionalFiniteNumber(balance?.cashBalance);
-    if (amount !== null || giftBalance !== null || cashBalance !== null) {
-      const detailParts = [];
-      if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, balance.currency)}`);
-      if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, balance.currency)}`);
-      const balanceText = formatMoney(amount, balance.currency) || '—';
-      const balanceNode = limitWindowNode(
-        'Balance',
-        { showMeter: false },
-        color,
-        0.68,
-        balanceText,
-        detailParts.join(' · ')
-      );
-      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(balanceNode);
-    }
-  } else if (provider.provider === 'grok') {
-    // Grok exposes a single Monthly billing window (no session/weekly). Render it
-    // full-width so it doesn't share a row with an empty placeholder. This mirrors
-    // how Cursor's billing cycle and OpenCode's Monthly are handled.
-    windows.classList.add('limit-windows-grok');
-    const monthly = windowForKind(provider, 'billing');
-    if (monthly) {
-      const node = limitWindowNode(monthly.label || 'Monthly', monthly, color, 0.68);
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'copilot') {
-    windows.classList.add('limit-windows-copilot');
-    const billingWindows = windowsForKind(provider, 'billing');
-    for (const billing of billingWindows) {
-      const node = limitWindowNode(billing?.label || 'Monthly', billing, color, 0.68);
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'zed') {
-    windows.classList.add('limit-windows-zed');
-    for (const billing of windowsForKind(provider, 'billing')) {
-      const unlimitedEditPredictions = billing?.limitId === 'zed.edit-predictions'
-        && String(billing?.detail || '').trim().toLowerCase() === 'unlimited';
-      const node = limitWindowNode(
-        billing?.label || 'Token Spend',
-        billing,
-        color,
-        0.95,
-        null,
-        formatZedBillingDetail(billing)
-      );
-      node.classList.add('limit-window-wide');
-      if (unlimitedEditPredictions) node.classList.add('limit-window-no-reset');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'zai' || provider.provider === 'zaiteam') {
-    // Billing-kind windows are one of three things: the subscription MCP
-    // monthly bucket (no metric, no limitId), ZCode Start/Weekend plan
-    // buckets (limitId set, per-model labels), or the cash balance
-    // (metric 'credits'). Each renders in its own slot below.
-    const session = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    const billingWindows = windowsForKind(provider, 'billing');
-    const dailyWindows = windowsForKind(provider, 'daily');
-    const planBuckets = billingWindows.filter((window) => window?.limitId && !window?.metric);
-    const monthlyWindows = billingWindows.filter((window) => !window?.metric && !window?.limitId);
-    const balanceWindow = (provider.windows || []).find((window) => window?.metric === 'credits');
-    const nodes = [
-      session && limitWindowNode(session.label || '5-hour', session, color, 0.95),
-      ...dailyWindows.map((window, index) => limitWindowNode(
-        window.label || (dailyWindows.length > 1 ? `Daily ${index + 1}` : 'Daily'),
-        window,
-        color,
-        0.78,
-        null,
-        window.detail || formatZcodeTokensDetail(window)
-      )),
-      weekly && limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68),
-      ...planBuckets.map((window) => limitWindowNode(
-        window.label || 'Start Plan',
-        window,
-        color,
-        0.68,
-        null,
-        window.detail || formatZcodeTokensDetail(window)
-      ))
-    ].filter(Boolean);
-    if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
-    windows.append(...nodes);
-    // Monthly subscription buckets stay full width, independent of the
-    // paired quota count. Preserve all legacy billing windows without ids.
-    for (const monthly of monthlyWindows) {
-      const node = limitWindowNode(monthly.label || 'MCP', monthly, color, 0.68, null, monthly.detail || '');
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    // Balance sits at the bottom on its own full-width row: coding-plan quota
-    // is consumed before the cash pool, so the money line reads as the last
-    // resort.
-    if (balanceWindow) {
-      const balanceNode = limitWindowNode(
-        'Balance',
-        { remainingPercent: creditsMeterPercent(provider, balanceWindow) },
-        color,
-        0.95,
-        formatMoney(balanceWindow.remaining, balanceWindow.currency)
-      );
-      balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(balanceNode);
-      const spendNode = provider.balance && providerSpendNode(provider.balance);
-      if (spendNode) windows.append(spendNode);
-    }
-  } else if (provider.provider === 'volcengine') {
-    const session = windowForKind(provider, 'session');
-    const daily = windowForKind(provider, 'daily');
-    const weekly = windowForKind(provider, 'weekly');
-    const monthly = windowForKind(provider, 'billing');
-    const nodes = [
-      session && limitWindowNode(session.label || '5-hour', session, color, 0.95),
-      daily && limitWindowNode('Daily', daily, color, 0.78),
-      weekly && limitWindowNode('Weekly', weekly, color, 0.68),
-      monthly && limitWindowNode('Monthly', monthly, color, 0.68)
-    ].filter(Boolean);
-    if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
-    windows.append(...nodes);
-  } else if (provider.provider === 'kiro') {
-    // Kiro exposes monthly credits (plus an optional bonus pool), both billing
-    // windows. Render them full-width like Copilot's quota windows.
-    windows.classList.add('limit-windows-kiro');
-    const billingWindows = windowsForKind(provider, 'billing');
-    for (const billing of billingWindows) {
-      if (billing?.showMeter === false) {
-        // Overage: a single compact line like Cursor's "Credits $0.00" (no bar,
-        // no reset) with the credits used and estimated cost joined on the right.
-        const node = limitWindowNode(billing.label || 'Overage', billing, color, 0.6, formatKiroOverageValue(billing));
-        node.classList.add('limit-window-wide', 'limit-window-no-reset');
-        windows.append(node);
-      } else {
-        const node = limitWindowNode(
-          billing?.label || 'Credits',
-          billing,
-          color,
-          0.68,
-          null,
-          formatLimitCount(billing, Boolean(state.settings?.showLimitUsed))
-        );
-        node.classList.add('limit-window-wide');
-        windows.append(node);
-      }
-    }
-  } else if (provider.provider === 'qoder') {
-    windows.classList.add('limit-windows-qoder');
-    const credits = windowForKind(provider, 'billing');
-    if (credits) {
-      const node = limitWindowNode(
-        credits?.label || 'Credits',
-        credits,
-        color,
-        0.68,
-        null,
-        formatLimitCount(credits, Boolean(state.settings?.showLimitUsed))
-      );
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'workbuddy' || provider.provider === 'trae') {
-    const credits = windowForKind(provider, 'billing');
-    const balance = provider.balance || null;
-    const value = creditsBalanceValue(provider, credits);
-    if (credits && value) {
-      const displayWindow = {
-        ...credits,
-        label: credits.label || 'Credits'
-      };
-      const node = limitWindowNode(
-        displayWindow.label,
-        displayWindow,
-        color,
-        0.95,
-        value
-      );
-      node.classList.add('limit-window-wide');
-      if (!displayWindow.resetsAt && !displayWindow.resetDescription) {
-        node.classList.add('limit-window-no-reset');
-      }
-      windows.append(node);
-      const spendNode = providerSpendNode(balance);
-      if (spendNode) windows.append(spendNode);
-    }
-  } else if (provider.provider === 'commandcode') {
-    // 5-hour and weekly are rate-limit windows (percent); the monthly grant and
-    // any rollover top-up are money, so they get the amount on the right of the
-    // reset line and span the row like Kimi's Monthly.
-    const fiveHour = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    if (fiveHour) {
-      const node = limitWindowNode('5-hour', fiveHour, color, 0.95);
-      if (!weekly) node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    if (weekly) {
-      const node = limitWindowNode('Weekly', weekly, color, 0.68);
-      if (!fiveHour) node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    for (const credits of windowsForKind(provider, 'billing')) {
-      const node = limitWindowNode(
-        credits.label || 'Monthly',
-        credits,
-        color,
-        0.5,
-        null,
-        formatCommandcodeCreditsDetail(credits)
-      );
-      node.classList.add('limit-window-wide');
-      // A grant with no known plan allowance has no meter, so there is no bar
-      // for a reset line to sit under either.
-      if (credits.showMeter === false) node.classList.add('limit-window-no-reset');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'kimi') {
-    const fiveHour = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    const monthly = windowForKind(provider, 'billing');
-    if (fiveHour) {
-      const node = limitWindowNode(fiveHour.label || '5-hour', fiveHour, color, 0.95);
-      if (!weekly) node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    if (weekly) {
-      const node = limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68);
-      if (!fiveHour) node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    if (monthly) {
-      const node = limitWindowNode(
-        monthly.label || 'Monthly',
-        monthly,
-        color,
-        0.5,
-        null,
-        monthly.detail || ''
-      );
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-  } else if (provider.provider === 'alibaba') {
-    // Team returns one credit pool; Personal/Solo returns rolling 5-hour and
-    // weekly windows. Both are the same provider, so the shape decides the
-    // layout rather than the configured variant — a device syncing another
-    // machine's row has no access to that setting.
-    const billing = windowForKind(provider, 'billing');
-    const session = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    if (billing) {
-      const node = limitWindowNode(billing.label || 'Monthly', billing, color, 0.68);
-      node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    if (session) {
-      const node = limitWindowNode(session.label || '5-hour', session, color, 0.95);
-      if (!weekly) node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    if (weekly) windows.append(limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68));
-  } else if (provider.provider === 'ollama') {
-    const session = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    if (session) {
-      const node = limitWindowNode('Session', session, color, 0.95);
-      if (!weekly) node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    if (weekly) windows.append(limitWindowNode('Weekly', weekly, color, 0.68));
-  } else if (provider.provider === 'claude') {
-    // Claude usually shows session + one all-models weekly, but can carry a second
-    // model-scoped weekly (the temporary "Fable only" promo cap). Render every
-    // weekly the response actually has, and nothing when a bucket is absent — no
-    // empty placeholder — so the scoped bar appears only while the promo is live.
-    const session = windowForKind(provider, 'session');
-    if (session) windows.append(limitWindowNode(session.label || 'Session', session, color, 0.95));
-    for (const weekly of windowsForKind(provider, 'weekly')) {
-      const node = limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68);
-      // The all-models weekly pairs with Session in the two-column grid; a
-      // model-scoped weekly (the "Fable only" promo cap) has no partner, so span
-      // the full row instead of leaving a half-empty cell.
-      if (weekly.label) node.classList.add('limit-window-wide');
-      windows.append(node);
-    }
-    // Usage credits: "$2.35 / $20.00" with a meter when a monthly spend limit is
-    // set, "$2.35 spent" without one. Absent entirely when credits are off.
-    const usageCredits = spendWindow(provider);
-    if (usageCredits) {
-      const value = usageCredits.limit === null
-        ? `${formatMoney(usageCredits.used, usageCredits.currency)} spent`
-        : `${formatMoney(usageCredits.used, usageCredits.currency)} / ${formatMoney(usageCredits.limit, usageCredits.currency)}`;
-      const node = limitWindowNode('Usage credits', usageCredits, color, 0.5, value);
-      node.classList.add('limit-window-wide', 'limit-window-no-reset');
-      windows.append(node);
-    }
-    const balanceNode = claudeBalanceNode(provider);
-    if (balanceNode) windows.append(balanceNode);
-  } else {
-    // Default: render only the windows the provider actually has. Providers
-    // that only expose a single window shouldn't leave a half-empty bar next to
-    // the real one. (Grok is handled above; this branch covers minimax's
-    // session + weekly pair and any future session/weekly provider.)
-    const session = windowForKind(provider, 'session');
-    const weekly = windowForKind(provider, 'weekly');
-    if (session) windows.append(limitWindowNode(session.label || 'Session', session, color, 0.95));
-    if (weekly) windows.append(limitWindowNode(weekly.label || 'Weekly', weekly, color, 0.68));
-  }
-  return windows;
-}
-
-function codexResetForecastDate(value, options = {}) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return '';
-  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
-  const locale = options.locale || currentLocale();
-  const timeZone = options.timeZone;
-  const dayNumber = (input) => {
-    const parts = new Intl.DateTimeFormat('en-US-u-ca-gregory-nu-latn', {
-      year: 'numeric',
-      month: 'numeric',
-      day: 'numeric',
-      ...(timeZone ? { timeZone } : {})
-    }).formatToParts(input);
-    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-    return Date.UTC(Number(values.year), Number(values.month) - 1, Number(values.day));
-  };
-  const dayDelta = Math.round((dayNumber(date) - dayNumber(new Date(nowMs))) / 86_400_000);
-  if (dayDelta >= -1 && dayDelta <= 1) {
-    const time = new Intl.DateTimeFormat(locale, {
-      hour: 'numeric',
-      minute: '2-digit',
-      ...(locale.startsWith('zh') ? { hourCycle: 'h23' } : {}),
-      ...(timeZone ? { timeZone } : {})
-    }).format(date);
-    const relativeDay = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(dayDelta, 'day');
-    return `${relativeDay} ${time}`;
-  }
-  return expiryDateLabel(date);
-}
-
-function codexResetForecastTimeUntil(value, options = {}) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return '';
-  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
-  const remainingMs = date.getTime() - nowMs;
-  if (remainingMs <= 0) return '';
-  const locale = options.locale || currentLocale();
-  const hours = remainingMs / 3_600_000;
-  const unit = hours >= 48 ? 'day' : (hours >= 1 ? 'hour' : 'minute');
-  const divisor = unit === 'day' ? 86_400_000 : (unit === 'hour' ? 3_600_000 : 60_000);
-  const amount = Math.max(1, Math.round(remainingMs / divisor));
-  const duration = new Intl.NumberFormat(locale, {
-    style: 'unit',
-    unit,
-    unitDisplay: 'long'
-  }).format(amount);
-  return t('limits.codexResetForecast.approximately', { duration });
-}
-
-function codexResetForecastAge(value) {
-  const date = value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return '';
-  return formatAgo(Math.max(0, Date.now() - date.getTime()));
-}
-
-function codexResetForecastSourceAuthor(value) {
-  const author = String(value || '').trim().replace(/^@+/, '');
-  return author ? `@${author}` : '';
-}
-
-function codexResetForecastPercent(value, locale = currentLocale()) {
-  return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value);
-}
-
-function positionCodexResetForecastTooltip(wrap) {
-  const tooltip = wrap?.querySelector('.limit-detail-tooltip');
-  const clip = wrap?.closest('.limits-panel');
-  if (!tooltip || !clip) return;
-  const roomAbove = wrap.getBoundingClientRect().top - clip.getBoundingClientRect().top;
-  tooltip.classList.toggle('is-below', roomAbove < tooltip.offsetHeight + 5);
-}
-
-function codexResetForecastType(value) {
-  const type = String(value || '').trim().toLowerCase();
-  if (type !== 'banked' && type !== 'regular') return '';
-  return t(`limits.codexResetForecast.resetType.${type}`);
-}
-
-function codexResetForecastTooltip(forecast) {
-  const entries = [];
-  const disclaimer = t('limits.codexResetForecast.disclaimer');
-  const resetType = codexResetForecastType(
-    forecast?.status === 'scheduled' ? forecast?.scheduledResetType : forecast?.latestResetType
-  );
-  if (resetType) {
-    entries.push([t('limits.codexResetForecast.resetType'), resetType]);
-  }
-  const scheduledFor = codexResetForecastDate(forecast?.scheduledFor);
-  const scheduledIn = codexResetForecastTimeUntil(forecast?.scheduledFor);
-  if (scheduledFor) {
-    entries.push([
-      t('limits.codexResetForecast.scheduledFor'),
-      [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
-    ]);
-  }
-  const latestReset = codexResetForecastDate(forecast?.latestResetAt);
-  if (latestReset) {
-    const age = codexResetForecastAge(forecast.latestResetAt);
-    entries.push([t('limits.codexResetForecast.lastReset'), [latestReset, age].filter(Boolean).join(' · ')]);
-  }
-  const sourceObservedAt = forecast?.status === 'scheduled'
-    ? forecast?.scheduledAnnouncedAt
-    : forecast?.observedAt;
-  const source = [
-    codexResetForecastSourceAuthor(forecast?.sourceAuthor),
-    codexResetForecastAge(sourceObservedAt)
-  ].filter(Boolean).join(' · ');
-  if (source) {
-    const sourceLabel = forecast?.status === 'scheduled'
-      ? 'limits.codexResetForecast.sourceAnnouncement'
-      : 'limits.codexResetForecast.sourceSignal';
-    entries.push([t(sourceLabel), source]);
-  }
-  const expiresAt = codexResetForecastDate(forecast?.expiresAt);
-  const expiresIn = codexResetForecastTimeUntil(forecast?.expiresAt);
-  if (expiresAt) {
-    entries.push([
-      t('limits.codexResetForecast.expiresLabel'),
-      [expiresAt, expiresIn].filter(Boolean).join(' · ')
-    ]);
-  }
-  if (forecast?.error && forecast.errorKind !== 'invalid-response') {
-    entries.push([
-      t('limits.codexResetForecast.connectionFailed'),
-      t('limits.codexResetForecast.connectionHelp')
-    ]);
-  }
-  if (forecast?.error) {
-    const lastAttempt = codexResetForecastAge(forecast.checkedAt);
-    if (lastAttempt) entries.push([t('limits.codexResetForecast.lastAttempt'), lastAttempt]);
-  }
-  if (entries.length === 0) return null;
-  const info = limitDetailInfoNode(
-    entries,
-    'codex-reset-forecast-info-wrap',
-    [...entries.map(([label, value]) => `${label}: ${value}`), disclaimer].join(', ')
-  );
-  const tooltip = info.querySelector('.limit-detail-tooltip');
-  if (tooltip) {
-    const footer = document.createElement('span');
-    footer.className = 'codex-reset-forecast-disclaimer';
-    footer.textContent = disclaimer;
-    tooltip.append(footer);
-  }
-  const position = () => positionCodexResetForecastTooltip(info);
-  info.addEventListener('pointerenter', position);
-  info.addEventListener('focusin', position);
-  return info;
-}
-
-function renderCodexResetForecast() {
-  if (state.settings?.codexResetForecastEnabled !== true) return null;
-  const forecast = state.codexResetForecast;
-  const expired = codexResetForecastExpired(forecast);
-  const item = document.createElement('div');
-  item.className = 'codex-reset-forecast';
-  const openButton = document.createElement('button');
-  openButton.type = 'button';
-  openButton.className = 'codex-reset-forecast-open';
-  openButton.addEventListener('click', () => window.tokenMonitor.openExternal?.('https://codex-resets.com/'));
-
-  const head = document.createElement('span');
-  head.className = 'codex-reset-forecast-head';
-  const title = document.createElement('span');
-  title.className = 'codex-reset-forecast-title';
-  const label = document.createElement('span');
-  label.className = 'codex-reset-forecast-label';
-  label.textContent = t('limits.codexResetForecast.title');
-  title.append(label);
-  const forecastInfo = codexResetForecastTooltip(forecast);
-  if (forecastInfo) title.append(forecastInfo);
-  const value = document.createElement('span');
-  value.className = 'codex-reset-forecast-value';
-
-  const detail = document.createElement('span');
-  detail.className = 'codex-reset-forecast-detail';
-  if (state.codexResetForecastBusy && !forecast) {
-    item.classList.add('is-loading');
-    value.textContent = t('limits.codexResetForecast.loading');
-  } else if (forecast?.status === 'scheduled') {
-    value.textContent = t('limits.codexResetForecast.scheduled');
-    const scheduledFor = codexResetForecastDate(forecast.scheduledFor);
-    const scheduledIn = codexResetForecastTimeUntil(forecast.scheduledFor);
-    detail.textContent = [
-      scheduledFor
-        ? t('limits.codexResetForecast.expected', {
-            date: [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
-          })
-        : t('limits.codexResetForecast.schedulePending'),
-      forecast.stale ? t('limits.codexResetForecast.stale') : ''
-    ].filter(Boolean).join(' · ');
-  } else if (forecast?.status === 'active' && !expired) {
-    const chance = forecast.chancePercent;
-    value.textContent = Number.isFinite(chance)
-      ? t('limits.codexResetForecast.chance', { percent: codexResetForecastPercent(chance) })
-      : t('limits.codexResetForecast.signal');
-    const predictedAt = codexResetForecastDate(forecast.predictedAt);
-    const expiresAt = codexResetForecastDate(forecast.expiresAt);
-    detail.textContent = [
-      predictedAt
-        ? t('limits.codexResetForecast.expected', { date: predictedAt })
-        : (expiresAt || ''),
-      forecast.stale ? t('limits.codexResetForecast.stale') : ''
-    ].filter(Boolean).join(' · ');
-  } else if (forecast?.status === 'inactive' || expired) {
-    value.textContent = t('limits.codexResetForecast.noSignal');
-    detail.textContent = forecast.stale ? t('limits.codexResetForecast.stale') : '';
-  } else {
-    item.classList.add('is-unavailable');
-    value.textContent = forecast?.error && forecast.errorKind !== 'invalid-response'
-      ? t('limits.codexResetForecast.connectionFailed')
-      : t('limits.codexResetForecast.unavailable');
-  }
-
-  head.append(title, value);
-  item.append(openButton, head, detail);
-  openButton.title = t('limits.codexResetForecast.openSource');
-  openButton.setAttribute('aria-label', [label.textContent, value.textContent, detail.textContent, t('limits.codexResetForecast.openSource')].filter(Boolean).join(', '));
-  return item;
-}
-
-function appendCodexResetForecast(parent) {
-  const node = renderCodexResetForecast();
-  if (node) parent.append(node);
-}
-
-function codexResetForecastExpired(forecast, nowMs = Date.now()) {
-  if (forecast?.status !== 'active') return false;
-  const expiresAtMs = Date.parse(forecast.expiresAt || '');
-  return Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs;
 }
 
 function clearCodexResetForecastRetryTimer() {
@@ -6052,327 +4278,6 @@ function maybeFetchCodexResetForecast() {
       }
     }, remainingMs);
   }
-}
-
-function renderLimitProviderRow(id, label, provider, color, options = {}) {
-  const row = document.createElement('div');
-  const classes = ['limit-row'];
-  if (options.accountRow) classes.push('limit-account-row');
-  if (provider.stale) classes.push('stale');
-  row.className = classes.join(' ');
-  row.dataset.limitMotionKey = limitResetMotionApi.providerKey(provider);
-  row.append(
-    renderLimitProviderHead(id, label, provider, color, options),
-    renderProviderWindows(provider, color)
-  );
-  if (id === 'codex' && !options.accountRow) appendCodexResetForecast(row);
-  return row;
-}
-
-// Every limits surface (the limits panel and the Home cards) resolves account
-// titles here. One table keeps a provider from masking its email on one surface
-// while leaking it on the other, and from rendering two different titles for the
-// same account. Providers identified by email need no entry — the default below
-// already masks them.
-const LIMIT_ACCOUNT_TITLES = {
-  codex: codexAccountTitle,
-  opencode: opencodeAccountTitle,
-  openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
-  thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
-  volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers)
-};
-
-function limitAccountTitle(id, provider, index, providerEntries = [provider]) {
-  const resolve = LIMIT_ACCOUNT_TITLES[String(id || '').trim().toLowerCase()];
-  return resolve
-    ? resolve(provider, index, providerEntries)
-    : limitAccountDefaultTitle(provider, index, providerEntries);
-}
-
-// maskLimitAccountEmails is display-only: it hides the address on the limits
-// surfaces without changing what is collected, synced, or stored.
-function limitAccountEmailsMasked() {
-  return state.settings?.maskLimitAccountEmails === true;
-}
-
-function limitAccountDefaultTitle(provider, index, providerEntries = [provider]) {
-  return accountIdentityApi.accountTitleLabel(provider, providerEntries, {
-    maskEmail: limitAccountEmailsMasked(),
-    index
-  }) || `Account ${index + 1}`;
-}
-
-function codexAccountTitle(provider, index, providers = [provider]) {
-  const label = accountIdentityApi.codexAccountDisplayLabel(provider, providers, {
-    maskEmail: limitAccountEmailsMasked(),
-    index,
-    // Limits presents raw account data such as email and Plus/Pro labels, so
-    // keep the provider's canonical English workspace name on this surface.
-    personalWorkspaceLabel: 'Personal'
-  });
-  if (label) return label;
-  // Never fall back to the plan label here — "Plus" as a title reads like an
-  // account name. The plan still shows on the right via limitProviderPlan().
-  return `Account ${index + 1}`;
-}
-
-function renderCodexAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: 'codex', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('codex', label, groupProvider, color, {
-    planText: t('settings.codex.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('codex', limitAccountTitle('codex', provider, index, providers), provider, color, {
-      accountRow: true,
-      accountTitle: true,
-      allowSystemSwitch: true,
-      showActiveBadge: true,
-      showIcon: false
-    }));
-  });
-  row.append(head, accountList);
-  appendCodexResetForecast(row);
-  return row;
-}
-
-function renderClaudeAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: 'claude', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('claude', label, groupProvider, color, {
-    planText: t('settings.claude.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('claude', limitAccountTitle('claude', provider, index, providers), provider, color, {
-      accountRow: true,
-      accountTitle: true,
-      showIcon: false
-    }));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function mimoSettingsAccountTitle(account, index) {
-  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
-}
-
-function renderMimoAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: 'mimo', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('mimo', label, groupProvider, color, {
-    planText: t('settings.mimo.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('mimo', limitAccountTitle('mimo', provider, index, providers), provider, color, {
-      accountRow: true,
-      accountTitle: true,
-      showIcon: false
-    }));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function renderCursorAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: 'cursor', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('cursor', label, groupProvider, color, {
-    planText: t('settings.cursor.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    accountList.append(renderLimitProviderRow('cursor', limitAccountTitle('cursor', provider, index, providers), provider, color, {
-      accountRow: true,
-      accountTitle: true,
-      showIcon: false
-    }));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function renderAntigravityAccountGroup(label, providers, color) {
-  return renderNamedApiAccountGroup('antigravity', label, providers, color, {
-    groupPlanText: t('settings.antigravity.nAccounts', { count: providers.length })
-  });
-}
-
-function opencodeAccountTitle(provider, index) {
-  const name = String(provider?.accountName || '').trim();
-  // The collector's canonical name is shown as-is. This column holds account
-  // names, which are user strings and almost never translated, so a localized
-  // phrase reads as a stray UI label among them — and the plan and source
-  // columns beside it are English for the same reason.
-  if (name) return name;
-  // Older synced clients put the user-defined profile name in accountLabel.
-  // Keep those rows identifiable while new clients carry profile and plan in
-  // separate fields. Go/Zen are plan labels, never account identities.
-  const legacyName = String(provider?.accountLabel || '').trim();
-  return legacyName && legacyName !== 'Go' && legacyName !== 'Zen'
-    ? legacyName
-    : `Account ${index + 1}`;
-}
-
-function renderOpenCodeAccountGroup(label, providers, color) {
-  const row = document.createElement('div');
-  row.className = 'limit-row limit-row-group';
-  const groupProvider = { provider: 'opencode', status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead('opencode', label, groupProvider, color, {
-    planText: t('settings.opencode.nAccounts', { count: providers.length }),
-    hideMeta: true
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    const legacyProfileLabel = !provider?.accountName
-      && provider?.accountLabel
-      && provider.accountLabel !== 'Go'
-      && provider.accountLabel !== 'Zen';
-    accountList.append(renderLimitProviderRow('opencode', limitAccountTitle('opencode', provider, index, providers), provider, color, {
-      accountRow: true,
-      showIcon: false,
-      ...(legacyProfileLabel ? { planText: '' } : {})
-    }));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function namedApiAccountTitle(provider, index, providerId) {
-  const accountName = String(provider?.accountName || provider?.accountLabel || '').trim();
-  if (accountName.toLowerCase() === 'environment') return t(`settings.${providerId}.environment`);
-  return accountName || `Account ${index + 1}`;
-}
-
-// Both Volcengine plans sit on one account, so the row title carries the plan
-// name from accountLabel. accountTitleLabel reads accountName/accountEmail,
-// neither of which these rows have, so without this they would all render as
-// "Account N".
-function volcenginePlanAccountTitle(provider, index, providers) {
-  return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
-}
-
-// '' while healthy, because the title already shows the plan and there is no
-// second fact to put here; undefined once it is not, so the head falls back to
-// the status label the same way thirdPartyPlanText does.
-function volcenginePlanRowText(provider) {
-  return provider?.status === 'ok' ? '' : undefined;
-}
-
-function thirdPartyPlanText(provider) {
-  if (provider?.status !== 'ok') return undefined;
-  const adapterId = String(provider?.adapterId || '').toLowerCase();
-  if (adapterId === 'newapi-account') return 'New API · Account';
-  if (adapterId === 'newapi-token') return 'New API · API key';
-  if (adapterId === 'sub2api') return 'Sub2API · Account';
-  if (adapterId === 'custom') return 'Custom';
-  const planLabel = String(provider?.planLabel || '').toLowerCase();
-  if (planLabel === 'account') return 'Account';
-  if (planLabel === 'api key') return 'API key';
-  if (planLabel === 'custom') return 'Custom';
-  return undefined;
-}
-
-const THIRD_PARTY_ADAPTER_VISUALS = Object.freeze({
-  'newapi-account': { color: '#C738FB', markId: 'newapi' },
-  'newapi-token': { color: '#C738FB', markId: 'newapi' },
-  sub2api: { color: '#39D9E7', markId: 'sub2api' },
-  custom: { color: '#8A96A8', markId: 'thirdparty' }
-});
-
-function thirdPartyAdapterVisual(provider, fallbackColor) {
-  return THIRD_PARTY_ADAPTER_VISUALS[String(provider?.adapterId || '').toLowerCase()]
-    || { color: fallbackColor, markId: 'thirdparty' };
-}
-
-function thirdPartyAdapterFamily(provider) {
-  const adapterId = String(provider?.adapterId || '').toLowerCase();
-  if (adapterId === 'newapi-account' || adapterId === 'newapi-token') return 'newapi';
-  if (adapterId === 'sub2api') return 'sub2api';
-  if (adapterId === 'custom') return 'thirdparty';
-  return '';
-}
-
-function thirdPartySharedAdapterFamily(providers) {
-  const families = new Set((providers || []).map(thirdPartyAdapterFamily));
-  return families.size === 1 ? [...families][0] : null;
-}
-
-function renderNamedApiAccountGroup(providerId, label, providers, color, options = {}) {
-  const row = document.createElement('div');
-  row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
-  const groupProvider = { provider: providerId, status: 'ok', windows: [], accountGroup: true };
-  const head = renderLimitProviderHead(providerId, label, groupProvider, color, {
-    planText: options.groupPlanText,
-    hideMeta: true,
-    ...(options.groupMarkId ? { markId: options.groupMarkId } : {})
-  });
-  const accountList = document.createElement('div');
-  accountList.className = 'limit-account-list';
-  providers.forEach((provider, index) => {
-    const providerColor = options.colorForProvider?.(provider) || color;
-    const markId = options.markIdForProvider?.(provider);
-    accountList.append(renderLimitProviderRow(
-      providerId,
-      limitAccountTitle(providerId, provider, index, providers),
-      provider,
-      providerColor,
-      {
-        accountRow: true,
-        showIcon: Boolean(markId),
-        ...(markId ? { markId } : {}),
-        ...(options.planTextForProvider
-          ? { planText: options.planTextForProvider(provider) }
-          : {})
-      }
-    ));
-  });
-  row.append(head, accountList);
-  return row;
-}
-
-function renderOpenRouterAccountGroup(label, providers, color) {
-  return renderNamedApiAccountGroup('openrouter', label, providers, color, {
-    groupPlanText: t('settings.openrouter.nAccounts', { count: providers.length })
-  });
-}
-
-function renderThirdPartyAccountGroup(label, providers, color) {
-  const sharedFamily = thirdPartySharedAdapterFamily(providers);
-  return renderNamedApiAccountGroup('thirdparty', label, providers, color, {
-    groupPlanText: t('settings.thirdparty.nAccounts', { count: providers.length }),
-    groupMarkId: sharedFamily || 'thirdparty',
-    planTextForProvider: thirdPartyPlanText,
-    colorForProvider: (provider) => thirdPartyAdapterVisual(provider, color).color,
-    ...(sharedFamily === null
-      ? { markIdForProvider: (provider) => thirdPartyAdapterVisual(provider, color).markId }
-      : {})
-  });
-}
-
-// The Coding Plan and the Agent Plan are two subscriptions on one Volcengine
-// account, so they are rows of one card rather than two provider cards.
-function renderVolcengineAccountGroup(label, providers, color) {
-  return renderNamedApiAccountGroup('volcengine', label, providers, color, {
-    groupPlanText: t('settings.volcengine.nPlans', { count: providers.length }),
-    planTextForProvider: volcenginePlanRowText
-  });
 }
 
 function captureLimitResetMotion() {
@@ -6456,14 +4361,12 @@ function animateLimitResets(snapshot) {
 function renderLimits() {
   if (!els.limitsPanel) return;
   const holdLimitDetailTooltipRender = limitDetailTooltipShouldHoldRender();
-  const holdCodexSwitchPopoverRender = codexSwitchPopoverShouldHoldRender();
+  const holdCodexSwitchPopoverRender = codexAccountControl.deferRender(els.limitsPanel);
   if (holdLimitDetailTooltipRender || holdCodexSwitchPopoverRender) {
     if (holdLimitDetailTooltipRender) state.limitDetailTooltipRenderPending = true;
-    if (holdCodexSwitchPopoverRender) state.codexSwitchPopoverRenderPending = true;
     return;
   }
   state.limitDetailTooltipRenderPending = false;
-  state.codexSwitchPopoverRenderPending = false;
   const limitsEnabled = state.settings?.limitsEnabled !== false;
   const enabled = enabledLimitProviderSet();
   const providers = providersByLimitProviderId(state.stats?.limits?.providers || []);
@@ -6495,9 +4398,7 @@ function renderLimits() {
       state.settings?.subscriptions || [],
       state.settings?.codexManagedAccounts || [],
       state.codexActiveAccount || null,
-      state.codexSystemSwitchingAccountId || '',
-      state.codexSystemSwitchErrorAccountId || '',
-      state.codexSystemSwitchError || '',
+      ...codexAccountControl.stateSignature(),
       state.codexResetForecastBusy,
       state.codexResetForecast || null
     ],
@@ -6523,54 +4424,17 @@ function renderLimits() {
   }
   for (const { id, label } of rows) {
     const visibleProviders = visibleProviderEntries.get(id) || [{ provider: id, status: 'disabled', windows: [] }];
-    const color = id === 'mimo' ? clientColors.xiaomi : (clientColors[id] || clientColors.default);
-    if (id === 'claude' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderClaudeAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'codex' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderCodexAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'opencode' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderOpenCodeAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'openrouter' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderOpenRouterAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'thirdparty' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderThirdPartyAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'mimo' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderMimoAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'cursor' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderCursorAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'antigravity' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderAntigravityAccountGroup(label, visibleProviders, color));
-      continue;
-    }
-    if (id === 'volcengine' && Array.isArray(visibleProviders) && visibleProviders.length > 1) {
-      nodes.push(renderVolcengineAccountGroup(label, visibleProviders, color));
+    const color = limitProviderColor(id);
+    // Several accounts of one provider are a group; one is a row. Both builders
+    // take the provider id and nothing else — which mark, colour and plan text
+    // each account takes is the view's own per-provider policy, so the dock card
+    // renders this loop's output without being told any of it.
+    if (Array.isArray(visibleProviders) && visibleProviders.length > 1) {
+      nodes.push(renderLimitProviderGroup(id, label, visibleProviders, color));
       continue;
     }
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
-    const thirdPartyVisual = id === 'thirdparty' ? thirdPartyAdapterVisual(provider, color) : null;
-    const rowOptions = id === 'codex'
-      ? { accountTitle: true, allowSystemSwitch: true }
-      : id === 'thirdparty'
-        ? {
-            planText: thirdPartyPlanText(provider),
-            markId: thirdPartyVisual.markId
-          }
-        : undefined;
-    nodes.push(renderLimitProviderRow(id, label, provider, thirdPartyVisual?.color || color, rowOptions));
+    nodes.push(renderLimitProviderSolo(id, label, provider, color));
   }
   els.limitsPanel.replaceChildren(...nodes);
   animateLimitResets(resetMotionSnapshot);
@@ -7400,6 +5264,7 @@ function hidePeriodContentForMessage(message) {
   els.trendsPanel.classList.add('hidden');
   els.sessionDetail.classList.add('hidden');
   els.sessionDetailHead.classList.add('hidden');
+  renderSessionPager(null);
 }
 
 function periodMenuButtons() {
@@ -7686,14 +5551,18 @@ function homeLimitRows() {
     providerOptions,
     enabledProviderIds: Array.from(enabled),
     hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet()),
-    colors: clientColors,
+    colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
     accountColor: (provider, id, fallbackColor) => (
-      id === 'thirdparty' ? thirdPartyAdapterVisual(provider, fallbackColor).color : fallbackColor
+      id === 'thirdparty'
+        ? limitProviderPresentationApi.thirdPartyAdapterVisual(provider, fallbackColor).color
+        : fallbackColor
     ),
     accountIcon: (provider, id) => (
-      id === 'thirdparty' ? thirdPartyAdapterVisual(provider, clientColors.thirdparty).markId : id
+      id === 'thirdparty'
+        ? limitProviderPresentationApi.thirdPartyAdapterVisual(provider, clientColors.thirdparty).markId
+        : id
     ),
     accountName: (provider, index, providerEntries) => {
       const id = String(provider?.provider || '').trim().toLowerCase();
@@ -8378,6 +6247,7 @@ function render() {
     return;
   }
   if (!state.stats) return;
+  allTimeSessions.ensure();
   const costNote = document.getElementById('usageCostPolicyNote');
   if (costNote) {
     costNote.hidden = !state.stats.costPolicyActive;
@@ -8457,6 +6327,7 @@ function render() {
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');
   els.shell.classList.toggle('home-mode', state.breakdown === 'home');
+  if (state.breakdown !== 'session' || state.openSession) els.sessionPagerHost.classList.add('hidden');
   els.viewBackRow?.classList.toggle('hidden', state.breakdown === 'home' || !state.homeReturnVisible);
   // Leaving Home only CSS-hides the panel, so its heatmap scroller never sees a
   // pointerleave — dismiss the body-level tooltip here (renderHome covers rerenders).
@@ -8634,22 +6505,6 @@ function settleRefreshButtonState(status) {
   }, REFRESH_BUTTON_FEEDBACK_MS);
 }
 
-// The main process rebuilds the TOTAL session list for display but ships it as a
-// display-only sibling (`allTimeSessionsView`) so it never pollutes the lossless
-// period export. Overlay it onto periods.allTime here, on the renderer's own copy, so
-// every session-view reader (list, archived count, detail lookup) sees it. See
-// injectLocalDeviceStatus in main.js.
-function overlayAllTimeSessions(stats) {
-  if (stats && stats.allTimeSessionsView && stats.periods?.allTime) {
-    const sessions = reasonixSessionGuard?.filterReasonixSyntheticSessions
-      ? reasonixSessionGuard.filterReasonixSyntheticSessions(stats.allTimeSessionsView)
-      : stats.allTimeSessionsView;
-    stats.allTimeSessionsView = sessions;
-    stats.periods.allTime.sessions = sessions;
-  }
-  return stats;
-}
-
 async function refreshStats(options = {}) {
   const feedback = options.feedback === true;
   if (feedback) {
@@ -8659,9 +6514,10 @@ async function refreshStats(options = {}) {
     setRefreshButtonState('refreshing');
   }
   try {
-    const nextStats = overlayAllTimeSessions(await window.tokenMonitor.getStats(options));
+    const nextStats = await window.tokenMonitor.getStats(options);
     observeLiveTokenRate(nextStats);
-    state.stats = nextStats;
+    allTimeSessions.invalidate();
+    state.stats = allTimeSessions.attach(nextStats);
     observeDisplayLiveTokenRates(nextStats);
     if (options.forceHistory === true) {
       // A manual history rescan is an explicit retry boundary. Let Home request the
@@ -8737,6 +6593,7 @@ function setPeriod(period) {
     return false;
   }
   state.period = next;
+  state.sessionPage = 0;
   if (fixedPeriodRangesApi.isDerived(next) && state.fixedPeriodHistoryFailed) {
     void warmFixedPeriodHistory({ retryFailed: true, renderOnComplete: true });
   }
@@ -8753,6 +6610,7 @@ function setBreakdown(breakdown, options = {}) {
   }
   state.homeReturnVisible = options.fromHome === true && state.breakdown === 'home' && next !== 'home';
   state.breakdown = next;
+  state.sessionPage = 0;
   state.rowSignature = '';
   publishViewState();
   return true;
@@ -8808,19 +6666,32 @@ function applyFontSettings(settings) {
 }
 
 function applyAppearanceSettings(settings) {
+  glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
   const opacity = glassRenderingApi.renderedGlassOpacity(settings, {
     platform: state.appInfo?.platform,
     userAgent: navigator.userAgent
   });
-  const depth = clamp(settings?.glassBlur ?? 32, 0, 100) / 100;
+  const depth = (glassRenderingApi.usesNativeMaterial(nativeMaterialState) ? 32 : clamp(settings?.glassBlur ?? 32, 0, 100)) / 100;
   const systemGlassDisabled = settings?.systemGlass === false;
   const isWindows = navigator.userAgent.toLowerCase().includes('windows');
   const windowsGlass = windowsGlassApi.appearanceState(settings, { isWindows });
+  const macGlass = macBackdropApi.appearanceState(settings, {
+    liquidGlassSupported: nativeMaterialState.liquidGlassSupported
+  });
   document.documentElement.style.setProperty('--glass-alpha', opacity.toFixed(2));
+  const imageOpacity = clamp(Number(settings?.backgroundImageOpacity ?? defaultAppearance.backgroundImageOpacity), 0, 100) / 100;
+  document.documentElement.style.setProperty('--background-image-alpha', imageOpacity.toFixed(2));
   document.documentElement.style.setProperty('--line-alpha', (0.1 + depth * 0.09).toFixed(3));
   document.documentElement.style.setProperty('--line-strong-alpha', (0.18 + depth * 0.14).toFixed(3));
   document.documentElement.style.setProperty('--control-alpha', (0.03 + depth * 0.045).toFixed(3));
   document.documentElement.classList.toggle('system-glass-disabled', systemGlassDisabled);
+  const nativeMaterial = glassRenderingApi.usesNativeMaterial(nativeMaterialState);
+  for (const control of [els.glassInput, els.blurInput, els.resetGlassButton, els.resetDepthButton]) {
+    if (control) control.disabled = nativeMaterial;
+  }
+  for (const note of [els.glassInputNote, els.blurInputNote]) {
+    if (note) note.classList.toggle('hidden', !nativeMaterial);
+  }
   els.windowsBackdropRow?.classList.toggle('hidden', !windowsGlass.showBackdropControl);
   if (els.windowsBackdropInput) {
     els.windowsBackdropInput.value = windowsGlass.backdropMode;
@@ -8834,6 +6705,10 @@ function applyAppearanceSettings(settings) {
     els.windowsBackdropNote.classList.toggle('error', accentFallback);
     els.windowsBackdropNote.classList.toggle('hidden', !windowsGlass.showAccentNote);
   }
+  els.macBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
+  // Same terms as the widget's own selector; material pushes land here too.
+  els.edgeDockMacBackdropRow?.classList.toggle('hidden', !macGlass.showBackdropControl);
+  if (els.macBackdropInput) els.macBackdropInput.value = macGlass.backdropMode;
   applyReduceMotionPreference(settings?.reduceMotion);
   applyFontSettings(settings);
   // Only full settings objects carry themeColors; glass/zoom preview patches
@@ -8865,7 +6740,88 @@ function applyAppearanceSettings(settings) {
   
   document.documentElement.classList.toggle('is-mac-legacy', isMacLegacyRadius);
   document.body.classList.toggle('is-mac-legacy', isMacLegacyRadius);
+  syncBackgroundImageStatus();
   updateTitleFit();
+}
+
+let backgroundImageActive = false;
+let backgroundImageBusy = false;
+let backgroundImageError = false;
+let backgroundImageRequest = 0;
+let backgroundImageObjectUrl = null;
+
+function syncBackgroundImageStatus() {
+  if (els.backgroundImageStatus) {
+    els.backgroundImageStatus.textContent = t(backgroundImageError
+      ? 'settings.appearance.backgroundImageError'
+      : backgroundImageActive
+        ? (nativeMaterialState.reducedTransparency || nativeMaterialState.type === 'opaque'
+          ? 'settings.appearance.backgroundImageAccessibilityHidden'
+          : nativeMaterialState.type === 'liquid-glass'
+            ? 'settings.appearance.backgroundImageNativeOverlay'
+            : 'settings.appearance.backgroundImageActive')
+        : 'settings.appearance.backgroundImageNone');
+  }
+  els.clearBackgroundImageButton?.classList.toggle('hidden', !backgroundImageActive);
+  els.backgroundImageOpacityRow?.classList.toggle('hidden', !backgroundImageActive);
+  if (els.chooseBackgroundImageButton) els.chooseBackgroundImageButton.disabled = backgroundImageBusy;
+  if (els.clearBackgroundImageButton) els.clearBackgroundImageButton.disabled = backgroundImageBusy;
+}
+
+function applyBackgroundImage(bytes) {
+  // The PNG is carried over IPC as bytes and shown through a blob: URL. A
+  // data: URL is not an option: Blink silently truncates CSS values set via
+  // setProperty() at 2 MiB, which corrupted the url("data:...") value and made
+  // larger saved images render as nothing at all.
+  const buffer = bytes instanceof Uint8Array && bytes.byteLength > 0 ? bytes : null;
+  backgroundImageActive = buffer !== null;
+  if (backgroundImageObjectUrl) {
+    URL.revokeObjectURL(backgroundImageObjectUrl);
+    backgroundImageObjectUrl = null;
+  }
+  if (backgroundImageActive) {
+    backgroundImageObjectUrl = URL.createObjectURL(new Blob([buffer], { type: 'image/png' }));
+    els.shell.style.setProperty('--custom-background-image', `url("${backgroundImageObjectUrl}")`);
+  } else {
+    els.shell.style.removeProperty('--custom-background-image');
+  }
+  els.shell.classList.toggle('has-custom-background', backgroundImageActive);
+  backgroundImageError = false;
+  syncBackgroundImageStatus();
+}
+
+async function loadBackgroundImage() {
+  const request = ++backgroundImageRequest;
+  try {
+    const bytes = await window.tokenMonitor.getBackgroundImage();
+    if (request === backgroundImageRequest) applyBackgroundImage(bytes);
+  } catch (_) {
+    if (request !== backgroundImageRequest) return;
+    backgroundImageError = true;
+    syncBackgroundImageStatus();
+  }
+}
+
+async function changeBackgroundImage(clear = false) {
+  if (backgroundImageBusy) return;
+  backgroundImageBusy = true;
+  backgroundImageRequest += 1;
+  syncBackgroundImageStatus();
+  try {
+    if (clear) {
+      await window.tokenMonitor.clearBackgroundImage();
+      applyBackgroundImage(null);
+    } else {
+      const result = await window.tokenMonitor.chooseBackgroundImage();
+      if (!result?.canceled && result?.bytes) applyBackgroundImage(result.bytes);
+    }
+  } catch (_) {
+    backgroundImageError = true;
+    syncBackgroundImageStatus();
+  } finally {
+    backgroundImageBusy = false;
+    syncBackgroundImageStatus();
+  }
 }
 
 const themePresetsApi = window.TokenMonitorThemePresets;
@@ -9018,7 +6974,9 @@ function currentVendorOverrides() {
 function previewThemeColor(key, value) {
   if (!themePresetsApi.isValidHex(value)) return;
   const next = { ...currentThemeOverrides(), [key]: themePresetsApi.normalizeHex(value) };
+  appearancePreview = { ...appearancePreview, themeColors: next };
   applyThemeColors(next);
+  window.tokenMonitor.previewAppearance?.(appearancePreview).catch?.(() => {});
 }
 
 async function saveThemeColor(key, value) {
@@ -9506,6 +7464,7 @@ function appearancePatchFromControls() {
   return {
     systemGlass,
     windowsBackdrop: windowsGlassApi.normalizeWindowsBackdropMode(els.windowsBackdropInput?.value),
+    macBackdrop: macBackdropApi.normalizeMacBackdropMode(els.macBackdropInput?.value),
     reduceMotion: els.reduceMotionInputs?.find((input) => input.checked)?.value || 'system',
     showLiveDot: Boolean(els.liveDotInput.checked),
     showToolIcons: Boolean(els.toolIconsInput.checked),
@@ -9517,6 +7476,7 @@ function appearancePatchFromControls() {
     settingsInTitlebar: Boolean(els.swapSettingsRefreshInput.checked),
     glassOpacity: Number(els.glassInput.value === '' ? defaultAppearance.glassOpacity : els.glassInput.value),
     glassBlur: Number(els.blurInput.value === '' ? defaultAppearance.glassBlur : els.blurInput.value),
+    backgroundImageOpacity: Number(els.backgroundImageOpacityInput?.value || defaultAppearance.backgroundImageOpacity),
     zoomFactor: Number(els.zoomInput.value === '' ? defaultAppearance.zoomFactor * 100 : els.zoomInput.value) / 100
   };
 }
@@ -9618,14 +7578,16 @@ function syncSliderRow(input) {
 function syncSliderRows() {
   syncSliderRow(els.glassInput);
   syncSliderRow(els.blurInput);
+  syncSliderRow(els.backgroundImageOpacityInput);
   syncSliderRow(els.zoomInput);
 }
 
 function applyAppearanceFromControls() {
   const patch = appearancePatchFromControls();
+  appearancePreview = { ...appearancePreview, ...patch };
   applyAppearanceSettings(patch);
   syncSliderRows();
-  window.tokenMonitor.previewAppearance?.(patch).catch(() => {});
+  window.tokenMonitor.previewAppearance?.(appearancePreview).catch(() => {});
 }
 
 async function saveAppearanceFromControls() {
@@ -9999,6 +7961,7 @@ function syncSettingsForm() {
     return;
   }
   settingsDomSyncPending = false;
+  setupLimitAccountPanels();
   applySettingsTranslations();
   applyInitialBreakdownPreference();
   syncPeriodTabs();
@@ -10050,6 +8013,7 @@ function syncSettingsForm() {
   if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled !== false;
   if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
   renderAutomaticAppUpdateControl();
+  allTimeSessions.ensure();
   renderSessionUsageArchiveStatus();
   const exportAutoOn = Boolean(state.settings.exportAutoEnabled);
   const exportDir = state.settings.exportDir || '';
@@ -10069,6 +8033,7 @@ function syncSettingsForm() {
   const systemGlass = state.settings.systemGlass === false ? 'off' : 'system';
   for (const input of els.systemGlassInputs || []) input.checked = input.value === systemGlass;
   if (els.windowsBackdropInput) els.windowsBackdropInput.value = windowsGlassApi.normalizeWindowsBackdropMode(state.settings.windowsBackdrop);
+  if (els.macBackdropInput) els.macBackdropInput.value = macBackdropApi.normalizeMacBackdropMode(state.settings.macBackdrop);
   const reduceMotion = motionPreferenceApi.normalize(state.settings.reduceMotion);
   for (const input of els.reduceMotionInputs || []) input.checked = input.value === reduceMotion;
   els.liveDotInput.checked = state.settings.showLiveDot !== false;
@@ -10097,6 +8062,7 @@ function syncSettingsForm() {
   for (const input of els.floatingBubbleTriggerInputs || []) input.checked = input.value === floatingBubbleTrigger;
   if (els.floatingBubbleContentInput) els.floatingBubbleContentInput.value = normalizeTrayContentValue(state.settings.floatingBubbleContent);
   els.floatingBubbleOptions?.classList.toggle('hidden', state.settings.floatingBubbleEnabled !== true);
+  syncEdgeDockControls();
   const showTrayIcon = state.settings.showTrayIcon !== false;
   if (els.showTrayIconInput) els.showTrayIconInput.checked = showTrayIcon;
   els.trayModeInput.disabled = !showTrayIcon;
@@ -10123,21 +8089,14 @@ function syncSettingsForm() {
   }
   els.glassInput.value = String(state.settings.glassOpacity ?? 68);
   els.blurInput.value = String(state.settings.glassBlur ?? 32);
+  if (els.backgroundImageOpacityInput) els.backgroundImageOpacityInput.value = String(state.settings.backgroundImageOpacity ?? defaultAppearance.backgroundImageOpacity);
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
   syncSliderRows();
-  renderDeepseekStatus();
-  renderMinimaxStatus();
-  renderExternalProviderStatus('claude');
-  renderExternalProviderStatus('zai');
-  renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
-  renderExternalProviderStatus('qoder');
-  renderExternalProviderStatus('trae');
-  renderExternalProviderStatus('zed');
-  renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
-  renderExternalProviderStatus('ollama');
-  renderExternalProviderStatus('alibaba');
+  for (const form of state.settings?.limitAccountForms || []) {
+    if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
+  }
   renderAntigravityStatus();
   renderMimoStatus();
   renderCopilotStatus();
@@ -10153,6 +8112,11 @@ function syncSettingsForm() {
   renderSettingsAppUpdateRow();
   renderCodexAccounts();
   renderCustomPricing();
+  const modelAliasGrouping = state.settings?.modelAliasGrouping || 'off';
+  for (const input of document.querySelectorAll('input[name="modelAliasGrouping"]')) {
+    input.checked = input.value === modelAliasGrouping;
+  }
+  modelAliasForm?.syncSettings();
   renderCursorStatus();
 }
 
@@ -10272,7 +8236,7 @@ function applyPreferenceOrder(kind, order) {
     if (!row) continue;
     list.appendChild(row);
     const companionId = kind === 'view'
-      ? ({ home: 'homeSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', status: 'serviceProvidersContainer' })[id]
+      ? ({ home: 'homeSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', session: 'sessionSettingsContainer', status: 'serviceProvidersContainer' })[id]
       : kind === 'homeModule'
         ? ({ limits: 'homeLimitProviderContainer', trends: 'homeActivitySettingsContainer' })[id]
         : '';
@@ -10308,6 +8272,7 @@ const VIEW_PREFERENCE_SUBGROUPS = {
   home: ['homeSettingsExpanded', 'homeSettingsContainer'],
   trends: ['trendSettingsExpanded', 'trendSettingsContainer'],
   project: ['projectSettingsExpanded', 'projectSettingsContainer'],
+  session: ['sessionSettingsExpanded', 'sessionSettingsContainer'],
   status: ['serviceProvidersExpanded', 'serviceProvidersContainer']
 };
 
@@ -10567,6 +8532,30 @@ function renderViewPreferences() {
       const inner = document.createElement('div');
       inner.className = 'accordion-animation-inner';
       inner.appendChild(renderProjectSettingsList());
+      listContainer.appendChild(inner);
+      els.viewDisplayList.appendChild(listContainer);
+    }
+    if (id === 'session') {
+      row.classList.add('has-subgroup');
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = `view-subgroup-toggle${state.sessionSettingsExpanded ? ' is-expanded' : ''}`;
+      toggle.title = t('settings.views.configureSession', { name: label });
+      toggle.setAttribute('aria-label', toggle.title);
+      toggle.setAttribute('aria-expanded', String(Boolean(state.sessionSettingsExpanded)));
+      const toggleIcon = document.createElement('span');
+      toggleIcon.className = 'view-subgroup-icon';
+      toggleIcon.setAttribute('aria-hidden', 'true');
+      toggle.append(toggleIcon);
+      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
+      actions.insertBefore(toggle, visibility);
+
+      const listContainer = document.createElement('div');
+      listContainer.id = 'sessionSettingsContainer';
+      listContainer.className = `accordion-animated-container${state.sessionSettingsExpanded ? '' : ' hidden'}`;
+      const inner = document.createElement('div');
+      inner.className = 'accordion-animation-inner';
+      inner.appendChild(renderSessionSettingsList());
       listContainer.appendChild(inner);
       els.viewDisplayList.appendChild(listContainer);
     }
@@ -10970,6 +8959,56 @@ async function setProjectsEnabled(enabled) {
   const hidden = hiddenViewSet();
   hidden.delete('project');
   await saveSettings({ projectsEnabled: true, hiddenViews: Array.from(hidden).join(',') });
+}
+
+// Sessions has its own settings subgroup rather than borrowing AI Tool
+// Limits': the context gauge reads a session's working budget, while the
+// limits meters read a provider quota, and the two genuinely disagree about
+// which end of the scale is the good news.
+function renderSessionSettingsList() {
+  const wrap = document.createElement('div');
+  wrap.id = 'sessionSettingsList';
+  wrap.className = 'settings-nested-list trend-settings-list';
+  // A plain `.settings-item` row, matching the Model ranking control in Main —
+  // the same title-left/control-right shape. It deliberately does NOT reuse
+  // `.home-activity-settings`: that carries its own indent rule for the Home
+  // modules list, and this row already sits inside `.settings-nested-list`,
+  // which draws that rule, so borrowing it painted a second line.
+  const row = document.createElement('div');
+  row.className = 'settings-item';
+  const label = document.createElement('span');
+  label.id = 'sessionContextMetricLabel';
+  label.className = 'settings-item-text';
+  const title = document.createElement('span');
+  title.className = 'settings-item-title';
+  title.textContent = t('settings.session.contextMetric');
+  label.append(title);
+  const options = document.createElement('div');
+  options.className = 'inline-options';
+  options.setAttribute('role', 'radiogroup');
+  options.setAttribute('aria-labelledby', label.id);
+  const current = state.settings?.sessionContextMetric === 'remaining' ? 'remaining' : 'used';
+  for (const metric of ['used', 'remaining']) {
+    const option = document.createElement('label');
+    option.className = 'inline-option';
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'sessionContextMetric';
+    input.value = metric;
+    input.checked = current === metric;
+    input.addEventListener('change', () => {
+      // saveSettings repaints through the same path the limits meters use; the
+      // preference rides in renderContext, so the session rows re-fingerprint.
+      if (input.checked) void saveSettings({ sessionContextMetric: metric });
+    });
+    const text = document.createElement('span');
+    text.textContent = t(`settings.session.contextMetric.${metric}`);
+    option.append(input, text);
+    options.append(option);
+  }
+  row.append(label, options);
+  wrap.append(row);
+  return wrap;
 }
 
 function renderServiceProviderList() {
@@ -12249,14 +10288,147 @@ function moveOpenCodeLocalFallbackSetting() {
   }
 }
 
+// Every account form saves through limits:saveCredential, which checks the
+// draft, probes it in main and stores it unless the provider rejected it. The
+// panel only turns the answer into its message line and the pending pill;
+// generated and hand-built panels share this, including which messages they
+// may override (`messages.required` / `rejected` / `invalidFormat`).
+async function saveAccountCredential(id, values, { messages = {}, failedKey, clearInput = () => {} } = {}) {
+  const provider = LIMIT_PROVIDERS.find((entry) => entry.id === id);
+  const name = provider?.settingsLabel || provider?.label || id;
+  setAccountPanelMessage(id, null);
+  renderExternalProviderStatus(id);
+  let result;
+  try {
+    result = await commitAccountCredential(() => window.tokenMonitor.limits.saveCredential(id, values));
+  } catch (error) {
+    setAccountPanelMessage(id, { key: failedKey, params: { message: error.message } });
+    renderExternalProviderStatus(id);
+    return result;
+  }
+  if (result?.verdict === 'superseded') return result;
+  if (!result?.saved) {
+    const rejection = {
+      required: { key: messages.required || 'settings.common.credentialRequired' },
+      invalidFormat: { key: messages.invalidFormat || 'settings.common.credentialInvalidFormat' }
+    }[result?.status] || { key: messages.rejected || 'settings.common.credentialRejected', params: { provider: name } };
+    setAccountPanelMessage(id, rejection);
+    renderExternalProviderStatus(id);
+    return result;
+  }
+  clearInput();
+  // Marked only once the credential is stored: marking drops the provider's
+  // current record, and a rejected key must leave the linked status on screen.
+  markExternalProviderCheckPending(id);
+  if (result.verdict === 'indeterminate') {
+    const throttled = result.status === 'rateLimited' || result.status === 'sourceRateLimited';
+    setAccountPanelMessage(id, {
+      key: throttled ? 'settings.common.credentialSavedRateLimited' : 'settings.common.credentialSavedUnconfirmed',
+      params: { provider: name },
+      tone: 'notice',
+      untilChecked: true
+    });
+  }
+  renderExternalProviderStatus(id);
+  await refreshStats({ force: true });
+  setExternalAccountExpanded(id, !externalProviderAccountLinked(id));
+  renderExternalProviderStatus(id);
+  return result;
+}
+
+// The busy guard generated panels get from their factory, for a hand-built
+// panel's own submit button.
+async function submitAccountCredential(button, id, values, options) {
+  if (button.disabled) return undefined;
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = t('settings.common.checking');
+  try {
+    return await saveAccountCredential(id, values, options);
+  } finally {
+    button.disabled = false;
+    button.textContent = label;
+  }
+}
+
+async function clearAccountCredential(id) {
+  setAccountPanelMessage(id, null);
+  await commitAccountCredential(() => window.tokenMonitor.limits.clearCredential(id));
+  clearExternalProviderCheckPending(id);
+  clearExternalProviderPendingStatus(id);
+  renderExternalProviderStatus(id);
+  await refreshStats({ force: true });
+}
+
+async function commitAccountCredential(request) {
+  const settingsPushRevision = state.settingsPushRevision;
+  const result = await request();
+  if (result?.settings) applyPersistedSettings(result.settings, settingsPushRevision);
+  return result;
+}
+
+function limitAccountForm(providerId) {
+  return state.settings?.limitAccountForms?.find((form) => form.id === providerId);
+}
+
+// A select beside a credential (region, site, console) saves as soon as it
+// changes. `clears` names what the change invalidates: an Alibaba cookie
+// belongs to the console it was copied from and cannot authenticate the other
+// one, so switching drops it instead of leaving a key that can only fail.
+async function saveAccountFormSetting({ id }, field, value) {
+  if (!field.saveOnChange) return;
+  const cleared = Object.fromEntries((field.clears || []).map((key) => [key, '']));
+  await saveSettings({ [field.key]: value, ...cleared });
+  if (!field.clears?.length) return;
+  clearExternalProviderCheckPending(id);
+  clearExternalProviderPendingStatus(id);
+  renderExternalProviderStatus(id);
+  await refreshStats({ force: true });
+}
+
+function setupLimitAccountPanels() {
+  const container = document.getElementById('accountsSettingsDetails');
+  let added = false;
+  for (const form of state.settings?.limitAccountForms || []) {
+    if (form.kind !== 'credential' || document.getElementById(`${form.id}AccountGroup`)) continue;
+    const panel = limitAccountPanelsApi.createCredentialPanel(form, {
+      document,
+      translate: t,
+      onToggle: ({ id }) => setExternalAccountExpanded(id, !state[`${id}AccountExpanded`]),
+      onOpen: (form) => window.tokenMonitor.openExternal(limitAccountPanelsApi.resolveOpenUrl(form, {
+        document,
+        provider: externalProviderForAccount(form.id)
+      })),
+      onRefresh: () => refreshStats({ force: true }),
+      onClear: ({ id }) => clearAccountCredential(id),
+      onSave: ({ id, messages, failedKey }, values, clearInput) => saveAccountCredential(id, values, { messages, failedKey, clearInput }),
+      onFieldChange: (form, field, value) => saveAccountFormSetting(form, field, value)
+    });
+    const catalogIndex = LIMIT_PROVIDERS.findIndex((provider) => provider.id === form.id);
+    const nextGroup = LIMIT_PROVIDERS.slice(catalogIndex + 1)
+      .map((provider) => limitProviderAccountGroup(provider.id))
+      .find((group) => group?.parentElement === container);
+    container.insertBefore(panel, nextGroup || null);
+    added = true;
+    setExternalAccountExpanded(form.id, false);
+    limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
+    renderExternalProviderStatus(form.id);
+  }
+  if (added) initSettingsAnimationWrappers();
+}
+
 function limitProviderAccountGroup(providerId) {
-  const groupId = LIMIT_PROVIDER_ACCOUNT_GROUP_IDS[providerId];
-  return groupId ? document.getElementById(groupId) : null;
+  const groupId = LIMIT_PROVIDER_ACCOUNT_NODES[providerId]?.group;
+  return (groupId || limitAccountForm(providerId))
+    ? document.getElementById(groupId || `${providerId}AccountGroup`)
+    : null;
 }
 
 function limitProviderAccountStatus(providerId) {
-  const statusId = LIMIT_PROVIDER_ACCOUNT_STATUS_IDS[providerId];
-  return statusId ? document.getElementById(statusId) : null;
+  const statusId = LIMIT_PROVIDER_ACCOUNT_NODES[providerId]?.status;
+  return (statusId || limitAccountForm(providerId))
+    ? document.getElementById(statusId || `${providerId}AccountStatus`)
+    : null;
 }
 
 function limitProviderConnectionDetail(bodyKey) {
@@ -12723,10 +10895,14 @@ function preserveSettingsPanelScroll(callback) {
 }
 
 async function saveSettings(patch) {
+  for (const key of Object.keys(patch)) delete appearancePreview[key];
   const settingsPushRevision = state.settingsPushRevision;
+  let next;
+  pendingSettingsPatches.add(patch);
   try {
-    state.settings = await window.tokenMonitor.updateSettings(patch);
+    next = await window.tokenMonitor.updateSettings(patch);
   } catch (error) {
+    pendingSettingsPatches.delete(patch);
     console.error('Could not persist settings:', error);
     try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
     applyEffectiveCurrencyRates();
@@ -12736,6 +10912,18 @@ async function saveSettings(patch) {
     maybeUpdateBarsIcon();
     throw error;
   }
+  pendingSettingsPatches.delete(patch);
+  applyPersistedSettings(next, settingsPushRevision);
+  if (patch.showTrayProviderBadge !== undefined) {
+    await deliverTrayProviderIcons(patch.showTrayProviderBadge === true);
+  }
+  return true;
+}
+
+// The resolved settings of a write that went through settings:update in main,
+// whether the renderer sent it as a patch or as an account credential command.
+function applyPersistedSettings(next, settingsPushRevision) {
+  state.settings = next;
   applyEffectiveCurrencyRates();
   // settings:update broadcasts the normalized settings before resolving the
   // IPC request. The push already ran the full sync; repeating it when the
@@ -12747,10 +10935,6 @@ async function saveSettings(patch) {
   }
   restartTimer();
   maybeUpdateBarsIcon();
-  if (patch.showTrayProviderBadge !== undefined) {
-    await deliverTrayProviderIcons(patch.showTrayProviderBadge === true);
-  }
-  return true;
 }
 
 function renderHomeIfVisible() {
@@ -12795,6 +10979,25 @@ window.addEventListener('blur', () => {
 });
 
 async function init() {
+  // Subscribe before querying: a native appearance/accessibility change can
+  // arrive while the initial state round trip is in flight.
+  const materialPush = window.tokenMonitor.onNativeMaterialState;
+  if (typeof materialPush === 'function') {
+    materialPush((next) => {
+      nativeMaterialRevision += 1;
+      nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState(next);
+      glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
+      applyAppearanceSettings(Object.assign({}, state.settings, ...pendingSettingsPatches, appearancePreview));
+    });
+  }
+  const materialQueryRevision = nativeMaterialRevision;
+  try {
+    const initialMaterial = await window.tokenMonitor.getNativeMaterialState?.();
+    if (materialQueryRevision === nativeMaterialRevision && initialMaterial) {
+      nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState(initialMaterial);
+      glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
+    }
+  } catch (_) {}
   // Subscribed before the app-info round trip, not after: a theme flipped while
   // that call is in flight would otherwise be missed until the next flip. The
   // seeded value then only fills in when no push has already answered.
@@ -13321,9 +11524,18 @@ els.resetDepthButton.addEventListener('click', async () => {
   applyAppearanceFromControls();
   await saveSettings({ glassBlur: defaultAppearance.glassBlur });
 });
+els.resetBackgroundImageOpacityButton?.addEventListener('click', async () => {
+  els.backgroundImageOpacityInput.value = String(defaultAppearance.backgroundImageOpacity);
+  applyAppearanceFromControls();
+  await saveSettings({ backgroundImageOpacity: defaultAppearance.backgroundImageOpacity });
+});
 els.glassInput.addEventListener('input', applyAppearanceFromControls);
 els.blurInput.addEventListener('input', applyAppearanceFromControls);
+els.backgroundImageOpacityInput?.addEventListener('input', applyAppearanceFromControls);
 els.zoomInput.addEventListener('input', applyAppearanceFromControls);
+els.chooseBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(); });
+els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(true); });
+void loadBackgroundImage();
 els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}));
 els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
 els.interfaceFontPreset?.addEventListener('change', () => handleFontPresetChange('interface'));
@@ -13368,6 +11580,7 @@ for (const input of els.systemGlassInputs || []) {
   });
 }
 els.windowsBackdropInput?.addEventListener('change', saveAppearanceFromControls);
+els.macBackdropInput?.addEventListener('change', saveAppearanceFromControls);
 for (const input of els.reduceMotionInputs || []) {
   input.addEventListener('change', async () => {
     if (!input.checked) return;
@@ -13423,6 +11636,83 @@ els.floatingBubbleInput.addEventListener('change', () => {
   refreshTrayComposers();
   saveSettings({ floatingBubbleEnabled: els.floatingBubbleInput.checked });
 });
+// The dock needs positionable, non-activating windows and a global cursor
+// read; Linux (Wayland in particular) offers neither reliably, so the option is
+// only offered on macOS and Windows.
+function edgeDockAvailable() {
+  const platform = state.appInfo?.platform;
+  return platform === 'darwin' || platform === 'win32';
+}
+
+function syncEdgeDockControls() {
+  if (!els.edgeDockInput) return;
+  const available = edgeDockAvailable();
+  els.edgeDockFeature?.classList.toggle('hidden', !available);
+  const enabled = available && state.settings?.edgeDockEnabled === true;
+  els.edgeDockInput.checked = enabled;
+  els.edgeDockOptions?.classList.toggle('hidden', !enabled);
+  const side = state.settings?.edgeDockSide === 'left' ? 'left' : 'right';
+  for (const input of els.edgeDockSideInputs || []) input.checked = input.value === side;
+  const mode = state.settings?.edgeDockMode === 'always' ? 'always' : 'autoHide';
+  for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
+  els.edgeDockHapticRow?.classList.toggle('hidden', state.appInfo?.platform !== 'darwin');
+  if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;
+  if (els.edgeDockWarnColorsInput) els.edgeDockWarnColorsInput.checked = state.settings?.edgeDockWarnColors === true;
+  if (els.edgeDockMacBackdropInput) {
+    els.edgeDockMacBackdropInput.value = macBackdropApi.normalizeEdgeDockBackdropMode(state.settings?.edgeDockMacBackdrop);
+  }
+  if (enabled) edgeDockComposer?.render();
+}
+
+const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComposer
+  ? window.TokenMonitorEdgeDockComposer.createEdgeDockComposer({
+    root: els.edgeDockComposer,
+    t,
+    itemsApi: window.TokenMonitorEdgeDockItems,
+    presentationApi: window.TokenMonitorEdgeDockPresentation,
+    getSettings: () => state.settings,
+    getStats: () => state.stats,
+    save: (patch) => saveSettings(patch),
+    providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
+    providerColor: (id) => limitProviderColor(id),
+    hasProviderMark: (id) => limitMarksWithIcon.has(id),
+    maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
+      ? accountIdentityApi.maskEmailAddress(email)
+      : String(email || '')),
+    createRowDrag: (config) => rowDragControllerApi.createRowDragController({
+      dragSort: verticalDragSortApi,
+      getScrollPanel: () => els.settingsPanel,
+      preserveScroll: preserveSettingsPanelScroll,
+      ...config
+    })
+  })
+  : null;
+
+els.edgeDockInput?.addEventListener('change', () => {
+  state.settings.edgeDockEnabled = els.edgeDockInput.checked;
+  els.edgeDockOptions?.classList.toggle('hidden', !els.edgeDockInput.checked);
+  void saveSettings({ edgeDockEnabled: els.edgeDockInput.checked });
+});
+for (const input of els.edgeDockSideInputs || []) {
+  input.addEventListener('change', () => {
+    if (input.checked) void saveSettings({ edgeDockSide: input.value });
+  });
+}
+els.edgeDockWarnColorsInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockWarnColors: els.edgeDockWarnColorsInput.checked });
+});
+els.edgeDockMacBackdropInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockMacBackdrop: macBackdropApi.normalizeEdgeDockBackdropMode(els.edgeDockMacBackdropInput.value) });
+});
+els.edgeDockHapticInput?.addEventListener('change', () => {
+  void saveSettings({ edgeDockHaptic: els.edgeDockHapticInput.checked });
+});
+for (const input of els.edgeDockModeInputs || []) {
+  input.addEventListener('change', () => {
+    if (input.checked) void saveSettings({ edgeDockMode: input.value });
+  });
+}
+
 for (const input of els.floatingBubbleTriggerInputs || []) {
   input.addEventListener('change', () => {
     if (input.checked) void saveSettings({ floatingBubbleTrigger: input.value });
@@ -13478,6 +11768,7 @@ els.startAtLoginInput?.addEventListener('change', () => saveSettings({ startAtLo
 els.automaticAppUpdatesInput?.addEventListener('change', () => saveSettings({ automaticAppUpdates: els.automaticAppUpdatesInput.checked }));
 els.glassInput.addEventListener('change', saveAppearanceFromControls);
 els.blurInput.addEventListener('change', saveAppearanceFromControls);
+els.backgroundImageOpacityInput?.addEventListener('change', saveAppearanceFromControls);
 els.zoomInput.addEventListener('change', saveAppearanceFromControls);
 els.resetZoomButton.addEventListener('click', async () => {
   els.zoomInput.value = String(Math.round(defaultAppearance.zoomFactor * 100));
@@ -13624,11 +11915,23 @@ els.appUpdateReleaseNotesButton.addEventListener('click', async () => {
 window.tokenMonitor.onSettingsPush?.((next) => {
   if (!next) return;
   state.settingsPushRevision += 1;
+  for (const key of Object.keys(appearancePreview)) {
+    if (JSON.stringify(next[key]) !== JSON.stringify(state.settings?.[key])) delete appearancePreview[key];
+  }
   state.settings = next;
   applyEffectiveCurrencyRates();
   observeDisplayLiveTokenRates(state.stats);
   preserveSettingsPanelScroll(syncSettingsForm);
   if (isSettingsSurfaceVisible()) render(); else statsRenderScheduler.request();
+  maybeUpdateBarsIcon();
+});
+
+window.tokenMonitor.codex.onActiveAccount?.((account) => {
+  if (!account) return;
+  applyCodexOptimisticActiveAccount(account);
+  renderLimits();
+  renderCodexAccounts();
+  renderSettingsSummaries();
   maybeUpdateBarsIcon();
 });
 
@@ -13691,19 +11994,11 @@ function renderStatsUpdate() {
   renderWslPanel();
   updateOpenRouterProfilesStatus();
   updateThirdPartyProfilesStatus();
-  renderDeepseekStatus();
-  renderMinimaxStatus();
-  renderExternalProviderStatus('claude');
-  renderExternalProviderStatus('zai');
-  renderExternalProviderStatus('zaiteam');
   renderExternalProviderStatus('volcengine');
-  renderExternalProviderStatus('qoder');
-  renderExternalProviderStatus('trae');
-  renderExternalProviderStatus('zed');
-  renderExternalProviderStatus('commandcode');
   renderExternalProviderStatus('kimi');
-  renderExternalProviderStatus('ollama');
-  renderExternalProviderStatus('alibaba');
+  for (const form of state.settings?.limitAccountForms || []) {
+    if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
+  }
   renderCopilotStatus();
   signalContentReady();
 }
@@ -13711,6 +12006,22 @@ function renderStatsUpdate() {
 const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler({
   isHidden: isRendererWindowHidden,
   render: renderStatsUpdate
+});
+// Pulled once up front, then only while something on screen reads it: the
+// archived count in Settings, or the TOTAL session and project lists.
+function allTimeSessionsNeeded() {
+  if (!allTimeSessions.loaded() || isSettingsPanelOpen()) return true;
+  return state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');
+}
+const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
+  fetchSessions: (snapshotId) => window.tokenMonitor.getAllTimeSessions(snapshotId),
+  currentSnapshot: () => state.stats?.snapshot,
+  needed: allTimeSessionsNeeded,
+  onLoaded: () => {
+    if (state.stats) state.stats = allTimeSessions.attach(state.stats);
+    statsRenderScheduler.request();
+  },
+  onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
 });
 function handleWindowVisibilityChange() {
   if (!statsRenderScheduler.visibilityChanged()) return;
@@ -13752,7 +12063,8 @@ window.tokenMonitor.onStatsPush?.((payload) => {
       state.streamFailure = null;
     }
     if (payload.data?.mode) state.mode = payload.data.mode;
-    state.stats = overlayAllTimeSessions(payload.data.stats);
+    allTimeSessions.invalidate();
+    state.stats = allTimeSessions.attach(payload.data.stats);
     observeLiveTokenRate(state.stats);
     observeDisplayLiveTokenRates(state.stats);
     applyCodexActiveAccountFromStats();
@@ -14477,13 +12789,12 @@ function renderCustomTrayItemCanvas(item, height = 44, colors = {}, options = {}
 }
 
 function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options = {}) {
-  const activeCodex = localLiveCodexProvider();
-  const activeCodexKey = activeCodex?.accountKey
-    && (stats?.limits?.providers || []).some((provider) => (
-      provider?.provider === 'codex' && provider?.accountKey === activeCodex.accountKey
-    ))
-    ? activeCodex.accountKey
-    : '';
+  const codexProviders = (stats?.limits?.providers || []).filter((provider) => provider?.provider === 'codex');
+  const selectedCodexKey = String(state.codexActiveAccount?.accountKey || '').trim();
+  const detectedCodexKey = String(localLiveCodexProvider()?.accountKey || '').trim();
+  const activeCodexKey = [selectedCodexKey, detectedCodexKey].find((accountKey) => (
+    accountKey && codexProviders.some((provider) => provider.accountKey === accountKey)
+  )) || '';
   const resolved = trayLayoutApi.resolveTrayLayout(layout, stats, {
     currency: currentCurrency(),
     ...compactTokenDisplayOptions(),
@@ -14496,7 +12807,7 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
   const items = resolved.items.map((item) => (
     item.type === 'text'
       && item.metric === 'account'
-      && limitAccountEmailsMasked()
+      && state.settings?.maskLimitAccountEmails === true
       ? { ...item, text: accountIdentityApi.maskEmailAddress(item.text) }
       : item
   ));
@@ -14561,8 +12872,12 @@ function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
 }
 
 async function maybeUpdateBarsIcon(options = {}) {
-  if (options.refreshComposers !== false && isSettingsSurfaceVisible()) refreshTrayComposers();
-  else syncCustomTrayClockTimer();
+  if (options.refreshComposers !== false && isSettingsSurfaceVisible()) {
+    refreshTrayComposers();
+    if (edgeDockAvailable() && state.settings?.edgeDockEnabled === true) edgeDockComposer?.render();
+  } else {
+    syncCustomTrayClockTimer();
+  }
   const mode = state.settings?.trayContent;
   if (!window.TokenMonitorTrayText.isGeneratedTrayIconMode(mode)) return;
   if (!window.tokenMonitor.setTrayIcons) return;
@@ -14984,14 +13299,14 @@ function setAccountGroupExpanded(prefix, expanded, stateKey) {
   if (!toggle || !details) return;
   const next = Boolean(expanded);
   if (stateKey) state[stateKey] = next;
-  toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-  details.classList.toggle('hidden', !next);
-  if (group) group.classList.toggle('expanded', next);
-  syncLimitProviderAccountExpansion(prefix, next);
+  accountShellApi.setExpanded({
+    toggle, details, group, expanded: next,
+    onChange: (open) => syncLimitProviderAccountExpansion(prefix, open)
+  });
 }
 
 function syncLimitProviderAccountExpansion(providerId, expanded) {
-  if (!LIMIT_PROVIDER_ACCOUNT_GROUP_IDS[providerId]) return;
+  if (!LIMIT_PROVIDER_ACCOUNT_NODES[providerId] && !limitAccountForm(providerId)) return;
   if (expanded) {
     setLimitProviderSettingsExpanded(providerId);
   } else if (state.limitProviderSettingsExpanded === providerId) {
@@ -15106,9 +13421,6 @@ function setThirdPartyAdapterFields() {
   }
 }
 
-function setDeepseekAccountExpanded(expanded) {
-  setAccountGroupExpanded('deepseek', expanded, 'deepseekAccountExpanded');
-}
 
 function setMimoAccountExpanded(expanded) {
   setAccountGroupExpanded('mimo', expanded, 'mimoAccountExpanded');
@@ -15148,8 +13460,7 @@ function renderCodexLoginStatus() {
   addButton.classList.toggle('hidden', state.codexSignInBusy);
   cancelButton.classList.toggle('hidden', !state.codexSignInBusy);
   refreshButton.classList.toggle('hidden', state.codexSignInBusy);
-  statusEl.textContent = state.codexLoginStatus;
-  statusEl.classList.toggle('hidden', !state.codexLoginStatus);
+  accountShellApi.render({ progress: statusEl, progressText: state.codexLoginStatus });
   workspaceSelection.classList.toggle('hidden', state.codexWorkspaceChoices.length === 0);
   workspaceSelect.replaceChildren(...state.codexWorkspaceChoices.map((workspace) => {
     const option = document.createElement('option');
@@ -15179,9 +13490,7 @@ function renderCodexAccounts() {
   const statusText = accounts.length === 0
     ? t('settings.codex.notConfigured')
     : t('settings.opencode.connected', { linked: enabledCount, total: accounts.length });
-  setCursorStatusText(statusEl, statusText);
-  errorEl.textContent = state.codexAccountError || '';
-  errorEl.classList.toggle('hidden', !state.codexAccountError);
+  accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.codexAccountError });
   listEl.replaceChildren();
   if (accounts.length === 0) {
     const empty = document.createElement('p');
@@ -15317,39 +13626,6 @@ function localProviderStatuses(name) {
   return providers.filter((provider) => provider.provider === name);
 }
 
-function deepseekAccountLinked() {
-  const provider = deepseekProviderForAccount();
-  return Boolean(state.settings?.deepseekApiKeyConfigured) && provider?.status === 'ok';
-}
-
-function deepseekProviderStatus() {
-  return localProviderStatus('deepseek');
-}
-
-function deepseekProviderForAccount() {
-  const provider = deepseekProviderStatus();
-  const pendingSince = Number(state.deepseekPendingCheckSince || 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state.deepseekPendingCheckSince = 0;
-  return provider;
-}
-
-function markDeepseekKeyCheckPending() {
-  state.deepseekPendingCheckSince = Date.now();
-  clearDeepseekProviderStatus();
-}
-
-function clearDeepseekPendingCheck() {
-  state.deepseekPendingCheckSince = 0;
-}
-
-function clearDeepseekProviderStatus() {
-  if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'deepseek');
-}
-
 function renderAntigravityStatus() {
   if (!isSettingsSurfaceVisible()) return;
   const statusEl = document.getElementById('antigravityAccountStatus');
@@ -15361,20 +13637,21 @@ function renderAntigravityStatus() {
   if (!statusEl || !listEl || !errorEl || !addButton || !cancelButton) return;
   const accounts = state.settings?.antigravityManagedAccounts || [];
   const enabledCount = accounts.filter((account) => account.enabled !== false).length;
-  setCursorStatusText(statusEl, accounts.length === 0
-    ? t('settings.antigravity.notConfigured')
-    : t('settings.antigravity.connected', { linked: enabledCount, total: accounts.length }));
-  errorEl.textContent = state.antigravityAccountError || '';
-  errorEl.classList.toggle('hidden', !state.antigravityAccountError);
+  accountShellApi.render({
+    status: statusEl,
+    statusText: accounts.length === 0
+      ? t('settings.antigravity.notConfigured')
+      : t('settings.antigravity.connected', { linked: enabledCount, total: accounts.length }),
+    error: errorEl,
+    errorText: state.antigravityAccountError,
+    progress: statusMessage,
+    progressText: state.antigravitySignInBusy ? t('settings.antigravity.loginStatus') : ''
+  });
   addButton.disabled = state.antigravitySignInBusy;
   addButton.textContent = t(state.antigravitySignInBusy
     ? 'settings.antigravity.waitingForGoogle'
     : 'settings.antigravity.addAccount');
   cancelButton.classList.toggle('hidden', !state.antigravitySignInBusy);
-  if (statusMessage) {
-    statusMessage.textContent = state.antigravitySignInBusy ? t('settings.antigravity.loginStatus') : '';
-    statusMessage.classList.toggle('hidden', !state.antigravitySignInBusy);
-  }
 
   listEl.replaceChildren();
   if (accounts.length === 0) {
@@ -15472,6 +13749,10 @@ function renderAntigravityStatus() {
   renderSettingsSummaries();
 }
 
+function mimoSettingsAccountTitle(account, index) {
+  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
+}
+
 function renderMimoStatus() {
   if (!isSettingsSurfaceVisible()) return;
   const statusEl = document.getElementById('mimoAccountStatus');
@@ -15484,9 +13765,7 @@ function renderMimoStatus() {
   const statusText = accounts.length === 0
     ? t('settings.mimo.notConfigured')
     : t('settings.mimo.connected', { linked: enabledCount, total: accounts.length });
-  setCursorStatusText(statusEl, statusText);
-  errorEl.textContent = state.mimoAccountError || '';
-  errorEl.classList.toggle('hidden', !state.mimoAccountError);
+  accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.mimoAccountError });
   emptyEl.classList.toggle('hidden', accounts.length > 0);
 
   listEl.replaceChildren();
@@ -15569,39 +13848,6 @@ function renderMimoStatus() {
   renderSettingsSummaries();
 }
 
-function minimaxProviderStatus() {
-  return localProviderStatus('minimax');
-}
-
-function minimaxAccountLinked() {
-  const provider = minimaxProviderForAccount();
-  return Boolean(state.settings?.minimaxApiKeyConfigured) && provider?.status === 'ok';
-}
-
-function minimaxProviderForAccount() {
-  const provider = minimaxProviderStatus();
-  const pendingSince = Number(state.minimaxPendingCheckSince || 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state.minimaxPendingCheckSince = 0;
-  return provider;
-}
-
-function markMinimaxKeyCheckPending() {
-  state.minimaxPendingCheckSince = Date.now();
-  clearMinimaxProviderStatus();
-}
-
-function clearMinimaxPendingCheck() {
-  state.minimaxPendingCheckSince = 0;
-}
-
-function clearMinimaxProviderStatus() {
-  if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'minimax');
-}
-
 function copilotProviderStatus() {
   return localProviderStatus('copilot');
 }
@@ -15636,75 +13882,29 @@ function clearCopilotProviderStatus() {
 }
 
 const externalLimitAccountConfig = {
-  claude: {
-    configuredKey: 'claudeWebCookieConfigured',
-    sourceKey: 'claudeWebCookieSource',
-    pendingKey: 'claudePendingCheckSince'
-  },
-  zai: {
-    configuredKey: 'zaiApiKeyConfigured',
-    sourceKey: 'zaiApiKeySource',
-    pendingKey: 'zaiPendingCheckSince'
-  },
-  zaiteam: {
-    configuredKey: 'zaiTeamApiKeyConfigured',
-    sourceKey: 'zaiTeamApiKeySource',
-    pendingKey: 'zaiteamPendingCheckSince'
-  },
-  volcengine: {
-    configuredKey: 'volcengineCredentialsConfigured',
-    sourceKey: 'volcengineCredentialsSource',
-    pendingKey: 'volcenginePendingCheckSince'
-  },
-  qoder: {
-    configuredKey: 'qoderCookieConfigured',
-    sourceKey: 'qoderCookieSource',
-    pendingKey: 'qoderPendingCheckSince'
-  },
-  trae: {
-    configuredKey: 'traeAccessTokenConfigured',
-    sourceKey: 'traeAccessTokenSource',
-    pendingKey: 'traePendingCheckSince'
-  },
-  zed: {
-    configuredKey: 'zedCookieConfigured',
-    sourceKey: 'zedCookieSource',
-    pendingKey: 'zedPendingCheckSince'
-  },
-  commandcode: {
-    configuredKey: 'commandcodeCookieConfigured',
-    sourceKey: 'commandcodeCookieSource',
-    pendingKey: 'commandcodePendingCheckSince'
-  },
   kimi: {
     configuredKey: 'kimiCredentialConfigured',
     sourceKey: 'kimiCredentialSource',
     pendingKey: 'kimiPendingCheckSince'
   },
-  ollama: {
-    configuredKey: 'ollamaCookieConfigured',
-    sourceKey: 'ollamaCookieSource',
-    pendingKey: 'ollamaPendingCheckSince'
-  },
-  alibaba: {
-    configuredKey: 'alibabaCookieConfigured',
-    sourceKey: 'alibabaCookieSource',
-    pendingKey: 'alibabaPendingCheckSince'
+  volcengine: {
+    configuredKey: 'volcengineCredentialsConfigured',
+    sourceKey: 'volcengineCredentialsSource',
+    pendingKey: 'volcenginePendingCheckSince'
   }
 };
 
 function clearDisabledLimitProviderPendingChecks(enabledProviders) {
-  if (!enabledProviders.has('deepseek')) clearDeepseekPendingCheck();
-  if (!enabledProviders.has('minimax')) clearMinimaxPendingCheck();
   if (!enabledProviders.has('copilot')) clearCopilotPendingCheck();
-  for (const providerName of Object.keys(externalLimitAccountConfig)) {
+  for (const providerName of [...Object.keys(externalLimitAccountConfig),
+    ...(state.settings?.limitAccountForms || []).map((form) => form.id)]) {
     if (!enabledProviders.has(providerName)) clearExternalProviderCheckPending(providerName);
   }
 }
 
 function externalProviderForAccount(providerName) {
   const provider = localProviderStatus(providerName);
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const pendingSince = Number(config ? state[config.pendingKey] : 0);
   if (!provider || !pendingSince) return provider;
   const updatedAt = Date.parse(provider.updatedAt || '');
@@ -15714,20 +13914,25 @@ function externalProviderForAccount(providerName) {
 }
 
 function externalProviderAccountLinked(providerName) {
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const provider = externalProviderForAccount(providerName);
   return Boolean(config && state.settings?.[config.configuredKey]) && provider?.status === 'ok';
 }
 
+function setAccountPanelMessage(providerName, message) {
+  if (message) state.accountPanelMessages[providerName] = message;
+  else delete state.accountPanelMessages[providerName];
+}
+
 function markExternalProviderCheckPending(providerName) {
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   if (!config) return;
   state[config.pendingKey] = Date.now();
   clearExternalProviderPendingStatus(providerName);
 }
 
 function clearExternalProviderCheckPending(providerName) {
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   if (config) state[config.pendingKey] = 0;
 }
 
@@ -15780,10 +13985,25 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
   if (accountStatus === 'linked') {
     // A ZCode-discovered login is an OAuth-style link, not a pasted API key,
     // so it reads as connected the way Zed's linked sessions do.
-    const linkedKey = providerName === 'zai' && source === 'zcode-auto' ? 'settings.zai.statusLinked' : null;
+    const linkedKey = providerName === 'zai' && source === 'zcode-auto'
+      ? 'settings.zai.statusLinked'
+      : providerName === 'factory' && source === 'droid-env'
+        ? 'settings.factory.statusDroidEnv'
+        : providerName === 'cline' && source === 'cline-signin'
+          ? 'settings.cline.statusSignin'
+          : null;
     return t(linkedKey || (source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`));
   }
-  if (accountStatus === 'invalid') return t(`settings.${providerName}.statusInvalid`);
+  if (accountStatus === 'invalid') {
+    // Cline's two lanes refuse in different places, and this row names the lane the
+    // credential came from rather than always the key field: Cline owns recovery for
+    // the discovered sign-in, while Token Monitor owns the configured API key. Every
+    // other provider here keeps the one statusInvalid string.
+    const invalidKey = providerName === 'cline' && source === 'cline-signin'
+      ? 'settings.cline.statusSigninInvalid'
+      : `settings.${providerName}.statusInvalid`;
+    return t(invalidKey);
+  }
   if (accountStatus === 'notConfigured') return t(`settings.${providerName}.statusNotSet`);
   const statusKeys = {
     checking: 'settings.common.checking',
@@ -15796,148 +14016,28 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
   return t(statusKeys[accountStatus] || 'settings.common.error');
 }
 
-// Follow the region we last successfully polled so a global (minimax.io)
-// account lands on platform.minimax.io, not the CN landing page. Fall back
-// to the CN host until we've seen a successful poll.
-function minimaxPlatformUrl() {
-  const provider = minimaxProviderForAccount();
-  const region = provider && provider.region === 'en' ? 'en' : 'cn';
-  return region === 'en'
-    ? 'https://platform.minimax.io/user-center/payment/token-plan'
-    : 'https://platform.minimaxi.com/user-center/payment/token-plan';
-}
-
 function setExternalAccountExpanded(providerName, expanded) {
   const details = document.getElementById(`${providerName}SettingsDetails`);
   const toggle = document.getElementById(`${providerName}SettingsToggle`);
   if (!details || !toggle) return;
   const next = Boolean(expanded);
   state[`${providerName}AccountExpanded`] = next;
-  details.classList.toggle('hidden', !next);
-  toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-  limitProviderAccountGroup(providerName)?.classList.toggle('expanded', next);
-  syncLimitProviderAccountExpansion(providerName, next);
-}
-
-function zaiPlatformUrl() {
-  const selectedRegion = document.getElementById('zaiApiRegionInput')?.value;
-  const region = selectedRegion || (state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global');
-  return region === 'bigmodel-cn'
-    ? 'https://bigmodel.cn/coding-plan/personal/usage'
-    : 'https://z.ai/manage-apikey/coding-plan/personal/my-plan';
-}
-
-function zaiteamPlatformUrl() {
-  return 'https://bigmodel.cn/coding-plan/team/usage-stats';
+  accountShellApi.setExpanded({
+    toggle, details, group: limitProviderAccountGroup(providerName), expanded: next,
+    onChange: (open) => syncLimitProviderAccountExpansion(providerName, open)
+  });
 }
 
 function volcenginePlatformUrl() {
   return 'https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe';
 }
 
-function claudePlatformUrl() {
-  return 'https://claude.ai/settings/usage';
-}
-
-function selectedQoderSite() {
-  const selectedSite = document.getElementById('qoderSiteInput')?.value;
-  return selectedSite || (state.settings?.qoderSite === 'cn' ? 'cn' : 'global');
-}
-
-function qoderUsagePagePath() {
-  return selectedQoderSite() === 'cn' ? 'qoder.com.cn/account/usage' : 'qoder.com/account/usage';
-}
-
-function qoderPlatformUrl() {
-  return `https://${qoderUsagePagePath()}`;
-}
-
-function updateQoderUsagePageHint() {
-  const hint = document.getElementById('qoderUsagePageHint');
-  if (hint) hint.textContent = qoderUsagePagePath();
-}
-
 function kimiPlatformUrl() {
   return 'https://www.kimi.com/code/console';
 }
 
-function ollamaPlatformUrl() {
-  return 'https://ollama.com/settings';
-}
-
-const ALIBABA_DASHBOARD_URLS = {
-  cn: 'https://bailian.console.aliyun.com/cn-beijing?tab=plan#/efm/subscription/token-plan',
-  intl: 'https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=plan#/efm/subscription/token-plan',
-  'cn-personal': 'https://bailian.console.aliyun.com/cn-beijing?tab=plan#/efm/subscription/token-plan/personal',
-  'intl-personal': 'https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=plan#/efm/subscription/token-plan/personal'
-};
-
-// Mirrors normalizeAlibabaCookieHeader's preprocessing in the main process:
-// surrounding quotes and a `Cookie:` prefix come off before the pair check, so
-// the two sides accept and reject exactly the same inputs.
-function alibabaCookieCandidate(value) {
-  let raw = String(value || '').trim();
-  if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-    raw = raw.slice(1, -1).trim();
-  }
-  return raw.replace(/^cookie\s*:\s*/i, '').trim();
-}
-
-function alibabaVariantOr(value) {
-  return ALIBABA_DASHBOARD_URLS[value] ? value : 'cn';
-}
-
-// What the user is looking at right now: the live select wins so the "Open
-// Token Plan" button and the request hint follow the dropdown before the
-// change has been saved.
-function alibabaSelectedVariant() {
-  const selected = document.getElementById('alibabaVariantInput')?.value;
-  return alibabaVariantOr(selected || state.settings?.alibabaVariant);
-}
-
-// What is stored. Used when re-rendering the form, so a settings reload can put
-// the select back rather than reading its own value and never changing.
-function alibabaSavedVariant() {
-  return alibabaVariantOr(state.settings?.alibabaVariant);
-}
-
-function alibabaPlatformUrl() {
-  return ALIBABA_DASHBOARD_URLS[alibabaSelectedVariant()];
-}
-
-// Personal/Solo quota comes from a different host than the dashboard, so the
-// cookie has to be copied from that request. Naming the right request is the
-// difference between a working paste and an `unauthorized` the user cannot
-// explain.
-function renderAlibabaVariantHints() {
-  const variant = alibabaSelectedVariant();
-  const personal = variant.endsWith('-personal');
-  const hint = document.getElementById('alibabaRequestHint');
-  if (hint) hint.textContent = personal ? '/tokenplan/personal/api/v2/usage' : 'GetSubscriptionSummary';
-  document.getElementById('alibabaPersonalNote')?.classList.toggle('hidden', !personal);
-}
-
-function commandcodePlatformUrl() {
-  // Account-scoped in the address bar (/<username>/settings/usage), but this
-  // path resolves to it and bounces through signin?returnTo= when signed out,
-  // so it is the one link that works without knowing the username.
-  return 'https://commandcode.ai/settings/usage';
-}
-
-function zedPlatformUrl() {
-  return 'https://dashboard.zed.dev/';
-}
-
-function ollamaValidationError(provider) {
-  if (provider?.status === 'unauthorized') return t('settings.ollama.validationInvalid');
-  if (provider?.status === 'rateLimited' || provider?.status === 'sourceRateLimited') {
-    return t('settings.ollama.validationRateLimited');
-  }
-  return t('settings.ollama.validationUnavailable');
-}
-
 function renderExternalProviderStatus(providerName) {
-  const config = externalLimitAccountConfig[providerName];
+  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
   const statusEl = document.getElementById(`${providerName}AccountStatus`);
   const openBtn = document.getElementById(`${providerName}OpenBrowser`);
   const logoutBtn = document.getElementById(`${providerName}LogoutButton`);
@@ -15946,34 +14046,30 @@ function renderExternalProviderStatus(providerName) {
   const errorEl = document.getElementById(`${providerName}ErrorMessage`);
   if (!config || !statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
 
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
-
   const source = state.settings?.[config.sourceKey] || '';
   const wasPending = Number(state[config.pendingKey] || 0) > 0;
   const provider = externalProviderForAccount(providerName);
+  // The message line is state, not DOM: this runs on every stats push, and a
+  // line written straight into the element would be wiped by the next one.
+  // A "saved but not yet confirmed" notice retires once a record newer than
+  // the save arrives, because the pill then carries the real answer.
+  if (state.accountPanelMessages[providerName]?.untilChecked && provider) {
+    delete state.accountPanelMessages[providerName];
+  }
+  const message = state.accountPanelMessages[providerName];
+  errorEl.textContent = message ? t(message.key, message.params) : '';
+  errorEl.classList.toggle('hidden', !message);
+  errorEl.classList.toggle('error', message?.tone !== 'notice');
   const configured = Boolean(state.settings?.[config.configuredKey]);
   const enabled = limitProviderEnabled(providerName);
   const pending = enabled && Number(state[config.pendingKey] || 0) > 0;
   const linked = externalProviderAccountLinked(providerName);
-  if (providerName === 'ollama' && wasPending && !pending && linked) {
-    setExternalAccountExpanded('ollama', false);
-  }
-  if (providerName === 'zai') {
-    const regionInput = document.getElementById('zaiApiRegionInput');
-    if (regionInput) regionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
-  }
+  // A pending check that comes back linked folds the panel: the refresh that
+  // followed the save may have returned before the new record did.
+  if (wasPending && !pending && linked) setExternalAccountExpanded(providerName, false);
+  const form = limitAccountForm(providerName);
+  if (form) limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
   if (providerName === 'volcengine') renderVolcengineAgentOverrideState();
-  if (providerName === 'qoder') {
-    const siteInput = document.getElementById('qoderSiteInput');
-    if (siteInput) siteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
-    updateQoderUsagePageHint();
-  }
-  if (providerName === 'alibaba') {
-    const variantInput = document.getElementById('alibabaVariantInput');
-    if (variantInput) variantInput.value = alibabaSavedVariant();
-    renderAlibabaVariantHints();
-  }
   setCursorStatusText(
     statusEl,
     pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
@@ -15986,14 +14082,17 @@ function renderExternalProviderStatus(providerName) {
   }
   manualPanel.classList.toggle('hidden', linked);
   openBtn.classList.toggle('hidden', linked);
-  if (providerName === 'zai' && source === 'zcode-auto') {
+  const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
+    || (providerName === 'cline' && source === 'cline-signin');
+  if (discoveredLogin) {
     // The discovered login is not user-entered, so the override input and the
-    // console link stay reachable instead of hiding behind linked.
+    // console link stay reachable instead of hiding behind linked. Cline's stored
+    // sign-in is the same situation as Zai's ZCode login.
     manualPanel.classList.remove('hidden');
     openBtn.classList.remove('hidden');
   }
-  const canClearConfiguredClaude = providerName === 'claude' && configured;
-  logoutBtn.classList.toggle('hidden', source !== 'settings' || (!linked && !canClearConfiguredClaude));
+  const canClearConfiguredCredential = source === 'settings' && configured;
+  logoutBtn.classList.toggle('hidden', !canClearConfiguredCredential);
   refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();
 }
@@ -16022,42 +14121,6 @@ function setVolcengineAgentExpanded(expanded) {
   document.getElementById('volcengineAgentPanel')?.classList.toggle('expanded', next);
 }
 
-function setMinimaxAccountExpanded(expanded) {
-  const details = document.getElementById('minimaxSettingsDetails');
-  const toggle = document.getElementById('minimaxSettingsToggle');
-  if (!details || !toggle) return;
-  const next = Boolean(expanded);
-  state.minimaxAccountExpanded = next;
-  details.classList.toggle('hidden', !next);
-  toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-  limitProviderAccountGroup('minimax')?.classList.toggle('expanded', next);
-  syncLimitProviderAccountExpansion('minimax', next);
-}
-
-function renderMinimaxStatus() {
-  const statusEl = document.getElementById('minimaxApiKeyStatus');
-  const openBtn = document.getElementById('minimaxOpenBrowser');
-  const logoutBtn = document.getElementById('minimaxLogoutButton');
-  const refreshBtn = document.getElementById('minimaxRefreshButton');
-  const manualPanel = document.getElementById('minimaxManualPanel');
-  const errorEl = document.getElementById('minimaxErrorMessage');
-  if (!statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
-
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
-
-  const source = state.settings?.minimaxApiKeySource || '';
-  const provider = minimaxProviderForAccount();
-  const configured = Boolean(state.settings?.minimaxApiKeyConfigured);
-  const enabled = limitProviderEnabled('minimax');
-  const linked = minimaxAccountLinked();
-  setCursorStatusText(statusEl, apiKeyAccountStatusText('minimax', provider, configured, source, enabled));
-  manualPanel.classList.toggle('hidden', linked);
-  openBtn.classList.toggle('hidden', linked);
-  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
-  refreshBtn.classList.toggle('hidden', !configured);
-  renderSettingsSummaries();
-}
 
 function renderCopilotStatus() {
   const statusEl = document.getElementById('copilotApiTokenStatus');
@@ -16075,59 +14138,44 @@ function renderCopilotStatus() {
   const configured = Boolean(state.settings?.copilotApiTokenConfigured);
   const enabled = limitProviderEnabled('copilot');
   const linked = copilotAccountLinked();
-  errorEl.textContent = state.copilotErrorMessage || '';
-  errorEl.classList.toggle('hidden', !state.copilotErrorMessage);
-  setCursorStatusText(statusEl, copilotAccountStatusText(provider, configured, source, enabled));
+  accountShellApi.render({
+    status: statusEl,
+    statusText: copilotAccountStatusText(provider, configured, source, enabled),
+    error: errorEl,
+    errorText: state.copilotErrorMessage,
+    progress: loginStatusEl,
+    progressText: state.copilotLoginStatus
+  });
   manualPanel.classList.toggle('hidden', linked);
   if (linked && state.copilotManualExpanded) setCopilotManualExpanded(false);
   signInBtn.classList.toggle('hidden', linked || state.copilotSignInBusy);
   cancelBtn.classList.toggle('hidden', !state.copilotSignInBusy || !state.copilotSignInCancelable || linked);
   logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
   refreshBtn.classList.toggle('hidden', !configured || (state.copilotSignInBusy && !linked));
-  loginStatusEl.classList.toggle('hidden', !state.copilotLoginStatus);
-  loginStatusEl.textContent = state.copilotLoginStatus;
   renderSettingsSummaries();
 }
 
-function renderDeepseekStatus() {
-  const statusEl = document.getElementById('deepseekApiKeyStatus');
-  const openBtn = document.getElementById('deepseekOpenBrowser');
-  const logoutBtn = document.getElementById('deepseekLogoutButton');
-  const refreshBtn = document.getElementById('deepseekRefreshButton');
-  const manualPanel = document.getElementById('deepseekManualPanel');
-  const errorEl = document.getElementById('deepseekErrorMessage');
-  if (!statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
-
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
-
-  const source = state.settings?.deepseekApiKeySource || '';
-  const provider = deepseekProviderForAccount();
-  const configured = Boolean(state.settings?.deepseekApiKeyConfigured);
-  const enabled = limitProviderEnabled('deepseek');
-  const linked = deepseekAccountLinked();
-  setCursorStatusText(statusEl, apiKeyAccountStatusText('deepseek', provider, configured, source, enabled));
-  manualPanel.classList.toggle('hidden', linked);
-  openBtn.classList.toggle('hidden', linked);
-  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
-  refreshBtn.classList.toggle('hidden', !configured);
-  renderSettingsSummaries();
-}
 
 function renderOpenCodeProfiles() {
   if (!isSettingsSurfaceVisible()) return;
   const listEl = document.getElementById('opencodeProfileList');
   if (!listEl) return;
+  renderAccountShellError('opencode');
 
   const api = window.tokenMonitor.opencode;
 
+  const isCurrent = accountProfileRequests.begin('opencode');
   api.getProfiles().then(({ profiles, hasEnvVar, hasAmbientKey, ambientEnabled = true }) => {
-    if (!isSettingsSurfaceVisible()) return;
-    listEl.innerHTML = '';
+    if (!isCurrent() || !isSettingsSurfaceVisible() || document.getElementById('opencodeProfileList') !== listEl) return;
+    accountProfileStatuses.retire('opencode');
+    listEl.replaceChildren();
     const entries = Object.entries(profiles);
 
     if (entries.length === 0 && !hasEnvVar && !hasAmbientKey) {
-      listEl.innerHTML = '<div class="opencode-empty">' + t('settings.opencode.emptyList') + '</div>';
+      const empty = document.createElement('div');
+      empty.className = 'opencode-empty';
+      empty.textContent = t('settings.opencode.emptyList');
+      listEl.append(empty);
       state.opencodeProfileCount = 0;
       renderOpenCodeProfilesStatusSummary({});
       renderSettingsSummaries();
@@ -16188,11 +14236,10 @@ function renderOpenCodeProfiles() {
             return;
           }
           if (offer.stale(at)) return;
-          const errorEl = document.getElementById('opencodeErrorMessage');
-          errorEl.textContent = opencodeSaveErrorText(result);
-          errorEl.classList.remove('hidden');
+          setAccountShellError('opencode', opencodeSaveErrorText(result));
           return;
         }
+        setAccountShellError('opencode', '');
         renderOpenCodeProfiles();
         updateOpenCodeProfilesStatus();
         renderSettingsSummaries();
@@ -16288,7 +14335,6 @@ function renderOpenCodeProfiles() {
       const offer = opencodeMergeOffer(mergeBtn, (next) => applyRename(next, true));
       const applyRename = async (next, merge) => {
         const at = offer.revision();
-        const errorEl = document.getElementById('opencodeErrorMessage');
         const result = await api.renameProfile(name, next, { merge });
         if (!result.ok) {
           if (result.nameTaken) {
@@ -16296,11 +14342,10 @@ function renderOpenCodeProfiles() {
             return;
           }
           if (offer.stale(at)) return;
-          errorEl.textContent = opencodeSaveErrorText(result);
-          errorEl.classList.remove('hidden');
+          setAccountShellError('opencode', opencodeSaveErrorText(result));
           return;
         }
-        errorEl.classList.add('hidden');
+        setAccountShellError('opencode', '');
         renderOpenCodeProfiles();
         updateOpenCodeProfilesStatus();
         renderSettingsSummaries();
@@ -16423,6 +14468,12 @@ function renderOpenCodeProfiles() {
     }
 
     updateOpenCodeProfilesStatus();
+  }).catch(() => {
+    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
+    accountShellApi.render({
+      status: document.getElementById('opencodeCookieStatus'),
+      statusText: t('settings.opencode.connectFailed')
+    });
   });
 }
 
@@ -16501,7 +14552,6 @@ function opencodeRowId(prefix, name) {
 // deleting drops just this credential and leaves the rest of the account.
 function opencodeCredentialRow(accountName, kind, label) {
   const api = window.tokenMonitor.opencode;
-  const errorEl = () => document.getElementById('opencodeErrorMessage');
   const refresh = () => {
     renderOpenCodeProfiles();
     updateOpenCodeProfilesStatus();
@@ -16544,10 +14594,10 @@ function opencodeCredentialRow(accountName, kind, label) {
         return;
       }
       if (offer.stale(at)) return;
-      errorEl().textContent = opencodeSaveErrorText(result);
-      errorEl().classList.remove('hidden');
+      setAccountShellError('opencode', opencodeSaveErrorText(result));
       return;
     }
+    setAccountShellError('opencode', '');
     refresh();
   };
   const endMove = async (save) => {
@@ -16596,7 +14646,9 @@ function opencodeCredentialRow(accountName, kind, label) {
 
 async function updateOpenCodeProfilesStatus() {
   const api = window.tokenMonitor.opencode;
+  const isCurrent = accountProfileStatuses.begin('opencode');
   const status = await api.status();
+  if (!isCurrent() || !isSettingsSurfaceVisible()) return;
   const profiles = status.profiles || {};
 
   // The auto-detected key has no account name, so it arrives in its own field
@@ -16650,11 +14702,12 @@ function renderOpenCodeProfilesStatusSummary(profiles, ambient = null) {
     const linkedCount = statuses.filter(s => s.linked).length;
     const configuredProfileCount = state.opencodeProfileCount || 0;
     const totalCount = Math.max(statuses.length, configuredProfileCount);
-    if (totalCount > 0) {
-      totalEl.textContent = t('settings.opencode.connected', { linked: linkedCount, total: totalCount });
-    } else {
-      totalEl.textContent = t('settings.opencode.statusNotSet');
-    }
+    accountShellApi.render({
+      status: totalEl,
+      statusText: totalCount > 0
+        ? t('settings.opencode.connected', { linked: linkedCount, total: totalCount })
+        : t('settings.opencode.statusNotSet')
+    });
   }
 }
 
@@ -16681,7 +14734,7 @@ function thirdPartyProfileStatusText(provider, options = {}) {
   if (status === 'invalid') return t('settings.thirdparty.invalidKey');
   if (status !== 'linked') return t('settings.thirdparty.unavailable');
   const balance = optionalFiniteNumber(provider.balance?.amount);
-  if (balance !== null) return `✓ ${formatCompactMoney(balance, provider.balance?.currency || 'USD')}`;
+  if (balance !== null) return `✓ ${formatCompactMoney(balance, provider.balance?.currency || 'USD', state.settings?.compactTokenUnits, currentLocale())}`;
   const unlimited = (provider.windows || []).some((window) => (
     window?.showMeter === false && String(window?.detail || '').toLowerCase() === 'unlimited'
   ));
@@ -16716,11 +14769,14 @@ function updateNamedApiProfilesStatus({
   if (!statusEl) return;
   const total = state[profileCountStateKey] || 0;
   const linked = providers.filter((provider) => provider.status === 'ok').length;
-  statusEl.textContent = total === 0
-    ? t(`settings.${providerId}.statusNotSet`)
-    : !providerEnabled
-      ? t(`settings.${providerId}.nAccounts`, { count: total })
-      : t(`settings.${providerId}.connected`, { linked, total });
+  accountShellApi.render({
+    status: statusEl,
+    statusText: total === 0
+      ? t(`settings.${providerId}.statusNotSet`)
+      : !providerEnabled
+        ? t(`settings.${providerId}.nAccounts`, { count: total })
+        : t(`settings.${providerId}.connected`, { linked, total })
+  });
 }
 
 function updateOpenRouterProfilesStatus() {
@@ -16851,14 +14907,11 @@ function appendNamedApiProfileRow(listEl, config) {
       if (save && nextName && nextName !== name) {
         const result = await api.renameProfile(name, nextName);
         if (result?.ok) {
+          setAccountShellError(providerId, '');
           rerender();
         } else {
           nameInput.value = name;
-          const errorEl = document.getElementById(`${providerId}ErrorMessage`);
-          if (errorEl) {
-            errorEl.textContent = errorText(result);
-            errorEl.classList.remove('hidden');
-          }
+          setAccountShellError(providerId, errorText(result));
         }
       }
     };
@@ -16925,8 +14978,10 @@ function renderNamedApiProfiles(config) {
   } = config;
   const listEl = document.getElementById(`${providerId}ProfileList`);
   if (!listEl || !api) return;
+  renderAccountShellError(providerId);
+  const isCurrent = accountProfileRequests.begin(providerId);
   api.getProfiles().then(({ profiles, hasEnvVar }) => {
-    if (!isSettingsSurfaceVisible()) return;
+    if (!isCurrent() || !isSettingsSurfaceVisible() || document.getElementById(`${providerId}ProfileList`) !== listEl) return;
     listEl.replaceChildren();
     state.settings[profileSettingsKey] = profiles;
     state.settings[envConfiguredKey] = Boolean(hasEnvVar);
@@ -16967,8 +15022,11 @@ function renderNamedApiProfiles(config) {
     updateStatus();
     renderSettingsSummaries();
   }).catch(() => {
-    const statusEl = document.getElementById(`${providerId}Status`);
-    if (statusEl) statusEl.textContent = t(`settings.${providerId}.unavailable`);
+    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
+    accountShellApi.render({
+      status: document.getElementById(`${providerId}Status`),
+      statusText: t(`settings.${providerId}.unavailable`)
+    });
   });
 }
 
@@ -17017,13 +15075,15 @@ function renderCursorStatus() {
   const errorEl = document.getElementById('cursorErrorMessage');
   if (!statusEl || !listEl || !errorEl) return;
 
-  errorEl.classList.add('hidden');
-  errorEl.textContent = '';
+  accountShellApi.render({
+    error: errorEl,
+    errorText: state.cursorAccount.error
+      ? t('settings.cursor.statusCheckFailed', { message: state.cursorAccount.error })
+      : accountShellErrors.cursor || ''
+  });
 
   if (state.cursorAccount.error) {
     setCursorStatusText(statusEl, t('settings.common.error'));
-    errorEl.textContent = t('settings.cursor.statusCheckFailed', { message: state.cursorAccount.error });
-    errorEl.classList.remove('hidden');
     setCursorCheckboxesEnabled(Boolean(state.cursorAccount.status?.accounts?.length));
     setSettingsSectionExpanded('limits', true);
     setCursorAccountExpanded(true);
@@ -17140,6 +15200,7 @@ function renderCursorStatus() {
 }
 
 async function refreshCursorStatus({ force = false, discover = false } = {}) {
+  setAccountShellError('cursor', '');
   state.cursorAccount = { status: null, error: '', busy: true };
   renderCursorStatus();
   try {
@@ -17162,6 +15223,27 @@ function setCursorCheckboxesEnabled(enabled) {
 }
 
 let openCustomPricingForm = null;
+let modelAliasForm = null;
+
+function setupModelAliasesUI() {
+  const toggle = document.getElementById('modelAliasesSettingsToggle');
+  if (!toggle) return;
+  toggle.addEventListener('click', () => setAccountGroupExpanded('modelAliases', !state.modelAliasesExpanded, 'modelAliasesExpanded'));
+  setAccountGroupExpanded('modelAliases', false, 'modelAliasesExpanded');
+  modelAliasForm = window.TokenMonitorModelAliasForm.createModelAliasForm({
+    document, t,
+    getAliases: () => state.settings?.modelAliases || {},
+    getGrouping: () => state.settings?.modelAliasGrouping || 'off',
+    saveAliases: (modelAliases) => saveSettings({ modelAliases })
+  });
+  for (const input of document.querySelectorAll('input[name="modelAliasGrouping"]')) {
+    input.addEventListener('change', async () => {
+      if (!input.checked) return;
+      await saveSettings({ modelAliasGrouping: input.value });
+      modelAliasForm?.syncSettings();
+    });
+  }
+}
 
 function customPricingMeta(ov) {
   const parts = [];
@@ -17518,25 +15600,25 @@ function setupCursorAccountUI() {
     window.tokenMonitor.openExternal('https://cursor.com/dashboard');
   });
 
-  document.getElementById('cursorManualSubmit').addEventListener('click', async () => {
+  const cursorManualSubmit = document.getElementById('cursorManualSubmit');
+  cursorManualSubmit.addEventListener('click', () => accountProfileSaves.run('cursor', cursorManualSubmit, async () => {
     const input = document.getElementById('cursorManualInput');
-    const errorEl = document.getElementById('cursorErrorMessage');
-    errorEl.classList.add('hidden');
+    setAccountShellError('cursor', '');
     const result = await window.tokenMonitor.cursor.loginManual(input.value);
     if (!result.ok) {
       const message = result.code === 'EXTERNAL_AGENT_ACTIVE'
         ? t('settings.cursor.agentActive')
         : result.error;
-      errorEl.textContent = t('settings.cursor.loginFailed', { message });
-      errorEl.classList.remove('hidden');
+      setAccountShellError('cursor', t('settings.cursor.loginFailed', { message }));
       return;
     }
     input.value = '';
+    setAccountShellError('cursor', '');
     state.cursorAccount = { status: result.status, error: '', busy: false };
     renderCursorStatus();
     setCursorManualExpanded(false);
     await refreshStats({ force: true });
-  });
+  }));
 
   refreshCursorStatus({ discover: true });
 
@@ -17597,23 +15679,23 @@ function setupCursorAccountUI() {
       // can never be submitted as the other.
       const stale = document.getElementById(isCookie ? 'opencodeApiKeyInput' : 'opencodeCookieInput');
       if (stale) stale.value = '';
-      document.getElementById('opencodeErrorMessage')?.classList.add('hidden');
+      setAccountShellError('opencode', '');
       clearOpenCodeMergeOffer();
     };
     kindSelect?.addEventListener('change', applyOpenCodeCredentialKind);
     applyOpenCodeCredentialKind();
 
-    document.getElementById('opencodeCookieSubmit').addEventListener('click', async () => {
+    const profileSubmit = document.getElementById('opencodeCookieSubmit');
+    profileSubmit.addEventListener('click', () => accountProfileSaves.run('opencode', profileSubmit, async () => {
       const opencodeCredentialKind = kindSelect?.value === 'cookie' ? 'cookie' : 'api';
       const input = document.getElementById(opencodeCredentialKind === 'cookie'
         ? 'opencodeCookieInput'
         : 'opencodeApiKeyInput');
       const nameInput = document.getElementById('opencodeProfileName');
-      const errorEl = document.getElementById('opencodeErrorMessage');
       const name = (nameInput.value || '').trim();
       const cookie = input.value;
 
-      errorEl.classList.add('hidden');
+      setAccountShellError('opencode', '');
 
       // The name is required rather than defaulted. Saving one credential keeps
       // the other under the same name, and the collector reads that as "these
@@ -17621,8 +15703,7 @@ function setupCursorAccountUI() {
       // could attach one account's key to another account's cookie. Making the
       // user type the name is what keeps the association explicit.
       if (!name) {
-        errorEl.textContent = t('settings.opencode.nameRequired');
-        errorEl.classList.remove('hidden');
+        setAccountShellError('opencode', t('settings.opencode.nameRequired'));
         nameInput.focus();
         return;
       }
@@ -17633,7 +15714,7 @@ function setupCursorAccountUI() {
       // it: the next click has different consequences from the one just made.
       const submit = async (merge) => {
         const at = addMergeOffer?.revision();
-        confirmOpenCodeMerge = () => submit(true);
+        confirmOpenCodeMerge = () => accountProfileSaves.run('opencode', addMergeButton, () => submit(true));
         const result = await window.tokenMonitor.opencode.saveProfile(
           name,
           cookie,
@@ -17654,6 +15735,7 @@ function setupCursorAccountUI() {
             nameInput.value = '';
             addMergeOffer?.withdraw();
           }
+          if (!stale) setAccountShellError('opencode', '');
           renderOpenCodeProfiles();
           updateOpenCodeProfilesStatus();
           renderSettingsSummaries();
@@ -17664,11 +15746,10 @@ function setupCursorAccountUI() {
           addMergeOffer.offer(at, name, t('settings.opencode.mergeInto', { name }));
           return;
         }
-        errorEl.textContent = opencodeSaveErrorText(result);
-        errorEl.classList.remove('hidden');
+        setAccountShellError('opencode', opencodeSaveErrorText(result));
       };
       await submit(false);
-    });
+    }));
   }
 
   const openrouterToggle = document.getElementById('openrouterSettingsToggle');
@@ -17691,18 +15772,15 @@ function setupCursorAccountUI() {
     document.getElementById('openrouterOpenBrowser')?.addEventListener('click', () => {
       window.tokenMonitor.openExternal('https://openrouter.ai/settings/keys');
     });
-    document.getElementById('openrouterProfileSubmit')?.addEventListener('click', async () => {
+    const profileSubmit = document.getElementById('openrouterProfileSubmit');
+    profileSubmit?.addEventListener('click', () => accountProfileSaves.run('openrouter', profileSubmit, async () => {
       const nameInput = document.getElementById('openrouterProfileName');
       const keyInput = document.getElementById('openrouterApiKeyInput');
-      const errorEl = document.getElementById('openrouterErrorMessage');
       const name = String(nameInput?.value || '').trim() || 'default';
       const apiKey = String(keyInput?.value || '').trim();
-      errorEl?.classList.add('hidden');
+      setAccountShellError('openrouter', '');
       if (!apiKey) {
-        if (errorEl) {
-          errorEl.textContent = t('settings.openrouter.statusNotSet');
-          errorEl.classList.remove('hidden');
-        }
+        setAccountShellError('openrouter', t('settings.openrouter.statusNotSet'));
         return;
       }
       const result = await window.tokenMonitor.openrouter.saveProfile(name, apiKey);
@@ -17711,11 +15789,10 @@ function setupCursorAccountUI() {
         keyInput.value = '';
         renderOpenRouterProfiles();
         await refreshStats({ force: true });
-      } else if (errorEl) {
-        errorEl.textContent = openrouterProfileErrorText(result);
-        errorEl.classList.remove('hidden');
+      } else {
+        setAccountShellError('openrouter', openrouterProfileErrorText(result));
       }
-    });
+    }));
   }
 
   const thirdpartyToggle = document.getElementById('thirdpartySettingsToggle');
@@ -17743,7 +15820,8 @@ function setupCursorAccountUI() {
       addDetails?.classList.toggle('hidden', !expanded);
       document.getElementById('thirdpartyAddForm')?.classList.toggle('expanded', expanded);
     });
-    document.getElementById('thirdpartyProfileSubmit')?.addEventListener('click', async () => {
+    const profileSubmit = document.getElementById('thirdpartyProfileSubmit');
+    profileSubmit?.addEventListener('click', () => accountProfileSaves.run('thirdparty', profileSubmit, async () => {
       const nameInput = document.getElementById('thirdpartyProfileName');
       const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
       const refreshTokenInput = document.getElementById('thirdpartyRefreshTokenInput');
@@ -17756,7 +15834,6 @@ function setupCursorAccountUI() {
       const totalPathInput = document.getElementById('thirdpartyTotalPathInput');
       const currencyInput = document.getElementById('thirdpartyCurrencyInput');
       const divisorInput = document.getElementById('thirdpartyDivisorInput');
-      const errorEl = document.getElementById('thirdpartyErrorMessage');
       const name = String(nameInput?.value || '').trim() || 'default';
       const adapter = selectedThirdPartyAdapter();
       const baseUrl = String(baseUrlInput?.value || '').trim();
@@ -17764,7 +15841,7 @@ function setupCursorAccountUI() {
       const refreshToken = String(refreshTokenInput?.value || '').trim();
       const userId = String(userIdInput?.value || '').trim();
       const apiKey = String(keyInput?.value || '').trim();
-      errorEl?.classList.add('hidden');
+      setAccountShellError('thirdparty', '');
       const result = await window.tokenMonitor.thirdparty.saveProfile({
         name,
         adapter,
@@ -17798,211 +15875,10 @@ function setupCursorAccountUI() {
         divisorInput.value = '1';
         renderThirdPartyProfiles();
         await refreshStats({ force: true });
-      } else if (errorEl) {
-        errorEl.textContent = thirdPartyProfileErrorText(result, adapter);
-        errorEl.classList.remove('hidden');
+      } else {
+        setAccountShellError('thirdparty', thirdPartyProfileErrorText(result, adapter));
       }
-    });
-  }
-
-  const deepseekToggle = document.getElementById('deepseekSettingsToggle');
-  if (deepseekToggle) {
-    deepseekToggle.addEventListener('click', () => setDeepseekAccountExpanded(!state.deepseekAccountExpanded));
-    setDeepseekAccountExpanded(false);
-    renderDeepseekStatus();
-
-    document.getElementById('deepseekOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://platform.deepseek.com/api_keys');
-    });
-
-    document.getElementById('deepseekLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ deepseekApiKey: '' });
-      clearDeepseekPendingCheck();
-      clearDeepseekProviderStatus();
-      renderDeepseekStatus();
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('deepseekRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('deepseekApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('deepseekApiKeyInput');
-      const errorEl = document.getElementById('deepseekErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.deepseek.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markDeepseekKeyCheckPending();
-        await saveSettings({ deepseekApiKey: input.value });
-        input.value = '';
-        renderDeepseekStatus();
-        await refreshStats({ force: true });
-        if (deepseekAccountLinked()) setDeepseekAccountExpanded(false);
-        else setDeepseekAccountExpanded(true);
-        renderDeepseekStatus();
-      } catch (err) {
-        clearDeepseekPendingCheck();
-        errorEl.textContent = t('settings.deepseek.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-  const minimaxToggle = document.getElementById('minimaxSettingsToggle');
-  if (minimaxToggle) {
-    minimaxToggle.addEventListener('click', () => setMinimaxAccountExpanded(!state.minimaxAccountExpanded));
-    setMinimaxAccountExpanded(false);
-    renderMinimaxStatus();
-
-    document.getElementById('minimaxOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(minimaxPlatformUrl());
-    });
-
-    document.getElementById('minimaxLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ minimaxApiKey: '' });
-      clearMinimaxPendingCheck();
-      clearMinimaxProviderStatus();
-      renderMinimaxStatus();
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('minimaxRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('minimaxApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('minimaxApiKeyInput');
-      const errorEl = document.getElementById('minimaxErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.minimax.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markMinimaxKeyCheckPending();
-        await saveSettings({ minimaxApiKey: input.value });
-        input.value = '';
-        renderMinimaxStatus();
-        await refreshStats({ force: true });
-        if (minimaxAccountLinked()) setMinimaxAccountExpanded(false);
-        else setMinimaxAccountExpanded(true);
-        renderMinimaxStatus();
-      } catch (err) {
-        clearMinimaxPendingCheck();
-        errorEl.textContent = t('settings.minimax.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const zaiToggle = document.getElementById('zaiSettingsToggle');
-  if (zaiToggle) {
-    const zaiApiRegionInput = document.getElementById('zaiApiRegionInput');
-    if (zaiApiRegionInput) zaiApiRegionInput.value = state.settings?.zaiApiRegion === 'bigmodel-cn' ? 'bigmodel-cn' : 'global';
-    zaiApiRegionInput?.addEventListener('change', () => void saveSettings({ zaiApiRegion: zaiApiRegionInput.value || 'global' }));
-    zaiToggle.addEventListener('click', () => setExternalAccountExpanded('zai', !state.zaiAccountExpanded));
-    setExternalAccountExpanded('zai', false);
-    renderExternalProviderStatus('zai');
-
-    document.getElementById('zaiOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(zaiPlatformUrl());
-    });
-
-    document.getElementById('zaiLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ zaiApiKey: '' });
-      clearExternalProviderCheckPending('zai');
-      clearExternalProviderPendingStatus('zai');
-      renderExternalProviderStatus('zai');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('zaiApiKeyInput');
-      const regionInput = document.getElementById('zaiApiRegionInput');
-      const errorEl = document.getElementById('zaiErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.zai.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('zai');
-        await saveSettings({ zaiApiKey: input.value, zaiApiRegion: regionInput?.value || 'global' });
-        input.value = '';
-        renderExternalProviderStatus('zai');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('zai', !externalProviderAccountLinked('zai'));
-        renderExternalProviderStatus('zai');
-      } catch (err) {
-        clearExternalProviderCheckPending('zai');
-        errorEl.textContent = t('settings.zai.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const zaiteamToggle = document.getElementById('zaiteamSettingsToggle');
-  if (zaiteamToggle) {
-    zaiteamToggle.addEventListener('click', () => setExternalAccountExpanded('zaiteam', !state.zaiteamAccountExpanded));
-    setExternalAccountExpanded('zaiteam', false);
-    renderExternalProviderStatus('zaiteam');
-
-    document.getElementById('zaiteamOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(zaiteamPlatformUrl());
-    });
-
-    document.getElementById('zaiteamLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ zaiTeamApiKey: '', zaiTeamOrganizationId: '', zaiTeamProjectId: '' });
-      clearExternalProviderCheckPending('zaiteam');
-      clearExternalProviderPendingStatus('zaiteam');
-      renderExternalProviderStatus('zaiteam');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiteamRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zaiteamApiKeySubmit').addEventListener('click', async () => {
-      const keyInput = document.getElementById('zaiteamApiKeyInput');
-      const orgInput = document.getElementById('zaiteamOrganizationIdInput');
-      const projectInput = document.getElementById('zaiteamProjectIdInput');
-      const errorEl = document.getElementById('zaiteamErrorMessage');
-      errorEl.classList.add('hidden');
-      const apiKey = String(keyInput.value || '').trim();
-      const organizationId = String(orgInput.value || '').trim();
-      const projectId = String(projectInput.value || '').trim();
-      if (!apiKey || !organizationId || !projectId) {
-        errorEl.textContent = t('settings.zaiteam.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('zaiteam');
-        await saveSettings({ zaiTeamApiKey: apiKey, zaiTeamOrganizationId: organizationId, zaiTeamProjectId: projectId });
-        keyInput.value = '';
-        orgInput.value = '';
-        projectInput.value = '';
-        renderExternalProviderStatus('zaiteam');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('zaiteam', !externalProviderAccountLinked('zaiteam'));
-        renderExternalProviderStatus('zaiteam');
-      } catch (err) {
-        clearExternalProviderCheckPending('zaiteam');
-        errorEl.textContent = t('settings.zaiteam.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
+    }));
   }
 
   const volcengineToggle = document.getElementById('volcengineSettingsToggle');
@@ -18028,493 +15904,52 @@ function setupCursorAccountUI() {
       await refreshStats({ force: true });
     });
 
-    document.getElementById('volcengineLogoutButton').addEventListener('click', async () => {
-      await saveSettings({
-        volcengineAccessKeyId: '', volcengineSecretAccessKey: '', volcengineRegion: '',
-        volcengineAgentAccessKeyId: '', volcengineAgentSecretAccessKey: '', volcengineAgentRegion: ''
-      });
-      clearExternalProviderCheckPending('volcengine');
-      clearExternalProviderPendingStatus('volcengine');
-      renderExternalProviderStatus('volcengine');
-      await refreshStats({ force: true });
-    });
+    document.getElementById('volcengineLogoutButton').addEventListener('click', () => clearAccountCredential('volcengine'));
 
     document.getElementById('volcengineRefreshButton').addEventListener('click', async () => {
       await refreshStats({ force: true });
     });
 
-    document.getElementById('volcengineCredentialsSubmit').addEventListener('click', async () => {
+    document.getElementById('volcengineCredentialsSubmit').addEventListener('click', async (event) => {
       const accessKeyInput = document.getElementById('volcengineAccessKeyInput');
       const secretInput = document.getElementById('volcengineSecretAccessKeyInput');
       const regionInput = document.getElementById('volcengineRegionInput');
       const agentAccessKeyInput = document.getElementById('volcengineAgentAccessKeyInput');
       const agentSecretInput = document.getElementById('volcengineAgentSecretAccessKeyInput');
       const agentRegionInput = document.getElementById('volcengineAgentRegionInput');
-      const errorEl = document.getElementById('volcengineErrorMessage');
-      errorEl.classList.add('hidden');
       const accessKeyValue = String(accessKeyInput.value || '').trim();
       const secretValue = String(secretInput.value || '').trim();
-      if (!accessKeyValue || (/^AKLT/i.test(accessKeyValue) && !secretValue)) {
-        errorEl.textContent = t('settings.volcengine.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      // Only sent when the user actually filled the override in, so saving the
-      // Coding Plan key again cannot silently wipe a separate Agent account.
+      // Checks only this panel can make: which fields pair with which.
       const agentAccessKeyValue = String(agentAccessKeyInput?.value || '').trim();
       const agentSecretValue = String(agentSecretInput?.value || '').trim();
-      if (agentAccessKeyValue && !agentSecretValue) {
-        errorEl.textContent = t('settings.volcengine.agentSecretRequired');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('volcengine');
-        await saveSettings({
-          volcengineAccessKeyId: accessKeyInput.value,
-          volcengineSecretAccessKey: secretInput.value,
-          volcengineRegion: regionInput.value || 'cn-beijing',
-          ...(agentAccessKeyValue ? {
-            volcengineAgentAccessKeyId: agentAccessKeyValue,
-            volcengineAgentSecretAccessKey: agentSecretValue,
-            volcengineAgentRegion: agentRegionInput?.value || 'cn-beijing'
-          } : {})
-        });
-        accessKeyInput.value = '';
-        secretInput.value = '';
-        if (agentAccessKeyInput) agentAccessKeyInput.value = '';
-        if (agentSecretInput) agentSecretInput.value = '';
+      const pairing = accessKeyValue && /^AKLT/i.test(accessKeyValue) && !secretValue
+        ? 'settings.volcengine.secretRequired'
+        : agentAccessKeyValue && !agentSecretValue ? 'settings.volcengine.agentSecretRequired' : '';
+      if (pairing) {
+        setAccountPanelMessage('volcengine', { key: pairing });
         renderExternalProviderStatus('volcengine');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('volcengine', !externalProviderAccountLinked('volcengine'));
-        renderExternalProviderStatus('volcengine');
-      } catch (err) {
-        clearExternalProviderCheckPending('volcengine');
-        errorEl.textContent = t('settings.volcengine.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const claudeToggle = document.getElementById('claudeSettingsToggle');
-  if (claudeToggle) {
-    claudeToggle.addEventListener('click', () => setExternalAccountExpanded('claude', !state.claudeAccountExpanded));
-    setExternalAccountExpanded('claude', false);
-    renderExternalProviderStatus('claude');
-
-    document.getElementById('claudeOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(claudePlatformUrl());
-    });
-
-    document.getElementById('claudeLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ claudeWebCookie: '' });
-      clearExternalProviderCheckPending('claude');
-      clearExternalProviderPendingStatus('claude');
-      renderExternalProviderStatus('claude');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('claudeRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('claudeWebCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('claudeWebCookieInput');
-      const submitButton = document.getElementById('claudeWebCookieSubmit');
-      const errorEl = document.getElementById('claudeErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.claude.cookieRequired');
-        errorEl.classList.remove('hidden');
         return;
       }
-      if (/[\r\n]/.test(input.value)) {
-        errorEl.textContent = t('settings.claude.cookieInvalidFormat');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      if (submitButton.disabled) return;
-      submitButton.disabled = true;
-      submitButton.textContent = t('settings.common.checking');
-      try {
-        const result = await window.tokenMonitor.claude.saveCookie(input.value);
-        if (result?.superseded) return;
-        if (!result?.ok) {
-          if (result?.errorCode === 'INVALID_CLAUDE_WEB_SESSION_KEY') {
-            errorEl.textContent = t('settings.claude.cookieInvalidFormat');
-          } else if (result?.errorCode === 'CLAUDE_WEB_SOURCE_CHALLENGE') {
-            errorEl.textContent = t('settings.claude.sourceChallenge');
-          } else if (result?.status === 'unauthorized') {
-            errorEl.textContent = t('settings.claude.cookieRejected');
-          } else {
-            errorEl.textContent = t('settings.claude.cookieCheckFailed');
-          }
-          errorEl.classList.remove('hidden');
-          return;
+      await submitAccountCredential(event.currentTarget, 'volcengine', {
+        volcengineAccessKeyId: accessKeyInput.value,
+        volcengineSecretAccessKey: secretInput.value,
+        volcengineRegion: regionInput.value || 'cn-beijing',
+        // Only sent when the user actually filled the override in, so saving the
+        // Coding Plan key again cannot silently wipe a separate Agent account.
+        ...(agentAccessKeyValue ? {
+          volcengineAgentAccessKeyId: agentAccessKeyValue,
+          volcengineAgentSecretAccessKey: agentSecretValue,
+          volcengineAgentRegion: agentRegionInput?.value || 'cn-beijing'
+        } : {})
+      }, {
+        failedKey: 'settings.volcengine.saveFailed',
+        clearInput: () => {
+          accessKeyInput.value = '';
+          secretInput.value = '';
+          if (agentAccessKeyInput) agentAccessKeyInput.value = '';
+          if (agentSecretInput) agentSecretInput.value = '';
         }
-        markExternalProviderCheckPending('claude');
-        await saveSettings({
-          limitProviders: limitProviderSelectionIncluding('claude'),
-          limitsEnabled: true
-        });
-        input.value = '';
-        renderExternalProviderStatus('claude');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('claude', !externalProviderAccountLinked('claude'));
-        renderExternalProviderStatus('claude');
-      } catch (err) {
-        clearExternalProviderCheckPending('claude');
-        errorEl.textContent = t('settings.claude.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      } finally {
-        submitButton.disabled = false;
-        submitButton.textContent = t('settings.claude.saveCookie');
-      }
-    });
-  }
-
-  const qoderToggle = document.getElementById('qoderSettingsToggle');
-  if (qoderToggle) {
-    qoderToggle.addEventListener('click', () => setExternalAccountExpanded('qoder', !state.qoderAccountExpanded));
-    setExternalAccountExpanded('qoder', false);
-    renderExternalProviderStatus('qoder');
-
-    const qoderSiteInput = document.getElementById('qoderSiteInput');
-    if (qoderSiteInput) qoderSiteInput.value = state.settings?.qoderSite === 'cn' ? 'cn' : 'global';
-    updateQoderUsagePageHint();
-    qoderSiteInput?.addEventListener('change', () => {
-      updateQoderUsagePageHint();
-      void saveSettings({ qoderSite: qoderSiteInput.value || 'global' });
-    });
-
-    document.getElementById('qoderOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(qoderPlatformUrl());
-    });
-
-    document.getElementById('qoderLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ qoderCookie: '' });
-      clearExternalProviderCheckPending('qoder');
-      clearExternalProviderPendingStatus('qoder');
-      renderExternalProviderStatus('qoder');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('qoderRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('qoderCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('qoderCookieInput');
-      const siteInput = document.getElementById('qoderSiteInput');
-      const errorEl = document.getElementById('qoderErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.qoder.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('qoder');
-        await saveSettings({ qoderCookie: input.value, qoderSite: siteInput?.value || 'global' });
-        input.value = '';
-        renderExternalProviderStatus('qoder');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('qoder', !externalProviderAccountLinked('qoder'));
-        renderExternalProviderStatus('qoder');
-      } catch (err) {
-        clearExternalProviderCheckPending('qoder');
-        errorEl.textContent = t('settings.qoder.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const traeToggle = document.getElementById('traeSettingsToggle');
-  if (traeToggle) {
-    traeToggle.addEventListener('click', () => setExternalAccountExpanded('trae', !state.traeAccountExpanded));
-    setExternalAccountExpanded('trae', false);
-    renderExternalProviderStatus('trae');
-
-    document.getElementById('traeOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://www.trae.cn');
-    });
-    document.getElementById('traeLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ traeAccessToken: '', traeDeviceId: '' });
-      clearExternalProviderCheckPending('trae');
-      clearExternalProviderPendingStatus('trae');
-      renderExternalProviderStatus('trae');
-      await refreshStats({ force: true });
-    });
-    document.getElementById('traeRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-    document.getElementById('traeTokenSubmit').addEventListener('click', async () => {
-      const tokenInput = document.getElementById('traeTokenInput');
-      const deviceIdInput = document.getElementById('traeDeviceIdInput');
-      const errorEl = document.getElementById('traeErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(tokenInput.value || '').trim()) {
-        errorEl.textContent = t('settings.trae.missingAuthorization');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('trae');
-        await saveSettings({
-          traeAccessToken: tokenInput.value,
-          traeDeviceId: deviceIdInput.value,
-          limitProviders: limitProviderSelectionIncluding('trae'),
-          limitsEnabled: true
-        });
-        tokenInput.value = '';
-        deviceIdInput.value = '';
-        renderExternalProviderStatus('trae');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('trae', !externalProviderAccountLinked('trae'));
-        renderExternalProviderStatus('trae');
-      } catch (err) {
-        clearExternalProviderCheckPending('trae');
-        errorEl.textContent = t('settings.trae.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const zedToggle = document.getElementById('zedSettingsToggle');
-  if (zedToggle) {
-    zedToggle.addEventListener('click', () => setExternalAccountExpanded('zed', !state.zedAccountExpanded));
-    setExternalAccountExpanded('zed', false);
-    renderExternalProviderStatus('zed');
-
-    document.getElementById('zedOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(zedPlatformUrl());
-    });
-
-    document.getElementById('zedLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ zedCookie: '' });
-      clearExternalProviderCheckPending('zed');
-      clearExternalProviderPendingStatus('zed');
-      renderExternalProviderStatus('zed');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zedRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('zedCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('zedCookieInput');
-      const errorEl = document.getElementById('zedErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.zed.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('zed');
-        await saveSettings({
-          zedCookie: input.value,
-          limitProviders: limitProviderSelectionIncluding('zed'),
-          limitsEnabled: true
-        });
-        input.value = '';
-        renderExternalProviderStatus('zed');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('zed', !externalProviderAccountLinked('zed'));
-        renderExternalProviderStatus('zed');
-      } catch (err) {
-        clearExternalProviderCheckPending('zed');
-        errorEl.textContent = t('settings.zed.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const commandcodeToggle = document.getElementById('commandcodeSettingsToggle');
-  if (commandcodeToggle) {
-    commandcodeToggle.addEventListener('click', () => setExternalAccountExpanded('commandcode', !state.commandcodeAccountExpanded));
-    setExternalAccountExpanded('commandcode', false);
-    renderExternalProviderStatus('commandcode');
-
-    document.getElementById('commandcodeOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(commandcodePlatformUrl());
-    });
-
-    document.getElementById('commandcodeLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ commandcodeCookie: '' });
-      clearExternalProviderCheckPending('commandcode');
-      clearExternalProviderPendingStatus('commandcode');
-      renderExternalProviderStatus('commandcode');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('commandcodeRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('commandcodeCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('commandcodeCookieInput');
-      const errorEl = document.getElementById('commandcodeErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.commandcode.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('commandcode');
-        await saveSettings({
-          commandcodeCookie: input.value,
-          limitProviders: limitProviderSelectionIncluding('commandcode'),
-          limitsEnabled: true
-        });
-        input.value = '';
-        renderExternalProviderStatus('commandcode');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('commandcode', !externalProviderAccountLinked('commandcode'));
-        renderExternalProviderStatus('commandcode');
-      } catch (err) {
-        clearExternalProviderCheckPending('commandcode');
-        errorEl.textContent = t('settings.commandcode.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const alibabaToggle = document.getElementById('alibabaSettingsToggle');
-  if (alibabaToggle) {
-    alibabaToggle.addEventListener('click', () => setExternalAccountExpanded('alibaba', !state.alibabaAccountExpanded));
-    setExternalAccountExpanded('alibaba', false);
-    renderExternalProviderStatus('alibaba');
-
-    const variantInput = document.getElementById('alibabaVariantInput');
-    if (variantInput) {
-      variantInput.value = alibabaSavedVariant();
-      variantInput.addEventListener('change', async () => {
-        renderAlibabaVariantHints();
-        // Switching console switches account: the stored cookie belongs to the
-        // console it was copied from and cannot authenticate the other one.
-        // Clearing it here is honest about that instead of leaving a saved
-        // credential that will only ever answer `unauthorized`.
-        await saveSettings({ alibabaVariant: variantInput.value || 'cn', alibabaCookie: '' });
-        clearExternalProviderCheckPending('alibaba');
-        clearExternalProviderPendingStatus('alibaba');
-        renderExternalProviderStatus('alibaba');
-        await refreshStats({ force: true });
       });
-    }
-    renderAlibabaVariantHints();
-
-    document.getElementById('alibabaOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(alibabaPlatformUrl());
-    });
-    document.getElementById('alibabaLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ alibabaCookie: '' });
-      clearExternalProviderCheckPending('alibaba');
-      clearExternalProviderPendingStatus('alibaba');
-      renderExternalProviderStatus('alibaba');
-      await refreshStats({ force: true });
-    });
-    document.getElementById('alibabaRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-    document.getElementById('alibabaCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('alibabaCookieInput');
-      const errorEl = document.getElementById('alibabaErrorMessage');
-      errorEl.classList.add('hidden');
-      // The main process rejects a header with no name=value pair, so catching
-      // it here keeps a mis-paste from being reported back as "saved" while the
-      // stored value is silently empty.
-      // Same anchored rule as normalizeAlibabaCookieHeader in the main process.
-      // A looser test here lets a pasted URL pass, save as empty, and surface as
-      // "Not configured" instead of telling the user the paste was wrong.
-      if (!/(?:^|;\s*)[A-Za-z0-9!#$%&'*+\-.^_`|~]+=/.test(alibabaCookieCandidate(input.value))) {
-        errorEl.textContent = t('settings.alibaba.invalidCookie');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('alibaba');
-        renderExternalProviderStatus('alibaba');
-        await saveSettings({
-          alibabaCookie: input.value,
-          alibabaVariant: alibabaSelectedVariant(),
-          limitProviders: limitProviderSelectionIncluding('alibaba'),
-          limitsEnabled: true
-        });
-        input.value = '';
-        renderExternalProviderStatus('alibaba');
-        await refreshStats({ force: true });
-        renderExternalProviderStatus('alibaba');
-      } catch (err) {
-        clearExternalProviderCheckPending('alibaba');
-        renderExternalProviderStatus('alibaba');
-        errorEl.textContent = t('settings.alibaba.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-  }
-
-  const ollamaToggle = document.getElementById('ollamaSettingsToggle');
-  if (ollamaToggle) {
-    ollamaToggle.addEventListener('click', () => setExternalAccountExpanded('ollama', !state.ollamaAccountExpanded));
-    setExternalAccountExpanded('ollama', false);
-    renderExternalProviderStatus('ollama');
-
-    document.getElementById('ollamaOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(ollamaPlatformUrl());
-    });
-    document.getElementById('ollamaLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ ollamaCookie: '' });
-      clearExternalProviderCheckPending('ollama');
-      clearExternalProviderPendingStatus('ollama');
-      renderExternalProviderStatus('ollama');
-      await refreshStats({ force: true });
-    });
-    document.getElementById('ollamaRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-    document.getElementById('ollamaCookieSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('ollamaCookieInput');
-      const errorEl = document.getElementById('ollamaErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.ollama.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('ollama');
-        renderExternalProviderStatus('ollama');
-        const validation = await window.tokenMonitor.ollama.validateCookie(input.value);
-        if (!validation?.ok) {
-          clearExternalProviderCheckPending('ollama');
-          renderExternalProviderStatus('ollama');
-          errorEl.textContent = ollamaValidationError(validation);
-          errorEl.classList.remove('hidden');
-          return;
-        }
-        await saveSettings({
-          ollamaCookie: input.value,
-          limitProviders: limitProviderSelectionIncluding('ollama'),
-          limitsEnabled: true
-        });
-        if (!state.settings?.ollamaCookieConfigured) {
-          clearExternalProviderCheckPending('ollama');
-          renderExternalProviderStatus('ollama');
-          errorEl.textContent = t('settings.ollama.validationInvalid');
-          errorEl.classList.remove('hidden');
-          return;
-        }
-        input.value = '';
-        renderExternalProviderStatus('ollama');
-      } catch (err) {
-        clearExternalProviderCheckPending('ollama');
-        renderExternalProviderStatus('ollama');
-        errorEl.textContent = t('settings.ollama.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
     });
   }
 
@@ -18528,65 +15963,26 @@ function setupCursorAccountUI() {
       window.tokenMonitor.openExternal(kimiPlatformUrl());
     });
 
-    document.getElementById('kimiLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ kimiApiKey: '', kimiWebAccessToken: '' });
-      clearExternalProviderCheckPending('kimi');
-      clearExternalProviderPendingStatus('kimi');
-      renderExternalProviderStatus('kimi');
-      await refreshStats({ force: true });
-    });
+    document.getElementById('kimiLogoutButton').addEventListener('click', () => clearAccountCredential('kimi'));
 
     document.getElementById('kimiRefreshButton').addEventListener('click', async () => {
       await refreshStats({ force: true });
     });
 
-    document.getElementById('kimiWebAccessTokenSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('kimiWebAccessTokenInput');
-      const errorEl = document.getElementById('kimiErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.kimi.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('kimi');
-        await saveSettings({ kimiWebAccessToken: input.value });
-        input.value = '';
-        renderExternalProviderStatus('kimi');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('kimi', !externalProviderAccountLinked('kimi'));
-        renderExternalProviderStatus('kimi');
-      } catch (err) {
-        clearExternalProviderCheckPending('kimi');
-        errorEl.textContent = t('settings.kimi.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
-
-    document.getElementById('kimiApiKeySubmit').addEventListener('click', async () => {
-      const input = document.getElementById('kimiApiKeyInput');
-      const errorEl = document.getElementById('kimiErrorMessage');
-      errorEl.classList.add('hidden');
-      if (!String(input.value || '').trim()) {
-        errorEl.textContent = t('settings.kimi.statusNotSet');
-        errorEl.classList.remove('hidden');
-        return;
-      }
-      try {
-        markExternalProviderCheckPending('kimi');
-        await saveSettings({ kimiApiKey: input.value });
-        input.value = '';
-        renderExternalProviderStatus('kimi');
-        await refreshStats({ force: true });
-        setExternalAccountExpanded('kimi', !externalProviderAccountLinked('kimi'));
-        renderExternalProviderStatus('kimi');
-      } catch (err) {
-        clearExternalProviderCheckPending('kimi');
-        errorEl.textContent = t('settings.kimi.saveFailed', { message: err.message });
-        errorEl.classList.remove('hidden');
-      }
-    });
+    // Two independent lanes: each submit sends only its own credential, so
+    // saving one never blanks the other.
+    for (const [submitId, inputId, field] of [
+      ['kimiApiKeySubmit', 'kimiApiKeyInput', 'kimiApiKey'],
+      ['kimiWebAccessTokenSubmit', 'kimiWebAccessTokenInput', 'kimiWebAccessToken']
+    ]) {
+      document.getElementById(submitId).addEventListener('click', (event) => {
+        const input = document.getElementById(inputId);
+        return submitAccountCredential(event.currentTarget, 'kimi', { [field]: input.value }, {
+          failedKey: 'settings.kimi.saveFailed',
+          clearInput: () => { input.value = ''; }
+        });
+      });
+    }
   }
 
   const antigravityToggle = document.getElementById('antigravitySettingsToggle');
@@ -18735,13 +16131,9 @@ function setupCursorAccountUI() {
     setCopilotManualExpanded(false);
     renderCopilotStatus();
 
-    const errorEl = document.getElementById('copilotErrorMessage');
     const setCopilotError = (message) => {
       state.copilotErrorMessage = message || '';
-      if (errorEl) {
-        errorEl.textContent = state.copilotErrorMessage;
-        errorEl.classList.toggle('hidden', !state.copilotErrorMessage);
-      }
+      renderCopilotStatus();
     };
 
     window.tokenMonitor.copilot?.onLoginStatus?.((status) => {
@@ -18867,21 +16259,11 @@ function initSettingsAnimationWrappers() {
     '.app-update-notes-details',
     '.hub-mode-fields',
     '.presence-feature-body',
-    '#claudeManualPanel',
-    '#cursorManualPanel',
     '#opencodeManualPanel',
-    '#deepseekManualPanel',
-    '#minimaxManualPanel',
-    '#zaiManualPanel',
-    '#zaiteamManualPanel',
-    '#volcengineManualPanel',
-    '#qoderManualPanel',
-    '#traeManualPanel',
-    '#zedManualPanel',
-    '#commandcodeManualPanel',
+    '#cursorManualPanel',
     '#kimiManualPanel',
-    '#ollamaManualPanel',
-    '#alibabaManualPanel'
+    '.credential-manual-panel',
+    '#volcengineManualPanel'
   ].join(', ');
 
   document.querySelectorAll(selectors).forEach(el => {
@@ -18893,9 +16275,9 @@ function initSettingsAnimationWrappers() {
       ? 'cursor-settings-details-inner'
       : el.classList.contains('settings-section-details')
         ? 'settings-section-details-inner'
-        : 'accordion-animation-inner';
+        : '';
 
-    inner.className = `accordion-animation-inner ${innerSpecificClass}`;
+    inner.className = ['accordion-animation-inner', innerSpecificClass].filter(Boolean).join(' ');
     while (el.firstChild) {
       inner.appendChild(el.firstChild);
     }
@@ -18908,4 +16290,5 @@ initSettingsAnimationWrappers();
 setupSettingsSections();
 setupCursorAccountUI();
 setupCustomPricingUI();
+setupModelAliasesUI();
 init();

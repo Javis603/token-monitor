@@ -107,15 +107,28 @@ test('the seed reports the project setting it was built under', () => {
 
 test('the cold-start seed accepts an anchor configured for Qoder CN', () => {
   const homeDir = '/tmp/token-monitor-qodercn-home';
-  const qoderCnDbPath = qoderCnDataPaths({ homeDir }).dbPaths[0];
+  const cnPaths = qoderCnDataPaths({ homeDir });
   const clients = 'claude,qodercn';
   const anchor = anchorFixture({
-    configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, qoderCnDbPath)
+    configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, cnPaths.dbPaths[0], cnPaths.projectsDir)
   });
 
   const record = deviceRecordFromAnchor(anchor, seedOptions({ clients, homeDir }));
   assert.equal(record.today.totalTokens, 1_000);
   assert.deepEqual(record.trackedClients, ['claude', 'qodercn']);
+});
+
+test('the seed refuses a Qoder CN anchor that predates the JSONL source', () => {
+  // A DB-only fingerprint cannot cover transcript usage: reusing it would show
+  // month/allTime from before the storage migration while only today's JSONL
+  // is scanned. The projects dir must be part of the trusted fingerprint.
+  const homeDir = '/tmp/token-monitor-qodercn-home';
+  const cnPaths = qoderCnDataPaths({ homeDir });
+  const clients = 'claude,qodercn';
+  const legacyAnchor = anchorFixture({
+    configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, cnPaths.dbPaths[0])
+  });
+  assert.equal(deviceRecordFromAnchor(legacyAnchor, seedOptions({ clients, homeDir })), null);
 });
 
 test('the seed carries local-only native Reasonix views when the anchor has them', () => {

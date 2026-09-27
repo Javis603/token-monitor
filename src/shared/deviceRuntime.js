@@ -59,9 +59,11 @@ function createDeviceRuntime(options = {}, deps = {}) {
     const configured = {
       ...nextUsageOptions,
       ...runtimeOptions,
-      onUpdate(summary, reason) {
+      // A worker-hosted runtime (usageHost.js) has already run the transform
+      // where the session archive lives, and says so in `meta`.
+      onUpdate(summary, reason, meta) {
         if (!active || generation !== usageGeneration) return;
-        const transformed = options.transformUsage
+        const transformed = options.transformUsage && meta?.transformed !== true
           ? options.transformUsage(summary, reason, { preview: false })
           : summary;
         deviceState.updateUsage(transformed, reason, { epoch, preview: false });
@@ -82,9 +84,9 @@ function createDeviceRuntime(options = {}, deps = {}) {
       }
     };
     if (options.progressive === true) {
-      configured.onPreview = (summary, reason = 'progress') => {
+      configured.onPreview = (summary, reason = 'progress', meta) => {
         if (!active || generation !== usageGeneration) return;
-        const transformed = options.transformUsage
+        const transformed = options.transformUsage && meta?.transformed !== true
           ? options.transformUsage(summary, reason, { preview: true })
           : summary;
         deviceState.updateUsage(transformed, reason, { epoch, preview: true });

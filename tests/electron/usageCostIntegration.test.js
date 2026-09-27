@@ -6,12 +6,14 @@ const path = require('node:path');
 const vm = require('node:vm');
 const test = require('node:test');
 const policy = require('../../src/electron/usageCostPolicy');
+const presentation = require('../../src/electron/modelAliasPresentation');
+const { createStatsPresentationCache } = require('../../src/electron/statsPublisher');
 const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 const rules = [{ client: 'codex', modelPrefix: 'chatgpt-web/', included: false }];
 function mainFunction(name, dependencies) {
   const body = source.match(new RegExp(`(?:async )?function ${name}\\([^]*?\\n\\}`))?.[0];
   assert.ok(body);
-  return vm.runInNewContext(`(${body})`, { ...policy, ...dependencies });
+  return vm.runInNewContext(`(${body})`, { ...policy, ...presentation, ...dependencies });
 }
 
 test('tool preference rendering reacts independently to cost rules and custom scan paths', () => {
@@ -43,14 +45,98 @@ test('tool preference rendering reacts independently to cost rules and custom sc
   assert.equal(signature(), initial);
 });
 
+test('normalized cost rules remain available to the renderer settings UI', () => {
+  const settings = { usageCostRules: policy.normalizeUsageCostRules(rules) };
+  const project = mainFunction('settingsForRenderer', {
+    settings,
+    credentialSettingsForRenderer: () => ({}),
+    rendererOmittedAccountKeys: () => [],
+    trayMenuLocale: () => 'en',
+    effectiveSubscriptions: () => [],
+    subscriptionsAreShared: () => false,
+    currentHubIdentity: () => '',
+    subscriptionsDocumentFor: () => null,
+    pendingOrphanedSubscriptions: () => [],
+    accountFieldProjection: () => ({}),
+    codexAccountsForRenderer: () => [],
+    antigravityAccountsForRenderer: () => [],
+    mimoAccountsForRenderer: () => [],
+    accountStatusProjection: () => ({}),
+    limitAccountFormsForRenderer: () => ({}),
+    effectiveRates: {},
+    resolveEffectiveRates: () => ({}),
+    rateCache: null,
+    currentWindowToggleShortcutStatus: () => null,
+    process: { env: {} }
+  });
+  assert.equal(JSON.stringify(project().usageCostRules), JSON.stringify(settings.usageCostRules));
+});
+
 test('main process projects cached stats and restoring the setting needs no rescan', () => {
   const raw = { periods: { today: { totalTokens: 100, costUsd: 9, clientCosts: { codex: 9 }, modelCosts: { 'chatgpt-web/pro': 9 }, clientModelCosts: { codex: { 'chatgpt-web/pro': 9 } } } } };
   const settings = { usageCostRules: rules };
-  const project = mainFunction('electronPresentationStats', { settings, mode: 'local', projectLimitStatsForDisplay: (stats) => stats });
+  const project = mainFunction('electronPresentationStats', {
+    settings,
+    syncProvenanceActive: () => false,
+    projectLimitStatsForDisplay: (stats) => stats,
+    presentationCache: createStatsPresentationCache()
+  });
   assert.equal(project(raw).periods.today.costUsd, 0);
   assert.equal(raw.periods.today.costUsd, 9);
   settings.usageCostRules = [];
   assert.equal(project(raw), raw);
+});
+
+test('cost rules match raw model IDs before display aliases are applied', () => {
+  const raw = { periods: { today: { totalTokens: 100, costUsd: 9, clientCosts: { codex: 9 }, modelCosts: { 'chatgpt-web/extra-high': 9 }, clientModelCosts: { codex: { 'chatgpt-web/extra-high': 9 } } } } };
+  const settings = {
+    usageCostRules: [{ client: 'codex', modelPrefix: 'chatgpt-web/', included: true, models: { 'chatgpt-web/extra-high': false } }],
+    modelAliases: { 'chatgpt-web/extra-high': 'web-extra-high' },
+    modelAliasGrouping: 'off'
+  };
+  const project = mainFunction('electronPresentationStats', {
+    settings,
+    syncProvenanceActive: () => false,
+    projectLimitStatsForDisplay: (stats) => stats,
+    presentationCache: createStatsPresentationCache()
+  });
+  const result = project(raw);
+  assert.equal(result.periods.today.costUsd, 0);
+  assert.deepEqual(result.periods.today.modelCosts, { 'web-extra-high': 0 });
+  assert.equal(raw.periods.today.costUsd, 9);
+});
+
+test('pulled all-time sessions use the same cost and alias projection', () => {
+  const raw = {
+    periods: {
+      allTime: {
+        sessions: {
+          one: {
+            client: 'codex',
+            costUsd: 9,
+            models: { 'chatgpt-web/pro': 100 },
+            modelCosts: { 'chatgpt-web/pro': 9 }
+          }
+        }
+      }
+    }
+  };
+  const settings = {
+    usageCostRules: rules,
+    modelAliases: { 'chatgpt-web/pro': 'web-pro' },
+    modelAliasGrouping: 'off'
+  };
+  const project = mainFunction('rendererAllTimeSessions', {
+    settings,
+    allTimeSessionsCache: createStatsPresentationCache(),
+    completeLocalSyncStats: (stats) => stats,
+    snapshotLocalDevices: new WeakMap(),
+    mergedLocalAllTimeSessions: () => ({})
+  });
+  const sessions = project(raw);
+  assert.equal(sessions.one.costUsd, 0);
+  assert.deepEqual(sessions.one.models, { 'web-pro': 100 });
+  assert.equal(raw.periods.allTime.sessions.one.costUsd, 9);
 });
 
 test('dashboard history and per-device fixed periods use policy; export bypass stays raw', async () => {

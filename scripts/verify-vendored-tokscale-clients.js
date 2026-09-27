@@ -29,11 +29,11 @@ const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const { resolveManifestEntry, resolveTargetBinPath, loadManifest, manifestMode } = require('./vendoredTokscale');
 const { parseSupportedClients } = require('../src/shared/tokscaleCapabilities');
-const { DEFAULT_CLIENTS, PARSE_LOCAL_CLIENTS } = require(path.join(__dirname, '..', 'src', 'shared', 'clientTracking'));
+const { KNOWN_CLIENTS, PARSE_LOCAL_CLIENTS } = require(path.join(__dirname, '..', 'src', 'shared', 'clientTracking'));
 const { tokscaleClientFilter } = require(path.join(__dirname, '..', 'src', 'shared', 'collector'));
 
 // Clients Token Monitor parses itself rather than through tokscale — see the
-// "Adding a tracked client" table in AGENTS.md (parse_local clients). These
+// "Adding a tracked client" table in docs/providers/README.md (parse_local clients). These
 // are expected to be absent from tokscale's own --client list; everything
 // else in DEFAULT_CLIENTS must be a client tokscale genuinely recognizes.
 const LOCALLY_PARSED_CLIENTS = new Set(PARSE_LOCAL_CLIENTS);
@@ -57,7 +57,12 @@ function verifyVendoredTokscaleClients({
   const { key, entry } = resolveEntry(manifest);
   const binPath = resolveTarget(entry);
 
-  const tokscaleOnlyClients = DEFAULT_CLIENTS.split(',').filter((client) => !LOCALLY_PARSED_CLIENTS.has(client));
+  // KNOWN_CLIENTS, not DEFAULT_CLIENTS: an opt-in client (qodercn) sends the
+  // same --client value the moment a user enables it, and tokscale exits 2 on
+  // an id it does not recognize, so a binary missing one breaks that client's
+  // scans outright. Scoping this to the default-on list would leave every
+  // opt-in client — and its alias sub-sources — unguarded.
+  const tokscaleOnlyClients = KNOWN_CLIENTS.split(',').filter((client) => !LOCALLY_PARSED_CLIENTS.has(client));
   const clients = tokscaleClientFilter(tokscaleOnlyClients.join(',')).split(',');
   const supported = supportedClients(binPath, spawn);
   const unsupported = clients.filter((client) => !supported.has(client));
@@ -69,7 +74,7 @@ function verifyVendoredTokscaleClients({
     );
   }
 
-  log(`Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): all ${clients.length} effective client ids (default clients plus their tokscale aliases) are supported (tokscale-native or locally parsed).`);
+  log(`Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): all ${clients.length} effective client ids (known clients plus their tokscale aliases) are supported (tokscale-native or locally parsed).`);
   return { key, mode, clients: clients.length };
 }
 

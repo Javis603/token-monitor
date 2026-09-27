@@ -226,6 +226,14 @@ test('detectProcessInfo (win32) reports unavailable for a quoted desktop LS with
   assert.equal(err.status, 'unavailable');
 });
 
+test('detectProcessInfo (win32) reports missing CSRF for a tokenless agy hub', async () => {
+  const stdout = '9001 C:\\Users\\j\\.antigravity\\agy.exe --hub --hub-port=55555 --app_data_dir=antigravity\n';
+  const err = await probe.detectProcessInfo({ platform: 'win32', spawn: fakeSpawn(stdout) })
+    .catch((e) => e);
+  assert.equal(err.status, 'unavailable');
+  assert.match(err.message, /missing --csrf_token/);
+});
+
 test('listeningPorts (posix) extracts ports from lsof output', async () => {
   const stdout = [
     'COMMAND     PID  USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME',
@@ -308,6 +316,33 @@ test('callLs throws sourceRateLimited on 429', async () => {
 
 test('callLs throws unavailable on 500', async () => {
   const { port, close } = await startStubHttpServer((req, res) => { res.writeHead(500); res.end(); });
+  try {
+    const err = await probe.callLs({ scheme: 'http', port, csrfToken: 'tok', method: 'GetUserStatus', body: {} }).catch((e) => e);
+    assert.equal(err.status, 'unavailable');
+  } finally {
+    await close();
+  }
+});
+
+test('callLs classifies a CSRF-mentioning error body as unauthorized even on a non-401/403 status', async () => {
+  const { port, close } = await startStubHttpServer((req, res) => {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ code: 'invalid_argument', message: 'missing CSRF token' }));
+  });
+  try {
+    const err = await probe.callLs({ scheme: 'http', port, csrfToken: '', method: 'RetrieveUserQuotaSummary', body: {} }).catch((e) => e);
+    assert.equal(err.status, 'unauthorized');
+    assert.equal(err.httpStatus, 400);
+  } finally {
+    await close();
+  }
+});
+
+test('callLs falls back to statusFromHttpCode when a non-200 body does not mention csrf', async () => {
+  const { port, close } = await startStubHttpServer((req, res) => {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ code: 'invalid_argument', message: 'bad request' }));
+  });
   try {
     const err = await probe.callLs({ scheme: 'http', port, csrfToken: 'tok', method: 'GetUserStatus', body: {} }).catch((e) => e);
     assert.equal(err.status, 'unavailable');
@@ -631,6 +666,40 @@ test('probe resolves same-source process endpoints concurrently', async () => {
   assert.equal(result.sourceDetail, 'app');
 });
 
+test('probe returns a same-source grouped success without waiting for sibling discovery', async () => {
+  let siblingDiscoveryStarted = false;
+  const result = await probe.probe({
+    probeTimeoutMs: 500,
+    detectProcessInfos: async () => [
+      { pid: 10, kind: 'cli', csrfToken: 'hub-token', hubPort: 55555, extensionPort: null },
+      { pid: 20, kind: 'cli', csrfToken: '', hubPort: null, extensionPort: null }
+    ],
+    listeningPorts: (pid) => {
+      if (pid === 10) return Promise.resolve([]);
+      siblingDiscoveryStarted = true;
+      return new Promise(() => {});
+    },
+    callLs: async ({ port, method }) => {
+      if (port !== 55555) throw probe._errorWithStatus('unavailable', 'unexpected port');
+      if (method === 'GetUnleashData') return {};
+      if (method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.4 }]
+          }]
+        };
+      }
+      if (method === 'GetUserStatus') return { userStatus: { email: 'hub@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'unexpected method');
+    }
+  });
+
+  assert.equal(siblingDiscoveryStarted, true);
+  assert.equal(result.sourceDetail, 'cli');
+  assert.equal(result.accountEmail, 'hub@example.com');
+});
+
 test('probe enforces one provider-wide deadline and abort signal', async () => {
   let sawAbort = false;
   const startedAt = Date.now();
@@ -779,4 +848,371 @@ test('probe surfaces notConfigured from detectProcessInfo', async () => {
     detectProcessInfo: async () => { throw probe._errorWithStatus('notConfigured', 'not running'); }
   }).catch((e) => e);
   assert.equal(err.status, 'notConfigured');
+});
+
+test('parseProcessLine requires --csrf_token for agy.exe in hub mode without token', () => {
+  const line = '9001 C:\\Users\\j\\.antigravity\\agy.exe --hub --hub-port=55555 --app_data_dir=antigravity';
+  assert.equal(probe._parseProcessLine(line), null);
+});
+
+test('parseProcessLine extracts --hub-port and requires CSRF for hub-mode CLI with token', () => {
+  const line = '9001 C:\\Users\\j\\.antigravity\\agy.exe --hub --hub-port=55555 --csrf_token=abc123 --app_data_dir=antigravity';
+  const info = probe._parseProcessLine(line);
+  assert.equal(info.pid, 9001);
+  assert.equal(info.kind, 'cli');
+  assert.equal(info.hubPort, 55555);
+  assert.equal(info.csrfToken, 'abc123');
+});
+
+test('parseProcessLine allows bare agy CLI without hub flag and without CSRF (legacy behavior)', () => {
+  const line = '60123 /Users/example/.antigravity/bin/agy language-server --stdio';
+  const info = probe._parseProcessLine(line);
+  assert.equal(info.pid, 60123);
+  assert.equal(info.kind, 'cli');
+  assert.equal(info.csrfToken, '');
+  assert.equal(info.hubPort, null);
+});
+
+test('parseProcessLine returns null for interactive agy agent sessions', () => {
+  const line = '28668 "C:\\Users\\yuwell\\AppData\\Local\\agy\\bin\\agy.exe" --mode=accept-edits --dangerously-skip-permissions';
+  assert.equal(probe._parseProcessLine(line), null);
+});
+
+// Port discovery is a fallback, not a gate: it fails for reasons that say
+// nothing about the process (permission-blocked lsof/Get-NetTCPConnection, a
+// missing binary, or no listener yet). When the command line already named an
+// explicit --hub-port, that endpoint must still be probed.
+test('probe still tries an explicit --hub-port when port discovery throws', async () => {
+  const calledPorts = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    listeningPorts: async () => { throw new Error('lsof failed: operation not permitted'); },
+    callLs: async ({ port, method }) => {
+      calledPorts.push(port);
+      if (port === 55555 && method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.4 }]
+          }]
+        };
+      }
+      if (port === 55555 && method === 'GetUserStatus') return { userStatus: { email: 'hub@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'hub endpoint unavailable');
+    }
+  });
+
+  assert.ok(calledPorts.includes(55555), 'the explicit hub port must be probed');
+  assert.equal(result.sourceDetail, 'cli');
+  assert.equal(result.accountEmail, 'hub@example.com');
+});
+
+// The ordering matters, not just the candidate order. Port discovery shares the
+// provider-wide deadline, so a slow or hanging lsof/Get-NetTCPConnection can
+// consume all of it; awaiting discovery before probing would then leave the
+// explicit hub port untried even though the deadline guard is satisfied by the
+// rejection. This is the case the immediate-throw test above does not reach.
+test('probe reaches a reachable explicit --hub-port while port discovery is still hanging', async () => {
+  const calledPorts = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    // Never settles: the process-wide deadline is the only thing that ends it.
+    listeningPorts: () => new Promise(() => {}),
+    callLs: async ({ port, method }) => {
+      calledPorts.push(port);
+      if (port !== 55555) throw probe._errorWithStatus('unavailable', 'unexpected port');
+      if (method === 'GetUnleashData') return {};
+      if (method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.4 }]
+          }]
+        };
+      }
+      if (method === 'GetUserStatus') return { userStatus: { email: 'hub@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'hub endpoint unavailable');
+    },
+    probeTimeoutMs: 1500
+  });
+
+  assert.ok(calledPorts.includes(55555), 'the explicit hub port must be probed before discovery settles');
+  assert.equal(result.sourceDetail, 'cli');
+  assert.equal(result.accountEmail, 'hub@example.com');
+});
+
+test('probe starts reachable hub quota before hanging discovery consumes its budget', async () => {
+  let hubPreflightCalls = 0;
+  let hubQuotaCalls = 0;
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    listeningPorts: () => new Promise(() => {}),
+    callLs: async ({ port, method }) => {
+      if (port !== 55555) throw probe._errorWithStatus('unavailable', 'unexpected port');
+      if (method === 'GetUnleashData') {
+        hubPreflightCalls += 1;
+        return {};
+      }
+      if (method === 'RetrieveUserQuotaSummary') {
+        hubQuotaCalls += 1;
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.4 }]
+          }]
+        };
+      }
+      if (method === 'GetUserStatus') return { userStatus: { email: 'hub@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'hub endpoint unavailable');
+    },
+    probeTimeoutMs: 1500
+  });
+
+  assert.equal(hubPreflightCalls, 1, 'a resolved hub is not preflighted again');
+  assert.equal(hubQuotaCalls, 1);
+  assert.equal(result.accountEmail, 'hub@example.com');
+});
+
+// Discovery stays the fallback: a dead explicit hub port must not stop the
+// discovered listener from being probed.
+test('probe falls back to discovered ports when the explicit hub port is unreachable', async () => {
+  const calledPorts = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    listeningPorts: async () => [60000],
+    callLs: async ({ port, method }) => {
+      calledPorts.push(port);
+      if (port === 55555) throw probe._errorWithStatus('unavailable', 'hub port closed');
+      if (port === 60000 && method === 'GetUnleashData') return {};
+      if (port === 60000 && method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.3 }]
+          }]
+        };
+      }
+      if (port === 60000 && method === 'GetUserStatus') return { userStatus: { email: 'discovered@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'endpoint unavailable');
+    },
+    probeTimeoutMs: 2000
+  });
+
+  assert.ok(calledPorts.includes(55555), 'the explicit hub port is tried first');
+  assert.ok(calledPorts.includes(60000), 'the discovered port is still used as fallback');
+  assert.equal(result.accountEmail, 'discovered@example.com');
+});
+
+// resolveWorkingEndpoint() treats any HTTP response to GetUnleashData as
+// reachability success, deliberately, because the lightweight RPC may simply be
+// unsupported. That is not proof the quota RPCs work, so a hub port that answers
+// the preflight must not remove the discovered candidates from the quota stage.
+test('probe still tries discovered ports when the hub port answers the preflight but cannot serve quota', async () => {
+  const calledPorts = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    listeningPorts: async () => [60000],
+    callLs: async ({ port, method }) => {
+      calledPorts.push(port);
+      if (port === 55555) {
+        // Reachable, but the lightweight RPC is unsupported.
+        if (method === 'GetUnleashData') {
+          const error = probe._errorWithStatus('unavailable', 'unsupported');
+          error.httpStatus = 404;
+          throw error;
+        }
+        throw probe._errorWithStatus('unavailable', 'quota unavailable');
+      }
+      if (port === 60000 && method === 'GetUnleashData') return {};
+      if (port === 60000 && method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.25 }]
+          }]
+        };
+      }
+      if (port === 60000 && method === 'GetUserStatus') return { userStatus: { email: 'discovered@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'endpoint unavailable');
+    },
+    probeTimeoutMs: 2000
+  });
+
+  assert.ok(calledPorts.includes(60000), 'the discovered port must still be reached once the hub cannot serve quota');
+  assert.equal(result.accountEmail, 'discovered@example.com');
+});
+
+// A failed lightweight preflight lowers the explicit hub's priority, but it is
+// not proof that the quota RPC is unavailable. Keep it after resolved discovered
+// listeners so quota retrieval can still use it as a last resort.
+test('probe keeps a failed-preflight hub as a last-resort quota candidate', async () => {
+  const calls = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    listeningPorts: async () => [60000],
+    callLs: async ({ port, method }) => {
+      calls.push(`${port}:${method}`);
+      if (port === 55555) {
+        if (method === 'GetUnleashData') {
+          throw probe._errorWithStatus('unavailable', 'lightweight preflight unavailable');
+        }
+        if (method === 'RetrieveUserQuotaSummary') {
+          return {
+            groups: [{
+              displayName: 'Gemini Models',
+              buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.3 }]
+            }]
+          };
+        }
+        if (method === 'GetUserStatus') return { userStatus: { email: 'hub-quota@example.com' } };
+      }
+      if (port === 60000 && method === 'GetUnleashData') return {};
+      throw probe._errorWithStatus('unavailable', 'discovered quota unavailable');
+    },
+    probeTimeoutMs: 2000
+  });
+
+  assert.ok(
+    calls.includes('55555:RetrieveUserQuotaSummary'),
+    'the failed-preflight hub remains available to the quota stage'
+  );
+  assert.equal(result.accountEmail, 'hub-quota@example.com');
+});
+
+// The mirror of the discovery-hang case: a hub port that blackholes (stale entry,
+// firewall drop) must not consume the whole provider deadline and lock out a
+// healthy discovered listener.
+test('probe still reaches a discovered port when the explicit hub port never responds', async () => {
+  const calledPorts = [];
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    listeningPorts: async () => [60000],
+    callLs: async ({ port, method }) => {
+      calledPorts.push(port);
+      if (port === 55555) return new Promise(() => {}); // firewall blackhole
+      if (port === 60000 && method === 'GetUnleashData') return {};
+      if (port === 60000 && method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.25 }]
+          }]
+        };
+      }
+      if (port === 60000 && method === 'GetUserStatus') return { userStatus: { email: 'healthy@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'endpoint unavailable');
+    },
+    probeTimeoutMs: 1200
+  });
+
+  assert.ok(calledPorts.includes(60000), 'the healthy discovered port must still be probed');
+  assert.equal(result.accountEmail, 'healthy@example.com');
+});
+
+// The dead hub port must be preflighted at most once. Re-resolving it after
+// discovery spends the same resolution budget twice and starves the healthy
+// discovered listener, so a realistic quota round-trip (not the instant reply
+// the test above uses) starts timing out.
+test('probe does not re-resolve a dead hub port ahead of a healthy discovered listener', async () => {
+  const probeTimeoutMs = 1200;
+  const quotaDelayMs = 200;
+  const hubAttempts = [];
+
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 9001, kind: 'cli', csrfToken: 'abc', hubPort: 55555, extensionPort: null }
+    ],
+    listeningPorts: async () => [60000],
+    callLs: async ({ port, method }) => {
+      if (port === 55555) {
+        hubAttempts.push(method);
+        return new Promise(() => {}); // firewall blackhole
+      }
+      if (method === 'GetUnleashData') return {};
+      if (method === 'RetrieveUserQuotaSummary') {
+        await new Promise((resolve) => setTimeout(resolve, quotaDelayMs));
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.3 }]
+          }]
+        };
+      }
+      if (method === 'GetUserStatus') return { userStatus: { email: 'healthy@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'endpoint unavailable');
+    },
+    probeTimeoutMs
+  });
+
+  assert.equal(result.accountEmail, 'healthy@example.com');
+  assert.ok(
+    hubAttempts.length <= 2,
+    `the dead hub port is preflighted once, not once per resolution pass (got ${hubAttempts.length})`
+  );
+});
+
+test('probe keeps reporting the discovery failure for a tokenless CLI with no hub port', async () => {
+  const calledPorts = [];
+  const err = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 60123, kind: 'cli', csrfToken: '', hubPort: null, extensionPort: null }
+    ],
+    listeningPorts: async () => { throw new Error('lsof failed: operation not permitted'); },
+    callLs: async ({ port }) => { calledPorts.push(port); throw probe._errorWithStatus('unavailable', 'nope'); }
+  }).catch((error) => error);
+
+  assert.equal(calledPorts.length, 0, 'nothing is probeable without a hub port or discovered ports');
+  assert.match(String(err.status || err.message), /lsof failed/);
+});
+
+// The split budget exists only because an explicit hub port competes for the
+// same provider deadline. Without one, discovery must keep the full remaining
+// deadline: listeningPorts() itself allows up to 6s, so halving it silently
+// turns a slow-but-legal lsof/Get-NetTCPConnection into a false unavailable.
+test('probe keeps the full discovery budget when there is no explicit hub port', async () => {
+  const probeTimeoutMs = 800;
+  const discoveryDelayMs = 600; // >50% of the deadline, <100%
+  let discoveryResolved = false;
+
+  const result = await probe.probe({
+    detectProcessInfos: async () => [
+      { pid: 60123, kind: 'cli', csrfToken: '', hubPort: null, extensionPort: null }
+    ],
+    listeningPorts: () => new Promise((resolve) => {
+      setTimeout(() => { discoveryResolved = true; resolve([60000]); }, discoveryDelayMs);
+    }),
+    callLs: async ({ port, method }) => {
+      if (port !== 60000) throw probe._errorWithStatus('unavailable', 'unexpected port');
+      if (method === 'GetUnleashData') return {};
+      if (method === 'RetrieveUserQuotaSummary') {
+        return {
+          groups: [{
+            displayName: 'Gemini Models',
+            buckets: [{ bucketId: 'gemini-5h', remainingFraction: 0.3 }]
+          }]
+        };
+      }
+      if (method === 'GetUserStatus') return { userStatus: { email: 'nohub@example.com' } };
+      throw probe._errorWithStatus('unavailable', 'endpoint unavailable');
+    },
+    probeTimeoutMs
+  });
+
+  assert.equal(discoveryResolved, true, 'discovery must be allowed to finish after half the deadline');
+  assert.equal(result.accountEmail, 'nohub@example.com');
 });

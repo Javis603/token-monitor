@@ -25,13 +25,15 @@ const {
 const { antigravitySyncLockPath } = require('../../src/shared/providers/antigravity/selfSync');
 const {
   clientActivityDaysFromHistory,
+  clientDataDirPresence,
   clientDiagnosticRoots,
   clientSourceChecks,
   clientSourceRoots,
   clientWatchCandidates,
   deriveClientHealth,
   deriveClientStatus,
-  mergeClientActivityDays
+  mergeClientActivityDays,
+  visibleDiagnosticRoots
 } = require('../../src/shared/collector');
 const { KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
 const { createSelfSyncThrottle } = require('../../src/shared/selfSyncThrottle');
@@ -335,6 +337,28 @@ test('every source-root id the collector emits is in the allowlist', () => {
   }
 });
 
+test('shared home-relative directories retain exact source roots, checks and watch candidates', () => {
+  const homeDir = path.join(path.sep, 'tmp', 'source-home');
+  const clients = 'droid,qwen,pi,omp,commandcode';
+  const expected = {
+    droid: [{ id: 'droid-sessions', dir: path.join(homeDir, '.factory', 'sessions') }],
+    qwen: [{ id: 'qwen-projects', dir: path.join(homeDir, '.qwen', 'projects') }],
+    pi: [{ id: 'pi-sessions', dir: path.join(homeDir, '.pi', 'agent', 'sessions') }],
+    omp: [{ id: 'omp-sessions', dir: path.join(homeDir, '.omp', 'agent', 'sessions') }],
+    commandcode: [{ id: 'commandcode-projects', dir: path.join(homeDir, '.commandcode', 'projects') }]
+  };
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    const options = { homeDir, platform, env: {} };
+    assert.deepEqual(clientSourceRoots(clients, options), expected);
+    const candidates = clientWatchCandidates(clients, options);
+    for (const [client, roots] of Object.entries(expected)) {
+      assert.deepEqual(candidates[client], roots.map(({ dir }) => dir));
+      assert.deepEqual(clientSourceChecks(client, options)[client].map(({ id }) => id), roots.map(({ id }) => id));
+      for (const { id } of roots) assert.ok(CLIENT_SOURCE_CHECK_IDS.includes(id));
+    }
+  }
+});
+
 test('Claude source roots follow CLAUDE_CONFIG_DIR like tokscale', () => {
   const previousConfigDir = process.env.CLAUDE_CONFIG_DIR;
   const originalHomedir = os.homedir;
@@ -369,6 +393,9 @@ test('the Cursor cache stays home-relative while Antigravity follows the config 
   assert.deepEqual(roots.antigravity, [{
     id: 'tokscale-antigravity-cache',
     dir: path.join(appData, 'tokscale', 'antigravity-cache')
+  }, {
+    id: 'antigravity-extension-data',
+    dir: path.join(homeDir, '.gemini', 'antigravity', 'conversations')
   }]);
   // The sync lock lives inside the Antigravity cache, so it has to move with it.
   assert.equal(
@@ -392,6 +419,9 @@ test('TOKSCALE_CONFIG_DIR moves the Antigravity cache but not the Cursor one', (
   assert.deepEqual(roots.antigravity, [{
     id: 'tokscale-antigravity-cache',
     dir: path.join('C:\\iso\\tokscale', 'antigravity-cache')
+  }, {
+    id: 'antigravity-extension-data',
+    dir: path.join(homeDir, '.gemini', 'antigravity', 'conversations')
   }]);
 });
 
@@ -408,6 +438,88 @@ test('the Cursor cache follows an absolute Windows HOME override', () => {
     id: 'tokscale-cursor-cache',
     dir: path.join('D:\\profiles\\alice', '.config', 'tokscale', 'cursor-cache')
   }]);
+});
+
+test('source resolution feeds watcher paths and exact-file diagnostics without changing the root contract', () => {
+  const homeDir = path.join(os.tmpdir(), 'source-resolution');
+  const env = { XDG_DATA_HOME: path.join(homeDir, 'xdg') };
+  const options = {
+    homeDir,
+    platform: process.platform,
+    env,
+    customScanPaths: { codex: [path.join(homeDir, 'extra-codex')] }
+  };
+  const roots = clientSourceRoots('copilot,codex,amp,zcode', options);
+  assert.deepEqual(roots.codex.slice(0, 2), [
+    { id: 'codex-sessions', dir: path.join(homeDir, '.codex', 'sessions') },
+    { id: 'codex-sessions', dir: path.join(homeDir, '.codex', 'archived_sessions') }
+  ]);
+  assert.deepEqual(roots.codex.at(-1), { id: 'custom-scan-path', dir: path.join(homeDir, 'extra-codex'), custom: true });
+  assert.deepEqual(roots.amp, [{ id: 'amp-threads', dir: path.join(homeDir, 'xdg', 'amp', 'threads') }]);
+  const zcodeDb = roots.zcode.find((root) => root.id === 'zcode-cli-db');
+  assert.deepEqual(zcodeDb, {
+    id: 'zcode-cli-db',
+    dir: path.join(homeDir, '.zcode', 'cli', 'db'),
+    sourcePath: path.join(homeDir, '.zcode', 'cli', 'db', 'db.sqlite')
+  });
+  assert.deepEqual(clientWatchCandidates('zcode,codex,amp', options).zcode, roots.zcode.map((root) => root.dir));
+  assert.deepEqual(clientSourceChecks('zcode', options).zcode.map((check) => check.id), ['zcode-projects', 'zcode-cli-db']);
+  assert.equal(clientDiagnosticRoots('zcode', options).zcode.find((root) => root.id === 'zcode-cli-db').dir, zcodeDb.sourcePath);
+});
+
+test('source observations keep exact files, optional roots and WSL health in sync with diagnostics', () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-source-observations-'));
+  const previousHome = os.homedir;
+  const previousGeminiHome = process.env.GEMINI_CLI_HOME;
+  os.homedir = () => homeDir;
+  delete process.env.GEMINI_CLI_HOME;
+  try {
+    const options = { homeDir, platform: process.platform, env: {}, wslDetected: ['hermes'] };
+    const dbDir = path.join(homeDir, '.zcode', 'cli', 'db');
+    const capture = path.join(homeDir, '.config', 'tokscale', 'headless', 'codex');
+    fs.mkdirSync(dbDir, { recursive: true });
+    fs.mkdirSync(path.join(homeDir, '.gemini', 'antigravity'), { recursive: true });
+    const observe = () => ({
+      checks: clientSourceChecks('zcode,codex,antigravity,hermes', options),
+      diagnostics: clientDiagnosticRoots('zcode,codex,antigravity,hermes', options),
+      visible: visibleDiagnosticRoots('zcode,codex,antigravity,hermes', options)
+    });
+    const missing = observe();
+    const zcode = missing.diagnostics.zcode.find((root) => root.id === 'zcode-cli-db');
+    assert.equal(zcode.dir, path.join(dbDir, 'db.sqlite'));
+    assert.equal(zcode.exists, false, 'a watch parent is not an existing database');
+    assert.deepEqual(missing.checks.zcode.find((check) => check.id === 'zcode-cli-db'), { id: 'zcode-cli-db', exists: false });
+    assert.equal(missing.visible.codex.some((root) => root.dir === capture), false);
+    assert.equal(missing.diagnostics.codex.find((root) => root.dir === capture).optional, true);
+    assert.equal(missing.checks.codex.some((check) => check.id === 'codex-sessions'), true);
+    assert.deepEqual(missing.checks.hermes.at(-1), { id: 'wsl-home', exists: true });
+    assert.equal(deriveClientHealth('hermes', { clients: {} }, { sourceChecks: missing.checks }).clients.hermes.overall, 'waiting');
+    assert.deepEqual(missing.checks.antigravity.map(({ id, exists }) => ({ id, exists })), [
+      { id: 'tokscale-antigravity-cache', exists: false },
+      { id: 'antigravity-extension-data', exists: false },
+      { id: 'antigravity-ide-source', exists: true },
+      { id: 'antigravity-cli-data', exists: false }
+    ]);
+    assert.equal(clientDataDirPresence('antigravity', { sourceChecks: missing.checks }).antigravity, true);
+
+    fs.writeFileSync(path.join(dbDir, 'db.sqlite'), '');
+    fs.mkdirSync(capture, { recursive: true });
+    const extensionDir = path.join(homeDir, '.gemini', 'antigravity', 'conversations');
+    fs.mkdirSync(extensionDir, { recursive: true });
+    const present = observe();
+    assert.deepEqual(present.checks.zcode.find((check) => check.id === 'zcode-cli-db'), { id: 'zcode-cli-db', exists: true });
+    assert.equal(present.diagnostics.zcode.find((root) => root.id === 'zcode-cli-db').exists, true);
+    assert.equal(present.visible.codex.some((root) => root.dir === capture), true);
+    assert.equal(clientDataDirPresence('zcode', { sourceChecks: present.checks }).zcode, true);
+    assert.deepEqual(present.checks.antigravity.find((check) => check.id === 'antigravity-extension-data'),
+      { id: 'antigravity-extension-data', exists: true });
+    assert.equal(present.diagnostics.antigravity.find((root) => root.id === 'antigravity-extension-data').dir, extensionDir);
+  } finally {
+    os.homedir = previousHome;
+    if (previousGeminiHome === undefined) delete process.env.GEMINI_CLI_HOME;
+    else process.env.GEMINI_CLI_HOME = previousGeminiHome;
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  }
 });
 
 test('labelling roots keeps diagnostics separate from watcher roots', () => {
@@ -431,12 +543,16 @@ test('labelling roots keeps diagnostics separate from watcher roots', () => {
 test('clientSourceChecks collapses same-kind roots into one entry', () => {
   const checks = clientSourceChecks('copilot,zed,cline,antigravity');
   const ids = (client) => checks[client].map((check) => check.id);
-  assert.deepEqual(ids('copilot'), ['copilot-otel', 'copilot-data', 'vscode-workspace-storage']);
+  // The desktop and CLI databases are distinct sources, not same-kind variants:
+  // both can exist at once, so each reports its own check.
+  assert.deepEqual(ids('copilot'), ['copilot-otel', 'copilot-data', 'copilot-session-store', 'vscode-workspace-storage']);
   assert.deepEqual(ids('zed'), ['zed-threads']);
   assert.deepEqual(ids('cline'), ['cline-tasks', 'cline-cli-sessions']);
-  // antigravity's watch candidate is only the tokscale cache; its two real
-  // sources are separate checks so the record can tell them apart.
-  assert.deepEqual(ids('antigravity'), ['tokscale-antigravity-cache', 'antigravity-ide-source', 'antigravity-cli-data']);
+  // The extension database is a direct parser source alongside the synced IDE
+  // cache and the separate CLI database.
+  assert.deepEqual(ids('antigravity'), [
+    'tokscale-antigravity-cache', 'antigravity-extension-data', 'antigravity-ide-source', 'antigravity-cli-data'
+  ]);
   for (const list of Object.values(checks)) {
     for (const check of list) assert.equal(typeof check.exists, 'boolean');
   }
@@ -453,18 +569,49 @@ test('Qoder CN source health requires local.db, not only its watch parent', () =
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-qodercn-health-'));
   const dbPath = path.join(tempRoot, 'cache', 'db', 'local.db');
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  const previous = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+  const projectsPath = path.join(tempRoot, 'projects');
+  const previousDb = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+  const previousProjects = process.env.TOKEN_MONITOR_QODER_CN_PROJECTS_PATH;
   process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = dbPath;
+  process.env.TOKEN_MONITOR_QODER_CN_PROJECTS_PATH = projectsPath;
   try {
     const roots = clientSourceRoots('qodercn').qodercn;
     assert.equal(roots[0].dir, path.dirname(dbPath));
     assert.equal(roots[0].sourcePath, dbPath);
-    assert.deepEqual(clientSourceChecks('qodercn').qodercn, [{ id: 'qodercn-db', exists: false }]);
+    // The DB check keys on the file, not its watch parent, so an empty
+    // SharedClientCache tree is never mistaken for an install; the transcript
+    // tree is a second, alternative source for 2026-09+ builds.
+    assert.deepEqual(clientSourceChecks('qodercn').qodercn, [
+      { id: 'qodercn-db', exists: false },
+      { id: 'qodercn-projects', exists: false }
+    ]);
+    // A database-less build is still detected through its JSONL projects tree.
+    fs.mkdirSync(projectsPath, { recursive: true });
+    assert.deepEqual(clientSourceChecks('qodercn').qodercn, [
+      { id: 'qodercn-db', exists: false },
+      { id: 'qodercn-projects', exists: true }
+    ]);
   } finally {
-    if (previous === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
-    else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = previous;
+    if (previousDb === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+    else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = previousDb;
+    if (previousProjects === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_PROJECTS_PATH;
+    else process.env.TOKEN_MONITOR_QODER_CN_PROJECTS_PATH = previousProjects;
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
+});
+
+test('Qoder CN roots honor the injected environment over process globals', () => {
+  const roots = clientSourceRoots('qodercn', {
+    homeDir: '/inject',
+    platform: 'darwin',
+    env: {
+      TOKEN_MONITOR_QODER_CN_DB_PATH: '/inject/cn/local.db',
+      TOKEN_MONITOR_QODER_CN_PROJECTS_PATH: '/inject/cn/projects'
+    }
+  }).qodercn;
+  assert.equal(roots[0].sourcePath, path.resolve('/inject/cn/local.db'));
+  assert.equal(roots[1].id, 'qodercn-projects');
+  assert.equal(roots[1].dir, path.resolve('/inject/cn/projects'));
 });
 
 test('diagnostic roots expose antigravity native sources without treating them as watch roots', () => {
@@ -474,13 +621,15 @@ test('diagnostic roots expose antigravity native sources without treating them a
     'antigravity-ide-source',
     'antigravity-ide-source',
     'antigravity-cli-data',
-    'tokscale-antigravity-cache'
+    'tokscale-antigravity-cache',
+    'antigravity-extension-data'
   ]);
   assert.deepEqual(
     diagnostics.slice(0, 3).map(({ dir }) => dir.split(/[\\/]/).at(-1)),
     ['antigravity', 'antigravity-ide', 'antigravity-backup']
   );
   assert.equal(diagnostics[3].dir.split(/[\\/]/).at(-1), 'conversations');
+  assert.equal(diagnostics[5].dir, path.join(os.homedir(), '.gemini', 'antigravity', 'conversations'));
   for (const root of diagnostics) {
     assert.equal(typeof root.dir, 'string');
     assert.equal(typeof root.exists, 'boolean');

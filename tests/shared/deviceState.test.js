@@ -89,6 +89,49 @@ test('limits-only updates preserve usage updatedAt and usage metadata', () => {
   assert.equal(state.getSnapshot().today.totalTokens, 10);
 });
 
+// Carried fields are shared between successive usage parts rather than copied
+// on every tick, so this pins that nothing handed in or out can reach them: the
+// observer keeps what it is given (the Hub queue does), and the input stays the
+// caller's.
+test('published records and inputs never reach the state later records carry forward', () => {
+  const emitted = [];
+  const state = createDeviceState({ onRecord: (record) => emitted.push(record) });
+  const summary = usage();
+  const limitsInput = limits();
+  state.updateUsage(summary, 'interval');
+  state.updateLimits(limitsInput, 'scheduled');
+
+  for (const record of emitted) {
+    record.month.totalTokens = 999;
+    record.allTime.totalTokens = 999;
+    record.history.daily[0].tokens = 999;
+    record.clientStatus.codex = 'missing';
+  }
+  emitted[1].limits.providers[0].status = 'mutated';
+  summary.month.totalTokens = 888;
+  summary.history.daily[0].tokens = 888;
+  limitsInput.providers[0].status = 'mutated';
+
+  const preview = state.updateUsage({
+    updatedAt: '2026-07-21T01:00:01.000Z',
+    today: { totalTokens: 11 }
+  }, 'progress', { preview: true });
+  assert.equal(preview.month.totalTokens, 20);
+  assert.equal(preview.allTime.totalTokens, 30);
+  assert.equal(preview.history.daily[0].tokens, 10);
+  assert.equal(preview.clientStatus.codex, 'active');
+  assert.equal(preview.limits.providers[0].status, 'ok');
+  assert.equal(emitted[2], preview);
+
+  preview.month.totalTokens = 777;
+  preview.history.daily[0].tokens = 777;
+  const snapshot = state.getSnapshot();
+  assert.equal(snapshot.today.totalTokens, 11);
+  assert.equal(snapshot.month.totalTokens, 20);
+  assert.equal(snapshot.history.daily[0].tokens, 10);
+  assert.notEqual(snapshot.history, preview.history);
+});
+
 test('partial usage previews carry broader periods and optional usage state', () => {
   const state = createDeviceState();
   state.updateUsage(usage('2026-07-21T01:00:00.000Z', {

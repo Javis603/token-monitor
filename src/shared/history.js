@@ -5,8 +5,17 @@
 const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 
 const TOKSCALE_CLIENT_ALIASES = new Map([
-  ['omp', 'pi'],
-  ['kilocode', 'kilo']
+  ['antigravity-cli', 'antigravity'],
+  ['antigravity-extension', 'antigravity'],
+  // `micode` is tokscale's id for MiMo Code, a fossil of the path typo its PR
+  // #784 fixed. Token Monitor's id is `mimo`, so both upstream spellings fold
+  // onto it — including plain `micode`, which is what every device and stored
+  // history record written before the rename still says.
+  ['micode', 'mimo'],
+  ['micode-desktop', 'mimo'],
+  ['kilocode', 'kilo'],
+  ['devin-cli', 'devin'],
+  ['devin-desktop', 'devin']
 ]);
 
 // Canonical Token Monitor identity for client ids emitted by Tokscale. Keep
@@ -39,7 +48,9 @@ function normalizeTimeMetrics(value) {
 
 // Tokscale emits these clients' reasoning as a disjoint JSON bucket. History
 // uses the same reasoning-inclusive public output convention as usage.js.
-const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'codex', 'droid', 'dsh']);
+// zcode/opencode: tokscale subtracts the reasoning overlap out of `output`
+// (their source DBs are reasoning-inclusive), so it has to be added back here.
+const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'codex', 'droid', 'dsh', 'zcode', 'opencode']);
 
 function hasDisjointReasoning(client) {
   return TOKSCALE_DISJOINT_REASONING_CLIENTS.has(String(client).trim().toLowerCase());
@@ -279,7 +290,8 @@ function computeStreaks(days, todayKey) {
 }
 
 function addPerClient(target, source, includeTokenComponents = false) {
-  for (const [client, v] of Object.entries(source || {})) {
+  for (const [rawClient, v] of Object.entries(source || {})) {
+    const client = normalizeTokscaleClientName(rawClient) || rawClient;
     const t = target[client] || (target[client] = { tokens: 0, cost: 0, messages: 0 });
     t.tokens += num(v.tokens); t.cost += num(v.cost); t.messages += num(v.messages);
     if (includeTokenComponents) {

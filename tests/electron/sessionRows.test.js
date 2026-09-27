@@ -65,10 +65,10 @@ test('session rows sort by latest activity and keep subtitles compact', () => {
     'session:codex:old'
   ]);
   assert.equal(rows[0].name, 'Codex · gpt-5.5');
-  assert.equal(rows[0].subtitle, '12:25 · 184 msgs');
+  assert.equal(rows[0].subtitle, '12:25 · 184 calls');
   assert.equal(rows[0].detail, '019e76fc-dddd-eeee-ffff-222222222222');
   assert.equal(rows[0].kind, 'session');
-  assert.equal(rows[1].subtitle, '12:07 · 1 msg');
+  assert.equal(rows[1].subtitle, '12:07 · 1 call');
   assert.equal(rows[1].detail, '214c24d5-aaaa-bbbb-cccc-f87e');
 });
 
@@ -112,7 +112,7 @@ test('session rows group client and model apart from activity metadata', () => {
 
   assert.equal(row.name, '修復 session detail');
   assert.equal(row.subtitle, 'Codex · gpt-5.6-sol');
-  assert.equal(row.activity, '12:07 · 4 msgs');
+  assert.equal(row.activity, '12:07 · 4 calls');
   assert.equal(row.detail, 'titled');
 });
 
@@ -273,7 +273,7 @@ test('Reasonix native rows reuse the common session schema without a native acco
   assert.equal(row.kind, 'session');
   assert.equal(row.key, 'session:reasonix:ABC123');
   assert.equal(row.name, 'Reasonix · deepseek/deepseek-v4-flash');
-  assert.equal(row.subtitle, '14:10 · 2 msgs');
+  assert.equal(row.subtitle, '14:10 · 2 calls');
   assert.equal(row.detail, 'ABC123');
   assert.equal(row.value, 15382);
   assert.equal(row.cost, 0.25);
@@ -304,7 +304,7 @@ test('Reasonix native rows reuse the common session schema without a native acco
     assert.ok(Object.hasOwn(ordinary, field), `ordinary row is missing ${field}`);
   }
   assert.equal(ordinary.name, 'Codex · gpt-5.6-luna');
-  assert.equal(ordinary.subtitle, '14:09 · 1 msg');
+  assert.equal(ordinary.subtitle, '14:09 · 1 call');
 });
 
 test('Reasonix native rows omit turns from the compact subtitle when turns are unavailable', () => {
@@ -346,7 +346,7 @@ test('Reasonix native rows remain visible when official per-session tokens are u
   assert.equal(row.tokenDataUnavailable, true);
   assert.equal(row.periodTokenDataUnavailable, false);
   assert.equal(row.sessionDetailAvailable, false);
-  assert.equal(row.subtitle, '14:10 · 2 msgs');
+  assert.equal(row.subtitle, '14:10 · 2 calls');
 });
 
 test('Reasonix native rows show cumulative totals for an unreliable bounded period', () => {
@@ -388,7 +388,7 @@ test('Reasonix native rows hide legacy stats paths while keeping the compact mes
     clientLabels: { reasonix: 'Reasonix' }
   });
 
-  assert.equal(row.subtitle, '6 msgs');
+  assert.equal(row.subtitle, '6 calls');
   assert.equal(row.detail, '');
   assert.doesNotMatch(row.title, /reasonix-stats|\/Users\//i);
   assert.equal(sessionIdLabel(leakedPath), '');
@@ -414,7 +414,7 @@ test('session rows label archived sessions without claiming the source was delet
   });
 
   assert.equal(rows[0].archived, true);
-  assert.equal(rows[0].subtitle, 'Archived · 12:07 · 3 msgs');
+  assert.equal(rows[0].subtitle, 'Archived · 12:07 · 3 calls');
   assert.equal(rows[0].title, 'OpenCode session deleted');
 });
 
@@ -460,4 +460,121 @@ test('session layout keeps page chrome consistent and scrolls long labels on one
   assert.match(renderer, /class="row-activity"/);
   assert.match(renderer, /function setHoverMarqueeText\([^]*?element\.removeAttribute\('title'\);\n}/);
   assert.doesNotMatch(renderer, /function setHoverMarqueeText\([^]*?element\.title\s*=/);
+});
+
+test('a session still being written to is marked running and shows its context headroom', () => {
+  const now = new Date(2026, 8, 18, 12, 30);
+  const minutesAgo = (minutes) => new Date(now.getTime() - minutes * 60_000).toISOString();
+  const rows = sessionRowsForPeriod({
+    sessions: {
+      'codex:live': {
+        client: 'codex',
+        sessionId: 'rollout-2026-09-18T11-44-50-019e76fc-dddd-eeee-ffff-222222222222',
+        totalTokens: 24_870_232,
+        costUsd: 21.91,
+        models: { 'gpt-5.5': 24_870_232 },
+        messageCount: 184,
+        contextTokens: 190_867,
+        contextWindow: 950_000,
+        lastUsedAt: minutesAgo(2)
+      },
+      'codex:quiet': {
+        client: 'codex',
+        sessionId: 'rollout-2026-09-18T09-47-36-019e76fc-aaaa-bbbb-cccc-111111111111',
+        totalTokens: 20_548_311,
+        costUsd: 17.59,
+        models: { 'gpt-5.5': 20_548_311 },
+        messageCount: 160,
+        lastUsedAt: minutesAgo(90)
+      }
+    }
+  }, { clientLabels, clientColors, now });
+
+  const live = rows.find((row) => row.key === 'session:codex:live');
+  assert.equal(live.running, true);
+  assert.deepEqual(live.context, {
+    contextTokens: 190_867,
+    contextWindow: 950_000,
+    percentLeft: 80,
+    percentUsed: 20,
+    tone: ''
+  });
+  // The activity line keeps exactly what it carried before: it is one
+  // ellipsizing line, so a headroom reading appended here would be paid for by
+  // dropping the timestamp.
+  assert.match(live.subtitle, /^\d{2}:\d{2} · 184 calls$/);
+
+  const quiet = rows.find((row) => row.key === 'session:codex:quiet');
+  assert.equal(quiet.running, undefined);
+  assert.equal(quiet.context, undefined);
+});
+
+test('context headroom only takes on a colour as it runs out', () => {
+  const now = new Date(2026, 8, 18, 12, 30);
+  const toneAt = (contextTokens) => {
+    const rows = sessionRowsForPeriod({
+      sessions: {
+        'codex:tight': {
+          client: 'codex',
+          sessionId: 'rollout-2026-09-18T11-44-50-019e76fc-dddd-eeee-ffff-444444444444',
+          totalTokens: 1_000,
+          models: { 'gpt-5.5': 1_000 },
+          contextTokens,
+          contextWindow: 200_000,
+          lastUsedAt: new Date(now.getTime() - 60_000).toISOString()
+        }
+      }
+    }, { clientLabels, clientColors, now });
+    return rows[0].context;
+  };
+
+  assert.equal(toneAt(40_000).tone, '');
+  assert.equal(toneAt(140_000).tone, 'caution');
+  assert.equal(toneAt(180_000).tone, 'low');
+  // The boundaries themselves belong to the more serious tone.
+  assert.equal(toneAt(200_000 * 0.7).tone, 'caution');
+  assert.equal(toneAt(200_000 * 0.9).tone, 'low');
+  // Both readings of the gauge are published so the Remaining/Used preference
+  // can flip the label without the two ever disagreeing by a point.
+  assert.deepEqual(toneAt(190_000), {
+    contextTokens: 190_000,
+    contextWindow: 200_000,
+    percentLeft: 5,
+    percentUsed: 95,
+    tone: 'low'
+  });
+});
+
+test('an archived session is never running and a half-read context is not shown', () => {
+  const now = new Date(2026, 8, 18, 12, 30);
+  const rows = sessionRowsForPeriod({
+    sessions: {
+      'codex:archived': {
+        client: 'codex',
+        sessionId: 'rollout-2026-09-18T12-20-00-019e76fc-aaaa-bbbb-cccc-333333333333',
+        totalTokens: 100,
+        models: { 'gpt-5.5': 100 },
+        archived: true,
+        contextTokens: 5_000,
+        contextWindow: 200_000,
+        lastUsedAt: new Date(now.getTime() - 60_000).toISOString()
+      },
+      'claude:windowless': {
+        client: 'claude',
+        sessionId: '214c24d5-aaaa-bbbb-cccc-f87e',
+        totalTokens: 200,
+        models: { 'claude-opus-5': 200 },
+        contextTokens: 5_000,
+        lastUsedAt: new Date(now.getTime() - 60_000).toISOString()
+      }
+    }
+  }, { clientLabels, clientColors, now, archivedLabel: 'Archived' });
+
+  const archived = rows.find((row) => row.key === 'session:codex:archived');
+  assert.equal(archived.running, undefined);
+  assert.equal(archived.context, undefined);
+
+  const windowless = rows.find((row) => row.key === 'session:claude:windowless');
+  assert.equal(windowless.running, true);
+  assert.equal(windowless.context, undefined);
 });

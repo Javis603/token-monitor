@@ -95,6 +95,25 @@ test('usage transforms run only for usage events, not limits-only publishes', ()
   assert.equal(records[1].record.transformed, true);
 });
 
+test('summaries a worker-hosted runtime already transformed are not transformed again', () => {
+  const transformed = [];
+  const { records, usageOptions } = harness({
+    progressive: true,
+    transformUsage(summary, reason) {
+      transformed.push(reason);
+      return { ...summary, transformedHere: true };
+    }
+  });
+  usageOptions.onPreview({ updatedAt: 'preview-time', today: { totalTokens: 2 } }, 'progress', { transformed: true });
+  const visible = usageOptions.onUpdate({ updatedAt: 'usage-time', today: { totalTokens: 4 } }, 'startup', { transformed: true });
+  usageOptions.onUpdate({ updatedAt: 'usage-time-2', today: { totalTokens: 5 } }, 'watch');
+
+  assert.deepEqual(transformed, ['watch']);
+  assert.equal(visible.transformedHere, undefined);
+  assert.equal(records[0].record.transformedHere, undefined);
+  assert.equal(records.at(-1).record.transformedHere, true);
+});
+
 test('progressive cold-start previews wait for the first complete usage record', () => {
   const { records, usageOptions } = harness({ progressive: true });
   usageOptions.onPreview({ updatedAt: 'preview-time', today: { totalTokens: 2 } });

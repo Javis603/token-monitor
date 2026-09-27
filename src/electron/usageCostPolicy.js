@@ -291,6 +291,14 @@
     return result;
   }
 
+  function projectUsageSessions(sessions, inputRules) {
+    const rules = normalizeUsageCostRules(inputRules);
+    if (!sessions || typeof sessions !== 'object' || !activeRules(rules)) return sessions;
+    const result = clone(sessions);
+    for (const session of Object.values(result)) projectSession(session, rules);
+    return result;
+  }
+
   function projectRecord(record, rules) {
     if (!record || typeof record !== 'object') return record;
     for (const field of ['today', 'month', 'allTime']) projectPeriod(record[field], rules);
@@ -336,6 +344,7 @@
     codexWebCostRule,
     updateCodexWebCostRule,
     projectUsageCosts,
+    projectUsageSessions,
     projectHistoryCosts
   };
 });

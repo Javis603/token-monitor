@@ -2,6 +2,256 @@
   "sourceLanguage": "en",
   "version": "1.0",
   "strings": {
+    "Breakdown": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Breakdown" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "明细" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "明細" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "内訳" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "분석" } }
+      }
+    },
+    "Quota Mode": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Quota Mode" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度模式" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度模式" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータモード" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 모드" } }
+      }
+    },
+    "Automatic": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Automatic" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "自动" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "自動" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "自動" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "자동" } }
+      }
+    },
+    "Custom": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Custom" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "自定义" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "自訂" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "カスタム" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "사용자 지정" } }
+      }
+    },
+    "Quota 1": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Quota 1" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度 1" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度 1" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータ 1" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 1" } }
+      }
+    },
+    "Quota 2": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Quota 2" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度 2" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度 2" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータ 2" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 2" } }
+      }
+    },
+    "Quota Account": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Quota Account" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "额度账户" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "額度帳號" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータアカウント" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 계정" } }
+      }
+    },
+    "Usage Summary": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Usage Summary" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "用量摘要" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "用量摘要" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "使用量サマリー" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "사용량 요약" } }
+      }
+    },
+    "Choose the usage period shown by this widget.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose the usage period shown by this widget." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择此小组件显示的用量周期。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇此小工具顯示的用量週期。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "このウィジェットに表示する使用期間を選択します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "이 위젯에 표시할 사용량 기간을 선택합니다." } }
+      }
+    },
+    "Usage Breakdown": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Usage Breakdown" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "用量明细" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "用量明細" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "使用量の内訳" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "사용량 분석" } }
+      }
+    },
+    "Choose a tool or model breakdown and its period.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose a tool or model breakdown and its period." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择工具或模型明细及其统计周期。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇工具或模型明細及其統計週期。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ツールまたはモデルの内訳と期間を選択します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "도구 또는 모델 분석과 기간을 선택합니다." } }
+      }
+    },
+    "Dashboard": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Dashboard" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "仪表盘" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "儀表板" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ダッシュボード" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "대시보드" } }
+      }
+    },
+    "Choose the dashboard period, breakdown, and quota display mode.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Choose the dashboard period, breakdown, and quota display mode." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "选择仪表盘的统计周期、明细和额度显示模式。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "選擇儀表板的統計週期、明細和額度顯示模式。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "ダッシュボードの期間、内訳、クォータ表示モードを選択します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "대시보드의 기간, 분석 및 할당량 표시 모드를 선택합니다." } }
+      }
+    },
+    "Show quota accounts automatically or choose up to two.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Show quota accounts automatically or choose up to two." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "自动显示额度账户，或选择最多两个账户。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "自動顯示額度帳號，或選擇最多兩個帳號。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "クォータアカウントを自動表示するか、最大2つ選択します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "할당량 계정을 자동으로 표시하거나 최대 2개를 선택합니다." } }
+      }
+    },
+    "Token Monitor Dashboard": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Dashboard" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 仪表盘" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 儀表板" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor ダッシュボード" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 대시보드" } }
+      }
+    },
+    "Usage, quota, breakdown, and activity in one dashboard.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Usage, quota, breakdown, and activity in one dashboard." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "在一个仪表盘中查看用量、额度、明细和活动。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "在一個儀表板中查看用量、額度、明細和活動。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "使用量、クォータ、内訳、アクティビティを1つのダッシュボードで確認できます。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "사용량, 할당량, 분석 및 활동을 하나의 대시보드에서 확인합니다." } }
+      }
+    },
+    "Token Monitor Summary": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Summary" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 摘要" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 摘要" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor サマリー" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 요약" } }
+      }
+    },
+    "Tokens, cost, and a compact trend.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Tokens, cost, and a compact trend." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "令牌数、费用和简洁趋势。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token 數、費用和簡潔趨勢。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "トークン、コスト、コンパクトな推移。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "토큰, 비용 및 간결한 추세입니다." } }
+      }
+    },
+    "Token Monitor Activity": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Activity" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 活动" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 活動" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor アクティビティ" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 활동" } }
+      }
+    },
+    "Your recent activity heatmap.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Your recent activity heatmap." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "你最近的活动热力图。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "你最近的活動熱力圖。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "最近のアクティビティヒートマップ。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "최근 활동 히트맵입니다." } }
+      }
+    },
+    "Token Monitor Breakdown": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Breakdown" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 明细" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 明細" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor 内訳" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 분석" } }
+      }
+    },
+    "Compare tools or models for one period.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Compare tools or models for one period." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "比较一个周期内的工具或模型。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "比較一個期間內的工具或模型。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "1つの期間のツールまたはモデルを比較します。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "한 기간의 도구 또는 모델을 비교합니다." } }
+      }
+    },
+    "Token Monitor Quota": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Token Monitor Quota" } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "Token Monitor 额度" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "Token Monitor 額度" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "Token Monitor クォータ" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "Token Monitor 할당량" } }
+      }
+    },
+    "Subscription windows and reset times.": {
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Subscription windows and reset times." } },
+        "zh-Hans": { "stringUnit": { "state": "translated", "value": "订阅窗口和重置时间。" } },
+        "zh-Hant": { "stringUnit": { "state": "translated", "value": "訂閱視窗和重設時間。" } },
+        "ja": { "stringUnit": { "state": "translated", "value": "サブスクリプション期間とリセット時刻。" } },
+        "ko": { "stringUnit": { "state": "translated", "value": "구독 기간과 초기화 시간입니다." } }
+      }
+    },
+    "Current Account": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Current Account"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "当前账号"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "目前帳號"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "現在のアカウント"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "현재 계정"
+          }
+        }
+      }
+    },
     "Overview": {
       "localizations": {
         "en": {
@@ -70,6 +320,40 @@
         }
       }
     },
+    "Tools": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tools"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工具"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "工具"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ツール"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "도구"
+          }
+        }
+      }
+    },
     "Models": {
       "localizations": {
         "en": {
@@ -134,210 +418,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "활동"
-          }
-        }
-      }
-    },
-    "Trend": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Trend"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "趋势"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "趨勢"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "トレンド"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "추세"
-          }
-        }
-      }
-    },
-    "Widget Page": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Widget Page"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "小组件页面"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "小工具頁面"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ウィジェットページ"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "위젯 페이지"
-          }
-        }
-      }
-    },
-    "Token Monitor Page": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Token Monitor Page"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Token Monitor 页面"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Token Monitor 頁面"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Token Monitor ページ"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Token Monitor 페이지"
-          }
-        }
-      }
-    },
-    "Display Page": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Display Page"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "显示页面"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "顯示頁面"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "表示ページ"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "표시 페이지"
-          }
-        }
-      }
-    },
-    "Choose the page shown by this widget instance.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose the page shown by this widget instance."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "选择此小组件实例显示的页面。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "選擇此小工具實例顯示的頁面。"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "このウィジェットに表示するページを選択します。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "이 위젯에 표시할 페이지를 선택합니다."
-          }
-        }
-      }
-    },
-    "Choose Overview, Quota, Models, Activity, or Trend for each widget.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Choose Overview, Quota, Models, Activity, or Trend for each widget."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "为每个小组件选择主页、额度、模型、活动或趋势。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "為每個小工具選擇主頁、額度、模型、活動或趨勢。"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ウィジェットごとに概要、クォータ、モデル、アクティビティ、トレンドを選択します。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "각 위젯에서 개요, 할당량, 모델, 활동 또는 추세를 선택합니다."
           }
         }
       }
@@ -716,142 +796,6 @@
         }
       }
     },
-    "No usage yet": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No usage yet"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暂无用量"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暫無用量"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "使用量はまだありません"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "아직 사용량 없음"
-          }
-        }
-      }
-    },
-    "Open Token Monitor to collect data": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Open Token Monitor to collect data"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "打开 Token Monitor 以收集数据"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "開啟 Token Monitor 以收集資料"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "データを収集するには Token Monitor を開いてください"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "데이터를 수집하려면 Token Monitor를 여세요"
-          }
-        }
-      }
-    },
-    "Active days": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Active days"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "活跃天数"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "活躍天數"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "アクティブ日数"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "활동 일수"
-          }
-        }
-      }
-    },
-    "No model data": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No model data"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暂无模型数据"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暫無模型資料"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "モデルデータがありません"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "모델 데이터 없음"
-          }
-        }
-      }
-    },
     "No data": {
       "localizations": {
         "en": {
@@ -886,614 +830,36 @@
         }
       }
     },
-    "No quota provider configured": {
+    "%lld active days": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "No quota provider configured"
+            "value": "%lld active days"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "未配置额度来源"
+            "value": "活跃 %lld 天"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "未設定額度來源"
+            "value": "活躍 %lld 天"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "クォータプロバイダーが未設定です"
+            "value": "アクティブ %lld 日"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "할당량 공급자가 구성되지 않음"
-          }
-        }
-      }
-    },
-    "%lld more": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld more"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "另有 %lld 项"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "另有 %lld 項"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "他 %lld 件"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "외 %lld개"
-          }
-        }
-      }
-    },
-    "Sign in to the provider in the desktop app": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sign in to the provider in the desktop app"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "请在桌面应用中登录 Provider"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "請在桌面應用程式中登入 Provider"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "デスクトップアプリで Provider にログインしてください"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "데스크톱 앱에서 Provider에 로그인하세요"
-          }
-        }
-      }
-    },
-    "No model rankings": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No model rankings"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暂无模型排行"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暫無模型排行"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "モデルランキングがありません"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "모델 순위 없음"
-          }
-        }
-      }
-    },
-    "No activity data": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No activity data"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暂无活动数据"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暫無活動資料"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "アクティビティデータがありません"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "활동 데이터 없음"
-          }
-        }
-      }
-    },
-    "Active": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Active"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "活跃"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "活躍"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "アクティブ"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "활동"
-          }
-        }
-      }
-    },
-    "%lld days": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld days"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 天"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 天"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 日"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld일"
-          }
-        }
-      }
-    },
-    "Active days in the last %lld weeks": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Active days in the last %lld weeks"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "近 %lld 周活跃天数"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "近 %lld 週活躍天數"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "過去 %lld 週間のアクティブ日数"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "최근 %lld주 활동 일수"
-          }
-        }
-      }
-    },
-    "Last %lld weeks": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Last %lld weeks"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "近 %lld 周"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "近 %lld 週"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "過去 %lld 週間"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "최근 %lld주"
-          }
-        }
-      }
-    },
-    "%@ tokens": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ tokens"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ tokens"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ tokens"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ トークン"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ 토큰"
-          }
-        }
-      }
-    },
-    "%@ · %@ tokens": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ · %@ tokens"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ · %@ tokens"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ · %@ tokens"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ · %@ トークン"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ · %@ 토큰"
-          }
-        }
-      }
-    },
-    "Peak %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Peak %@"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "峰值 %@"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "峰值 %@"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ピーク %@"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "최고 %@"
-          }
-        }
-      }
-    },
-    "Peak · %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Peak · %@"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "峰值 · %@"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "峰值 · %@"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "ピーク · %@"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "최고 · %@"
-          }
-        }
-      }
-    },
-    "No trend data": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No trend data"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暂无趋势数据"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暫無趨勢資料"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "トレンドデータがありません"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "추세 데이터 없음"
-          }
-        }
-      }
-    },
-    "No change": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "No change"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暂无变化"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "暫無變化"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "変化なし"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "변화 없음"
-          }
-        }
-      }
-    },
-    "Unchanged from first day": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Unchanged from first day"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "与首日持平"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "與首日持平"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "初日から変化なし"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "첫날과 동일"
-          }
-        }
-      }
-    },
-    "Up %lld%% from first day": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Up %lld%% from first day"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "较首日上升 %lld%%"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "較首日上升 %lld%%"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "初日から %lld%% 増加"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "첫날 대비 %lld%% 증가"
-          }
-        }
-      }
-    },
-    "Down %lld%% from first day": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Down %lld%% from first day"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "较首日下降 %lld%%"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "較首日下降 %lld%%"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "初日から %lld%% 減少"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "첫날 대비 %lld%% 감소"
+            "value": "활동 %lld일"
           }
         }
       }
@@ -1634,176 +1000,6 @@
         }
       }
     },
-    "%@, selected": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@, selected"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@，已选择"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@，已選取"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@、選択中"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@, 선택됨"
-          }
-        }
-      }
-    },
-    "Switch to %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Switch to %@"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "切换到 %@"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "切換到 %@"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@ に切り替え"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%@로 전환"
-          }
-        }
-      }
-    },
-    "Current page: %@": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Current page: %@"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "当前页面：%@"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "目前頁面：%@"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "現在のページ：%@"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "현재 페이지: %@"
-          }
-        }
-      }
-    },
-    "TOTAL TOKENS": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "TOTAL TOKENS"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "总 TOKENS"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "總 TOKENS"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "合計トークン"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "총 토큰"
-          }
-        }
-      }
-    },
-    "Top model": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Top model"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "热门模型"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "熱門模型"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "トップモデル"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "상위 모델"
-          }
-        }
-      }
-    },
     "Updated %@": {
       "localizations": {
         "en": {
@@ -1872,108 +1068,6 @@
         }
       }
     },
-    "Today": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Today"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "当日"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "當日"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "今日"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "오늘"
-          }
-        }
-      }
-    },
-    "This month": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This month"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "本月"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "本月"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "今月"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "이번 달"
-          }
-        }
-      }
-    },
-    "All time": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "All time"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "累计"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "累計"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "累計"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "누적"
-          }
-        }
-      }
-    },
     "DAY": {
       "localizations": {
         "en": {
@@ -1985,25 +1079,25 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "当日"
+            "value": "DAY"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "當日"
+            "value": "DAY"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "今日"
+            "value": "DAY"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "오늘"
+            "value": "DAY"
           }
         }
       }
@@ -2019,25 +1113,25 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "本月"
+            "value": "MONTH"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "本月"
+            "value": "MONTH"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "今月"
+            "value": "MONTH"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "이번 달"
+            "value": "MONTH"
           }
         }
       }
@@ -2053,25 +1147,25 @@
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "累计"
+            "value": "TOTAL"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "累計"
+            "value": "TOTAL"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "累計"
+            "value": "TOTAL"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "누적"
+            "value": "TOTAL"
           }
         }
       }
@@ -2382,172 +1476,104 @@
         }
       }
     },
-    "Set Period": {
+    "%@ · %@ tokens": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Set Period"
+            "value": "%1$@ · %2$@ tokens"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "切换统计周期"
+            "value": "%1$@ · %2$@ tokens"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "切換統計週期"
+            "value": "%1$@ · %2$@ tokens"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "期間を設定"
+            "value": "%1$@ · %2$@トークン"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "기간 설정"
+            "value": "%1$@ · %2$@ 토큰"
           }
         }
       }
     },
-    "Cycle Period": {
+    "%@ · %@ tokens · %@": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cycle Period"
+            "value": "%1$@ · %2$@ tokens · %3$@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "循环切换统计周期"
+            "value": "%1$@ · %2$@ tokens · %3$@"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "循環切換統計週期"
+            "value": "%1$@ · %2$@ tokens · %3$@"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "期間を切り替え"
+            "value": "%1$@ · %2$@トークン · %3$@"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "기간 순환"
+            "value": "%1$@ · %2$@ 토큰 · %3$@"
           }
         }
       }
     },
-    "Cycle Widget Page": {
+    "%@ tokens · %lld active days": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Cycle Widget Page"
+            "value": "%@ tokens · %lld active days"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "切换小组件页面"
+            "value": "%@ tokens · 活跃 %lld 天"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "切換小工具頁面"
+            "value": "%@ tokens · 活躍 %lld 天"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "ウィジェットページを切り替え"
+            "value": "%@トークン · アクティブ %lld 日"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "위젯 페이지 전환"
-          }
-        }
-      }
-    },
-    "Switch the page shown by the current widget size.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Switch the page shown by the current widget size."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "切换当前尺寸小组件显示的页面。"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "切換目前尺寸小工具顯示的頁面。"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "現在のウィジェットサイズに表示するページを切り替えます。"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "현재 위젯 크기에 표시되는 페이지를 전환합니다."
-          }
-        }
-      }
-    },
-    "Current Page": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Current Page"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "当前页面"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "目前頁面"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "現在のページ"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "현재 페이지"
+            "value": "%@ 토큰 · 활동 %lld일"
           }
         }
       }
@@ -2620,138 +1646,70 @@
         }
       }
     },
-    "Expires in %lldd %lldh": {
+    "Expires in %@": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Expires in %lldd %lldh"
+            "value": "Expires in %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 天 %lld 小时后到期"
+            "value": "%@ 后到期"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 天 %lld 小時後到期"
+            "value": "%@ 後到期"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld日%lld時間後に期限切れ"
+            "value": "%@後に期限切れ"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld일 %lld시간 후 만료"
+            "value": "%@ 후 만료"
           }
         }
       }
     },
-    "Expires in %lldh": {
+    "Changes in %@": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Expires in %lldh"
+            "value": "Changes in %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 小时后到期"
+            "value": "%@ 后变更"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 小時後到期"
+            "value": "%@ 後變更"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld時間後に期限切れ"
+            "value": "%@後に変更"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld시간 후 만료"
-          }
-        }
-      }
-    },
-    "Changes in %lldd %lldh": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Changes in %lldd %lldh"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 天 %lld 小时后变更"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 天 %lld 小時後變更"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld日%lld時間後に変更"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld일 %lld시간 후 변경"
-          }
-        }
-      }
-    },
-    "Changes in %lldh": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Changes in %lldh"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 小时后变更"
-          }
-        },
-        "zh-Hant": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld 小時後變更"
-          }
-        },
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld時間後に変更"
-          }
-        },
-        "ko": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "%lld시간 후 변경"
+            "value": "%@ 후 변경"
           }
         }
       }
@@ -2790,70 +1748,70 @@
         }
       }
     },
-    "Reset in %lldd %lldh": {
+    "Refresh Widget": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reset in %lldd %lldh"
+            "value": "Refresh Widget"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 天 %lld 小时后重置"
+            "value": "刷新小组件"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 天 %lld 小時後重設"
+            "value": "重新整理小工具"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld日%lld時間後にリセット"
+            "value": "ウィジェットを更新"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld일 %lld시간 후 초기화"
+            "value": "위젯 새로고침"
           }
         }
       }
     },
-    "Reset in %lldh": {
+    "Reset in %@": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Reset in %lldh"
+            "value": "Reset in %@"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 小时后重置"
+            "value": "%@ 后重置"
           }
         },
         "zh-Hant": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld 小時後重設"
+            "value": "%@ 後重設"
           }
         },
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld時間後にリセット"
+            "value": "%@後にリセット"
           }
         },
         "ko": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld시간 후 초기화"
+            "value": "%@ 후 초기화"
           }
         }
       }

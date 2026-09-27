@@ -4,27 +4,29 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Custom scan paths:** Adds extra session folders for supported tools through **Settings → Collection → expand a tool → Add path**, covering records outside the default locations. (#674)
-- **Session activity and projects:** Adds activity times across discoverable sessions and project attribution when the workspace folder can be identified. (#676)
-- **Factory Droid usage:** Supports token usage from Droid CLI and Factory desktop sessions. (#682)
-- **Volcengine Agent Plan:** Reads personal Agent Plan quotas automatically from the locally signed-in arkcli account on this computer when explicit Volcengine credentials are not configured. (#655)
+- **macOS Liquid Glass:** On macOS 26+, choose Liquid Glass in Appearance → macOS Glass Style for the main window and Dashboard. (#705, #816)
+- **Edge Dock glass style:** On macOS 26+, choose a separate glass style for Edge Dock or have it follow the main window. (#825)
+- **Cursor conversation titles:** Shows desktop conversation titles in Sessions. (#819)
 
 ### Improved
-- **Hub sync bandwidth:** Reduces repeated full statistics transfers for Node and Cloudflare Worker Hubs while keeping older clients compatible. (#649)
+- **Background image opacity:** Adjust the image separately from Glass; the image stays layered over the glass. (#826)
+- **Limits account setup:** Checks pasted credentials when saved and enables the selected limits source. (#803)
 
 ### Fixed
-- **Codex scheduled resets:** Shows an announced reset schedule instead of leaving the earlier forecast visible. (#679)
-- **DeepSeek Harness sessions on Windows:** Switches to the latest versioned transcript even when it is created rapidly, so usage and details do not remain pinned to older data. (#680)
-- **Pi-family sessions:** Avoids double-counting copied responses across forked or continued Pi, Senpi, and Omp session files.
+- **Qoder CN custom-model usage:** Reads measured tokens from newer desktop transcripts; plan-billed built-in models still do not report token counts. (#753)
+- **Antigravity IDE usage:** Restores usage from IDE extension sessions. (#821)
+- **TypeSafe limits:** Stops treating a Cloudflare challenge as an expired Cookie. (#814)
+- **Edge Dock limits:** Shows 0% when an account-level quota is exhausted, even if its session quota remains. (#804)
+- **macOS tray popover:** No longer jumps to the left edge of the primary display. (#818)
+- **Edge Dock session models:** Labels sessions with multiple models consistently with Sessions. (#799)
 <!-- app-update-notes:en:end -->
-
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.63.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.63.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-Setup-0.63.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.63.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -62,27 +64,30 @@ open-source: https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **自定义扫描路径：** 可通过**“设置”→“采集”→展开工具→“添加路径”**为支持的工具添加额外 session 文件夹，读取不在默认位置的记录。（#674）
-- **会话时间与项目：** 为可发现的会话补充活动时间；能识别工作区文件夹时，也会归入对应项目。（#676）
-- **Factory Droid 用量：** 支持统计 Droid CLI 与 Factory 桌面版 session 的 Token 用量。（#682）
-- **Volcengine Agent Plan：** 未配置 Volcengine 凭据时，可自动读取本机 arkcli 当前登录个人账号的 Agent Plan 额度。（#655）
+- **macOS Liquid Glass：** 在 macOS 26 及以上版本，可于“外观”→“macOS 玻璃样式”选择 Liquid Glass，应用于主窗口和仪表盘。（#705, #816）
+- **侧边栏玻璃样式：** 在 macOS 26 及以上版本，可单独选择样式，或跟随主窗口。（#825）
+- **Cursor 会话标题：** 在“会话”中显示桌面版对话标题。（#819）
 
 ### 改进
-- **Hub 同步流量：** 减少 Node 与 Cloudflare Worker Hub 重复传输完整统计数据，同时保持旧版客户端兼容。（#649）
+- **背景图片透明度：** 可独立于“玻璃”调整，图片叠加显示在玻璃之上。（#826）
+- **额度账号设置：** 保存粘贴的凭据时会检查连接，并启用所选额度来源。（#803）
 
 ### 修复
-- **Codex 计划重置：** 收到重置排期公告后会显示该排期，不再停留在先前的预测状态。（#679）
-- **Windows DeepSeek Harness 会话：** 快速生成版本化对话记录时也会切换到最新记录，避免用量与详情停留在旧数据。（#680）
-- **Pi 系列会话：** Pi、Senpi 与 Omp 分叉或续接 session 文件中的已复制响应不再重复计入用量。
+- **Qoder CN 自定义模型用量：** 可读取新版桌面端实际记录的 Tokens；按方案计费的内置模型仍未提供 Tokens 数量。（#753）
+- **Antigravity IDE 用量：** 修复 IDE 扩展会话的用量漏计。（#821）
+- **TypeSafe 额度：** Cloudflare 验证不再被误判为 Cookie 过期。（#814）
+- **侧边栏额度：** 账号级额度耗尽时显示 0%，即使会话额度仍有剩余。（#804）
+- **macOS 菜单栏弹窗：** 修复弹窗跳到主显示器左边缘的问题。（#818）
+- **侧边栏会话模型：** 使用多个模型的会话与“会话”列表显示一致。（#799）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.63.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.63.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-Setup-0.63.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.63.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -115,7 +120,7 @@ https://github.com/junhoyeo/tokscale
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.56.0...v0.57.0">v0.56.0...v0.57.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.62.0...v0.63.0">v0.62.0...v0.63.0</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -133,27 +138,30 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **自訂掃描路徑：** 可透過**「設定」→「採集」→展開工具→「新增路徑」**為支援的工具加入額外 session 資料夾，讀取不在預設位置的記錄。（#674）
-- **工作階段時間與專案：** 為可找到的工作階段補上活動時間；能識別工作區資料夾時，也會歸入對應專案。（#676）
-- **Factory Droid 用量：** 支援統計 Droid CLI 與 Factory 桌面版 session 的 Token 用量。（#682）
-- **Volcengine Agent Plan：** 未設定 Volcengine 憑證時，可自動讀取本機 arkcli 目前登入個人帳號的 Agent Plan 額度。（#655）
+- **macOS Liquid Glass：** macOS 26 或更新版本可在「外觀」→「macOS 玻璃樣式」選用 Liquid Glass，套用至主視窗和儀表板。（#705, #816）
+- **側邊欄玻璃樣式：** macOS 26 或更新版本可獨立選擇樣式，或跟隨主視窗。（#825）
+- **Cursor 會話標題：** 在「會話」顯示桌面版對話標題。（#819）
 
 ### 改進
-- **Hub 同步流量：** 減少 Node 與 Cloudflare Worker Hub 重複傳輸完整統計資料，同時保持舊版用戶端相容。（#649）
+- **背景圖片不透明度：** 可獨立於「玻璃」調整，圖片疊在玻璃之上。（#826）
+- **額度帳號設定：** 儲存貼上的憑證時會檢查連線，並啟用所選額度來源。（#803）
 
 ### 修復
-- **Codex 排程重設：** 收到重設排程公告後會顯示該排程，不再停留在先前的預測狀態。（#679）
-- **Windows DeepSeek Harness 工作階段：** 快速產生版本化對話記錄時也會切換至最新記錄，避免用量與詳情停留在舊資料。（#680）
-- **Pi 系列工作階段：** Pi、Senpi 與 Omp 分支或接續 session 檔案中的已複製回應不再重複計入用量。
+- **Qoder CN 自訂模型用量：** 可讀取新版桌面版實際記錄的 Tokens；按方案計費的內建模型仍未提供 Tokens 數量。（#753）
+- **Antigravity IDE 用量：** 修復 IDE 擴充功能會話的用量漏計。（#821）
+- **TypeSafe 額度：** Cloudflare 驗證不再被誤判為 Cookie 過期。（#814）
+- **側邊欄額度：** 帳號層級額度用盡時顯示 0%，即使會話額度仍有餘額。（#804）
+- **macOS 選單列彈窗：** 修復彈窗跳到主要顯示器左側邊緣的問題。（#818）
+- **側邊欄會話模型：** 使用多個模型的會話與「會話」清單顯示一致。（#799）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.63.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.63.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-Setup-0.63.0.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.63.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.AppImage)
 
 </details>
 
@@ -166,27 +174,30 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ko:start -->
 ### 추가
-- **사용자 지정 스캔 경로:** **설정 → 수집 → 도구 펼치기 → 경로 추가**에서 지원 도구별로 세션 폴더를 추가하여 기본 위치 밖의 기록을 읽을 수 있습니다. (#674)
-- **세션 시간 및 프로젝트:** 탐색 가능한 세션에 활동 시간을 표시하고, 작업 공간 폴더를 식별할 수 있으면 해당 프로젝트에 연결합니다. (#676)
-- **Factory Droid 사용량:** Droid CLI와 Factory 데스크톱 세션의 토큰 사용량을 지원합니다. (#682)
-- **Volcengine Agent Plan:** Volcengine 자격 증명을 직접 설정하지 않은 경우 이 컴퓨터의 arkcli에 로그인된 개인 계정에서 Agent Plan 할당량을 자동으로 읽습니다. (#655)
+- **macOS Liquid Glass:** macOS 26 이상에서 모양 → macOS 글래스 스타일에서 Liquid Glass를 선택하면 기본 창과 대시보드에 적용됩니다. (#705, #816)
+- **가장자리 도크 글래스 스타일:** macOS 26 이상에서 별도 스타일을 선택하거나 기본 창과 동일하게 설정할 수 있습니다. (#825)
+- **Cursor 대화 제목:** 세션 화면에 데스크톱 대화 제목을 표시합니다. (#819)
 
 ### 개선
-- **Hub 동기화 트래픽:** 이전 클라이언트 호환성을 유지하면서 Node 및 Cloudflare Worker Hub의 반복적인 전체 통계 전송을 줄였습니다. (#649)
+- **배경 이미지 불투명도:** 글래스와 별도로 조절할 수 있으며 이미지가 글래스 위에 표시됩니다. (#826)
+- **한도 계정 설정:** 붙여 넣은 인증 정보를 저장할 때 연결을 확인하고 선택한 한도 제공원을 활성화합니다. (#803)
 
 ### 수정
-- **Codex 예약 리셋:** 리셋 일정이 공지되면 이전 예측 대신 공지된 일정을 표시합니다. (#679)
-- **Windows의 DeepSeek Harness 세션:** 버전이 지정된 대화 기록이 빠르게 생성되어도 최신 기록으로 전환되어 사용량과 상세 정보가 이전 데이터에 머무르지 않습니다. (#680)
-- **Pi 계열 세션:** 포크하거나 이어서 진행한 Pi, Senpi 및 Omp 세션 파일에 복사된 응답이 중복 집계되지 않습니다.
+- **Qoder CN 사용자 지정 모델 사용량:** 새 데스크톱 버전의 기록에서 실제 토큰 수를 읽습니다. 요금제에 포함된 기본 모델은 여전히 토큰 수를 기록하지 않습니다. (#753)
+- **Antigravity IDE 사용량:** IDE 확장 프로그램 세션의 사용량 누락을 수정했습니다. (#821)
+- **TypeSafe 한도:** Cloudflare 확인 절차를 Cookie 만료로 잘못 판단하지 않습니다. (#814)
+- **가장자리 도크 한도:** 계정 전체 한도가 소진되면 세션 한도가 남아 있어도 0%를 표시합니다. (#804)
+- **macOS 메뉴 막대 팝오버:** 주 디스플레이의 왼쪽 끝으로 이동하던 문제를 수정했습니다. (#818)
+- **가장자리 도크 세션 모델:** 여러 모델을 사용한 세션을 세션 목록과 동일하게 표시합니다. (#799)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.63.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.63.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-Setup-0.63.0.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.63.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.AppImage)
 
 </details>
 
@@ -199,27 +210,30 @@ https://github.com/junhoyeo/tokscale
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **カスタムスキャンパス：** **設定 → 収集 → ツールを展開 → パスを追加**から、対応ツールごとに追加のセッションフォルダーを指定し、既定の場所にない記録を読み込めます。（#674）
-- **セッション時刻とプロジェクト：** 検出可能なセッションにアクティビティ時刻を表示し、ワークスペースフォルダーを識別できる場合は該当プロジェクトに関連付けます。（#676）
-- **Factory Droid の使用量：** Droid CLI と Factory デスクトップのセッションで Token 使用量を集計できます。（#682）
-- **Volcengine Agent Plan：** Volcengine の認証情報を明示的に設定していない場合、このコンピューターで arkcli にログイン中の個人アカウントから Agent Plan のクォータを自動取得します。（#655）
+- **macOS Liquid Glass：** macOS 26 以降では、外観 → macOS ガラススタイルから Liquid Glass を選ぶとメインウィンドウとダッシュボードに適用されます。（#705、#816）
+- **エッジドックのガラススタイル：** macOS 26 以降では個別に選ぶか、メインウィンドウに合わせられます。（#825）
+- **Cursor の会話タイトル：** セッション画面にデスクトップ版の会話タイトルを表示します。（#819）
 
 ### 改善
-- **Hub 同期トラフィック：** 旧バージョンのクライアントとの互換性を保ちながら、Node および Cloudflare Worker Hub による完全な統計データの重複送信を減らしました。（#649）
+- **背景画像の不透明度：** ガラスとは別に調整でき、画像をガラスの上に重ねて表示します。（#826）
+- **上限アカウントの設定：** 貼り付けた認証情報を保存するときに接続を確認し、選択した上限の取得元を有効にします。（#803）
 
 ### 修正
-- **Codex の予定リセット：** リセット予定が告知されると、以前の予測ではなく告知された予定を表示します。（#679）
-- **Windows の DeepSeek Harness セッション：** バージョン付きの会話記録が短時間に作成されても最新の記録へ切り替わり、使用量や詳細が古いデータのまま残りません。（#680）
-- **Pi 系セッション：** フォークまたは継続した Pi、Senpi、Omp のセッションファイルにコピーされた応答を重複計上しません。
+- **Qoder CN のカスタムモデル使用量：** 新しいデスクトップ版の記録から実測のトークン数を読み取ります。プラン課金の内蔵モデルは引き続きトークン数を記録しません。（#753）
+- **Antigravity IDE の使用量：** IDE 拡張機能のセッションで使用量が計上されない問題を修正しました。（#821）
+- **TypeSafe の上限：** Cloudflare の確認画面を Cookie の期限切れと誤判定しなくなりました。（#814）
+- **エッジドックの上限：** アカウント全体の上限が尽きた場合、セッション枠が残っていても 0% と表示します。（#804）
+- **macOS メニューバーのポップオーバー：** メインディスプレイの左端に飛ぶ問題を修正しました。（#818）
+- **エッジドックのセッションモデル：** 複数のモデルを使ったセッションを、セッション一覧と同じ表記で表示します。（#799）
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.57.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.57.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-Setup-0.57.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.57.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.57.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.57.0/Token-Monitor-0.57.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.63.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.63.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-Setup-0.63.0.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.63.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.63.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.63.0/Token-Monitor-0.63.0.AppImage)
 
 </details>
 

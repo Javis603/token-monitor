@@ -1,5 +1,6 @@
 ---
 summary: "Antigravity provider notes: token/session tracking, local RPC quota probing, standalone OAuth, identity, and aggregation."
+ids: [antigravity]
 read_when:
   - Adding or changing Antigravity token or session tracking
   - Changing Antigravity local RPC or standalone OAuth quota collection
@@ -32,13 +33,15 @@ Token Monitor recognizes these native Antigravity roots under `~/.gemini/`:
 
 When Antigravity tracking is enabled and at least one native root exists, `maybeSyncAntigravity()` in `src/shared/providers/antigravity/selfSync.js` runs `tokscale antigravity sync` before the relevant scan. It is built once by the collector, which injects the process-wide self-sync throttle and the tokscale command resolver rather than letting this module create either. `tokscale` writes the normalized cache under its configured `antigravity-cache` directory.
 
-The normalized client id is `antigravity`. The tokscale alias `antigravity-cli` must continue to normalize and filter back to that parent id so targeted scans do not clear one partition and write another.
+The normalized client id is `antigravity`. The tokscale aliases `antigravity-cli` and `antigravity-extension` must continue to normalize and filter back to that parent id so targeted scans do not clear one partition and write another.
 
-The parse-local CLI source lives under `${GEMINI_CLI_HOME || ~/.gemini}/antigravity-cli/conversations`. It is a direct scan source rather than part of the native self-sync roots.
+The parse-local CLI source lives under `${GEMINI_CLI_HOME || ~/.gemini}/antigravity-cli/conversations`. The IDE extension's generation databases are read directly from `~/.gemini/antigravity/conversations/*.db`; this source follows the home directory and not `GEMINI_CLI_HOME`. Neither source depends on a successful `antigravity sync`. The extension directory is already inside a watched native root, while the CLI directory is watched separately.
+
+Normal scans include both database identities. A custom Antigravity root is passed only to `antigravity` and `antigravity-cli`: the CLI and extension use the same `*.db` parser, so passing one custom directory to both would count rows without response IDs twice. When a persisted custom root is inside the built-in extension directory — the pre-upgrade workaround for reading it — the `antigravity-cli` leg is dropped for that root so its files are not parsed a second time. A custom root that contains the extension directory keeps the leg because it may hold databases outside it; the shared subtree can still count rows without response IDs twice until Tokscale dedupes on canonical file paths.
 
 ### Watch behavior
 
-The native roots are watched because tokscale reads them without writing back to them. A change can therefore trigger an Antigravity-targeted refresh safely.
+The native roots are watched so that a change there triggers an Antigravity-targeted refresh. Reading them is not quite write-free: the extension keeps one SQLite database per conversation in WAL mode, and each read-only scan rewrites every conversation's `*.db-shm` wal-index. The collector therefore drops `-shm` events for Antigravity (`SELF_WATCHED_SQLITE_SIDECAR_CLIENTS`); otherwise every scan would schedule the next one, about every 2 s, with nothing new to collect. Real activity still arrives through the `*.db` and `*.db-wal` files.
 
 The generated `antigravity-cache` directory is deliberately not watched. Token Monitor's own sync writes it, so watching it would create a refresh loop.
 
@@ -63,7 +66,7 @@ Local RPC probes prefer process kinds in this order:
 2. CLI
 3. IDE
 
-When managed OAuth accounts exist, Token Monitor fetches enabled OAuth accounts and the local RPC snapshot concurrently. If local RPC returns a trusted email matching an OAuth account, the live local result replaces the remote result for that account.
+When managed OAuth accounts exist, Token Monitor fetches enabled OAuth accounts and the local RPC snapshot concurrently. If local RPC returns a trusted email matching an OAuth account, the live local result replaces the remote result for that account, unless the local snapshot is empty or unavailable (`status !== 'ok'`), or a legacy 3-pool RPC fallback (`windowMinutes: null`) would overwrite richer grouped OAuth quota (`windowMinutes: 300` or `10080`).
 
 An account-scoped manual refresh fetches only the requested OAuth account. With no managed accounts, normal collection remains local-RPC-only.
 
@@ -88,7 +91,7 @@ OAuth client discovery prefers explicit environment overrides, then supported in
 
 The OAuth scopes intentionally cover Cloud Code quota access plus Google profile/email identity. Account identity currently uses the normalized email returned by Google userinfo rather than OpenID `sub`; keep the user-info request and identity derivation aligned if the scopes change.
 
-Remote quota collection uses the Cloud Code bootstrap, onboarding, grouped quota-summary, available-models, and legacy quota endpoints. Available-model discovery retains production, daily, and sandbox endpoint fallbacks. The legacy quota request is also used to verify suspicious all-100-percent grouped responses.
+Remote quota collection uses the Cloud Code bootstrap, onboarding, grouped quota-summary, available-models, and legacy quota endpoints. Grouped quota-summary requests prefer `daily-cloudcode-pa.googleapis.com`, matching the CLI's service: production can return a different Gemini quota window for the same credential and project, even when both requests succeed. Production remains a compatibility fallback when daily returns no usable windows or a non-terminal error; authentication, account-verification and rate-limit errors stop the attempt. Available-model discovery retains production, daily, and sandbox endpoint fallbacks. The legacy quota request is also used to verify suspicious all-100-percent available-model responses.
 
 A generic `403 PERMISSION_DENIED` may mean that one quota endpoint is unavailable and must continue through the existing fallbacks. Only a 403 that explicitly asks the user to verify the account at `accounts.google.com` becomes `actionRequired: accountVerification`; the UI then directs the user to open Antigravity, complete verification, and refresh. Never forward the provider-supplied verification URL because it may contain account-specific parameters.
 
@@ -137,13 +140,13 @@ Token/session tracking remains dependent on local source data. OAuth does not ma
 
 | Concern | Primary files |
 | --- | --- |
-| Usage source roots and watch mapping | `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/clientHealth.js`, `src/shared/usage.js` |
+| Usage source roots, health and watch mapping | `src/shared/clientSources.js`, `src/shared/clientSourceObservations.js`, `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/clientHealth.js`, `src/shared/usage.js` |
 | Self-sync and the tokscale sync lock | `src/shared/providers/antigravity/selfSync.js`, `src/shared/selfSyncThrottle.js` |
 | Local RPC and remote quota requests | `src/shared/providers/antigravity/probe.js`, `src/shared/providers/antigravity/oauth.js`, `src/shared/providers/antigravity/limits.js` |
 | Browser OAuth lifecycle | `src/electron/providers/antigravity/oauthLogin.js`, `src/electron/main.js`, `src/electron/preload.js` |
 | Account settings and credentials | `src/shared/credentialStore.js`, `src/electron/main.js`, renderer settings files |
 | Normalization and cross-device aggregation | `src/shared/limits/core.js`, generated `worker/src/shared/limits/core.js` |
-| Limits presentation | `src/electron/renderer/limitProviderPresentation.js`, `src/electron/renderer/app.js`, localized strings |
+| Limits presentation | `src/electron/renderer/limits/providerPresentation.js`, `src/electron/renderer/app.js`, localized strings |
 | Hub build identity after shared changes | `src/shared/hubBuildRegistry.json`, generated Worker registry |
 
 ## Verification checklist

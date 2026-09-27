@@ -3,9 +3,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const {
-  DEFAULT_WIDGET_URL_SCHEME,
+  isTeamPrefixedAppGroup,
   normalizeMacDistributionChannel,
-  normalizeWidgetURLScheme,
   validateAppGroupForDistribution,
   validateAppGroupSyntax
 } = require('./macos-widget-config');
@@ -75,15 +74,19 @@ function assertWidgetArtifacts(root, options = {}) {
   return paths;
 }
 
-function resolveWidgetUrlScheme(env = process.env, root = path.resolve(__dirname, '..')) {
-  let value = String(env.TOKEN_MONITOR_WIDGET_URL_SCHEME || '').trim();
-  if (!value) {
-    try {
-      const config = JSON.parse(fs.readFileSync(widgetArtifactPaths(root).config, 'utf8'));
-      value = String(config.urlScheme || '').trim();
-    } catch (_) {}
+function localWidgetSigningIdentity(env, appGroup) {
+  const explicitIdentity = String(env.TOKEN_MONITOR_MAC_DEVELOPMENT_IDENTITY || '').trim();
+  if (explicitIdentity) return explicitIdentity;
+
+  const developmentTeam = String(env.DEVELOPMENT_TEAM || '').trim();
+  const normalizedAppGroup = String(appGroup || '').trim();
+  if (isTeamPrefixedAppGroup(normalizedAppGroup)) {
+    if (developmentTeam && !normalizedAppGroup.startsWith(`${developmentTeam}.`)) {
+      throw new Error('TOKEN_MONITOR_APP_GROUP prefix does not match DEVELOPMENT_TEAM');
+    }
+    return 'Apple Development';
   }
-  return normalizeWidgetURLScheme(value, DEFAULT_WIDGET_URL_SCHEME);
+  return '-';
 }
 
 function widgetMacBuildConfig(baseMac = {}, options = {}) {
@@ -98,8 +101,8 @@ function widgetMacBuildConfig(baseMac = {}, options = {}) {
   }
 
   assertWidgetArtifacts(root, { env });
-  const urlScheme = resolveWidgetUrlScheme(env, root);
   const localDevelopmentSigning = String(env.TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING || '').trim() === '1';
+  const appGroup = String(env.TOKEN_MONITOR_APP_GROUP || 'group.com.example.tokenmonitor').trim();
   const extraFiles = Array.isArray(base.extraFiles)
     ? base.extraFiles
     : (base.extraFiles === undefined ? [] : [base.extraFiles]);
@@ -108,7 +111,7 @@ function widgetMacBuildConfig(baseMac = {}, options = {}) {
     : (base.extraResources === undefined ? [] : [base.extraResources]);
   return {
     ...base,
-    ...(localDevelopmentSigning ? { identity: '-' } : {}),
+    ...(localDevelopmentSigning ? { identity: localWidgetSigningIdentity(env, appGroup) } : {}),
     entitlements: 'build/macos-widget/TokenMonitor.entitlements',
     sign: 'scripts/sign-macos-with-widget.js',
     extraFiles: [
@@ -128,19 +131,7 @@ function widgetMacBuildConfig(baseMac = {}, options = {}) {
         from: 'build/macos-widget/TokenMonitorWidgetReloader',
         to: 'TokenMonitorWidgetReloader'
       }
-    ],
-    extendInfo: {
-      ...(base.extendInfo || {}),
-      CFBundleURLTypes: [
-        ...(Array.isArray(base.extendInfo?.CFBundleURLTypes)
-          ? base.extendInfo.CFBundleURLTypes
-          : []),
-        {
-          CFBundleURLName: 'token-monitor-widget',
-          CFBundleURLSchemes: [urlScheme]
-        }
-      ]
-    }
+    ]
   };
 }
 
@@ -157,10 +148,9 @@ if (require.main === module && widgetEnabled()) {
 }
 
 module.exports = {
-  DEFAULT_WIDGET_URL_SCHEME,
   assertWidgetArtifacts,
   createBuilderConfig,
-  resolveWidgetUrlScheme,
+  localWidgetSigningIdentity,
   widgetArtifactPaths,
   widgetEnabled,
   widgetMacBuildConfig

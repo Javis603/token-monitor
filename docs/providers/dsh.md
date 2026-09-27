@@ -1,5 +1,6 @@
 ---
 summary: "DeepSeek Harness (dsh) provider notes: where the harness stores transcripts, how usage, session metadata and Session Detail read them, and why usage totals still come from tokscale."
+ids: [dsh]
 read_when:
   - Changing or debugging DeepSeek Harness (dsh) session discovery, titles or Session Detail
   - Investigating DSH usage that is missing from the widget

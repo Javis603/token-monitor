@@ -2,9 +2,12 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { defaultDeviceId, loadDotEnv, parseArgs, pidFilePath } = require('../shared/config');
+const {
+  defaultDeviceId, loadDotEnv, parseArgs, pidFilePath
+} = require('../shared/config');
 const { appVersion } = require('../shared/appVersion');
 const { clientsCsvForSetting } = require('../shared/clientTracking');
+const { seedAgentClients } = require('./seedClients');
 const { normalizeHistoryIntervalMs } = require('../shared/collector');
 const {
   normalizeLimitsRefreshMode,
@@ -18,21 +21,34 @@ const { applyProjectRollups } = require('../shared/usage');
 const { runAgent, runAgentOnce } = require('./runtime');
 const {
   applySessionUsageArchive,
-  captureSessionUsageArchive,
-  readSessionUsageArchive,
   sessionUsageArchiveDate,
-  writeSessionUsageArchive
+  updateSessionUsageArchive
 } = require('../shared/sessionUsageArchive');
+const {
+  createSessionUsageArchiveStore,
+  readSessionUsageArchiveSnapshot
+} = require('../shared/sessionUsageArchiveStore');
+const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 
 loadDotEnv();
 const args = parseArgs(process.argv.slice(2));
+
 const hubUrl = String(args.hub || args.hubUrl || process.env.TOKEN_MONITOR_HUB_URL || 'http://127.0.0.1:17321').replace(/\/$/, '');
 const secret = String(args.secret || process.env.TOKEN_MONITOR_SECRET || '').trim();
 const deviceId = String(args.device || args.deviceId || process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId());
 const intervalMs = Number(args.interval || args.intervalMs || process.env.TOKEN_MONITOR_INTERVAL_MS || 5 * 60 * 1000);
 const watchEnabled = String(args.watch ?? process.env.TOKEN_MONITOR_WATCH ?? '1') !== '0';
 const watchDebounceMs = Number(args.watchDebounceMs || process.env.TOKEN_MONITOR_WATCH_DEBOUNCE_MS || 1500);
-const clients = clientsCsvForSetting(args.clients ?? process.env.TOKEN_MONITOR_CLIENTS);
+// A headless deployment has no settings.json, so the enabled-client CSV is a
+// fresh declaration on every launch. That makes the identity-split migration a
+// different problem from the widget's: there is no persisted user choice to
+// leave alone, but there is still a pre-split meaning to carry forward, because
+// a CSV written before the split listed the merged id and counted both products.
+// The marker therefore lives beside the collector anchor, and it is what stops
+// the seed from re-adding a client the operator deliberately removed afterwards.
+const clients = seedAgentClients(clientsCsvForSetting(args.clients ?? process.env.TOKEN_MONITOR_CLIENTS), {
+  persist: !(args['dry-run'] || args.dryRun)
+});
 const allTimeSince = String(args.since || args.allTimeSince || process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01');
 const commandTimeoutMs = Number(args.timeoutMs || process.env.TOKEN_MONITOR_TOKSCALE_TIMEOUT_MS || 120 * 1000);
 const limitsEnabled = parseBoolean(args.limits ?? args.limitsEnabled ?? process.env.TOKEN_MONITOR_LIMITS_ENABLED, true);
@@ -96,24 +112,29 @@ const limitsOptions = {
   opencodeCookie
 };
 let sessionUsageArchive;
+const cursorUsageEvents = createCursorUsageEventIndex();
+const sessionUsageArchiveStore = dryRun ? null : createSessionUsageArchiveStore({ cursorUsageEvents });
 
 function summaryWithSessionUsageArchive(summary, now = new Date()) {
   let visibleSummary = summary;
   if (sessionUsageArchiveEnabled) {
     const archiveDate = sessionUsageArchiveDate(summary, now);
-    const previous = sessionUsageArchive || readSessionUsageArchive();
-    const next = captureSessionUsageArchive(previous, summary, archiveDate);
-    if (!dryRun && JSON.stringify(next) !== JSON.stringify(previous)) {
-      try {
-        writeSessionUsageArchive(next);
-        sessionUsageArchive = next;
-      } catch (error) {
-        console.error(`[session-archive] write failed: ${error.message}`);
-      }
-    } else if (!dryRun) {
-      sessionUsageArchive = next;
+    if (dryRun) {
+      sessionUsageArchive = updateSessionUsageArchive(
+        sessionUsageArchive || readSessionUsageArchiveSnapshot(),
+        summary,
+        archiveDate,
+        { cursorUsageEvents }
+      ).archive;
+    } else {
+      const result = sessionUsageArchiveStore.capture(summary, archiveDate);
+      sessionUsageArchive = result.archive;
+      if (result.error) console.error(`[session-archive] update failed: ${result.error.message}`);
     }
-    visibleSummary = applySessionUsageArchive(summary, next, { now: archiveDate });
+    visibleSummary = applySessionUsageArchive(summary, sessionUsageArchive, {
+      now: archiveDate,
+      canonical: !dryRun
+    });
   }
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
 }
@@ -161,7 +182,10 @@ async function main() {
   // Claim archive ownership before either a one-shot or long-running scan so
   // Electron can yield before its history read-modify-write reaches disk.
   let runtimeHandle = null;
-  if (!dryRun) registerPidFile(() => runtimeHandle?.stop());
+  if (!dryRun) registerPidFile(() => {
+    runtimeHandle?.stop();
+    sessionUsageArchiveStore.close();
+  });
   const runtimeOptions = {
     envelope: { deviceId, agentVersion: appVersion(), agentRuntime: 'headless-agent' },
     usageOptions,
@@ -173,7 +197,11 @@ async function main() {
     onError: (error, reason) => console.error(`[${new Date().toISOString()}] (${reason}) ${error.message}`)
   };
   if (once) {
-    await runAgentOnce(runtimeOptions);
+    try {
+      await runAgentOnce(runtimeOptions);
+    } finally {
+      sessionUsageArchiveStore?.close();
+    }
     return;
   }
   runtimeHandle = runAgent(runtimeOptions);

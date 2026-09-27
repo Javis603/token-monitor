@@ -1,6 +1,6 @@
 'use strict';
 
-const { aggregateDevices } = require('../shared/usage');
+const { aggregateDevices, normalizeDeviceRecord } = require('../shared/usage');
 const { deviceHistoryRevision } = require('../shared/history');
 const { pickRecentUsageActivity } = require('../shared/trayText');
 
@@ -46,6 +46,33 @@ function attachLocalPresentationNativeViews(stats, options = {}) {
   return attachLocalNativeViews(stats, localDevice);
 }
 
+// Each local collection replaces the record rather than mutating it, and every
+// Hub event in between recomposes it again. Normalizing it once per record takes
+// the largest share of a recompose off the main thread.
+const normalizedLocalRecords = new WeakMap();
+
+function normalizedLocalRecord(localDevice) {
+  let normalized = normalizedLocalRecords.get(localDevice);
+  if (!normalized) {
+    normalized = normalizeDeviceRecord(localDevice);
+    normalizedLocalRecords.set(localDevice, normalized);
+  }
+  return normalized;
+}
+
+const summaryRecords = new WeakMap();
+
+function withoutAllTimeSessions(record) {
+  const allTime = record?.periods?.allTime;
+  if (!allTime?.sessions) return record;
+  let summary = summaryRecords.get(record);
+  if (!summary) {
+    summary = { ...record, periods: { ...record.periods, allTime: { ...allTime, sessions: {} } } };
+    summaryRecords.set(record, summary);
+  }
+  return summary;
+}
+
 function composeLocalSyncStats(hubStats, localDevice, options = {}) {
   if (!localDevice?.deviceId) return hubStats;
   if (hubStats && !Array.isArray(hubStats.devices)) return hubStats;
@@ -58,7 +85,10 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     .concat(localDevice);
   const hubStaleAfterMs = nonNegativeNumber(hubStats?.staleAfterMs);
   const hasHubStaleAfterMs = hubStaleAfterMs !== null;
-  const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs);
+  const normalize = (record) => (record === localDevice ? normalizedLocalRecord(localDevice) : normalizeDeviceRecord(record));
+  const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs, {
+    normalizeRecord: options.allTimeSessions === false ? (record) => withoutAllTimeSessions(normalize(record)) : normalize
+  });
 
   aggregate.devices = aggregate.devices.map((device) => {
     const previous = previousDevices.get(device.deviceId);
@@ -97,4 +127,33 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
   return displayStats;
 }
 
-module.exports = { attachLocalNativeViews, attachLocalPresentationNativeViews, composeLocalSyncStats };
+// Most of a recompose is merging this machine's all-time sessions, which no
+// per-publish reader needs: the Hub strips them from uploads (#118), so the list
+// is only ever shown whole, on request. A publish composes without them, and the
+// exporter and the renderer's session list complete that same snapshot when
+// they ask. The completion is composed from the publish's own inputs and clock,
+// so it agrees with the summary it completes.
+const completions = new WeakMap();
+
+function composeLocalSyncSummary(hubStats, localDevice, options = {}) {
+  const nowMs = options.nowMs ?? Date.now();
+  const summary = composeLocalSyncStats(hubStats, localDevice, { nowMs, allTimeSessions: false });
+  if (summary && summary !== hubStats) completions.set(summary, { hubStats, localDevice, nowMs, complete: null });
+  return summary;
+}
+
+// Any other stats object is already complete and comes back as it is.
+function completeLocalSyncStats(stats) {
+  const entry = stats && typeof stats === 'object' ? completions.get(stats) : null;
+  if (!entry) return stats;
+  if (!entry.complete) entry.complete = composeLocalSyncStats(entry.hubStats, entry.localDevice, { nowMs: entry.nowMs });
+  return entry.complete;
+}
+
+module.exports = {
+  attachLocalNativeViews,
+  attachLocalPresentationNativeViews,
+  completeLocalSyncStats,
+  composeLocalSyncStats,
+  composeLocalSyncSummary
+};

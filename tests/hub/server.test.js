@@ -84,6 +84,71 @@ test('a hub without a secret binds to localhost only even when asked to bind eve
   }
 });
 
+test('a configured secret is accepted from headers, not from the query string', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const base = `http://127.0.0.1:${port}/api/stats`;
+    assert.equal((await fetch(`${base}?secret=shh`)).status, 401);
+    assert.equal((await fetch(base)).status, 401);
+    assert.equal((await fetch(base, { headers: { authorization: 'Bearer shh' } })).status, 200);
+    assert.equal((await fetch(base, { headers: { authorization: 'bearer shh' } })).status, 200);
+    assert.equal((await fetch(base, { headers: { authorization: 'Bearer  shh  ' } })).status, 200);
+    assert.equal((await fetch(base, { headers: { 'x-token-monitor-secret': 'shh' } })).status, 200);
+    assert.equal((await fetch(base, { headers: { 'X-Token-Monitor-Secret': '  shh  ' } })).status, 200);
+    assert.equal((await fetch(base, { headers: { authorization: 'Bearer nope' } })).status, 401);
+    assert.equal((await fetch(base, { headers: { authorization: 'Bearer sh' } })).status, 401);
+    assert.equal((await fetch(`${base}?secret=shh`, { headers: { authorization: 'Bearer nope' } })).status, 401);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('ingest, devices, and history share the same header gate', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const origin = `http://127.0.0.1:${port}`;
+    const ingestBody = JSON.stringify({ deviceId: 'dev-a', today: { totalTokens: 3 } });
+    const post = (url, headers = {}) => fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: ingestBody
+    });
+
+    assert.equal((await fetch(`${origin}/api/health`)).status, 200);
+    assert.equal((await post(`${origin}/api/ingest`)).status, 401);
+    assert.equal((await post(`${origin}/api/ingest?secret=shh`)).status, 401);
+    assert.equal((await post(`${origin}/api/ingest`, { authorization: 'Bearer nope' })).status, 401);
+    const accepted = await post(`${origin}/api/ingest`, { authorization: 'Bearer shh' });
+    assert.equal(accepted.status, 200);
+    assert.equal((await accepted.json()).deviceId, 'dev-a');
+
+    const viaHeader = await post(`${origin}/api/ingest`, { 'x-token-monitor-secret': 'shh' });
+    assert.equal(viaHeader.status, 200);
+
+    assert.equal((await fetch(`${origin}/api/devices`)).status, 401);
+    assert.equal((await fetch(`${origin}/api/devices?secret=shh`)).status, 401);
+    const devices = await fetch(`${origin}/api/devices`, { headers: { authorization: 'Bearer shh' } });
+    assert.equal(devices.status, 200);
+    assert.equal((await devices.json()).devices[0].deviceId, 'dev-a');
+
+    assert.equal((await fetch(`${origin}/api/history`)).status, 401);
+    assert.equal((await fetch(`${origin}/api/history`, { headers: { authorization: 'Bearer shh' } })).status, 200);
+    assert.equal((await fetch(`${origin}/api/subscriptions`)).status, 401);
+    assert.equal((await fetch(`${origin}/api/subscriptions`, { headers: { authorization: 'Bearer shh' } })).status, 200);
+    assert.equal((await fetch(`${origin}/api/stats`, { headers: { authorization: 'Bearer shh' } })).status, 200);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
 test('health exposes the Node Hub build identity without authentication', async () => {
   const dataFile = tempDataFile();
   const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });

@@ -489,25 +489,32 @@ async function fetchRemoteSnapshot(account, deps = {}) {
   const projectBody = projectId ? { project: projectId } : {};
   const quotaSummaryWindows = deps.quotaSummaryWindows;
   if (typeof quotaSummaryWindows === 'function') {
-    try {
-      const summary = await cloudCodeRequest(
-        '/v1internal:retrieveUserQuotaSummary',
-        credential.accessToken,
-        projectBody,
-        deps
-      );
-      const windows = quotaSummaryWindows(summary);
-      if (windows.some((window) => window.remainingFraction !== null)) {
-        return {
-          accountEmail: normalizeEmail(account?.accountEmail),
-          accountPlan: planFromLoadResponse(loadResponse, credential),
-          windows,
-          sourceDetail: 'oauth'
-        };
+    // The CLI consumes the daily service's quota. Production can return a
+    // different Gemini window for the same credential and project, including
+    // an unused 100% window, so a successful production response is not a
+    // reason to skip daily. Retain production for older endpoint deployments.
+    for (const baseUrl of [API_DAILY_BASE_URL, API_BASE_URL]) {
+      try {
+        const summary = await cloudCodeRequest(
+          '/v1internal:retrieveUserQuotaSummary',
+          credential.accessToken,
+          projectBody,
+          deps,
+          { baseUrl }
+        );
+        const windows = quotaSummaryWindows(summary);
+        if (windows.some((window) => window.remainingFraction !== null)) {
+          return {
+            accountEmail: normalizeEmail(account?.accountEmail),
+            accountPlan: planFromLoadResponse(loadResponse, credential),
+            windows,
+            sourceDetail: 'oauth'
+          };
+        }
+      } catch (error) {
+        if (error?.status === 'unauthorized' || error?.status === 'verificationRequired' || error?.status === 'rateLimited') throw error;
+        deps.logger?.(`Antigravity quota summary unavailable: ${error.message}`);
       }
-    } catch (error) {
-      if (error?.status === 'unauthorized' || error?.status === 'verificationRequired' || error?.status === 'rateLimited') throw error;
-      deps.logger?.(`Antigravity quota summary unavailable: ${error.message}`);
     }
   }
   let models;

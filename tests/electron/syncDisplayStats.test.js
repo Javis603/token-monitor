@@ -1,13 +1,17 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const { aggregateDevices } = require('../../src/shared/usage');
 const { pickRecentUsageProviderId } = require('../../src/shared/trayText');
 const {
   attachLocalPresentationNativeViews,
-  composeLocalSyncStats
+  completeLocalSyncStats,
+  composeLocalSyncStats,
+  composeLocalSyncSummary
 } = require('../../src/electron/syncDisplayStats');
 
 function device(deviceId, totalTokens, extra = {}) {
@@ -331,4 +335,67 @@ test('composeLocalSyncStats preserves an incompatible legacy snapshot instead of
   const hubStats = { periods: { today: { totalTokens: 50 } } };
 
   assert.equal(composeLocalSyncStats(hubStats, device('local', 25)), hubStats);
+});
+
+test('composeLocalSyncStats recomposes an unchanged local record exactly like a fresh one', () => {
+  const nowMs = Date.parse('2026-07-16T10:05:00.000Z');
+  const shared = (totalTokens) => usagePeriod('codex', '2026-07-16T10:00:00.000Z', totalTokens);
+  const local = device('local', 10, { today: shared(10), month: shared(10), allTime: shared(10) });
+  const untouched = structuredClone(local);
+
+  // The remote device reports the same session key, so every recompose merges
+  // into it; a reused normalization must come out of that exactly as it went in.
+  for (const remoteTokens of [5, 7, 11]) {
+    const hubStats = aggregateDevices([
+      device('remote', remoteTokens, { today: shared(remoteTokens), month: shared(remoteTokens), allTime: shared(remoteTokens) })
+    ], 0, nowMs);
+    const reused = composeLocalSyncStats(hubStats, local, { nowMs });
+    const fresh = composeLocalSyncStats(hubStats, structuredClone(local), { nowMs });
+    assert.deepEqual(reused.periods, fresh.periods);
+    assert.deepEqual(reused.devices, fresh.devices);
+    assert.equal(Object.values(reused.periods.today.sessions)[0].totalTokens, 10 + remoteTokens);
+  }
+  assert.deepEqual(local, untouched);
+});
+
+test('a publish composes without all-time session detail and completes to the full composition', () => {
+  const nowMs = Date.parse('2026-07-16T10:05:00.000Z');
+  const period = (client, totalTokens) => usagePeriod(client, '2026-07-16T10:00:00.000Z', totalTokens);
+  const local = device('local', 10, { today: period('codex', 10), month: period('codex', 10), allTime: period('codex', 10) });
+  // An agent older than #118 still uploads its all-time sessions.
+  const hubStats = aggregateDevices([
+    device('legacy', 5, { today: period('claude', 5), month: period('claude', 5), allTime: period('claude', 5) })
+  ], 0, nowMs);
+  const untouched = structuredClone(local);
+
+  const summary = composeLocalSyncSummary(hubStats, local, { nowMs });
+  const full = composeLocalSyncStats(hubStats, local, { nowMs });
+  assert.deepEqual(summary.periods.allTime.sessions, {});
+  assert.deepEqual({ ...summary.periods.allTime, sessions: null }, { ...full.periods.allTime, sessions: null });
+  assert.deepEqual(summary.periods.today, full.periods.today);
+  assert.deepEqual(summary.periods.month, full.periods.month);
+
+  const complete = completeLocalSyncStats(summary);
+  assert.deepEqual(complete.periods, full.periods);
+  assert.equal(Object.keys(complete.periods.allTime.sessions).length, 2, 'both devices, legacy upload included');
+  assert.equal(completeLocalSyncStats(summary), complete, 'completed once per snapshot');
+  assert.deepEqual(local, untouched);
+});
+
+test('stats that were never summarised are already complete', () => {
+  const hubStats = { periods: { today: { totalTokens: 50 } } };
+  assert.equal(composeLocalSyncSummary(hubStats, device('local', 25)), hubStats, 'a legacy snapshot passes through');
+  assert.equal(completeLocalSyncStats(hubStats), hubStats);
+  const full = composeLocalSyncStats(null, device('local', 25));
+  assert.equal(completeLocalSyncStats(full), full);
+  assert.equal(completeLocalSyncStats(null), null);
+});
+
+test('main publishes summaries and exports their completions', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  assert.doesNotMatch(main, /composeLocalSyncStats\(/, 'every composition main publishes is a summary');
+  assert.equal((main.match(/composeLocalSyncSummary\(/g) || []).length, 2, 'the publish and stats:get');
+  assert.match(main, /writeExportTo\(settings\.exportDir, completeLocalSyncStats\(payload\.data\.stats\)\.periods/);
+  assert.match(main, /writeExportTo\(result\.filePaths\[0\], completeLocalSyncStats\(stats\)\.periods\)/);
+  assert.equal((main.match(/writeExportTo\(/g) || []).length, 3, 'the definition and the two exports above');
 });

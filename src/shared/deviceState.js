@@ -56,22 +56,25 @@ function normalizedEnvelope(value) {
   return envelope;
 }
 
+// The usage part is copied once on the way in and never mutated afterwards:
+// every update builds a new part, and everything handed out is a copy. That is
+// what lets a carried field be shared with the previous part by reference. A
+// carried period in particular needs no second sanitize, because it was
+// filtered when it arrived.
 function mergeUsagePart(previous, incoming) {
   const next = sanitizeUsagePeriods(incoming || {});
   delete next.limits;
   if (!previous) return next;
 
   if (!hasOwn(next, 'history') && hasOwn(previous, 'history')) {
-    next.history = cloneValue(previous.history);
+    next.history = previous.history;
   }
 
   const partial = !hasOwn(next, 'month') || !hasOwn(next, 'allTime');
   if (partial) {
     for (const field of PARTIAL_USAGE_CARRY_FIELDS) {
       if (!hasOwn(next, field) && hasOwn(previous, field)) {
-        next[field] = field === 'month' || field === 'allTime'
-          ? sanitizeUsagePeriods(previous[field])
-          : cloneValue(previous[field]);
+        next[field] = previous[field];
       }
     }
   }
@@ -84,7 +87,9 @@ function createDeviceState(options = {}) {
   const onRecord = typeof options.onRecord === 'function' ? options.onRecord : null;
   let usagePart = null;
   let limitsPart = hasOwn(options, 'initialLimits') ? cloneValue(options.initialLimits) : undefined;
-  let currentRecord = null;
+  // The parts as of the last publish. The parts are never mutated in place, so
+  // holding them is enough to rebuild that record on demand.
+  let published = null;
   let hasCompleteUsageBaseline = false;
   let revision = 0;
   let stopped = false;
@@ -94,15 +99,24 @@ function createDeviceState(options = {}) {
     return !hasOwn(meta, 'epoch') || meta.epoch === epoch;
   }
 
+  function recordFrom(parts) {
+    const record = { ...cloneValue(parts.usagePart), ...cloneValue(envelope) };
+    if (parts.limitsPart !== undefined) record.limits = cloneValue(parts.limitsPart);
+    return record;
+  }
+
+  // One copy per publish. Every tick lands here, limits-only updates included,
+  // and on a long history the record runs to megabytes, so each extra
+  // defensive copy was a measurable stall on the main process. The observer and
+  // the caller share that one copy; neither can reach the parts behind it.
   function publish(source, reason) {
     if (!usagePart || stopped) return null;
-    const record = { ...cloneValue(usagePart), ...cloneValue(envelope) };
-    if (limitsPart !== undefined) record.limits = cloneValue(limitsPart);
-    currentRecord = record;
+    published = { usagePart, limitsPart };
+    const record = recordFrom(published);
     revision += 1;
     const meta = { revision, source, reason, epoch };
-    if (onRecord) onRecord(cloneValue(record), meta);
-    return cloneValue(record);
+    if (onRecord) onRecord(record, meta);
+    return record;
   }
 
   function updateUsage(summary, reason = 'usage', meta = {}) {
@@ -122,7 +136,7 @@ function createDeviceState(options = {}) {
   }
 
   function getSnapshot() {
-    return currentRecord ? cloneValue(currentRecord) : null;
+    return published ? recordFrom(published) : null;
   }
 
   function stop() {
