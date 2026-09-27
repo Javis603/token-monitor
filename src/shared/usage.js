@@ -623,7 +623,7 @@ function sessionFromRow(row) {
   session.title = normalizeSessionTitle(firstString(row, SESSION_TITLE_KEYS));
   session.sessionKind = normalizeSessionKind(row.sessionKind || row.session_kind);
   let model = detectModel(row, client);
-  if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
+  if (client === 'cursor' && (model === 'auto' || model === 'default')) model = 'cursor-auto';
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
   if (model && session.costUsd > 0) session.modelCosts[model] = (session.modelCosts[model] || 0) + session.costUsd;
   const provider = normalizeProviderName(row.provider);
@@ -870,7 +870,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   // plain counter, which is what lets it merge and delta like every other token field.
   const timedOutputTokens = timedDurationMs > 0 ? output : 0;
   let model = detectModel(row, client);
-  if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
+  if (client === 'cursor' && (model === 'auto' || model === 'default')) model = 'cursor-auto';
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;
   period.cacheReadTokens += cacheRead;

@@ -1075,6 +1075,27 @@ test('extractUsageFromTokscale folds disjoint Codex reasoning into the public ou
   assert.equal(period.sessions['cursor:cursor-active'].models['cursor-auto'], 3);
 });
 
+test('extractUsageFromTokscale maps Cursor `default` to cursor-auto without touching other clients', () => {
+  // tokscale's JSON usage cache renames Cursor Auto requests from `auto` to
+  // `default`; both must fold onto cursor-auto so history is not split in two.
+  // The rename stays scoped to Cursor: a `default` model on any other client
+  // is a real (if generic) label and passes through unchanged (#842).
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [
+      { client: 'Cursor', sessionId: 'c-default', model: 'default', provider: 'cursor', input: 1, output: 2, cost: 0.01 },
+      { client: 'Cursor', sessionId: 'c-auto', model: 'auto', provider: 'cursor', input: 3, output: 4, cost: 0.02 },
+      { client: 'claude', sessionId: 'x-default', model: 'default', provider: 'anthropic', input: 5, output: 6, cost: 0.03 }
+    ]
+  });
+
+  assert.equal(period.sessions['cursor:c-default'].models['cursor-auto'], 3);
+  assert.equal(period.sessions['cursor:c-default'].models.default, undefined);
+  assert.equal(period.sessions['cursor:c-auto'].models['cursor-auto'], 7);
+  assert.equal(period.sessions['claude:x-default'].models.default, 11);
+  assert.equal(period.sessions['claude:x-default'].models['cursor-auto'], undefined);
+});
+
 test('extractUsageFromTokscale folds disjoint DSH reasoning into totals and output', () => {
   const period = extractUsageFromTokscale({
     entries: [{
