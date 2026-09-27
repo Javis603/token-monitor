@@ -2662,10 +2662,10 @@ const usageTransform = createUsageTransform({
   onCaptureFailure: () => diagnosticJournal.record({ subsystem: 'storage', code: 'storage-archive-update-failed' })
 });
 
-// The usage runtime every device runtime starts. With TOKEN_MONITOR_USAGE_WORKER
-// set, collection and the transform run on a worker thread (usageHost.js) and
-// summaries arrive transformed; otherwise it is the in-process collector and
-// `usageTransform` above runs on this thread, as it also does if the worker fails.
+// The usage runtime every device runtime starts. Collection and the transform
+// run on a worker thread (usageHost.js) and summaries arrive transformed. With
+// TOKEN_MONITOR_USAGE_WORKER=0, or once the worker has failed, it is the
+// in-process collector and `usageTransform` above runs on this thread.
 let latestUsageHost = null;
 function createElectronUsageRuntime(options) {
   latestUsageHost = createUsageHost(options, {

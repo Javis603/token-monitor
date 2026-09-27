@@ -57,11 +57,12 @@ A failed usage reconfiguration rolls back to the last-known-good runtime and ret
 
 ### Usage worker
 
-With `TOKEN_MONITOR_USAGE_WORKER=1` (opt-in for now), the widget runs the collector, the usage transform (`src/shared/usageTransform.js`) and the session archive writer on a worker thread through `src/shared/usageHost.js`, so a tick's post-scan work and a full scan's transcript reads do not stall the main process. Summaries arrive already transformed (`onUpdate(summary, reason, { transformed: true })`) and `DeviceRuntime` skips its own transform for them.
+The widget runs the collector, the usage transform (`src/shared/usageTransform.js`) and the session archive writer on a worker thread through `src/shared/usageHost.js`, so a tick's post-scan work and a full scan's transcript reads do not stall the main process. Summaries arrive already transformed (`onUpdate(summary, reason, { transformed: true })`) and `DeviceRuntime` skips its own transform for them.
 
 - One worker at a time: a replacement starts only after the previous worker has exited, so two collectors never overlap their scans, watcher descriptor sets or archive writes. Clearing the archive stops the runtime and waits for the same exit.
 - The worker is handed the transform's settings as data, `USAGE_TRANSFORM_SETTING_KEYS`, and `applySettingsPatch()` sends it the new values as soon as they are saved, ahead of the reconfigure settle delay. `settings:update` resolves only once the worker confirms them, so once pausing the session archive reports done, nothing more is captured, as in-process. A setting the transform starts reading has to be added to that list, or the worker transforms without it.
-- A worker that fails emits `usage-worker-failed` and falls back to the in-process collector, and later runtimes stay in-process for the rest of the process.
+- A worker that fails emits `usage-worker-failed` and falls back to the in-process collector, and later runtimes stay in-process for the rest of the process. `TOKEN_MONITOR_USAGE_WORKER=0` pins the in-process collector from the start.
+- Quit does not wait for the worker. A tokscale subprocess is only running while the worker awaits it, so the worker is free to handle its stop, and sends the `SIGTERM` the in-process `stop()` would, while the process is still exiting. A worker that holds its thread while a subprocess runs would lose that race.
 
 ## Limits collector
 

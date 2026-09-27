@@ -1,6 +1,6 @@
 'use strict';
 
-// With TOKEN_MONITOR_USAGE_WORKER set, the collector, the transform and the
+// Unless TOKEN_MONITOR_USAGE_WORKER=0, the collector, the transform and the
 // session archive writer run on a worker thread (tests/shared/usageHost.test.js
 // covers the host itself). main.js cannot be required outside Electron, so these
 // pin the wiring that decides whether every runtime actually goes through it.

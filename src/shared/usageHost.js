@@ -27,6 +27,8 @@
 // so does a worker that crashes later. An exit nobody asked for switches this
 // runtime to the in-process collector, replays the calls that were waiting on
 // the worker, and keeps later runtimes in-process for the rest of the process.
+//
+// On by default. TOKEN_MONITOR_USAGE_WORKER=0 pins the in-process collector.
 
 const { startCollector } = require('./collector');
 
@@ -47,7 +49,6 @@ const CALLER_OPTION_KEYS = Object.freeze([
 
 function usageWorkerRequested(env = process.env) {
   const raw = String(env.TOKEN_MONITOR_USAGE_WORKER ?? '').trim().toLowerCase();
-  if (!raw) return false;
   return !['0', 'false', 'no', 'off'].includes(raw);
 }
 

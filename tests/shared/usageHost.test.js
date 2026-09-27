@@ -88,20 +88,23 @@ function recorder() {
   };
 }
 
-test('the worker is opt-in through TOKEN_MONITOR_USAGE_WORKER', () => {
-  assert.equal(usageWorkerRequested({}), false);
-  assert.equal(usageWorkerRequested({ TOKEN_MONITOR_USAGE_WORKER: '' }), false);
-  assert.equal(usageWorkerRequested({ TOKEN_MONITOR_USAGE_WORKER: '0' }), false);
-  assert.equal(usageWorkerRequested({ TOKEN_MONITOR_USAGE_WORKER: 'off' }), false);
+test('the worker is on by default, and TOKEN_MONITOR_USAGE_WORKER=0 pins the collector to this thread', () => {
+  assert.equal(usageWorkerRequested({}), true);
+  assert.equal(usageWorkerRequested({ TOKEN_MONITOR_USAGE_WORKER: '' }), true);
   assert.equal(usageWorkerRequested({ TOKEN_MONITOR_USAGE_WORKER: '1' }), true);
-  assert.equal(usageWorkerRequested({ TOKEN_MONITOR_USAGE_WORKER: 'true' }), true);
+  assert.equal(usageWorkerRequested({ TOKEN_MONITOR_USAGE_WORKER: '0' }), false);
+  assert.equal(usageWorkerRequested({ TOKEN_MONITOR_USAGE_WORKER: 'false' }), false);
+  assert.equal(usageWorkerRequested({ TOKEN_MONITOR_USAGE_WORKER: ' OFF ' }), false);
 });
 
 test('without the worker the collector starts on this thread with the options untouched', () => {
   const inProcess = fakeInProcessCollector();
   const options = { clients: 'codex', onUpdate() {} };
 
-  const runtime = createUsageHost(options, {}, { env: {}, startCollector: inProcess.startCollector });
+  const runtime = createUsageHost(options, {}, {
+    env: { TOKEN_MONITOR_USAGE_WORKER: '0' },
+    startCollector: inProcess.startCollector
+  });
 
   assert.equal(runtime, inProcess.started[0]);
   assert.equal(inProcess.started[0].options, options);
