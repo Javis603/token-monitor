@@ -416,6 +416,39 @@ test('a summary never normalizes the local all-time sessions', () => {
   assert.ok(reads.count > 0, 'the completions normalize them');
 });
 
+test('a completion normalizes only the all-time period on top of its summary', () => {
+  const nowMs = Date.parse('2026-07-16T10:05:00.000Z');
+  const period = (totalTokens) => usagePeriod('codex', '2026-07-16T10:00:00.000Z', totalTokens);
+  const today = period(10);
+  const { sessions, reads } = countingSessions(today.sessions);
+  const local = device('local', 10, { today: { ...today, sessions }, month: period(10), allTime: period(10) });
+
+  const summary = composeLocalOnlySummary(local, (stats) => stats, { nowMs });
+  const afterSummary = reads.count;
+  assert.ok(afterSummary > 0);
+  completeLocalSyncStats(summary);
+  assert.equal(reads.count, afterSummary, 'today is not normalized again');
+});
+
+test('a completion matches normalizing the whole record', () => {
+  const nowMs = Date.parse('2026-07-16T10:05:00.000Z');
+  const period = (client, totalTokens) => ({
+    ...usagePeriod(client, '2026-07-16T10:00:00.000Z', totalTokens),
+    projects: { 'repo-a': { totalTokens, clients: { [client]: totalTokens } } }
+  });
+  const records = {
+    'top-level periods': device('local', 10, { today: period('codex', 10), month: period('codex', 10), allTime: period('claude', 10) }),
+    'wire periods': { deviceId: 'local', receivedAt: '2026-07-16T10:00:00.000Z', periods: { today: period('codex', 10), month: period('codex', 10), allTime: period('claude', 10) } },
+    'projects disabled': device('local', 10, { projectsEnabled: false, today: period('codex', 10), month: period('codex', 10), allTime: period('claude', 10) }),
+    'both shapes, top level first': device('local', 10, { allTime: period('claude', 10), periods: { allTime: period('codex', 99) } }),
+    'no all-time period': device('local', 10, { allTime: undefined })
+  };
+  for (const [name, local] of Object.entries(records)) {
+    const summary = composeLocalOnlySummary(local, (stats) => stats, { nowMs });
+    assert.deepEqual(completeLocalSyncStats(summary).periods, aggregateDevices([local], 0, nowMs).periods, name);
+  }
+});
+
 test('local mode publishes a summary that completes to the full aggregate', () => {
   const nowMs = Date.parse('2026-07-16T10:05:00.000Z');
   const period = (client, totalTokens) => usagePeriod(client, '2026-07-16T10:00:00.000Z', totalTokens);

@@ -1,6 +1,6 @@
 'use strict';
 
-const { aggregateDevices, normalizeDeviceRecord } = require('../shared/usage');
+const { aggregateDevices, normalizeDeviceRecord, normalizePeriod } = require('../shared/usage');
 const { deviceHistoryRevision } = require('../shared/history');
 const { pickRecentUsageActivity } = require('../shared/trayText');
 
@@ -50,25 +50,18 @@ function attachLocalPresentationNativeViews(stats, options = {}) {
 // Hub event in between recomposes it again. Normalizing it once per record takes
 // the largest share of a recompose off the main thread. A summary normalizes the
 // record with its all-time session list already emptied: those sessions are
-// most of the normalization, and a summary would only drop them afterwards.
-const normalizedLocalRecords = new WeakMap();
+// most of the normalization, and a summary would only drop them afterwards. The
+// full normalization then adds just the all-time period to the summary's, so a
+// view that completes every summary does not normalize today and month twice.
 const normalizedLocalSummaries = new WeakMap();
-
-function cachedNormalization(cache, record, prepare) {
-  let normalized = cache.get(record);
-  if (!normalized) {
-    normalized = normalizeDeviceRecord(prepare(record));
-    cache.set(record, normalized);
-  }
-  return normalized;
-}
-
-function normalizedLocalRecord(localDevice) {
-  return cachedNormalization(normalizedLocalRecords, localDevice, (record) => record);
-}
+const normalizedLocalRecords = new WeakMap();
 
 // A local record carries its periods at the top level, a wire record under
-// `periods`; normalizeDeviceRecord() reads either.
+// `periods`; normalizeDeviceRecord() reads either, preferring the top level.
+function rawAllTime(record) {
+  return record.allTime || record.periods?.allTime;
+}
+
 function withoutRawAllTimeSessions(record) {
   const stripped = { ...record };
   if (record.allTime?.sessions) stripped.allTime = { ...record.allTime, sessions: {} };
@@ -79,7 +72,23 @@ function withoutRawAllTimeSessions(record) {
 }
 
 function normalizedLocalSummary(localDevice) {
-  return cachedNormalization(normalizedLocalSummaries, localDevice, withoutRawAllTimeSessions);
+  let normalized = normalizedLocalSummaries.get(localDevice);
+  if (!normalized) {
+    normalized = normalizeDeviceRecord(withoutRawAllTimeSessions(localDevice));
+    normalizedLocalSummaries.set(localDevice, normalized);
+  }
+  return normalized;
+}
+
+function normalizedLocalRecord(localDevice) {
+  let normalized = normalizedLocalRecords.get(localDevice);
+  if (!normalized) {
+    const summary = normalizedLocalSummary(localDevice);
+    const allTime = normalizePeriod(rawAllTime(localDevice), { projectsEnabled: summary.projectsEnabled !== false });
+    normalized = { ...summary, periods: { ...summary.periods, allTime } };
+    normalizedLocalRecords.set(localDevice, normalized);
+  }
+  return normalized;
 }
 
 const summaryRecords = new WeakMap();
