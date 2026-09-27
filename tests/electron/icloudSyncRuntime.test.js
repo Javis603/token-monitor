@@ -990,3 +990,36 @@ test('restart keeps an unfinished multi-ID handoff out of the aggregate until ma
     fixture.cleanup();
   }
 });
+
+test('leaving iCloud retains its identity through Local and Hub edits until iCloud publication', async () => {
+  const fixture = rootFixture();
+  let runtime;
+  try {
+    const store = createIcloudSyncStore({
+      platform: 'darwin', home: fixture.root, cloudDocsRoot: path.join(fixture.root, 'CloudDocs'), writerId: 'writer'
+    });
+    await store.writeDevice(record('mac-a', 42));
+    const local = retainIdentity({ hubMode: 'icloud', deviceId: 'mac-a' }, { hubMode: 'local', deviceId: 'mac-a' });
+    const edited = retainIdentity(local, { hubMode: 'local', deviceId: 'mac-b' });
+    const hub = retainIdentity(edited, { hubMode: 'client', deviceId: 'mac-b' });
+    const returned = JSON.parse(JSON.stringify(retainIdentity(hub, { hubMode: 'icloud', deviceId: 'mac-b' })));
+    assert.deepEqual(returned.icloudRetiredDeviceIds, ['mac-a']);
+    assert.deepEqual((await store.discoverDevices()).records.map((entry) => entry.deviceId), ['mac-a']);
+    runtime = createIcloudSyncRuntime({
+      store, deviceId: returned.deviceId, retiredDeviceIds: returned.icloudRetiredDeviceIds,
+      reconcileMs: 0, watchFactory: () => null
+    });
+    await runtime.start();
+    assert.equal(await runtime.writeDevice(record(returned.deviceId, 42), {
+      retiredDeviceIds: returned.icloudRetiredDeviceIds
+    }), true);
+    assert.deepEqual((await store.discoverDevices()).records.map((entry) => entry.deviceId), ['mac-b']);
+    assert.equal(runtime.getStats().periods.today.totalTokens, 42);
+    assert.equal(runtime.getStats().periods.allTime.totalTokens, 42);
+    const sameId = retainIdentity(local, { hubMode: 'icloud', deviceId: 'mac-a' });
+    assert.deepEqual(Array.from(sameId.icloudRetiredDeviceIds), ['mac-a']);
+  } finally {
+    await runtime?.stop();
+    fixture.cleanup();
+  }
+});

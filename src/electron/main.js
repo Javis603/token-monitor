@@ -3978,7 +3978,8 @@ async function stopIcloudRuntime() {
 
 function retainIcloudDeviceIdentity(previous, next) {
   const retired = new Set(previous.icloudRetiredDeviceIds || []);
-  if (previous.hubMode === 'icloud' && previous.deviceId !== next.deviceId) {
+  if (previous.hubMode === 'icloud'
+    && (previous.deviceId !== next.deviceId || next.hubMode !== 'icloud')) {
     retired.add(previous.deviceId);
   }
   next.icloudRetiredDeviceIds = [...retired].filter(Boolean);
