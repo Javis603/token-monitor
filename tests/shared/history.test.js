@@ -126,6 +126,29 @@ test('Cursor Auto and default graph rows share one model without renaming other 
   assert.equal(day.tokens, 21);
 });
 
+test('Cursor graph summary retains exact components after default is renamed', () => {
+  const row = {
+    date: '2026-09-27',
+    clients: [{ client: 'cursor', modelId: 'default', tokens: { input: 2, output: 3 } }],
+    tokenComponentSummary: {
+      tokenComponentsAvailable: true,
+      outputTokens: 3,
+      perClient: { cursor: { outputTokens: 3 } },
+      perModel: { default: { outputTokens: 3 } }
+    }
+  };
+  const day = parseGraphResult({ contributions: [row] }).contributions[0];
+  assert.equal(day.perModel['cursor-auto'].outputTokens, 3);
+  assert.equal(day.outputTokens, 3);
+
+  const mixed = parseGraphResult({ contributions: [{
+    ...row,
+    clients: [...row.clients, { client: 'claude', modelId: 'default', tokens: { input: 1, output: 4 } }]
+  }] }).contributions[0];
+  assert.equal(mixed.perModel['cursor-auto'].outputTokens, 3);
+  assert.equal(mixed.perModel.default.outputTokens, 4);
+});
+
 test('parseGraphResult keeps Oh My Pi and Pi as separate history identities', () => {
   const { contributions } = parseGraphResult({
     contributions: [{

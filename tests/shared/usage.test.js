@@ -1098,6 +1098,40 @@ test('extractUsageFromTokscale maps Cursor `default` to cursor-auto without touc
   assert.equal(period.models.default, 11);
 });
 
+test('normalizePeriod reconciles old Cursor default global models using client attribution', () => {
+  const old = {
+    totalTokens: 10,
+    clients: { cursor: 7, claude: 3 },
+    models: { default: 10 },
+    modelCosts: { default: 1 },
+    modelCacheReads: { default: 4 },
+    modelOutputs: { default: 6 },
+    clientModels: { cursor: { default: 7 }, claude: { default: 3 } },
+    clientModelCosts: { cursor: { default: 0.7 }, claude: { default: 0.3 } }
+  };
+  const mixed = normalizePeriod(old);
+  assert.deepEqual({ ...mixed.models }, { default: 3, 'cursor-auto': 7 });
+  assert.equal(mixed.modelCosts['cursor-auto'], 0.7);
+  assert.ok(Math.abs(mixed.modelCosts.default - 0.3) < 1e-9);
+  assert.equal(mixed.modelUnclassifiedTokens.default, 3);
+  assert.equal(mixed.modelUnclassifiedTokens['cursor-auto'], 7);
+  assert.equal(mixed.capabilities.tokenComponents, false);
+  assert.deepEqual(normalizePeriod(mixed), mixed);
+
+  const cursorOnly = normalizePeriod({
+    ...old,
+    totalTokens: 7,
+    clients: { cursor: 7 },
+    models: { default: 7 },
+    modelCosts: { default: 0.7 },
+    clientModels: { cursor: { default: 7 } },
+    clientModelCosts: { cursor: { default: 0.7 } }
+  });
+  assert.equal(cursorOnly.models.default, undefined);
+  assert.equal(cursorOnly.modelCacheReads['cursor-auto'], 4);
+  assert.equal(cursorOnly.modelOutputs['cursor-auto'], 6);
+});
+
 test('extractUsageFromTokscale folds disjoint DSH reasoning into totals and output', () => {
   const period = extractUsageFromTokscale({
     entries: [{

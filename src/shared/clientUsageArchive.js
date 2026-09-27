@@ -1,6 +1,7 @@
 'use strict';
 
 const { PERIODS, normalizeClientName, normalizePeriod } = require('./usage');
+const { normalizeTokscaleModelNameForClient } = require('./history');
 const {
   CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry
 } = require('./clientIdentitySplits');
@@ -25,13 +26,13 @@ function clientSet(value) {
   return new Set(String(value || '').split(',').map(normalizeClientId).filter(Boolean));
 }
 
-function archivedPeriod(input) {
+function archivedPeriod(input, client) {
   const normalized = normalizePeriod({ sessions: input?.sessions });
   return {
     totalTokens: Math.max(0, Math.round(numberValue(input?.totalTokens))),
     costUsd: numberValue(input?.costUsd),
-    models: normalizedModelMap(input?.models),
-    modelCosts: normalizedModelMap(input?.modelCosts, false),
+    models: normalizedModelMap(input?.models, client),
+    modelCosts: normalizedModelMap(input?.modelCosts, client, false),
     sessions: normalized.sessions
   };
 }
@@ -41,16 +42,11 @@ function hasUsage(period) {
   return Object.values(period?.sessions || {}).some((session) => numberValue(session?.totalTokens) > 0 || numberValue(session?.costUsd) > 0);
 }
 
-function normalizeModelName(value) {
-  const raw = String(value || '').trim();
-  return raw || null;
-}
-
-function normalizedModelMap(input, roundTokens = true) {
+function normalizedModelMap(input, client, roundTokens = true) {
   const result = {};
   if (!input || typeof input !== 'object') return result;
   for (const [model, value] of Object.entries(input)) {
-    const key = normalizeModelName(model);
+    const key = normalizeTokscaleModelNameForClient(model, client);
     if (!key) continue;
     const next = roundTokens ? Math.max(0, Math.round(numberValue(value))) : numberValue(value);
     if (next > 0) result[key] = (result[key] || 0) + next;
@@ -69,7 +65,7 @@ function clientUsageFromPeriod(period, client) {
     models: period?.clientModels?.[client],
     modelCosts: period?.clientModelCosts?.[client],
     sessions
-  });
+  }, client);
 }
 
 // The session id half of a `client:sessionId` key, preferring the session's own
@@ -106,7 +102,7 @@ function normalizeArchivedClientUsage(value) {
     };
     let includesUsage = false;
     for (const periodName of PERIODS) {
-      const period = archivedPeriod(rawEntry.periods?.[periodName] || rawEntry[periodName]);
+      const period = archivedPeriod(rawEntry.periods?.[periodName] || rawEntry[periodName], client);
       entry.periods[periodName] = period;
       includesUsage = includesUsage || hasUsage(period);
     }

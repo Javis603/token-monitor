@@ -35,6 +35,33 @@ function normalizeTokscaleModelNameForClient(value, client) {
   return model;
 }
 
+// A graph/day component summary is keyed by the source model labels. Its
+// per-model buckets can follow a Cursor rename only if no other client shares
+// the old label; otherwise the aggregate has no client split to recover.
+function normalizeTokscaleModelComponentSummary(summary, rows) {
+  if (!summary?.perModel) return summary;
+  const renames = new Map();
+  for (const row of rows || []) {
+    const model = String(row?.modelId || row?.model || row?.model_id || 'unknown');
+    const canonical = normalizeTokscaleModelNameForClient(model, row?.client);
+    if (renames.has(model) && renames.get(model) !== canonical) return null;
+    renames.set(model, canonical);
+  }
+  if (![...renames].some(([before, after]) => before !== after)) return summary;
+  const perModel = {};
+  for (const [model, components] of Object.entries(summary.perModel)) {
+    const key = renames.get(model) || model;
+    const previous = perModel[key];
+    perModel[key] = previous ? {
+      cacheReadTokens: num(previous.cacheReadTokens) + num(components?.cacheReadTokens),
+      cacheWriteTokens: num(previous.cacheWriteTokens) + num(components?.cacheWriteTokens),
+      outputTokens: num(previous.outputTokens) + num(components?.outputTokens),
+      unclassifiedTokens: num(previous.unclassifiedTokens) + num(components?.unclassifiedTokens)
+    } : components;
+  }
+  return { ...summary, perModel };
+}
+
 function num(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '') {
@@ -176,7 +203,7 @@ function parseGraphResult(raw) {
       pm.unclassifiedTokens += unclassified;
     }
     const componentSummary = applyComponentSummary(
-      row.tokenComponentSummary,
+      normalizeTokscaleModelComponentSummary(row.tokenComponentSummary, clientRows),
       tokens,
       perClient,
       perModel
@@ -564,7 +591,8 @@ function deviceHistoryRevision(devices) {
 }
 
 module.exports = {
-  hasDisjointReasoning, num, normalizeTokscaleClientName, normalizeTokscaleModelNameForClient, sumOutputTokens, sumTokens,
+  hasDisjointReasoning, num, normalizeTokscaleClientName, normalizeTokscaleModelNameForClient,
+  normalizeTokscaleModelComponentSummary, sumOutputTokens, sumTokens,
   parseGraphResult, computeIntensities, localDayKey, dayKeyAddDays,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories,
   coerceHistory, historyPreview, historyRevision, deviceHistoryRevision

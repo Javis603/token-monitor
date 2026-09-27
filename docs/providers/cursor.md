@@ -23,7 +23,7 @@ Only accounts added manually by Token Monitor may be removed from its UI. Deskto
 
 Cursor is self-synced: the collector supplies its one `SelfSyncThrottle` and tokscale resolver to `createCursorSelfSync()`. A credential change forces one targeted Cursor usage sync but does not restart the usage runtime.
 
-Cursor's old CSV usage names Auto as `auto`; its JSON usage events name the same mode `default`. Token Monitor groups both under `cursor-auto` in usage, History graph, and archived session/day replay. Keep this mapping scoped to Cursor because other clients may use `default` for a different model.
+Cursor's old CSV usage names Auto as `auto`; its JSON usage events name the same mode `default`. Token Monitor groups both under `cursor-auto` in usage, History graph, old device periods, and archived session/client/day replay. Keep this mapping scoped to Cursor because other clients may use `default` for a different model. A persisted Cursor collector anchor from before this mapping must be rescanned once so its broader periods cannot mix old and new model keys.
 
 The generated tokscale Cursor cache is not watched because Token Monitor's own sync writes it. `usageEvents.js` indexes live and archived cache events by account and conversation, invalidating only changed files. `sessionGuard.js` uses that index to retire legacy synthetic event ids when a canonical session supersedes them; ambiguous events do not guess.
 

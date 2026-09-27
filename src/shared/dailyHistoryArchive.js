@@ -5,7 +5,8 @@ const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 const { sharedDataDir, writeJsonAtomic } = require('./config');
 const {
-  normalizeTokscaleClientName, normalizeTokscaleModelNameForClient, num, sumOutputTokens, sumTokens
+  normalizeTokscaleClientName, normalizeTokscaleModelNameForClient,
+  normalizeTokscaleModelComponentSummary, num, sumOutputTokens, sumTokens
 } = require('./history');
 const {
   CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry
@@ -184,37 +185,9 @@ function normalizeDay(value, fallbackDate = '') {
     observations[key] = addObservation(observations[key], observation);
   }
   if (Object.keys(observations).length === 0 && num(value?.activeTimeMs) <= 0) return null;
-  // A stored live-day summary is keyed by the old model ids too. Fold its
-  // components only when the old id belongs exclusively to Cursor; if another
-  // client shares `default`, the aggregate cannot be split without guessing.
-  let summary = value?.componentSummary;
-  if (summary?.perModel) {
-    const renames = new Map();
-    let ambiguous = false;
-    for (const raw of source) {
-      const model = String(raw?.modelId || raw?.model || raw?.model_id || 'unknown');
-      const canonical = normalizeTokscaleModelNameForClient(model, raw?.client);
-      if (renames.has(model) && renames.get(model) !== canonical) ambiguous = true;
-      renames.set(model, canonical);
-    }
-    if (ambiguous) {
-      summary = null;
-    } else if ([...renames].some(([before, after]) => before !== after)) {
-      const perModel = {};
-      for (const [model, components] of Object.entries(summary.perModel)) {
-        const key = renames.get(model) || model;
-        const previous = perModel[key];
-        perModel[key] = previous ? {
-          cacheReadTokens: num(previous.cacheReadTokens) + num(components?.cacheReadTokens),
-          cacheWriteTokens: num(previous.cacheWriteTokens) + num(components?.cacheWriteTokens),
-          outputTokens: num(previous.outputTokens) + num(components?.outputTokens),
-          unclassifiedTokens: num(previous.unclassifiedTokens) + num(components?.unclassifiedTokens)
-        } : components;
-      }
-      summary = { ...summary, perModel };
-    }
-  }
-  const componentSummary = normalizeComponentSummary(summary, observations);
+  const componentSummary = normalizeComponentSummary(
+    normalizeTokscaleModelComponentSummary(value?.componentSummary, source), observations
+  );
   return {
     date,
     activeTimeMs: Math.max(0, Math.round(num(value?.activeTimeMs))),
