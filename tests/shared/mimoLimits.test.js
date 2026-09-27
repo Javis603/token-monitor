@@ -126,7 +126,7 @@ function mimoWorld(options = {}) {
           code: 0,
           data: {
             balance: options.balance ?? 9.96,
-            currency: 'CNY',
+            currency: options.currency ?? 'CNY',
             cashBalance: 0,
             giftBalance: 9.96
           }
@@ -1333,6 +1333,17 @@ test('today and week are the console total’s own deltas, and a drop only rebas
   const after = call(0.5, Date.UTC(2026, 8, 27, 9));
   assert.equal(after.todaySpend, 0.6);
 
+  // The rolling seven days the other two providers keep: a bucket older than
+  // that stays out of `weekSpend` while today's own bucket is counted. The
+  // deltas here are +0.5 into the 17th and +0.5 into the 27th, on top of the
+  // 0.6 the 27th already holds.
+  const oldDay = call(1.0, Date.UTC(2026, 8, 17, 9));
+  assert.equal(oldDay.todaySpend, 0.5, 'a delta lands on the day it was observed');
+  const back = call(1.5, Date.UTC(2026, 8, 27, 10));
+  assert.equal(back.todaySpend, 1.1, 'today counts only its own bucket');
+  assert.equal(back.weekSpend, 1.1, 'the week is the last seven days, not everything the store keeps');
+  assert.equal(back.trackingSince, first.trackingSince, 'the ledger states when observation began once, and that does not move');
+
   // A ledger only compares like with like: switching the console's currency
   // rebases it rather than subtracting one currency's total from another's.
   const otherCurrency = recordMimoCumulativeSpend({
@@ -1379,4 +1390,14 @@ test('the console row states the console’s own month and all time beside a loc
   assert.equal(probed[0].balance.todaySpend, null, 'a credential probe does not write history');
   const afterProbe = await fetchMimoLimits(options, probeAt('1.90', 9));
   assert.equal(afterProbe[0].balance.todaySpend, 0.4, 'and the baseline is the one the collector left');
+
+  // The ledger is fed the currency the console states, not one of its own: a
+  // change of currency rebases it instead of subtracting across currencies.
+  const switched = await fetchMimoLimits(options, {
+    ...probeAt('1.95', 10),
+    fetch: mimoWorld({ totalCost: '1.95', currency: 'USD' }).fetch
+  });
+  assert.equal(switched[0].balance.currency, 'USD');
+  assert.equal(switched[0].balance.todaySpend, 0, 'a currency change starts a new baseline');
+
 });
