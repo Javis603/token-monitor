@@ -6,7 +6,7 @@
 
 const path = require('node:path');
 
-const { createUsageHostCoordinator } = require('../../src/shared/usageHost');
+const { createUsageHostCoordinator } = require('../../src/shared/usage/usageHost');
 
 const coordinator = createUsageHostCoordinator({
   workerPath: path.join(__dirname, 'usageWorkerScriptedCollector.js')

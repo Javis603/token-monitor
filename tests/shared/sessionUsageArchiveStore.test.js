@@ -11,12 +11,12 @@ const { readJson } = require('../../src/shared/config');
 const {
   captureSessionUsageArchive,
   writeSessionUsageArchive
-} = require('../../src/shared/sessionUsageArchive');
+} = require('../../src/shared/usage/sessionUsageArchive');
 const {
   createSessionUsageArchiveStore,
   readSessionUsageArchiveSnapshot,
   sessionUsageArchiveDatabasePath
-} = require('../../src/shared/sessionUsageArchiveStore');
+} = require('../../src/shared/usage/sessionUsageArchiveStore');
 
 function summary(totalTokens = 100, sessionId = 'one', periodNames = ['today', 'month', 'allTime']) {
   const session = {

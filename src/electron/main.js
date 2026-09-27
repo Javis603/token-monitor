@@ -91,8 +91,8 @@ const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { actionWindowForEvent, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
-const { createDeviceRuntime } = require('../shared/deviceRuntime');
-const { externalAgentActive } = require('../shared/agentPid');
+const { createDeviceRuntime } = require('../shared/usage/deviceRuntime');
+const { externalAgentActive } = require('../shared/usage/agentPid');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
 const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
@@ -239,14 +239,14 @@ const {
   captureArchivedClientUsage,
   normalizeArchivedClientUsage,
   pruneArchivedClientUsage
-} = require('../shared/clientUsageArchive');
-const { sessionUsageArchiveDate } = require('../shared/sessionUsageArchive');
+} = require('../shared/usage/clientUsageArchive');
+const { sessionUsageArchiveDate } = require('../shared/usage/sessionUsageArchive');
 const {
   createSessionUsageArchiveStore,
   sessionUsageArchiveDatabasePath
-} = require('../shared/sessionUsageArchiveStore');
-const { createUsageTransform, usageTransformSettings } = require('../shared/usageTransform');
-const { createUsageHost, terminateUsageHostSubprocesses, whenUsageHostsIdle } = require('../shared/usageHost');
+} = require('../shared/usage/sessionUsageArchiveStore');
+const { createUsageTransform, usageTransformSettings } = require('../shared/usage/usageTransform');
+const { createUsageHost, terminateUsageHostSubprocesses, whenUsageHostsIdle } = require('../shared/usage/usageHost');
 const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
 const { aggregateDevices, aggregateHistory } = require('../shared/usage');
 const {
@@ -321,6 +321,7 @@ const {
   attachLocalNativeViews,
   attachLocalPresentationNativeViews,
   completeLocalSyncStats,
+  composeLocalOnlySummary,
   composeLocalSyncSummary
 } = require('./syncDisplayStats');
 const {
@@ -4434,8 +4435,11 @@ function startLocalCollector() {
       const visibleSummary = summary;
       localDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       lastCollectedDevice = localDevice;
-      localStats = withHistoryPreview(aggregateDevices([localDevice], 0), [localDevice]);
-      attachLocalNativeViews(localStats, localDevice);
+      localStats = composeLocalOnlySummary(localDevice, (stats) => {
+        withHistoryPreview(stats, [localDevice]);
+        attachLocalNativeViews(stats, localDevice);
+        return stats;
+      });
       updateDiscordRpcDisplay(localStats);
       sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } }, { widgetProducerOwner });
       sendStatus(true, { reason });

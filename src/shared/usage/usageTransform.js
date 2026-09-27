@@ -7,7 +7,7 @@ const {
   sessionUsageArchiveDate
 } = require('./sessionUsageArchive');
 const { readSessionUsageArchiveSnapshot } = require('./sessionUsageArchiveStore');
-const { applyProjectRollups } = require('./usage');
+const { applyProjectRollups } = require('../usage');
 
 // Every setting project() and transform() read. A transform running on another
 // thread is handed exactly these (see usageTransformSettings).

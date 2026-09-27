@@ -7,7 +7,7 @@ const {
   USAGE_TRANSFORM_SETTING_KEYS,
   createUsageTransform,
   usageTransformSettings
-} = require('../../src/shared/usageTransform');
+} = require('../../src/shared/usage/usageTransform');
 const { normalizePeriod } = require('../../src/shared/usage');
 
 const AT = '2026-07-09T08:15:00.000Z';
