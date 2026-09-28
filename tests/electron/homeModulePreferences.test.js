@@ -6,7 +6,6 @@ const test = require('node:test');
 const {
   DEFAULT_HOME_MODULE_ORDER,
   defaultHomeModulePreferences,
-  migrateHiddenHomeModules,
   moveHomeModuleOrder,
   normalizeHiddenHomeModules,
   normalizeHomeModuleOrder,
@@ -23,21 +22,21 @@ const modules = [
   { id: 'trends', label: 'Activity' }
 ];
 
-test('defaultHomeModulePreferences includes Sessions but hides it by default', () => {
+test('defaultHomeModulePreferences includes Sessions and shows it by default', () => {
   assert.equal(DEFAULT_HOME_MODULE_ORDER, 'limits,tool,device,model,session,trends');
   assert.deepEqual(defaultHomeModulePreferences(), {
     homeModuleOrder: 'limits,tool,device,model,session,trends',
-    hiddenHomeModules: 'tool,device,session'
+    hiddenHomeModules: 'tool,device'
   });
 });
 
-test('default Home module preferences show the original overview modules first', () => {
+test('default Home module preferences show Sessions in the overview', () => {
   const hidden = new Set(defaultHomeModulePreferences().hiddenHomeModules.split(','));
   assert.deepEqual(
     orderedHomeModules(modules, defaultHomeModulePreferences().homeModuleOrder)
       .map((module) => module.id)
       .filter((id) => !hidden.has(id)),
-    ['limits', 'model', 'trends']
+    ['limits', 'model', 'session', 'trends']
   );
 });
 
@@ -78,8 +77,9 @@ test('existing saved orders gain Sessions without dropping a custom order', () =
   );
 });
 
-test('legacy Home settings hide Sessions while preserving previous visibility', () => {
-  assert.equal(migrateHiddenHomeModules('tool,device', 'limits,tool,device,model,trends', modules), 'tool,device,session');
-  assert.equal(migrateHiddenHomeModules('', 'model,limits,trends,tool,device', modules), 'session');
-  assert.equal(migrateHiddenHomeModules('tool,device', 'limits,tool,device,model,session,trends', modules), 'tool,device');
+test('legacy Home settings append Sessions visibly while preserving hidden modules', () => {
+  const order = normalizeHomeModuleOrder('model,limits,trends,tool,device', modules);
+  const hidden = new Set(normalizeHiddenHomeModules('tool,device', modules).split(','));
+  assert.deepEqual(order.filter((id) => !hidden.has(id)), ['model', 'limits', 'trends', 'session']);
+  assert.equal(normalizeHiddenHomeModules('', modules), '');
 });

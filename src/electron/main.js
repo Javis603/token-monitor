@@ -162,7 +162,6 @@ const {
 } = require('./renderer/viewDisplayPreferences');
 const {
   defaultHomeModulePreferences,
-  migrateHiddenHomeModules,
   normalizeHiddenHomeModules,
   normalizeHomeModuleOrder
 } = require('./renderer/homeModulePreferences');
@@ -2450,7 +2449,7 @@ function readSettings() {
       merged.homeModuleOrder = normalizeHomeModuleOrder(saved.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',');
     }
     if (saved.hiddenHomeModules !== undefined) {
-      merged.hiddenHomeModules = migrateHiddenHomeModules(saved.hiddenHomeModules, saved.homeModuleOrder, DEFAULT_HOME_MODULE_LIST);
+      merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
