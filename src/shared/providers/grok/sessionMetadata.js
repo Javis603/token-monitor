@@ -119,6 +119,13 @@ function resolveSessionMetadata(sessionIds, context) {
     if (!wanted.has(candidate.sessionId) || result.has(candidate.sessionId)) continue;
     const summary = readSummary(candidate.summaryPath, readFileSync);
     if (!summary) continue;
+    // The join is the directory name: tokscale reports the same bare uuid that
+    // grok uses for the session directory and records as `info.id`. A summary
+    // whose stated id disagrees with the directory it was found in is someone
+    // else's record sitting in the wrong place, and its title, times and
+    // project path must not be attached to this session.
+    const claimed = typeof summary.info?.id === 'string' ? summary.info.id.trim() : '';
+    if (claimed && claimed !== candidate.sessionId) continue;
     const meta = {};
     const startedAt = timestamp(summary.created_at, isoFromDate);
     if (startedAt) meta.startedAt = startedAt;

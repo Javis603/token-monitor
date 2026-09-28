@@ -133,6 +133,18 @@ test('a whitespace-only or missing title leaves no name behind', () => {
   assert.equal(grok.resolveSessionMetadata(new Set([bare]), context(home)).get(bare).title, undefined);
 });
 
+// The join is the directory name: a summary claiming a different id is a record
+// in the wrong place, and its title, times and project must not be adopted.
+test('a summary whose stated id disagrees with its directory is not attributed to that session', () => {
+  const home = makeHome();
+  writeSession(home, 'D%3A%5Cwork', 'sess-real', {
+    info: { id: 'sess-someone-else', cwd: 'D:\\elsewhere' },
+    created_at: '2026-09-28T12:35:29.829384700Z',
+    generated_title: 'Not this session'
+  });
+  assert.equal(grok.resolveSessionMetadata(new Set(['sess-real']), context(home)).size, 0);
+});
+
 test('a scoped home ignores the host GROK_HOME', () => {
   const home = makeHome();
   const decoy = makeHome();
