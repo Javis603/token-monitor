@@ -474,8 +474,8 @@ const SMART_COLLECTION_INTERVAL_MS = 10 * 60 * 1000;
 const DEFAULT_COLLECTION_INTERVAL_MS = 5 * 60 * 1000;
 const HUB_DEFAULT_PORT = 17321;
 const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
-const DEFAULT_VIEW_LIST = ['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'].map((id) => ({ id }));
-const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'session', 'trends'].map((id) => ({ id }));
+const DEFAULT_VIEW_LIST = ['home', 'limits', 'tool', 'model', 'project', 'session', 'device', 'trends', 'status'].map((id) => ({ id }));
+const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'model', 'session', 'device', 'trends'].map((id) => ({ id }));
 const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
 
 let mainWindow = null;

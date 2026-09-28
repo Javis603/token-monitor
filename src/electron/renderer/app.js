@@ -228,23 +228,23 @@ const deviceStaleColor = '#8c97a7';
 const baseBreakdownOrder = ['tool', 'device', 'model', 'project', 'session'];
 const VIEW_DISPLAY_OPTIONS = [
   { id: 'home', labelKey: 'views.home' },
+  { id: 'limits', labelKey: 'views.limits' },
   { id: 'tool', labelKey: 'views.tool' },
-  { id: 'status', labelKey: 'views.status' },
-  { id: 'device', labelKey: 'views.device' },
   { id: 'model', labelKey: 'views.model' },
   { id: 'project', labelKey: 'views.project' },
   { id: 'session', labelKey: 'views.session' },
-  { id: 'limits', labelKey: 'views.limits' },
-  { id: 'trends', labelKey: 'views.trends' }
+  { id: 'device', labelKey: 'views.device' },
+  { id: 'trends', labelKey: 'views.trends' },
+  { id: 'status', labelKey: 'views.status' }
 ];
 const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', 'allTime']);
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
   { id: 'tool', labelKey: 'home.tools', viewId: 'tool' },
-  { id: 'device', labelKey: 'home.devices', viewId: 'device' },
   { id: 'model', labelKey: 'home.models', viewId: 'model' },
   { id: 'session', labelKey: 'home.sessions', viewId: 'session' },
+  { id: 'device', labelKey: 'home.devices', viewId: 'device' },
   { id: 'trends', labelKey: 'home.activity', viewId: 'trends' }
 ];
 const VIEW_SWITCHER_LONG_PRESS_MS = 420;

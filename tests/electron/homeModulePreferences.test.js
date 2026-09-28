@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -23,11 +25,24 @@ const modules = [
 ];
 
 test('defaultHomeModulePreferences includes Sessions and shows it by default', () => {
-  assert.equal(DEFAULT_HOME_MODULE_ORDER, 'limits,tool,device,model,session,trends');
+  assert.equal(DEFAULT_HOME_MODULE_ORDER, 'limits,tool,model,session,device,trends');
   assert.deepEqual(defaultHomeModulePreferences(), {
-    homeModuleOrder: 'limits,tool,device,model,session,trends',
+    homeModuleOrder: 'limits,tool,model,session,device,trends',
     hiddenHomeModules: 'tool,device'
   });
+});
+
+test('main and renderer Home module options follow the default order', () => {
+  const mainSource = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const mainMatch = mainSource.match(/const DEFAULT_HOME_MODULE_LIST = \[([^\]]+)\]\.map/);
+  const rendererMatch = rendererSource.match(/const HOME_MODULE_OPTIONS = \[([\s\S]*?)\];/);
+  assert.ok(mainMatch);
+  assert.ok(rendererMatch);
+  const mainIds = [...mainMatch[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
+  const rendererIds = [...rendererMatch[1].matchAll(/id: '([^']+)'/g)].map((match) => match[1]);
+  assert.deepEqual(mainIds, DEFAULT_HOME_MODULE_ORDER.split(','));
+  assert.deepEqual(rendererIds, mainIds);
 });
 
 test('default Home module preferences show Sessions in the overview', () => {
