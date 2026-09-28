@@ -19,8 +19,8 @@
 //
 // One worker at a time per coordinator. A replacement starts only after the
 // previous worker has exited, so two collectors never overlap: not their scans,
-// not their watcher descriptor sets (the watcher is a worker nested in this
-// one), and not their archive writes.
+// not their watcher descriptor sets (the watcher is a child process this one
+// owns, killed by its collector's stop), and not their archive writes.
 //
 // The in-process collector is a real fallback, as in watcherHost.js. A Worker
 // constructor does not throw on a broken module; it emits 'error' and exits, and

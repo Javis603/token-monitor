@@ -3141,8 +3141,8 @@ function startCollector(options) {
   // chokidar's close() walks every watched entry and closes every fs.watch
   // handle inline, and its cost grows superlinearly with that count, so on a
   // tree the size of ~/.claude/projects it runs for about a second. That cost
-  // has not gone away — watcherHost.js just decides which thread pays it, and
-  // by default that is a worker rather than the one driving the UI. `skipClose`
+  // has not gone away — watcherHost.js just decides who pays it, and by
+  // default that is a child process rather than the thread driving the UI. `skipClose`
   // is the quit path: descriptors go with the process, so there is nothing to
   // wait for.
   function closeWatchers({ skipClose = false } = {}) {
