@@ -11702,7 +11702,8 @@ function syncEdgeDockControls() {
   els.edgeDockOptions?.classList.toggle('hidden', !enabled);
   const side = state.settings?.edgeDockSide === 'left' ? 'left' : 'right';
   for (const input of els.edgeDockSideInputs || []) input.checked = input.value === side;
-  const mode = state.settings?.edgeDockMode === 'always' ? 'always' : 'autoHide';
+  const modes = (els.edgeDockModeInputs || []).map((input) => input.value);
+  const mode = modes.includes(state.settings?.edgeDockMode) ? state.settings.edgeDockMode : 'autoHide';
   for (const input of els.edgeDockModeInputs || []) input.checked = input.value === mode;
   els.edgeDockHapticRow?.classList.toggle('hidden', state.appInfo?.platform !== 'darwin');
   if (els.edgeDockHapticInput) els.edgeDockHapticInput.checked = state.settings?.edgeDockHaptic !== false;

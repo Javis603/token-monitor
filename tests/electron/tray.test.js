@@ -475,15 +475,23 @@ test('tray context menu offers edge dock controls only where the dock is support
   const dock = template.find((item) => item.label === 'Edge Dock');
   assert.ok(dock);
   assert.equal(template.indexOf(dock), template.findIndex((item) => item.label === 'Window Presentation') + 1);
-  const [show, , autoHide, always, , left, right] = dock.submenu;
+  const [show, , autoHide, always, exceptFullScreen, , left, right] = dock.submenu;
   assert.equal(show.checked, false);
   assert.equal(always.checked, true);
   assert.equal(autoHide.checked, false);
+  assert.equal(exceptFullScreen.label, 'Always, hide in full screen');
+  assert.equal(exceptFullScreen.checked, false);
   assert.equal(left.checked, true);
   show.click();
   autoHide.click();
+  exceptFullScreen.click();
   right.click();
-  assert.deepEqual(patches, [{ edgeDockEnabled: true }, { edgeDockMode: 'autoHide' }, { edgeDockSide: 'right' }]);
+  assert.deepEqual(patches, [
+    { edgeDockEnabled: true },
+    { edgeDockMode: 'autoHide' },
+    { edgeDockMode: 'alwaysExceptFullScreen' },
+    { edgeDockSide: 'right' }
+  ]);
 });
 
 test('tray context menu exposes refresh progress and current window mode', () => {

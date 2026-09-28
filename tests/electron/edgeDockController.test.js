@@ -132,6 +132,7 @@ function createFixture(options = {}) {
     liquidGlass: () => (typeof options.liquidGlass === 'function' ? options.liquidGlass() : options.liquidGlass || null),
     createGlass: options.createGlass,
     prefersReducedMotion: () => true,
+    isFullScreen: options.isFullScreen,
     applyShapeMask: (win) => {
       maskWindows.push(win);
       return options.maskAvailable !== false;
@@ -515,6 +516,59 @@ test('a peek payload carries the handle, and an open rail keeps it away', (t) =>
   fixture.controller.sync();
   assert.equal(sentPayload(peek, 'peek').peeking, true);
   assert.equal(peek.ignoreMouse, false);
+});
+
+test('always-except-full-screen keeps the rail up on the desktop and auto-hides over a full-screen app', async (t) => {
+  let fullScreen = false;
+  const probed = [];
+  const fixture = createFixture({
+    settings: { edgeDockMode: 'alwaysExceptFullScreen' },
+    isFullScreen: (bounds) => {
+      probed.push(bounds);
+      return fullScreen;
+    }
+  });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const peek = fixture.windowFor('peek');
+  assert.deepEqual(probed[0], fixture.screen.displays[0].bounds, 'the probe is asked about the dock display');
+  assert.equal(rail.opacity, 1);
+  assert.equal(sentPayload(rail, 'rail').always, true);
+  assert.equal(sentPayload(peek, 'peek').peeking, false);
+
+  // The pointer is away from the edge; the poll alone notices the full-screen app.
+  fixture.screen.point = { x: 10, y: 10 };
+  fullScreen = true;
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  assert.equal(rail.opacity, 0, 'a full-screen app retracts the rail');
+  assert.equal(sentPayload(rail, 'rail').always, false);
+  assert.equal(sentPayload(peek, 'peek').peeking, true);
+
+  fullScreen = false;
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  assert.equal(rail.opacity, 1, 'back on the desktop the rail returns');
+  assert.equal(sentPayload(rail, 'rail').always, true);
+  assert.equal(sentPayload(peek, 'peek').peeking, false);
+});
+
+test('only the full-screen mode probes for full-screen apps', async (t) => {
+  let probes = 0;
+  const fixture = createFixture({
+    settings: { edgeDockMode: 'always' },
+    isFullScreen: () => {
+      probes += 1;
+      return true;
+    }
+  });
+  t.after(() => fixture.controller.stop());
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(probes, 0);
+  assert.equal(fixture.windowFor('rail').opacity, 1, 'plain always-visible ignores full-screen apps');
+
+  fixture.settings.edgeDockMode = 'alwaysExceptFullScreen';
+  fixture.controller.sync();
+  assert.equal(probes, 1, 'switching into the mode checks straight away');
+  assert.equal(fixture.windowFor('rail').opacity, 0);
 });
 
 test('display metric changes hide and remeasure an open card against the new work area', (t) => {
