@@ -7,7 +7,6 @@ const { CLIENT_LABELS } = require('../shared/clientCatalog');
 
 const CLIENT_ID = '1507034330436862062';
 const GITHUB_URL = 'https://github.com/Javis603/token-monitor';
-const CLIENT_LABEL_OVERRIDES = Object.freeze({ claude: 'Claude' });
 const UPDATE_MIN_INTERVAL_MS = 15000;
 const RECONNECT_DELAY_MS = 30000;
 
@@ -50,10 +49,7 @@ function buildPayload(stats, currency = 'USD', compactTokenUnits = 'western', lo
     return { ...base, details: 'Token Monitor', state: 'No usage today' };
   }
   const top = topClient(today);
-  const label = top
-    ? (Object.hasOwn(CLIENT_LABEL_OVERRIDES, top) ? CLIENT_LABEL_OVERRIDES[top] :
-      Object.hasOwn(CLIENT_LABELS, top) ? CLIENT_LABELS[top] : top)
-    : 'Active';
+  const label = top && Object.hasOwn(CLIENT_LABELS, top) ? CLIENT_LABELS[top] : (top || 'Active');
   const payload = {
     ...base,
     details: `${label} · ${formatTokensCompact(totalTokens, compactTokenUnits, locale)} tokens`,

@@ -74,7 +74,7 @@ test('Discord Rich Presence follows localized compact token units', () => {
     }
   }, 'USD', 'localized', 'zh-TW');
 
-  assert.equal(payload.details, 'Claude · 1.5萬 tokens');
+  assert.equal(payload.details, 'Claude Code · 1.5萬 tokens');
 });
 
 test('Discord Rich Presence uses labels and asset keys for tracked clients', () => {
@@ -143,13 +143,12 @@ test('Discord Rich Presence derives client labels and image keys from the catalo
   const { CLIENT_CATALOG } = require('../../src/shared/clientCatalog');
   const buildPayload = loadBuildPayload();
   for (const { id, label } of CLIENT_CATALOG) {
-    const expectedLabel = id === 'claude' ? 'Claude' : label;
     const payload = buildPayload({
       periods: { today: { totalTokens: 100, costUsd: 0, clients: { [id]: 100 } } }
     });
-    assert.equal(payload.details, `${expectedLabel} · 100 tokens`, id);
+    assert.equal(payload.details, `${label} · 100 tokens`, id);
     assert.equal(payload.smallImageKey, id);
-    assert.equal(payload.smallImageText, expectedLabel);
+    assert.equal(payload.smallImageText, label);
   }
 });
 
