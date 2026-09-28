@@ -13936,7 +13936,6 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
         : providerName === 'cline' && source === 'cline-signin'
           ? 'settings.cline.statusSignin'
           : null;
-    return t(linkedKey || (source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`));
     // Only the Kimi credential chain produces a 'desktop' source (the Kimi
     // Work desktop app session picked up automatically on Windows).
     if (source === 'desktop') return t(`settings.${providerName}.statusDesktop`);

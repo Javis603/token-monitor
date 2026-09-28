@@ -1719,16 +1719,10 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.doesNotMatch(opencodeRedactor, /\.\.\.profile/);
   assert.match(opencodeRedactor, /cookie: profile\?\.cookie \? 'set' : ''/);
   assert.match(opencodeRedactor, /apiKey: profile\?\.apiKey \? 'set' : ''/);
-<<<<<<< HEAD
   const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
   assert.deepEqual(CREDENTIAL_SETTING_PATHS.kimiWebAccessToken, ['providers', 'kimi', 'webAccessToken']);
-  const { accountStatusProjection } = require('../../src/electron/limits/accountSettings');
-  assert.equal(accountStatusProjection({ kimiWebAccessToken: 'private' }, {}).kimiWebAccessTokenConfigured, true);
-=======
-  assert.match(credentialStore, /kimiWebAccessToken: \['providers', 'kimi', 'webAccessToken'\]/);
-  assert.match(credentialStore, /kimiWebRefreshToken: \['providers', 'kimi', 'webRefreshToken'\]/);
-  assert.match(body, /kimiWebAccessTokenConfigured: Boolean\(currentKimiWebAccessToken\(\)\)/);
->>>>>>> 5f1060b (fix(kimi): align setup copy and panel guards with the refresh-token flow)
+  const { limitProviderEntry } = require('../../src/shared/limits/registry');
+  assert.deepEqual(limitProviderEntry('kimi').fields.find((f) => f.key === 'kimiWebRefreshToken').storePath, ['providers', 'kimi', 'webRefreshToken']);
   const mimoRendererShape = main.slice(
     main.indexOf('function mimoAccountsForRenderer'),
     main.indexOf('function mimoManagedAccountsForCollector')
