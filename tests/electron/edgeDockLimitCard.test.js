@@ -701,7 +701,7 @@ test('MiMo groups products under each account and keeps their own plan and statu
   assert.deepEqual(accounts.map((row) => row.find('limit-name-title').textContent), [
     'MiMo abcdef1', 'MiMo abcdef6'
   ]);
-  assert.equal(group.find('limit-plan').textContent, '');
+  assert.equal(group.find('limit-plan').textContent, '2 accounts');
   const products = accounts.map((account) => account.find('limit-account-list').children[0]);
   assert.deepEqual(products.map((row) => row.find('limit-name-title').textContent), [
     'Desktop Membership', 'Desktop Membership'
@@ -710,18 +710,39 @@ test('MiMo groups products under each account and keeps their own plan and statu
   assert.equal(products[1].find('limit-plan')?.textContent ?? '', '');
 });
 
-test('one MiMo account has one title even when its two products came from different devices', () => {
+test('one MiMo account uses the provider heading and separate product rows', () => {
   const view = dockView({ maskLimitAccountEmails: true });
   const rows = [
     { provider: 'mimo', status: 'ok', accountKey: 'sha256:console', accountName: 'Old profile · MiMo abcdef1', accountEmail: 'same@example.com', accountLabel: 'Console', windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }] },
     { provider: 'mimo', status: 'unauthorized', sourceDetail: 'app', accountKey: 'sha256:membership', accountName: 'New profile · MiMo abcdef1', accountEmail: 'same@example.com', accountLabel: 'Desktop Membership', windows: [] }
   ];
   const group = view.renderLimitProviderGroup('mimo', 'Xiaomi MiMo', rows, '#000000');
-  assert.equal(group.find('limit-name-title').textContent, 'Xiaomi MiMo · s***e@example.com');
+  assert.equal(group.find('limit-name-title').textContent, 'Xiaomi MiMo');
+  assert.equal(group.find('limit-plan').textContent, '');
   const products = group.find('limit-account-list').children;
   assert.deepEqual(products.map((row) => row.find('limit-name-title').textContent), ['Console', 'Desktop Membership']);
   assert.match(products[0].text, /9\.95/);
   assert.match(products[1].text, /Sign in again/);
+});
+
+test('one MiMo product still names its product under the provider heading', () => {
+  const view = dockView();
+  for (const [accountLabel, status, expectedPlan] of [
+    ['Console', 'ok', 'Pay-as-you-go'],
+    ['Desktop Membership', 'unauthorized', 'Sign in again']
+  ]) {
+    const row = {
+      provider: 'mimo', status, sourceDetail: 'app', accountLabel,
+      planLabel: 'Pay-as-you-go', windows: []
+    };
+    const card = view.renderLimitProviderSolo('mimo', 'Xiaomi MiMo', row, '#000000');
+    assert.deepEqual(card.textOf('limit-name-title'), ['Xiaomi MiMo', accountLabel]);
+    assert.equal(card.find('limit-account-list').children[0].find('limit-plan').textContent, expectedPlan);
+  }
+  const unconfigured = view.renderLimitProviderSolo('mimo', 'Xiaomi MiMo', {
+    provider: 'mimo', status: 'notConfigured', windows: []
+  }, '#000000');
+  assert.deepEqual(unconfigured.textOf('limit-name-title'), ['Xiaomi MiMo']);
 });
 
 test('MiMo keeps different accounts apart when emails mask alike', () => {
@@ -738,6 +759,7 @@ test('MiMo keeps different accounts apart when emails mask alike', () => {
     'j***s@example.com · Profile · MiMo abcdef1',
     'j***s@example.com · Profile · MiMo abcdef6'
   ]);
+  assert.equal(group.find('limit-plan').textContent, '2 accounts');
   assert.deepEqual(accounts.map((account) => account.find('limit-account-list').children.map(
     (product) => product.find('limit-name-title').textContent
   )), [['Console', 'Desktop Membership'], ['Desktop Membership']]);

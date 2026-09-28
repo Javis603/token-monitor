@@ -1957,6 +1957,8 @@
   // renderLimitProviderRow, so the policy cannot be skipped by a caller that did
   // not know there was one to pass.
   function renderLimitProviderSolo(id, label, provider, color) {
+    // A single MiMo row still needs to say which of its two products it is.
+    if (id === 'mimo' && mimoProductLabel(provider)) return renderMimoProviderGroup(label, [provider], color);
     const policy = limitAccountRowPolicy(id, provider, color, { grouped: false, sharedFamily: null });
     // Standing alone, the row is titled with the provider's name, so the account
     // name is resolved here instead: the switch control still has to say which
@@ -2121,8 +2123,7 @@
     const header = { provider: 'mimo', status: 'ok', windows: [], accountGroup: true, groupAccounts: providers };
     const oneAccount = groups.length === 1;
     row.append(renderLimitProviderHead('mimo', label, header, color, {
-      title: oneAccount ? `${label} · ${accountTitle(0)}` : label,
-      planText: '',
+      planText: oneAccount ? '' : limitGroupCountText('mimo', groups.length),
       hideMeta: true
     }));
     if (oneAccount) {
