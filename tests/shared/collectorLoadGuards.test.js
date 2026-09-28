@@ -5040,7 +5040,7 @@ test('the quit variant of stop() skips the watcher walk and leans on `stopped`',
 
 // A watch event clears the pending debounce timer and re-arms a fresh window, so
 // a source that changes more often than once per `watchDebounceMs` defers the
-// tick forever and the collector publishes nothing. `watchMaxWaitMs` caps the
+// watch tick until the interval fallback runs. `watchMaxWaitMs` caps the
 // total deferral: once a storm has held the tick back for that long, the tick
 // runs even though events are still arriving.
 test('a watch-event storm faster than the debounce still ticks within the max-wait ceiling', async () => {

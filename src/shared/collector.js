@@ -2367,11 +2367,12 @@ const FULL_SCAN_INTERVAL_MS = 60 * 60 * 1000;
 
 // Ceiling on how long an unbroken run of watch events may keep deferring the
 // tick. Every event clears the pending debounce timer and re-arms a fresh one,
-// so a source that changes more often than once per `watchDebounceMs` starves
-// the tick indefinitely and the collector publishes nothing (issue #520). The
-// re-arm itself stays — it is what keeps a mid-tick event from coalescing — and
-// 5s is the far end of the promised 3-5s refresh, so the ceiling only ever
-// fires where the promise was already broken.
+// so a source that changes more often than once per `watchDebounceMs` would
+// hold the live refresh back until the interval fallback. Concurrent agents
+// streaming to their transcripts do exactly that. The re-arm itself stays — it
+// is what keeps a mid-tick event from coalescing — and 5s is the far end of
+// the promised 3-5s refresh, so the ceiling only ever fires where the promise
+// was already broken.
 const WATCH_MAX_WAIT_MS = 5000;
 
 // Escape hatch for filesystems that never deliver native events — network
@@ -3103,12 +3104,18 @@ function startCollector(options) {
     // The first event of a run pins the deadline; every re-arm after it waits
     // out whichever of the debounce and the remaining ceiling comes first, so a
     // storm faster than the debounce still ticks instead of deferring forever.
-    // Floored at 1ms because clampTimerDelayMs' reason applies here too: a zero
-    // or negative delay is rewritten to 1ms by setTimeout, and an expired
-    // deadline must arm a real timer rather than spin.
+    // Time behind an in-flight tick does not count toward the ceiling: the timer
+    // can only re-arm there, and a slow tick under a steady write stream would
+    // otherwise chain scans back-to-back once it finished. Floored at 1ms
+    // because clampTimerDelayMs' reason applies here too: a zero or negative
+    // delay is rewritten to 1ms by setTimeout, and an expired deadline must arm
+    // a real timer rather than spin.
     const nowMs = Date.now();
-    if (watchDeadlineAt === 0) watchDeadlineAt = nowMs + watchMaxWaitMs;
-    const delayMs = Math.max(1, Math.min(watchDebounceMs, watchDeadlineAt - nowMs));
+    if (tickInFlight) watchDeadlineAt = 0;
+    else if (watchDeadlineAt === 0) watchDeadlineAt = nowMs + watchMaxWaitMs;
+    const delayMs = watchDeadlineAt === 0
+      ? watchDebounceMs
+      : Math.max(1, Math.min(watchDebounceMs, watchDeadlineAt - nowMs));
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
@@ -3116,10 +3123,7 @@ function startCollector(options) {
       // would re-run immediately on completion, stacking scans back-to-back.
       // There is deliberately no cooldown on top of the debounce: the product
       // promises 3–5 s updates, and a cooldown would break that promise.
-      // The deadline restarts from the re-arm rather than staying expired, which
-      // would otherwise fire this branch every millisecond for the tick's whole
-      // duration.
-      if (tickInFlight) { watchDeadlineAt = 0; scheduleTick(reason); return; }
+      if (tickInFlight) { scheduleTick(reason); return; }
       watchDeadlineAt = 0;
       // A raw source event means that client's synced cache may now be stale, so
       // its sync drops to the short floor instead of waiting out the idle

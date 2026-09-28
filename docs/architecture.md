@@ -38,7 +38,7 @@ Only the app, agent and packaging scripts run `ensure:tokscale`, which installs 
 
 ### Watching
 
-- There is no cooldown on top of the debounce, because the product promises 3–5 s updates.
+- There is no cooldown on top of the debounce, because the product promises 3–5 s updates. The debounce is instead capped by `watchMaxWaitMs` (5 s, floored at the debounce), because a trailing debounce never fires while agents keep writing faster than it. Time behind an in-flight tick does not count toward the cap, so a slow tick cannot chain scans back-to-back.
 - The self-synced tokscale cache dirs (cursor, antigravity) are not watched: only our own syncs write them, so watching them re-triggers forever. Antigravity's source roots are watched, because tokscale only reads them.
 - `resolveWatchUsePolling()` owns the native-vs-polling default (`TOKEN_MONITOR_WATCH_POLLING` overrides it). Descriptor exhaustion (`ENOSPC`/`EMFILE`/`ENFILE`) rebuilds the watcher on polling, sticky for the process.
 - The watcher runs in a worker thread (`src/shared/watcherHost.js`), because chokidar's synchronous `close()` froze the widget on every root change. Roots, attribution, debouncing and tick decisions stay on the owning thread. Do not replace worker recycling with `unwatch()`: it keeps the descriptors. Watch-behaviour tests pin the in-process host with `TOKEN_MONITOR_WATCH_IN_PROCESS` via `tests/helpers/watchHost.js`.
