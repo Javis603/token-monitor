@@ -1,12 +1,10 @@
 'use strict';
 
-// Release gate for ensure-vendored-tokscale.js. Checking `--version` is not
-// enough to prove the swap worked: tokscale's Cargo.toml version stays at the
-// last tagged release (4.13.0) even on commits far past it, since DSH landed
-// without a version bump upstream. So this runs the swapped binary against a
-// minimal DSH and Muse session fixtures and asserts their parsed token buckets
-// match the contracts Token Monitor relies on. This proves the binary in place
-// actually parses the clients rather than merely listing their ids.
+// Integration gate for the Tokscale binary Token Monitor will ship. Listing a
+// client or checking `--version` cannot prove its JSON token-bucket semantics.
+// Run DSH and Muse sessions through the selected binary, then check the fields
+// Token Monitor consumes. Muse parsing comes from upstream; this fixture tests
+// the binary-to-Token-Monitor contract, not a fork-specific parser change.
 //
 // Fixture values are the vendor pair upstream's own dsh.rs test module cites
 // (reasoning_tokens_do_not_inflate_the_additive_output_bucket): raw
@@ -19,12 +17,9 @@
 // entry is a client the vendored binary recognizes at all is a separate,
 // generic concern — see verify-vendored-tokscale-clients.js.
 //
-// mode "override" (the default): this verifies the pinned fork build
-// ensure-vendored-tokscale.js has already swapped in. mode "upstream": no
-// swap happens, so this verifies the plain npm-installed binary instead —
-// deliberately NOT skipped, since switching to upstream is exactly the
-// moment this fixture most needs to prove the official release actually
-// carries the reasoning-accounting fix, not just the dsh client id.
+// mode "override" (the default): verify the pinned fork build installed by
+// ensure-vendored-tokscale.js. mode "upstream": verify the npm-installed binary
+// instead. Both must preserve the same output contract when changing sources.
 //
 // The child process must be hermetic: without pinning HOME/XDG_*/config dirs
 // and clearing scan-path env vars, a run on a machine (or CI runner) that
