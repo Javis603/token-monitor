@@ -25,7 +25,7 @@ test('macOS: the display counts as full screen when its current Space is a full-
 });
 
 test('macOS: displays sharing Spaces report one entry, and an unknown layout is not full screen', () => {
-  assert.equal(macCurrentSpaceIsFullScreen([{ display: 'Main', type: 4 }], EXTERNAL), true);
+  assert.equal(macCurrentSpaceIsFullScreen([{ display: BUILT_IN, type: 4 }], EXTERNAL), true);
   assert.equal(macCurrentSpaceIsFullScreen([{ display: BUILT_IN, type: 4 }], null), true);
   assert.equal(macCurrentSpaceIsFullScreen([{ display: BUILT_IN, type: 4 }, { display: EXTERNAL, type: 0 }], null), false);
   assert.equal(macCurrentSpaceIsFullScreen([], BUILT_IN), false);
@@ -64,13 +64,15 @@ test('macOS reader reads each display\'s current Space type and releases what it
   // CFDictionaryGetValue hands back CFNumber pointers, never bare numbers.
   const n = (value) => ({ value });
   const spaces = [
-    { 'Display Identifier': BUILT_IN, 'Current Space': { type: n(4) } },
+    // The primary display can be listed as 'Main' next to UUID entries.
+    { 'Display Identifier': 'Main', 'Current Space': { type: n(4) } },
     { 'Display Identifier': EXTERNAL, 'Current Space': { type: n(0) } }
   ];
   const uuids = { 1: `uuid:${BUILT_IN}`, 2: `uuid:${EXTERNAL}` };
   const exported = {
     // Only the CGS names exist, so the reader has to fall back from SLS.
     CGSMainConnectionID: () => 7,
+    CGMainDisplayID: () => 1,
     CGSCopyManagedDisplaySpaces: (connection) => (connection === 7 ? spaces : null),
     CGDisplayCreateUUIDFromDisplayID: (id) => uuids[id] || null,
     CFUUIDCreateString: (_alloc, uuid) => uuid.slice('uuid:'.length),
@@ -94,7 +96,8 @@ test('macOS reader reads each display\'s current Space type and releases what it
     }
   };
   const probe = createFullScreenProbe({ platform: 'darwin', koffi: fakeKoffi });
-  assert.equal(probe({ id: 1, bounds: display }), true);
+  assert.equal(probe({ id: 1, bounds: display }), true, "'Main' is the primary display");
+  // A full-screen app on the primary must not hide a dock on the other display.
   assert.equal(probe({ id: 2, bounds: external }), false);
   assert.equal(released.filter((ref) => ref === spaces).length, 2, 'every copied Space list is released');
 });

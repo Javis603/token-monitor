@@ -26,8 +26,8 @@
 const CF_STRING_ENCODING_UTF8 = 0x08000100;
 const CF_NUMBER_DOUBLE_TYPE = 13;
 const CGS_SPACE_TYPE_FULL_SCREEN = 4;
-// With "Displays have separate Spaces" off there is one entry for every display.
-const CGS_SHARED_DISPLAY_IDENTIFIER = 'Main';
+// The primary display may be listed under this name instead of its UUID.
+const CGS_MAIN_DISPLAY_IDENTIFIER = 'Main';
 const MONITOR_DEFAULTTONEAREST = 2;
 const WINDOWS_SHELL_CLASSES = new Set(['Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd']);
 const RECT_TOLERANCE = 1;
@@ -41,12 +41,12 @@ function rectMatches(rect, bounds, tolerance = RECT_TOLERANCE) {
 }
 
 // The pure half of the macOS probe. `spaces` is one `{ display, type }` per
-// managed display: its identifier (a UUID, or 'Main' when displays share
-// Spaces) and the type of its current Space.
+// managed display: its UUID (the reader has already resolved 'Main' to the
+// primary display's) and the type of its current Space. A single entry is the
+// "Displays have separate Spaces" off layout, where it covers every display.
 function macCurrentSpaceIsFullScreen(spaces, displayUuid) {
   const list = spaces || [];
   const entry = (displayUuid && list.find((space) => space.display === displayUuid))
-    || list.find((space) => space.display === CGS_SHARED_DISPLAY_IDENTIFIER)
     || (list.length === 1 ? list[0] : null);
   return entry?.type === CGS_SPACE_TYPE_FULL_SCREEN;
 }
@@ -80,6 +80,9 @@ function createMacSpaceReader(koffi) {
     ['int']
   );
   const CGDisplayCreateUUIDFromDisplayID = colorSync.func('void *CGDisplayCreateUUIDFromDisplayID(uint32_t display)');
+  const CGMainDisplayID = koffi
+    .load('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
+    .func('uint32_t CGMainDisplayID()');
   const CFUUIDCreateString = cf.func('void *CFUUIDCreateString(void *alloc, void *uuid)');
   const CFStringCreateWithCString = cf.func('void *CFStringCreateWithCString(void *alloc, const char *cStr, uint32_t encoding)');
   const CFStringGetCString = cf.func('bool CFStringGetCString(void *str, void *buffer, intptr_t size, uint32_t encoding)');
@@ -141,8 +144,11 @@ function createMacSpaceReader(koffi) {
       for (let index = 0; index < count; index += 1) {
         const entry = CFArrayGetValueAtIndex(list, index);
         if (!entry) continue;
+        const display = string(CFDictionaryGetValue(entry, keys.display));
         spaces.push({
-          display: string(CFDictionaryGetValue(entry, keys.display)),
+          // The primary display is re-read each time: it changes when the
+          // user moves the menu bar to another display.
+          display: display === CGS_MAIN_DISPLAY_IDENTIFIER ? displayUuid(CGMainDisplayID()) : display,
           type: number(CFDictionaryGetValue(entry, keys.currentSpace), 'type')
         });
       }
