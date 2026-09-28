@@ -263,7 +263,12 @@ test('main process deletion accepts only a known remote device in the current sy
     settings: { hubMode: 'icloud', deviceId: 'local' },
     icloudRuntimeHandle: { deleteDevice: async (id) => { context.deleted = id; } },
     currentHubIdentity: () => 'icloud',
-    fetchStats: async () => ({ devices: [{ deviceId: 'local' }, { deviceId: 'remote' }] }),
+    fetchStats: async () => ({ devices: [
+      { deviceId: 'local' },
+      { deviceId: 'remote', stale: true },
+      { deviceId: 'active', stale: false },
+      { deviceId: 'unknown-status' }
+    ] }),
     deleteDeviceFromHub: async (id) => { context.deleted = id; },
     defaultDeviceId: () => 'fallback-device',
     Promise,
@@ -280,10 +285,35 @@ test('main process deletion accepts only a known remote device in the current sy
     () => context.deleteDeviceFromCurrentSync('unknown'),
     (error) => error.code === 'device_not_found'
   );
+  for (const id of ['active', 'unknown-status']) {
+    await assert.rejects(
+      () => context.deleteDeviceFromCurrentSync(id),
+      (error) => error.code === 'device_not_stale'
+    );
+  }
   assert.equal(context.deleted, undefined);
 
   await context.deleteDeviceFromCurrentSync('remote');
   assert.equal(context.deleted, 'remote');
+});
+
+test('Hub deletion still accepts a known active remote device', async () => {
+  const source = functionSource(main, 'deleteDeviceFromCurrentSync', 'postToHub');
+  const context = vm.createContext({
+    settings: { hubMode: 'client', deviceId: 'local' },
+    icloudRuntimeHandle: null,
+    currentHubIdentity: () => 'https://example.test',
+    fetchStats: async () => ({ devices: [{ deviceId: 'active', stale: false }] }),
+    deleteDeviceFromHub: async (id) => { context.deleted = id; },
+    defaultDeviceId: () => 'fallback-device',
+    Promise,
+    String,
+    Object
+  });
+  vm.runInNewContext(`async ${source}\nglobalThis.deleteDeviceFromCurrentSync = deleteDeviceFromCurrentSync;`, context);
+
+  await context.deleteDeviceFromCurrentSync('active');
+  assert.equal(context.deleted, 'active');
 });
 
 test('main process deletion abandons eligibility checks after a mode switch', async () => {

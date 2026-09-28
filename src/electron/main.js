@@ -3296,8 +3296,12 @@ async function deleteDeviceFromCurrentSync(deviceId) {
     throw Object.assign(new Error('local_device_delete_not_allowed'), { code: 'local_device_delete_not_allowed' });
   }
   const devices = Array.isArray(stats?.devices) ? stats.devices : [];
-  if (!devices.some((device) => device?.deviceId === deviceId)) {
+  const target = devices.find((device) => device?.deviceId === deviceId);
+  if (!target) {
     throw Object.assign(new Error('device_not_found'), { code: 'device_not_found' });
+  }
+  if (hubMode === 'icloud' && target.stale !== true) {
+    throw Object.assign(new Error('device_not_stale'), { code: 'device_not_stale' });
   }
 
   if (hubMode === 'icloud') return runtime.deleteDevice(deviceId);

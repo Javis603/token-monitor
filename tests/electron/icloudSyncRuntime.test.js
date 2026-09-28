@@ -606,9 +606,21 @@ test('runtime quiescence drains a pending subscription write before replacement'
   try {
     const cloudDocsRoot = path.join(fixture.root, 'CloudDocs');
     const ledgerPath = path.join(fixture.root, 'revision-ledger.json');
-    const blockedFs = blockingWriteFs();
+    const subscriptionFilename = writerFilenameForId('writer-a');
+    let releaseSubscriptionWrite;
+    let subscriptionWriteBlocked = false;
     const storeA = createIcloudSyncStore({
-      platform: 'darwin', home: fixture.root, cloudDocsRoot, writerId: 'writer-a', revisionLedgerPath: ledgerPath, fsApi: blockedFs.api
+      platform: 'darwin', home: fixture.root, cloudDocsRoot, writerId: 'writer-a', revisionLedgerPath: ledgerPath,
+      fsApi: {
+        ...fs.promises,
+        rename: async (from, to) => {
+          if (String(to).endsWith(subscriptionFilename)) {
+            subscriptionWriteBlocked = true;
+            await new Promise((resolve) => { releaseSubscriptionWrite = resolve; });
+          }
+          return fs.promises.rename(from, to);
+        }
+      }
     });
     const runtimeA = createIcloudSyncRuntime({ store: storeA, reconcileMs: 0, watchFactory: () => ({ close() {} }) });
     await runtimeA.start();
@@ -617,12 +629,14 @@ test('runtime quiescence drains a pending subscription write before replacement'
       intervalCount: 1, startDate: '2026-01-01', topUps: [], autoRenew: true,
       updatedAt: '2026-09-06T10:00:00.000Z'
     });
-    blockedFs.enable();
     const oldSave = runtimeA.saveSubscriptions([subscription('old')], '');
-    await waitFor(blockedFs.isBlocked, 'old subscription write to block');
+    await waitFor(() => subscriptionWriteBlocked, 'old subscription write to block');
     const stopping = runtimeA.stop();
+    // Different writers keep separate local ledgers; sharing the injected
+    // ledger would make B claim A's unseen in-flight subscription snapshot.
     const storeB = createIcloudSyncStore({
-      platform: 'darwin', home: fixture.root, cloudDocsRoot, writerId: 'writer-b', revisionLedgerPath: ledgerPath
+      platform: 'darwin', home: fixture.root, cloudDocsRoot, writerId: 'writer-b',
+      revisionLedgerPath: path.join(fixture.root, 'writer-b-revision-ledger.json')
     });
     const runtimeB = createIcloudSyncRuntime({ store: storeB, reconcileMs: 0, watchFactory: () => ({ close() {} }) });
     const replacement = (async () => {
@@ -632,7 +646,7 @@ test('runtime quiescence drains a pending subscription write before replacement'
       assert.equal(current.subscriptions[0].id, 'old');
       await runtimeB.saveSubscriptions([subscription('new')], current.revisionToken);
     })();
-    blockedFs.release();
+    releaseSubscriptionWrite();
     await assert.rejects(oldSave, { code: 'icloud_stopped' });
     await replacement;
     assert.equal(runtimeB.getSubscriptions().subscriptions[0].id, 'new');

@@ -303,6 +303,7 @@ async function atomicWriteJson(fsApi, target, value, options = {}) {
     await syncDirectory(api, directory, platform, hostPlatform);
   } catch (error) {
     try { await handle?.close(); } catch (_) { /* best effort */ }
+    if (renamed) error.atomicWriteRenamed = true;
     if (!renamed) {
       try { await api.unlink(temp); } catch (_) { /* best effort */ }
     }
@@ -449,6 +450,8 @@ function emptyRevisionLedger() {
     kind: 'icloud-revision-ledger',
     devices: Object.create(null),
     subscriptionCounter: 0,
+    publishedSubscriptionCounter: 0,
+    pendingSubscriptionCounter: 0,
     deletionCounter: 0,
     deletions: []
   };
@@ -468,9 +471,15 @@ function validRevisionLedger(document) {
     devices[deviceId] = numeric;
   }
   const subscriptionCounter = Number(document.subscriptionCounter || 0);
+  const publishedSubscriptionCounter = Number(document.publishedSubscriptionCounter || 0);
+  const pendingSubscriptionCounter = Number(document.pendingSubscriptionCounter || 0);
   const deletionCounter = Number(document.deletionCounter || 0);
   if (
     !Number.isSafeInteger(subscriptionCounter) || subscriptionCounter < 0
+    || !Number.isSafeInteger(publishedSubscriptionCounter) || publishedSubscriptionCounter < 0
+    || publishedSubscriptionCounter > subscriptionCounter
+    || !Number.isSafeInteger(pendingSubscriptionCounter) || pendingSubscriptionCounter < 0
+    || pendingSubscriptionCounter > subscriptionCounter
     || !Number.isSafeInteger(deletionCounter) || deletionCounter < 0
   ) return null;
   const deletions = document.deletions === undefined
@@ -482,6 +491,8 @@ function validRevisionLedger(document) {
     kind: 'icloud-revision-ledger',
     devices,
     subscriptionCounter,
+    publishedSubscriptionCounter,
+    pendingSubscriptionCounter,
     deletionCounter,
     deletions
   };
@@ -784,6 +795,10 @@ function createIcloudSyncStore(options = {}) {
       ...current,
       devices,
       subscriptionCounter: Math.max(current.subscriptionCounter, disk.subscriptionCounter),
+      publishedSubscriptionCounter: Math.max(current.publishedSubscriptionCounter, disk.publishedSubscriptionCounter),
+      // Zero is a completed/failed reservation, not a missing counter. Do not
+      // resurrect an in-memory pending marker after disk has cleared it.
+      pendingSubscriptionCounter: disk.pendingSubscriptionCounter,
       deletionCounter: Math.max(current.deletionCounter, disk.deletionCounter),
       deletions: [...deletionTargets].map(([targetDeviceId, targetDeviceRevision]) => ({ targetDeviceId, targetDeviceRevision }))
         .sort((left, right) => left.targetDeviceId.localeCompare(right.targetDeviceId))
@@ -818,11 +833,35 @@ function createIcloudSyncStore(options = {}) {
     });
   }
 
-  async function nextCounter(field, observedCounter) {
+  async function reserveSubscriptionCounter(observedCounter) {
     return allocateRevision(async (ledger) => {
-      const revision = Math.max(Number(ledger[field] || 0), observedCounter || 0) + 1;
-      return { revision, ledger: { ...ledger, [field]: revision } };
+      const counter = Math.max(ledger.subscriptionCounter, observedCounter) + 1;
+      return {
+        revision: counter,
+        ledger: { ...ledger, subscriptionCounter: counter, pendingSubscriptionCounter: counter }
+      };
     });
+  }
+
+  async function markPublishedSubscription(counter) {
+    await allocateRevision(async (ledger) => ({
+      revision: counter,
+      ledger: {
+        ...ledger,
+        publishedSubscriptionCounter: Math.max(ledger.publishedSubscriptionCounter, counter),
+        pendingSubscriptionCounter: ledger.pendingSubscriptionCounter === counter ? 0 : ledger.pendingSubscriptionCounter
+      }
+    }));
+  }
+
+  async function clearPendingSubscription(counter) {
+    await allocateRevision(async (ledger) => ({
+      revision: counter,
+      ledger: {
+        ...ledger,
+        pendingSubscriptionCounter: ledger.pendingSubscriptionCounter === counter ? 0 : ledger.pendingSubscriptionCounter
+      }
+    }));
   }
 
   function deviceHeartbeatMs(wire) {
@@ -1056,6 +1095,18 @@ function createIcloudSyncStore(options = {}) {
     }
     const documents = [...subscriptionCache.values()];
     const winner = documents.slice().sort((left, right) => compareSubscriptionRevision(left.revision, right.revision)).at(-1) || null;
+    // A pending counter means the file may have landed before its success
+    // marker. A failed write clears it; an interrupted write stays conservative
+    // until its own snapshot is visible again.
+    const ledger = await loadRevisionLedger();
+    const ownCounter = Math.max(ledger.publishedSubscriptionCounter, ledger.pendingSubscriptionCounter);
+    if (ownCounter > 0
+      && !documents.some((document) => document.writerId === writerId
+        && document.revision.counter >= ownCounter)
+      && compareSubscriptionRevision(winner?.revision, { counter: ownCounter, writerId }) < 0) {
+      errors.push({ category: 'subscription-snapshot-unavailable' });
+      return { documents, winner: null, revisionToken: '', status: status(), errors };
+    }
     return { documents, winner, revisionToken: revisionToken(winner?.revision), status: status(), errors };
   }
 
@@ -1088,7 +1139,7 @@ function createIcloudSyncStore(options = {}) {
       throw error;
     }
     const maxCounter = current.documents.reduce((max, document) => Math.max(max, document.revision.counter), 0);
-    const counter = await nextCounter('subscriptionCounter', maxCounter);
+    const counter = await reserveSubscriptionCounter(maxCounter);
     const document = {
       schemaVersion: ICLOUD_SCHEMA_VERSION,
       kind: 'subscriptions',
@@ -1107,11 +1158,15 @@ function createIcloudSyncStore(options = {}) {
         { platform, hostPlatform, maxBytes: MAX_ICLOUD_DOCUMENT_BYTES }
       );
     } catch (error) {
+      if (!error.atomicWriteRenamed) {
+        try { await clearPendingSubscription(counter); } catch (_) { /* Keep the write uncertain if the ledger is unavailable. */ }
+      }
       lastError = { category: error.code === 'document_too_large' ? 'document-too-large' : 'subscription-write-failed', error };
       error.code = error.code || lastError.category;
       throw error;
     }
     subscriptionCache.set(filename, validSubscriptionDocument(document, filename));
+    await markPublishedSubscription(counter);
     const refreshed = await discoverSubscriptions();
     return { ...refreshed, written: document };
   }

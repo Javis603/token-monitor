@@ -603,9 +603,13 @@ test('device and subscription revisions stay monotonic across restart and tempor
     const firstSubscription = await first.writeSubscriptions([subscription('one')]);
     const subscriptionPath = path.join(first.status().subscriptionsRoot, writerFilenameForId('writer-a'));
     await fs.promises.unlink(subscriptionPath);
-    const secondSubscription = await restarted.writeSubscriptions([subscription('two')]);
+    const restartedSubscriptions = storeFor(root.root, 'writer-a');
+    await assert.rejects(
+      () => restartedSubscriptions.writeSubscriptions([subscription('two')]),
+      { code: 'subscription_discovery_incomplete' }
+    );
     assert.equal(firstSubscription.written.revision.counter, 1);
-    assert.equal(secondSubscription.written.revision.counter, 2);
+    assert.equal(fs.existsSync(subscriptionPath), false);
   } finally {
     root.cleanup();
   }
@@ -661,7 +665,179 @@ test('a restart with an invisible subscription snapshot rejects a stale base ins
     const restarted = storeFor(root.root, 'writer-a');
     await assert.rejects(
       () => restarted.writeSubscriptions([subscription('stale')], { baseRevision: snapshot.revisionToken }),
-      { code: 'stale_write' }
+      { code: 'subscription_discovery_incomplete' }
+    );
+  } finally {
+    root.cleanup();
+  }
+});
+
+test('a missing newer own subscription snapshot cannot be replaced from an older visible writer', async () => {
+  const root = makeRoot();
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    const older = storeFor(root.root, 'writer-b');
+    const own = storeFor(root.root, 'writer-a');
+    const first = await older.writeSubscriptions([subscription('old')]);
+    const latest = await own.writeSubscriptions([subscription('new')], { baseRevision: first.revisionToken });
+    await own.close();
+    const ownFilename = writerFilenameForId('writer-a');
+    let hidden = true;
+    const restarted = createIcloudSyncStore({
+      platform: 'darwin', home: root.root, cloudDocsRoot: path.join(root.root, 'CloudDocs'), writerId: 'writer-a',
+      fsApi: {
+        ...fs.promises,
+        readdir: async (directory, ...args) => {
+          const files = await fs.promises.readdir(directory, ...args);
+          return hidden && String(directory).endsWith('subscriptions')
+            ? files.filter((file) => file !== ownFilename)
+            : files;
+        }
+      }
+    });
+    const incomplete = await restarted.discoverSubscriptions();
+    assert.equal(incomplete.winner, null);
+    assert.ok(incomplete.errors.length);
+    await assert.rejects(
+      () => restarted.writeSubscriptions([subscription('overwritten')], { baseRevision: first.revisionToken }),
+      { code: 'subscription_discovery_incomplete' }
+    );
+    assert.equal(JSON.parse(await fs.promises.readFile(path.join(own.status().subscriptionsRoot, ownFilename))).revision.counter, 2);
+    hidden = false;
+    const recovered = await restarted.discoverSubscriptions();
+    assert.equal(recovered.revisionToken, latest.revisionToken);
+    assert.equal(recovered.winner.subscriptions[0].id, 'new');
+  } finally {
+    root.cleanup();
+  }
+});
+
+test('a reserved but failed subscription counter does not hide the last published snapshot', async () => {
+  const root = makeRoot();
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    const first = storeFor(root.root, 'writer-a');
+    const published = await first.writeSubscriptions([subscription('published')]);
+    await first.close();
+    const failing = createIcloudSyncStore({
+      platform: 'darwin', home: root.root, cloudDocsRoot: path.join(root.root, 'CloudDocs'), writerId: 'writer-a',
+      fsApi: {
+        ...fs.promises,
+        rename: async (from, to) => {
+          if (path.dirname(to).endsWith('subscriptions')) throw Object.assign(new Error('offline'), { code: 'EIO' });
+          return fs.promises.rename(from, to);
+        }
+      }
+    });
+    await assert.rejects(
+      () => failing.writeSubscriptions([subscription('failed')], { baseRevision: published.revisionToken }),
+      { code: 'EIO' }
+    );
+    await failing.close();
+    const restarted = storeFor(root.root, 'writer-a');
+    const discovered = await restarted.discoverSubscriptions();
+    assert.equal(discovered.revisionToken, published.revisionToken);
+    assert.deepEqual(discovered.errors, []);
+    const next = await restarted.writeSubscriptions([subscription('next')], { baseRevision: published.revisionToken });
+    assert.equal(next.written.revision.counter, 3);
+  } finally {
+    root.cleanup();
+  }
+});
+
+test('an interrupted subscription publication cannot make an older writer a safe base', async () => {
+  const root = makeRoot();
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    const older = storeFor(root.root, 'writer-b');
+    const initial = await older.writeSubscriptions([subscription('old')]);
+    const interrupted = createIcloudSyncStore({
+      platform: 'darwin', home: root.root, cloudDocsRoot: path.join(root.root, 'CloudDocs'), writerId: 'writer-a',
+      fsApi: {
+        ...fs.promises,
+        rename: async (from, to) => {
+          if (path.dirname(to).endsWith('subscriptions')) {
+            const error = Object.assign(new Error('interrupted'), { code: 'EIO' });
+            throw error;
+          }
+          return fs.promises.rename(from, to);
+        }
+      }
+    });
+    await assert.rejects(
+      () => interrupted.writeSubscriptions([subscription('new')], { baseRevision: initial.revisionToken }),
+      { code: 'EIO' }
+    );
+    await interrupted.close();
+    // Simulate a crash before the failure handler could clear the pending
+    // marker: the file may have been published even if it is invisible now.
+    const ledgerPath = interrupted.status().revisionLedgerPath;
+    const ledger = JSON.parse(await fs.promises.readFile(ledgerPath, 'utf8'));
+    ledger.pendingSubscriptionCounter = ledger.subscriptionCounter;
+    await fs.promises.writeFile(ledgerPath, JSON.stringify(ledger));
+    const restarted = storeFor(root.root, 'writer-a');
+    const result = await restarted.discoverSubscriptions();
+    assert.equal(result.winner, null);
+    assert.ok(result.errors.length);
+    await assert.rejects(
+      () => restarted.writeSubscriptions([subscription('overwritten')], { baseRevision: initial.revisionToken }),
+      { code: 'subscription_discovery_incomplete' }
+    );
+  } finally {
+    root.cleanup();
+  }
+});
+
+test('a subscription published before directory fsync failure remains protected after restart', async () => {
+  const root = makeRoot();
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    const older = storeFor(root.root, 'writer-b');
+    const initial = await older.writeSubscriptions([subscription('old')]);
+    const ownFilename = writerFilenameForId('writer-a');
+    let hidden = false;
+    const failed = createIcloudSyncStore({
+      platform: 'darwin', home: root.root, cloudDocsRoot: path.join(root.root, 'CloudDocs'), writerId: 'writer-a',
+      fsApi: {
+        ...fs.promises,
+        readdir: async (directory, ...args) => {
+          const files = await fs.promises.readdir(directory, ...args);
+          return hidden && String(directory).endsWith('subscriptions')
+            ? files.filter((file) => file !== ownFilename)
+            : files;
+        },
+        open: async (target, ...args) => {
+          if (String(target).endsWith('subscriptions')) {
+            const error = Object.assign(new Error('directory sync failed'), { code: 'EIO' });
+            throw error;
+          }
+          return fs.promises.open(target, ...args);
+        }
+      }
+    });
+    await assert.rejects(
+      () => failed.writeSubscriptions([subscription('new')], { baseRevision: initial.revisionToken }),
+      { code: 'EIO' }
+    );
+    const ownPath = path.join(older.status().subscriptionsRoot, ownFilename);
+    assert.equal(JSON.parse(await fs.promises.readFile(ownPath, 'utf8')).revision.counter, 2);
+    await failed.close();
+    hidden = true;
+    const restarted = createIcloudSyncStore({
+      platform: 'darwin', home: root.root, cloudDocsRoot: path.join(root.root, 'CloudDocs'), writerId: 'writer-a',
+      fsApi: {
+        ...fs.promises,
+        readdir: async (directory, ...args) => {
+          const files = await fs.promises.readdir(directory, ...args);
+          return String(directory).endsWith('subscriptions') ? files.filter((file) => file !== ownFilename) : files;
+        }
+      }
+    });
+    const discovered = await restarted.discoverSubscriptions();
+    assert.equal(discovered.winner, null);
+    await assert.rejects(
+      () => restarted.writeSubscriptions([subscription('overwritten')], { baseRevision: initial.revisionToken }),
+      { code: 'subscription_discovery_incomplete' }
     );
   } finally {
     root.cleanup();
