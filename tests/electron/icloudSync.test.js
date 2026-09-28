@@ -165,6 +165,18 @@ test('store close rejects new mutations and drains device, subscription, deletio
           await writeGate;
         }
         return base.open(...args);
+      },
+      // This macOS-only store is exercised on Windows CI too. A concurrent
+      // ledger reader can briefly prevent replacing the destination there.
+      rename: async (from, to) => {
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            return await base.rename(from, to);
+          } catch (error) {
+            if (process.platform !== 'win32' || to !== ledgerPath || error.code !== 'EPERM' || attempt >= 19) throw error;
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+        }
       }
     };
     const store = createIcloudSyncStore({
