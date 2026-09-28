@@ -52,17 +52,28 @@ async function requestJson(url, apiKey, deps = {}) {
   return response.json();
 }
 
+// `/key` reports `usage` as the key's all-time spend. A limit that resets
+// counts only the current period, so its meter is measured against the
+// matching period field instead.
+const PERIOD_USAGE_FIELDS = Object.freeze({
+  daily: 'usage_daily',
+  weekly: 'usage_weekly',
+  monthly: 'usage_monthly'
+});
+
 function keyLimitWindow(data) {
   const limit = finiteNumber(data?.limit);
   if (!(limit > 0)) return null;
-  const providedUsed = finiteNumber(data?.usage);
+  const reset = String(data?.limit_reset || '').trim().toLowerCase();
+  const providedUsed = finiteNumber(data?.[PERIOD_USAGE_FIELDS[reset] || 'usage']);
   const providedRemaining = finiteNumber(data?.limit_remaining);
   if (providedUsed === null && providedRemaining === null) return null;
-  const used = providedUsed === null
-    ? Math.max(0, limit - providedRemaining)
-    : Math.max(0, providedUsed);
+  // `limit_remaining` is OpenRouter's own accounting against this limit, so it
+  // wins over a spend figure whenever both are present.
+  const used = providedRemaining === null
+    ? Math.max(0, providedUsed)
+    : Math.max(0, limit - providedRemaining);
   const remaining = providedRemaining === null ? Math.max(0, limit - used) : Math.max(0, providedRemaining);
-  const reset = String(data?.limit_reset || '').trim().toLowerCase();
   const kind = reset === 'daily' ? 'session' : reset === 'weekly' ? 'weekly' : 'billing';
   const label = reset === 'daily'
     ? 'Daily limit'
