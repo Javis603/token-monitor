@@ -162,6 +162,7 @@ const {
 } = require('./renderer/viewDisplayPreferences');
 const {
   defaultHomeModulePreferences,
+  migrateHiddenHomeModules,
   normalizeHiddenHomeModules,
   normalizeHomeModuleOrder
 } = require('./renderer/homeModulePreferences');
@@ -475,7 +476,7 @@ const DEFAULT_COLLECTION_INTERVAL_MS = 5 * 60 * 1000;
 const HUB_DEFAULT_PORT = 17321;
 const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
 const DEFAULT_VIEW_LIST = ['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'].map((id) => ({ id }));
-const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'trends'].map((id) => ({ id }));
+const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'device', 'model', 'session', 'trends'].map((id) => ({ id }));
 const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
 
 let mainWindow = null;
@@ -2449,7 +2450,7 @@ function readSettings() {
       merged.homeModuleOrder = normalizeHomeModuleOrder(saved.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',');
     }
     if (saved.hiddenHomeModules !== undefined) {
-      merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
+      merged.hiddenHomeModules = migrateHiddenHomeModules(saved.hiddenHomeModules, saved.homeModuleOrder, DEFAULT_HOME_MODULE_LIST);
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);

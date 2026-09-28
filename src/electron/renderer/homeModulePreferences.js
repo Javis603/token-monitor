@@ -5,7 +5,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorHomeModulePreferences = api;
 })(typeof window !== 'undefined' ? window : null, function createHomeModulePreferencesApi() {
-  const DEFAULT_HOME_MODULE_ORDER = 'limits,tool,device,model,trends';
+  const DEFAULT_HOME_MODULE_ORDER = 'limits,tool,device,model,session,trends';
 
   function optionIds(options) {
     return (options || []).map((option) => String(option?.id || '').trim().toLowerCase()).filter(Boolean);
@@ -46,6 +46,12 @@
     return hidden.length >= known.length ? '' : hidden.join(',');
   }
 
+  function migrateHiddenHomeModules(value, savedOrder, options) {
+    const order = Array.isArray(savedOrder) ? savedOrder : String(savedOrder || '').split(',');
+    const hadSession = order.some((id) => String(id).trim().toLowerCase() === 'session');
+    return normalizeHiddenHomeModules(hadSession ? value : `${value || ''},session`, options);
+  }
+
   function orderedHomeModules(options, value) {
     const byId = new Map((options || []).map((option) => [String(option.id || '').toLowerCase(), option]));
     return normalizeHomeModuleOrder(value, options).map((id) => byId.get(id)).filter(Boolean);
@@ -76,13 +82,14 @@
   function defaultHomeModulePreferences() {
     return {
       homeModuleOrder: DEFAULT_HOME_MODULE_ORDER,
-      hiddenHomeModules: 'tool,device'
+      hiddenHomeModules: 'tool,device,session'
     };
   }
 
   return {
     DEFAULT_HOME_MODULE_ORDER,
     defaultHomeModulePreferences,
+    migrateHiddenHomeModules,
     moveHomeModuleOrder,
     normalizeHiddenHomeModules,
     normalizeHomeModuleOrder,

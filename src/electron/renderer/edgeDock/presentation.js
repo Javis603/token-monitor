@@ -243,6 +243,17 @@
     return { rows: sessionRowsFor(ordered, stateByKey), running, stateByKey };
   }
 
+  function recentSessionRows(stats, cap = SESSIONS_RECENT_COUNT, options = {}) {
+    const entries = sessionSourceRows(stats);
+    if (options.includeRunningBeyondCap === true) {
+      const states = new Map(entries.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
+      const selected = entries.filter((entry, index) => index < cap || states.get(entry.key) === 'running');
+      return sessionRowsFor(selected, states);
+    }
+    const runningOnly = options.runningOnly === true;
+    return cappedSessionRows(entries, runningOnly ? entries.length : cap, runningOnly, 'timeline').rows;
+  }
+
   // The running reading, derived from the projected rows at the clock the caller
   // passes rather than frozen into the cell.
   //
@@ -477,21 +488,12 @@
     if (metric === dockItems.SESSIONS_METRIC) {
       // Every tracked client, not just the ones with a limits provider: this is
       // the item that answers for the clients no quota card can show.
-      const rows = sessionSourceRows(stats);
+      const sessions = recentSessionRows(stats, SESSIONS_RECENT_COUNT, { runningOnly: options.runningOnly === true });
       // Only a cell that draws the rate carries one: attaching the sample to every
       // sessions item would put live figures in a projection nothing reads them
       // from, and would make "this cell shows marks" indistinguishable in the cell.
       const wantsRate = options.cellDetail === 'rate';
       const sample = wantsRate ? options.liveRate || null : null;
-      const stateByKey = new Map(rows.map(({ key, session }) => [key, sessionLive.sessionActivityState(session)]));
-      const runningEntries = rows.filter(({ key }) => stateByKey.get(key) === 'running');
-      const { rows: sessions } = cappedSessionRows(
-        rows,
-        options.runningOnly === true ? runningEntries.length : SESSIONS_RECENT_COUNT,
-        options.runningOnly === true,
-        // A timeline prints newest-first; the provider card keeps running-first.
-        'timeline'
-      );
       // No frozen count: the cell carries its rows and the renderer asks them at
       // paint time, so a rail left on screen stops claiming a running session the
       // moment that session crosses the window. `expiresAt` lets the main process
@@ -652,6 +654,7 @@
     SESSIONS_METRIC: dockItems.SESSIONS_METRIC,
     buildEdgeDockCells,
     nextRunningExpiryAt,
+    recentSessionRows,
     runningSessionSummary,
     connectedLimitProviders,
     displayPercent,
