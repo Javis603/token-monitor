@@ -73,7 +73,7 @@ function createEdgeDockController(deps) {
     onSwitchCodexAccount,
     onOpenResetForecastSource,
     performHaptic = () => false,
-    // (displayBounds) => whether another app is full screen on that display.
+    // (display) => whether another app is full screen on that display.
     isFullScreen = () => false,
     logger = () => {}
   } = deps;
@@ -135,7 +135,7 @@ function createEdgeDockController(deps) {
     } else if (force || now - fullScreenCheckedAt >= FULL_SCREEN_POLL_MS) {
       fullScreenCheckedAt = now;
       try {
-        fullScreen = isFullScreen(display()?.bounds) === true;
+        fullScreen = isFullScreen(display()) === true;
       } catch (error) {
         logger(`[edge-dock] full-screen check failed: ${error.message}`);
         fullScreen = false;

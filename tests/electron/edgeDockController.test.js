@@ -523,15 +523,15 @@ test('always-except-full-screen keeps the rail up on the desktop and auto-hides 
   const probed = [];
   const fixture = createFixture({
     settings: { edgeDockMode: 'alwaysExceptFullScreen' },
-    isFullScreen: (bounds) => {
-      probed.push(bounds);
+    isFullScreen: (display) => {
+      probed.push(display);
       return fullScreen;
     }
   });
   t.after(() => fixture.controller.stop());
   const rail = fixture.windowFor('rail');
   const peek = fixture.windowFor('peek');
-  assert.deepEqual(probed[0], fixture.screen.displays[0].bounds, 'the probe is asked about the dock display');
+  assert.equal(probed[0], fixture.screen.displays[0], 'the probe is asked about the dock display');
   assert.equal(rail.opacity, 1);
   assert.equal(sentPayload(rail, 'rail').always, true);
   assert.equal(sentPayload(peek, 'peek').peeking, false);

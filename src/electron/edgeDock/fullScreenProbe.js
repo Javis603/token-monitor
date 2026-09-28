@@ -4,14 +4,16 @@
 // `alwaysExceptFullScreen` mode. Neither platform has a public event for it,
 // so the controller polls this at a slow cadence while that mode is selected.
 //
-// macOS: a full-screen app lives on its own Space, and the dock's windows join
-// every Space. CGWindowListCopyWindowInfo lists the windows on screen right
-// now; a normal-level window of another process covering the whole display is
-// a full-screen app. The keys read here (layer, bounds, owner PID, alpha) need
-// no Screen Recording permission - only window titles do. A zoomed window
-// normally stops at the menu bar, so it does not match; with both the menu bar
-// and the Dock set to auto-hide a zoomed window can fill the display and reads
-// as full screen, which is also what it looks like.
+// macOS: a full-screen app gets a Space of its own, and the dock's windows
+// join every Space, so the question is the type of each display's current
+// Space. Window geometry cannot answer it: on a display with a camera housing
+// a full-screen window stops below the menu bar, exactly where a zoomed window
+// stops when the Dock is hidden or at the side. The Accessibility attribute
+// AXFullScreen can, but needs a permission grant and blocks on unresponsive
+// apps. WindowServer's CGSCopyManagedDisplaySpaces reports the current Space
+// per display with its type (4 = full screen) and needs neither; it is private
+// SPI, the same call Hammerspoon's hs.spaces and yabai rely on. If it is ever
+// missing the probe reports "not full screen".
 //
 // Windows: the foreground window counts when its rect is exactly its
 // monitor's. A maximized window overhangs the monitor by its resize border,
@@ -23,8 +25,9 @@
 
 const CF_STRING_ENCODING_UTF8 = 0x08000100;
 const CF_NUMBER_DOUBLE_TYPE = 13;
-const CG_WINDOW_LIST_ON_SCREEN_ONLY = 1;
-const CG_WINDOW_LIST_EXCLUDE_DESKTOP_ELEMENTS = 16;
+const CGS_SPACE_TYPE_FULL_SCREEN = 4;
+// With "Displays have separate Spaces" off there is one entry for every display.
+const CGS_SHARED_DISPLAY_IDENTIFIER = 'Main';
 const MONITOR_DEFAULTTONEAREST = 2;
 const WINDOWS_SHELL_CLASSES = new Set(['Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd']);
 const RECT_TOLERANCE = 1;
@@ -37,79 +40,119 @@ function rectMatches(rect, bounds, tolerance = RECT_TOLERANCE) {
   ));
 }
 
-// The pure half of the macOS probe: `windows` are CGWindowList entries already
-// read into plain objects.
-function macWindowsCoverDisplay(windows, displayBounds, ownPid) {
-  return (windows || []).some((win) => (
-    win.layer === 0
-    && win.pid !== ownPid
-    && !(win.alpha <= 0)
-    && rectMatches(win.bounds, displayBounds)
-  ));
+// The pure half of the macOS probe. `spaces` is one `{ display, type }` per
+// managed display: its identifier (a UUID, or 'Main' when displays share
+// Spaces) and the type of its current Space.
+function macCurrentSpaceIsFullScreen(spaces, displayUuid) {
+  const list = spaces || [];
+  const entry = (displayUuid && list.find((space) => space.display === displayUuid))
+    || list.find((space) => space.display === CGS_SHARED_DISPLAY_IDENTIFIER)
+    || (list.length === 1 ? list[0] : null);
+  return entry?.type === CGS_SPACE_TYPE_FULL_SCREEN;
 }
 
-function createMacWindowReader(koffi) {
+// Resolves a function from the first library exporting any of its names.
+function privateFunc(libraries, names, returns, args) {
+  for (const lib of libraries) {
+    for (const name of names) {
+      try { return lib.func(name, returns, args); } catch { /* try the next export */ }
+    }
+  }
+  throw new Error(`${names[0]} is not exported`);
+}
+
+function createMacSpaceReader(koffi) {
   const cf = koffi.load('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation');
-  const cg = koffi.load('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics');
+  const colorSync = koffi.load('/System/Library/Frameworks/ColorSync.framework/ColorSync');
+  // SkyLight owns the WindowServer SPI; CoreGraphics re-exports the CGS names.
+  const spaceLibraries = [];
+  for (const file of [
+    '/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight',
+    '/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics'
+  ]) {
+    try { spaceLibraries.push(koffi.load(file)); } catch { /* try the next library */ }
+  }
+  const MainConnectionID = privateFunc(spaceLibraries, ['SLSMainConnectionID', 'CGSMainConnectionID'], 'int', []);
+  const CopyManagedDisplaySpaces = privateFunc(
+    spaceLibraries,
+    ['SLSCopyManagedDisplaySpaces', 'CGSCopyManagedDisplaySpaces'],
+    'void *',
+    ['int']
+  );
+  const CGDisplayCreateUUIDFromDisplayID = colorSync.func('void *CGDisplayCreateUUIDFromDisplayID(uint32_t display)');
+  const CFUUIDCreateString = cf.func('void *CFUUIDCreateString(void *alloc, void *uuid)');
   const CFStringCreateWithCString = cf.func('void *CFStringCreateWithCString(void *alloc, const char *cStr, uint32_t encoding)');
+  const CFStringGetCString = cf.func('bool CFStringGetCString(void *str, void *buffer, intptr_t size, uint32_t encoding)');
   const CFArrayGetCount = cf.func('intptr_t CFArrayGetCount(void *array)');
   const CFArrayGetValueAtIndex = cf.func('void *CFArrayGetValueAtIndex(void *array, intptr_t index)');
   const CFDictionaryGetValue = cf.func('void *CFDictionaryGetValue(void *dict, void *key)');
   const CFNumberGetValue = cf.func('bool CFNumberGetValue(void *number, int type, _Out_ double *value)');
   const CFRelease = cf.func('void CFRelease(void *ref)');
-  const CGWindowListCopyWindowInfo = cg.func('void *CGWindowListCopyWindowInfo(uint32_t option, uint32_t relativeToWindow)');
 
-  // The kCGWindow* key constants are CFStrings whose value is their own name.
   // Created once and kept for the life of the process.
   const key = (name) => CFStringCreateWithCString(null, name, CF_STRING_ENCODING_UTF8);
   const keys = {
-    layer: key('kCGWindowLayer'),
-    bounds: key('kCGWindowBounds'),
-    pid: key('kCGWindowOwnerPID'),
-    alpha: key('kCGWindowAlpha'),
-    x: key('X'),
-    y: key('Y'),
-    width: key('Width'),
-    height: key('Height')
+    display: key('Display Identifier'),
+    currentSpace: key('Current Space'),
+    type: key('type')
   };
+  const connection = MainConnectionID();
+  const uuids = new Map();
+
+  function string(ref) {
+    if (!ref) return null;
+    const buffer = Buffer.alloc(256);
+    if (!CFStringGetCString(ref, buffer, buffer.length, CF_STRING_ENCODING_UTF8)) return null;
+    const end = buffer.indexOf(0);
+    return buffer.toString('utf8', 0, end < 0 ? buffer.length : end);
+  }
 
   function number(dict, name) {
-    const value = CFDictionaryGetValue(dict, keys[name]);
+    const value = dict ? CFDictionaryGetValue(dict, keys[name]) : null;
     if (!value) return null;
     const out = [0];
     return CFNumberGetValue(value, CF_NUMBER_DOUBLE_TYPE, out) ? out[0] : null;
   }
 
-  return function readWindows() {
-    const list = CGWindowListCopyWindowInfo(
-      CG_WINDOW_LIST_ON_SCREEN_ONLY | CG_WINDOW_LIST_EXCLUDE_DESKTOP_ELEMENTS,
-      0
-    );
+  // Electron's display id is the CGDirectDisplayID.
+  function displayUuid(displayId) {
+    const id = Number(displayId);
+    if (!Number.isInteger(id) || id < 0) return null;
+    if (uuids.has(id)) return uuids.get(id);
+    let value = null;
+    const uuid = CGDisplayCreateUUIDFromDisplayID(id >>> 0);
+    if (uuid) {
+      const text = CFUUIDCreateString(null, uuid);
+      try { value = string(text); } finally {
+        if (text) CFRelease(text);
+        CFRelease(uuid);
+      }
+    }
+    uuids.set(id, value);
+    return value;
+  }
+
+  function currentSpaces() {
+    const list = CopyManagedDisplaySpaces(connection);
     if (!list) return [];
     try {
-      const windows = [];
+      const spaces = [];
       const count = Number(CFArrayGetCount(list));
       for (let index = 0; index < count; index += 1) {
         const entry = CFArrayGetValueAtIndex(list, index);
-        const bounds = entry ? CFDictionaryGetValue(entry, keys.bounds) : null;
-        if (!bounds) continue;
-        windows.push({
-          layer: number(entry, 'layer'),
-          pid: number(entry, 'pid'),
-          alpha: number(entry, 'alpha') ?? 1,
-          bounds: {
-            x: number(bounds, 'x'),
-            y: number(bounds, 'y'),
-            width: number(bounds, 'width'),
-            height: number(bounds, 'height')
-          }
+        if (!entry) continue;
+        spaces.push({
+          display: string(CFDictionaryGetValue(entry, keys.display)),
+          type: number(CFDictionaryGetValue(entry, keys.currentSpace), 'type')
         });
       }
-      return windows;
+      return spaces;
     } finally {
       CFRelease(list);
     }
-  };
+  }
+
+  return { currentSpaces, displayUuid };
 }
 
 function createWindowsForegroundReader(koffi) {
@@ -169,7 +212,7 @@ function createFullScreenProbe(options = {}) {
     if (reader !== null) return reader;
     try {
       const koffi = options.koffi || require('koffi');
-      if (platform === 'darwin') reader = createMacWindowReader(koffi);
+      if (platform === 'darwin') reader = createMacSpaceReader(koffi);
       else if (platform === 'win32') reader = createWindowsForegroundReader(koffi);
       else reader = false;
     } catch (error) {
@@ -179,14 +222,15 @@ function createFullScreenProbe(options = {}) {
     return reader;
   }
 
-  return function isFullScreen(displayBounds) {
-    if (!displayBounds) return false;
+  // `display` is the Electron display the dock sits on.
+  return function isFullScreen(display) {
+    if (!display) return false;
     const read = load();
     if (!read) return false;
     try {
-      if (platform === 'darwin') return macWindowsCoverDisplay(read(), displayBounds, ownPid);
+      if (platform === 'darwin') return macCurrentSpaceIsFullScreen(read.currentSpaces(), read.displayUuid(display.id));
       const toDip = (rect) => options.screen?.screenToDipRect?.(null, rect) || rect;
-      return windowsForegroundCoversDisplay(read(), displayBounds, ownPid, toDip);
+      return windowsForegroundCoversDisplay(read(), display.bounds, ownPid, toDip);
     } catch (error) {
       logger(`[edge-dock] full-screen detection failed: ${error.message}`);
       return false;
@@ -196,7 +240,8 @@ function createFullScreenProbe(options = {}) {
 
 module.exports = {
   createFullScreenProbe,
-  macWindowsCoverDisplay,
+  createMacSpaceReader,
+  macCurrentSpaceIsFullScreen,
   rectMatches,
   windowsForegroundCoversDisplay
 };

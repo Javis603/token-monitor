@@ -5,28 +5,30 @@ const test = require('node:test');
 
 const {
   createFullScreenProbe,
-  macWindowsCoverDisplay,
+  macCurrentSpaceIsFullScreen,
   windowsForegroundCoversDisplay
 } = require('../../src/electron/edgeDock/fullScreenProbe');
 
 const display = { x: 0, y: 0, width: 1512, height: 982 };
 const external = { x: 1512, y: -200, width: 2560, height: 1440 };
 
-test('macOS: a normal-level window of another app covering the display is full screen', () => {
-  const fullScreen = { layer: 0, pid: 42, alpha: 1, bounds: { ...display } };
-  assert.equal(macWindowsCoverDisplay([fullScreen], display, 1), true);
-  assert.equal(macWindowsCoverDisplay([{ ...fullScreen, bounds: { ...external } }], external, 1), true);
+const BUILT_IN = '37D8832A-2D66-02CA-B9F7-8F30A301B230';
+const EXTERNAL = '9A0B1C2D-3E4F-5061-7283-94A5B6C7D8E9';
+
+test('macOS: the display counts as full screen when its current Space is a full-screen Space', () => {
+  const spaces = [{ display: BUILT_IN, type: 4 }, { display: EXTERNAL, type: 0 }];
+  assert.equal(macCurrentSpaceIsFullScreen(spaces, BUILT_IN), true);
   // Only the display the dock is on counts.
-  assert.equal(macWindowsCoverDisplay([fullScreen], external, 1), false);
+  assert.equal(macCurrentSpaceIsFullScreen(spaces, EXTERNAL), false);
+  // A desktop Space is not full screen whatever its windows look like.
+  assert.equal(macCurrentSpaceIsFullScreen([{ display: BUILT_IN, type: 0 }], BUILT_IN), false);
 });
 
-test('macOS: zoomed windows, overlays, invisible windows and our own windows are not', () => {
-  const zoomed = { layer: 0, pid: 42, alpha: 1, bounds: { x: 0, y: 33, width: 1512, height: 949 } };
-  const menuBar = { layer: 24, pid: 7, alpha: 1, bounds: { ...display } };
-  const transparent = { layer: 0, pid: 42, alpha: 0, bounds: { ...display } };
-  const own = { layer: 0, pid: 1, alpha: 1, bounds: { ...display } };
-  assert.equal(macWindowsCoverDisplay([zoomed, menuBar, transparent, own], display, 1), false);
-  assert.equal(macWindowsCoverDisplay([], display, 1), false);
+test('macOS: displays sharing Spaces report one entry, and an unknown layout is not full screen', () => {
+  assert.equal(macCurrentSpaceIsFullScreen([{ display: 'Main', type: 4 }], EXTERNAL), true);
+  assert.equal(macCurrentSpaceIsFullScreen([{ display: BUILT_IN, type: 4 }], null), true);
+  assert.equal(macCurrentSpaceIsFullScreen([{ display: BUILT_IN, type: 4 }, { display: EXTERNAL, type: 0 }], null), false);
+  assert.equal(macCurrentSpaceIsFullScreen([], BUILT_IN), false);
 });
 
 test('Windows: the foreground window counts only when it exactly fills its monitor', () => {
@@ -57,33 +59,42 @@ test('the probe reports not full screen when native access is unavailable', () =
   assert.equal(createFullScreenProbe({ platform: 'linux' })(display), false);
 });
 
-test('macOS reader turns the CGWindowList into window entries and releases it', () => {
+test('macOS reader reads each display\'s current Space type and releases what it copies', () => {
   const released = [];
   // CFDictionaryGetValue hands back CFNumber pointers, never bare numbers.
   const n = (value) => ({ value });
-  const entries = [
-    { kCGWindowLayer: n(0), kCGWindowOwnerPID: n(42), kCGWindowBounds: { X: n(0), Y: n(0), Width: n(1512), Height: n(982) } }
+  const spaces = [
+    { 'Display Identifier': BUILT_IN, 'Current Space': { type: n(4) } },
+    { 'Display Identifier': EXTERNAL, 'Current Space': { type: n(0) } }
   ];
+  const uuids = { 1: `uuid:${BUILT_IN}`, 2: `uuid:${EXTERNAL}` };
+  const exported = {
+    // Only the CGS names exist, so the reader has to fall back from SLS.
+    CGSMainConnectionID: () => 7,
+    CGSCopyManagedDisplaySpaces: (connection) => (connection === 7 ? spaces : null),
+    CGDisplayCreateUUIDFromDisplayID: (id) => uuids[id] || null,
+    CFUUIDCreateString: (_alloc, uuid) => uuid.slice('uuid:'.length),
+    CFStringCreateWithCString: (_alloc, value) => value,
+    CFStringGetCString: (value, buffer) => { buffer.write(`${value}\0`); return true; },
+    CFArrayGetCount: (list) => list.length,
+    CFArrayGetValueAtIndex: (list, index) => list[index],
+    CFDictionaryGetValue: (dict, key) => dict[key] ?? null,
+    CFNumberGetValue: (number, _type, out) => { out[0] = number.value; return true; },
+    CFRelease: (ref) => released.push(ref)
+  };
   const fakeKoffi = {
     load() {
       return {
-        func(signature) {
-          const name = signature.match(/(\w+)\(/)[1];
-          return {
-            CFStringCreateWithCString: (_alloc, value) => value,
-            CFArrayGetCount: (list) => list.length,
-            CFArrayGetValueAtIndex: (list, index) => list[index],
-            CFDictionaryGetValue: (dict, key) => dict[key] ?? null,
-            CFNumberGetValue: (number, _type, out) => { out[0] = number.value; return true; },
-            CFRelease: (ref) => released.push(ref),
-            CGWindowListCopyWindowInfo: () => entries
-          }[name];
+        func(signature, ...rest) {
+          const name = rest.length ? signature : signature.match(/(\w+)\(/)[1];
+          if (!exported[name]) throw new Error(`Cannot find function '${name}'`);
+          return exported[name];
         }
       };
     }
   };
-  const probe = createFullScreenProbe({ platform: 'darwin', koffi: fakeKoffi, pid: 1 });
-  assert.equal(probe(display), true);
-  assert.equal(probe(external), false);
-  assert.deepEqual(released, [entries, entries]);
+  const probe = createFullScreenProbe({ platform: 'darwin', koffi: fakeKoffi });
+  assert.equal(probe({ id: 1, bounds: display }), true);
+  assert.equal(probe({ id: 2, bounds: external }), false);
+  assert.equal(released.filter((ref) => ref === spaces).length, 2, 'every copied Space list is released');
 });
