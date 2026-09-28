@@ -503,6 +503,9 @@ test('the watch process exits when the thread that owns it is terminated', { ski
   const { Worker } = require('node:worker_threads');
   const root = tmpTree();
   const hostPath = require.resolve('../../src/shared/watcherHost');
+  // Earlier cases SIGKILL their children without waiting, so one may still be
+  // exiting. Only the child this case spawns is asserted on.
+  const earlier = new Set(watcherChildrenOf(process.pid));
   const owner = new Worker(`
     const { parentPort } = require('node:worker_threads');
     const { createWatcherCoordinator } = require(${JSON.stringify(hostPath)});
@@ -520,9 +523,13 @@ test('the watch process exits when the thread that owns it is terminated', { ski
       owner.once('error', reject);
       setTimeout(() => reject(new Error('watcher never reported ready')), 15000).unref();
     });
-    assert.equal(watcherChildrenOf(process.pid).length, 1, 'expected one watch process');
+    const spawned = watcherChildrenOf(process.pid).filter((pid) => !earlier.has(pid));
+    assert.equal(spawned.length, 1, 'expected one watch process');
     await owner.terminate();
-    assert.ok(await until(() => watcherChildrenOf(process.pid).length === 0, 5000), 'watch process outlived its owner');
+    assert.ok(
+      await until(() => !watcherChildrenOf(process.pid).includes(spawned[0]), 5000),
+      'watch process outlived its owner'
+    );
   } finally {
     await owner.terminate();
     fs.rmSync(root, { recursive: true, force: true });
