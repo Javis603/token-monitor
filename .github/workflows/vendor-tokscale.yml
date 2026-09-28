@@ -97,5 +97,5 @@ jobs:
         run: node scripts/ensure-vendored-tokscale.js
       - name: Verify DEFAULT_CLIENTS against the vendored binary's real capabilities
         run: node scripts/verify-vendored-tokscale-clients.js
-      - name: Verify DSH parsing semantics
+      - name: Verify DSH and Muse token contracts
         run: node scripts/verify-vendored-tokscale.js

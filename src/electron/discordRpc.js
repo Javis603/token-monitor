@@ -3,21 +3,11 @@
 const { Client } = require('@xhayper/discord-rpc');
 const { formatCurrencyFromUsd, normalizeCurrency } = require('../shared/currency');
 const compactTokens = require('../shared/compactTokens');
+const { CLIENT_LABELS } = require('../shared/clientCatalog');
 
 const CLIENT_ID = '1507034330436862062';
 const GITHUB_URL = 'https://github.com/Javis603/token-monitor';
-const KNOWN_CLIENT_ASSETS = new Set([
-  'claude', 'codex', 'opencode', 'hermes', 'openclaw', 'cursor', 'antigravity', 'cline',
-  'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'omp', 'zed', 'kilo', 'commandcode', 'mimo', 'muse', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'proma', 'qodercn', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth', 'devin',
-  'gemini'
-]);
-const CLIENT_LABELS = {
-  claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', hermes: 'Hermes Agent',
-  openclaw: 'OpenClaw', cursor: 'Cursor', antigravity: 'Antigravity', cline: 'Cline',
-  amp: 'Amp', droid: 'Factory Droid', kimi: 'Kimi', qwen: 'Qwen', grok: 'Grok Build', copilot: 'GitHub Copilot',
-  pi: 'Pi', omp: 'Oh My Pi', zed: 'Zed', kilo: 'Kilo', commandcode: 'Command Code', mimo: 'Xiaomi MiMo', muse: 'Muse Code', zcode: 'ZCode', kiro: 'Kiro', codebuddy: 'CodeBuddy', workbuddy: 'WorkBuddy', proma: 'Proma', qodercn: 'Qoder CN', reasonix: 'Reasonix', dsh: 'DeepSeek Harness', cherrystudio: 'Cherry Studio', lmstudio: 'LM Studio', unsloth: 'Unsloth', devin: 'Devin',
-  gemini: 'Gemini'
-};
+const CLIENT_LABEL_OVERRIDES = Object.freeze({ claude: 'Claude' });
 const UPDATE_MIN_INTERVAL_MS = 15000;
 const RECONNECT_DELAY_MS = 30000;
 
@@ -60,13 +50,16 @@ function buildPayload(stats, currency = 'USD', compactTokenUnits = 'western', lo
     return { ...base, details: 'Token Monitor', state: 'No usage today' };
   }
   const top = topClient(today);
-  const label = (top && CLIENT_LABELS[top]) || (top ? top : 'Active');
+  const label = top
+    ? (Object.hasOwn(CLIENT_LABEL_OVERRIDES, top) ? CLIENT_LABEL_OVERRIDES[top] :
+      Object.hasOwn(CLIENT_LABELS, top) ? CLIENT_LABELS[top] : top)
+    : 'Active';
   const payload = {
     ...base,
     details: `${label} · ${formatTokensCompact(totalTokens, compactTokenUnits, locale)} tokens`,
     state: `${formatCurrencyFromUsd(today.costUsd, displayCurrency)} today`
   };
-  if (top && KNOWN_CLIENT_ASSETS.has(top)) {
+  if (top && Object.hasOwn(CLIENT_LABELS, top)) {
     payload.smallImageKey = top;
     payload.smallImageText = label;
   }
