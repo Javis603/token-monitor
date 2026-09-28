@@ -151,6 +151,43 @@ function deviceDetail(deviceId = 'remote-a', tools = []) {
   };
 }
 
+test('only stale remote iCloud devices offer removal, including historical views', () => {
+  const source = functionSource(app, 'deviceRowsForPeriod', 'attributionComponent');
+  const active = { deviceId: 'active', stale: false, periods: { today: {} } };
+  const stale = { deviceId: 'stale', stale: true, periods: { today: {} } };
+  const local = { deviceId: 'local', stale: true, periods: { today: {} } };
+  const context = vm.createContext({
+    state: { settings: { hubMode: 'icloud', deviceId: 'local' }, period: 'today', stats: { devices: [active, stale, local] } },
+    fixedPeriodDevices: () => [active, stale, local],
+    deviceBreakdownApi: {
+      deviceBreakdownForPeriod: () => ({ totalTokens: 0, tools: [] }),
+      devicePlatformLabel: () => ''
+    },
+    clientLabels: {},
+    clientColors: { default: '#fff' },
+    deviceColor: () => '#fff',
+    deviceLabel: (device) => device.deviceId,
+    deviceRuntimeLabel: () => '',
+    deviceSyncedLabel: () => '',
+    t: () => '',
+    Boolean,
+    Number,
+    String
+  });
+  vm.runInContext(`${source}\nglobalThis.rows = deviceRowsForPeriod;`, context);
+  const eligibility = () => Object.fromEntries(context.rows().map((row) => [row.key, row.deviceDetail.canDelete]));
+
+  assert.deepEqual(eligibility(), { active: false, stale: true, local: false });
+  context.state.period = 'last30Days';
+  context.fixedPeriodDevices = () => [
+    { deviceId: 'active', stale: true, periods: { last30Days: {} } },
+    { deviceId: 'stale', stale: false, periods: { last30Days: {} } }
+  ];
+  assert.deepEqual(eligibility(), { active: false, stale: true });
+  context.state.settings.hubMode = 'client';
+  assert.deepEqual(eligibility(), { active: false, stale: false });
+});
+
 test('device deletion confirmation cancels on blur, outside interaction, timeout, and changed redraw', async () => {
   const harness = createHarness();
   const accordion = harness.createNode('div');

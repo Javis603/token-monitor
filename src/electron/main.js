@@ -3655,6 +3655,15 @@ async function adoptOrphanedSubscriptions() {
           revisionToken: result.revisionToken || ''
         }, hub);
       }
+      // iCloud may discover a competing writer's snapshot after publishing ours.
+      // Unlike the Hub's accepted write, that result does not prove adoption.
+      const winningRecords = new Map((result?.winner?.subscriptions || []).map((entry) => [entry.id, entry]));
+      if (result?.errors?.length || !result?.winner || orphans.some((entry) =>
+        JSON.stringify(winningRecords.get(entry.id)) !== JSON.stringify(entry)
+      )) {
+        const code = result?.errors?.length || !result?.winner ? 'icloud_adoption_unconfirmed' : 'stale_write';
+        throw Object.assign(new Error(code), { code });
+      }
     } else {
       const held = subscriptionsDocumentFor(hub);
       const merged = new Map((held?.subscriptions || []).map((entry) => [entry.id, entry]));
@@ -3678,7 +3687,7 @@ function subscriptionWriteFailureCode(error) {
   if (error?.code === 'write_failed') return 'write_failed';
   if (error?.code === 'hub_changed') return 'hub_changed';
   if (typeof settings !== 'undefined' && settings?.hubMode === 'icloud') {
-    return error?.code === 'icloud_unavailable' || error?.code === 'icloud_stopped'
+    return error?.code === 'icloud_unavailable' || error?.code === 'icloud_stopped' || error?.code === 'icloud_adoption_unconfirmed'
       ? error.code
       : 'icloud_write_failed';
   }

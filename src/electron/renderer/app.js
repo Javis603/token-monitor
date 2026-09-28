@@ -2820,7 +2820,9 @@ function deviceRowsForPeriod() {
         emptyText: breakdown.totalTokens > 0 ? t('devices.detailsUnavailable') : t('home.noTools'),
         metaParts,
         deviceId: device.deviceId,
-        canDelete: state.settings?.hubMode === 'icloud' && device.deviceId !== localId
+        canDelete: state.settings?.hubMode === 'icloud'
+          && device.deviceId !== localId
+          && state.stats?.devices?.some((live) => live.deviceId === device.deviceId && live.stale === true)
       }
     };
   }).sort((a, b) => b.value - a.value);
@@ -3470,6 +3472,7 @@ async function saveSubscriptions(list, base, { render = true } = {}) {
 function subscriptionWriteErrorKey(error) {
   const message = error?.message || '';
   if (/stale_write/.test(message)) return 'settings.subscriptions.errorStaleWrite';
+  if (/icloud_adoption_unconfirmed/.test(message)) return 'settings.subscriptions.errorIcloudAdoptionUnconfirmed';
   if (/hub_rejected/.test(message)) return 'settings.subscriptions.errorHubRejected';
   if (/icloud_(?:unavailable|stopped)|icloud_write_failed|root-create-failed|subscription-write-failed/.test(message)) {
     return 'settings.subscriptions.errorIcloudWrite';

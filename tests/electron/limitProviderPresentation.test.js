@@ -9,6 +9,7 @@ const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
 const compactTokenApi = require('../../src/shared/compactTokens');
+const { normalizeSubscriptions } = require('../../src/shared/subscriptionDisplay');
 const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
 const limitProviderOrderApi = require('../../src/electron/renderer/limits/providerOrder');
 const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
@@ -4467,6 +4468,7 @@ test('a refused write says which problem it was', () => {
   assert.match(key("Error invoking remote method 'subscriptions:save': Error: hub_rejected"), /errorHubRejected$/);
   assert.match(key('Error: write_failed'), /errorWriteFailed$/);
   assert.match(key('Error: icloud_write_failed'), /errorIcloudWrite$/);
+  assert.match(key('Error: icloud_adoption_unconfirmed'), /errorIcloudAdoptionUnconfirmed$/);
   assert.match(key('Error: stale_write'), /errorStaleWrite$/);
   assert.match(key('Error: hub_unreachable'), /errorHubWrite$/);
 
@@ -5530,6 +5532,101 @@ test('iCloud adoption keeps orphan records when the saving runtime is replaced',
   assert.deepEqual(plain(context.cacheCalls), []);
   assert.deepEqual(plain(context.settings.subscriptionsOrphaned.records), [{ id: 'mine' }]);
   assert.equal(context.saved, undefined);
+});
+
+test('iCloud adoption retains orphaned records when another writer wins the local snapshot', async () => {
+  const source = [
+    functionBody(mainProcessSource, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(mainProcessSource, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(mainProcessSource, 'currentHubIdentity', 'subscriptionDocumentVersion'),
+    functionBody(mainProcessSource, 'orphanedSubscriptions', 'pendingOrphanedSubscriptions'),
+    functionBody(mainProcessSource, 'pendingOrphanedSubscriptions', 'adoptOrphanedSubscriptions'),
+    `async ${functionBody(mainProcessSource, 'adoptOrphanedSubscriptions', 'subscriptionWriteFailureCode')}`
+  ].join('\n');
+
+  const orphan = normalizeSubscriptions([{
+    id: 'mine', provider: 'codex', kind: 'recurring', startDate: '2026-01-01',
+    amountMinor: 2000, currency: 'USD', updatedAt: '2026-01-02T00:00:00.000Z'
+  }])[0];
+  for (const { winnerSubscriptions, errors, code } of [
+    { winnerSubscriptions: [], code: 'stale_write' },
+    { winnerSubscriptions: [{ ...orphan, amountMinor: 3000 }], code: 'stale_write' },
+    { winnerSubscriptions: null, code: 'icloud_adoption_unconfirmed' },
+    { winnerSubscriptions: [orphan], errors: [{ category: 'read-failed' }], code: 'icloud_adoption_unconfirmed' }
+  ]) {
+    const runtime = {
+      getSubscriptions: () => ({ subscriptions: [], revisionToken: 'v1' }),
+      saveSubscriptions: async () => ({
+        winner: winnerSubscriptions && { updatedAt: 'now', subscriptions: winnerSubscriptions },
+        revisionToken: winnerSubscriptions ? 'v2:other' : '',
+        errors
+      })
+    };
+    const context = vm.createContext({
+      settings: { hubMode: 'icloud', subscriptionsOrphaned: { hubUrl: 'icloud', records: [orphan] } },
+      subscriptionQueues: new Map(),
+      icloudRuntimeHandle: runtime,
+      effectiveHubConfig: () => ({ url: '' }),
+      subscriptionsAreShared: () => true,
+      cacheSharedSubscriptions: () => true,
+      saveSettings: () => { context.saved = true; return true; },
+      settingsForRenderer: () => ({}),
+      Promise,
+      String,
+      Object,
+      JSON,
+      Map
+    });
+    vm.runInContext(source, context);
+
+    await assert.rejects(
+      () => vm.runInContext('adoptOrphanedSubscriptions();', context),
+      (error) => error.code === code
+    );
+    assert.deepEqual(plain(context.settings.subscriptionsOrphaned.records), [orphan]);
+    assert.equal(context.saved, undefined);
+  }
+});
+
+test('iCloud adoption clears orphans when the winning snapshot contains their full records', async () => {
+  const source = [
+    functionBody(mainProcessSource, 'queueSubscriptionOp', 'subscriptionOpIsCurrent'),
+    functionBody(mainProcessSource, 'subscriptionOpIsCurrent', 'subscriptionsEndpoint'),
+    functionBody(mainProcessSource, 'currentHubIdentity', 'subscriptionDocumentVersion'),
+    functionBody(mainProcessSource, 'orphanedSubscriptions', 'pendingOrphanedSubscriptions'),
+    functionBody(mainProcessSource, 'pendingOrphanedSubscriptions', 'adoptOrphanedSubscriptions'),
+    `async ${functionBody(mainProcessSource, 'adoptOrphanedSubscriptions', 'subscriptionWriteFailureCode')}`
+  ].join('\n');
+  const orphan = normalizeSubscriptions([{
+    id: 'mine', provider: 'codex', kind: 'recurring', startDate: '2026-01-01',
+    amountMinor: 2000, currency: 'USD', updatedAt: '2026-01-02T00:00:00.000Z'
+  }])[0];
+  const runtime = {
+    getSubscriptions: () => ({ subscriptions: [], revisionToken: 'v1' }),
+    saveSubscriptions: async () => ({
+      winner: { updatedAt: 'now', subscriptions: normalizeSubscriptions([orphan]) },
+      revisionToken: 'v2:other'
+    })
+  };
+  const context = vm.createContext({
+    settings: { hubMode: 'icloud', subscriptionsOrphaned: { hubUrl: 'icloud', records: [orphan] } },
+    subscriptionQueues: new Map(),
+    icloudRuntimeHandle: runtime,
+    effectiveHubConfig: () => ({ url: '' }),
+    subscriptionsAreShared: () => true,
+    cacheSharedSubscriptions: () => true,
+    saveSettings: () => true,
+    settingsForRenderer: () => ({}),
+    Promise,
+    String,
+    Object,
+    JSON,
+    Map
+  });
+  vm.runInContext(source, context);
+
+  await vm.runInContext('adoptOrphanedSubscriptions();', context);
+  assert.deepEqual(plain(context.settings.subscriptionsOrphaned), { hubUrl: '', records: [] });
 });
 
 test('iCloud local seeding does not cache a result from a replaced runtime', async () => {
