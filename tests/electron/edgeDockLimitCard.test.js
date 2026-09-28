@@ -307,7 +307,7 @@ test('a MiMo membership row meters like any percent quota, WorkBuddy included', 
       windowMinutes: 10080,
       usedPercent: 21.5,
       remainingPercent: 78.5,
-      resetsAt: '2026-09-28T00:00:00.000Z'
+      resetsAt: new Date(Date.now() + 86_400_000).toISOString()
     }]
   };
   const card = dockView().renderProviderWindows(membershipRow, '#000000');
@@ -387,8 +387,8 @@ test('one MiMo product failing still leaves the other row and its quota on the c
   // ...and the lane that did not is a row of its own instead of taking the
   // other product's place, so neither failure is silent and neither is a
   // swallowed row.
-  assert.match(group.text, /Sign in to MiMo Desktop again/);
-  assert.equal(group.text.match(/Sign in to MiMo Desktop again/g).length, 1, 'one row asks, the healthy one does not');
+  assert.match(group.text, /Sign in again/);
+  assert.equal(group.text.match(/Sign in again/g).length, 1, 'one row asks, the healthy one does not');
 });
 
 test('a MiMo wallet meters against its month spend and carries the spend line', () => {
@@ -690,7 +690,7 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
   }
 });
 
-test('MiMo membership rows distinguish accounts and keep the tier beside the product', () => {
+test('MiMo groups products under each account and keeps their own plan and status', () => {
   const view = dockView();
   const rows = [
     { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef123456', accountName: 'MiMo abcdef1', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [] },
@@ -699,13 +699,48 @@ test('MiMo membership rows distinguish accounts and keep the tier beside the pro
   const group = view.renderLimitProviderGroup('mimo', 'MiMo', rows, '#000000');
   const accounts = group.find('limit-account-list').children;
   assert.deepEqual(accounts.map((row) => row.find('limit-name-title').textContent), [
-    'MiMo abcdef1 · Desktop Membership', 'MiMo abcdef6 · Desktop Membership'
+    'MiMo abcdef1', 'MiMo abcdef6'
   ]);
-  assert.equal(group.find('limit-plan').textContent, '2 products');
-  assert.equal(accounts[0].find('limit-plan').textContent, 'Pro');
-  // No plan and no window: the product name already says which row it is, so the
-  // plan cell is empty rather than stating that the app has no plan right now.
-  assert.equal(accounts[1].find('limit-plan')?.textContent ?? '', '');
+  assert.equal(group.find('limit-plan').textContent, '');
+  const products = accounts.map((account) => account.find('limit-account-list').children[0]);
+  assert.deepEqual(products.map((row) => row.find('limit-name-title').textContent), [
+    'Desktop Membership', 'Desktop Membership'
+  ]);
+  assert.equal(products[0].find('limit-plan').textContent, 'Pro');
+  assert.equal(products[1].find('limit-plan')?.textContent ?? '', '');
+});
+
+test('one MiMo account has one title even when its two products came from different devices', () => {
+  const view = dockView({ maskLimitAccountEmails: true });
+  const rows = [
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:console', accountName: 'Old profile · MiMo abcdef1', accountEmail: 'same@example.com', accountLabel: 'Console', windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }] },
+    { provider: 'mimo', status: 'unauthorized', sourceDetail: 'app', accountKey: 'sha256:membership', accountName: 'New profile · MiMo abcdef1', accountEmail: 'same@example.com', accountLabel: 'Desktop Membership', windows: [] }
+  ];
+  const group = view.renderLimitProviderGroup('mimo', 'Xiaomi MiMo', rows, '#000000');
+  assert.equal(group.find('limit-name-title').textContent, 'Xiaomi MiMo · s***e@example.com');
+  const products = group.find('limit-account-list').children;
+  assert.deepEqual(products.map((row) => row.find('limit-name-title').textContent), ['Console', 'Desktop Membership']);
+  assert.match(products[0].text, /9\.95/);
+  assert.match(products[1].text, /Sign in again/);
+});
+
+test('MiMo keeps different accounts apart when emails mask alike', () => {
+  const view = dockView({ maskLimitAccountEmails: true });
+  const rows = [
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:console-a', accountName: 'Profile · MiMo abcdef1', accountEmail: 'james@example.com', accountLabel: 'Console', windows: [] },
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:member-b', accountName: 'Profile · MiMo abcdef6', accountEmail: 'jones@example.com', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [] },
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:member-a', accountName: 'Profile · MiMo abcdef1', accountEmail: 'james@example.com', accountLabel: 'Desktop Membership', planLabel: 'Plus', windows: [] }
+  ];
+  const group = view.renderLimitProviderGroup('mimo', 'Xiaomi MiMo', rows, '#000000');
+  const accounts = group.find('limit-account-list').children;
+  assert.equal(accounts.length, 2);
+  assert.deepEqual(accounts.map((account) => account.find('limit-name-title').textContent), [
+    'j***s@example.com · Profile · MiMo abcdef1',
+    'j***s@example.com · Profile · MiMo abcdef6'
+  ]);
+  assert.deepEqual(accounts.map((account) => account.find('limit-account-list').children.map(
+    (product) => product.find('limit-name-title').textContent
+  )), [['Console', 'Desktop Membership'], ['Desktop Membership']]);
 });
 
 test('a group-only plan replacement leaves a solo row its plan', () => {

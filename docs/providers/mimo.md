@@ -198,7 +198,7 @@ The membership is that account's **second product**, so it gets a second row, ke
 
 If the Desktop account signs out or changes while a pasted Console account still answers, the provider explicitly removes the vanished automatic row identities. Omitting them is insufficient because the limits runtime treats a missing identity in a mixed response as transient and retains its last good quota. The removal is a **control row** — `{ provider, accountKey, removed: true }`, carrying no reading — that `collectLimitsOnce` and the runtime's `commitRows` consume and that is stripped before normalization, so it never reaches a device record or the wire. The provider compares with the runtime's last accepted rows, so a superseded probe cannot consume a removal before it commits. It is the one row this provider emits that is an instruction rather than a reading.
 
-The two rows carry one account identity: the console profile name plus a short opaque suffix derived from the account key, or that suffix alone when the profile has no name. The console email is retained with that identity in the limits runtime's in-memory provider state, so a membership-only scoped refresh does not lose the association. Limits, tray selectors and the native widget render `account · product`; multiple Xiaomi accounts remain distinguishable even when the profile endpoint has no email.
+The two rows carry one account identity: the console profile name plus a short opaque suffix derived from the account key, or that suffix alone when the profile has no name. The console email is retained with that identity in the limits runtime's in-memory provider state, so a membership-only scoped refresh does not lose the association. Limits and Edge Dock show one account heading with separate product rows; multiple Xiaomi accounts get separate account blocks. Tray selectors and the native widget use `account · product` because they present flat rows.
 
 | Row | `accountLabel` (product) | `planLabel` | Source |
 |---|---|---|---|
@@ -211,7 +211,7 @@ The membership has no plan to name when the subscription answers `current: null`
 
 Each row carries its own lane's answer, so a lane that failed takes its own row's status instead of speaking through the other product's row. A membership whose session ended is an `unauthorized` membership row beside a live wallet row; before the split, both shared one row and the failure had to be smuggled in beside a wallet that was still true. A region the app's table does not carry resolves no membership endpoint at all, so that row is absent rather than mislabelled.
 
-The renderer reads which recovery to name off the row's own `sourceDetail` (`app` → sign in to MiMo Desktop again, `managed` → replace the pasted Cookie), which is also why `sourceDetail` has to stay truthful per row.
+The renderer reads which recovery to name off the row's own `sourceDetail` (`app` → the shared “Sign in again” status, `managed` → replace the pasted Cookie), which is also why `sourceDetail` has to stay truthful per row. The app source is identified as MiMo Desktop in Settings.
 
 ### Session reader
 

@@ -2783,8 +2783,7 @@ test('a MiMo row whose recovery belongs to a sign-in says which sign-in it means
       sourceDetail: 'app'
     }),
     {
-      label: 'Sign in to MiMo Desktop again',
-      key: 'settings.mimo.desktopRelogin',
+      label: 'Sign in again',
       tone: 'setup'
     },
   );
@@ -2886,7 +2885,7 @@ test('MiMo status gives the correct recovery action for each credential source',
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }),
-    { label: 'Sign in to MiMo Desktop again', key: 'settings.mimo.desktopRelogin', tone: 'setup' }
+    { label: 'Sign in again', tone: 'setup' }
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }),
@@ -2919,7 +2918,7 @@ test('MiMo Limits rows show the no-plan and source-specific recovery text', () =
     accountIdentity: require('../../src/electron/renderer/accountIdentity'),
     settings: () => ({}),
     t: (key) => ({
-      'settings.mimo.desktopRelogin': '请重新登录 MiMo Desktop',
+      'settings.limits.status.signInAgain': '重新登录',
       'settings.mimo.repasteCookie': '请重新粘贴 MiMo Cookie'
     })[key] || key,
     presentation: presentation
@@ -2933,7 +2932,7 @@ test('MiMo Limits rows show the no-plan and source-specific recovery text', () =
     'an invited quota keeps the product in the title without inventing a plan name'
   );
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [] }), 'Pro');
-  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }), '请重新登录 MiMo Desktop');
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }), '重新登录');
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }), '请重新粘贴 MiMo Cookie');
   assert.equal(view.limitAccountTitle('mimo', { provider: 'mimo', accountName: 'MiMo account', accountLabel: 'Console' }, 0), 'MiMo account · Console');
 });
@@ -2960,7 +2959,7 @@ test('a healthy MiMo row keeps its meta line free of recovery prompts', () => {
     isMimoMembershipProduct: limitWindowLabels.isMimoMembershipProduct,
     mimoProductLabel: limitWindowLabels.mimoProductLabel,
     accountIdentity: require('../../src/electron/renderer/accountIdentity'),
-    t: (key) => ({ 'settings.mimo.desktopRelogin': '请重新登录 MiMo Desktop' })[key] || key,
+    t: (key) => ({ 'settings.limits.status.signInAgain': '重新登录' })[key] || key,
     presentation,
     settings: () => ({})
   });

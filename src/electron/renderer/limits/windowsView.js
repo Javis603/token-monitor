@@ -1495,7 +1495,7 @@
 
   function providerStatusLabel(provider) {
     if (provider?.provider === 'mimo' && provider?.sourceDetail === 'app' && provider?.status === 'unauthorized') {
-      return t('settings.mimo.desktopRelogin');
+      return t('settings.limits.status.signInAgain');
     }
     if (provider?.provider === 'mimo' && provider?.sourceDetail === 'managed' && provider?.status === 'unauthorized') {
       return t('settings.mimo.repasteCookie');
@@ -2061,12 +2061,10 @@
       : limitAccountDefaultTitle(provider, index, providerEntries);
   }
 
-  // Volcengine's two rows are one account's two subscriptions, and MiMo's are
-  // the platform console and the Desktop membership of one account, so both
-  // headers count plans; every other group counts accounts.
+  // Volcengine's two rows are one account's two subscriptions, so its header
+  // counts plans; every other ordinary group counts accounts.
   const GROUP_COUNT_KEYS = {
     volcengine: 'settings.volcengine.nPlans',
-    mimo: 'settings.mimo.nProducts'
   };
 
   // "4 accounts" on the group header. A caller that has a better phrase passes
@@ -2079,11 +2077,81 @@
     return text === key ? '' : text;
   }
 
+  function mimoAccountGroups(providers) {
+    const groups = new Map();
+    providers.forEach((provider, index) => {
+      const name = String(provider.accountName || '').trim();
+      // Current MiMo rows share this suffix from their Console account key,
+      // even when two devices report different profile names for that account.
+      const suffix = name.match(/(?:^| · )(MiMo [a-f0-9]{7})$/i)?.[1];
+      const email = String(provider.accountEmail || '').trim().toLowerCase();
+      const key = suffix ? `suffix:${suffix.toLowerCase()}`
+        : email ? `email:${email}`
+          : name ? `name:${name.toLowerCase()}`
+            : `row:${provider.accountKey || index}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(provider);
+    });
+    return [...groups.values()];
+  }
+
+  function renderMimoAccountProducts(providers, color) {
+    const list = document.createElement('div');
+    list.className = 'limit-account-list';
+    providers.forEach((provider, index) => {
+      const policy = limitAccountRowPolicy('mimo', provider, color, { grouped: true, sharedFamily: null });
+      const title = mimoProductLabel(provider) || limitAccountTitle('mimo', provider, index, providers);
+      list.append(renderLimitProviderRow('mimo', title, provider, policy.color, {
+        accountRow: true,
+        ...policy.options
+      }));
+    });
+    return list;
+  }
+
+  function renderMimoProviderGroup(label, providers, color) {
+    const groups = mimoAccountGroups(providers);
+    const representatives = groups.map((group) => group.find((row) => row.accountEmail) || group[0]);
+    const accountTitle = (index) => accountIdentity.accountTitleLabel(representatives[index], representatives, {
+      maskEmail: limitAccountEmailsMasked(),
+      index
+    }) || `Account ${index + 1}`;
+    const row = document.createElement('div');
+    row.className = `limit-row limit-row-group${providers.some((provider) => provider.stale) ? ' stale' : ''}`;
+    const header = { provider: 'mimo', status: 'ok', windows: [], accountGroup: true, groupAccounts: providers };
+    const oneAccount = groups.length === 1;
+    row.append(renderLimitProviderHead('mimo', label, header, color, {
+      title: oneAccount ? `${label} · ${accountTitle(0)}` : label,
+      planText: '',
+      hideMeta: true
+    }));
+    if (oneAccount) {
+      row.append(renderMimoAccountProducts(groups[0], color));
+    } else {
+      const list = document.createElement('div');
+      list.className = 'limit-account-list';
+      groups.forEach((group, index) => {
+        const account = document.createElement('div');
+        account.className = 'limit-row limit-account-row';
+        account.append(renderLimitProviderHead('mimo', accountTitle(index), header, color, {
+          showIcon: false,
+          accountRow: true,
+          planText: '',
+          hideMeta: true
+        }), renderMimoAccountProducts(group, color));
+        list.append(account);
+      });
+      row.append(list);
+    }
+    return row;
+  }
+
   // A provider's several accounts, as the page's group header plus one row each.
   // No options: what the header wears and what each row says is the provider's
   // policy above, so a second surface cannot render the same group differently by
   // passing a different set.
   function renderLimitProviderGroup(providerId, label, providers, color) {
+    if (providerId === 'mimo') return renderMimoProviderGroup(label, providers, color);
     const policy = LIMIT_GROUP_POLICIES[providerId] || (() => ({}));
     const { markId, sharedFamily, forecastOnGroup } = policy(providers);
     const row = document.createElement('div');

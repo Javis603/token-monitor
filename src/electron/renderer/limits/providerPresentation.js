@@ -453,7 +453,7 @@
           : { label: 'Open Cline', tone: 'setup' };
       }
       if (providerName === 'mimo' && provider?.sourceDetail === 'app') {
-        return { label: 'Sign in to MiMo Desktop again', key: 'settings.mimo.desktopRelogin', tone: 'setup' };
+        return { label: 'Sign in again', tone: 'setup' };
       }
       if (providerName === 'mimo' && provider?.sourceDetail === 'managed') {
         return { label: 'Update MiMo Cookie', key: 'settings.mimo.repasteCookie', tone: 'setup' };
