@@ -2558,8 +2558,9 @@ function startCollector(options) {
   let lastFullScanAt = 0;
   let pendingWaiters = [];
   let debounceTimer = null;
-  // Epoch ms by which the current run of watch events must have ticked, or 0
-  // when no run is pending. Set by the first scheduleTick of a run, cleared when
+  // Monotonic ms (performance.now()) by which the current run of watch events
+  // must have ticked, or 0 when no run is pending. Not Date.now(): a wall-clock
+  // step backwards mid-storm would push the deadline out by the same amount. Set by the first scheduleTick of a run, cleared when
   // a tick actually starts so the next quiet period begins its own run.
   let watchDeadlineAt = 0;
   let intervalTimer = null;
@@ -3110,7 +3111,7 @@ function startCollector(options) {
     // because clampTimerDelayMs' reason applies here too: a zero or negative
     // delay is rewritten to 1ms by setTimeout, and an expired deadline must arm
     // a real timer rather than spin.
-    const nowMs = Date.now();
+    const nowMs = performance.now();
     if (tickInFlight) watchDeadlineAt = 0;
     else if (watchDeadlineAt === 0) watchDeadlineAt = nowMs + watchMaxWaitMs;
     const delayMs = watchDeadlineAt === 0
