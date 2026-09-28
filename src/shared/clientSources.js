@@ -9,6 +9,7 @@ const { tokscaleConfigDir, tokscaleHomeDir } = require('./tokscaleConfig');
 const { claudeSessionRoots } = require('./providers/claude/paths');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
+const { minimaxCodeDatabaseLocation } = require('./providers/minimaxcode/usage');
 const { qoderCnDataPaths } = require('./providers/qodercn/usage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
@@ -462,6 +463,12 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ...devinRoots.cli.map((dir) => [DEVIN_CLI_SOURCE_CHECK_ID, dir, path.join(dir, 'sessions.db')]),
     ...devinRoots.desktop.map((dir) => [DEVIN_DESKTOP_SOURCE_CHECK_ID, dir])
   );
+  const minimaxCodeDb = minimaxCodeDatabaseLocation({ homeDir: home, env, platform });
+  add('minimaxcode', [
+    'minimaxcode-db',
+    path.dirname(minimaxCodeDb.databasePath),
+    minimaxCodeDb.databasePath
+  ]);
   const customScanPaths = normalizeCustomScanPaths(options.customScanPaths, { platform });
   for (const [client, dirs] of Object.entries(customScanPaths)) {
     if (!enabled.has(client)) continue;

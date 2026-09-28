@@ -10,7 +10,7 @@ const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv, PARSE_LOCAL_CLIENTS } = require('./clientTracking');
 const { antigravityCliDataDir, canonicalWatchPath, cherryStudioTranscriptRoots, clientSourceRoots, copilotExporterWatch } = require('./clientSources');
-const { clientDiagnosticRoots, clientSourceChecks, dirExists, visibleDiagnosticRoots } = require('./clientSourceObservations');
+const { clientDiagnosticRoots, clientSourceChecks, dirExists, fileExists, visibleDiagnosticRoots } = require('./clientSourceObservations');
 const {
   CLIENT_HEALTH_VERSION,
   MAX_DIAGNOSTICS_PER_CLIENT,
@@ -33,7 +33,7 @@ const {
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { createWatcherHost } = require('./watcherHost');
 const { localDayKey, mergeHistories, parseGraphResult, normalizeHistory } = require('./history');
-const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
+const { projectClientDailyHistory, retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const {
   createSubprocessTermination,
   terminationUnconfirmedError
@@ -50,6 +50,14 @@ const {
 } = require('./sessionMetadata');
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
+const {
+  CLIENT_ID: MINIMAXCODE_CLIENT,
+  buildMiniMaxCodeHistoryGraph,
+  buildMiniMaxCodePeriods,
+  minimaxCodeDatabaseLocation,
+  readMiniMaxCodeSnapshot,
+  reusableMiniMaxPeriods
+} = require('./providers/minimaxcode/usage');
 const {
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
@@ -1044,6 +1052,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
   }
+  if (options.minimaxCodeGraph) {
+    rawGraphs.push(options.minimaxCodeGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.minimaxCodeGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -1172,7 +1184,7 @@ async function collectUsageOnce(options) {
   const anchorUsed = Boolean(
     anchor
     && anchor.dateKey === localTodayKey(collectedAt)
-    && canTargetTodayPartitions(anchor, targetClients)
+    && canTargetTodayPartitions(anchor, withoutMiniMaxCode(targetClients))
   );
   let promaPeriods = null;
   let promaRows = null;
@@ -1325,8 +1337,8 @@ async function collectUsageOnce(options) {
         }
       }
       todayPartitions = useTargetedPartitions
-        ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, targetClients)
-        : completeTodayPartitions(freshPartitions, normalizedClients);
+        ? replaceTodayPartitions(anchor.todayPartitions, freshPartitions, withoutMiniMaxCode(targetClients))
+        : completeTodayPartitions(freshPartitions, withoutMiniMaxCode(normalizedClients).join(','));
       today = mergeTodayPartitions(todayPartitions);
       month = applyPeriodDelta(anchor.month, today, anchor.today);
       allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
@@ -1377,7 +1389,7 @@ async function collectUsageOnce(options) {
       allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), qodercn: qoderCnPeriods.today };
     }
-    todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
+    todayPartitions = completeTodayPartitions(todayPartitions, withoutMiniMaxCode(normalizedClients).join(','));
     // Partition metadata is internal but must remain as complete as the public
     // period: a later targeted tick re-merges these sessions into `today`.
     propagateTodayProjects(today, Object.values(todayPartitions));
@@ -1394,9 +1406,88 @@ async function collectUsageOnce(options) {
   // 2. wslAnchor (watch anchored tick): reuse the frozen snapshot — WSL is heavy
   //    and watch ticks fire every few seconds.
   // 3. !anchorUsed (full scan): scan WSL as part of the complete rescan.
+  const minimaxKeys = minimaxCodeWindowKeys(collectedAt, allTimeSince);
+  const includesMiniMaxCode = normalizedClients.split(',').includes(MINIMAXCODE_CLIENT);
+  const shouldReadMiniMaxCode = includesMiniMaxCode
+    && (!targetRequested || !anchorUsed || targetClients.includes(MINIMAXCODE_CLIENT));
+  let minimaxCapture = {
+    ok: false,
+    failed: false,
+    sourcePath: '',
+    ...minimaxKeys,
+    periods: { today: null, month: null, allTime: null },
+    graph: null
+  };
+  if (includesMiniMaxCode) {
+    const stored = options.minimaxCodePeriods || null;
+    const location = minimaxCodeDatabaseLocation({
+      env: options.env,
+      homeDir: options.homeDir,
+      platform: platformValue
+    });
+    const currentSourcePath = location.databasePath;
+    const sourcePresent = !location.absent && fileExists(location.databasePath);
+    if (!shouldReadMiniMaxCode) {
+      // The stored path is not proof the file is still there. Compare against
+      // the path this process would read now; a missing file must not be
+      // republished by the next other-client refresh.
+      minimaxCapture.sourcePath = currentSourcePath;
+      if (!sourcePresent) {
+        minimaxCapture.cleared = true;
+      } else {
+        minimaxCapture.periods = reusableMiniMaxPeriods(stored, {
+          sourcePath: currentSourcePath,
+          ...minimaxKeys
+        });
+      }
+    } else {
+      const snapshot = (options.readMiniMaxCodeSnapshot || readMiniMaxCodeSnapshot)({
+        env: options.env,
+        homeDir: options.homeDir,
+        platform: platformValue
+      });
+      minimaxCapture.sourcePath = snapshot.sourcePath || currentSourcePath;
+      if (snapshot.code === 'absent' || snapshot.code === 'no-database') {
+        minimaxCapture.cleared = true;
+      } else if (snapshot.ok) {
+        const pricing = await resolveModelPricing(snapshot.rows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        });
+        const json = buildMiniMaxCodePeriods({
+          now: collectedAt,
+          allTimeSince,
+          rows: snapshot.rows,
+          pricingByModel: pricing
+        });
+        minimaxCapture = {
+          ok: true,
+          failed: false,
+          sourcePath: snapshot.sourcePath,
+          ...minimaxKeys,
+          periods: {
+            today: extractUsageFromTokscale(json.today),
+            month: extractUsageFromTokscale(json.month),
+            allTime: extractUsageFromTokscale(json.allTime)
+          },
+          graph: buildMiniMaxCodeHistoryGraph({ rows: snapshot.rows, pricingByModel: pricing })
+        };
+      } else if (snapshot.code === 'read-failed') {
+        minimaxCapture.failed = true;
+        minimaxCapture.periods = reusableMiniMaxPeriods(stored, {
+          sourcePath: snapshot.sourcePath,
+          ...minimaxKeys
+        });
+      }
+    }
+  }
+
   const windowsPeriods = { today, month, allTime };
   let wslBundle = emptyWslBundle();
   let wslDetected = [];
+  let minimaxWslByHome = null;
+  let minimaxWslScanned = false;
   if (normalizedClients && options.wslScanEnabled !== false) {
     if (options.refreshWsl) {
       const wslResult = await collectWsl({
@@ -1413,10 +1504,18 @@ async function collectUsageOnce(options) {
           pricingRevision: options.pricingRevision
         }),
         logger: options.logger,
+        minimaxCodeByHome: options.minimaxWslByHome,
+        resolveMiniMaxPricing: (rows) => resolveModelPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        }),
         decoratePeriods: (periods, home) => applySessionMetadata(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
+      minimaxWslByHome = wslResult.minimaxCodeByHome || {};
+      minimaxWslScanned = true;
     } else if (options.wslAnchor) {
       wslBundle = options.wslAnchor;
     } else if (!anchorUsed) {
@@ -1434,15 +1533,26 @@ async function collectUsageOnce(options) {
           pricingRevision: options.pricingRevision
         }),
         logger: options.logger,
+        minimaxCodeByHome: options.minimaxWslByHome,
+        resolveMiniMaxPricing: (rows) => resolveModelPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        }),
         decoratePeriods: (periods, home) => applySessionMetadata(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
+      minimaxWslByHome = wslResult.minimaxCodeByHome || {};
+      minimaxWslScanned = true;
     }
   }
   today = mergePeriods(windowsPeriods.today, wslBundle.today);
   month = mergePeriods(windowsPeriods.month, wslBundle.month);
   allTime = mergePeriods(windowsPeriods.allTime, wslBundle.allTime);
+  if (minimaxCapture.periods.today) today = mergePeriods(today, minimaxCapture.periods.today);
+  if (minimaxCapture.periods.month) month = mergePeriods(month, minimaxCapture.periods.month);
+  if (minimaxCapture.periods.allTime) allTime = mergePeriods(allTime, minimaxCapture.periods.allTime);
   throwIfAborted(options.signal);
 
   // The renderer intentionally uses the live today period while a day is in
@@ -1551,6 +1661,8 @@ async function collectUsageOnce(options) {
       qoderCnPeriods,
       wslBundle,
       wslStatus,
+      minimaxCode: includesMiniMaxCode ? minimaxCapture : null,
+      ...(minimaxWslScanned ? { minimaxWslByHome } : {}),
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
       ...(summary.nativeProjects ? { nativeProjects: summary.nativeProjects } : {})
     });
@@ -1600,6 +1712,7 @@ async function collectUsageOnce(options) {
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
       qoderCnGraph: historyQoderCnGraph || null,
+      minimaxCodeGraph: options.dailyHistoryArchiveEnabled ? null : (minimaxCapture.ok ? minimaxCapture.graph : null),
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1619,6 +1732,25 @@ async function collectUsageOnce(options) {
       options.onQoderCnHistoryGraph(qoderCnGraph);
     }
   }
+  if ((minimaxCapture.ok || minimaxCapture.cleared) && options.historyEnabled !== false && options.dailyHistoryArchiveEnabled) {
+    const projected = projectClientDailyHistory(
+      MINIMAXCODE_CLIENT,
+      minimaxCapture.cleared ? { contributions: [] } : minimaxCapture.graph,
+      {
+        ...(options.dailyHistoryArchiveOptions || {}),
+        liveDays: dailyHistoryLiveDays,
+        todayKey: localTodayKey(collectedAt),
+        capDays: options.historyCapDays,
+        writeEnabled: options.minimaxHistoryPersist === true && options.dailyHistoryArchiveWriteEnabled !== false
+      }
+    );
+    dailyHistoryLiveDays = projected.archive.liveDays || {};
+    try { options.onDailyHistoryLiveDays?.(dailyHistoryLiveDays); } catch (_) {}
+    summary.history = normalizeHistory(parseGraphResult(projected.graph), {
+      capDays: options.historyCapDays,
+      todayKey: localTodayKey(collectedAt)
+    });
+  }
   // After history, so `lastActivityDay` can come from the daily buckets this
   // scan already produced rather than from a second source of truth.
   const clientHealth = deriveClientHealth(normalizedClients, allTime, {
@@ -1630,7 +1762,8 @@ async function collectUsageOnce(options) {
       summary.history,
       today,
       localTodayKey(collectedAt)
-    )
+    ),
+    localReadFailures: minimaxCapture.failed ? new Set([MINIMAXCODE_CLIENT]) : null
   });
   if (clientHealth) summary.clientHealth = clientHealth;
   return summary;
@@ -2049,6 +2182,11 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   bound('kiro', withBasename('kiro', 'kiro-cli'), directChildOnly((name) => KIRO_DB_WATCH_PATTERN.test(name)));
   bound('zed', withBasename('zed', 'threads'), directChildOnly((name) => ZED_DB_WATCH_PATTERN.test(name)));
   bound('codebuddy', withBasename('codebuddy', 'Logs'), (parts) => !CODEBUDDY_EXTENSION_SOURCE_DIRS.has(parts[0]));
+  // The ledger is one database plus its WAL. -shm is not a data signal: a
+  // read-only open can rewrite it, and that write must not schedule another tick.
+  bound('minimaxcode', candidates.minimaxcode || [], directChildOnly((name) => (
+    name === 'runtime-state.sqlite' || name === 'runtime-state.sqlite-wal'
+  )));
 
   // Everything left is a recursive transcript tree: tokscale walks it, so every
   // path inside it is a potential source. Copilot's built-in roots are bounded
@@ -2219,6 +2357,7 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
     }
     const activityDay = activityDays[client];
     if (activityDay) entry.data.lastActivityDay = activityDay;
+    if (options.localReadFailures?.has?.(client)) entry.collection.state = 'failed';
     const overall = deriveClientOverall(entry);
     if (overall !== 'healthy') {
       if (checks.length > 0 && detected.length < checks.length) {
@@ -2234,6 +2373,7 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
       if (sync?.detailCode === 'sync-lock-present') codes.push('sync-lock-present');
       else if (sync?.failureCode) codes.push(sync.failureCode);
       if (detected.length > 0 && liveTokens <= 0) codes.push('no-usage-observed');
+      if (options.localReadFailures?.has?.(client)) codes.push('local-read-failed');
       // States a fact, not a cause: a marker without usage can equally mean the
       // tool is installed in that distro and simply unused.
       if (wslDetected.has(client) && !wslWithData.has(client)) codes.push('wsl-detected-no-data');
@@ -2266,6 +2406,20 @@ function wslPeriodsForPreview(wslAnchor, anchorDateKey, todayKey) {
   return {
     today: key === todayKey ? wslAnchor.today : null,
     month: key.slice(0, 7) === todayKey.slice(0, 7) ? wslAnchor.month : null
+  };
+}
+
+function withoutMiniMaxCode(values) {
+  const ids = Array.isArray(values) ? values : String(values || '').split(',');
+  return ids.map((value) => String(value || '').trim()).filter((id) => id && id !== MINIMAXCODE_CLIENT);
+}
+
+function minimaxCodeWindowKeys(now, allTimeSince) {
+  const date = now instanceof Date ? now : new Date(now);
+  return {
+    todayKey: localTodayKey(date),
+    monthKey: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
+    allTimeSince: String(allTimeSince || '')
   };
 }
 
@@ -2648,6 +2802,8 @@ function startCollector(options) {
           month: saved.month,
           allTime: saved.allTime,
           qoderCnPeriods: saved.qoderCnPeriods || null,
+          minimaxCodePeriods: saved.minimaxCodePeriods || null,
+          minimaxWslByHome: saved.minimaxWslByHome || null,
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -2719,7 +2875,7 @@ function startCollector(options) {
     }
     let historyScanSucceeded = !includeHistory;
     const requestedTargetClients = [...new Set(normalizeClientsCsv(tickOptions.targetClients).split(',').filter(Boolean))];
-    const targetAnchorReady = canTargetTodayPartitions(anchor, requestedTargetClients);
+    const targetAnchorReady = canTargetTodayPartitions(anchor, withoutMiniMaxCode(requestedTargetClients));
     const anchored = Boolean(tickOptions.todayOnly && anchor && anchor.dateKey === todayKey);
     const refreshWsl = Boolean(tickOptions.refreshWsl);
     const hadPreviousFailure = tickHadFailure;
@@ -2772,6 +2928,10 @@ function startCollector(options) {
         lastActivityDays: activityDaysAnchor,
         refreshWsl: anchored ? refreshWsl : false,
         qoderCnFallbackPeriods: anchor?.qoderCnPeriods || null,
+        minimaxCodePeriods: anchor?.minimaxCodePeriods || null,
+        minimaxHistoryPersist: !anchored || includeHistory || anchor?.dateKey !== todayKey,
+        onDailyHistoryLiveDays: (liveDays) => { liveDailyHistoryDays = liveDays || {}; },
+        minimaxWslByHome: anchor?.minimaxWslByHome || null,
         qoderCnHistoryFallbackGraph: qoderCnHistoryGraph,
         qoderCnReadState,
         onAnchorComputed: (x) => { captured = x; },
@@ -2848,6 +3008,18 @@ function startCollector(options) {
           allTime: captured.windowsPeriods.allTime,
           todayPartitions: captured.todayPartitions,
           qoderCnPeriods: captured.qoderCnPeriods,
+          ...(captured.minimaxCode?.ok ? { minimaxCodePeriods: {
+            sourcePath: captured.minimaxCode.sourcePath,
+            todayKey: captured.minimaxCode.todayKey,
+            monthKey: captured.minimaxCode.monthKey,
+            allTimeSince: captured.minimaxCode.allTimeSince,
+            today: captured.minimaxCode.periods.today,
+            month: captured.minimaxCode.periods.month,
+            allTime: captured.minimaxCode.periods.allTime
+          } } : captured.minimaxCode?.cleared ? {} : (anchor?.minimaxCodePeriods ? { minimaxCodePeriods: anchor.minimaxCodePeriods } : {})),
+          ...(captured.minimaxWslByHome
+            ? { minimaxWslByHome: captured.minimaxWslByHome }
+            : (anchor?.minimaxWslByHome ? { minimaxWslByHome: anchor.minimaxWslByHome } : {})),
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {})
         };
@@ -2864,6 +3036,8 @@ function startCollector(options) {
               month: anchor.month,
               allTime: anchor.allTime,
               qoderCnPeriods: anchor.qoderCnPeriods,
+              ...(anchor.minimaxCodePeriods ? { minimaxCodePeriods: anchor.minimaxCodePeriods } : {}),
+              ...(anchor.minimaxWslByHome ? { minimaxWslByHome: anchor.minimaxWslByHome } : {}),
               wslBundle: wslAnchor,
               wslStatus: wslStatusAnchor,
               ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
@@ -2890,6 +3064,20 @@ function startCollector(options) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
         }
+        if (captured.minimaxCode?.cleared) {
+          anchor.minimaxCodePeriods = null;
+        } else if (captured.minimaxCode?.ok) {
+          anchor.minimaxCodePeriods = {
+            sourcePath: captured.minimaxCode.sourcePath,
+            todayKey: captured.minimaxCode.todayKey,
+            monthKey: captured.minimaxCode.monthKey,
+            allTimeSince: captured.minimaxCode.allTimeSince,
+            today: captured.minimaxCode.periods.today,
+            month: captured.minimaxCode.periods.month,
+            allTime: captured.minimaxCode.periods.allTime
+          };
+        }
+        if (captured.minimaxWslByHome) anchor.minimaxWslByHome = captured.minimaxWslByHome;
       }
       if (qoderCnReadState.periodFailed) scheduledWatchNeedsFullScan = true;
       const transformedSummary = await onUpdate?.(summary, reason);

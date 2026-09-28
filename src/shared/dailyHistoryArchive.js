@@ -719,6 +719,138 @@ function retainDailyHistory(graphs, options = {}) {
   return graphFromDailyHistoryArchive(graphs, next, options);
 }
 
+function observationClient(observation) {
+  return normalizeTokscaleClientName(observation?.client) || 'unknown';
+}
+
+function dayWithoutClient(day, clientId) {
+  if (!day || typeof day !== 'object') return null;
+  const observations = {};
+  for (const [key, observation] of Object.entries(day.observations || {})) {
+    if (observationClient(observation) === clientId) continue;
+    observations[key] = observation;
+  }
+  return normalizeDay({ ...day, observations }, day.date);
+}
+
+// MiniMax Code's ledger can shrink. The shared archive keeps the larger
+// observation for every other client; this replaces one client's observations
+// on every stored day and every liveDays entry, including dates the new graph
+// no longer mentions.
+function replaceClientDailyHistory(clientId, graph, options = {}) {
+  const client = normalizeTokscaleClientName(clientId);
+  if (!client) return readDailyHistoryArchive(options);
+  const previous = readDailyHistoryArchive(options);
+  const next = normalizeDailyHistoryArchive(previous);
+  const days = {};
+  for (const [date, day] of Object.entries(next.days || {})) {
+    const stripped = dayWithoutClient(day, client);
+    if (stripped) days[date] = stripped;
+  }
+  const liveDays = {};
+  for (const [date, day] of Object.entries(next.liveDays || {})) {
+    const stripped = dayWithoutClient(day, client);
+    if (stripped) liveDays[date] = stripped;
+  }
+  const incoming = observationsFromGraphs(graph);
+  for (const [date, day] of incoming) {
+    const additions = {};
+    for (const [key, observation] of Object.entries(day.observations || {})) {
+      if (observationClient(observation) !== client) continue;
+      additions[key] = observation;
+    }
+    if (Object.keys(additions).length === 0) continue;
+    const base = days[date] || { date, activeTimeMs: 0, observations: {} };
+    const replaced = normalizeDay({
+      ...base,
+      observations: { ...base.observations, ...additions }
+    }, date);
+    if (replaced) days[date] = replaced;
+    const liveBase = liveDays[date] || { date, activeTimeMs: 0, observations: {} };
+    const liveReplaced = normalizeDay({
+      ...liveBase,
+      observations: { ...(liveBase.observations || {}), ...additions }
+    }, date);
+    if (liveReplaced) liveDays[date] = liveReplaced;
+  }
+  next.days = days;
+  if (Object.keys(liveDays).length > 0) next.liveDays = liveDays;
+  else delete next.liveDays;
+  if (archiveWriteEnabled(options) && !isDeepStrictEqual(previous, next)) {
+    const latest = readDailyHistoryArchive(options);
+    const latestNext = replaceClientDailyHistoryFromArchive(latest, client, graph);
+    if (archiveWriteEnabled(options) && !isDeepStrictEqual(latest, latestNext)) {
+      writeDailyHistoryArchive(latestNext, options);
+      return latestNext;
+    }
+    return latestNext;
+  }
+  return next;
+}
+
+function replaceClientDailyHistoryFromArchive(archive, client, graph) {
+  const next = normalizeDailyHistoryArchive(archive);
+  const days = {};
+  for (const [date, day] of Object.entries(next.days || {})) {
+    const stripped = dayWithoutClient(day, client);
+    if (stripped) days[date] = stripped;
+  }
+  const liveDays = {};
+  for (const [date, day] of Object.entries(next.liveDays || {})) {
+    const stripped = dayWithoutClient(day, client);
+    if (stripped) liveDays[date] = stripped;
+  }
+  const incoming = observationsFromGraphs(graph);
+  for (const [date, day] of incoming) {
+    const additions = {};
+    for (const [key, observation] of Object.entries(day.observations || {})) {
+      if (observationClient(observation) !== client) continue;
+      additions[key] = observation;
+    }
+    if (Object.keys(additions).length === 0) continue;
+    const base = days[date] || { date, activeTimeMs: 0, observations: {} };
+    const replaced = normalizeDay({ ...base, observations: { ...base.observations, ...additions } }, date);
+    if (replaced) days[date] = replaced;
+    const liveBase = liveDays[date] || { date, activeTimeMs: 0, observations: {} };
+    const liveReplaced = normalizeDay({
+      ...liveBase,
+      observations: { ...(liveBase.observations || {}), ...additions }
+    }, date);
+    if (liveReplaced) liveDays[date] = liveReplaced;
+  }
+  next.days = days;
+  if (Object.keys(liveDays).length > 0) next.liveDays = liveDays;
+  else delete next.liveDays;
+  return next;
+}
+
+// In-memory replacement of one client's archive observations, including every
+// liveDays date. Disk is updated only when writeEnabled asks for it, so a
+// watch tick can publish the corrected chart without rewriting the file.
+function projectClientDailyHistory(clientId, graph, options = {}) {
+  const client = normalizeTokscaleClientName(clientId);
+  const build = (archive) => {
+    const withLive = mergeLiveDaysIntoArchive(archive, options.liveDays);
+    return client
+      ? replaceClientDailyHistoryFromArchive(withLive, client, graph || { contributions: [] })
+      : withLive;
+  };
+  const previous = readDailyHistoryArchive(options);
+  let next = build(previous);
+  if (archiveWriteEnabled(options) && !isDeepStrictEqual(previous, next)) {
+    const latest = readDailyHistoryArchive(options);
+    const latestNext = build(latest);
+    if (archiveWriteEnabled(options) && !isDeepStrictEqual(latest, latestNext)) {
+      writeDailyHistoryArchive(latestNext, options);
+    }
+    next = latestNext;
+  }
+  return {
+    archive: next,
+    graph: graphFromDailyHistoryArchive([], next, options)
+  };
+}
+
 function retainLiveDailyHistory(period, options = {}) {
   const previous = readDailyHistoryArchive(options);
   const capture = (archive) => captureLiveDailyHistory(
@@ -739,6 +871,8 @@ function retainLiveDailyHistory(period, options = {}) {
 
 module.exports = {
   captureDailyHistoryArchive,
+  replaceClientDailyHistory,
+  projectClientDailyHistory,
   clearDailyHistoryArchive,
   dailyHistoryArchivePath,
   graphFromDailyHistoryArchive,

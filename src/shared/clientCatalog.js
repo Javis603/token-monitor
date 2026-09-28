@@ -81,7 +81,8 @@
     { id: 'cherrystudio', label: 'Cherry Studio' },
     { id: 'lmstudio', label: 'LM Studio' },
     { id: 'unsloth', label: 'Unsloth' },
-    { id: 'devin', label: 'Devin' }
+    { id: 'devin', label: 'Devin' },
+    { id: 'minimaxcode', label: 'MiniMax Code', locallyParsed: true }
   ].map((client) => Object.freeze({
     defaultTracked: true,
     locallyParsed: false,

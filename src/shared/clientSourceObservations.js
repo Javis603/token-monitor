@@ -98,4 +98,4 @@ function clientDiagnosticRoots(clientsCsv, options = {}) {
   return byClient;
 }
 
-module.exports = { clientDiagnosticRoots, clientSourceChecks, dirExists, visibleDiagnosticRoots };
+module.exports = { clientDiagnosticRoots, clientSourceChecks, dirExists, fileExists, visibleDiagnosticRoots };
