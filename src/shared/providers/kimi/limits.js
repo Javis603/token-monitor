@@ -14,7 +14,8 @@ const {
   refreshKimiDesktopSession,
   kimiDesktopAppRunning,
   resolveKimiManualSession,
-  looksLikeKimiRefreshToken
+  looksLikeKimiRefreshToken,
+  kimiDesktopTokenStoreExists
 } = require('./desktopSession');
 
 const KIMI_FETCH_TIMEOUT_MS = 12_000;
