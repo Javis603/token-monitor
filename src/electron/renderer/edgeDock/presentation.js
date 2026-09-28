@@ -189,7 +189,8 @@
         models: session.models || {},
         totalTokens: finite(session.totalTokens) || 0,
         costUsd: finite(session.costUsd) || 0,
-        lastUsedAt: session.lastUsedAt || session.startedAt || null,
+        lastUsedAt: session.lastUsedAt || null,
+        startedAt: session.startedAt || null,
         // Carried onto the projected row, not just used here: the dock renderer
         // re-derives the state at paint time and needs the boundary to do it.
         turnEnded: session.turnEnded === true,

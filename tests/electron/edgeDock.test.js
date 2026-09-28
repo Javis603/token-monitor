@@ -372,6 +372,28 @@ test('Home session preview uses the sidebar timeline and keeps running rows with
   );
 });
 
+test('a startedAt-only session keeps its display age without becoming running', () => {
+  const startedAt = new Date(Date.now() - 60_000).toISOString();
+  const stats = { periods: { month: { sessions: {
+    'codex:new': { client: 'codex', sessionId: 'new', startedAt, lastUsedAt: '', totalTokens: 0 }
+  } } } };
+  const original = stats.periods.month.sessions['codex:new'];
+  assert.equal(sessionLive.sessionActivityState(original), 'idle');
+
+  const [home] = edgeDockPresentation.recentSessionRows(stats, 5, { includeRunningBeyondCap: true });
+  const [sidebar] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] })[0].sessions;
+  for (const row of [home, sidebar]) {
+    assert.equal(row.lastUsedAt, null);
+    assert.equal(row.startedAt, startedAt);
+    assert.equal(row.running, false);
+    assert.equal(sessionLive.sessionActivityState(row), 'idle');
+  }
+  assert.equal(edgeDockPresentation.runningSessionSummary([home]).count, 0);
+  assert.equal(edgeDockPresentation.nextRunningExpiryAt([home]), 0);
+  assert.match(readRendererFile('app.js'), /homeSessionAgo\(Date\.parse\(row\.lastUsedAt \|\| row\.startedAt \|\| ''\)\)/);
+  assert.match(readRendererFile(path.join('edgeDock', 'dock.js')), /relativeAgo\(session\.lastUsedAt \|\| session\.startedAt\)/);
+});
+
 test('running sessions are never truncated by the recent cap, and the count matches the rows', () => {
   const nowIso = new Date().toISOString();
   const oldIso = new Date(Date.now() - 90 * 60_000).toISOString();

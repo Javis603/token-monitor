@@ -5821,7 +5821,7 @@ function renderHomeSessionModule() {
     value.textContent = formatCompact(row.totalTokens);
     const meta = document.createElement('div');
     meta.className = 'home-session-meta';
-    const age = homeSessionAgo(Date.parse(row.lastUsedAt || ''));
+    const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
     const description = document.createElement('span');
     description.className = 'home-list-sub';
     description.textContent = [sessionRowsApi.sessionModelLabel(row), age].filter(Boolean).join(' · ');
