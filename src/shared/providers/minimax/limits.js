@@ -22,6 +22,56 @@ const MINIMAX_TOKEN_PLAN_REMAINS_URL_EN = 'https://api.minimax.io/v1/token_plan/
 const MINIMAX_WINDOW_MINUTES_5H = 5 * 60;
 const MINIMAX_WINDOW_MINUTES_WEEKLY = 7 * 24 * 60;
 
+const MINIMAX_REGIONS = ['en', 'cn'];
+
+// Region of the last successful probe, kept in the runtime's persistent
+// provider state (the same channel the Claude identity cache uses). The
+// default order probes the global (en) endpoints first, which only suits
+// global keys: a CN key pays two doomed requests per probe, and while those
+// endpoints are unreachable from CN networks the whole probe used to fail
+// before the CN endpoint was ever asked. Remembering the winner puts the
+// key's own region first from the second probe on, so the flaky leg drops
+// out of the steady state entirely.
+const MINIMAX_REGION_MEMORY_STATE_KEY = 'minimax.last-good-region';
+
+function rememberedMinimaxRegion(deps = {}) {
+  if (!(deps.providerRuntimeState instanceof Map)) return '';
+  const remembered = deps.providerRuntimeState.get(MINIMAX_REGION_MEMORY_STATE_KEY);
+  return MINIMAX_REGIONS.includes(remembered) ? remembered : '';
+}
+
+function storeMinimaxRegionMemory(deps = {}, region) {
+  if (!(deps.providerRuntimeState instanceof Map)) return;
+  deps.providerRuntimeState.set(MINIMAX_REGION_MEMORY_STATE_KEY, region);
+}
+
+// A failure on the way to the host: connect timeout, DNS, TLS, reset, and the
+// per-request abort. What marks those apart is an error that carries no
+// HTTP-layer answer at all — the fetcher's rejection shapes always carry either
+// a status or a statusCode — which says nothing about the key, and makes
+// re-asking the same host's other endpoint pointless since it shares the
+// network path that just failed.
+//
+// A response that arrived but did not parse is deliberately NOT one of those:
+// it reached a server (an interception page, a reverse proxy, an HTML error
+// page), so the request count and the region order stay worth honouring. Node
+// reports that as a SyntaxError; Chromium's net.fetch rejects with a message
+// rather than a cause code, which is why the rule reads "no HTTP answer"
+// instead of a transport whitelist. A body cut off mid-stream still has no
+// answer to point at and stays a transport failure, as it should: the region
+// jump is what rescues that case.
+function isMinimaxTransportError(error) {
+  if (!error) return false;
+  if (typeof error.statusCode === 'number' && Number.isFinite(error.statusCode)) return false;
+  if (error.status) return false;
+  return error.name !== 'SyntaxError';
+}
+
+function isMinimaxAuthError(error) {
+  const code = Number(error && error.statusCode);
+  return code === 401 || code === 403 || (error && error.status) === 'unauthorized';
+}
+
 function minimaxToken(env = process.env, explicitKey = '') {
   const explicit = cleanSecret(explicitKey);
   if (explicit) return explicit;
@@ -144,6 +194,13 @@ function minimaxRegionOrder(options = {}) {
   const pinned = options.minimaxApiHost;
   if (pinned === 'cn') return ['cn'];
   if (pinned === 'en' || pinned === 'minimax.io') return ['en'];
+  const remembered = MINIMAX_REGIONS.includes(options.minimaxRememberedRegion)
+    ? options.minimaxRememberedRegion
+    : '';
+  // The remembered region goes first; the other one stays behind it as the
+  // fallback, so a key swapped between regions still resolves on its first
+  // probe after the swap.
+  if (remembered) return [remembered, ...MINIMAX_REGIONS.filter((region) => region !== remembered)];
   return ['en', 'cn'];
 }
 
@@ -236,8 +293,15 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
     Accept: 'application/json',
     'Content-Type': 'application/json'
   };
-  const attempts = minimaxAttemptSpecs(options);
+  // An explicit `minimaxRememberedRegion` option wins over the runtime state
+  // (tests drive both layers through it); the hydrated value only fills the
+  // gap when the option is absent.
+  const rememberedRegion = MINIMAX_REGIONS.includes(options.minimaxRememberedRegion)
+    ? options.minimaxRememberedRegion
+    : rememberedMinimaxRegion(deps);
+  const attempts = minimaxAttemptSpecs({ ...options, minimaxRememberedRegion: rememberedRegion });
   let lastError = null;
+  let sawTransportFailure = false;
   for (let index = 0; index < attempts.length; index += 1) {
     const attempt = attempts[index];
     try {
@@ -277,6 +341,10 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
         throw Object.assign(new Error('MiniMax token-plan response has no quota windows'), { status: 'unavailable' });
       }
       const accountKey = hashKey('minimax', key);
+      // Only a parseable quota counts as "this region works": a response that
+      // answered but parsed to nothing is not evidence either way, and
+      // remembering it would send the next probe down the same blind alley.
+      if (windows.length) storeMinimaxRegionMemory(deps, attempt.region);
       return normalizeLimitProvider({
         provider: 'minimax',
         accountKey,
@@ -290,17 +358,39 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
     } catch (error) {
       lastError = error;
       const next = attempts[index + 1];
+      // A transport failure never reached an HTTP server, so the rest of this
+      // region would only repeat the same wait on the same host. Jump
+      // straight to the next region — that cross-region fallback is why two
+      // regions are probed at all, and it is what keeps a CN key off
+      // 'unavailable' while the global host is unreachable from CN networks.
+      if (isMinimaxTransportError(error)) {
+        sawTransportFailure = true;
+        const nextRegionIndex = attempts.findIndex(
+          (candidate, candidateIndex) => candidateIndex > index && candidate.region !== attempt.region
+        );
+        if (nextRegionIndex > index) {
+          index = nextRegionIndex - 1; // the loop's own increment lands on it
+          continue;
+        }
+        break;
+      }
       if (attempt.kind === 'tokenPlan' && next?.region === attempt.region && shouldTryLegacyMinimaxEndpoint(error)) continue;
       if (next && next.region !== attempt.region && shouldTryNextMinimaxRegion(error)) continue;
-      // Non-auth failures (5xx, network, malformed JSON) are surfaced
-      // immediately so the user sees the real failure instead of region churn.
       break;
     }
   }
+  // The fallback region rejects a foreign key with an auth-shaped error by
+  // design (2049 / 1004 / 401). When that rejection trails a transport
+  // failure on the key's own region, publishing it would wipe the retained
+  // quota and show "Update API key" for what is a network outage — publish
+  // the transport failure instead.
+  const publishedStatus = sawTransportFailure && isMinimaxAuthError(lastError)
+    ? 'unavailable'
+    : mapMinimaxErrorStatus(lastError);
   return normalizeLimitProvider({
     provider: 'minimax',
     source: 'api',
-    status: mapMinimaxErrorStatus(lastError),
+    status: publishedStatus,
     updatedAt,
     windows: []
   });
@@ -314,10 +404,12 @@ function mapMinimaxErrorStatus(error) {
 
 module.exports = {
   MINIMAX_KEY_NAMES,
+  MINIMAX_REGION_MEMORY_STATE_KEY,
   MINIMAX_REMAINS_URL_CN,
   MINIMAX_REMAINS_URL_EN,
   MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
   MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
+  isMinimaxTransportError,
   minimaxToken,
   minimaxAttemptOrder,
   minimaxBaseUrl,

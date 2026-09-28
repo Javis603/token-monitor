@@ -9,6 +9,8 @@ const {
   fetchMinimaxLimits,
   minimaxAttemptOrder,
   minimaxRegionForUrl,
+  isMinimaxTransportError,
+  MINIMAX_REGION_MEMORY_STATE_KEY,
   MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
   MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
   MINIMAX_REMAINS_URL_CN,
@@ -59,12 +61,62 @@ test('minimaxAttemptOrder prefers token-plan endpoint before legacy coding-plan 
   ]);
 });
 
+test('minimaxAttemptOrder puts a remembered region first and keeps the other as fallback', () => {
+  assert.deepEqual(minimaxAttemptOrder({ minimaxRememberedRegion: 'cn' }), [
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
+    MINIMAX_REMAINS_URL_CN,
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
+    MINIMAX_REMAINS_URL_EN
+  ]);
+  assert.deepEqual(minimaxAttemptOrder({ minimaxRememberedRegion: 'en' }), [
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
+    MINIMAX_REMAINS_URL_EN,
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
+    MINIMAX_REMAINS_URL_CN
+  ]);
+  // An unknown value falls back to the default order rather than breaking.
+  assert.deepEqual(minimaxAttemptOrder({ minimaxRememberedRegion: 'jp' }), minimaxAttemptOrder());
+  // An explicit host pin outranks the memory: the pin is a single-region order.
+  assert.deepEqual(minimaxAttemptOrder({ minimaxApiHost: 'cn', minimaxRememberedRegion: 'en' }), [
+    MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
+    MINIMAX_REMAINS_URL_CN
+  ]);
+});
+
 test('minimaxRegionForUrl maps endpoints to en/cn labels for the renderer', () => {
   assert.equal(minimaxRegionForUrl(MINIMAX_REMAINS_URL_EN), 'en');
   assert.equal(minimaxRegionForUrl(MINIMAX_REMAINS_URL_CN), 'cn');
   assert.equal(minimaxRegionForUrl(MINIMAX_TOKEN_PLAN_REMAINS_URL_EN), 'en');
   assert.equal(minimaxRegionForUrl(MINIMAX_TOKEN_PLAN_REMAINS_URL_CN), 'cn');
   assert.equal(minimaxRegionForUrl('https://example.com'), '');
+});
+
+// Only a failure with no HTTP-layer answer at all justifies jumping regions:
+// the transport shapes (Node undici's `fetch failed` with or without a cause
+// code, and Chromium's plain `net::ERR_*` rejection) carry neither a status nor
+// a statusCode.
+test('isMinimaxTransportError accepts the shapes a failing host actually rejects with', () => {
+  assert.equal(isMinimaxTransportError(null), false);
+  assert.equal(isMinimaxTransportError(new Error('fetch failed')), true);
+  assert.equal(
+    isMinimaxTransportError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'UND_ERR_CONNECT_TIMEOUT' } })),
+    true
+  );
+  assert.equal(isMinimaxTransportError(Object.assign(new Error('aborted'), { name: 'AbortError' })), true);
+  assert.equal(isMinimaxTransportError(Object.assign(new Error('net::ERR_CONNECTION_TIMED_OUT'))), true);
+});
+
+// An HTTP answer never counts as transport: the status-carrying rejection the
+// fetcher throws, the JSON parse failure of a body that did arrive (a
+// truncated or interception page), and the internal throws that carry a status
+// without a statusCode.
+test('isMinimaxTransportError refuses every shape that got an HTTP answer', () => {
+  assert.equal(isMinimaxTransportError(Object.assign(new Error('unreachable host'), { status: 'unavailable', statusCode: 503 })), false);
+  assert.equal(isMinimaxTransportError(Object.assign(new Error('bad token'), { status: 'unauthorized', statusCode: 401 })), false);
+  const parseError = new SyntaxError('Unexpected token < in JSON at position 0');
+  assert.equal(isMinimaxTransportError(parseError), false);
+  assert.equal(isMinimaxTransportError(Object.assign(new Error('no quota windows'), { status: 'unavailable' })), false);
+  assert.equal(isMinimaxTransportError(Object.assign(new Error('nope'), { status: 'timeout' })), false);
 });
 
 test('parseMinimaxTiers reads the nested data.model_remains shape used by the live endpoint', () => {
@@ -580,4 +632,161 @@ test('fetchMinimaxLimits aborts when the body stalls after the headers', { timeo
   });
   assert.equal(r.status, 'unavailable');
   assert.deepEqual(r.windows, []);
+});
+
+const windowsBody = {
+  data: {
+    model_remains: [
+      { model_name: 'general', current_interval_remaining_percent: 80, current_weekly_remaining_percent: 70 }
+    ]
+  }
+};
+
+// Connect timeout / DNS / reset never reach an HTTP server, so the legacy
+// endpoint on the same host would only repeat the wait. The rescue is the
+// OTHER region's token-plan endpoint.
+test('fetchMinimaxLimits skips the rest of a region whose host is unreachable and tries the next region', async () => {
+  const calls = [];
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-cn-only' },
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_EN) throw new Error('fetch failed');
+      return okResponse(windowsBody);
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'cn');
+});
+
+// A body that arrived but did not parse is an HTTP answer, so it does not earn
+// the region jump: it is reported like any other unreadable response, and the
+// other region's endpoint is not committed to. (Before the transport rule
+// read "no HTTP answer" this SyntaxError counted as an unreachable host and
+// the CN token-plan endpoint was probed for it.)
+test('fetchMinimaxLimits does not jump regions when a 200 body fails to parse', async () => {
+  const calls = [];
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test' },
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      return { ok: true, status: 200, json: async () => { throw new SyntaxError('Unexpected token'); } };
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
+  assert.equal(r.status, 'unavailable');
+});
+
+// A body that parses but names no quota is an answer, not a rescue: it must
+// not be remembered as the region that works, or the next probe would start
+// down the same blind alley. (Remember-before-check is the regression this
+// pins: the write would land on an 'unavailable' result.)
+test('fetchMinimaxLimits does not remember a region whose response parsed to no windows', async () => {
+  const state = new Map();
+  const calls = [];
+  const r = await fetchMinimaxLimits({ minimaxApiHost: 'cn' }, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test' },
+    now: () => 1_716_350_000_000,
+    providerRuntimeState: state,
+    fetch: async (url) => {
+      calls.push(url);
+      return okResponse({ base_resp: { status_code: 0 } });
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
+  assert.equal(r.status, 'unavailable');
+  assert.equal(state.has(MINIMAX_REGION_MEMORY_STATE_KEY), false);
+});
+
+test('fetchMinimaxLimits remembers the region that answered and asks it first on the next probe', async () => {
+  const state = new Map();
+  const firstCalls = [];
+  const secondCalls = [];
+  await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-cn-only' },
+    now: () => 1_716_350_000_000,
+    providerRuntimeState: state,
+    fetch: async (url) => {
+      firstCalls.push(url);
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_EN) throw new Error('fetch failed');
+      return okResponse(windowsBody);
+    }
+  });
+  assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
+  assert.deepEqual(firstCalls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-cn-only' },
+    now: () => 1_716_350_000_000,
+    providerRuntimeState: state,
+    fetch: async (url) => {
+      secondCalls.push(url);
+      return okResponse(windowsBody);
+    }
+  });
+  assert.deepEqual(secondCalls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'cn');
+});
+
+test('fetchMinimaxLimits does not publish the fallback region auth rejection over a transport failure', async () => {
+  // The remembered region (cn) is unreachable; the global endpoints answer
+  // with their by-design foreign-key rejection. Publishing that as
+  // 'unauthorized' would wipe the retained quota, so the transport failure
+  // wins and the state stays untouched.
+  const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'cn']]);
+  const calls = [];
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-cn-only' },
+    now: () => 1_716_350_000_000,
+    providerRuntimeState: state,
+    fetch: async (url) => {
+      calls.push(url);
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN) throw new Error('fetch failed');
+      return unauthorized();
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN]);
+  assert.equal(r.status, 'unavailable');
+  assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
+});
+
+test('fetchMinimaxLimits still reports unauthorized when every region rejects the key', async () => {
+  const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'cn']]);
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-revoked' },
+    now: () => 1_716_350_000_000,
+    providerRuntimeState: state,
+    fetch: async (url) => {
+      if (url.includes('minimaxi.com')) {
+        return okResponse({ base_resp: { status_code: 1004, status_msg: 'cookie is missing, log in again' } });
+      }
+      return unauthorized();
+    }
+  });
+  assert.equal(r.status, 'unauthorized');
+});
+
+test('fetchMinimaxLimits follows a key swapped to the other region and updates the memory', async () => {
+  const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'cn']]);
+  const calls = [];
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-global-now' },
+    now: () => 1_716_350_000_000,
+    providerRuntimeState: state,
+    fetch: async (url) => {
+      calls.push(url);
+      if (url.includes('minimaxi.com')) {
+        return okResponse({ base_resp: { status_code: 2049, status_msg: 'invalid api key' } });
+      }
+      return okResponse(windowsBody);
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN, MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'en');
+  assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'en');
 });
