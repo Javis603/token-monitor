@@ -112,7 +112,7 @@ test('source markers declare each WSL path once and preserve discovery order', (
     '.config/Code/User/globalStorage/kilocode.kilo-code/tasks',
     '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks',
     '.commandcode/projects', '.dsh/sessions', '.factory/sessions',
-    '.local/share/mimocode/mimocode.db', '.zcode/projects', '.zcode/cli/db',
+    '.local/share/mimocode/mimocode.db', '.local/share/muse/sessions', '.zcode/projects', '.zcode/cli/db',
     '.kiro/sessions', '.local/share/kiro-cli/data.sqlite3',
     '.config/Kiro/User/globalStorage/kiro.kiroagent',
     '.config/kiro/User/globalStorage/kiro.kiroagent', '.codebuddy/projects',

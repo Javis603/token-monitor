@@ -209,6 +209,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'lmstudio-server-logs',
   'mimocode-data',
   'mimocode-orca-data',
+  'muse-sessions',
   'omp-sessions',
   'opencode-data',
   'openclaw-agents',
