@@ -18,6 +18,8 @@ const {
 } = require('../../src/shared/providers/minimax/limits');
 const { parseLimitProviders } = require('../../src/shared/limits/collector');
 
+const CN_REMAINS_URLS = new Set([MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
+
 function okResponse(body) {
   return { ok: true, status: 200, json: async () => body };
 }
@@ -761,7 +763,7 @@ test('fetchMinimaxLimits still reports unauthorized when every region rejects th
     now: () => 1_716_350_000_000,
     providerRuntimeState: state,
     fetch: async (url) => {
-      if (url.includes('minimaxi.com')) {
+      if (CN_REMAINS_URLS.has(url)) {
         return okResponse({ base_resp: { status_code: 1004, status_msg: 'cookie is missing, log in again' } });
       }
       return unauthorized();
@@ -779,7 +781,7 @@ test('fetchMinimaxLimits follows a key swapped to the other region and updates t
     providerRuntimeState: state,
     fetch: async (url) => {
       calls.push(url);
-      if (url.includes('minimaxi.com')) {
+      if (CN_REMAINS_URLS.has(url)) {
         return okResponse({ base_resp: { status_code: 2049, status_msg: 'invalid api key' } });
       }
       return okResponse(windowsBody);
