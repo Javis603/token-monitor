@@ -96,6 +96,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     factoryApiKey: ['providers', 'factory', 'apiKey'],
     kimiApiKey: ['providers', 'kimi', 'apiKey'],
     kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
+    kimiWebRefreshToken: ['providers', 'kimi', 'webRefreshToken'],
     copilotApiToken: ['providers', 'copilot', 'apiToken'],
     zedCookie: ['providers', 'zed', 'cookie'],
     typesafeCookie: ['providers', 'typesafe', 'cookie'],
@@ -151,7 +152,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     cursor: ['cursorDisabledAccountIds'],
     cline: ['clineApiKey'],
     factory: ['factoryApiKey'],
-    kimi: ['kimiApiKey', 'kimiWebAccessToken'],
+    kimi: ['kimiApiKey', 'kimiWebAccessToken', 'kimiWebRefreshToken'],
     copilot: ['copilotApiToken', 'copilotEnterpriseHost'],
     zed: ['zedCookie'],
     commandcode: ['commandcodeCookie'],
@@ -280,7 +281,7 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
     'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
-    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId'
+    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'kimiWebRefreshToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId'
   ].sort());
   for (const key of normalizedKeys) {
     const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test'
