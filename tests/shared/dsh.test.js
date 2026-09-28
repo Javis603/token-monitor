@@ -11,7 +11,7 @@ const {
   DSH_SOURCE_CHECK_ID,
   resolveDshHome,
   resolveDshSessionsDir
-} = require('../../src/shared/dshPaths');
+} = require('../../src/shared/providers/dsh/paths');
 const {
   clientSourceChecks,
   clientSourceRoots,

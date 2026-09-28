@@ -21,13 +21,16 @@ function deferred() {
 }
 
 function sessionDetailHarness(getSessionDetail) {
-  const start = rendererSource.indexOf('async function openSessionDetail(');
+  const start = rendererSource.indexOf('function applySessionDetailResult(');
   const end = rendererSource.indexOf('\nfunction toggleDetailSort', start);
   assert.ok(start >= 0 && end > start, 'openSessionDetail should be present');
   const renders = [];
   const state = { period: 'today', openSession: null };
   const context = {
     state,
+    visibleStatsSurface: () => 'main',
+    isRendererWindowHidden: () => false,
+    statsRenderScheduler: { request() {} },
     renderSessionDetail: (args) => renders.push(args),
     window: { tokenMonitor: { getSessionDetail } }
   };
@@ -105,6 +108,27 @@ test('exchangeRows labels compaction usage without consuming a reply number', ()
 
   assert.match(rows[0].subtitle, /1 turn/);
   assert.deepEqual(rows[0].turns.map((turn) => turn.label), ['Compaction summary', 'Reply #1']);
+  assert.deepEqual(rows[0].turns.map((turn) => turn.value), [30, 70]);
+});
+
+test('exchangeRows labels model attempts without consuming a reply number', () => {
+  const rows = exchangeRows({
+    exchanges: [{
+      promptPreview: 'retry this',
+      startedAt: '2026-05-30T06:00:01.000Z',
+      turnCount: 1,
+      tools: [],
+      tokens: { total: 100 },
+      costEstimate: 0.2,
+      turns: [
+        { type: 'assistant-attempt', timestamp: '2026-05-30T06:00:02.000Z', tokens: { total: 30 }, tools: [], costEstimate: 0.06 },
+        { type: 'reply', timestamp: '2026-05-30T06:00:03.000Z', tokens: { total: 70 }, tools: [], costEstimate: 0.14 }
+      ]
+    }]
+  }, { now: new Date(2026, 4, 30, 12, 0) });
+
+  assert.match(rows[0].subtitle, /1 turn/);
+  assert.deepEqual(rows[0].turns.map((turn) => turn.label), ['Model attempt', 'Reply #1']);
   assert.deepEqual(rows[0].turns.map((turn) => turn.value), [30, 70]);
 });
 

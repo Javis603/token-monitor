@@ -4,8 +4,8 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const test = require('node:test');
 
-const { codexCommandCandidates, codexCommandSourceDetail, createLimitsCollector, fetchCodexLimits, mapCodexRateLimitsToProvider } = require('../../src/shared/limitCollector');
-const { codexAccountKey, hashAccountKey } = require('../../src/shared/codexAuth');
+const { codexCommandCandidates, codexCommandSourceDetail, createLimitsCollector, fetchCodexLimits, mapCodexRateLimitsToProvider } = require('../../src/shared/limits/collector');
+const { codexAccountKey, hashAccountKey } = require('../../src/shared/providers/codex/auth');
 
 function dirent(name, directory = true) {
   return {
@@ -16,12 +16,14 @@ function dirent(name, directory = true) {
 
 test('Codex command candidates include legacy and ChatGPT-bundled macOS apps', () => {
   const legacy = '/Applications/Codex.app/Contents/Resources/codex';
+  const currentChatgpt = '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex';
   const chatgpt = '/Applications/ChatGPT.app/Contents/Resources/codex';
   const candidates = codexCommandCandidates({}, 'darwin');
 
-  assert.deepEqual(candidates.slice(0, 2), [legacy, chatgpt]);
+  assert.deepEqual(candidates.slice(0, 3), [legacy, currentChatgpt, chatgpt]);
   assert.equal(candidates.at(-1), 'codex');
   assert.equal(codexCommandSourceDetail(legacy, 'darwin'), 'app');
+  assert.equal(codexCommandSourceDetail(currentChatgpt, 'darwin'), 'app');
   assert.equal(codexCommandSourceDetail(chatgpt, 'darwin'), 'app');
 });
 
@@ -171,6 +173,32 @@ test('Codex provider reads quota windows from alternate rate limit ids', () => {
   assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly']);
   assert.equal(provider.windows[0].remainingPercent, 90);
   assert.equal(provider.windows[1].remainingPercent, 75);
+});
+
+test('Codex provider classifies additional quota windows by their actual duration', () => {
+  const provider = mapCodexRateLimitsToProvider({
+    account: { email: 'user@example.com', planType: 'plus' },
+    rateLimits: {
+      primary: { usedPercent: 10, windowDurationMins: 300 }
+    },
+    rateLimitsByLimitId: {
+      'some-quota': {
+        limitName: 'Some quota',
+        primary: { usedPercent: 20, windowDurationMins: 60 },
+        secondary: { usedPercent: 30, windowDurationMins: 1_440 }
+      }
+    }
+  }, {
+    source: 'rpc',
+    sourceDetail: 'app',
+    updatedAt: '2026-06-01T00:00:00Z'
+  });
+
+  assert.deepEqual(provider.windows.map((window) => [window.kind, window.label, window.limitId, window.additional, window.windowMinutes]), [
+    ['session', '', 'codex', undefined, 300],
+    ['session', 'Some quota', 'some-quota', true, 60],
+    ['daily', 'Some quota', 'some-quota', true, 1_440]
+  ]);
 });
 
 test('Codex provider does not guess between conflicting alternate rate limit ids', () => {
@@ -588,7 +616,7 @@ test('fetchCodexLimits supports a single weekly OAuth window', async () => {
   assert.equal(provider.windows[0].windowMinutes, 10_080);
 });
 
-test('fetchCodexLimits does not promote an additional OAuth bucket when the main bucket is absent', async () => {
+test('fetchCodexLimits surfaces a named additional OAuth bucket without promoting it into the main lanes', async () => {
   const provider = await fetchCodexLimits({}, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin' },
@@ -614,10 +642,15 @@ test('fetchCodexLimits does not promote an additional OAuth bucket when the main
   assert.equal(provider.status, 'ok');
   assert.equal(provider.source, 'oauth');
   assert.equal(provider.accountLabel, 'Pro 20x');
-  assert.deepEqual(provider.windows, []);
+  assert.equal(provider.windows.length, 1);
+  assert.equal(provider.windows[0].kind, 'weekly');
+  assert.equal(provider.windows[0].label, 'Codex Other');
+  assert.equal(provider.windows[0].limitId, 'codex_other');
+  assert.equal(provider.windows[0].additional, true);
+  assert.equal(provider.windows[0].usedPercent, 70);
 });
 
-test('fetchCodexLimits keeps the main OAuth windows without surfacing an additional bucket', async () => {
+test('fetchCodexLimits keeps the main OAuth windows and surfaces gpt-reserve separately', async () => {
   const provider = await fetchCodexLimits({}, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin' },
@@ -632,8 +665,8 @@ test('fetchCodexLimits keeps the main OAuth windows without surfacing an additio
           secondary_window: { used_percent: 34, reset_at: 1_770_500_000, limit_window_seconds: 604_800 }
         },
         additional_rate_limits: [{
-          limit_name: 'Codex Other',
-          metered_feature: 'codex_other',
+          limit_name: 'gpt-reserve',
+          metered_feature: 'base_model_inference',
           rate_limit: {
             primary_window: { used_percent: 70, reset_at: 1_770_500_000, limit_window_seconds: 604_800 }
           }
@@ -643,11 +676,14 @@ test('fetchCodexLimits keeps the main OAuth windows without surfacing an additio
     readCodexResetCredits: async () => null
   });
 
-  assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly']);
-  assert.deepEqual(provider.windows.map((window) => window.usedPercent), [12, 34]);
+  assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly', 'weekly']);
+  assert.deepEqual(provider.windows.map((window) => window.usedPercent), [12, 34, 70]);
+  assert.deepEqual(provider.windows.map((window) => window.label), ['', '', 'gpt-reserve']);
+  assert.deepEqual(provider.windows.map((window) => window.limitId), ['codex', 'codex', 'base_model_inference']);
+  assert.deepEqual(provider.windows.map((window) => window.additional), [undefined, undefined, true]);
 });
 
-test('fetchCodexLimits does not choose between different additional OAuth buckets', async () => {
+test('fetchCodexLimits keeps different additional OAuth buckets as independent named windows', async () => {
   const provider = await fetchCodexLimits({}, {
     now: () => Date.parse('2026-06-01T00:00:00Z'),
     env: { PATH: '/usr/bin' },
@@ -667,7 +703,6 @@ test('fetchCodexLimits does not choose between different additional OAuth bucket
             }
           },
           {
-            limit_name: 'Codex Spark',
             metered_feature: 'codex_spark',
             rate_limit: {
               primary_window: { used_percent: 20, reset_at: 1_770_000_000, limit_window_seconds: 18_000 }
@@ -680,7 +715,41 @@ test('fetchCodexLimits does not choose between different additional OAuth bucket
   });
 
   assert.equal(provider.status, 'ok');
-  assert.deepEqual(provider.windows, []);
+  assert.deepEqual(provider.windows.map((window) => [window.kind, window.label, window.limitId, window.additional, window.usedPercent]), [
+    ['session', 'codex_spark', 'codex_spark', true, 20],
+    ['weekly', 'Codex Other', 'codex_other', true, 70]
+  ]);
+});
+
+test('fetchCodexLimits falls back to metered_feature for an empty additional quota name', async () => {
+  const provider = await fetchCodexLimits({}, {
+    now: () => Date.parse('2026-06-01T00:00:00Z'),
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token' } }),
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        plan_type: 'plus',
+        rate_limit: {
+          primary_window: { used_percent: 12, reset_at: 1_770_000_000, limit_window_seconds: 18_000 }
+        },
+        additional_rate_limits: [{
+          limit_name: '',
+          metered_feature: 'codex_spark',
+          rate_limit: {
+            primary_window: { used_percent: 20, reset_at: 1_770_000_000, limit_window_seconds: 18_000 }
+          }
+        }]
+      })
+    }),
+    readCodexResetCredits: async () => null
+  });
+
+  assert.deepEqual(provider.windows.map((window) => [window.label, window.limitId, window.additional]), [
+    ['', 'codex', undefined],
+    ['codex_spark', 'codex_spark', true]
+  ]);
 });
 
 test('fetchCodexLimits uses Codex API paths for a non-ChatGPT base URL', async () => {
@@ -1679,7 +1748,7 @@ test('fetchCodexLimits retries the next command after a Codex stdin transport fa
 
   assert.deepEqual(commands, [
     '/Applications/Codex.app/Contents/Resources/codex',
-    '/Applications/ChatGPT.app/Contents/Resources/codex'
+    '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex'
   ]);
   assert.deepEqual(accountReadParams, [{ refreshToken: false }]);
   assert.equal(providers.status, 'ok');
@@ -1741,7 +1810,7 @@ test('fetchCodexLimits retries another command when optional account read loses 
 
   assert.deepEqual(commands, [
     '/Applications/Codex.app/Contents/Resources/codex',
-    '/Applications/ChatGPT.app/Contents/Resources/codex'
+    '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex'
   ]);
   assert.equal(providers.status, 'ok');
   assert.equal(providers.accountEmail, 'fallback@example.com');

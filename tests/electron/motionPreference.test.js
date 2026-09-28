@@ -85,3 +85,13 @@ test('motion preference labels exist in every bundled locale', () => {
     for (const key of keys) assert.ok(messages[key], `${locale} should define ${key}`);
   }
 });
+
+// The dock animates its own windows from the main process, so its reading of the
+// system setting comes from Electron rather than from the renderer's media query.
+// Windows reports the same setting through that API, so a darwin-only gate left
+// every dock fade running for a Windows user who had asked the OS to reduce motion.
+test('the dock fades read the system reduce-motion setting on every platform it runs on', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const dock = main.slice(main.indexOf('function ensureEdgeDockController()'), main.indexOf('applyShapeMask: (win, commands'));
+  assert.match(dock, /edgeDockSupported\(process\.platform\) && systemPreferences\?\.getAnimationSettings\?\.\(\)\.prefersReducedMotion === true/);
+});

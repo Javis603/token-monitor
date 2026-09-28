@@ -8,10 +8,10 @@ const test = require('node:test');
 const {
   projectLimitProviderForDisplay,
   projectLimitStatsForDisplay
-} = require('../../src/electron/limitStatsPresentation');
+} = require('../../src/electron/limits/statsPresentation');
 const { homeLimitAccountsForProviders } = require('../../src/electron/renderer/homeOverview');
-const { collectLimitsOnce: collectLimitsOnceRaw } = require('../../src/shared/limitCollector');
-const { aggregateLimits } = require('../../src/shared/limits');
+const { collectLimitsOnce: collectLimitsOnceRaw } = require('../../src/shared/limits/collector');
+const { aggregateLimits } = require('../../src/shared/limits/core');
 const { buildMacWidgetSnapshot } = require('../../src/shared/macWidgetSnapshot');
 const { formatTrayText } = require('../../src/shared/trayText');
 
@@ -169,7 +169,7 @@ test('mixed local and Web OpenCode quota fails closed through a pre-provenance H
   );
   const collected = summary.providers[0];
   assert.equal(collected.source, 'local');
-  assert.deepEqual(collected.windows.map((window) => window.source), ['local', 'web']);
+  assert.deepEqual(collected.windows.map((window) => window.source), ['local', 'web', 'web']);
 
   const legacyLimits = roundTripThroughLegacyHub(summary);
   assert.equal(legacyLimits.providers[0].source, 'local');
@@ -509,7 +509,7 @@ test('Electron routes cached stats through the presentation projection', () => {
   );
   assert.match(main, /function updateTrayDisplay\(\)[\s\S]*formatTrayText\(visibleStats, mode/);
   assert.match(main, /function refreshLimitStatsPresentation\(\)[\s\S]*reason: 'presentation'/);
-  assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*return electronPresentationStats\(stats\)/);
+  assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*return rendererSnapshots\.stamp\(stats, rendererStats\(electronPresentationStats\(stats\)\)\)/);
   assert.doesNotMatch(renderer, /function displayLimitProvider\(/);
   assert.match(renderer, /reason !== 'local' && payload\.data\?\.reason !== 'presentation'/);
 });

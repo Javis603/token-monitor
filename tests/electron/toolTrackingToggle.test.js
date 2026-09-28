@@ -25,6 +25,13 @@ test('clients stays a usage-structural setting', () => {
   assert.match(keys[1], /'clients'/);
 });
 
+test('settings load keeps the default tracked clients for a null saved value', () => {
+  // clientsCsvForSetting distinguishes a missing/null value from an explicit
+  // empty string. Keep readSettings on that default contract so a legacy null
+  // does not silently disable every usage scan.
+  assert.match(mainSource, /merged\.clients = clientsCsvForSetting\(merged\.clients\);/);
+});
+
 test('usage-structural changes replace usage without restarting limits', () => {
   const start = mainSource.indexOf("ipcMain.handle('settings:update'");
   const end = mainSource.indexOf("ipcMain.handle('appearance:preview'", start);

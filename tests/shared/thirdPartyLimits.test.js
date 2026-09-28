@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createLimitsRuntime } = require('../../src/shared/limitsRuntime');
+const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
 
 const {
   DEFAULT_QUOTA_PER_UNIT,
@@ -39,7 +39,7 @@ const {
   quotaPerUnit,
   readCustomJsonPath,
   thirdPartyProfileName
-} = require('../../src/shared/thirdPartyLimits');
+} = require('../../src/shared/providers/thirdparty/limits');
 
 function response(status, body) {
   return {
@@ -412,6 +412,8 @@ test('Sub2API adapter attaches rolling-month and all-time spend and survives sta
   assert.deepEqual(enriched.usageSummary, {
     period: 'month',
     requests: 21,
+    todayTokens: null,
+    weekTokens: null,
     inputTokens: 1234,
     outputTokens: 456,
     cacheReadTokens: 200,

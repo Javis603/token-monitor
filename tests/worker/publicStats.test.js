@@ -13,7 +13,8 @@ test('public stats periods strip every project identity field', async () => {
     },
     sessions: { 'codex:s1': {
       client: 'codex', sessionId: 's1', totalTokens: 1,
-      projectId: 'sha256:secret', projectLabel: 'Private-Client', projectPath: '/Users/alice/Private-Client'
+      projectId: 'sha256:secret', projectLabel: 'Private-Client', projectPath: '/Users/alice/Private-Client',
+      title: 'Private conversation', preview: 'Private preview', first_user_message: 'Private prompt'
     } }
   } });
   assert.deepEqual(periods.today.sessions['codex:s1'], { client: 'codex', sessionId: 's1', totalTokens: 1 });
@@ -21,6 +22,42 @@ test('public stats periods strip every project identity field', async () => {
   const json = JSON.stringify(periods);
   assert.doesNotMatch(json, /Private-Client/);
   assert.doesNotMatch(json, /private-client/);
+  assert.doesNotMatch(json, /Private conversation|Private preview|Private prompt/);
+});
+
+test('Worker ingest never stores conversation text from an untrusted sender', async () => {
+  const worker = await import(pathToFileURL(path.resolve(__dirname, '../../worker/src/index.js')).href);
+  const stored = new Map();
+  const hub = new worker.HubDO({
+    storage: {
+      async get(key) { return stored.get(key); },
+      async put(key, value) { stored.set(key, value); },
+      async list({ prefix }) {
+        return new Map([...stored].filter(([key]) => key.startsWith(prefix)));
+      }
+    }
+  }, { TOKEN_MONITOR_SECRET: 'secret' });
+
+  const response = await hub.fetch(new Request('https://example.com/api/ingest', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer secret' },
+    body: JSON.stringify({
+      deviceId: 'private-device',
+      today: { totalTokens: 1, sessions: {
+        'codex:review': {
+          client: 'codex', sessionId: 'review', totalTokens: 1,
+          title: 'Private title', preview: 'Private preview', first_user_message: 'Private prompt',
+          sessionKind: 'background-review'
+        }
+      } }
+    })
+  }));
+
+  assert.equal(response.status, 200);
+  const session = stored.get('dev:private-device').periods.today.sessions['codex:review'];
+  assert.equal(session.sessionKind, 'background-review');
+  assert.equal(session.title, '');
+  assert.doesNotMatch(JSON.stringify(stored.get('dev:private-device')), /Private title|Private preview|Private prompt/);
 });
 
 test('Worker public stats strip every account identity and plan field', async () => {

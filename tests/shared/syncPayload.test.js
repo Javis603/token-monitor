@@ -32,6 +32,44 @@ test('syncPayload carries OS version metadata to the hub', () => {
   assert.equal(payload.osVersion, '26.0');
 });
 
+test('syncPayload keeps locally resolved conversation titles off the hub wire', () => {
+  const summary = {
+    deviceId: 'dev-a',
+    today: {
+      totalTokens: 10,
+      sessions: {
+        'codex:thread-a': {
+          client: 'codex',
+          sessionId: 'thread-a',
+          title: 'Private local title',
+          sessionKind: 'background-review',
+          totalTokens: 10
+        }
+      }
+    },
+    month: {
+      totalTokens: 10,
+      sessions: {
+        'codex:thread-a': {
+          client: 'codex',
+          sessionId: 'thread-a',
+          title: 'Private local title',
+          totalTokens: 10
+        }
+      }
+    },
+    allTime: { totalTokens: 10 },
+    limits: { providers: [] }
+  };
+
+  const payload = syncPayload(summary);
+
+  assert.equal(Object.hasOwn(payload.today.sessions['codex:thread-a'], 'title'), false);
+  assert.equal(Object.hasOwn(payload.month.sessions['codex:thread-a'], 'title'), false);
+  assert.equal(payload.today.sessions['codex:thread-a'].sessionKind, 'background-review');
+  assert.equal(summary.today.sessions['codex:thread-a'].title, 'Private local title');
+});
+
 test('syncPayload bounds uploads by omitting all-time sessions', () => {
   const summary = {
     deviceId: 'dev-a',

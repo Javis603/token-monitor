@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { fetchAntigravityLimits, fetchClaudeLimits, mapCodexRateLimitsToProvider } = require('../../src/shared/limitCollector');
+const { fetchAntigravityLimits, fetchClaudeLimits, mapCodexRateLimitsToProvider } = require('../../src/shared/limits/collector');
 
 function codexProviderForPlan(plan) {
   return mapCodexRateLimitsToProvider({

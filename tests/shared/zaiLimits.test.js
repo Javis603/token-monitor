@@ -1,6 +1,10 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -10,7 +14,7 @@ const {
   zaiSubscriptionUrl,
   parseZaiUsage,
   fetchZaiLimits
-} = require('../../src/shared/zaiLimits');
+} = require('../../src/shared/providers/zai/limits');
 
 test('zaiToken accepts Z.ai and GLM compatible API key env names', () => {
   assert.equal(zaiToken({ ZAI_API_KEY: '  "zai-key"  ' }), 'zai-key');
@@ -148,14 +152,97 @@ test('parseZaiUsage reads official plan labels from subscription or quota payloa
   );
 });
 
-test('fetchZaiLimits returns notConfigured without an API key', async () => {
-  const provider = await fetchZaiLimits({}, { env: {}, now: () => Date.parse('2026-07-06T00:00:00Z') });
+const noZcode = {
+  readFileSync: () => { throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' }); }
+};
+
+// Console-key lane responder: quota, finance report, subscription list.
+function keyLaneResponses({ balance, subscription }) {
+  return async (url) => {
+    if (String(url).includes('/quota/limit')) {
+      return { ok: true, status: 200, json: async () => ({ data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }] } }) };
+    }
+    if (String(url).includes('query-customer-account-report')) {
+      return { ok: true, status: 200, json: async () => ({ code: 200, data: { availableBalance: balance } }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ data: [{ product_name: subscription }] }) };
+  };
+}
+
+// Encrypts one store value the way ZCode's own credential service writes it,
+// so a provider-level test can build a store-backed install (the
+// discovery-level store cases live in zcodeLimits.test.js).
+const FIXTURE_CREDENTIAL_SECRET = 'fixture-credential-secret';
+function encryptStoreValue(value, secret = FIXTURE_CREDENTIAL_SECRET) {
+  const key = crypto.createHash('sha256').update(secret).digest();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
+  return `enc:v1:${iv.toString('base64url')}.${cipher.getAuthTag().toString('base64url')}.${ciphertext.toString('base64url')}`;
+}
+
+// ZCode on-disk fixture for the plan-lane tests: an entitled provider
+// selection ('start-plan' or 'coding-plan') with a mirror key and a
+// telemetry device id.
+function zcodeLaneDeps(fetchMock, selection = 'start-plan', { includeStartPlan = false } = {}) {
+  const providerId = `builtin:zai-${selection}`;
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      modelProviderFamilySelectedKeys: { zai: `coding-plan:${providerId}` }
+    }),
+    'config.json': JSON.stringify({
+      provider: {
+        [providerId]: { enabled: true, options: { apiKey: 'mirror-jwt' } },
+        ...(includeStartPlan ? { 'builtin:zai-start-plan': { enabled: false, options: { apiKey: 'start-jwt' } } } : {})
+      }
+    }),
+    'coding-plan-cache.json': JSON.stringify({
+      entryStatus: { items: {
+        [providerId]: { status: 'available' },
+        ...(includeStartPlan ? { 'builtin:zai-start-plan': { status: 'available' } } : {})
+      } }
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  return {
+    readFileSync: (filePath) => {
+      // path.join separators are platform-dependent; key on the bare file
+      // name so the same fixture resolves on the windows-latest CI leg.
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    ...(fetchMock ? { fetch: fetchMock } : {})
+  };
+}
+
+const BILLING_OK = {
+  ok: true,
+  status: 200,
+  json: async () => ({
+    code: 0,
+    data: {
+      plans: [{ plan_id: 'zcode-v3-x', name: 'ZCode Start Plan', status: 'active', entitlements: [{ entitlement_id: 'e1', period: 'daily' }] }],
+      balances: [{ entitlement_id: 'e1', plan_id: 'zcode-v3-x', show_name: 'GLM-5.3', total_units: 100, used_units: 10, remaining_units: 90 }]
+    }
+  })
+};
+
+test('fetchZaiLimits returns notConfigured without an API key or local ZCode login', async () => {
+  // No ZCode install on disk: discovery resolves to kind 'none', so the
+  // billing lane has no credential and the provider stays notConfigured.
+  const provider = await fetchZaiLimits({}, {
+    env: {},
+    now: () => Date.parse('2026-07-06T00:00:00Z'),
+    ...noZcode
+  });
   assert.equal(provider.provider, 'zai');
-  assert.equal(provider.source, 'api');
+  assert.equal(provider.source, '');
   assert.equal(provider.status, 'notConfigured');
 });
 
-test('fetchZaiLimits requests quota and subscription with bearer auth', async () => {
+test('fetchZaiLimits queries quota and balance, then enriches usable quota', async () => {
   const urls = [];
   const auth = [];
   const provider = await fetchZaiLimits(
@@ -163,39 +250,27 @@ test('fetchZaiLimits requests quota and subscription with bearer auth', async ()
     {
       env: {},
       now: () => Date.parse('2026-07-06T00:00:00Z'),
+      ...noZcode,
       fetch: async (url, init) => {
         urls.push(String(url));
         auth.push(init.headers.Authorization);
-        if (String(url).includes('/quota/limit')) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              data: {
-                limits: [
-                  { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }
-                ]
-              }
-            })
-          };
-        }
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ data: [{ product_name: 'GLM Coding' }] })
-        };
+        return keyLaneResponses({ balance: '0E-9', subscription: 'GLM Coding' })(url, init);
       }
     }
   );
 
   assert.equal(provider.status, 'ok');
   assert.equal(provider.accountLabel, 'GLM Coding');
-  assert.equal(provider.windows.length, 1);
+  assert.equal(provider.windows.length, 2);
+  const balance = provider.windows.find((window) => window.metric === 'credits');
+  assert.equal(balance.remaining, 0);
+  assert.equal(balance.currency, 'USD');
   assert.deepEqual(urls, [
     'https://api.z.ai/api/monitor/usage/quota/limit',
+    'https://api.z.ai/api/biz/account/query-customer-account-report',
     'https://api.z.ai/api/biz/subscription/list'
   ]);
-  assert.deepEqual(auth, ['Bearer zai-token', 'Bearer zai-token']);
+  assert.deepEqual(auth, ['Bearer zai-token', 'Bearer zai-token', 'Bearer zai-token']);
 });
 
 test('fetchZaiLimits requests the selected BigModel CN region', async () => {
@@ -205,26 +280,10 @@ test('fetchZaiLimits requests the selected BigModel CN region', async () => {
     {
       env: {},
       now: () => Date.parse('2026-07-06T00:00:00Z'),
+      ...noZcode,
       fetch: async (url) => {
         urls.push(String(url));
-        if (String(url).includes('/quota/limit')) {
-          return {
-            ok: true,
-            status: 200,
-            json: async () => ({
-              data: {
-                limits: [
-                  { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 20 }
-                ]
-              }
-            })
-          };
-        }
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ data: [{ product_name: 'GLM Coding CN' }] })
-        };
+        return keyLaneResponses({ balance: '12.5', subscription: 'GLM Coding CN' })(url);
       }
     }
   );
@@ -233,8 +292,315 @@ test('fetchZaiLimits requests the selected BigModel CN region', async () => {
   assert.equal(provider.region, 'bigmodel-cn');
   assert.deepEqual(urls, [
     'https://open.bigmodel.cn/api/monitor/usage/quota/limit',
+    'https://open.bigmodel.cn/api/biz/account/query-customer-account-report',
     'https://open.bigmodel.cn/api/biz/subscription/list'
   ]);
+  const balance = provider.windows.find((window) => window.metric === 'credits');
+  assert.equal(balance.remaining, 12.5);
+  assert.equal(balance.currency, 'CNY');
+});
+
+test('fetchZaiLimits merges the key and ZCode plan lanes when both exist', async () => {
+  let billingHeaders = null;
+  const keyLane = keyLaneResponses({ balance: '2.50', subscription: 'GLM Coding' });
+  const provider = await fetchZaiLimits(
+    { zaiApiKey: 'zai-token' },
+    {
+      env: {},
+      now: () => Date.parse('2026-09-05T12:00:00Z'),
+      ...zcodeLaneDeps(async (url, init) => {
+        if (String(url).includes('zcode-plan/billing/balance')) {
+          billingHeaders = init.headers;
+          return BILLING_OK;
+        }
+        return keyLane(url, init);
+      })
+    }
+  );
+  assert.equal(provider.status, 'ok');
+  const kinds = provider.windows.map((window) => window.metric === 'credits' ? 'credits' : (window.limitId ? 'plan-bucket' : window.kind));
+  assert.ok(kinds.includes('credits'), 'balance window present');
+  assert.ok(kinds.includes('plan-bucket'), 'ZCode plan buckets present');
+  assert.ok(kinds.includes('session') || kinds.includes('weekly'), 'subscription quota present');
+  // The billing lane authenticates with the mirror key and the device id the
+  // gateway hard-requires (code 3001 without it).
+  assert.equal(billingHeaders.Authorization, 'Bearer mirror-jwt');
+  assert.equal(billingHeaders['X-Device-Mid'], 'dm');
+});
+
+test('fetchZaiLimits serves Coding Plan quota from the ZCode mirror key', async () => {
+  const provider = await fetchZaiLimits({}, {
+    env: {},
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    ...zcodeLaneDeps(async (url) => {
+      if (!String(url).includes('/quota/limit')) throw new Error('unexpected url ' + url);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }], planName: 'GLM Coding Pro' } })
+      };
+    }, 'coding-plan')
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.accountLabel, 'GLM Coding Pro');
+  assert.equal(provider.windows[0].kind, 'session');
+  assert.equal(provider.windows[0].source, undefined);
+});
+
+test('fetchZaiLimits keeps ZCode plan windows when the console key quota fails', async () => {
+  // The lane merge used to throw a TDZ ReferenceError on this path.
+  const provider = await fetchZaiLimits(
+    { zaiApiKey: 'zai-token' },
+    {
+      env: {},
+      now: () => Date.parse('2026-09-05T12:00:00Z'),
+      ...zcodeLaneDeps(async (url) => {
+        const target = String(url);
+        if (target.includes('/quota/limit')) return { ok: false, status: 500, json: async () => ({}) };
+        if (target.includes('zcode-plan/billing/balance')) return BILLING_OK;
+        return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      })
+    }
+  );
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'api');
+  assert.ok(provider.accountKey, 'accountKey survives from the plan lane');
+  assert.equal(provider.accountLabel, 'ZCode Start Plan');
+  assert.ok(provider.windows.some((window) => window.limitId === 'zcode-v3-x'), 'plan bucket survives');
+});
+
+test('fetchZaiLimits reports a revoked console key the same way whichever lane it ran with', async () => {
+  // 401 must read as unauthorized in both shapes: with the plan lane healthy
+  // (single rejection) and when both lanes fail. The double-failure path used
+  // to collapse 401 into notConfigured, contradicting the Configured pill.
+  const base = { env: {}, now: () => Date.parse('2026-09-05T12:00:00Z') };
+  const revokedKey = { ok: false, status: 401, json: async () => ({}) };
+  const withPlan = await fetchZaiLimits(
+    { zaiApiKey: 'zai-token' },
+    {
+      ...base,
+      ...zcodeLaneDeps(async (url) => {
+        if (String(url).includes('/quota/limit')) return revokedKey;
+        if (String(url).includes('zcode-plan/billing/balance')) return BILLING_OK;
+        return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      })
+    }
+  );
+  assert.equal(withPlan.status, 'unauthorized');
+
+  const bothFailed = await fetchZaiLimits(
+    { zaiApiKey: 'zai-token' },
+    {
+      ...base,
+      ...zcodeLaneDeps(async () => revokedKey)
+    }
+  );
+  assert.equal(bothFailed.status, 'unauthorized');
+});
+
+test('fetchZaiLimits reports the ZCode lane own error when only it ran', async () => {
+  const base = { env: {}, now: () => Date.parse('2026-09-05T12:00:00Z') };
+  const unavailable = await fetchZaiLimits({}, {
+    ...base,
+    ...zcodeLaneDeps(async () => ({ ok: false, status: 500, json: async () => ({}) }))
+  });
+  assert.equal(unavailable.status, 'unavailable');
+  assert.equal(unavailable.source, 'oauth');
+
+  // Billing 401/403 maps to unavailable, mirroring ZCode's own
+  // classifyAvailabilityError: the mirror token is ZCode-managed and rotates
+  // there — "not configured" would contradict the detected-login pill.
+  const staleToken = await fetchZaiLimits({}, {
+    ...base,
+    ...zcodeLaneDeps(async () => ({ ok: false, status: 401, json: async () => ({}) }))
+  });
+  assert.equal(staleToken.status, 'unavailable');
+  assert.equal(staleToken.source, 'oauth');
+});
+
+test('fetchZaiLimits treats an entitled plan with empty buckets as unavailable', async () => {
+  // ZCode reports the plan as available while grants are not yet effective
+  // (empty balances is a legal mid-state); the row must not claim
+  // notConfigured while the login is detected.
+  const provider = await fetchZaiLimits({}, {
+    env: {},
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    ...zcodeLaneDeps(async (url) => {
+      if (String(url).includes('zcode-plan/billing/balance')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ code: 0, data: { plans: [{ plan_id: 'zcode-v3-x', name: 'ZCode Start Plan', status: 'active', entitlements: [] }], balances: [] } })
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    })
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'oauth');
+  assert.deepEqual(provider.windows, []);
+});
+
+test('fetchZaiLimits treats a mirror key without a subscription as unavailable', async () => {
+  // The quota endpoint answers 200 + code 500 "当前用户不存在coding plan"
+  // for a key with no subscription — a state under that key, not a missing
+  // configuration.
+  const provider = await fetchZaiLimits({}, {
+    env: {},
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    ...zcodeLaneDeps(
+      async () => ({ ok: true, status: 200, json: async () => ({ code: 500, msg: '当前用户不存在coding plan' }) }),
+      'coding-plan'
+    )
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'oauth');
+});
+
+test('fetchZaiLimits preserves a classified Coding Plan error instead of flattening it', async () => {
+  // A 429 against the quota endpoint surfaces as sourceRateLimited — the
+  // same retention the start-billing lane applies; the old catch-all
+  // reported plain unavailable.
+  const provider = await fetchZaiLimits({}, {
+    env: {},
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    ...zcodeLaneDeps(
+      async () => ({ ok: false, status: 429, json: async () => ({}) }),
+      'coding-plan'
+    )
+  });
+  assert.equal(provider.status, 'sourceRateLimited');
+  assert.equal(provider.source, 'oauth');
+});
+
+test('fetchZaiLimits tracks cumulative spend and ignores a missing total', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zai-spend-'));
+  const storePath = path.join(dir, 'zai-balance.json');
+  try {
+    const call = (data) => fetchZaiLimits(
+      { zaiApiKey: 'zai-token' },
+      {
+        env: {},
+        now: () => Date.parse('2026-09-05T12:00:00Z'),
+        zaiBalanceStorePath: storePath,
+        ...noZcode,
+        fetch: async (url) => {
+          if (String(url).includes('query-customer-account-report')) {
+            return { ok: true, status: 200, json: async () => ({ code: 200, data }) };
+          }
+          if (String(url).includes('/quota/limit')) {
+            return { ok: true, status: 200, json: async () => ({ data: { limits: [] } }) };
+          }
+          return { ok: true, status: 200, json: async () => ({ data: [] }) };
+        }
+      }
+    );
+
+    const first = await call({ availableBalance: '5.00', totalSpendAmount: '100' });
+    assert.equal(first.balance.todaySpend, 0);
+    assert.equal(first.balance.allTimeSpend, 0);
+    // Tracking began within the same local month, so the not-yet-a-month
+    // flag is true; the old month-key comparison never matched a day key.
+    assert.equal(first.balance.monthSinceTracking, true);
+
+    // A report without the cumulative total must not rebase the baseline:
+    // Number(null) is 0, so a null check — not isFinite alone — gates it.
+    // Normalization fills absent spend fields with null.
+    const missing = await call({ availableBalance: '5.00' });
+    assert.equal(missing.balance.todaySpend, null);
+
+    const second = await call({ availableBalance: '5.00', totalSpendAmount: '150' });
+    assert.equal(second.balance.todaySpend, 50);
+    assert.equal(second.balance.allTimeSpend, 50);
+
+    // A drop (refund, plan reset) moves the baseline only — no negative
+    // spend, and the later rise records only its own delta.
+    const refunded = await call({ availableBalance: '5.00', totalSpendAmount: '120' });
+    assert.equal(refunded.balance.todaySpend, 50);
+    assert.equal(refunded.balance.allTimeSpend, 50);
+    const afterRefund = await call({ availableBalance: '5.00', totalSpendAmount: '130' });
+    assert.equal(afterRefund.balance.todaySpend, 60);
+    assert.equal(afterRefund.balance.allTimeSpend, 60);
+
+    // Day buckets past the 40-day retention window are pruned while
+    // allTimeSpend keeps accumulating, as on DeepSeek's balance history.
+    const later = await fetchZaiLimits(
+      { zaiApiKey: 'zai-token' },
+      {
+        env: {},
+        now: () => Date.parse('2026-10-20T12:00:00Z'),
+        zaiBalanceStorePath: storePath,
+        ...noZcode,
+        fetch: async (url) => {
+          if (String(url).includes('query-customer-account-report')) {
+            return { ok: true, status: 200, json: async () => ({ code: 200, data: { availableBalance: '5.00', totalSpendAmount: '160' } }) };
+          }
+          if (String(url).includes('/quota/limit')) {
+            return { ok: true, status: 200, json: async () => ({ data: { limits: [] } }) };
+          }
+          return { ok: true, status: 200, json: async () => ({ data: [] }) };
+        }
+      }
+    );
+    assert.equal(later.balance.todaySpend, 30);
+    assert.equal(later.balance.allTimeSpend, 90);
+    // October reading against a September baseline: a full month boundary
+    // has passed, so the flag flips off.
+    assert.equal(later.balance.monthSinceTracking, false);
+    const stored = JSON.parse(fs.readFileSync(storePath, 'utf8'));
+    const dayKeys = Object.keys(Object.values(stored.accounts)[0].dailySpend);
+    assert.ok(!dayKeys.includes('2026-09-05'), 'old day bucket pruned');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('fetchZaiLimits survives a malformed spend store and a failing write', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zai-spend-'));
+  const storePath = path.join(dir, 'zai-balance.json');
+  const respond = async (url) => {
+    if (String(url).includes('query-customer-account-report')) {
+      return { ok: true, status: 200, json: async () => ({ code: 200, data: { availableBalance: '5.00', totalSpendAmount: '100' } }) };
+    }
+    if (String(url).includes('/quota/limit')) {
+      return { ok: true, status: 200, json: async () => ({ data: { limits: [] } }) };
+    }
+    return { ok: true, status: 200, json: async () => ({ data: [] }) };
+  };
+  try {
+    // Valid JSON without an accounts map: the store reinitializes instead of
+    // throwing and discarding an otherwise successful quota response.
+    fs.writeFileSync(storePath, '{"version": 1, "unexpected": true}', 'utf8');
+    const malformed = await fetchZaiLimits(
+      { zaiApiKey: 'zai-token' },
+      { env: {}, now: () => Date.parse('2026-09-05T12:00:00Z'), zaiBalanceStorePath: storePath, ...noZcode, fetch: respond }
+    );
+    // Quota answered (no subscription windows) but the balance window makes
+    // the row ok; the spend baseline restarts from this report.
+    assert.equal(malformed.status, 'ok');
+    assert.equal(malformed.balance.allTimeSpend, 0);
+
+    // A read-only dir / full disk fails the write only; the row and its
+    // balance still report, and the baseline is simply not persisted.
+    fs.rmSync(storePath, { force: true });
+    const failingWrite = await fetchZaiLimits(
+      { zaiApiKey: 'zai-token' },
+      {
+        env: {},
+        now: () => Date.parse('2026-09-05T12:00:00Z'),
+        zaiBalanceStorePath: storePath,
+        ...noZcode,
+        readJson: () => null,
+        writeJsonAtomic: () => { throw new Error('EACCES: read-only'); },
+        fetch: respond
+      }
+    );
+    assert.equal(failingWrite.status, 'ok');
+    assert.equal(failingWrite.balance.allTimeSpend, 0);
+    assert.equal(fs.existsSync(storePath), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('fetchZaiLimits physically aborts a hung request within its configured bound', async () => {
@@ -244,6 +610,7 @@ test('fetchZaiLimits physically aborts a hung request within its configured boun
     {
       env: {},
       zaiFetchTimeoutMs: 5,
+      ...noZcode,
       fetch: async (_url, init) => {
         signal = init.signal;
         return new Promise(() => {});
@@ -253,4 +620,518 @@ test('fetchZaiLimits physically aborts a hung request within its configured boun
 
   assert.equal(provider.status, 'unavailable');
   assert.equal(signal.aborted, true);
+});
+
+for (const badDailySpend of [undefined, null, [], 'broken']) {
+  test(`fetchZaiLimits repairs dailySpend ${JSON.stringify(badDailySpend)} and persists subsequent deltas`, async () => {
+    let stored = null;
+    let total = 100;
+    const call = () => fetchZaiLimits({ zaiApiKey: 'repair-key' }, {
+      env: {}, ...noZcode, now: () => Date.parse('2026-09-05T12:00:00Z'),
+      readJson: () => structuredClone(stored),
+      writeJsonAtomic: (_path, value) => { stored = JSON.parse(JSON.stringify(value)); },
+      fetch: async (url) => ({ ok: true, json: async () => String(url).includes('query-customer-account-report')
+        ? { data: { availableBalance: 5, totalSpendAmount: total } }
+        : { data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }] } } })
+    });
+    await call();
+    Object.values(stored.accounts)[0].dailySpend = badDailySpend;
+    const repaired = await call();
+    assert.equal(repaired.status, 'ok');
+    assert.deepEqual(Object.values(stored.accounts)[0].dailySpend, {});
+    total = 110;
+    const advanced = await call();
+    assert.equal(advanced.balance.todaySpend, 10);
+    assert.equal((await call()).balance.todaySpend, 10);
+    assert.equal(advanced.windows.length, 2);
+  });
+}
+
+for (const status of [401, 429, 500]) {
+  test(`fetchZaiLimits preserves balance on quota ${status} without subscription enrichment`, async () => {
+    const urls = [];
+    const provider = await fetchZaiLimits({ zaiApiKey: 'quota-failure' }, {
+      env: {}, ...noZcode,
+      fetch: async (url) => {
+        urls.push(String(url));
+        return String(url).includes('/quota/limit')
+          ? { ok: false, status }
+          : { ok: true, json: async () => ({ data: { availableBalance: 7 } }) };
+      }
+    });
+    assert.equal(provider.status, status === 401 ? 'unauthorized' : status === 429 ? 'sourceRateLimited' : 'unavailable');
+    assert.equal(provider.balance?.amount, 7);
+    assert.equal(provider.windows.find(w => w.metric === 'credits')?.remaining, 7);
+    assert.equal(urls.length, 2);
+  });
+}
+
+// The same gateway failures also arrive as HTTP 200 with the failure in the
+// body. An expired or revoked credential is the one shape that is a transport
+// failure (code 401/403, ZCode's isSuccessfulBusinessEnvelope reads both as
+// auth); a key without a subscription answers code 500 and stays a state.
+for (const code of [401, 403]) {
+  test(`fetchZaiLimits classifies a body code ${code} under HTTP 200 as unauthorized`, async () => {
+    const provider = await fetchZaiLimits({ zaiApiKey: 'expired-token' }, {
+      env: {}, ...noZcode,
+      fetch: async (url) => String(url).includes('/quota/limit')
+        ? { ok: true, status: 200, json: async () => ({ code, msg: 'token expired or incorrect' }) }
+        : { ok: true, status: 200, json: async () => ({ code: 200, data: { availableBalance: 7 } }) }
+    });
+    assert.equal(provider.status, 'unauthorized');
+    assert.equal(provider.balance?.amount, 7);
+  });
+}
+
+test('fetchZaiLimits keeps a no-plan body code 500 as a state with the balance intact', async () => {
+  const provider = await fetchZaiLimits({ zaiApiKey: 'no-plan-key' }, {
+    env: {}, ...noZcode,
+    fetch: async (url) => String(url).includes('/quota/limit')
+      ? { ok: true, status: 200, json: async () => ({ code: 500, msg: '当前用户不存在coding plan' }) }
+      : { ok: true, status: 200, json: async () => ({ code: 200, data: { availableBalance: 7 } }) }
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.balance?.amount, 7);
+  assert.equal(provider.windows.find(w => w.metric === 'credits')?.remaining, 7);
+});
+
+test('a failed ZCode billing request preserves console data and surfaces the managed-token failure', async () => {
+  const provider = await fetchZaiLimits({ zaiApiKey: 'console' }, {
+    env: {}, ...zcodeLaneDeps(async url => {
+      if (String(url).includes('zcode-plan/billing/balance')) return { ok: false, status: 401 };
+      return keyLaneResponses({ balance: 7, subscription: 'Pro' })(url);
+    })
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.balance.amount, 7);
+  assert.equal(provider.accountLabel, 'Pro');
+  assert.ok(provider.windows.some(w => w.kind === 'session'));
+});
+
+// The billing gateway also answers HTTP 200 with the failure in the body, and
+// that shape used to read as "fulfilled but empty" while the console lane
+// succeeded — the row kept `ok` and hid the dead ZCode credential entirely.
+// ZCode-managed failures stay `unavailable` at provider level even though the
+// billing helper classifies them as unauthorized.
+for (const code of [401, 403]) {
+  test(`a billing body code ${code} under HTTP 200 preserves the console lane and reports unavailable`, async () => {
+    const provider = await fetchZaiLimits({ zaiApiKey: 'console' }, {
+      env: {}, ...zcodeLaneDeps(async url => {
+        if (String(url).includes('zcode-plan/billing/balance')) {
+          return { ok: true, status: 200, json: async () => ({ code, msg: 'token expired or incorrect' }) };
+        }
+        return keyLaneResponses({ balance: 7, subscription: 'Pro' })(url);
+      })
+    });
+    assert.equal(provider.status, 'unavailable');
+    assert.equal(provider.source, 'api');
+    assert.equal(provider.balance.amount, 7);
+    assert.equal(provider.accountLabel, 'Pro');
+    assert.ok(provider.windows.some(w => w.kind === 'session'), 'console windows survive');
+    assert.ok(provider.windows.some(w => w.metric === 'credits'), 'balance window survives');
+    assert.equal(provider.windows.some(w => w.label === 'GLM-5.3'), false, 'no plan buckets from the dead credential');
+  });
+}
+
+test('a billing body code 500 stays a no-plan state rather than an auth failure', async () => {
+  const provider = await fetchZaiLimits({ zaiApiKey: 'console' }, {
+    env: {}, ...zcodeLaneDeps(async url => {
+      if (String(url).includes('zcode-plan/billing/balance')) {
+        return { ok: true, status: 200, json: async () => ({ code: 500, msg: '当前用户不存在coding plan' }) };
+      }
+      return keyLaneResponses({ balance: 7, subscription: 'Pro' })(url);
+    })
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'api');
+  assert.equal(provider.balance.amount, 7);
+});
+
+test('the same console and ZCode coding key queries and renders quota once', async () => {
+  let quotaCalls = 0;
+  const provider = await fetchZaiLimits({ zaiApiKey: 'mirror-jwt' }, {
+    env: {}, ...zcodeLaneDeps(async url => {
+      if (String(url).includes('/quota/limit')) quotaCalls++;
+      return keyLaneResponses({ balance: 7, subscription: 'Pro' })(url);
+    }, 'coding-plan')
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(quotaCalls, 1);
+  assert.equal(provider.windows.filter(w => w.kind === 'session').length, 1);
+});
+
+test('fetchZaiLimits shows Start/Weekend buckets alongside Coding Plan quota', async () => {
+  // Billing is account-level: a coding-plan selection still surfaces the
+  // account's Start/Weekend grants in the same row, fetched in parallel —
+  // a failed billing query never blocks the quota answer.
+  const files = {
+    'setting.json': JSON.stringify({ providerFamilyDomain: 'zai', modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-coding-plan' } }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'coding-mirror' } },
+      'builtin:zai-start-plan': { enabled: false, options: { apiKey: 'start-jwt' } }
+    } }),
+    'coding-plan-cache.json': JSON.stringify({ entryStatus: { items: {
+      'builtin:zai-coding-plan': { status: 'available' },
+      'builtin:zai-start-plan': { status: 'available' }
+    } } }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  let subscriptionCalls = 0;
+  const deps = {
+    env: {}, now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url) => {
+      const target = String(url);
+      if (target.includes('/quota/limit')) {
+        return { ok: true, status: 200, json: async () => ({ data: { limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 40 }], planName: 'GLM Coding Pro' } }) };
+      }
+      if (target.includes('zcode-plan/billing/balance')) {
+        return { ok: true, status: 200, json: async () => ({ code: 0, data: {
+          plans: [{ plan_id: 'zcode-v3-start-plan-wk-0904', name: 'ZCode Weekend Build', status: 'active', entitlements: [{ entitlement_id: 'e1', period: 'one_time' }] }],
+          balances: [{ entitlement_id: 'e1', plan_id: 'zcode-v3-start-plan-wk-0904', show_name: 'GLM-5.3-Flash', total_units: 305000000, used_units: 109149447, remaining_units: 195850553 }]
+        } }) };
+      }
+      if (target.includes('subscription/list')) {
+        subscriptionCalls += 1;
+        return { ok: true, status: 200, json: async () => ({ data: [{ product_name: 'GLM Coding Pro' }] }) };
+      }
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+  };
+  const provider = await fetchZaiLimits({}, deps);
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'oauth');
+  // Header carries the consumed mode; the Weekend bucket rides the same row.
+  assert.equal(provider.accountLabel, 'GLM Coding Pro');
+  assert.equal(subscriptionCalls, 1, 'subscription enriches usable quota once');
+  assert.ok(provider.windows.some((window) => window.kind === 'session'), 'subscription quota present');
+  const weekend = provider.windows.find((window) => window.limitId);
+  assert.ok(weekend, 'Weekend bucket present');
+  assert.equal(weekend.limit, 305000000);
+  // A console key equal to the mirror key still gets its billing buckets:
+  // the duplicate-quota guard skips only the quota fetch, not the lane.
+  let quotaCalls = 0;
+  const sameKey = await fetchZaiLimits(
+    { zaiApiKey: 'coding-mirror' },
+    { ...deps, fetch: async (url) => { if (String(url).includes('/quota/limit')) quotaCalls++; return deps.fetch(url); } }
+  );
+  assert.equal(quotaCalls, 1, 'quota queried once');
+  assert.ok(sameKey.windows.some((window) => window.limitId), 'Weekend bucket survives the dedupe guard');
+
+  // The MCP month bucket falls back to the subscription renewal time when the
+  // TIME_LIMIT entry omits nextResetTime — the same fallback the console-key
+  // lane applies, aligned with the Kimi/Kiro/Grok month-bucket precedent.
+  const noMcpReset = { ...deps, fetch: async (url) => {
+    const target = String(url);
+    if (target.includes('/quota/limit')) {
+      return { ok: true, status: 200, json: async () => ({ data: { planName: 'GLM Coding Pro', limits: [
+        { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 40, nextResetTime: 1788600000 },
+        { type: 'TIME_LIMIT', unit: 5, number: 1, percentage: 67 }
+      ] } }) };
+    }
+    if (target.includes('subscription/list')) {
+      return { ok: true, status: 200, json: async () => ({ data: [{ product_name: 'GLM Coding Pro', next_renew_time: 1789000000 }] }) };
+    }
+    return deps.fetch(url);
+  } };
+  const mcpFallback = await fetchZaiLimits({}, noMcpReset);
+  const mcp = mcpFallback.windows.find((window) => window.label === 'MCP');
+  assert.equal(mcp.resetsAt, '2026-09-10T00:26:40.000Z');
+  assert.equal(mcpFallback.accountLabel, 'GLM Coding Pro');
+
+  // Billing failure must not block the quota answer.
+  const billingFails = { ...deps, fetch: async (url) => String(url).includes('zcode-plan') ? { ok: false, status: 500, json: async () => ({}) } : deps.fetch(url) };
+  const degraded = await fetchZaiLimits({}, billingFails);
+  assert.equal(degraded.status, 'ok');
+  assert.ok(degraded.windows.some((window) => window.kind === 'session'), 'quota survives billing failure');
+  assert.ok(!degraded.windows.some((window) => window.limitId), 'no bucket when billing failed');
+});
+
+for (const scenario of [
+  {
+    name: 'fails',
+    quotaResponse: { ok: false, status: 429, json: async () => ({}) },
+    status: 'sourceRateLimited'
+  },
+  {
+    name: 'is empty',
+    quotaResponse: { ok: true, status: 200, json: async () => ({ data: { limits: [] } }) },
+    status: 'ok'
+  }
+]) {
+  test(`fetchZaiLimits preserves billing when combined Coding Plan quota ${scenario.name}`, async () => {
+    let subscriptionCalls = 0;
+    const provider = await fetchZaiLimits({}, {
+      env: {},
+      now: () => Date.parse('2026-09-05T12:00:00Z'),
+      ...zcodeLaneDeps(async (url) => {
+        const target = String(url);
+        if (target.includes('/quota/limit')) return scenario.quotaResponse;
+        if (target.includes('zcode-plan/billing/balance')) return BILLING_OK;
+        if (target.includes('subscription/list')) subscriptionCalls += 1;
+        return { ok: true, status: 200, json: async () => ({ data: [] }) };
+      }, 'coding-plan', { includeStartPlan: true })
+    });
+
+    assert.equal(provider.status, scenario.status);
+    assert.ok(provider.windows.some((window) => window.limitId), 'billing survives quota result');
+    assert.equal(subscriptionCalls, 0, 'subscription is skipped without usable quota');
+  });
+}
+
+// The migration shape 3.12.3 leaves behind: the kind-based selection is the
+// only live one, the entry carries a persistent not_entitled reason, and the
+// entitlement cache is gone. Every other ZCode fixture here routes through the
+// legacy selected-key string, so without this case the subscribed account's
+// recovery — the user-visible point of the change — had no end-to-end guard.
+test('a 3.12.3-shaped install with a subscription renders the quota windows', async () => {
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } },
+      // The frozen legacy string points at the *other* provider on purpose:
+      // that is what a 3.12.3 install looks like after the user switched, and
+      // it keeps this case a guard on the kind path — a code path that fell
+      // back to the legacy string would query billing instead, which the
+      // fetch mock below rejects.
+      modelProviderFamilySelectedKeys: { zai: 'coding-plan:builtin:zai-start-plan' }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': {
+        enabled: false,
+        systemDisabledReason: 'coding_plan_not_entitled',
+        options: { apiKey: 'mirror-key' }
+      }
+    } }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  const provider = await fetchZaiLimits({}, {
+    env: {},
+    now: () => Date.parse('2026-09-17T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url) => {
+      const target = String(url);
+      if (target.includes('/quota/limit')) {
+        return { ok: true, status: 200, json: async () => ({ data: { limits: [
+          { type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 12.5 },
+          { type: 'TOKENS_LIMIT', unit: 6, number: 1, percentage: 25 },
+          { type: 'TIME_LIMIT', remaining: 9, percentage: 40 }
+        ] } }) };
+      }
+      if (target.includes('/subscription/list')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ product_name: 'GLM Coding Pro', next_renew_time: '2026-10-13T00:00:00Z' }] }) };
+      }
+      throw new Error('unexpected url ' + target);
+    }
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'oauth');
+  assert.equal(provider.accountLabel, 'GLM Coding Pro');
+  assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly', 'billing']);
+  assert.equal(provider.windows[0].usedPercent, 12.5);
+  assert.equal(provider.windows[1].usedPercent, 25);
+  assert.equal(provider.windows[2].usedPercent, 40);
+});
+
+// The refused quota half: the profile names the logged-in account, no entry
+// exists for it, and config.json still carries the previous account's mirror.
+// The live JWT is what decides whether an independent billing leg exists.
+function missingQuotaKeyFiles({ withBillingJwt }) {
+  return {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'previous-account-mirror' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      ...(withBillingJwt ? { zcodejwttoken: encryptStoreValue('live-billing-jwt') } : {}),
+      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: 'known-account-id' }))
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+}
+
+function missingQuotaKeyDeps(files, fetchMock) {
+  return {
+    env: { ZCODE_CREDENTIAL_SECRET: FIXTURE_CREDENTIAL_SECRET },
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: fetchMock
+  };
+}
+
+test('fetchZaiLimits never queries the quota lane with the mirror once the identity is known without its key', async () => {
+  // That mirror cannot be shown to belong to the account the profile just
+  // named, so the quota half refuses it — and with no live JWT and no start
+  // entry there is no billing leg either, so no request goes out at all.
+  const urls = [];
+  const provider = await fetchZaiLimits({}, missingQuotaKeyDeps(
+    missingQuotaKeyFiles({ withBillingJwt: false }),
+    async (url) => {
+      urls.push(String(url));
+      throw new Error('the mirror must not be queried');
+    }
+  ));
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'oauth');
+  assert.deepEqual(provider.windows, []);
+  assert.deepEqual(urls, []);
+});
+
+test('fetchZaiLimits keeps the live billing leg when the account\'s own key is missing', async () => {
+  // The billing credential is a different one — the account-level JWT ZCode
+  // maintains on login — so refusing the quota half must not take Start/Weekend
+  // down with it: exactly one request, to billing, and the previous account's
+  // mirror is never carried to any endpoint.
+  const calls = [];
+  const provider = await fetchZaiLimits({}, missingQuotaKeyDeps(
+    missingQuotaKeyFiles({ withBillingJwt: true }),
+    async (url, options) => {
+      calls.push({ url: String(url), authorization: String(options?.headers?.Authorization || '') });
+      if (String(url).includes('zcode-plan/billing/balance')) return BILLING_OK;
+      throw new Error(`unexpected url ${url}`);
+    }
+  ));
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'oauth');
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].url.includes('zcode-plan/billing/balance'), 'the live billing leg queried');
+  assert.ok(calls.every((call) => !call.url.includes('/quota/limit')), 'no quota request');
+  assert.ok(calls.every((call) => !call.authorization.includes('previous-account-mirror')), 'the mirror is never carried');
+  assert.ok(provider.windows.some((window) => window.limitId), 'the Start/Weekend bucket is rendered');
+});
+
+test('fetchZaiLimits refuses the start-plan mirror once the identity is known and the JWT is gone', async () => {
+  // The live JWT is the only credential that can be attributed to the account,
+  // so the mirror cannot carry the lane: the attempt is reported and the row
+  // reads unavailable rather than notConfigured beside a stored login.
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'start-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-start-plan': { enabled: true, options: { apiKey: 'previous-account-mirror' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: 'known-account-id' }))
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  const urls = [];
+  const provider = await fetchZaiLimits({}, {
+    env: { ZCODE_CREDENTIAL_SECRET: FIXTURE_CREDENTIAL_SECRET },
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url) => {
+      urls.push(String(url));
+      throw new Error('the mirror must not be queried');
+    }
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'oauth');
+  assert.deepEqual(provider.windows, []);
+  assert.deepEqual(urls, []);
+});
+
+test('fetchZaiLimits reports the refused billing attempt with no mirror to fall back on either', async () => {
+  // The identity decides it on its own: the entry carries no mirror at all, so
+  // what the lane needs is the same attempted-but-empty answer rather than the
+  // "not configured" a missing credential would otherwise produce.
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'start-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-start-plan': { enabled: true, options: { apiKey: '' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: 'known-account-id' }))
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  const urls = [];
+  const provider = await fetchZaiLimits({}, {
+    env: { ZCODE_CREDENTIAL_SECRET: FIXTURE_CREDENTIAL_SECRET },
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url) => {
+      urls.push(String(url));
+      throw new Error('there is no credential to query with');
+    }
+  });
+  assert.equal(provider.status, 'unavailable');
+  assert.equal(provider.source, 'oauth');
+  assert.deepEqual(provider.windows, []);
+  assert.deepEqual(urls, []);
+});
+
+test('fetchZaiLimits keeps the quota half when the billing mirror is refused', async () => {
+  // A coding-plan selection: the account's own key still resolves, so the same
+  // refusal drops only the billing leg, and no request carries the start mirror.
+  const identity = 'known-account-id';
+  const files = {
+    'setting.json': JSON.stringify({
+      providerFamilyDomain: 'zai',
+      providerFamilyConnectionSelections: { zai: { kind: 'individual-coding-plan' } }
+    }),
+    'config.json': JSON.stringify({ provider: {
+      'builtin:zai-coding-plan': { enabled: true, options: { apiKey: 'coding-mirror' } },
+      'builtin:zai-start-plan': { enabled: false, systemDisabledReason: 'coding_plan_not_entitled', options: { apiKey: 'previous-account-mirror' } }
+    } }),
+    'credentials.json': JSON.stringify({
+      'oauth:zai:user_info': encryptStoreValue(JSON.stringify({ user_id: identity })),
+      [`account-provider:coding-plan:account:zai-individual-coding-plan:account:${identity}:api-key`]:
+        encryptStoreValue('account-key')
+    }),
+    'telemetry-state.json': JSON.stringify({ deviceMid: 'dm' })
+  };
+  const calls = [];
+  const provider = await fetchZaiLimits({}, {
+    env: { ZCODE_CREDENTIAL_SECRET: FIXTURE_CREDENTIAL_SECRET },
+    now: () => Date.parse('2026-09-05T12:00:00Z'),
+    readFileSync: (filePath) => {
+      const name = path.basename(String(filePath));
+      if (Object.hasOwn(files, name)) return files[name];
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    },
+    fetch: async (url, options) => {
+      const target = String(url);
+      calls.push({ url: target, authorization: String(options?.headers?.Authorization || '').replace(/^Bearer /, '') });
+      if (target.includes('/quota/limit')) {
+        return { ok: true, status: 200, json: async () => ({ data: { planName: 'GLM Coding Pro', limits: [{ type: 'TOKENS_LIMIT', unit: 3, number: 5, percentage: 10 }] } }) };
+      }
+      if (target.includes('subscription/list')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ product_name: 'GLM Coding Pro' }] }) };
+      }
+      throw new Error(`unexpected url ${url}`);
+    }
+  });
+  assert.equal(provider.status, 'ok');
+  assert.ok(provider.windows.some((window) => window.kind === 'session'), 'the quota half rendered');
+  assert.ok(calls.every((call) => !call.url.includes('billing')), 'no billing request');
+  assert.ok(calls.every((call) => call.authorization === 'account-key'), 'only the account key was carried');
 });

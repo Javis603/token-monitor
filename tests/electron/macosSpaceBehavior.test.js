@@ -67,7 +67,20 @@ test('main process reapplies the complete Space policy before showing either mod
   const focusWindow = main.match(/function focusExistingWindow[\s\S]*?\n}\n\nfunction currentWindowToggleShortcutStatus/)[0];
 
   assert.match(policy, /setMoveToActiveSpace\(mainWindow, false\)[\s\S]*setVisibleOnAllWorkspaces\(true, \{[\s\S]*visibleOnFullScreen: true,[\s\S]*skipTransformProcessType: true/);
-  assert.match(policy, /setVisibleOnAllWorkspaces\(false\)[\s\S]*setHiddenInMissionControl\(false\)[\s\S]*setMoveToActiveSpace\(mainWindow, true\)/);
+  assert.match(policy, /setVisibleOnAllWorkspaces\(false, \{ skipTransformProcessType: true \}\)[\s\S]*setHiddenInMissionControl\(false\)[\s\S]*setMoveToActiveSpace\(mainWindow, true\)/);
+  // Both directions skip the process-type transform. Electron performs it to
+  // keep its own Dock/activation state consistent, but this app decides that in
+  // applyMacActivationPolicy() — and every caller runs that first. Dropping the
+  // option from the leave-tray-mode branch re-shows the Dock icon and undoes a
+  // hideAppIcon that is still switched on.
+  assert.equal((policy.match(/skipTransformProcessType: true/g) || []).length, 2);
+  // Skipping the transform is only safe because applyMacActivationPolicy() has
+  // decided the process type first on every path in. createWindow() is reached
+  // from the activate handler too, which had no policy call of its own.
+  assert.match(
+    main,
+    /app\.on\('activate', \(\) => \{[\s\S]*?applyMacActivationPolicy\(\{ mainWindowVisible: true \}\);[\s\S]*?createWindow\(\);/
+  );
   assert.match(policy, /setHiddenInMissionControl\(true\)/);
   assert.match(popover, /applyMacSpaceBehavior\(true\)[\s\S]*mainWindow\.show\(\)/);
   assert.match(focusWindow, /applyMacSpaceBehavior\(false\)[\s\S]*mainWindow\.show\(\)/);

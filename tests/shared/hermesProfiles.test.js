@@ -7,7 +7,7 @@ const test = require('node:test');
 const {
   discoverHermesProfileScanPaths,
   resolveHermesHome
-} = require('../../src/shared/hermesProfiles');
+} = require('../../src/shared/providers/hermes/profiles');
 
 test('resolveHermesHome prefers HERMES_HOME when set', () => {
   assert.equal(

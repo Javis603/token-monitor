@@ -1,8 +1,8 @@
 'use strict';
 
 const { MAX_JSON_BODY_BYTES } = require('./http');
-const { syncLimits } = require('./limits');
-const { isReasonixSyntheticSession } = require('./reasonixSessionGuard');
+const { syncLimits } = require('./limits/core');
+const { isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
 const SYNC_PAYLOAD_BUDGET_BYTES = MAX_JSON_BODY_BYTES - SYNC_PAYLOAD_MARGIN_BYTES;
@@ -161,6 +161,20 @@ function sessionsWithoutProjectMetadata(sessions) {
   return sanitized;
 }
 
+function sessionsWithoutLocalTitles(sessions) {
+  if (!sessions || typeof sessions !== 'object') return sessions;
+  const sanitized = {};
+  for (const [key, session] of Object.entries(sessions)) {
+    if (!session || typeof session !== 'object') {
+      sanitized[key] = session;
+      continue;
+    }
+    sanitized[key] = { ...session };
+    delete sanitized[key].title;
+  }
+  return sanitized;
+}
+
 function sessionsWithoutReasonix(sessions) {
   if (!sessions || typeof sessions !== 'object') return sessions;
   const sanitized = {};
@@ -206,6 +220,10 @@ function buildSyncPayload(summary, {
     delete payload[periodName].projects;
     if (hasOwn(payload[periodName], 'sessions')) {
       payload[periodName].sessions = sessionsWithoutReasonix(payload[periodName].sessions);
+      // Titles come from local client metadata rather than Tokscale. Keep them
+      // as a widget-only overlay: composeLocalSyncStats() restores this device's
+      // local record for presentation, while the sync payload never carries text.
+      payload[periodName].sessions = sessionsWithoutLocalTitles(payload[periodName].sessions);
       if (!projectsEnabled) payload[periodName].sessions = sessionsWithoutProjectMetadata(payload[periodName].sessions);
     }
   }

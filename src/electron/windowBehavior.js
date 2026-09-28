@@ -63,6 +63,17 @@ function describeWindowBehavior(settings = {}) {
   return { ...WINDOW_BEHAVIOR_PROFILES[modeFromSettings(settings)] };
 }
 
+// The only two keys that select a mode. A caller which has already merged and
+// normalized its patch must narrow it through this before handing it over, since
+// normalizeWindowBehaviorSettings spreads whatever patch it is given over the
+// settings and would otherwise reinstate the raw values it just normalized away.
+function windowBehaviorSelection(patch = {}) {
+  const selection = {};
+  if (hasOwn(patch, 'windowBehavior')) selection.windowBehavior = patch.windowBehavior;
+  if (hasOwn(patch, 'alwaysOnTop')) selection.alwaysOnTop = patch.alwaysOnTop;
+  return selection;
+}
+
 function normalizeWindowBehaviorSettings(settings = {}, patch = {}) {
   const merged = { ...settings, ...patch };
   const previousMode = modeFromSettings(settings);
@@ -82,8 +93,22 @@ function normalizeWindowBehaviorSettings(settings = {}, patch = {}) {
   };
 }
 
+// Z-order level for an always-on-top widget. On Windows Electron deliberately
+// demotes the `floating` level (and torn-off-menu/modal-panel/main-menu/status)
+// behind Shell_TrayWnd — SetAlwaysOnTop and every window activation re-run that
+// SetWindowPos — so a `floating` widget overlapping the taskbar disappears
+// behind it. Any level outside that set opts out; on win32 they are all
+// equivalent, and `screen-saver` is the one the collapsed bubble already ships.
+// macOS/Linux keep `floating`, where the level maps to a real NSWindow level.
+// Do not "simplify" this back to a bare 'floating' — that is issue #533.
+function floatingAlwaysOnTopLevel(platform = process.platform) {
+  return platform === 'win32' ? 'screen-saver' : 'floating';
+}
+
 module.exports = {
   describeWindowBehavior,
+  floatingAlwaysOnTopLevel,
   normalizeWindowBehavior,
-  normalizeWindowBehaviorSettings
+  normalizeWindowBehaviorSettings,
+  windowBehaviorSelection
 };

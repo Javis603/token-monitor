@@ -12,7 +12,7 @@ const {
   normalizeCommandcodeCookieHeader,
   parseCommandcodeCredits,
   parseCommandcodeSubscription
-} = require('../../src/shared/commandcodeLimits');
+} = require('../../src/shared/providers/commandcode/limits');
 
 const SESSION_COOKIE = '__Secure-commandcode_prod_.session_token=tok';
 const SESSION_DATA_COOKIE = '__Secure-commandcode_prod_.session_data=data';

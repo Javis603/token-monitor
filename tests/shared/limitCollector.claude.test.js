@@ -2,17 +2,25 @@
 
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
-const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider, normalizeClaudeWebCookieInput } = require('../../src/shared/limitCollector');
+const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider, normalizeClaudeWebCookieInput } = require('../../src/shared/limits/collector');
+const { runClaudeAuthStatus, touchClaudeAuthPath } = require('../../src/shared/providers/claude/limits');
 
-function fakeSpawnForClaudeUsage(expectedCommand = 'claude.cmd') {
-  return (command, args) => {
+function fakeSpawnForClaudeUsage(expectedCommand = 'cmd.exe') {
+  return (command, args, options) => {
     assert.equal(command, expectedCommand);
-    assert.deepEqual(args, ['/usage']);
+    assert.deepEqual(args, ['/d', '/s', '/c', '""claude.cmd" /usage"']);
+    assert.equal(options.shell, false);
+    assert.equal(options.windowsVerbatimArguments, true);
+    assert.equal(options.env.DISABLE_AUTOUPDATER, '1');
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
+    child.stdin = { end() {} };
     child.kill = () => {};
     process.nextTick(() => {
       child.stdout.emit('data', Buffer.from([
@@ -98,7 +106,7 @@ test('Claude Web source takes precedence and carries stable account metadata', a
             json: async () => [{ uuid: 'organization-web', name: 'Example Workspace' }]
           };
         }
-        if (url.endsWith('/api/organizations/organization-web/usage')) {
+        if (url.endsWith('/api/organizations/organization-web/usage?cedar_ember=1')) {
           return {
             ok: true,
             json: async () => ({
@@ -166,7 +174,7 @@ test('Claude Web source takes precedence and carries stable account metadata', a
     'every Claude Web request should carry the browser user-agent'
   );
   assert.equal(first.requests[0].url.endsWith('/api/organizations'), true);
-  assert.equal(first.requests[1].url.endsWith('/api/organizations/organization-web/usage'), true);
+  assert.equal(first.requests[1].url.endsWith('/api/organizations/organization-web/usage?cedar_ember=1'), true);
   assert.equal(first.requests[2].url.endsWith('/api/account'), true);
 });
 
@@ -221,7 +229,7 @@ test('Claude Web follows a renewed sessionKey across sequential requests and rep
           json: async () => [{ uuid: 'organization-web', name: 'Workspace' }]
         };
       }
-      if (url.endsWith('/usage')) {
+      if (url.endsWith('/usage?cedar_ember=1')) {
         return {
           ok: true,
           json: async () => ({
@@ -275,7 +283,7 @@ test('Claude Web reports a renewed sessionKey even when a later request fails', 
             json: async () => [{ uuid: 'organization-web', name: 'Workspace' }]
           };
         }
-        if (url.endsWith('/usage')) {
+        if (url.endsWith('/usage?cedar_ember=1')) {
           return {
             ok: true,
             json: async () => ({
@@ -323,7 +331,7 @@ test('Claude Web retries later rotation from the last persisted sessionKey after
           json: async () => [{ uuid: 'organization-web', name: 'Workspace' }]
         };
       }
-      if (url.endsWith('/usage')) {
+      if (url.endsWith('/usage?cedar_ember=1')) {
         assert.equal(options.headers.cookie, 'sessionKey=sk-ant-first-renewal');
         return {
           ok: true,
@@ -380,7 +388,7 @@ test('Claude Web prefers chat-capable organizations, then non-API-only organizat
             })
           };
         }
-        const match = url.match(/\/api\/organizations\/([^/]+)\/usage$/);
+        const match = url.match(/\/api\/organizations\/([^/]+)\/usage\?cedar_ember=1$/);
         assert.ok(match);
         usageOrganizationId = decodeURIComponent(match[1]);
         return {
@@ -455,7 +463,7 @@ test('Claude Web caches stable identity and reuses it when account lookup is tra
   assert.equal(cached.accountKey, first.accountKey);
   assert.equal(cached.windows[0].usedPercent, 23);
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].endsWith('/usage'), true);
+  assert.equal(requests[0].endsWith('/usage?cedar_ember=1'), true);
 
   requests.length = 0;
   nowMs += 2000;
@@ -466,7 +474,7 @@ test('Claude Web caches stable identity and reuses it when account lookup is tra
   assert.equal(second.accountKey, first.accountKey);
   assert.equal(second.windows[0].usedPercent, 37);
   assert.equal(requests.some((url) => url.endsWith('/api/account')), true);
-  assert.equal(requests.some((url) => url.endsWith('/usage')), true);
+  assert.equal(requests.some((url) => url.endsWith('/usage?cedar_ember=1')), true);
 });
 
 test('Claude Web requires the account endpoint on a cold identity cache', async () => {
@@ -477,7 +485,7 @@ test('Claude Web requires the account endpoint on a cold identity cache', async 
         if (url.endsWith('/api/organizations')) {
           return { ok: true, json: async () => [{ uuid: 'organization-web' }] };
         }
-        if (url.endsWith('/usage')) {
+        if (url.endsWith('/usage?cedar_ember=1')) {
           return {
             ok: true,
             json: async () => ({
@@ -544,6 +552,7 @@ test('Claude Web authentication failure does not silently fall back to another l
 test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is unavailable', async () => {
   const provider = await fetchClaudeLimits({}, {
     platform: 'win32',
+    env: {},
     now: () => Date.parse('2026-06-11T00:00:00Z'),
     claudeCredentialPath: 'C:\\Users\\Javis\\.claude\\.credentials.json',
     stat: async () => ({ mtimeMs: 1 }),
@@ -559,6 +568,7 @@ test('Claude limits fall back to direct CLI usage on Windows when OAuth usage is
       status: 500
     }),
     existsSync: () => false,
+    isClaudeCliAuthenticated: async () => true,
     spawn: fakeSpawnForClaudeUsage()
   });
 
@@ -583,6 +593,7 @@ test('Claude limits fall back to CLI usage when OAuth credentials are not discov
       throw error;
     },
     readMacKeychain: false,
+    isClaudeCliAuthenticated: async () => true,
     runClaudeUsageCli: async () => {
       cliCalls += 1;
       return [
@@ -602,6 +613,208 @@ test('Claude limits fall back to CLI usage when OAuth credentials are not discov
   assert.equal(provider.source, 'cli');
   assert.equal(provider.windows[0].usedPercent, 5);
   assert.equal(provider.windows[1].usedPercent, 20);
+});
+
+test('Claude CLI fallback requires a positive non-interactive auth status', async () => {
+  let usageCalls = 0;
+  const provider = await fetchClaudeLimits({}, {
+    platform: 'darwin',
+    env: {},
+    now: () => Date.parse('2026-07-15T00:00:00Z'),
+    claudeCredentialPath: '/tmp/missing-claude-credentials.json',
+    stat: async () => {
+      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    },
+    readMacKeychain: false,
+    runClaudeAuthStatus: async () => [
+      'Claude Code 2.1.0',
+      JSON.stringify({ loggedIn: true, authMethod: 'oauth' })
+    ].join('\n'),
+    runClaudeUsageCli: async () => {
+      usageCalls += 1;
+      return [
+        'Current session',
+        '95% left',
+        'Resets 6pm',
+        'Current week',
+        '80% left',
+        'Resets Jul 22'
+      ].join('\n');
+    }
+  });
+
+  assert.equal(usageCalls, 1);
+  assert.equal(provider.source, 'cli');
+});
+
+test('Claude CLI fallback preserves the original error when auth is not positively confirmed', async () => {
+  for (const authOutput of [JSON.stringify({ loggedIn: false }), 'not-json']) {
+    let usageCalls = 0;
+    await assert.rejects(
+      fetchClaudeLimits({}, {
+        platform: 'darwin',
+        env: {},
+        claudeCredentialPath: '/tmp/missing-claude-credentials.json',
+        stat: async () => {
+          throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        },
+        readMacKeychain: false,
+        runClaudeAuthStatus: async () => authOutput,
+        runClaudeUsageCli: async () => {
+          usageCalls += 1;
+          return '';
+        }
+      }),
+      (error) => error?.status === 'notConfigured'
+        && error?.message === 'Claude credentials not found'
+    );
+    assert.equal(usageCalls, 0);
+  }
+});
+
+test('Claude auth status uses cmd.exe without shell mode on Windows', async () => {
+  let stdinEnded = false;
+  const output = await runClaudeAuthStatus({
+    platform: 'win32',
+    env: {},
+    existsSync: () => false,
+    spawn: (command, args, options) => {
+      assert.equal(command, 'cmd.exe');
+      assert.deepEqual(args, ['/d', '/s', '/c', '""claude.cmd" auth status --json"']);
+      assert.equal(options.shell, false);
+      assert.equal(options.windowsVerbatimArguments, true);
+      assert.equal(options.env.DISABLE_AUTOUPDATER, '1');
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.stdin = { end: () => { stdinEnded = true; } };
+      child.kill = () => {};
+      process.nextTick(() => {
+        child.stdout.emit('data', JSON.stringify({ loggedIn: true }));
+        child.emit('close', 0);
+      });
+      return child;
+    }
+  });
+
+  assert.deepEqual(JSON.parse(output), { loggedIn: true });
+  assert.equal(stdinEnded, true);
+});
+
+test('Claude PTY probing preserves the first executable Python failure', async (t) => {
+  const probeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'token-monitor-claude-python-'));
+  t.after(() => fs.rm(probeDir, { recursive: true, force: true }));
+  const calls = [];
+
+  await assert.rejects(
+    touchClaudeAuthPath({
+      platform: 'darwin',
+      env: { TERM: 'dumb' },
+      claudeProbeDir: probeDir,
+      existsSync: () => false,
+      spawn: (command, args, options) => {
+        calls.push(command);
+        assert.equal(options.env.TERM, 'xterm-256color');
+        assert.equal(options.env.DISABLE_AUTOUPDATER, '1');
+        const script = args[1];
+        assert.match(script, /matched_at = None/);
+        assert.match(script, /matched_at is not None and now - matched_at >= 2/);
+        assert.doesNotMatch(script, /time\.sleep\(2\)/);
+        assert.match(script, /TIOCSWINSZ/);
+        assert.match(script, /handled_prompts/);
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = () => {};
+        process.nextTick(() => {
+          child.stderr.emit('data', 'original Python failure');
+          child.emit('close', 1);
+        });
+        return child;
+      }
+    }),
+    (error) => error?.status === 'unavailable'
+      && error?.message === 'original Python failure'
+  );
+
+  assert.deepEqual(calls, ['python3']);
+});
+
+test('Claude PTY prompt matching handles overlapping tokens with one carriage return', async (t) => {
+  const probeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'token-monitor-claude-prompt-'));
+  t.after(() => fs.rm(probeDir, { recursive: true, force: true }));
+  let script = '';
+
+  await assert.rejects(
+    touchClaudeAuthPath({
+      platform: 'darwin',
+      env: {},
+      claudeProbeDir: probeDir,
+      existsSync: () => false,
+      spawn: (_command, args) => {
+        script = args[1];
+        const child = new EventEmitter();
+        child.stdout = new EventEmitter();
+        child.stderr = new EventEmitter();
+        child.kill = () => {};
+        process.nextTick(() => child.emit('close', 1));
+        return child;
+      }
+    }),
+    (error) => error?.status === 'unavailable'
+  );
+
+  assert.match(script, /sorted\(prompt_tokens, key=len, reverse=True\)/);
+  assert.match(script, /prompt_token\.startswith\(token\)/);
+  assert.doesNotMatch(script, /for token in prompt_tokens:\s*\n\s*if token in scan/);
+  const promptStart = script.indexOf('        prompt_token = next(');
+  const promptEnd = script.indexOf('        if io_closed:', promptStart);
+  assert.ok(promptStart >= 0 && promptEnd > promptStart);
+  const promptBlock = script.slice(promptStart, promptEnd);
+  assert.equal(promptBlock.match(/write_master\(b"\\r"\)/g)?.length, 1);
+});
+
+test('Claude CLI commands execute from a Windows path containing spaces', {
+  skip: process.platform !== 'win32'
+}, async (t) => {
+  const fixtureDir = await fs.mkdtemp(path.join(os.tmpdir(), 'token monitor claude '));
+  const command = path.join(fixtureDir, 'claude.cmd');
+  t.after(() => fs.rm(fixtureDir, { recursive: true, force: true }));
+  await fs.writeFile(command, [
+    '@echo off',
+    'if /I "%~1"=="auth" goto auth',
+    'if /I "%~1"=="/usage" goto usage',
+    'exit /b 1',
+    ':auth',
+    'echo {"loggedIn":true}',
+    'exit /b 0',
+    ':usage',
+    'echo Current session',
+    'echo 95%% left',
+    'echo Resets 6pm',
+    'echo Current week ^(all models^)',
+    'echo 80%% left',
+    'echo Resets Jun 19',
+    'exit /b 0'
+  ].join('\r\n'));
+
+  const deps = {
+    platform: 'win32',
+    env: { ...process.env, TOKEN_MONITOR_CLAUDE_COMMAND: command },
+    now: () => Date.parse('2026-06-13T07:00:00Z'),
+    claudeCredentialPath: path.join(fixtureDir, 'missing-credentials.json'),
+    stat: async () => {
+      throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+    },
+    readdirSync: () => [],
+    readWindowsCredentialSecret: async () => ''
+  };
+
+  assert.deepEqual(JSON.parse(await runClaudeAuthStatus(deps)), { loggedIn: true });
+  const provider = await fetchClaudeLimits({}, deps);
+  assert.equal(provider.source, 'cli');
+  assert.equal(provider.windows.find((window) => window.kind === 'session')?.remainingPercent, 95);
+  assert.equal(provider.windows.find((window) => window.kind === 'weekly')?.remainingPercent, 80);
 });
 
 test('Claude limits read Windows Credential Manager credentials when credential files are absent', async () => {
@@ -989,6 +1202,120 @@ test('Claude CLI usage parses compact PTY reset lines', () => {
   assert.equal(typeof weekly.resetsAt, 'string');
 });
 
+test('Claude CLI usage preserves colon-delimited reset lines', () => {
+  const provider = mapClaudeCliUsageToProvider([
+    'Current session',
+    '95% left',
+    'Resets:4pm',
+    'Current week (all models)',
+    '80% left',
+    'Resets:Jun 19'
+  ].join('\n'), {
+    now: new Date('2026-06-13T07:00:00Z'),
+    updatedAt: '2026-06-13T07:00:00Z'
+  });
+
+  const session = provider.windows.find((window) => window.kind === 'session');
+  const weekly = provider.windows.find((window) => window.kind === 'weekly');
+  assert.equal(session.resetDescription, 'Resets:4pm');
+  assert.equal(weekly.resetDescription, 'Resets:Jun 19');
+  assert.equal(typeof session.resetsAt, 'string');
+  assert.equal(typeof weekly.resetsAt, 'string');
+});
+
+test('Claude CLI usage preserves a spaced time reset', () => {
+  const provider = mapClaudeCliUsageToProvider([
+    'Current session',
+    '95% left',
+    'Resets 6pm',
+    'Current week',
+    '80% left',
+    'Resets Jul 22'
+  ].join('\n'), {
+    now: new Date('2026-07-15T00:00:00Z'),
+    updatedAt: '2026-07-15T00:00:00Z'
+  });
+
+  const session = provider.windows.find((window) => window.kind === 'session');
+  assert.equal(session.resetDescription, 'Resets 6pm');
+  assert.equal(typeof session.resetsAt, 'string');
+});
+
+test('Claude CLI usage preserves time-only resets in their own quota sections', () => {
+  const provider = mapClaudeCliUsageToProvider([
+    'Current session',
+    '69% used',
+    'Resets 5am (Europe/Saratov)',
+    'Current week (all models)',
+    '87% used',
+    'Resets 6pm (Europe/Saratov)'
+  ].join('\n'), {
+    now: new Date('2026-07-15T00:00:00Z'),
+    updatedAt: '2026-07-15T00:00:00Z'
+  });
+
+  const session = provider.windows.find((window) => window.kind === 'session');
+  const weekly = provider.windows.find((window) => window.kind === 'weekly');
+  assert.equal(session.resetDescription, 'Resets 5am');
+  assert.equal(typeof session.resetsAt, 'string');
+  assert.equal(weekly.resetDescription, 'Resets 6pm');
+  assert.equal(typeof weekly.resetsAt, 'string');
+});
+
+test('Claude CLI usage never borrows the weekly percentage for a missing session', () => {
+  assert.throws(
+    () => mapClaudeCliUsageToProvider([
+      'Current session',
+      'Current week',
+      '80% left',
+      'Resets Jul 22'
+    ].join('\n'), {
+      now: new Date('2026-07-15T00:00:00Z'),
+      updatedAt: '2026-07-15T00:00:00Z'
+    }),
+    (error) => error?.status === 'unavailable'
+      && error?.message === 'Claude CLI usage missing current session'
+  );
+});
+
+test('Claude CLI usage never borrows Sonnet-only data for a missing all-model weekly window', () => {
+  const provider = mapClaudeCliUsageToProvider([
+    'Current session',
+    '95% left',
+    'Resets 6pm',
+    'Current week (all models)',
+    'Current week (Sonnet only)',
+    '80% left',
+    'Resets Jun 19'
+  ].join('\n'), {
+    now: new Date('2026-06-13T07:00:00Z'),
+    updatedAt: '2026-06-13T07:00:00Z'
+  });
+
+  assert.equal(provider.windows.find((window) => window.kind === 'weekly'), undefined);
+});
+
+test('Claude CLI usage never borrows a Sonnet-only reset for the all-model weekly window', () => {
+  const provider = mapClaudeCliUsageToProvider([
+    'Current session',
+    '95% left',
+    'Resets 6pm',
+    'Current week (all models)',
+    '40% left',
+    'Current week (Sonnet only)',
+    '80% left',
+    'Resets Jun 19'
+  ].join('\n'), {
+    now: new Date('2026-06-13T07:00:00Z'),
+    updatedAt: '2026-06-13T07:00:00Z'
+  });
+
+  const weekly = provider.windows.find((window) => window.kind === 'weekly');
+  assert.equal(weekly.remainingPercent, 40);
+  assert.equal(weekly.resetDescription, '');
+  assert.equal(weekly.resetsAt, null);
+});
+
 test('Claude CLI usage carries account email and organization into the provider identity', () => {
   const provider = mapClaudeCliUsageToProvider([
     'Current session',
@@ -1188,6 +1515,142 @@ test('Claude usage credits honour a non-cent decimal_places', () => {
   assert.equal(window.used, 235);
   assert.equal(window.limit, 2000);
   assert.equal(window.currency, 'JPY');
+});
+
+test('Claude OAuth usage maps cedar_ember reset grants into resetCredits', () => {
+  const provider = mapClaudeUsageToProvider(claudeUsagePayload({
+    cedar_ember: {
+      grants: [
+        {
+          id: 'later-promo',
+          label: 'Later promo reset',
+          resets_left: 2,
+          resets_total: 2,
+          starts_at: '2030-01-01T00:00:00Z',
+          ends_at: '2030-02-01T00:00:00Z',
+          clears: ['seven_day'],
+          usable_now: true,
+          use_requires_limit: false,
+          paused: false
+        },
+        {
+          id: 'launch-promo',
+          label: 'Launch promo reset',
+          resets_left: 1,
+          resets_total: 1,
+          starts_at: '2030-01-01T00:00:00Z',
+          ends_at: '2030-01-15T00:00:00Z',
+          clears: ['five_hour', 'seven_day', 'seven_day_overage_included'],
+          usable_now: true,
+          use_requires_limit: false,
+          paused: false
+        }
+      ]
+    }
+  }));
+
+  const resetCredits = provider.resetCredits;
+  assert.equal(resetCredits.availableCount, 3);
+  assert.equal(resetCredits.nextExpiresAt, '2030-01-15T00:00:00.000Z');
+  assert.deepEqual(resetCredits.expirations, ['2030-01-15T00:00:00.000Z', '2030-02-01T00:00:00.000Z']);
+  assert.equal(resetCredits.grants.length, 2);
+  const launch = resetCredits.grants[1];
+  assert.equal(launch.id, 'launch-promo');
+  assert.equal(launch.label, 'Launch promo reset');
+  assert.equal(launch.resetsLeft, 1);
+  assert.equal(launch.resetsTotal, 1);
+  assert.equal(launch.endsAt, '2030-01-15T00:00:00.000Z');
+  assert.deepEqual(launch.clears, ['five_hour', 'seven_day', 'seven_day_overage_included']);
+  assert.equal(launch.usableNow, true);
+  assert.equal(launch.useRequiresLimit, false);
+  assert.equal(launch.paused, false);
+});
+
+test('Claude OAuth usage drops spent and lapsed reset grants', () => {
+  const provider = mapClaudeUsageToProvider(claudeUsagePayload({
+    cedar_ember: {
+      grants: [
+        {
+          id: 'spent',
+          label: 'Spent reset',
+          resets_left: 0,
+          resets_total: 1,
+          ends_at: '2030-01-15T00:00:00Z',
+          clears: ['five_hour'],
+          usable_now: false
+        },
+        {
+          id: 'lapsed',
+          label: 'Lapsed reset',
+          resets_left: 1,
+          resets_total: 1,
+          ends_at: '2020-01-15T00:00:00Z',
+          clears: ['five_hour'],
+          usable_now: false
+        }
+      ]
+    }
+  }));
+
+  assert.equal(provider.resetCredits, null);
+});
+
+test('Claude OAuth usage without cedar_ember grants carries no resetCredits', () => {
+  for (const cedar_ember of [null, {}, { grants: [] }]) {
+    const provider = mapClaudeUsageToProvider(claudeUsagePayload({ cedar_ember }));
+    assert.equal(provider.resetCredits, null);
+  }
+});
+
+test('Claude OAuth usage asks the usage endpoint for reset grants', async () => {
+  const requested = [];
+  let usageHeaders = null;
+  const provider = await fetchClaudeLimits({}, {
+    platform: 'linux',
+    now: () => Date.parse('2026-07-25T00:00:00Z'),
+    claudeCredentialPath: '/same/path/.credentials.json',
+    stat: async () => ({ mtimeMs: 1 }),
+    readFile: async () => JSON.stringify({
+      claudeAiOauth: {
+        accessToken: 'stable-access',
+        refreshToken: 'stable-refresh',
+        expiresAt: Date.parse('2026-07-26T00:00:00Z')
+      }
+    }),
+    fetch: async (url, options) => {
+      requested.push(url);
+      if (url.includes('/api/oauth/usage')) usageHeaders = options?.headers || null;
+      if (url.endsWith('/api/oauth/profile')) {
+        return { ok: true, json: async () => DEFAULT_CLAUDE_PROFILE };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          five_hour: { utilization: 12, resets_at: '2026-07-25T05:00:00Z' },
+          cedar_ember: {
+            grants: [{
+              id: 'launch-promo',
+              label: 'Launch promo reset',
+              resets_left: 1,
+              resets_total: 1,
+              ends_at: '2030-01-15T00:00:00Z',
+              clears: ['five_hour', 'seven_day'],
+              usable_now: true
+            }]
+          }
+        })
+      };
+    }
+  });
+
+  const usageRequest = requested.find((url) => url.includes('/api/oauth/usage'));
+  assert.equal(new URL(usageRequest).searchParams.get('cedar_ember'), '1');
+  // Anthropic gates cedar_ember on the client surface: any user-agent that
+  // is not Claude Code gets `eligible: false` with no grants, so the OAuth
+  // usage call must present as the CLI.
+  assert.match(usageHeaders?.['user-agent'], /^claude-cli\/\d+\.\d+\.\d+ \(external, cli\)$/);
+  assert.equal(provider.resetCredits.availableCount, 1);
+  assert.equal(provider.resetCredits.grants[0].label, 'Launch promo reset');
 });
 
 const PREPAID_CREDITS = {

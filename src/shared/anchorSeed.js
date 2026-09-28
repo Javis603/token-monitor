@@ -1,8 +1,8 @@
 'use strict';
 
-const { collectorAnchorTrust, computePeriodWindows, qoderCnDbPathForClients } = require('./collector');
+const { collectorAnchorTrust, computePeriodWindows, qoderCnSourcesForClients } = require('./collector');
 const { mergePeriods } = require('./usage');
-const { filterReasonixSyntheticSessions } = require('./reasonixSessionGuard');
+const { filterReasonixSyntheticSessions } = require('./providers/reasonix/sessionGuard');
 
 // The collector persists every full scan to collector-anchor.json so it can
 // derive month/allTime from a `--today` scan after a restart. A widget cold
@@ -24,17 +24,21 @@ function deviceRecordFromAnchor(saved, options = {}) {
     allTimeSince = '',
     projectsEnabled = true,
     qoderCnDbPath: qoderCnDbPathOption,
+    qoderCnProjectsDir: qoderCnProjectsDirOption,
+    customScanPaths = null,
     homeDir,
+    env,
+    sourcePlatform,
     wslScanEnabled = true,
     wslSupported = false,
     hostname = '',
     platform = '',
     now = new Date()
   } = options;
-  const qoderCnDbPath = qoderCnDbPathOption === undefined
-    ? qoderCnDbPathForClients(clients, { homeDir })
-    : qoderCnDbPathOption;
-  const trust = collectorAnchorTrust(saved, { clients, allTimeSince, projectsEnabled, qoderCnDbPath, now });
+  const qoderCnSources = qoderCnSourcesForClients(clients, { homeDir, env, platform: sourcePlatform });
+  const qoderCnDbPath = qoderCnDbPathOption === undefined ? qoderCnSources.dbPath : qoderCnDbPathOption;
+  const qoderCnProjectsDir = qoderCnProjectsDirOption === undefined ? qoderCnSources.projectsDir : qoderCnProjectsDirOption;
+  const trust = collectorAnchorTrust(saved, { clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, now });
   if (!trust) return null;
   // The seed's own rule, and the one place it is stricter than the collector.
   // A capture time the collector cannot trust only costs it a full scan, but

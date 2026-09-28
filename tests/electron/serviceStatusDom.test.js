@@ -253,7 +253,9 @@ test('Home limit provider settings expand with the shared accordion transition',
   assert.match(renderHomeSettingsList, /homeLimitProviderContainer/);
   assert.match(renderHomeSettingsList, /accordion-animated-container\$\{state\.homeLimitSettingsExpanded \? '' : ' hidden'\}/);
   assert.match(renderHomeSettingsList, /accordion-animation-inner/);
-  assert.match(renderHomeSettingsList, /container\.classList\.toggle\('hidden', !state\.homeLimitSettingsExpanded\)/);
+  assert.match(renderHomeSettingsList, /togglePreferenceSubgroup\(HOME_MODULE_SUBGROUPS, '\.home-module-preference-row', id\)/);
+  const sharedExpansion = functionBody(app, 'setPreferenceSubgroupsExpanded', 'togglePreferenceSubgroup');
+  assert.match(sharedExpansion, /document\.getElementById\(containerId\)\?\.classList\.toggle\('hidden', !open\)/);
   assert.doesNotMatch(renderHomeSettingsList, /if \(id === 'limits' && state\.homeLimitSettingsExpanded\) wrap\.append\(renderHomeLimitProviderList\(\)\)/);
   assert.match(css, /\.tool-preference-list,\s*\.settings-nested-list,\s*\.cursor-settings-details-inner/);
   assert.match(css, /\.tool-preference-list > \* \+ \*,\s*\.settings-nested-list > \* \+ \*/);
@@ -338,7 +340,6 @@ test('Home-launched secondary views expose an accessible return action', () => {
   const backIconRule = cssRule(css, '.back-home-icon');
   assert.match(backRowRule, /min-height:\s*26px/);
   assert.match(backRowRule, /padding:\s*0\s*;/);
-  assert.match(cssRule(css, '.view-back-row.hidden'), /display:\s*none/);
   assert.match(backButtonRule, /height:\s*26px/);
   assert.match(backButtonRule, /margin-left:\s*0\s*;/);
   assert.match(backButtonRule, /padding:\s*0 6px 0 0\s*;/);
@@ -379,8 +380,8 @@ test('Projects TOTAL view explains an incomplete cross-device breakdown', () => 
   assert.match(app, /projectRowsApi\.projectBreakdownIncomplete\(state\.stats, state\.period\)/);
   assert.match(app, /hint\.className = 'breakdown-incomplete-hint'/);
   assert.doesNotMatch(app, /hint\.dataset\.key/);
-  assert.match(app, /children\.filter\(\(child\) => child !== existingHint\)/);
-  assert.match(app, /JSON\.stringify\(\[state\.breakdown, hintText, rows\.map\(\(row\) => row\.key\)\]\)/);
+  assert.match(app, /\.filter\(\(child\) => child !== existingHint\)/);
+  assert.match(app, /page\.total,[\s\S]*visibleRows\.map\(\(row\) => row\.key\)/);
   assert.match(app, /hint\.setAttribute\('role', 'status'\)/);
   assert.match(app, /incompleteHint = 'projects\.incomplete'/);
   assert.match(app, /incompleteHint = 'sessions\.incomplete'/);
@@ -397,14 +398,12 @@ test('project rows use a fuller icon without changing the navigation icon', () =
 test('row accordions expose keyboard and aria interactions', () => {
   const app = readRendererFile('app.js');
   assert.match(app, /function toggleAccordionRow/);
-  assert.match(app, /function setAttributeIfChanged/);
   assert.match(app, /event\.key !== 'Enter' && event\.key !== ' '/);
-  assert.match(app, /row\.tabIndex = 0/);
-  assert.match(app, /setAttributeIfChanged\(row, 'role', 'button'\)/);
-  assert.match(app, /setAttributeIfChanged\(row, 'aria-expanded'/);
-  assert.match(app, /setAttributeIfChanged\(row, 'aria-label', `\$\{name\}, \$\{t\('dashboard\.stat\.totalTokens'\)\}/);
+  assert.match(app, /sessionRowsApi\.applyBreakdownRowSemantics\(row, rowHead/);
+  assert.match(app, /hasAccordion,/);
+  assert.match(app, /expanded: row\.classList\.contains\('expanded'\)/);
+  assert.match(app, /\$\{name\}, \$\{t\('dashboard\.stat\.totalTokens'\)\}/);
   assert.match(app, /\$\{t\('dashboard\.stat\.totalCost'\)\}: \$\{formatCost\(cost \|\| 0\)\}/);
-  assert.match(app, /row\.removeAttribute\('aria-label'\)/);
 });
 
 test('project accordions retain unchanged DOM between live refreshes', () => {

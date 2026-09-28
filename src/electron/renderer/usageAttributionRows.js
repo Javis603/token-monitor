@@ -58,5 +58,52 @@
     return Math.max(0, finiteNumber(total) - attributed);
   }
 
-  return { attributionRows, visibleAttributionRows, attributionValue, UNATTRIBUTED_KEY };
+  function normalizeRankingMetric(value) {
+    return value === 'cost' ? 'cost' : 'tokens';
+  }
+
+  function hasKnownCost(rows) {
+    return (Array.isArray(rows) ? rows : []).some((row) => (
+      row?.unattributed !== true && finiteNumber(row?.cost) > 0
+    ));
+  }
+
+  function effectiveRankingMetric(rows, metric) {
+    return normalizeRankingMetric(metric) === 'cost' && hasKnownCost(rows) ? 'cost' : 'tokens';
+  }
+
+  function rankingValue(row, metric) {
+    return Math.max(0, finiteNumber(normalizeRankingMetric(metric) === 'cost' ? row?.cost : row?.value));
+  }
+
+  function sortedRowsByMetric(rows, effectiveMetric) {
+    return [...rows].sort((left, right) => {
+      if (effectiveMetric === 'cost') {
+        const costDifference = finiteNumber(right?.cost) - finiteNumber(left?.cost);
+        if (costDifference !== 0) return costDifference;
+      }
+      const tokenDifference = finiteNumber(right?.value) - finiteNumber(left?.value);
+      if (tokenDifference !== 0) return tokenDifference;
+      return String(left?.key || left?.name || '').localeCompare(String(right?.key || right?.name || ''));
+    });
+  }
+
+  function rankRowsWithValues(rows, metric) {
+    const sourceRows = Array.isArray(rows) ? rows : [];
+    const effectiveMetric = effectiveRankingMetric(sourceRows, metric);
+    return sortedRowsByMetric(sourceRows, effectiveMetric).map((row) => ({
+      ...row,
+      barValue: rankingValue(row, effectiveMetric)
+    }));
+  }
+
+  return {
+    attributionRows,
+    visibleAttributionRows,
+    attributionValue,
+    normalizeRankingMetric,
+    rankingValue,
+    rankRowsWithValues,
+    UNATTRIBUTED_KEY
+  };
 });

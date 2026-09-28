@@ -7,7 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
-const oc = require('../../src/shared/opencodeLimits');
+const oc = require('../../src/shared/providers/opencode/goLimits');
 
 // ---------------------------------------------------------------------------
 // Helper: build a synthetic opencode.db in a temp dir

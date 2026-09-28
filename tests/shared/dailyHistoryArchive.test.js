@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -54,6 +57,44 @@ test('normalizeDailyHistoryArchive rejects malformed days and observations', () 
     version: 1,
     days: {}
   });
+});
+
+test('Cursor Auto archive observations normalize old default keys before a new graph capture', () => {
+  const date = '2026-09-27';
+  const stored = { days: { [date]: { observations: [
+    { client: 'cursor', modelId: 'default', tokens: 5, cost: 0.01 },
+    { client: 'claude', modelId: 'default', tokens: 11, cost: 0.03 }
+  ] } } };
+  const incoming = graph(date, [client('cursor', 'default', 5, 0.01, 1)]);
+  const archive = captureDailyHistoryArchive(stored, incoming, { todayKey: '2026-09-28' });
+  const visible = graphFromDailyHistoryArchive([], archive, { todayKey: '2026-09-28' });
+  const rows = visible.contributions[0].clients;
+
+  assert.equal(rows.find((row) => row.client === 'cursor').modelId, 'cursor-auto');
+  assert.equal(rows.find((row) => row.client === 'cursor').tokens.input, 5);
+  assert.equal(rows.find((row) => row.client === 'claude').modelId, 'default');
+});
+
+test('Cursor Auto archive summary moves exact model components only when attribution is unambiguous', () => {
+  const date = '2026-09-27';
+  const cursor = { client: 'cursor', modelId: 'default', tokens: 5, cost: 0.01 };
+  const summary = {
+    tokenComponentsAvailable: true,
+    outputTokens: 5,
+    perClient: { cursor: { outputTokens: 5 } },
+    perModel: { default: { outputTokens: 5 } }
+  };
+  const one = normalizeDailyHistoryArchive({ liveDays: { [date]: {
+    observations: [cursor], componentSummary: summary
+  } } }).liveDays[date];
+  assert.equal(one.componentSummary.perModel['cursor-auto'].outputTokens, 5);
+  assert.equal(one.componentSummary.tokenComponentsAvailable, true);
+
+  const mixed = normalizeDailyHistoryArchive({ liveDays: { [date]: {
+    observations: [cursor, { client: 'claude', modelId: 'default', tokens: 11 }],
+    componentSummary: summary
+  } } }).liveDays[date];
+  assert.equal(mixed.componentSummary, undefined);
 });
 
 test('capture preserves a larger prior observation as one coherent record', () => {
@@ -382,6 +423,165 @@ function dayObservation(archive, date) {
   return Object.values(archive.liveDays[date].observations)[0];
 }
 
+function withArchiveFile(content, callback) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-archive-'));
+  const archivePath = path.join(directory, 'daily-history-archive.json');
+  fs.writeFileSync(archivePath, content, 'utf8');
+  try {
+    return callback(archivePath);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+for (const [name, retain] of [
+  ['retainDailyHistory', (options) => retainDailyHistory(graph('2026-08-05', [
+    client('claude', 'opus', 120, 4.8, 6)
+  ]), options)],
+  ['retainLiveDailyHistory', (options) => retainLiveDailyHistory(livePeriod(120, 1.2), options)]
+]) {
+  test(`${name} treats only a missing archive as empty`, () => {
+    withArchiveFile('   \n', (archivePath) => {
+      assert.throws(
+        () => retain({ path: archivePath, todayKey: '2026-08-05' }),
+        (error) => error.message.includes(archivePath) && error.message.includes('empty')
+      );
+      assert.equal(fs.readFileSync(archivePath, 'utf8'), '   \n');
+    });
+
+    withArchiveFile('{"days":', (archivePath) => {
+      assert.throws(
+        () => retain({ path: archivePath, todayKey: '2026-08-05' }),
+        (error) => error.message.includes(archivePath) && error.cause instanceof SyntaxError
+      );
+      assert.equal(fs.readFileSync(archivePath, 'utf8'), '{"days":');
+    });
+
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-archive-'));
+    const archivePath = path.join(directory, 'missing.json');
+    try {
+      assert.doesNotThrow(() => retain({ path: archivePath, todayKey: '2026-08-05' }));
+      assert.equal(fs.existsSync(archivePath), true);
+      const created = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+      assert.ok(created.days?.['2026-08-05'] || created.liveDays?.['2026-08-05']);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const [name, retain] of [
+  ['retainDailyHistory', (options) => retainDailyHistory(graph('2026-08-05', [
+    client('claude', 'opus', 120, 4.8, 6)
+  ]), options)],
+  ['retainLiveDailyHistory', (options) => retainLiveDailyHistory(livePeriod(120, 1.2), options)]
+]) {
+  test(`${name} leaves the archive untouched when the prewrite rebase read fails`, () => {
+    const initial = captureDailyHistoryArchive({}, graph('2026-08-04', [
+      client('codex', 'gpt', 50, 2, 3)
+    ]), { todayKey: '2026-08-05' });
+    withArchiveFile(`${JSON.stringify(initial)}\n`, (archivePath) => {
+      const before = fs.readFileSync(archivePath);
+      const beforeMtime = fs.statSync(archivePath).mtimeMs;
+      let writeChecks = 0;
+      let writes = 0;
+      let failedMtime;
+      const options = {
+        path: archivePath,
+        todayKey: '2026-08-05',
+        writeEnabled: () => {
+          writeChecks += 1;
+          if (writeChecks === 1) {
+            fs.writeFileSync(archivePath, '{"days":', 'utf8');
+            failedMtime = fs.statSync(archivePath).mtimeMs;
+          }
+          return true;
+        },
+        writeJsonAtomic: () => { writes += 1; }
+      };
+      assert.throws(() => retain(options), (error) => error.cause instanceof SyntaxError);
+      const failedBytes = fs.readFileSync(archivePath, 'utf8');
+      assert.equal(failedBytes, '{"days":');
+      assert.notEqual(failedBytes, before.toString('utf8'));
+      assert.equal(failedMtime >= beforeMtime, true);
+      assert.equal(writes, 0);
+      assert.equal(fs.readFileSync(archivePath, 'utf8'), failedBytes);
+      assert.equal(fs.statSync(archivePath).mtimeMs, failedMtime);
+
+      const repaired = captureDailyHistoryArchive({}, graph('2026-08-04', [
+        client('codex', 'gpt', 50, 2, 3)
+      ]), { todayKey: '2026-08-05' });
+      fs.writeFileSync(archivePath, `${JSON.stringify(repaired)}\n`, 'utf8');
+      assert.doesNotThrow(() => retain({ path: archivePath, todayKey: '2026-08-05' }));
+      const recovered = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+      assert.ok(recovered.days['2026-08-04']);
+      assert.ok(recovered.days['2026-08-05'] || recovered.liveDays?.['2026-08-05']);
+    });
+  });
+}
+
+test('strict archive reader rejects invalid container shapes while preserving compatibility', () => {
+  withArchiveFile('null', (archivePath) => {
+    assert.throws(() => retainDailyHistory([], { path: archivePath }), (error) => error.message.includes('root'));
+  });
+  withArchiveFile('{"days":[]}', (archivePath) => {
+    assert.throws(() => retainDailyHistory([], { path: archivePath }), (error) => error.message.includes('days'));
+  });
+  assert.doesNotThrow(() => retainDailyHistory([], { readJson: () => ({}) }));
+});
+
+const ioRetainCases = [
+  ['retainDailyHistory', (options) => retainDailyHistory(graph('2026-08-05', [
+    client('claude', 'opus', 120, 4.8, 6)
+  ]), options)],
+  ['retainLiveDailyHistory', (options) => retainLiveDailyHistory(livePeriod(120, 1.2), options)]
+];
+
+for (const [name, retain] of ioRetainCases) {
+  for (const [phase, failingRead] of [['initial', 1], ['prewrite rebase', 2]]) {
+    for (const code of ['EACCES', 'EBUSY', 'EPERM']) {
+      test(`${name} propagates ${code} from the ${phase} archive read`, (t) => {
+        const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-archive-'));
+        const archivePath = path.join(directory, 'daily-history-archive.json');
+        const initial = captureDailyHistoryArchive({}, graph('2026-08-04', [
+          client('codex', 'gpt', 50, 2, 3)
+        ]), { todayKey: '2026-08-05' });
+        const before = Buffer.from(`${JSON.stringify(initial)}\n`);
+        fs.writeFileSync(archivePath, before);
+        const beforeMtime = fs.statSync(archivePath).mtimeMs;
+        const originalReadFileSync = fs.readFileSync;
+        let reads = 0;
+        let writes = 0;
+        const readError = Object.assign(new Error(code), { code });
+        t.mock.method(fs, 'readFileSync', (filePath, encoding) => {
+          if (filePath === archivePath && ++reads === failingRead) throw readError;
+          return originalReadFileSync(filePath, encoding);
+        });
+        try {
+          assert.throws(
+            () => retain({
+              path: archivePath,
+              todayKey: '2026-08-05',
+              writeJsonAtomic: () => { writes += 1; }
+            }),
+            (error) => error === readError
+          );
+          assert.equal(writes, 0);
+          assert.deepEqual(originalReadFileSync(archivePath), before);
+          assert.equal(fs.statSync(archivePath).mtimeMs, beforeMtime);
+          t.mock.restoreAll();
+          assert.doesNotThrow(() => retain({ path: archivePath, todayKey: '2026-08-05' }));
+          const recovered = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
+          assert.deepEqual(recovered.days['2026-08-04'], initial.days['2026-08-04']);
+          assert.ok(recovered.days?.['2026-08-05'] || recovered.liveDays?.['2026-08-05']);
+        } finally {
+          fs.rmSync(directory, { recursive: true, force: true });
+        }
+      });
+    }
+  }
+}
+
 test('retainLiveDailyHistory persists only a higher live snapshot', () => {
   let stored = {};
   let writes = 0;
@@ -512,19 +712,71 @@ test('lazy write ownership is checked after the archive read', () => {
   assert.equal(writes, 0);
 });
 
-test('durable archive canonicalizes OMP into Pi before identity and reconstruction', () => {
+
+test('durable archive keeps Oh My Pi and Pi as separate clients', () => {
   const archive = captureDailyHistoryArchive({}, graph('2026-07-18', [
     client('pi', 'gpt', 10, 1, 1),
     client('omp', 'gpt', 20, 2, 1)
   ]), { todayKey: '2026-07-18' });
   const observations = Object.values(archive.days['2026-07-18'].observations);
+  assert.equal(observations.length, 2);
+  const byClient = Object.fromEntries(observations.map((o) => [o.client, o.tokens]));
+  assert.deepEqual(byClient, { pi: 10, omp: 20 });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, { todayKey: '2026-07-18' }));
+  assert.equal(restored.daily[0].perClient.pi.tokens, 10);
+  assert.equal(restored.daily[0].perClient.omp.tokens, 20);
+});
+
+// The split reverses a merge, so a day the archive already holds under the
+// merged id cannot be replayed as two rows: the merged row already contains the
+// split client, and adding it again would count that usage twice. Days captured
+// while the two ids were one therefore keep the merged identity.
+test('durable archive folds a merged-era day back together instead of double counting', () => {
+  const mergedArchive = {
+    version: 1,
+    days: {
+      '2026-08-01': {
+        date: '2026-08-01',
+        activeTimeMs: 0,
+        observations: [{ client: 'pi', modelId: 'gpt', tokens: 30, cost: 3, messages: 2 }]
+      }
+    }
+  };
+  const archive = captureDailyHistoryArchive(mergedArchive, graph('2026-08-01', [
+    client('pi', 'gpt', 10, 1, 1),
+    client('omp', 'gpt', 20, 2, 1)
+  ]), { todayKey: '2026-08-25' });
+  const day = archive.days['2026-08-01'];
+  const total = Object.values(day.observations).reduce((sum, o) => sum + o.tokens, 0);
+  assert.equal(total, 30, 'the merged day must not gain a second row for the same usage');
+  assert.equal(Object.keys(day.observations).length, 1);
+});
+
+// A day the archive never saw is not retroactively merged: nothing merged
+// exists to be counted twice, so the scan keeps reporting the real split.
+test('durable archive does not merge a day it never observed', () => {
+  const archive = captureDailyHistoryArchive({ version: 1, days: {} }, graph('2026-08-01', [
+    client('pi', 'gpt', 10, 1, 1),
+    client('omp', 'gpt', 20, 2, 1)
+  ]), { todayKey: '2026-08-25' });
+  const day = archive.days['2026-08-01'];
+  assert.equal(Object.keys(day.observations).length, 2);
+});
+
+test('durable archive canonicalizes antigravity-cli into antigravity before identity and reconstruction', () => {
+  const archive = captureDailyHistoryArchive({}, graph('2026-07-18', [
+    client('antigravity', 'gemini-3.8-flash', 10, 1, 1),
+    client('antigravity-cli', 'gemini-3.8-flash', 20, 2, 1)
+  ]), { todayKey: '2026-07-18' });
+  const observations = Object.values(archive.days['2026-07-18'].observations);
   assert.equal(observations.length, 1);
-  assert.equal(observations[0].client, 'pi');
+  assert.equal(observations[0].client, 'antigravity');
   assert.equal(observations[0].tokens, 30);
 
   const restored = historyFrom(graphFromDailyHistoryArchive([], archive, { todayKey: '2026-07-18' }));
-  assert.equal(restored.daily[0].perClient.pi.tokens, 30);
-  assert.equal(Object.hasOwn(restored.daily[0].perClient, 'omp'), false);
+  assert.equal(restored.daily[0].perClient.antigravity.tokens, 30);
+  assert.equal(Object.hasOwn(restored.daily[0].perClient, 'antigravity-cli'), false);
 });
 
 test('durable reconstruction preserves client-specific reasoning output without recounting it', () => {
@@ -553,4 +805,249 @@ test('clearDailyHistoryArchive removes persisted data and accepts a missing file
     error.code = 'ENOENT';
     throw error;
   } }), false);
+});
+
+// The rule that keeps a post-split day from being absorbed into Pi forever.
+// Every test above starts from an empty archive and sees Pi and Oh My Pi in the
+// same scan, which is the easy case. In real use a day is captured the first time
+// either client is seen, and Pi being seen first used to be enough to fold Oh My
+// Pi into it for good: the archive held `pi`, not `omp`, so every later scan of
+// that day was folded. Provenance is what separates the two cases now — a day
+// this version wrote carries its generation, and only a day without one may fold.
+test('durable archive keeps a day separate when Pi is captured before Oh My Pi', () => {
+  // Morning: only Pi. This is a legitimate post-split state, not a merged day.
+  const morning = captureDailyHistoryArchive({ version: 1, days: {} }, graph('2026-09-20', [
+    client('pi', 'gpt', 10, 1, 1)
+  ]), { todayKey: '2026-09-20' });
+  assert.equal(
+    morning.days['2026-09-20'].clientIdentityGeneration, 2,
+    'a day this version writes must be marked, or it can never be split again'
+  );
+
+  // Afternoon: both clients. Oh My Pi must stay its own row.
+  const archive = captureDailyHistoryArchive(morning, graph('2026-09-20', [
+    client('pi', 'gpt', 10, 1, 1),
+    client('omp', 'gpt', 20, 2, 1)
+  ]), { todayKey: '2026-09-20' });
+  const observations = Object.values(archive.days['2026-09-20'].observations);
+  const byClient = Object.fromEntries(observations.map((o) => [o.client, o.tokens]));
+  assert.deepEqual(byClient, { pi: 10, omp: 20 });
+});
+
+// The other direction: a true pre-split day must keep folding, or replaying its
+// post-split scan would count Oh My Pi twice.
+test('durable archive still folds a pre-split day that carries no generation', () => {
+  const legacy = {
+    version: 1,
+    days: {
+      '2026-09-01': {
+        date: '2026-09-01',
+        activeTimeMs: 0,
+        // No clientIdentityGeneration: written before the split existed.
+        observations: [{ client: 'pi', modelId: 'gpt', tokens: 100, cost: 1, messages: 3 }]
+      }
+    }
+  };
+  const archive = captureDailyHistoryArchive(legacy, graph('2026-09-01', [
+    client('pi', 'gpt', 60, 0.6, 2),
+    client('omp', 'gpt', 40, 0.4, 1)
+  ]), { todayKey: '2026-09-16' });
+  const observations = Object.values(archive.days['2026-09-01'].observations);
+  assert.equal(observations.length, 1, 'the merged day must stay one row');
+  assert.equal(observations[0].tokens, 100, 'the merged total must be preserved, not doubled');
+  assert.equal(
+    archive.days['2026-09-01'].clientIdentityGeneration, undefined,
+    'folding a legacy day must not silently promote it to a post-split day'
+  );
+});
+
+function cursorLivePeriod(totalTokens, costUsd) {
+  return {
+    capabilities: { tokenComponents: true },
+    totalTokens,
+    costUsd,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    outputTokens: 0,
+    clients: { cursor: totalTokens },
+    clientCosts: { cursor: costUsd },
+    models: { 'cursor-grok-4.6-high': totalTokens },
+    modelCosts: { 'cursor-grok-4.6-high': costUsd },
+    clientModels: { cursor: { 'cursor-grok-4.6-high': totalTokens } },
+    clientModelCosts: { cursor: { 'cursor-grok-4.6-high': costUsd } }
+  };
+}
+
+test('equal-token liveDays snapshot does not inflate cost over the graph archive', () => {
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 202_924_472, 141.5175, 91)
+  ]), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, cursorLivePeriod(202_924_472, 243.0328), {
+    todayKey: '2026-08-18'
+  });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  const day = restored.daily.find((row) => row.date === '2026-08-18');
+  assert.equal(day.tokens, 202_924_472);
+  assert.equal(day.cost, 141.5175);
+  assert.equal(day.perModel['cursor-grok-4.6-high'].cost, 141.5175);
+});
+
+test('equal-token liveDays may lower cost when the graph later corrects pricing', () => {
+  let archive = captureLiveDailyHistory({}, cursorLivePeriod(100, 2), { todayKey: '2026-08-18' });
+  archive = captureDailyHistoryArchive(archive, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 100, 1, 1)
+  ]), { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  const day = restored.daily.find((row) => row.date === '2026-08-18');
+  assert.equal(day.tokens, 100);
+  assert.equal(day.cost, 1);
+});
+
+test('live day with more tokens does not inflate an equal-token model price', () => {
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-28', [
+    client('cursor', 'cursor-grok-4.6-high', 83_478_257, 60.45, 10),
+    client('cursor', 'gpt-5.5', 95_000_000, 27.55, 5)
+  ]), { todayKey: '2026-08-28' });
+  archive = captureLiveDailyHistory(archive, {
+    capabilities: { tokenComponents: true },
+    totalTokens: 234_765_552,
+    costUsd: 141.62,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    outputTokens: 0,
+    clients: { cursor: 234_765_552 },
+    clientCosts: { cursor: 141.62 },
+    models: {
+      'cursor-grok-4.6-high': 83_478_257,
+      'gpt-5.5': 151_287_295
+    },
+    modelCosts: {
+      'cursor-grok-4.6-high': 109.99,
+      'gpt-5.5': 31.63
+    },
+    clientModels: {
+      cursor: {
+        'cursor-grok-4.6-high': 83_478_257,
+        'gpt-5.5': 151_287_295
+      }
+    },
+    clientModelCosts: {
+      cursor: {
+        'cursor-grok-4.6-high': 109.99,
+        'gpt-5.5': 31.63
+      }
+    }
+  }, { todayKey: '2026-08-28' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-29'
+  }), '2026-08-29');
+  const day = restored.daily.find((row) => row.date === '2026-08-28');
+  assert.equal(day.perModel['cursor-grok-4.6-high'].tokens, 83_478_257);
+  assert.equal(day.perModel['cursor-grok-4.6-high'].cost, 60.45);
+  assert.equal(day.tokens, 234_765_552);
+});
+
+test('equal-token liveDays fills in a missing price without requiring more tokens', () => {
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 100, 0, 1)
+  ]), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, cursorLivePeriod(100, 1.5), {
+    todayKey: '2026-08-18'
+  });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  const day = restored.daily.find((row) => row.date === '2026-08-18');
+  assert.equal(day.tokens, 100);
+  assert.equal(day.cost, 1.5);
+});
+
+test('a Cursor liveDay takes the graph cost after the graph reprices the same usage upward', () => {
+  let archive = captureLiveDailyHistory({}, cursorLivePeriod(100, 1), { todayKey: '2026-08-18' });
+  archive = captureDailyHistoryArchive(archive, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 100, 1.2, 1)
+  ]), { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  assert.equal(restored.daily.find((row) => row.date === '2026-08-18').cost, 1.2);
+});
+
+function claudeLivePeriod(totalTokens, costUsd) {
+  const period = cursorLivePeriod(totalTokens, costUsd);
+  return {
+    ...period,
+    clients: { claude: totalTokens },
+    clientCosts: { claude: costUsd },
+    models: { 'claude-sonnet-5': totalTokens },
+    modelCosts: { 'claude-sonnet-5': costUsd },
+    clientModels: { claude: { 'claude-sonnet-5': totalTokens } },
+    clientModelCosts: { claude: { 'claude-sonnet-5': costUsd } }
+  };
+}
+
+test('other clients keep repricing equal-token live days in either direction', () => {
+  let archive = captureLiveDailyHistory({}, claudeLivePeriod(100, 1), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, claudeLivePeriod(100, 1.2), { todayKey: '2026-08-18' });
+  archive = captureDailyHistoryArchive(archive, graph('2026-08-18', [
+    client('claude', 'claude-sonnet-5', 100, 0.9, 1)
+  ]), { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  assert.equal(restored.daily.find((row) => row.date === '2026-08-18').cost, 1.2);
+});
+
+test('a live day fills one model price while another model on that day is already priced', () => {
+  const liveDay = {
+    ...claudeLivePeriod(300, 3),
+    clients: { claude: 300 },
+    clientCosts: { claude: 3 },
+    models: { 'claude-sonnet-5': 100, 'claude-haiku-4-5': 200 },
+    modelCosts: { 'claude-sonnet-5': 1, 'claude-haiku-4-5': 2 },
+    clientModels: { claude: { 'claude-sonnet-5': 100, 'claude-haiku-4-5': 200 } },
+    clientModelCosts: { claude: { 'claude-sonnet-5': 1, 'claude-haiku-4-5': 2 } }
+  };
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-18', [
+    client('claude', 'claude-sonnet-5', 100, 1, 1),
+    client('claude', 'claude-haiku-4-5', 200, 0, 1)
+  ]), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, liveDay, { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  assert.equal(restored.daily.find((row) => row.date === '2026-08-18').cost, 3);
+});
+
+test('a Cursor graph day kept on a tied aggregate cost still fills a price only the liveDay has', () => {
+  let archive = captureDailyHistoryArchive({}, graph('2026-08-18', [
+    client('cursor', 'cursor-grok-4.6-high', 100, 0, 1),
+    client('cursor', 'gpt-5.5', 200, 3, 1)
+  ]), { todayKey: '2026-08-18' });
+  archive = captureLiveDailyHistory(archive, {
+    ...cursorLivePeriod(300, 3),
+    models: { 'cursor-grok-4.6-high': 100, 'gpt-5.5': 200 },
+    modelCosts: { 'cursor-grok-4.6-high': 1, 'gpt-5.5': 2 },
+    clientModels: { cursor: { 'cursor-grok-4.6-high': 100, 'gpt-5.5': 200 } },
+    clientModelCosts: { cursor: { 'cursor-grok-4.6-high': 1, 'gpt-5.5': 2 } }
+  }, { todayKey: '2026-08-18' });
+
+  const restored = historyFrom(graphFromDailyHistoryArchive([], archive, {
+    todayKey: '2026-08-19'
+  }), '2026-08-19');
+  const day = restored.daily.find((row) => row.date === '2026-08-18');
+  assert.equal(day.perModel['cursor-grok-4.6-high'].cost, 1);
+  assert.equal(day.perModel['gpt-5.5'].cost, 3);
+  assert.equal(day.cost, 4);
 });

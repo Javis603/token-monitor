@@ -9,10 +9,19 @@ const {
   parseEnterpriseUsage,
   parsePersonalUsage,
   workbuddyAccountKey
-} = require('../../src/shared/workbuddyLimits');
-const { collectLimitsOnce } = require('../../src/shared/limitCollector');
+} = require('../../src/shared/providers/workbuddy/limits');
+const { collectLimitsOnce } = require('../../src/shared/limits/collector');
 
 const NOW = Date.parse('2026-08-09T10:00:00Z');
+const PERSONAL_REQUEST_NOW = new Date(2026, 7, 9, 10, 11, 12).getTime();
+const EXPECTED_PERSONAL_REQUEST_BODY = {
+  PageNumber: 1,
+  PageSize: 100,
+  ProductCode: 'p_tcaca',
+  Status: [0, 3],
+  PackageEndTimeRangeBegin: '2026-08-09 10:11:12',
+  PackageEndTimeRangeEnd: '2127-07-16 10:11:12'
+};
 
 function response(body, status = 200) {
   return {
@@ -63,7 +72,7 @@ test('parsePersonalUsage aggregates valid WorkBuddy resource packages', () => {
   assert.equal(usage.window.usedPercent, 40);
 });
 
-test('parsePersonalUsage prefers the reported used amount and excludes non-active packages', () => {
+test('parsePersonalUsage prefers reported usage and excludes requested Status 3 history packages', () => {
   const usage = parsePersonalUsage({
     data: { Response: { Data: { Accounts: [
       {
@@ -153,7 +162,7 @@ test('fetchWorkbuddyLimits sends the private personal billing request without ex
     },
     {
       env: {},
-      now: () => NOW,
+      now: () => PERSONAL_REQUEST_NOW,
       fetch: async (url, init) => {
         requests.push({ url: String(url), init });
         return response({
@@ -182,13 +191,7 @@ test('fetchWorkbuddyLimits sends the private personal billing request without ex
   assert.equal(requests[0].init.headers['X-Domain'], 'copilot.tencent.com');
   assert.equal(requests[0].init.headers['X-Department-Info'], 'Engineering');
   assert.equal(requests[0].init.headers['Accept-Language'], 'en');
-  assert.deepEqual(JSON.parse(requests[0].init.body), {
-    PageNumber: 1,
-    PageSize: 100,
-    ProductCode: 'p_tcaca',
-    Status: [0],
-    OnlyValidPeriod: true
-  });
+  assert.deepEqual(JSON.parse(requests[0].init.body), EXPECTED_PERSONAL_REQUEST_BODY);
   assert.equal(provider.provider, 'workbuddy');
   assert.equal(provider.status, 'ok');
   assert.equal(provider.source, 'api');
@@ -219,7 +222,7 @@ test('fetchWorkbuddyLimits uses the WorkBuddy app session without asking users f
     { workbuddyDesktopSessionEnabled: true },
     {
       env: {},
-      now: () => NOW,
+      now: () => PERSONAL_REQUEST_NOW,
       fetch: async () => { throw new Error('the local app fetch should be used'); },
       workbuddyFetch: async (url, init) => {
         requests.push({ url: String(url), init });
@@ -247,6 +250,7 @@ test('fetchWorkbuddyLimits uses the WorkBuddy app session without asking users f
   assert.equal(requests[0].init.headers.Authorization, undefined);
   assert.equal(requests[0].init.headers.Cookie, undefined);
   assert.equal(requests[0].init.headers['X-User-Id'], undefined);
+  assert.deepEqual(JSON.parse(requests[0].init.body), EXPECTED_PERSONAL_REQUEST_BODY);
   assert.equal(provider.status, 'ok');
   assert.equal(provider.source, 'local');
   assert.equal(provider.sourceDetail, 'app');
@@ -442,7 +446,7 @@ test('WorkBuddy Local App reports unsupported desktop platforms without reading 
   assert.equal(called, false);
 });
 
-test('limitCollector dispatches the WorkBuddy provider through the shared provider lane', async () => {
+test('the limits collector dispatches the WorkBuddy provider through the shared provider lane', async () => {
   const summary = await collectLimitsOnce(
     { limitsEnabled: true, limitProviders: 'workbuddy', workbuddyAccessToken: 'fixture-token' },
     {
@@ -457,4 +461,87 @@ test('limitCollector dispatches the WorkBuddy provider through the shared provid
   assert.deepEqual(summary.providers.map((provider) => provider.provider), ['workbuddy']);
   assert.equal(summary.providers[0].windows[0].remaining, 15);
   assert.equal(summary.providers[0].balance.currency, 'CREDITS');
+});
+
+// The app owns the credential and sealed it, so signing in again cannot change
+// the outcome. The row has to name that instead of reusing the sign-in prompt.
+test('fetchWorkbuddyLimits names an app-sealed credential instead of asking for a sign-in', async () => {
+  let requests = 0;
+  const provider = await fetchWorkbuddyLimits(
+    {
+      workbuddyDesktopSessionEnabled: true,
+      workbuddyLocalSessionReason: 'encrypted'
+    },
+    {
+      env: {},
+      workbuddyFetch: async () => {
+        requests += 1;
+        return response({});
+      }
+    }
+  );
+
+  assert.equal(requests, 0);
+  assert.equal(provider.status, 'notConfigured');
+  assert.equal(provider.actionRequired, 'appSessionEncrypted');
+  assert.equal(provider.source, 'local');
+  assert.equal(provider.sourceDetail, 'app');
+  assert.doesNotMatch(JSON.stringify(provider), /encrypted"|envelope|eyJ/);
+});
+
+test('other WorkBuddy session read reasons keep the existing sign-in row', async () => {
+  const provider = await fetchWorkbuddyLimits(
+    {
+      workbuddyDesktopSessionEnabled: true,
+      workbuddyLocalSessionReason: 'absent'
+    },
+    {
+      env: {},
+      workbuddyFetch: async () => {
+        throw Object.assign(new Error('WorkBuddy app sign-in is required'), { status: 'notConfigured' });
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'notConfigured');
+  assert.equal(Object.hasOwn(provider, 'actionRequired'), false);
+});
+
+test('a sealed app credential never outranks the explicit WorkBuddy billing token', async () => {
+  const provider = await fetchWorkbuddyLimits(
+    {
+      workbuddyAccessToken: 'explicit-token',
+      workbuddyUserId: 'user-1',
+      workbuddyDesktopSessionEnabled: true,
+      workbuddyLocalSessionReason: 'encrypted'
+    },
+    {
+      env: {},
+      fetch: async () => response({ data: { Response: { Data: { Accounts: [] } } } })
+    }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(Object.hasOwn(provider, 'actionRequired'), false);
+});
+
+test('the sealed-credential hint stays inside the desktop provider lane', async () => {
+  let requests = 0;
+  const provider = await fetchWorkbuddyLimits(
+    {
+      workbuddyDesktopSessionEnabled: false,
+      workbuddyLocalSessionReason: 'encrypted'
+    },
+    {
+      env: {},
+      fetch: async () => {
+        requests += 1;
+        return response({});
+      }
+    }
+  );
+
+  assert.equal(requests, 0);
+  assert.equal(provider.status, 'notConfigured');
+  assert.equal(Object.hasOwn(provider, 'actionRequired'), false);
 });

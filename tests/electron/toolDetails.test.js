@@ -1,0 +1,137 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const { tokenComponentBreakdown } = require('../../src/electron/renderer/fixedPeriodRanges');
+const {
+  detailPercentLabel,
+  modelRowsForTool,
+  tokenInputPercentages,
+  visibleModelRowsForTool
+} = require('../../src/electron/renderer/toolDetails');
+
+test('modelRowsForTool keeps the same model separated by tool and sorts usage', () => {
+  const period = {
+    clients: { codex: 1000, opencode: 400 },
+    clientCosts: { codex: 2, opencode: 0.4 },
+    clientModels: {
+      codex: { shared: 250, 'gpt-5.4': 700 },
+      opencode: { shared: 400 }
+    },
+    clientModelCosts: {
+      codex: { shared: 0.25, 'gpt-5.4': 1.5 },
+      opencode: { shared: 0.4 }
+    }
+  };
+
+  assert.deepEqual(modelRowsForTool(period, 'codex'), [
+    { key: 'gpt-5.4', name: 'gpt-5.4', value: 700, cost: 1.5, percent: 70, unattributed: false },
+    { key: 'shared', name: 'shared', value: 250, cost: 0.25, percent: 25, unattributed: false },
+    { key: '__unattributed', name: '__unattributed', value: 50, cost: 0.25, percent: 5, unattributed: true }
+  ]);
+  assert.deepEqual(modelRowsForTool(period, 'opencode'), [
+    { key: 'shared', name: 'shared', value: 400, cost: 0.4, percent: 100, unattributed: false }
+  ]);
+});
+
+test('modelRowsForTool tolerates missing, invalid, and cost-only attribution', () => {
+  assert.deepEqual(modelRowsForTool(null, 'codex'), []);
+  assert.deepEqual(modelRowsForTool({ clients: { codex: 0 }, clientModelCosts: { codex: { unknown: 2 } } }, 'codex'), [
+    { key: 'unknown', name: 'unknown', value: 0, cost: 2, percent: 0, unattributed: false }
+  ]);
+  assert.deepEqual(modelRowsForTool({
+    clients: { codex: 50 },
+    clientModels: { codex: { broken: Number.NaN, negative: -1, valid: 75 } }
+  }, 'codex'), [
+    { key: 'valid', name: 'valid', value: 75, cost: 0, percent: 100, unattributed: false }
+  ]);
+});
+
+test('modelRowsForTool does not invent a remainder without any model attribution', () => {
+  assert.deepEqual(modelRowsForTool({
+    clients: { codex: 50 },
+    clientCosts: { codex: 1 }
+  }, 'codex'), []);
+});
+
+test('visibleModelRowsForTool hides only synthetic cost remainders that format as zero', () => {
+  const period = {
+    clients: { 'deepseek-harness': 100 },
+    clientCosts: { 'deepseek-harness': 1.000001 },
+    clientModels: { 'deepseek-harness': { 'deepseek-v4': 100 } },
+    clientModelCosts: { 'deepseek-harness': { 'deepseek-v4': 1 } }
+  };
+  const formatHkd = (value) => `HK$${(Number(value || 0) * 7.8).toFixed(4)}`;
+
+  assert.deepEqual(visibleModelRowsForTool(period, 'deepseek-harness', formatHkd), [
+    { key: 'deepseek-v4', name: 'deepseek-v4', value: 100, cost: 1, percent: 100, unattributed: false }
+  ]);
+
+  period.clientCosts['deepseek-harness'] = 1.01;
+  assert.deepEqual(visibleModelRowsForTool(period, 'deepseek-harness', formatHkd).at(-1), {
+    key: '__unattributed',
+    name: '__unattributed',
+    value: 0,
+    cost: 0.01,
+    percent: 0,
+    unattributed: true
+  });
+});
+
+test('detailPercentLabel does not present small positive shares as zero', () => {
+  assert.equal(detailPercentLabel(95.2), '95%');
+  assert.equal(detailPercentLabel(0.29), '<1%');
+  assert.equal(detailPercentLabel(0), '0%');
+  assert.equal(detailPercentLabel(150), '100%');
+});
+
+test('token detail input shares preserve small positive values through the breakdown pipeline', () => {
+  const tinyHit = tokenInputPercentages(tokenComponentBreakdown({
+    totalTokens: 1000,
+    cacheReadTokens: 1,
+    outputTokens: 0,
+    unclassifiedTokens: 0
+  }));
+  assert.equal(detailPercentLabel(tinyHit.hit), '<1%');
+  assert.equal(detailPercentLabel(tinyHit.miss), '100%');
+
+  const tinyMiss = tokenInputPercentages(tokenComponentBreakdown({
+    totalTokens: 1000,
+    cacheReadTokens: 999,
+    outputTokens: 0,
+    unclassifiedTokens: 0
+  }));
+  assert.equal(detailPercentLabel(tinyMiss.hit), '100%');
+  assert.equal(detailPercentLabel(tinyMiss.miss), '<1%');
+});
+
+test('tool details helper loads before app.js and exposes a contextual app footer switch', () => {
+  const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
+  const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
+  assert.ok(html.indexOf('<script src="usageAttributionRows.js"></script>') < html.indexOf('<script src="toolDetails.js"></script>'));
+  assert.ok(html.indexOf('<script src="toolDetails.js"></script>') < html.indexOf('<script src="app.js"></script>'));
+  assert.match(html, /id="toolDetailFooter"[^>]*role="group"/);
+  assert.match(app, /function activeToolDetail\(\)/);
+  assert.match(app, /visibleStatsSurface\(\) !== 'main' \|\| state\.breakdown !== 'tool'/);
+  assert.match(app, /function renderActiveToolDetail\(\)/);
+  assert.match(app, /function setActiveToolDetailMode\(mode\)/);
+  assert.match(app, /state\.toolDetailMode = mode/);
+  assert.match(app, /const inputPercentages = toolDetailsApi\.tokenInputPercentages\(tokenParts\)/);
+  assert.doesNotMatch(app, /toolDetailMode: state\.toolDetailMode/);
+  assert.match(app, /state\.toolDetailMode = mode;\s*renderToolDetailAccordion\(active\.accordionInner, active\.detail\);\s*renderToolDetailFooter\(\);/);
+  assert.doesNotMatch(app, /state\.toolDetailMode = mode;\s*render\(\);/);
+  assert.match(app, /row\.classList\.add\('expanded'\);\s*row\.querySelector\('\.row-head'\)\?\.setAttribute\('aria-expanded', 'true'\);\s*renderActiveToolDetail\(\);/);
+  assert.match(app, /const mode = state\.toolDetailMode === 'models' && hasModels/);
+  assert.match(app, /model\.unattributed === true \? labels\.unclassified : model\.name/);
+  assert.match(app, /els\.toolDetailFooter\.classList\.toggle\('hidden', !active\)/);
+  assert.ok(app.indexOf("if (surface !== 'main')") < app.indexOf("els.toolDetailFooter.classList.add('hidden')"));
+  assert.match(css, /\.tool-detail-footer-option:focus-visible/);
+  assert.match(css, /\.shell\.settings-open \.tool-detail-footer \{ display: none; \}/);
+  assert.match(css, /\.accordion-row \{[^}]*line-height: 1\.35;/);
+  assert.doesNotMatch(css, /\.tool-detail-switch/);
+  assert.doesNotMatch(app, /className = 'tool-detail-tabs'/);
+});

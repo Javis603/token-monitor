@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { EventEmitter } = require('node:events');
 
-const { runCodexLogin } = require('../../src/shared/limitCollector');
+const { runCodexLogin } = require('../../src/shared/limits/collector');
 
 function fakeChild() {
   const child = new EventEmitter();
@@ -54,7 +54,7 @@ test('runCodexLogin spawns codex login with the scoped CODEX_HOME and streams ou
 });
 
 test('runCodexLogin selects the ChatGPT-bundled Codex binary when the legacy app is absent', async () => {
-  const chatgptCodex = '/Applications/ChatGPT.app/Contents/Resources/codex';
+  const chatgptCodex = '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex';
   let spawnArgs = null;
   const child = fakeChild();
   const promise = runCodexLogin(

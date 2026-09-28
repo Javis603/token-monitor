@@ -13,13 +13,11 @@ const {
 const APP_ID = 'com.javis.tokenmonitor';
 const WIDGET_BUNDLE_ID = 'com.javis.tokenmonitor.widget';
 const WIDGET_KIND = 'com.tokenmonitor.dashboard';
-const URL_SCHEME = 'token-monitor';
 
 function plistForApp() {
   return {
     CFBundleExecutable: 'Token Monitor',
     CFBundleIdentifier: APP_ID,
-    CFBundleURLTypes: [{ CFBundleURLSchemes: [URL_SCHEME] }],
     CFBundleShortVersionString: '0.39.0',
     CFBundleVersion: '0.39.0'
   };
@@ -29,7 +27,6 @@ function plistForWidget(appGroup) {
   return {
     CFBundleIdentifier: WIDGET_BUNDLE_ID,
     TokenMonitorAppGroup: appGroup,
-    TokenMonitorURLScheme: URL_SCHEME,
     TMWidgetKind: WIDGET_KIND,
     CFBundleShortVersionString: '0.39.0',
     CFBundleVersion: '0.39.0'
@@ -45,9 +42,12 @@ function makeBundle({ appGroup, configAppGroup = appGroup, widgetInfoAppGroup = 
   const extensionExecutable = path.join(extensionContents, 'MacOS', 'TokenMonitorWidget');
   const reloader = path.join(contents, 'Resources', 'TokenMonitorWidgetReloader');
   const configPath = path.join(contents, 'Resources', 'token-monitor-widget.json');
+  const helpers = ['', ' (GPU)', ' (Plugin)', ' (Renderer)']
+    .map((suffix) => path.join(contents, 'Frameworks', `Token Monitor Helper${suffix}.app`));
   fs.mkdirSync(path.join(contents, 'MacOS'), { recursive: true });
   fs.mkdirSync(path.dirname(extensionExecutable), { recursive: true });
   fs.mkdirSync(path.dirname(reloader), { recursive: true });
+  for (const helper of helpers) fs.mkdirSync(helper, { recursive: true });
   fs.writeFileSync(path.join(contents, 'Info.plist'), 'fixture');
   fs.writeFileSync(path.join(extensionContents, 'Info.plist'), 'fixture');
   fs.writeFileSync(path.join(contents, 'MacOS', 'Token Monitor'), 'fixture');
@@ -56,7 +56,6 @@ function makeBundle({ appGroup, configAppGroup = appGroup, widgetInfoAppGroup = 
   fs.writeFileSync(configPath, `${JSON.stringify({
     appGroup: configAppGroup,
     widgetKind: WIDGET_KIND,
-    urlScheme: URL_SCHEME,
     marketingVersion: '0.39.0',
     bundleVersion: '0.39.0'
   })}\n`);
@@ -64,26 +63,42 @@ function makeBundle({ appGroup, configAppGroup = appGroup, widgetInfoAppGroup = 
     root,
     appPath,
     extension,
+    helpers,
     reloader,
+    configPath,
     appInfo: plistForApp(),
     extensionInfo: plistForWidget(widgetInfoAppGroup)
   };
 }
 
-function entitlementXml(appGroup, { app = false, includeGroup = true } = {}) {
+function entitlementXml(appGroup, {
+  app = false,
+  includeGroup = true,
+  applicationIdentifier,
+  teamIdentifier
+} = {}) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <plist><dict>
+  ${applicationIdentifier ? `<key>com.apple.application-identifier</key><string>${applicationIdentifier}</string>` : ''}
+  ${teamIdentifier ? `<key>com.apple.developer.team-identifier</key><string>${teamIdentifier}</string>` : ''}
   ${app ? '<key>com.apple.security.cs.allow-jit</key><true/>' : '<key>com.apple.security.app-sandbox</key><true/>'}
   ${includeGroup ? `<key>com.apple.security.application-groups</key><array><string>${appGroup}</string></array>` : ''}
 </dict></plist>`;
 }
 
-function signatureText(teamIdentifier, authority = true, includeTeamIdentifier = true) {
+function signatureText(teamIdentifier, authority = true, includeTeamIdentifier = true, identifier = APP_ID) {
   return [
-    'Identifier=com.javis.tokenmonitor',
+    `Identifier=${identifier}`,
     includeTeamIdentifier ? `TeamIdentifier=${teamIdentifier}` : '',
     authority ? 'Authority=Developer ID Application: Example (ABCDE12345)' : ''
   ].filter(Boolean).join('\n');
+}
+
+function helperEntitlementXml(includeLibraryValidation = true) {
+  return `<plist><dict>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  ${includeLibraryValidation ? '<key>com.apple.security.cs.disable-library-validation</key><true/>' : ''}
+</dict></plist>`;
 }
 
 function verifyFixture(bundle, {
@@ -95,8 +110,10 @@ function verifyFixture(bundle, {
   widgetTeam = appTeam,
   appEntitlementGroup = appGroup,
   widgetEntitlementGroup = appGroup,
+  helperLibraryValidation = true,
   authority = true,
-  includeTeamIdentifier = true
+  includeTeamIdentifier = true,
+  includeProvisionedIdentity = true
 } = {}) {
   const execFileSyncImpl = (command, args) => {
     if (command === 'plutil') {
@@ -109,7 +126,7 @@ function verifyFixture(bundle, {
       return {
         stdout: '',
         stderr: args.at(-1) === bundle.extension
-          ? signatureText(widgetTeam, authority, includeTeamIdentifier)
+          ? signatureText(widgetTeam, authority, includeTeamIdentifier, WIDGET_BUNDLE_ID)
           : signatureText(appTeam, authority, includeTeamIdentifier)
       };
     }
@@ -121,10 +138,21 @@ function verifyFixture(bundle, {
     if (command === 'codesign') {
       const filePath = args.at(-1);
       if (filePath === bundle.extension) {
-        return { status: 0, stdout: '', stderr: entitlementXml(widgetEntitlementGroup, { app: false }) };
+        return { status: 0, stdout: '', stderr: entitlementXml(widgetEntitlementGroup, {
+          app: false,
+          applicationIdentifier: distributionBuild && includeProvisionedIdentity ? `${widgetTeam}.${WIDGET_BUNDLE_ID}` : null,
+          teamIdentifier: distributionBuild && includeProvisionedIdentity ? widgetTeam : null
+        }) };
       }
       if (filePath === bundle.appPath) {
-        return { status: 0, stdout: '', stderr: entitlementXml(appEntitlementGroup, { app: true }) };
+        return { status: 0, stdout: '', stderr: entitlementXml(appEntitlementGroup, {
+          app: true,
+          applicationIdentifier: distributionBuild && includeProvisionedIdentity ? `${appTeam}.${APP_ID}` : null,
+          teamIdentifier: distributionBuild && includeProvisionedIdentity ? appTeam : null
+        }) };
+      }
+      if (bundle.helpers.includes(filePath)) {
+        return { status: 0, stdout: '', stderr: helperEntitlementXml(helperLibraryValidation) };
       }
       return { status: 0, stdout: '', stderr: entitlementXml(appGroup, { app: false, includeGroup: false }) };
     }
@@ -169,6 +197,39 @@ test('local ad-hoc verification does not require a TeamIdentifier', (t) => {
   const bundle = makeBundle({ appGroup });
   t.after(() => fs.rmSync(bundle.root, { recursive: true, force: true }));
   assert.doesNotThrow(() => verifyFixture(bundle, { appGroup, includeTeamIdentifier: false }));
+});
+
+test('local verification rejects ad-hoc signing for a Team App Group', (t) => {
+  const appGroup = 'ABCDE12345.tokenmonitor';
+  const bundle = makeBundle({ appGroup });
+  t.after(() => fs.rmSync(bundle.root, { recursive: true, force: true }));
+  assert.throws(() => verifyFixture(bundle, {
+    appGroup,
+    includeTeamIdentifier: false
+  }), /main app TeamIdentifier \(missing\) does not authorize Team App Group/);
+});
+
+test('local verification permits a Widget-only build revision for descriptor reindexing', (t) => {
+  const appGroup = 'group.com.example.tokenmonitor';
+  const bundle = makeBundle({ appGroup });
+  t.after(() => fs.rmSync(bundle.root, { recursive: true, force: true }));
+  bundle.extensionInfo.CFBundleVersion = '29';
+  const config = JSON.parse(fs.readFileSync(bundle.configPath, 'utf8'));
+  config.widgetBundleVersion = '29';
+  fs.writeFileSync(bundle.configPath, `${JSON.stringify(config)}\n`);
+
+  assert.doesNotThrow(() => verifyFixture(bundle, { appGroup }));
+});
+
+test('local ad-hoc verification requires every Electron helper to load the Electron Framework', (t) => {
+  const appGroup = 'group.com.example.tokenmonitor';
+  const bundle = makeBundle({ appGroup });
+  t.after(() => fs.rmSync(bundle.root, { recursive: true, force: true }));
+
+  assert.throws(() => verifyFixture(bundle, {
+    appGroup,
+    helperLibraryValidation: false
+  }), /cannot load the ad-hoc-signed Electron Framework/);
 });
 
 test('cross-checks the expected App Group across config, Info.plist, and signed entitlements', (t) => {
@@ -244,4 +305,17 @@ test('formal verification rejects a signed Team that differs from DEVELOPMENT_TE
     appTeam: 'ABCDE12345',
     widgetTeam: 'ABCDE12345'
   }), /main app TeamIdentifier ABCDE12345 does not match DEVELOPMENT_TEAM ZZZZZ99999/);
+});
+
+test('formal group.* verification rejects signatures without their provisioned Apple identities', (t) => {
+  const appGroup = 'group.com.example.tokenmonitor';
+  const bundle = makeBundle({ appGroup });
+  t.after(() => fs.rmSync(bundle.root, { recursive: true, force: true }));
+  assert.throws(() => verifyFixture(bundle, {
+    appGroup,
+    distributionBuild: true,
+    localDevelopmentSigning: false,
+    developmentTeam: 'ABCDE12345',
+    includeProvisionedIdentity: false
+  }), /main app entitlement com\.apple\.application-identifier/);
 });

@@ -57,6 +57,12 @@ html, body {
   user-select: none;
   -webkit-user-select: none;
 }
+/* The document's own type size. Without it the fallback is the browser's 16px —
+   roughly double this UI's body text — so any element that forgets a font-size
+   renders unmistakably wrong rather than merely inheriting. Set on `body`, not
+   `html`, so `rem` keeps its conventional 16px meaning. The few glyph buttons
+   that do want 16px now say so; everything else already declares its own size. */
+body { font-size: 11px; }
 button, input, select { font: inherit; }
 button:focus, button:focus-visible { outline: none; }
 input, textarea, [contenteditable="true"] {
@@ -80,6 +86,78 @@ input, textarea, [contenteditable="true"] {
   -webkit-backdrop-filter: var(--glass-filter);
   backdrop-filter: var(--glass-filter);
 }
+/* The image is its own layer over the glass, never a replacement for it: the
+   shell keeps its glass (or the native material below it) and the image's
+   opacity is a separate setting, so either can be tuned without the other. */
+.shell.has-custom-background::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: linear-gradient(rgba(var(--glass-rgb), 0.18), rgba(var(--glass-rgb), 0.18)), var(--custom-background-image);
+  background-position: center;
+  background-size: cover;
+  opacity: var(--background-image-alpha, 0.28);
+}
+html.native-material-opaque .shell.has-custom-background::before,
+html.native-reduced-transparency .shell.has-custom-background::before {
+  display: none;
+}
+.background-image-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.background-image-actions button {
+  min-height: 26px;
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
+  color: var(--text);
+  cursor: pointer;
+}
+.background-image-actions button:hover { border-color: var(--line-strong); }
+.background-image-actions button:disabled { opacity: 0.5; cursor: default; }
+/* Native macOS material supplies the window backdrop. Keep the app's own
+   outer shell clear so it does not stack a second tint, blur, or shadow over it. */
+html.native-liquid-glass .shell,
+body.native-liquid-glass .shell,
+html.native-liquid-glass .floating-bubble-tab,
+body.native-liquid-glass .floating-bubble-tab {
+  background: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.native-material-opaque .shell,
+body.native-material-opaque .shell,
+html.native-material-opaque .floating-bubble-tab,
+body.native-material-opaque .floating-bubble-tab {
+  background: rgb(var(--glass-rgb));
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.native-reduced-transparency .shell,
+body.native-reduced-transparency .shell,
+html.native-reduced-transparency .floating-bubble-tab,
+body.native-reduced-transparency .floating-bubble-tab {
+  background: rgb(var(--glass-rgb));
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.native-reduced-transparency body * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.native-high-contrast {
+  --line-alpha: 0.28 !important;
+  --line-strong-alpha: 0.48 !important;
+}
+html.native-high-contrast .shell { border: 1px solid var(--line-strong); }
 html.is-windows, html.is-windows body {
   border-radius: 8px;
 }
@@ -353,19 +431,23 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   width: 148px;
   height: 30px;
 }
+/* Cover the whole top-right rounded corner without covering the period tabs:
+   the top arm occupies the 12px shell padding and the right arm continues down
+   through the 14px side padding. The parent's rounded clip supplies the arc. */
 .actions-hotspot {
   position: absolute;
-  top: -14px;
-  right: -12px;
+  top: -12px;
+  right: -14px;
   width: 28px;
-  height: 22px;
+  height: 28px;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 100%, 50% 42.857%, 0 42.857%);
   z-index: 5;
 }
 .window-actions {
   position: absolute;
   top: 0;
   right: 0;
-  width: 154px;
+  width: 114px;
   height: 30px;
   display: flex;
   justify-content: flex-end;
@@ -373,7 +455,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   opacity: 0;
   pointer-events: none;
   transform: translateY(-2px);
-  transition: opacity 160ms ease 280ms, transform 160ms ease 280ms;
+  transition: opacity 160ms ease 140ms, transform 160ms ease 140ms;
   z-index: 4;
 }
 #footerActionSlot { display: contents; }
@@ -450,7 +532,7 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   position: absolute;
   inset: 0;
   width: 100%;
-  transition: opacity 160ms ease 280ms, transform 160ms ease 280ms;
+  transition: opacity 160ms ease 140ms, transform 160ms ease 140ms;
 }
 .title-controls:has(.actions-hotspot:hover) .tabs, .title-controls:has(.window-actions:hover) .tabs, .title-controls:has(.window-actions:focus-within) .tabs, .shell.settings-open .title-controls .tabs {
   opacity: 0;
@@ -502,6 +584,9 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .settings-panel::-webkit-scrollbar { width: 0; height: 0; }
 .settings-panel.hidden {
+  /* Animates out rather than disappearing, so it must keep its box. Higher
+     specificity than the blanket `.hidden`, and matching weight to beat it. */
+  display: grid !important;
   max-height: 0;
   padding-top: 0;
   padding-bottom: 0;
@@ -581,7 +666,6 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .settings-panel .checkbox-label.is-disabled .settings-item-title { color: var(--muted); }
 .settings-group { display: grid; min-width: 0; gap: 8px; }
-.settings-group.hidden, .settings-subgroup.hidden, .settings-actions button.hidden { display: none; }
 .settings-collection-cadence {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -616,7 +700,6 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .session-archive-clear:focus-visible { outline: 1px solid rgba(244, 119, 136, 0.46); outline-offset: 1px; }
 .session-archive-clear:disabled { opacity: 0.38; cursor: default; }
 .settings-wsl-block { display: grid; gap: 6px; min-width: 0; }
-.settings-wsl-block.hidden { display: none; }
 .wsl-panel { display: grid; gap: 4px; margin-top: 4px; }
 .settings-export-block { display: grid; gap: 8px; min-width: 0; }
 /* Give the section description room under the header so the two small-text lines don't merge. */
@@ -627,10 +710,8 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .export-auto-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .export-auto-head .export-auto-toggle { flex: 1 1 auto; min-width: 0; }
 .export-status-pill { flex: 0 0 auto; }
-.export-status-pill.hidden { display: none; }
 .export-status-pill.is-active { color: var(--success); border-color: rgba(var(--success-rgb), 0.5); background: rgba(var(--success-rgb), 0.08); }
 .export-auto-details { display: grid; gap: 8px; }
-.export-auto-details.hidden { display: none; }
 .export-dir-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .export-dir-actions { flex: 0 0 auto; }
 .export-dir-path { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11px; }
@@ -659,9 +740,6 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .settings-item + .settings-item {
   border-top: 1px solid rgba(var(--line-rgb), 0.06);
 }
-.settings-panel .settings-item.hidden { display: none; }
-#windowsBackdropNote.hidden { display: none; }
-#limitsRefreshAdaptiveNote.hidden { display: none; }
 .settings-item-text {
   flex: 1 1 auto;
   min-width: 0;
@@ -669,6 +747,8 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   gap: 2px;
 }
 .settings-item-title { color: var(--text); }
+.model-alias-example { overflow-wrap: anywhere; }
+
 .settings-item-desc,
 p.settings-note.settings-item-desc,
 span.settings-note.settings-item-desc {
@@ -857,6 +937,9 @@ span.settings-note.settings-item-desc {
   min-width: 0;
 }
 .accordion-animated-container.hidden {
+  /* Animates out rather than disappearing, so it must keep its box. Higher
+     specificity than the blanket `.hidden`, and matching weight to beat it. */
+  display: grid !important;
   grid-template-rows: 0fr;
   pointer-events: none;
   margin-top: 0 !important;
@@ -985,7 +1068,6 @@ span.settings-note.settings-item-desc {
   font-size: 10px;
   line-height: 1.35;
 }
-.maintenance-version-item.hidden { display: none; }
 .maintenance-version-item strong {
   min-width: 0;
   color: var(--text);
@@ -1170,7 +1252,6 @@ span.settings-note.settings-item-desc {
   align-items: end;
   gap: 8px;
 }
-.codex-workspace-selection.hidden { display: none; }
 .codex-workspace-selection label {
   display: grid;
   gap: 5px;
@@ -1280,7 +1361,6 @@ span.settings-note.settings-item-desc {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.codex-login-output.hidden { display: none; }
 .codex-login-details {
   min-width: 0;
   color: var(--muted);
@@ -1292,20 +1372,17 @@ span.settings-note.settings-item-desc {
   user-select: none;
 }
 .codex-login-details .codex-login-output { margin-top: 6px; }
-.codex-login-details.hidden,
-#codexLoginUrlActions.hidden,
-#codexLoginStatus.hidden { display: none; }
 .settings-note { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .settings-note code { padding: 1px 5px; border-radius: 3px; background: rgba(var(--overlay-rgb), 0.06); font-size: 10px; }
-.kimi-cookie-steps { text-wrap: pretty; }
-.kimi-api-fallback {
+.kimi-web-steps { text-wrap: pretty; }
+.kimi-web-fallback {
   min-width: 0;
   padding-top: 10px;
   border-top: 1px solid rgba(var(--line-rgb), 0.075);
   color: var(--muted);
   font-size: 10px;
 }
-.kimi-api-fallback summary {
+.kimi-web-fallback summary {
   width: max-content;
   max-width: 100%;
   color: var(--text);
@@ -1315,19 +1392,18 @@ span.settings-note.settings-item-desc {
   line-height: 1.35;
   user-select: none;
 }
-.kimi-api-fallback summary::marker { color: var(--muted); }
-.kimi-api-fallback summary:focus-visible {
+.kimi-web-fallback summary::marker { color: var(--muted); }
+.kimi-web-fallback summary:focus-visible {
   border-radius: 3px;
   outline: 1px solid rgba(115, 189, 245, 0.72);
   outline-offset: 3px;
 }
-.kimi-api-fallback-body {
+.kimi-web-fallback-body {
   display: grid;
   gap: 8px;
   margin-top: 8px;
 }
 .app-update-notes { min-width: 0; color: var(--muted); font-size: 10px; }
-.app-update-notes.hidden { display: none; }
 .app-update-notes-toggle {
   display: flex;
   width: 100%;
@@ -1391,7 +1467,6 @@ span.settings-note.settings-item-desc {
 }
 .app-update-note-group li + li { margin-top: 3px; }
 .app-update-notes .inline-link { margin-top: 8px; font-size: 10px; }
-.app-update-notes .inline-link.hidden { display: none; }
 .inline-link {
   padding: 0;
   border: 0;
@@ -1421,10 +1496,12 @@ span.settings-note.settings-item-desc {
     border-top-color 250ms ease;
 }
 .about-settings-diagnostics.hidden {
+  /* Animates out rather than disappearing, so it must keep its box. Higher
+     specificity than the blanket `.hidden`, and matching weight to beat it. */
+  display: grid !important;
   padding-top: 0;
   border-top-color: transparent;
 }
-.diagnostic-preview.hidden { display: none; }
 .about-settings-diagnostics-inner {
   display: grid;
   min-width: 0;
@@ -1577,7 +1654,6 @@ span.settings-note.settings-item-desc {
 .hub-status.ok { color: var(--success); border-color: rgba(var(--success-rgb), 0.32); }
 .hub-status.warning { color: var(--orange); border-color: rgba(244, 160, 115, 0.4); }
 .hub-status.error { color: var(--red); border-color: rgba(244, 119, 136, 0.42); }
-.hub-status[hidden] { display: none; }
 .hub-build-status { line-height: 1.4; }
 .hub-address-list { display: grid; min-width: 0; gap: 5px; }
 .hub-address-header { color: var(--muted); font-size: 10px; }
@@ -1609,9 +1685,14 @@ span.settings-note.settings-item-desc {
 .hub-address-row .icon-button { width: 26px; height: 26px; flex: 0 0 auto; font-size: 12px; }
 .settings-note.hub-warning { color: var(--orange); }
 .currency-rate-row { display: grid; gap: 4px; min-width: 0; }
-.currency-rate-row.hidden, .currency-rate-manual-field.hidden { display: none; }
 /* The rate row is a sub-setting of the Currency row: keep them as one unseparated pair. */
 .settings-subgroup > .settings-item + .currency-rate-row { margin-top: 0; }
+/* The pair ends there: the next setting rejoins the grouped list with its hairline,
+   instead of floating off on the generic 8px subgroup margin. */
+.settings-subgroup > .currency-rate-row + .settings-item {
+  margin-top: 0;
+  border-top: 1px solid rgba(var(--line-rgb), 0.06);
+}
 .currency-rate-manual-field { display: flex; align-items: center; gap: 8px; min-width: 0; padding-bottom: 2px; }
 .currency-rate-prefix { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
 .settings-panel .currency-rate-manual-field input { flex: 1 1 0; width: 0; min-width: 0; font-size: 11px; }
@@ -1693,6 +1774,8 @@ span.settings-note.settings-item-desc {
   gap: 4px;
 }
 .tool-header-action {
+  /* Its label is a glyph, sized independently of the body text around it. */
+  font-size: 16px;
   display: inline-grid;
   place-items: center;
   width: 24px;
@@ -1733,6 +1816,71 @@ span.settings-note.settings-item-desc {
   border-radius: 50%;
   background: currentColor;
   content: "";
+}
+/* Filter field for the two long settings lists (tracked tools, limit
+   providers). Sits outside the list container on purpose: both lists are
+   rebuilt wholesale on every stats tick, so a field inside one would lose its
+   value and focus mid-keystroke. Border, radius and background come from the
+   panel's shared input rule; only the type size, the icon inset and the icon
+   itself are set here. */
+.settings-list-search {
+  position: relative;
+  display: grid;
+  min-width: 0;
+}
+/* Drawn rather than an asset, the way the eye and pin glyphs next to it are. */
+.settings-list-search::before {
+  position: absolute;
+  top: 50%;
+  left: 9px;
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid var(--muted);
+  border-radius: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  content: "";
+}
+.settings-list-search::after {
+  position: absolute;
+  top: calc(50% + 2px);
+  left: 15px;
+  width: 4px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: var(--muted);
+  transform: rotate(45deg);
+  transform-origin: left center;
+  pointer-events: none;
+  content: "";
+}
+.settings-panel .settings-list-search-input {
+  padding: 5px 9px 5px 24px;
+  font-size: 11px;
+}
+.settings-list-search-input::placeholder { color: var(--muted); }
+.settings-list-search-input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  width: 9px;
+  height: 9px;
+  background:
+    linear-gradient(var(--muted), var(--muted)) center / 9px 1.5px no-repeat,
+    linear-gradient(var(--muted), var(--muted)) center / 1.5px 9px no-repeat;
+  cursor: pointer;
+  transform: rotate(45deg);
+}
+/* Filtered-out rows stay in the DOM and are hidden, never omitted: the limits
+   rows adopt singleton live nodes from index.html, and a row that is not
+   rendered would take them out of the document when the outgoing rows are
+   removed. */
+.tool-preference-row.is-filtered-out,
+.settings-panel .limit-provider-row.is-filtered-out {
+  display: none;
+}
+/* No matches: the note lands inside the list box, where the rows were. */
+.settings-list-empty {
+  margin: 0;
+  padding: 4px 2px;
 }
 .tool-preference-list {
   display: grid;
@@ -1926,6 +2074,57 @@ span.settings-note.settings-item-desc {
   font: inherit;
   font-weight: 500;
 }
+.tool-health-source-summary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.tool-health-source-control {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.tool-health-source-control:hover {
+  background: rgba(var(--line-rgb), 0.1);
+  color: var(--fg);
+}
+.tool-health-source-control:focus-visible {
+  outline: 1px solid rgba(var(--accent-rgb), 0.72);
+  outline-offset: 1px;
+}
+.tool-health-source-control svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.5;
+}
+.tool-health-source-add {
+  display: flex;
+  align-items: center;
+  width: auto;
+  height: 18px;
+  padding: 1px 5px 1px 4px;
+  border: 1px solid rgba(var(--line-rgb), 0.18);
+  gap: 2px;
+  font: inherit;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.tool-health-source-add svg {
+  width: 10px;
+  height: 10px;
+}
 .tool-health-group-body {
   display: grid;
   gap: 3px;
@@ -1987,6 +2186,14 @@ span.settings-note.settings-item-desc {
   border-color: rgba(var(--accent-rgb), 0.42);
   color: var(--fg);
 }
+.tool-health-action.is-repair {
+  border-color: rgba(244, 160, 115, 0.48);
+  color: var(--orange);
+}
+.tool-health-action.is-repair:hover:not(:disabled) {
+  border-color: rgba(244, 160, 115, 0.72);
+  color: var(--fg);
+}
 .tool-health-action:disabled { cursor: default; opacity: 0.55; }
 .tool-health-action-feedback {
   align-self: center;
@@ -2004,6 +2211,13 @@ span.settings-note.settings-item-desc {
   justify-items: start;
   gap: 3px;
 }
+.tool-health-check-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+}
 .tool-health-check {
   max-width: 100%;
   padding: 1px 4px;
@@ -2014,17 +2228,20 @@ span.settings-note.settings-item-desc {
   line-height: 1.3;
   opacity: 0.72;
   overflow-wrap: anywhere;
-  text-decoration: line-through;
 }
 .tool-health-check.pending {
   opacity: 0.72;
-  text-decoration: none;
 }
 .tool-health-check.found {
   border-color: rgba(var(--success-rgb), 0.28);
   color: var(--success);
   opacity: 1;
-  text-decoration: none;
+}
+.tool-health-source-remove {
+  flex: 0 0 auto;
+}
+.tool-health-source-error {
+  color: var(--orange);
 }
 .tool-health-note-line {
   font-size: 10px;
@@ -2119,6 +2336,10 @@ span.settings-note.settings-item-desc {
   margin: 0 -2px;
   padding: 1px 0;
   border-radius: 6px;
+  /* The row owns the list's type size, not the disclosure button inside it: a
+     provider with nothing to expand renders no button, and its name would
+     otherwise fall through to the document's 16px default. */
+  font-size: 11px;
   touch-action: pan-y;
   transform: translateY(calc(var(--drag-y, 0px) + var(--drag-shift, 0px)));
   transition:
@@ -2143,7 +2364,6 @@ span.settings-note.settings-item-desc {
   background: transparent;
   color: var(--fg);
   font: inherit;
-  font-size: 11px;
   line-height: 1.3;
   text-align: left;
   cursor: pointer;
@@ -2371,14 +2591,9 @@ span.settings-note.settings-item-desc {
   opacity: 0.34;
   cursor: default;
 }
-.view-preference-row.is-dragging,
-.home-module-preference-row.is-dragging,
-.home-limit-provider-row.is-dragging {
-  background: rgba(var(--accent-rgb), 0.08);
-  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.28);
-  opacity: 0.9;
-}
 .reset-appearance-button {
+  /* Glyph label, same reason as .tool-header-action. */
+  font-size: 16px;
   width: 24px;
   height: 24px;
   padding: 0;
@@ -2442,7 +2657,6 @@ span.settings-note.settings-item-desc {
   color: var(--muted);
   font-size: 10px;
 }
-.settings-font-custom-row.hidden { display: none; }
 .settings-font-preview {
   display: flex;
   align-items: baseline;
@@ -2707,7 +2921,6 @@ html.is-windows .settings-panel select option {
   text-align: center;
   text-wrap: balance;
 }
-.fixed-period-message.hidden { display: none; }
 .total-panel {
   position: relative;
   z-index: 1;
@@ -2748,7 +2961,6 @@ html.is-windows .settings-panel select option {
   font-weight: 500;
   white-space: nowrap;
 }
-.total-compact.hidden { display: none; }
 .cost { margin-top: 6px; color: var(--muted); font-size: 12px; }
 .view-back-row {
   position: relative;
@@ -2760,7 +2972,6 @@ html.is-windows .settings-panel select option {
   margin-bottom: -2px;
   padding: 0;
 }
-.view-back-row.hidden { display: none; }
 .back-home-button {
   display: inline-flex;
   height: 26px;
@@ -2806,7 +3017,6 @@ html.is-windows .settings-panel select option {
   padding-right: 2px;
   scrollbar-width: none;
 }
-.breakdown.hidden { display: none; }
 .breakdown::-webkit-scrollbar { width: 0; height: 0; }
 .breakdown-incomplete-hint {
   margin: 0;
@@ -2829,7 +3039,6 @@ html.is-windows .settings-panel select option {
   padding-right: 2px;
   scrollbar-width: none;
 }
-.home-panel.hidden { display: none; }
 .home-panel::-webkit-scrollbar { width: 0; height: 0; }
 .home-module {
   display: grid;
@@ -3007,6 +3216,58 @@ html.is-windows .settings-panel select option {
   grid-template-columns: 10px minmax(0, 1fr) minmax(42px, auto);
   column-gap: 8px;
 }
+.home-session-row {
+  grid-template-columns: 10px 10px minmax(0, 1fr) minmax(42px, auto);
+  column-gap: 7px;
+  row-gap: 2px;
+  align-items: start;
+}
+.home-session-row .home-list-mark { margin-top: 1px; }
+.home-session-row .home-list-name { font-size: 11px; }
+.home-session-state { position: relative; width: 10px; height: 10px; margin-top: 1px; }
+.home-session-state > * {
+  position: absolute;
+  inset: 0;
+  display: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.home-session-state[data-state="running"] .home-session-spin,
+.home-session-state[data-state="ended"] .home-session-check,
+.home-session-state[data-state="idle"] .home-session-idle { display: block; }
+.home-session-spin {
+  background: var(--text);
+  -webkit-mask: url("icons/actions/spinner.svg") center / contain no-repeat;
+  mask: url("icons/actions/spinner.svg") center / contain no-repeat;
+}
+.home-session-check { color: var(--muted); }
+.home-session-idle::before {
+  content: '';
+  position: absolute;
+  top: 2.5px;
+  left: 2.5px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(var(--overlay-rgb), 0.22);
+}
+.home-session-row .home-list-value { text-align: right; }
+.home-session-meta {
+  grid-column: 2 / -1;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.home-session-meta .home-list-sub { min-width: 0; }
+.home-session-context { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; margin-left: auto; color: var(--muted); font-size: 10px; }
+.home-session-context-meter { width: 16px; height: 3px; overflow: hidden; border-radius: 2px; background: rgba(var(--overlay-rgb), 0.18); }
+.home-session-context-fill { display: block; width: 100%; height: 100%; background: rgba(var(--overlay-rgb), 0.5); transform: scaleX(var(--bar-scale, 0)); transform-origin: left center; }
+.home-session-context[data-tone="caution"] { color: var(--yellow); }
+.home-session-context[data-tone="caution"] .home-session-context-fill { background: var(--yellow); }
+.home-session-context[data-tone="low"] { color: var(--orange); }
+.home-session-context[data-tone="low"] .home-session-context-fill { background: var(--orange); }
 .home-device-row.is-stale .home-list-mark {
   opacity: 0.55;
 }
@@ -3350,13 +3611,68 @@ html.is-windows .settings-panel select option {
 }
 
 .row { display: grid; gap: 6px; padding-bottom: 10px; border-bottom: 1px solid rgba(var(--line-rgb), 0.12); }
-.breakdown.large-session-list .session-row {
-  contain-intrinsic-block-size: auto 72px;
+.session-pager-host {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
 }
-.breakdown.large-session-list.large-session-list-ready .session-row {
-  content-visibility: auto;
-  contain: layout paint style;
+.session-pager {
+  display: grid;
+  width: min(208px, 100%);
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+  align-items: center;
+  min-height: 24px;
+  margin-inline: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
+.session-page-status {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  line-height: 1;
+  opacity: 0.78;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-page-button {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0.72;
+  transition: color 120ms ease, opacity 120ms ease;
+}
+.session-page-button:hover:not(:disabled) {
+  color: var(--text);
+  opacity: 1;
+}
+.session-page-button:focus-visible {
+  box-shadow: inset 0 -1px 0 rgba(var(--accent-rgb), 0.58);
+  color: var(--text);
+  opacity: 1;
+}
+.session-page-button:disabled { cursor: default; opacity: 0.28; }
+.session-page-icon {
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+  mask: url("icons/actions/arrow-left.svg") center / contain no-repeat;
+}
+.session-page-next .session-page-icon { transform: rotate(180deg); }
 .row-head { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
 .row-name { display: flex; min-width: 0; flex: 1 1 auto; align-items: center; gap: 8px; color: var(--text); }
 .dot {
@@ -3376,58 +3692,14 @@ html.is-windows .settings-panel select option {
   -webkit-mask-size: contain;    mask-size: contain;
   -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
 }
-.row-icon-claude     { -webkit-mask-image: url(../../../assets/icons/claude.svg);        mask-image: url(../../../assets/icons/claude.svg); }
-.row-icon-codex      { -webkit-mask-image: url(../../../assets/icons/codex.svg);         mask-image: url(../../../assets/icons/codex.svg); }
-.row-icon-hermes     { -webkit-mask-image: url(../../../assets/icons/hermes-agent.svg);  mask-image: url(../../../assets/icons/hermes-agent.svg); }
-.row-icon-gemini     { -webkit-mask-image: url(../../../assets/icons/gemini.svg);        mask-image: url(../../../assets/icons/gemini.svg); }
-.row-icon-cursor     { -webkit-mask-image: url(../../../assets/icons/cursor.svg);        mask-image: url(../../../assets/icons/cursor.svg); }
-.row-icon-antigravity { -webkit-mask-image: url(../../../assets/icons/antigravity.svg);   mask-image: url(../../../assets/icons/antigravity.svg); }
-.row-icon-cline      { -webkit-mask-image: url(../../../assets/icons/cline.svg);         mask-image: url(../../../assets/icons/cline.svg); }
-.row-icon-kimi       { -webkit-mask-image: url(../../../assets/icons/kimi.svg);          mask-image: url(../../../assets/icons/kimi.svg); }
-.row-icon-grok       { -webkit-mask-image: url(../../../assets/icons/xai.svg);           mask-image: url(../../../assets/icons/xai.svg); }
-.row-icon-copilot    { -webkit-mask-image: url(../../../assets/icons/copilot.svg);       mask-image: url(../../../assets/icons/copilot.svg); }
-.row-icon-pi         { -webkit-mask-image: url(../../../assets/icons/pi.svg);            mask-image: url(../../../assets/icons/pi.svg); }
-.row-icon-zed        { -webkit-mask-image: url(../../../assets/icons/zed.svg);           mask-image: url(../../../assets/icons/zed.svg); }
-.row-icon-kilocode   { -webkit-mask-image: url(../../../assets/icons/kilocode.svg);      mask-image: url(../../../assets/icons/kilocode.svg); }
-.row-icon-commandcode { -webkit-mask-image: url(../../../assets/icons/commandcode.svg);   mask-image: url(../../../assets/icons/commandcode.svg); }
-.row-icon-micode     { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);       mask-image: url(../../../assets/icons/xiaomi.svg); }
-.row-icon-zcode      { -webkit-mask-image: url(../../../assets/icons/zai.svg);          mask-image: url(../../../assets/icons/zai.svg); }
-.row-icon-kiro       { -webkit-mask-image: url(../../../assets/icons/kiro.svg);          mask-image: url(../../../assets/icons/kiro.svg); }
-.row-icon-codebuddy  { -webkit-mask-image: url(../../../assets/icons/codebuddy.svg);     mask-image: url(../../../assets/icons/codebuddy.svg); }
-.row-icon-workbuddy  { -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);     mask-image: url(../../../assets/icons/workbuddy.svg); }
-.row-icon-proma      { -webkit-mask-image: url(../../../assets/icons/proma.svg);         mask-image: url(../../../assets/icons/proma.svg); }
-.row-icon-reasonix   { -webkit-mask-image: url(../../../assets/icons/reasonix.svg);      mask-image: url(../../../assets/icons/reasonix.svg); }
-.row-icon-dsh        { -webkit-mask-image: url(../../../assets/icons/dsh.svg);            mask-image: url(../../../assets/icons/dsh.svg); }
-.row-icon-cherrystudio { -webkit-mask-image: url(../../../assets/icons/cherrystudio.svg); mask-image: url(../../../assets/icons/cherrystudio.svg); }
-.row-icon-opencode   { -webkit-mask-image: url(../../../assets/icons/opencode.svg);      mask-image: url(../../../assets/icons/opencode.svg); }
-.row-icon-openrouter { -webkit-mask-image: url(../../../assets/icons/openrouter.svg);    mask-image: url(../../../assets/icons/openrouter.svg); }
-.row-icon-openclaw   { -webkit-mask-image: url(../../../assets/icons/openclaw.svg);      mask-image: url(../../../assets/icons/openclaw.svg); }
-.row-icon-deepseek   { -webkit-mask-image: url(../../../assets/icons/deepseek.svg);      mask-image: url(../../../assets/icons/deepseek.svg); }
-.row-icon-hunyuan    { -webkit-mask-image: url(../../../assets/icons/hunyuan.svg);       mask-image: url(../../../assets/icons/hunyuan.svg); }
-.row-icon-xai        { -webkit-mask-image: url(../../../assets/icons/grok.svg);          mask-image: url(../../../assets/icons/grok.svg); }
-.row-icon-meta       { -webkit-mask-image: url(../../../assets/icons/meta.svg);          mask-image: url(../../../assets/icons/meta.svg); }
-.row-icon-mistral    { -webkit-mask-image: url(../../../assets/icons/mistral.svg);       mask-image: url(../../../assets/icons/mistral.svg); }
-.row-icon-qwen       { -webkit-mask-image: url(../../../assets/icons/qwen.svg);          mask-image: url(../../../assets/icons/qwen.svg); }
-.row-icon-moonshot   { -webkit-mask-image: url(../../../assets/icons/moonshot.svg);      mask-image: url(../../../assets/icons/moonshot.svg); }
-.row-icon-zai        { -webkit-mask-image: url(../../../assets/icons/zai.svg);           mask-image: url(../../../assets/icons/zai.svg); }
-.row-icon-zaiteam    { -webkit-mask-image: url(../../../assets/icons/zai.svg);           mask-image: url(../../../assets/icons/zai.svg); }
-.row-icon-cohere     { -webkit-mask-image: url(../../../assets/icons/cohere.svg);        mask-image: url(../../../assets/icons/cohere.svg); }
-.row-icon-xiaomi,
-.row-icon-mimo       { -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);        mask-image: url(../../../assets/icons/xiaomi.svg); }
-.row-icon-minimax    { -webkit-mask-image: url(../../../assets/icons/minimax.svg);       mask-image: url(../../../assets/icons/minimax.svg); }
-.row-icon-doubao     { -webkit-mask-image: url(../../../assets/icons/doubao.svg);        mask-image: url(../../../assets/icons/doubao.svg); }
-.row-icon-volcengine     { -webkit-mask-image: url(../../../assets/icons/volcengine.svg);        mask-image: url(../../../assets/icons/volcengine.svg); }
-.row-icon-qoder      { -webkit-mask-image: url(../../../assets/icons/qoder.svg);         mask-image: url(../../../assets/icons/qoder.svg); }
-.row-icon-trae       { -webkit-mask-image: url(../../../assets/icons/trae.svg);          mask-image: url(../../../assets/icons/trae.svg); }
-.row-icon-qodercn    { -webkit-mask-image: url(../../../assets/icons/qodercn.svg);      mask-image: url(../../../assets/icons/qodercn.svg); }
-.row-icon-ollama     { -webkit-mask-image: url(../../../assets/icons/ollama.svg);        mask-image: url(../../../assets/icons/ollama.svg); }
-.row-icon-thirdparty { -webkit-mask-image: url(../../../assets/icons/thirdparty.svg);      mask-image: url(../../../assets/icons/thirdparty.svg); }
-.row-icon-newapi    { -webkit-mask-image: url(../../../assets/icons/newapi.svg);           mask-image: url(../../../assets/icons/newapi.svg); }
-.row-icon-sub2api   { -webkit-mask-image: url(../../../assets/icons/sub2api.svg);          mask-image: url(../../../assets/icons/sub2api.svg); }
+/* Vendor marks (.row-icon-<id>) are installed by rowIconMasks.js from src/shared/vendorPresentation.js. Only masks that are not vendor marks live here. */
 .row-icon-token-monitor { -webkit-mask-image: url(../../../assets/icons/token-monitor.svg); mask-image: url(../../../assets/icons/token-monitor.svg); }
 .row-icon-os-apple   { -webkit-mask-image: url(../../../assets/icons/os-apple.svg);      mask-image: url(../../../assets/icons/os-apple.svg); }
 .row-icon-os-linux   { -webkit-mask-image: url(../../../assets/icons/os-linux.svg);      mask-image: url(../../../assets/icons/os-linux.svg); }
 .row-icon-os-windows { -webkit-mask-image: url(../../../assets/icons/os-windows.svg);    mask-image: url(../../../assets/icons/os-windows.svg); }
+/* The Limits list mark. Sizing only: the mask itself comes from the same
+   .row-icon-<id> rules a breakdown row uses, installed from the vendor table
+   that limitMarksWithIcon is derived from. */
 .limit-icon {
   display: inline-block;
   flex: 0 0 auto;
@@ -3441,121 +3713,31 @@ html.is-windows .settings-panel select option {
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
 }
-.limit-icon-claude {
-  -webkit-mask-image: url(../../../assets/icons/claude.svg);
-  mask-image: url(../../../assets/icons/claude.svg);
-}
-.limit-icon-codex {
-  -webkit-mask-image: url(../../../assets/icons/codex.svg);
-  mask-image: url(../../../assets/icons/codex.svg);
-}
-.limit-icon-cursor {
-  -webkit-mask-image: url(../../../assets/icons/cursor.svg);
-  mask-image: url(../../../assets/icons/cursor.svg);
-}
-.limit-icon-antigravity {
-  -webkit-mask-image: url(../../../assets/icons/antigravity.svg);
-  mask-image: url(../../../assets/icons/antigravity.svg);
-}
-.limit-icon-opencode {
-  -webkit-mask-image: url(../../../assets/icons/opencode.svg);
-  mask-image: url(../../../assets/icons/opencode.svg);
-}
-.limit-icon-openrouter {
-  -webkit-mask-image: url(../../../assets/icons/openrouter.svg);
-  mask-image: url(../../../assets/icons/openrouter.svg);
-}
-.limit-icon-deepseek {
-  -webkit-mask-image: url(../../../assets/icons/deepseek.svg);
-  mask-image: url(../../../assets/icons/deepseek.svg);
-}
-.limit-icon-grok {
+/* Grok is the one mark that differs between the two sizes: the tracked client
+   reuses the vendor mask (.row-icon-grok is xai.svg) while the limits provider
+   has its own. Everything else shares the .row-icon-<id> mask that
+   renderLimitProviderMark now asks for, so there is one mask table, not two. */
+.limit-icon.row-icon-grok {
   -webkit-mask-image: url(../../../assets/icons/grok.svg);
   mask-image: url(../../../assets/icons/grok.svg);
-}
-.limit-icon-minimax {
-  -webkit-mask-image: url(../../../assets/icons/minimax.svg);
-  mask-image: url(../../../assets/icons/minimax.svg);
-}
-.limit-icon-copilot {
-  -webkit-mask-image: url(../../../assets/icons/copilot.svg);
-  mask-image: url(../../../assets/icons/copilot.svg);
-}
-.limit-icon-kiro {
-  -webkit-mask-image: url(../../../assets/icons/kiro.svg);
-  mask-image: url(../../../assets/icons/kiro.svg);
-}
-.limit-icon-commandcode {
-  -webkit-mask-image: url(../../../assets/icons/commandcode.svg);
-  mask-image: url(../../../assets/icons/commandcode.svg);
-}
-.limit-icon-zai {
-  -webkit-mask-image: url(../../../assets/icons/zai.svg);
-  mask-image: url(../../../assets/icons/zai.svg);
-}
-.limit-icon-zaiteam {
-  -webkit-mask-image: url(../../../assets/icons/zai.svg);
-  mask-image: url(../../../assets/icons/zai.svg);
-}
-.limit-icon-volcengine {
-  -webkit-mask-image: url(../../../assets/icons/volcengine.svg);
-  mask-image: url(../../../assets/icons/volcengine.svg);
-}
-.limit-icon-qoder {
-  -webkit-mask-image: url(../../../assets/icons/qoder.svg);
-  mask-image: url(../../../assets/icons/qoder.svg);
-}
-.limit-icon-trae {
-  -webkit-mask-image: url(../../../assets/icons/trae.svg);
-  mask-image: url(../../../assets/icons/trae.svg);
-}
-.limit-icon-workbuddy {
-  -webkit-mask-image: url(../../../assets/icons/workbuddy.svg);
-  mask-image: url(../../../assets/icons/workbuddy.svg);
-}
-
-.limit-icon-ollama {
-  -webkit-mask-image: url(../../../assets/icons/ollama.svg);
-  mask-image: url(../../../assets/icons/ollama.svg);
-}
-.limit-icon-kimi {
-  -webkit-mask-image: url(../../../assets/icons/kimi.svg);
-  mask-image: url(../../../assets/icons/kimi.svg);
-}
-.limit-icon-mimo {
-  -webkit-mask-image: url(../../../assets/icons/xiaomi.svg);
-  mask-image: url(../../../assets/icons/xiaomi.svg);
-}
-.limit-icon-thirdparty {
-  -webkit-mask-image: url(../../../assets/icons/thirdparty.svg);
-  mask-image: url(../../../assets/icons/thirdparty.svg);
-}
-.limit-icon-newapi {
-  -webkit-mask-image: url(../../../assets/icons/newapi.svg);
-  mask-image: url(../../../assets/icons/newapi.svg);
-}
-.limit-icon-sub2api {
-  -webkit-mask-image: url(../../../assets/icons/sub2api.svg);
-  mask-image: url(../../../assets/icons/sub2api.svg);
 }
 .row-label {
   display: grid;
   min-width: 0;
   gap: 2px;
 }
-.row-title, .row-subtitle, .row-detail {
+.row-title, .row-subtitle, .row-activity, .row-detail {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.row-subtitle, .row-detail {
+.row-subtitle, .row-activity, .row-detail {
   color: var(--muted);
   font-size: 10px;
 }
 .row-detail {
   opacity: 0.84;
 }
-.row-subtitle.hidden, .row-detail.hidden { display: none; }
 .row-metrics { display: grid; flex: 0 0 auto; gap: 2px; min-width: max-content; text-align: right; }
 .row-value { color: var(--text); white-space: nowrap; }
 .row-cost { color: var(--muted); font-size: 10px; white-space: nowrap; }
@@ -3586,6 +3768,95 @@ html.is-windows .settings-panel select option {
   content: 'you';
 }
 .row.local.stale .row-name::after { display: none; }
+/* A session whose transcript is still being appended to. The dot sits on the
+   tool mark's corner - where presence belongs, and where it can be scanned down
+   the left edge of the list - rather than in the text, which is a single
+   ellipsizing line already carrying the title, the model and the timestamp.
+   Absolutely positioned so a running row never shifts against the rows around
+   it.
+
+   A dot, not a glyph: this row already leads with the client's own icon, and a
+   spinner or check drawn over it reads as part of that logo. The card surface
+   has no icon to compete with, so it carries the richer states instead; here the
+   old idiom stands - green means active right now - and every other state simply
+   draws nothing.
+
+   Painted with --success, never --accent: "this is alive" is a semantic state,
+   and --accent is the user's own colour (the obsidian preset sets it to a near
+   white, which would leave the dot indistinguishable from the mark it sits on).
+   --success is the variable this codebase keeps independent of the custom
+   accent for exactly this reason, and it darkens on light themes. */
+.row-name { position: relative; }
+.row-live { display: none; }
+/* Absolutely positioned so a running row never shifts against its neighbours. */
+ .row-live.is-active { display: block; position: absolute; top: 8px; left: 6px; }
+.row-live-dot {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--success);
+  /* The ring separates the dot from the mark it overlaps; --panel-rgb flips
+     with the theme, so it stays a separation rather than becoming a dark spot
+     on a light background. */
+  box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 4px rgba(var(--success-rgb), 0.55);
+}
+/* One-shot flare when that session's transcript actually grew, matching the
+   titlebar dot's rule: no `infinite`, so a list of open-but-idle sessions costs
+   the compositor nothing and a heartbeat means "generating right now" rather
+   than merely "not closed". */
+.row-live.is-active.pulse .row-live-dot { animation: row-live-pulse 1.2s ease-out; }
+@keyframes row-live-pulse {
+  0%   { box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 3px rgba(var(--success-rgb), 0.45); }
+  35%  { box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 10px rgba(var(--success-rgb), 0.95); }
+  100% { box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 4px rgba(var(--success-rgb), 0.55); }
+}
+/* How much of the running session's context window is left, as the third line
+   of the metrics column. A gauge rather than a sentence: headroom only matters
+   as it runs out, which a shrinking bar says at a glance and 10px grey text
+   does not. The metrics column is two lines tall inside a four-line row, so
+   this lands in existing empty space and clears the detail chevron pinned to
+   the row's bottom-right. */
+.row-context {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.1;
+}
+.row-context-meter {
+  width: 20px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: rgba(var(--sunken-rgb), 0.46);
+}
+.row-context-fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  /* Neutral while healthy. Colour here is reserved for headroom that is running
+     out, so the green beside it keeps meaning exactly one thing ("this session
+     is alive") and a coloured gauge is always worth a look. Uses the
+     border/overlay system, which flips with the theme. */
+  background: rgba(var(--line-rgb), 0.55);
+  transform: scaleX(var(--bar-scale, 0));
+  transform-origin: left center;
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* The heads-up, then the boundary where a client starts rewriting the
+   conversation to make room — the only moment the number is worth interrupting
+   for. Both are semantic colours, never the customisable accent. */
+.row-context[data-tone="caution"] { color: var(--yellow); }
+.row-context[data-tone="caution"] .row-context-fill { background: var(--yellow); }
+.row-context[data-tone="low"] { color: var(--orange); }
+.row-context[data-tone="low"] .row-context-fill { background: var(--orange); }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .row-context-fill { transition: none; }
+}
 .shell.session-mode .breakdown {
   gap: 7px;
 }
@@ -3594,6 +3865,7 @@ html.is-windows .settings-panel select option {
   padding-bottom: 8px;
 }
 .shell.session-mode .row-head {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(66px, max-content);
   align-items: start;
@@ -3612,17 +3884,29 @@ html.is-windows .settings-panel select option {
   margin-top: 3px;
 }
 .shell.session-mode .row-label {
+  flex: 1 1 auto;
   gap: 1px;
 }
-.shell.session-mode .row-subtitle {
+.shell.session-mode .row-subtitle,
+.shell.session-mode .row-activity {
   font-size: 10px;
   line-height: 1.2;
 }
 .shell.session-mode .row-detail {
   font-size: 10px;
   line-height: 1.2;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+}
+.shell.session-mode .row-title,
+.shell.session-mode .row-detail {
+  scrollbar-width: none;
+}
+.shell.session-mode .row-title::-webkit-scrollbar,
+.shell.session-mode .row-detail::-webkit-scrollbar {
+  display: none;
+}
+.shell.session-mode .row-title.is-hover-scrolling,
+.shell.session-mode .row-detail.is-hover-scrolling {
   text-overflow: clip;
 }
 .shell.session-mode .row-metrics {
@@ -3634,6 +3918,12 @@ html.is-windows .settings-panel select option {
 }
 .shell.session-mode .row-cost {
   line-height: 1.1;
+}
+.shell.session-mode .session-row .row-metrics::after,
+.shell.session-mode .summary-row[data-review-group="true"] .row-metrics::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
 }
 .shell.session-mode .bar {
   height: 5px;
@@ -3651,7 +3941,6 @@ html.is-windows .settings-panel select option {
   scrollbar-width: none;
 }
 .limits-panel::-webkit-scrollbar { width: 0; height: 0; }
-.limits-panel.hidden { display: none; }
 .service-status-panel {
   position: relative;
   z-index: 1;
@@ -3665,7 +3954,6 @@ html.is-windows .settings-panel select option {
   scrollbar-width: none;
 }
 .service-status-panel::-webkit-scrollbar { width: 0; height: 0; }
-.service-status-panel.hidden { display: none; }
 .service-status-row {
   display: grid;
   width: 100%;
@@ -3844,6 +4132,102 @@ html.is-windows .settings-panel select option {
 .limit-row-group {
   gap: 8px;
 }
+.codex-reset-forecast {
+  position: relative;
+  display: grid;
+  width: 100%;
+  gap: 3px;
+  padding: 8px 0 0;
+  color: var(--muted);
+}
+.limit-row:has(> .codex-reset-forecast) {
+  padding-bottom: 7px;
+}
+.codex-reset-forecast-open {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.codex-reset-forecast-head {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  pointer-events: none;
+}
+.codex-reset-forecast-title {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+}
+.codex-reset-forecast-label {
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+}
+.codex-reset-forecast-value {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codex-reset-forecast-detail {
+  position: relative;
+  z-index: 1;
+  overflow: hidden;
+  font-size: 9px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.codex-reset-forecast:hover :is(.codex-reset-forecast-label, .codex-reset-forecast-value),
+.codex-reset-forecast:has(.codex-reset-forecast-open:focus-visible) :is(.codex-reset-forecast-label, .codex-reset-forecast-value) {
+  color: var(--accent);
+}
+.codex-reset-forecast:has(.codex-reset-forecast-open:focus-visible) {
+  outline: 2px solid rgba(var(--accent-rgb), 0.5);
+  outline-offset: 3px;
+}
+.codex-reset-forecast-info-wrap {
+  z-index: 2;
+  pointer-events: auto;
+}
+.codex-reset-forecast-info-wrap .limit-detail-tooltip {
+  right: auto;
+  left: calc(anchor(left) - 1px);
+  width: max-content;
+  max-width: min(230px, calc(100vw - 48px));
+  grid-template-columns: max-content minmax(0, 1fr);
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.2;
+  text-align: left;
+}
+.codex-reset-forecast-info-wrap .limit-detail-tooltip::after {
+  right: auto;
+  left: 6px;
+}
+.codex-reset-forecast-info-wrap .limit-detail-tooltip-row span:last-child {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.codex-reset-forecast.is-loading .codex-reset-forecast-value,
+.codex-reset-forecast.is-unavailable .codex-reset-forecast-value {
+  color: var(--muted);
+}
 /* Spacing lives on the rows, not here, so each account can carry its own
    separator rule in the gap it opens above itself. */
 .limit-account-list {
@@ -4004,13 +4388,24 @@ html.is-windows .limit-live-badge {
    this stylesheet's floor for a hairline that survives the light theme, so the
    weight can't go lower. Twice the within-account gap (.limit-row) carries the
    grouping on its own; the rule just pins it. `+` keeps it strictly between
-   accounts. */
+   accounts.
+
+   The reset forecast takes this same separator in every shape it is drawn in:
+   it is a block of its own below the quota rows, and whether the provider above
+   it holds one account or several is not something the reader should have to
+   notice. Scoping it to `.limit-row-group` is what made the rule appear in a
+   multi-account row and go missing in a single-account one — and since the dock
+   card is built on this same row, it showed only the missing half. The forecast
+   is only ever a child of one of those two shapes (limits/windowsView.js appends
+   it to a solo row and to a group, never to an account row), so an unscoped
+   selector reaches no third case. */
 .limit-account-row + .limit-account-row {
   position: relative;
   margin-top: 10px;
   padding-top: 10px;
 }
-.limit-account-row + .limit-account-row::before {
+.limit-account-row + .limit-account-row::before,
+.codex-reset-forecast::before {
   position: absolute;
   top: 0;
   right: 0;
@@ -4046,6 +4441,12 @@ html.is-windows .limit-live-badge {
   grid-column: 1 / -1;
 }
 .limit-window-text { color: var(--muted); font-size: 10px; }
+.limit-window-text span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .limit-window-text span:last-child { color: var(--text); white-space: nowrap; }
 .limit-meter {
   width: 100%;
@@ -4055,12 +4456,21 @@ html.is-windows .limit-live-badge {
   background: rgba(var(--sunken-rgb), 0.44);
 }
 .limit-meter-fill {
+  position: relative;
   width: 100%;
   height: 100%;
   border-radius: 3px;
   transform: scaleX(var(--bar-scale, 0));
   transform-origin: left center;
   transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.limit-meter-completion {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.58);
+  opacity: 0;
+  will-change: opacity;
 }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .bar-fill,
@@ -4163,7 +4573,6 @@ html.is-windows .limit-live-badge {
   height: 14px;
   flex: 0 0 14px;
   place-items: center;
-  transform: translateY(-1px);
 }
 .limit-detail-tooltip-trigger {
   display: inline-grid;
@@ -4188,18 +4597,33 @@ html.is-windows .limit-live-badge {
 .limit-detail-tooltip-wrap:hover .limit-detail-tooltip-trigger {
   opacity: 0.72;
 }
+/* Every tooltip on this surface is a popover, so it paints in the top layer.
+   Both surfaces that draw these rows scroll inside a clipping box — the limits
+   panel and the dock card's account list — and an absolutely positioned tooltip
+   was cut off by it and painted under whatever sat above. The top layer escapes
+   every ancestor's overflow and stacking context at once, which is why this is
+   one rule rather than a z-index hunt per caller.
+
+   The top layer is not the containing block, though: a popover has no ancestor
+   to be positioned against, so it is anchored instead. The anchor names have to
+   be unique per trigger, so they are minted in JS (attachLimitDetailTooltip)
+   and only consumed here. `inset: auto` undoes the UA popover rule that would
+   otherwise stretch it across the viewport. */
 .limit-detail-tooltip {
-  position: absolute;
-  right: -1px;
-  bottom: calc(100% + 5px);
+  position: fixed;
+  inset: auto;
+  right: calc(anchor(right) - 1px);
+  bottom: calc(anchor(top) + 5px);
   z-index: 20;
-  display: grid;
   width: max-content;
   min-width: 0;
+  max-height: none;
+  margin: 0;
   grid-template-columns: max-content max-content;
   column-gap: 12px;
   row-gap: 4px;
   padding: 6px 7px;
+  overflow: visible;
   border: 1px solid rgba(var(--line-rgb), 0.22);
   border-radius: 7px;
   background:
@@ -4210,10 +4634,39 @@ html.is-windows .limit-live-badge {
   opacity: 0;
   pointer-events: none;
   transform: translateY(2px);
-  transition: opacity 120ms ease, transform 120ms ease;
-  visibility: hidden;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    display 120ms allow-discrete,
+    overlay 120ms allow-discrete;
   -webkit-backdrop-filter: blur(28px) saturate(115%);
   backdrop-filter: blur(28px) saturate(115%);
+}
+.limit-detail-tooltip:popover-open {
+  display: grid;
+  opacity: 1;
+  transform: translateY(0);
+}
+@starting-style {
+  .limit-detail-tooltip:popover-open {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+/* Flipped below when the trigger sits too near the top of the window. The top
+   layer clears every clipping ancestor but not the window itself, and on a
+   280px dock card there is often nothing above the first row. */
+.limit-detail-tooltip.is-below {
+  top: calc(anchor(bottom) + 5px);
+  bottom: auto;
+}
+.limit-detail-tooltip.is-below::after {
+  top: -4px;
+  bottom: auto;
+  border-top: 1px solid rgba(var(--line-rgb), 0.22);
+  border-right: none;
+  border-bottom: none;
+  border-left: 1px solid rgba(var(--line-rgb), 0.22);
 }
 .limit-detail-tooltip-triple {
   grid-template-columns: max-content max-content max-content;
@@ -4229,12 +4682,6 @@ html.is-windows .limit-live-badge {
   background: rgba(var(--glass-rgb), 0.76);
   content: "";
   transform: rotate(45deg);
-}
-.limit-detail-tooltip-wrap:hover .limit-detail-tooltip,
-.limit-detail-tooltip-wrap:focus-within .limit-detail-tooltip {
-  opacity: 1;
-  transform: translateY(0);
-  visibility: visible;
 }
 .limit-detail-tooltip-wrap.has-opened .limit-detail-tooltip {
   transition: none;
@@ -4261,6 +4708,42 @@ html.is-windows .limit-live-badge {
   opacity: 0.54;
   text-align: right;
   white-space: nowrap;
+}
+/* A full-row entry spans the whole grid and wraps in place — a long sentence
+   in a nowrap cell would push the popover past the window edge. Same bound
+   the forecast disclaimer uses. */
+.limit-detail-tooltip-full {
+  grid-column: 1 / -1;
+  max-width: 210px;
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: normal;
+}
+.limit-detail-tooltip-full.is-separated {
+  margin-top: 3px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.16);
+}
+/* A caption full-row is context, not data — smaller and dimmer so it reads
+   as a footnote instead of another line competing with the rows. */
+.limit-detail-tooltip-full.is-caption {
+  font-size: 8px;
+  opacity: 0.66;
+}
+.codex-reset-forecast-disclaimer {
+  grid-column: 1 / -1;
+  max-width: 210px;
+  margin-top: 2px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.16);
+  color: var(--muted);
+  font-size: 8px;
+  font-weight: 400;
+  line-height: 1.35;
+  opacity: 0.66;
+  overflow-wrap: anywhere;
+  text-align: left;
+  white-space: normal;
 }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .limit-detail-tooltip {
@@ -4316,12 +4799,6 @@ html.is-windows .limit-live-badge {
 }
 .subscription-field-note {
   margin-top: -2px;
-}
-/* This stylesheet has no blanket `.hidden { display: none }` — every hidden
-   thing declares its own rule — so a bare `hidden` class on these wrappers left
-   both kinds of field on screen at once. */
-.subscription-kind-fields.hidden {
-  display: none;
 }
 /* The ledger stands where a labelled field would, so it keeps the form's left
    edge rather than indenting to the control column. Its currency select is
@@ -4428,9 +4905,6 @@ html.is-windows .limit-live-badge {
   border-radius: 6px;
   background: rgba(255, 176, 46, 0.08);
 }
-.subscription-orphan-notice.hidden {
-  display: none;
-}
 .subscription-orphan-notice .settings-note {
   margin: 0 0 6px;
 }
@@ -4454,9 +4928,6 @@ html.is-windows .limit-live-badge {
    has no form open to report into. */
 .subscription-sync-error {
   color: var(--red);
-}
-.subscription-sync-error.hidden {
-  display: none;
 }
 .subscription-row {
   display: grid;
@@ -4604,24 +5075,8 @@ html.is-windows .limit-live-badge {
    against right-aligned values. A key/value card reads as labels left, values
    right; the value cells set their own alignment already. */
 .subscription-tooltip {
-  right: 0;
+  right: anchor(right);
   text-align: left;
-}
-/* The card opens upward, and .limits-panel scrolls behind `overflow: hidden
-   auto` — so on the topmost provider the whole card landed above the panel's
-   edge and was clipped away. positionSubscriptionTooltip() flips it below when
-   the row has no room above it. */
-.subscription-tooltip.is-below {
-  top: calc(100% + 5px);
-  bottom: auto;
-}
-.subscription-tooltip.is-below::after {
-  top: -4px;
-  bottom: auto;
-  border-top: 1px solid rgba(var(--line-rgb), 0.22);
-  border-right: none;
-  border-bottom: none;
-  border-left: 1px solid rgba(var(--line-rgb), 0.22);
 }
 .subscription-tooltip-rule {
   height: 1px;
@@ -4645,6 +5100,7 @@ html.is-windows .limit-live-badge {
 }
 .limit-row.stale .limit-name, .limit-row.stale .limit-window-text span:last-child { color: var(--muted); }
 .footer {
+  --view-switcher-max-width: min(150px, 52%);
   position: relative;
   z-index: 1;
   display: flex;
@@ -4654,11 +5110,117 @@ html.is-windows .limit-live-badge {
   color: var(--muted);
   font-size: 11px;
 }
+.tool-detail-footer {
+  display: grid;
+  height: 30px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  flex: 0 0 104px;
+  overflow: hidden;
+  border: 1px solid rgba(var(--line-rgb), 0.18);
+  border-radius: 7px;
+  background: rgba(var(--overlay-rgb), var(--control-alpha));
+}
+.shell.settings-open .tool-detail-footer { display: none; }
+.tool-detail-footer-option {
+  min-width: 0;
+  padding: 0 7px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  transition: color 120ms ease, background 120ms ease;
+}
+.tool-detail-footer-option + .tool-detail-footer-option {
+  border-left: 1px solid rgba(var(--line-rgb), 0.14);
+}
+.tool-detail-footer-option:hover {
+  color: var(--text);
+  background: rgba(var(--overlay-rgb), 0.04);
+}
+.tool-detail-footer-option[aria-pressed="true"] {
+  color: var(--text);
+  background: rgba(var(--accent-rgb), 0.11);
+}
+.tool-detail-footer-option:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: -2px;
+}
+.live-token-rate {
+  position: absolute;
+  left: 50%;
+  display: inline-flex;
+  height: 30px;
+  max-width: 116px;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 7px;
+  transform: translateX(-50%);
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+  transition: color 140ms ease, background-color 140ms ease, opacity 180ms ease;
+}
+.live-token-rate:hover {
+  background: rgba(var(--overlay-rgb), 0.055);
+  color: var(--text);
+}
+.live-token-rate:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: 1px;
+}
+.live-token-rate-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  background: var(--accent);
+  -webkit-mask: url("icons/actions/zap.svg") center / contain no-repeat;
+  mask: url("icons/actions/zap.svg") center / contain no-repeat;
+}
+.live-token-rate-value {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+.live-token-rate.is-idle { opacity: 0.52; }
+.live-token-rate.is-fresh .live-token-rate-icon {
+  animation: live-token-rate-flash 620ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes live-token-rate-flash {
+  0% { filter: drop-shadow(0 0 0 rgba(var(--accent-rgb), 0)); transform: scale(0.86); }
+  42% { filter: drop-shadow(0 0 5px rgba(var(--accent-rgb), 0.68)); transform: scale(1.13); }
+  100% { filter: drop-shadow(0 0 0 rgba(var(--accent-rgb), 0)); transform: scale(1); }
+}
+.footer.live-token-rate-enabled {
+  --view-switcher-max-width: min(112px, max(0px, calc(50% - 66px)));
+}
+.footer.live-token-rate-obscured .live-token-rate,
+.footer:has(.utility-actions:hover) .live-token-rate,
+.footer:has(.utility-actions :focus-visible) .live-token-rate,
+.footer:has(.refresh-button:is(.is-refreshing, .is-refreshed, .is-refresh-error)) .live-token-rate,
+.shell.settings-open .footer .live-token-rate {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
 .view-switcher {
   position: relative;
   display: flex;
   min-width: 0;
-  max-width: min(150px, 52%);
+  max-width: var(--view-switcher-max-width);
   flex: 0 1 auto;
   align-items: center;
   margin-right: auto;
@@ -4772,6 +5334,9 @@ html.is-windows .limit-live-badge {
   will-change: opacity, transform, filter;
 }
 .view-switcher-menu.hidden {
+  /* Animates out rather than disappearing, so it must keep its box. Higher
+     specificity than the blanket `.hidden`, and matching weight to beat it. */
+  display: grid !important;
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
@@ -4813,6 +5378,44 @@ html.is-windows .limit-live-badge {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* On Liquid Glass the controls sit straight on the AppKit surface, so they read
+   as lensed edges of that one sheet rather than slabs stacked on it: capsule
+   shapes and a specular top edge. The highlight stays white on light themes
+   too — it is reflected light, not an overlay tint. Chromium's backdrop blur has
+   nothing but transparent pixels to sample here, so it is dropped. Fills and
+   borders are left to the base rules so their hover/active states still win,
+   and the refresh button's state glows keep their own shadow (each already
+   carries a top edge of its own). */
+html.native-liquid-glass {
+  --liquid-glass-specular: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.035);
+}
+html.native-liquid-glass :is(.tabs, .tab, .tab-indicator, .tool-detail-footer, #utilityActions button) {
+  border-radius: 999px;
+}
+html.native-liquid-glass :is(.tabs, .tab-indicator, .tool-detail-footer, #utilityActions button:not(.is-refreshing, .is-refreshed, .is-refresh-error), .view-switcher-current, .view-switcher-disclosure) {
+  box-shadow: var(--liquid-glass-specular);
+}
+html.native-liquid-glass :is(.tabs, .tab-indicator, .tool-detail-footer, #utilityActions button, .view-switcher-current, .view-switcher-disclosure) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html.native-liquid-glass .tab-indicator { background: rgba(var(--overlay-rgb), 0.11); }
+html.native-liquid-glass .view-switcher-current { border-radius: 999px 0 0 999px; padding-left: 11px; }
+html.native-liquid-glass .view-switcher-disclosure { width: 28px; flex-basis: 28px; padding-right: 3px; border-radius: 0 999px 999px 0; }
+/* The menu is the one layer that floats over content, and the page is drawn
+   above the native glass, so nothing but its own fill can hide the rows it
+   covers. It stays a dense frosted plate; only its shape and edge follow the
+   glass controls. */
+html.native-liquid-glass .view-switcher-menu {
+  padding: 5px;
+  border-color: rgba(var(--line-rgb), 0.16);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.07), rgba(var(--overlay-rgb), 0.02)),
+    rgba(var(--glass-rgb), 0.86);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24), var(--liquid-glass-specular);
+}
+html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .period-menu {
   -webkit-app-region: no-drag;
   top: 34px;
@@ -4828,12 +5431,21 @@ html.is-windows .limit-live-badge {
   grid-template-columns: minmax(0, 1fr);
 }
 .period-menu.hidden {
+  /* Animates out rather than disappearing, so it must keep its box. Higher
+     specificity than the blanket `.hidden`, and matching weight to beat it. */
+  display: grid !important;
   transform: translateY(-6px) scale(0.985);
 }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .view-switcher-menu {
     filter: none;
     transition-duration: 0.01ms;
+  }
+  :root:not([data-reduce-motion="off"]) .live-token-rate {
+    transition: none;
+  }
+  :root:not([data-reduce-motion="off"]) .live-token-rate-icon {
+    animation: none;
   }
 }
 .view-icon-home { -webkit-mask-image: url("icons/views/home.svg"); mask-image: url("icons/views/home.svg"); }
@@ -4864,7 +5476,6 @@ html.is-windows .limit-live-badge {
   white-space: nowrap;
   transition: opacity 120ms ease, background-color 120ms ease, border-color 120ms ease;
 }
-.update-pill.hidden { display: none; }
 .update-pill:hover { background: rgba(115, 189, 245, 0.18); border-color: rgba(115, 189, 245, 0.52); }
 .footer:has(.utility-actions:hover) .update-pill,
 .footer:has(.utility-actions :focus-visible) .update-pill,
@@ -4914,7 +5525,6 @@ html.is-windows .limit-live-badge {
   font-weight: 600;
   line-height: 1;
 }
-.update-pill-restart.hidden { display: none; }
 @media (max-width: 300px) {
   .update-pill-restart { gap: 0; padding-inline: 7px; }
   .update-pill-restart-label { display: none; }
@@ -4934,7 +5544,6 @@ html.is-windows .limit-live-badge {
   cursor: pointer;
 }
 .update-pill-dismiss:hover { opacity: 1; }
-.update-pill-dismiss.hidden { display: none; }
 .app-update-popover {
   inset: auto;
   margin: 0;
@@ -5000,7 +5609,6 @@ html.is-windows .limit-live-badge {
 .app-update-popover-primary:hover { background: rgba(115, 189, 245, 0.22); }
 .app-update-popover-primary:disabled { cursor: default; opacity: 0.5; }
 .app-update-popover .inline-link { font-size: 10px; }
-.app-update-popover .inline-link.hidden { display: none; }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .update-pill,
   :root:not([data-reduce-motion="off"]) .app-update-popover { transition-duration: 0.01ms; }
@@ -5052,84 +5660,35 @@ html.is-windows .limit-live-badge {
   .service-status-panel { display: none; }
 }
 
-#claudeManualPanel.hidden,
-#cursorManualPanel.hidden,
-#opencodeManualPanel.hidden,
-#deepseekManualPanel.hidden,
-#minimaxManualPanel.hidden,
-#zaiManualPanel.hidden,
-#zaiteamManualPanel.hidden,
-#volcengineManualPanel.hidden,
-#qoderManualPanel.hidden,
-#traeManualPanel.hidden,
-#commandcodeManualPanel.hidden,
-#ollamaManualPanel.hidden,
-#mimoManualPanel.hidden,
-#kimiManualPanel.hidden,
-#copilotManualPanel.hidden,
-#copilotManualDetails.hidden,
-#cursorErrorMessage.hidden,
-#opencodeErrorMessage.hidden,
-#openrouterErrorMessage.hidden,
-#thirdpartyErrorMessage.hidden,
-#thirdpartySub2ApiSteps.hidden,
-#thirdpartyAccessTokenRow.hidden,
-#thirdpartyRefreshTokenRow.hidden,
-#thirdpartyUserIdRow.hidden,
-#thirdpartyApiKeyRow.hidden,
-#thirdpartyModeField.hidden,
-#thirdpartyCustomConfig.hidden,
-#deepseekErrorMessage.hidden,
-#minimaxErrorMessage.hidden,
-#zaiErrorMessage.hidden,
-#zaiteamErrorMessage.hidden,
-#volcengineErrorMessage.hidden,
-#qoderErrorMessage.hidden,
-#traeErrorMessage.hidden,
-#commandcodeErrorMessage.hidden,
-#ollamaErrorMessage.hidden,
-#kimiErrorMessage.hidden,
-#copilotErrorMessage.hidden,
-#copilotLoginStatus.hidden { display: none; }
-#claudeManualPanel,
-#cursorManualPanel,
 #opencodeManualPanel,
-#deepseekManualPanel,
-#minimaxManualPanel,
-#zaiManualPanel,
-#zaiteamManualPanel,
-#volcengineManualPanel,
-#qoderManualPanel,
-#traeManualPanel,
-#commandcodeManualPanel,
-#ollamaManualPanel,
-#mimoManualPanel,
+#cursorManualPanel,
 #kimiManualPanel,
-#copilotManualPanel {
+#copilotManualPanel,
+.credential-manual-panel,
+#mimoManualPanel,
+#volcengineManualPanel {
   min-width: 0;
 }
-#claudeManualPanel > .accordion-animation-inner,
-#cursorManualPanel > .accordion-animation-inner,
 #opencodeManualPanel > .accordion-animation-inner,
-#deepseekManualPanel > .accordion-animation-inner,
-#minimaxManualPanel > .accordion-animation-inner,
-#zaiManualPanel > .accordion-animation-inner,
-#zaiteamManualPanel > .accordion-animation-inner,
-#volcengineManualPanel > .accordion-animation-inner,
-#qoderManualPanel > .accordion-animation-inner,
-#traeManualPanel > .accordion-animation-inner,
-#commandcodeManualPanel > .accordion-animation-inner,
-#ollamaManualPanel > .accordion-animation-inner,
+#cursorManualPanel > .accordion-animation-inner,
+#kimiManualPanel > .accordion-animation-inner,
+.credential-manual-panel > .accordion-animation-inner,
 #mimoManualPanel > .accordion-animation-inner,
-#kimiManualPanel > .accordion-animation-inner {
+#volcengineManualPanel > .accordion-animation-inner {
   display: grid;
   min-width: 0;
   gap: 8px;
 }
-#claudeManualPanel textarea,
-#cursorManualPanel textarea,
 #opencodeManualPanel textarea,
+#cursorManualPanel textarea,
+#kimiManualPanel input,
+#kimiManualPanel textarea,
+#copilotManualDetails input,
+.credential-input,
+#mimoManualPanel input,
+#mimoManualPanel textarea,
 #openrouterApiKeyInput,
+#volcengineManualPanel input,
 #thirdpartyPlatformInput,
 #thirdpartyModeInput,
 #thirdpartyAuthModeInput,
@@ -5142,30 +5701,19 @@ html.is-windows .limit-live-badge {
 #thirdpartyUsedPathInput,
 #thirdpartyTotalPathInput,
 #thirdpartyCurrencyInput,
-#thirdpartyDivisorInput,
-#deepseekManualPanel input,
-#minimaxManualPanel input,
-#zaiManualPanel input,
-#zaiteamManualPanel input,
-#zaiApiRegionInput,
-#volcengineManualPanel input,
-#qoderManualPanel textarea,
-#qoderManualPanel select,
-#traeManualPanel input,
-#commandcodeManualPanel textarea,
-#ollamaManualPanel textarea,
-#mimoManualPanel input,
-#mimoManualPanel textarea,
-#kimiManualPanel input,
-#kimiManualPanel textarea,
-#copilotManualDetails input {
+#thirdpartyDivisorInput {
   width: 100%;
   font-size: 12px;
 }
-#claudeManualPanel textarea,
-#cursorManualPanel textarea,
 #opencodeManualPanel textarea,
+#cursorManualPanel textarea,#kimiManualPanel input,
+#kimiManualPanel textarea,
+#copilotManualDetails input,
+.credential-input:not(select),
+#mimoManualPanel input,
+#mimoManualPanel textarea,
 #openrouterApiKeyInput,
+#volcengineManualPanel input,
 #thirdpartyBaseUrlInput,
 #thirdpartyAccessTokenInput,
 #thirdpartyUserIdInput,
@@ -5175,21 +5723,7 @@ html.is-windows .limit-live-badge {
 #thirdpartyUsedPathInput,
 #thirdpartyTotalPathInput,
 #thirdpartyCurrencyInput,
-#thirdpartyDivisorInput,
-#deepseekManualPanel input,
-#minimaxManualPanel input,
-#zaiManualPanel input,
-#zaiteamManualPanel input,
-#volcengineManualPanel input,
-#qoderManualPanel textarea,
-#traeManualPanel input,
-#commandcodeManualPanel textarea,
-#ollamaManualPanel textarea,
-#mimoManualPanel input,
-#mimoManualPanel textarea,
-#kimiManualPanel input,
-#kimiManualPanel textarea,
-#copilotManualDetails input {
+#thirdpartyDivisorInput {
   font-family: monospace;
 }
 .link-button {
@@ -5212,10 +5746,9 @@ html.is-windows .limit-live-badge {
 }
 .session-detail { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 6px; overflow: hidden auto; scrollbar-width: none; font-size: 12px; }
 .session-detail::-webkit-scrollbar { width: 0; height: 0; }
-.session-detail.hidden { display: none; }
 .detail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
-.detail-head.hidden { display: none; }
 .detail-back { background: transparent; border: 0; color: var(--muted, #8a8a90); font: inherit; cursor: pointer; padding: 0; }
+.detail-heading { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .detail-sort { background: transparent; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; color: var(--muted, #8a8a90); font: inherit; font-size: 11px; cursor: pointer; padding: 2px 8px; margin-block: -4px; }
 .detail-note { color: var(--muted, #8a8a90); padding: 16px 4px; text-align: center; }
 .detail-exchange { border-bottom: 1px dashed rgba(255,255,255,0.08); padding: 6px 0; }
@@ -5228,7 +5761,6 @@ html.is-windows .limit-live-badge {
 .detail-ex-metrics { text-align: right; white-space: nowrap; display: flex; flex-direction: column; }
 .detail-ex-cost, .detail-turn-cost { font-size: 10px; color: var(--muted, #8a8a90); }
 .detail-turns { margin: 4px 0 4px 20px; padding-left: 12px; border-left: 2px solid rgba(255,255,255,0.08); }
-.detail-turns.hidden { display: none; }
 .detail-turn { display: flex; align-items: baseline; justify-content: space-between; padding: 4px 0; }
 .detail-turn-label { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .detail-turn-split, .detail-turn-tools { font-size: 10px; color: var(--muted, #8a8a90); }
@@ -5236,8 +5768,14 @@ html.is-windows .limit-live-badge {
 .detail-role-user { color: #bda5f5; }
 .detail-role-sep { color: var(--muted); }
 .detail-turn-title { color: var(--muted); }
+.background-review-overview { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 4px 0 6px; color: var(--muted); font-size: 10px; }
+.background-review-totals { white-space: nowrap; color: var(--text); }
+.background-review-run:focus-visible,
+.row[role="button"]:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.35); outline-offset: 2px; }
 .row.session-row[data-client="claude"], .row.session-row[data-client="codex"], .row.session-row[data-client="opencode"], .row.session-row[data-client="reasonix"], .row.session-row[data-client="dsh"] { cursor: pointer; }
 .row.session-row[data-client="claude"] .row-metrics::after, .row.session-row[data-client="codex"] .row-metrics::after, .row.session-row[data-client="opencode"] .row-metrics::after, .row.session-row[data-client="reasonix"] .row-metrics::after, .row.session-row[data-client="dsh"] .row-metrics::after { content: '›'; color: var(--muted); font-size: 14px; line-height: 1; }
+.row.summary-row[data-review-group="true"] { cursor: pointer; }
+.row.summary-row[data-review-group="true"] .row-metrics::after { content: '›'; color: var(--muted); font-size: 14px; line-height: 1; }
 .row.session-row[data-client="reasonix"][data-detail-unavailable="true"] { cursor: default; }
 .row.session-row[data-client="reasonix"][data-detail-unavailable="true"] .row-metrics::after { content: none; }
 .view-preference-row.has-subgroup {
@@ -5359,6 +5897,56 @@ html.is-windows .limit-live-badge {
   gap: 8px;
 }
 .status-provider-row.is-hidden .tool-preference-name { opacity: 0.45; }
+
+/* Main Screen starts pointer reordering from the six-dot handles, while the
+   rows use the same transform choreography as Collection and AI Tool Limits. */
+.view-preference-row,
+.home-module-preference-row,
+.home-limit-provider-row,
+.status-provider-row {
+  position: relative;
+  touch-action: pan-y;
+  transform: translateY(calc(var(--drag-y, 0px) + var(--drag-shift, 0px)));
+  transition:
+    transform 170ms cubic-bezier(0.22, 1, 0.36, 1),
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+.view-preference-row.dragging,
+.home-module-preference-row.dragging,
+.home-limit-provider-row.dragging,
+.status-provider-row.dragging {
+  z-index: 2;
+  background: rgba(var(--panel-rgb), 0.96);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.62);
+  cursor: grabbing;
+  scale: 1.02;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+  will-change: transform;
+}
+.view-preference-row.dragging .preference-order-handle,
+.home-module-preference-row.dragging .preference-order-handle,
+.home-limit-provider-row.dragging .preference-order-handle,
+.status-provider-row.dragging .preference-order-handle { cursor: grabbing; }
+#viewDisplayList.is-landing > .view-preference-row,
+.home-settings-list.is-landing > .home-module-preference-row,
+.home-limit-provider-list.is-landing > .home-limit-provider-row,
+.status-provider-list.is-landing > .status-provider-row {
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease;
+}
+#viewDisplayList.drag-active > .view-preference-row:not(.dragging),
+.home-settings-list.drag-active > .home-module-preference-row:not(.dragging),
+.home-limit-provider-list.drag-active > .home-limit-provider-row:not(.dragging),
+.status-provider-list.drag-active > .status-provider-row:not(.dragging) { opacity: 0.78; }
+#viewDisplayList.is-reordering > .accordion-animated-container,
+.home-settings-list.is-reordering > .accordion-animated-container { transition: none; }
 .service-status-empty {
   padding: 12px 0;
   color: var(--muted);
@@ -5379,10 +5967,8 @@ html.is-windows .limit-live-badge {
   max-width: 58%;
   font-size: 11px;
 }
-.status-provider-interval.hidden { display: none; }
 
 .trends-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; overflow: hidden; }
-.trends-panel.hidden { display: none; }
 .trends-cap { flex: none; display: flex; align-items: center; justify-content: space-between; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; opacity: 0.6; }
 .trends-open-hint { opacity: 0.75; cursor: pointer; font-size: 13px; }
 .trends-spark { flex: 1 1 auto; min-height: 0; display: flex; cursor: pointer; border-radius: 8px; padding: 6px 4px; transition: background 0.12s ease; }
@@ -5449,6 +6035,7 @@ html.is-windows .limit-live-badge {
   align-items: baseline;
   gap: 12px;
   font-size: 11px;
+  line-height: 1.35;
 }
 .accordion-label {
   color: var(--muted);
@@ -5457,6 +6044,12 @@ html.is-windows .limit-live-badge {
   display: flex;
   align-items: baseline;
   gap: 6px;
+  white-space: nowrap;
+}
+.accordion-item-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .device-breakdown { gap: 6px; }
@@ -5563,17 +6156,18 @@ html.is-windows .limit-live-badge {
   border-radius: 50%;
 }
 
-.custom-pricing-form {
+.custom-pricing-form,
+.model-alias-form {
   display: flex;
   flex-direction: column;
   gap: 8px;
   margin-top: 8px;
 }
 
-.custom-pricing-form.hidden { display: none; }
+.model-alias-form label { display: grid; gap: 4px; min-width: 0; }
+.model-alias-form input { width: 100%; min-width: 0; box-sizing: border-box; }
 
-.custom-pricing-form input.hidden,
-.custom-pricing-form .settings-note.hidden { display: none; }
+
 
 .custom-pricing-approx {
   margin-left: 8px;
@@ -5628,14 +6222,11 @@ html.is-windows .limit-live-badge {
 .opencode-profile-list {
   margin-bottom: 4px;
 }
-/* This stylesheet has no global `.hidden`; every use is scoped to its own
-   selector, so the credential blocks need their own rule to disappear. */
 .opencode-credential-fields {
   display: flex;
   flex-direction: column;
   gap: 7px;
 }
-.opencode-credential-fields.hidden { display: none; }
 /* The API key field sits outside .settings-row, so it needs the same explicit
    sizing that rule gives the labelled controls. */
 .opencode-credential-fields > input {
@@ -5651,7 +6242,6 @@ html.is-windows .limit-live-badge {
   font-size: 11px;
   text-align: center;
 }
-.opencode-empty.hidden { display: none; }
 .opencode-profile-item {
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr) auto;
@@ -5819,7 +6409,6 @@ html.is-windows .limit-live-badge {
   white-space: nowrap;
   cursor: pointer;
 }
-.credential-merge-btn.hidden { display: none; }
 .opencode-credential-row .credential-merge-btn { flex: 0 0 auto; }
 .opencode-profile-item .profile-name-box {
   display: grid;
@@ -5866,10 +6455,6 @@ html.is-windows .limit-live-badge {
   color: var(--muted);
   font-size: 9px;
   line-height: 1.2;
-}
-.opencode-profile-item .profile-name.hidden,
-.opencode-profile-item .profile-name-input.hidden {
-  display: none;
 }
 .opencode-profile-item .profile-name-input {
   grid-area: name;
@@ -5988,6 +6573,12 @@ html.is-windows .limit-live-badge {
 .opencode-add-details {
   margin-top: 8px;
 }
+/* Cursor sits below both the account list and its own provider copy, so the
+   shared add-details margin doubles the visual step before the first action.
+   The form wrapper already supplies the same separation used by MiMo. */
+#cursorManualDetails {
+  margin-top: 0;
+}
 .opencode-add-body {
   display: flex;
   flex-direction: column;
@@ -6016,6 +6607,20 @@ html.is-windows .limit-live-badge {
   height: 30px;
   box-sizing: border-box;
   font-size: 12px;
+}
+/* The Agent Plan override borrows the disclosure chrome above, but that form's
+   rows put a short label beside its input, and these labels are full field
+   names, so the three inputs ended up at three different widths. Fall back to
+   the stacked row the rest of the Volcengine card already uses. */
+#volcengineAgentDetails .settings-row {
+  display: block;
+}
+#volcengineAgentDetails .settings-row label {
+  white-space: normal;
+}
+#volcengineAgentDetails .settings-row :is(input, select) {
+  height: auto;
+  font-size: inherit;
 }
 .opencode-add-body textarea {
   width: 100%;
@@ -6109,7 +6714,6 @@ html.is-windows .limit-live-badge {
   min-width: 0;
   padding: 8px 0 4px;
 }
-.tray-composer.hidden { display: none; }
 .tray-composer-heading {
   display: flex;
   /* Holds either a drag hint or a Customize button depending on the mode; a
@@ -6744,5 +7348,26 @@ html.is-windows .limit-live-badge {
   .tray-composer-item { transition: none; }
   .settings-panel .limit-provider-row { transition: none; }
   .tool-preference-row { transition: none; }
+  .view-preference-row,
+  .home-module-preference-row,
+  .home-limit-provider-row,
+  .status-provider-row { transition: none; }
   .tool-preference-main .cursor-disclosure-icon { transition: none; }
+}
+
+/* One rule for hiding. Before this, each hidden thing carried its own
+   `display: none` and a new one that forgot simply stayed on screen — a trap
+   this stylesheet had already fallen into twice and papered over with comments.
+   `!important` is load-bearing, not laziness: layout here is written with
+   descendant selectors (`.settings-panel .settings-item`, `.settings-panel
+   label`, …) that outrank a lone class, so without it a blanket rule loses to
+   the component on 300+ elements — measured, which is how this rule got here.
+   Hiding is a utility that must beat layout by design, the same call Bootstrap
+   makes for `.d-none`; to un-hide something you remove the class, you do not
+   out-specify it. `[hidden]` joins it because the attribute means exactly this.
+   The handful of elements that animate out instead of disappearing override it
+   from their own, more specific, `.hidden` rule. */
+.hidden,
+[hidden] {
+  display: none !important;
 }

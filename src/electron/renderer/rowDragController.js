@@ -1,18 +1,18 @@
 'use strict';
 
-// Whole-row drag-to-reorder for a settings list, factored out of the limit
-// provider list so a second list can adopt the same gesture without a second
-// copy of it. The pure geometry lives in `verticalDragSort.js`; what is here is
-// the pointer/DOM choreography around it, every step of which exists because of
-// a specific failure noted inline.
+// Drag-to-reorder for a settings list, factored out of the limit provider list
+// so other lists can adopt the same gesture without a second copy of it. A
+// caller may use the whole row or require an explicit handle; the pure geometry
+// lives in `verticalDragSort.js`. What is here is the pointer/DOM choreography,
+// every step of which exists because of a specific failure noted inline.
 (function exposeRowDragController(root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorRowDragController = api;
 })(typeof window !== 'undefined' ? window : null, function createRowDragControllerApi() {
-  // The list drags from the whole row instead of a handle: the pointer must
-  // travel this far vertically before the gesture counts as a drag rather than
-  // a click. Same threshold the tray composer uses horizontally.
+  // The pointer must travel this far vertically before the gesture counts as a
+  // drag rather than a click. Same threshold the tray composer uses
+  // horizontally, whether the caller arms from a row or a handle.
   const DEFAULT_DRAG_THRESHOLD = 4;
 
   function createRowDragController(config = {}) {
@@ -23,6 +23,7 @@
       rowSelector,
       idKey,
       dragExcluded,
+      dragStartSelector = '',
       threshold = DEFAULT_DRAG_THRESHOLD,
       getExpanded = () => '',
       setExpanded = () => {},
@@ -83,6 +84,11 @@
     function startRowDrag(event, id) {
       if (event.button !== 0) return;
       const rowEl = event.currentTarget;
+      // Handle-only lists still listen on the row so `currentTarget` remains the
+      // element whose geometry and pointer capture the controller owns. The
+      // closest match also lets an icon nested inside the handle start the drag.
+      const dragStart = dragStartSelector && event.target?.closest?.(dragStartSelector);
+      if (dragStartSelector && (!dragStart || !rowEl.contains(dragStart))) return;
       // Scoped to the row on purpose: `closest` keeps walking past it, and the
       // whole settings section is itself an `.accordion-animated-container`, so an
       // unscoped match excludes every row and no drag ever starts.

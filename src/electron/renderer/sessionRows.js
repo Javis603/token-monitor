@@ -6,9 +6,17 @@
   if (root) root.TokenMonitorSessionRows = api;
 })(typeof window !== 'undefined' ? window : null, function createSessionRowsApi(root) {
   const reasonixSessionGuard = typeof module === 'object' && module.exports
-    ? require('../../shared/reasonixSessionGuard')
+    ? require('../../shared/providers/reasonix/sessionGuard')
     : root?.TokenMonitorReasonixSessionGuard;
   const isReasonixSyntheticSession = reasonixSessionGuard?.isReasonixSyntheticSession || (() => false);
+  // Running/archived and the context pair are shared with the Edge Dock's
+  // session rows: both render the same session record, so the predicate cannot
+  // live in only one of the two renderers.
+  const sessionLive = typeof module === 'object' && module.exports
+    ? require('../../shared/sessionLive')
+    : root?.TokenMonitorSessionLive;
+  const sessionActivityState = sessionLive.sessionActivityState;
+  const sessionContextForRow = sessionLive.sessionContextForRow;
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
 
   function finiteNumber(value) {
@@ -58,8 +66,12 @@
     if (reasonixLabel.toLowerCase().startsWith('reasonix-stats:')) return '';
     if (reasonixPrefix) return reasonixLabel;
     if (raw.toLowerCase().startsWith('reasonix-stats:')) return '';
+    const uuids = raw.match(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/gi) || [];
+    // Tokscale can merge resumed Codex rollouts into one session key. Keep that
+    // identity useful without exposing the rollout timestamps or join syntax.
+    if (uuids.length > 1) return uuids.join(' · ');
     const rollout = raw.match(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}[:-]\d{2}-(.+)$/);
-    if (rollout) return rollout[1];
+    if (rollout) return uuids[0] || rollout[1];
     if (/^\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}/.test(raw)) return '';
     return raw;
   }
@@ -87,6 +99,37 @@
     return typeof value === 'string' ? value.trim() : '';
   }
 
+  function clearButtonSemantics(element) {
+    for (const attribute of ['tabindex', 'role', 'aria-expanded', 'aria-label']) {
+      element.removeAttribute(attribute);
+    }
+  }
+
+  function applyBreakdownRowSemantics(row, rowHead, options = {}) {
+    clearButtonSemantics(row);
+    clearButtonSemantics(rowHead);
+    if (options.hasAccordion === true) {
+      rowHead.setAttribute('tabindex', '0');
+      rowHead.setAttribute('role', 'button');
+      rowHead.setAttribute('aria-expanded', String(options.expanded === true));
+      rowHead.setAttribute('aria-label', textValue(options.ariaLabel));
+      return;
+    }
+    if (options.interactive !== true) return;
+    row.setAttribute('tabindex', '0');
+    row.setAttribute('role', 'button');
+    row.setAttribute('aria-label', textValue(options.ariaLabel));
+  }
+
+  function handleBreakdownRowKeydown(event) {
+    if (event?.key !== 'Enter' && event?.key !== ' ') return false;
+    const row = event.target?.closest?.('.row[role="button"]');
+    if (!row) return false;
+    event.preventDefault();
+    row.click();
+    return true;
+  }
+
   function sessionTitleParts(session, labels, fallbackLabel = 'Session', explicitModel = '') {
     const client = textValue(session?.client);
     const clientLabel = labels[client] || client || fallbackLabel;
@@ -101,7 +144,23 @@
 
   function messageLabel(session) {
     const count = finiteNumber(session?.messageCount);
-    return count > 0 ? `${formatNumber(count)} msg${count === 1 ? '' : 's'}` : '';
+    if (count <= 0) return '';
+    // A session's "message count" is tokscale's count of usage-bearing replies,
+    // not conversation messages: Claude writes one API response as several
+    // content-block lines de-duplicated by message id, and Codex counts
+    // token_count events. `calls` is what the number actually is (a request
+    // count) and keeps this row a spending readout rather than a transcript
+    // readout; Session Detail resolves the same records into "turns" and
+    // Reply #N instead, because it has the boundaries to group them by.
+    // Deliberately NOT localized, matching the Limits view's fixed English
+    // wording: this is a billing unit, and a translated counter reads as a
+    // different measure in each locale (the Chinese candidates all read as
+    // something closer to "invocations" than to billable calls).
+    return `${formatNumber(count)} ${count === 1 ? 'call' : 'calls'}`;
+  }
+
+  function isBackgroundReviewSession(session) {
+    return textValue(session?.sessionKind) === 'background-review';
   }
 
   function nativeSessionRow(session, key, options, now) {
@@ -128,11 +187,23 @@
       sessionActivityLabel(session, now),
       messageLabel(session)
     ].filter(Boolean);
+    // One derivation, not two: the boolean is a projection of the three-state
+    // value, so a row can never be marked running by one reading and idle by the
+    // other. `isRunningSession` itself delegates to `sessionActivityState` for the
+    // same reason.
+    const activityState = sessionActivityState(session, now);
+    const running = activityState === 'running';
     return {
       key: `session:${key}`,
       kind: 'session',
       name: titleParts.join(' · '),
       subtitle: subtitleParts.join(' · '),
+      running: running || undefined,
+      activityState,
+      // Decided by the shared gate, not by `running`: it follows the recency
+      // window so the reading survives the turn ending, and the dock's card
+      // calls the same function so the two cannot disagree.
+      context: sessionContextForRow(session, now),
       detail: sessionIdLabel(session?.sessionId || key),
       value,
       tokenDataUnavailable,
@@ -166,7 +237,14 @@
         const { client, titleParts, clientLabel, modelLabel } = sessionTitleParts(session, labels);
         const sessionId = session?.sessionId || key;
         const archived = session?.archived === true || session?.deleted === true || session?.sourceDeleted === true;
-        const subtitleParts = [
+        const sessionTitle = textValue(session?.title);
+        // One derivation, as above. An archived session is idle whatever its
+        // timestamp says: the source it was read from is gone, so nothing can
+        // still be appending, which is what `sessionActivityState` already
+        // enforces through `isArchivedSession`.
+        const activityState = sessionActivityState(session, now);
+        const running = activityState === 'running';
+        const activityParts = [
           archived ? archivedLabel : '',
           sessionActivityLabel(session, now),
           messageLabel(session)
@@ -174,15 +252,20 @@
         return {
           key: `session:${key}`,
           kind: 'session',
-          name: titleParts.join(' · '),
-          subtitle: subtitleParts.join(' · '),
+          name: sessionTitle || titleParts.join(' · '),
+          subtitle: (sessionTitle ? titleParts : activityParts).join(' · '),
+          activity: sessionTitle ? activityParts.join(' · ') : undefined,
           detail: sessionIdLabel(sessionId),
           value,
           cost: finiteNumber(session?.costUsd),
           color: colors[client] || (modelLabel && colorForModel ? colorForModel(modelLabel) : stable(key, palette)),
           stale: false,
           archived: archived || undefined,
+          running: running || undefined,
+          activityState,
+          context: sessionContextForRow(session, now),
           client,
+          backgroundReview: isBackgroundReviewSession(session) || undefined,
           sortTime: sessionTimestampValue(session),
           title: `${clientLabel} session${sessionIdLabel(sessionId) ? ` ${sessionIdLabel(sessionId)}` : ''}`
         };
@@ -193,6 +276,47 @@
       if (row) rows.push(row);
     }
     return rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
+  }
+
+  function groupBackgroundReviewRows(rows, options = {}) {
+    const primary = [];
+    const reviews = [];
+    for (const row of Array.isArray(rows) ? rows : []) {
+      (row?.backgroundReview === true ? reviews : primary).push(row);
+    }
+    if (reviews.length === 0) return primary;
+    const value = reviews.reduce((sum, row) => sum + finiteNumber(row.value), 0);
+    const cost = reviews.reduce((sum, row) => sum + finiteNumber(row.cost), 0);
+    const sortTime = reviews.reduce((max, row) => Math.max(max, finiteNumber(row.sortTime)), 0);
+    const orderedReviews = [...reviews].sort((a, b) => finiteNumber(b.sortTime) - finiteNumber(a.sortTime));
+    const latest = orderedReviews[0] || null;
+    const countLabel = typeof options.countLabel === 'function'
+      ? options.countLabel(reviews.length)
+      : `${reviews.length} sessions`;
+    const summary = {
+      key: 'session-group:codex-auto-review',
+      kind: 'summary',
+      name: options.label || 'Codex Auto Review',
+      subtitle: typeof options.summaryLabel === 'function'
+        ? options.summaryLabel({
+          count: reviews.length,
+          countLabel,
+          latestTime: compactSessionTime(sortTime, options.now || new Date()),
+          latestValue: finiteNumber(latest?.value)
+        })
+        : '',
+      detail: countLabel,
+      value,
+      cost,
+      barValue: value,
+      color: reviews[0]?.color || fallbackColors[0],
+      stale: false,
+      client: 'codex',
+      sortTime,
+      reviewGroup: true,
+      backgroundReviewRows: orderedReviews
+    };
+    return [...primary, summary];
   }
 
   function sessionBreakdownIncomplete(stats, periodName) {
@@ -216,10 +340,17 @@
   }
 
   return {
+    applyBreakdownRowSemantics,
     archivedSessionCount,
     compactSessionTime,
+    groupBackgroundReviewRows,
+    handleBreakdownRowKeydown,
     sessionBreakdownIncomplete,
     sessionIdLabel,
+    // Exported for the edge dock's session rows: a card that shows the top
+    // model reads a different name than the list's "N models" for the same
+    // session, so both surfaces compose the label from this one helper.
+    sessionModelLabel,
     sessionRowsForPeriod
   };
 });

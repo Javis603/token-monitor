@@ -6,7 +6,7 @@
 //
 // Everything in this module is display-layer derivation, deliberately kept out of
 // the wire shape — the same rule that keeps `creditsMeterPercent()` in
-// limitBalanceDisplay.js rather than in a collector.
+// limits/balanceDisplay.js rather than in a collector.
 (function exposeSubscriptionDisplay(root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -232,7 +232,7 @@
   // A subscription describes an account, not a machine, so when devices share a
   // hub they share ONE list rather than each carrying their own copy inside its
   // device record. That choice is what keeps the arithmetic honest: account keys
-  // are not stable across platforms (see the collapse pass in limits.js — the
+  // are not stable across platforms (see the collapse pass in limits/core.js — the
   // same OAuth login hashes differently on macOS and Windows), so a per-device
   // copy could not be reliably deduped and the monthly total would double on
   // exactly the two-machine setup this exists for. One list also means a delete
@@ -587,7 +587,7 @@
   // a balance attached, and treating them as balance accounts would hide the
   // very accounts most people want to record.
   //
-  // `metric` is the wire marker owned by limitBalanceDisplay.js — 'credits' is
+  // `metric` is the wire marker owned by limits/balanceDisplay.js — 'credits' is
   // remaining money, 'spend' is money already used, and a window with neither is
   // a real percentage quota.
   function isBalanceOnlyAccount(provider) {

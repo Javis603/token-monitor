@@ -193,5 +193,5 @@ test('Windows exposes an accessible Acrylic and experimental Accent selector', (
 test('experimental Accent mode uses the shared glass surface treatment', () => {
   assert.doesNotMatch(app, /windows-accent-backdrop/);
   assert.doesNotMatch(css, /windows-accent-backdrop/);
-  assert.match(css, /#windowsBackdropNote\.hidden \{ display: none; \}/);
+  assert.match(html, /id="windowsBackdropNote"[^>]*class="[^"]*hidden"/);
 });

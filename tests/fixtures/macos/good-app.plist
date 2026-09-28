@@ -8,6 +8,10 @@
   <array><string>ABCDE12345</string></array>
   <key>ExpirationDate</key>
   <date>2099-01-01T00:00:00Z</date>
+  <key>CreationDate</key>
+  <date>2026-01-01T00:00:00Z</date>
+  <key>DeveloperCertificates</key>
+  <array><data>AQIDBA==</data></array>
   <key>ProvisionsAllDevices</key>
   <true/>
   <key>Entitlements</key>

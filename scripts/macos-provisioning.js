@@ -1,7 +1,6 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const {
@@ -54,40 +53,139 @@ function parseProvisioningProfileDocument(document) {
   };
 }
 
-function readPlistJson(filePath, execFileSyncImpl = execFileSync) {
-  // `plutil -convert json` rejects NSDate values instead of serializing them.
-  // Provisioning profiles always contain ExpirationDate, so remove that one
-  // value from a temporary copy and read it separately as ISO text.
-  let expirationDate = null;
-  try {
-    expirationDate = String(execFileSyncImpl('plutil', [
-      '-extract', 'ExpirationDate', 'raw', '-o', '-', filePath
-    ], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe']
-    })).trim() || null;
-  } catch (_) {}
+// `security cms -D` emits the profile as an XML property list, and a real
+// profile carries top-level NSDate and NSData values (CreationDate,
+// DeveloperCertificates) that `plutil`'s JSON converters reject outright.
+// Parsing that XML directly keeps validation independent of the host plutil
+// build: `plutil -extract ... json` succeeds on some macOS versions and
+// silently yields nothing on others, which previously made a valid profile
+// look like it had no Team ID.
+function parsePlistXml(xml) {
+  const source = String(xml);
+  let position = 0;
 
-  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-plist-'));
-  const temporaryPath = path.join(temporaryDirectory, 'profile.plist');
-  try {
-    fs.copyFileSync(filePath, temporaryPath);
-    if (expirationDate) {
-      execFileSyncImpl('plutil', ['-remove', 'ExpirationDate', temporaryPath], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe']
-      });
+  const skipWhitespace = () => {
+    while (position < source.length && /\s/.test(source[position])) position += 1;
+  };
+
+  const skipIgnorableMarkup = () => {
+    for (;;) {
+      skipWhitespace();
+      const closing = source.startsWith('<?', position)
+        ? '?>'
+        : source.startsWith('<!--', position)
+          ? '-->'
+          : source.startsWith('<!DOCTYPE', position)
+            ? '>'
+            : null;
+      if (!closing) return;
+      const end = source.indexOf(closing, position);
+      if (end === -1) throw new Error(`plist XML: missing ${closing}`);
+      position = end + closing.length;
     }
-    const output = execFileSyncImpl('plutil', ['-convert', 'json', '-o', '-', temporaryPath], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-    const document = JSON.parse(String(output));
-    if (expirationDate) document.ExpirationDate = expirationDate;
-    return document;
-  } finally {
-    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
-  }
+  };
+
+  const readUntil = (closing) => {
+    const index = source.indexOf(closing, position);
+    if (index === -1) throw new Error(`plist XML: missing ${closing}`);
+    const text = source.slice(position, index);
+    position = index + closing.length;
+    return text;
+  };
+
+  const entityValues = Object.freeze({
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    amp: '&'
+  });
+  // Decode only entities present in the original text. Replacement text must
+  // not be scanned again: `&amp;lt;` represents the literal text `&lt;`, not `<`.
+  const decodeEntities = (text) => text.replace(
+    /&(lt|gt|quot|apos|amp);/g,
+    (_entity, name) => entityValues[name]
+  );
+
+  const readElement = () => {
+    skipIgnorableMarkup();
+    if (source[position] !== '<') throw new Error('plist XML: expected element');
+    const end = source.indexOf('>', position);
+    if (end === -1) throw new Error('plist XML: unterminated element');
+    let name = source.slice(position + 1, end).trim();
+    position = end + 1;
+    const selfClosing = name.endsWith('/');
+    if (selfClosing) name = name.slice(0, -1).trim();
+    // Drop any attributes (`<plist version="1.0">`) so only the tag name stays.
+    name = name.split(/[\s/]/, 1)[0];
+    if (selfClosing) {
+      if (name === 'true') return true;
+      if (name === 'false') return false;
+      return null;
+    }
+    switch (name) {
+      case 'true':
+        return true;
+      case 'false':
+        return false;
+      case 'string':
+      case 'key':
+        return decodeEntities(readUntil(`</${name}>`));
+      case 'integer':
+        return Number.parseInt(readUntil('</integer>').trim(), 10);
+      case 'real':
+        return Number.parseFloat(readUntil('</real>').trim());
+      case 'data':
+        return readUntil('</data>').replace(/\s+/g, '');
+      case 'date':
+        return readUntil('</date>').trim();
+      case 'dict': {
+        const result = {};
+        for (;;) {
+          skipIgnorableMarkup();
+          if (source.startsWith('</dict>', position)) {
+            position += '</dict>'.length;
+            return result;
+          }
+          const key = readElement();
+          result[String(key)] = readElement();
+        }
+      }
+      case 'array': {
+        const result = [];
+        for (;;) {
+          skipIgnorableMarkup();
+          if (source.startsWith('</array>', position)) {
+            position += '</array>'.length;
+            return result;
+          }
+          result.push(readElement());
+        }
+      }
+      case 'plist': {
+        const value = readElement();
+        skipIgnorableMarkup();
+        if (source.startsWith('</plist>', position)) position += '</plist>'.length;
+        return value;
+      }
+      default:
+        return readUntil(`</${name}>`);
+    }
+  };
+
+  return readElement();
+}
+
+function readPlistXml(filePath, execFileSyncImpl = execFileSync) {
+  const text = fs.readFileSync(filePath).toString('utf8');
+  if (/^\s*(?:<\?xml|<plist)/.test(text)) return parsePlistXml(text);
+  // A binary or otherwise non-XML plist: normalize it to XML first. XML can
+  // represent NSDate and NSData, so this conversion never drops a field.
+  const converted = execFileSyncImpl('plutil', ['-convert', 'xml1', '-o', '-', filePath], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  return parsePlistXml(converted);
 }
 
 function readProvisioningProfile(filePath, options = {}) {
@@ -98,21 +196,14 @@ function readProvisioningProfile(filePath, options = {}) {
   if (options.profileReader) return options.profileReader(resolvedPath);
   const execFileSyncImpl = options.execFileSync || execFileSync;
   if (options.plainPlist || path.extname(resolvedPath).toLowerCase() === '.plist') {
-    return parseProvisioningProfileDocument(readPlistJson(resolvedPath, execFileSyncImpl));
+    return parseProvisioningProfileDocument(readPlistXml(resolvedPath, execFileSyncImpl));
   }
 
   const decoded = execFileSyncImpl('security', ['cms', '-D', '-i', resolvedPath], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe']
   });
-  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-profile-'));
-  const plistPath = path.join(temporaryDirectory, 'decoded.plist');
-  try {
-    fs.writeFileSync(plistPath, decoded, { mode: 0o600 });
-    return parseProvisioningProfileDocument(readPlistJson(plistPath, execFileSyncImpl));
-  } finally {
-    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
-  }
+  return parseProvisioningProfileDocument(parsePlistXml(decoded));
 }
 
 function validateProvisioningProfile(profile, {
@@ -198,6 +289,7 @@ module.exports = {
   copyProvisioningProfiles,
   isTeamPrefixedAppGroup,
   parseProvisioningProfileDocument,
+  parsePlistXml,
   profileIsRequired,
   profilePath,
   readProvisioningProfile,

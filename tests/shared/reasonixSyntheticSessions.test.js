@@ -6,14 +6,14 @@ const test = require('node:test');
 const {
   filterReasonixSyntheticSessions,
   isReasonixSyntheticSession
-} = require('../../src/shared/reasonixSessionGuard');
-const { createDeviceState } = require('../../src/shared/deviceState');
+} = require('../../src/shared/providers/reasonix/sessionGuard');
+const { createDeviceState } = require('../../src/shared/usage/deviceState');
 const {
   applySessionUsageArchive,
   captureSessionUsageArchive,
   normalizeSessionUsageArchive,
   readSessionUsageArchive
-} = require('../../src/shared/sessionUsageArchive');
+} = require('../../src/shared/usage/sessionUsageArchive');
 const { composeLocalSyncStats } = require('../../src/electron/syncDisplayStats');
 const { mergedLocalAllTimeSessions } = require('../../src/shared/localSessions');
 const { syncPayload } = require('../../src/shared/syncPayload');
@@ -182,7 +182,7 @@ test('sync and renderer expose only native Reasonix and never serialize the stat
   assert.equal(rows[0].client, 'reasonix');
   assert.equal(rows[0].key, 'session:reasonix:branch-id');
   assert.equal(rows[0].name, 'Reasonix · deepseek/deepseek-v4-flash');
-  assert.equal(rows[0].subtitle, '14:29 · 2 msgs');
+  assert.equal(rows[0].subtitle, '14:29 · 2 calls');
   assert.equal(rows[0].detail, 'branch-id');
   assert.deepEqual(rows.map((row) => row.client), ['reasonix']);
   assert.doesNotMatch(JSON.stringify(rows), /\/Users\/test/);

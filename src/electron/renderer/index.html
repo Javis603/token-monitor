@@ -6,6 +6,7 @@
     <title>Token Monitor</title>
     <script src="floatingBubbleBoot.js"></script>
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="edgeDock/composer.css" />
   </head>
   <body>
     <main class="shell">
@@ -222,6 +223,13 @@
                   <input id="currencyRateOverrideInput" type="number" step="0.0001" min="0" />
                 </div>
               </div>
+              <div class="settings-item">
+                <span id="modelRankingMetricLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.modelRanking.label">Model ranking</span></span>
+                <div class="inline-options" role="radiogroup" aria-labelledby="modelRankingMetricLabel">
+                  <label class="inline-option"><input type="radio" name="modelRankingMetric" value="tokens" id="modelRankingMetricTokens" /><span data-i18n="settings.modelRanking.tokens">Tokens</span></label>
+                  <label class="inline-option"><input type="radio" name="modelRankingMetric" value="cost" id="modelRankingMetricCost" /><span data-i18n="settings.modelRanking.cost">Cost</span></label>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -244,6 +252,13 @@
                 </select>
                 <span class="settings-note settings-item-desc" data-i18n="settings.display.windowBehaviorNote">Desktop pinned keeps the widget below other apps and locks drag/resize while staying clickable.</span>
               </label>
+              <label id="keepAboveTaskbarRow" class="checkbox-label settings-item hidden">
+                <span class="settings-item-text">
+                  <span class="settings-item-title" data-i18n="settings.display.keepAboveTaskbar">Keep above taskbar (Experimental)</span>
+                </span>
+                <input id="keepAboveTaskbarInput" type="checkbox" />
+                <span class="settings-note settings-item-desc" data-i18n="settings.display.keepAboveTaskbarNote">Re-asserts the widget above the Windows taskbar while they overlap. It may briefly flicker during some app switches.</span>
+              </label>
               <div class="settings-item settings-shortcut-item">
                 <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.windowShortcut">Shortcut</span></span>
                 <div class="shortcut-recorder">
@@ -255,6 +270,30 @@
             </div>
             <div class="settings-subgroup settings-presence-group">
               <div class="settings-group-header"><span data-i18n="settings.display.presenceTitle">Floating & Tray</span></div>
+              <div id="edgeDockFeature" class="presence-feature">
+                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.edgeDock">Edge Dock</span></span><input id="edgeDockInput" type="checkbox" /></label>
+                <div id="edgeDockOptions" class="presence-feature-body hidden">
+                  <p class="settings-note" data-i18n="settings.display.edgeDockNote">A slim quota rail hidden at the screen edge. Push the pointer to the edge to reveal it, click to pin, drag to move or switch sides.</p>
+                  <div class="settings-item">
+                    <span id="edgeDockModeLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.mode">Visibility</span></span>
+                    <div class="inline-options" role="radiogroup" aria-labelledby="edgeDockModeLabel">
+                      <label class="inline-option"><input type="radio" name="edgeDockMode" value="autoHide" /><span data-i18n="settings.edgeDock.mode.autoHide">Auto-hide</span></label>
+                      <label class="inline-option"><input type="radio" name="edgeDockMode" value="always" /><span data-i18n="settings.edgeDock.mode.always">Always visible</span></label>
+                    </div>
+                  </div>
+                  <div class="settings-item">
+                    <span id="edgeDockSideLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.edgeDockSide">Screen edge</span></span>
+                    <div class="inline-options" role="radiogroup" aria-labelledby="edgeDockSideLabel">
+                      <label class="inline-option"><input type="radio" name="edgeDockSide" value="left" /><span data-i18n="settings.edgeDockSide.left">Left</span></label>
+                      <label class="inline-option"><input type="radio" name="edgeDockSide" value="right" /><span data-i18n="settings.edgeDockSide.right">Right</span></label>
+                    </div>
+                  </div>
+                  <label id="edgeDockHapticRow" class="checkbox-label settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.haptic">Trackpad haptic feedback</span></span><input id="edgeDockHapticInput" type="checkbox" /></label>
+                  <label id="edgeDockMacBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.macBackdrop">Glass style</span></span><select id="edgeDockMacBackdropInput"><option value="inherit" data-i18n="settings.edgeDock.macBackdropInherit">Same as widget</option><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass</option></select></label>
+                  <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.edgeDock.warnColors">Highlight low limits in colour</span></span><input id="edgeDockWarnColorsInput" type="checkbox" /></label>
+                  <div id="edgeDockComposer" class="edge-dock-composer"></div>
+                </div>
+              </div>
               <div class="presence-feature">
                 <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.floatingBubble">Floating Bubble</span></span><input id="floatingBubbleInput" type="checkbox" /></label>
                 <div id="floatingBubbleOptions" class="presence-feature-body hidden">
@@ -276,6 +315,7 @@
                       <option value="costAll" data-i18n="settings.tray.costTotal">Cost Total ($8.28)</option>
                       <option value="bothAll" data-i18n="settings.tray.bothTotal">Tokens + Cost Total</option>
                       <option value="limitsAllSessions" data-i18n="settings.tray.limitsAllSessions">Limits: first two tools' primary quotas (12% · 34%)</option>
+                      <option value="liveTokenRate" data-i18n="settings.tray.liveTokenRate">Live rate (tok/s)</option>
                       <option value="barsSession" data-i18n="settings.tray.barsSession">Limit bars: lowest session remaining</option>
                       <option value="barsWeekly" data-i18n="settings.tray.barsWeekly">Limit bars: lowest weekly remaining</option>
                       <option value="barsAllSessions" data-i18n="settings.tray.barsAllSessions">Limit bars: first two tools' primary quotas</option>
@@ -298,6 +338,7 @@
                       <option value="costAll" data-i18n="settings.tray.costTotal">Cost Total ($8.28)</option>
                       <option value="bothAll" data-i18n="settings.tray.bothTotal">Tokens + Cost Total</option>
                       <option value="limitsAllSessions" data-i18n="settings.tray.limitsAllSessions">Limits: first two tools' primary quotas (12% · 34%)</option>
+                      <option value="liveTokenRate" data-i18n="settings.tray.liveTokenRate">Live rate (tok/s)</option>
                       <option value="barsSession" data-i18n="settings.tray.barsSession">Limit bars: lowest session remaining</option>
                       <option value="barsWeekly" data-i18n="settings.tray.barsWeekly">Limit bars: lowest weekly remaining</option>
                       <option value="barsAllSessions" data-i18n="settings.tray.barsAllSessions">Limit bars: first two tools' primary quotas</option>
@@ -311,6 +352,10 @@
                   <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.trayMode">Tray-only mode</span></span><input id="trayModeInput" type="checkbox" /></label>
                   <div id="trayOptions" class="presence-feature-body hidden">
                     <p class="settings-note" data-i18n="settings.display.trayNote">Hide the main window; show a popover from the macOS menu bar or Windows system tray.</p>
+                  </div>
+                  <label id="hideAppIconRow" class="checkbox-label settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.hideAppIcon">Hide taskbar/Dock icon</span></span><input id="hideAppIconInput" type="checkbox" /></label>
+                  <div id="hideAppIconOptions" class="presence-feature-body hidden">
+                    <p class="settings-note" data-i18n="settings.display.hideAppIconNote">The widget stays on the desktop; use the tray icon or the shortcut to bring it to the front.</p>
                   </div>
                 </div>
               </div>
@@ -327,15 +372,29 @@
             <div class="settings-subgroup settings-appearance-group">
               <div class="settings-item"><span class="settings-item-text"><span id="windowGlassEffectLabel" class="settings-item-title" data-i18n="settings.appearance.systemGlass">Glass Backdrop</span></span><div class="inline-options" role="radiogroup" aria-labelledby="windowGlassEffectLabel"><label class="inline-option"><input type="radio" name="systemGlassOption" value="system" /><span data-i18n="settings.appearance.glassEffectSystem">System</span></label><label class="inline-option"><input type="radio" name="systemGlassOption" value="off" /><span data-i18n="settings.appearance.glassEffectTransparent">Transparent</span></label></div></div>
               <label id="windowsBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.windowsBackdrop">Windows Glass Style</span></span><select id="windowsBackdropInput"><option value="acrylic" data-i18n="settings.appearance.windowsBackdropAcrylic">Acrylic</option><option value="accent" data-i18n="settings.appearance.windowsBackdropAccent">Accent Blur (experimental)</option></select><span id="windowsBackdropNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.windowsBackdropNote">Keeps the background translucent and blurred, even when the window is not focused.</span></label>
+              <label id="macBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.macBackdrop">macOS Glass Style</span></span><select id="macBackdropInput"><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass</option></select></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveIndicator">Live Indicator</span></span><input id="liveDotInput" type="checkbox" /></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.toolIcons">Tool Icons</span></span><input id="toolIconsInput" type="checkbox" /></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.titleIcon">Use Title Icon</span></span><input id="titleIconInput" type="checkbox" /></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTotalTokens">Show compact token total</span></span><input id="showCompactTotalTokensInput" type="checkbox" /></label>
+              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveTokenRate">Show live token rate</span></span><input id="showLiveTokenRateInput" type="checkbox" aria-describedby="showLiveTokenRateNote" /><span id="showLiveTokenRateNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.liveTokenRateNote">Show the latest generation speed in the footer. Click it to switch between tok/s and TPM.</span></label>
+              <label id="liveTokenRateScopeRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveTokenRateScope">Live rate scope</span></span><select id="liveTokenRateScopeInput"><option value="all" data-i18n="settings.appearance.liveTokenRateScopeAll">All devices</option><option value="device" data-i18n="settings.appearance.liveTokenRateScopeDevice">This device</option></select></label>
               <label id="compactTokenUnitsRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTokenUnits">Compact token units</span></span><select id="compactTokenUnitsInput"><option value="western" data-i18n="settings.appearance.compactTokenUnitsWestern">International (K/M/B)</option><option value="localized" data-i18n="settings.appearance.compactTokenUnitsLocalized">East Asian (萬/億)</option></select></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.swapSettingsRefresh">Swap Settings and Refresh buttons</span></span><input id="swapSettingsRefreshInput" type="checkbox" /></label>
-              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="glassSliderLabel" class="settings-item-title" data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" title="Reset glass" data-i18n-title="settings.appearance.resetGlass">↺</button></span></span><input id="glassInput" type="range" min="0" max="100" step="1" aria-labelledby="glassSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
-              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="depthSliderLabel" class="settings-item-title" data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="reset-appearance-button reset-inline" title="Reset depth" data-i18n-title="settings.appearance.resetDepth">↺</button></span></span><input id="blurInput" type="range" min="0" max="100" step="1" aria-labelledby="depthSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="glassSliderLabel" class="settings-item-title" data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" title="Reset glass" data-i18n-title="settings.appearance.resetGlass">↺</button></span><span id="glassInputNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.nativeManaged">Managed by macOS</span></span><input id="glassInput" type="range" min="0" max="100" step="1" aria-labelledby="glassSliderLabel" aria-describedby="glassInputNote" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="depthSliderLabel" class="settings-item-title" data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="reset-appearance-button reset-inline" title="Reset depth" data-i18n-title="settings.appearance.resetDepth">↺</button></span><span id="blurInputNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.nativeManaged">Managed by macOS</span></span><input id="blurInput" type="range" min="0" max="100" step="1" aria-labelledby="depthSliderLabel" aria-describedby="blurInputNote" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="zoomSliderLabel" class="settings-item-title" data-i18n="settings.appearance.zoom">Zoom</span><button id="resetZoomButton" type="button" class="reset-appearance-button reset-inline" title="Reset zoom" data-i18n-title="settings.appearance.resetZoom">↺</button></span></span><input id="zoomInput" type="range" min="70" max="160" step="5" aria-labelledby="zoomSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div class="settings-item background-image-setting">
+                <span class="settings-item-text">
+                  <span class="settings-item-title" data-i18n="settings.appearance.backgroundImage">Background image</span>
+                  <span id="backgroundImageStatus" class="settings-note settings-item-desc" data-i18n="settings.appearance.backgroundImageNone">No image selected</span>
+                </span>
+                <div class="background-image-actions">
+                  <button id="chooseBackgroundImageButton" type="button" data-i18n="settings.appearance.backgroundImageChoose">Choose image…</button>
+                  <button id="clearBackgroundImageButton" type="button" class="hidden" data-i18n="settings.appearance.backgroundImageClear">Remove</button>
+                </div>
+              </div>
+              <div id="backgroundImageOpacityRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="backgroundImageOpacityLabel" class="settings-item-title" data-i18n="settings.appearance.backgroundImageOpacity">Image opacity</span><button id="resetBackgroundImageOpacityButton" type="button" class="reset-appearance-button reset-inline" title="Reset image opacity" data-i18n-title="settings.appearance.resetBackgroundImageOpacity">↺</button></span></span><input id="backgroundImageOpacityInput" type="range" min="0" max="100" step="1" aria-labelledby="backgroundImageOpacityLabel" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-item">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.appearance.reduceMotion">Reduce Motion</span>
@@ -456,6 +515,9 @@
                   <button id="showAllClientsButton" class="tool-header-action" type="button" title="Show all" aria-label="Show all" data-i18n-title="settings.tools.showAll" data-i18n-aria-label="settings.tools.showAll"><span class="tool-header-eye" aria-hidden="true"></span></button>
                 </div>
               </div>
+              <div class="settings-list-search">
+                <input id="clientDisplaySearchInput" class="settings-list-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search tools" data-i18n-placeholder="settings.tools.search" aria-label="Search tools" data-i18n-aria-label="settings.tools.search" aria-controls="clientDisplayList" />
+              </div>
               <div id="clientDisplayList" class="tool-preference-list"></div>
             </div>
             <div class="settings-subgroup settings-collection-cadence">
@@ -536,6 +598,44 @@
                 </div>
               </div>
             </div>
+            <div id="modelAliasesAccountGroup" class="settings-group cursor-account-group">
+              <button id="modelAliasesSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="modelAliasesSettingsDetails">
+                <span data-i18n="settings.modelAliases.title">Model aliases</span>
+                <span class="cursor-settings-summary">
+                  <span id="modelAliasesStatus" class="cursor-status-pill"></span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="modelAliasesSettingsDetails" class="cursor-settings-details hidden">
+                <p class="settings-note" data-i18n="settings.modelAliases.note">Show different names for the same model as one row.</p>
+                <div class="settings-item">
+                  <span id="modelAliasesGroupingLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.modelAliases.grouping">Automatic grouping</span></span>
+                  <div class="inline-options" role="radiogroup" aria-labelledby="modelAliasesGroupingLabel">
+                    <label class="inline-option"><input type="radio" name="modelAliasGrouping" value="off" id="modelAliasGroupingOff" /><span data-i18n="settings.modelAliases.groupingOff">Off</span></label>
+                    <label class="inline-option"><input type="radio" name="modelAliasGrouping" value="duplicates" id="modelAliasGroupingDuplicates" /><span data-i18n="settings.modelAliases.groupingDuplicates">Merge duplicates</span></label>
+                    <label class="inline-option"><input type="radio" name="modelAliasGrouping" value="prefix" id="modelAliasGroupingPrefix" /><span data-i18n="settings.modelAliases.groupingPrefix">Strip prefixes</span></label>
+                  </div>
+                  <span class="settings-item-desc model-alias-example" data-i18n="settings.modelAliases.groupingDesc">Merge duplicates only handles a model reported under two spellings at once. Strip prefixes removes the provider name before the / in every model name, for example anthropic/claude-opus-5 → claude-opus-5.</span>
+                </div>
+                <div id="modelAliasesList" class="managed-account-list"></div>
+                <div class="settings-actions">
+                  <button id="modelAliasesAddButton" type="button" data-i18n="settings.modelAliases.add">Add alias</button>
+                </div>
+                <div id="modelAliasesForm" class="model-alias-form hidden">
+                  <label for="modelAliasesAliasInput"><span data-i18n="settings.modelAliases.alias">Alias (reported model ID)</span>
+                    <input id="modelAliasesAliasInput" type="text" maxlength="256" placeholder="anthropic/claude-opus-5" spellcheck="false" />
+                  </label>
+                  <label for="modelAliasesCanonicalInput"><span data-i18n="settings.modelAliases.canonical">Group as (model ID)</span>
+                    <input id="modelAliasesCanonicalInput" type="text" maxlength="256" placeholder="claude-opus-5" spellcheck="false" />
+                  </label>
+                  <div class="settings-actions">
+                    <button id="modelAliasesSaveButton" type="button" data-i18n="settings.modelAliases.save">Save</button>
+                    <button id="modelAliasesCancelButton" type="button" data-i18n="settings.modelAliases.cancel">Cancel</button>
+                  </div>
+                </div>
+                <p id="modelAliasesError" class="settings-note error hidden" role="alert"></p>
+              </div>
+            </div>
             <div id="customPricingAccountGroup" class="settings-group cursor-account-group">
               <button id="customPricingSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="customPricingSettingsDetails">
                 <span data-i18n="settings.customPricing.title">Custom model pricing</span>
@@ -584,6 +684,9 @@
           </button>
           <div id="limitsSettingsDetails" class="settings-section-details hidden">
             <p class="settings-note" data-i18n="settings.limits.reorderNote">Drag a provider to reorder the list.</p>
+            <div class="settings-list-search">
+              <input id="limitProviderSearchInput" class="settings-list-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search providers" data-i18n-placeholder="settings.limits.search" aria-label="Search providers" data-i18n-aria-label="settings.limits.search" aria-controls="limitProviderCheckboxes" />
+            </div>
             <div id="limitProviderCheckboxes" class="client-checkboxes limit-provider-list"></div>
             <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.refresh">Refresh</span></span>
               <select id="limitsRefreshInput">
@@ -609,36 +712,6 @@
         </div>
 
         <div id="accountsSettingsDetails" class="hidden" aria-hidden="true">
-            <div id="claudeAccountGroup" class="settings-group cursor-account-group">
-              <button id="claudeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="claudeSettingsDetails">
-                <span data-i18n="settings.claude.title">Claude Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="claudeAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="claudeSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="claudeOpenBrowser" data-i18n="settings.claude.openBrowser">Open Claude usage in browser</button>
-                  <button id="claudeLogoutButton" class="hidden" data-i18n="settings.claude.clearCookie">Clear cookie</button>
-                  <button id="claudeRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="claudeManualPanel">
-                  <p class="settings-note" data-i18n="settings.claude.note">Claude Code OAuth and CLI are detected automatically when Web login is not configured. Adding Web login makes it the local Claude source. The cookie stays on this device.</p>
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.claude.step1">Open Claude usage in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.claude.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -> https://claude.ai.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.claude.step3">Copy the sessionKey value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.claude.step4">Paste it below and click Save cookie.</span>
-                  </p>
-                  <textarea id="claudeWebCookieInput" rows="3" autocomplete="off" spellcheck="false" placeholder="sessionKey=..." data-i18n-placeholder="settings.claude.cookiePlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="claudeWebCookieSubmit" data-i18n="settings.claude.saveCookie">Save cookie</button>
-                  </div>
-                </div>
-                <div id="claudeErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
             <div id="codexAccountGroup" class="settings-group cursor-account-group">
               <button id="codexSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="codexSettingsDetails">
                 <span data-i18n="settings.codex.title">Codex Accounts</span>
@@ -671,36 +744,7 @@
                   <summary data-i18n="settings.codex.loginDetails">Details</summary>
                   <pre id="codexLoginOutput" class="codex-login-output"></pre>
                 </details>
-                <div id="codexAccountErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="cursorAccountGroup" class="settings-group cursor-account-group">
-              <button id="cursorSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="cursorSettingsDetails">
-                <span data-i18n="settings.cursor.title">Cursor Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="cursorAccountStatus" class="cursor-status-pill">Checking...</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="cursorSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="cursorLoginButton" data-i18n="settings.cursor.openBrowser">Open cursor.com in browser</button>
-                  <button id="cursorLogoutButton" class="hidden" data-i18n="settings.common.logout">Logout</button>
-                  <button id="cursorRefreshButton" class="hidden" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="cursorManualPanel">
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.cursor.step1Before">Open</span> <code>cursor.com/settings</code> <span data-i18n="settings.cursor.step1After">in your browser (button above).</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.cursor.step2Before">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -></span> cursor.com.<br>
-                    <strong>3.</strong> <span data-i18n="settings.cursor.step3Before">Copy the</span> <code>WorkosCursorSessionToken</code> <span data-i18n="settings.cursor.step3After">value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.cursor.step4">Paste it below and click Save.</span>
-                  </p>
-                  <textarea id="cursorManualInput" rows="3" spellcheck="false" placeholder="WorkosCursorSessionToken=..." data-i18n-placeholder="settings.cursor.manualPlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="cursorManualSubmit" data-i18n="settings.cursor.saveToken">Save token</button>
-                  </div>
-                </div>
-                <div id="cursorErrorMessage" class="settings-note error hidden"></div>
+                <div id="codexAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="opencodeCookieGroup" class="settings-group cursor-account-group">
@@ -788,7 +832,180 @@
                   </div>
                 </div>
 
-                <div id="opencodeErrorMessage" class="settings-note error hidden"></div>
+                <div id="opencodeErrorMessage" class="settings-note error hidden" role="alert"></div>
+              </div>
+            </div>
+            <div id="cursorAccountGroup" class="settings-group cursor-account-group">
+              <button id="cursorSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="cursorSettingsDetails">
+                <span data-i18n="settings.cursor.title">Cursor Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="cursorAccountStatus" class="cursor-status-pill">Checking...</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="cursorSettingsDetails" class="cursor-settings-details hidden">
+                <p class="settings-note" data-i18n="settings.cursor.accountsNote">Token Monitor automatically detects accounts signed in through the Cursor desktop app. Uncheck an account to stop monitoring its limits; account-level token usage still includes every saved account.</p>
+                <p id="cursorAgentActiveNote" class="settings-note hidden" data-i18n="settings.cursor.agentActive">Stop the headless agent before adding or removing Cursor accounts.</p>
+                <div id="cursorAccountList" class="managed-account-list"></div>
+                <div id="cursorManualPanel" class="opencode-add-form">
+                  <button id="cursorAddAccountButton" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="cursorManualDetails">
+                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span data-i18n="settings.cursor.addManual">Add account</span>
+                  </button>
+                  <div id="cursorManualDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body">
+                      <div class="settings-actions">
+                        <button id="cursorLoginButton" data-i18n="settings.cursor.openBrowser">Open Cursor dashboard</button>
+                      </div>
+                      <p class="settings-note">
+                        <strong>1.</strong> <span data-i18n="settings.cursor.step1Before">Open</span> <code>cursor.com/dashboard</code> <span data-i18n="settings.cursor.step1After">in your browser using the button above, then sign in.</span><br>
+                        <strong>2.</strong> <span data-i18n="settings.cursor.step2Before">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -></span> cursor.com.<br>
+                        <strong>3.</strong> <span data-i18n="settings.cursor.step3Before">Copy the</span> <code>WorkosCursorSessionToken</code> <span data-i18n="settings.cursor.step3After">value.</span><br>
+                        <strong>4.</strong> <span data-i18n="settings.cursor.step4">Paste it below and click Save.</span>
+                      </p>
+                      <textarea id="cursorManualInput" rows="3" spellcheck="false" placeholder="WorkosCursorSessionToken=..." data-i18n-placeholder="settings.cursor.manualPlaceholder" aria-label="Cursor token" data-i18n-aria-label="settings.cursor.tokenLabel"></textarea>
+                      <div class="settings-actions">
+                        <button id="cursorManualSubmit" data-i18n="settings.cursor.saveToken">Save token</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div id="cursorErrorMessage" class="settings-note error hidden" role="alert"></div>
+              </div>
+            </div>
+            <div id="antigravityAccountGroup" class="settings-group cursor-account-group">
+              <button id="antigravitySettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="antigravitySettingsDetails">
+                <span data-i18n="settings.antigravity.title">Antigravity Accounts</span>
+                <span class="cursor-settings-summary">
+                  <span id="antigravityAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="antigravitySettingsDetails" class="cursor-settings-details hidden">
+                <div id="antigravityAccountList" class="managed-account-list"></div>
+                <div class="settings-actions">
+                  <button id="antigravityAddAccountButton" type="button" data-i18n="settings.antigravity.addAccount">Add Google account</button>
+                  <button id="antigravityCancelLoginButton" type="button" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
+                </div>
+                <div id="antigravityLoginStatus" class="settings-note hidden" role="status" aria-live="polite"></div>
+                <div id="antigravityAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
+              </div>
+            </div>
+            <div id="kimiAccountGroup" class="settings-group cursor-account-group">
+              <button id="kimiSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="kimiSettingsDetails">
+                <span data-i18n="settings.kimi.title">Kimi Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="kimiAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="kimiSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="kimiOpenBrowser" data-i18n="settings.kimi.openBrowser">Open Kimi Code Console</button>
+                  <button id="kimiLogoutButton" class="hidden" data-i18n="settings.kimi.clearApiKey">Clear key</button>
+                  <button id="kimiRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <div id="kimiManualPanel">
+                  <p class="settings-note" data-i18n="settings.kimi.apiKeyNote">Paste your Kimi Code API key. It stays on this device and is used only for the Kimi Code quota API.</p>
+                  <input id="kimiApiKeyInput" type="password" spellcheck="false" aria-label="Kimi Code API key" data-i18n-aria-label="settings.kimi.apiKeyLabel" placeholder="sk-..." data-i18n-placeholder="settings.kimi.apiKeyPlaceholder" />
+                  <div class="settings-actions">
+                    <button id="kimiApiKeySubmit" data-i18n="settings.kimi.saveApiKey">Save API key</button>
+                  </div>
+                  <details class="kimi-web-fallback">
+                    <summary data-i18n="settings.kimi.webFallback">Optional: Kimi Web fallback</summary>
+                    <div class="kimi-web-fallback-body">
+                      <p class="settings-note" data-i18n="settings.kimi.webTokenNote">Use a Kimi Web access token only to fill quota windows missing from the Code API. The token stays on this device and expires quickly.</p>
+                      <p class="settings-note kimi-web-steps">
+                        <strong>1.</strong> <span data-i18n="settings.kimi.step1">Open Kimi Code Console in your browser (button above) and sign in.</span><br>
+                        <strong>2.</strong> <span data-i18n="settings.kimi.step2">Open DevTools (F12 or Cmd+Opt+I) -&gt; Application/Storage -&gt; Local Storage -&gt; https://www.kimi.com.</span><br>
+                        <strong>3.</strong> <span data-i18n="settings.kimi.step3">Find access_token and copy its Value.</span><br>
+                        <strong>4.</strong> <span data-i18n="settings.kimi.step4">Paste the value below and click Save Web token.</span>
+                      </p>
+                      <textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off" spellcheck="false" aria-label="Kimi Web access token" data-i18n-aria-label="settings.kimi.webTokenLabel" placeholder="access_token=..." data-i18n-placeholder="settings.kimi.webTokenPlaceholder"></textarea>
+                      <div class="settings-actions">
+                        <button id="kimiWebAccessTokenSubmit" data-i18n="settings.kimi.saveWebToken">Save Web token</button>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+                <div id="kimiErrorMessage" class="settings-note error hidden"></div>
+              </div>
+            </div>
+            <div id="copilotAccountGroup" class="settings-group cursor-account-group">
+              <button id="copilotSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="copilotSettingsDetails">
+                <span data-i18n="settings.copilot.title">GitHub Copilot Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="copilotApiTokenStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="copilotSettingsDetails" class="cursor-settings-details hidden">
+                <div class="settings-actions">
+                  <button id="copilotSignInButton" data-i18n="settings.copilot.signIn">Sign in with GitHub</button>
+                  <button id="copilotCancelSignInButton" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
+                  <button id="copilotLogoutButton" class="hidden" data-i18n="settings.copilot.logout">Sign out</button>
+                  <button id="copilotRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
+                </div>
+                <pre id="copilotLoginStatus" class="codex-login-output hidden" role="status" aria-live="polite"></pre>
+                <div id="copilotManualPanel" class="opencode-add-form">
+                  <button id="copilotManualToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="copilotManualDetails">
+                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span data-i18n="settings.copilot.manualToggle">Enter token manually</span>
+                  </button>
+                  <div id="copilotManualDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body">
+                      <p class="settings-note" data-i18n="settings.copilot.note">Paste a GitHub OAuth token with Copilot access. It stays on this device and is used only for Copilot quota lookup.</p>
+                      <input id="copilotApiTokenInput" type="password" spellcheck="false" placeholder="gho_..." data-i18n-placeholder="settings.copilot.apiTokenPlaceholder" />
+                      <div class="settings-actions">
+                        <button id="copilotApiTokenSubmit" data-i18n="settings.copilot.saveToken">Save token</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div id="copilotErrorMessage" class="settings-note error hidden" role="alert"></div>
+              </div>
+            </div>
+            <div id="mimoAccountGroup" class="settings-group cursor-account-group">
+              <button id="mimoSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="mimoSettingsDetails">
+                <span data-i18n="settings.mimo.title">Xiaomi MiMo Account</span>
+                <span class="cursor-settings-summary">
+                  <span id="mimoAccountStatus" class="cursor-status-pill">Not configured</span>
+                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                </span>
+              </button>
+              <div id="mimoSettingsDetails" class="cursor-settings-details hidden">
+                <div id="mimoAccountList" class="managed-account-list"></div>
+                <div id="mimoAccountEmpty" class="opencode-empty" data-i18n="settings.mimo.emptyList">No accounts yet. Click "+ Add account" below to get started.</div>
+                <div id="mimoManualPanel" class="opencode-add-form">
+                  <button id="mimoAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="mimoAddDetails">
+                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                    <span data-i18n="settings.mimo.addAccount">Add account</span>
+                  </button>
+                  <div id="mimoAddDetails" class="opencode-add-details accordion-animated-container hidden">
+                    <div class="accordion-animation-inner opencode-add-body">
+                      <div class="settings-actions">
+                        <button id="mimoOpenConsoleButton" type="button" data-i18n="settings.mimo.openConsole">Open Xiaomi MiMo console in browser</button>
+                      </div>
+                      <p class="settings-note">
+                        <strong>1.</strong> <span data-i18n="settings.mimo.step1">Open the Xiaomi MiMo console in your browser (button above) and sign in.</span><br>
+                        <strong>2.</strong> <span data-i18n="settings.mimo.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, then reload the page.</span><br>
+                        <strong>3.</strong> <span data-i18n="settings.mimo.step3Before">In Network, select</span> <code>balance</code><span data-i18n="settings.mimo.step3After">, then copy the full Cookie value from Headers -> Request Headers.</span><br>
+                        <strong>4.</strong> <span data-i18n="settings.mimo.step4">Paste it below, then click Save account.</span>
+                      </p>
+                      <textarea id="mimoCookieInput" rows="3" autocomplete="off" spellcheck="false" data-i18n-aria-label="settings.mimo.cookieLabel" aria-label="Cookie header" data-i18n-placeholder="settings.mimo.cookiePlaceholder" placeholder="Cookie: ..."></textarea>
+                      <div class="settings-actions">
+                        <button id="mimoSaveAccountButton" type="button" data-i18n="settings.mimo.saveAccount">Save account</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div id="mimoAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="openrouterAccountGroup" class="settings-group cursor-account-group">
@@ -825,128 +1042,7 @@
                     </div>
                   </div>
                 </div>
-                <div id="openrouterErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="deepseekAccountGroup" class="settings-group cursor-account-group">
-              <button id="deepseekSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="deepseekSettingsDetails">
-                <span data-i18n="settings.deepseek.title">DeepSeek Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="deepseekApiKeyStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="deepseekSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="deepseekOpenBrowser" data-i18n="settings.deepseek.openBrowser">Open DeepSeek API keys</button>
-                  <button id="deepseekLogoutButton" class="hidden" data-i18n="settings.deepseek.clearApiKey">Clear key</button>
-                  <button id="deepseekRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="deepseekManualPanel">
-                  <p class="settings-note" data-i18n="settings.deepseek.note">Paste a DeepSeek API key. It stays on this device and is used only for the balance API.</p>
-                  <input id="deepseekApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.deepseek.apiKeyPlaceholder" />
-                  <div class="settings-actions">
-                    <button id="deepseekApiKeySubmit" data-i18n="settings.deepseek.saveApiKey">Save API key</button>
-                  </div>
-                </div>
-                <div id="deepseekErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="minimaxAccountGroup" class="settings-group cursor-account-group">
-              <button id="minimaxSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="minimaxSettingsDetails">
-                <span data-i18n="settings.minimax.title">Minimax Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="minimaxApiKeyStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="minimaxSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="minimaxOpenBrowser" data-i18n="settings.minimax.openBrowser">Open Minimax Token Plan page</button>
-                  <button id="minimaxLogoutButton" class="hidden" data-i18n="settings.minimax.clearApiKey">Clear key</button>
-                  <button id="minimaxRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="minimaxManualPanel">
-                  <p class="settings-note" data-i18n="settings.minimax.note">Paste your Minimax API key. It stays on this device and is used only for the Token Plan quota API.</p>
-                  <input id="minimaxApiKeyInput" type="password" spellcheck="false" placeholder="sk-cp-..." data-i18n-placeholder="settings.minimax.apiKeyPlaceholder" />
-                  <div class="settings-actions">
-                    <button id="minimaxApiKeySubmit" data-i18n="settings.minimax.saveApiKey">Save API key</button>
-                  </div>
-                </div>
-                <div id="minimaxErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="zaiAccountGroup" class="settings-group cursor-account-group">
-              <button id="zaiSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="zaiSettingsDetails">
-                <span data-i18n="settings.zai.title">Z.ai Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="zaiAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="zaiSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="zaiOpenBrowser" data-i18n="settings.zai.openBrowser">Open GLM Coding Plan</button>
-                  <button id="zaiLogoutButton" class="hidden" data-i18n="settings.zai.clearApiKey">Clear key</button>
-                  <button id="zaiRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div class="settings-row">
-                  <label for="zaiApiRegionInput" data-i18n="settings.zai.apiRegion">API region</label>
-                  <select id="zaiApiRegionInput">
-                    <option value="global" data-i18n="settings.zai.regionGlobal">Global (api.z.ai)</option>
-                    <option value="bigmodel-cn" data-i18n="settings.zai.regionBigmodelCn">BigModel CN (open.bigmodel.cn)</option>
-                  </select>
-                </div>
-                <div id="zaiManualPanel">
-                  <p class="settings-note" data-i18n="settings.zai.note">Paste a Z.ai API key for GLM Coding Plan quota lookup.</p>
-                  <input id="zaiApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.zai.apiKeyPlaceholder" />
-                  <div class="settings-actions">
-                    <button id="zaiApiKeySubmit" data-i18n="settings.zai.saveApiKey">Save API key</button>
-                  </div>
-                </div>
-                <div id="zaiErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="zaiteamAccountGroup" class="settings-group cursor-account-group">
-              <button id="zaiteamSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="zaiteamSettingsDetails">
-                <span data-i18n="settings.zaiteam.title">Z.ai Team Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="zaiteamAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="zaiteamSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="zaiteamOpenBrowser" data-i18n="settings.zaiteam.openBrowser">Open GLM Team Plan</button>
-                  <button id="zaiteamLogoutButton" class="hidden" data-i18n="settings.zaiteam.clearApiKey">Clear key</button>
-                  <button id="zaiteamRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <p class="settings-note" data-i18n="settings.zaiteam.regionNote">Team plan is available only on BigModel CN (open.bigmodel.cn).</p>
-                <div id="zaiteamManualPanel">
-                  <p class="settings-note" data-i18n="settings.zaiteam.note">Paste a Z.ai API key for GLM Team Coding Plan quota lookup.</p>
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.zaiteam.step1">Open BigModel in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.zaiteam.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Local Storage -> bigmodel.cn.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.zaiteam.step3">Copy the Bigmodel-Organization and Bigmodel-Project values.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.zaiteam.step4">Paste them below with your API key and click Save credentials.</span>
-                  </p>
-                  <div class="settings-row">
-                    <label for="zaiteamApiKeyInput" data-i18n="settings.zaiteam.apiKey">API key</label>
-                    <input id="zaiteamApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.zaiteam.apiKeyPlaceholder" />
-                  </div>
-                  <div class="settings-row">
-                    <label for="zaiteamOrganizationIdInput" data-i18n="settings.zaiteam.organizationId">Organization ID</label>
-                    <input id="zaiteamOrganizationIdInput" type="text" spellcheck="false" placeholder="org-xxx" data-i18n-placeholder="settings.zaiteam.organizationIdPlaceholder" />
-                  </div>
-                  <div class="settings-row">
-                    <label for="zaiteamProjectIdInput" data-i18n="settings.zaiteam.projectId">Project ID</label>
-                    <input id="zaiteamProjectIdInput" type="text" spellcheck="false" placeholder="proj_xxx" data-i18n-placeholder="settings.zaiteam.projectIdPlaceholder" />
-                  </div>
-                  <div class="settings-actions">
-                    <button id="zaiteamApiKeySubmit" data-i18n="settings.zaiteam.saveCredentials">Save credentials</button>
-                  </div>
-                </div>
-                <div id="zaiteamErrorMessage" class="settings-note error hidden"></div>
+                <div id="openrouterErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
             <div id="volcengineAccountGroup" class="settings-group cursor-account-group">
@@ -964,10 +1060,10 @@
                   <button id="volcengineRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
                 </div>
                 <div id="volcengineManualPanel">
-                  <p class="settings-note" data-i18n="settings.volcengine.note">Paste an Ark API key, or use a Volcengine access key ID with the secret field for Coding Plan usage.</p>
+                  <p class="settings-note" data-i18n="settings.volcengine.note">Paste an Ark API key, or use a Volcengine access key ID with the secret field. An access key reads both the Coding Plan and the Agent Plan.</p>
                   <div class="settings-row">
-                    <label for="volcengineAccessKeyInput" data-i18n="settings.volcengine.accessKeyId">API key / Access key ID</label>
-                    <input id="volcengineAccessKeyInput" type="password" spellcheck="false" placeholder="ark-... or AKLT..." data-i18n-placeholder="settings.volcengine.accessKeyPlaceholder" />
+                    <label for="volcengineAccessKeyInput" data-i18n="settings.volcengine.accessKeyId">Access key ID / API key</label>
+                    <input id="volcengineAccessKeyInput" type="password" spellcheck="false" placeholder="AKLT... or ark-..." data-i18n-placeholder="settings.volcengine.accessKeyPlaceholder" />
                   </div>
                   <div class="settings-row">
                     <label for="volcengineSecretAccessKeyInput" data-i18n="settings.volcengine.secretAccessKey">Secret access key</label>
@@ -977,259 +1073,40 @@
                     <label for="volcengineRegionInput" data-i18n="settings.volcengine.region">Region (optional)</label>
                     <input id="volcengineRegionInput" type="text" spellcheck="false" placeholder="cn-beijing" data-i18n-placeholder="settings.volcengine.regionPlaceholder" />
                   </div>
+                  <div id="volcengineAgentPanel" class="opencode-add-form">
+                    <button id="volcengineAgentToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="volcengineAgentDetails">
+                      <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
+                        <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                      </svg>
+                      <span data-i18n="settings.volcengine.agentToggle">Agent Plan is on a different account</span>
+                      <span id="volcengineAgentConfigured" class="tool-status-tag tool-status-tag-ok hidden" data-i18n="settings.volcengine.agentConfigured">Set</span>
+                    </button>
+                    <div id="volcengineAgentDetails" class="opencode-add-details accordion-animated-container hidden">
+                      <div class="accordion-animation-inner opencode-add-body">
+                        <p class="settings-note" data-i18n="settings.volcengine.agentNote">Leave empty to read the Agent Plan with the access key above. Fill these in only when the Agent Plan was bought on a different Volcengine account.</p>
+                        <div class="settings-row">
+                          <label for="volcengineAgentAccessKeyInput" data-i18n="settings.volcengine.agentAccessKeyId">Agent access key ID</label>
+                          <input id="volcengineAgentAccessKeyInput" type="password" spellcheck="false" placeholder="AKLT..." data-i18n-placeholder="settings.volcengine.agentAccessKeyPlaceholder" />
+                        </div>
+                        <div class="settings-row">
+                          <label for="volcengineAgentSecretAccessKeyInput" data-i18n="settings.volcengine.agentSecretAccessKey">Agent secret access key</label>
+                          <input id="volcengineAgentSecretAccessKeyInput" type="password" spellcheck="false" placeholder="..." data-i18n-placeholder="settings.volcengine.secretKeyPlaceholder" />
+                        </div>
+                        <div class="settings-row">
+                          <label for="volcengineAgentRegionInput" data-i18n="settings.volcengine.agentRegion">Agent region (optional)</label>
+                          <input id="volcengineAgentRegionInput" type="text" spellcheck="false" placeholder="cn-beijing" data-i18n-placeholder="settings.volcengine.regionPlaceholder" />
+                        </div>
+                        <div class="settings-actions">
+                          <button id="volcengineAgentClearButton" class="hidden" data-i18n="settings.volcengine.agentClear">Use the main account</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                   <div class="settings-actions">
                     <button id="volcengineCredentialsSubmit" data-i18n="settings.volcengine.saveCredentials">Save credentials</button>
                   </div>
                 </div>
                 <div id="volcengineErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="qoderAccountGroup" class="settings-group cursor-account-group">
-              <button id="qoderSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="qoderSettingsDetails">
-                <span data-i18n="settings.qoder.title">Qoder Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="qoderAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="qoderSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="qoderOpenBrowser" data-i18n="settings.qoder.openBrowser">Open Qoder usage</button>
-                  <button id="qoderLogoutButton" class="hidden" data-i18n="settings.qoder.clearCookie">Clear cookie</button>
-                  <button id="qoderRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="qoderManualPanel">
-                  <div class="settings-row">
-                    <label for="qoderSiteInput" data-i18n="settings.qoder.site">Site</label>
-                    <select id="qoderSiteInput">
-                      <option value="global" data-i18n="settings.qoder.siteGlobal">qoder.com</option>
-                      <option value="cn" data-i18n="settings.qoder.siteCn">qoder.com.cn</option>
-                    </select>
-                  </div>
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.qoder.step1Before">Open the selected Qoder usage page</span> <code id="qoderUsagePageHint">qoder.com/account/usage</code> <span data-i18n="settings.qoder.step1After">in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.qoder.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the big_model_credits request.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.qoder.step3">In Headers -> Request Headers, copy the full Cookie value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.qoder.step4">Paste it below and click Save cookie.</span>
-                  </p>
-                  <textarea id="qoderCookieInput" rows="3" spellcheck="false" placeholder="session=..." data-i18n-placeholder="settings.qoder.cookiePlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="qoderCookieSubmit" data-i18n="settings.qoder.saveCookie">Save cookie</button>
-                  </div>
-                </div>
-                <div id="qoderErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="traeAccountGroup" class="settings-group cursor-account-group">
-              <button id="traeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="traeSettingsDetails">
-                <span data-i18n="settings.trae.title">Trae CN Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="traeAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="traeSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="traeOpenBrowser" data-i18n="settings.trae.openBrowser">Open Trae CN in browser</button>
-                  <button id="traeLogoutButton" class="hidden" data-i18n="settings.trae.clearCredentials">Clear credentials</button>
-                  <button id="traeRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="traeManualPanel">
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.trae.step1">Open Trae CN in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.trae.step2">Open DevTools (F12 or Cmd+Opt+I) → Network, then select the ide_user_ent_usage request.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.trae.step3">Under Headers → Request Headers, copy the full Authorization value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.trae.step4">If present, copy X-Device-Id into the optional field, then click Save credentials.</span>
-                  </p>
-                  <div class="settings-row">
-                    <label for="traeTokenInput" data-i18n="settings.trae.token">Access token</label>
-                    <input id="traeTokenInput" type="password" spellcheck="false" autocomplete="off" placeholder="Cloud-IDE-JWT ..." data-i18n-placeholder="settings.trae.tokenPlaceholder" />
-                  </div>
-                  <div class="settings-row">
-                    <label for="traeDeviceIdInput" data-i18n="settings.trae.deviceId">Device ID (optional)</label>
-                    <input id="traeDeviceIdInput" type="text" spellcheck="false" autocomplete="off" placeholder="device-..." data-i18n-placeholder="settings.trae.deviceIdPlaceholder" />
-                  </div>
-                  <div class="settings-actions">
-                    <button id="traeTokenSubmit" data-i18n="settings.trae.saveCredentials">Save credentials</button>
-                  </div>
-                </div>
-                <div id="traeErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="commandcodeAccountGroup" class="settings-group cursor-account-group">
-              <button id="commandcodeSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="commandcodeSettingsDetails">
-                <span data-i18n="settings.commandcode.title">Command Code Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="commandcodeAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="commandcodeSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="commandcodeOpenBrowser" data-i18n="settings.commandcode.openBrowser">Open Command Code usage</button>
-                  <button id="commandcodeLogoutButton" class="hidden" data-i18n="settings.commandcode.clearCookie">Clear cookie</button>
-                  <button id="commandcodeRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="commandcodeManualPanel">
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.commandcode.step1">Open the Command Code usage page in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.commandcode.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the credits request.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.commandcode.step3">In Headers -> Request Headers, copy the full Cookie value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.commandcode.step4">Paste it below and click Save cookie.</span>
-                  </p>
-                  <textarea id="commandcodeCookieInput" rows="3" spellcheck="false" placeholder="__Secure-commandcode_prod_.session_token=..." data-i18n-placeholder="settings.commandcode.cookiePlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="commandcodeCookieSubmit" data-i18n="settings.commandcode.saveCookie">Save cookie</button>
-                  </div>
-                </div>
-                <div id="commandcodeErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="ollamaAccountGroup" class="settings-group cursor-account-group">
-              <button id="ollamaSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="ollamaSettingsDetails">
-                <span data-i18n="settings.ollama.title">Ollama Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="ollamaAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="ollamaSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="ollamaOpenBrowser" data-i18n="settings.ollama.openBrowser">Open Ollama settings</button>
-                  <button id="ollamaLogoutButton" class="hidden" data-i18n="settings.ollama.clearCookie">Clear cookie</button>
-                  <button id="ollamaRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="ollamaManualPanel">
-                  <p class="settings-note">
-                    <strong>1.</strong> <span data-i18n="settings.ollama.step1">Open Ollama settings in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.ollama.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, reload the page, then select the settings document request.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.ollama.step3">In Headers -> Request Headers, copy the full Cookie value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.ollama.step4">Paste it below and click Save cookie.</span>
-                  </p>
-                  <textarea id="ollamaCookieInput" rows="3" spellcheck="false" placeholder="wos-session=..." data-i18n-placeholder="settings.ollama.cookiePlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="ollamaCookieSubmit" data-i18n="settings.ollama.saveCookie">Save cookie</button>
-                  </div>
-                </div>
-                <div id="ollamaErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="kimiAccountGroup" class="settings-group cursor-account-group">
-              <button id="kimiSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="kimiSettingsDetails">
-                <span data-i18n="settings.kimi.title">Kimi Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="kimiAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="kimiSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="kimiOpenBrowser" data-i18n="settings.kimi.openBrowser">Open Kimi Code Console</button>
-                  <button id="kimiLogoutButton" class="hidden" data-i18n="settings.kimi.clearApiKey">Clear key</button>
-                  <button id="kimiRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="kimiManualPanel">
-                  <p class="settings-note" data-i18n="settings.kimi.cookieIntro">Connect your Kimi website session to show 5-hour, weekly, and monthly limits. The cookie stays on this device.</p>
-                  <p class="settings-note kimi-cookie-steps">
-                    <strong>1.</strong> <span data-i18n="settings.kimi.step1">Open Kimi Code Console in your browser (button above) and sign in.</span><br>
-                    <strong>2.</strong> <span data-i18n="settings.kimi.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -> https://www.kimi.com.</span><br>
-                    <strong>3.</strong> <span data-i18n="settings.kimi.step3">Find kimi-auth and copy its Value.</span><br>
-                    <strong>4.</strong> <span data-i18n="settings.kimi.step4">Paste the value below and click Save cookie.</span>
-                  </p>
-                  <textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off" spellcheck="false" placeholder="kimi-auth=..." data-i18n-placeholder="settings.kimi.webTokenPlaceholder"></textarea>
-                  <div class="settings-actions">
-                    <button id="kimiWebAccessTokenSubmit" data-i18n="settings.kimi.saveWebToken">Save cookie</button>
-                  </div>
-                  <details class="kimi-api-fallback">
-                    <summary data-i18n="settings.kimi.apiFallback">Optional: Kimi Code API fallback</summary>
-                    <div class="kimi-api-fallback-body">
-                      <p class="settings-note" data-i18n="settings.kimi.apiKeyNote">Use this only when Kimi web access is unavailable. It can restore 5-hour and weekly limits, but not Monthly.</p>
-                      <label for="kimiApiKeyInput">
-                        <span data-i18n="settings.kimi.apiKeyLabel">Kimi Code API key</span>
-                        <input id="kimiApiKeyInput" type="password" spellcheck="false" placeholder="sk-..." data-i18n-placeholder="settings.kimi.apiKeyPlaceholder" />
-                      </label>
-                      <div class="settings-actions">
-                        <button id="kimiApiKeySubmit" data-i18n="settings.kimi.saveApiKey">Save API key</button>
-                      </div>
-                    </div>
-                  </details>
-                </div>
-                <div id="kimiErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="mimoAccountGroup" class="settings-group cursor-account-group">
-              <button id="mimoSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="mimoSettingsDetails">
-                <span data-i18n="settings.mimo.title">MiMo Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="mimoAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="mimoSettingsDetails" class="cursor-settings-details hidden">
-                <div id="mimoAccountList" class="managed-account-list"></div>
-                <div id="mimoAccountEmpty" class="opencode-empty" data-i18n="settings.mimo.emptyList">No accounts yet. Click "+ Add account" below to get started.</div>
-                <div id="mimoManualPanel" class="opencode-add-form">
-                  <button id="mimoAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="mimoAddDetails">
-                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
-                    <span data-i18n="settings.mimo.addAccount">Add account</span>
-                  </button>
-                  <div id="mimoAddDetails" class="opencode-add-details accordion-animated-container hidden">
-                    <div class="accordion-animation-inner opencode-add-body">
-                      <div class="settings-actions">
-                        <button id="mimoOpenConsoleButton" type="button" data-i18n="settings.mimo.openConsole">Open MiMo console in browser</button>
-                      </div>
-                      <p class="settings-note">
-                        <strong>1.</strong> <span data-i18n="settings.mimo.step1">Open the MiMo console in your browser (button above) and sign in.</span><br>
-                        <strong>2.</strong> <span data-i18n="settings.mimo.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, then reload the page.</span><br>
-                        <strong>3.</strong> <span data-i18n="settings.mimo.step3Before">In Network, select</span> <code>balance</code><span data-i18n="settings.mimo.step3After">, then copy the full Cookie value from Headers -> Request Headers.</span><br>
-                        <strong>4.</strong> <span data-i18n="settings.mimo.step4">Paste it below, then click Save account.</span>
-                      </p>
-                      <textarea id="mimoCookieInput" rows="3" autocomplete="off" spellcheck="false" data-i18n-aria-label="settings.mimo.cookieLabel" aria-label="Cookie header" data-i18n-placeholder="settings.mimo.cookiePlaceholder" placeholder="Cookie: ..."></textarea>
-                      <div class="settings-actions">
-                        <button id="mimoSaveAccountButton" type="button" data-i18n="settings.mimo.saveAccount">Save account</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div id="mimoAccountErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="copilotAccountGroup" class="settings-group cursor-account-group">
-              <button id="copilotSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="copilotSettingsDetails">
-                <span data-i18n="settings.copilot.title">GitHub Copilot Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="copilotApiTokenStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="copilotSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="copilotSignInButton" data-i18n="settings.copilot.signIn">Sign in with GitHub</button>
-                  <button id="copilotCancelSignInButton" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
-                  <button id="copilotLogoutButton" class="hidden" data-i18n="settings.copilot.logout">Sign out</button>
-                  <button id="copilotRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <pre id="copilotLoginStatus" class="codex-login-output hidden"></pre>
-                <div id="copilotManualPanel" class="opencode-add-form">
-                  <button id="copilotManualToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="copilotManualDetails">
-                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
-                    <span data-i18n="settings.copilot.manualToggle">Enter token manually</span>
-                  </button>
-                  <div id="copilotManualDetails" class="opencode-add-details accordion-animated-container hidden">
-                    <div class="accordion-animation-inner opencode-add-body">
-                      <p class="settings-note" data-i18n="settings.copilot.note">Paste a GitHub OAuth token with Copilot access. It stays on this device and is used only for Copilot quota lookup.</p>
-                      <input id="copilotApiTokenInput" type="password" spellcheck="false" placeholder="gho_..." data-i18n-placeholder="settings.copilot.apiTokenPlaceholder" />
-                      <div class="settings-actions">
-                        <button id="copilotApiTokenSubmit" data-i18n="settings.copilot.saveToken">Save token</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div id="copilotErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
             <div id="thirdpartyAccountGroup" class="settings-group cursor-account-group">
@@ -1352,7 +1229,7 @@
                     </div>
                   </div>
                 </div>
-                <div id="thirdpartyErrorMessage" class="settings-note error hidden"></div>
+                <div id="thirdpartyErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
         </div>
@@ -1562,8 +1439,17 @@
       <section id="serviceStatusPanel" class="service-status-panel hidden"></section>
       <section id="limitsPanel" class="limits-panel hidden"></section>
       <section id="trendsPanel" class="trends-panel hidden"></section>
+      <div id="sessionPagerHost" class="session-pager-host hidden"></div>
       <footer class="footer">
         <div id="viewSwitcher" class="view-switcher"></div>
+        <div id="toolDetailFooter" class="tool-detail-footer hidden" role="group">
+          <button id="toolDetailFooterTokens" class="tool-detail-footer-option" type="button">Tokens</button>
+          <button id="toolDetailFooterModels" class="tool-detail-footer-option" type="button">Models</button>
+        </div>
+        <button id="liveTokenRate" class="live-token-rate hidden is-idle" type="button" title="Live token rate" aria-label="Live token rate">
+          <span class="live-token-rate-icon" aria-hidden="true"></span>
+          <span id="liveTokenRateValue" class="live-token-rate-value">— tok/s</span>
+        </button>
         <div id="appUpdatePill" class="update-pill hidden" title="">
           <button id="appUpdatePillAction" type="button" class="update-pill-action">
             <span id="appUpdatePillLabel" class="update-pill-label"></span>
@@ -1596,17 +1482,29 @@
     <button id="floatingBubbleTab" class="floating-bubble-tab" type="button" title="Show Token Monitor" aria-label="Show Token Monitor" data-i18n-title="floatingBubble.expand" data-i18n-aria-label="floatingBubble.expand">
       <span id="floatingBubbleContent" aria-hidden="true">Σ</span>
     </button>
-    <script src="../../shared/limitBalanceDisplay.js"></script>
+    <script src="../../shared/clientCatalog.js"></script>
+    <script src="../../shared/vendorPresentation.js"></script>
+    <script src="rowIconMasks.js"></script>
+    <script src="../../shared/limits/providers.js"></script>
+    <script src="../../shared/compactTokens.js"></script>
+    <script src="../../shared/limits/balanceDisplay.js"></script>
+    <script src="../../shared/limits/windowLabels.js"></script>
+    <script src="../../shared/limits/windowText.js"></script>
+    <script src="limits/windowsView.js"></script>
     <script src="trayBars.js"></script>
     <script src="usageCharts.js"></script>
     <script src="homeOverview.js"></script>
     <script src="themePresets.js"></script>
     <script src="trayProviderIcons.js"></script>
-    <script src="limitProviderOrder.js"></script>
+    <script src="limits/providerOrder.js"></script>
+    <script src="limits/accountPanels.js"></script>
+    <script src="limits/accountShell.js"></script>
     <script src="accountIdentity.js"></script>
     <script src="appUpdatePresentation.js"></script>
-    <script src="limitProviderPresentation.js"></script>
-    <script src="limitDisplayMode.js"></script>
+    <script src="limits/providerPresentation.js"></script>
+    <script src="../providers/codex/accountControl.js"></script>
+    <script src="limits/displayMode.js"></script>
+    <script src="limits/resetMotion.js"></script>
     <script src="clientStatusPresentation.js"></script>
     <script src="clientHealthPresentation.js"></script>
     <script src="clientSourceCache.js"></script>
@@ -1615,36 +1513,45 @@
     <script src="serviceStatusPresentation.js"></script>
     <script src="serviceStatusProviderPreferences.js"></script>
     <script src="clientDisplayPreferences.js"></script>
+    <script src="settingsListFilter.js"></script>
     <script src="viewDisplayPreferences.js"></script>
     <script src="homeModulePreferences.js"></script>
     <script src="fixedPeriodRanges.js"></script>
-    <script src="preferenceDragSort.js"></script>
     <script src="verticalDragSort.js"></script>
     <script src="rowDragController.js"></script>
     <script src="i18n.js"></script>
-    <script src="../../shared/reasonixSessionGuard.js"></script>
+    <script src="../../shared/providers/reasonix/sessionGuard.js"></script>
+    <script src="../../shared/sessionLive.js"></script>
     <script src="sessionRows.js"></script>
     <script src="breakdownRenderPolicy.js"></script>
     <script src="statsRenderScheduler.js"></script>
+    <script src="allTimeSessions.js"></script>
     <script src="hubBuildPresentation.js"></script>
     <script src="deviceBreakdown.js"></script>
     <script src="usageAttributionRows.js"></script>
+    <script src="toolDetails.js"></script>
     <script src="../../shared/projectKey.js"></script>
     <script src="projectRows.js"></script>
     <script src="sessionDetail.js"></script>
     <script src="customPricingForm.js"></script>
+    <script src="modelAliases.js"></script>
+    <script src="modelAliasForm.js"></script>
     <script src="../windowShortcut.js"></script>
     <script src="../../shared/currency.js"></script>
     <script src="../../shared/subscriptionDisplay.js"></script>
-    <script src="../../shared/compactTokens.js"></script>
+    <script src="../../shared/subscriptionText.js"></script>
     <script src="../../shared/compactMoney.js"></script>
     <script src="../../shared/fontSettings.js"></script>
     <script src="../../shared/trayText.js"></script>
+    <script src="edgeDock/items.js"></script>
+    <script src="edgeDock/presentation.js"></script>
+    <script src="edgeDock/composer.js"></script>
     <script src="../../shared/trayLayout.js"></script>
     <script src="tokenRatePresentation.js"></script>
     <script src="../motionPreference.js"></script>
     <script src="../windowsBackdropMode.js"></script>
     <script src="windowsGlass.js"></script>
+    <script src="../macBackdropMode.js"></script>
     <script src="glassRendering.js"></script>
     <script src="trayComposer.js"></script>
     <script src="diagnosticsPanel.js"></script>

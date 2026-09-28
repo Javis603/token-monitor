@@ -1,24 +1,34 @@
 ﻿'use strict';
 
+const crypto = require('node:crypto');
+const zlib = require('node:zlib');
+const { acceptsEncoding } = require('./hubProtocol');
+
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
+const JSON_COMPRESSION_MIN_BYTES = 1024;
 
 function corsHeaders(extraHeaders = {}) {
   return {
     'access-control-allow-origin': '*',
     'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-    'access-control-allow-headers': 'authorization,content-type,x-token-monitor-secret',
+    'access-control-allow-headers': 'authorization,content-type,x-token-monitor-secret,x-token-monitor-response,x-token-monitor-stream',
     ...extraHeaders
   };
 }
 
 function sendJson(res, statusCode, payload, extraHeaders = {}) {
-  const body = JSON.stringify(payload, null, 2);
+  const body = Buffer.from(JSON.stringify(payload), 'utf8');
+  const compressed = acceptsEncoding(res.req, 'gzip') && body.byteLength >= JSON_COMPRESSION_MIN_BYTES
+    ? zlib.gzipSync(body, { level: zlib.constants.Z_BEST_SPEED })
+    : null;
   res.writeHead(statusCode, corsHeaders({
     'content-type': 'application/json; charset=utf-8',
     'cache-control': 'no-store',
+    'content-length': String((compressed || body).byteLength),
+    ...(compressed ? { 'content-encoding': 'gzip', vary: 'accept-encoding' } : {}),
     ...extraHeaders
   }));
-  res.end(body);
+  res.end(compressed || body);
 }
 
 function sendText(res, statusCode, body, contentType = 'text/plain; charset=utf-8') {
@@ -64,9 +74,24 @@ function requestSecret(req) {
   return String(req.headers['x-token-monitor-secret'] || '').trim();
 }
 
-function isAuthorized(req, expectedSecret) {
-  if (!expectedSecret) return true;
-  return requestSecret(req) === expectedSecret;
+// Compare SHA-256 digests rather than the raw strings: timingSafeEqual needs
+// equal-length inputs, and hashing both sides first gives it that without
+// leaking the secret's length through a padded compare.
+function timingSafeEqualText(actual, expected) {
+  const digest = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest();
+  return crypto.timingSafeEqual(digest(actual), digest(expected));
 }
 
-module.exports = { MAX_JSON_BODY_BYTES, isAuthorized, readJsonBody, sendJson, sendText };
+function isAuthorized(req, expectedSecret) {
+  if (!expectedSecret) return true;
+  return timingSafeEqualText(requestSecret(req), expectedSecret);
+}
+
+module.exports = {
+  MAX_JSON_BODY_BYTES,
+  isAuthorized,
+  readJsonBody,
+  sendJson,
+  sendText,
+  timingSafeEqualText
+};

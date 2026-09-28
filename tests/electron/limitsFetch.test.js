@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { createElectronLimitsFetch } = require('../../src/electron/limitsFetch');
+const { createElectronLimitsFetch } = require('../../src/electron/limits/fetch');
 const { resetOutboundFetchCache } = require('../../src/shared/outboundFetch');
 
 function recordingNet() {
@@ -100,7 +100,8 @@ test('every widget provider probe takes the runtime transport', () => {
   for (const call of [
     /opencodeWeb\.fetchGoWeb\([^,]+, electronProviderDeps\(\)\)/,
     /opencodeWeb\.fetchZen\([^,]+, electronProviderDeps\(\)\)/,
-    /fetchOllamaLimits\([^,]+, electronProviderDeps\(/,
+    // Every account form's save-time probe (limits:saveCredential).
+    /function credentialProbeDeps\(renewed = \{\}\) \{\s*return electronProviderDeps\(/,
     /fetchMimoLimits\([^;]+electronProviderDeps\(\)\)/,
     /fetchOpenRouterAccount\([^,]+, [^,]+, electronProviderDeps\(/,
     /fetchThirdPartyAccount\(\{[^}]*\}, electronProviderDeps\(/,
@@ -108,4 +109,12 @@ test('every widget provider probe takes the runtime transport', () => {
   ]) {
     assert.match(main, call);
   }
+});
+
+test('the auto-detect pill requires a usable ZCode credential, not any install', () => {
+  const account = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'providers', 'zai', 'account.js'), 'utf8');
+  // An API-only or unentitled ZCode selection is not an auto quota source;
+  // only entitled + credential marks the login detected, so the pill never
+  // advertises auto-detect for a state the collector cannot answer.
+  assert.match(account, /return discovery\.entitled && discovery\.credential \? discovery : null;/);
 });

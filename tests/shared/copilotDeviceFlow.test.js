@@ -11,7 +11,7 @@ const {
   runCopilotDeviceFlowLogin,
   copilotLoginErrorMessage,
   isAllowedVerificationUrl
-} = require('../../src/shared/copilotDeviceFlow');
+} = require('../../src/shared/providers/copilot/deviceFlow');
 
 test('isAllowedVerificationUrl accepts GitHub device-flow URLs only', () => {
   assert.equal(isAllowedVerificationUrl('https://github.com/login/device?user_code=ABCD-1234'), true);

@@ -4,96 +4,11 @@ const fs = require('node:fs');
 const { execFileSync } = require('node:child_process');
 const { throwIfAborted } = require('./abortSignal');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
-const { REASONIX_CLIENT } = require('./reasonixPaths');
-const { buildPromaPeriods, collectPromaRows } = require('./promaUsage');
+const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
+const { buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
+const { WSL_DATA_MARKERS, MARKER_CLIENTS } = require('./clientSourceRegistration');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
-
-// Relative (Linux-style) paths under a WSL home. If any exists, a tracked client
-// stores data there and the home is worth a tokscale scan. These mirror the roots
-// tokscale actually reads (incl. alternate roots: Claude transcripts, Kimi
-// Code, legacy OpenClaw bot dirs) so a home holding only an alternate-root client
-// is still discovered. The `.vscode-server` entries cover Cline / Kilo Code
-// running through the VS Code WSL remote.
-const WSL_DATA_MARKERS = [
-  '.claude/projects',
-  '.claude/transcripts',
-  '.codex/sessions',
-  '.local/share/opencode',
-  '.openclaw/agents',
-  '.clawdbot/agents',
-  '.moltbot/agents',
-  '.moldbot/agents',
-  '.hermes',
-  '.kimi/sessions',
-  '.kimi-code/sessions',
-  '.qwen/projects',
-  '.grok/sessions',
-  '.copilot/otel',
-  '.gemini/antigravity-cli/conversations',
-  '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks',
-  '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks',
-  '.pi/agent/sessions',
-  '.omp/agent/sessions',
-  '.local/share/zed/threads/threads.db',
-  '.config/Code/User/globalStorage/kilocode.kilo-code/tasks',
-  '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks',
-  '.commandcode/projects',
-  '.dsh/sessions',
-  '.local/share/mimocode/mimocode.db',
-  '.zcode/projects',
-  '.zcode/cli/db',
-  '.kiro/sessions',
-  '.local/share/kiro-cli/data.sqlite3',
-  '.config/Kiro/User/globalStorage/kiro.kiroagent',
-  '.config/kiro/User/globalStorage/kiro.kiroagent',
-  '.codebuddy/projects',
-  '.workbuddy',
-  '.proma/agent-sessions'
-];
-
-// Maps every WSL_DATA_MARKERS entry to the tracked-client id that owns it, so a
-// matched marker can be attributed back to a client (alt roots collapse to one
-// id, e.g. .kimi/.kimi-code -> kimi; the OpenClaw bot dirs -> openclaw; the two
-// Cline globalStorage paths -> cline). Ids must match DEFAULT_CLIENTS.
-const MARKER_CLIENTS = {
-  '.claude/projects': 'claude',
-  '.claude/transcripts': 'claude',
-  '.codex/sessions': 'codex',
-  '.local/share/opencode': 'opencode',
-  '.openclaw/agents': 'openclaw',
-  '.clawdbot/agents': 'openclaw',
-  '.moltbot/agents': 'openclaw',
-  '.moldbot/agents': 'openclaw',
-  '.hermes': 'hermes',
-  '.kimi/sessions': 'kimi',
-  '.kimi-code/sessions': 'kimi',
-  '.qwen/projects': 'qwen',
-  '.grok/sessions': 'grok',
-  '.copilot/otel': 'copilot',
-  // Antigravity CLI's own parse-local root, mapped to the umbrella `antigravity`
-  // id we track; tokscaleClientFilter widens the scan to the antigravity-cli id.
-  '.gemini/antigravity-cli/conversations': 'antigravity',
-  '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks': 'cline',
-  '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks': 'cline',
-  '.pi/agent/sessions': 'pi',
-  '.omp/agent/sessions': 'pi',
-  '.local/share/zed/threads/threads.db': 'zed',
-  '.config/Code/User/globalStorage/kilocode.kilo-code/tasks': 'kilocode',
-  '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks': 'kilocode',
-  '.commandcode/projects': 'commandcode',
-  '.dsh/sessions': 'dsh',
-  '.local/share/mimocode/mimocode.db': 'micode',
-  '.zcode/projects': 'zcode',
-  '.zcode/cli/db': 'zcode',
-  '.kiro/sessions': 'kiro',
-  '.local/share/kiro-cli/data.sqlite3': 'kiro',
-  '.config/Kiro/User/globalStorage/kiro.kiroagent': 'kiro',
-  '.config/kiro/User/globalStorage/kiro.kiroagent': 'kiro',
-  '.codebuddy/projects': 'codebuddy',
-  '.workbuddy': 'workbuddy',
-  '.proma/agent-sessions': 'proma'
-};
 
 // Default command runner. reg output is ANSI/utf8; wsl.exe output is UTF-16LE.
 // stdin is NUL ('ignore') so a non-WSL wsl.exe stub cannot block on "press any

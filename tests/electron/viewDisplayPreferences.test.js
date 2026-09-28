@@ -51,7 +51,9 @@ test('main default settings use the default view display preferences', () => {
   const mainSource = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   assert.match(mainSource, /defaultViewDisplayPreferences/);
   assert.match(mainSource, /hiddenViews:\s*defaultViewDisplayPreferences\(\)\.hiddenViews/);
-  assert.match(mainSource, /projectsEnabled:\s*parseBoolean\(process\.env\.TOKEN_MONITOR_PROJECTS_ENABLED, false\)/);
+  // On by default since the scan itself reports which workspace a session ran
+  // in: enabling projects no longer means reopening every transcript to find one.
+  assert.match(mainSource, /projectsEnabled:\s*parseBoolean\(process\.env\.TOKEN_MONITOR_PROJECTS_ENABLED, true\)/);
 });
 
 test('main default settings include independent Home module preferences', () => {
@@ -72,6 +74,10 @@ test('main and renderer keep their view display options in sync', () => {
   assert.deepEqual(
     extractViewIds(mainSource, 'DEFAULT_VIEW_LIST'),
     extractViewIds(rendererSource, 'VIEW_DISPLAY_OPTIONS')
+  );
+  assert.deepEqual(
+    extractViewIds(rendererSource, 'VIEW_DISPLAY_OPTIONS'),
+    ['home', 'limits', 'tool', 'model', 'project', 'session', 'device', 'trends', 'status']
   );
 });
 

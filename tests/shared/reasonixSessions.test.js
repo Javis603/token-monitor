@@ -14,15 +14,15 @@ const {
   REASONIX_META_MAX_BYTES,
   REASONIX_TELEMETRY_USAGE_MAX_BYTES,
   reasonixNativeSessionWatchRoots
-} = require('../../src/shared/reasonixSessions');
+} = require('../../src/shared/providers/reasonix/sessions');
 const {
   readReasonixTelemetryUsage,
   REASONIX_TELEMETRY_TAIL_OVERHEAD_BYTES
-} = require('../../src/shared/reasonixFileIo');
+} = require('../../src/shared/providers/reasonix/fileIo');
 const { collectUsageOnce, projectIdentity, watchIgnoreMatcher, watchPathsForClients } = require('../../src/shared/collector');
 const { syncPayload } = require('../../src/shared/syncPayload');
-const { createDeviceState } = require('../../src/shared/deviceState');
-const { captureSessionUsageArchive } = require('../../src/shared/sessionUsageArchive');
+const { createDeviceState } = require('../../src/shared/usage/deviceState');
+const { captureSessionUsageArchive } = require('../../src/shared/usage/sessionUsageArchive');
 const { localIso, localMs } = require('../helpers/localTime');
 const { projectRowsForPeriod } = require('../../src/electron/renderer/projectRows');
 const { sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');

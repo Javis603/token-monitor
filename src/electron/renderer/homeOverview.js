@@ -4,13 +4,14 @@
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : null, function createHomeOverviewApi() {
   const balanceDisplay = (typeof require === 'function')
-    ? require('../../shared/limitBalanceDisplay')
+    ? require('../../shared/limits/balanceDisplay')
     : (typeof window !== 'undefined' ? window.TokenMonitorLimitBalanceDisplay : null);
   const windowPriority = new Map([
     ['session', 0],
-    ['weekly', 1],
-    ['billing', 2],
-    ['monthly', 3]
+    ['daily', 1],
+    ['weekly', 2],
+    ['billing', 3],
+    ['monthly', 4]
   ]);
 
   function finiteNumber(value) {
@@ -103,6 +104,7 @@
                 : finiteNumber(window.remaining),
               currency: credits ? balanceDisplay.creditsCurrency(account, window) : '',
               resetsAt: window.resetsAt,
+              ...(window.boundaryKind ? { boundaryKind: window.boundaryKind } : {}),
               resetDescription: window.resetDescription || '',
               value: window.value || '',
               planStatus: window.planStatus || '',

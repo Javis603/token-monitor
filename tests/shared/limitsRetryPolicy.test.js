@@ -8,7 +8,7 @@ const {
   computeRetryDelayMs,
   isRetryableLimitStatus,
   parseRetryAfterHeader
-} = require('../../src/shared/limitsRetryPolicy');
+} = require('../../src/shared/limits/retryPolicy');
 
 test('parseRetryAfterHeader supports delay-seconds and HTTP dates', () => {
   assert.equal(parseRetryAfterHeader('12', 1_000), 12_000);

@@ -163,7 +163,7 @@ test('release-note disclosure has keyboard focus and compact reading styles', ()
   assert.match(css, /\.app-update-notes\.expanded \.app-update-notes-disclosure \{[\s\S]*transform: rotate\(90deg\)/);
   assert.match(css, /\.app-update-notes-toggle:focus-visible/);
   assert.match(css, /\.app-update-note-group ul[\s\S]*line-height: 1\.45/);
-  assert.match(css, /\.app-update-notes\.hidden \{ display: none; \}/);
+  assert.match(html, /id="appUpdateNotes" class="app-update-notes hidden"/);
   assert.match(app, /'\.app-update-notes-details'/);
   assert.match(app, /setupSettingsAccordion\(els\.appUpdateNotes, els\.appUpdateNotesToggle, els\.appUpdateNotesDetails\)/);
   assert.match(css, /\.app-update-popover:popover-open/);

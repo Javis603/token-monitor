@@ -35,9 +35,31 @@ test('data bars animate on the compositor instead of changing layout width', () 
   assert.match(css, /\.limit-meter-fill\s*\{[^}]*transform:\s*scaleX\(var\(--bar-scale, 0\)\)/s);
   assert.doesNotMatch(css, /(?:\.bar-fill|\.limit-meter-fill)\s*\{[^}]*transition:\s*width/s);
   assert.match(app, /applyBarScale\(fill, width \/ 100\)/);
-  assert.match(app, /applyBarScale\(fill, safePercent \/ 100\)/);
+  // The limit meter moved to the shared Limits view with the rest of the rows.
+  assert.match(read('limits/windowsView.js'), /applyBarScale\(fill, safePercent \/ 100\)/);
   assert.match(app, /state\.animateBarsFromZero[\s\S]*?animateBarBetween\(fill, 0, safeScale, 0, 420\)/s);
   assert.match(applyBarScale, /animateBarBetween\(fill, 0, safeScale, 0, 420\)/);
+});
+
+test('cached Limits bars replay their entrance motion when the view is revisited', () => {
+  const app = read('app.js');
+  const animateCachedLimitBarsFromZero = app.slice(
+    app.indexOf('function animateCachedLimitBarsFromZero('),
+    app.indexOf('function rowWidth(', app.indexOf('function animateCachedLimitBarsFromZero('))
+  );
+  const renderLimits = app.slice(
+    app.indexOf('function renderLimits('),
+    app.indexOf('function serviceStatusLabel(', app.indexOf('function renderLimits('))
+  );
+
+  assert.match(animateCachedLimitBarsFromZero, /if \(!state\.animateBarsFromZero \|\| prefersReducedMotion\(\)\) return;/);
+  assert.match(animateCachedLimitBarsFromZero, /querySelectorAll\('\.limit-meter-fill'\)/);
+  assert.match(animateCachedLimitBarsFromZero, /fill\.style\.getPropertyValue\('--bar-scale'\)/);
+  assert.match(animateCachedLimitBarsFromZero, /animateBarBetween\(fill, 0, targetScale, 0, 420\)/);
+  assert.match(
+    renderLimits,
+    /state\.limitPanelRenderSignature === renderSignature[\s\S]*?animateCachedLimitBarsFromZero\(\);\s*return;/
+  );
 });
 
 test('period changes preserve row identity, animate rank changes, and count from the previous total', () => {
@@ -61,8 +83,10 @@ test('period changes preserve row identity, animate rank changes, and count from
 
 test('live row updates count and resize bars together without slowing the headline', () => {
   const app = read('app.js');
+  const renderRows = app.slice(app.indexOf('function renderRows('), app.indexOf('function deviceLabel('));
 
-  assert.match(app, /const liveMotionSnapshot = !state\.periodMotionActive && !state\.animateBarsFromZero[\s\S]*?captureBreakdownMotion\(\)/);
+  assert.match(renderRows, /const rowsChanged =[\s\S]*?const liveMotionSnapshot = rowsChanged && !state\.periodMotionActive && !state\.animateBarsFromZero[\s\S]*?captureBreakdownMotion\(\)/);
+  assert.ok(renderRows.indexOf('captureBreakdownMotion()') < renderRows.indexOf('if (structureChanged)'));
   assert.match(app, /if \(liveMotionSnapshot\) animateBreakdownFrom\(liveMotionSnapshot, \{ duration: 600 \}\)/);
   assert.match(app, /const animationFrom = numberAnimHandle \? numberAnimValue : state\.currentTotal/);
   assert.match(app, /animateTotalNumber\(els\.totalTokens, animationFrom, nextTotal, state\.periodMotionActive \? 800 : 1000\)/);

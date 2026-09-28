@@ -73,8 +73,10 @@ async function pump() {
       if (desired !== target) continue;
       if (target.config) {
         try {
-          const { dirs, clients, usePolling } = target.config;
-          const instance = chokidar.watch(dirs, watcherOptions(usePolling === true, watchIgnoreMatcher(clients)));
+          const { dirs, clients, customScanPaths, usePolling } = target.config;
+          const instance = chokidar.watch(dirs, watcherOptions(usePolling === true, watchIgnoreMatcher(clients, {
+            customScanPaths
+          })));
           watcher = instance;
           watcherRevision = target.revision;
           appliedRevision = target.revision;

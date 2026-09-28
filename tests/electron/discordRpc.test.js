@@ -97,7 +97,7 @@ test('Discord Rich Presence uses labels and asset keys for tracked clients', () 
 
 test('Discord Rich Presence uses labels and asset keys for newer tracked clients', () => {
   const buildPayload = loadBuildPayload();
-  for (const [client, label] of [['pi', 'Pi'], ['zed', 'Zed'], ['kilocode', 'Kilo Code'], ['commandcode', 'Command Code'], ['micode', 'MiMo Code'], ['zcode', 'ZCode'], ['kiro', 'Kiro'], ['codebuddy', 'CodeBuddy'], ['workbuddy', 'WorkBuddy'], ['reasonix', 'Reasonix'], ['dsh', 'DeepSeek Harness']]) {
+  for (const [client, label] of [['pi', 'Pi'], ['zed', 'Zed'], ['kilo', 'Kilo'], ['commandcode', 'Command Code'], ['mimo', 'Xiaomi MiMo'], ['zcode', 'ZCode'], ['kiro', 'Kiro'], ['codebuddy', 'CodeBuddy'], ['workbuddy', 'WorkBuddy'], ['reasonix', 'Reasonix'], ['dsh', 'DeepSeek Harness'], ['lmstudio', 'LM Studio']]) {
     const payload = buildPayload({
       periods: {
         today: {
@@ -112,6 +112,15 @@ test('Discord Rich Presence uses labels and asset keys for newer tracked clients
     assert.equal(payload.smallImageKey, client);
     assert.equal(payload.smallImageText, label);
   }
+});
+
+test('Discord Rich Presence uses the Unsloth label and uploaded asset key', () => {
+  const payload = loadBuildPayload()({
+    periods: { today: { totalTokens: 12345, costUsd: 0, clients: { unsloth: 12345 } } }
+  });
+  assert.equal(payload.details, 'Unsloth · 12.3K tokens');
+  assert.equal(payload.smallImageKey, 'unsloth');
+  assert.equal(payload.smallImageText, 'Unsloth');
 });
 
 test('Discord Rich Presence formats today cost with selected currency', () => {

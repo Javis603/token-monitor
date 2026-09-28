@@ -15,12 +15,12 @@ Click the `⚙` button in the bottom-right corner of the widget to open the sett
 
 | Section | What it controls |
 |---|---|
-| **General** | Language, launch at login, app updates, Discord Rich Presence, About, and Advanced (open the raw `settings.json` for less-common options such as `allTimeSince`). |
+| **General** | Language, launch at login, app updates (optionally downloaded in the background), Discord Rich Presence, About — including an on-demand redacted diagnostic report to attach to an issue — and Advanced (open the raw `settings.json` for less-common options such as `allTimeSince`). |
 | **Main** | Which Home modules appear and their order, plus the display currency (USD, TWD, HKD, or CNY; daily auto rate or a manual override). |
-| **Window** | Window behavior (float above other apps / normal / desktop-pinned), tray mode (macOS menu bar or Windows system tray, and what shows next to the icon), the floating bubble, and the global show/hide shortcut. |
-| **Appearance** | Interface theme (presets such as Default and Obsidian, a porcelain light mode, or custom colors), per-vendor tool colors, and system glass opacity / blur. |
-| **Collection** | Tracked tools (and hide / pin / drag-reorder for the main list), collection cadence, **Keep usage from deleted sessions**, custom pricing, data export, and — on Windows — the built-in WSL scan toggle. |
-| **AI Tool Limits** | Which providers to enable, their credentials and sign-in options, multiple accounts per provider (including switching the active local Codex account), session / weekly / billing / credit windows, and how often to refresh. |
+| **Window** | Window behavior (float above other apps / normal / desktop-pinned), tray mode (macOS menu bar or Windows system tray, and what shows next to the icon), built-in or hand-built menu bar and floating-bubble layouts, hiding the taskbar/Dock icon while keeping the widget on screen, and the global show/hide shortcut. |
+| **Appearance** | Interface theme (presets such as Default and Obsidian, a porcelain light mode, or custom colors), per-vendor tool colors, system glass opacity / blur (on macOS 26+, Frosted Glass or native Liquid Glass; the Edge Dock can follow it or pick its own), and separate interface and display fonts. |
+| **Collection** | Tracked tools — searchable, with hide / pin / drag-reorder for the main list, per-tool source health, re-scan, and custom scan paths for sessions kept outside the defaults — collection cadence, **Keep usage from deleted sessions**, custom pricing, data export, and — on Windows — the built-in WSL scan toggle. |
+| **AI Tool Limits** | Which providers to enable, their credentials and sign-in options, multiple accounts per provider (including switching the active local Codex account), session / daily / weekly / billing / credit windows, and how often to refresh (a fixed interval, or adaptive to how fast a quota is being consumed). The provider list is searchable. |
 | **Subscriptions** | What you actually pay for each AI account — a recurring plan, or a top-up ledger for balance-style accounts — surfaced on hover of that account's plan label. Entered by hand; nothing is fetched from any provider. With a hub configured the list is stored on the hub and shared by every connected device; otherwise it stays in this device's `settings.json`. |
 | **Multi-device Sync** | **Local only** (no hub), **Connect to a hub** (paste another machine's Hub URL + secret), or **Host hub on this device** (run a hub locally; the panel lists reachable LAN / Tailscale / ZeroTier addresses). |
 
@@ -38,11 +38,11 @@ TOKEN_MONITOR_SECRET=                # shared secret; must match the hub
 TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to the hostname
 TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # optional — 0/live, 600000/10min, 1200000/20min, 1800000/30min
 TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported tools; empty disables tracking
-TOKEN_MONITOR_PROJECTS_ENABLED=      # optional — defaults off; 1 collects project metadata
+TOKEN_MONITOR_PROJECTS_ENABLED=      # optional — defaults on; 0 stops collecting project metadata
 TOKEN_MONITOR_HISTORY_ENABLED=       # optional — defaults on; 0 skips trend history
 TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED= # optional — defaults on; 0 stops archiving deleted-session usage
 TOKEN_MONITOR_LIMITS_ENABLED=        # optional — defaults on; 0 skips CLI probing
-TOKEN_MONITOR_LIMIT_PROVIDERS=       # optional — defaults to all supported providers
+TOKEN_MONITOR_LIMIT_PROVIDERS=       # optional — omit for all supported providers; empty probes none
 TOKEN_MONITOR_LIMITS_REFRESH_MODE=   # optional — fixed (default) or adaptive
 TOKEN_MONITOR_LIMITS_REFRESH_MS=     # optional — interval for fixed mode; defaults to 300000
 # WorkBuddy: the desktop widget auto-detects the signed-in local app when the
@@ -59,7 +59,7 @@ TOKEN_MONITOR_WORKBUDDY_DEPARTMENT_INFO= # headless only — enterprise metadata
 TOKEN_MONITOR_WORKBUDDY_LOCALE=       # headless only — en or zh
 ```
 
-Provider credentials (Grok, DeepSeek, Minimax, Copilot, GLM / GLM Team, Volcengine, Qoder, Command Code, WorkBuddy, Ollama, Kimi, …) and proxy settings live in the same file. **`.env.example` is the complete, authoritative list** — start from it rather than copying keys by hand, since it stays in sync with the code. The desktop widget automatically reads the session owned by the local WorkBuddy app when that provider is enabled; the WorkBuddy token fields above remain only for headless/CLI deployments.
+Provider credentials (Grok, DeepSeek, Minimax, Copilot, GLM / GLM Team, Volcengine, Qoder, Command Code, WorkBuddy, Ollama, Kimi, Alibaba Token Plan, …) and proxy settings live in the same file. **`.env.example` is the complete, authoritative list** — start from it rather than copying keys by hand, since it stays in sync with the code. The desktop widget automatically reads the session owned by the local WorkBuddy app when that provider is enabled; the WorkBuddy token fields above remain only for headless/CLI deployments.
 
 The widget reads most settings as first-run defaults. WorkBuddy follows the same provider checkbox as other auto-detected integrations on macOS and Windows; Linux local-app monitoring is unsupported. Desktop users do not copy a token, and the WorkBuddy token fields above apply only to the headless agent/CLI. The agent and hub take a CLI flag over an env var over the built-in default.
 
