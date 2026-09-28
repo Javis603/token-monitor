@@ -22,7 +22,8 @@
       providerColor,
       hasProviderMark,
       maskEmail,
-      createRowDrag
+      createRowDrag,
+      enabledLimitProviders
     } = deps;
 
     // Selection and the open add menu live here rather than in the DOM, because
@@ -153,9 +154,13 @@
         }
         menu.append(group);
       };
-      section('settings.edgeDock.addLimits', connectedProviders()
-        .map((provider) => ({ type: 'limit', provider, hiddenAccounts: [], showUsage: true }))
-        .filter((item) => !present.has(itemsApi.itemId(item))));
+      // Keep every enabled provider in one list and in the user's limits order.
+      // A provider without quota data can still be pinned; the menu need not
+      // label it as temporarily unavailable.
+      section('settings.edgeDock.addLimits', addableLimitProviders(
+        enabledLimitProviders?.() || connectedProviders(),
+        items.filter((item) => item.type === 'limit').map((item) => item.provider)
+      ).map((provider) => ({ type: 'limit', provider, hiddenAccounts: [], showUsage: true })));
       section('settings.edgeDock.addUsage', itemsApi.STAT_METRICS
         .filter((metric) => metric !== itemsApi.SESSIONS_METRIC)
         .map((metric) => ({ type: 'stat', metric }))
@@ -368,5 +373,20 @@
     return { render };
   }
 
-  return { createEdgeDockComposer };
+  function normalizeProviderId(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  // Providers still available to add, in the order the Limits page lists them.
+  // `added` is what the dock already shows.
+  //
+  // A plain function rather than a few lines inside the menu because the menu is
+  // DOM and this is the part worth testing: this rule is what decides whether a
+  // provider with no quota can be pinned at all.
+  function addableLimitProviders(enabled, added) {
+    const skip = new Set((added || []).map(normalizeProviderId));
+    return (enabled || []).map(normalizeProviderId).filter((id) => id && !skip.has(id));
+  }
+
+  return { createEdgeDockComposer, addableLimitProviders };
 });

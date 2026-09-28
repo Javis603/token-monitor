@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { projectIdentity, projectPathFromJsonl } = require('../../src/shared/collector');
-const { applySessionUsageArchive } = require('../../src/shared/sessionUsageArchive');
+const { applySessionUsageArchive } = require('../../src/shared/usage/sessionUsageArchive');
 const { aggregateDevices, applyProjectRollups, canonicalProjectKey, normalizePeriod, projectRollupFromSessions } = require('../../src/shared/usage');
 
 test('projectPathFromJsonl reads direct and nested session cwd metadata', () => {

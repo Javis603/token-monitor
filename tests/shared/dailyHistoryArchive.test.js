@@ -63,6 +63,44 @@ test('normalizeDailyHistoryArchive rejects malformed days and observations', () 
   });
 });
 
+test('Cursor Auto archive observations normalize old default keys before a new graph capture', () => {
+  const date = '2026-09-27';
+  const stored = { days: { [date]: { observations: [
+    { client: 'cursor', modelId: 'default', tokens: 5, cost: 0.01 },
+    { client: 'claude', modelId: 'default', tokens: 11, cost: 0.03 }
+  ] } } };
+  const incoming = graph(date, [client('cursor', 'default', 5, 0.01, 1)]);
+  const archive = captureDailyHistoryArchive(stored, incoming, { todayKey: '2026-09-28' });
+  const visible = graphFromDailyHistoryArchive([], archive, { todayKey: '2026-09-28' });
+  const rows = visible.contributions[0].clients;
+
+  assert.equal(rows.find((row) => row.client === 'cursor').modelId, 'cursor-auto');
+  assert.equal(rows.find((row) => row.client === 'cursor').tokens.input, 5);
+  assert.equal(rows.find((row) => row.client === 'claude').modelId, 'default');
+});
+
+test('Cursor Auto archive summary moves exact model components only when attribution is unambiguous', () => {
+  const date = '2026-09-27';
+  const cursor = { client: 'cursor', modelId: 'default', tokens: 5, cost: 0.01 };
+  const summary = {
+    tokenComponentsAvailable: true,
+    outputTokens: 5,
+    perClient: { cursor: { outputTokens: 5 } },
+    perModel: { default: { outputTokens: 5 } }
+  };
+  const one = normalizeDailyHistoryArchive({ liveDays: { [date]: {
+    observations: [cursor], componentSummary: summary
+  } } }).liveDays[date];
+  assert.equal(one.componentSummary.perModel['cursor-auto'].outputTokens, 5);
+  assert.equal(one.componentSummary.tokenComponentsAvailable, true);
+
+  const mixed = normalizeDailyHistoryArchive({ liveDays: { [date]: {
+    observations: [cursor, { client: 'claude', modelId: 'default', tokens: 11 }],
+    componentSummary: summary
+  } } }).liveDays[date];
+  assert.equal(mixed.componentSummary, undefined);
+});
+
 test('capture preserves a larger prior observation as one coherent record', () => {
   const first = captureDailyHistoryArchive({}, graph('2026-07-17', [
     client('claude', 'opus', 100, 4, 5, { providerId: 'anthropic', reasoning: 7 })

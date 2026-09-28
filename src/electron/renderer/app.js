@@ -228,22 +228,23 @@ const deviceStaleColor = '#8c97a7';
 const baseBreakdownOrder = ['tool', 'device', 'model', 'project', 'session'];
 const VIEW_DISPLAY_OPTIONS = [
   { id: 'home', labelKey: 'views.home' },
+  { id: 'limits', labelKey: 'views.limits' },
   { id: 'tool', labelKey: 'views.tool' },
-  { id: 'status', labelKey: 'views.status' },
-  { id: 'device', labelKey: 'views.device' },
   { id: 'model', labelKey: 'views.model' },
   { id: 'project', labelKey: 'views.project' },
   { id: 'session', labelKey: 'views.session' },
-  { id: 'limits', labelKey: 'views.limits' },
-  { id: 'trends', labelKey: 'views.trends' }
+  { id: 'device', labelKey: 'views.device' },
+  { id: 'trends', labelKey: 'views.trends' },
+  { id: 'status', labelKey: 'views.status' }
 ];
 const viewPeriodValues = new Set(['today', 'month', 'week', 'last7', 'last30', 'allTime']);
 const viewBreakdownValues = new Set(['home', ...baseBreakdownOrder, 'status', 'limits', 'trends']);
 const HOME_MODULE_OPTIONS = [
   { id: 'limits', labelKey: 'home.limits', viewId: 'limits' },
   { id: 'tool', labelKey: 'home.tools', viewId: 'tool' },
-  { id: 'device', labelKey: 'home.devices', viewId: 'device' },
   { id: 'model', labelKey: 'home.models', viewId: 'model' },
+  { id: 'session', labelKey: 'home.sessions', viewId: 'session' },
+  { id: 'device', labelKey: 'home.devices', viewId: 'device' },
   { id: 'trends', labelKey: 'home.activity', viewId: 'trends' }
 ];
 const VIEW_SWITCHER_LONG_PRESS_MS = 420;
@@ -2883,8 +2884,8 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
   return toolRowsForPeriod(period);
 }
 
-function sessionRowsForPeriod(period) {
-  const rows = sessionRowsApi.sessionRowsForPeriod(period, {
+function rawSessionRowsForPeriod(period) {
+  return sessionRowsApi.sessionRowsForPeriod(period, {
     clientLabels,
     clientColors,
     modelColor,
@@ -2893,6 +2894,10 @@ function sessionRowsForPeriod(period) {
     archivedLabel: t('session.archived'),
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
+}
+
+function sessionRowsForPeriod(period) {
+  const rows = rawSessionRowsForPeriod(period);
   if (rows.length > 0) {
     rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
     return sessionRowsApi.groupBackgroundReviewRows(rows, {
@@ -5815,6 +5820,110 @@ function renderHomeToolModule(period) {
   return module;
 }
 
+function homeSessionAgo(value) {
+  if (!Number.isFinite(value) || value <= 0) return '';
+  const minutes = Math.round(Math.max(0, Date.now() - value) / 60000);
+  if (minutes < 1) return t('edgeDock.agoNow');
+  if (minutes < 60) return t('edgeDock.agoMinutes', { count: minutes });
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return t('edgeDock.agoHours', { count: hours });
+  return t('edgeDock.agoDays', { count: Math.round(hours / 24) });
+}
+
+function homeSessionContext(context) {
+  const showUsed = state.settings?.sessionContextMetric !== 'remaining';
+  const percent = showUsed ? context.percentUsed : context.percentLeft;
+  const node = document.createElement('span');
+  node.className = 'home-session-context';
+  node.dataset.tone = context.tone || '';
+  node.title = t(showUsed ? 'session.contextUsed' : 'session.contextLeft', { percent });
+  const meter = document.createElement('span');
+  meter.className = 'home-session-context-meter';
+  const fill = document.createElement('span');
+  fill.className = 'home-session-context-fill';
+  fill.style.setProperty('--bar-scale', String(percent / 100));
+  meter.append(fill);
+  const value = document.createElement('span');
+  value.textContent = `${percent}%`;
+  node.append(meter, value);
+  return node;
+}
+
+function stopHomeSessionRepaint() {
+  clearTimeout(state.homeSessionRepaintTimer);
+  state.homeSessionRepaintTimer = null;
+}
+
+function scheduleHomeSessionRepaint() {
+  stopHomeSessionRepaint();
+  const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
+  if (!rows.length) return;
+  const now = Date.now();
+  const expiry = window.TokenMonitorEdgeDockPresentation.nextRunningExpiryAt(rows, now);
+  // Refresh relative ages once a minute, or sooner when a running session expires.
+  const delay = expiry > now ? Math.min(60_000, Math.max(1_000, expiry - now + 50)) : 60_000;
+  state.homeSessionRepaintTimer = setTimeout(() => {
+    state.homeSessionRepaintTimer = null;
+    if (visibleStatsSurface() !== 'main' || state.breakdown !== 'home') return;
+    const current = els.homePanel?.querySelector('.home-module-session');
+    if (!current) return;
+    const hadFocus = document.activeElement === current;
+    const next = renderHomeSessionModule();
+    current.replaceWith(next);
+    if (hadFocus) next.focus();
+    scheduleHomeSessionRepaint();
+  }, delay);
+}
+
+function renderHomeSessionModule() {
+  const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
+  const runningCount = rows.filter((row) => window.TokenMonitorSessionLive.sessionActivityState(row) === 'running').length;
+  const meta = runningCount > 0 ? t('home.runningSessions', { count: runningCount }) : '';
+  const { module, body } = homeModuleShell('session', t('home.sessions'), 'session', meta);
+  if (rows.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'home-module-empty';
+    empty.textContent = t('home.noSessions');
+    body.append(empty);
+    return module;
+  }
+  for (const row of rows) {
+    const activityState = window.TokenMonitorSessionLive.sessionActivityState(row);
+    const item = document.createElement('div');
+    item.className = 'home-list-row home-session-row';
+    const mark = document.createElement('span');
+    applyHomeListMark(mark, iconKindFor({ client: row.client }, 'session'), clientColors[row.client] || stableColor(row.key, fallbackModelColors));
+    const stateMark = document.createElement('span');
+    stateMark.className = 'home-session-state';
+    stateMark.dataset.state = activityState;
+    stateMark.setAttribute('aria-hidden', 'true');
+    stateMark.innerHTML = window.TokenMonitorSessionLive.sessionStateMarkup({
+      spin: 'home-session-spin',
+      check: 'home-session-check',
+      idle: 'home-session-idle'
+    });
+    stateMark.title = t(activityState === 'running' ? 'session.running'
+      : activityState === 'ended' ? 'session.finished' : 'session.idle');
+    const name = document.createElement('span');
+    name.className = 'home-list-name';
+    name.textContent = row.title || row.projectLabel || String(row.sessionId || '').slice(0, 12) || '—';
+    const value = document.createElement('span');
+    value.className = 'home-list-value';
+    value.textContent = formatCompact(row.totalTokens);
+    const meta = document.createElement('div');
+    meta.className = 'home-session-meta';
+    const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
+    const description = document.createElement('span');
+    description.className = 'home-list-sub';
+    description.textContent = [sessionRowsApi.sessionModelLabel(row), age].filter(Boolean).join(' · ');
+    meta.append(description);
+    if (row.context) meta.append(homeSessionContext(row.context));
+    item.append(mark, stateMark, name, value, meta);
+    body.append(item);
+  }
+  return module;
+}
+
 function renderHomeDeviceModule() {
   const { module, body } = homeModuleShell('device', t('home.devices'), 'device');
   const rows = homeOverviewApi.homeDeviceRows(fixedPeriodDevices(), {
@@ -6307,9 +6416,11 @@ function renderHome() {
     if (id === 'tool') return renderHomeToolModule(period);
     if (id === 'device') return renderHomeDeviceModule();
     if (id === 'model') return renderHomeModelModule(period);
+    if (id === 'session') return renderHomeSessionModule();
     return renderHomeTrendsModule();
   });
   els.homePanel.replaceChildren(...nodes);
+  if (moduleIds.includes('session')) scheduleHomeSessionRepaint();
   // setupHomeActivityScroller first runs while its module is detached, where
   // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
   // attached, before the browser paints or hover restoration measures the new cell.
@@ -6331,6 +6442,7 @@ function render() {
   }
   if (!state.stats) return;
   allTimeSessions.ensure();
+  stopHomeSessionRepaint();
   els.toolDetailFooter.classList.add('hidden');
   syncLiveTokenRateFooterState();
   renderSessionUsageArchiveStatus();
@@ -11757,6 +11869,12 @@ const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComp
     providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
     providerColor: (id) => limitProviderColor(id),
     hasProviderMark: (id) => limitMarksWithIcon.has(id),
+    // Offer every enabled provider in the user's limits order, including those
+    // without quota data. Keep the ordering rule here rather than in the composer.
+    enabledLimitProviders: () => limitProviderOrderApi
+      .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
+      .filter(({ id }) => enabledLimitProviderSet().has(id))
+      .map(({ id }) => id),
     maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
       ? accountIdentityApi.maskEmailAddress(email)
       : String(email || '')),

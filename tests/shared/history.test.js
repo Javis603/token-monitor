@@ -43,6 +43,7 @@ test('sumTokens adds disjoint Tokscale reasoning only for opted-in clients', () 
   assert.equal(sumTokens(b, 'reasonix'), 1134);
   assert.equal(sumTokens(b, 'zcode'), 1134);
   assert.equal(sumTokens(b, 'opencode'), 1134);
+  assert.equal(sumTokens(b, 'muse'), 1134);
   assert.equal(sumTokens(b, 'claude'), 135);
   assert.equal(sumTokens({}), 0);
   assert.equal(sumTokens(null), 0);
@@ -53,6 +54,7 @@ test('sumOutputTokens folds disjoint reasoning into output only for opted-in cli
   assert.equal(sumOutputTokens(b), 20);
   assert.equal(sumOutputTokens(b, 'zcode'), 1019);
   assert.equal(sumOutputTokens(b, 'opencode'), 1019);
+  assert.equal(sumOutputTokens(b, 'muse'), 1019);
   assert.equal(sumOutputTokens(b, 'claude'), 20);
 });
 
@@ -109,6 +111,44 @@ test('parseGraphResult folds client rows into perClient/perModel and derives day
     unclassifiedTokens: 0,
     cacheReadTokens: 2, cacheWriteTokens: 1, outputTokens: 5
   });
+});
+
+test('Cursor Auto and default graph rows share one model without renaming other clients', () => {
+  const rows = [
+    { client: 'cursor', modelId: 'auto', tokens: { input: 3 }, cost: 0.01 },
+    { client: 'cursor', modelId: 'default', tokens: { input: 7 }, cost: 0.02 },
+    { client: 'claude', modelId: 'default', tokens: { input: 11 }, cost: 0.03 }
+  ];
+  const graph = { contributions: [{ date: '2026-09-27', clients: rows }] };
+  const day = normalizeHistory(parseGraphResult(graph), { todayKey: '2026-09-28' }).daily[0];
+
+  assert.equal(day.perModel['cursor-auto'].tokens, 10);
+  assert.equal(day.perModel.default.tokens, 11);
+  assert.equal(day.perModel['cursor-auto'].cost, 0.03);
+  assert.equal(day.tokens, 21);
+});
+
+test('Cursor graph summary retains exact components after default is renamed', () => {
+  const row = {
+    date: '2026-09-27',
+    clients: [{ client: 'cursor', modelId: 'default', tokens: { input: 2, output: 3 } }],
+    tokenComponentSummary: {
+      tokenComponentsAvailable: true,
+      outputTokens: 3,
+      perClient: { cursor: { outputTokens: 3 } },
+      perModel: { default: { outputTokens: 3 } }
+    }
+  };
+  const day = parseGraphResult({ contributions: [row] }).contributions[0];
+  assert.equal(day.perModel['cursor-auto'].outputTokens, 3);
+  assert.equal(day.outputTokens, 3);
+
+  const mixed = parseGraphResult({ contributions: [{
+    ...row,
+    clients: [...row.clients, { client: 'claude', modelId: 'default', tokens: { input: 1, output: 4 } }]
+  }] }).contributions[0];
+  assert.equal(mixed.perModel['cursor-auto'].outputTokens, 3);
+  assert.equal(mixed.perModel.default.outputTokens, 4);
 });
 
 test('parseGraphResult keeps Oh My Pi and Pi as separate history identities', () => {

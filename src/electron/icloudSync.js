@@ -31,7 +31,7 @@ const MAX_WRITER_ID_LENGTH = 512;
 // limit. Keeping the document cap at that limit leaves room for the device
 // envelope and avoids making a valid Hub payload impossible to persist here.
 const MAX_ICLOUD_DOCUMENT_BYTES = MAX_JSON_BODY_BYTES;
-const MAX_REVISION_LEDGER_BYTES = 64 * 1024;
+const MAX_REVISION_LEDGER_BYTES = MAX_JSON_BODY_BYTES;
 const MAX_DELETIONS_PER_WRITER = 512;
 const DEFAULT_STALE_AFTER_MS = 10 * 60 * 1000;
 const REVISION_LEDGER_SCHEMA_VERSION = 1;
@@ -404,18 +404,11 @@ function validSubscriptionDocument(document, expectedFilename) {
   };
 }
 
-function validDeletionDocument(document, expectedFilename) {
-  if (!document || typeof document !== 'object' || Array.isArray(document)) return null;
-  if (document.schemaVersion !== ICLOUD_SCHEMA_VERSION || document.kind !== 'device-deletions') return null;
-  const writerId = cleanId(document.writerId, MAX_WRITER_ID_LENGTH);
-  if (!writerId || writerFilenameForId(writerId) !== expectedFilename) return null;
-  const counter = Number(document.revision?.counter);
-  if (!Number.isSafeInteger(counter) || counter < 1) return null;
-  if (String(document.revision?.writerId || '') !== writerId) return null;
-  if (!Array.isArray(document.deletions) || document.deletions.length > MAX_DELETIONS_PER_WRITER) return null;
+function validDeletionTargets(entries) {
+  if (!Array.isArray(entries) || entries.length > MAX_DELETIONS_PER_WRITER) return null;
   const seen = new Set();
   const deletions = [];
-  for (const entry of document.deletions) {
+  for (const entry of entries) {
     const targetDeviceId = cleanId(entry?.targetDeviceId, MAX_DEVICE_ID_LENGTH);
     const targetDeviceRevision = Number(entry?.targetDeviceRevision);
     if (
@@ -427,7 +420,19 @@ function validDeletionDocument(document, expectedFilename) {
     seen.add(targetDeviceId);
     deletions.push({ targetDeviceId, targetDeviceRevision });
   }
-  deletions.sort((left, right) => left.targetDeviceId.localeCompare(right.targetDeviceId));
+  return deletions.sort((left, right) => left.targetDeviceId.localeCompare(right.targetDeviceId));
+}
+
+function validDeletionDocument(document, expectedFilename) {
+  if (!document || typeof document !== 'object' || Array.isArray(document)) return null;
+  if (document.schemaVersion !== ICLOUD_SCHEMA_VERSION || document.kind !== 'device-deletions') return null;
+  const writerId = cleanId(document.writerId, MAX_WRITER_ID_LENGTH);
+  if (!writerId || writerFilenameForId(writerId) !== expectedFilename) return null;
+  const counter = Number(document.revision?.counter);
+  if (!Number.isSafeInteger(counter) || counter < 1) return null;
+  if (String(document.revision?.writerId || '') !== writerId) return null;
+  const deletions = validDeletionTargets(document.deletions);
+  if (!deletions) return null;
   return {
     schemaVersion: ICLOUD_SCHEMA_VERSION,
     kind: 'device-deletions',
@@ -444,7 +449,8 @@ function emptyRevisionLedger() {
     kind: 'icloud-revision-ledger',
     devices: Object.create(null),
     subscriptionCounter: 0,
-    deletionCounter: 0
+    deletionCounter: 0,
+    deletions: []
   };
 }
 
@@ -467,12 +473,17 @@ function validRevisionLedger(document) {
     !Number.isSafeInteger(subscriptionCounter) || subscriptionCounter < 0
     || !Number.isSafeInteger(deletionCounter) || deletionCounter < 0
   ) return null;
+  const deletions = document.deletions === undefined
+    ? []
+    : validDeletionTargets(document.deletions);
+  if (!deletions) return null;
   return {
     schemaVersion: REVISION_LEDGER_SCHEMA_VERSION,
     kind: 'icloud-revision-ledger',
     devices,
     subscriptionCounter,
-    deletionCounter
+    deletionCounter,
+    deletions
   };
 }
 
@@ -765,11 +776,17 @@ function createIcloudSyncStore(options = {}) {
     for (const [deviceId, revision] of Object.entries(disk.devices)) {
       devices[deviceId] = Math.max(Number(devices[deviceId] || 0), revision);
     }
+    const deletionTargets = new Map();
+    for (const { targetDeviceId, targetDeviceRevision } of [...current.deletions, ...disk.deletions]) {
+      deletionTargets.set(targetDeviceId, Math.max(deletionTargets.get(targetDeviceId) || 0, targetDeviceRevision));
+    }
     return {
       ...current,
       devices,
       subscriptionCounter: Math.max(current.subscriptionCounter, disk.subscriptionCounter),
-      deletionCounter: Math.max(current.deletionCounter, disk.deletionCounter)
+      deletionCounter: Math.max(current.deletionCounter, disk.deletionCounter),
+      deletions: [...deletionTargets].map(([targetDeviceId, targetDeviceRevision]) => ({ targetDeviceId, targetDeviceRevision }))
+        .sort((left, right) => left.targetDeviceId.localeCompare(right.targetDeviceId))
     };
   }
 
@@ -936,8 +953,29 @@ function createIcloudSyncStore(options = {}) {
     );
     const deletionFilename = writerFilenameForId(writerId);
     const prior = deletionCache.get(deletionFilename);
-    const deletionMap = new Map((prior?.deletions || []).map((entry) => [entry.targetDeviceId, entry.targetDeviceRevision]));
+    const ownFile = await readJsonFile(
+      fsApi,
+      path.join(available.paths.deletionsRoot, deletionFilename),
+      MAX_ICLOUD_DOCUMENT_BYTES,
+      platform,
+      hostPlatform
+    );
+    const ownDocument = ownFile.ok ? validDeletionDocument(ownFile.value, deletionFilename) : null;
+    // The writer file is a complete snapshot. Preserve targets locally so an
+    // unavailable file after restart cannot make a later deletion undo an older one.
+    if (ledger.deletionCounter > 0 && !prior && !ownDocument && ledger.deletions.length === 0) {
+      const error = new Error('The previous iCloud deletion snapshot is unavailable');
+      error.code = 'deletion_snapshot_unavailable';
+      throw error;
+    }
+    const deletionMap = new Map();
+    for (const entry of [...ledger.deletions, ...(prior?.deletions || []), ...(ownDocument?.deletions || [])]) {
+      deletionMap.set(entry.targetDeviceId, Math.max(deletionMap.get(entry.targetDeviceId) || 0, entry.targetDeviceRevision));
+    }
     deletionMap.set(id, Math.max(deletionMap.get(id) || 0, targetDeviceRevision));
+    for (const { targetDeviceId, targetDeviceRevision: knownRevision } of (await refreshRevisionLedger()).deletions) {
+      deletionMap.set(targetDeviceId, Math.max(deletionMap.get(targetDeviceId) || 0, knownRevision));
+    }
     const deletions = [...deletionMap.entries()]
       .map(([targetDeviceId, targetDeviceRevision]) => ({ targetDeviceId, targetDeviceRevision }))
       .sort((left, right) => left.targetDeviceId.localeCompare(right.targetDeviceId));
@@ -946,8 +984,15 @@ function createIcloudSyncStore(options = {}) {
       error.code = 'deletion-ledger-full';
       throw error;
     }
-    const observedCounter = Number(prior?.revision?.counter || 0);
-    const revision = await nextCounter('deletionCounter', observedCounter);
+    const observedCounter = Math.max(Number(prior?.revision?.counter || 0), Number(ownDocument?.revision?.counter || 0));
+    const revision = await allocateRevision(async (current) => ({
+      revision: Math.max(current.deletionCounter, observedCounter) + 1,
+      ledger: {
+        ...current,
+        deletionCounter: Math.max(current.deletionCounter, observedCounter) + 1,
+        deletions
+      }
+    }));
     const document = {
       schemaVersion: ICLOUD_SCHEMA_VERSION,
       kind: 'device-deletions',
@@ -1028,6 +1073,11 @@ function createIcloudSyncStore(options = {}) {
       throw error;
     }
     const current = await discoverSubscriptions();
+    if (current.errors.length) {
+      const error = new Error('The iCloud subscription snapshots could not be fully read');
+      error.code = 'subscription_discovery_incomplete';
+      throw error;
+    }
     // A non-empty base is proof that the caller edited a known snapshot. If
     // that snapshot is temporarily invisible, accepting the write would let a
     // stale editor reset the shared list or its counter.

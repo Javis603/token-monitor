@@ -599,6 +599,46 @@ test('device and subscription revisions stay monotonic across restart and tempor
   }
 });
 
+test('a subscription save refuses an incomplete discovery rather than losing a reported edit', async () => {
+  const root = makeRoot();
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    const first = storeFor(root.root, 'mac-a');
+    const remote = storeFor(root.root, 'mac-z');
+    const initial = await first.writeSubscriptions([subscription('original')]);
+    const remoteFile = writerFilenameForId('mac-z');
+    let unreadable = false;
+    const local = createIcloudSyncStore({
+      platform: 'darwin', home: root.root, cloudDocsRoot: path.join(root.root, 'CloudDocs'), writerId: 'mac-b',
+      fsApi: {
+        ...fs.promises,
+        open: async (target, ...args) => {
+          if (unreadable && String(target).endsWith(remoteFile)) {
+            throw Object.assign(new Error('writer unavailable'), { code: 'EIO' });
+          }
+          return fs.promises.open(target, ...args);
+        }
+      }
+    });
+    await local.discoverSubscriptions();
+    await remote.writeSubscriptions([subscription('remote')], { baseRevision: initial.revisionToken });
+    unreadable = true;
+    await assert.rejects(
+      () => local.writeSubscriptions([subscription('local')], { baseRevision: initial.revisionToken }),
+      { code: 'subscription_discovery_incomplete' }
+    );
+    assert.equal(fs.existsSync(path.join(local.status().subscriptionsRoot, writerFilenameForId('mac-b'))), false);
+    unreadable = false;
+    await assert.rejects(
+      () => local.writeSubscriptions([subscription('local')], { baseRevision: initial.revisionToken }),
+      { code: 'stale_write' }
+    );
+    assert.equal((await local.discoverSubscriptions()).winner.subscriptions[0].id, 'remote');
+  } finally {
+    root.cleanup();
+  }
+});
+
 test('a restart with an invisible subscription snapshot rejects a stale base instead of resetting it', async () => {
   const root = makeRoot();
   try {
@@ -611,6 +651,83 @@ test('a restart with an invisible subscription snapshot rejects a stale base ins
       () => restarted.writeSubscriptions([subscription('stale')], { baseRevision: snapshot.revisionToken }),
       { code: 'stale_write' }
     );
+  } finally {
+    root.cleanup();
+  }
+});
+
+test('an unavailable own deletion snapshot cannot be replaced with an incomplete one after restart', async () => {
+  const root = makeRoot();
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    const producer = storeFor(root.root, 'producer');
+    await producer.writeDevice(device('mac-x', 42));
+    await producer.writeDevice(device('mac-y', 42));
+    const first = storeFor(root.root, 'deleter');
+    await first.deleteDevice('mac-x');
+    const deletionPath = path.join(first.status().deletionsRoot, writerFilenameForId('deleter'));
+    const snapshot = await fs.promises.readFile(deletionPath, 'utf8');
+    await first.close();
+    await fs.promises.unlink(deletionPath);
+
+    const restarted = storeFor(root.root, 'deleter');
+    await restarted.deleteDevice('mac-y');
+    const replacement = JSON.parse(await fs.promises.readFile(deletionPath, 'utf8'));
+    assert.ok(replacement.revision.counter > JSON.parse(snapshot).revision.counter);
+    assert.deepEqual(replacement.deletions.map((entry) => entry.targetDeviceId), ['mac-x', 'mac-y']);
+    assert.deepEqual((await producer.discoverDevices()).records, []);
+  } finally {
+    root.cleanup();
+  }
+});
+
+test('a failed deletion write preserves its target in the ledger across restart', async () => {
+  const root = makeRoot();
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    const producer = storeFor(root.root, 'producer');
+    await producer.writeDevice(device('mac-x'));
+    await producer.writeDevice(device('mac-y'));
+    const first = createIcloudSyncStore({
+      platform: 'darwin', home: root.root, cloudDocsRoot: path.join(root.root, 'CloudDocs'), writerId: 'deleter',
+      fsApi: {
+        ...fs.promises,
+        rename: async (from, to) => {
+          if (path.dirname(to).endsWith('deletions')) throw Object.assign(new Error('offline'), { code: 'EIO' });
+          return fs.promises.rename(from, to);
+        }
+      }
+    });
+    await assert.rejects(() => first.deleteDevice('mac-x'), { code: 'EIO' });
+    await first.close();
+    const restarted = storeFor(root.root, 'deleter');
+    await restarted.deleteDevice('mac-y');
+    const deletionPath = path.join(restarted.status().deletionsRoot, writerFilenameForId('deleter'));
+    const replacement = JSON.parse(await fs.promises.readFile(deletionPath, 'utf8'));
+    assert.deepEqual(replacement.deletions.map((entry) => entry.targetDeviceId), ['mac-x', 'mac-y']);
+    assert.deepEqual((await producer.discoverDevices()).records, []);
+  } finally {
+    root.cleanup();
+  }
+});
+
+test('an older revision ledger refuses to overwrite a missing deletion snapshot', async () => {
+  const root = makeRoot();
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    const first = storeFor(root.root, 'deleter');
+    await first.writeDevice(device('mac-x'));
+    await first.deleteDevice('mac-x');
+    const deletionPath = path.join(first.status().deletionsRoot, writerFilenameForId('deleter'));
+    await first.close();
+    const ledgerPath = first.status().revisionLedgerPath;
+    const ledger = JSON.parse(await fs.promises.readFile(ledgerPath, 'utf8'));
+    delete ledger.deletions;
+    await fs.promises.writeFile(ledgerPath, JSON.stringify(ledger));
+    await fs.promises.unlink(deletionPath);
+    const restarted = storeFor(root.root, 'deleter');
+    await assert.rejects(() => restarted.deleteDevice('mac-y'), { code: 'deletion_snapshot_unavailable' });
+    assert.equal(fs.existsSync(deletionPath), false);
   } finally {
     root.cleanup();
   }

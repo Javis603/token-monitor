@@ -886,6 +886,7 @@ function codexCommandCandidates(env = process.env, platform = process.platform, 
   if (platform === 'darwin') {
     candidates.push(
       '/Applications/Codex.app/Contents/Resources/codex',
+      '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
       '/Applications/ChatGPT.app/Contents/Resources/codex'
     );
   } else if (platform === 'win32') {

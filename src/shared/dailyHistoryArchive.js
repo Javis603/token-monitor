@@ -5,7 +5,8 @@ const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
 const { sharedDataDir, writeJsonAtomic } = require('./config');
 const {
-  normalizeTokscaleClientName, num, sumOutputTokens, sumTokens
+  normalizeTokscaleClientName, normalizeTokscaleModelNameForClient,
+  normalizeTokscaleModelComponentSummary, num, sumOutputTokens, sumTokens
 } = require('./history');
 const {
   CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry
@@ -17,14 +18,14 @@ const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 function observationKey(value) {
   return JSON.stringify([
     normalizeTokscaleClientName(value?.client) || 'unknown',
-    String(value?.modelId || value?.model || value?.model_id || 'unknown')
+    normalizeTokscaleModelNameForClient(value?.modelId || value?.model || value?.model_id || 'unknown', value?.client)
   ]);
 }
 
 function normalizeObservation(value) {
   if (!value || typeof value !== 'object') return null;
   const client = normalizeTokscaleClientName(value.client) || 'unknown';
-  const modelId = String(value.modelId || value.model || value.model_id || 'unknown');
+  const modelId = normalizeTokscaleModelNameForClient(value.modelId || value.model || value.model_id || 'unknown', client);
   const tokens = Math.max(0, Math.round(num(value.tokens)));
   const cost = Math.max(0, num(value.cost));
   const messages = Math.max(0, Math.round(num(value.messages)));
@@ -184,7 +185,9 @@ function normalizeDay(value, fallbackDate = '') {
     observations[key] = addObservation(observations[key], observation);
   }
   if (Object.keys(observations).length === 0 && num(value?.activeTimeMs) <= 0) return null;
-  const componentSummary = normalizeComponentSummary(value?.componentSummary, observations);
+  const componentSummary = normalizeComponentSummary(
+    normalizeTokscaleModelComponentSummary(value?.componentSummary, source), observations
+  );
   return {
     date,
     activeTimeMs: Math.max(0, Math.round(num(value?.activeTimeMs))),

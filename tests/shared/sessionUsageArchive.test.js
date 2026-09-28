@@ -7,7 +7,7 @@ const test = require('node:test');
 
 let archiveApi = {};
 try {
-  archiveApi = require('../../src/shared/sessionUsageArchive');
+  archiveApi = require('../../src/shared/usage/sessionUsageArchive');
 } catch (_) {}
 
 const {
@@ -335,6 +335,25 @@ test('normalizes legacy and malformed archive entries without losing usable sess
   assert.equal(normalized.sessions['opencode:o1'].periods.today, undefined);
 });
 
+test('replayed Cursor default sessions use cursor-auto while other clients keep default', () => {
+  const archive = normalizeSessionUsageArchive({ sessions: {
+    'cursor:old': {
+      capturedAt: '2026-09-20T12:00:00.000Z',
+      periods: { allTime: { client: 'cursor', sessionId: 'old', totalTokens: 5, models: { default: 5 } } }
+    },
+    'claude:old': {
+      capturedAt: '2026-09-20T12:00:00.000Z',
+      periods: { allTime: { client: 'claude', sessionId: 'old', totalTokens: 11, models: { default: 11 } } }
+    }
+  } });
+  const visible = applySessionUsageArchive({ allTime: { sessions: {} } }, archive);
+
+  assert.equal(visible.allTime.clientModels.cursor['cursor-auto'], 5);
+  assert.equal(visible.allTime.clientModels.claude.default, 11);
+  assert.equal(visible.allTime.models['cursor-auto'], 5);
+  assert.equal(visible.allTime.models.default, 11);
+});
+
 test('capture does not churn timestamps when session data is unchanged', () => {
   const first = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
   const second = captureSessionUsageArchive(first, liveSummary(), new Date('2026-07-09T08:30:00.000Z'));
@@ -352,6 +371,56 @@ test('canonical capture updates only changed rows in place', () => {
   assert.equal(result.archive, archive);
   assert.deepEqual([...result.changedKeys], ['opencode:o1']);
   assert.equal(result.archive.sessions['opencode:o1'].periods.allTime.totalTokens, 101);
+});
+
+// The shape the archive store hands over: periods already normalized, which is
+// what lets capture read sessions without normalizing them again.
+function canonicalLiveSummary() {
+  const summary = liveSummary();
+  for (const periodName of ['today', 'month', 'allTime']) summary[periodName] = normalizePeriod(summary[periodName]);
+  return summary;
+}
+
+test('canonical capture does not copy a session that has not changed', () => {
+  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  const summary = canonicalLiveSummary();
+  let copies = 0;
+  // Invisible to the comparison, which reads enumerable keys only, but called
+  // by every JSON round-trip of the session.
+  Object.defineProperty(summary.allTime.sessions['opencode:o1'], 'toJSON', {
+    enumerable: false,
+    value() {
+      copies += 1;
+      return { ...this };
+    }
+  });
+
+  const result = updateSessionUsageArchive(archive, summary, new Date('2026-07-09T08:30:00.000Z'), { canonicalSummary: true });
+
+  assert.deepEqual([...result.changedKeys], []);
+  assert.equal(copies, 0);
+});
+
+test('canonical capture ignores a difference the stored copy could not hold', () => {
+  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  const summary = canonicalLiveSummary();
+  summary.allTime.sessions['opencode:o1'].unset = undefined;
+
+  const result = updateSessionUsageArchive(archive, summary, new Date('2026-07-09T08:30:00.000Z'), { canonicalSummary: true });
+
+  assert.deepEqual([...result.changedKeys], []);
+});
+
+test('canonical capture stores a changed session as its own copy', () => {
+  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  const summary = canonicalLiveSummary();
+  summary.allTime.sessions['opencode:o1'].totalTokens = 101;
+
+  const result = updateSessionUsageArchive(archive, summary, new Date('2026-07-09T08:30:00.000Z'), { canonicalSummary: true });
+  summary.allTime.sessions['opencode:o1'].totalTokens = 999;
+
+  assert.deepEqual([...result.changedKeys], ['opencode:o1']);
+  assert.equal(archive.sessions['opencode:o1'].periods.allTime.totalTokens, 101);
 });
 
 test('canonical capture safely prunes malformed entries without period windows', () => {

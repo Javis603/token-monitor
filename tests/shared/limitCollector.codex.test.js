@@ -16,12 +16,14 @@ function dirent(name, directory = true) {
 
 test('Codex command candidates include legacy and ChatGPT-bundled macOS apps', () => {
   const legacy = '/Applications/Codex.app/Contents/Resources/codex';
+  const currentChatgpt = '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex';
   const chatgpt = '/Applications/ChatGPT.app/Contents/Resources/codex';
   const candidates = codexCommandCandidates({}, 'darwin');
 
-  assert.deepEqual(candidates.slice(0, 2), [legacy, chatgpt]);
+  assert.deepEqual(candidates.slice(0, 3), [legacy, currentChatgpt, chatgpt]);
   assert.equal(candidates.at(-1), 'codex');
   assert.equal(codexCommandSourceDetail(legacy, 'darwin'), 'app');
+  assert.equal(codexCommandSourceDetail(currentChatgpt, 'darwin'), 'app');
   assert.equal(codexCommandSourceDetail(chatgpt, 'darwin'), 'app');
 });
 
@@ -1746,7 +1748,7 @@ test('fetchCodexLimits retries the next command after a Codex stdin transport fa
 
   assert.deepEqual(commands, [
     '/Applications/Codex.app/Contents/Resources/codex',
-    '/Applications/ChatGPT.app/Contents/Resources/codex'
+    '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex'
   ]);
   assert.deepEqual(accountReadParams, [{ refreshToken: false }]);
   assert.equal(providers.status, 'ok');
@@ -1808,7 +1810,7 @@ test('fetchCodexLimits retries another command when optional account read loses 
 
   assert.deepEqual(commands, [
     '/Applications/Codex.app/Contents/Resources/codex',
-    '/Applications/ChatGPT.app/Contents/Resources/codex'
+    '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex'
   ]);
   assert.equal(providers.status, 'ok');
   assert.equal(providers.accountEmail, 'fallback@example.com');

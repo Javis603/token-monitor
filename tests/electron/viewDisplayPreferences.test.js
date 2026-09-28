@@ -75,6 +75,10 @@ test('main and renderer keep their view display options in sync', () => {
     extractViewIds(mainSource, 'DEFAULT_VIEW_LIST'),
     extractViewIds(rendererSource, 'VIEW_DISPLAY_OPTIONS')
   );
+  assert.deepEqual(
+    extractViewIds(rendererSource, 'VIEW_DISPLAY_OPTIONS'),
+    ['home', 'limits', 'tool', 'model', 'project', 'session', 'device', 'trends', 'status']
+  );
 });
 
 test('normalizeViewDisplayOrder drops invalid entries and appends missing views', () => {

@@ -8,7 +8,7 @@ const { aggregateLimits, normalizeLimitsSummary } = require('./limits/core');
 const { normalizeClientHealth } = require('./clientHealth');
 const {
   coerceHistory, dayKeyAddDays, hasDisjointReasoning, localDayKey, mergeHistories,
-  normalizeTokscaleClientName
+  normalizeTokscaleClientName, normalizeTokscaleModelNameForClient
 } = require('./history');
 const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
@@ -250,6 +250,7 @@ function normalizeClientName(value) {
   if (/^kilo[\s_-]*code$/.test(raw)) return 'kilo';
   if (/command[\s_-]*code/.test(raw)) return 'commandcode';
   if (raw.includes('micode') || raw.includes('mimo')) return 'mimo';
+  if (raw === 'muse' || /^muse[\s_-]*code$/.test(raw)) return 'muse';
   if (raw.includes('zcode')) return 'zcode';
   if (raw.includes('kiro')) return 'kiro';
   if (raw.includes('codebuddy')) return 'codebuddy';
@@ -278,7 +279,7 @@ function normalizeModelName(value) {
 }
 
 function normalizeModelNameForClient(value, client) {
-  const normalized = normalizeModelName(value);
+  const normalized = normalizeModelName(normalizeTokscaleModelNameForClient(value, client));
   if (!normalized || normalizeClientName(client) !== REASONIX_CLIENT) return normalized;
   const qualified = normalized.match(/^(?:deepseek|deepseek-flash)\/(.+)$/);
   return qualified?.[1] || normalized;
@@ -625,8 +626,7 @@ function sessionFromRow(row) {
   session.projectLabel = String(row.projectLabel || row.project_label || '').trim();
   session.title = normalizeSessionTitle(firstString(row, SESSION_TITLE_KEYS));
   session.sessionKind = normalizeSessionKind(row.sessionKind || row.session_kind);
-  let model = detectModel(row, client);
-  if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
+  const model = detectModel(row, client);
   if (model && session.totalTokens > 0) session.models[model] = (session.models[model] || 0) + session.totalTokens;
   if (model && session.costUsd > 0) session.modelCosts[model] = (session.modelCosts[model] || 0) + session.costUsd;
   const provider = normalizeProviderName(row.provider);
@@ -681,6 +681,56 @@ function normalizeSession(input, fallbackKey) {
   }
   if (input.archived === true || input.deleted === true || input.sourceDeleted === true) session.archived = true;
   return session;
+}
+
+function cursorAutoRawModels(source, roundTokens) {
+  const totals = new Map();
+  for (const [client, models] of Object.entries(source || {})) {
+    if (normalizeClientName(client) !== 'cursor' || !models || typeof models !== 'object') continue;
+    for (const [model, value] of Object.entries(models)) {
+      const raw = normalizeModelName(model);
+      if (raw !== 'auto' && raw !== 'default') continue;
+      const next = Math.max(0, roundTokens ? Math.round(asNumber(value)) : asNumber(value));
+      totals.set(raw, (totals.get(raw) || 0) + next);
+    }
+  }
+  return totals;
+}
+
+function reconcileCursorAutoGlobalModels(period, input) {
+  for (const [raw, moved] of cursorAutoRawModels(input.clientModels, true)) {
+    const available = Math.max(0, Math.round(asNumber(period.models[raw])));
+    if (moved <= 0 || moved > available) continue;
+    const exclusive = moved === available;
+    period.models[raw] = available - moved;
+    if (period.models[raw] === 0) delete period.models[raw];
+    period.models['cursor-auto'] = (period.models['cursor-auto'] || 0) + moved;
+    if (exclusive) {
+      for (const key of ['modelCacheReads', 'modelCacheWrites', 'modelOutputs', 'modelUnclassifiedTokens']) {
+        if (!period[key][raw]) continue;
+        period[key]['cursor-auto'] = (period[key]['cursor-auto'] || 0) + period[key][raw];
+        delete period[key][raw];
+      }
+    } else {
+      // The source period has one global component bucket for multiple
+      // clients. Keep the token split, but do not invent a cache/output split.
+      for (const key of ['modelCacheReads', 'modelCacheWrites', 'modelOutputs']) delete period[key][raw];
+      period.modelUnclassifiedTokens[raw] = period.models[raw];
+      period.modelUnclassifiedTokens['cursor-auto'] = Math.min(
+        period.models['cursor-auto'],
+        (period.modelUnclassifiedTokens['cursor-auto'] || 0) + moved
+      );
+      period.capabilities.tokenComponents = false;
+    }
+  }
+  for (const [raw, requested] of cursorAutoRawModels(input.clientModelCosts, false)) {
+    const available = Math.max(0, asNumber(period.modelCosts[raw]));
+    if (requested <= 0 || requested > available + 1e-9) continue;
+    const moved = Math.min(requested, available);
+    period.modelCosts[raw] = available - moved;
+    if (period.modelCosts[raw] === 0) delete period.modelCosts[raw];
+    period.modelCosts['cursor-auto'] = (period.modelCosts['cursor-auto'] || 0) + moved;
+  }
 }
 
 function normalizePeriod(input, options = {}) {
@@ -831,6 +881,7 @@ function normalizePeriod(input, options = {}) {
       }
     }
   }
+  reconcileCursorAutoGlobalModels(period, input);
   if (input.sessions && typeof input.sessions === 'object') {
     for (const [key, value] of Object.entries(input.sessions)) {
       const session = normalizeSession(value, key);
@@ -872,8 +923,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   // the denominator. Gating rather than scaling by tokscale's `tokenCoverage` keeps this a
   // plain counter, which is what lets it merge and delta like every other token field.
   const timedOutputTokens = timedDurationMs > 0 ? output : 0;
-  let model = detectModel(row, client);
-  if (client === 'cursor' && model === 'auto') model = 'cursor-auto';
+  const model = detectModel(row, client);
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;
   period.cacheReadTokens += cacheRead;

@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
-const { PERIODS, normalizePeriod } = require('./usage');
+const { PERIODS, normalizePeriod } = require('../usage');
 const {
   cloneJson,
   hasSummaryPeriod,
@@ -13,22 +13,39 @@ const {
   periodFor,
   targetPeriod,
   toDate
-} = require('./archiveHelpers');
-const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
-const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
-const { splitClientIdFor } = require('./clientIdentitySplits');
+} = require('../archiveHelpers');
+const { readJson, sharedDataDir, writeJsonAtomic } = require('../config');
+const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('../providers/reasonix/sessionGuard');
+const { splitClientIdFor } = require('../clientIdentitySplits');
 const {
   isLegacyCursorEntry,
   legacyCursorLookup,
   supersedingCursorSessionId
-} = require('./providers/cursor/sessionGuard');
+} = require('../providers/cursor/sessionGuard');
 
 function sessionUsageArchiveDate(deviceRecord, fallback = new Date()) {
   const collectedAt = new Date(deviceRecord?.updatedAt || '');
   return Number.isNaN(collectedAt.getTime()) ? toDate(fallback) : collectedAt;
 }
 
+// A capture asks for the key of every session in the tick, and building it
+// means normalizing a one-session period. The answer depends on nothing but the
+// two strings, so it is kept; the bound only matters to a process that runs for
+// months without restarting.
+const SESSION_KEY_CACHE_LIMIT = 50000;
+const sessionKeyCache = new Map();
+
 function sessionKey(client, sessionId) {
+  if (typeof client !== 'string' || typeof sessionId !== 'string') return computeSessionKey(client, sessionId);
+  const cacheKey = `${client}\u0000${sessionId}`;
+  if (sessionKeyCache.has(cacheKey)) return sessionKeyCache.get(cacheKey);
+  const key = computeSessionKey(client, sessionId);
+  if (sessionKeyCache.size >= SESSION_KEY_CACHE_LIMIT) sessionKeyCache.clear();
+  sessionKeyCache.set(cacheKey, key);
+  return key;
+}
+
+function computeSessionKey(client, sessionId) {
   const normalized = normalizePeriod({
     sessions: {
       candidate: { client, sessionId, totalTokens: 1 }
@@ -169,7 +186,6 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
         periodWindows: {},
         periods: {}
       };
-      const nextSession = cloneJson(session);
       const window = entry.periodWindows?.[periodName] || {};
       const retainedCaptureTime = Date.parse(window.capturedAt || '');
       // SQLite serializes commits, not collection time. Keep the newest event
@@ -180,7 +196,13 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
         : periodName === 'month'
           ? window.month === month
           : true;
-      if (sameJson(entry.periods[periodName], nextSession) && sameWindow) continue;
+      // Every tick carries every session of all three periods, and nearly all of
+      // them are unchanged, so compare before copying. A session equal to the
+      // stored copy would also be equal after the round-trip; one that differs
+      // only in what the round-trip drops is caught by the second comparison.
+      if (sameWindow && sameJson(entry.periods[periodName], session)) continue;
+      const nextSession = cloneJson(session);
+      if (sameWindow && sameJson(entry.periods[periodName], nextSession)) continue;
       entry.client = session.client;
       entry.sessionId = session.sessionId;
       entry.capturedAt = capturedAtIso;
