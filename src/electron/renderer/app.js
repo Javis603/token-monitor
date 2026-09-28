@@ -5758,6 +5758,32 @@ function homeSessionContext(context) {
   return node;
 }
 
+function stopHomeSessionRepaint() {
+  clearTimeout(state.homeSessionRepaintTimer);
+  state.homeSessionRepaintTimer = null;
+}
+
+function scheduleHomeSessionRepaint() {
+  stopHomeSessionRepaint();
+  const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
+  if (!rows.length) return;
+  const now = Date.now();
+  const expiry = window.TokenMonitorEdgeDockPresentation.nextRunningExpiryAt(rows, now);
+  // Refresh relative ages once a minute, or sooner when a running session expires.
+  const delay = expiry > now ? Math.min(60_000, Math.max(1_000, expiry - now + 50)) : 60_000;
+  state.homeSessionRepaintTimer = setTimeout(() => {
+    state.homeSessionRepaintTimer = null;
+    if (visibleStatsSurface() !== 'main' || state.breakdown !== 'home') return;
+    const current = els.homePanel?.querySelector('.home-module-session');
+    if (!current) return;
+    const hadFocus = document.activeElement === current;
+    const next = renderHomeSessionModule();
+    current.replaceWith(next);
+    if (hadFocus) next.focus();
+    scheduleHomeSessionRepaint();
+  }, delay);
+}
+
 function renderHomeSessionModule() {
   const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
   const runningCount = rows.filter((row) => window.TokenMonitorSessionLive.sessionActivityState(row) === 'running').length;
@@ -6303,6 +6329,7 @@ function renderHome() {
     return renderHomeTrendsModule();
   });
   els.homePanel.replaceChildren(...nodes);
+  if (moduleIds.includes('session')) scheduleHomeSessionRepaint();
   // setupHomeActivityScroller first runs while its module is detached, where
   // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
   // attached, before the browser paints or hover restoration measures the new cell.
@@ -6324,6 +6351,7 @@ function render() {
   }
   if (!state.stats) return;
   allTimeSessions.ensure();
+  stopHomeSessionRepaint();
   els.toolDetailFooter.classList.add('hidden');
   syncLiveTokenRateFooterState();
   renderSessionUsageArchiveStatus();
