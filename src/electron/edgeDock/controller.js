@@ -828,6 +828,12 @@ function createEdgeDockController(deps) {
     if (bubbleCell !== null) invalidateBubblePlacement();
     positionRail();
     if (bubbleCell !== null) render('bubble');
+    // The dock may now sit on another display (a removed one falls back to the
+    // primary), so the cached full-screen state can describe the wrong screen.
+    if (refreshFullScreen(Date.now(), true)) {
+      syncAlwaysVisible();
+      render('rail');
+    }
     if (!railVisible) showPeek();
   }
 

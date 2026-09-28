@@ -551,6 +551,39 @@ test('always-except-full-screen keeps the rail up on the desktop and auto-hides 
   assert.equal(sentPayload(peek, 'peek').peeking, false);
 });
 
+test('a display change re-checks full screen for the display the dock lands on', (t) => {
+  const primary = {
+    id: 1,
+    scaleFactor: 1,
+    bounds: { x: 0, y: 0, width: 1200, height: 900 },
+    workArea: { x: 0, y: 0, width: 1200, height: 860 }
+  };
+  const secondary = {
+    id: 2,
+    scaleFactor: 1,
+    bounds: { x: 1200, y: 0, width: 1600, height: 1000 },
+    workArea: { x: 1200, y: 0, width: 1600, height: 960 }
+  };
+  const fixture = createFixture({
+    displays: [primary, secondary],
+    settings: { edgeDockMode: 'alwaysExceptFullScreen', edgeDockDisplayId: '2' },
+    // Only the primary display has a full-screen app.
+    isFullScreen: (display) => display.id === 1
+  });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const peek = fixture.windowFor('peek');
+  assert.equal(rail.opacity, 1, 'the dock display is on its desktop');
+
+  // Unplugging the dock's display moves it to the primary, and the primary's
+  // full-screen app applies at once rather than on the next poll.
+  fixture.screen.displays.splice(1, 1);
+  fixture.screen.emit('display-removed');
+  assert.equal(rail.opacity, 0);
+  assert.equal(sentPayload(rail, 'rail').always, false);
+  assert.equal(sentPayload(peek, 'peek').peeking, true);
+});
+
 test('only the full-screen mode probes for full-screen apps', async (t) => {
   let probes = 0;
   const fixture = createFixture({
