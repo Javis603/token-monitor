@@ -2377,7 +2377,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   if (kind !== undefined) row.dataset.kind = kind || '';
   if (reviewGroup === true) row.dataset.reviewGroup = 'true';
   else delete row.dataset.reviewGroup;
-  if (kind === 'session' && client === 'reasonix') {
+  if (kind === 'session' && sessionDetailAvailable !== undefined) {
     row.dataset.detailUnavailable = sessionDetailAvailable === true ? 'false' : 'true';
   } else if (row.hasAttribute('data-detail-unavailable')) {
     row.removeAttribute('data-detail-unavailable');
@@ -2385,6 +2385,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   const interactive = reviewGroup === true || (
     kind === 'session'
     && ['claude', 'codex', 'opencode', 'dsh'].includes(client)
+    && sessionDetailAvailable !== false
   ) || (kind === 'session' && client === 'reasonix' && sessionDetailAvailable === true);
   const mark = row.querySelector('.row-mark');
   const iconKind = iconKindFor({ key: row.dataset.key, platform: row.dataset.platform || '', client: row.dataset.client || '' }, state.breakdown);
@@ -2798,16 +2799,32 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
   return toolRowsForPeriod(period);
 }
 
+function nativeSessionsForCurrentPeriod() {
+  const native = state.stats?.nativeSessions || {};
+  if (!fixedPeriodRangesApi.isDerived(state.period)) return native[state.period] || {};
+  const local = state.fixedPeriodSnapshot?.devices?.find((device) => device.deviceId === state.settings?.deviceId);
+  if (!local?.range) return {};
+  return fixedPeriodRangesApi.nativeSessionsForRange(native, local.range, local.periodWindows?.timeZone);
+}
+
 function rawSessionRowsForPeriod(period) {
-  return sessionRowsApi.sessionRowsForPeriod(period, {
+  const rows = sessionRowsApi.sessionRowsForPeriod(period, {
     clientLabels,
     clientColors,
     modelColor,
     stableColor,
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived'),
-    nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
+    nativeSessions: nativeSessionsForCurrentPeriod()
   });
+  if (!fixedPeriodRangesApi.isDerived(state.period)) return rows;
+  const localId = state.settings?.deviceId || '';
+  for (const row of rows) {
+    if (row.kind === 'session' && row.client !== 'reasonix') {
+      row.sessionDetailAvailable = row.key.startsWith(`session:${localId}:`);
+    }
+  }
+  return rows;
 }
 
 function sessionRowsForPeriod(period) {
@@ -4648,9 +4665,17 @@ function sessionDetailTargetForRow(key, client, period, nativeSessions) {
   const session = client === 'reasonix'
     ? nativeSessions?.[nativeId]
     : period?.sessions?.[key.slice('session:'.length)];
+  if (!session) return null;
+  if (client !== 'reasonix' && fixedPeriodRangesApi.isDerived(state.period)) {
+    const localId = state.settings?.deviceId;
+    if (!localId || !key.startsWith(`session:${localId}:`)) return null;
+  }
+  const sessionId = client === 'reasonix' ? nativeId
+    : session.sessionId || (fixedPeriodRangesApi.isDerived(state.period) ? '' : match[2]);
+  if (!sessionId) return null;
   return {
     client,
-    sessionId: client === 'reasonix' ? nativeId : session?.sessionId || match[2],
+    sessionId,
     sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0)
   };
 }
@@ -4732,8 +4757,6 @@ function renderSessionDetail({ detail, loading, error } = {}) {
 function backgroundReviewRunNode(row, max, parent) {
   const wrap = document.createElement('div');
   wrap.className = 'detail-exchange background-review-run';
-  wrap.setAttribute('role', 'button');
-  wrap.setAttribute('tabindex', '0');
   wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">›</span>'
     + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span></div>'
     + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
@@ -4744,19 +4767,23 @@ function backgroundReviewRunNode(row, max, parent) {
   wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
   wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0);
   applyBarScale(wrap.querySelector('.bar-fill'), rowWidth(row.value, max) / 100);
-  const open = () => openSessionDetail({
-    client: row.client,
-    sessionId: String(row.key || '').replace(/^session:[^:]+:/, ''),
-    sessionCost: Number(row.cost || 0),
-    title: `${t('sessions.backgroundReviews')} · ${time}`,
-    returnTo: parent
-  });
-  wrap.addEventListener('click', open);
-  wrap.addEventListener('keydown', (event) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    open();
-  });
+  const target = sessionDetailTargetForRow(row.key, row.client,
+    state.stats?.periods?.[state.period], nativeSessionsForCurrentPeriod());
+  if (target) {
+    wrap.setAttribute('role', 'button');
+    wrap.setAttribute('tabindex', '0');
+    const open = () => openSessionDetail({
+      ...target,
+      title: `${t('sessions.backgroundReviews')} · ${time}`,
+      returnTo: parent
+    });
+    wrap.addEventListener('click', open);
+    wrap.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      open();
+    });
+  }
   return wrap;
 }
 
@@ -5260,6 +5287,7 @@ async function warmFixedPeriodHistory(options = {}) {
 function fixedPeriodMessage(snapshot, breakdown = '') {
   if (snapshot?.status === 'loading') return t('periodRange.loading');
   if (breakdown === 'project') return t('periodRange.projectUnavailable');
+  if (breakdown === 'session') return t('periodRange.sessionUnavailable');
   if (snapshot?.reason === 'historyDisabled') return t('periodRange.historyDisabled');
   if (snapshot?.reason === 'historyUnavailable') return t('periodRange.historyUnavailable');
   return t('periodRange.historyUnavailable');
@@ -6394,7 +6422,8 @@ function render() {
   const fixedUnavailable = derivedPeriod && state.fixedPeriodSnapshot?.status !== 'ready';
   const detailUnavailable = derivedPeriod
     && !fixedPeriodRangesApi.supportsBreakdown(state.period, state.breakdown, {
-      deviceHistoriesAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories)
+      deviceHistoriesAvailable: Array.isArray(state.fixedPeriodHistory?.deviceHistories),
+      sessionCoverageAvailable: state.fixedPeriodSnapshot?.sessionCoverageAvailable
     });
   if (fixedUnavailable || detailUnavailable) {
     cancelNumberAnimation();
@@ -11238,9 +11267,9 @@ els.breakdown.addEventListener('click', (event) => {
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
   if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh') return;
-  if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
+  if (rowEl.dataset.detailUnavailable === 'true') return;
   const period = state.stats?.periods?.[state.period];
-  const target = sessionDetailTargetForRow(key, client, period, state.stats?.nativeSessions?.[state.period]);
+  const target = sessionDetailTargetForRow(key, client, period, nativeSessionsForCurrentPeriod());
   if (!target) return;
   openSessionDetail({
     ...target,

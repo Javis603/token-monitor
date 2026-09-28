@@ -7,6 +7,8 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const { exchangeRows, formatToolList } = require('../../src/electron/renderer/sessionDetail');
+const ranges = require('../../src/electron/renderer/fixedPeriodRanges');
+const sessionRows = require('../../src/electron/renderer/sessionRows');
 
 const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
 
@@ -25,7 +27,7 @@ function sessionDetailHarness(getSessionDetail) {
   const end = rendererSource.indexOf('\nfunction toggleDetailSort', start);
   assert.ok(start >= 0 && end > start, 'openSessionDetail should be present');
   const renders = [];
-  const state = { period: 'today', openSession: null };
+  const state = { period: 'today', openSession: null, settings: { deviceId: 'mac' } };
   const context = {
     state,
     fixedPeriodRangesApi: { isDerived: (period) => ['week', 'last7', 'last30'].includes(period) },
@@ -186,9 +188,83 @@ test('derived session rows open the original session with cumulative detail', as
   assert.equal(state.openSession.period, 'week');
 });
 
+test('remote and missing derived sessions cannot open a local transcript', () => {
+  const { sessionDetailTargetForRow, state } = sessionDetailHarness(() => Promise.resolve({ found: true }));
+  state.period = 'last30';
+  const period = { sessions: {
+    'mac:codex:same-id': { sessionId: 'same-id', costUsd: 1 },
+    'other:codex:same-id': { sessionId: 'same-id', costUsd: 2 }
+  } };
+  assert.equal(sessionDetailTargetForRow('session:other:codex:same-id', 'codex', period), null);
+  assert.equal(sessionDetailTargetForRow('session:mac:codex:missing', 'codex', period), null);
+  assert.equal(sessionDetailTargetForRow('session:mac:codex:same-id', 'codex', period).sessionCost, 1);
+});
+
+test('fixed-range renderer includes locally retained Reasonix sessions', () => {
+  const start = rendererSource.indexOf('function nativeSessionsForCurrentPeriod()');
+  const end = rendererSource.indexOf('\nfunction sessionRowsForPeriod(', start);
+  assert.ok(start >= 0 && end > start);
+  const state = {
+    period: 'last7', settings: { deviceId: 'mac' },
+    fixedPeriodSnapshot: { devices: [{ deviceId: 'mac',
+      range: { start: '2026-08-06', end: '2026-08-12' }, periodWindows: { timeZone: 'UTC' } }] },
+    stats: { nativeSessions: { allTime: {
+      'reasonix:branch': { client: 'reasonix', sessionId: 'reasonix:branch',
+        totalTokens: 100, lastMessageAt: '2026-08-10T12:00:00.000Z',
+        lastUsedAt: '2026-08-10T12:00:00.000Z' }
+    } } }
+  };
+  const context = { state, fixedPeriodRangesApi: ranges, sessionRowsApi: sessionRows,
+    clientLabels: {}, clientColors: {}, modelColor: () => '', stableColor: () => '',
+    fallbackModelColors: [], t: () => '' };
+  vm.runInNewContext(`${rendererSource.slice(start, end)}\nglobalThis.testRows = rawSessionRowsForPeriod;`, context);
+  const rows = context.testRows({ sessions: {} });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].key, 'session:reasonix:branch');
+  assert.equal(rows[0].value, 100);
+});
+
+test('background-review runs open only a local session with its original id', () => {
+  const start = rendererSource.indexOf('function backgroundReviewRunNode(');
+  const end = rendererSource.indexOf('\nfunction renderBackgroundReviewDetail(', start);
+  assert.ok(start >= 0 && end > start);
+  const opened = [];
+  const state = { period: 'week', settings: { deviceId: 'mac' }, stats: { periods: { week: {
+    sessions: {
+      'mac:codex:same-id': { sessionId: 'same-id', costUsd: 1 },
+      'remote:codex:same-id': { sessionId: 'same-id', costUsd: 2 }
+    }
+  } } } };
+  const context = {
+    state, fixedPeriodRangesApi: ranges, nativeSessionsForCurrentPeriod: () => ({}),
+    sessionRowsApi: { compactSessionTime: () => '12:00' },
+    document: { createElement: () => {
+      const attributes = new Map();
+      const listeners = new Map();
+      return { attributes, listeners, className: '', innerHTML: '',
+        setAttribute: (key, value) => attributes.set(key, value),
+        querySelector: () => ({ textContent: '' }),
+        addEventListener: (key, callback) => listeners.set(key, callback) };
+    } },
+    rowWidth: () => 50, applyBarScale: () => {}, formatNumber: String,
+    formatCost: String, t: () => 'Reviews',
+    openSessionDetail: (request) => opened.push(request)
+  };
+  const targetStart = rendererSource.indexOf('function sessionDetailTargetForRow(');
+  const targetEnd = rendererSource.indexOf('\nasync function openSessionDetail(', targetStart);
+  vm.runInNewContext(`${rendererSource.slice(targetStart, targetEnd)}\n${rendererSource.slice(start, end)}\nglobalThis.testRunNode = backgroundReviewRunNode;`, context);
+  const local = context.testRunNode({ key: 'session:mac:codex:same-id', client: 'codex', value: 10, cost: 1 }, 10, {});
+  const remote = context.testRunNode({ key: 'session:remote:codex:same-id', client: 'codex', value: 10, cost: 2 }, 10, {});
+  assert.equal(remote.attributes.has('role'), false);
+  assert.equal(remote.listeners.has('click'), false);
+  local.listeners.get('click')();
+  assert.equal(opened[0].sessionId, 'same-id');
+  assert.equal(opened[0].sessionCost, 1);
+});
+
 test('Reasonix rows enter the shared detail navigation path instead of a native accordion', () => {
   assert.match(rendererSource, /client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix'/);
-  assert.match(rendererSource, /client === 'reasonix' && rowEl\.dataset\.detailUnavailable === 'true'/);
+  assert.match(rendererSource, /rowEl\.dataset\.detailUnavailable === 'true'/);
   assert.doesNotMatch(rendererSource, /nativeSessionBreakdown/);
   const { sessionDetailTargetForRow } = sessionDetailHarness(() => Promise.resolve({ found: true }));
   const target = sessionDetailTargetForRow('session:reasonix:branch-id', 'reasonix', null, {

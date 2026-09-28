@@ -5776,8 +5776,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .row.session-row[data-client="claude"] .row-metrics::after, .row.session-row[data-client="codex"] .row-metrics::after, .row.session-row[data-client="opencode"] .row-metrics::after, .row.session-row[data-client="reasonix"] .row-metrics::after, .row.session-row[data-client="dsh"] .row-metrics::after { content: '›'; color: var(--muted); font-size: 14px; line-height: 1; }
 .row.summary-row[data-review-group="true"] { cursor: pointer; }
 .row.summary-row[data-review-group="true"] .row-metrics::after { content: '›'; color: var(--muted); font-size: 14px; line-height: 1; }
-.row.session-row[data-client="reasonix"][data-detail-unavailable="true"] { cursor: default; }
-.row.session-row[data-client="reasonix"][data-detail-unavailable="true"] .row-metrics::after { content: none; }
+.row.session-row[data-detail-unavailable="true"] { cursor: default; }
+.row.session-row[data-detail-unavailable="true"] .row-metrics::after { content: none; }
 .view-preference-row.has-subgroup {
   grid-template-columns: minmax(0, 1fr) repeat(3, 22px);
 }

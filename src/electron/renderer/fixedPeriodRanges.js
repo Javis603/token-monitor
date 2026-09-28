@@ -376,7 +376,8 @@
         // record's sessions alongside the newer live period summaries.
         historySessions: {
           month: historySource?.periods?.month?.sessions || {},
-          allTime: historySource?.periods?.allTime?.sessions || {}
+          allTime: historySource?.periods?.allTime?.sessions || {},
+          allTimeAvailable: historySource?.periods?.allTime?.sessions !== undefined
         }
       };
     });
@@ -430,7 +431,8 @@
   function sessionsForRange(source, range) {
     const allTime = source?.historySessions?.allTime || sourcePeriod(source, 'allTime')?.sessions || {};
     const month = source?.historySessions?.month || sourcePeriod(source, 'month')?.sessions || {};
-    const candidates = { ...allTime, ...month };
+    // The all-time entry has the cumulative values used by total transcript detail.
+    const candidates = { ...month, ...allTime };
     const sessions = {};
     for (const [key, session] of Object.entries(candidates)) {
       const last = session?.lastUsedAt || session?.startedAt;
@@ -438,6 +440,32 @@
       if (day && day >= range.start && day <= range.end) sessions[key] = session;
     }
     return sessions;
+  }
+
+  function nativeSessionsForRange(source, range, timeZone) {
+    const candidates = { ...(source?.month || {}), ...(source?.allTime || {}) };
+    const sessions = {};
+    for (const [key, session] of Object.entries(candidates)) {
+      const last = session?.lastMessageAt || session?.lastUsedAt || session?.startedAt;
+      const day = last ? dayKeyInTimeZone(last, timeZone) : '';
+      if (day && day >= range.start && day <= range.end) sessions[key] = session;
+    }
+    return sessions;
+  }
+
+  function sessionCoverageAvailable(source, range) {
+    const allTime = source?.historySessions
+      ? source.historySessions.allTimeAvailable === true
+      : sourcePeriod(source, 'allTime')?.sessions !== undefined;
+    if (allTime && finiteNumber(source?.sessionDetailsOmitted?.allTime) === 0) return true;
+    if (finiteNumber(source?.sessionDetailsOmitted?.month) > 0) return false;
+    const monthKey = normalizeDateKey(source?.periodWindows?.today?.key)?.slice(0, 7);
+    if (!monthKey) return false;
+    return !(source?.history?.daily || []).some((row) => (
+      row?.date >= range.start && row?.date <= range.end
+      && row.date.slice(0, 7) !== monthKey
+      && (finiteNumber(row?.tokens) > 0 || finiteNumber(row?.cost) > 0)
+    ));
   }
 
   function readySnapshotForSelection(snapshot, selection) {
@@ -539,7 +567,7 @@
         daily: [],
         todayPeriod: null
       });
-      return { ...empty, devices: [] };
+      return { ...empty, devices: [], sessionCoverageAvailable: true };
     }
     const snapshots = [];
     for (const source of participating) {
@@ -581,6 +609,7 @@
       daily,
       summary: summaryForDaily(daily),
       period,
+      sessionCoverageAvailable: snapshots.every((snapshot) => sessionCoverageAvailable(snapshot, snapshot.range)),
       devices: snapshots.map((snapshot) => ({
         ...snapshot,
         period: snapshot.period,
@@ -693,6 +722,7 @@
   function supportsBreakdown(selection, breakdown, options = {}) {
     if (!isDerived(selection)) return true;
     if (breakdown === 'project') return false;
+    if (breakdown === 'session') return options.sessionCoverageAvailable !== false;
     if (breakdown === 'device') return options.deviceHistoriesAvailable === true;
     return true;
   }
@@ -712,6 +742,7 @@
     isDerived,
     joinDeviceHistorySources,
     localDayKey,
+    nativeSessionsForRange,
     handlePeriodMenuNavigation,
     normalizeMonthMode,
     periodMenuTargetIndex,

@@ -749,6 +749,65 @@ test('last 30 days can select prior-month sessions retained in local all-time da
     now: Date.parse('2026-08-12T12:00:00.000Z')
   });
   assert.deepEqual(Object.keys(result.period.sessions).sort(), ['mac:claude:current', 'mac:claude:prior']);
+  assert.equal(result.sessionCoverageAvailable, true);
+});
+
+test('all-time session values win over month values for cumulative detail', () => {
+  const source = deviceSource({ deviceId: 'mac', timeZone: 'UTC', history: [day('2026-08-10', 50)] });
+  source.periods.month.sessions = {
+    'codex:resumed': { client: 'codex', sessionId: 'resumed', totalTokens: 50, costUsd: 0.5,
+      lastUsedAt: '2026-08-10T12:00:00.000Z' }
+  };
+  source.periods.allTime.sessions = {
+    'codex:resumed': { client: 'codex', sessionId: 'resumed', totalTokens: 150, costUsd: 1.5,
+      lastUsedAt: '2026-08-10T12:00:00.000Z' }
+  };
+  const result = ranges.fixedPeriodSnapshotFromDevices('last7', [source], {
+    historyEnabled: true, historyAvailable: true, now: Date.parse('2026-08-12T12:00:00.000Z')
+  });
+  assert.equal(result.period.sessions['mac:codex:resumed'].totalTokens, 150);
+  assert.equal(result.period.sessions['mac:codex:resumed'].costUsd, 1.5);
+});
+
+test('remote prior-month usage cannot claim a complete session breakdown', () => {
+  const historySource = deviceSource({ deviceId: 'remote', timeZone: 'UTC',
+    history: [day('2026-07-30', 80)] });
+  historySource.periods.month.sessions = {};
+  delete historySource.periods.allTime.sessions;
+  const [joined] = ranges.joinDeviceHistorySources([historySource], []);
+  const result = ranges.fixedPeriodSnapshotFromDevices('last30', [joined], {
+    historyEnabled: true, historyAvailable: true, now: Date.parse('2026-08-12T12:00:00.000Z')
+  });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.sessionCoverageAvailable, false);
+  assert.equal(ranges.supportsBreakdown('last30', 'session', result), false);
+});
+
+test('remote current-month sessions remain available unless upload omitted entries', () => {
+  const historySource = deviceSource({ deviceId: 'remote', timeZone: 'UTC',
+    history: [day('2026-08-10', 80)] });
+  historySource.periods.month.sessions = {
+    'codex:current': { client: 'codex', sessionId: 'current', totalTokens: 80,
+      lastUsedAt: '2026-08-10T12:00:00.000Z' }
+  };
+  const [joined] = ranges.joinDeviceHistorySources([historySource], []);
+  const options = { historyEnabled: true, historyAvailable: true,
+    now: Date.parse('2026-08-12T12:00:00.000Z') };
+  assert.equal(ranges.fixedPeriodSnapshotFromDevices('last7', [joined], options).sessionCoverageAvailable, true);
+  joined.sessionDetailsOmitted = { month: 1 };
+  assert.equal(ranges.fixedPeriodSnapshotFromDevices('last7', [joined], options).sessionCoverageAvailable, false);
+});
+
+test('native Reasonix sessions use last message activity and cumulative values', () => {
+  const source = {
+    month: { 'reasonix:branch': { totalTokens: 20, lastMessageAt: '2026-08-10T12:00:00.000Z' } },
+    allTime: { 'reasonix:branch': { totalTokens: 100, lastMessageAt: '2026-08-10T12:00:00.000Z' },
+      'reasonix:old': { totalTokens: 40, lastMessageAt: '2026-07-20T12:00:00.000Z' } }
+  };
+  const selected = ranges.nativeSessionsForRange(source,
+    { start: '2026-08-06', end: '2026-08-12' }, 'UTC');
+  assert.deepEqual(Object.keys(selected), ['reasonix:branch']);
+  assert.equal(selected['reasonix:branch'].totalTokens, 100);
 });
 
 test('period menu keyboard navigation moves focus with standard menu keys', () => {
