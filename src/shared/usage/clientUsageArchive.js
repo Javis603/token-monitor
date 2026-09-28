@@ -506,8 +506,82 @@ function pruneArchivedClientUsage(archive, activeClients) {
   return normalizedArchive;
 }
 
+// allTime accrues from live scans plus the client and session archives, so it
+// only ever counts sources still on disk. When a source file is rotated away —
+// cleaned up by hand, or by the upstream tool — its history drops out of the
+// total even though the daily history archive still holds every observed day
+// (issue #808). Neither existing archive covers that: the session archive only
+// knows sessions seen since first run, and archivedClientUsage only snapshots
+// what was on the device the moment a client was untracked. The daily history
+// archive is the record that outlives the source, so its per-client cumulative
+// is the floor allTime must not fall below.
+//
+// This tops each client up to that floor and never past it: addClientUsage keys
+// the client and period totals off the blob's own totalTokens/costUsd, so a
+// source still wholly present (live >= floor) adds nothing and the same tokens
+// are never counted twice. `cumulative` is allTimeCumulativeFromArchive()'s
+// output, already folded onto the period's client and model keys.
+function applyDailyHistoryAllTimeFloor(summary, cumulative) {
+  if (!cumulative || typeof cumulative !== 'object') return summary;
+  const clients = Object.keys(cumulative);
+  if (clients.length === 0 || !hasSummaryPeriod(summary, 'allTime')) return summary;
+
+  // Decide what needs topping up against a read-only view first, so the common
+  // steady state — every source present, nothing rotated — returns the summary
+  // untouched instead of paying for a deep clone on every tick.
+  const live = periodFor(summary, 'allTime');
+  const shortfalls = [];
+  for (const client of clients) {
+    const floor = cumulative[client];
+    const floorTokens = Math.max(0, Math.round(numberValue(floor?.totalTokens)));
+    if (floorTokens === 0) continue;
+    const liveTokens = Math.max(0, Math.round(numberValue(live.clients?.[client])));
+    const missingTokens = floorTokens - liveTokens;
+    if (missingTokens <= 0) continue;
+    const floorCost = Math.max(0, numberValue(floor?.costUsd));
+    const liveCost = Math.max(0, numberValue(live.clientCosts?.[client]));
+    shortfalls.push({ client, floor, floorTokens, missingTokens, missingCost: Math.max(0, floorCost - liveCost) });
+  }
+  if (shortfalls.length === 0) return summary;
+
+  const next = cloneJson(summary);
+  const period = targetPeriod(next, 'allTime');
+  for (const { client, floor, floorTokens, missingTokens, missingCost } of shortfalls) {
+    // The floor is a client cumulative, not a per-day series, so which days
+    // rotated is unknown: the missing slice is spread across the archived models
+    // by their share of the floor. The totals stay exact (addClientUsage keys
+    // them off the blob's totalTokens/costUsd); only the per-model split is
+    // proportional, which is why the restored tokens land as unclassified rather
+    // than claiming a cache/output breakdown they never had.
+    const tokenScale = missingTokens / floorTokens;
+    const models = {};
+    for (const [model, tokens] of Object.entries(floor.models || {})) {
+      const share = Math.round(numberValue(tokens) * tokenScale);
+      if (share > 0) models[model] = share;
+    }
+    const floorCost = Math.max(0, numberValue(floor?.costUsd));
+    const costScale = floorCost > 0 ? missingCost / floorCost : 0;
+    const modelCosts = {};
+    if (costScale > 0) {
+      for (const [model, cost] of Object.entries(floor.modelCosts || {})) {
+        const share = numberValue(cost) * costScale;
+        if (share > 0) modelCosts[model] = share;
+      }
+    }
+    addClientUsage(period, client, {
+      totalTokens: missingTokens,
+      costUsd: missingCost,
+      models,
+      modelCosts,
+      sessions: {}
+    });
+  }
+  return next;
+}
+
 module.exports = {
   applyArchivedClientUsage,
+  applyDailyHistoryAllTimeFloor,
   captureArchivedClientUsage,
   normalizeArchivedClientUsage,
   pruneArchivedClientUsage

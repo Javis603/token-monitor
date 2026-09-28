@@ -175,3 +175,42 @@ test('the transform reads no setting outside the ones a worker is handed', () =>
     { clients: 'codex', projectsEnabled: false }
   );
 });
+
+test('project raises allTime to the daily-history floor for a rotated source (#808)', () => {
+  const period = (tokens) => normalizePeriod({ totalTokens: tokens, clients: { codex: tokens } });
+  const enabled = createUsageTransform({
+    store: fakeStore(),
+    getSettings: () => ({}),
+    loadDailyHistoryFloor: () => ({ codex: { totalTokens: 900, costUsd: 0, models: { 'gpt-5.5': 900 }, modelCosts: {} } })
+  });
+  const lifted = enabled.project(
+    { deviceId: 'mac', updatedAt: AT, today: period(5), month: period(20), allTime: period(20) },
+    { version: 1, sessions: {} },
+    new Date(AT)
+  );
+  assert.equal(lifted.allTime.totalTokens, 900, 'allTime lifted to the archive cumulative');
+  assert.equal(lifted.today.totalTokens, 5, 'today untouched');
+  assert.equal(lifted.month.totalTokens, 20, 'month untouched');
+});
+
+test('project does not consult the floor when the archive is disabled', () => {
+  const period = (tokens) => normalizePeriod({ totalTokens: tokens, clients: { codex: tokens } });
+  const rotated = { deviceId: 'mac', updatedAt: AT, today: period(5), month: period(20), allTime: period(20) };
+  let loads = 0;
+  const transform = createUsageTransform({
+    store: fakeStore(),
+    getSettings: () => ({ sessionUsageArchiveEnabled: false }),
+    loadDailyHistoryFloor: () => { loads += 1; return { codex: { totalTokens: 900, costUsd: 0, models: {}, modelCosts: {} } }; }
+  });
+  const projected = transform.project(rotated, null, new Date(AT));
+  assert.equal(loads, 0, 'the floor loader is never called on the disabled path');
+  assert.equal(projected.allTime.totalTokens, 20, 'allTime unchanged');
+});
+
+test('a transform built without dailyHistoryArchive never reads the floor from disk', () => {
+  const period = (tokens) => normalizePeriod({ totalTokens: tokens, clients: { codex: tokens } });
+  const summaryRecord = { deviceId: 'mac', updatedAt: AT, today: period(5), month: period(5), allTime: period(5) };
+  const transform = createUsageTransform({ store: fakeStore() });
+  const projected = transform.project(summaryRecord, { version: 1, sessions: {} }, new Date(AT));
+  assert.equal(projected.allTime.totalTokens, 5, 'no floor applied without opt-in');
+});
