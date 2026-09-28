@@ -640,7 +640,7 @@ test('covered sparse days remain exact zero rows for Trends', () => {
   });
 });
 
-test('fixed periods fail closed without History and for unsupported detail views', () => {
+test('fixed periods require History and support session but not project detail views', () => {
   assert.equal(ranges.fixedPeriodSnapshot('last30', {
     historyAvailable: false,
     historyEnabled: true
@@ -649,11 +649,106 @@ test('fixed periods fail closed without History and for unsupported detail views
     historyAvailable: false,
     historyEnabled: false
   }).reason, 'historyDisabled');
-  assert.equal(ranges.supportsBreakdown('last7', 'session'), false);
-  assert.equal(ranges.supportsBreakdown('last7', 'project'), false);
+  assert.equal(ranges.supportsBreakdown('last7', 'session'), true);
+  for (const selection of ['week', 'last7', 'last30']) {
+    assert.equal(ranges.supportsBreakdown(selection, 'session'), true);
+    assert.equal(ranges.supportsBreakdown(selection, 'project'), false);
+  }
   assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceHistoriesAvailable: true }), true);
   assert.equal(ranges.supportsBreakdown('last7', 'device', { deviceHistoriesAvailable: false }), false);
   assert.equal(ranges.supportsBreakdown('last7', 'model'), true);
+});
+
+test('fixed ranges select sessions by last activity', () => {
+  const source = deviceSource({ deviceId: 'mac', timeZone: 'UTC', history: [day('2026-08-10', 100, 'codex', 'gpt')] });
+  source.periods.allTime.sessions = {
+    'codex:spanning': {
+      client: 'codex', sessionId: 'spanning', totalTokens: 200, costUsd: 2,
+      startedAt: '2026-07-30T10:00:00.000Z', lastUsedAt: '2026-08-10T12:00:00.000Z',
+      projectLabel: 'Repo A'
+    },
+    'codex:old': {
+      client: 'codex', sessionId: 'old', totalTokens: 30, costUsd: 0.3,
+      lastUsedAt: '2026-08-04T12:00:00.000Z', projectLabel: 'Repo B'
+    }
+  };
+  const result = ranges.fixedPeriodSnapshotFromDevices('last7', [source], {
+    historyEnabled: true, historyAvailable: true,
+    now: Date.parse('2026-08-12T12:00:00.000Z')
+  });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.period.totalTokens, 100);
+  assert.deepEqual(Object.keys(result.period.sessions), ['mac:codex:spanning']);
+  assert.equal(result.period.sessions['mac:codex:spanning'].totalTokens, 200);
+  assert.deepEqual(Object.keys(result.devices[0].period.sessions), ['codex:spanning']);
+  const week = ranges.fixedPeriodSnapshotFromDevices('week', [source], {
+    historyEnabled: true, historyAvailable: true, locale: 'en-GB',
+    now: Date.parse('2026-08-12T12:00:00.000Z')
+  });
+  assert.deepEqual(Object.keys(week.period.sessions), ['mac:codex:spanning']);
+});
+
+test('pulled device sessions survive renderer stats that omit session detail', () => {
+  const historySource = deviceSource({
+    deviceId: 'mac', timeZone: 'UTC', history: [day('2026-08-10', 100)]
+  });
+  historySource.periods.month.sessions = {
+    'codex:active': {
+      client: 'codex', sessionId: 'active', totalTokens: 120,
+      lastUsedAt: '2026-08-10T12:00:00.000Z', projectLabel: 'Repo A'
+    }
+  };
+  const liveDevice = {
+    deviceId: 'mac',
+    periodWindows: historySource.periodWindows,
+    periods: {
+      today: { totalTokens: 0 },
+      month: { totalTokens: 100 },
+      allTime: { totalTokens: 100 }
+    }
+  };
+  const [joined] = ranges.joinDeviceHistorySources([historySource], [liveDevice]);
+  assert.equal(joined.periods.month.sessions, undefined);
+  const result = ranges.fixedPeriodSnapshotFromDevices('week', [joined], {
+    historyEnabled: true, historyAvailable: true, locale: 'en-GB',
+    now: Date.parse('2026-08-12T12:00:00.000Z')
+  });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.period.totalTokens, 100);
+  assert.deepEqual(Object.keys(result.period.sessions), ['mac:codex:active']);
+});
+
+test('session activity uses the source device calendar at the range boundary', () => {
+  const source = deviceSource({
+    deviceId: 'mac', timeZone: 'Asia/Hong_Kong',
+    endsAt: '2026-08-12T16:00:00.000Z', history: [day('2026-08-06', 10)]
+  });
+  source.periods.month.sessions = {
+    'codex:boundary': {
+      client: 'codex', sessionId: 'boundary', totalTokens: 10,
+      lastUsedAt: '2026-08-05T17:00:00.000Z'
+    }
+  };
+  const result = ranges.fixedPeriodSnapshotFromDevices('last7', [source], {
+    historyEnabled: true, historyAvailable: true,
+    now: Date.parse('2026-08-12T12:00:00.000Z')
+  });
+  assert.deepEqual(Object.keys(result.period.sessions), ['mac:codex:boundary']);
+});
+
+test('last 30 days can select prior-month sessions retained in local all-time data', () => {
+  const source = deviceSource({ deviceId: 'mac', timeZone: 'UTC', history: [day('2026-08-10', 20)] });
+  source.periods.allTime.sessions = {
+    'claude:prior': { client: 'claude', sessionId: 'prior', totalTokens: 80, lastUsedAt: '2026-07-20T12:00:00.000Z' }
+  };
+  source.periods.month.sessions = {
+    'claude:current': { client: 'claude', sessionId: 'current', totalTokens: 20, lastUsedAt: '2026-08-10T12:00:00.000Z' }
+  };
+  const result = ranges.fixedPeriodSnapshotFromDevices('last30', [source], {
+    historyEnabled: true, historyAvailable: true,
+    now: Date.parse('2026-08-12T12:00:00.000Z')
+  });
+  assert.deepEqual(Object.keys(result.period.sessions).sort(), ['mac:claude:current', 'mac:claude:prior']);
 });
 
 test('period menu keyboard navigation moves focus with standard menu keys', () => {

@@ -28,6 +28,7 @@ function sessionDetailHarness(getSessionDetail) {
   const state = { period: 'today', openSession: null };
   const context = {
     state,
+    fixedPeriodRangesApi: { isDerived: (period) => ['week', 'last7', 'last30'].includes(period) },
     visibleStatsSurface: () => 'main',
     isRendererWindowHidden: () => false,
     statsRenderScheduler: { request() {} },
@@ -35,10 +36,10 @@ function sessionDetailHarness(getSessionDetail) {
     window: { tokenMonitor: { getSessionDetail } }
   };
   vm.runInNewContext(
-    `${rendererSource.slice(start, end)}\nglobalThis.testOpenSessionDetail = openSessionDetail;`,
+    `${rendererSource.slice(start, end)}\nglobalThis.testOpenSessionDetail = openSessionDetail; globalThis.testSessionDetailTargetForRow = sessionDetailTargetForRow;`,
     context
   );
-  return { openSessionDetail: context.testOpenSessionDetail, renders, state };
+  return { openSessionDetail: context.testOpenSessionDetail, sessionDetailTargetForRow: context.testSessionDetailTargetForRow, renders, state };
 }
 
 const detail = {
@@ -165,11 +166,34 @@ test('openSessionDetail ignores a stale period result that completes last', asyn
   assert.deepEqual(renders.filter((render) => render.detail).map((render) => render.detail.marker), ['month']);
 });
 
+test('derived session rows open the original session with cumulative detail', async () => {
+  const requests = [];
+  const { openSessionDetail, sessionDetailTargetForRow, state } = sessionDetailHarness((args) => {
+    requests.push(args);
+    return Promise.resolve({ found: true });
+  });
+  state.period = 'week';
+  const target = sessionDetailTargetForRow('session:mac:codex:original-id', 'codex', {
+    sessions: {
+      'mac:codex:original-id': { client: 'codex', sessionId: 'original-id', costUsd: 2.5 }
+    }
+  });
+  assert.equal(target.sessionId, 'original-id');
+  assert.equal(target.sessionCost, 2.5);
+  await openSessionDetail({ ...target, title: 'Session' });
+  assert.equal(requests[0].sessionId, 'original-id');
+  assert.equal(requests[0].period, 'total');
+  assert.equal(state.openSession.period, 'week');
+});
+
 test('Reasonix rows enter the shared detail navigation path instead of a native accordion', () => {
   assert.match(rendererSource, /client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix'/);
-  assert.match(rendererSource, /const sessionId = client === 'reasonix' \? `reasonix:\$\{match\[2\]\}` : match\[2\];/);
-  assert.match(rendererSource, /state\.stats\?\.nativeSessions\?\.\[state\.period\]\?\.\[sessionId\]/);
   assert.match(rendererSource, /client === 'reasonix' && rowEl\.dataset\.detailUnavailable === 'true'/);
-  assert.match(rendererSource, /sessionCost: client === 'reasonix' \? Number\(session\?\.reportedCostUsd \|\| 0\)/);
   assert.doesNotMatch(rendererSource, /nativeSessionBreakdown/);
+  const { sessionDetailTargetForRow } = sessionDetailHarness(() => Promise.resolve({ found: true }));
+  const target = sessionDetailTargetForRow('session:reasonix:branch-id', 'reasonix', null, {
+    'reasonix:branch-id': { reportedCostUsd: 1.25 }
+  });
+  assert.equal(target.sessionId, 'reasonix:branch-id');
+  assert.equal(target.sessionCost, 1.25);
 });

@@ -371,7 +371,13 @@
         ...(liveSource || {}),
         deviceId,
         history: historySource?.history || null,
-        historyAvailable: historySource?.historyAvailable === true
+        historyAvailable: historySource?.historyAvailable === true,
+        // Renderer stats omit per-device sessions. Keep the pulled History
+        // record's sessions alongside the newer live period summaries.
+        historySessions: {
+          month: historySource?.periods?.month?.sessions || {},
+          allTime: historySource?.periods?.allTime?.sessions || {}
+        }
       };
     });
   }
@@ -416,6 +422,22 @@
     if (nowMs < endsAtMs) return { currentKey: key, snapshotKey: key };
     const currentKey = dayKeyInTimeZone(nowMs, source?.periodWindows?.timeZone);
     return currentKey ? { currentKey, snapshotKey: key } : null;
+  }
+
+  // Session timestamps answer which rows were active in a fixed range. Their
+  // token/cost fields still describe the source period, not an exact slice of
+  // the fixed range; History V1 has no per-day session attribution.
+  function sessionsForRange(source, range) {
+    const allTime = source?.historySessions?.allTime || sourcePeriod(source, 'allTime')?.sessions || {};
+    const month = source?.historySessions?.month || sourcePeriod(source, 'month')?.sessions || {};
+    const candidates = { ...allTime, ...month };
+    const sessions = {};
+    for (const [key, session] of Object.entries(candidates)) {
+      const last = session?.lastUsedAt || session?.startedAt;
+      const day = last ? dayKeyInTimeZone(last, source?.periodWindows?.timeZone) : '';
+      if (day && day >= range.start && day <= range.end) sessions[key] = session;
+    }
+    return sessions;
   }
 
   function readySnapshotForSelection(snapshot, selection) {
@@ -534,6 +556,7 @@
         todayPeriod: sourcePeriod(source, 'today')
       });
       if (snapshot.status !== 'ready') return { ...snapshot, devices: [] };
+      snapshot.period.sessions = sessionsForRange(source, snapshot.range);
       snapshots.push({ ...source, ...snapshot });
     }
 
@@ -542,6 +565,14 @@
       start: snapshots.reduce((value, snapshot) => !value || snapshot.range.start < value ? snapshot.range.start : value, ''),
       end: snapshots.reduce((value, snapshot) => !value || snapshot.range.end > value ? snapshot.range.end : value, '')
     };
+    const period = derivePeriod(daily, range);
+    // Keep device identity in the map key so two devices that report the same
+    // session id cannot silently overwrite one another's visible row.
+    for (const snapshot of snapshots) {
+      for (const [key, session] of Object.entries(snapshot.period.sessions)) {
+        period.sessions[`${snapshot.deviceId}:${key}`] = session;
+      }
+    }
     return {
       status: 'ready',
       selection,
@@ -549,7 +580,7 @@
       range,
       daily,
       summary: summaryForDaily(daily),
-      period: derivePeriod(daily, range),
+      period,
       devices: snapshots.map((snapshot) => ({
         ...snapshot,
         period: snapshot.period,
@@ -661,7 +692,7 @@
 
   function supportsBreakdown(selection, breakdown, options = {}) {
     if (!isDerived(selection)) return true;
-    if (breakdown === 'session' || breakdown === 'project') return false;
+    if (breakdown === 'project') return false;
     if (breakdown === 'device') return options.deviceHistoriesAvailable === true;
     return true;
   }

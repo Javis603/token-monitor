@@ -2823,7 +2823,7 @@ function sessionRowsForPeriod(period) {
       ].filter(Boolean).join(' · ')
     });
   }
-  if (Number(period?.totalTokens || 0) === 0) return [];
+  if (fixedPeriodRangesApi.isDerived(state.period) || Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
 }
 
@@ -4641,12 +4641,27 @@ function applySessionDetailResult(request, options) {
   renderSessionDetail(options);
 }
 
+function sessionDetailTargetForRow(key, client, period, nativeSessions) {
+  const match = String(key || '').match(/^session:([^:]+):(.+)$/);
+  if (!match) return null;
+  const nativeId = `reasonix:${match[2]}`;
+  const session = client === 'reasonix'
+    ? nativeSessions?.[nativeId]
+    : period?.sessions?.[key.slice('session:'.length)];
+  return {
+    client,
+    sessionId: client === 'reasonix' ? nativeId : session?.sessionId || match[2],
+    sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0)
+  };
+}
+
 async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null }) {
   const request = { kind: 'session', client, sessionId, sessionCost, title, period: state.period, detail: null, returnTo };
   state.openSession = request;
   renderSessionDetail({ loading: true });
   try {
-    const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: request.period, sessionCost });
+    const detailPeriod = fixedPeriodRangesApi.isDerived(request.period) ? 'total' : request.period;
+    const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: detailPeriod, sessionCost });
     if (state.openSession === request) {
       request.detail = detail;
       applySessionDetailResult(request, { detail });
@@ -5244,7 +5259,6 @@ async function warmFixedPeriodHistory(options = {}) {
 
 function fixedPeriodMessage(snapshot, breakdown = '') {
   if (snapshot?.status === 'loading') return t('periodRange.loading');
-  if (breakdown === 'session') return t('periodRange.sessionUnavailable');
   if (breakdown === 'project') return t('periodRange.projectUnavailable');
   if (snapshot?.reason === 'historyDisabled') return t('periodRange.historyDisabled');
   if (snapshot?.reason === 'historyUnavailable') return t('periodRange.historyUnavailable');
@@ -11225,17 +11239,11 @@ els.breakdown.addEventListener('click', (event) => {
   const client = rowEl.dataset.client || '';
   if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh') return;
   if (client === 'reasonix' && rowEl.dataset.detailUnavailable === 'true') return;
-  const match = key.match(/^session:([^:]+):(.+)$/);
-  if (!match) return;
-  const sessionId = client === 'reasonix' ? `reasonix:${match[2]}` : match[2];
   const period = state.stats?.periods?.[state.period];
-  const session = client === 'reasonix'
-    ? state.stats?.nativeSessions?.[state.period]?.[sessionId]
-    : period?.sessions?.[`${client}:${sessionId}`];
+  const target = sessionDetailTargetForRow(key, client, period, state.stats?.nativeSessions?.[state.period]);
+  if (!target) return;
   openSessionDetail({
-    client,
-    sessionId,
-    sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
+    ...target,
     title: rowEl.querySelector('.row-title')?.textContent || ''
   });
 });
