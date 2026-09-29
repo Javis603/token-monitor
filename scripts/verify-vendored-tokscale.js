@@ -1,12 +1,10 @@
 'use strict';
 
-// Release gate for ensure-vendored-tokscale.js. Checking `--version` is not
-// enough to prove the swap worked: tokscale's Cargo.toml version stays at the
-// last tagged release (4.13.0) even on commits far past it, since DSH landed
-// without a version bump upstream. So this runs the swapped binary against a
-// minimal DSH session fixture and asserts the parsed token buckets match the
-// upstream-documented reasoning-accounting fix — proof the binary in place is
-// actually the pinned DSH build, not just an executable that runs.
+// Integration gate for the Tokscale binary Token Monitor will ship. Listing a
+// client or checking `--version` cannot prove its JSON token-bucket semantics.
+// Run DSH and registered client sessions through the selected binary, then
+// check the fields Token Monitor consumes. These fixtures test the binary-to-
+// Token-Monitor contract, regardless of where each parser was implemented.
 //
 // Fixture values are the vendor pair upstream's own dsh.rs test module cites
 // (reasoning_tokens_do_not_inflate_the_additive_output_bucket): raw
@@ -15,16 +13,13 @@
 // once as "reasoning". Same fixture as tokscale's own
 // test_dsh_zstd_transcript_counts_identically_cold_and_warm_cache.
 //
-// This only checks DSH parsing semantics. Whether every DEFAULT_CLIENTS
+// This checks DSH and registered client parsing semantics. Whether every DEFAULT_CLIENTS
 // entry is a client the vendored binary recognizes at all is a separate,
 // generic concern — see verify-vendored-tokscale-clients.js.
 //
-// mode "override" (the default): this verifies the pinned fork build
-// ensure-vendored-tokscale.js has already swapped in. mode "upstream": no
-// swap happens, so this verifies the plain npm-installed binary instead —
-// deliberately NOT skipped, since switching to upstream is exactly the
-// moment this fixture most needs to prove the official release actually
-// carries the reasoning-accounting fix, not just the dsh client id.
+// mode "override" (the default): verify the pinned fork build installed by
+// ensure-vendored-tokscale.js. mode "upstream": verify the npm-installed binary
+// instead. Both must preserve the same output contract when changing sources.
 //
 // The child process must be hermetic: without pinning HOME/XDG_*/config dirs
 // and clearing scan-path env vars, a run on a machine (or CI runner) that
@@ -39,6 +34,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { loadManifest, manifestMode, resolveManifestEntry, resolveTargetBinPath } = require('./vendoredTokscale');
+const { extractUsageFromTokscale } = require('../src/shared/usage');
 
 const FIXTURE_CLIENT = 'dsh';
 const FIXTURE_SESSION_ID = '96cf59c9-b347-48b9-b234-a5200913ad05';
@@ -48,6 +44,53 @@ const FIXTURE_LINES = [
   '{"type":"assistant/message","seq":39,"time":1785730448979,"data":{"turn":1,"message":{"id":"7ac2e3d7-d558-4b24-b71e-40fc2f42216d","source":{"kind":"model","provider":"deepseek","model":"deepseek-reasoner"}},"usage":{"inputTokens":2885,"outputTokens":25,"cacheReadTokens":0,"reasoningTokens":23}}}'
 ];
 const EXPECTED = { client: FIXTURE_CLIENT, model: 'deepseek-reasoner', input: 2885, output: 2, reasoning: 23, cacheRead: 0 };
+const MUSE_SESSION_ID = 'b1111111-2222-4333-8444-555555555555';
+const MUSE_MODEL = 'muse-spark-1.3-contributor';
+// Every Tokscale-parsed client added after the legacy baseline in
+// tests/shared/tokscaleTokenContracts.test.js needs a case here. That test
+// makes a new catalog id fail locally until its real binary output and Token
+// Monitor normalization are both exercised by this release gate.
+const TOKEN_CONTRACT_CASES = Object.freeze([
+  {
+    client: 'muse',
+    // Responses usage includes 5105 cached input and 278 reasoning output.
+    expectedRow: { model: MUSE_MODEL, input: 21859, output: 101, cacheRead: 5105, reasoning: 278 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 27343, clientTokens: 27343, clientOutputTokens: 379 },
+    expectedSession: { id: MUSE_SESSION_ID, totalTokens: 27343, outputTokens: 379, reasoningTokens: 278 },
+    writeFixture(home) {
+      const sessionDir = path.join(home, '.local', 'share', 'muse', 'sessions', '2026', '09', '18', MUSE_SESSION_ID);
+      fs.mkdirSync(sessionDir, { recursive: true });
+      fs.writeFileSync(path.join(sessionDir, 'session.jsonl'), `${JSON.stringify({
+        schema_version: 1,
+        stream: { kind: 'session', id: MUSE_SESSION_ID },
+        sequence: 39,
+        recorded_at: 1789790455896395,
+        record_type: 'event',
+        payload_type: 'runtime.session',
+        payload_schema_version: 1,
+        payload: {
+          kind: 'run',
+          run_id: 'c1111111-2222-4333-8444-555555555555',
+          event: {
+            kind: 'model_completed',
+            usage: {
+              input_tokens: 26964,
+              output_tokens: 379,
+              cached_tokens: 5105,
+              cache_write_tokens: 0,
+              cache_read_tokens: 5105,
+              reasoning_tokens: 278
+            },
+            duration_ms: 5819,
+            finish_reason: 'tool_calls',
+            model: MUSE_MODEL
+          }
+        }
+      })}\n`);
+    }
+  }
+]);
 
 // Second capability this fixture proves: the collector asks for the fork's
 // workspace-joined grouping so one scan can attribute sessions to projects. A
@@ -83,6 +126,7 @@ function writeFixtureHome() {
   // sniff the frame magic rather than assume compression, so this and a
   // zstd-compressed session.jsonl.zstd are equivalent inputs.
   fs.writeFileSync(path.join(sessionDir, 'session.jsonl'), `${FIXTURE_LINES.join('\n')}\n`);
+  for (const contract of TOKEN_CONTRACT_CASES) contract.writeFixture(home);
   return home;
 }
 
@@ -130,16 +174,16 @@ function hermeticEnv(home) {
   return env;
 }
 
-function spawnFixture(binPath, home, groupBy) {
-  return spawnSync(binPath, ['--json', '--client', FIXTURE_CLIENT, '--group-by', groupBy, '--no-spinner'], {
+function spawnFixture(binPath, home, groupBy, client = FIXTURE_CLIENT) {
+  return spawnSync(binPath, ['--json', '--client', client, '--group-by', groupBy, '--no-spinner'], {
     encoding: 'utf8',
     timeout: 15_000,
     env: hermeticEnv(home)
   });
 }
 
-function runAgainstFixture(binPath, home, groupBy = 'client,model') {
-  const result = spawnFixture(binPath, home, groupBy);
+function runAgainstFixture(binPath, home, groupBy = 'client,model', client = FIXTURE_CLIENT) {
+  const result = spawnFixture(binPath, home, groupBy, client);
   if (result.error) throw new Error(`Fixture run failed to execute: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`Fixture run exited ${result.status}: ${result.stderr || result.stdout}`);
   let parsed;
@@ -163,6 +207,31 @@ function assertExpected(parsed) {
       `DSH fixture mismatch — expected ${JSON.stringify(EXPECTED)}, got ${JSON.stringify(entry)}. ` +
         'If this is a legitimate upstream behavior change, update EXPECTED and scripts/vendor/tokscale.json together, do not just silence this check.'
     );
+  }
+}
+
+function assertTokenContract(parsed, contract) {
+  const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
+  const entry = entries[0];
+  const expectedRow = { client: contract.client, ...contract.expectedRow };
+  const mismatches = Object.entries(expectedRow).filter(([key, value]) => entry?.[key] !== value);
+  const explicitTotalKeys = ['totalTokens', 'total_tokens', 'totalTokenCount', 'total_token_count', 'tokens', 'tokenCount', 'token_count'];
+  const hasExplicitTotal = entry && explicitTotalKeys.some((key) => Object.hasOwn(entry, key));
+  if (entries.length !== 1 || mismatches.length > 0 || hasExplicitTotal !== contract.hasExplicitTotal) {
+    throw new Error(
+      `${contract.client} fixture mismatch — expected one row with ${JSON.stringify(expectedRow)} and ` +
+      `hasExplicitTotal=${contract.hasExplicitTotal}, got ${JSON.stringify(entries)}. ` +
+      'If Tokscale changes its JSON token contract, update Token Monitor normalization and this fixture together.'
+    );
+  }
+  const usage = extractUsageFromTokscale(parsed);
+  const expected = contract.expectedPeriod;
+  const session = contract.expectedSession && usage.sessions[`${contract.client}:${contract.expectedSession.id}`];
+  const sessionMismatches = contract.expectedSession && Object.entries(contract.expectedSession)
+    .filter(([key, value]) => key !== 'id' && session?.[key] !== value);
+  if (usage.totalTokens !== expected.totalTokens || usage.clients[contract.client] !== expected.clientTokens ||
+      usage.clientOutputs[contract.client] !== expected.clientOutputTokens || sessionMismatches?.length > 0) {
+    throw new Error(`${contract.client} normalization mismatch — expected ${JSON.stringify(expected)}, got ${JSON.stringify(usage)}.`);
   }
 }
 
@@ -222,13 +291,15 @@ function main() {
     } else {
       assertSessionMetadata(runAgainstFixture(binPath, home, SESSION_GROUP_BY));
     }
+    for (const contract of TOKEN_CONTRACT_CASES) {
+      assertTokenContract(runAgainstFixture(binPath, home, 'client,session,model', contract.client), contract);
+    }
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
 
   console.log(
-    `Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): DSH fixture parses with correct ` +
-      `reasoning-corrected token buckets, and ${isUpstream ? `'${SESSION_GROUP_BY}' is rejected as the collector's fallback expects` : 'the joined grouping reports session and workspace metadata'}.`
+    `Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): DSH and ${TOKEN_CONTRACT_CASES.length} tracked-client token contract fixture(s) parse correctly, and ${isUpstream ? `'${SESSION_GROUP_BY}' is rejected as the collector's fallback expects` : 'the joined grouping reports session and workspace metadata'}.`
   );
 }
 
@@ -241,4 +312,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main };
+module.exports = { main, TOKEN_CONTRACT_CASES };

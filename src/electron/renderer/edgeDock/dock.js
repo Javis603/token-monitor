@@ -959,7 +959,7 @@ function sessionsContainer(sessions, options = {}) {
     // multi-model session reads "N models" here exactly as it does there —
     // projecting only the top model showed a different name than the list's
     // for the same session.
-    meta.append(document.createTextNode([sessionRowsApi.sessionModelLabel(session), relativeAgo(session.lastUsedAt)].filter(Boolean).join(' · ')));
+    meta.append(document.createTextNode([sessionRowsApi.sessionModelLabel(session), relativeAgo(session.lastUsedAt || session.startedAt)].filter(Boolean).join(' · ')));
     const context = contextNode(session);
     if (context) meta.append(context);
     row.append(

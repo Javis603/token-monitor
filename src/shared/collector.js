@@ -2519,6 +2519,16 @@ function collectorAnchorTrust(saved, options = {}) {
 // and picks up any changes that the delta-derivation might miss.
 const FULL_SCAN_INTERVAL_MS = 60 * 60 * 1000;
 
+// Ceiling on how long an unbroken run of watch events may keep deferring the
+// tick. Every event clears the pending debounce timer and re-arms a fresh one,
+// so a source that changes more often than once per `watchDebounceMs` would
+// hold the live refresh back until the interval fallback. Concurrent agents
+// streaming to their transcripts do exactly that. The re-arm itself stays — it
+// is what keeps a mid-tick event from coalescing — and 5s is the far end of
+// the promised 3-5s refresh, so the ceiling only ever fires where the promise
+// was already broken.
+const WATCH_MAX_WAIT_MS = 5000;
+
 // Escape hatch for filesystems that never deliver native events — network
 // mounts, some FUSE drivers, container bind mounts. chokidar has its own
 // CHOKIDAR_USEPOLLING override, but that is chokidar's surface, not ours: it
@@ -2619,6 +2629,9 @@ function startCollector(options) {
   // the interval loop into spins. Clamping here means no timer below can
   // reintroduce that by forgetting.
   const watchDebounceMs = clampTimerDelayMs(options.watchDebounceMs, 1500);
+  // Floored at the debounce: a ceiling shorter than one debounce window would
+  // pull every lone event forward and make the debounce itself unobservable.
+  const watchMaxWaitMs = Math.max(watchDebounceMs, clampTimerDelayMs(options.watchMaxWaitMs, WATCH_MAX_WAIT_MS));
   const intervalMs = clampTimerDelayMs(options.intervalMs, 5 * 60 * 1000);
   const historyRetryMs = clampTimerDelayMs(options.historyRetryMs, 60 * 1000);
   const watchUsePolling = resolveWatchUsePolling(options.watchUsePolling);
@@ -2699,6 +2712,11 @@ function startCollector(options) {
   let lastFullScanAt = 0;
   let pendingWaiters = [];
   let debounceTimer = null;
+  // Monotonic ms (performance.now()) by which the current run of watch events
+  // must have ticked, or 0 when no run is pending. Not Date.now(): a wall-clock
+  // step backwards mid-storm would push the deadline out by the same amount. Set by the first scheduleTick of a run, cleared when
+  // a tick actually starts so the next quiet period begins its own run.
+  let watchDeadlineAt = 0;
   let intervalTimer = null;
   let stopped = false;
   let lastTickAttemptAt = 0;
@@ -3272,6 +3290,21 @@ function startCollector(options) {
   function scheduleTick(reason, eventClients) {
     if (stopped) return;
     recordWatchClients(eventClients);
+    // The first event of a run pins the deadline; every re-arm after it waits
+    // out whichever of the debounce and the remaining ceiling comes first, so a
+    // storm faster than the debounce still ticks instead of deferring forever.
+    // Time behind an in-flight tick does not count toward the ceiling: the timer
+    // can only re-arm there, and a slow tick under a steady write stream would
+    // otherwise chain scans back-to-back once it finished. Floored at 1ms
+    // because clampTimerDelayMs' reason applies here too: a zero or negative
+    // delay is rewritten to 1ms by setTimeout, and an expired deadline must arm
+    // a real timer rather than spin.
+    const nowMs = performance.now();
+    if (tickInFlight) watchDeadlineAt = 0;
+    else if (watchDeadlineAt === 0) watchDeadlineAt = nowMs + watchMaxWaitMs;
+    const delayMs = watchDeadlineAt === 0
+      ? watchDebounceMs
+      : Math.max(1, Math.min(watchDebounceMs, watchDeadlineAt - nowMs));
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
@@ -3280,6 +3313,7 @@ function startCollector(options) {
       // There is deliberately no cooldown on top of the debounce: the product
       // promises 3–5 s updates, and a cooldown would break that promise.
       if (tickInFlight) { scheduleTick(reason); return; }
+      watchDeadlineAt = 0;
       // A raw source event means that client's synced cache may now be stale, so
       // its sync drops to the short floor instead of waiting out the idle
       // cadence. Its cache is deliberately outside the watcher, so a sync here
@@ -3289,14 +3323,14 @@ function startCollector(options) {
         targetClients: takeWatchClients(),
         sourceSelfSync: sourceSyncQueue.takeDue()
       });
-    }, watchDebounceMs);
+    }, delayMs);
   }
 
   // chokidar's close() walks every watched entry and closes every fs.watch
   // handle inline, and its cost grows superlinearly with that count, so on a
   // tree the size of ~/.claude/projects it runs for about a second. That cost
-  // has not gone away — watcherHost.js just decides which thread pays it, and
-  // by default that is a worker rather than the one driving the UI. `skipClose`
+  // has not gone away — watcherHost.js just decides who pays it, and by
+  // default that is a child process rather than the thread driving the UI. `skipClose`
   // is the quit path: descriptors go with the process, so there is nothing to
   // wait for.
   function closeWatchers({ skipClose = false } = {}) {

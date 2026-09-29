@@ -979,6 +979,35 @@ test('normalizeClientName keeps Qoder CN distinct from international Qoder', () 
   assert.equal(normalizeClientName('Qoder'), 'qoder');
 });
 
+test('Muse scan rows and display names share the tracked client id', () => {
+  assert.equal(normalizeClientName('muse'), 'muse');
+  assert.equal(normalizeClientName('Muse Code'), 'muse');
+  const period = extractUsageFromTokscale([{ client: 'muse', model: 'muse-spark', totalTokens: 12 }]);
+  assert.equal(period.clients.muse, 12);
+});
+
+test('Muse rows fold Tokscale disjoint reasoning into output and totals', () => {
+  // Tokscale splits a Responses-shaped usage record: 379 output includes 278
+  // reasoning at the source, but its JSON row reports output 101 and reasoning
+  // 278 as additive buckets, with no explicit total.
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [{
+      client: 'muse', sessionId: 'muse-session', model: 'muse-spark-1.3-contributor',
+      input: 21859, output: 101, cacheRead: 5105, cacheWrite: 0,
+      reasoning: 278, messageCount: 1, cost: 0.1,
+      timestamp: '2026-09-28T00:00:00.000Z'
+    }]
+  });
+  assert.equal(period.totalTokens, 27343);
+  assert.equal(period.clients.muse, 27343);
+  assert.equal(period.clientOutputs.muse, 379);
+  const session = period.sessions['muse:muse-session'];
+  assert.equal(session.totalTokens, 27343);
+  assert.equal(session.outputTokens, 379);
+  assert.equal(session.reasoningTokens, 278);
+});
+
 test('extractUsageFromTokscale keeps model usage grouped by client', () => {
   const period = extractUsageFromTokscale([
     { client: 'Hermes', model: 'claude-3-5-sonnet', totalTokens: 100, costUsd: 1.25 },

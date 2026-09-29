@@ -70,6 +70,7 @@
     { id: 'kilo', label: 'Kilo' },
     { id: 'commandcode', label: 'Command Code' },
     { id: 'mimo', label: 'Xiaomi MiMo' },
+    { id: 'muse', label: 'Muse Code' },
     { id: 'zcode', label: 'ZCode' },
     { id: 'kiro', label: 'Kiro' },
     { id: 'codebuddy', label: 'CodeBuddy' },
