@@ -53,6 +53,8 @@ The settings form discovers organizations after a session key is pasted. Chat-ca
 
 A cold identity cache requires the account endpoint. A transient identity failure may reuse a cached stable identity, but quota without any stable identity is unavailable rather than published under a credential-derived key. Authentication errors do not silently fall through to another local account. A Cloudflare challenge is unavailable, not unauthorized.
 
+When account and organization UUIDs are both available, Claude Web and OAuth quota identity includes both. This keeps different organizations under one login separate across devices while allowing the same organization to deduplicate across sources. OAuth profiles without an organization UUID retain their account-level identity. Older collectors with account-only keys may temporarily show a separate row until every device uses the organization-scoped key.
+
 Prepaid balance is best effort and cached more slowly than usage. A failed or refused prepaid endpoint must not erase the quota row. Transient failures retain the last balance; durable refusal is backed off. An unfunded zero pool is hidden when usage credits are disabled, while a funded or exhausted relevant pool remains visible. The provider emits its credits window explicitly without inventing a percentage meter.
 
 ## Verification

@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
+const { aggregateLimits } = require('../../src/shared/limits/core');
 const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider, normalizeClaudeWebCookieInput } = require('../../src/shared/limits/collector');
 const { listClaudeWebOrganizations, runClaudeAuthStatus, touchClaudeAuthPath } = require('../../src/shared/providers/claude/limits');
 
@@ -544,6 +545,52 @@ test('Claude Web does not carry a fallback account key across organizations', as
   assert.equal(free.status, 'ok');
   assert.equal(team.status, 'ok');
   assert.notEqual(team.accountKey, free.accountKey);
+});
+
+test('Claude Web keeps two organizations under one account UUID separate across devices', async () => {
+  const organizations = [
+    { uuid: 'free', name: 'Personal', capabilities: ['chat'] },
+    { uuid: 'team', name: 'Workspace', capabilities: ['chat', 'raven'], raven_type: 'team' }
+  ];
+  const collect = (selectedId) => fetchClaudeLimits({
+    claudeWebCookie: 'sessionKey=sk-ant-multi-device',
+    claudeWebOrganizationId: selectedId,
+    claudePrepaidBalanceEnabled: false
+  }, {
+    providerRuntimeState: new Map(),
+    fetch: async (url) => {
+      if (url.endsWith('/api/organizations')) return { ok: true, json: async () => organizations };
+      if (url.endsWith('/api/account')) return { ok: true, json: async () => ({ uuid: 'account-multi' }) };
+      if (url.includes('/usage?')) return { ok: true, json: async () => ({ five_hour: { utilization: selectedId === 'free' ? 12 : 42 } }) };
+      throw new Error(`unexpected endpoint: ${url}`);
+    }
+  });
+  const [free, team, sameTeam] = await Promise.all([collect('free'), collect('team'), collect('team')]);
+  assert.notEqual(free.accountKey, team.accountKey);
+  assert.equal(team.accountKey, sameTeam.accountKey);
+  const oauthTeam = await fetchClaudeLimits({}, {
+    platform: 'linux',
+    claudeCredentialPath: '/home/test/.claude/.credentials.json',
+    stat: async () => ({ mtimeMs: 1 }),
+    readFile: async () => JSON.stringify({ claudeAiOauth: {
+      accessToken: 'access-team',
+      refreshToken: 'refresh-team',
+      expiresAt: Date.now() + 86_400_000,
+      subscriptionType: 'team'
+    } }),
+    fetch: fakeClaudeOauthFetch({ five_hour: { utilization: 42 } }, {
+      account: { uuid: 'account-multi' },
+      organization: { uuid: 'team' }
+    })
+  });
+  assert.equal(oauthTeam.accountKey, team.accountKey);
+  const providers = aggregateLimits([
+    { deviceId: 'mac', limits: { providers: [free] } },
+    { deviceId: 'windows', limits: { providers: [team] } },
+    { deviceId: 'linux', limits: { providers: [sameTeam] } }
+  ], 0, Date.now()).providers.filter((provider) => provider.provider === 'claude');
+  assert.equal(providers.length, 2);
+  assert.deepEqual(new Set(providers.map((provider) => provider.windows[0].usedPercent)), new Set([12, 42]));
 });
 
 test('Claude Web rejects a stored fallback when a chat organization becomes eligible', async () => {
@@ -1127,9 +1174,11 @@ test('Claude OAuth profile provides stable cross-device account identity and met
 
   const mac = await collect('/Users/test/.claude/.credentials.json', 'account-a', 'organization-a');
   const windows = await collect('C:\\Users\\test\\.claude\\.credentials.json', 'account-a', 'organization-changed');
+  const sameOrganization = await collect('/home/same/.claude/.credentials.json', 'account-a', 'organization-a');
   const other = await collect('/home/other/.claude/.credentials.json', 'account-b', 'organization-a');
 
-  assert.equal(mac.accountKey, windows.accountKey);
+  assert.notEqual(mac.accountKey, windows.accountKey);
+  assert.equal(mac.accountKey, sameOrganization.accountKey);
   assert.notEqual(mac.accountKey, other.accountKey);
   assert.equal(mac.accountEmail, 'owner@example.com');
   assert.equal(mac.accountName, 'Example Workspace');

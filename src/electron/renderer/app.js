@@ -10485,7 +10485,9 @@ function moveOpenCodeLocalFallbackSetting() {
 // panel only turns the answer into its message line and the pending pill;
 // generated and hand-built panels share this, including which messages they
 // may override (`messages.required` / `rejected` / `invalidFormat`).
+let claudeOrganizationChoicesRevision = 0;
 async function saveAccountCredential(id, values, { messages = {}, failedKey, clearInput = () => {} } = {}) {
+  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   const provider = LIMIT_PROVIDERS.find((entry) => entry.id === id);
   const name = provider?.settingsLabel || provider?.label || id;
   setAccountPanelMessage(id, null);
@@ -10499,6 +10501,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
     return result;
   }
   if (result?.verdict === 'superseded') return result;
+  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   if (id === 'claude' && result?.choices) renderClaudeOrganizationChoices(result.choices, result.settings?.claudeWebOrganizationId || values.claudeWebOrganizationId);
   if (id === 'claude' && result?.verdict === 'selectionRequired') {
     setAccountPanelMessage(id, { key: 'settings.claude.organizationRequired', tone: 'notice' });
@@ -10550,9 +10553,13 @@ async function submitAccountCredential(button, id, values, options) {
 }
 
 async function clearAccountCredential(id) {
+  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   setAccountPanelMessage(id, null);
   await commitAccountCredential(() => window.tokenMonitor.limits.clearCredential(id));
-  if (id === 'claude') renderClaudeOrganizationChoices([]);
+  if (id === 'claude') {
+    claudeOrganizationChoicesRevision += 1;
+    renderClaudeOrganizationChoices([]);
+  }
   clearExternalProviderCheckPending(id);
   clearExternalProviderPendingStatus(id);
   renderExternalProviderStatus(id);
@@ -10592,8 +10599,10 @@ function renderClaudeOrganizationChoices(choices, selectedId = state.settings?.c
 }
 
 async function loadClaudeOrganizationChoices() {
+  const revision = ++claudeOrganizationChoicesRevision;
   try {
     const result = await window.tokenMonitor.limits.listOrganizationChoices('claude');
+    if (revision !== claudeOrganizationChoicesRevision) return;
     if (result.status === 'ok') {
       const selectedAvailable = renderClaudeOrganizationChoices(result.choices);
       if (!selectedAvailable && (state.settings?.claudeWebOrganizationId || result.choices.length > 1)) {
@@ -10603,6 +10612,7 @@ async function loadClaudeOrganizationChoices() {
       }
     } else setAccountPanelMessage('claude', { key: 'settings.claude.organizationLoadFailed', tone: 'notice' });
   } catch (_) {
+    if (revision !== claudeOrganizationChoicesRevision) return;
     setAccountPanelMessage('claude', { key: 'settings.claude.organizationLoadFailed', tone: 'notice' });
   }
 }
@@ -10614,6 +10624,7 @@ async function loadClaudeOrganizationChoices() {
 async function saveAccountFormSetting({ id }, field, value) {
   if (id === 'claude' && field.key === 'claudeWebOrganizationId') {
     if (!value || !state.settings?.claudeWebCookieConfigured || document.getElementById('claudeWebCookieInput')?.value) return;
+    claudeOrganizationChoicesRevision += 1;
     await saveSettings({ claudeWebOrganizationId: value });
     setAccountPanelMessage('claude', null);
     await refreshStats({ force: true });

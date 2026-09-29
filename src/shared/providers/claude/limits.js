@@ -798,6 +798,7 @@ function claudeWebMembership(accountBody, organizationId) {
 }
 
 function claudeStableIdentity(accountId, organizationId, accountEmail) {
+  if (accountId && organizationId) return `account:${accountId}:organization:${organizationId}`;
   if (accountId) return `account:${accountId}`;
   if (organizationId) return `organization:${organizationId}`;
   return accountEmail;
