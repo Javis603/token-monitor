@@ -689,6 +689,16 @@ function claudeWebOrganizationId(organization) {
   return String(organization?.uuid || organization?.id || organization?.organization_uuid || '').trim();
 }
 
+function normalizeClaudeWebOrganizationId(value) {
+  const id = String(value || '').trim();
+  if (id && (id.length > 128 || !/^[\w-]+$/.test(id))) {
+    const error = new Error('Invalid Claude Web organization ID');
+    error.code = 'INVALID_CLAUDE_WEB_ORGANIZATION_ID';
+    throw error;
+  }
+  return id;
+}
+
 function claudeWebOrganizationCapabilities(organization) {
   if (!Array.isArray(organization?.capabilities)) return new Set();
   return new Set(
@@ -732,24 +742,40 @@ function claudeSeatTier(membership) {
   return PLAN_LABEL_ALIASES[plan] ? plan : '';
 }
 
-function selectClaudeWebOrganization(organizations) {
+function claudeWebEligibleOrganizations(organizations) {
   const candidates = organizations.filter((candidate) => claudeWebOrganizationId(candidate));
-  const hasChatCapability = (candidate) => (
-    claudeWebOrganizationCapabilities(candidate).has('chat')
-  );
-  const hasChatSubscription = (candidate) => (
-    hasChatCapability(candidate)
-    && claudeCapabilityPlan(claudeWebOrganizationCapabilities(candidate), candidate)
-  );
-  const isApiOnly = (candidate) => {
+  const chat = candidates.filter((candidate) => claudeWebOrganizationCapabilities(candidate).has('chat'));
+  if (chat.length) return chat;
+  const nonApiOnly = candidates.filter((candidate) => {
     const capabilities = claudeWebOrganizationCapabilities(candidate);
-    return capabilities.size === 1 && capabilities.has('api');
-  };
-  return candidates.find(hasChatSubscription)
-    || candidates.find(hasChatCapability)
-    || candidates.find((candidate) => !isApiOnly(candidate))
-    || candidates[0]
-    || null;
+    return capabilities.size !== 1 || !capabilities.has('api');
+  });
+  return nonApiOnly.length ? nonApiOnly : candidates;
+}
+
+function claudeWebOrganizationChoices(organizations) {
+  return claudeWebEligibleOrganizations(organizations).map((candidate) => ({
+    id: claudeWebOrganizationId(candidate),
+    name: String(candidate.name || candidate.display_name || '').trim(),
+    plan: claudeCapabilityPlan(claudeWebOrganizationCapabilities(candidate), candidate)
+  }));
+}
+
+function selectClaudeWebOrganization(organizations, selectedId = '') {
+  const candidates = organizations.filter((candidate) => claudeWebOrganizationId(candidate));
+  if (selectedId) {
+    const selected = candidates.find((candidate) => claudeWebOrganizationId(candidate) === selectedId);
+    if (selected) return selected;
+    const error = errorWithStatus('unavailable', 'Selected Claude Web organization is no longer available');
+    error.code = 'CLAUDE_WEB_ORGANIZATION_NOT_FOUND';
+    throw error;
+  }
+  const eligible = claudeWebEligibleOrganizations(candidates);
+  if (eligible.length <= 1) return eligible[0] || null;
+  const error = errorWithStatus('unavailable', 'Choose a Claude Web organization');
+  error.code = 'CLAUDE_WEB_ORGANIZATION_SELECTION_REQUIRED';
+  error.organizationChoices = claudeWebOrganizationChoices(candidates);
+  throw error;
 }
 
 // Exact matches only. Everything read off a membership is scoped to its own
@@ -926,6 +952,24 @@ function createClaudeWebSession(cookie) {
     },
     initialCookie
   };
+}
+
+async function listClaudeWebOrganizations(cookie, deps = {}) {
+  const session = createClaudeWebSession(cookie);
+  const baseUrl = String(deps.claudeWebBaseUrl || CLAUDE_WEB_BASE_URL).replace(/\/$/, '');
+  const body = await fetchClaudeWebJson(`${baseUrl}/api/organizations`, session.headers(), deps, {
+    onResponse: async (response) => {
+      session.observe(response);
+      if (session.cookie() !== session.initialCookie) {
+        try {
+          await deps.onClaudeWebCookieRenewed?.({ previousCookie: session.initialCookie, cookie: session.cookie() });
+        } catch (error) {
+          deps.logger?.(`[limits] Claude Web session renewal could not be persisted: ${error.message}`);
+        }
+      }
+    }
+  });
+  return claudeWebOrganizationChoices(claudeWebOrganizations(body));
 }
 
 function claudeOauthIdentityFingerprint(credentials) {
@@ -1111,13 +1155,15 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
     onResponse: observeResponse
   });
   const fingerprint = claudeWebIdentityFingerprint(cookie);
+  const selectedId = normalizeClaudeWebOrganizationId(options.claudeWebOrganizationId);
   let context = claudeCachedIdentity(fingerprint, deps);
+  if (context && selectedId && context.organizationId !== selectedId) context = null;
   let usage;
   if (!context) {
     const stale = claudeCachedIdentity(fingerprint, deps, { allowStale: true });
     const organizationsBody = await fetchWebJson(`${baseUrl}/api/organizations`);
     const organizations = claudeWebOrganizations(organizationsBody);
-    const organization = selectClaudeWebOrganization(organizations);
+    const organization = selectClaudeWebOrganization(organizations, selectedId);
     const organizationId = claudeWebOrganizationId(organization);
     if (!organizationId) throw errorWithStatus('unavailable', 'Claude Web organization not found');
     usage = await fetchWebJson(
@@ -1130,7 +1176,7 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
         identity: claudeWebAccountIdentity(accountBody, organization)
       }, deps);
     } catch (error) {
-      if (!stale) {
+      if (!stale || stale.organizationId !== organizationId) {
         throw claudeIdentityUnavailable('Claude Web usage is available, but stable account identity could not be resolved', error);
       }
       context = {
@@ -1877,10 +1923,12 @@ module.exports = {
   claudeWebCookie,
   delegatedClaudeRefresh,
   fetchClaudeLimits,
+  listClaudeWebOrganizations,
   isClaudeCliAuthenticated,
   mapClaudeCliUsageToProvider,
   mapClaudeUsageToProvider,
   normalizeClaudeWebCookieInput,
+  normalizeClaudeWebOrganizationId,
   parseClaudeCliUsageText,
   rankClaudeCredentialFiles,
   refreshClaudeAccessToken,

@@ -43,7 +43,7 @@ function syncCredentialFields(form, { document, settings }) {
     if (!control) continue;
     if (field.input === 'select') {
       const stored = settings?.[field.key];
-      control.value = field.options.some((option) => option.value === stored) ? stored : field.options[0].value;
+      control.value = [...(control.options || field.options)].some((option) => option.value === stored) ? stored : field.options[0].value;
     } else if (field.prefill && !control.value && document.activeElement !== control) {
       control.value = settings?.[field.key] || '';
     }
@@ -116,6 +116,7 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
     input.id = controlId(field);
     input.className = 'credential-input';
     if (field.input === 'select') {
+      if (field.key === 'claudeWebOrganizationId') input.disabled = true;
       for (const option of field.options) {
         const node = localized(document.createElement('option'), option.labelKey);
         node.value = option.value;

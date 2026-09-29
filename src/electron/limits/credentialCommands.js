@@ -111,6 +111,34 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
     }
     const renewed = {};
     const deps = { ...probeDeps(renewed), env: {} };
+    const discover = accountForm(entry).discover;
+    let discoveredChoices;
+    if (discover) {
+      let choices;
+      try {
+        choices = await entry.limits[discover.fn](candidate[discover.credential], deps);
+      } catch (error) {
+        if (revisions.get(entry.id) !== revision) {
+          return { saved: false, verdict: 'superseded', status: 'superseded', errorCode: '' };
+        }
+        if (credentialVerdict(error?.status) === 'invalid') return invalid(error.status, error?.code || '');
+      }
+      if (revisions.get(entry.id) !== revision) {
+        return { saved: false, verdict: 'superseded', status: 'superseded', errorCode: '' };
+      }
+      if (choices?.length) {
+        discoveredChoices = choices;
+        if (choices.length === 1 && !candidate[discover.selection]) {
+          candidate[discover.selection] = choices[0].id;
+        } else if (choices.length > 1 && !candidate[discover.selection]) {
+          return { saved: false, verdict: 'selectionRequired', status: 'selectionRequired', choices };
+        }
+        if (!choices.some((choice) => choice.id === candidate[discover.selection])) {
+          return { saved: false, verdict: 'selectionRequired', status: 'selectionRequired', choices };
+        }
+      }
+      if (renewed[discover.credential]) candidate[discover.credential] = normalizeAccountField(discover.credential, renewed[discover.credential]);
+    }
     let provider = null;
     let status;
     let errorCode = '';
@@ -120,6 +148,7 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
     } catch (error) {
       status = error?.status || 'unavailable';
       errorCode = error?.code || '';
+      if (errorCode === 'CLAUDE_WEB_ORGANIZATION_SELECTION_REQUIRED') discoveredChoices = error.organizationChoices;
     }
     // Any later write for this form retires the whole probe — a stale
     // rejection must not land over a newer credential either.
@@ -127,6 +156,9 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
       return { saved: false, verdict: 'superseded', status: 'superseded', errorCode: '' };
     }
     const verdict = credentialVerdict(status);
+    if (discoveredChoices && errorCode === 'CLAUDE_WEB_ORGANIZATION_SELECTION_REQUIRED') {
+      return { saved: false, verdict: 'selectionRequired', status: 'selectionRequired', choices: discoveredChoices };
+    }
     if (verdict === 'invalid') return invalid(status, errorCode);
     // A probe may rotate the credential it was given (Claude's session key);
     // what gets stored is the value the provider will accept next.
@@ -140,19 +172,37 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
       limitProviders: providerSelectionIncluding(getSettings().limitProviders, entry.id),
       limitsEnabled: true
     });
-    return { saved: true, verdict, status, errorCode, settings };
+    return { saved: true, verdict, status, errorCode, settings, ...(discoveredChoices ? { choices: discoveredChoices } : {}) };
   }
 
   function clearCredential(providerId) {
     const entry = formEntry(providerId);
     if (!entry) return { cleared: false };
     const settings = applySettingsPatch(Object.fromEntries(
-      formFields(entry).filter((field) => field.secret).map(({ key }) => [key, ''])
+      formFields(entry).filter((field) => field.secret || entry.fields.find((item) => item.key === field.key)?.clearWithCredential).map(({ key }) => [key, ''])
     ));
     return { cleared: true, settings };
   }
 
-  return { saveCredential, clearCredential, noteSettingsPatch };
+  async function listOrganizationChoices(providerId) {
+    const entry = formEntry(providerId);
+    const form = entry && accountForm(entry);
+    if (!form?.discover) return { status: 'notConfigured', choices: [] };
+    const cookie = limitsAccountConfig(getSettings(), { env })[form.discover.credential];
+    if (!cookie) return { status: 'notConfigured', choices: [] };
+    const renewed = {};
+    try {
+      const choices = await entry.limits[form.discover.fn](cookie, { ...probeDeps(renewed), env: {} });
+      if (renewed[form.discover.credential] && getSettings()[form.discover.credential] === cookie) {
+        applySettingsPatch({ [form.discover.credential]: renewed[form.discover.credential] });
+      }
+      return { status: 'ok', choices };
+    } catch (error) {
+      return { status: error?.status || 'unavailable', choices: [] };
+    }
+  }
+
+  return { saveCredential, clearCredential, listOrganizationChoices, noteSettingsPatch };
 }
 
 module.exports = {

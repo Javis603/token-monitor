@@ -193,6 +193,34 @@ test('a session key renewed during the probe is the one stored', async () => {
   assert.equal(result.verdict, 'valid');
   assert.equal(patches.length, 1);
   assert.equal(patches[0].claudeWebCookie, 'sessionKey=sk-ant-sid01-rotated');
+  assert.equal(patches[0].claudeWebOrganizationId, 'organization-web');
+});
+
+test('Claude save asks for an organization before storing a multi-organization session', async () => {
+  const organizations = [
+    { uuid: 'free', name: 'Personal', capabilities: ['chat'] },
+    { uuid: 'team', name: 'Workspace', capabilities: ['chat', 'raven'], raven_type: 'team' }
+  ];
+  const { api, patches } = commands({ answer: (url) => {
+    if (url.endsWith('/api/organizations')) return response(200, organizations);
+    if (url.endsWith('/api/account')) return response(200, { uuid: 'same-account', memberships: [
+      { organization: organizations[0] }, { organization: organizations[1], seat_tier: 'team_standard' }
+    ] });
+    if (url.endsWith('/prepaid/credits')) return response(200, { amount: 0 });
+    assert.match(url, /\/organizations\/team\/usage/);
+    return response(200, { five_hour: { utilization: 23 } });
+  } });
+  const draft = { claudeWebCookie: 'sessionKey=sk-ant-multi' };
+  const pending = await api.saveCredential('claude', draft);
+  assert.equal(pending.verdict, 'selectionRequired');
+  assert.deepEqual(pending.choices.map(({ id }) => id), ['free', 'team']);
+  assert.deepEqual(patches, []);
+  const saved = await api.saveCredential('claude', { ...draft, claudeWebOrganizationId: 'team' });
+  assert.equal(saved.saved, true);
+  assert.equal(patches[0].claudeWebOrganizationId, 'team');
+  assert.deepEqual((await api.listOrganizationChoices('claude')).choices.map(({ id }) => id), ['free', 'team']);
+  api.clearCredential('claude');
+  assert.equal(patches.at(-1).claudeWebOrganizationId, '');
 });
 
 test('a lane saved on its own is probed without the stored sibling vouching for it', async () => {
