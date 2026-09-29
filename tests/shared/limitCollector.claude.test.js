@@ -498,6 +498,37 @@ test('Claude Web requires a choice for multiple organizations and never falls ba
   );
 });
 
+test('Claude Web rejects a stored fallback when a chat organization becomes eligible', async () => {
+  for (const capabilities of [['files'], ['api']]) {
+    const fallback = { uuid: 'fallback', name: 'Old workspace', capabilities };
+    const chat = { uuid: 'chat', name: 'Chat workspace', capabilities: ['chat'] };
+    let organizations = [fallback];
+    let nowMs = Date.parse('2026-07-25T00:00:00Z');
+    let usageRequests = 0;
+    const deps = {
+      now: () => nowMs,
+      claudeIdentityCacheTtlMs: 1000,
+      providerRuntimeState: new Map(),
+      fetch: async (url) => {
+        if (url.endsWith('/api/organizations')) return { ok: true, json: async () => organizations };
+        if (url.endsWith('/api/account')) return { ok: true, json: async () => ({ uuid: 'account-web', email_address: 'owner@example.com' }) };
+        if (url.includes('/usage?')) {
+          usageRequests += 1;
+          return { ok: true, json: async () => ({ five_hour: { utilization: 12 } }) };
+        }
+        throw new Error(`unexpected endpoint: ${url}`);
+      }
+    };
+    const options = { claudeWebCookie: 'sessionKey=sk-ant-fallback', claudeWebOrganizationId: 'fallback', claudePrepaidBalanceEnabled: false };
+    assert.equal((await fetchClaudeLimits(options, deps)).status, 'ok');
+    assert.equal(usageRequests, 1);
+    organizations = [fallback, chat];
+    nowMs += 1001;
+    await assert.rejects(fetchClaudeLimits(options, deps), (error) => error.code === 'CLAUDE_WEB_ORGANIZATION_NOT_FOUND');
+    assert.equal(usageRequests, 1, 'the ineligible stored organization must not be queried again');
+  }
+});
+
 test('Claude Web keeps Team usage, identity and prepaid balance together regardless of Free organization order', async () => {
   const free = { uuid: 'organization-free', name: 'Personal', capabilities: ['chat'] };
   const team = { uuid: 'organization-team', name: 'Team Workspace', capabilities: ['chat', 'raven'], raven_type: 'team' };

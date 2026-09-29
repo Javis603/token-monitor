@@ -762,19 +762,18 @@ function claudeWebOrganizationChoices(organizations) {
 }
 
 function selectClaudeWebOrganization(organizations, selectedId = '') {
-  const candidates = organizations.filter((candidate) => claudeWebOrganizationId(candidate));
+  const eligible = claudeWebEligibleOrganizations(organizations);
   if (selectedId) {
-    const selected = candidates.find((candidate) => claudeWebOrganizationId(candidate) === selectedId);
+    const selected = eligible.find((candidate) => claudeWebOrganizationId(candidate) === selectedId);
     if (selected) return selected;
     const error = errorWithStatus('unavailable', 'Selected Claude Web organization is no longer available');
     error.code = 'CLAUDE_WEB_ORGANIZATION_NOT_FOUND';
     throw error;
   }
-  const eligible = claudeWebEligibleOrganizations(candidates);
   if (eligible.length <= 1) return eligible[0] || null;
   const error = errorWithStatus('unavailable', 'Choose a Claude Web organization');
   error.code = 'CLAUDE_WEB_ORGANIZATION_SELECTION_REQUIRED';
-  error.organizationChoices = claudeWebOrganizationChoices(candidates);
+  error.organizationChoices = claudeWebOrganizationChoices(organizations);
   throw error;
 }
 
