@@ -2728,6 +2728,7 @@ test('main settings migrateLimitProviders normalizes without expanding old defau
 test('Home limits groups multiple MiMo accounts like Codex', () => {
   const app = readRendererFile('app.js');
   const groupBody = viewBody('renderLimitProviderGroup');
+  const frameBody = viewBody('renderLimitProviderGroupFrame', 'mimoAccountGroups');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   // accountGroup marks the synthetic header provider, so a subscription card on
   // it summarises the group instead of adopting one member's record — and
@@ -2735,10 +2736,11 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
   // for its own rows and not for every account the provider has. The count
   // phrase is the catalog's own, keyed by provider id.
   assert.match(
-    groupBody,
+    frameBody,
     /const groupProvider = \{\s*provider: providerId,\s*status: 'ok',\s*windows: \[\],\s*accountGroup: true,\s*groupAccounts: providers\s*\};/
   );
-  assert.match(groupBody, /planText: limitGroupCountText\(providerId, providers\.length\)/);
+  assert.match(frameBody, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(groupBody, /renderLimitProviderGroupFrame\(\s*providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
 
   // The page's dispatch is by account count with no provider branch left.
@@ -3218,4 +3220,57 @@ test('MiMo lists the detected Desktop session without controls the user does not
   assert.match(render, /if \(input\) row\.append\(input\)/);
   assert.match(render, /if \(remove\) right\.append\(remove\)/);
   assert.match(app, /if \(account\?\.removable === false\) return t\('settings\.mimo\.desktopAccount'\)/);
+});
+
+test('MiMo settings asks only the rejected local Cookie owner to paste it again', () => {
+  const app = readRendererFile('app.js');
+  const source = functionBody(app, 'mimoSettingsAccountTitle', 'copilotProviderStatus');
+  class Node {
+    constructor() {
+      this.children = [];
+      this.classList = { toggle() {} };
+    }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = children; }
+    addEventListener() {}
+    setAttribute() {}
+    *walk() { yield this; for (const child of this.children) yield* child.walk(); }
+  }
+  const list = new Node();
+  const nodes = new Map([
+    ['mimoAccountStatus', new Node()],
+    ['mimoAccountList', list],
+    ['mimoAccountEmpty', new Node()],
+    ['mimoAccountErrorMessage', new Node()]
+  ]);
+  let providers = [
+    { accountKey: 'a', sourceDetail: 'managed', status: 'unauthorized' },
+    { accountKey: 'b', sourceDetail: 'app', status: 'unauthorized' }
+  ];
+  const context = {
+    document: { getElementById: (id) => nodes.get(id), createElement: () => new Node() },
+    isSettingsSurfaceVisible: () => true,
+    state: { settings: { mimoManagedAccounts: [
+      { id: 'a', accountKey: 'a', accountEmail: 'a@example.com', accountLabel: 'Console' },
+      { id: 'b', accountKey: 'b', accountEmail: 'b@example.com', accountLabel: 'Console' },
+      { id: 'desktop', accountKey: 'b', removable: false, accountLabel: 'Desktop app' }
+    ] }, mimoAccountError: '' },
+    accountShellApi: { render() {} },
+    localProviderStatuses: () => providers,
+    limitProviderPresentationApi: { limitProviderDisplayLabel: (label) => label },
+    renderSettingsSummaries() {},
+    t: (key) => ({
+      'settings.mimo.repasteCookie': 'Paste Cookie again',
+      'settings.mimo.invalidCookie': 'Copy a fresh Cookie after signing in.',
+      'settings.mimo.desktopAccount': 'MiMo Desktop'
+    })[key] || key
+  };
+  const render = vm.runInNewContext(`${source}\nrenderMimoStatus`, context);
+  render();
+  const info = list.children.map((row) => [...row.walk()].find((node) => node.className === 'managed-account-info'));
+  assert.deepEqual(info.map((node) => node.textContent), ['Paste Cookie again', 'Console', 'Desktop app']);
+  assert.equal(info[0].title, 'Copy a fresh Cookie after signing in.');
+  providers = [{ accountKey: 'a', sourceDetail: 'managed', status: 'ok' }];
+  render();
+  assert.equal([...list.children[0].walk()].find((node) => node.className === 'managed-account-info').textContent, 'Console');
 });

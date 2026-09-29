@@ -22,6 +22,7 @@
       providerColor,
       hasProviderMark,
       maskEmail,
+      mimoProductLabel,
       createRowDrag
     } = deps;
 
@@ -290,8 +291,13 @@
             else next.add(account.accountKey);
             void updateItem(id, { hiddenAccounts: [...next] });
           });
-          const name = account.accountName || maskEmail(account.accountEmail) || account.planLabel || providerLabel(item.provider);
+          const identity = account.accountName || maskEmail(account.accountEmail);
+          const product = item.provider === 'mimo' ? mimoProductLabel(account) : '';
+          const name = product
+            ? [product, identity].filter(Boolean).join(' · ')
+            : identity || account.planLabel || providerLabel(item.provider);
           const text = el('span', 'edge-dock-composer-account-name', name);
+          text.title = name;
           const plan = account.planLabel && name !== account.planLabel ? el('span', 'edge-dock-composer-account-plan', account.planLabel) : null;
           label.append(input, text);
           if (plan) label.append(plan);

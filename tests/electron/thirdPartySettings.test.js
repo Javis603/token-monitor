@@ -168,7 +168,7 @@ test('third-party Limits presentation uses compact scope labels and a details to
   // family they share.
   const view = read('src/electron/renderer/limits/windowsView.js');
   assert.match(view, /function renderLimitProviderGroup\(providerId, label, providers, color\)/);
-  assert.match(view, /planText: limitGroupCountText\(providerId, providers\.length\)/);
+  assert.match(view, /renderLimitProviderGroupFrame\(\s*providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.match(view, /thirdparty: \(providers\) => \{[\s\S]*?markId: family \|\| 'thirdparty', sharedFamily: family/);
   assert.match(view, /thirdparty: \(provider, color, \{ grouped, sharedFamily \}\) => \{[\s\S]*?const visual = presentationApi\.thirdPartyAdapterVisual\(provider, color\)/);
   // The page's group call passes the provider and nothing else, so it cannot

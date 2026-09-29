@@ -4388,6 +4388,10 @@ html.is-windows .limit-live-badge {
   font-size: 11px;
   color: var(--text);
 }
+.limit-account-row .limit-name-title {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .limit-account-row .limit-windows {
   gap: 8px;
 }

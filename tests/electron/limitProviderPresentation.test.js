@@ -848,7 +848,8 @@ test('every multi-account Limits group uses its provider-localized account count
   // key itself.
   assert.match(view, /const key = GROUP_COUNT_KEYS\[providerId\] \|\| `settings\.\$\{providerId\}\.nAccounts`;/);
   assert.match(view, /return text === key \? '' : text;/);
-  assert.match(view, /planText: limitGroupCountText\(providerId, providers\.length\)/);
+  assert.match(view, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(view, /providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.doesNotMatch(view, /settings\.(claude|codex|mimo|opencode|openrouter|thirdparty)\.nAccounts/);
   for (const provider of ['claude', 'codex', 'mimo', 'opencode', 'openrouter', 'thirdparty']) {
     assert.match(i18n, new RegExp(`'settings\\.${provider}\\.nAccounts'`));
@@ -2772,33 +2773,13 @@ test('Antigravity account verification is shown as an actionable status', () => 
   );
 });
 
-test('a MiMo row whose recovery belongs to a sign-in says which sign-in it means', () => {
-  // The membership lane has one credential — the machine's own Desktop session —
-  // so a refusal there is always that sign-in's to fix. The pasted console
-  // credential is the user's, and the row says to replace it instead.
-  assert.deepEqual(
-    presentation.limitProviderStatusLabel({
-      provider: 'mimo',
-      status: 'unauthorized',
-      sourceDetail: 'app'
-    }),
-    {
-      label: 'Sign in again',
-      tone: 'setup'
-    },
-  );
-  assert.deepEqual(
-    presentation.limitProviderStatusLabel({
-      provider: 'mimo',
-      status: 'unauthorized',
-      sourceDetail: 'managed'
-    }),
-    {
-      label: 'Update MiMo Cookie',
-      key: 'settings.mimo.repasteCookie',
-      tone: 'setup'
-    }
-  );
+test('MiMo reuses the Cookie-backed provider status for either credential source', () => {
+  for (const sourceDetail of ['app', 'managed']) {
+    assert.deepEqual(
+      presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'unauthorized', sourceDetail }),
+      presentation.limitProviderStatusLabel({ provider: 'ollama', status: 'unauthorized' })
+    );
+  }
 });
 
 test('WorkBuddy sealed app credentials are shown as an actionable status', () => {
@@ -2874,7 +2855,7 @@ test('minimax status copy uses the same API key wording as CodexBar', () => {
   );
 });
 
-test('MiMo status gives the correct recovery action for each credential source', () => {
+test('MiMo uses shared Limits statuses while keeping errors distinct from rejected sessions', () => {
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'notConfigured' }),
     { label: 'Not set up', tone: 'setup' }
@@ -2889,7 +2870,7 @@ test('MiMo status gives the correct recovery action for each credential source',
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }),
-    { label: 'Update MiMo Cookie', key: 'settings.mimo.repasteCookie', tone: 'setup' }
+    { label: 'Sign in again', tone: 'setup' }
   );
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'error' }),
@@ -2911,16 +2892,13 @@ test('MiMo settings stays connected while one independent product is live', () =
   assert.equal(presentation.limitProviderSettingsRecord([expired], 'mimo'), expired);
 });
 
-test('MiMo Limits rows show the no-plan and source-specific recovery text', () => {
+test('MiMo Limits rows show the no-plan and shared session recovery text', () => {
   const view = createLimitWindowsView({
     isMimoMembershipProduct: limitWindowLabels.isMimoMembershipProduct,
     mimoProductLabel: limitWindowLabels.mimoProductLabel,
     accountIdentity: require('../../src/electron/renderer/accountIdentity'),
     settings: () => ({}),
-    t: (key) => ({
-      'settings.limits.status.signInAgain': '重新登录',
-      'settings.mimo.repasteCookie': '请重新粘贴 MiMo Cookie'
-    })[key] || key,
+    t: (key) => key,
     presentation: presentation
   });
   // No plan and no window is a product row with nothing to meter; its plan cell
@@ -2932,8 +2910,8 @@ test('MiMo Limits rows show the no-plan and source-specific recovery text', () =
     'an invited quota keeps the product in the title without inventing a plan name'
   );
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [] }), 'Pro');
-  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }), '重新登录');
-  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }), '请重新粘贴 MiMo Cookie');
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }), 'Sign in again');
+  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }), 'Sign in again');
   assert.equal(view.limitAccountTitle('mimo', { provider: 'mimo', accountName: 'MiMo account', accountLabel: 'Console' }, 0), 'MiMo account · Console');
 });
 
@@ -4053,11 +4031,13 @@ test('the provider rollup appears once, on the row that stands for the provider'
   // that did not do the grouping.
   const head = viewBody('renderLimitProviderHead', 'codexResetForecastDate');
   const group = viewBody('renderLimitProviderGroup');
+  const frame = viewBody('renderLimitProviderGroupFrame', 'mimoAccountGroups');
   assert.match(head, /decoratePlanWithSubscription\(plan, provider, !options\.accountRow\)/);
   assert.doesNotMatch(head, /state\.stats/);
   // The group's own head is drawn without the flag, and each member passes it —
   // so the summary lands once, on the header.
-  assert.match(group, /renderLimitProviderHead\(providerId, label, groupProvider, color, \{/);
+  assert.match(group, /renderLimitProviderGroupFrame\(/);
+  assert.match(frame, /renderLimitProviderHead\(providerId, label, groupProvider, color, \{/);
   assert.match(group, /accountRow: true/);
   assert.match(cardFor, /provider\?\.accountGroup === true/);
 });

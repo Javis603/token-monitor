@@ -11604,6 +11604,7 @@ const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComp
     maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
       ? accountIdentityApi.maskEmailAddress(email)
       : String(email || '')),
+    mimoProductLabel,
     createRowDrag: (config) => rowDragControllerApi.createRowDragController({
       dragSort: verticalDragSortApi,
       getScrollPanel: () => els.settingsPanel,
@@ -11909,6 +11910,7 @@ function renderStatsUpdate() {
   render();
   if (!isSettingsSurfaceVisible()) return;
   renderCodexAccounts();
+  renderMimoStatus();
   renderSettingsSummaries();
   renderLimitProviderCheckboxes();
   renderToolPreferences();
@@ -13675,6 +13677,7 @@ function renderMimoStatus() {
   accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.mimoAccountError });
   emptyEl.classList.toggle('hidden', accounts.length > 0);
 
+  const providers = localProviderStatuses('mimo');
   listEl.replaceChildren();
   if (accounts.length > 0) {
     for (const [index, account] of accounts.entries()) {
@@ -13722,7 +13725,15 @@ function renderMimoStatus() {
       right.className = 'managed-account-right';
       const info = document.createElement('span');
       info.className = 'managed-account-info';
-      info.textContent = enabled ? limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel) : t('settings.mimo.disabled');
+      const rejectedCookie = !detected && enabled && providers.some((provider) => (
+        provider.accountKey === account.accountKey
+        && provider.sourceDetail === 'managed'
+        && provider.status === 'unauthorized'
+      ));
+      info.textContent = !enabled ? t('settings.mimo.disabled')
+        : rejectedCookie ? t('settings.mimo.repasteCookie')
+          : limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel);
+      info.title = rejectedCookie ? t('settings.mimo.invalidCookie') : info.textContent;
 
       const remove = detected ? null : document.createElement('button');
       if (remove) {
