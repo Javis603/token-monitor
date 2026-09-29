@@ -1339,7 +1339,7 @@ async function addMimoManagedAccount(cookieValue) {
   const [validation] = await fetchMimoLimits({
     mimoManagedAccounts: [result.account],
     limitRefreshScope: { provider: 'mimo', accountKey: result.account.accountKey }
-  }, electronProviderDeps());
+  }, credentialProbeDeps());
   if (validation?.status !== 'ok') {
     const errorCode = validation?.status === 'unauthorized'
       ? 'invalidCookie'
