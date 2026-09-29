@@ -985,7 +985,7 @@ var translations = {
     "more.liveRate.body": "푸터, 메뉴 막대, Bubble의 tok/s 또는 TPM.",
     "more.ranges.name": "유연한 범위",
     "more.ranges.body": "이번 주, 최근 7일, 최근 30일.",
-    "more.export.name": "일일 모델보내기",
+    "more.export.name": "일일 모델 내보내기",
     "more.export.body": "토큰 구성과 비용이 담긴 모델별 CSV.",
     "more.diagnostics.name": "진단 보고서",
     "more.diagnostics.body": "이슈에 붙여 넣을 수 있는 비식별 보고서.",
