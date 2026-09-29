@@ -124,8 +124,12 @@ function createInProcessWatcherHost(config = {}, handlers = {}) {
     // failure to build the host, so it arrives the way chokidar's own errors
     // do: on the handler, after this host has been returned.
     if (error?.code !== WATCH_POLLING_LIMIT_CODE) throw error;
-    setImmediate(() => handlers.onError?.(error));
-    return { kind: 'in-process', close() {} };
+    // A host replaced before this fires must not report into its successor.
+    let closed = false;
+    setImmediate(() => {
+      if (!closed) handlers.onError?.(error);
+    });
+    return { kind: 'in-process', close() { closed = true; } };
   }
   watcher.on('all', (event, filePath) => handlers.onEvent?.(event, filePath));
   watcher.on('error', (error) => handlers.onError?.(error));

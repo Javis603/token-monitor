@@ -2431,6 +2431,10 @@ function watchPollingEnvOverride(env = process.env) {
 }
 
 function resolveWatchUsePolling(preferred, env = process.env) {
+  // chokidar's own variable overrides whatever we pass it, so it has to win
+  // here too or diagnostics would report native events while chokidar polls.
+  const chokidarOverride = chokidarPollingEnv(env);
+  if (chokidarOverride !== undefined) return chokidarOverride;
   const override = watchPollingEnvOverride(env);
   if (override !== undefined) return override;
   if (typeof preferred === 'boolean') return preferred;
@@ -2462,17 +2466,18 @@ const WATCH_POLLING_ENTRY_LIMIT = 20000;
 // Counts what chokidar would watch — the same roots through the same ignore
 // matcher — and stops as soon as the count passes `limit`, so a million-entry
 // tree costs no more than a small one. opendir rather than readdir, because a
-// single flat directory can itself hold the whole tree. Symlinked directories
-// are followed, as chokidar follows them by default; like chokidar, a target
-// already reached by its real path is not walked again, which is also what
-// ends a link cycle.
+// single flat directory can itself hold the whole tree.
+//
+// Symlinked directories are followed, as chokidar follows them by default, and
+// every link is walked on its own: chokidar dedupes by the link's own path, not
+// its target, so two links into one tree are two trees to poll. Nothing here
+// dedupes cycles either. A link back into its own ancestry stops resolving at
+// the kernel's symlink limit (ELOOP), which is where chokidar stops too, and
+// failing that the counter itself ends the walk — refusing to poll, which is
+// the safe answer for a tree chokidar could not finish either.
 function watchEntriesExceed(dirs, ignored, limit) {
   let count = 0;
   const pending = [...dirs];
-  const linkedTargets = new Set();
-  for (const dir of dirs) {
-    try { linkedTargets.add(fs.realpathSync.native(dir)); } catch (_) {}
-  }
   while (pending.length > 0) {
     const dir = pending.pop();
     let handle;
@@ -2487,15 +2492,10 @@ function watchEntriesExceed(dirs, ignored, limit) {
         if (entry.isDirectory()) {
           pending.push(entryPath);
         } else if (entry.isSymbolicLink()) {
-          let target = null;
           try {
-            if (fs.statSync(entryPath).isDirectory()) target = fs.realpathSync.native(entryPath);
+            if (fs.statSync(entryPath).isDirectory()) pending.push(entryPath);
           } catch (_) {
-            // A dangling link is one entry and nothing below it.
-          }
-          if (target && !linkedTargets.has(target)) {
-            linkedTargets.add(target);
-            pending.push(entryPath);
+            // A dangling or looping link is one entry and nothing below it.
           }
         }
       }
@@ -2506,6 +2506,18 @@ function watchEntriesExceed(dirs, ignored, limit) {
     }
   }
   return false;
+}
+
+// chokidar reads CHOKIDAR_USEPOLLING after the options it is handed and lets it
+// win, so the polling mode it actually runs can differ from the one we asked
+// for. Parsed exactly as chokidar 4 parses it; undefined when unset.
+function chokidarPollingEnv(env = process.env) {
+  const raw = env.CHOKIDAR_USEPOLLING;
+  if (raw === undefined) return undefined;
+  const lower = String(raw).toLowerCase();
+  if (lower === 'false' || lower === '0') return false;
+  if (lower === 'true' || lower === '1') return true;
+  return Boolean(lower);
 }
 
 // Reported in place of a watcher when polling would cover more than the limit.
@@ -2521,12 +2533,14 @@ function openWatch(chokidar, config = {}) {
   const limit = Number.isInteger(config.pollingEntryLimit) && config.pollingEntryLimit >= 0
     ? config.pollingEntryLimit
     : WATCH_POLLING_ENTRY_LIMIT;
-  if (config.usePolling === true && watchEntriesExceed(config.dirs || [], ignored, limit)) {
+  // Bounded on the mode chokidar will really run, not the one requested.
+  const usePolling = chokidarPollingEnv() ?? config.usePolling === true;
+  if (usePolling && watchEntriesExceed(config.dirs || [], ignored, limit)) {
     const error = new Error(`over ${limit} paths to poll`);
     error.code = WATCH_POLLING_LIMIT_CODE;
     throw error;
   }
-  return chokidar.watch(config.dirs, watcherOptions(config.usePolling === true, ignored));
+  return chokidar.watch(config.dirs, watcherOptions(usePolling, ignored));
 }
 
 function watcherOptions(usePolling, ignored) {

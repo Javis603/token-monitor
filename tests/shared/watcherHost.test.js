@@ -326,6 +326,26 @@ test('polling forced by an unconfirmed terminate still respects the entry limit'
   }
 });
 
+test('a refused host that is already closed does not report into its successor', async () => {
+  const stub = stubChokidar();
+  const root = tmpTree();
+  for (let index = 0; index < 5; index += 1) fs.writeFileSync(path.join(root, `s${index}.jsonl`), '');
+  const errors = [];
+  try {
+    const host = createInProcessWatcherHost(
+      { dirs: [root], clients: 'claude', usePolling: true, pollingEntryLimit: 3 },
+      { onError: (error) => errors.push(error) }
+    );
+    host.close();
+    await wait(20);
+    assert.deepEqual(errors, []);
+    assert.equal(stub.built.length, 0);
+  } finally {
+    stub.restore();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('the quit path terminates instead of waiting for the slow teardown', () => {
   FakeWorker.reset();
   const coordinator = createWatcherCoordinator({ Worker: FakeWorker });

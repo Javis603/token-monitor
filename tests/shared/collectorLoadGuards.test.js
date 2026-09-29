@@ -5083,24 +5083,81 @@ test('the polling bound follows symlinked directories the way chokidar does', ()
     fs.mkdirSync(root, { recursive: true });
     fs.mkdirSync(elsewhere, { recursive: true });
     for (let index = 0; index < 10; index += 1) fs.writeFileSync(path.join(elsewhere, `f${index}`), '');
-    // A cycle back to the root must end the walk, not hang it.
-    fs.symlinkSync(root, path.join(root, 'loop'), 'junction');
     const built = [];
     const chokidar = { watch: (dirs, options) => { built.push(options); return {}; } };
-    const config = { dirs: [root], clients: 'claude', usePolling: true, pollingEntryLimit: 5 };
+    const config = { dirs: [root], clients: 'claude', usePolling: true, pollingEntryLimit: 15 };
 
+    // chokidar follows symlinks by default, so a link into a large tree counts
+    // toward the bound like the tree itself.
+    fs.symlinkSync(elsewhere, path.join(root, 'first'), 'junction');
     openWatch(chokidar, config);
-    assert.equal(built.length, 1, 'a small tree with a link cycle is still polled');
+    assert.equal(built.length, 1, 'one link into a 10-entry tree fits under 15');
 
-    // chokidar follows symlinks by default, so a link into a large tree has to
-    // count toward the bound like the tree itself.
-    fs.symlinkSync(elsewhere, path.join(root, 'linked'), 'junction');
+    // chokidar dedupes links by their own path, not their target, so a second
+    // alias of the same tree is a second tree to poll.
+    fs.symlinkSync(elsewhere, path.join(root, 'second'), 'junction');
     assert.throws(() => openWatch(chokidar, config), { code: 'watch-polling-limit' });
     assert.equal(built.length, 1);
+
     // Native watching is not bounded here; the descriptor fallback covers it.
     openWatch(chokidar, { ...config, usePolling: false });
     assert.equal(built.length, 2);
   } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a symlink cycle ends the polling count instead of hanging it', () => {
+  const tmp = withTmpHome([]);
+  try {
+    const { openWatch } = freshCollector();
+    const root = path.join(tmp, 'root');
+    fs.mkdirSync(root, { recursive: true });
+    fs.symlinkSync(root, path.join(root, 'loop'), 'junction');
+    const chokidar = { watch: () => ({}) };
+    // Where the walk stops is the platform's symlink limit or the counter,
+    // whichever comes first; either answer is acceptable, never returning is not.
+    try {
+      openWatch(chokidar, { dirs: [root], clients: 'claude', usePolling: true, pollingEntryLimit: 20000 });
+    } catch (error) {
+      assert.equal(error.code, 'watch-polling-limit');
+    }
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('CHOKIDAR_USEPOLLING cannot switch chokidar to polling around the bound', () => {
+  const tmp = withTmpHome([]);
+  const original = process.env.CHOKIDAR_USEPOLLING;
+  try {
+    const { openWatch, resolveWatchUsePolling } = freshCollector();
+    const root = path.join(tmp, 'root');
+    fs.mkdirSync(root, { recursive: true });
+    for (let index = 0; index < 5; index += 1) fs.writeFileSync(path.join(root, `f${index}`), '');
+    const built = [];
+    const chokidar = { watch: (dirs, options) => { built.push(options); return {}; } };
+    const config = { dirs: [root], clients: 'claude', usePolling: false, pollingEntryLimit: 3 };
+
+    process.env.CHOKIDAR_USEPOLLING = 'true';
+    // chokidar applies the variable after our options, so native was asked for
+    // and polling is what would run.
+    assert.throws(() => openWatch(chokidar, config), { code: 'watch-polling-limit' });
+    assert.equal(built.length, 0);
+    // Diagnostics must report the mode chokidar really runs, over our own
+    // override as well.
+    assert.equal(resolveWatchUsePolling(false, { CHOKIDAR_USEPOLLING: '1', TOKEN_MONITOR_WATCH_POLLING: '0' }), true);
+    assert.equal(resolveWatchUsePolling(true, { CHOKIDAR_USEPOLLING: 'false' }), false);
+
+    process.env.CHOKIDAR_USEPOLLING = '0';
+    openWatch(chokidar, { ...config, usePolling: true });
+    assert.equal(built.length, 1, 'turned off, a polling request over the limit runs native');
+    assert.equal(built[0].usePolling, false);
+  } finally {
+    if (original === undefined) delete process.env.CHOKIDAR_USEPOLLING;
+    else process.env.CHOKIDAR_USEPOLLING = original;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }
