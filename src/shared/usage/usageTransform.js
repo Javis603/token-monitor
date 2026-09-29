@@ -64,7 +64,10 @@ function createDailyHistoryFloorReader(options = {}) {
     try {
       floor = allTimeCumulativeFromArchive(read(archiveOptions));
     } catch (_) {
-      floor = {};
+      // A read that fails after the stat succeeded is transient: apply no floor
+      // this tick, but do not cache the empty result, so the next call retries
+      // even though the file mtime has not changed.
+      return {};
     }
     cache = { mtimeMs, floor };
     return floor;
