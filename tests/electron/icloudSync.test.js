@@ -712,6 +712,58 @@ test('a missing newer own subscription snapshot cannot be replaced from an older
   }
 });
 
+test('manual deletion rechecks the current device before writing a tombstone', async () => {
+  const root = makeRoot();
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    let clock = Date.parse('2026-09-06T10:20:00.000Z');
+    const store = createIcloudSyncStore({
+      platform: 'darwin', home: root.root, cloudDocsRoot: path.join(root.root, 'CloudDocs'),
+      writerId: 'writer-a', now: () => clock, staleAfterMs: 10 * 60 * 1000
+    });
+    await store.writeDevice(device('remote'));
+    const active = device('remote', 2);
+    active.updatedAt = '2026-09-06T10:19:00.000Z';
+    active.receivedAt = active.updatedAt;
+    const updater = storeFor(root.root, 'writer-b');
+    await updater.writeDevice(active);
+    await assert.rejects(() => store.deleteDevice('remote', { onlyIfStale: true }), { code: 'device_not_stale' });
+    assert.equal((await store.discoverDevices()).records[0].periods.today.totalTokens, 2);
+    assert.deepEqual(fs.readdirSync(store.status().deletionsRoot), []);
+
+    clock += 11 * 60 * 1000;
+    await store.deleteDevice('remote', { onlyIfStale: true });
+    assert.equal((await store.discoverDevices()).records.length, 0);
+  } finally {
+    root.cleanup();
+  }
+});
+
+test('manual deletion refuses an older stale file when a newer active revision was observed', async () => {
+  const root = makeRoot();
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    const store = createIcloudSyncStore({
+      platform: 'darwin', home: root.root, cloudDocsRoot: path.join(root.root, 'CloudDocs'),
+      writerId: 'writer-a', now: () => Date.parse('2026-09-06T10:20:00.000Z')
+    });
+    const old = await store.writeDevice(device('remote'));
+    const target = path.join(store.status().devicesRoot, deviceFilenameForId('remote'));
+    const oldBody = await fs.promises.readFile(target, 'utf8');
+    const active = device('remote', 2);
+    active.updatedAt = '2026-09-06T10:19:00.000Z';
+    active.receivedAt = active.updatedAt;
+    await store.writeDevice(active);
+    assert.equal((await store.discoverDevices()).records[0].periods.today.totalTokens, 2);
+    await fs.promises.writeFile(target, oldBody);
+    await assert.rejects(() => store.deleteDevice('remote', { onlyIfStale: true }), { code: 'device_not_stale' });
+    assert.equal((await store.discoverDevices()).documents[0].revision, old.revision + 1);
+    assert.deepEqual(fs.readdirSync(store.status().deletionsRoot), []);
+  } finally {
+    root.cleanup();
+  }
+});
+
 test('a reserved but failed subscription counter does not hide the last published snapshot', async () => {
   const root = makeRoot();
   try {
@@ -745,7 +797,7 @@ test('a reserved but failed subscription counter does not hide the last publishe
   }
 });
 
-test('an interrupted subscription publication cannot make an older writer a safe base', async () => {
+test('an interrupted subscription publication with a legacy counter cannot make an older writer a safe base', async () => {
   const root = makeRoot();
   try {
     fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
@@ -774,6 +826,7 @@ test('an interrupted subscription publication cannot make an older writer a safe
     const ledgerPath = interrupted.status().revisionLedgerPath;
     const ledger = JSON.parse(await fs.promises.readFile(ledgerPath, 'utf8'));
     ledger.pendingSubscriptionCounter = ledger.subscriptionCounter;
+    delete ledger.pendingSubscriptionDocument;
     await fs.promises.writeFile(ledgerPath, JSON.stringify(ledger));
     const restarted = storeFor(root.root, 'writer-a');
     const result = await restarted.discoverSubscriptions();
@@ -783,6 +836,100 @@ test('an interrupted subscription publication cannot make an older writer a safe
       () => restarted.writeSubscriptions([subscription('overwritten')], { baseRevision: initial.revisionToken }),
       { code: 'subscription_discovery_incomplete' }
     );
+  } finally {
+    root.cleanup();
+  }
+});
+
+test('a crash after reserving a subscription snapshot can publish the same edit on restart', async () => {
+  const root = makeRoot();
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    const older = storeFor(root.root, 'writer-b');
+    const initial = await older.writeSubscriptions([subscription('old')]);
+    const writer = createIcloudSyncStore({
+      platform: 'darwin', home: root.root, cloudDocsRoot: path.join(root.root, 'CloudDocs'), writerId: 'writer-a',
+      fsApi: {
+        ...fs.promises,
+        rename: async (from, to) => {
+          if (path.dirname(to).endsWith('subscriptions')) {
+            throw Object.assign(new Error('interrupted'), { code: 'EIO' });
+          }
+          return fs.promises.rename(from, to);
+        }
+      }
+    });
+    await assert.rejects(() => writer.writeSubscriptions([subscription('new')], { baseRevision: initial.revisionToken }), { code: 'EIO' });
+    const ledgerPath = writer.status().revisionLedgerPath;
+    const ledger = JSON.parse(await fs.promises.readFile(ledgerPath, 'utf8'));
+    ledger.pendingSubscriptionCounter = ledger.subscriptionCounter;
+    ledger.pendingSubscriptionDocument = {
+      schemaVersion: 1, kind: 'subscriptions', writerId: 'writer-a',
+      revision: { counter: ledger.subscriptionCounter, writerId: 'writer-a' },
+      updatedAt: '2026-09-06T10:21:00.000Z', subscriptions: [subscription('new')]
+    };
+    await fs.promises.writeFile(ledgerPath, JSON.stringify(ledger));
+    await writer.close();
+    const restarted = storeFor(root.root, 'writer-a');
+    const recovered = await restarted.discoverSubscriptions();
+    assert.equal(recovered.winner?.subscriptions[0].id, 'new');
+    assert.equal(recovered.winner?.revision.counter, 2);
+    const saved = JSON.parse(await fs.promises.readFile(path.join(restarted.status().subscriptionsRoot, writerFilenameForId('writer-a'))));
+    assert.equal(saved.updatedAt, ledger.pendingSubscriptionDocument.updatedAt);
+    assert.equal(JSON.parse(await fs.promises.readFile(ledgerPath)).pendingSubscriptionCounter, 0);
+  } finally {
+    root.cleanup();
+  }
+});
+
+test('pending subscription recovery refuses a same-revision snapshot with different content', async () => {
+  const root = makeRoot();
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    const writer = storeFor(root.root, 'writer-a');
+    const published = await writer.writeSubscriptions([subscription('published')]);
+    const ledgerPath = writer.status().revisionLedgerPath;
+    const ledger = JSON.parse(await fs.promises.readFile(ledgerPath, 'utf8'));
+    ledger.pendingSubscriptionCounter = published.written.revision.counter;
+    ledger.pendingSubscriptionDocument = { ...published.written, subscriptions: [subscription('pending')] };
+    await fs.promises.writeFile(ledgerPath, JSON.stringify(ledger));
+    const restarted = storeFor(root.root, 'writer-a');
+    const discovered = await restarted.discoverSubscriptions();
+    assert.equal(discovered.winner, null);
+    assert.ok(discovered.errors.some((entry) => entry.category === 'subscription-snapshot-unavailable'));
+    assert.equal(JSON.parse(await fs.promises.readFile(ledgerPath)).pendingSubscriptionCounter, 1);
+  } finally {
+    root.cleanup();
+  }
+});
+
+test('pending subscription recovery refuses an invalid visible own snapshot', async () => {
+  const root = makeRoot();
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    const writer = storeFor(root.root, 'writer-a');
+    const published = await writer.writeSubscriptions([subscription('published')]);
+    const ledgerPath = writer.status().revisionLedgerPath;
+    const ledger = JSON.parse(await fs.promises.readFile(ledgerPath, 'utf8'));
+    ledger.subscriptionCounter += 1;
+    ledger.pendingSubscriptionCounter = ledger.subscriptionCounter;
+    ledger.pendingSubscriptionDocument = {
+      ...published.written,
+      revision: { counter: ledger.subscriptionCounter, writerId: 'writer-a' },
+      subscriptions: [subscription('pending')]
+    };
+    await fs.promises.writeFile(ledgerPath, JSON.stringify(ledger));
+    const snapshotPath = path.join(writer.status().subscriptionsRoot, writerFilenameForId('writer-a'));
+    await fs.promises.writeFile(snapshotPath, '{invalid');
+    const restarted = storeFor(root.root, 'writer-a');
+    const discovered = await restarted.discoverSubscriptions();
+    assert.equal(discovered.winner, null);
+    assert.ok(discovered.errors.some((entry) => entry.category === 'subscription-snapshot-unavailable'));
+    await assert.rejects(
+      () => restarted.writeSubscriptions([subscription('replacement')], { baseRevision: published.revisionToken }),
+      { code: 'subscription_discovery_incomplete' }
+    );
+    assert.equal(await fs.promises.readFile(snapshotPath, 'utf8'), '{invalid');
   } finally {
     root.cleanup();
   }
@@ -834,10 +981,11 @@ test('a subscription published before directory fsync failure remains protected 
       }
     });
     const discovered = await restarted.discoverSubscriptions();
-    assert.equal(discovered.winner, null);
+    assert.equal(discovered.winner?.subscriptions[0].id, 'new');
+    assert.equal(discovered.winner?.revision.counter, 2);
     await assert.rejects(
       () => restarted.writeSubscriptions([subscription('overwritten')], { baseRevision: initial.revisionToken }),
-      { code: 'subscription_discovery_incomplete' }
+      { code: 'stale_write' }
     );
   } finally {
     root.cleanup();

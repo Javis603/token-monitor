@@ -586,6 +586,7 @@ function defaultSettings() {
     lastViewState: { period: 'today', breakdown: 'tool' },
     discordRpcEnabled: false,
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
+    icloudWriterId: '',
     lastPostedDeviceId: '',
     clients: clientsCsvForSetting(process.env.TOKEN_MONITOR_CLIENTS),
     customScanPaths: {},
@@ -3988,11 +3989,17 @@ async function startIcloudCollector() {
   ) && runtimeEpoch === icloudRuntimeEpoch;
   const widgetProducerOwner = captureMacWidgetProducerOwner();
   let lastIcloudStatusState = '';
+  // The writer owns subscription and deletion snapshots across Device ID edits.
+  // Persist its identity before publishing anything under it.
+  if (!settings.icloudWriterId) {
+    settings.icloudWriterId = settings.deviceId;
+    if (!saveSettings()) throw new Error('Could not persist iCloud writer identity');
+  }
   const store = createIcloudSyncStore({
     platform: process.platform,
     home: app.getPath('home'),
     deviceId: settings.deviceId,
-    writerId: settings.deviceId,
+    writerId: settings.icloudWriterId,
     revisionLedgerPath: path.join(app.getPath('userData'), 'icloud-revisions.json'),
     staleAfterMs: 10 * 60 * 1000
   });
@@ -5018,6 +5025,7 @@ function settingsForRenderer() {
   });
   const rendererSettings = { ...settings };
   delete rendererSettings.icloudRetiredDeviceIds;
+  delete rendererSettings.icloudWriterId;
   for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
   return {
     ...rendererSettings,
@@ -7229,6 +7237,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.subscriptions;
     delete normalizedPatch.subscriptionsOrphaned;
     delete normalizedPatch.subscriptionsCacheHub;
+    delete normalizedPatch.icloudWriterId;
     // Derived for the renderer from the hub document, not settings. Persisting a
     // copy would leave a key on disk that describes a hub as of whenever a form
     // was last saved, waiting to be mistaken for the real thing.
@@ -7306,6 +7315,7 @@ app.whenReady().then(() => {
         { currencyApi: { normalizeCurrency } }
       ),
       subscriptionsCacheHub: String(settings.subscriptionsCacheHub || ''),
+      icloudWriterId: String(settings.icloudWriterId || ''),
       subscriptionsOrphaned: {
         hubUrl: orphanedSubscriptions().hubUrl,
         records: subscriptionDisplay.normalizeSubscriptions(

@@ -31,7 +31,8 @@ const MAX_WRITER_ID_LENGTH = 512;
 // limit. Keeping the document cap at that limit leaves room for the device
 // envelope and avoids making a valid Hub payload impossible to persist here.
 const MAX_ICLOUD_DOCUMENT_BYTES = MAX_JSON_BODY_BYTES;
-const MAX_REVISION_LEDGER_BYTES = MAX_JSON_BODY_BYTES;
+// The local ledger may also hold one pending subscription snapshot for recovery.
+const MAX_REVISION_LEDGER_BYTES = 2 * MAX_JSON_BODY_BYTES;
 const MAX_DELETIONS_PER_WRITER = 512;
 const DEFAULT_STALE_AFTER_MS = 10 * 60 * 1000;
 const REVISION_LEDGER_SCHEMA_VERSION = 1;
@@ -452,6 +453,7 @@ function emptyRevisionLedger() {
     subscriptionCounter: 0,
     publishedSubscriptionCounter: 0,
     pendingSubscriptionCounter: 0,
+    pendingSubscriptionDocument: null,
     deletionCounter: 0,
     deletions: []
   };
@@ -473,6 +475,7 @@ function validRevisionLedger(document) {
   const subscriptionCounter = Number(document.subscriptionCounter || 0);
   const publishedSubscriptionCounter = Number(document.publishedSubscriptionCounter || 0);
   const pendingSubscriptionCounter = Number(document.pendingSubscriptionCounter || 0);
+  const pendingSubscriptionDocument = document.pendingSubscriptionDocument ?? null;
   const deletionCounter = Number(document.deletionCounter || 0);
   if (
     !Number.isSafeInteger(subscriptionCounter) || subscriptionCounter < 0
@@ -480,6 +483,11 @@ function validRevisionLedger(document) {
     || publishedSubscriptionCounter > subscriptionCounter
     || !Number.isSafeInteger(pendingSubscriptionCounter) || pendingSubscriptionCounter < 0
     || pendingSubscriptionCounter > subscriptionCounter
+    || (pendingSubscriptionDocument !== null && (
+      pendingSubscriptionCounter === 0
+      || !validSubscriptionDocument(pendingSubscriptionDocument, writerFilenameForId(pendingSubscriptionDocument.writerId))
+      || pendingSubscriptionDocument.revision.counter !== pendingSubscriptionCounter
+    ))
     || !Number.isSafeInteger(deletionCounter) || deletionCounter < 0
   ) return null;
   const deletions = document.deletions === undefined
@@ -493,6 +501,7 @@ function validRevisionLedger(document) {
     subscriptionCounter,
     publishedSubscriptionCounter,
     pendingSubscriptionCounter,
+    pendingSubscriptionDocument,
     deletionCounter,
     deletions
   };
@@ -539,6 +548,8 @@ function createIcloudSyncStore(options = {}) {
   let revisionLedgerQueue = Promise.resolve();
   let deviceMutationQueue = Promise.resolve();
   let subscriptionMutationQueue = Promise.resolve();
+  let publishingSubscription = false;
+  let pendingRecoveryPromise = null;
   let acceptingMutations = true;
   let closePromise = null;
   let lastDeviceFingerprint = '';
@@ -566,12 +577,13 @@ function createIcloudSyncStore(options = {}) {
 
   async function waitForIdle() {
     while (true) {
-      const queues = [deviceMutationQueue, subscriptionMutationQueue, revisionLedgerQueue];
+      const queues = [deviceMutationQueue, subscriptionMutationQueue, revisionLedgerQueue, pendingRecoveryPromise];
       await Promise.allSettled(queues);
       if (
         queues[0] === deviceMutationQueue
         && queues[1] === subscriptionMutationQueue
         && queues[2] === revisionLedgerQueue
+        && !pendingRecoveryPromise
       ) return;
     }
   }
@@ -799,6 +811,7 @@ function createIcloudSyncStore(options = {}) {
       // Zero is a completed/failed reservation, not a missing counter. Do not
       // resurrect an in-memory pending marker after disk has cleared it.
       pendingSubscriptionCounter: disk.pendingSubscriptionCounter,
+      pendingSubscriptionDocument: disk.pendingSubscriptionDocument,
       deletionCounter: Math.max(current.deletionCounter, disk.deletionCounter),
       deletions: [...deletionTargets].map(([targetDeviceId, targetDeviceRevision]) => ({ targetDeviceId, targetDeviceRevision }))
         .sort((left, right) => left.targetDeviceId.localeCompare(right.targetDeviceId))
@@ -833,12 +846,25 @@ function createIcloudSyncStore(options = {}) {
     });
   }
 
-  async function reserveSubscriptionCounter(observedCounter) {
+  async function reserveSubscriptionDocument(observedCounter, subscriptions) {
     return allocateRevision(async (ledger) => {
       const counter = Math.max(ledger.subscriptionCounter, observedCounter) + 1;
+      const document = {
+        schemaVersion: ICLOUD_SCHEMA_VERSION,
+        kind: 'subscriptions',
+        writerId,
+        revision: { counter, writerId },
+        updatedAt: nowIso(now),
+        subscriptions
+      };
       return {
-        revision: counter,
-        ledger: { ...ledger, subscriptionCounter: counter, pendingSubscriptionCounter: counter }
+        revision: document,
+        ledger: {
+          ...ledger,
+          subscriptionCounter: counter,
+          pendingSubscriptionCounter: counter,
+          pendingSubscriptionDocument: document
+        }
       };
     });
   }
@@ -849,7 +875,8 @@ function createIcloudSyncStore(options = {}) {
       ledger: {
         ...ledger,
         publishedSubscriptionCounter: Math.max(ledger.publishedSubscriptionCounter, counter),
-        pendingSubscriptionCounter: ledger.pendingSubscriptionCounter === counter ? 0 : ledger.pendingSubscriptionCounter
+        pendingSubscriptionCounter: ledger.pendingSubscriptionCounter === counter ? 0 : ledger.pendingSubscriptionCounter,
+        pendingSubscriptionDocument: ledger.pendingSubscriptionCounter === counter ? null : ledger.pendingSubscriptionDocument
       }
     }));
   }
@@ -859,7 +886,8 @@ function createIcloudSyncStore(options = {}) {
       revision: counter,
       ledger: {
         ...ledger,
-        pendingSubscriptionCounter: ledger.pendingSubscriptionCounter === counter ? 0 : ledger.pendingSubscriptionCounter
+        pendingSubscriptionCounter: ledger.pendingSubscriptionCounter === counter ? 0 : ledger.pendingSubscriptionCounter,
+        pendingSubscriptionDocument: ledger.pendingSubscriptionCounter === counter ? null : ledger.pendingSubscriptionDocument
       }
     }));
   }
@@ -959,7 +987,7 @@ function createIcloudSyncStore(options = {}) {
     });
   }
 
-  async function deleteDeviceNow(deviceId) {
+  async function deleteDeviceNow(deviceId, { onlyIfStale = false } = {}) {
     const id = cleanId(deviceId, MAX_DEVICE_ID_LENGTH);
     const filename = deviceFilenameForId(id);
     if (!filename) {
@@ -975,7 +1003,10 @@ function createIcloudSyncStore(options = {}) {
     }
     // Refresh first so a device that is present in the last-good cache, but
     // temporarily absent from the directory, still gets a precise tombstone.
-    await discoverDevices();
+    const discoveredDevices = await discoverDevices();
+    if (onlyIfStale && discoveredDevices.errors.length) {
+      throw Object.assign(new Error('Device discovery is incomplete'), { code: 'device_not_stale' });
+    }
     const existingDevice = await readJsonFile(
       fsApi,
       path.join(available.paths.devicesRoot, filename),
@@ -984,6 +1015,16 @@ function createIcloudSyncStore(options = {}) {
       hostPlatform
     );
     const existingDocument = existingDevice.ok ? validDeviceDocument(existingDevice.value, filename) : null;
+    if (onlyIfStale) {
+      const record = existingDocument?.record;
+      const cachedRevision = deviceCache.get(filename)?.document?.revision || 0;
+      const ageMs = now() - Date.parse(record?.receivedAt || record?.updatedAt || 0);
+      const staleAfter = staleAfterMsForSyncUpload(record?.syncUploadIntervalMs, staleAfterMs);
+      if (!record || existingDocument.revision < cachedRevision
+        || !Number.isFinite(ageMs) || staleAfter <= 0 || ageMs <= staleAfter) {
+        throw Object.assign(new Error('Device is not confirmed stale'), { code: 'device_not_stale' });
+      }
+    }
     const ledger = await refreshRevisionLedger();
     const targetDeviceRevision = Math.max(
       Number(ledger.devices[id] || 0),
@@ -1056,8 +1097,51 @@ function createIcloudSyncStore(options = {}) {
     return { deleted: true, deviceId: id, targetDeviceRevision };
   }
 
-  function deleteDevice(deviceId) {
-    return enqueueDeviceMutation(() => deleteDeviceNow(deviceId));
+  function deleteDevice(deviceId, { onlyIfStale = false } = {}) {
+    return enqueueDeviceMutation(() => deleteDeviceNow(deviceId, { onlyIfStale }));
+  }
+
+  async function recoverPendingSubscription(available) {
+    const ledger = await loadRevisionLedger();
+    const pending = ledger.pendingSubscriptionDocument;
+    if (!pending || !available.paths.available || publishingSubscription || !acceptingMutations) return;
+    if (pendingRecoveryPromise) return pendingRecoveryPromise;
+    pendingRecoveryPromise = publishPendingSubscription(pending, available).finally(() => { pendingRecoveryPromise = null; });
+    return pendingRecoveryPromise;
+  }
+
+  async function publishPendingSubscription(pending, available) {
+    if (pending.writerId !== writerId) {
+      throw Object.assign(new Error('iCloud writer identity does not match the pending snapshot'), { code: 'subscription-writer-changed' });
+    }
+    const filename = writerFilenameForId(writerId);
+    const pathToOwnSnapshot = path.join(available.paths.subscriptionsRoot, filename);
+    const result = await readJsonFile(fsApi, pathToOwnSnapshot, MAX_ICLOUD_DOCUMENT_BYTES, platform, hostPlatform);
+    const visible = result.ok ? validSubscriptionDocument(result.value, filename) : null;
+    if (visible?.revision.counter >= pending.revision.counter) {
+      if (visible.revision.counter === pending.revision.counter
+        && stableSerialize(visible.subscriptions) !== stableSerialize(validSubscriptionDocument(pending, filename).subscriptions)) {
+        throw Object.assign(new Error('The pending iCloud subscription snapshot differs from the visible copy'), { code: 'subscription-snapshot-unavailable' });
+      }
+      subscriptionCache.set(filename, visible);
+      await markPublishedSubscription(pending.revision.counter);
+      return;
+    }
+    if (!visible && result.reason !== 'missing') {
+      throw Object.assign(new Error('The pending iCloud subscription snapshot cannot be verified'), { code: 'subscription-snapshot-unavailable' });
+    }
+    const cached = subscriptionCache.get(filename);
+    if (cached?.revision.counter > pending.revision.counter) {
+      throw Object.assign(new Error('A newer iCloud subscription snapshot was already observed'), { code: 'subscription-snapshot-unavailable' });
+    }
+    // Re-publish only the exact candidate persisted before the interrupted write.
+    // As with a normal iCloud write, another writer not yet visible on this Mac
+    // may still win later; this cannot provide atomic conflict detection.
+    await atomicWriteJson(fsApi, pathToOwnSnapshot, pending, {
+      platform, hostPlatform, maxBytes: MAX_ICLOUD_DOCUMENT_BYTES
+    });
+    subscriptionCache.set(filename, validSubscriptionDocument(pending, filename));
+    await markPublishedSubscription(pending.revision.counter);
   }
 
   async function discoverSubscriptions() {
@@ -1071,6 +1155,14 @@ function createIcloudSyncStore(options = {}) {
         revisionToken: revisionToken(winner?.revision),
         status: status(),
         errors: available.error ? [{ category: available.paths.reason || 'root-unavailable' }] : []
+      };
+    }
+    try {
+      await recoverPendingSubscription(available);
+    } catch (error) {
+      return {
+        documents: [...subscriptionCache.values()], winner: null, revisionToken: '', status: status(),
+        errors: [{ category: error.code || 'subscription-recovery-failed' }]
       };
     }
     const listing = await listFiles(available.paths.subscriptionsRoot, isKnownWriterFilename);
@@ -1139,34 +1231,33 @@ function createIcloudSyncStore(options = {}) {
       throw error;
     }
     const maxCounter = current.documents.reduce((max, document) => Math.max(max, document.revision.counter), 0);
-    const counter = await reserveSubscriptionCounter(maxCounter);
-    const document = {
-      schemaVersion: ICLOUD_SCHEMA_VERSION,
-      kind: 'subscriptions',
-      writerId,
-      revision: { counter, writerId },
-      updatedAt: nowIso(now),
-      // An empty array is an explicit, valid snapshot. Absence of files is not.
-      subscriptions: normalized
-    };
-    const filename = writerFilenameForId(writerId);
+    // An empty array is an explicit, valid snapshot. Absence of files is not.
+    publishingSubscription = true;
+    let document;
     try {
-      await atomicWriteJson(
-        fsApi,
-        path.join(available.paths.subscriptionsRoot, filename),
-        document,
-        { platform, hostPlatform, maxBytes: MAX_ICLOUD_DOCUMENT_BYTES }
-      );
-    } catch (error) {
-      if (!error.atomicWriteRenamed) {
-        try { await clearPendingSubscription(counter); } catch (_) { /* Keep the write uncertain if the ledger is unavailable. */ }
+      document = await reserveSubscriptionDocument(maxCounter, normalized);
+      const counter = document.revision.counter;
+      const filename = writerFilenameForId(writerId);
+      try {
+        await atomicWriteJson(
+          fsApi,
+          path.join(available.paths.subscriptionsRoot, filename),
+          document,
+          { platform, hostPlatform, maxBytes: MAX_ICLOUD_DOCUMENT_BYTES }
+        );
+      } catch (error) {
+        if (!error.atomicWriteRenamed) {
+          try { await clearPendingSubscription(counter); } catch (_) { /* Keep the write uncertain if the ledger is unavailable. */ }
+        }
+        lastError = { category: error.code === 'document_too_large' ? 'document-too-large' : 'subscription-write-failed', error };
+        error.code = error.code || lastError.category;
+        throw error;
       }
-      lastError = { category: error.code === 'document_too_large' ? 'document-too-large' : 'subscription-write-failed', error };
-      error.code = error.code || lastError.category;
-      throw error;
+      subscriptionCache.set(filename, validSubscriptionDocument(document, filename));
+      await markPublishedSubscription(counter);
+    } finally {
+      publishingSubscription = false;
     }
-    subscriptionCache.set(filename, validSubscriptionDocument(document, filename));
-    await markPublishedSubscription(counter);
     const refreshed = await discoverSubscriptions();
     return { ...refreshed, written: document };
   }

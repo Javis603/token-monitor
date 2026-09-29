@@ -443,7 +443,7 @@ function createIcloudSyncRuntime(options = {}) {
     }
     const expectedGeneration = generation;
     try {
-      const result = await Promise.resolve(store.deleteDevice(deviceId));
+      const result = await Promise.resolve(store.deleteDevice(deviceId, { onlyIfStale: true }));
       if (!active || expectedGeneration !== generation) {
         const error = new Error('iCloud sync is stopped');
         error.code = 'icloud_stopped';

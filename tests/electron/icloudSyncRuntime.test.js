@@ -670,7 +670,7 @@ test('runtime quiescence drains a pending deletion before replacement', async ()
     await runtimeA.start();
     await runtimeA.writeDevice(record('shared-delete', 1));
     blockedFs.enable();
-    const oldDelete = runtimeA.deleteDevice('shared-delete');
+    const oldDelete = storeA.deleteDevice('shared-delete');
     await waitFor(blockedFs.isBlocked, 'old deletion to block');
     const stopping = runtimeA.stop();
     const storeB = createIcloudSyncStore({
@@ -687,7 +687,7 @@ test('runtime quiescence drains a pending deletion before replacement', async ()
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(replacementStarted, false);
     blockedFs.release();
-    await assert.rejects(oldDelete, { code: 'icloud_stopped' });
+    await oldDelete;
     await replacement;
     const final = await storeB.discoverDevices();
     assert.equal(final.records[0].periods.today.totalTokens, 9);
@@ -699,6 +699,26 @@ test('runtime quiescence drains a pending deletion before replacement', async ()
     assert.equal(tombstone.deletions[0].targetDeviceRevision, 1);
     await runtimeB.stop();
   } finally {
+    fixture.cleanup();
+  }
+});
+
+test('runtime manual deletion refuses a live device while internal cleanup still works', async () => {
+  const fixture = rootFixture();
+  let runtime;
+  try {
+    const store = createIcloudSyncStore({
+      platform: 'darwin', home: fixture.root, cloudDocsRoot: path.join(fixture.root, 'CloudDocs'), writerId: 'writer-a'
+    });
+    runtime = createIcloudSyncRuntime({ store, reconcileMs: 0, watchFactory: () => ({ close() {} }) });
+    await runtime.start();
+    await runtime.writeDevice(record('mac-a', 1));
+    await assert.rejects(() => runtime.deleteDevice('mac-a'), { code: 'device_not_stale' });
+    assert.deepEqual((await store.discoverDevices()).records.map((entry) => entry.deviceId), ['mac-a']);
+    await runtime.writeDevice(record('mac-b', 2), { retiredDeviceIds: ['mac-a'] });
+    assert.deepEqual((await store.discoverDevices()).records.map((entry) => entry.deviceId), ['mac-b']);
+  } finally {
+    await runtime?.stop();
     fixture.cleanup();
   }
 });
@@ -864,7 +884,7 @@ test('settings identity handoff survives restart and hides a temporarily missing
     )));
     assert.deepEqual(settings.icloudRetiredDeviceIds, ['mac-a']);
     fs.unlinkSync(oldPath);
-    const store = createIcloudSyncStore({ ...options, writerId: 'mac-b' });
+    const store = createIcloudSyncStore({ ...options, writerId: 'mac-a' });
     runtime = createIcloudSyncRuntime({ store, reconcileMs: 0, watchFactory: () => null });
     await runtime.start();
     assert.equal(await runtime.writeDevice(record('mac-b', 42), { retiredDeviceIds: settings.icloudRetiredDeviceIds }), true);
@@ -879,6 +899,18 @@ test('settings identity handoff survives restart and hides a temporarily missing
     await runtime?.stop();
     fixture.cleanup();
   }
+});
+
+test('iCloud writer identity persists before startup and cannot be patched from the renderer', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = main.slice(main.indexOf('async function startIcloudCollector()'), main.indexOf('\nfunction startSyncCollector()', main.indexOf('async function startIcloudCollector()')));
+  assert.match(start, /if \(!settings\.icloudWriterId\) \{\s*settings\.icloudWriterId = settings\.deviceId;\s*if \(!saveSettings\(\)\) throw/);
+  assert.match(start, /writerId: settings\.icloudWriterId/);
+  const renderer = main.slice(main.indexOf('function settingsForRenderer()'), main.indexOf('\nfunction ', main.indexOf('function settingsForRenderer()') + 1));
+  assert.match(renderer, /delete rendererSettings\.icloudWriterId/);
+  const patch = main.slice(main.indexOf('function applySettingsPatch(patch)'));
+  assert.match(patch, /delete normalizedPatch\.icloudWriterId/);
+  assert.match(patch, /icloudWriterId: String\(settings\.icloudWriterId \|\| ''\)/);
 });
 
 test('failed replacement keeps the old cloud record and failed cleanup retries on an unchanged publish', async () => {
