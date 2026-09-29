@@ -45,7 +45,7 @@ var translations = {
     "cta.download.aria.linux": "Download Token Monitor for Linux",
     "cta.github": "View on GitHub",
 
-    "tools.eyebrow": "40+ tools and providers",
+    "tools.eyebrow": "41+ tools and providers",
     "home.limits": "LIMITS",
     "home.models": "MODELS",
     "home.activity": "ACTIVITY",
@@ -303,7 +303,7 @@ var translations = {
     "cta.download.aria.linux": "下載 Linux 版 Token Monitor",
     "cta.github": "查看 GitHub",
 
-    "tools.eyebrow": "40+ 種工具與供應商",
+    "tools.eyebrow": "41+ 種工具與供應商",
     "home.limits": "額度",
     "home.models": "模型",
     "home.activity": "活動",
@@ -561,7 +561,7 @@ var translations = {
     "cta.download.aria.linux": "下载 Linux 版 Token Monitor",
     "cta.github": "查看 GitHub",
 
-    "tools.eyebrow": "40+ 种工具与提供商",
+    "tools.eyebrow": "41+ 种工具与提供商",
     "home.limits": "额度",
     "home.models": "模型",
     "home.activity": "活动",
@@ -819,7 +819,7 @@ var translations = {
     "cta.download.aria.linux": "Linux용 Token Monitor 다운로드",
     "cta.github": "GitHub에서 보기",
 
-    "tools.eyebrow": "40+ 도구와 제공업체",
+    "tools.eyebrow": "41+ 도구와 제공업체",
     "home.limits": "한도",
     "home.models": "모델",
     "home.activity": "활동",
@@ -1077,7 +1077,7 @@ var translations = {
     "cta.download.aria.linux": "Linux 版 Token Monitor をダウンロード",
     "cta.github": "GitHub で見る",
 
-    "tools.eyebrow": "40+ のツールとプロバイダー",
+    "tools.eyebrow": "41+ のツールとプロバイダー",
     "home.limits": "制限",
     "home.models": "モデル",
     "home.activity": "アクティビティ",
