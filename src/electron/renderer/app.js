@@ -14255,7 +14255,8 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
   const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
   if (accountStatus === 'linked') {
     // A ZCode-discovered login is an OAuth-style link, not a pasted API key,
-    // so it reads as connected the way Zed's linked sessions do.
+    // so it reads as connected the way Zed's linked sessions do. Same idea for
+    // a Factory Droid env credential.
     const linkedKey = providerName === 'zai' && source === 'zcode-auto'
       ? 'settings.zai.statusLinked'
       : providerName === 'factory' && source === 'droid-env'
@@ -14263,6 +14264,9 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
         : providerName === 'cline' && source === 'cline-signin'
           ? 'settings.cline.statusSignin'
           : null;
+    // Only the Kimi credential chain produces a 'desktop' source (the Kimi
+    // Work desktop app session picked up automatically on Windows).
+    if (source === 'desktop') return t(`settings.${providerName}.statusDesktop`);
     return t(linkedKey || (source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`));
   }
   if (accountStatus === 'invalid') {
@@ -14343,7 +14347,12 @@ function renderExternalProviderStatus(providerName) {
   if (providerName === 'volcengine') renderVolcengineAgentOverrideState();
   setCursorStatusText(
     statusEl,
-    pending ? t('settings.common.checking') : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
+    pending
+      // Limits stay buffered until the device's first usage baseline completes,
+      // so a fresh save on a cold start waits on the collector, not on the
+      // credential. Say so instead of showing a "checking" that never lands.
+      ? t(state.stats?.limits ? 'settings.common.checking' : 'settings.common.collectingBaseline')
+      : apiKeyAccountStatusText(providerName, provider, configured, source, enabled)
   );
   // A local ZCode install keeps the Z.ai row honest when unchecked: the
   // auto-discovered plans still exist, so the pill shows auto-detect instead

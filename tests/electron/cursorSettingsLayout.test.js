@@ -1043,9 +1043,11 @@ test('Kimi account panel makes the Code API primary and keeps Web access as a fa
   const html = readRendererFile('index.html');
   assert.match(html, /data-i18n="settings\.kimi\.title">Kimi Account<\/span>/);
   assert.match(html, /data-i18n="settings\.kimi\.openBrowser">Open Kimi Code Console<\/button>/);
-  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?data-i18n-aria-label="settings\.kimi\.apiKeyLabel"[\s\S]*?<button id="kimiApiKeySubmit"[\s\S]*?<details class="kimi-web-fallback">[\s\S]*?settings\.kimi\.step2[\s\S]*?Local Storage[\s\S]*?settings\.kimi\.step3[\s\S]*?access_token[\s\S]*?<textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off"[\s\S]*?data-i18n-aria-label="settings\.kimi\.webTokenLabel"[\s\S]*?placeholder="access_token=\.\.\."[\s\S]*?<button id="kimiWebAccessTokenSubmit"[\s\S]*data-i18n="settings\.kimi\.saveWebToken">/);
+  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?data-i18n-aria-label="settings\.kimi\.apiKeyLabel"[\s\S]*?<button id="kimiApiKeySubmit"[\s\S]*?<details class="kimi-web-fallback">[\s\S]*?settings\.kimi\.step2[\s\S]*?Local Storage[\s\S]*?settings\.kimi\.step3[\s\S]*?access_token[\s\S]*?<textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off"[\s\S]*?data-i18n-aria-label="settings\.kimi\.webTokenLabel"[\s\S]*?placeholder="access_token \/ refresh_token=\.\.\."[\s\S]*?<button id="kimiWebAccessTokenSubmit"[\s\S]*data-i18n="settings\.kimi\.saveWebToken">/);
   assert.doesNotMatch(html, /kimi-auth|kimi-api-fallback/);
-
+  assert.match(html, /settings\.kimi\.step2[\s\S]*Application\/Storage[\s\S]*Local Storage[\s\S]*www\.kimi\.com/);
+  assert.match(html, /settings\.kimi\.step3[\s\S]*Find access_token and copy its Value/);
+  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?<details class="kimi-web-fallback">[\s\S]*?placeholder="access_token \/ refresh_token=\.\.\."[\s\S]*?data-i18n="settings\.kimi\.saveWebToken">/);
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
   // Each lane sends only its own credential through the shared save path, so
@@ -1726,8 +1728,8 @@ test('settingsForRenderer strips provider cookies before they reach the renderer
   assert.match(opencodeRedactor, /apiKey: profile\?\.apiKey \? 'set' : ''/);
   const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
   assert.deepEqual(CREDENTIAL_SETTING_PATHS.kimiWebAccessToken, ['providers', 'kimi', 'webAccessToken']);
-  const { accountStatusProjection } = require('../../src/electron/limits/accountSettings');
-  assert.equal(accountStatusProjection({ kimiWebAccessToken: 'private' }, {}).kimiWebAccessTokenConfigured, true);
+  const { limitProviderEntry } = require('../../src/shared/limits/registry');
+  assert.deepEqual(limitProviderEntry('kimi').fields.find((f) => f.key === 'kimiWebRefreshToken').storePath, ['providers', 'kimi', 'webRefreshToken']);
   const mimoRendererShape = main.slice(
     main.indexOf('function mimoAccountsForRenderer'),
     main.indexOf('function mimoManagedAccountsForCollector')
