@@ -85,6 +85,35 @@ test('normalizes the public codex-resets v1 status schema', () => {
   assert.equal(result.latestResetType, 'banked');
 });
 
+test('accepts a strong watch without a numeric reset chance', async () => {
+  const payload = {
+    data: {
+      latest_reset: { announced_at: '2026-09-26T18:17:54.000Z' },
+      scheduled_reset: null,
+      active_watch: {
+        level: 'strong',
+        reset_chance_percent: null,
+        forecast_window: 'around OpenAI DevDay 2026 on September 29 (Pacific Time)',
+        observed_at: '2026-09-27T10:39:35.426Z',
+        expires_at: '2026-09-30T06:59:59.999Z'
+      }
+    }
+  };
+  const client = createCodexResetForecastClient({
+    now: () => Date.parse('2026-09-28T03:35:48.181Z'),
+    fetchImpl: async () => ({ ok: true, json: async () => payload })
+  });
+  const forecast = await client.getForecast();
+  assert.equal(forecast.status, 'active');
+  assert.equal(forecast.chancePercent, null);
+  assert.equal(forecast.expiresAt, '2026-09-30T06:59:59.999Z');
+  assert.equal(forecast.error, undefined);
+  assert.equal(forecast.retryAfterMs, 15 * 60 * 1000);
+  assert.equal(normalizeCodexResetForecast(payload, {
+    checkedAt: '2026-09-30T06:59:59.999Z'
+  }).status, 'inactive');
+});
+
 test('prefers an explicit scheduled reset over an empty active watch', async () => {
   const payload = {
     data: {

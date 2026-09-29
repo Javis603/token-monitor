@@ -37,7 +37,7 @@ Switching the system account rewrites the live auth material for the selected wo
 
 ## Reset forecast
 
-The optional reset forecast is display enrichment from `codex-resets.com`, not quota authority. It has independent success/error cache durations and bounded fetch time. A forecast failure must not alter the provider's real windows.
+The optional reset forecast is display enrichment from `codex-resets.com`, not quota authority. Its `active_watch.level: strong` signal can be valid with a null chance percentage; the expiry remains the validity boundary. It has independent success/error cache durations and bounded fetch time. A forecast failure must not alter the provider's real windows.
 
 ## Verification
 

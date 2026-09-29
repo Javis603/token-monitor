@@ -111,21 +111,37 @@ test('publishes projected stats to the macOS Widget on collection and presentati
   assert.match(mainSource, /compactTokenUnits: settings\?\.compactTokenUnits/);
 });
 
+function mainFunctionSource(signature) {
+  const start = mainSource.indexOf(signature);
+  const end = mainSource.indexOf('\nfunction ', start + signature.length);
+  assert.ok(start >= 0, `${signature} should exist`);
+  return mainSource.slice(start, end === -1 ? mainSource.length : end);
+}
+
 test('Widget producers carry lifetime ownership through the sendPush outlet', () => {
   for (const signature of [
-    'function startSyncCollector()',
     'function startHostStats()',
     'function startLocalCollector()',
-    'async function startStatsStream(options = {})',
     'async function refreshFromTray()'
   ]) {
-    const start = mainSource.indexOf(signature);
-    const end = mainSource.indexOf('\nfunction ', start + signature.length);
-    assert.ok(start >= 0, `${signature} should exist`);
-    const source = mainSource.slice(start, end === -1 ? mainSource.length : end);
+    const source = mainFunctionSource(signature);
     assert.match(source, /const widgetProducerOwner = captureMacWidgetProducerOwner\(\);/);
     assert.match(source, /sendPush\([\s\S]*\{ widgetProducerOwner \}\)/);
   }
+  // Client mode batches its publications, so its producers hand the owner to the
+  // batch and the publisher passes it on to sendPush.
+  for (const signature of [
+    'function startSyncCollector()',
+    'async function startStatsStream(options = {})'
+  ]) {
+    const source = mainFunctionSource(signature);
+    assert.match(source, /const widgetProducerOwner = captureMacWidgetProducerOwner\(\);/);
+    assert.match(source, /requestSyncDisplayStats\(\{[\s\S]*widgetProducerOwner\s*\}\)/);
+  }
+  assert.match(
+    mainFunctionSource('function publishSyncDisplayStats('),
+    /sendPush\([\s\S]*\{ widgetProducerOwner \}\)/
+  );
 });
 
 test('Widget ownership advances producer lifetime only for mode transitions', () => {

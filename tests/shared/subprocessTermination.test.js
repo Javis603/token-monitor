@@ -3,7 +3,14 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createSubprocessTermination } = require('../../src/shared/subprocessTermination');
+const { EventEmitter } = require('node:events');
+
+const {
+  createLiveSubprocessTable,
+  createSubprocessTermination,
+  signalLiveSubprocesses,
+  trackLiveSubprocesses
+} = require('../../src/shared/subprocessTermination');
 
 function fakeTimers() {
   const timers = [];
@@ -83,4 +90,41 @@ test('forced termination reports an unconfirmed close after a bounded second gra
   assert.equal(unconfirmed, 1, 'the terminal fallback is reported once');
 
   termination.confirmClosed();
+});
+
+test('a tracked subprocess is listed from its spawn until it exits', (t) => {
+  const table = createLiveSubprocessTable();
+  trackLiveSubprocesses(table);
+  t.after(() => trackLiveSubprocesses(null));
+  const child = Object.assign(new EventEmitter(), { pid: 4201, kill() { return true; } });
+  const closedBeforeExit = Object.assign(new EventEmitter(), { pid: 4202, kill() { return true; } });
+
+  createSubprocessTermination(child);
+  const second = createSubprocessTermination(closedBeforeExit);
+  const killed = [];
+  signalLiveSubprocesses(table, 'SIGTERM', (pid, signal) => killed.push([pid, signal]));
+  assert.deepEqual(killed, [[4201, 'SIGTERM'], [4202, 'SIGTERM']]);
+
+  // Its PID can be reused as soon as it has exited, before stdio closes.
+  child.emit('exit', 0, null);
+  second.confirmClosed();
+  killed.length = 0;
+  signalLiveSubprocesses(table, 'SIGTERM', (pid) => killed.push(pid));
+  assert.deepEqual(killed, []);
+});
+
+test('a full table leaves the extra subprocess untracked, and no table tracks nothing', (t) => {
+  const table = createLiveSubprocessTable();
+  trackLiveSubprocesses(table);
+  t.after(() => trackLiveSubprocesses(null));
+  const spawnFake = (pid) => createSubprocessTermination(Object.assign(new EventEmitter(), { pid, kill() { return true; } }));
+
+  for (let index = 0; index <= table.length; index += 1) spawnFake(5000 + index);
+  assert.equal(table.at(-1), 5000 + table.length - 1);
+  assert.ok(!table.includes(5000 + table.length));
+
+  trackLiveSubprocesses(null);
+  const before = Array.from(table);
+  spawnFake(6000);
+  assert.deepEqual(Array.from(table), before);
 });

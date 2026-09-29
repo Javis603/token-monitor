@@ -886,11 +886,14 @@ test('extractUsageFromTokscale normalizes MiMo and ZCode client ids', () => {
   assert.equal(period.clients.zcode, 29);
 });
 
-test('extractUsageFromTokscale passes zcode input straight through (tokscale normalizes cache upstream)', () => {
+test('extractUsageFromTokscale passes zcode input straight through and folds disjoint reasoning into output', () => {
   // tokscale >= 4.0.11 emits zcode rows whose `input` already excludes cache
   // overlap (junhoyeo/tokscale#825), so zcode is aggregated like any other
   // client with no local subtraction. If the removed workaround still ran it
   // would subtract cache a second time (200 - 800 clamped to 0) and under-count.
+  // tokscale 4.17.0 also emits zcode `reasoning` as a disjoint bucket subtracted
+  // out of `output`, so it is added back into the reasoning-inclusive output
+  // family: output 50 + reasoning 10 = 60, total 200 + 60 + 800 = 1060 (#797).
   const period = extractUsageFromTokscale({
     groupBy: 'client,session,model',
     entries: [
@@ -911,19 +914,19 @@ test('extractUsageFromTokscale passes zcode input straight through (tokscale nor
     ]
   });
 
-  assert.equal(period.clients.zcode, 1050);
-  assert.equal(period.totalTokens, 1050);
+  assert.equal(period.clients.zcode, 1060);
+  assert.equal(period.totalTokens, 1060);
   assert.equal(period.cacheReadTokens, 800);
   assert.equal(period.clientCacheReads.zcode, 800);
-  assert.equal(period.clientOutputs.zcode, 50);
+  assert.equal(period.clientOutputs.zcode, 60);
 
   const session = period.sessions['zcode:sess-z1'];
-  assert.equal(session.totalTokens, 1050);
+  assert.equal(session.totalTokens, 1060);
   assert.equal(session.inputTokens, 200);
   assert.equal(session.cacheReadTokens, 800);
-  assert.equal(session.outputTokens, 50);
+  assert.equal(session.outputTokens, 60);
   assert.equal(session.reasoningTokens, 10);
-  assert.equal(session.models['glm-5.2'], 1050);
+  assert.equal(session.models['glm-5.2'], 1060);
 });
 
 test('extractUsageFromTokscale normalizes Kiro client ids', () => {
@@ -974,6 +977,35 @@ test('normalizeClientName keeps Qoder CN distinct from international Qoder', () 
   assert.equal(normalizeClientName('Qoder CN'), 'qodercn');
   assert.equal(normalizeClientName('qoder-cn'), 'qodercn');
   assert.equal(normalizeClientName('Qoder'), 'qoder');
+});
+
+test('Muse scan rows and display names share the tracked client id', () => {
+  assert.equal(normalizeClientName('muse'), 'muse');
+  assert.equal(normalizeClientName('Muse Code'), 'muse');
+  const period = extractUsageFromTokscale([{ client: 'muse', model: 'muse-spark', totalTokens: 12 }]);
+  assert.equal(period.clients.muse, 12);
+});
+
+test('Muse rows fold Tokscale disjoint reasoning into output and totals', () => {
+  // Tokscale splits a Responses-shaped usage record: 379 output includes 278
+  // reasoning at the source, but its JSON row reports output 101 and reasoning
+  // 278 as additive buckets, with no explicit total.
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [{
+      client: 'muse', sessionId: 'muse-session', model: 'muse-spark-1.3-contributor',
+      input: 21859, output: 101, cacheRead: 5105, cacheWrite: 0,
+      reasoning: 278, messageCount: 1, cost: 0.1,
+      timestamp: '2026-09-28T00:00:00.000Z'
+    }]
+  });
+  assert.equal(period.totalTokens, 27343);
+  assert.equal(period.clients.muse, 27343);
+  assert.equal(period.clientOutputs.muse, 379);
+  const session = period.sessions['muse:muse-session'];
+  assert.equal(session.totalTokens, 27343);
+  assert.equal(session.outputTokens, 379);
+  assert.equal(session.reasoningTokens, 278);
 });
 
 test('extractUsageFromTokscale keeps model usage grouped by client', () => {
@@ -1070,6 +1102,63 @@ test('extractUsageFromTokscale folds disjoint Codex reasoning into the public ou
   assert.equal(codex.models['gpt-4o'], 5);
   assert.equal(codex.providers.openai, 122);
   assert.equal(period.sessions['cursor:cursor-active'].models['cursor-auto'], 3);
+});
+
+test('extractUsageFromTokscale maps Cursor `default` to cursor-auto without touching other clients', () => {
+  // tokscale's JSON usage cache renames Cursor Auto requests from `auto` to
+  // `default`; both must fold onto cursor-auto so history is not split in two.
+  // The rename stays scoped to Cursor: a `default` model on any other client
+  // is a real (if generic) label and passes through unchanged (#842).
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [
+      { client: 'Cursor', sessionId: 'c-default', model: 'default', provider: 'cursor', input: 1, output: 2, cost: 0.01 },
+      { client: 'Cursor', sessionId: 'c-auto', model: 'auto', provider: 'cursor', input: 3, output: 4, cost: 0.02 },
+      { client: 'claude', sessionId: 'x-default', model: 'default', provider: 'anthropic', input: 5, output: 6, cost: 0.03 }
+    ]
+  });
+
+  assert.equal(period.sessions['cursor:c-default'].models['cursor-auto'], 3);
+  assert.equal(period.sessions['cursor:c-default'].models.default, undefined);
+  assert.equal(period.sessions['cursor:c-auto'].models['cursor-auto'], 7);
+  assert.equal(period.sessions['claude:x-default'].models.default, 11);
+  assert.equal(period.sessions['claude:x-default'].models['cursor-auto'], undefined);
+  assert.equal(period.models['cursor-auto'], 10);
+  assert.equal(period.models.default, 11);
+});
+
+test('normalizePeriod reconciles old Cursor default global models using client attribution', () => {
+  const old = {
+    totalTokens: 10,
+    clients: { cursor: 7, claude: 3 },
+    models: { default: 10 },
+    modelCosts: { default: 1 },
+    modelCacheReads: { default: 4 },
+    modelOutputs: { default: 6 },
+    clientModels: { cursor: { default: 7 }, claude: { default: 3 } },
+    clientModelCosts: { cursor: { default: 0.7 }, claude: { default: 0.3 } }
+  };
+  const mixed = normalizePeriod(old);
+  assert.deepEqual({ ...mixed.models }, { default: 3, 'cursor-auto': 7 });
+  assert.equal(mixed.modelCosts['cursor-auto'], 0.7);
+  assert.ok(Math.abs(mixed.modelCosts.default - 0.3) < 1e-9);
+  assert.equal(mixed.modelUnclassifiedTokens.default, 3);
+  assert.equal(mixed.modelUnclassifiedTokens['cursor-auto'], 7);
+  assert.equal(mixed.capabilities.tokenComponents, false);
+  assert.deepEqual(normalizePeriod(mixed), mixed);
+
+  const cursorOnly = normalizePeriod({
+    ...old,
+    totalTokens: 7,
+    clients: { cursor: 7 },
+    models: { default: 7 },
+    modelCosts: { default: 0.7 },
+    clientModels: { cursor: { default: 7 } },
+    clientModelCosts: { cursor: { default: 0.7 } }
+  });
+  assert.equal(cursorOnly.models.default, undefined);
+  assert.equal(cursorOnly.modelCacheReads['cursor-auto'], 4);
+  assert.equal(cursorOnly.modelOutputs['cursor-auto'], 6);
 });
 
 test('extractUsageFromTokscale folds disjoint DSH reasoning into totals and output', () => {

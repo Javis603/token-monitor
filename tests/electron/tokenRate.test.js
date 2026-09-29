@@ -361,11 +361,22 @@ test('live rate selects every active hub device or only this device by scope', (
     ],
     source: 'devices:all'
   });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'icloud', 'all'), {
+    entries: [
+      { id: 'device:other', period: other },
+      { id: 'device:this-device', period: local }
+    ],
+    source: 'devices:all'
+  });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'this-device', 'client', 'device'), {
     entries: [{ id: 'device:this-device', period: local }],
     source: 'device:this-device'
   });
   assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'missing', 'client', 'device'), {
+    entries: [],
+    source: 'device:missing'
+  });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods(stats, 'missing', 'icloud', 'device'), {
     entries: [],
     source: 'device:missing'
   });
@@ -395,6 +406,22 @@ test('live rate selects every active hub device or only this device by scope', (
     entries: [],
     source: 'device:this-device'
   });
+  assert.deepEqual(tokenRateApi.selectLiveTokenRatePeriods({
+    periods: { today: aggregate },
+    devices: [{ deviceId: 'old-device', periods: { today: other } }]
+  }, 'this-device', 'icloud', 'device'), {
+    entries: [],
+    source: 'device:this-device'
+  });
+});
+
+test('all live-rate surfaces use shared scope for iCloud', () => {
+  assert.equal(tokenRateApi.isSharedSyncMode('icloud'), true);
+  assert.equal(tokenRateApi.isSharedSyncMode('local'), false);
+  assert.match(app, /function effectiveLiveTokenRateScope\(\)[\s\S]*?tokenRateApi\.isSharedSyncMode\(hubMode\)/);
+  assert.match(app, /function effectiveDisplayLiveTokenRateScope\(scope\)[\s\S]*?tokenRateApi\.isSharedSyncMode\(hubMode\)/);
+  assert.match(app, /const liveRateHasScope = state\.settings\.showLiveTokenRate === true\s*&& tokenRateApi\.isSharedSyncMode\(state\.settings\.hubMode\)/);
+  assert.match(main, /function edgeDockLiveRateSample\(visibleStats\)[\s\S]*?tokenRateApi\.isSharedSyncMode\(hubMode\)/);
 });
 
 test('holding the title mark accelerates from the real rate and keeps rising', () => {
@@ -607,8 +634,8 @@ test('the live footer rate is opt-in, accessible, and shares the persisted mode'
   assert.match(app, /els\.showLiveTokenRateInput\.checked = state\.settings\.showLiveTokenRate === true/);
   assert.match(app, /els\.liveTokenRateScopeInput\.value = state\.settings\.liveTokenRateScope === 'device' \? 'device' : 'all'/);
   assert.match(app, /els\.liveTokenRate\?\.addEventListener\('click', toggleTokenRateMode\)/);
-  assert.match(app, /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);\s*observeLiveTokenRate\(state\.stats\);/);
-  assert.match(app, /observeLiveTokenRate\(nextStats\);\s*state\.stats = nextStats;/);
+  assert.match(app, /state\.stats = allTimeSessions\.attach\(payload\.data\.stats\);\s*observeLiveTokenRate\(state\.stats\);/);
+  assert.match(app, /observeLiveTokenRate\(nextStats\);\s*allTimeSessions\.invalidate\(\);\s*state\.stats = allTimeSessions\.attach\(nextStats\);/);
   assert.match(app, /createLiveTokenRateGroupTracker\([\s\S]*activeMs: LIVE_TOKEN_RATE_ACTIVE_MS[\s\S]*\)/);
   assert.match(app, /const LIVE_TOKEN_RATE_ACTIVE_MS = 8000;/);
   assert.match(app, /const LIVE_TOKEN_RATE_CLEAR_MS = 3 \* 60 \* 1000;/);
@@ -657,8 +684,8 @@ test('compact display surfaces can render live rates independently of the footer
   assert.match(app, /function liveTokenRateTrayLayout\(\)/);
   assert.match(app, /if \(mode === 'liveTokenRate'\) \{[\s\S]*liveTokenRateTrayLayout\(\)/);
   assert.match(app, /if \(isSettingsSurfaceVisible\(\)\) refreshTrayComposers\(\)/);
-  assert.match(app, /state\.stats = nextStats;\s*observeDisplayLiveTokenRates\(nextStats\)/);
-  assert.match(app, /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);\s*observeLiveTokenRate\(state\.stats\);\s*observeDisplayLiveTokenRates\(state\.stats\)/);
+  assert.match(app, /state\.stats = allTimeSessions\.attach\(nextStats\);\s*observeDisplayLiveTokenRates\(nextStats\)/);
+  assert.match(app, /state\.stats = allTimeSessions\.attach\(payload\.data\.stats\);\s*observeLiveTokenRate\(state\.stats\);\s*observeDisplayLiveTokenRates\(state\.stats\)/);
   assert.match(app, /liveTokenRates: options\.liveTokenRates \|\| displayLiveTokenRateSamples\(\)/);
   assert.match(app, /renderFloatingBubbleContent\(\);\s*if \(isSettingsSurfaceVisible\(\)\) refreshTrayComposers\(\)/);
   assert.match(app, /trayContentInput\.value = \['tokens',[\s\S]*'liveTokenRate'/);

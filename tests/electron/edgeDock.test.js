@@ -194,7 +194,7 @@ const {
   railLength
 } = require('../../src/electron/edgeDock/geometry');
 const { canUseEdgeDock } = require('../../src/electron/edgeDock/controller');
-const { bubbleCommands, railCommands, toPolygons, toSvgPath } = require('../../src/electron/renderer/edgeDock/shapes');
+const { bubbleCommands, peekCommands, railCommands, toPolygons, toSvgPath } = require('../../src/electron/renderer/edgeDock/shapes');
 const { rasterizeMask, shapeRectsFromPolygons } = require('../../src/electron/edgeDock/mask');
 const { DEFAULT_LIMIT_COUNT, normalizeEdgeDockItems, reorderEdgeDockItems } = require('../../src/electron/renderer/edgeDock/items');
 const { SESSIONS_METRIC } = require('../../src/electron/renderer/edgeDock/presentation');
@@ -275,7 +275,8 @@ test('the Sessions list uses a plain dot, not the dock card glyph stack', () => 
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
   assert.match(app, /rowLiveMarkup = '<span class="row-live-dot"><\/span>'/);
-  assert.doesNotMatch(app, /sessionStateMarkup\(\{/);
+  const sessionList = app.slice(app.indexOf('function updateRowLive('), app.indexOf('function updateRow(', app.indexOf('function updateRowLive(')));
+  assert.doesNotMatch(sessionList, /sessionStateMarkup\(\{/);
   assert.doesNotMatch(styles, /row-live-spin|row-live-check|row-live-idle/);
   assert.match(styles, /\.row-live-dot\s*\{[\s\S]*?background: var\(--success\)/);
   // The dot is drawn only while the agent works, so a quiet row shows nothing.
@@ -389,6 +390,73 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   const i18n = readRendererFile('i18n.js');
   assert.doesNotMatch(i18n, /'session\.calls':/);
   assert.doesNotMatch(i18n, /'session\.callsOne':/);
+});
+
+test('Home session preview uses the sidebar timeline and keeps running rows within its cap', () => {
+  const now = Date.now();
+  const at = (minutesAgo) => new Date(now - minutesAgo * 60_000).toISOString();
+  const session = (id, minutesAgo, extra = {}) => ({
+    client: 'codex', sessionId: id, lastUsedAt: at(minutesAgo),
+    title: id, totalTokens: minutesAgo * 100, models: { 'gpt-6-sol': 1 }, ...extra
+  });
+  const stats = {
+    periods: {
+      month: { sessions: {
+        'codex:new': session('new', 1),
+        'codex:running': session('running', 9),
+        'codex:old-running': session('old-running', 8),
+        'codex:quiet': session('quiet', 40),
+        'codex:older': session('older', 50),
+        'codex:oldest': session('oldest', 60),
+        'codex:review': session('review', 0, { sessionKind: 'background-review' })
+      } },
+      today: { sessions: {
+        'codex:new': session('new', 1, { totalTokens: 999_999 }),
+        'codex:today-only': session('today-only', 30)
+      } }
+    },
+    limits: { providers: [] }
+  };
+  const sidebar = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] })[0].sessions;
+  assert.deepEqual(edgeDockPresentation.recentSessionRows(stats), sidebar);
+  const home = edgeDockPresentation.recentSessionRows(stats, 5);
+  assert.deepEqual(home.map((row) => row.sessionId), ['new', 'old-running', 'running', 'today-only', 'quiet']);
+  assert.equal(home[0].totalTokens, 100, 'the month record wins when today has a different total');
+  assert.equal(home.filter((row) => row.running).length, 3);
+
+  const lateRunning = { periods: { month: { sessions: {} }, today: { sessions: {} } } };
+  for (let index = 0; index < 6; index++) {
+    lateRunning.periods.month.sessions[`codex:${index}`] = session(String(index), index + 1, {
+      turnEnded: index < 5
+    });
+  }
+  assert.deepEqual(
+    edgeDockPresentation.recentSessionRows(lateRunning, 5, { includeRunningBeyondCap: true })
+      .map((row) => row.sessionId),
+    ['0', '1', '2', '3', '4', '5']
+  );
+});
+
+test('a startedAt-only session keeps its display age without becoming running', () => {
+  const startedAt = new Date(Date.now() - 60_000).toISOString();
+  const stats = { periods: { month: { sessions: {
+    'codex:new': { client: 'codex', sessionId: 'new', startedAt, lastUsedAt: '', totalTokens: 0 }
+  } } } };
+  const original = stats.periods.month.sessions['codex:new'];
+  assert.equal(sessionLive.sessionActivityState(original), 'idle');
+
+  const [home] = edgeDockPresentation.recentSessionRows(stats, 5, { includeRunningBeyondCap: true });
+  const [sidebar] = buildEdgeDockCells(stats, { items: [{ type: 'stat', metric: SESSIONS_METRIC }] })[0].sessions;
+  for (const row of [home, sidebar]) {
+    assert.equal(row.lastUsedAt, null);
+    assert.equal(row.startedAt, startedAt);
+    assert.equal(row.running, false);
+    assert.equal(sessionLive.sessionActivityState(row), 'idle');
+  }
+  assert.equal(edgeDockPresentation.runningSessionSummary([home]).count, 0);
+  assert.equal(edgeDockPresentation.nextRunningExpiryAt([home]), 0);
+  assert.match(readRendererFile('app.js'), /homeSessionAgo\(Date\.parse\(row\.lastUsedAt \|\| row\.startedAt \|\| ''\)\)/);
+  assert.match(readRendererFile(path.join('edgeDock', 'dock.js')), /relativeAgo\(session\.lastUsedAt \|\| session\.startedAt\)/);
 });
 
 test('running sessions are never truncated by the recent cap, and the count matches the rows', () => {
@@ -1139,6 +1207,7 @@ test('rail hugs the chosen edge and its peek handle is flush with it', () => {
   assert.equal(right.height, railLength(3));
   const peek = edgeDockPeekBounds({ workArea, side: 'right', railBounds: right });
   assert.equal(peek.x + peek.width, workArea.width);
+  assert.equal(peek.height, 48);
 
   const left = edgeDockRailBounds({ workArea, side: 'left', offset: 1, cellCount: 3 });
   assert.equal(left.x, EDGE_DOCK_METRICS.edgeInset);
@@ -1255,6 +1324,21 @@ test('rail silhouette starts and ends on the screen edge and mirrors for the lef
   const left = railCommands({ width: 64, height: 300, side: 'left', shoulder: 28, radius: 20 });
   assert.deepEqual(left[0], ['M', 0, 0]);
   assert.match(toSvgPath(right), /^M64 0 C/);
+});
+
+test('peek handle curves into either screen edge without a visible tip', () => {
+  const right = peekCommands({ width: 7, height: 48 });
+  assert.deepEqual(right[0], ['M', 11, 0]);
+  assert.deepEqual(right.at(-2).slice(-2), [11, 48]);
+  assert.equal(right[3][2] - right[2][6], 27, 'the visible straight section keeps its original length');
+  assert.deepEqual(right.at(-1), ['Z']);
+  assert.notDeepEqual(peekCommands({ width: 7, height: 48, open: true }).at(-1), ['Z']);
+  const left = peekCommands({ width: 7, height: 48, side: 'left' });
+  assert.deepEqual(left[0], ['M', -4, 0]);
+  const { buffer, pixelWidth } = rasterizeMask(toPolygons(right), 7, 48);
+  const alpha = (x, y) => buffer[(y * pixelWidth + x) * 4 + 3];
+  assert.equal(alpha(6, 0), 0, 'the hidden curve tip does not touch the screen corner');
+  assert.equal(alpha(6, 24), 255, 'the handle remains flush along the screen edge');
 });
 
 test('bubble tail tip lands on tailY and stays clear of the corners', () => {

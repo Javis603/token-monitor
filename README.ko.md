@@ -26,7 +26,7 @@
 
 ## Token Monitor란?
 
-Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 40개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 위젯입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다.
+Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 41개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 위젯입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다.
 
 ## 지원 도구
 
@@ -54,6 +54,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`, VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — 확장 프로그램 로그는 Linux 및 원격/WSL만 | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/` (`projects/`, `cli/db/db.sqlite`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage 및 `kiro-cli` DB | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code 확장 로그 | ✅ | — | — |
@@ -127,7 +128,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 
 ### 사용량 추적
 
-- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 32개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
+- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 33개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
 - **실시간 토큰 속도** — 생성 속도를 `tok/s`로, 총 소모를 `tok/min`으로 보여주는 선택형 실시간 표시
 - **세션별 상세** — 세션을 열면 프롬프트별 토큰, 응답별 토큰 분할·사용 도구까지 확장 (로컬 transcript/DB를 필요할 때만 읽으며 동기화하지 않음)
 - **캐시 히트 통계** — 도구·모델 클릭 시 입력 토큰(캐시 hit/miss), 출력 토큰, 히트율 상세
@@ -149,7 +150,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 
 ### 멀티 디바이스와 배포
 
-- **멀티 디바이스 실시간 동기화** — Server-Sent Events. 한 기기의 변경이 수 초 내 다른 기기에 반영
+- **멀티 디바이스 동기화** — Hub 동기화는 Server-Sent Events로 수 초 내 다른 기기에 반영되며, iCloud Drive 동기화는 eventual consistency 방식입니다
 - **로컬 우선** — 단일 기기는 서버 불필요
 - **자체 호스트 동기화** — 위젯 내 hub, Node CLI hub, Cloudflare Worker
 - **iOS 위젯** — Worker hub + Widgy, Scriptable
@@ -191,7 +192,7 @@ brew install --cask token-monitor
 
 ## 멀티 디바이스 동기화
 
-모든 기기(및 headless agent)가 연결할 **hub 하나**를 고릅니다. 각 기기에서 위젯을 열고 **설정 → 멀티 디바이스 동기화**에서 모드를 선택합니다. 위젯이 이 기기 사용량을 자동으로 올리며, 위젯이 없는 기기에서만 `npm run agent`를 실행하면 됩니다.
+기기(및 headless agent)에 사용할 **멀티 디바이스 동기화 방식 하나**를 고릅니다. 각 기기에서 위젯을 열고 **설정 → 멀티 디바이스 동기화**에서 모드를 선택합니다. 위젯이 이 기기 사용량을 자동으로 올리며, 위젯이 없는 기기에서만 `npm run agent`를 실행하면 됩니다. iCloud Drive는 macOS 위젯 전용이며 headless agent를 지원하지 않습니다.
 
 #### 옵션 A — 위젯에서 hub 호스트 (가장 쉬움, CLI 불필요)
 
@@ -223,6 +224,10 @@ npx wrangler deploy
 ```
 
 배포 URL을 각 기기 **설정 → 멀티 디바이스 동기화**에 붙여 넣습니다. iOS 위젯은 [worker/README.md](worker/README.md), HTTP API는 [docs/API.md](docs/API.md)를 참고하세요.
+
+#### 옵션 D — iCloud Drive (macOS, Hub 서버 불필요)
+
+같은 Apple ID로 로그인한 각 Mac에서 **설정 → 멀티 디바이스 동기화 → iCloud Drive**를 선택합니다. 선택 사항인 macOS 전용 방식으로, Token Monitor는 iCloud Drive의 `Token Monitor/sync-v1/` 아래에 기기별·작성자별 원자 스냅샷을 저장하고 각 Mac에서 유효한 파일을 집계합니다. Token Monitor 서버, CloudKit 또는 자격 증명을 사용하지 않으며 제공업체 API 키, Cookie와 token은 로컬에 남습니다. iCloud Drive는 최종 일관성이므로 다른 Mac의 업데이트가 나타나기까지 시간이 걸릴 수 있고, 손상되거나 일시적으로 사라진 파일이 마지막 정상 집계를 지우지 않습니다.
 
 ## 앱 데이터
 
@@ -263,7 +268,7 @@ npm run pack         # 설치 없이 앱 디렉터리만 (로컬 테스트)
     기기 C agent ──▶
 ```
 
-위젯은 **설정 → 멀티 디바이스 동기화**에 따라 로컬/동기화를 선택합니다. hub는 `npm run hub`, Cloudflare Worker, 또는 위젯 내 Host 모드로 실행할 수 있습니다. 동기화 모드에서는 hub가 SSE로 집계 통계를 푸시해 한 기기의 변경이 수 초 내 다른 기기에 반영됩니다.
+위젯은 **설정 → 멀티 디바이스 동기화**에 따라 로컬/동기화를 선택합니다. hub는 `npm run hub`, Cloudflare Worker, 또는 위젯 내 Host 모드로 실행할 수 있습니다. Hub Client/Host 모드에서는 hub가 SSE로 집계 통계를 푸시해 한 기기의 변경이 보통 수 초 내 다른 기기에 반영됩니다. iCloud Drive 모드는 파일을 직접 동기화하는 eventual consistency 방식이며 반영이 더 늦어질 수 있습니다.
 
 ## 세션 데이터 보존 기간
 

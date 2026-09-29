@@ -18,7 +18,7 @@ const {
   rectContains
 } = require('./geometry');
 const { shapeRectsFromPolygons } = require('./mask');
-const { bubbleCommands, railCommands, toPolygons, toSvgPath } = require('../renderer/edgeDock/shapes');
+const { bubbleCommands, peekCommands, railCommands, toPolygons, toSvgPath } = require('../renderer/edgeDock/shapes');
 
 const SURFACES = Object.freeze(['peek', 'rail', 'bubble']);
 const POLL_IDLE_MS = 90;
@@ -278,7 +278,10 @@ function createEdgeDockController(deps) {
     const win32 = platform === 'win32';
     const material = materialKey !== 'none';
     const macMaterial = mac && material;
-    const macGlass = materialKey === 'mac-glass';
+    // A 7px handle leaves no room for Liquid Glass's own bright edge highlight:
+    // it reads as a second grip at the display edge. Keep its masked HUD material
+    // so the renderer's grip stays in the same place in both glass styles.
+    const macGlass = materialKey === 'mac-glass' && surface !== 'peek';
     nativeMaterial[surface] = macMaterial;
     const win = new BrowserWindow({
       width: surface === 'bubble' ? EDGE_DOCK_METRICS.bubbleWidth : EDGE_DOCK_METRICS.railWidth,
@@ -415,9 +418,11 @@ function createEdgeDockController(deps) {
         radius: m.bubbleRadius
       });
     }
-    const options = surface === 'peek'
-      ? { width: bounds.width, height: bounds.height, side, shoulder: m.peekShoulder, radius: 3.5 }
-      : { width: bounds.width, height: bounds.height, side, shoulder: m.shoulder, radius: m.railRadius };
+    if (surface === 'peek') {
+      const options = { width: bounds.width, height: bounds.height, side };
+      return { closed: peekCommands(options), outline: peekCommands({ ...options, open: true }) };
+    }
+    const options = { width: bounds.width, height: bounds.height, side, shoulder: m.shoulder, radius: m.railRadius };
     return { closed: railCommands(options), outline: railCommands({ ...options, open: true }) };
   }
 

@@ -53,3 +53,28 @@ test('settings expose a localized macOS style selector wired to the saved prefer
     assert.equal((i18n.match(new RegExp(`'settings\\.appearance\\.${key}':`, 'g')) || []).length, 5, key);
   }
 });
+
+test('the edge dock follows the widget style unless it names its own', () => {
+  const { normalizeEdgeDockBackdropMode, edgeDockBackdropMode } = require('../../src/electron/macBackdropMode');
+  for (const value of [undefined, null, '', 'hud', 'inherit']) {
+    assert.equal(normalizeEdgeDockBackdropMode(value), 'inherit');
+  }
+  assert.equal(edgeDockBackdropMode({}), 'vibrancy');
+  assert.equal(edgeDockBackdropMode({ macBackdrop: 'liquid-glass' }), 'liquid-glass');
+  assert.equal(edgeDockBackdropMode({ macBackdrop: 'vibrancy', edgeDockMacBackdrop: 'liquid-glass' }), 'liquid-glass');
+  assert.equal(edgeDockBackdropMode({ macBackdrop: 'liquid-glass', edgeDockMacBackdrop: 'vibrancy' }), 'vibrancy');
+});
+
+test('the edge dock style is persisted, feeds only the dock glass, and has a localized selector', () => {
+  assert.match(main, /edgeDockMacBackdrop: 'inherit',/);
+  assert.match(main, /merged\.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode\(merged\.edgeDockMacBackdrop\)/);
+  assert.match(main, /edgeDockMacBackdrop: normalizeEdgeDockBackdropMode\(patch\.edgeDockMacBackdrop \?\? settings\.edgeDockMacBackdrop\)/);
+  // It picks the style only: System Glass and Reduce Transparency still gate the material.
+  assert.match(main, /options\.enabled\s+&& edgeDockBackdropMode\(settings\) === MAC_BACKDROP_LIQUID_GLASS\s+&& !options\.reducedTransparency/);
+  assert.match(html, /id="edgeDockMacBackdropRow" class="settings-item hidden"[\s\S]*?<select id="edgeDockMacBackdropInput"><option value="inherit"/);
+  assert.match(app, /edgeDockMacBackdropRow\?\.classList\.toggle\('hidden', !macGlass\.showBackdropControl\)/);
+  assert.match(app, /saveSettings\(\{ edgeDockMacBackdrop: macBackdropApi\.normalizeEdgeDockBackdropMode\(els\.edgeDockMacBackdropInput\.value\) \}\)/);
+  for (const key of ['macBackdrop', 'macBackdropInherit']) {
+    assert.equal((i18n.match(new RegExp(`'settings\\.edgeDock\\.${key}':`, 'g')) || []).length, 5, key);
+  }
+});

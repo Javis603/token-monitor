@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { createDeviceState } = require('../../src/shared/deviceState');
+const { createDeviceState } = require('../../src/shared/usage/deviceState');
 
 function usage(updatedAt = '2026-07-21T01:00:00.000Z', extra = {}) {
   return {

@@ -21,7 +21,7 @@ test('first-run limit provider seeding is guarded by settings-file and env state
 
 test('all collector modes seed from the first completed discovery snapshot', () => {
   const enqueueCount = (main.match(/seedInitialLimitProviders\(summary\);/g) || []).length;
-  assert.equal(enqueueCount, 3);
+  assert.equal(enqueueCount, 4);
 });
 
 test('a completed source snapshot persists, reconfigures, and pushes once', () => {

@@ -105,7 +105,6 @@ function collectStatsModelIds(stats) {
     collectHistoryModelIds(device?.history, modelIds);
     collectHistoryModelIds(device?.historyPreview, modelIds);
   }
-  for (const row of Object.values(stats.allTimeSessionsView || {})) collectUsageModelIds(row, modelIds);
   for (const field of ['nativeSessions', 'nativeProjects']) {
     for (const period of Object.values(stats[field] || {})) {
       for (const row of Object.values(period || {})) collectUsageModelIds(row, modelIds);
@@ -375,9 +374,6 @@ function projectModelAliasStats(stats, aliases, options = {}) {
   result.modelAliasSourceIds = [...pricingSourceIds].sort();
 
   if (Array.isArray(stats.devices)) result.devices = mapRows(stats.devices, projectRecord);
-  if (stats.allTimeSessionsView) {
-    result.allTimeSessionsView = mapValues(stats.allTimeSessionsView, (session) => projectUsage(session, plan.resolve));
-  }
   for (const field of ['nativeSessions', 'nativeProjects']) {
     if (stats[field]) {
       result[field] = mapValues(stats[field], (period) => mapValues(period, (row) => projectUsage(row, plan.resolve)));
@@ -402,11 +398,28 @@ function projectModelAliasStats(stats, aliases, options = {}) {
   return result;
 }
 
+// The renderer pulls the all-time session list apart from the stats it belongs
+// to, so its plan is read off both: the ids that shaped those stats' projection
+// and the sessions' own.
+function projectModelAliasSessions(stats, sessions, aliases, options = {}) {
+  if (!sessions || typeof sessions !== 'object') return sessions;
+  const grouping = normalizeModelAliasGrouping(options.grouping);
+  let modelIds = [];
+  if (grouping !== 'off') {
+    const ids = collectStatsModelIds(stats);
+    for (const session of Object.values(sessions)) collectUsageModelIds(session, ids);
+    modelIds = [...ids];
+  }
+  const plan = aliasPlan(modelIds, aliases, grouping);
+  return plan.active ? mapValues(sessions, (session) => projectUsage(session, plan.resolve)) : sessions;
+}
+
 module.exports = {
   normalizeModelAliases,
   normalizeModelAliasGrouping,
   inferModelAliases,
   createModelAliasResolver,
   projectModelAliasStats,
+  projectModelAliasSessions,
   projectModelAliasHistory
 };

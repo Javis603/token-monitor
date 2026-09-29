@@ -26,7 +26,7 @@
 
 ## Token Monitor 是什么？
 
-一款桌面小部件，实时显示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 40+ 种 AI 编程工具的 Token 用量与 AI 工具额度，具备实时多设备同步与历史使用趋势功能，并支持按工具、设备、模型、session 或项目分项显示。
+一款桌面小部件，实时显示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 41+ 种 AI 编程工具的 Token 用量与 AI 工具额度，具备实时多设备同步与历史使用趋势功能，并支持按工具、设备、模型、session 或项目分项显示。
 
 ## 支持的工具
 
@@ -54,6 +54,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`；VS Code globalStorage tasks（`.../kilocode.kilo-code/tasks/`）—— 扩展记录仅限 Linux 与远程/WSL | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/`（`projects/`、`cli/db/db.sqlite`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`、Kiro IDE globalStorage 与 `kiro-cli` 数据库 | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` 与 IDE / VS Code 扩展日志 | ✅ | — | — |
@@ -127,7 +128,7 @@ Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settin
 
 ### 用量追踪
 
-- **实时 Token 追踪**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 32+ 种 AI 工具，每轮对话后 UI 在数秒内刷新（完整列表见上方表格）
+- **实时 Token 追踪**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 33+ 种 AI 工具，每轮对话后 UI 在数秒内刷新（完整列表见上方表格）
 - **实时 Token 速率**：可选显示的实时读数，以 `tok/s` 显示生成速度或以 `tok/min` 显示总消耗
 - **单个 session 明细**：点进某个 session，可看每条提问的 Token 消耗，并展开查看每次回复的 Token 拆分与用到的工具（打开时才实时读取本机 transcript 或数据库，绝不同步）
 - **缓存命中统计**：点击任何工具或模型，展开查看输入 Token（缓存命中与未命中）、输出 Token 的详细分类及命中率百分比
@@ -149,7 +150,7 @@ Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settin
 
 ### 多设备与部署
 
-- **多设备实时同步**：通过 Server-Sent Events 推送，一台设备的更新数秒内出现在其他设备
+- **多设备同步**：Hub 同步通过 Server-Sent Events 在数秒内推送更新；iCloud Drive 同步具有最终一致性
 - **本地优先**：单设备使用完全无需服务器
 - **自托管同步后端**：小部件内 hub、Node CLI hub 或 Cloudflare Worker
 - **iOS 小部件支持**：通过 Worker hub 搭配 Widgy、Scriptable
@@ -191,7 +192,7 @@ brew install --cask token-monitor
 
 ## 多设备同步
 
-挑一个所有设备（与任何无头代理）都能连上的 hub 后端。在每台设备上打开小部件，在 设置 → 多设备同步 选一个模式。小部件会自动上报本机用量；只在没有小部件的机器上跑 `npm run agent`。
+挑一个供设备（与任何无头代理）使用的多设备同步后端。在每台设备上打开小部件，在 设置 → 多设备同步 选一个模式。小部件会自动上报本机用量；只在没有小部件的机器上跑 `npm run agent`。iCloud Drive 仅供 macOS 小部件使用，不支持无头代理。
 
 #### 方案 A——直接在小部件内开 hub（最简单，无需命令行）
 
@@ -223,6 +224,10 @@ npx wrangler deploy
 ```
 
 把部署 URL 贴到每台设备的小部件 设置 → 多设备同步。iOS 小部件配方与端点参考见 [worker/README.md](worker/README.md)，hub HTTP API 见 [docs/API.md](docs/API.md)。
+
+#### 方案 D——iCloud Drive（macOS，无需 Hub Server）
+
+在每台登录同一 Apple ID 的 Mac 上，进入 设置 → 多设备同步并选择 **iCloud Drive**。这是可选的 macOS 专属模式：Token Monitor 会在 iCloud Drive 的 `Token Monitor/sync-v1/` 下为每台设备和每个写入者保存原子快照，再由每台 Mac 聚合有效文件。不使用 Token Monitor 服务器、CloudKit 或凭据；提供方 API key、Cookie 和 token 保留在本机。iCloud Drive 采用最终一致性，其他 Mac 的更新可能需要一点时间才会出现，损坏或暂时缺失的文件也不会清空最后一次有效的聚合结果。
 
 ## App 数据
 
@@ -263,7 +268,7 @@ npm run pack         # 未打包的 app 目录（无安装包），方便本机�
     设备 C agent ──▶
 ```
 
-小部件会根据 设置 → 多设备同步 决定走本地还是同步模式。hub 本身可以是单独的 `npm run hub` 进程、Cloudflare Worker，或直接跑在某一个小部件里（Host 模式）。同步模式下，hub 通过 Server-Sent Events 把聚合后的统计推送给每个连接中的小部件，所以一台设备上的更新会在数秒内出现在其他设备上。
+小部件会根据 设置 → 多设备同步 决定走本地还是同步模式。hub 本身可以是单独的 `npm run hub` 进程、Cloudflare Worker，或直接跑在某一个小部件里（Host 模式）。在 Hub Client 和 Host 模式下，hub 通过 Server-Sent Events 把聚合后的统计推送给每个连接中的小部件，所以一台设备上的更新通常会在数秒内出现在其他设备上。iCloud Drive 模式直接同步文件，具有最终一致性，更新可能需要更长时间才会出现。
 
 ## 会话数据保留期
 

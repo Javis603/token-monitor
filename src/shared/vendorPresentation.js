@@ -54,6 +54,7 @@
     { id: 'kilo', color: '#F8F676' },
     { id: 'commandcode', color: '#8C4EDD', widgetColor: '#9D66E7' },
     { id: 'mimo', color: '#000000', icon: 'xiaomi', widgetInk: true },
+    { id: 'muse', color: '#0866FF', icon: 'meta' },
     { id: 'zcode', color: '#000000', icon: 'zai', widgetInk: true },
     { id: 'kiro', color: '#9046FF', widgetColor: '#A66AFF' },
     { id: 'codebuddy', color: '#6C4DFF', widgetColor: '#8064FF' },

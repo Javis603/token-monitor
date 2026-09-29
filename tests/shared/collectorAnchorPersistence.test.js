@@ -111,6 +111,20 @@ test('configFingerprint labels the Qoder CN database path explicitly', () => {
   );
 });
 
+test('configFingerprint invalidates the anchor when a custom scan path changes', () => {
+  const scanPath = process.platform === 'win32' ? 'C:\\tmp\\claude-alt' : '/tmp/claude-alt';
+  const other = process.platform === 'win32' ? 'C:\\tmp\\claude-other' : '/tmp/claude-other';
+  const none = configFingerprint('claude', '2024-01-01', true, '', '');
+  // No custom paths keeps the legacy fingerprint, so existing anchors stay valid on upgrade.
+  assert.equal(configFingerprint('claude', '2024-01-01', true, '', '', {}), none);
+  assert.equal(configFingerprint('claude', '2024-01-01', true, '', '', null), none);
+  assert.equal(configFingerprint('claude', '2024-01-01', true, '', '', { claude: [] }), none);
+  // Adding a path changes the fingerprint; a different path changes it again.
+  const withPath = configFingerprint('claude', '2024-01-01', true, '', '', { claude: [scanPath] });
+  assert.notEqual(withPath, none);
+  assert.notEqual(configFingerprint('claude', '2024-01-01', true, '', '', { claude: [other] }), withPath);
+});
+
 test('anchored tick with valid anchor runs todayOnly scan and derives month/allTime', async () => {
   const dateKey = localTodayKey();
 
@@ -242,6 +256,7 @@ test('full anchors persist local-only Reasonix native views alongside aggregate 
 
     await waitForCondition(() => updates.length === 1);
     const saved = JSON.parse(fs.readFileSync(path.join(tmpShared, 'collector-anchor.json'), 'utf8'));
+    assert.equal(saved.cursorAutoModelVersion, 1);
     assert.deepEqual(saved.nativeSessions, nativeView.sessions);
     assert.deepEqual(saved.nativeProjects, nativeView.projects);
   } finally {
@@ -646,9 +661,32 @@ test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
   assert.equal(collectorAnchorTrust(anchor(), { ...options, clients: 'claude,codex' }), null);
   assert.equal(collectorAnchorTrust(anchor(), { ...options, projectsEnabled: false }), null);
 
+  // A custom scan path added after the anchor was written invalidates it; an
+  // anchor whose fingerprint already covers that path stays trusted.
+  const scanPath = process.platform === 'win32' ? 'C:\\tmp\\claude-alt' : '/tmp/claude-alt';
+  assert.equal(collectorAnchorTrust(anchor(), { ...options, customScanPaths: { claude: [scanPath] } }), null);
+  const scannedAnchor = anchor({ configFingerprint: configFingerprint('claude', '2024-01-01', true, '', '', { claude: [scanPath] }) });
+  assert.equal(
+    collectorAnchorTrust(scannedAnchor, { ...options, customScanPaths: { claude: [scanPath] } }).capturedAtMs,
+    now.getTime() - 60_000
+  );
+
   // Usable, but undatable.
   assert.equal(collectorAnchorTrust(anchor({ fullScanAt: undefined }), options).capturedAtMs, null);
   assert.equal(collectorAnchorTrust(anchor({ fullScanAt: 'nope' }), options).capturedAtMs, null);
   const future = new Date(now.getTime() + 60_000).toISOString();
   assert.equal(collectorAnchorTrust(anchor({ fullScanAt: future }), options).capturedAtMs, null);
+});
+
+test('Cursor anchors from before the Auto model rename require a full scan', () => {
+  const { collectorAnchorTrust, configFingerprint } = freshCollector();
+  const now = new Date(2026, 7, 8, 10, 0, 0);
+  const options = { clients: 'cursor', allTimeSince: '2024-01-01', now };
+  const anchor = {
+    dateKey: '2026-08-08', today: {}, month: {}, allTime: {},
+    configFingerprint: configFingerprint('cursor', '2024-01-01'),
+    fullScanAt: new Date(now.getTime() - 60_000).toISOString()
+  };
+  assert.equal(collectorAnchorTrust(anchor, options), null);
+  assert.equal(collectorAnchorTrust({ ...anchor, cursorAutoModelVersion: 1 }, options).capturedAtMs, now.getTime() - 60_000);
 });
