@@ -1,6 +1,9 @@
 'use strict';
 
 const fs = require('node:fs/promises');
+const { createWriteStream } = require('node:fs');
+const { Transform } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { pathToFileURL } = require('node:url');
@@ -10,6 +13,37 @@ const MAX_VIDEO_BYTES = 256 * 1024 * 1024;
 const MANIFEST = 'background-video.json';
 const VIDEO_FILE = /^background-video-[a-f0-9-]{36}\.(mp4|webm)$/;
 const VIDEO_PRIVILEGES = { standard: true, secure: true, stream: true, supportFetchAPI: true, corsEnabled: true };
+
+function validateVideoFile(stat) {
+  if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_VIDEO_BYTES) {
+    throw new Error('Video must be a file no larger than 256 MB');
+  }
+}
+
+async function copyBoundedVideo(sourcePath, destination) {
+  const source = await fs.open(sourcePath, 'r');
+  try {
+    validateVideoFile(await source.stat());
+    let bytes = 0;
+    const limit = new Transform({
+      transform(chunk, _encoding, callback) {
+        bytes += chunk.length;
+        if (bytes > MAX_VIDEO_BYTES) callback(new Error('Video must be a file no larger than 256 MB'));
+        else callback(null, chunk);
+      }
+    });
+    // Pin the opened file and read at most one byte beyond the limit, even
+    // if a download or sync client keeps growing it during the copy.
+    await pipeline(
+      source.createReadStream({ start: 0, end: MAX_VIDEO_BYTES }),
+      limit,
+      createWriteStream(destination, { flags: 'wx', mode: 0o600 })
+    );
+    validateVideoFile(await fs.stat(destination));
+  } finally {
+    await source.close();
+  }
+}
 
 function createBackgroundVideoManager(userDataPath) {
   let pending = null;
@@ -39,7 +73,7 @@ function createBackgroundVideoManager(userDataPath) {
     const extension = path.extname(sourcePath).toLowerCase();
     if (!['.mp4', '.webm'].includes(extension)) throw new Error('Use an MP4 or WebM video');
     const stat = await fs.stat(sourcePath);
-    if (!stat.isFile() || stat.size <= 0 || stat.size > MAX_VIDEO_BYTES) throw new Error('Video must be a file no larger than 256 MB');
+    validateVideoFile(stat);
     pending = { id: randomUUID(), name: path.basename(sourcePath), sourcePath, extension };
     return publicRecord(pending, true);
   }
@@ -54,8 +88,7 @@ function createBackgroundVideoManager(userDataPath) {
     const record = { id, name: selection.name, fileName };
     await fs.mkdir(userDataPath, { recursive: true });
     try {
-      await fs.copyFile(selection.sourcePath, destination);
-      await fs.chmod(destination, 0o600);
+      await copyBoundedVideo(selection.sourcePath, destination);
       await fs.writeFile(temporaryManifest, JSON.stringify(record), { flag: 'wx', mode: 0o600 });
       await fs.rename(temporaryManifest, manifestPath);
     } catch (error) {

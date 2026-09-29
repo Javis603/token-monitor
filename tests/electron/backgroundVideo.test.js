@@ -26,7 +26,10 @@ test('validated video is copied privately, survives original removal and restart
   const record = await f.manager.commit(preview.id);
   const saved = await f.manager.resolve(record.url);
   assert.notEqual(saved, f.source);
-  assert.equal((await fs.stat(saved)).mode & 0o777, 0o600);
+  // Windows uses the user-data directory ACL rather than POSIX mode bits.
+  if (process.platform !== 'win32') {
+    assert.equal((await fs.stat(saved)).mode & 0o777, 0o600);
+  }
   await fs.unlink(f.source);
   const restarted = createBackgroundVideoManager(f.data);
   assert.deepEqual(await restarted.get(), record);
@@ -93,4 +96,39 @@ test('Electron media handler forwards byte ranges only for a managed video', asy
   assert.equal(fetched.init.headers.Range, 'bytes=0-9');
   assert.ok(fetched.url.startsWith('file:'));
   assert.equal((await handler(new Request('token-monitor-background://video/current?id=wrong'))).status, 404);
+});
+
+for (const size of [0, MAX_VIDEO_BYTES + 1]) {
+  test(`commit rejects a selection changed to ${size} bytes and preserves the previous video`, async (t) => {
+    const f = await fixture(t);
+    const first = await f.manager.prepare(f.source);
+    const saved = await f.manager.commit(first.id);
+    const before = (await fs.readdir(f.data)).sort();
+    const next = await f.manager.prepare(f.source);
+    await fs.truncate(f.source, size);
+    await assert.rejects(f.manager.commit(next.id), /256 MB/);
+    assert.deepEqual(await f.manager.get(), saved);
+    assert.deepEqual((await fs.readdir(f.data)).sort(), before);
+  });
+}
+
+test('commit bounds the copy even if the source grows after its handle is checked', async (t) => {
+  const f = await fixture(t);
+  const selection = await f.manager.prepare(f.source);
+  const open = fs.open.bind(fs);
+  t.mock.method(fs, 'open', async (...args) => {
+    const handle = await open(...args);
+    if (args[0] === f.source) {
+      const stat = handle.stat.bind(handle);
+      t.mock.method(handle, 'stat', async () => {
+        const result = await stat();
+        await fs.truncate(f.source, MAX_VIDEO_BYTES + 1);
+        return result;
+      });
+    }
+    return handle;
+  });
+  await assert.rejects(f.manager.commit(selection.id), /256 MB/);
+  assert.equal(await f.manager.get(), null);
+  assert.deepEqual(await fs.readdir(f.data), ['background-image.png']);
 });
