@@ -370,10 +370,10 @@ test('Claude Web retries later rotation from the last persisted sessionKey after
   ]);
 });
 
-test('Claude Web prefers chat-capable organizations, then non-API-only organizations', async () => {
+test('Claude Web prefers subscribed chat organizations and preserves fallback order', async () => {
   async function selectedUsageOrganization(organizations, cookie) {
     let usageOrganizationId = '';
-    await fetchClaudeLimits({ claudeWebCookie: cookie }, {
+    await fetchClaudeLimits({ claudeWebCookie: cookie, claudePrepaidBalanceEnabled: false }, {
       providerRuntimeState: new Map(),
       fetch: async (url) => {
         if (url.endsWith('/api/organizations')) {
@@ -405,6 +405,37 @@ test('Claude Web prefers chat-capable organizations, then non-API-only organizat
     return usageOrganizationId;
   }
 
+  const free = { uuid: 'organization-free', capabilities: ['chat'] };
+  const subscriptions = [
+    { uuid: 'organization-pro', capabilities: [' CHAT ', ' CLAUDE_PRO '] },
+    { uuid: 'organization-max', capabilities: ['chat', 'claude_max'] },
+    { uuid: 'organization-enterprise', capabilities: ['chat', 'raven'], raven_type: 'enterprise' }
+  ];
+  for (const subscription of subscriptions) {
+    assert.equal(
+      await selectedUsageOrganization([free, subscription], 'sessionKey=sk-ant-subscribed'),
+      subscription.uuid
+    );
+  }
+  for (const organizations of [subscriptions, subscriptions.toReversed()]) {
+    assert.equal(
+      await selectedUsageOrganization(organizations, 'sessionKey=sk-ant-same-priority'),
+      organizations[0].uuid,
+      'equally preferred subscriptions keep server order'
+    );
+  }
+  const ineligibleCandidates = [
+    { capabilities: ['chat', 'claude_max'] },
+    { uuid: 'organization-no-chat', capabilities: ['api', 'claude_pro'] },
+    { uuid: 'organization-unknown-raven', capabilities: ['chat', 'raven'], raven_type: null }
+  ];
+  for (const candidate of ineligibleCandidates) {
+    assert.equal(
+      await selectedUsageOrganization([free, candidate], 'sessionKey=sk-ant-ineligible'),
+      free.uuid,
+      'an invalid, non-chat or unnamed subscription cannot outrank Free'
+    );
+  }
   assert.equal(
     await selectedUsageOrganization([
       { uuid: 'organization-api', capabilities: ['API'] },
@@ -427,6 +458,53 @@ test('Claude Web prefers chat-capable organizations, then non-API-only organizat
     ], 'sessionKey=sk-ant-first'),
     'organization-api-first'
   );
+});
+
+test('Claude Web keeps Team usage, identity and prepaid balance together regardless of Free organization order', async () => {
+  const free = { uuid: 'organization-free', name: 'Personal', capabilities: ['chat'] };
+  const team = { uuid: 'organization-team', name: 'Team Workspace', capabilities: ['chat', 'raven'], raven_type: 'team' };
+  for (const organizations of [[free, team], [team, free]]) {
+    const requests = [];
+    const responses = new Map([
+      ['/api/organizations', organizations],
+      ['/api/account', {
+        uuid: 'account-multi',
+        memberships: [
+          { organization: free, seat_tier: null },
+          { organization: team, seat_tier: 'team_standard' }
+        ]
+      }],
+      ['/api/organizations/organization-free/usage?cedar_ember=1', { five_hour: null, seven_day: null }],
+      ['/api/organizations/organization-team/usage?cedar_ember=1', {
+        five_hour: { utilization: 21, resets_at: '2026-07-25T05:00:00Z' },
+        seven_day: { utilization: 35, resets_at: '2026-08-01T00:00:00Z' }
+      }],
+      ['/api/organizations/organization-team/prepaid/credits', { amount: 1234, currency: 'USD' }]
+    ]);
+    const provider = await fetchClaudeLimits({ claudeWebCookie: 'sessionKey=sk-ant-free-team' }, {
+      providerRuntimeState: new Map(),
+      fetch: async (url) => {
+        const parsed = new URL(url);
+        const endpoint = parsed.pathname + parsed.search;
+        requests.push(endpoint);
+        assert.ok(responses.has(endpoint), `unexpected endpoint: ${endpoint}`);
+        return { ok: true, json: async () => responses.get(endpoint) };
+      }
+    });
+    assert.deepEqual(requests, [
+      '/api/organizations',
+      '/api/organizations/organization-team/usage?cedar_ember=1',
+      '/api/account',
+      '/api/organizations/organization-team/prepaid/credits'
+    ]);
+    assert.equal(provider.status, 'ok');
+    assert.equal(provider.accountName, team.name);
+    assert.equal(provider.accountLabel, 'Team');
+    assert.deepEqual(provider.windows.map((window) => [window.kind, window.usedPercent]), [
+      ['session', 21], ['weekly', 35], ['billing', null]
+    ]);
+    assert.equal(provider.balance.amount, 12.34);
+  }
 });
 
 test('Claude Web caches stable identity and reuses it when account lookup is transiently unavailable', async () => {

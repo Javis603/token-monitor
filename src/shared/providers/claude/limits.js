@@ -737,11 +737,16 @@ function selectClaudeWebOrganization(organizations) {
   const hasChatCapability = (candidate) => (
     claudeWebOrganizationCapabilities(candidate).has('chat')
   );
+  const hasChatSubscription = (candidate) => (
+    hasChatCapability(candidate)
+    && claudeCapabilityPlan(claudeWebOrganizationCapabilities(candidate), candidate)
+  );
   const isApiOnly = (candidate) => {
     const capabilities = claudeWebOrganizationCapabilities(candidate);
     return capabilities.size === 1 && capabilities.has('api');
   };
-  return candidates.find(hasChatCapability)
+  return candidates.find(hasChatSubscription)
+    || candidates.find(hasChatCapability)
     || candidates.find((candidate) => !isApiOnly(candidate))
     || candidates[0]
     || null;
