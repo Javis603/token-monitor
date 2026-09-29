@@ -130,6 +130,9 @@ const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 
 function limitProviderColor(providerId) {
   if (providerId === 'factory') return clientColors.droid;
+  // StepFun's black brand mark stays intact, while its quota meter needs a
+  // visible neutral ink on both the dark and light Limits surfaces.
+  if (providerId === 'stepfun' && clientColors.stepfun === '#000000') return '#8a94a1';
   return clientColors[providerId] || clientColors.default;
 }
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;

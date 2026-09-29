@@ -1335,11 +1335,10 @@
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
-    } else if (provider.provider === 'alibaba') {
-      // Team returns one credit pool; Personal/Solo returns rolling 5-hour and
-      // weekly windows. Both are the same provider, so the shape decides the
-      // layout rather than the configured variant — a device syncing another
-      // machine's row has no access to that setting.
+    } else if (provider.provider === 'alibaba' || provider.provider === 'stepfun') {
+      // Alibaba Team / StepFun Token Plan return one credit window; their
+      // rolling plans return 5-hour and weekly windows. The payload shape
+      // decides the layout, including on a device receiving a synced row.
       const billing = windowForKind(provider, 'billing');
       const session = windowForKind(provider, 'session');
       const weekly = windowForKind(provider, 'weekly');

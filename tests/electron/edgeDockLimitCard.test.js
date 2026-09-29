@@ -27,6 +27,7 @@ const accountIdentityApi = require('../../src/electron/renderer/accountIdentity'
 const i18n = require('../../src/electron/renderer/i18n');
 const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
 const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
+const { parseStepfunUsage } = require('../../src/shared/providers/stepfun/limits');
 
 const root = path.join(__dirname, '../..');
 
@@ -245,6 +246,25 @@ test('a TypeSafe card shows the next credit expiry without calling it a reset', 
   assert.match(card.text, /\$2\.00/);
   assert.doesNotMatch(card.text, /Reset/);
   assert.equal(card.find('limit-window').classNames.has('limit-window-no-reset'), false);
+});
+
+test('StepFun draws rolling windows and Token Plan credit as actual meters', () => {
+  const reset = String(Math.floor(Date.now() / 1000) + 86400);
+  const coding = dockView().renderProviderWindows({ provider: 'stepfun', windows: parseStepfunUsage({
+    status: 1, five_hour_usage_left_rate: 0.8, weekly_usage_left_rate: 0.6,
+    five_hour_usage_reset_time: reset, weekly_usage_reset_time: reset
+  }) }, '#8a94a1');
+  assert.deepEqual([...coding.walk()].filter((node) => node.classNames.has('limit-window-text')).map((node) => node.children[0].textContent), ['5-hour', 'Weekly']);
+  assert.equal(coding.textOf('limit-meter').length, 2);
+
+  const credit = dockView().renderProviderWindows({ provider: 'stepfun', windows: parseStepfunUsage({
+    status: 1, plan_family: 2, five_hour_usage_reset_time: '0', weekly_usage_reset_time: '0',
+    plan_credit_rate_limit: { subscription_credit_left_rate: 0.73, subscription_credit_reset_time: reset }
+  }) }, '#8a94a1');
+  assert.deepEqual([...credit.walk()].filter((node) => node.classNames.has('limit-window-text')).map((node) => node.children[0].textContent), ['Credit']);
+  assert.equal(credit.textOf('limit-meter').length, 1);
+  assert.ok(credit.find('limit-window').classNames.has('limit-window-wide'));
+  assert.match(credit.text, /73% left/);
 });
 
 test('a TypeSafe card does not repeat the full balance beside its expiry', () => {
