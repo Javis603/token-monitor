@@ -233,14 +233,16 @@ test('blank and absent API numbers stay unknown instead of becoming zero-value m
 });
 
 test('a key limit can derive usage from a real remaining value', () => {
-  assert.deepEqual(keyLimitWindow({ limit: 30, limit_remaining: 18 }), {
+  const expected = {
     kind: 'billing',
     label: 'API key limit',
     used: 12,
     limit: 30,
     remaining: 18,
     showMeter: true
-  });
+  };
+  assert.deepEqual(keyLimitWindow({ limit: 30, limit_remaining: 18 }), expected);
+  assert.deepEqual(keyLimitWindow({ limit: 30, usage: 5, limit_remaining: 18 }), expected);
 });
 
 test('a resetting key limit is measured against the current period, not lifetime usage', () => {
