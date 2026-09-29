@@ -218,6 +218,9 @@ function createEdgeDockController(deps) {
     if (!win.isVisible()) {
       win.setOpacity(0);
       win.showInactive();
+      // Reassert native topmost after showInactive. The floating level can be
+      // demoted when Electron moves the HWND behind a non-topmost taskbar.
+      if (platform === 'win32') win.setAlwaysOnTop(true, 'pop-up-menu');
     }
     fade(win, visible ? 1 : 0, duration);
   }

@@ -35,6 +35,7 @@ class FakeBrowserWindow extends EventEmitter {
     this.backgroundMaterials = [];
     this.vibrancyCalls = [];
     this.hasShadowCalls = [];
+    this.zOrderCalls = [];
     FakeBrowserWindow.instances.push(this);
   }
 
@@ -49,9 +50,9 @@ class FakeBrowserWindow extends EventEmitter {
   getBounds() { return { ...this.bounds }; }
   setOpacity(value) { this.opacity = value; }
   setIgnoreMouseEvents(value) { this.ignoreMouse = value; }
-  showInactive() { this.visible = true; }
+  showInactive() { this.visible = true; this.zOrderCalls.push('showInactive'); }
   setBounds(bounds) { this.bounds = { ...bounds }; }
-  setAlwaysOnTop() {}
+  setAlwaysOnTop(flag, level) { this.zOrderCalls.push(['setAlwaysOnTop', flag, level]); }
   setVisibleOnAllWorkspaces() {}
   setHiddenInMissionControl() {}
   setShape(rects) { this.shapeCalls.push(rects); }
@@ -157,6 +158,33 @@ function createFixture(options = {}) {
   const windowFor = (surface) => FakeBrowserWindow.instances.filter((win) => !win.destroyed && win.surface === surface).at(-1);
   return { controller, hapticCalls, haptics, ipcMain, maskWindows, placements, screen, settings, windowFor };
 }
+
+test('Windows Edge Dock reasserts topmost after each surface is first shown and rebuilt', (t) => {
+  const fixture = createFixture();
+  t.after(() => fixture.controller.stop());
+  const surfaces = ['peek', 'rail', 'bubble'];
+  const expected = ['showInactive', ['setAlwaysOnTop', true, 'pop-up-menu']];
+
+  for (const surface of surfaces) {
+    const win = fixture.windowFor(surface);
+    assert.equal(win.options.alwaysOnTop, true);
+    assert.deepEqual(win.zOrderCalls, expected, `${surface} reasserts topmost after showing`);
+  }
+
+  fixture.controller.sync();
+  for (const surface of surfaces) {
+    assert.deepEqual(fixture.windowFor(surface).zOrderCalls, expected, `${surface} is not repeatedly raised`);
+  }
+
+  fixture.controller.stop();
+  fixture.controller.sync();
+  for (const win of FakeBrowserWindow.instances.filter((win) => !win.destroyed)) {
+    win.webContents.emit('did-finish-load');
+  }
+  for (const surface of surfaces) {
+    assert.deepEqual(fixture.windowFor(surface).zOrderCalls, expected, `${surface} reasserts topmost after rebuild`);
+  }
+});
 
 test('auto-hide haptics distinguish the handle reveal from the first hovered item', async (t) => {
   const fixture = createFixture({ platform: 'darwin', settings: { edgeDockMode: 'autoHide' } });
