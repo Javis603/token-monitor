@@ -5,9 +5,85 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
-const { addableLimitProviders } = require('../../src/electron/renderer/edgeDock/composer');
+const { addableLimitProviders, createEdgeDockComposer } = require('../../src/electron/renderer/edgeDock/composer');
+const itemsApi = require('../../src/electron/renderer/edgeDock/items');
+const { limitWindowLabel } = require('../../src/shared/limits/windowLabels');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
+
+test('a stats-only repaint keeps an open window picker and its labels match the Limits view', () => {
+  class Element {
+    constructor(tagName) {
+      this.tagName = tagName.toUpperCase();
+      this.children = [];
+      this.listeners = {};
+      this.dataset = {};
+      this.style = { setProperty() {} };
+      this.classList = { toggle() {}, add() {} };
+    }
+    append(...children) {
+      for (const child of children) {
+        child.parent = this;
+        this.children.push(child);
+      }
+    }
+    replaceChildren(...children) { this.children = []; this.append(...children); }
+    get firstChild() { return this.children[0]; }
+    addEventListener(name, handler) { this.listeners[name] = handler; }
+    setAttribute() {}
+    contains(node) { return this === node || this.children.some((child) => child.contains(node)); }
+  }
+  const previousDocument = global.document;
+  const document = { createElement: (tag) => new Element(tag), activeElement: null };
+  global.document = document;
+  try {
+    const root = new Element('div');
+    const settings = { edgeDockItems: [{ type: 'limit', provider: 'claude' }] };
+    let stats = { limits: { providers: [{ provider: 'claude', status: 'ok', windows: [
+      { kind: 'session', label: 'Session', remainingPercent: 100 },
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 19 }
+    ] }] }, periods: { today: { totalTokens: 100 } } };
+    const composer = createEdgeDockComposer({
+      root, itemsApi,
+      t: (key) => key,
+      presentationApi: {},
+      getSettings: () => settings,
+      getStats: () => stats,
+      save: () => {},
+      providerLabel: (id) => id,
+      providerColor: () => '#fff',
+      windowLabel: (record, quotaWindow) => limitWindowLabel(record.provider, quotaWindow),
+      hasProviderMark: () => true,
+      maskEmail: (email) => email,
+      createRowDrag: () => ({ deferRender: () => false })
+    });
+    const find = (node, tag) => node.tagName === tag ? node : node.children.map((child) => find(child, tag)).find(Boolean);
+    composer.render();
+    const button = root.children[1].children[0].children.find((node) => node.dataset.itemId);
+    button.listeners.click();
+    const select = find(root, 'SELECT');
+    assert.deepEqual(select.children.map((option) => option.textContent), [
+      'settings.edgeDock.window.auto', 'Session', 'Weekly'
+    ]);
+    document.activeElement = select;
+    stats = { ...stats, periods: { today: { totalTokens: 200 } } };
+    composer.render();
+    assert.equal(find(root, 'SELECT'), select);
+    stats = { ...stats, limits: { providers: [{ ...stats.limits.providers[0], windows: [
+      { kind: 'session', label: 'Session', remainingPercent: 90 },
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 19 },
+      { kind: 'billing', label: 'Monthly', remainingPercent: 70 }
+    ] }] } };
+    composer.render();
+    assert.equal(find(root, 'SELECT'), select);
+    document.activeElement = null;
+    composer.render();
+    assert.notEqual(find(root, 'SELECT'), select);
+    assert.equal(find(root, 'SELECT').children.at(-1).textContent, 'Monthly');
+  } finally {
+    global.document = previousDocument;
+  }
+});
 
 // A provider that reports no quota has no cell in automatic mode. The add menu
 // still needs to offer it alongside the connected providers.

@@ -7,7 +7,7 @@
 // `edgeDockItems` is either null — the automatic default, which follows the
 // connected limit providers — or an ordered list the user composed:
 //   { type: 'limit', provider, hiddenAccounts: [accountKey], showUsage,
-//     accountMode: 'active' | 'lowest' }
+//     accountMode: 'active' | 'lowest', windowKey: '' | limitWindowKey(window) }
 //   { type: 'stat', metric }   metric: a usage period, 'liveRate', or 'sessions'
 //                              ('sessions' additionally carries runningOnly
 //                              and groupBy; see normalizeItem)
@@ -46,6 +46,26 @@
     return String(value || '').trim().toLowerCase();
   }
 
+  // A window's identity must survive refreshes and account changes. The label
+  // distinguishes scoped pools of the same kind without storing an array index.
+  function limitWindowKey(window) {
+    if (!window || typeof window !== 'object' || !window.kind) return '';
+    return JSON.stringify([
+      String(window.kind), String(window.label || ''),
+      String(window.metric || ''), window.additional === true
+    ]);
+  }
+
+  function normalizeWindowKey(value) {
+    if (typeof value !== 'string' || value.length > 400) return '';
+    try {
+      const [kind, label, metric, additional] = JSON.parse(value);
+      if (typeof kind !== 'string' || !kind || typeof label !== 'string'
+        || typeof metric !== 'string' || typeof additional !== 'boolean') return '';
+      return limitWindowKey({ kind, label, metric, additional });
+    } catch (_) { return ''; }
+  }
+
   function itemId(item) {
     if (item?.type === 'limit') return `limit:${item.provider}`;
     if (item?.type === 'stat') return `stat:${item.metric}`;
@@ -73,6 +93,7 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
         hiddenAccounts,
         showUsage: raw.showUsage !== false,
         showSessions: raw.showSessions !== false,
+        windowKey: normalizeWindowKey(raw.windowKey),
         // Codex has a meaningful local "current account", so its glance value
         // follows that account unless the user explicitly asks for the tightest
         // visible account. Other providers have no local-login identity.
@@ -125,6 +146,7 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
       hiddenAccounts: [],
       showUsage: true,
       showSessions: true,
+      windowKey: '',
       accountMode: provider === 'codex' ? 'active' : 'lowest'
     }));
   }
@@ -154,6 +176,7 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
     USAGE_PERIODS,
     defaultEdgeDockItems,
     itemId,
+    limitWindowKey,
     normalizeEdgeDockItems,
     reorderEdgeDockItems
   };

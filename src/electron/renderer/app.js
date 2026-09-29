@@ -11937,6 +11937,12 @@ const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComp
     save: (patch) => saveSettings(patch),
     providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
     providerColor: (id) => limitProviderColor(id),
+    windowLabel: (record, quotaWindow) => record?.provider === 'codex' && quotaWindow.additional === true
+      ? limitWindowsView.codexAdditionalWindowLabel(
+        quotaWindow,
+        (record.windows || []).filter((entry) => entry?.additional === true)
+      )
+      : limitWindowsView.providerWindowLabel(record, quotaWindow, 'Quota'),
     hasProviderMark: (id) => limitMarksWithIcon.has(id),
     // Offer every enabled provider in the user's limits order, including those
     // without quota data. Keep the ordering rule here rather than in the composer.

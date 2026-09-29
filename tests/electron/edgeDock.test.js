@@ -131,7 +131,7 @@ const {
 const { canUseEdgeDock } = require('../../src/electron/edgeDock/controller');
 const { bubbleCommands, peekCommands, railCommands, toPolygons, toSvgPath } = require('../../src/electron/renderer/edgeDock/shapes');
 const { rasterizeMask, shapeRectsFromPolygons } = require('../../src/electron/edgeDock/mask');
-const { DEFAULT_LIMIT_COUNT, normalizeEdgeDockItems, reorderEdgeDockItems } = require('../../src/electron/renderer/edgeDock/items');
+const { DEFAULT_LIMIT_COUNT, limitWindowKey, normalizeEdgeDockItems, reorderEdgeDockItems } = require('../../src/electron/renderer/edgeDock/items');
 const { SESSIONS_METRIC } = require('../../src/electron/renderer/edgeDock/presentation');
 const edgeDockPresentation = require('../../src/electron/renderer/edgeDock/presentation');
 // The predicate the projection, the rail and the card all answer with, so these
@@ -1535,6 +1535,23 @@ test('the rail headline reports the pool that gates the account, not just the se
   assert.equal(cells6[0].windowKind, 'session');
 });
 
+test('a pinned rail window ignores automatic exhaustion and keeps its identity across refreshes', () => {
+  const session = { kind: 'session', label: 'Session', remainingPercent: 85 };
+  const weekly = { kind: 'weekly', label: 'Weekly', remainingPercent: 0 };
+  const scoped = { kind: 'session', label: 'Fable', remainingPercent: 35 };
+  const record = provider('claude', { windows: [session, weekly, scoped] });
+  const key = limitWindowKey(session);
+  const items = normalizeEdgeDockItems([{ type: 'limit', provider: 'claude', windowKey: key }]);
+  const build = (windows) => buildEdgeDockCells({ limits: { providers: [provider('claude', { windows })] } }, { items })[0];
+  const pinned = build(record.windows);
+  assert.equal(pinned.remainingPercent, 85);
+  assert.equal(pinned.windowKind, 'session');
+  assert.equal(pinned.severityPercent, 85);
+  assert.equal(build([scoped, weekly, { ...session, remainingPercent: 72 }]).remainingPercent, 72);
+  assert.equal(build([scoped, weekly]).remainingPercent, null);
+  assert.equal(build([scoped, weekly]).status, 'error');
+});
+
 test('explicit items keep their order, their empty providers, and add usage readouts', () => {
   const stats = {
     periods: {
@@ -2147,8 +2164,10 @@ test('item settings normalize to null for automatic and drop unknown entries', (
   ]);
   assert.deepEqual(
     normalizeEdgeDockItems([{ type: 'limit', provider: 'CODEX', hiddenAccounts: ['k', 'k', 7, ''] }]),
-    [{ type: 'limit', provider: 'codex', hiddenAccounts: ['k', '7'], showUsage: true, showSessions: true, accountMode: 'active' }]
+    [{ type: 'limit', provider: 'codex', hiddenAccounts: ['k', '7'], showUsage: true, showSessions: true, windowKey: '', accountMode: 'active' }]
   );
+  assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'codex', windowKey: '["weekly","Weekly","",false]' }])[0].windowKey, '["weekly","Weekly","",false]');
+  assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'codex', windowKey: 'junk' }])[0].windowKey, '');
   assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'codex', accountMode: 'lowest' }])[0].accountMode, 'lowest');
   assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'claude', accountMode: 'active' }])[0].accountMode, 'lowest');
 });
