@@ -253,14 +253,14 @@ test('StepFun draws rolling windows and Token Plan credit as actual meters', () 
   const coding = dockView().renderProviderWindows({ provider: 'stepfun', windows: parseStepfunUsage({
     status: 1, five_hour_usage_left_rate: 0.8, weekly_usage_left_rate: 0.6,
     five_hour_usage_reset_time: reset, weekly_usage_reset_time: reset
-  }) }, '#8a94a1');
+  }) }, '#000000');
   assert.deepEqual([...coding.walk()].filter((node) => node.classNames.has('limit-window-text')).map((node) => node.children[0].textContent), ['5-hour', 'Weekly']);
   assert.equal(coding.textOf('limit-meter').length, 2);
 
   const credit = dockView().renderProviderWindows({ provider: 'stepfun', windows: parseStepfunUsage({
     status: 1, plan_family: 2, five_hour_usage_reset_time: '0', weekly_usage_reset_time: '0',
     plan_credit_rate_limit: { subscription_credit_left_rate: 0.73, subscription_credit_reset_time: reset }
-  }) }, '#8a94a1');
+  }) }, '#000000');
   assert.deepEqual([...credit.walk()].filter((node) => node.classNames.has('limit-window-text')).map((node) => node.children[0].textContent), ['Credit']);
   assert.equal(credit.textOf('limit-meter').length, 1);
   assert.ok(credit.find('limit-window').classNames.has('limit-window-wide'));
