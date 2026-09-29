@@ -889,7 +889,9 @@ function cacheClaudeIdentity(fingerprint, entry, deps = {}) {
     ...entry,
     identity: {
       ...entry.identity,
-      ...(previous?.identity?.accountKey ? { accountKey: previous.identity.accountKey } : {})
+      ...(previous?.organizationId === entry.organizationId && previous?.identity?.accountKey
+        ? { accountKey: previous.identity.accountKey }
+        : {})
     },
     resolvedAt: (deps.now || Date.now)()
   };
@@ -1156,7 +1158,7 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
   const fingerprint = claudeWebIdentityFingerprint(cookie);
   const selectedId = normalizeClaudeWebOrganizationId(options.claudeWebOrganizationId);
   let context = claudeCachedIdentity(fingerprint, deps);
-  if (context && selectedId && context.organizationId !== selectedId) context = null;
+  if (context && context.selectedOrganizationId !== selectedId) context = null;
   let usage;
   if (!context) {
     const stale = claudeCachedIdentity(fingerprint, deps, { allowStale: true });
@@ -1172,6 +1174,7 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
       const accountBody = await fetchWebJson(`${baseUrl}/api/account`);
       context = cacheClaudeIdentity(fingerprint, {
         organizationId,
+        selectedOrganizationId: selectedId,
         identity: claudeWebAccountIdentity(accountBody, organization)
       }, deps);
     } catch (error) {
@@ -1180,6 +1183,7 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
       }
       context = {
         organizationId,
+        selectedOrganizationId: selectedId,
         identity: stale.identity,
         resolvedAt: stale.resolvedAt
       };
