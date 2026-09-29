@@ -29,6 +29,8 @@ The live system account stays visible alongside enabled managed accounts. Compos
 
 Reset-credit data supplements quota when available. Empty quota can receive one bounded retry for plans expected to expose windows; do not turn absence into zero.
 
+Plan labels come from the quota response's plan type. Display `prolite`, `pro` and `promax` as Pro, Pro More and Pro Max, without assuming a fixed quota multiplier from a tier name.
+
 ## Login and account switching
 
 Only allowlisted `auth.openai.com` authorization/device URLs may be opened from CLI output. Command discovery and Windows quoting are part of the provider contract because Store/npm installations resolve differently.
