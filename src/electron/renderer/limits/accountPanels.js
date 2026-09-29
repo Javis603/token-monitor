@@ -165,6 +165,10 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
     const input = control(field);
     if (!field.labelKey) return input;
     const row = element('div', '', 'settings-row');
+    if (field.key === 'claudeWebOrganizationId') {
+      row.id = 'claudeWebOrganizationRow';
+      row.classList.add('hidden');
+    }
     const label = localized(document.createElement('label'), field.labelKey);
     label.setAttribute('for', input.id);
     row.append(label, input);

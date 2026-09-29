@@ -10573,6 +10573,7 @@ function limitAccountForm(providerId) {
 function renderClaudeOrganizationChoices(choices, selectedId = state.settings?.claudeWebOrganizationId || '') {
   const select = document.getElementById('claudeWebOrganizationIdInput');
   if (!select) return false;
+  document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', choices.length === 0);
   select.options.length = 0;
   const placeholder = document.createElement('option');
   placeholder.value = '';
