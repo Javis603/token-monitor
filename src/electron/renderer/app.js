@@ -14037,15 +14037,17 @@ function renderMimoStatus() {
       right.className = 'managed-account-right';
       const info = document.createElement('span');
       info.className = 'managed-account-info';
-      const rejectedCookie = !detected && enabled && providers.some((provider) => (
+      const failedProvider = enabled && providers.find((provider) => (
         provider.accountKey === account.accountKey
-        && provider.sourceDetail === 'managed'
+        && provider.sourceDetail === (detected ? 'app' : 'managed')
         && provider.status === 'unauthorized'
       ));
+      const statusLabel = failedProvider
+        ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(failedProvider))
+        : '';
       info.textContent = !enabled ? t('settings.mimo.disabled')
-        : rejectedCookie ? t('settings.mimo.repasteCookie')
-          : limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel);
-      info.title = rejectedCookie ? t('settings.mimo.invalidCookie') : info.textContent;
+        : statusLabel || limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel);
+      info.title = info.textContent;
 
       const remove = detected ? null : document.createElement('button');
       if (remove) {

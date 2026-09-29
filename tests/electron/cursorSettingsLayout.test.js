@@ -3247,7 +3247,7 @@ test('MiMo refreshes its detected account when the settings section is expanded 
   assert.match(app, /if \(expanding\) void refreshMimoAccounts\(\)/);
 });
 
-test('MiMo settings asks only the rejected local Cookie owner to paste it again', () => {
+test('MiMo settings reuses the shared sign-in status for rejected accounts', () => {
   const app = readRendererFile('app.js');
   const source = functionBody(app, 'mimoSettingsAccountTitle', 'copilotProviderStatus');
   class Node {
@@ -3282,19 +3282,24 @@ test('MiMo settings asks only the rejected local Cookie owner to paste it again'
     ] }, mimoAccountError: '' },
     accountShellApi: { render() {} },
     localProviderStatuses: () => providers,
-    limitProviderPresentationApi: { limitProviderDisplayLabel: (label) => label },
+    limitProviderPresentationApi: {
+      limitProviderDisplayLabel: (label) => label,
+      limitProviderStatusLabel: () => ({ label: 'Sign in again', tone: 'setup' })
+    },
+    translatedLimitProviderTag: (tagInfo) => tagInfo?.label || '',
     renderSettingsSummaries() {},
     t: (key) => ({
-      'settings.mimo.repasteCookie': 'Paste Cookie again',
-      'settings.mimo.invalidCookie': 'Copy a fresh Cookie after signing in.',
+      'settings.limits.status.signInAgain': 'Sign in again',
       'settings.mimo.desktopAccount': 'MiMo Desktop'
     })[key] || key
   };
   const render = vm.runInNewContext(`${source}\nrenderMimoStatus`, context);
   render();
   const info = list.children.map((row) => [...row.walk()].find((node) => node.className === 'managed-account-info'));
-  assert.deepEqual(info.map((node) => node.textContent), ['Paste Cookie again', 'Console', 'Desktop app']);
-  assert.equal(info[0].title, 'Copy a fresh Cookie after signing in.');
+  assert.deepEqual(info.map((node) => node.textContent), ['Sign in again', 'Console', 'Sign in again']);
+  assert.equal(info[0].title, 'Sign in again');
+  assert.equal(info[1].title, 'Console');
+  assert.equal(info[2].title, 'Sign in again');
   providers = [{ accountKey: 'a', sourceDetail: 'managed', status: 'ok' }];
   render();
   assert.equal([...list.children[0].walk()].find((node) => node.className === 'managed-account-info').textContent, 'Console');

@@ -219,7 +219,9 @@ The membership has no plan to name when the subscription answers `current: null`
 
 Each row carries its own lane's answer, so a lane that failed takes its own row's status instead of speaking through the other product's row. A membership whose session ended is an `unauthorized` membership row beside a live wallet row; before the split, both shared one row and the failure had to be smuggled in beside a wallet that was still true. A region the app's table does not carry resolves no membership endpoint at all, so that row is absent rather than mislabelled.
 
-Limits uses the shared “Sign in again” status for rejected sessions, as it does for other Cookie-backed providers. Settings identifies the `app` source as MiMo Desktop and tells the owner of a rejected `managed` Console Cookie to paste a fresh one. This depends on each row keeping its own truthful `sourceDetail`.
+Limits uses the shared “Sign in again” status for rejected sessions, as it does for other Cookie-backed providers. Settings keeps one account-level row for a saved Console credential or a detected MiMo Desktop session and reuses that same shared status when the matching account-level row is rejected; a membership-only failure remains on its independent Limits row rather than creating a second Settings credential row. The manual form keeps its existing `settings.mimo.invalidCookie` detail for a Cookie rejected while saving. The source fields stay truthful (`web` + `managed` for a saved Console Cookie, `local` + `app` for the Desktop session).
+
+When Desktop discovery is `notConfigured`, the provider emits no automatic row, so a working pasted Console account remains by itself. If there is no MiMo account at all, the shared Limits view may still show its enabled-provider `Not signed in` placeholder; that is the common view fallback, not a fabricated Desktop reading.
 
 ### Session reader
 
