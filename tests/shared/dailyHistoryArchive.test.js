@@ -1085,3 +1085,22 @@ test('allTimeCumulativeFromArchive folds Cursor Auto model ids to the period key
   assert.equal(cumulative.cursor.totalTokens, 500);
   assert.equal(cumulative.cursor.models['cursor-auto'], 500, 'auto and default both key to cursor-auto');
 });
+
+test('allTimeCumulativeFromArchive drops reserved key names and never pollutes the prototype', () => {
+  const before = Object.prototype.totalTokens;
+  const archive = {
+    days: {
+      '2026-06-01': { date: '2026-06-01', observations: [
+        { client: '__proto__', modelId: 'x', tokens: 500, cost: 1, messages: 1 },
+        { client: 'constructor', modelId: 'y', tokens: 500, cost: 1, messages: 1 },
+        { client: 'claude-code', modelId: 'claude-opus-4-8', tokens: 100, cost: 2, messages: 1 }
+      ] }
+    }
+  };
+
+  const cumulative = allTimeCumulativeFromArchive(archive);
+
+  assert.deepEqual(Object.keys(cumulative), ['claude'], 'reserved client names are dropped');
+  assert.equal(cumulative.claude.totalTokens, 100);
+  assert.equal(Object.prototype.totalTokens, before, 'Object.prototype is untouched');
+});
