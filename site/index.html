@@ -4,17 +4,18 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title data-i18n="meta.title">Token Monitor: AI Tools usage at a glance</title>
-    <meta name="description" content="Token Monitor is a local-first desktop app for live tokens, cost, limits, sessions, and history across 28+ AI coding tools." data-i18n-attr="content:meta.description">
+    <meta name="description" content="Token Monitor is a local-first desktop app for live tokens, cost, limits, sessions, and history across 30+ AI coding tools." data-i18n-attr="content:meta.description">
     <meta property="og:title" content="Token Monitor" data-i18n-attr="content:meta.ogTitle">
-    <meta property="og:description" content="Live tokens, cost, limits, sessions, and history across 28+ AI coding tools." data-i18n-attr="content:meta.ogDescription">
+    <meta property="og:description" content="Live tokens, cost, limits, sessions, and history across 30+ AI coding tools." data-i18n-attr="content:meta.ogDescription">
     <meta property="og:type" content="website">
     <meta property="og:image" content="assets/icon.png">
     <meta name="theme-color" content="#14171c">
     <link rel="icon" href="assets/icon.png">
-    <link rel="stylesheet" href="styles/tokens.css?v=20260730-story29">
-    <link rel="stylesheet" href="styles/base.css?v=20260730-story29">
-    <link rel="stylesheet" href="styles/components.css?v=20260730-story29">
-    <link rel="stylesheet" href="styles/sections.css?v=20260730-story29">
+    <link rel="stylesheet" href="styles/tokens.css?v=20260929-v063">
+    <link rel="stylesheet" href="styles/base.css?v=20260929-v063">
+    <link rel="stylesheet" href="styles/components.css?v=20260929-v063">
+    <link rel="stylesheet" href="styles/edgedock.css?v=20260929-v063">
+    <link rel="stylesheet" href="styles/sections.css?v=20260929-v063">
   </head>
   <body>
     <a class="skip-link" href="#main" data-i18n="nav.skip">Skip to content</a>
@@ -42,6 +43,8 @@
               <button type="button" role="menuitemradio" data-lang="zh-TW" aria-checked="false">繁體中文</button>
               <button type="button" role="menuitemradio" data-lang="zh-CN" aria-checked="false">简体中文</button>
               <button type="button" role="menuitemradio" data-lang="en" aria-checked="true">English</button>
+              <button type="button" role="menuitemradio" data-lang="ko" aria-checked="false">한국어</button>
+              <button type="button" role="menuitemradio" data-lang="ja" aria-checked="false">日本語</button>
             </div>
           </details>
           <a class="nav-github-link" href="https://github.com/Javis603/token-monitor" aria-label="Star Token Monitor on GitHub" data-i18n-attr="aria-label:nav.githubStar">
@@ -86,7 +89,7 @@
           </div>
         </div>
         <div class="hero-tools reveal" aria-labelledby="tools-title">
-          <p class="tool-strip-label" id="tools-title" data-i18n="tools.eyebrow">29+ tools and providers</p>
+          <p class="tool-strip-label" id="tools-title" data-i18n="tools.eyebrow">40+ tools and providers</p>
           <div class="tool-marquee" aria-label="Supported tools" data-i18n-attr="aria-label:tools.eyebrow">
             <div class="tool-track">
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/claude.svg" alt=""></span><span>Claude Code</span></span>
@@ -115,6 +118,20 @@
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/dsh.svg" alt=""></span><span>DeepSeek Harness</span></span>
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/openrouter.svg" alt=""></span><span>OpenRouter</span></span>
               <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/volcengine.svg" alt=""></span><span>Volcengine</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/devin.svg" alt=""></span><span>Devin</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/amp.svg" alt=""></span><span>Amp</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/droid.svg" alt=""></span><span>Droid</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/omp.svg" alt=""></span><span>Oh My Pi</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/commandcode.svg" alt=""></span><span>Command Code</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/qoder.svg" alt=""></span><span>Qoder</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/trae.svg" alt=""></span><span>Trae</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/cherrystudio.svg" alt=""></span><span>Cherry Studio</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/lmstudio.svg" alt=""></span><span>LM Studio</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/unsloth.svg" alt=""></span><span>Unsloth</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/alibaba.svg" alt=""></span><span>Alibaba Cloud</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/typesafe.svg" alt=""></span><span>TypeSafe</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/ollama.svg" alt=""></span><span>Ollama</span></span>
+              <span class="tool-chip"><span class="tool-mark" aria-hidden="true"><img src="assets/icons/proma.svg" alt=""></span><span>Proma</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/claude.svg" alt=""></span><span>Claude Code</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/codex.svg" alt=""></span><span>Codex</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/opencode.svg" alt=""></span><span>OpenCode</span></span>
@@ -141,6 +158,20 @@
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/dsh.svg" alt=""></span><span>DeepSeek Harness</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/openrouter.svg" alt=""></span><span>OpenRouter</span></span>
               <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/volcengine.svg" alt=""></span><span>Volcengine</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/devin.svg" alt=""></span><span>Devin</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/amp.svg" alt=""></span><span>Amp</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/droid.svg" alt=""></span><span>Droid</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/omp.svg" alt=""></span><span>Oh My Pi</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/commandcode.svg" alt=""></span><span>Command Code</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/qoder.svg" alt=""></span><span>Qoder</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/trae.svg" alt=""></span><span>Trae</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/cherrystudio.svg" alt=""></span><span>Cherry Studio</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/lmstudio.svg" alt=""></span><span>LM Studio</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/unsloth.svg" alt=""></span><span>Unsloth</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/alibaba.svg" alt=""></span><span>Alibaba Cloud</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/typesafe.svg" alt=""></span><span>TypeSafe</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/ollama.svg" alt=""></span><span>Ollama</span></span>
+              <span class="tool-chip" aria-hidden="true"><span class="tool-mark"><img src="assets/icons/proma.svg" alt=""></span><span>Proma</span></span>
             </div>
           </div>
         </div>
@@ -370,43 +401,115 @@
                 <div class="tm-label">TOTAL TOKENS</div>
                 <div class="tm-total">165,164,772</div>
                 <div class="tm-cost">$136.08</div>
-                <div class="tm-crumb">
-                  <span class="tm-back">‹ Sessions</span>
-                  <span class="tm-pill" data-i18n="mock.newest">↕ Newest</span>
-                </div>
-                <div class="tm-session-feed">
-                  <div class="tm-sess is-open">
-                    <span class="tm-caret" aria-hidden="true"></span>
-                    <div class="tm-sess-body">
-                      <div class="tm-sess-head">
-                        <span class="tm-sess-title"><span class="you">YOU</span><span class="sep">›</span><span>Polish dashboard details...</span></span>
-                        <span class="tm-sess-val">8,314,064</span>
-                      </div>
-                      <div class="tm-sess-meta"><span>18:13 · 32 turns · 3 tools</span><span class="tm-sess-cost">$25.12</span></div>
-                      <div class="tm-bar"><span style="--w:64%;--bar:#7bc8ff"></span></div>
-                      <div class="tm-replies">
-                        <div class="tm-reply">
-                          <div class="tm-reply-head"><span class="tm-reply-name">AI Reply #1</span><span class="tm-reply-val">240,335</span></div>
-                          <div class="tm-reply-meta"><span>in 2 · out 10,255 · cache 226,024</span><span class="tm-reply-cost">$0.7261</span></div>
+                <div class="tm-slist" role="list">
+                  <div class="row session-row running" data-client="codex" role="listitem">
+                    <div class="row-head">
+                      <div class="row-name">
+                        <span class="row-mark row-icon row-icon-codex"></span>
+                        <span class="row-live is-active" aria-hidden="true"><span class="row-live-dot"></span></span>
+                        <div class="row-label">
+                          <span class="row-title">Refactor edge dock hover cards</span>
+                          <span class="row-subtitle">Codex · gpt-5.6-sol</span>
+                          <span class="row-activity">21:56 · 14 calls</span>
+                          <span class="row-detail">019a4f2e-a1b2-4c3d-8e4f-0a1b2c3d4e5f</span>
                         </div>
-                        <div class="tm-reply">
-                          <div class="tm-reply-head"><span class="tm-reply-name">AI Reply #2</span><span class="tm-reply-val">240,335</span></div>
-                          <div class="tm-reply-meta"><span>in 2 · out 10,255 · cache 226,024</span><span class="tm-reply-cost">$0.7261</span></div>
-                          <div class="tm-tool-line">├─ Read</div>
+                      </div>
+                      <div class="row-metrics">
+                        <div class="row-value">8,314,064</div>
+                        <div class="row-cost">$6.8600</div>
+                        <div class="row-context" data-i18n-attr="title:mock.sessions.ctx38" title="38% of context used">
+                          <span class="row-context-meter"><span class="row-context-fill" style="--bar-scale:.38"></span></span>
+                          <span class="row-context-value">38%</span>
                         </div>
                       </div>
                     </div>
+                    <div class="row-body"><div class="bar"><div class="bar-fill" style="--bar-scale:.585;background:#49a3b0"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>
                   </div>
-                  <div class="tm-sess">
-                    <span class="tm-caret tm-caret-closed" aria-hidden="true"></span>
-                    <div class="tm-sess-body">
-                      <div class="tm-sess-head">
-                        <span class="tm-sess-title"><span class="you">YOU</span><span class="sep">›</span><span>Compare model spend...</span></span>
-                        <span class="tm-sess-val">3,907,118</span>
+                  <div class="row session-row running" data-client="claude" role="listitem">
+                    <div class="row-head">
+                      <div class="row-name">
+                        <span class="row-mark row-icon row-icon-claude"></span>
+                        <span class="row-live is-active" aria-hidden="true"><span class="row-live-dot"></span></span>
+                        <div class="row-label">
+                          <span class="row-title">Polish dashboard details</span>
+                          <span class="row-subtitle">Claude Code · claude-fable-5</span>
+                          <span class="row-activity">21:53 · 21 calls</span>
+                          <span class="row-detail">77c1b908-22ab-4c9d-91ef-1b2c3d4e5f6a</span>
+                        </div>
                       </div>
-                      <div class="tm-sess-meta"><span>16:42 · 18 turns · 2 tools</span><span class="tm-sess-cost">$11.84</span></div>
-                      <div class="tm-bar"><span style="--w:30%;--bar:#7bc8ff"></span></div>
+                      <div class="row-metrics">
+                        <div class="row-value">6,204,771</div>
+                        <div class="row-cost">$18.42</div>
+                        <div class="row-context" data-tone="caution" data-i18n-attr="title:mock.sessions.ctx74" title="74% of context used">
+                          <span class="row-context-meter"><span class="row-context-fill" style="--bar-scale:.74"></span></span>
+                          <span class="row-context-value">74%</span>
+                        </div>
+                      </div>
                     </div>
+                    <div class="row-body"><div class="bar"><div class="bar-fill" style="--bar-scale:.437;background:#cc7c5e"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>
+                  </div>
+                  <div class="row session-row" data-client="opencode" role="listitem">
+                    <div class="row-head">
+                      <div class="row-name">
+                        <span class="row-mark row-icon row-icon-opencode"></span>
+                        <span class="row-live" aria-hidden="true"><span class="row-live-dot"></span></span>
+                        <div class="row-label">
+                          <span class="row-title">Diff viewer polish pass</span>
+                          <span class="row-subtitle">OpenCode · big-pickle-3</span>
+                          <span class="row-activity">21:47 · 8 calls</span>
+                          <span class="row-detail">b2d81c04</span>
+                        </div>
+                      </div>
+                      <div class="row-metrics">
+                        <div class="row-value">2,640,088</div>
+                        <div class="row-cost">$4.1200</div>
+                        <div class="row-context" data-i18n-attr="title:mock.sessions.ctx57" title="57% of context used">
+                          <span class="row-context-meter"><span class="row-context-fill" style="--bar-scale:.57"></span></span>
+                          <span class="row-context-value">57%</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="row-body"><div class="bar"><div class="bar-fill" style="--bar-scale:.186;background:#a78bfa"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>
+                  </div>
+                  <div class="row session-row" data-client="dsh" role="listitem">
+                    <div class="row-head">
+                      <div class="row-name">
+                        <span class="row-mark row-icon row-icon-dsh"></span>
+                        <span class="row-live" aria-hidden="true"><span class="row-live-dot"></span></span>
+                        <div class="row-label">
+                          <span class="row-title">Weekly report generator</span>
+                          <span class="row-subtitle">DeepSeek Harness · deepseek-reasoner</span>
+                          <span class="row-activity">21:09 · 5 calls</span>
+                          <span class="row-detail">e6a90d17</span>
+                        </div>
+                      </div>
+                      <div class="row-metrics">
+                        <div class="row-value">1,177,402</div>
+                        <div class="row-cost">$0.5800</div>
+                        <div class="row-context hidden"></div>
+                      </div>
+                    </div>
+                    <div class="row-body"><div class="bar"><div class="bar-fill" style="--bar-scale:.083;background:#6d9eeb"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>
+                  </div>
+                  <div class="row summary-row" data-client="codex" data-review-group="true" role="listitem">
+                    <div class="row-head">
+                      <div class="row-name">
+                        <span class="row-mark row-icon row-icon-codex"></span>
+                        <span class="row-live" aria-hidden="true"><span class="row-live-dot"></span></span>
+                        <div class="row-label">
+                          <span class="row-title" data-i18n="mock.sessions.reviewGroup">Codex Auto Review</span>
+                          <span class="row-subtitle" data-i18n="mock.sessions.reviewLatest">Latest 18:24 · 2.4M</span>
+                          <span class="row-activity hidden"></span>
+                          <span class="row-detail" data-i18n="mock.sessions.reviewCount">6 background runs</span>
+                        </div>
+                      </div>
+                      <div class="row-metrics">
+                        <div class="row-value">14,207,882</div>
+                        <div class="row-cost">$11.71</div>
+                        <div class="row-context hidden"></div>
+                      </div>
+                    </div>
+                    <div class="row-body"><div class="bar"><div class="bar-fill" style="--bar-scale:1;background:#49a3b0"></div></div><div class="row-accordion"><div class="row-accordion-inner"></div></div></div>
                   </div>
                 </div>
                 <div class="tm-footer tm-app-footer">
@@ -468,6 +571,228 @@
             </div>
           </div>
         </div>
+      </section>
+
+      <section class="edge-dock section shell" id="edge-dock" aria-labelledby="edge-dock-title">
+        <div class="section-head reveal ed-head">
+          <h2 id="edge-dock-title" data-i18n="edgeDock.title">Edge Dock: limits and usage on the screen edge</h2>
+          <p class="lede" data-i18n="edgeDock.lede">An opt-in rail that stays out of the way. Hover it for account limits, running sessions, and token usage.</p>
+        </div>
+        <div class="ed-stage reveal" data-ed-stage role="group" data-i18n-attr="aria-label:edgeDock.stageLabel" aria-label="Edge Dock replica: a screen edge with the dock rail and its detail card">
+          <div class="ed-copy" aria-hidden="true">
+            <h2 class="ed-copy-title" data-i18n="edgeDock.title">Edge Dock: limits and usage on the screen edge</h2>
+            <p class="ed-copy-lede" data-i18n="edgeDock.lede">An opt-in rail that stays out of the way. Hover it for account limits, running sessions, and token usage.</p>
+            <p class="ed-copy-note" data-i18n="edgeDock.note">Auto-hide or always visible. Configure it in Settings → Window → Floating &amp; Tray.</p>
+          </div>
+          <!-- Edge Dock scene: the DOM the app's own renderer builds
+               (src/electron/renderer/edgeDock/dock.js), captured per surface.
+               Rail cells become <button>s so the site keeps its
+               hover/focus/click card switching; the SVG silhouettes are drawn
+               from the app's shapes.js commands in setupEdgeDock(). -->
+          <div class="ed-scene" data-ed-scene>
+            <div class="ed-bubble edge-dock-root" data-surface="bubble" data-side="right" id="ed-card-usage" data-ed-card="stat:today">
+              <svg class="edge-dock-shape" aria-hidden="true" preserveAspectRatio="none"><path class="edge-dock-shape-fill" d=""/><path class="edge-dock-shape-line" d=""/></svg>
+              <div class="edge-dock-content">
+                <section class="edge-dock-card" data-breakdown-mode="tools" data-cell-id="stat:today" role="region" aria-label="Usage" data-i18n-attr="aria-label:edgeDock.card.usage">
+                  <header class="edge-dock-card-head is-breakdown">
+                    <span class="edge-dock-stat-caption" data-i18n="edgeDock.demo.today">Today</span>
+                    <div class="edge-dock-breakdown-switch" role="group" aria-label="Tools / Models">
+                      <button class="edge-dock-breakdown-option is-active" type="button" aria-pressed="true" data-ed-mode="tools" data-i18n="edgeDock.demo.tools">Tools</button>
+                      <button class="edge-dock-breakdown-option" type="button" aria-pressed="false" data-ed-mode="models" data-i18n="edgeDock.demo.models">Models</button>
+                    </div>
+                  </header>
+                  <div class="edge-dock-stat-headline">
+                    <div class="edge-dock-total-row"><strong style="font-size: 29px;">165,164,772</strong><span class="edge-dock-total-compact" aria-hidden="true">≈ 165.2M</span></div>
+                    <span>$136.08</span>
+                  </div>
+                  <div class="edge-dock-accounts edge-dock-clients" data-ed-rows="tools">
+                    <div class="edge-dock-client"><span class="edge-dock-mark row-icon-codex" style="--ring-color: #49a3b0;"></span><span class="edge-dock-client-name">Codex</span><span class="edge-dock-client-tokens">64.9M</span><span class="edge-dock-client-share">39%</span><div class="limit-meter" style="background: rgba(73, 163, 176, 0.16);"><div class="limit-meter-fill" style="background: rgb(73, 163, 176); opacity: 0.95; --bar-scale: 1;"></div></div></div>
+                    <div class="edge-dock-client"><span class="edge-dock-mark row-icon-claude" style="--ring-color: #cc7c5e;"></span><span class="edge-dock-client-name">Claude Code</span><span class="edge-dock-client-tokens">38.9M</span><span class="edge-dock-client-share">24%</span><div class="limit-meter" style="background: rgba(204, 124, 94, 0.16);"><div class="limit-meter-fill" style="background: rgb(204, 124, 94); opacity: 0.95; --bar-scale: 0.5998394807709554;"></div></div></div>
+                    <div class="edge-dock-client"><span class="edge-dock-mark row-icon-kimi" style="--ring-color: var(--text);"></span><span class="edge-dock-client-name">Kimi</span><span class="edge-dock-client-tokens">26.4M</span><span class="edge-dock-client-share">16%</span><div class="limit-meter" style="background: rgba(183, 234, 212, 0.16);"><div class="limit-meter-fill" style="background: var(--text); opacity: 0.95; --bar-scale: 0.407007562562314;"></div></div></div>
+                    <div class="edge-dock-client"><span class="edge-dock-mark row-icon-zcode" style="--ring-color: var(--text);"></span><span class="edge-dock-client-name">ZCode</span><span class="edge-dock-client-tokens">19M</span><span class="edge-dock-client-share">11%</span><div class="limit-meter" style="background: rgba(183, 234, 212, 0.16);"><div class="limit-meter-fill" style="background: var(--text); opacity: 0.95; --bar-scale: 0.2925584129668752;"></div></div></div>
+                    <div class="edge-dock-client"><span class="edge-dock-mark row-icon-opencode" style="--ring-color: var(--text);"></span><span class="edge-dock-client-name">OpenCode</span><span class="edge-dock-client-tokens">9.4M</span><span class="edge-dock-client-share">6%</span><div class="limit-meter" style="background: rgba(183, 234, 212, 0.16);"><div class="limit-meter-fill" style="background: var(--text); opacity: 0.95; --bar-scale: 0.1451158521742411;"></div></div></div>
+                    <div class="edge-dock-client"><span class="edge-dock-mark row-icon-cursor" style="--ring-color: var(--text);"></span><span class="edge-dock-client-name">Cursor</span><span class="edge-dock-client-tokens">6.6M</span><span class="edge-dock-client-share">4%</span><div class="limit-meter" style="background: rgba(183, 234, 212, 0.16);"><div class="limit-meter-fill" style="background: var(--text); opacity: 0.95; --bar-scale: 0.10188096079845567;"></div></div></div>
+                  </div>
+                  <div class="edge-dock-accounts edge-dock-clients" data-ed-rows="models" hidden>
+                    <div class="edge-dock-client"><span class="edge-dock-mark row-icon-codex" style="--ring-color: #49a3b0;"></span><span class="edge-dock-client-name">gpt-5.6-sol</span><span class="edge-dock-client-tokens">64.9M</span><span class="edge-dock-client-share">39%</span><div class="limit-meter" style="background: rgba(73, 163, 176, 0.16);"><div class="limit-meter-fill" style="background: rgb(73, 163, 176); opacity: 0.95; --bar-scale: 1;"></div></div></div>
+                    <div class="edge-dock-client"><span class="edge-dock-mark row-icon-claude" style="--ring-color: #cc7c5e;"></span><span class="edge-dock-client-name">claude-fable-5</span><span class="edge-dock-client-tokens">38.9M</span><span class="edge-dock-client-share">24%</span><div class="limit-meter" style="background: rgba(204, 124, 94, 0.16);"><div class="limit-meter-fill" style="background: rgb(204, 124, 94); opacity: 0.95; --bar-scale: 0.5998394807709554;"></div></div></div>
+                    <div class="edge-dock-client"><span class="edge-dock-mark row-icon-kimi" style="--ring-color: var(--text);"></span><span class="edge-dock-client-name">kimi-k3</span><span class="edge-dock-client-tokens">26.4M</span><span class="edge-dock-client-share">16%</span><div class="limit-meter" style="background: rgba(183, 234, 212, 0.16);"><div class="limit-meter-fill" style="background: var(--text); opacity: 0.95; --bar-scale: 0.407007562562314;"></div></div></div>
+                    <div class="edge-dock-client"><span class="edge-dock-mark row-icon-zai" style="--ring-color: var(--text);"></span><span class="edge-dock-client-name">glm-5.2</span><span class="edge-dock-client-tokens">19M</span><span class="edge-dock-client-share">11%</span><div class="limit-meter" style="background: rgba(183, 234, 212, 0.16);"><div class="limit-meter-fill" style="background: var(--text); opacity: 0.95; --bar-scale: 0.2925584129668752;"></div></div></div>
+                    <div class="edge-dock-client"><span class="edge-dock-mark row-icon-codex" style="--ring-color: #49a3b0;"></span><span class="edge-dock-client-name">o4-mini</span><span class="edge-dock-client-tokens">9.4M</span><span class="edge-dock-client-share">6%</span><div class="limit-meter" style="background: rgba(73, 163, 176, 0.16);"><div class="limit-meter-fill" style="background: rgb(73, 163, 176); opacity: 0.95; --bar-scale: 0.1451158521742411;"></div></div></div>
+                    <div class="edge-dock-client"><span class="edge-dock-mark row-icon-token-monitor" style="--ring-color: #5fbf8a;"></span><span class="edge-dock-client-name">composer-2</span><span class="edge-dock-client-tokens">6.6M</span><span class="edge-dock-client-share">4%</span><div class="limit-meter" style="background: rgba(95, 191, 138, 0.16);"><div class="limit-meter-fill" style="background: rgb(95, 191, 138); opacity: 0.95; --bar-scale: 0.10188096079845567;"></div></div></div>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div class="ed-bubble edge-dock-root" data-surface="bubble" data-side="right" id="ed-card-codex" data-ed-card="codex">
+              <svg class="edge-dock-shape" aria-hidden="true" preserveAspectRatio="none"><path class="edge-dock-shape-fill" d=""/><path class="edge-dock-shape-line" d=""/></svg>
+              <div class="edge-dock-content">
+                <section class="edge-dock-card" data-cell-id="codex" role="region" aria-label="Codex limits" data-i18n-attr="aria-label:edgeDock.card.codex">
+                  <div class="edge-dock-accounts">
+                    <div class="limit-row">
+                      <div class="limit-head">
+                        <div class="limit-title">
+                          <div class="limit-name"><span class="limit-icon row-icon-codex"></span><span class="limit-name-title">Codex</span></div>
+                          <div class="limit-meta">Updated 2m ago</div>
+                        </div>
+                        <div class="limit-plan">Pro</div>
+                      </div>
+                      <div class="limit-windows">
+                        <div class="limit-window" data-limit-remaining-percent="55" data-limit-display-percent="55">
+                          <div class="limit-window-text"><span>Session</span><span>55% left</span></div>
+                          <div class="limit-meter" style="background: rgba(73, 163, 176, 0.16);"><div class="limit-meter-fill" style="--bar-scale: 0.55; background: rgb(73, 163, 176); opacity: 0.95;"></div></div>
+                          <div class="limit-reset">Reset 2h 15m</div>
+                        </div>
+                        <div class="limit-window" data-limit-remaining-percent="92" data-limit-display-percent="92">
+                          <div class="limit-window-text"><span>Weekly</span><span>92% left</span></div>
+                          <div class="limit-meter" style="background: rgba(73, 163, 176, 0.16);"><div class="limit-meter-fill" style="--bar-scale: 0.92; background: rgb(73, 163, 176); opacity: 0.68;"></div></div>
+                          <div class="limit-reset">Reset 4d 18h</div>
+                        </div>
+                        <div class="limit-window limit-window-wide limit-window-note limit-reset-credits" aria-label="Reset credits, 2 resets, Expires in 4d 6h, Expires in 6d 9h">
+                          <div class="limit-reset-credits-line">
+                            <span class="limit-reset-credits-value">2 resets</span>
+                            <span class="limit-reset-credits-expiry-group"><span class="limit-reset-credits-timeline"><span class="limit-reset-credits-time">4d 6h</span><span class="limit-reset-credits-time"><span class="limit-reset-credits-separator" aria-hidden="true">·</span>6d 9h</span></span><span class="limit-detail-tooltip-wrap"><span class="limit-detail-tooltip-trigger" tabindex="0" aria-label="Reset 1: Expires in 4d 6h, Reset 2: Expires in 6d 9h">i</span><span class="limit-detail-tooltip" role="tooltip" popover="manual"><span class="limit-detail-tooltip-row"><span>10/3, 2:49 PM</span><span>4d 6h</span></span><span class="limit-detail-tooltip-row"><span>10/5, 6:25 PM</span><span>6d 9h</span></span></span></span></span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="edge-dock-sessions">
+                    <div class="edge-dock-section-head">
+                      <span class="edge-dock-section-title" data-i18n="edgeDock.demo.sessions">Sessions</span>
+                      <span class="edge-dock-section-count" data-i18n="edgeDock.demo.running1">1 running</span>
+                    </div>
+                    <div class="edge-dock-session-list">
+                      <div class="edge-dock-session is-running">
+                        <span class="edge-dock-session-name"><span class="edge-dock-session-dot" aria-hidden="true" data-state="running" title="Running" data-i18n-attr="title:edgeDock.demo.stateRunning"><span class="edge-dock-session-spin"></span><svg class="edge-dock-session-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18"></path><path d="m8.7 12.2 2.1 2.1 4.5-4.6"></path></svg><span class="edge-dock-session-idle"></span></span>Retry billing webhook<span class="sr-only" data-i18n="edgeDock.demo.stateRunning"> Running</span></span>
+                        <span class="edge-dock-session-tokens">4.8M</span>
+                        <span class="edge-dock-session-meta"><span data-i18n="edgeDock.demo.metaGpt">gpt-5.6-sol · 2m ago</span><span class="edge-dock-session-context" data-tone="" title="38% of context used" data-i18n-attr="title:edgeDock.demo.context38"><span class="edge-dock-session-context-meter"><span class="edge-dock-session-context-fill" style="--bar-scale: 0.38;"></span></span><span class="edge-dock-session-context-value">38%</span></span></span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="edge-dock-usage">
+                    <div class="edge-dock-usage-tile"><span class="edge-dock-usage-label" data-i18n="edgeDock.demo.today">Today</span><span class="edge-dock-usage-tokens">64.9M</span><span class="edge-dock-usage-cost">$53.41</span></div>
+                    <div class="edge-dock-usage-tile"><span class="edge-dock-usage-label" data-i18n="edgeDock.demo.month">This month</span><span class="edge-dock-usage-tokens">3.9B</span><span class="edge-dock-usage-cost">$3270.50</span></div>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div class="ed-bubble edge-dock-root" data-surface="bubble" data-side="right" id="ed-card-claude" data-ed-card="claude">
+              <svg class="edge-dock-shape" aria-hidden="true" preserveAspectRatio="none"><path class="edge-dock-shape-fill" d=""/><path class="edge-dock-shape-line" d=""/></svg>
+              <div class="edge-dock-content">
+                <section class="edge-dock-card" data-cell-id="claude" role="region" aria-label="Claude limits" data-i18n-attr="aria-label:edgeDock.card.claude">
+                  <div class="edge-dock-accounts">
+                    <div class="limit-row">
+                      <div class="limit-head">
+                        <div class="limit-title">
+                          <div class="limit-name"><span class="limit-icon row-icon-claude"></span><span class="limit-name-title">Claude</span></div>
+                          <div class="limit-meta">Updated 2m ago</div>
+                        </div>
+                        <div class="limit-plan">Max 5x</div>
+                      </div>
+                      <div class="limit-windows">
+                        <div class="limit-window" data-limit-remaining-percent="28" data-limit-display-percent="28">
+                          <div class="limit-window-text"><span>Session</span><span>28% left</span></div>
+                          <div class="limit-meter" style="background: rgba(204, 124, 94, 0.16);"><div class="limit-meter-fill" style="--bar-scale: 0.28; background: rgb(204, 124, 94); opacity: 0.95;"></div></div>
+                          <div class="limit-reset">Reset 3h 6m</div>
+                        </div>
+                        <div class="limit-window" data-limit-remaining-percent="64" data-limit-display-percent="64">
+                          <div class="limit-window-text"><span>Weekly</span><span>64% left</span></div>
+                          <div class="limit-meter" style="background: rgba(204, 124, 94, 0.16);"><div class="limit-meter-fill" style="--bar-scale: 0.64; background: rgb(204, 124, 94); opacity: 0.68;"></div></div>
+                          <div class="limit-reset">Reset 3d 9h</div>
+                        </div>
+                        <div class="limit-window limit-window-wide limit-window-note limit-reset-credits" aria-label="Reset credits, 1 reset, Expires in 23d 14h">
+                          <div class="limit-reset-credits-line">
+                            <span class="limit-reset-credits-value">1 reset</span>
+                            <span class="limit-reset-credits-expiry-group"><span class="limit-reset-credits-timeline"><span class="limit-reset-credits-time">23d 14h</span></span><span class="limit-detail-tooltip-wrap"><span class="limit-detail-tooltip-trigger" tabindex="0" aria-label="Reset 1, 1 left, Peak hours bonus, Expires: 10/22, 11:13 PM · 23d 14h, Clears: Session">i</span><span class="limit-detail-tooltip" role="tooltip" popover="manual"><span class="limit-detail-tooltip-full is-caption">Peak hours bonus</span><span class="limit-detail-tooltip-row"><span>Expires</span><span>10/22, 11:13 PM · 23d 14h</span></span><span class="limit-detail-tooltip-row"><span>Clears</span><span>Session</span></span></span></span></span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="edge-dock-sessions">
+                    <div class="edge-dock-section-head">
+                      <span class="edge-dock-section-title" data-i18n="edgeDock.demo.sessions">Sessions</span>
+                      <span class="edge-dock-section-count" data-i18n="edgeDock.demo.running1">1 running</span>
+                    </div>
+                    <div class="edge-dock-session-list">
+                      <div class="edge-dock-session is-running">
+                        <span class="edge-dock-session-name"><span class="edge-dock-session-dot" aria-hidden="true" data-state="running" title="Running" data-i18n-attr="title:edgeDock.demo.stateRunning"><span class="edge-dock-session-spin"></span><svg class="edge-dock-session-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18"></path><path d="m8.7 12.2 2.1 2.1 4.5-4.6"></path></svg><span class="edge-dock-session-idle"></span></span>Landing page copy pass<span class="sr-only" data-i18n="edgeDock.demo.stateRunning"> Running</span></span>
+                        <span class="edge-dock-session-tokens">2.1M</span>
+                        <span class="edge-dock-session-meta"><span data-i18n="edgeDock.demo.metaFable">claude-fable-5 · 1m ago</span><span class="edge-dock-session-context" data-tone="" title="50% of context used" data-i18n-attr="title:edgeDock.demo.context50"><span class="edge-dock-session-context-meter"><span class="edge-dock-session-context-fill" style="--bar-scale: 0.5;"></span></span><span class="edge-dock-session-context-value">50%</span></span></span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="edge-dock-usage">
+                    <div class="edge-dock-usage-tile"><span class="edge-dock-usage-label" data-i18n="edgeDock.demo.today">Today</span><span class="edge-dock-usage-tokens">38.9M</span><span class="edge-dock-usage-cost">$32.07</span></div>
+                    <div class="edge-dock-usage-tile"><span class="edge-dock-usage-label" data-i18n="edgeDock.demo.month">This month</span><span class="edge-dock-usage-tokens">2.6B</span><span class="edge-dock-usage-cost">$2153.20</span></div>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div class="ed-bubble edge-dock-root" data-surface="bubble" data-side="right" id="ed-card-sessions" data-ed-card="stat:sessions">
+              <svg class="edge-dock-shape" aria-hidden="true" preserveAspectRatio="none"><path class="edge-dock-shape-fill" d=""/><path class="edge-dock-shape-line" d=""/></svg>
+              <div class="edge-dock-content">
+                <section class="edge-dock-card" data-cell-id="stat:sessions" role="region" aria-label="Sessions" data-i18n-attr="aria-label:edgeDock.card.sessions">
+                  <header class="edge-dock-card-head is-inline">
+                    <span class="edge-dock-stat-caption" data-i18n="edgeDock.demo.sessions">Sessions</span>
+                    <span class="edge-dock-card-status" data-i18n="edgeDock.demo.running2">2 running</span>
+                  </header>
+                  <div class="edge-dock-sessions">
+                    <div class="edge-dock-session-list">
+                      <div class="edge-dock-session is-running">
+                        <span class="edge-dock-session-name"><span class="edge-dock-mark row-icon-claude"></span><span class="sr-only">Claude Code </span><span class="edge-dock-session-dot" aria-hidden="true" data-state="running" title="Running" data-i18n-attr="title:edgeDock.demo.stateRunning"><span class="edge-dock-session-spin"></span><svg class="edge-dock-session-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18"></path><path d="m8.7 12.2 2.1 2.1 4.5-4.6"></path></svg><span class="edge-dock-session-idle"></span></span>Landing page copy pass<span class="sr-only" data-i18n="edgeDock.demo.stateRunning"> Running</span></span>
+                        <span class="edge-dock-session-tokens">2.1M</span>
+                        <span class="edge-dock-session-meta"><span data-i18n="edgeDock.demo.metaFable">claude-fable-5 · 1m ago</span><span class="edge-dock-session-context" data-tone="" title="50% of context used" data-i18n-attr="title:edgeDock.demo.context50"><span class="edge-dock-session-context-meter"><span class="edge-dock-session-context-fill" style="--bar-scale: 0.5;"></span></span><span class="edge-dock-session-context-value">50%</span></span></span>
+                      </div>
+                      <div class="edge-dock-session is-running">
+                        <span class="edge-dock-session-name"><span class="edge-dock-mark row-icon-codex"></span><span class="sr-only">Codex </span><span class="edge-dock-session-dot" aria-hidden="true" data-state="running" title="Running" data-i18n-attr="title:edgeDock.demo.stateRunning"><span class="edge-dock-session-spin"></span><svg class="edge-dock-session-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18"></path><path d="m8.7 12.2 2.1 2.1 4.5-4.6"></path></svg><span class="edge-dock-session-idle"></span></span>Retry billing webhook<span class="sr-only" data-i18n="edgeDock.demo.stateRunning"> Running</span></span>
+                        <span class="edge-dock-session-tokens">4.8M</span>
+                        <span class="edge-dock-session-meta"><span data-i18n="edgeDock.demo.metaGpt">gpt-5.6-sol · 2m ago</span><span class="edge-dock-session-context" data-tone="" title="38% of context used" data-i18n-attr="title:edgeDock.demo.context38"><span class="edge-dock-session-context-meter"><span class="edge-dock-session-context-fill" style="--bar-scale: 0.38;"></span></span><span class="edge-dock-session-context-value">38%</span></span></span>
+                      </div>
+                      <div class="edge-dock-session">
+                        <span class="edge-dock-session-name"><span class="edge-dock-mark row-icon-opencode"></span><span class="sr-only">OpenCode </span><span class="edge-dock-session-dot" aria-hidden="true" data-state="ended" title="Finished" data-i18n-attr="title:edgeDock.demo.stateFinished"><span class="edge-dock-session-spin"></span><svg class="edge-dock-session-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18"></path><path d="m8.7 12.2 2.1 2.1 4.5-4.6"></path></svg><span class="edge-dock-session-idle"></span></span>Migrate fixtures to v3<span class="sr-only" data-i18n="edgeDock.demo.stateFinished"> Finished</span></span>
+                        <span class="edge-dock-session-tokens">933.1K</span>
+                        <span class="edge-dock-session-meta"><span data-i18n="edgeDock.demo.metaKimi">kimi-k3 · 8m ago</span></span>
+                      </div>
+                      <div class="edge-dock-session">
+                        <span class="edge-dock-session-name"><span class="edge-dock-mark row-icon-zcode"></span><span class="sr-only">ZCode </span><span class="edge-dock-session-dot" aria-hidden="true" data-state="idle"><span class="edge-dock-session-spin"></span><svg class="edge-dock-session-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18"></path><path d="m8.7 12.2 2.1 2.1 4.5-4.6"></path></svg><span class="edge-dock-session-idle"></span></span>Sync delta backfill<span class="sr-only" data-i18n="edgeDock.demo.stateIdle"> Idle</span></span>
+                        <span class="edge-dock-session-tokens">412.8K</span>
+                        <span class="edge-dock-session-meta"><span data-i18n="edgeDock.demo.metaGlm">glm-5.2 · 2h ago</span></span>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div class="ed-rail-win edge-dock-root" data-surface="rail" data-side="right">
+              <svg class="edge-dock-shape" aria-hidden="true" viewBox="0 0 64 322" preserveAspectRatio="none"><path class="edge-dock-shape-fill" d=""/><path class="edge-dock-shape-line" d=""/></svg>
+              <div class="edge-dock-content">
+                <div class="edge-dock-rail" data-ed-rail>
+                  <button class="edge-dock-cell edge-dock-cell-stat" type="button" data-metric="today" data-ed-item="stat:today" data-index="0" style="top: 32px; height: 56px;" aria-expanded="false" aria-controls="ed-card-usage" data-i18n-attr="aria-label:edgeDock.demo.ariaToday" aria-label="Today 165.2M $136">
+                    <span class="edge-dock-stat-label" data-i18n="edgeDock.demo.todayShort">TODAY</span>
+                    <span class="edge-dock-stat-value">165.2M</span>
+                    <span class="edge-dock-stat-cost">$136</span>
+                  </button>
+                  <button class="edge-dock-cell" type="button" data-status="ok" data-running="yes" data-ed-item="codex" data-index="1" style="top: 90px; height: 70px;" aria-expanded="false" aria-controls="ed-card-codex" data-i18n-attr="aria-label:edgeDock.demo.ariaCodex" aria-label="Codex 55% 1 running">
+                    <div class="edge-dock-ring" style="--ring-color: #49a3b0;"><svg viewBox="0 0 42 42" aria-hidden="true"><circle class="edge-dock-ring-track" cx="21" cy="21" r="19" style="stroke: rgba(73, 163, 176, 0.2);"></circle><circle class="edge-dock-ring-fill" cx="21" cy="21" r="19" stroke-dasharray="119.38052083641213" stroke-dashoffset="53.72123437638545"></circle></svg><span class="edge-dock-ring-glow" style="animation-delay: -398ms;"></span><span class="edge-dock-mark row-icon-codex"></span></div>
+                    <span class="edge-dock-value" data-severity="ok">55%</span>
+                  </button>
+                  <button class="edge-dock-cell" type="button" data-status="ok" data-running="yes" data-ed-item="claude" data-index="2" style="top: 162px; height: 70px;" aria-expanded="false" aria-controls="ed-card-claude" data-i18n-attr="aria-label:edgeDock.demo.ariaClaude" aria-label="Claude 28% 1 running">
+                    <div class="edge-dock-ring" style="--ring-color: #cc7c5e;"><svg viewBox="0 0 42 42" aria-hidden="true"><circle class="edge-dock-ring-track" cx="21" cy="21" r="19" style="stroke: rgba(204, 124, 94, 0.2);"></circle><circle class="edge-dock-ring-fill" cx="21" cy="21" r="19" stroke-dasharray="119.38052083641213" stroke-dashoffset="85.95397500221674"></circle></svg><span class="edge-dock-ring-glow" style="animation-delay: -398ms;"></span><span class="edge-dock-mark row-icon-claude"></span></div>
+                    <span class="edge-dock-value" data-severity="ok">28%</span>
+                  </button>
+                  <button class="edge-dock-cell edge-dock-cell-stat" type="button" data-metric="sessions" data-ed-item="stat:sessions" data-index="3" style="top: 234px; height: 56px;" aria-expanded="false" aria-controls="ed-card-sessions" data-i18n-attr="aria-label:edgeDock.demo.ariaSessions" aria-label="Sessions 2 1.8Ktok/s Claude Code, Codex">
+                    <span class="edge-dock-stat-label" data-i18n="edgeDock.demo.sessionsShort">SESSIONS</span>
+                    <span class="edge-dock-stat-value">2</span>
+                    <span class="edge-dock-cell-rate"><span class="edge-dock-cell-rate-value">1.8K</span><span class="edge-dock-cell-rate-unit" data-i18n="edgeDock.demo.rateUnit">tok/s</span></span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p class="ed-note reveal" data-i18n="edgeDock.note">Auto-hide or always visible. Configure it in Settings → Window → Floating &amp; Tray.</p>
       </section>
 
       <section class="dashboard section shell" id="dashboard" aria-labelledby="dashboard-title">
@@ -544,6 +869,138 @@
         </div>
       </section>
 
+      <section class="widgets section shell" id="widgets" aria-labelledby="widgets-title">
+        <div class="section-head reveal">
+          <h2 id="widgets-title" data-i18n="widgets.title">Native macOS widgets</h2>
+          <p class="lede" data-i18n="widgets.lede">Summary, Activity, Breakdown, Quota, and Dashboard widgets for macOS 14 and later, from the same local data.</p>
+        </div>
+        <div class="wdg-wall reveal" data-wdg-wall role="group" data-i18n-attr="aria-label:widgets.stageLabel" aria-label="Sample macOS widgets showing illustrative Token Monitor data">
+          <div class="wdg-scene" data-wdg-scene>
+          <div class="wdg wdg-dash" data-wdg="dash">
+            <div class="wdg-dash-head">
+              <div class="wdg-metric">
+                <span class="wdg-period">MONTH</span>
+                <span class="wdg-metric-num">8.6B</span>
+                <span class="wdg-metric-cost">$7,177.64</span>
+              </div>
+              <div class="wdg-trend">
+                <span class="wdg-trend-cap">&minus;60%</span>
+                <svg class="wdg-spark" viewBox="0 0 120 34" preserveAspectRatio="none" aria-hidden="true"><path d="M0 26 C 12 24, 18 28, 26 22 S 40 16, 48 18 S 62 10, 70 12 S 84 6, 92 9 S 110 4, 120 3" fill="none" stroke="#73bdf5" stroke-width="1.8" stroke-linecap="round"/></svg>
+              </div>
+            </div>
+            <div class="wdg-divider" aria-hidden="true"></div>
+            <div class="wdg-dquota">
+              <span class="wdg-mtitle" data-i18n="widgets.demo.quota">Quota</span>
+              <div class="wdg-dqrows">
+                <div class="wdg-dqrow">
+                  <div class="wdg-dq-id">
+                    <div class="wdg-dq-name"><span class="wdg-mark"><img src="assets/icons/codex.svg" alt=""></span><span>Codex</span></div>
+                    <span class="wdg-dq-acct">w***k@example.com</span>
+                  </div>
+                  <div class="wdg-dq-wins">
+                    <div class="wdg-dqwin">
+                      <div class="wdg-dqwin-top"><span>Session</span><span class="wdg-qval" data-i18n="widgets.demo.left55">55% left</span></div>
+                      <span class="wdg-pbar"><i style="--w:55%;--bar:#49a3b0"></i></span>
+                      <span class="wdg-dq-reset" data-i18n="widgets.demo.reset214">Reset in 2h 14m</span>
+                    </div>
+                    <div class="wdg-dqwin">
+                      <div class="wdg-dqwin-top"><span>Weekly</span><span class="wdg-qval" data-i18n="widgets.demo.left92">92% left</span></div>
+                      <span class="wdg-pbar"><i style="--w:92%;--bar:#49a3b0"></i></span>
+                      <span class="wdg-dq-reset" data-i18n="widgets.demo.reset3d8">Reset in 3d 8h</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="wdg-dqrow">
+                  <div class="wdg-dq-id">
+                    <div class="wdg-dq-name"><span class="wdg-mark"><img src="assets/icons/claude.svg" alt=""></span><span>Claude Code</span></div>
+                    <span class="wdg-dq-acct">l***3@icloud.com</span>
+                  </div>
+                  <div class="wdg-dq-wins">
+                    <div class="wdg-dqwin">
+                      <div class="wdg-dqwin-top"><span>Session</span><span class="wdg-qval" data-i18n="widgets.demo.left28">28% left</span></div>
+                      <span class="wdg-pbar"><i style="--w:28%;--bar:#cc7c5e"></i></span>
+                      <span class="wdg-dq-reset" data-i18n="widgets.demo.reset459">Reset in 4h 59m</span>
+                    </div>
+                    <div class="wdg-dqwin">
+                      <div class="wdg-dqwin-top"><span>Weekly</span><span class="wdg-qval" data-i18n="widgets.demo.left64">64% left</span></div>
+                      <span class="wdg-pbar"><i style="--w:64%;--bar:#cc7c5e"></i></span>
+                      <span class="wdg-dq-reset" data-i18n="widgets.demo.reset2d12">Reset in 2d 12h</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="wdg-divider" aria-hidden="true"></div>
+            <div class="wdg-dash-bottom">
+              <div class="wdg-dact">
+                <span class="wdg-mtitle" data-i18n="widgets.demo.activity">Activity</span>
+                <div class="wdg-dact-heat">
+                  <div class="wdg-heat" data-wdg-heat="mini" aria-hidden="true"></div>
+                  <div class="wdg-months" data-wdg-months="mini" aria-hidden="true"></div>
+                </div>
+                <span class="wdg-dact-sub" data-i18n="widgets.demo.active169">169 active days</span>
+              </div>
+              <div class="wdg-vdivider" aria-hidden="true"></div>
+              <div class="wdg-dbd">
+                <span class="wdg-mtitle" data-i18n="widgets.demo.models">Models</span>
+                <div class="wdg-dbd-rows">
+                  <div class="wdg-drow"><div class="wdg-drow-top"><span class="wdg-mark"><img src="assets/icons/codex.svg" alt=""></span><span class="wdg-dname">gpt-5.6-sol</span><span class="wdg-dval">1.9B</span></div><span class="wdg-pbar"><i style="--w:100%;--bar:#49a3b0"></i></span></div>
+                  <div class="wdg-drow"><div class="wdg-drow-top"><span class="wdg-mark"><img src="assets/icons/claude.svg" alt=""></span><span class="wdg-dname">claude-fable-5</span><span class="wdg-dval">1.4B</span></div><span class="wdg-pbar"><i style="--w:74%;--bar:#cc7c5e"></i></span></div>
+                  <div class="wdg-drow"><div class="wdg-drow-top"><span class="wdg-mark"><img src="assets/icons/kimi.svg" alt=""></span><span class="wdg-dname">kimi-k3</span><span class="wdg-dval">0.8B</span></div><span class="wdg-pbar"><i style="--w:42%;--bar:#4285f4"></i></span></div>
+                  <div class="wdg-drow"><div class="wdg-drow-top"><span class="wdg-mark"><img src="assets/icons/zai.svg" alt=""></span><span class="wdg-dname">glm-5.2</span><span class="wdg-dval">0.5B</span></div><span class="wdg-pbar"><i style="--w:26%;--bar:#8ea7bd"></i></span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="wdg wdg-medium wdg-activity" data-wdg="activity">
+            <div class="wdg-mact-body">
+              <div class="wdg-heat wdg-heat-lg" data-wdg-heat="full" aria-hidden="true"></div>
+              <div class="wdg-months" data-wdg-months="full" aria-hidden="true"></div>
+            </div>
+            <span class="wdg-mact-sub" data-i18n="widgets.demo.activitySummary">24.5B tokens · 169 active days</span>
+          </div>
+          <div class="wdg wdg-medium wdg-quota" data-wdg="quota">
+            <div class="wdg-qblock">
+              <div class="wdg-qblock-head"><span class="wdg-mark"><img src="assets/icons/cursor.svg" alt=""></span><span class="wdg-qname">Cursor</span></div>
+              <div class="wdg-qwins">
+                <div class="wdg-qwin-lg"><span class="wdg-qwin-top"><span>Cursor Models</span><span class="wdg-qval" data-i18n="widgets.demo.left100">100% left</span></span><span class="wdg-pbar"><i style="--w:100%;--bar:#6d9eeb"></i></span><span class="wdg-qreset" data-i18n="widgets.demo.reset214">Reset in 2h 14m</span></div>
+                <div class="wdg-qwin-lg"><span class="wdg-qwin-top"><span>Other Models</span><span class="wdg-qval" data-i18n="widgets.demo.left97">97% left</span></span><span class="wdg-pbar"><i style="--w:97%;--bar:#6d9eeb"></i></span><span class="wdg-qreset" data-i18n="widgets.demo.reset4d3">Reset in 4d 3h</span></div>
+              </div>
+            </div>
+            <div class="wdg-qblock">
+              <div class="wdg-qblock-head"><span class="wdg-mark"><img src="assets/icons/commandcode.svg" alt=""></span><span class="wdg-qname">Command Code</span></div>
+              <div class="wdg-qwins">
+                <div class="wdg-qwin-lg"><span class="wdg-qwin-top"><span>5-hour</span><span class="wdg-qval" data-i18n="widgets.demo.left82">82% left</span></span><span class="wdg-pbar"><i style="--w:82%;--bar:#8ea7bd"></i></span><span class="wdg-qreset" data-i18n="widgets.demo.reset141">Reset in 1h 41m</span></div>
+                <div class="wdg-qwin-lg"><span class="wdg-qwin-top"><span>Weekly</span><span class="wdg-qval" data-i18n="widgets.demo.left67">67% left</span></span><span class="wdg-pbar"><i style="--w:67%;--bar:#8ea7bd"></i></span><span class="wdg-qreset" data-i18n="widgets.demo.reset3d8">Reset in 3d 8h</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="wdg wdg-medium wdg-breakdown" data-wdg="breakdown">
+            <div class="wdg-brow"><span class="wdg-brow-top"><span class="wdg-mark"><img src="assets/icons/codex.svg" alt=""></span><span class="wdg-bname">Codex</span><span class="wdg-bval">64.9M</span><span class="wdg-bpct">39%</span></span><span class="wdg-pbar"><i style="--w:39%;--bar:#49a3b0"></i></span></div>
+            <div class="wdg-brow"><span class="wdg-brow-top"><span class="wdg-mark"><img src="assets/icons/claude.svg" alt=""></span><span class="wdg-bname">Claude Code</span><span class="wdg-bval">38.9M</span><span class="wdg-bpct">24%</span></span><span class="wdg-pbar"><i style="--w:24%;--bar:#cc7c5e"></i></span></div>
+            <div class="wdg-brow"><span class="wdg-brow-top"><span class="wdg-mark"><img src="assets/icons/kimi.svg" alt=""></span><span class="wdg-bname">Kimi</span><span class="wdg-bval">26.4M</span><span class="wdg-bpct">16%</span></span><span class="wdg-pbar"><i style="--w:16%;--bar:#4285f4"></i></span></div>
+            <div class="wdg-brow"><span class="wdg-brow-top"><span class="wdg-mark"><img src="assets/icons/zai.svg" alt=""></span><span class="wdg-bname">ZCode</span><span class="wdg-bval">19.0M</span><span class="wdg-bpct">11%</span></span><span class="wdg-pbar"><i style="--w:11%;--bar:#8ea7bd"></i></span></div>
+          </div>
+          <div class="wdg wdg-small" data-wdg="small-a">
+            <div class="wdg-small-metric">
+              <span class="wdg-period">TODAY</span>
+              <span class="wdg-small-num">165.2M</span>
+              <span class="wdg-small-cost">$136.08</span>
+            </div>
+            <svg class="wdg-spark" viewBox="0 0 100 34" preserveAspectRatio="none" aria-hidden="true"><path d="M0 26 C 10 24, 16 28, 24 22 S 36 15, 44 17 S 58 10, 66 12 S 80 6, 88 9 S 96 5, 100 4" fill="none" stroke="#73bdf5" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </div>
+          <div class="wdg wdg-small" data-wdg="small-b">
+            <div class="wdg-small-metric">
+              <span class="wdg-period">MONTH</span>
+              <span class="wdg-small-num">8.6B</span>
+              <span class="wdg-small-cost">$7,177.64</span>
+            </div>
+            <svg class="wdg-spark" viewBox="0 0 100 34" preserveAspectRatio="none" aria-hidden="true"><path d="M0 27 C 12 26, 20 21, 30 22 S 46 15, 56 16 S 72 9, 82 11 S 94 6, 100 5" fill="none" stroke="#73bdf5" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </div>
+          </div>
+        </div>
+      </section>
+
       <section class="surfaces section shell" aria-labelledby="surfaces-title">
         <div class="section-head reveal">
           <h2 id="surfaces-title" data-i18n="surfaces.title">The same usage, on every surface you already use.</h2>
@@ -585,7 +1042,7 @@
               </span>
             </div>
             <h3 data-i18n="surfaces.menubar.title">Custom menu bar &amp; tray</h3>
-            <p data-i18n="surfaces.menubar.body">Build a live display from tool icons, quota bars, reset times, cost, tokens, and text, with an instant preview.</p>
+            <p data-i18n="surfaces.menubar.body">Build a live display from tool icons, quota bars, reset times, cost, tokens, live tok/s, and text, with an instant preview.</p>
           </article>
           <article class="card surface-card reveal">
             <div class="surface-mock bubble" aria-hidden="true"><span class="bub-glass"><img class="bub-mark" src="assets/icons/tray-claude.svg" alt="" width="19" height="19"><span class="bub-bars"><span class="bub-bar"><i style="--w:95%"></i></span><span class="bub-bar"><i style="--w:52%"></i></span></span></span></div>
@@ -602,6 +1059,50 @@
             <h3 data-i18n="surfaces.ios.title">iOS widget</h3>
             <p data-i18n="surfaces.ios.body">Today's totals on your Home Screen via the Worker hub, with Widgy or Scriptable.</p>
           </article>
+        </div>
+      </section>
+      <section class="more section shell" id="more" aria-labelledby="more-title">
+        <div class="section-head reveal">
+          <h2 id="more-title" data-i18n="more.title">More in every release</h2>
+          <p class="lede"><span data-i18n="more.lede">A few of the smaller things that shipped recently.</span> <a class="more-link" href="https://github.com/Javis603/token-monitor/releases" data-i18n="more.releases">All release notes</a></p>
+        </div>
+        <div class="more-grid reveal">
+          <div class="more-cluster">
+            <h3 data-i18n="more.limits.title">Limits</h3>
+            <ul>
+              <li><strong data-i18n="more.subscriptions.name">Subscriptions</strong><span data-i18n="more.subscriptions.body">Record what you pay and compare it with monthly usage value.</span></li>
+              <li><strong data-i18n="more.forecasts.name">Reset forecasts</strong><span data-i18n="more.forecasts.body">Predicted Codex resets, regular versus banked.</span></li>
+              <li><strong data-i18n="more.balances.name">Balances and credits</strong><span data-i18n="more.balances.body">Credit-backed quotas show money, not just percentages.</span></li>
+              <li><strong data-i18n="more.claudeResets.name">Claude reset counts</strong><span data-i18n="more.claudeResets.body">Available usage-limit resets and their details.</span></li>
+            </ul>
+          </div>
+          <div class="more-cluster">
+            <h3 data-i18n="more.collection.title">Collection</h3>
+            <ul>
+              <li><strong data-i18n="more.scanPaths.name">Custom scan paths</strong><span data-i18n="more.scanPaths.body">Add session folders outside the default locations.</span></li>
+              <li><strong data-i18n="more.wsl.name">WSL discovery</strong><span data-i18n="more.wsl.body">Usage and Grok limits from running WSL distros.</span></li>
+              <li><strong data-i18n="more.aliases.name">Model aliases</strong><span data-i18n="more.aliases.body">Merge different names for one model into a single row.</span></li>
+              <li><strong data-i18n="more.health.name">Per-tool health</strong><span data-i18n="more.health.body">Source, status, and counted usage per tool, with re-scan.</span></li>
+            </ul>
+          </div>
+          <div class="more-cluster">
+            <h3 data-i18n="more.appearance.title">Appearance</h3>
+            <ul>
+              <li><strong data-i18n="more.glass.name">Liquid Glass</strong><span data-i18n="more.glass.body">macOS 26 glass for the main window, Dashboard, and Edge Dock.</span></li>
+              <li><strong data-i18n="more.bgImage.name">Background image</strong><span data-i18n="more.bgImage.body">A local image with its own opacity over the glass.</span></li>
+              <li><strong data-i18n="more.fonts.name">Custom fonts</strong><span data-i18n="more.fonts.body">Separate interface and display fonts.</span></li>
+              <li><strong data-i18n="more.languages.name">Five languages</strong><span data-i18n="more.languages.body">English, 简体中文, 繁體中文, 한국어, 日本語.</span></li>
+            </ul>
+          </div>
+          <div class="more-cluster">
+            <h3 data-i18n="more.data.title">Data</h3>
+            <ul>
+              <li><strong data-i18n="more.liveRate.name">Live token rate</strong><span data-i18n="more.liveRate.body">tok/s or TPM in the footer, menu bar, and Bubble.</span></li>
+              <li><strong data-i18n="more.ranges.name">Flexible ranges</strong><span data-i18n="more.ranges.body">This week, Last 7 days, Last 30 days.</span></li>
+              <li><strong data-i18n="more.export.name">Daily model export</strong><span data-i18n="more.export.body">Per-model CSV with token components and cost.</span></li>
+              <li><strong data-i18n="more.diagnostics.name">Diagnostics report</strong><span data-i18n="more.diagnostics.body">A redacted report you can copy into an issue.</span></li>
+            </ul>
+          </div>
         </div>
       </section>
       <section class="how section shell" aria-labelledby="how-title">
@@ -695,7 +1196,7 @@
                       <div class="tm-device-client-row"><span><img src="assets/icons/codex.svg" alt="">Codex <em>100%</em></span><strong>6.80B</strong></div>
                       <div class="tm-device-model-row"><span>gpt-5.6-sol</span><strong>6.31B</strong></div>
                       <div class="tm-device-model-row"><span>codex-auto-review</span><strong>490.3M</strong></div>
-                      <small data-i18n="mock.deviceMeta">Windows 11 · Agent v0.37.0 · Synced 3m ago</small>
+                      <small data-i18n="mock.deviceMeta">Windows 11 · Agent v0.63.1 · Synced 3m ago</small>
                     </div>
                   </div>
                   <div class="tm-row tm-device-row is-stale">
@@ -751,7 +1252,7 @@
   <span class="pk">"deviceId"</span>: <span class="ps">"mac-studio"</span>,
   <span class="pk">"hostname"</span>: <span class="ps">"Mac Studio"</span>,
   <span class="pk">"platform"</span>: <span class="ps">"darwin"</span>,
-  <span class="pk">"agentVersion"</span>: <span class="ps">"0.36.0"</span>,
+  <span class="pk">"agentVersion"</span>: <span class="ps">"0.63.1"</span>,
   <span class="pk">"updatedAt"</span>: <span class="ps">"2026-07-28T10:14:20.193Z"</span>,
   <span class="pk">"today"</span>: {
     <span class="pk">"totalTokens"</span>: <span class="pn">165164772</span>,
@@ -849,7 +1350,7 @@
       </div>
     </footer>
 
-    <script src="scripts/i18n.js?v=20260730-story29" defer></script>
-    <script src="scripts/main.js?v=20260730-story29" defer></script>
+    <script src="scripts/i18n.js?v=20260929-v063" defer></script>
+    <script src="scripts/main.js?v=20260929-v063" defer></script>
   </body>
 </html>

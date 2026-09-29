@@ -1688,9 +1688,28 @@ html[data-platform="linux"] [data-platform-option="linux"] { display: none; }
   transform: scaleX(1);
   transition: transform .72s cubic-bezier(.16,1,.3,1);
 }
+.js .reveal.is-visible #tour-session .bar-fill {
+  transform: scaleX(0);
+  transition: none;
+}
+.js .reveal.is-visible #tour-session.is-active .bar-fill {
+  transform: scaleX(var(--bar-scale, 0));
+  transition: transform .72s cubic-bezier(.16,1,.3,1);
+}
+.js .reveal.is-visible #tour-session.is-active .row:nth-child(2) .bar-fill {
+  transition-delay: .07s;
+}
+.js .reveal.is-visible #tour-session.is-active .row:nth-child(3) .bar-fill {
+  transition-delay: .14s;
+}
+.js .reveal.is-visible #tour-session.is-active .row:nth-child(4) .bar-fill {
+  transition-delay: .21s;
+}
+.js .reveal.is-visible #tour-session.is-active .row:nth-child(5) .bar-fill {
+  transition-delay: .28s;
+}
 .js .reveal.is-visible .tour-screen.is-active .tm-row:nth-child(2) .tm-bar span,
-.js .reveal.is-visible .tour-screen.is-active .tm-limit:nth-child(2) .tm-bar span,
-.js .reveal.is-visible .tour-screen.is-active .tm-sess:nth-child(2) .tm-bar span {
+.js .reveal.is-visible .tour-screen.is-active .tm-limit:nth-child(2) .tm-bar span {
   transition-delay: .07s;
 }
 .js .reveal.is-visible .tour-screen.is-active .tm-row:nth-child(3) .tm-bar span,
@@ -3759,4 +3778,357 @@ html[data-platform="linux"] [data-platform-option="linux"] { display: none; }
   }
   .hero-os { width: 100%; }
   .surface-mock.mb .mb-reset { display: none; }
+}
+
+/* ---------- Sessions list replica (tour step 03) ---------- */
+/* Ported from src/electron/renderer styles.css: the .shell.session-mode row
+   rules, .row-live dot, .row-context gauge and .detail-sort button, scoped to
+   the tour screen with the app's dark-theme variables resolved to literals. */
+#tour-session .tm-slist {
+  --text: #eef5fb; --muted: #a3adbb;
+  --line-rgb: 232, 238, 244; --sunken-rgb: 4, 8, 13; --panel-rgb: 16, 21, 30;
+  --success: #b7ead4; --success-rgb: 183, 234, 212;
+  --yellow: #f1d973; --orange: #f4a073;
+  display: flex; flex-direction: column; gap: 7px;
+  margin-top: 8px;
+  font-family: var(--mono);
+}
+#tour-session .row {
+  display: grid; gap: 5px; padding-bottom: 8px;
+  border-bottom: 1px solid rgba(var(--line-rgb), 0.12);
+}
+#tour-session .row-head {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(66px, max-content);
+  align-items: start;
+  gap: 8px;
+  font-size: 12px;
+}
+#tour-session .row-name {
+  position: relative;
+  display: flex; min-width: 0; flex: 1 1 auto;
+  align-items: start; gap: 7px;
+  color: var(--text);
+}
+#tour-session .row-mark { flex: 0 0 auto; }
+#tour-session .row-icon {
+  display: inline-block;
+  width: 11px; height: 11px; margin-top: 2px;
+  background-color: currentColor;
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain; mask-size: contain;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+}
+#tour-session .row-icon-codex { -webkit-mask-image: url("../assets/icons/codex.svg"); mask-image: url("../assets/icons/codex.svg"); }
+#tour-session .row-icon-claude { -webkit-mask-image: url("../assets/icons/claude.svg"); mask-image: url("../assets/icons/claude.svg"); }
+#tour-session .row-icon-opencode { -webkit-mask-image: url("../assets/icons/opencode.svg"); mask-image: url("../assets/icons/opencode.svg"); }
+#tour-session .row-icon-dsh { -webkit-mask-image: url("../assets/icons/dsh.svg"); mask-image: url("../assets/icons/dsh.svg"); }
+#tour-session .row-label { display: grid; flex: 1 1 auto; min-width: 0; gap: 1px; }
+#tour-session .row-title,
+#tour-session .row-subtitle,
+#tour-session .row-activity,
+#tour-session .row-detail {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#tour-session .row-subtitle,
+#tour-session .row-activity {
+  color: var(--muted); font-size: 10px; line-height: 1.2;
+}
+#tour-session .row-detail {
+  color: var(--muted); font-size: 10px; line-height: 1.2;
+  white-space: nowrap; opacity: 0.84;
+}
+#tour-session .row-metrics { display: grid; flex: 0 0 auto; gap: 2px; min-width: 66px; text-align: right; }
+#tour-session .row-value { color: var(--text); font-size: 12px; line-height: 1.15; white-space: nowrap; }
+#tour-session .row-cost { color: var(--muted); font-size: 10px; line-height: 1.1; white-space: nowrap; }
+#tour-session .session-row .row-metrics::after,
+#tour-session .summary-row[data-review-group="true"] .row-metrics::after {
+  content: "›";
+  position: absolute; right: 0; bottom: 0;
+  color: var(--muted); font-size: 14px; line-height: 1;
+}
+#tour-session .row-live { display: none; }
+#tour-session .row-live.is-active { display: block; position: absolute; top: 8px; left: 6px; }
+#tour-session .row-live-dot {
+  display: block;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 1.5px rgb(var(--panel-rgb)), 0 0 4px rgba(var(--success-rgb), 0.55);
+}
+#tour-session .row-context {
+  display: flex; align-items: center; justify-content: flex-end; gap: 4px;
+  color: var(--muted); font-size: 9px; line-height: 1.1;
+}
+#tour-session .row-context-meter {
+  width: 20px; height: 3px; overflow: hidden; border-radius: 2px;
+  background: rgba(var(--sunken-rgb), 0.46);
+}
+#tour-session .row-context-fill {
+  display: block; width: 100%; height: 100%; border-radius: 2px;
+  background: rgba(var(--line-rgb), 0.55);
+  transform: scaleX(var(--bar-scale, 0));
+  transform-origin: left center;
+}
+#tour-session .row-context[data-tone="caution"] { color: var(--yellow); }
+#tour-session .row-context[data-tone="caution"] .row-context-fill { background: var(--yellow); }
+#tour-session .row-context[data-tone="low"] { color: var(--orange); }
+#tour-session .row-context[data-tone="low"] .row-context-fill { background: var(--orange); }
+#tour-session .bar {
+  width: 100%; height: 5px; overflow: hidden; border-radius: 3px;
+  background: rgba(var(--sunken-rgb), 0.46);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+#tour-session .bar-fill {
+  width: 100%; height: 100%; border-radius: 3px;
+  transform: scaleX(var(--bar-scale, 0));
+  transform-origin: left center;
+}
+#tour-session .row-accordion { display: none; }
+#tour-session .hidden { display: none; }
+
+/* ---------- Edge Dock ---------- */
+.ed-stage {
+  position: relative;
+  height: 420px;
+  overflow: hidden;
+  border: 1px solid var(--stage-border);
+  border-radius: var(--r-lg);
+  background:
+    radial-gradient(120% 160% at 18% 0%, rgba(42, 51, 64, 0.55), transparent 55%),
+    linear-gradient(160deg, var(--stage-mid), var(--stage-bg));
+}
+/* Desktop composition: copy on the left of the stage, dock at the right edge.
+   <768px the copy returns above the stage as a normal section head. */
+.ed-head { display: none; }
+.ed-copy {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 396px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-left: clamp(26px, 4.5vw, 56px);
+  padding-right: 20px;
+}
+.ed-copy-title {
+  margin: 0;
+  max-width: 36ch;
+  font-size: clamp(1.3rem, 1rem + 1.2vw, 1.75rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--text-strong);
+}
+.ed-copy-lede { margin: 14px 0 0; max-width: 36ch; color: var(--muted); font-size: 0.98rem; line-height: 1.55; }
+.ed-copy-note { margin: 22px 0 0; max-width: 36ch; color: var(--muted); font-size: 0.84rem; line-height: 1.5; }
+.ed-note { margin-top: 18px; color: var(--muted); font-size: 0.9rem; text-align: center; }
+
+/* ---------- Native macOS widgets ---------- */
+/* Ported from native/macos/TokenMonitorWidget Swift views: WidgetBackground's
+   dark base + accent gradient over a desktop-wallpaper stage, WidgetDesignTokens
+   sizes/colors, and the Dashboard/Medium/Small view hierarchies. Everything
+   renders in SF Pro; .monospacedDigit() maps to font-variant-numeric. */
+/* The wall is a desktop-scale scene, not a fluid grid: widgets render at the
+   fixed WidgetKit sizes (small 170pt, medium 364x170, large 364x382, 24pt
+   desktop spacing = 2 smalls + gap = 364) and the whole composition scales
+   down with a transform on narrower viewports, like the Edge Dock stage. */
+.wdg-wall {
+  position: relative;
+  height: calc(var(--wdg-wall-h, 430px));
+  margin-top: 56px;
+  overflow: hidden;
+  border: 1px solid var(--stage-border);
+  border-radius: 22px;
+  background:
+    radial-gradient(130% 170% at 82% -12%, rgba(96, 148, 205, 0.42), transparent 58%),
+    linear-gradient(158deg, #18243a 0%, #0b1322 46%, #04070c 100%);
+}
+.wdg-scene {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  width: 1140px;
+  height: 382px;
+  margin-left: -570px;
+  transform: scale(var(--wdg-scale, 1));
+  transform-origin: top center;
+}
+.wdg-wall.is-stack .wdg-scene { width: 364px; margin-left: -182px; }
+.wdg {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 16px;
+  /* WidgetBackground: base #090b0e + white .025 -> accent .13 diagonal, made
+     translucent so the wallpaper reads through the containerBackground glass. */
+  background:
+    linear-gradient(295deg, rgba(115, 189, 245, 0.13), rgba(255, 255, 255, 0.025)),
+    rgba(9, 11, 14, 0.74);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+  color: #f3fbf7;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", sans-serif;
+  font-size: 10px;
+}
+.wdg-dash { left: 0; top: 0; width: 364px; height: 382px; gap: 8px; }
+.wdg-activity { left: 388px; top: 0; width: 364px; height: 170px; }
+.wdg-quota { left: 388px; top: 194px; width: 364px; height: 170px; }
+.wdg-breakdown { left: 776px; top: 0; width: 364px; height: 170px; }
+.wdg-wall [data-wdg="small-a"] { left: 776px; top: 194px; width: 170px; height: 170px; }
+.wdg-wall [data-wdg="small-b"] { left: 970px; top: 194px; width: 170px; height: 170px; }
+/* Head + metric block (WidgetMetricBlock): caption2 medium caption, 42pt
+   semibold number with .monospacedDigit(), caption medium cost. */
+.wdg-dash-head { display: flex; flex: 0 0 76px; align-items: flex-end; justify-content: space-between; gap: 20px; min-height: 0; }
+.wdg-metric { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.wdg-period { font-size: 11px; font-weight: 500; line-height: 1.2; color: #a3adbb; text-transform: uppercase; letter-spacing: 0.02em; }
+.wdg-metric-num {
+  font-size: 42px; font-weight: 600; line-height: 1.02; letter-spacing: -0.015em;
+  color: #f3fbf7; font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.wdg-metric-cost { font-size: 12px; font-weight: 500; line-height: 1.25; color: #a3adbb; font-variant-numeric: tabular-nums; }
+.wdg-trend { display: flex; flex: 1; flex-direction: column; align-items: flex-end; gap: 4px; min-width: 80px; padding-bottom: 3px; }
+.wdg-trend-cap { font-size: 12px; font-weight: 500; color: #a3adbb; font-variant-numeric: tabular-nums; }
+.wdg-spark { width: 100%; height: 34px; }
+.wdg-divider { height: 1px; flex: 0 0 1px; margin: 0; background: rgba(255, 255, 255, 0.14); }
+.wdg-mtitle { display: block; font-size: 10px; font-weight: 500; line-height: 1.2; color: #a3adbb; text-transform: uppercase; letter-spacing: 0.02em; }
+/* Dashboard quota module: QUOTA title + provider rows, 80pt tall. */
+.wdg-dquota { display: flex; flex: 0 0 80px; flex-direction: column; gap: 4px; min-height: 0; overflow: hidden; }
+.wdg-dqrows { display: flex; flex-direction: column; gap: 5px; min-height: 0; }
+.wdg-dqrow { display: flex; gap: 10px; align-items: flex-start; min-height: 0; }
+.wdg-dq-id { display: flex; flex: 0 0 92px; flex-direction: column; gap: 1px; min-width: 0; }
+.wdg-dq-name { display: flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+.wdg-dq-name .wdg-mark img { width: 12px; height: 12px; }
+.wdg-dq-acct { font-size: 7.5px; font-weight: 500; color: rgba(163, 173, 187, 0.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wdg-dq-wins { display: flex; flex: 1; gap: 10px; min-width: 0; }
+.wdg-dqwin { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.wdg-dqwin-top { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; font-size: 8.5px; font-weight: 500; color: rgba(163, 173, 187, 0.9); white-space: nowrap; }
+.wdg-dqwin-top .wdg-qval { font-weight: 600; color: #f3fbf7; font-variant-numeric: tabular-nums; }
+.wdg-dq-reset { font-size: 7.5px; line-height: 1.2; color: rgba(163, 173, 187, 0.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* PercentageBar: 3pt capsule track, vendor-color fill at 82% opacity. */
+.wdg-pbar { display: block; height: 3px; overflow: hidden; border-radius: 999px; background: rgba(255, 255, 255, 0.07); }
+.wdg-pbar i { display: block; width: var(--w, 0); height: 100%; border-radius: 999px; background: var(--bar, #73bdf5); opacity: 0.82; }
+/* Bottom split: Activity (44%) | Models. */
+/* Real: DashboardActivityModule gets exactly 44% of the content width, then a
+   divider, then the breakdown module takes the rest of the 12pt-spaced row. */
+.wdg-dash-bottom { display: grid; grid-template-columns: 44% 1px 1fr; grid-template-rows: minmax(0, 1fr); gap: 12px; flex: 1; min-height: 0; }
+.wdg-dact { display: flex; flex-direction: column; gap: 9px; min-width: 0; min-height: 0; }
+.wdg-dact-heat { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }
+.wdg-dact-sub { font-size: 7.5px; font-weight: 500; color: rgba(163, 173, 187, 0.9); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wdg-vdivider { background: rgba(255, 255, 255, 0.14); }
+.wdg-dbd { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 0; }
+.wdg-dbd-rows { display: flex; flex-direction: column; gap: 5px; min-height: 0; }
+.wdg-drow { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wdg-drow-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.wdg-dname { flex: 1; min-width: 0; overflow: hidden; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.wdg-dval { font-size: 8.5px; font-weight: 500; color: rgba(163, 173, 187, 0.9); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wdg-dbd .wdg-mark img { width: 11px; height: 11px; }
+.wdg-mark { flex: 0 0 auto; display: inline-flex; }
+.wdg-mark img { display: block; width: 13px; height: 13px; filter: grayscale(1) brightness(0) invert(1); opacity: 0.88; }
+/* Medium Activity: heatmap (26 weeks, ~9.5pt cells, 2.5 spacing) + month labels
+   + a caption summary line, centered vertically, no module title. */
+.wdg-activity { justify-content: center; gap: 8px; }
+.wdg-mact-body { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; align-self: center; }
+.wdg-heat {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, minmax(0, 1fr));
+  gap: 2.25px;
+}
+.wdg-heat i { border-radius: 1.5px; background: rgba(255, 255, 255, 0.03); }
+.wdg-heat i[data-f] { background: transparent; }
+.wdg-heat i[data-l="1"] { background: rgba(90, 170, 255, 0.18); }
+.wdg-heat i[data-l="2"] { background: rgba(120, 190, 255, 0.45); }
+.wdg-heat i[data-l="3"] { background: rgba(150, 210, 255, 0.8); }
+.wdg-heat i[data-l="4"] { background: rgb(180, 230, 255); }
+.wdg-heat-lg { grid-template-rows: repeat(7, 9.5px); grid-auto-columns: 9.5px; gap: 2.5px; }
+.wdg-heat-lg i { border-radius: 2px; }
+.wdg-months { position: relative; display: block; height: 10px; overflow: hidden; align-self: stretch; }
+.wdg-months span { position: absolute; top: 0; font-size: 8px; font-weight: 500; color: rgba(163, 173, 187, 0.7); white-space: nowrap; }
+.wdg-mact-sub { font-size: 12px; font-weight: 500; color: #a3adbb; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Medium Quota: QuotaProviderRow — provider header then windows side by side;
+   two providers 10pt apart, vertically centered. */
+.wdg-quota { justify-content: center; gap: 10px; }
+.wdg-qblock { display: flex; flex-direction: column; gap: 5px; }
+.wdg-qblock-head { display: flex; align-items: center; gap: 7px; }
+.wdg-qname { overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.wdg-qwins { display: flex; gap: 14px; }
+.wdg-qwin-lg { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+.wdg-qwin-top { display: flex; align-items: baseline; justify-content: space-between; gap: 5px; font-size: 11px; font-weight: 500; color: rgba(163, 173, 187, 0.9); white-space: nowrap; }
+.wdg-qwin-top .wdg-qval { font-weight: 600; color: #f3fbf7; font-variant-numeric: tabular-nums; }
+.wdg-qreset { font-size: 11px; line-height: 1.2; color: rgba(163, 173, 187, 0.7); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Medium Breakdown: four rows of height/4 — mark, name, compact value, share. */
+.wdg-breakdown { justify-content: space-between; }
+.wdg-breakdown .wdg-brow { flex: 1; justify-content: center; }
+.wdg-brow { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.wdg-brow-top { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.wdg-bname { flex: 1; min-width: 0; overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.wdg-bval { font-size: 11px; font-weight: 500; color: rgba(163, 173, 187, 0.9); font-variant-numeric: tabular-nums; }
+.wdg-bpct { flex: 0 0 30px; font-size: 11px; font-weight: 500; color: rgba(163, 173, 187, 0.65); font-variant-numeric: tabular-nums; text-align: right; }
+/* Small Summary: caption, 37pt number, subheadline cost, sparkline at bottom. */
+.wdg-small-metric { display: flex; flex-direction: column; gap: 4px; }
+.wdg-small .wdg-period { font-size: 12px; }
+.wdg-small-num {
+  font-size: 37px; font-weight: 600; line-height: 1.05; letter-spacing: -0.015em;
+  color: #f3fbf7; font-variant-numeric: tabular-nums;
+  margin-left: -1.5px; white-space: nowrap;
+}
+.wdg-small-cost { font-size: 15px; font-weight: 500; color: #a3adbb; font-variant-numeric: tabular-nums; }
+.wdg-small .wdg-spark { height: 34px; margin-top: auto; }
+/* Dashboard mini heatmap: 16 weeks max, 5-7.5pt cells, 2.25 spacing —
+   the JS layout sets the exact cell px; these are the unstyled fallbacks. */
+.wdg-dact-heat .wdg-heat { grid-template-rows: repeat(7, 7.2px); grid-auto-columns: 7.2px; gap: 2.25px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .js .wdg-wall.is-visible .wdg-heat i { animation: wdg-cell-in 420ms ease backwards; animation-delay: var(--d, 0ms); }
+}
+@keyframes wdg-cell-in {
+  from { opacity: 0; transform: scale(0.4); }
+}
+
+/* ---------- More in every release ---------- */
+.more-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 36px;
+  margin-top: 44px;
+  padding-top: 40px;
+  border-top: 1px solid var(--surface-border);
+}
+.more-cluster h3 {
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.more-cluster ul { display: flex; flex-direction: column; gap: 15px; margin: 0; padding: 0; list-style: none; }
+.more-cluster li { display: flex; flex-direction: column; gap: 2px; font-size: 0.9rem; }
+.more-cluster strong { color: var(--text-strong); font-weight: 650; }
+.more-cluster span { color: var(--muted); line-height: 1.45; }
+.more-link { color: var(--link); }
+
+@media (max-width: 1100px) {
+  .more-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (min-width: 769px) {
+  .edge-dock .ed-note { display: none; }
+}
+
+@media (max-width: 768px) {
+  .edge-dock .ed-head { display: block; }
+  .ed-copy { display: none; }
+  .more-grid { grid-template-columns: 1fr; }
 }
