@@ -1,0 +1,20 @@
+.background-video-layer {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: -1;
+  object-fit: cover;
+  pointer-events: none;
+  opacity: var(--background-image-alpha, 0.28);
+}
+.background-video-layer[hidden] { display: none; }
+.shell.has-background-video::before { display: none; }
+.background-video-setting .settings-item-text { min-width: 0; }
+#backgroundVideoStatus {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 175px;
+}

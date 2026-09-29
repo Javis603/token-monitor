@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
-const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, screen, session, shell, systemPreferences } = require('electron');
+const { app, BrowserWindow, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, protocol, Notification, screen, session, shell, systemPreferences } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
 const {
@@ -24,6 +24,8 @@ const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/tray
 const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
+const { VIDEO_SCHEME, VIDEO_PRIVILEGES, installBackgroundVideo } = require('./backgroundVideo');
+protocol.registerSchemesAsPrivileged([{ scheme: VIDEO_SCHEME, privileges: VIDEO_PRIVILEGES }]);
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
 const { runAntigravityOAuthLogin } = require('./providers/antigravity/oauthLogin');
@@ -455,6 +457,7 @@ const CSP_HEADER = [
   "script-src 'self'",
   "style-src 'self'",
   "img-src 'self' data: blob:",
+  "media-src 'self' token-monitor-background:",
   "font-src 'self'",
   "connect-src 'self'",
   "object-src 'none'",
@@ -7106,6 +7109,7 @@ app.whenReady().then(() => {
   syncEdgeDock();
   setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
+  installBackgroundVideo({ app, ipcMain, dialog, protocol, net, getWindow: () => mainWindow });
   ipcMain.handle('appearance:getBackgroundImage', () => getBackgroundImage(app.getPath('userData')));
   ipcMain.handle('appearance:chooseBackgroundImage', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
