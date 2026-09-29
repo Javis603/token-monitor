@@ -27,14 +27,19 @@ function grokSessionsRoot(home, env, platform) {
 // extra scan root. Resolve each shape to the same sessions tree as the primary
 // root, so a row counted from an alternate root can find its summary.
 function sessionsRootFromScanPath(scanPath) {
-  let current = path.resolve(scanPath);
+  const resolved = path.resolve(scanPath);
+  // The configured path's own sessions directory answers first: an alternate
+  // home sitting below a directory that happens to be named sessions is still
+  // a home, and the ancestor walk would hand back that unrelated directory.
+  if (fs.existsSync(path.join(resolved, 'sessions'))) return path.join(resolved, 'sessions');
+  let current = resolved;
   for (;;) {
     if (path.basename(current).toLowerCase() === 'sessions') return current;
     const parent = path.dirname(current);
     if (parent === current) break;
     current = parent;
   }
-  return path.join(scanPath, 'sessions');
+  return path.join(resolved, 'sessions');
 }
 
 // The same cap the other adapters apply to a derived session name. There is no

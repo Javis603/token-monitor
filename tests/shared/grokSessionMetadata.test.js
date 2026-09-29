@@ -251,6 +251,22 @@ test('extra Grok roots accept a home or a nested session path, but stay out of s
   assert.equal(inherited.title, 'Alternate root shapes');
 });
 
+// An alternate home that happens to live below a directory named `sessions`
+// is still a home: the walk must not stop at that unrelated ancestor.
+test('an extra root resolves its own sessions directory before an ancestor named sessions', () => {
+  const home = makeHome();
+  // The decoy ancestor: a directory literally named sessions above the home.
+  const belowSessions = path.join(makeHome(), 'sessions', 'alt-host', '.grok');
+  const id = 'sess-under-sessions';
+  writeSession(path.dirname(belowSessions), '%2Fwork', id, {
+    info: { id, cwd: '/work' }, generated_title: 'Below a sessions dir'
+  });
+  const meta = grok.resolveSessionMetadata(new Set([id]), context(home, {
+    deps: { env: {}, customScanPaths: { grok: [belowSessions] } }
+  })).get(id);
+  assert.equal(meta.title, 'Below a sessions dir');
+});
+
 test('an unparseable or malformed summary is skipped, not thrown', () => {
   const home = makeHome();
   const dir = path.join(home, '.grok', 'sessions', 'D%3A%5Cwork', 'broken');
