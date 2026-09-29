@@ -12,7 +12,7 @@ Tokscale parses grok end to end and reports tokens, cost, model and message coun
 
 That is not cosmetic. `edgeDock/presentation.js` drops a session whose `lastUsedAt` and `startedAt` are both unparseable, so every grok row was discarded and the Grok card showed quota and totals with no sessions. `applyTokscaleSessionMetadata` cannot fill the gap either: it reads `json.sessions` / `json.workspaces`, arrays this tokscale build never emits, so it early-returns for every client.
 
-`src/shared/providers/grok/sessionMetadata.js` is therefore the whole answer, reading one small file per session from `~/.grok/sessions/<url-encoded cwd>/<uuid>/summary.json`. It also checks configured Grok extra scan roots, which may name a Grok home, its `sessions` directory or a descendant. The join is exact: tokscale's `sessionId` is the same bare uuid as the directory name and `summary.json`'s `info.id`. The workspace directory name is only a place to start. Worktree sessions use a non-empty `source_workspace_dir` for project grouping; other sessions use `info.cwd`. Neither path needs URL decoding.
+`src/shared/providers/grok/sessionMetadata.js` is therefore the whole answer, reading one small file per session from `~/.grok/sessions/<url-encoded cwd>/<uuid>/summary.json`. It also checks configured Grok extra scan roots, which may name a Grok home, its `sessions` directory or a descendant. The join is exact: tokscale's `sessionId` is the same bare uuid as the directory name and `summary.json`'s `info.id`. If more than one persisted summary claims that directory id across cwd buckets or scan roots, the resolver skips it as ambiguous. The workspace directory name is only a place to start. Worktree sessions use a non-empty `source_workspace_dir` for project grouping; other sessions use `info.cwd`. Neither path needs URL decoding.
 
 ## Timestamps
 
@@ -26,7 +26,7 @@ Grok writes nanosecond ISO strings (`2026-08-19T07:53:22.948065400Z`). V8 trunca
 
 `generated_title`, whitespace-collapsed and capped at 96 code points — the same cap claude, codex and kimi each carry locally (there is no shared cleaner). Grok titles are the writer's own prompt text and run to ~173 code points, so the cap is load-bearing. A blank title yields no `title` field at all rather than an empty one, and the row still resolves on its timestamps.
 
-`title` is on the shared `SESSION_TEXT_KEYS` list, so the Hub strips it on the ingress path. The device still uploads it.
+`title` stays on the device: `buildSyncPayload()` removes local session titles before upload, and the Hub strips text again on ingress.
 
 ## Scope
 

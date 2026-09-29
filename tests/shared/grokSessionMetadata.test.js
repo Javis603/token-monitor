@@ -169,6 +169,39 @@ test('a summary whose stated id disagrees with its directory is not attributed t
   assert.equal(grok.resolveSessionMetadata(new Set(['sess-real']), context(home)).size, 0);
 });
 
+test('a session id in two cwd buckets is ambiguous, even across scan roots', () => {
+  const home = makeHome();
+  const extra = makeHome();
+  const id = 'sess-ambiguous';
+  writeSession(home, '%2Fwork-a', id, {
+    info: { id, cwd: '/work-a' }, created_at: '2026-09-28T12:00:00Z', generated_title: 'First'
+  });
+  writeSession(extra, '%2Fwork-b', id, {
+    info: { id, cwd: '/work-b' }, created_at: '2026-09-28T13:00:00Z', generated_title: 'Second'
+  });
+  const resolved = grok.resolveSessionMetadata(new Set([id]), context(home, {
+    deps: { env: {}, customScanPaths: { grok: [path.join(extra, '.grok')] } }
+  }));
+  assert.equal(resolved.has(id), false);
+
+  const duplicate = writeSession(home, '%2Fwork-c', 'sess-same-home', {
+    info: { id: 'sess-same-home', cwd: '/work-c' }, generated_title: 'Third'
+  });
+  writeSession(home, '%2Fwork-d', duplicate, {
+    info: { id: duplicate, cwd: '/work-d' }, generated_title: 'Fourth'
+  });
+  assert.equal(grok.resolveSessionMetadata(new Set([duplicate]), context(home)).has(duplicate), false);
+});
+
+test('a duplicate directory without a summary does not make a persisted session ambiguous', () => {
+  const home = makeHome();
+  const id = writeSession(home, '%2Fwork-a', 'sess-single-summary', {
+    info: { id: 'sess-single-summary', cwd: '/work-a' }, generated_title: 'Only summary'
+  });
+  fs.mkdirSync(path.join(home, '.grok', 'sessions', '%2Fwork-b', id), { recursive: true });
+  assert.equal(grok.resolveSessionMetadata(new Set([id]), context(home)).get(id).title, 'Only summary');
+});
+
 test('a scoped home ignores the host GROK_HOME', () => {
   const home = makeHome();
   const decoy = makeHome();
