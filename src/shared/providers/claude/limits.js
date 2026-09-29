@@ -890,7 +890,7 @@ function cacheClaudeIdentity(fingerprint, entry, deps = {}) {
     ...entry,
     identity: {
       ...entry.identity,
-      ...(previous?.organizationId === entry.organizationId && previous?.identity?.accountKey
+      ...(previous?.organizationId && previous.organizationId === entry.organizationId && previous.identity?.accountKey
         ? { accountKey: previous.identity.accountKey }
         : {})
     },

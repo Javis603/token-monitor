@@ -1228,10 +1228,11 @@ test('Claude OAuth profile failures never derive account identity from rotating 
   assert.equal(cliCalls, 0);
 });
 
-test('Claude OAuth keeps fresh quota with cached identity when profile lookup is transiently unavailable', async () => {
+test('Claude OAuth keeps cached identity on a profile failure and adopts a changed organization', async () => {
   const providerRuntimeState = new Map();
   let nowMs = Date.parse('2026-07-25T00:00:00Z');
   let profileAvailable = true;
+  let organizationId = 'organization-default';
   let utilization = 12;
   const deps = {
     platform: 'linux',
@@ -1250,7 +1251,10 @@ test('Claude OAuth keeps fresh quota with cached identity when profile lookup is
     fetch: async (url) => {
       if (url.endsWith('/api/oauth/profile')) {
         return profileAvailable
-          ? { ok: true, json: async () => DEFAULT_CLAUDE_PROFILE }
+          ? { ok: true, json: async () => ({
+              ...DEFAULT_CLAUDE_PROFILE,
+              organization: { uuid: organizationId }
+            }) }
           : { ok: false, status: 503 };
       }
       return {
@@ -1269,6 +1273,12 @@ test('Claude OAuth keeps fresh quota with cached identity when profile lookup is
   assert.equal(second.accountKey, first.accountKey);
   assert.equal(second.windows[0].usedPercent, 44);
   assert.equal(second.source, 'oauth');
+
+  nowMs += 2000;
+  profileAvailable = true;
+  organizationId = 'organization-changed';
+  const third = await fetchClaudeLimits({}, deps);
+  assert.notEqual(third.accountKey, first.accountKey);
 });
 
 test('Claude OAuth usage mapping accepts camelCase response fields', async () => {
