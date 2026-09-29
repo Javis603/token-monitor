@@ -2430,6 +2430,14 @@ function watchPollingEnvOverride(env = process.env) {
   return !['0', 'false', 'no', 'off'].includes(raw);
 }
 
+// Whether the environment rules polling out, resolved in the same order as
+// resolveWatchUsePolling so the two can never disagree about who decides.
+function watchPollingForbidden(env = process.env) {
+  const chokidarOverride = chokidarPollingEnv(env);
+  if (chokidarOverride !== undefined) return chokidarOverride === false;
+  return watchPollingEnvOverride(env) === false;
+}
+
 function resolveWatchUsePolling(preferred, env = process.env) {
   // chokidar's own variable overrides whatever we pass it, so it has to win
   // here too or diagnostics would report native events while chokidar polls.
@@ -2520,9 +2528,12 @@ function chokidarPollingEnv(env = process.env) {
   return Boolean(lower);
 }
 
-// Reported in place of a watcher when polling would cover more than the limit.
-// The collector answers it by dropping to interval collection.
+// Reported in place of a watcher when polling would cover more than the limit,
+// or when the owner required polling and the environment forbids it. The
+// collector answers either by dropping to interval collection.
 const WATCH_POLLING_LIMIT_CODE = 'watch-polling-limit';
+const WATCH_POLLING_UNAVAILABLE_CODE = 'watch-polling-unavailable';
+const WATCH_REFUSAL_CODES = new Set([WATCH_POLLING_LIMIT_CODE, WATCH_POLLING_UNAVAILABLE_CODE]);
 
 // The one place a chokidar instance is created, in the watch process and in the
 // in-process fallback alike. The bound lives here rather than in the collector
@@ -2535,6 +2546,14 @@ function openWatch(chokidar, config = {}) {
     : WATCH_POLLING_ENTRY_LIMIT;
   // Bounded on the mode chokidar will really run, not the one requested.
   const usePolling = chokidarPollingEnv() ?? config.usePolling === true;
+  // `requirePolling` is not a preference: the host sets it when native
+  // descriptors from a previous watcher may still be held, so falling through
+  // to native here would put two sets in flight. Not watching is the safe answer.
+  if (config.requirePolling === true && !usePolling) {
+    const error = new Error('polling required but forbidden by CHOKIDAR_USEPOLLING');
+    error.code = WATCH_POLLING_UNAVAILABLE_CODE;
+    throw error;
+  }
   if (usePolling && watchEntriesExceed(config.dirs || [], ignored, limit)) {
     const error = new Error(`over ${limit} paths to poll`);
     error.code = WATCH_POLLING_LIMIT_CODE;
@@ -2613,7 +2632,7 @@ function startCollector(options) {
   const watchPollingEntryLimit = Number.isInteger(options.watchPollingEntryLimit) && options.watchPollingEntryLimit >= 0
     ? options.watchPollingEntryLimit
     : WATCH_POLLING_ENTRY_LIMIT;
-  const watchNativeForced = watchPollingEnvOverride() === false;
+  const watchNativeForced = watchPollingForbidden();
   const runtimeAbortController = new AbortController();
   const runtimeSignal = runtimeAbortController.signal;
   let startBarrier = options.startBarrier ? Promise.resolve(options.startBarrier) : null;
@@ -3290,7 +3309,7 @@ function startCollector(options) {
     watchers.length = 0;
   }
 
-  function enterIntervalFallback() {
+  function enterIntervalFallback(error) {
     if (watchIntervalFallback) return;
     watchIntervalFallback = true;
     emitDiagnosticEvent({
@@ -3298,7 +3317,7 @@ function startCollector(options) {
       code: 'watcher-interval-fallback',
       ...(watchFallbackCode ? { detailCode: watchFallbackCode } : {})
     });
-    log(`Over ${watchPollingEntryLimit} paths to poll; not watching, collecting every ${Math.round(intervalMs / 1000)}s instead.`);
+    log(`Cannot watch safely (${error.message}); collecting every ${Math.round(intervalMs / 1000)}s instead.`);
     // Reported from inside the host's own dispatch, so the teardown waits a turn.
     setImmediate(() => {
       if (!stopped) closeWatchers();
@@ -3308,8 +3327,8 @@ function startCollector(options) {
   function handleWatchError(error) {
     log(`chokidar error: ${error.message}`);
     if (stopped) return;
-    if (error?.code === WATCH_POLLING_LIMIT_CODE) {
-      enterIntervalFallback();
+    if (WATCH_REFUSAL_CODES.has(error?.code)) {
+      enterIntervalFallback(error);
       return;
     }
     if (stopped || watchUsePolling || watchNativeForced || watchDescriptorFallback || watchIntervalFallback) return;
@@ -3646,5 +3665,7 @@ module.exports = {
   watchIgnoreMatcher,
   openWatch,
   WATCH_POLLING_LIMIT_CODE,
+  WATCH_POLLING_UNAVAILABLE_CODE,
+  WATCH_REFUSAL_CODES,
   watchPathsForClients
 };

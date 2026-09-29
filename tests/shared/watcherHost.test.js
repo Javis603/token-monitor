@@ -326,6 +326,34 @@ test('polling forced by an unconfirmed terminate still respects the entry limit'
   }
 });
 
+test('an unconfirmed terminate gives up watching when polling is forbidden', async () => {
+  FakeWorker.reset();
+  const stub = stubChokidar();
+  const original = process.env.CHOKIDAR_USEPOLLING;
+  process.env.CHOKIDAR_USEPOLLING = '0';
+  const errors = [];
+  const handlers = { onError: (error) => errors.push(error) };
+  try {
+    const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+    const first = coordinator.acquire({ dirs: ['/a'], clients: 'claude', usePolling: false }, handlers);
+    const wedged = FakeWorker.last();
+    wedged.deferTerminate = true;
+    first.close();
+    coordinator.acquire({ dirs: ['/b'], clients: 'claude', usePolling: false }, handlers);
+
+    wedged.failTerminate(new Error('terminate failed'));
+    await until(() => errors.length === 1);
+    // The old native descriptors may still be held and polling cannot run, so
+    // any watcher here would be a second native set in flight.
+    assert.equal(stub.built.length, 0);
+    assert.equal(errors[0].code, 'watch-polling-unavailable');
+  } finally {
+    if (original === undefined) delete process.env.CHOKIDAR_USEPOLLING;
+    else process.env.CHOKIDAR_USEPOLLING = original;
+    stub.restore();
+  }
+});
+
 test('a refused host that is already closed does not report into its successor', async () => {
   const stub = stubChokidar();
   const root = tmpTree();

@@ -3939,7 +3939,7 @@ test('descriptor exhaustion over a tree too large to poll degrades to interval c
     const diagnostics = handle.getDiagnostics();
     assert.equal(diagnostics.watchMode, 'interval');
     assert.equal(diagnostics.watchFallbackCode, 'EMFILE');
-    assert.ok(logs.some((line) => line.includes('not watching')));
+    assert.ok(logs.some((line) => line.includes('Cannot watch safely')));
 
     // Smart mode would otherwise wait for watch activity that can no longer
     // arrive, and scan nothing but the hourly reconciliation.
@@ -4179,14 +4179,17 @@ test('the ignore matcher agrees with the roots chokidar was actually handed', as
   }
 });
 
-test('TOKEN_MONITOR_WATCH_POLLING=0 opts out of the descriptor fallback', async () => {
+// chokidar's own variable forbids polling just as ours does: it overrides the
+// options chokidar is handed, so a fallback that asked for polling would still
+// run native while diagnostics claimed otherwise.
+for (const pollingEnv of ['TOKEN_MONITOR_WATCH_POLLING', 'CHOKIDAR_USEPOLLING']) test(`${pollingEnv}=0 opts out of the descriptor fallback`, async () => {
   const tmp = withTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  const originalPolling = process.env.TOKEN_MONITOR_WATCH_POLLING;
+  const originalPolling = process.env[pollingEnv];
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
-  process.env.TOKEN_MONITOR_WATCH_POLLING = '0';
+  process.env[pollingEnv] = '0';
 
   const chokidar = require('chokidar');
   const originalWatch = chokidar.watch;
@@ -4228,6 +4231,7 @@ test('TOKEN_MONITOR_WATCH_POLLING=0 opts out of the descriptor fallback', async 
 
     await new Promise((resolve) => setTimeout(resolve, 40));
     assert.equal(watchOptions.length, 1, 'an explicit "never poll" must survive descriptor exhaustion');
+    assert.equal(handle.getDiagnostics().watchMode, 'native');
   } finally {
     if (handle) handle.stop();
     childProcess.spawn = originalSpawn;
@@ -4235,8 +4239,8 @@ test('TOKEN_MONITOR_WATCH_POLLING=0 opts out of the descriptor fallback', async 
     os.homedir = originalHomedir;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
-    if (originalPolling === undefined) delete process.env.TOKEN_MONITOR_WATCH_POLLING;
-    else process.env.TOKEN_MONITOR_WATCH_POLLING = originalPolling;
+    if (originalPolling === undefined) delete process.env[pollingEnv];
+    else process.env[pollingEnv] = originalPolling;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -5155,6 +5159,12 @@ test('CHOKIDAR_USEPOLLING cannot switch chokidar to polling around the bound', (
     openWatch(chokidar, { ...config, usePolling: true });
     assert.equal(built.length, 1, 'turned off, a polling request over the limit runs native');
     assert.equal(built[0].usePolling, false);
+    // A host that must not open native descriptors gets no watcher at all.
+    assert.throws(
+      () => openWatch(chokidar, { ...config, usePolling: true, requirePolling: true }),
+      { code: 'watch-polling-unavailable' }
+    );
+    assert.equal(built.length, 1);
   } finally {
     if (original === undefined) delete process.env.CHOKIDAR_USEPOLLING;
     else process.env.CHOKIDAR_USEPOLLING = original;

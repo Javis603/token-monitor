@@ -115,15 +115,16 @@ function createInProcessWatcherHost(config = {}, handlers = {}) {
   // Required lazily so a worker-hosted run never loads chokidar on the owning
   // thread, and so the collector's tests can still swap chokidar.watch.
   const chokidar = require('chokidar');
-  const { openWatch, WATCH_POLLING_LIMIT_CODE } = require('./collector');
+  const { openWatch, WATCH_REFUSAL_CODES } = require('./collector');
   let watcher;
   try {
     watcher = openWatch(chokidar, config);
   } catch (error) {
-    // A refused polling bound is an outcome for the owner to act on, not a
-    // failure to build the host, so it arrives the way chokidar's own errors
-    // do: on the handler, after this host has been returned.
-    if (error?.code !== WATCH_POLLING_LIMIT_CODE) throw error;
+    // A refused watch (polling over the limit, or polling required and
+    // forbidden) is an outcome for the owner to act on, not a failure to build
+    // the host, so it arrives the way chokidar's own errors do: on the handler,
+    // after this host has been returned.
+    if (!WATCH_REFUSAL_CODES.has(error?.code)) throw error;
     // A host replaced before this fires must not report into its successor.
     let closed = false;
     setImmediate(() => {
@@ -177,7 +178,7 @@ function createWatcherCoordinator(deps = {}) {
   let inProcessHost = null;
 
   function fallbackConfig(config) {
-    return forcePollingFallback ? { ...config, usePolling: true } : config;
+    return forcePollingFallback ? { ...config, usePolling: true, requirePolling: true } : config;
   }
 
   function restoreCurrentWatcher() {
