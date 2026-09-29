@@ -15,7 +15,7 @@ test.after(() => {
 });
 
 // grok nests sessions under a url-encoded workspace directory; the name is only
-// a place to start, because `info.cwd` is the authoritative project path.
+// a place to start; the summary carries the project path.
 function writeSession(home, workspace, sessionId, summary) {
   const dir = path.join(home, '.grok', 'sessions', workspace, sessionId);
   fs.mkdirSync(dir, { recursive: true });
@@ -54,6 +54,30 @@ test('names a session from summary.json, which tokscale never emits', () => {
   assert.equal(meta.startedAt, '2026-09-28T12:35:29.829Z');
   assert.equal(meta.title, 'Review MiniMax card mapping');
   assert.equal(meta.projectLabel, 'work');
+});
+
+test('worktree sessions belong to their source workspace project', () => {
+  const home = makeHome();
+  const id = writeSession(home, '%2FUsers%2Fme%2F.grok%2Fworktrees%2Ftoken-monitor%2Ffeature', 'sess-worktree', {
+    info: { id: 'sess-worktree', cwd: '/Users/me/.grok/worktrees/token-monitor/feature' },
+    session_kind: 'worktree',
+    source_workspace_dir: '  /Users/me/token-monitor  ',
+    created_at: '2026-09-28T12:35:29Z'
+  });
+  const meta = grok.resolveSessionMetadata(new Set([id]), context(home)).get(id);
+  assert.deepEqual(
+    { projectId: meta.projectId, projectLabel: meta.projectLabel },
+    projectIdentity('/Users/me/token-monitor')
+  );
+
+  writeSession(home, '%2FUsers%2Fme%2F.grok%2Fworktrees%2Ftoken-monitor%2Fother', 'sess-no-source', {
+    info: { id: 'sess-no-source', cwd: '/Users/me/.grok/worktrees/token-monitor/other' },
+    session_kind: 'worktree',
+    source_workspace_dir: '  ',
+    created_at: '2026-09-28T12:35:29Z'
+  });
+  const fallback = grok.resolveSessionMetadata(new Set(['sess-no-source']), context(home)).get('sess-no-source');
+  assert.equal(fallback.projectId, projectIdentity('/Users/me/.grok/worktrees/token-monitor/other').projectId);
 });
 
 test('a session with no activity timestamps falls back to creation time, so the dock keeps it', () => {
@@ -172,6 +196,59 @@ test('GROK_HOME redirects the lookup when the home is not scoped', () => {
     context(home, { deps: { env: { GROK_HOME: path.join(custom, '.grok') } } })
   );
   assert.equal(resolved.get(id).title, 'From GROK_HOME');
+});
+
+test('the collector resolves Grok sessions from an extra scan root', async () => {
+  const { collectUsageOnce } = require('../../src/shared/collector');
+  const home = makeHome();
+  const extraHome = makeHome();
+  const id = writeSession(extraHome, '%2Fwork', 'sess-extra', {
+    info: { id: 'sess-extra', cwd: '/work' },
+    created_at: '2026-09-28T12:35:29Z',
+    generated_title: 'Alternate root session'
+  });
+  const summary = await collectUsageOnce({
+    clients: 'grok',
+    allTimeSince: '2024-01-01',
+    deviceId: 'grok-extra-root-test',
+    historyEnabled: false,
+    wslScanEnabled: false,
+    limitsEnabled: false,
+    homeDir: home,
+    customScanPaths: { grok: [path.join(extraHome, '.grok', 'sessions')] },
+    runTokscale: async () => ({ entries: [
+      { client: 'grok', sessionId: id, model: 'grok-code-fast-1', input: 10, output: 5, cost: 0.01 }
+    ] })
+  });
+  const session = summary.allTime.sessions[`grok:${id}`];
+  assert.equal(session.title, 'Alternate root session');
+  assert.equal(session.startedAt, '2026-09-28T12:35:29.000Z');
+  assert.equal(session.projectId, projectIdentity('/work').projectId);
+});
+
+test('extra Grok roots accept a home or a nested session path, but stay out of scoped homes', () => {
+  const home = makeHome();
+  const extraHome = makeHome();
+  const id = writeSession(extraHome, '%2Fwork', 'sess-extra-shapes', {
+    info: { id: 'sess-extra-shapes', cwd: '/work' },
+    generated_title: 'Alternate root shapes'
+  });
+  const grokHome = path.join(extraHome, '.grok');
+  const nested = path.join(grokHome, 'sessions', '%2Fwork', id);
+  for (const scanPath of [grokHome, nested]) {
+    const meta = grok.resolveSessionMetadata(new Set([id]), context(home, {
+      deps: { env: {}, customScanPaths: { grok: [scanPath] } }
+    })).get(id);
+    assert.equal(meta.title, 'Alternate root shapes');
+  }
+  const scoped = grok.resolveSessionMetadata(new Set([id]), context(home, {
+    deps: { scopedHome: true, env: { TOKSCALE_EXTRA_DIRS: `grok:${grokHome}` }, customScanPaths: { grok: [grokHome] } }
+  }));
+  assert.equal(scoped.has(id), false);
+  const inherited = grok.resolveSessionMetadata(new Set([id]), context(home, {
+    deps: { env: { TOKSCALE_EXTRA_DIRS: `claude:/irrelevant,grok:${grokHome}` } }
+  })).get(id);
+  assert.equal(inherited.title, 'Alternate root shapes');
 });
 
 test('an unparseable or malformed summary is skipped, not thrown', () => {

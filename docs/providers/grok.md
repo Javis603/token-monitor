@@ -12,7 +12,7 @@ Tokscale parses grok end to end and reports tokens, cost, model and message coun
 
 That is not cosmetic. `edgeDock/presentation.js` drops a session whose `lastUsedAt` and `startedAt` are both unparseable, so every grok row was discarded and the Grok card showed quota and totals with no sessions. `applyTokscaleSessionMetadata` cannot fill the gap either: it reads `json.sessions` / `json.workspaces`, arrays this tokscale build never emits, so it early-returns for every client.
 
-`src/shared/providers/grok/sessionMetadata.js` is therefore the whole answer, reading one small file per session from `~/.grok/sessions/<url-encoded cwd>/<uuid>/summary.json`. The join is exact: tokscale's `sessionId` is the same bare uuid as the directory name and `summary.json`'s `info.id`. The workspace directory name is only a place to start; `info.cwd` is the authoritative project path and needs no URL decoding.
+`src/shared/providers/grok/sessionMetadata.js` is therefore the whole answer, reading one small file per session from `~/.grok/sessions/<url-encoded cwd>/<uuid>/summary.json`. It also checks configured Grok extra scan roots, which may name a Grok home, its `sessions` directory or a descendant. The join is exact: tokscale's `sessionId` is the same bare uuid as the directory name and `summary.json`'s `info.id`. The workspace directory name is only a place to start. Worktree sessions use a non-empty `source_workspace_dir` for project grouping; other sessions use `info.cwd`. Neither path needs URL decoding.
 
 ## Timestamps
 
@@ -30,7 +30,7 @@ Grok writes nanosecond ISO strings (`2026-08-19T07:53:22.948065400Z`). V8 trunca
 
 ## Scope
 
-A scoped home is a WSL distro, so `GROK_HOME` is ignored there — a host root must never answer a distro's session. `chat_history.jsonl` is never read: it carries no timestamp on any line, so it cannot establish a session's span.
+A scoped home is a WSL distro, so host `GROK_HOME` and extra scan roots are ignored there — a host root must never answer a distro's session. `chat_history.jsonl` is never read: it carries no timestamp on any line, so it cannot establish a session's span.
 
 There is no cross-tick cache. The registry rebuilds its map every tick, and a full sweep of ~100 summaries costs single-digit milliseconds.
 

@@ -1129,6 +1129,7 @@ async function collectUsageOnce(options) {
   const normalizedClients = normalizeClientsCsv(clients);
   const localSessionMetadataDeps = {
     ...(options.sessionMetadataDeps || {}),
+    customScanPaths: options.customScanPaths,
     metadataCache: new Map(),
     resolvedSessionKeys: new Set(),
     attemptedSessionKeys: new Set()

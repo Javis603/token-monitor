@@ -23,6 +23,20 @@ function grokSessionsRoot(home, env, platform) {
   return path.join(home, '.grok', 'sessions');
 }
 
+// Tokscale accepts a Grok home, its sessions directory, or a descendant as an
+// extra scan root. Resolve each shape to the same sessions tree as the primary
+// root, so a row counted from an alternate root can find its summary.
+function sessionsRootFromScanPath(scanPath) {
+  let current = path.resolve(scanPath);
+  for (;;) {
+    if (path.basename(current).toLowerCase() === 'sessions') return current;
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return path.join(scanPath, 'sessions');
+}
+
 // The same cap the other adapters apply to a derived session name. There is no
 // shared cleaner: claude, codex and kimi each carry their own. grok's
 // `generated_title` is the writer's own prompt text and runs to ~173 code
@@ -73,8 +87,7 @@ function readSummary(filePath, readFileSync) {
 }
 
 // One directory entry per workspace; the workspace name is only a place to
-// start, because grok's own `info.cwd` is the authoritative project path and
-// needs no URL decoding.
+// start. The summary carries the project path and needs no URL decoding.
 function collectSummaryFiles(root) {
   const files = [];
   let workspaces;
@@ -111,37 +124,53 @@ function resolveSessionMetadata(sessionIds, context) {
 
   const env = deps.scopedHome ? {} : (deps.env || process.env);
   const platform = deps.platform || process.platform;
-  const root = grokSessionsRoot(home, env, platform);
+  const roots = [grokSessionsRoot(home, env, platform)];
+  if (!deps.scopedHome) {
+    // The collector forwards these settings to Tokscale as GROK entries in
+    // TOKSCALE_EXTRA_DIRS. Include inherited entries that Tokscale also reads.
+    const configured = Array.isArray(deps.customScanPaths?.grok) ? deps.customScanPaths.grok : [];
+    const inherited = String(env.TOKSCALE_EXTRA_DIRS || '').split(',').map((entry) => {
+      const separator = entry.indexOf(':');
+      return separator !== -1 && entry.slice(0, separator).trim() === 'grok'
+        ? entry.slice(separator + 1).trim() : '';
+    });
+    for (const scanPath of [...configured, ...inherited]) {
+      if (typeof scanPath === 'string' && scanPath.trim()) roots.push(sessionsRootFromScanPath(scanPath.trim()));
+    }
+  }
   const projectFor = typeof projectIdentity === 'function' ? projectIdentity : null;
   const readFileSync = deps.readFileSync || fs.readFileSync;
 
-  for (const candidate of collectSummaryFiles(root)) {
-    if (!wanted.has(candidate.sessionId) || result.has(candidate.sessionId)) continue;
-    const summary = readSummary(candidate.summaryPath, readFileSync);
-    if (!summary) continue;
-    // The join is the directory name: tokscale reports the same bare uuid that
-    // grok uses for the session directory and records as `info.id`. A summary
-    // whose stated id disagrees with the directory it was found in is someone
-    // else's record sitting in the wrong place, and its title, times and
-    // project path must not be attached to this session.
-    const claimed = typeof summary.info?.id === 'string' ? summary.info.id.trim() : '';
-    if (claimed && claimed !== candidate.sessionId) continue;
-    const meta = {};
-    const startedAt = timestamp(summary.created_at, isoFromDate);
-    if (startedAt) meta.startedAt = startedAt;
-    const used = lastUsedAt(summary, isoFromDate);
-    if (used) meta.lastUsedAt = used;
-    const title = cleanTitle(summary.generated_title);
-    if (title) meta.title = title;
-    if (resolveProjects && projectFor) {
-      const identity = projectFor(summary?.info?.cwd || '');
-      if (identity?.projectId) meta.projectId = identity.projectId;
-      if (identity?.projectLabel) meta.projectLabel = identity.projectLabel;
+  for (const root of new Set(roots)) {
+    for (const candidate of collectSummaryFiles(root)) {
+      if (!wanted.has(candidate.sessionId) || result.has(candidate.sessionId)) continue;
+      const summary = readSummary(candidate.summaryPath, readFileSync);
+      if (!summary) continue;
+      // The join is the directory name: tokscale reports the same bare uuid that
+      // grok uses for the session directory and records as `info.id`. A summary
+      // whose stated id disagrees with the directory it was found in is someone
+      // else's record sitting in the wrong place, and its title, times and
+      // project path must not be attached to this session.
+      const claimed = typeof summary.info?.id === 'string' ? summary.info.id.trim() : '';
+      if (claimed && claimed !== candidate.sessionId) continue;
+      const meta = {};
+      const startedAt = timestamp(summary.created_at, isoFromDate);
+      if (startedAt) meta.startedAt = startedAt;
+      const used = lastUsedAt(summary, isoFromDate);
+      if (used) meta.lastUsedAt = used;
+      const title = cleanTitle(summary.generated_title);
+      if (title) meta.title = title;
+      if (resolveProjects && projectFor) {
+        const source = typeof summary.source_workspace_dir === 'string' ? summary.source_workspace_dir.trim() : '';
+        const identity = projectFor(source || summary?.info?.cwd || '');
+        if (identity?.projectId) meta.projectId = identity.projectId;
+        if (identity?.projectLabel) meta.projectLabel = identity.projectLabel;
+      }
+      // A session with only a title is still worth recording: the applier writes
+      // each field it is given, so dropping the row here would lose the name even
+      // though the dock's row label prefers it over the bare uuid.
+      if (Object.keys(meta).length) result.set(candidate.sessionId, meta);
     }
-    // A session with only a title is still worth recording: the applier writes
-    // each field it is given, so dropping the row here would lose the name even
-    // though the dock's row label prefers it over the bare uuid.
-    if (Object.keys(meta).length) result.set(candidate.sessionId, meta);
   }
   return result;
 }
