@@ -49,10 +49,10 @@ GET {base}/user/xiaomi/me
   -> 200 {"code":0, "data":{"userId": …}}
 ```
 
-The hop through `/api/sts` is what **mints the service session**, and the cookie jar gains `serviceToken`, `mimopc_ph`, `mimopc_slh`, `passInfo`, `pass_ua` and `deviceId`. The service id is `mimopc`, and the login is driven by visiting the API — the app carries no URL that constructs it.
+The hop through `/api/sts` is what **mints the service session**, and the cookie jar gains `serviceToken`, `mimopc_ph`, `mimopc_slh` and `userId` — the last under `.xiaomimimo.com`, so it covers the service host, and `mimopc_slh` arriving twice for the reason the console lane's `api-platform_slh` does. `passInfo`, `pass_ua`, `deviceId` and `ptn_count` belong to the SSO hop above it rather than to this one, and stay on the account hosts. Measured on a live exchange, the membership host receives `serviceToken`, `userId`, `mimopc_ph` and `mimopc_slh`. The service id is `mimopc`, and the login is driven by visiting the API — the app carries no URL that constructs it.
 
 - **Exchange-minted service cookies stay in memory.** They are this exchange's output, and the membership lane's only credential is the account cookie it was minted from: the account cookie is read again on every refresh, and nothing minted here is stored.
-- **A service cookie is not a substitute for the identity hop.** Measured: a freshly minted `serviceToken` set answers `/user/xiaomi/subscription/self` and `/user/usage` with `code: 0`, and is answered by `/user/xiaomi/me` with a **302 back to the SSO**, so it carries no identity and no region reading. Nothing else needs that distinction today — the lane has no paste — but the console lane's service cookie is a different service's and would not work here either.
+- **A service cookie is not a substitute for the identity hop.** Measured: a freshly minted `serviceToken` set answers `/user/xiaomi/subscription/self` and `/user/usage` with `code: 0`, and is answered by `/user/xiaomi/me` with a **302 back to the SSO**, so it carries no identity and no region reading. What makes that hop answer 200 is where `/sts` sends the client — `/api/user/xiaomi/me?userId=…`, a query the redirect carries — rather than the cookies: the minted set replayed against the bare path answers 302 whether it is sent whole or as `serviceToken` alone. Nothing else needs that distinction today — the lane has no paste — but the console lane's service cookie is a different service's and would not work here either.
 - **The account cookie uses a 30-day sliding server window.** An accepted exchange re-issues `passToken`, but Token Monitor discards the refreshed value and never writes it back. The reader is read-only, repeated exchanges leave the partition unchanged, and a row Chromium has purged becomes the normal silent fallback. An absolute server-side lifetime is not known.
 - **The exchange is silent while the account cookie is valid.** When it is rejected, the chain stops at `account.xiaomi.com/fe/service/login` and **mints nothing** — the refusal signature, detectable with no interactive step.
 - The final followup was observed as `http://`, answering 200 with a `/sts` token not marked `Secure`. Do not force HTTPS on it: a `Secure` cookie is withheld from an `http:` hop.
@@ -96,11 +96,19 @@ visit loginUrl
   -> 307 <the original endpoint>
 ```
 
-That mints `api-platform_serviceToken`, `api-platform_ph`, `api-platform_slh`, `deviceId`, `passInfo`, `pass_ua` and `ptn_count` — the first being one of the two names the console lane requires. With that session, all five console reads answer `code: 0`: `/balance`, `/userProfile`, `/tokenPlan/detail`, `/tokenPlan/usage` and `/usage`.
+Both hosts in that chain set cookies, and only the second hop's are in scope for the console:
 
-`/usage` is the only console summary that reports spend. `costUsage.totalCost` is all-time money spent and `currentMonthCost` is the month figure shown by the row. It has no daily or weekly rollup, so those values stay absent. The paginated call ledger and monthly bill endpoint are intentionally not queried.
+| Hop | Sets | Scope |
+|---|---|---|
+| `account.xiaomi.com` (the SSO) | `deviceId`, `passInfo`, `pass_ua`, `uLocale`, `theme`, `passToken`, `cUserId`, `ptn_count`, `userId` | `account.xiaomi.com`, `.account.xiaomi.com` and `.xiaomi.com` — no scope that matches the console host |
+| `platform.xiaomimimo.com/sts` | `api-platform_serviceToken`, `api-platform_ph`, `api-platform_slh` | `platform.xiaomimimo.com` |
+| the same `/sts` answer | `userId`, a second `api-platform_slh` | `xiaomimimo.com`, so both also cover the console host |
 
-The wallet itself reports money only: `{balance, frozenBalance, currency, overdraftLimit, remainingOverdraftLimit, giftBalance, cashBalance}` — no cap and no percentage of its own. The meter the row draws beside it is therefore **derived at display time** (`amount / (amount + monthSpend)`, `creditsMeterPercent` in `src/shared/limitBalanceDisplay.js`), the same display-layer rule deepseek's and openrouter's balances follow, and never a wire value.
+`userId` is the one worth stating outright, because the console lane requires it beside `api-platform_serviceToken` and only one of the three copies can be sent: the account cookie's own `userId` is seeded host-only on `account.xiaomi.com`, and the SSO hop re-issues one under `.account.xiaomi.com` — neither scope matches the console host, so the `/sts` answer's copy is the one that answers the requirement. Measured on a live exchange, the header that host receives is exactly `api-platform_serviceToken`, `userId`, `api-platform_ph`, `api-platform_slh`. The last appears twice with different values, because the jar keys cookies by name and domain and this response set it under two; `normalizeMimoCookieHeader` collapses the pair to the last one. With that session, all five console reads answer `code: 0`: `/balance`, `/userProfile`, `/tokenPlan/detail`, `/tokenPlan/usage` and `/usage`.
+
+`/usage` is the only console summary that reports spend. `costUsage.totalCost` is all-time money spent and `currentMonthCost` is the month figure shown by the row. The endpoint has no daily or weekly rollup, so the row's `todaySpend` and `weekSpend` are tracked locally as positive deltas of that cumulative total — the derivation z.ai's report also uses, and the one `docs/API.md` documents — while `monthSpend` and `allTimeSpend` stay the console's own figures. The paginated call ledger and monthly bill endpoint are intentionally not queried.
+
+The wallet itself reports money only: `{balance, frozenBalance, currency, overdraftLimit, remainingOverdraftLimit, giftBalance, cashBalance}` — no cap and no percentage of its own. The meter the row draws beside it is therefore **derived at display time** (`amount / (amount + monthSpend)`, `creditsMeterPercent` in `src/shared/limits/balanceDisplay.js`), never a wire value. That derivation is the fallback for a money window carrying no percentage of its own, which is what deepseek's balance window is; openrouter's credits window reports a real `usedPercent`, so `creditsMeterPercent` returns that instead and never reaches the rule.
 
 Both lanes therefore resolve the same way: an account cookie already on the machine, exchanged per refresh for a session that is never stored. The console lane keeps the manual paste as its fallback where no MiMo Desktop is signed in; the membership has none, because it is not sold on the developer platform.
 
@@ -165,7 +173,7 @@ So a 500 reads as an outage rather than a signed-out app, and a body-level `4610
 
 `46109` is Xiaomi's own auth code and is not an HTTP status — it is why a MiMo refusal can arrive as a perfectly ordinary 200 and still mean the session is gone. The classifier also carries the account's `region`, which is what selects the base URL. A region the app does not carry has no host at all, so the membership lane goes quiet for one; an **absent** region is not evidence of a foreign account — there the call proceeds and the endpoint answers for itself.
 
-**The account id must come from the server-issued `userId`, never from a rotating token.** A minted console session's fresh cookies do not include one, so the id the account cookie already carries is passed through — the same value `/userProfile` reports.
+**The account id must come from the server-issued `userId`, never from a rotating token.** Measured: the `/sts` answer re-issues that same id under `.xiaomimimo.com` rather than minting a new one, and `/userProfile` reports it back unchanged — all three copies (the account cookie's, the minted header's, the profile's) hold one value. The code still takes the copy the account cookie already carries instead of parsing the minted header, which keeps the account key independent of how a given exchange shaped its cookies.
 
 ## Live signatures
 
@@ -215,7 +223,7 @@ Limits uses the shared “Sign in again” status for rejected sessions, as it d
 
 ### Session reader
 
-The local reader follows the existing `readClineSession` result shape:
+The local reader is shaped like `readClineSession` in one respect and not in another: it throws on a refusal, as that one does, but what it answers with is this lane's pair — `{userId, cookieHeader}` rather than an access token — and `fetchMimoLimits` reads it through a wrapper that turns the throw into `{ok: false, status}`, because discovery is one credential of two and a missing sign-in must not fail the tick:
 
 | Store state | Answer |
 |---|---|
