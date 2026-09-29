@@ -178,13 +178,21 @@ test('the transform reads no setting outside the ones a worker is handed', () =>
 
 test('project raises allTime to the daily-history floor for a rotated source (#808)', () => {
   const period = (tokens) => normalizePeriod({ totalTokens: tokens, clients: { codex: tokens } });
+  // allTime's live 20 tokens sit on the same model the floor knows, so the floor
+  // tops that model up to 900 rather than adding a second, unattributed slice.
+  const allTime = normalizePeriod({
+    totalTokens: 20,
+    clients: { codex: 20 },
+    models: { 'gpt-5.5': 20 },
+    clientModels: { codex: { 'gpt-5.5': 20 } }
+  });
   const enabled = createUsageTransform({
     store: fakeStore(),
     getSettings: () => ({}),
     loadDailyHistoryFloor: () => ({ codex: { totalTokens: 900, costUsd: 0, models: { 'gpt-5.5': 900 }, modelCosts: {} } })
   });
   const lifted = enabled.project(
-    { deviceId: 'mac', updatedAt: AT, today: period(5), month: period(20), allTime: period(20) },
+    { deviceId: 'mac', updatedAt: AT, today: period(5), month: period(20), allTime },
     { version: 1, sessions: {} },
     new Date(AT)
   );

@@ -513,14 +513,18 @@ function pruneArchivedClientUsage(archive, activeClients) {
 // (issue #808). Neither existing archive covers that: the session archive only
 // knows sessions seen since first run, and archivedClientUsage only snapshots
 // what was on the device the moment a client was untracked. The daily history
-// archive is the record that outlives the source, so its per-client cumulative
-// is the floor allTime must not fall below.
+// archive is the record that outlives the source, so its retained (client,
+// model) cumulative is the floor allTime must not fall below.
 //
-// This tops each client up to that floor and never past it: addClientUsage keys
-// the client and period totals off the blob's own totalTokens/costUsd, so a
-// source still wholly present (live >= floor) adds nothing and the same tokens
-// are never counted twice. `cumulative` is allTimeCumulativeFromArchive()'s
-// output, already folded onto the period's client and model keys.
+// The floor is applied per (client, model), not per client total. A client
+// whose live total has already grown past its archived total on one model must
+// still get back a *different* model whose source has since rotated away — a
+// client-total floor would see the grown model cover the gap and restore
+// nothing. Each archived model is compared against its own live usage and only
+// the positive shortfall is added, so a model still wholly present contributes
+// nothing and no tokens are ever counted twice. `cumulative` is
+// allTimeCumulativeFromArchive()'s output, already folded onto the period's
+// client and model keys, so the two sides compare on the same key.
 function applyDailyHistoryAllTimeFloor(summary, cumulative) {
   if (!cumulative || typeof cumulative !== 'object') return summary;
   const clients = Object.keys(cumulative);
@@ -533,41 +537,47 @@ function applyDailyHistoryAllTimeFloor(summary, cumulative) {
   const shortfalls = [];
   for (const client of clients) {
     const floor = cumulative[client];
-    const floorTokens = Math.max(0, Math.round(numberValue(floor?.totalTokens)));
-    if (floorTokens === 0) continue;
-    const liveTokens = Math.max(0, Math.round(numberValue(live.clients?.[client])));
-    const missingTokens = floorTokens - liveTokens;
-    if (missingTokens <= 0) continue;
-    const floorCost = Math.max(0, numberValue(floor?.costUsd));
-    const liveCost = Math.max(0, numberValue(live.clientCosts?.[client]));
-    shortfalls.push({ client, floor, floorTokens, missingTokens, missingCost: Math.max(0, floorCost - liveCost) });
+    const liveModels = live.clientModels?.[client] || {};
+    const liveModelCosts = live.clientModelCosts?.[client] || {};
+    // The union of token- and cost-bearing models: a retained observation with
+    // cost but zero tokens still has a shortfall to restore.
+    const modelKeys = new Set([
+      ...Object.keys(floor.models || {}),
+      ...Object.keys(floor.modelCosts || {})
+    ]);
+    const models = {};
+    const modelCosts = {};
+    let missingTokens = 0;
+    let missingCost = 0;
+    for (const model of modelKeys) {
+      const gapTokens = Math.max(0, Math.round(numberValue(floor.models?.[model])))
+        - Math.max(0, Math.round(numberValue(liveModels[model])));
+      if (gapTokens > 0) {
+        models[model] = gapTokens;
+        missingTokens += gapTokens;
+      }
+      const gapCost = Math.max(0, numberValue(floor.modelCosts?.[model]))
+        - Math.max(0, numberValue(liveModelCosts[model]));
+      if (gapCost > 0) {
+        modelCosts[model] = gapCost;
+        missingCost += gapCost;
+      }
+    }
+    if (missingTokens > 0 || missingCost > 0) {
+      shortfalls.push({ client, models, modelCosts, missingTokens, missingCost });
+    }
   }
   if (shortfalls.length === 0) return summary;
 
   const next = cloneJson(summary);
   const period = targetPeriod(next, 'allTime');
-  for (const { client, floor, floorTokens, missingTokens, missingCost } of shortfalls) {
-    // The floor is a client cumulative, not a per-day series, so which days
-    // rotated is unknown: the missing slice is spread across the archived models
-    // by their share of the floor. The totals stay exact (addClientUsage keys
-    // them off the blob's totalTokens/costUsd); only the per-model split is
-    // proportional, which is why the restored tokens land as unclassified rather
-    // than claiming a cache/output breakdown they never had.
-    const tokenScale = missingTokens / floorTokens;
-    const models = {};
-    for (const [model, tokens] of Object.entries(floor.models || {})) {
-      const share = Math.round(numberValue(tokens) * tokenScale);
-      if (share > 0) models[model] = share;
-    }
-    const floorCost = Math.max(0, numberValue(floor?.costUsd));
-    const costScale = floorCost > 0 ? missingCost / floorCost : 0;
-    const modelCosts = {};
-    if (costScale > 0) {
-      for (const [model, cost] of Object.entries(floor.modelCosts || {})) {
-        const share = numberValue(cost) * costScale;
-        if (share > 0) modelCosts[model] = share;
-      }
-    }
+  for (const { client, models, modelCosts, missingTokens, missingCost } of shortfalls) {
+    // Exact per-model shortfalls, so the client and global totals move by exactly
+    // the sum of what each model got back — no proportional rounding drift, and a
+    // model still fully present adds nothing. addClientUsage keys the
+    // client/period totals off totalTokens/costUsd; the restored slice carries no
+    // session detail, so it lands as unclassified rather than claiming a
+    // cache/output breakdown it never had.
     addClientUsage(period, client, {
       totalTokens: missingTokens,
       costUsd: missingCost,
