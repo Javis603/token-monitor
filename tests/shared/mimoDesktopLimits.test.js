@@ -810,11 +810,18 @@ test('a membership the account does not have is not a row, and the wallet is unt
 
 test('a membership that ends clears the row it used to publish', async () => {
   const active = await fetchMimoLimits({}, {
-    fetch: mimoWorld({ subscription: { code: 0, data: { current: { planTier: 3, percent: 65, nextResetTime: '2026-10-01T00:00:00Z' } } } }).fetch,
+    fetch: mimoWorld().fetch,
     readMimoDesktopAccount: signedInDesktop(),
     now: () => Date.UTC(2026, 8, 24)
   });
-  assert.equal(active.some((row) => row.accountLabel === 'Desktop Membership'), true);
+  const membership = active.find((row) => row.accountLabel === 'Desktop Membership');
+  // `mimoWorld()` answers the membership with the vendor's full payload, which is
+  // what makes this row an active plan rather than a refusal: `readMimoMembershipPlan`
+  // rejects a `current` without `planCode` and `endTime`, and an `unavailable` row
+  // would let this test pass while ending no membership at all.
+  assert.equal(membership.status, 'ok', 'the row this test ends is an active membership');
+  assert.deepEqual(membership.windows.map((window) => window.kind), ['weekly']);
+  assert.equal(membership.windows[0].usedPercent, 21.5);
 
   const ended = await fetchMimoLimits({ previousLimits: { providers: active } }, {
     fetch: mimoWorld({ subscription: { code: 0, data: { current: null } } }).fetch,
