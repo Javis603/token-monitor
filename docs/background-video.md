@@ -9,3 +9,9 @@ Playback pauses while the window is hidden, collapsed to a floating bubble, or c
 Videos stay on this device. After a frame successfully decodes, the main process copies the selection into the application's user-data directory and atomically replaces `background-video.json`. Canceling the picker or rejecting an unsupported video leaves the previous background intact. The original file can then be moved or deleted. The saved copy and its manifest are removed when the video is cleared; they are not sent to the Hub or iCloud sync.
 
 The renderer receives an opaque `token-monitor-background:` URL instead of a filesystem path or the video's bytes over IPC. The protocol resolves only the currently selected preview or saved video and forwards byte-range requests to Electron's file loader. Register the scheme before Electron is ready and keep it in the `media-src` CSP directive. No additional network listener is required.
+
+## Preview
+
+Focused appearance-control preview using a generated H.264 test video:
+
+![Background video controls with a generated test clip](images/background-video-preview.png)
