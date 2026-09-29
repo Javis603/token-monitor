@@ -15,9 +15,12 @@
 // SPI, the same call Hammerspoon's hs.spaces and yabai rely on. If it is ever
 // missing the probe reports "not full screen".
 //
-// Windows: the foreground window counts when its rect is exactly its
-// monitor's. A maximized window overhangs the monitor by its resize border,
-// so it does not match; the desktop and taskbar do, and are excluded by class.
+// Windows: a display is full screen when the topmost app window on its monitor
+// has exactly the monitor's rect. The foreground window cannot answer it: with
+// a full-screen app on one display and focus on a window on another, only the
+// focused one is foreground. A maximized window overhangs the monitor by its
+// resize border, so it does not match; the desktop and taskbar do, and are
+// excluded by class.
 //
 // Everything is best-effort: koffi or a library failing to load, or any call
 // throwing, returns a probe that reports "not full screen", which leaves the
@@ -31,6 +34,14 @@ const CGS_MAIN_DISPLAY_IDENTIFIER = 'Main';
 const MONITOR_DEFAULTTONEAREST = 2;
 const WINDOWS_SHELL_CLASSES = new Set(['Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd']);
 const RECT_TOLERANCE = 1;
+const GW_HWNDNEXT = 2;
+const GWL_EXSTYLE = -20;
+const WS_EX_TOPMOST = 0x00000008;
+const WS_EX_TRANSPARENT = 0x00000020;
+const WS_EX_TOOLWINDOW = 0x00000080;
+const DWMWA_CLOAKED = 14;
+// Guards the Z-order walk against a window list that changes under it.
+const WINDOWS_MAX_WALK = 4096;
 
 function rectMatches(rect, bounds, tolerance = RECT_TOLERANCE) {
   if (!rect || !bounds) return false;
@@ -161,8 +172,9 @@ function createMacSpaceReader(koffi) {
   return { currentSpaces, displayUuid };
 }
 
-function createWindowsForegroundReader(koffi) {
+function createWindowsZOrderReader(koffi) {
   const user32 = koffi.load('user32.dll');
+  const dwmapi = koffi.load('dwmapi.dll');
   const RECT = koffi.struct('TM_EDGE_DOCK_RECT', { left: 'int32_t', top: 'int32_t', right: 'int32_t', bottom: 'int32_t' });
   const MONITORINFO = koffi.struct('TM_EDGE_DOCK_MONITORINFO', {
     cbSize: 'uint32_t',
@@ -170,20 +182,29 @@ function createWindowsForegroundReader(koffi) {
     rcWork: RECT,
     dwFlags: 'uint32_t'
   });
-  const GetForegroundWindow = user32.func('void * __stdcall GetForegroundWindow()');
+  const GetTopWindow = user32.func('void * __stdcall GetTopWindow(void *hwnd)');
+  const GetWindow = user32.func('void * __stdcall GetWindow(void *hwnd, uint32_t cmd)');
+  const IsWindowVisible = user32.func('bool __stdcall IsWindowVisible(void *hwnd)');
+  const IsIconic = user32.func('bool __stdcall IsIconic(void *hwnd)');
+  // 32-bit user32 only exports the non-Ptr name.
+  const GetWindowLong = privateFunc([user32], ['GetWindowLongPtrW', 'GetWindowLongW'], 'intptr_t', ['void *', 'int']);
   const GetWindowThreadProcessId = user32.func('uint32_t __stdcall GetWindowThreadProcessId(void *hwnd, _Out_ uint32_t *pid)');
   const GetWindowRect = user32.func('bool __stdcall GetWindowRect(void *hwnd, _Out_ TM_EDGE_DOCK_RECT *rect)');
   const GetClassNameW = user32.func('int __stdcall GetClassNameW(void *hwnd, void *name, int maxCount)');
   const MonitorFromWindow = user32.func('void * __stdcall MonitorFromWindow(void *hwnd, uint32_t flags)');
   const GetMonitorInfoW = user32.func('bool __stdcall GetMonitorInfoW(void *monitor, _Inout_ TM_EDGE_DOCK_MONITORINFO *info)');
+  const DwmGetWindowAttribute = dwmapi.func('int32_t __stdcall DwmGetWindowAttribute(void *hwnd, uint32_t attribute, _Out_ uint32_t *value, uint32_t size)');
 
   const toRect = (rect) => ({ x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top });
 
-  // Returns the foreground window's rect and its monitor's rect, both in
-  // physical pixels, or null when there is nothing to judge.
-  return function readForeground() {
-    const hwnd = GetForegroundWindow();
-    if (!hwnd) return null;
+  // Suspended UWP frames and windows on other virtual desktops are visible
+  // to user32 but cloaked by DWM, and can be monitor-sized.
+  function cloaked(hwnd) {
+    const value = [0];
+    return DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, value, 4) === 0 && value[0] !== 0;
+  }
+
+  function describe(hwnd, exStyle) {
     const pid = [0];
     GetWindowThreadProcessId(hwnd, pid);
     const name = Buffer.alloc(128);
@@ -195,17 +216,46 @@ function createWindowsForegroundReader(koffi) {
     const emptyRect = { left: 0, top: 0, right: 0, bottom: 0 };
     const info = { cbSize: koffi.sizeof(MONITORINFO), rcMonitor: emptyRect, rcWork: emptyRect, dwFlags: 0 };
     if (!monitor || !GetMonitorInfoW(monitor, info)) return null;
-    return { pid: pid[0], className, window: toRect(windowRect), monitor: toRect(info.rcMonitor) };
+    return {
+      pid: pid[0],
+      className,
+      topmost: (exStyle & WS_EX_TOPMOST) !== 0,
+      window: toRect(windowRect),
+      monitor: toRect(info.rcMonitor)
+    };
+  }
+
+  // Yields the shown top-level windows from the top of the Z-order down, each
+  // with its rect and its monitor's rect in physical pixels. Lazy, so the
+  // caller stops walking as soon as a display is decided.
+  return function* readWindows() {
+    let hwnd = GetTopWindow(null);
+    for (let seen = 0; hwnd && seen < WINDOWS_MAX_WALK; seen += 1, hwnd = GetWindow(hwnd, GW_HWNDNEXT)) {
+      if (!IsWindowVisible(hwnd) || IsIconic(hwnd) || cloaked(hwnd)) continue;
+      const exStyle = Number(GetWindowLong(hwnd, GWL_EXSTYLE));
+      // Click-through overlays and tool windows are not the app on screen.
+      if (exStyle & (WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW)) continue;
+      const entry = describe(hwnd, exStyle);
+      if (entry) yield entry;
+    }
   };
 }
 
-// The pure half of the Windows probe. `toDip` converts a physical-pixel rect to
-// the DIP coordinates the dock's display bounds are in.
-function windowsForegroundCoversDisplay(foreground, displayBounds, ownPid, toDip = (rect) => rect) {
-  if (!foreground || foreground.pid === ownPid) return false;
-  if (WINDOWS_SHELL_CLASSES.has(foreground.className)) return false;
-  if (!rectMatches(foreground.window, foreground.monitor, 0)) return false;
-  return rectMatches(toDip(foreground.monitor), displayBounds);
+// The pure half of the Windows probe. `windows` runs from the top of the
+// Z-order down. The display is full screen when the first app window on its
+// monitor exactly fills that monitor; always-on-top windows that do not fill
+// it (a floating player, a sticky note) are looked past. Focus plays no part:
+// clicking a window on another display leaves this display's stack alone.
+// `toDip` converts a physical-pixel rect to the DIP coordinates the dock's
+// display bounds are in.
+function windowsDisplayIsFullScreen(windows, displayBounds, ownPid, toDip = (rect) => rect) {
+  for (const entry of windows || []) {
+    if (entry.pid === ownPid || WINDOWS_SHELL_CLASSES.has(entry.className)) continue;
+    if (!rectMatches(toDip(entry.monitor), displayBounds)) continue;
+    if (rectMatches(entry.window, entry.monitor, 0)) return true;
+    if (!entry.topmost) return false;
+  }
+  return false;
 }
 
 function createFullScreenProbe(options = {}) {
@@ -219,7 +269,7 @@ function createFullScreenProbe(options = {}) {
     try {
       const koffi = options.koffi || require('koffi');
       if (platform === 'darwin') reader = createMacSpaceReader(koffi);
-      else if (platform === 'win32') reader = createWindowsForegroundReader(koffi);
+      else if (platform === 'win32') reader = createWindowsZOrderReader(koffi);
       else reader = false;
     } catch (error) {
       logger(`[edge-dock] full-screen detection unavailable: ${error.message}`);
@@ -236,7 +286,7 @@ function createFullScreenProbe(options = {}) {
     try {
       if (platform === 'darwin') return macCurrentSpaceIsFullScreen(read.currentSpaces(), read.displayUuid(display.id));
       const toDip = (rect) => options.screen?.screenToDipRect?.(null, rect) || rect;
-      return windowsForegroundCoversDisplay(read(), display.bounds, ownPid, toDip);
+      return windowsDisplayIsFullScreen(read(), display.bounds, ownPid, toDip);
     } catch (error) {
       logger(`[edge-dock] full-screen detection failed: ${error.message}`);
       return false;
@@ -249,5 +299,5 @@ module.exports = {
   createMacSpaceReader,
   macCurrentSpaceIsFullScreen,
   rectMatches,
-  windowsForegroundCoversDisplay
+  windowsDisplayIsFullScreen
 };

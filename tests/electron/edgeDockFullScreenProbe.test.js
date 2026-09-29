@@ -6,7 +6,7 @@ const test = require('node:test');
 const {
   createFullScreenProbe,
   macCurrentSpaceIsFullScreen,
-  windowsForegroundCoversDisplay
+  windowsDisplayIsFullScreen
 } = require('../../src/electron/edgeDock/fullScreenProbe');
 
 const display = { x: 0, y: 0, width: 1512, height: 982 };
@@ -31,19 +31,82 @@ test('macOS: displays sharing Spaces report one entry, and an unknown layout is 
   assert.equal(macCurrentSpaceIsFullScreen([], BUILT_IN), false);
 });
 
-test('Windows: the foreground window counts only when it exactly fills its monitor', () => {
+test('Windows: the topmost app window on the display counts only when it exactly fills its monitor', () => {
   const monitor = { x: 0, y: 0, width: 3024, height: 1964 };
   const toDip = (rect) => ({ x: rect.x / 2, y: rect.y / 2, width: rect.width / 2, height: rect.height / 2 });
-  const foreground = { pid: 42, className: 'Chrome_WidgetWin_1', window: { ...monitor }, monitor };
-  assert.equal(windowsForegroundCoversDisplay(foreground, display, 1, toDip), true);
+  const fullScreen = { pid: 42, className: 'Chrome_WidgetWin_1', topmost: false, window: { ...monitor }, monitor };
+  const desktop = { pid: 4, className: 'Progman', topmost: false, window: { ...monitor }, monitor };
+  const check = (windows, bounds = display) => windowsDisplayIsFullScreen(windows, bounds, 1, toDip);
+  assert.equal(check([fullScreen, desktop]), true);
   // A maximized window overhangs the monitor by its resize border.
-  const maximized = { ...foreground, window: { x: -8, y: -8, width: 3040, height: 1980 } };
-  assert.equal(windowsForegroundCoversDisplay(maximized, display, 1, toDip), false);
-  // The desktop fills the monitor when it has focus.
-  assert.equal(windowsForegroundCoversDisplay({ ...foreground, className: 'WorkerW' }, display, 1, toDip), false);
-  assert.equal(windowsForegroundCoversDisplay({ ...foreground, pid: 1 }, display, 1, toDip), false);
-  assert.equal(windowsForegroundCoversDisplay(foreground, external, 1, toDip), false);
-  assert.equal(windowsForegroundCoversDisplay(null, display, 1, toDip), false);
+  assert.equal(check([{ ...fullScreen, window: { x: -8, y: -8, width: 3040, height: 1980 } }, desktop]), false);
+  // The desktop fills the monitor when nothing covers it.
+  assert.equal(check([desktop]), false);
+  assert.equal(check([{ ...fullScreen, className: 'WorkerW' }]), false);
+  // The dock's own windows never count.
+  assert.equal(check([{ ...fullScreen, pid: 1 }]), false);
+  // A normal window stacked above the full-screen app on the same display wins.
+  const note = { ...fullScreen, pid: 43, window: { x: 100, y: 100, width: 600, height: 400 } };
+  assert.equal(check([note, fullScreen]), false);
+  // A small always-on-top window does not.
+  assert.equal(check([{ ...note, topmost: true }, fullScreen]), true);
+  assert.equal(check([fullScreen], external), false);
+  assert.equal(check(null), false);
+});
+
+test('Windows: a full-screen app on one display keeps it full screen while another display has focus', () => {
+  // Two displays at 100%: A (primary, dock target 1) and B to its right.
+  const monitorA = { x: 0, y: 0, width: 1920, height: 1080 };
+  const monitorB = { x: 1920, y: 0, width: 2560, height: 1440 };
+  const r = ({ x, y, width, height }) => ({ left: x, top: y, right: x + width, bottom: y + height });
+  // Z-order, top first. The user has just clicked the editor on A, so it is
+  // the foreground window and sits above B's full-screen video.
+  const windows = [
+    { hwnd: 'editor', pid: 50, className: 'Notepad', rect: { x: 200, y: 100, width: 1000, height: 700 }, monitor: 'A' },
+    { hwnd: 'video', pid: 60, className: 'Chrome_WidgetWin_1', rect: { ...monitorB }, monitor: 'B' },
+    { hwnd: 'uwp', pid: 70, className: 'ApplicationFrameWindow', rect: { ...monitorA }, monitor: 'A', cloaked: true },
+    { hwnd: 'overlay', pid: 80, className: 'Overlay', rect: { ...monitorA }, monitor: 'A', exStyle: 0x28 },
+    { hwnd: 'desktop', pid: 4, className: 'Progman', rect: { ...monitorA }, monitor: 'A' }
+  ];
+  const byHandle = new Map(windows.map((window) => [window.hwnd, window]));
+  const monitors = { A: monitorA, B: monitorB };
+  const exported = {
+    GetForegroundWindow: () => 'editor',
+    GetTopWindow: (hwnd) => (hwnd === null ? windows[0].hwnd : null),
+    GetWindow: (hwnd, cmd) => {
+      assert.equal(cmd, 2, 'walks with GW_HWNDNEXT');
+      const index = windows.findIndex((window) => window.hwnd === hwnd);
+      return windows[index + 1]?.hwnd ?? null;
+    },
+    IsWindowVisible: () => true,
+    IsIconic: () => false,
+    GetWindowLongPtrW: (hwnd, index) => (index === -20 ? byHandle.get(hwnd).exStyle ?? 0 : 0),
+    DwmGetWindowAttribute: (hwnd, attribute, out) => {
+      out[0] = attribute === 14 && byHandle.get(hwnd).cloaked ? 1 : 0;
+      return 0;
+    },
+    GetWindowThreadProcessId: (hwnd, pid) => { pid[0] = byHandle.get(hwnd).pid; return 1; },
+    GetClassNameW: (hwnd, buffer) => buffer.write(byHandle.get(hwnd).className, 'utf16le') / 2,
+    GetWindowRect: (hwnd, out) => { Object.assign(out, r(byHandle.get(hwnd).rect)); return true; },
+    MonitorFromWindow: (hwnd) => byHandle.get(hwnd).monitor,
+    GetMonitorInfoW: (monitor, info) => { info.rcMonitor = r(monitors[monitor]); return true; }
+  };
+  const fakeKoffi = {
+    load() {
+      return {
+        func(signature, ...rest) {
+          const name = rest.length ? signature : signature.match(/(\w+)\(/)[1];
+          if (!exported[name]) throw new Error(`Cannot find function '${name}'`);
+          return exported[name];
+        }
+      };
+    },
+    struct: (name) => name,
+    sizeof: () => 40
+  };
+  const probe = createFullScreenProbe({ platform: 'win32', pid: 1, koffi: fakeKoffi });
+  assert.equal(probe({ id: 2, bounds: monitorB }), true, 'B stays full screen after focus moves to A');
+  assert.equal(probe({ id: 1, bounds: monitorA }), false, 'A only has a normal window, a cloaked frame and an overlay');
 });
 
 test('the probe reports not full screen when native access is unavailable', () => {
