@@ -283,6 +283,43 @@ test('a resetting key limit is measured against the current period, not lifetime
   assert.deepEqual([lifetime.label, lifetime.used, lifetime.remaining], ['API key limit', 150, 50]);
 });
 
+test('key limit fallback includes BYOK usage only when it counts toward the cap', () => {
+  const key = {
+    limit: 100,
+    include_byok_in_limit: true,
+    usage: 80,
+    usage_daily: 1,
+    usage_weekly: 5,
+    usage_monthly: 20,
+    byok_usage: 70,
+    byok_usage_daily: 2,
+    byok_usage_weekly: 10,
+    byok_usage_monthly: 30
+  };
+  assert.deepEqual(
+    [
+      keyLimitWindow({ ...key, limit_reset: 'daily' }),
+      keyLimitWindow({ ...key, limit_reset: 'weekly' }),
+      keyLimitWindow({ ...key, limit_reset: 'monthly' }),
+      keyLimitWindow({ ...key, limit: 200 })
+    ].map(({ label, used, remaining }) => [label, used, remaining]),
+    [
+      ['Daily limit', 3, 97],
+      ['Weekly limit', 15, 85],
+      ['Monthly limit', 50, 50],
+      ['API key limit', 150, 50]
+    ]
+  );
+
+  const monthly = { ...key, limit_reset: 'monthly' };
+  const excluded = keyLimitWindow({ ...monthly, include_byok_in_limit: false });
+  assert.deepEqual([excluded.used, excluded.remaining], [20, 80]);
+  assert.equal(keyLimitWindow({ ...monthly, usage_monthly: null }), null);
+  assert.equal(keyLimitWindow({ ...monthly, byok_usage_monthly: null }), null);
+  const authoritative = keyLimitWindow({ ...monthly, usage_monthly: null, byok_usage_monthly: null, limit_remaining: 40 });
+  assert.deepEqual([authoritative.used, authoritative.remaining], [60, 40]);
+});
+
 test('scoped refresh fetches only the selected OpenRouter profile', async () => {
   const calls = [];
   const result = await fetchOpenRouterLimits({

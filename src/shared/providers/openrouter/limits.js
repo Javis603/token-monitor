@@ -65,13 +65,19 @@ function keyLimitWindow(data) {
   const limit = finiteNumber(data?.limit);
   if (!(limit > 0)) return null;
   const reset = String(data?.limit_reset || '').trim().toLowerCase();
-  const providedUsed = finiteNumber(data?.[PERIOD_USAGE_FIELDS[reset] || 'usage']);
+  const usageField = PERIOD_USAGE_FIELDS[reset] || 'usage';
+  const providedUsed = finiteNumber(data?.[usageField]);
+  const providedByokUsed = data?.include_byok_in_limit === true
+    ? finiteNumber(data?.[`byok_${usageField}`])
+    : 0;
   const providedRemaining = finiteNumber(data?.limit_remaining);
-  if (providedUsed === null && providedRemaining === null) return null;
+  // Without OpenRouter's remaining value, both counters are needed when BYOK
+  // counts toward the cap; a missing counter does not mean zero spend.
+  if (providedRemaining === null && (providedUsed === null || providedByokUsed === null)) return null;
   // `limit_remaining` is OpenRouter's own accounting against this limit, so it
   // wins over a spend figure whenever both are present.
   const used = providedRemaining === null
-    ? Math.max(0, providedUsed)
+    ? Math.max(0, providedUsed) + Math.max(0, providedByokUsed)
     : Math.max(0, limit - providedRemaining);
   const remaining = providedRemaining === null ? Math.max(0, limit - used) : Math.max(0, providedRemaining);
   const kind = reset === 'daily' ? 'session' : reset === 'weekly' ? 'weekly' : 'billing';
