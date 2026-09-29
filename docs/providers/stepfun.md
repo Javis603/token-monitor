@@ -15,11 +15,11 @@ The StepFun platform's `QueryStepPlanRateLimit` response supplies the authoritat
 
 ## Source precedence
 
-A live five-hour or weekly reset identifies the Coding Plan even if `plan_family` says otherwise. Without a live rate window, credit fields identify the Token Plan; `plan_family: 2` is the fallback. Complete credit buckets are weighted by `credit_total`, while a response without usable buckets uses the subscription rate, then the top-up rate. The two rates must never be added. A missing credit rate or missing Coding Plan window returns unavailable rather than a false percentage.
+A live five-hour or weekly reset identifies the Coding Plan even if `plan_family` says otherwise. Without a live rate window, credit fields identify the Token Plan; `plan_family: 2` is the fallback. Complete credit buckets are weighted by `credit_total`; only a response without buckets falls back to the subscription rate, then the top-up rate. The two rates must never be added. Incomplete buckets, a missing credit rate, or a missing Coding Plan window return unavailable rather than a false percentage.
 
 ## Credentials and transport
 
-The user copies `Oasis-Token` from a signed-in `platform.stepfun.com/plan-usage` browser request. It stays in main-process credential storage; `STEPFUN_TOKEN` is the optional environment fallback. The JWT refresh half provides the request's `oasis-webid` device ID. Every request uses the injected transport and omits browser credentials. This initial integration does not perform password login or persist a rotated Oasis token, so an expired token needs replacing through settings.
+The user copies `Oasis-Token` from a signed-in `platform.stepfun.com/plan-usage` browser request. It stays in main-process credential storage; `STEPFUN_TOKEN` is the optional environment fallback. The JWT refresh half provides the request's `oasis-webid` device ID. Every request uses the injected transport and omits browser credentials. The optional plan-name lookup has its own short deadline so it cannot discard valid quota windows. This initial integration does not perform password login or persist a rotated Oasis token, so an expired token needs replacing through settings.
 
 ## Verification
 

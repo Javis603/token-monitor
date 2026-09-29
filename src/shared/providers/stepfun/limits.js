@@ -70,7 +70,10 @@ function parseStepfunUsage(body) {
         total += limit;
         remaining += residual;
       }
-      if (valid) left = remaining / total;
+      if (!valid || !Number.isFinite(total) || !Number.isFinite(remaining)) {
+        throw errorWithStatus('unavailable', 'StepFun credit buckets incomplete');
+      }
+      left = remaining / total;
     }
     if (left === null) left = fraction(credit?.subscription_credit_left_rate) ?? fraction(credit?.topup_credit_left_rate);
     if (left === null) throw errorWithStatus('unavailable', 'StepFun credit balance missing');
@@ -95,26 +98,33 @@ async function fetchStepfunLimits(options = {}, deps = {}) {
   const token = stepfunToken(deps.env || process.env, options);
   if (!token) return normalizeLimitProvider({ ...base, status: 'notConfigured', windows: [] });
   try {
-    return await runWithProbeDeadline(async ({ signal }) => {
-      const webid = deviceId(token);
-      const request = async (url) => {
-        const response = await (deps.fetch || fetch)(url, {
-          method: 'POST', body: '{}', signal, redirect: 'error', credentials: 'omit',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json',
-            'User-Agent': BROWSER_USER_AGENT, 'oasis-appid': '10300', 'oasis-platform': 'web',
-            'oasis-webid': webid, Cookie: `Oasis-Token=${token}; Oasis-Webid=${webid}` }
-        });
-        if (!response.ok) throw errorWithStatus(response.status === 401 || response.status === 403 ? 'unauthorized' : response.status === 429 ? 'sourceRateLimited' : 'unavailable', `StepFun returned ${response.status}`);
-        try { return await response.json(); } catch { throw errorWithStatus('unavailable', 'Invalid StepFun response'); }
-      };
-      const windows = parseStepfunUsage(await request(RATE_URL));
-      let accountLabel = '';
-      try {
-        const plan = await request(PLAN_URL);
-        if ((plan.status === 1 || plan.status == null) && typeof plan.subscription?.name === 'string') accountLabel = plan.subscription.name;
-      } catch { /* Plan name is optional; quota remains authoritative. */ }
-      return normalizeLimitProvider({ ...base, status: 'ok', accountKey: hashKey('stepfun', token), accountLabel, windows });
-    }, { signal: deps.signal, deadlineMs: Number(deps.stepfunFetchTimeoutMs || 15000) });
+    const webid = deviceId(token);
+    const request = async (url, signal) => {
+      const response = await (deps.fetch || fetch)(url, {
+        method: 'POST', body: '{}', signal, redirect: 'error', credentials: 'omit',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json',
+          'User-Agent': BROWSER_USER_AGENT, 'oasis-appid': '10300', 'oasis-platform': 'web',
+          'oasis-webid': webid, Cookie: `Oasis-Token=${token}; Oasis-Webid=${webid}` }
+      });
+      if (!response.ok) throw errorWithStatus(response.status === 401 || response.status === 403 ? 'unauthorized' : response.status === 429 ? 'sourceRateLimited' : 'unavailable', `StepFun returned ${response.status}`);
+      try { return await response.json(); } catch { throw errorWithStatus('unavailable', 'Invalid StepFun response'); }
+    };
+    const windows = await runWithProbeDeadline(
+      async ({ signal }) => parseStepfunUsage(await request(RATE_URL, signal)),
+      { signal: deps.signal, deadlineMs: Number(deps.stepfunFetchTimeoutMs || 15000) }
+    );
+    let accountLabel = '';
+    try {
+      const plan = await runWithProbeDeadline(
+        ({ signal }) => request(PLAN_URL, signal),
+        { signal: deps.signal, deadlineMs: Number(deps.stepfunPlanFetchTimeoutMs || 1500) }
+      );
+      if ((plan.status === 1 || plan.status == null) && typeof plan.subscription?.name === 'string') accountLabel = plan.subscription.name;
+    } catch (error) {
+      if (deps.signal?.aborted) throw error;
+      // Plan name is optional; quota remains authoritative.
+    }
+    return normalizeLimitProvider({ ...base, status: 'ok', accountKey: hashKey('stepfun', token), accountLabel, windows });
   } catch (error) {
     return normalizeLimitProvider({ ...base, status: providerStatusFromError(error), windows: [] });
   }
