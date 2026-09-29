@@ -52,17 +52,34 @@ async function requestJson(url, apiKey, deps = {}) {
   return response.json();
 }
 
+// `/key` reports `usage` as the key's all-time spend. A limit that resets
+// counts only the current period, so its meter is measured against the
+// matching period field instead.
+const PERIOD_USAGE_FIELDS = Object.freeze({
+  daily: 'usage_daily',
+  weekly: 'usage_weekly',
+  monthly: 'usage_monthly'
+});
+
 function keyLimitWindow(data) {
   const limit = finiteNumber(data?.limit);
   if (!(limit > 0)) return null;
-  const providedUsed = finiteNumber(data?.usage);
-  const providedRemaining = finiteNumber(data?.limit_remaining);
-  if (providedUsed === null && providedRemaining === null) return null;
-  const used = providedUsed === null
-    ? Math.max(0, limit - providedRemaining)
-    : Math.max(0, providedUsed);
-  const remaining = providedRemaining === null ? Math.max(0, limit - used) : Math.max(0, providedRemaining);
   const reset = String(data?.limit_reset || '').trim().toLowerCase();
+  const usageField = PERIOD_USAGE_FIELDS[reset] || 'usage';
+  const providedUsed = finiteNumber(data?.[usageField]);
+  const providedByokUsed = data?.include_byok_in_limit === true
+    ? finiteNumber(data?.[`byok_${usageField}`])
+    : 0;
+  const providedRemaining = finiteNumber(data?.limit_remaining);
+  // Without OpenRouter's remaining value, both counters are needed when BYOK
+  // counts toward the cap; a missing counter does not mean zero spend.
+  if (providedRemaining === null && (providedUsed === null || providedByokUsed === null)) return null;
+  // `limit_remaining` is OpenRouter's own accounting against this limit, so it
+  // wins over a spend figure whenever both are present.
+  const used = providedRemaining === null
+    ? Math.max(0, providedUsed) + Math.max(0, providedByokUsed)
+    : Math.max(0, limit - providedRemaining);
+  const remaining = providedRemaining === null ? Math.max(0, limit - used) : Math.max(0, providedRemaining);
   const kind = reset === 'daily' ? 'session' : reset === 'weekly' ? 'weekly' : 'billing';
   const label = reset === 'daily'
     ? 'Daily limit'

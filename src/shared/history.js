@@ -83,9 +83,9 @@ function normalizeTimeMetrics(value) {
 
 // Tokscale emits these clients' reasoning as a disjoint JSON bucket. History
 // uses the same reasoning-inclusive public output convention as usage.js.
-// zcode/opencode: tokscale subtracts the reasoning overlap out of `output`
-// (their source DBs are reasoning-inclusive), so it has to be added back here.
-const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'codex', 'droid', 'dsh', 'zcode', 'opencode']);
+// zcode/opencode/muse: tokscale subtracts the reasoning overlap out of
+// `output` (their sources are reasoning-inclusive), so add it back here.
+const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'codex', 'droid', 'dsh', 'zcode', 'opencode', 'muse']);
 
 function hasDisjointReasoning(client) {
   return TOKSCALE_DISJOINT_REASONING_CLIENTS.has(String(client).trim().toLowerCase());

@@ -4,7 +4,7 @@ name: Vendored tokscale
 # exercises ensure-vendored-tokscale.js / verify-vendored-tokscale.js on any
 # platform before a real release. This gate runs those steps (no
 # electron-builder, no signing) on the same 4 targets release.yml packages,
-# so an executable or DSH regression fails fast on a PR instead of at release
+# so an executable or token-contract regression fails fast on a PR instead of at release
 # time. A separate job verifies that every native target declared by the
 # upstream npm package exists in the immutable vendor Release and matches its
 # manifest checksum, including targets that cannot execute on these runners.
@@ -22,7 +22,7 @@ name: Vendored tokscale
 # override active), the ensure step below no-ops (nothing to download or
 # swap), but both verify steps keep running — now against the plain
 # npm-installed binary — so this job still fails if that binary doesn't
-# actually cover DEFAULT_CLIENTS or regressed DSH parsing. No
+# actually cover DEFAULT_CLIENTS or regressed token parsing. No
 # scripts/workflow changes are needed to switch modes either way.
 
 on:
@@ -36,12 +36,16 @@ on:
       - 'scripts/verify-vendored-tokscale-release.js'
       - 'scripts/vendoredTokscale.js'
       - 'src/shared/tokscaleCapabilities.js'
+      - 'src/shared/clientCatalog.js'
       - 'src/shared/collector.js'
+      - 'src/shared/usage.js'
+      - 'src/shared/history.js'
       - 'tests/shared/tokscaleCapabilities.test.js'
       - 'tests/shared/ensureVendoredTokscale.test.js'
       - 'tests/shared/verifyVendoredTokscaleRelease.test.js'
       - 'tests/shared/vendoredScriptContract.test.js'
       - 'tests/shared/collectorCapabilityFallback.test.js'
+      - 'tests/shared/tokscaleTokenContracts.test.js'
       - '.github/workflows/release.yml'
       - '.github/workflows/vendor-tokscale.yml'
       - 'package.json'
@@ -97,5 +101,5 @@ jobs:
         run: node scripts/ensure-vendored-tokscale.js
       - name: Verify DEFAULT_CLIENTS against the vendored binary's real capabilities
         run: node scripts/verify-vendored-tokscale-clients.js
-      - name: Verify DSH parsing semantics
+      - name: Verify Tokscale token contracts
         run: node scripts/verify-vendored-tokscale.js

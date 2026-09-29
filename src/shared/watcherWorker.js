@@ -4,9 +4,9 @@
 // and its cost is superlinear in that count, so running it on the thread that
 // owns the collector froze the UI for about a second on every runtime restart.
 //
-// This thread is the only place a chokidar instance ever exists. The production
-// owner recycles the whole thread on a collector replacement so its native
-// allocation high-water is released. A defensive in-thread reconfigure still
+// This worker is the only place a chokidar instance ever exists. The production
+// owner recycles the whole worker on a collector replacement so its native
+// allocation high-water is released. A defensive in-worker reconfigure still
 // closes and awaits the previous watcher before opening the next, so descriptors
 // never overlap even if a caller replaces an owner without closing it first.
 //
@@ -17,7 +17,21 @@
 const { parentPort, workerData } = require('node:worker_threads');
 const chokidar = require('chokidar');
 
-const { watcherOptions, watchIgnoreMatcher } = require('./collector');
+// Production forks this module as a child process (see watcherHost.js); a
+// worker thread can still host it through the coordinator's Worker seam. Both
+// carry the same messages and only the pipe differs.
+const port = parentPort || {
+  postMessage(message) {
+    if (process.connected) process.send(message, () => {});
+  },
+  on(event, listener) { process.on(event, listener); }
+};
+
+// An owner that quit or crashed leaves nobody to read the events, and this
+// process would otherwise keep holding every descriptor it watches.
+if (!parentPort) process.on('disconnect', () => process.exit(0));
+
+const { openWatch } = require('./collector');
 
 // Latest-wins rather than a queue. A teardown can run for seconds, and a user
 // flipping several settings in that window must not make the worker replay
@@ -30,7 +44,7 @@ let watcherRevision = -1;
 let running = false;
 
 function post(message) {
-  try { parentPort.postMessage(message); } catch (_) { /* owner is gone */ }
+  try { port.postMessage(message); } catch (_) { /* owner is gone */ }
 }
 
 function wire(instance, revision) {
@@ -73,10 +87,7 @@ async function pump() {
       if (desired !== target) continue;
       if (target.config) {
         try {
-          const { dirs, clients, customScanPaths, usePolling } = target.config;
-          const instance = chokidar.watch(dirs, watcherOptions(usePolling === true, watchIgnoreMatcher(clients, {
-            customScanPaths
-          })));
+          const instance = openWatch(chokidar, target.config);
           watcher = instance;
           watcherRevision = target.revision;
           appliedRevision = target.revision;
@@ -112,7 +123,7 @@ async function pump() {
   }
 }
 
-parentPort.on('message', (message) => {
+port.on('message', (message) => {
   if (message?.type === 'configure') {
     desired = { revision: message.revision, config: message.config };
     void pump();

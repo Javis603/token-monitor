@@ -1084,8 +1084,10 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     { field: 'claudeWebCookie' }
   ]);
   assert.deepEqual(form.fields.map(({ key, input, placeholderKey }) => [key, input, placeholderKey]), [
-    ['claudeWebCookie', 'textarea', 'settings.claude.cookiePlaceholder']
+    ['claudeWebCookie', 'textarea', 'settings.claude.cookiePlaceholder'],
+    ['claudeWebOrganizationId', 'select', undefined]
   ]);
+  assert.deepEqual(form.top, [{ field: 'claudeWebOrganizationId' }]);
   assert.deepEqual(form.openUrl, { url: 'https://claude.ai/settings/usage' });
   assert.deepEqual(form.messages, {
     required: 'settings.claude.cookieRequired',
@@ -1093,6 +1095,11 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     rejected: 'settings.claude.cookieRejected'
   });
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+    for (const key of ['organization', 'organizationChoose', 'organizationRequired', 'organizationSelect', 'organizationUnavailable', 'organizationLoadFailed']) {
+      assert.ok(MESSAGES[locale][`settings.claude.${key}`], `${locale} ${key}`);
+    }
+  }
   assert.equal(MESSAGES.en['settings.claude.title'], 'Claude Account');
   assert.match(MESSAGES.en['settings.claude.note'], /detected automatically when Web login is not configured/);
   assert.match(MESSAGES.en['settings.claude.step2'], /Application\/Storage[\s\S]*Cookies[\s\S]*https:\/\/claude\.ai/);

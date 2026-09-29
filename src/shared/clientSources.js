@@ -177,7 +177,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // watcher prunes the rest of this broad app data root below.
   //
   // Only the roots tokscale declares as `PathRoot::XdgData` go through this —
-  // opencode, zed, kilo and micode (clients.rs), plus the CodeBuddy extension
+  // opencode, zed, kilo, micode and muse (clients.rs), plus the CodeBuddy extension
   // logs it resolves via `dirs::data_local_dir()`. Kiro's CLI database is
   // deliberately NOT one of them: tokscale spells it as a home-relative literal
   // (`{home}/.local/share/kiro-cli/data.sqlite3`, scanner.rs), so following XDG
@@ -303,6 +303,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['mimocode-data', path.join(xdgHome, 'mimocode')],
     ['mimocode-orca-data', path.join(home, 'Library', 'Application Support', 'orca', 'mimocode-hooks', 'shared', 'data')]
   );
+  add('muse', ['muse-sessions', path.join(xdgHome, 'muse', 'sessions')]);
   const zcodeDbDir = path.join(home, '.zcode', 'cli', 'db');
   add(
     'zcode',

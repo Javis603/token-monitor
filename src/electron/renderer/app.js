@@ -292,6 +292,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
 const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
+state.icloudStatus = null;
 state.zedAccountExpanded = false;
 state.zedPendingCheckSince = 0;
 state.toolDetailMode = 'tokens';
@@ -389,6 +390,10 @@ Object.assign(els, {
   trayIconOptions: document.getElementById('trayIconOptions'),
   trayOptions: document.getElementById('trayOptions'),
   hubModeOptions: document.getElementById('hubModeOptions'),
+  icloudModeOption: document.querySelector('input[name="hubMode"][value="icloud"]'),
+  icloudFields: document.getElementById('icloudFields'),
+  icloudStatus: document.getElementById('icloudStatus'),
+  icloudRootStatus: document.getElementById('icloudRootStatus'),
   hubBuildStatus: document.getElementById('hubBuildStatus'),
   hubClientFields: document.getElementById('hubClientFields'),
   hubHostFields: document.getElementById('hubHostFields'),
@@ -762,6 +767,7 @@ function settingsSectionSummary(section) {
   if (section === 'sync') {
     if (state.settings.hubMode === 'host') return t('settings.sync.hostHub');
     if (state.settings.hubMode === 'client') return t('settings.sync.connectHub');
+    if (state.settings.hubMode === 'icloud') return t('settings.sync.icloud');
     return t('settings.sync.localOnly');
   }
   if (section === 'tools') {
@@ -894,7 +900,7 @@ function liveTokenRateSourceKey(periodSource) {
 
 function effectiveLiveTokenRateScope() {
   const hubMode = state.settings?.hubMode;
-  const syncMode = hubMode === 'client' || hubMode === 'host';
+  const syncMode = tokenRateApi.isSharedSyncMode(hubMode);
   return syncMode && state.settings?.liveTokenRateScope !== 'device' ? 'all' : 'device';
 }
 
@@ -929,7 +935,7 @@ function displayLiveTokenRateItems() {
 
 function effectiveDisplayLiveTokenRateScope(scope) {
   const hubMode = state.settings?.hubMode;
-  const syncMode = hubMode === 'client' || hubMode === 'host';
+  const syncMode = tokenRateApi.isSharedSyncMode(hubMode);
   return syncMode && scope === 'all' ? 'all' : 'device';
 }
 
@@ -2047,6 +2053,42 @@ function rowTemplate(rowData) {
   return row;
 }
 
+const DEVICE_DELETE_CONFIRMATION_MS = 3000;
+const armedDeviceDeleteButtons = new Set();
+const devicesBeingDeleted = new Set();
+const deviceDeleteConfirmationTimers = new WeakMap();
+
+function clearDeviceDeleteConfirmationTimer(remove) {
+  const timer = deviceDeleteConfirmationTimers.get(remove);
+  if (timer === undefined) return;
+  clearTimeout(timer);
+  deviceDeleteConfirmationTimers.delete(remove);
+}
+
+function resetDeviceDeleteConfirmation(remove, defaultText = '') {
+  clearDeviceDeleteConfirmationTimer(remove);
+  armedDeviceDeleteButtons.delete(remove);
+  remove.dataset.confirm = '';
+  remove.textContent = defaultText;
+}
+
+function armDeviceDeleteConfirmation(remove, defaultText, confirmationText) {
+  clearDeviceDeleteConfirmationTimer(remove);
+  armedDeviceDeleteButtons.add(remove);
+  remove.dataset.confirm = 'true';
+  remove.textContent = confirmationText;
+  const timer = setTimeout(() => resetDeviceDeleteConfirmation(remove, defaultText), DEVICE_DELETE_CONFIRMATION_MS);
+  deviceDeleteConfirmationTimers.set(remove, timer);
+}
+
+document.addEventListener('pointerdown', (event) => {
+  for (const remove of armedDeviceDeleteButtons) {
+    if (remove !== event.target && !remove.contains?.(event.target)) {
+      resetDeviceDeleteConfirmation(remove, t('settings.sync.icloudDelete'));
+    }
+  }
+});
+
 const hoverMarqueeStates = new WeakMap();
 
 function stopHoverMarquee(element, { reset = true } = {}) {
@@ -2098,15 +2140,20 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
     toolIconsEnabled(state.settings?.showToolIcons),
     deviceDetail.emptyText,
     deviceDetail.metaParts,
+    deviceDetail.canDelete,
+    deviceDetail.deviceId,
+    devicesBeingDeleted.has(deviceDetail.deviceId),
     deviceDetail.tools.map((tool) => [
       tool.key,
       tool.value,
       Math.round(tool.percent),
       tool.color,
       tool.models.map((model) => [model.key, model.value])
-    ])
+      ])
   ]);
   if (accordionInner.dataset.signature === signature) return;
+  const previousDelete = accordionInner.querySelector?.('.device-delete-button');
+  if (previousDelete) resetDeviceDeleteConfirmation(previousDelete);
 
   const content = document.createElement('div');
   content.className = 'accordion-content device-breakdown';
@@ -2168,6 +2215,43 @@ function renderDeviceAccordion(accordionInner, deviceDetail) {
     meta.className = 'device-meta';
     meta.textContent = deviceDetail.metaParts.join(' · ');
     content.append(meta);
+  }
+  if (deviceDetail.canDelete && window.tokenMonitor.deleteDevice) {
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'device-delete-button';
+    remove.dataset.deviceId = deviceDetail.deviceId;
+    remove.disabled = devicesBeingDeleted.has(deviceDetail.deviceId);
+    const deleteText = t('settings.sync.icloudDelete');
+    const deleteConfirmText = t('settings.sync.icloudDeleteConfirm');
+    remove.textContent = deleteText;
+    const resetConfirmation = () => resetDeviceDeleteConfirmation(remove, deleteText);
+    remove.addEventListener('blur', resetConfirmation);
+    remove.addEventListener('click', async () => {
+      if (devicesBeingDeleted.has(deviceDetail.deviceId)) return;
+      if (remove.dataset.confirm !== 'true') {
+        armDeviceDeleteConfirmation(remove, deleteText, deleteConfirmText);
+        return;
+      }
+      remove.disabled = true;
+      devicesBeingDeleted.add(deviceDetail.deviceId);
+      try {
+        await window.tokenMonitor.deleteDevice(deviceDetail.deviceId);
+        resetConfirmation();
+        await refreshStats();
+      } catch (_) {
+        resetConfirmation();
+      } finally {
+        devicesBeingDeleted.delete(deviceDetail.deviceId);
+        // Stats may have replaced the original button while IPC was pending.
+        for (const current of [remove, ...document.querySelectorAll('.device-delete-button')]) {
+          if (current.dataset.deviceId !== deviceDetail.deviceId) continue;
+          current.disabled = false;
+          resetDeviceDeleteConfirmation(current, deleteText);
+        }
+      }
+    });
+    content.append(remove);
   }
   accordionInner.replaceChildren(content);
   accordionInner.dataset.signature = signature;
@@ -2734,7 +2818,11 @@ function deviceRowsForPeriod() {
       deviceDetail: {
         ...breakdown,
         emptyText: breakdown.totalTokens > 0 ? t('devices.detailsUnavailable') : t('home.noTools'),
-        metaParts
+        metaParts,
+        deviceId: device.deviceId,
+        canDelete: state.settings?.hubMode === 'icloud'
+          && device.deviceId !== localId
+          && state.stats?.devices?.some((live) => live.deviceId === device.deviceId && live.stale === true)
       }
     };
   }).sort((a, b) => b.value - a.value);
@@ -3384,7 +3472,11 @@ async function saveSubscriptions(list, base, { render = true } = {}) {
 function subscriptionWriteErrorKey(error) {
   const message = error?.message || '';
   if (/stale_write/.test(message)) return 'settings.subscriptions.errorStaleWrite';
+  if (/icloud_adoption_unconfirmed/.test(message)) return 'settings.subscriptions.errorIcloudAdoptionUnconfirmed';
   if (/hub_rejected/.test(message)) return 'settings.subscriptions.errorHubRejected';
+  if (/icloud_(?:unavailable|stopped)|icloud_write_failed|root-create-failed|subscription-write-failed/.test(message)) {
+    return 'settings.subscriptions.errorIcloudWrite';
+  }
   if (/write_failed/.test(message)) return 'settings.subscriptions.errorWriteFailed';
   if (/hub_changed/.test(message)) return 'settings.subscriptions.errorHubChanged';
   return 'settings.subscriptions.errorHubWrite';
@@ -3418,9 +3510,11 @@ function renderSubscriptionSyncError() {
 function renderSubscriptionNote() {
   const el = els.subscriptionNote;
   if (!el) return;
-  const key = state.settings?.subscriptionsShared
-    ? 'settings.subscriptions.noteShared'
-    : 'settings.subscriptions.note';
+  const key = state.settings?.hubMode === 'icloud'
+    ? 'settings.subscriptions.noteIcloud'
+    : state.settings?.subscriptionsShared
+      ? 'settings.subscriptions.noteShared'
+      : 'settings.subscriptions.note';
   el.dataset.i18n = key;
   el.textContent = t(key);
 }
@@ -6528,6 +6622,11 @@ function streamFailureText(failure) {
 }
 
 function statusTextFor(mode, connected) {
+  if (mode === 'sync' && state.settings?.hubMode === 'icloud') {
+    return String(state.icloudStatus?.state || '').toLowerCase() === 'available'
+      ? 'iCloud'
+      : 'Waiting…';
+  }
   if (mode === 'sync') return connected ? 'Live' : 'Offline';
   if (mode === 'local') return connected ? 'Local' : 'Collecting…';
   return 'Starting…';
@@ -6535,6 +6634,12 @@ function statusTextFor(mode, connected) {
 
 function liveDotTitle(mode, connected) {
   if (mode === 'sync') {
+    if (state.settings?.hubMode === 'icloud') {
+      const status = String(state.icloudStatus?.state || 'waiting');
+      return status === 'available'
+        ? t('settings.sync.icloudAvailable')
+        : t('settings.sync.icloudWaiting');
+    }
     if (connected) return t('status.hubStreamLive');
     const reason = streamFailureText(state.streamFailure);
     return reason ? `${t('status.hubStreamOffline')}: ${reason}` : t('status.hubStreamOffline');
@@ -7697,18 +7802,55 @@ function syncHubModeUi() {
   for (const input of els.hubModeOptions.querySelectorAll('input[name="hubMode"]')) {
     input.checked = input.value === mode;
   }
+  const icloudSupported = state.appInfo?.platform === 'darwin';
+  if (els.icloudModeOption) {
+    els.icloudModeOption.disabled = !icloudSupported;
+    els.icloudModeOption.closest('.hub-mode-option')?.classList.toggle('unsupported', !icloudSupported);
+  }
   els.hubClientFields.classList.toggle('hidden', mode !== 'client');
   els.hubHostFields.classList.toggle('hidden', mode !== 'host');
+  els.icloudFields?.classList.toggle('hidden', mode !== 'icloud');
   if (mode === 'host') {
     els.hubSecretInput.value = state.settings.hubHostSecret || '';
     renderHubStatus();
+  } else {
+    renderIcloudStatus();
   }
   renderSyncClientStatus();
   renderHubBuildStatus();
   syncHubSaveButton();
 }
 
+function renderIcloudStatus() {
+  if (!els.icloudStatus || !els.icloudRootStatus) return;
+  const supported = state.appInfo?.platform === 'darwin';
+  const info = state.icloudStatus || state.hubInfo?.icloud || null;
+  if (!supported) {
+    els.icloudStatus.textContent = t('settings.sync.icloudUnsupported');
+    els.icloudStatus.className = 'hub-status';
+    els.icloudRootStatus.textContent = '';
+    return;
+  }
+  const status = String(info?.state || 'waiting');
+  const labels = {
+    available: 'settings.sync.icloudAvailable',
+    initializing: 'settings.sync.icloudInitializing',
+    starting: 'settings.sync.icloudInitializing',
+    waiting: 'settings.sync.icloudWaiting',
+    unavailable: 'settings.sync.icloudUnavailable',
+    error: 'settings.sync.icloudError',
+    stopped: 'settings.sync.icloudWaiting'
+  };
+  els.icloudStatus.textContent = t(labels[status] || 'settings.sync.icloudWaiting');
+  els.icloudStatus.className = `hub-status${status === 'available' ? ' ok' : status === 'error' ? ' error' : ''}`;
+  const root = String(info?.root || '').trim();
+  els.icloudRootStatus.textContent = root
+    ? `${t('settings.sync.icloudRoot')}: ${root}`
+    : t('settings.sync.icloudRootWaiting');
+}
+
 function renderHubStatus() {
+  renderIcloudStatus();
   if (!els.hubStatusRow || !els.hubAddressList) return;
   const info = state.hubInfo;
   const port = Number(state.settings.hubHostPort || 17321);
@@ -7817,6 +7959,7 @@ async function refreshHubInfo() {
   if (!window.tokenMonitor.getHubInfo) return;
   try {
     state.hubInfo = await window.tokenMonitor.getHubInfo();
+    if (state.hubInfo?.icloud) state.icloudStatus = state.hubInfo.icloud;
     renderHubStatus();
   } catch (_) { /* ignore */ }
 }
@@ -8143,7 +8286,7 @@ function syncSettingsForm() {
     els.liveTokenRateScopeInput.value = state.settings.liveTokenRateScope === 'device' ? 'device' : 'all';
   }
   const liveRateHasScope = state.settings.showLiveTokenRate === true
-    && (state.settings.hubMode === 'client' || state.settings.hubMode === 'host');
+    && tokenRateApi.isSharedSyncMode(state.settings.hubMode);
   els.liveTokenRateScopeRow?.classList.toggle('hidden', !liveRateHasScope);
   if (els.compactTokenUnitsInput) {
     els.compactTokenUnitsInput.value = state.settings.compactTokenUnits === 'localized' ? 'localized' : 'western';
@@ -10342,7 +10485,9 @@ function moveOpenCodeLocalFallbackSetting() {
 // panel only turns the answer into its message line and the pending pill;
 // generated and hand-built panels share this, including which messages they
 // may override (`messages.required` / `rejected` / `invalidFormat`).
+let claudeOrganizationChoicesRevision = 0;
 async function saveAccountCredential(id, values, { messages = {}, failedKey, clearInput = () => {} } = {}) {
+  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   const provider = LIMIT_PROVIDERS.find((entry) => entry.id === id);
   const name = provider?.settingsLabel || provider?.label || id;
   setAccountPanelMessage(id, null);
@@ -10356,6 +10501,13 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
     return result;
   }
   if (result?.verdict === 'superseded') return result;
+  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
+  if (id === 'claude' && result?.choices) renderClaudeOrganizationChoices(result.choices, result.settings?.claudeWebOrganizationId || values.claudeWebOrganizationId);
+  if (id === 'claude' && result?.verdict === 'selectionRequired') {
+    setAccountPanelMessage(id, { key: 'settings.claude.organizationRequired', tone: 'notice' });
+    renderExternalProviderStatus(id);
+    return result;
+  }
   if (!result?.saved) {
     const rejection = {
       required: { key: messages.required || 'settings.common.credentialRequired' },
@@ -10401,8 +10553,13 @@ async function submitAccountCredential(button, id, values, options) {
 }
 
 async function clearAccountCredential(id) {
+  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
   setAccountPanelMessage(id, null);
   await commitAccountCredential(() => window.tokenMonitor.limits.clearCredential(id));
+  if (id === 'claude') {
+    claudeOrganizationChoicesRevision += 1;
+    renderClaudeOrganizationChoices([]);
+  }
   clearExternalProviderCheckPending(id);
   clearExternalProviderPendingStatus(id);
   renderExternalProviderStatus(id);
@@ -10420,11 +10577,59 @@ function limitAccountForm(providerId) {
   return state.settings?.limitAccountForms?.find((form) => form.id === providerId);
 }
 
+function renderClaudeOrganizationChoices(choices, selectedId = state.settings?.claudeWebOrganizationId || '') {
+  const select = document.getElementById('claudeWebOrganizationIdInput');
+  if (!select) return false;
+  document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', choices.length === 0);
+  select.options.length = 0;
+  const placeholder = document.createElement('option');
+  placeholder.value = '';
+  placeholder.textContent = t('settings.claude.organizationChoose');
+  select.append(placeholder);
+  for (const choice of choices) {
+    const option = document.createElement('option');
+    option.value = choice.id;
+    option.textContent = [choice.name || choice.id, choice.plan ? choice.plan[0].toUpperCase() + choice.plan.slice(1) : ''].filter(Boolean).join(' · ');
+    select.append(option);
+  }
+  const selectedAvailable = choices.some((choice) => choice.id === selectedId);
+  select.value = selectedAvailable ? selectedId : !selectedId && choices.length === 1 ? choices[0].id : '';
+  select.disabled = choices.length === 0;
+  return selectedAvailable;
+}
+
+async function loadClaudeOrganizationChoices() {
+  const revision = ++claudeOrganizationChoicesRevision;
+  try {
+    const result = await window.tokenMonitor.limits.listOrganizationChoices('claude');
+    if (revision !== claudeOrganizationChoicesRevision) return;
+    if (result.status === 'ok') {
+      const selectedAvailable = renderClaudeOrganizationChoices(result.choices);
+      if (!selectedAvailable && (state.settings?.claudeWebOrganizationId || result.choices.length > 1)) {
+        setAccountPanelMessage('claude', { key: state.settings?.claudeWebOrganizationId
+          ? 'settings.claude.organizationUnavailable'
+          : 'settings.claude.organizationSelect', tone: 'notice' });
+      }
+    } else setAccountPanelMessage('claude', { key: 'settings.claude.organizationLoadFailed', tone: 'notice' });
+  } catch (_) {
+    if (revision !== claudeOrganizationChoicesRevision) return;
+    setAccountPanelMessage('claude', { key: 'settings.claude.organizationLoadFailed', tone: 'notice' });
+  }
+}
+
 // A select beside a credential (region, site, console) saves as soon as it
 // changes. `clears` names what the change invalidates: an Alibaba cookie
 // belongs to the console it was copied from and cannot authenticate the other
 // one, so switching drops it instead of leaving a key that can only fail.
 async function saveAccountFormSetting({ id }, field, value) {
+  if (id === 'claude' && field.key === 'claudeWebOrganizationId') {
+    if (!value || !state.settings?.claudeWebCookieConfigured || document.getElementById('claudeWebCookieInput')?.value) return;
+    claudeOrganizationChoicesRevision += 1;
+    await saveSettings({ claudeWebOrganizationId: value });
+    setAccountPanelMessage('claude', null);
+    await refreshStats({ force: true });
+    return;
+  }
   if (!field.saveOnChange) return;
   const cleared = Object.fromEntries((field.clears || []).map((key) => [key, '']));
   await saveSettings({ [field.key]: value, ...cleared });
@@ -10448,7 +10653,10 @@ function setupLimitAccountPanels() {
         document,
         provider: externalProviderForAccount(form.id)
       })),
-      onRefresh: () => refreshStats({ force: true }),
+      onRefresh: async () => {
+        if (form.id === 'claude') await loadClaudeOrganizationChoices();
+        await refreshStats({ force: true });
+      },
       onClear: ({ id }) => clearAccountCredential(id),
       onSave: ({ id, messages, failedKey }, values, clearInput) => saveAccountCredential(id, values, { messages, failedKey, clearInput }),
       onFieldChange: (form, field, value) => saveAccountFormSetting(form, field, value)
@@ -10461,6 +10669,7 @@ function setupLimitAccountPanels() {
     added = true;
     setExternalAccountExpanded(form.id, false);
     limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
+    if (form.id === 'claude' && state.settings?.claudeWebCookieConfigured) void loadClaudeOrganizationChoices();
     renderExternalProviderStatus(form.id);
   }
   if (added) initSettingsAnimationWrappers();
@@ -11300,6 +11509,10 @@ els.saveSettingsButton.addEventListener('click', async () => {
 els.hubModeOptions.addEventListener('change', async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLInputElement) || target.name !== 'hubMode') return;
+  if (target.value === 'icloud' && state.appInfo?.platform !== 'darwin') {
+    syncHubModeUi();
+    return;
+  }
   await saveSettings({ hubMode: target.value });
   await refreshHubInfo();
   void refreshHubBuildStatus();
@@ -11650,7 +11863,7 @@ els.showCompactTotalTokensInput.addEventListener('change', async () => {
 els.showLiveTokenRateInput.addEventListener('change', async () => {
   state.settings.showLiveTokenRate = els.showLiveTokenRateInput.checked;
   const liveRateHasScope = state.settings.showLiveTokenRate
-    && (state.settings.hubMode === 'client' || state.settings.hubMode === 'host');
+    && tokenRateApi.isSharedSyncMode(state.settings.hubMode);
   els.liveTokenRateScopeRow?.classList.toggle('hidden', !liveRateHasScope);
   if (state.settings.showLiveTokenRate) observeLiveTokenRate(state.stats);
   renderLiveTokenRate();
@@ -12006,6 +12219,7 @@ window.tokenMonitor.onFloatingBubbleState?.((payload) => {
 window.tokenMonitor.onHubPush?.((payload) => {
   if (!payload?.info) return;
   state.hubInfo = payload.info;
+  if (payload.info.icloud) state.icloudStatus = payload.info.icloud;
   const settingsVisible = isSettingsSurfaceVisible();
   // The first switch to Host mode generates the shared secret asynchronously
   // after settings:update has already returned, so mirror the freshly minted
@@ -12109,6 +12323,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   if (payload.event === 'status') {
     state.streamConnected = Boolean(payload.data?.connected);
     if (payload.data?.mode) state.mode = payload.data.mode;
+    if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
     state.streamFailure = state.streamConnected ? null : (payload.data?.reason ? { reason: payload.data.reason, detail: payload.data.detail ?? null } : state.streamFailure);
   } else if (payload.data?.stats) {
     // Local collector overlays update client-mode data independently of the
@@ -12119,6 +12334,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
       state.streamFailure = null;
     }
     if (payload.data?.mode) state.mode = payload.data.mode;
+    if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
     allTimeSessions.invalidate();
     state.stats = allTimeSessions.attach(payload.data.stats);
     observeLiveTokenRate(state.stats);

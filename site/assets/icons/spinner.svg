@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="-5.5 -5.5 11 11">
+  <g fill="currentColor">
+    <rect x="-0.65" y="-4.75" width="1.3" height="2.75" rx="0.65" transform="rotate(315)">
+      <animate attributeName="opacity" values=".95;.78;.62;.44;.30;.22;.16;.12;.95" dur=".9s" repeatCount="indefinite" begin="0s" />
+    </rect>
+    <rect x="-0.65" y="-4.75" width="1.3" height="2.75" rx="0.65" transform="rotate(270)">
+      <animate attributeName="opacity" values=".95;.78;.62;.44;.30;.22;.16;.12;.95" dur=".9s" repeatCount="indefinite" begin="-.1125s" />
+    </rect>
+    <rect x="-0.65" y="-4.75" width="1.3" height="2.75" rx="0.65" transform="rotate(225)">
+      <animate attributeName="opacity" values=".95;.78;.62;.44;.30;.22;.16;.12;.95" dur=".9s" repeatCount="indefinite" begin="-.225s" />
+    </rect>
+    <rect x="-0.65" y="-4.75" width="1.3" height="2.75" rx="0.65" transform="rotate(180)">
+      <animate attributeName="opacity" values=".95;.78;.62;.44;.30;.22;.16;.12;.95" dur=".9s" repeatCount="indefinite" begin="-.3375s" />
+    </rect>
+    <rect x="-0.65" y="-4.75" width="1.3" height="2.75" rx="0.65" transform="rotate(135)">
+      <animate attributeName="opacity" values=".95;.78;.62;.44;.30;.22;.16;.12;.95" dur=".9s" repeatCount="indefinite" begin="-.45s" />
+    </rect>
+    <rect x="-0.65" y="-4.75" width="1.3" height="2.75" rx="0.65" transform="rotate(90)">
+      <animate attributeName="opacity" values=".95;.78;.62;.44;.30;.22;.16;.12;.95" dur=".9s" repeatCount="indefinite" begin="-.5625s" />
+    </rect>
+    <rect x="-0.65" y="-4.75" width="1.3" height="2.75" rx="0.65" transform="rotate(45)">
+      <animate attributeName="opacity" values=".95;.78;.62;.44;.30;.22;.16;.12;.95" dur=".9s" repeatCount="indefinite" begin="-.675s" />
+    </rect>
+    <rect x="-0.65" y="-4.75" width="1.3" height="2.75" rx="0.65">
+      <animate attributeName="opacity" values=".95;.78;.62;.44;.30;.22;.16;.12;.95" dur=".9s" repeatCount="indefinite" begin="-.7875s" />
+    </rect>
+  </g>
+</svg>
