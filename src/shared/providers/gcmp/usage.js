@@ -91,16 +91,26 @@ function normalizeUsageLine(line, sourceId) {
   if (record.status !== 'completed' || !record.rawUsage || typeof record.rawUsage !== 'object') return null;
 
   const usage = record.rawUsage;
-  const promptTokens = numberValue(usage.prompt_tokens ?? usage.promptTokens);
-  const output = numberValue(usage.completion_tokens ?? usage.completionTokens);
-  const cacheRead = numberValue(
-    usage.prompt_tokens_details?.cached_tokens
+  // Three rawUsage shapes share one row semantic (input = uncached input):
+  //   OpenAI:     prompt_tokens includes cached_tokens (prompt_tokens_details)
+  //   codex:      input_tokens includes cached_tokens (input_tokens_details)
+  //   Anthropic:  input_tokens excludes cache_read_input_tokens (additive)
+  // Details-borne cached tokens are a subset of the prompt total and subtract;
+  // the additive cache_read_input_tokens does not.
+  const cachedFromDetails = finiteNumber(
+    usage.input_tokens_details?.cached_tokens
+    ?? usage.prompt_tokens_details?.cached_tokens
     ?? usage.prompt_tokens_details?.cachedTokens
-    ?? usage.cache_read_input_tokens
   );
-  const input = Math.max(0, promptTokens - cacheRead);
-  const reasoning = numberValue(usage.completion_tokens_details?.reasoning_tokens);
-  if (input === 0 && output === 0 && cacheRead === 0 && reasoning === 0) return null;
+  const cacheRead = cachedFromDetails ?? numberValue(usage.cache_read_input_tokens);
+  const input = Math.max(0, numberValue(usage.prompt_tokens ?? usage.promptTokens ?? usage.input_tokens) - (cachedFromDetails ?? 0));
+  const output = numberValue(usage.completion_tokens ?? usage.completionTokens ?? usage.output_tokens);
+  const cacheWrite = numberValue(usage.input_tokens_details?.cache_write_tokens ?? usage.cache_creation_input_tokens);
+  const reasoning = numberValue(
+    usage.completion_tokens_details?.reasoning_tokens
+    ?? usage.output_tokens_details?.reasoning_tokens
+  );
+  if (input === 0 && output === 0 && cacheRead === 0 && cacheWrite === 0 && reasoning === 0) return null;
 
   const timestamp = numberValue(record.timestamp);
   const cost = finiteNumber(record.estimatedCost) ?? numberValue(record.costBreakdown?.total);
@@ -111,7 +121,7 @@ function normalizeUsageLine(line, sourceId) {
     input,
     output,
     cacheRead,
-    cacheWrite: 0,
+    cacheWrite,
     reasoning,
     cost,
     createdAt: timestamp

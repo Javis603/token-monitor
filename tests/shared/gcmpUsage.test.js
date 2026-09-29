@@ -77,6 +77,44 @@ test('the gcmp namespace prefix is stripped when only the model id is present', 
   assert.equal(row.model, 'glm-5.3-flash-go');
 });
 
+test('a codex-shaped record (input_tokens includes cached) is counted', () => {
+  const row = normalizeUsageLine(JSON.stringify({
+    ...COMPLETED,
+    rawUsage: {
+      input_tokens: 153631,
+      input_tokens_details: { cached_tokens: 147456, cache_write_tokens: 0 },
+      output_tokens: 324,
+      output_tokens_details: { reasoning_tokens: 66 },
+      total_tokens: 153955
+    }
+  }), 's');
+  assert.ok(row);
+  // input_tokens includes the cached subset; uncached is the remainder.
+  assert.equal(row.input, 6175);
+  assert.equal(row.output, 324);
+  assert.equal(row.cacheRead, 147456);
+  assert.equal(row.reasoning, 66);
+});
+
+test('an Anthropic-shaped record (additive cache_read) is counted without double subtraction', () => {
+  const row = normalizeUsageLine(JSON.stringify({
+    ...COMPLETED,
+    rawUsage: {
+      input_tokens: 265,
+      output_tokens: 685,
+      cache_creation_input_tokens: 40,
+      cache_read_input_tokens: 120
+    }
+  }), 's');
+  assert.ok(row);
+  // cache_read_input_tokens is additive to input_tokens, not part of it.
+  assert.equal(row.input, 265);
+  assert.equal(row.output, 685);
+  assert.equal(row.cacheRead, 120);
+  assert.equal(row.cacheWrite, 40);
+  assert.equal(row.reasoning, 0);
+});
+
 test('collectGcmpRows dedupes repeated requestIds within a root', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gcmp-usage-'));
   const usages = path.join(root, 'usages');
