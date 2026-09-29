@@ -196,6 +196,11 @@ test('selects drive their dependent hints, notes and landing page before they ar
   // MiniMax follows the region of its last successful poll.
   assert.equal(resolveOpenUrl(forms.minimax, { provider: { region: 'en' } }), 'https://platform.minimax.io/user-center/payment/token-plan');
   assert.equal(resolveOpenUrl(forms.minimax, { provider: null }), 'https://platform.minimaxi.com/user-center/payment/token-plan');
+
+  const minimax = renderPanel(forms.minimax);
+  const region = minimax.group.byId('minimaxApiRegionInput');
+  syncCredentialFields(forms.minimax, { document: minimax.document, settings: { minimaxApiRegion: 'cn' } });
+  assert.equal(region.value, 'cn');
 });
 
 test('a plain-text setting is shown again after a save, a secret never is', () => {

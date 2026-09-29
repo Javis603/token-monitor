@@ -161,7 +161,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     devin: ['devinBearerToken', 'devinOrganization'],
     typesafe: ['typesafeCookie'],
     openrouter: ['openrouterProfiles'],
-    minimax: ['minimaxApiKey'],
+    minimax: ['minimaxApiKey', 'minimaxApiRegion'],
     volcengine: [
       'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
       'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'
@@ -206,6 +206,15 @@ test('limitsConfigFromSettings env fallbacks and precedence', () => {
   assert.equal(legacyOnly.zedCookie, 'legacy-zed');
   assert.equal(legacyOnly.typesafeCookie, 'legacy-typesafe');
   assert.equal(legacyOnly.workbuddyAccessToken, 'legacy-wb');
+  // The Minimax region reaches the probe through the config layer, so the env
+  // names must be declared on the field — minimaxRegion's own env lane is
+  // shadowed by the configDefault this resolves to.
+  assert.equal(limitsConfigFromSettings({}, { env: {} }).minimaxApiRegion, 'auto');
+  assert.equal(limitsConfigFromSettings({}, { env: { MINIMAX_API_REGION: 'cn' } }).minimaxApiRegion, 'cn');
+  assert.equal(
+    limitsConfigFromSettings({}, { env: { TOKEN_MONITOR_MINIMAX_API_REGION: 'intl' } }).minimaxApiRegion,
+    'intl'
+  );
   // Settings win over env.
   const settingsWin = limitsConfigFromSettings(
     { claudeWebCookie: 'settings-claude', zedCookie: 'settings-zed' },
@@ -256,7 +265,7 @@ test('settings:update normalizes provider fields and strips separately managed a
   const fields = LIMIT_PROVIDER_REGISTRY.flatMap(({ fields }) => fields);
   const normalizedKeys = fields.filter(({ normalize, persist }) => normalize && persist !== 'never').map(({ key }) => key);
   assert.deepEqual(normalizedKeys.sort(), [
-    'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'minimaxApiKey', 'copilotApiToken', 'copilotEnterpriseHost',
+    'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'minimaxApiKey', 'minimaxApiRegion', 'copilotApiToken', 'copilotEnterpriseHost',
     'factoryApiKey', 'clineApiKey', 'zaiApiKey', 'zaiApiRegion', 'zaiTeamApiKey',
     'zaiTeamOrganizationId', 'zaiTeamProjectId', 'volcengineAccessKeyId',
     'volcengineSecretAccessKey', 'volcengineRegion', 'volcengineAgentAccessKeyId',
@@ -277,6 +286,10 @@ test('settings:update normalizes provider fields and strips separately managed a
   }
   assert.equal(finalAccountSettings({}, {}).zaiApiRegion, 'global');
   assert.equal(finalAccountSettings({}, {}).qoderSite, 'global');
+  assert.equal(finalAccountSettings({}, {}).minimaxApiRegion, 'auto');
+  // A stored value the normalizer no longer accepts is re-canonicalized against
+  // persistFallback rather than kept verbatim.
+  assert.equal(finalAccountSettings({}, { minimaxApiRegion: '  CN  ' }).minimaxApiRegion, 'cn');
   // Kimi's keys are normalized in the patch but have no final literal entry.
   assert.equal(Object.hasOwn(finalAccountSettings({ kimiApiKey: 'x' }, {}), 'kimiApiKey'), false);
 

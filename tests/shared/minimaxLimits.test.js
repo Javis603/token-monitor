@@ -8,6 +8,7 @@ const {
   parseMinimaxTiers,
   fetchMinimaxLimits,
   minimaxAttemptOrder,
+  minimaxRegion,
   minimaxRegionForUrl,
   MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
   MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
@@ -57,6 +58,33 @@ test('minimaxAttemptOrder prefers token-plan endpoint before legacy coding-plan 
     MINIMAX_TOKEN_PLAN_REMAINS_URL_EN,
     MINIMAX_REMAINS_URL_EN
   ]);
+});
+
+test('minimaxRegion normalizes the explicit region setting and keeps auto as the default', () => {
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'auto' }), 'auto');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'cn' }), 'cn');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'intl' }), 'intl');
+  assert.equal(minimaxRegion({ minimaxApiRegion: ' INTL ' }), 'intl');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'en' }), 'intl');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'global' }), 'intl');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'api.minimaxi.com' }), 'cn');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'api.minimax.io' }), 'intl');
+  // Anything unrecognized degrades to the historical probe order rather than
+  // pinning a region the user never asked for.
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'nonsense' }), 'auto');
+  assert.equal(minimaxRegion({}), 'auto');
+  assert.equal(minimaxRegion(), 'auto');
+});
+
+test('minimaxRegion prefers the new option, then the legacy host pin, then the env lane', () => {
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'cn', minimaxApiHost: 'en' }), 'cn');
+  assert.equal(minimaxRegion({}, { TOKEN_MONITOR_MINIMAX_API_REGION: 'cn' }), 'cn');
+  assert.equal(minimaxRegion({}, { MINIMAX_API_REGION: 'intl' }), 'intl');
+  assert.equal(minimaxRegion({}, { MINIMAX_API_HOST: 'api.minimaxi.com' }), 'cn');
+  assert.equal(
+    minimaxRegion({ minimaxApiRegion: 'intl' }, { TOKEN_MONITOR_MINIMAX_API_REGION: 'cn' }),
+    'intl'
+  );
 });
 
 test('minimaxRegionForUrl maps endpoints to en/cn labels for the renderer', () => {
@@ -554,6 +582,63 @@ test('fetchMinimaxLimits reports cn region when pinned to the CN endpoint', asyn
       return okResponse({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 50 }] } });
     }
   });
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'cn');
+});
+
+test('fetchMinimaxLimits probes only the pinned region and reports the resolved wire region', async () => {
+  const body = {
+    data: {
+      model_remains: [
+        { model_name: 'general', current_interval_remaining_percent: 60, current_weekly_remaining_percent: 55 }
+      ]
+    }
+  };
+  const intlCalls = [];
+  const intl = await fetchMinimaxLimits({ minimaxApiRegion: 'intl', minimaxApiKey: 'sk-cp-test' }, {
+    env: {},
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      intlCalls.push(url);
+      return okResponse(body);
+    }
+  });
+  assert.deepEqual(intlCalls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
+  assert.equal(intl.status, 'ok');
+  // The wire region keeps its historical en/cn vocabulary; the setting's 'auto'
+  // and 'intl' never leak into it.
+  assert.equal(intl.region, 'en');
+});
+
+test('fetchMinimaxLimits does not cross regions when the region is pinned', async () => {
+  // The cross-region hop is the whole point of pinning: a CN key on a network
+  // that cannot reach api.minimax.io would otherwise burn every probe on a
+  // doomed global request. A 401 here is final, not a signal to try CN.
+  const calls = [];
+  const r = await fetchMinimaxLimits({ minimaxApiRegion: 'cn', minimaxApiKey: 'sk-cp-test' }, {
+    env: {},
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      return unauthorized();
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
+  assert.equal(r.status, 'unauthorized');
+  assert.deepEqual(r.windows, []);
+});
+
+test('fetchMinimaxLimits pins the region from the env lane for headless use', async () => {
+  const calls = [];
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test', MINIMAX_API_REGION: 'cn' },
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      return okResponse({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 40 }] } });
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
   assert.equal(r.status, 'ok');
   assert.equal(r.region, 'cn');
 });

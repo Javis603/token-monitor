@@ -748,12 +748,16 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   const css = readRendererFile('styles.css');
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const forms = limitAccountFormsForRenderer();
+  const expectedFields = {
+    deepseek: [['deepseekApiKey', 'password']],
+    minimax: [['minimaxApiRegion', 'select'], ['minimaxApiKey', 'password']]
+  };
   for (const id of ['deepseek', 'minimax']) {
     assert.doesNotMatch(html, new RegExp(`id="${id}(AccountGroup|ManualPanel|ApiKeyInput)"`), id);
     assert.doesNotMatch(css, new RegExp(`#${id}ManualPanel`), id);
     const form = forms.find((candidate) => candidate.id === id);
     assert.equal(form.kind, 'credential', id);
-    assert.deepEqual(form.fields.map(({ key, input }) => [key, input]), [[`${id}ApiKey`, 'password']], id);
+    assert.deepEqual(form.fields.map(({ key, input }) => [key, input]), expectedFields[id], id);
     assert.deepEqual(form.manual[0], { note: `settings.${id}.note` }, id);
     assert.deepEqual(form.status, {
       configuredKey: `${id}ApiKeyConfigured`,
@@ -763,7 +767,11 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
     for (const key of ['titleKey', 'openKey', 'clearKey', 'saveKey', 'emptyKey', 'failedKey']) {
       assert.match(form[key], new RegExp(`^settings\\.${id}\\.`), `${id} ${key}`);
     }
-    assert.match(form.fields[0].placeholderKey, new RegExp(`^settings\\.${id}\\.`), id);
+    assert.match(
+      form.fields.find(({ key }) => key === `${id}ApiKey`).placeholderKey,
+      new RegExp(`^settings\\.${id}\\.`),
+      id
+    );
   }
   assert.deepEqual(forms.find(({ id }) => id === 'deepseek').openUrl, { url: 'https://platform.deepseek.com/api_keys' });
 
@@ -775,6 +783,26 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
     urls: { en: 'https://platform.minimax.io/user-center/payment/token-plan' },
     default: 'https://platform.minimaxi.com/user-center/payment/token-plan'
   });
+
+  // The region is a plain setting beside the credential, so Clear leaves it
+  // alone and it stays reachable once a key is saved — a user whose auto-probe
+  // keeps flapping needs the switch after linking, not before.
+  const minimax = forms.find(({ id }) => id === 'minimax');
+  const region = minimax.fields.find(({ key }) => key === 'minimaxApiRegion');
+  assert.equal(region.saveOnChange, true);
+  assert.deepEqual(region.options.map(({ value }) => value), ['auto', 'cn', 'intl']);
+  for (const { labelKey } of region.options) {
+    assert.match(labelKey, /^settings\.minimax\./, labelKey);
+  }
+  assert.deepEqual(minimax.top, [{ field: 'minimaxApiRegion' }]);
+
+  // The region never becomes a credential: no store path, so it stays in
+  // settings.json and a fresh install seeds it from the env lane.
+  const { initialAccountSettings } = require('../../src/electron/limits/accountSettings');
+  assert.equal(initialAccountSettings({}).minimaxApiRegion, 'auto');
+  assert.equal(initialAccountSettings({ MINIMAX_API_REGION: 'cn' }).minimaxApiRegion, 'cn');
+  assert.equal(initialAccountSettings({ TOKEN_MONITOR_MINIMAX_API_REGION: 'intl' }).minimaxApiRegion, 'intl');
+  assert.equal(initialAccountSettings({ MINIMAX_API_HOST: 'api.minimax.io' }).minimaxApiRegion, 'intl');
   assert.match(app, /limitAccountPanelsApi\.resolveOpenUrl\(form, \{\s*document,\s*provider: externalProviderForAccount\(form\.id\)/);
   assert.doesNotMatch(app, /minimaxPlatformUrl|form\.id === 'minimax'/);
   const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
