@@ -326,11 +326,12 @@ test('polling forced by an unconfirmed terminate still respects the entry limit'
   }
 });
 
-test('an unconfirmed terminate gives up watching when polling is forbidden', async () => {
+// Either variable forbids polling, and either must stop the must-poll path too.
+for (const pollingEnv of ['TOKEN_MONITOR_WATCH_POLLING', 'CHOKIDAR_USEPOLLING']) test(`an unconfirmed terminate gives up watching when ${pollingEnv}=0`, async () => {
   FakeWorker.reset();
   const stub = stubChokidar();
-  const original = process.env.CHOKIDAR_USEPOLLING;
-  process.env.CHOKIDAR_USEPOLLING = '0';
+  const original = process.env[pollingEnv];
+  process.env[pollingEnv] = '0';
   const errors = [];
   const handlers = { onError: (error) => errors.push(error) };
   try {
@@ -348,8 +349,8 @@ test('an unconfirmed terminate gives up watching when polling is forbidden', asy
     assert.equal(stub.built.length, 0);
     assert.equal(errors[0].code, 'watch-polling-unavailable');
   } finally {
-    if (original === undefined) delete process.env.CHOKIDAR_USEPOLLING;
-    else process.env.CHOKIDAR_USEPOLLING = original;
+    if (original === undefined) delete process.env[pollingEnv];
+    else process.env[pollingEnv] = original;
     stub.restore();
   }
 });

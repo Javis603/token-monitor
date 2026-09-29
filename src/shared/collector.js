@@ -2544,13 +2544,15 @@ function openWatch(chokidar, config = {}) {
   const limit = Number.isInteger(config.pollingEntryLimit) && config.pollingEntryLimit >= 0
     ? config.pollingEntryLimit
     : WATCH_POLLING_ENTRY_LIMIT;
-  // Bounded on the mode chokidar will really run, not the one requested.
-  const usePolling = chokidarPollingEnv() ?? config.usePolling === true;
+  // Bounded on the mode that will really run, through the same resolver every
+  // other watch decision uses: CHOKIDAR_USEPOLLING, then our own override, then
+  // what was asked for.
+  const usePolling = resolveWatchUsePolling(config.usePolling === true);
   // `requirePolling` is not a preference: the host sets it when native
   // descriptors from a previous watcher may still be held, so falling through
   // to native here would put two sets in flight. Not watching is the safe answer.
   if (config.requirePolling === true && !usePolling) {
-    const error = new Error('polling required but forbidden by CHOKIDAR_USEPOLLING');
+    const error = new Error('polling required but forbidden by the environment');
     error.code = WATCH_POLLING_UNAVAILABLE_CODE;
     throw error;
   }

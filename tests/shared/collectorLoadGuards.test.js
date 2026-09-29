@@ -5165,6 +5165,18 @@ test('CHOKIDAR_USEPOLLING cannot switch chokidar to polling around the bound', (
       { code: 'watch-polling-unavailable' }
     );
     assert.equal(built.length, 1);
+
+    // chokidar's variable outranks ours, so it can still permit what ours forbids.
+    process.env.CHOKIDAR_USEPOLLING = '1';
+    const originalOwn = process.env.TOKEN_MONITOR_WATCH_POLLING;
+    process.env.TOKEN_MONITOR_WATCH_POLLING = '0';
+    try {
+      openWatch(chokidar, { ...config, pollingEntryLimit: 100, requirePolling: true });
+      assert.equal(built.at(-1).usePolling, true);
+    } finally {
+      if (originalOwn === undefined) delete process.env.TOKEN_MONITOR_WATCH_POLLING;
+      else process.env.TOKEN_MONITOR_WATCH_POLLING = originalOwn;
+    }
   } finally {
     if (original === undefined) delete process.env.CHOKIDAR_USEPOLLING;
     else process.env.CHOKIDAR_USEPOLLING = original;
