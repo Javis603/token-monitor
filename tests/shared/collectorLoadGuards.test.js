@@ -3875,6 +3875,96 @@ test('watch-descriptor exhaustion degrades to polling and stays there', async ()
   }
 });
 
+test('descriptor exhaustion over a tree too large to poll degrades to interval collection', async () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  for (let index = 0; index < 5; index += 1) {
+    fs.writeFileSync(path.join(tmp, '.claude', 'projects', `session-${index}.jsonl`), '');
+  }
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  const watchOptions = [];
+  const errorHandlers = [];
+  let closed = 0;
+  chokidar.watch = (_dirs, options) => {
+    watchOptions.push(options);
+    return {
+      on: (event, handler) => { if (event === 'error') errorHandlers.push(handler); },
+      close: () => { closed += 1; }
+    };
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  let handle = null;
+  const logs = [];
+  const events = [];
+  const updates = [];
+  try {
+    const { startCollector } = freshCollector();
+    handle = startCollector({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 80,
+      watchEnabled: true,
+      watchTriggersCollection: false,
+      intervalRequiresActivity: true,
+      watchPollingEntryLimit: 3,
+      limitsEnabled: false,
+      historyEnabled: false,
+      logger: (line) => logs.push(line),
+      onDiagnosticEvent: (event) => events.push(event),
+      onUpdate: (_summary, reason) => updates.push(reason)
+    });
+
+    await waitForCondition(() => errorHandlers.length === 1 && updates.length === 1);
+    const emfile = new Error('EMFILE: too many open files, watch');
+    emfile.code = 'EMFILE';
+    errorHandlers[0](emfile);
+
+    await waitForCondition(() => events.some((event) => event.code === 'watcher-interval-fallback'));
+    assert.equal(watchOptions.length, 1, 'no polling watcher is built over the oversized tree');
+    assert.equal(closed, 1, 'the exhausted native watcher is still released');
+    assert.deepEqual(events.at(-1), { subsystem: 'watcher', code: 'watcher-interval-fallback', detailCode: 'EMFILE' });
+    const diagnostics = handle.getDiagnostics();
+    assert.equal(diagnostics.watchMode, 'interval');
+    assert.equal(diagnostics.watchFallbackCode, 'EMFILE');
+    assert.ok(logs.some((line) => line.includes('not watching')));
+
+    // Smart mode would otherwise wait for watch activity that can no longer
+    // arrive, and scan nothing but the hourly reconciliation.
+    const scansBefore = calls.length;
+    await waitForCondition(() => calls.length > scansBefore);
+    const interval = calls.at(-1);
+    assert.equal(interval.includes('--client') ? interval[interval.indexOf('--client') + 1] : 'claude', 'claude');
+
+    // Sticky: a later rebuild must not bring a watcher back.
+    fs.mkdirSync(path.join(tmp, '.claude', 'transcripts'), { recursive: true });
+    await handle.tick('manual');
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(watchOptions.length, 1);
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('a successful watcher rebuild clears the current watcher failure', async () => {
   const tmp = withTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;
@@ -4928,6 +5018,51 @@ test('custom Tokscale scan paths stay visible and use recursive extra-root watch
     assert.equal(copilotIgnored(path.join(copilotCustom, 'nested', 'session.jsonl')), false);
   } finally {
     os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('custom roots prune dependency and VCS trees without touching built-in roots', () => {
+  const tmp = withTmpHome([path.join('.codex', 'sessions')]);
+  const originalHomedir = os.homedir;
+  const originalCodexHome = process.env.CODEX_HOME;
+  delete process.env.CODEX_HOME;
+  os.homedir = () => tmp;
+  try {
+    const { watchIgnoreMatcher } = freshCollector();
+    // #857: the custom root was a whole projects directory.
+    const projects = path.join(tmp, 'projects');
+    fs.mkdirSync(projects, { recursive: true });
+    const ignored = watchIgnoreMatcher('codex', { customScanPaths: { codex: [projects] } });
+
+    assert.equal(ignored(projects), false, 'the root itself is always kept');
+    assert.equal(ignored(path.join(projects, 'agent', 'sessions', 'rollout.jsonl')), false);
+    for (const pruned of ['node_modules', '.git', '.venv', '__pycache__']) {
+      assert.equal(ignored(path.join(projects, 'app', pruned)), true, `${pruned} is pruned`);
+      assert.equal(ignored(path.join(projects, 'app', pruned, 'deep', 'x.jsonl')), true, `below ${pruned} is pruned`);
+    }
+
+    // The built-in root beside it keeps its whole-tree contract.
+    const builtIn = path.join(tmp, '.codex', 'sessions');
+    assert.equal(ignored(path.join(builtIn, 'node_modules', 'x.jsonl')), false);
+
+    // A custom root nested in a pruned directory is its own source and survives.
+    const nested = path.join(projects, 'app', '.git', 'captured');
+    fs.mkdirSync(nested, { recursive: true });
+    const nestedIgnored = watchIgnoreMatcher('codex', { customScanPaths: { codex: [projects, nested] } });
+    assert.equal(nestedIgnored(path.join(nested, 'rollout.jsonl')), false);
+    assert.equal(nestedIgnored(path.join(projects, 'app', '.git', 'objects')), true);
+
+    // A directory that is a built-in root for any client keeps everything, even
+    // where another client names it as a custom root.
+    const sharedIgnored = watchIgnoreMatcher('codex,claude', { customScanPaths: { codex: [projects], claude: [builtIn] } });
+    assert.equal(sharedIgnored(path.join(builtIn, 'node_modules', 'x.jsonl')), false);
+    assert.equal(sharedIgnored(path.join(projects, 'node_modules')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }
