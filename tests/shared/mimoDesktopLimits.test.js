@@ -574,7 +574,7 @@ test('a restart seeds automatic identity removal from the previous limits snapsh
   assert.deepEqual(rows.filter((row) => row.removed).map((row) => row.accountKey), [membershipKey]);
 });
 
-test('an unattributed half sign-in still asks for a Desktop login, while an unreadable store is transient', async () => {
+test('an unattributed half sign-in prompts alone but never invents an account beside a pasted one', async () => {
   const providerRuntimeState = new Map();
   const half = await fetchMimoLimits({}, {
     fetch: async () => { throw new Error('no request should be spent'); },
@@ -589,6 +589,7 @@ test('an unattributed half sign-in still asks for a Desktop login, while an unre
   assert.equal(half[0].accountLabel, 'Desktop Membership');
 
   const alongsideManual = await fetchMimoLimits({
+    previousLimits: { providers: half },
     mimoManagedAccounts: [{
       id: 'mimo-1',
       accountKey: CONSOLE_ACCOUNT_KEY_42,
@@ -600,13 +601,14 @@ test('an unattributed half sign-in still asks for a Desktop login, while an unre
     providerRuntimeState,
     now: () => Date.UTC(2026, 8, 24)
   });
-  assert.deepEqual(alongsideManual.map((row) => [row.accountLabel, row.status]), [
-    ['Console', 'ok'],
-    ['Desktop Membership', 'unauthorized']
-  ], 'a healthy pasted wallet must not hide an unattributed Desktop login failure');
+  assert.deepEqual(alongsideManual.filter((row) => !row.removed).map((row) => [row.accountLabel, row.status]), [
+    ['Console', 'ok']
+  ], 'a Desktop session without userId cannot be counted as another account');
+  assert.deepEqual(alongsideManual.filter((row) => row.removed).map((row) => row.accountKey), [half[0].accountKey],
+    'the earlier unattributed status is removed on the next accepted refresh');
 
   const recovered = await fetchMimoLimits({
-    previousLimits: { providers: alongsideManual },
+    previousLimits: { providers: alongsideManual.filter((row) => !row.removed) },
     mimoManagedAccounts: [{
       id: 'mimo-1',
       accountKey: CONSOLE_ACCOUNT_KEY_42,
@@ -618,7 +620,8 @@ test('an unattributed half sign-in still asks for a Desktop login, while an unre
     providerRuntimeState,
     now: () => Date.UTC(2026, 8, 24)
   });
-  assert.equal(recovered.filter((row) => row.removed).length, 1, 'the unattributed status is explicitly removed after login recovers');
+  assert.equal(recovered.filter((row) => row.removed).length, 0);
+  assert.equal(recovered.some((row) => row.accountLabel === 'Desktop Membership'), true);
 
   const unreadable = await fetchMimoLimits({}, {
     fetch: async () => { throw new Error('no request should be spent'); },

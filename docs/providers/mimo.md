@@ -221,7 +221,7 @@ The local reader follows the existing `readClineSession` result shape:
 |---|---|
 | Unsupported platform, no store, no `node:sqlite`, **sealed rows** | `notConfigured` — silence, and the user pastes instead |
 | Store exists but cannot be inspected or opened | `unavailable` — transient, so the Limits runtime retains last-good automatic rows |
-| Readable and carrying **one** of the two cookies | `unauthorized`, attributed to `userId` when present and otherwise provider-scoped, telling the user to sign in to MiMo Desktop again |
+| Readable and carrying **one** of the two cookies | `unauthorized` when `userId` identifies the account; without `userId`, a lone Desktop source shows `Sign in again`, while a pasted Console account remains alone rather than counting an unknown Desktop account |
 | Readable and carrying **neither** | `notConfigured` — an app nobody has signed into is the same answer as no app |
 
 At-rest encryption is a property of the store, never evidence that the user signed out.

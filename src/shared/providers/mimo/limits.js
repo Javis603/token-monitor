@@ -817,19 +817,6 @@ async function fetchMimoLimits(options = {}, deps = {}) {
   }));
 
   const rows = perEntry.flat();
-  // A plaintext passToken without userId proves that Desktop needs a login but
-  // cannot name the Xiaomi account. Keep that recovery row beside unrelated
-  // manual Console accounts; otherwise a healthy wallet would hide the only
-  // actionable membership failure. Transient store failures stay omitted so
-  // they cannot mark healthy account rows unavailable in the shared runtime.
-  if (!scope && !desktop.ok && desktop.status === 'unauthorized' && !desktop.userId) {
-    rows.push(statusProvider('unauthorized', updatedAt, {
-      accountKey: MIMO_UNATTRIBUTED_DESKTOP_KEY,
-      accountLabel: MIMO_MEMBERSHIP_LABEL,
-      source: 'local',
-      sourceDetail: 'app'
-    }));
-  }
   if (rows.length) return appendMimoDesktopRemovals(rows, desktop, options, scope);
   return appendMimoDesktopRemovals(
     scope ? [] : [statusProvider('notConfigured', updatedAt)],

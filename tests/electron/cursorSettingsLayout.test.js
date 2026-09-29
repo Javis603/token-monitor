@@ -3222,6 +3222,31 @@ test('MiMo lists the detected Desktop session without controls the user does not
   assert.match(app, /if \(account\?\.removable === false\) return t\('settings\.mimo\.desktopAccount'\)/);
 });
 
+test('MiMo refreshes its detected account when the settings section is expanded again', async () => {
+  const app = readRendererFile('app.js');
+  const refresh = functionBody(app, 'refreshMimoAccounts', 'setCopilotAccountExpanded');
+  let detected = [{ id: 'desktop-a', removable: false }];
+  let rendered = 0;
+  const state = { settings: { mimoManagedAccounts: [] } };
+  const context = {
+    state,
+    window: { tokenMonitor: { mimo: { accounts: async () => detected } } },
+    renderMimoStatus: () => { rendered += 1; }
+  };
+  const refreshAccounts = vm.runInNewContext(`${refresh}\nrefreshMimoAccounts`, context);
+
+  await refreshAccounts();
+  assert.equal(state.settings.mimoManagedAccounts[0].id, 'desktop-a');
+  detected = [{ id: 'desktop-b', removable: false }];
+  await refreshAccounts();
+  assert.equal(state.settings.mimoManagedAccounts[0].id, 'desktop-b');
+  detected = [];
+  await refreshAccounts();
+  assert.equal(state.settings.mimoManagedAccounts.length, 0);
+  assert.equal(rendered, 3);
+  assert.match(app, /if \(expanding\) void refreshMimoAccounts\(\)/);
+});
+
 test('MiMo settings asks only the rejected local Cookie owner to paste it again', () => {
   const app = readRendererFile('app.js');
   const source = functionBody(app, 'mimoSettingsAccountTitle', 'copilotProviderStatus');
