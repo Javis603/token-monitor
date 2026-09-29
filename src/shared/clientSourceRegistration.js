@@ -50,6 +50,8 @@ const SOURCE_MARKERS = [
   { marker: '.proma/agent-sessions', client: 'proma' },
   { marker: '.lmstudio/server-logs', client: 'lmstudio' },
   { marker: '.unsloth/studio/studio.db', client: 'unsloth' },
+  { marker: '.minimax/v2/sqlite/runtime-state.sqlite', client: 'minimaxcode' },
+  { marker: '.mavis/v2/sqlite/runtime-state.sqlite', client: 'minimaxcode' },
   { marker: '.local/share/devin/cli/sessions.db', client: 'devin' },
   { marker: 'AppData/Roaming/devin/cli/sessions.db', client: 'devin' },
   { marker: '.config/Devin/User/acp-events', client: 'devin' },

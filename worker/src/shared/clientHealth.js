@@ -212,6 +212,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'lmstudio-server-logs',
   'mimocode-data',
   'mimocode-orca-data',
+  'minimaxcode-db',
   'muse-sessions',
   'omp-sessions',
   'opencode-data',
@@ -248,6 +249,7 @@ const CLIENT_HEALTH_DIAGNOSTIC_CODES = Object.freeze([
   'sync-exit-error',       // the self-sync subprocess exited non-zero
   'sync-lock-present',     // an existing Antigravity sync lock blocked the subprocess
   'no-usage-observed',     // sources are present, all-time usage is zero
+  'local-read-failed',     // a local ledger was present but this read failed
   'wsl-detected-no-data'   // a WSL marker was found but the scan returned nothing
 ]);
 
@@ -365,6 +367,7 @@ function diagnosticAgreesWithEntry(code, entry) {
   // Both halves: "we can read this client and found nothing" is a different
   // statement from "there is nothing to read", and only the first is this code.
   if (code === 'no-usage-observed') return entry.source.state === 'detected' && entry.data.liveTokens === 0;
+  if (code === 'local-read-failed') return entry.collection.state === 'failed';
   return true;
 }
 

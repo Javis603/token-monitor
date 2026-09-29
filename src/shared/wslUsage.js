@@ -6,6 +6,12 @@ const { throwIfAborted } = require('./abortSignal');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 const { buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
+const {
+  buildMiniMaxCodePeriods,
+  canonicalPath,
+  readMiniMaxCodeDatabase,
+  reusableMiniMaxPeriods
+} = require('./providers/minimaxcode/usage');
 const { WSL_DATA_MARKERS, MARKER_CLIENTS } = require('./clientSourceRegistration');
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
@@ -113,16 +119,27 @@ function probeWslState(deps = {}) {
   return 'ok';
 }
 
+function minimaxWslDatabasePaths(home, existsSync) {
+  return [
+    wslHomePath(home, '.minimax/v2/sqlite/runtime-state.sqlite'),
+    wslHomePath(home, '.mavis/v2/sqlite/runtime-state.sqlite')
+  ].filter((file) => existsSync(file));
+}
+
 async function collectWslUsage(options = {}, deps = {}) {
   const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, now, runTokscale, logger, decoratePeriods } = options;
   const buildProma = options.buildPromaPeriods || buildPromaPeriods;
   const collectProma = options.collectPromaRows || collectPromaRows;
+  const readMiniMax = options.readMiniMaxCodeDatabase || readMiniMaxCodeDatabase;
+  const buildMiniMax = options.buildMiniMaxCodePeriods || buildMiniMaxCodePeriods;
+  const previousMiniMax = options.minimaxCodeByHome || {};
+  const nextMiniMax = {};
   const existsSync = deps.existsSync || fs.existsSync;
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
   const detected = new Set();
   throwIfAborted(options.signal, 'WSL usage scan aborted');
-  if (!trackedClients) return { bundle, detected: [] };
+  if (!trackedClients) return { bundle, detected: [], minimaxCodeByHome: {} };
   // Only attribute markers for clients the user is actually tracking — a marker
   // for an untracked client must not surface in the panel.
   // Reasonix aggregate usage is supported on the host, but remains excluded
@@ -166,6 +183,45 @@ async function collectWslUsage(options = {}, deps = {}) {
         if (typeof logger === 'function') logger(`wsl Proma usage parse failed for ${home}: ${error.message}`);
       }
     }
+    if (tracked.has('minimaxcode') && homeDataClients.includes('minimaxcode')) {
+      const seen = new Set();
+      const date = now ? new Date(now) : new Date();
+      const keys = {
+        todayKey: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
+        monthKey: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
+        allTimeSince: String(allTimeSince || '')
+      };
+      for (const databasePath of minimaxWslDatabasePaths(home, existsSync)) {
+        const sourcePath = canonicalPath(databasePath);
+        if (seen.has(sourcePath)) continue;
+        seen.add(sourcePath);
+        const snapshot = readMiniMax(databasePath);
+        const storedKey = snapshot.sourcePath || sourcePath;
+        if (snapshot.ok) {
+          let pricing = options.minimaxPricingByModel || {};
+          if (typeof options.resolveMiniMaxPricing === 'function') {
+            pricing = await options.resolveMiniMaxPricing(snapshot.rows);
+          }
+          const json = buildMiniMax({ now, allTimeSince, rows: snapshot.rows, pricingByModel: pricing });
+          const periods = {
+            today: extractUsageFromTokscale(json.today),
+            month: extractUsageFromTokscale(json.month),
+            allTime: extractUsageFromTokscale(json.allTime)
+          };
+          nextMiniMax[storedKey] = { sourcePath: storedKey, ...keys, ...periods };
+          bundle.today = mergePeriods(bundle.today, periods.today);
+          bundle.month = mergePeriods(bundle.month, periods.month);
+          bundle.allTime = mergePeriods(bundle.allTime, periods.allTime);
+        } else if (snapshot.code === 'read-failed') {
+          const previous = previousMiniMax[storedKey];
+          if (previous) nextMiniMax[storedKey] = previous;
+          const retained = reusableMiniMaxPeriods(previous, { sourcePath: storedKey, ...keys });
+          if (retained.today) bundle.today = mergePeriods(bundle.today, retained.today);
+          if (retained.month) bundle.month = mergePeriods(bundle.month, retained.month);
+          if (retained.allTime) bundle.allTime = mergePeriods(bundle.allTime, retained.allTime);
+        }
+      }
+    }
     // Tokscale 4.6+ keeps explicit --home scans isolated from host-native roots,
     // so every requested client can be passed through for each discovered home.
     // Keep the empty guard because an empty --client expands to all clients.
@@ -192,7 +248,7 @@ async function collectWslUsage(options = {}, deps = {}) {
       if (typeof logger === 'function') logger(`wsl usage scan failed for ${home}: ${error.message}`);
     }
   }
-  return { bundle, detected: [...detected] };
+  return { bundle, detected: [...detected], minimaxCodeByHome: nextMiniMax };
 }
 
 module.exports = {

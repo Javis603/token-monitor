@@ -16,6 +16,7 @@
     'no-usage-observed': 'muted',
     'wsl-detected-no-data': 'neutral',
     'sync-failed': 'warn',
+    'local-read-failed': 'warn',
     'sync-timeout': 'warn',
     'sync-spawn-failed': 'warn',
     'sync-exit-error': 'warn',
@@ -24,6 +25,7 @@
   const DIAGNOSTIC_GROUPS = {
     'source-missing': 'source',
     'sync-failed': 'collection',
+    'local-read-failed': 'collection',
     'sync-timeout': 'collection',
     'sync-spawn-failed': 'collection',
     'sync-exit-error': 'collection',

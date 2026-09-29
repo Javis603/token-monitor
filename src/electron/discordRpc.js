@@ -7,6 +7,7 @@ const { CLIENT_LABELS } = require('../shared/clientCatalog');
 
 const CLIENT_ID = '1507034330436862062';
 const GITHUB_URL = 'https://github.com/Javis603/token-monitor';
+
 const UPDATE_MIN_INTERVAL_MS = 15000;
 const RECONNECT_DELAY_MS = 30000;
 
