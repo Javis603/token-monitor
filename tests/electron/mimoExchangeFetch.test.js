@@ -29,6 +29,9 @@ test('a PAC result is read as the proxy Chromium resolved, or as nothing at all'
 test('a direct resolution reaches the origin without a dispatcher', async () => {
   const seen = [];
   const fetch = createMimoExchangeFetch({
+    // Pinned so an ambient HTTP(S)_PROXY on the machine running the
+    // suite cannot take the env branch and bypass the injected session.
+    env: {},
     session: { resolveProxy: async () => 'DIRECT' },
     fetch: async (url, init) => { seen.push(init); return { status: 200 }; }
   });
@@ -55,6 +58,9 @@ test('an explicit proxy environment wins before Chromium proxy resolution', asyn
 test('a resolved proxy becomes a dispatcher on the request', async () => {
   const seen = [];
   const fetch = createMimoExchangeFetch({
+    // Pinned so an ambient HTTP(S)_PROXY on the machine running the
+    // suite cannot take the env branch and bypass the injected session.
+    env: {},
     session: { resolveProxy: async () => 'PROXY 127.0.0.1:7890' },
     fetch: async (url, init) => { seen.push(init); return { status: 200 }; }
   });
@@ -65,6 +71,9 @@ test('a resolved proxy becomes a dispatcher on the request', async () => {
 test('a proxy undici cannot speak fails closed instead of going direct', async () => {
   let fetched = false;
   const fetch = createMimoExchangeFetch({
+    // Pinned so an ambient HTTP(S)_PROXY on the machine running the
+    // suite cannot take the env branch and bypass the injected session.
+    env: {},
     session: { resolveProxy: async () => 'SOCKS5 127.0.0.1:1080' },
     fetch: async () => { fetched = true; return { status: 200 }; }
   });
@@ -75,6 +84,9 @@ test('a proxy undici cannot speak fails closed instead of going direct', async (
 test('a failed PAC proxy advances to Chromium’s direct fallback', async () => {
   const attempts = [];
   const fetch = createMimoExchangeFetch({
+    // Pinned so an ambient HTTP(S)_PROXY on the machine running the
+    // suite cannot take the env branch and bypass the injected session.
+    env: {},
     session: { resolveProxy: async () => 'PROXY 127.0.0.1:1; DIRECT' },
     fetch: async (url, init) => {
       attempts.push(Boolean(init.dispatcher));
@@ -125,6 +137,9 @@ test('a request resolved to a proxy really travels through it', async () => {
   const originPort = origin.address().port;
   const proxyPort = proxy.server.address().port;
   const fetch = createMimoExchangeFetch({
+    // Pinned so an ambient HTTP(S)_PROXY on the machine running the
+    // suite cannot take the env branch and bypass the injected session.
+    env: {},
     session: { resolveProxy: async (url) => (String(url).includes(`:${originPort}`) ? `PROXY 127.0.0.1:${proxyPort}` : 'DIRECT') }
   });
   try {
