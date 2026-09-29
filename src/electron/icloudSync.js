@@ -270,14 +270,19 @@ function documentTooLargeError(bytes, maxBytes) {
   return error;
 }
 
+function boundedJsonBody(value, maxBytes) {
+  const body = `${JSON.stringify(value)}\n`;
+  const bytes = Buffer.byteLength(body, 'utf8');
+  if (bytes > maxBytes) throw documentTooLargeError(bytes, maxBytes);
+  return body;
+}
+
 async function atomicWriteJson(fsApi, target, value, options = {}) {
   const api = resolveFsApi(fsApi);
   const platform = options.platform || process.platform;
   const hostPlatform = options.hostPlatform || process.platform;
   const maxBytes = Number.isFinite(options.maxBytes) ? options.maxBytes : MAX_ICLOUD_DOCUMENT_BYTES;
-  const body = `${JSON.stringify(value)}\n`;
-  const bytes = Buffer.byteLength(body, 'utf8');
-  if (bytes > maxBytes) throw documentTooLargeError(bytes, maxBytes);
+  const body = boundedJsonBody(value, maxBytes);
 
   const directory = path.dirname(target);
   await ensureDirectory(api, directory);
@@ -857,6 +862,8 @@ function createIcloudSyncStore(options = {}) {
         updatedAt: nowIso(now),
         subscriptions
       };
+      // Never persist a candidate that recovery cannot publish after a crash.
+      boundedJsonBody(document, MAX_ICLOUD_DOCUMENT_BYTES);
       return {
         revision: document,
         ledger: {

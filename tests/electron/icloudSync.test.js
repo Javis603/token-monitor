@@ -797,6 +797,32 @@ test('a reserved but failed subscription counter does not hide the last publishe
   }
 });
 
+test('oversized subscriptions never reserve an unrecoverable pending snapshot', async () => {
+  const root = makeRoot();
+  try {
+    fs.mkdirSync(path.join(root.root, 'CloudDocs'), { recursive: true });
+    const store = storeFor(root.root, 'writer-a');
+    const first = await store.writeSubscriptions([subscription('published')]);
+    const ledgerPath = store.status().revisionLedgerPath;
+    const before = await fs.promises.readFile(ledgerPath, 'utf8');
+    const oversized = { ...subscription('oversized'), planName: '界'.repeat(400_000) };
+    assert.ok(Buffer.byteLength(JSON.stringify(oversized), 'utf8') > MAX_ICLOUD_DOCUMENT_BYTES);
+    await assert.rejects(
+      () => store.writeSubscriptions([oversized], { baseRevision: first.revisionToken }),
+      { code: 'document_too_large' }
+    );
+    assert.equal(await fs.promises.readFile(ledgerPath, 'utf8'), before);
+    const restarted = storeFor(root.root, 'writer-a');
+    const discovered = await restarted.discoverSubscriptions();
+    assert.equal(discovered.revisionToken, first.revisionToken);
+    assert.deepEqual(discovered.errors, []);
+    const next = await restarted.writeSubscriptions([subscription('next')], { baseRevision: first.revisionToken });
+    assert.equal(next.written.revision.counter, first.written.revision.counter + 1);
+  } finally {
+    root.cleanup();
+  }
+});
+
 test('an interrupted subscription publication with a legacy counter cannot make an older writer a safe base', async () => {
   const root = makeRoot();
   try {
