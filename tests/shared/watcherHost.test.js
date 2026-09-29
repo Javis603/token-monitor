@@ -294,6 +294,38 @@ test('a terminate that never confirms falls back instead of assuming release', a
   }
 });
 
+test('polling forced by an unconfirmed terminate still respects the entry limit', async () => {
+  FakeWorker.reset();
+  const stub = stubChokidar();
+  const root = tmpTree();
+  for (let index = 0; index < 5; index += 1) fs.writeFileSync(path.join(root, `s${index}.jsonl`), '');
+  const fallbacks = [];
+  const errors = [];
+  const handlers = {
+    onHostFallback: (error, fallback) => fallbacks.push(fallback),
+    onError: (error) => errors.push(error)
+  };
+  try {
+    const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+    const first = coordinator.acquire({ dirs: [root], clients: 'claude', usePolling: false, pollingEntryLimit: 3 }, handlers);
+    const wedged = FakeWorker.last();
+    wedged.deferTerminate = true;
+    first.close();
+    coordinator.acquire({ dirs: [root], clients: 'claude', usePolling: false, pollingEntryLimit: 3 }, handlers);
+
+    wedged.failTerminate(new Error('terminate failed'));
+    await until(() => errors.length === 1);
+    // The owner asked for native events; the host chose polling on its own and
+    // has to tell it so, and has to refuse a tree over the limit all the same.
+    assert.deepEqual(fallbacks, [{ usePolling: true }]);
+    assert.equal(stub.built.length, 0, 'no polling watcher over an oversized tree');
+    assert.equal(errors[0].code, 'watch-polling-limit');
+  } finally {
+    stub.restore();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('the quit path terminates instead of waiting for the slow teardown', () => {
   FakeWorker.reset();
   const coordinator = createWatcherCoordinator({ Worker: FakeWorker });

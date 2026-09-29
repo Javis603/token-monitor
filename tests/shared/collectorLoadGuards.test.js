@@ -5054,6 +5054,12 @@ test('custom roots prune dependency and VCS trees without touching built-in root
     assert.equal(nestedIgnored(path.join(nested, 'rollout.jsonl')), false);
     assert.equal(nestedIgnored(path.join(projects, 'app', '.git', 'objects')), true);
 
+    // A client naming its own built-in root as a custom path does not turn
+    // that root into a pruned one.
+    const duplicateIgnored = watchIgnoreMatcher('codex', { customScanPaths: { codex: [projects, builtIn] } });
+    assert.equal(duplicateIgnored(path.join(builtIn, 'node_modules', 'x.jsonl')), false);
+    assert.equal(duplicateIgnored(path.join(projects, 'node_modules')), true);
+
     // A directory that is a built-in root for any client keeps everything, even
     // where another client names it as a custom root.
     const sharedIgnored = watchIgnoreMatcher('codex,claude', { customScanPaths: { codex: [projects], claude: [builtIn] } });
@@ -5063,6 +5069,38 @@ test('custom roots prune dependency and VCS trees without touching built-in root
     os.homedir = originalHomedir;
     if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = originalCodexHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('the polling bound follows symlinked directories the way chokidar does', () => {
+  const tmp = withTmpHome([]);
+  try {
+    const { openWatch } = freshCollector();
+    const root = path.join(tmp, 'root');
+    const elsewhere = path.join(tmp, 'elsewhere');
+    fs.mkdirSync(root, { recursive: true });
+    fs.mkdirSync(elsewhere, { recursive: true });
+    for (let index = 0; index < 10; index += 1) fs.writeFileSync(path.join(elsewhere, `f${index}`), '');
+    // A cycle back to the root must end the walk, not hang it.
+    fs.symlinkSync(root, path.join(root, 'loop'), 'junction');
+    const built = [];
+    const chokidar = { watch: (dirs, options) => { built.push(options); return {}; } };
+    const config = { dirs: [root], clients: 'claude', usePolling: true, pollingEntryLimit: 5 };
+
+    openWatch(chokidar, config);
+    assert.equal(built.length, 1, 'a small tree with a link cycle is still polled');
+
+    // chokidar follows symlinks by default, so a link into a large tree has to
+    // count toward the bound like the tree itself.
+    fs.symlinkSync(elsewhere, path.join(root, 'linked'), 'junction');
+    assert.throws(() => openWatch(chokidar, config), { code: 'watch-polling-limit' });
+    assert.equal(built.length, 1);
+    // Native watching is not bounded here; the descriptor fallback covers it.
+    openWatch(chokidar, { ...config, usePolling: false });
+    assert.equal(built.length, 2);
+  } finally {
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }

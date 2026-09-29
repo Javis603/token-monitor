@@ -2069,6 +2069,15 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // contract. The self-synced cache roots are never handed to chokidar in the
   // first place. The parse-local Antigravity CLI dir is added back explicitly —
   // it shares the umbrella client id but is written by `agy`, not by our sync.
+  // Candidates are bare paths, so a client that names its own built-in root as
+  // a custom path too would read as custom twice over. Whether a root is
+  // built-in comes from the source list instead, which still says so.
+  const builtInBySource = new Map(Object.entries(clientSourceRoots(clientsCsv, options)).map(([client, roots]) => [
+    client,
+    new Set(roots.filter((root) => !root.custom).map((root) => canonicalRoot(root.dir)))
+  ]));
+  const isCustomOnly = (client, root) => Boolean(customRoots.get(client)?.has(root))
+    && !builtInBySource.get(client)?.has(root);
   const recursive = [
     ...Object.entries(candidates)
       .flatMap(([client, dirs]) => dirs
@@ -2077,14 +2086,14 @@ function watchPolicyEntries(clientsCsv, options = {}) {
           && (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir))
           && !(claimed.get(client) || EMPTY_SET).has(dir)
         ))
-        .map((dir) => ({ root: canonicalRoot(dir), custom: Boolean(customRoots.get(client)?.has(canonicalRoot(dir))) }))),
+        .map((dir) => ({ root: canonicalRoot(dir), custom: isCustomOnly(client, canonicalRoot(dir)) }))),
     ...(antigravityEnabled && dirExists(antigravityCliDataDir())
       ? [{ root: canonicalRoot(antigravityCliDataDir()), custom: false }]
       : [])
   ];
   // A directory that is a built-in root for any client keeps everything, even
-  // where another client also names it as a custom root: the union would keep
-  // those paths anyway, and the built-in contract is the one that must hold.
+  // where it is also named as a custom root, by that client or another: the
+  // built-in contract is the one that must hold.
   const builtInRoots = new Set(recursive.filter((entry) => !entry.custom).map((entry) => entry.root));
   for (const root of builtInRoots) {
     entries.push({ root, prefix: root + path.sep, policy: KEEP_EVERYTHING });
@@ -2453,12 +2462,17 @@ const WATCH_POLLING_ENTRY_LIMIT = 20000;
 // Counts what chokidar would watch — the same roots through the same ignore
 // matcher — and stops as soon as the count passes `limit`, so a million-entry
 // tree costs no more than a small one. opendir rather than readdir, because a
-// single flat directory can itself hold the whole tree. Symlinks are not
-// followed, which keeps a cycle from counting forever at the cost of
-// undercounting a linked tree.
+// single flat directory can itself hold the whole tree. Symlinked directories
+// are followed, as chokidar follows them by default; like chokidar, a target
+// already reached by its real path is not walked again, which is also what
+// ends a link cycle.
 function watchEntriesExceed(dirs, ignored, limit) {
   let count = 0;
   const pending = [...dirs];
+  const linkedTargets = new Set();
+  for (const dir of dirs) {
+    try { linkedTargets.add(fs.realpathSync.native(dir)); } catch (_) {}
+  }
   while (pending.length > 0) {
     const dir = pending.pop();
     let handle;
@@ -2470,7 +2484,20 @@ function watchEntriesExceed(dirs, ignored, limit) {
         if (ignored?.(entryPath)) continue;
         count += 1;
         if (count > limit) return true;
-        if (entry.isDirectory()) pending.push(entryPath);
+        if (entry.isDirectory()) {
+          pending.push(entryPath);
+        } else if (entry.isSymbolicLink()) {
+          let target = null;
+          try {
+            if (fs.statSync(entryPath).isDirectory()) target = fs.realpathSync.native(entryPath);
+          } catch (_) {
+            // A dangling link is one entry and nothing below it.
+          }
+          if (target && !linkedTargets.has(target)) {
+            linkedTargets.add(target);
+            pending.push(entryPath);
+          }
+        }
       }
     } catch (_) {
       // A directory removed or made unreadable mid-walk is simply not counted.
@@ -2479,6 +2506,27 @@ function watchEntriesExceed(dirs, ignored, limit) {
     }
   }
   return false;
+}
+
+// Reported in place of a watcher when polling would cover more than the limit.
+// The collector answers it by dropping to interval collection.
+const WATCH_POLLING_LIMIT_CODE = 'watch-polling-limit';
+
+// The one place a chokidar instance is created, in the watch process and in the
+// in-process fallback alike. The bound lives here rather than in the collector
+// because the host can switch to polling on its own (a watch process that never
+// confirmed its exit), and a check the host can route around bounds nothing.
+function openWatch(chokidar, config = {}) {
+  const ignored = watchIgnoreMatcher(config.clients, { customScanPaths: config.customScanPaths });
+  const limit = Number.isInteger(config.pollingEntryLimit) && config.pollingEntryLimit >= 0
+    ? config.pollingEntryLimit
+    : WATCH_POLLING_ENTRY_LIMIT;
+  if (config.usePolling === true && watchEntriesExceed(config.dirs || [], ignored, limit)) {
+    const error = new Error(`over ${limit} paths to poll`);
+    error.code = WATCH_POLLING_LIMIT_CODE;
+    throw error;
+  }
+  return chokidar.watch(config.dirs, watcherOptions(config.usePolling === true, ignored));
 }
 
 function watcherOptions(usePolling, ignored) {
@@ -2679,6 +2727,8 @@ function startCollector(options) {
   // WATCH_POLLING_ENTRY_LIMIT paths. No watcher runs from then on, and the
   // interval loop stops waiting for watch activity, since none can arrive.
   let watchIntervalFallback = false;
+  // Sticky as well: the watch host switched to polling on its own.
+  let watchHostPolling = false;
 
   function emitDiagnosticEvent(event) {
     try {
@@ -3226,8 +3276,28 @@ function startCollector(options) {
     watchers.length = 0;
   }
 
+  function enterIntervalFallback() {
+    if (watchIntervalFallback) return;
+    watchIntervalFallback = true;
+    emitDiagnosticEvent({
+      subsystem: 'watcher',
+      code: 'watcher-interval-fallback',
+      ...(watchFallbackCode ? { detailCode: watchFallbackCode } : {})
+    });
+    log(`Over ${watchPollingEntryLimit} paths to poll; not watching, collecting every ${Math.round(intervalMs / 1000)}s instead.`);
+    // Reported from inside the host's own dispatch, so the teardown waits a turn.
+    setImmediate(() => {
+      if (!stopped) closeWatchers();
+    });
+  }
+
   function handleWatchError(error) {
     log(`chokidar error: ${error.message}`);
+    if (stopped) return;
+    if (error?.code === WATCH_POLLING_LIMIT_CODE) {
+      enterIntervalFallback();
+      return;
+    }
     if (stopped || watchUsePolling || watchNativeForced || watchDescriptorFallback || watchIntervalFallback) return;
     if (!WATCH_DESCRIPTOR_ERROR_CODES.has(error?.code)) return;
     watchDescriptorFallback = true;
@@ -3323,27 +3393,20 @@ function startCollector(options) {
     }
 
     const usePolling = watchUsePolling || watchDescriptorFallback;
-    if (usePolling && watchEntriesExceed(
-      dirs,
-      watchIgnoreMatcher(clients, { customScanPaths: sourceOptions.customScanPaths }),
-      watchPollingEntryLimit
-    )) {
-      watchIntervalFallback = true;
-      watchedDirectoryKey = directoryKey;
-      lastWatchFailureCode = null;
-      emitDiagnosticEvent({
-        subsystem: 'watcher',
-        code: 'watcher-interval-fallback',
-        ...(watchFallbackCode ? { detailCode: watchFallbackCode } : {})
-      });
-      log(`Over ${watchPollingEntryLimit} paths to poll under ${dirs.join(', ')}; not watching, collecting every ${Math.round(intervalMs / 1000)}s instead.`);
-      return;
-    }
     try {
       const host = createWatcherHost(
-        { dirs, clients, customScanPaths: sourceOptions.customScanPaths, usePolling },
         {
-          onHostFallback: (error) => {
+          dirs,
+          clients,
+          customScanPaths: sourceOptions.customScanPaths,
+          usePolling,
+          pollingEntryLimit: watchPollingEntryLimit
+        },
+        {
+          onHostFallback: (error, fallback = {}) => {
+            // The host moves to polling by itself when a watch process never
+            // confirmed its exit; diagnostics have to say so.
+            if (fallback.usePolling === true) watchHostPolling = true;
             emitDiagnosticEvent({ subsystem: 'watcher', code: 'watcher-host-fallback' });
             log(`Watch worker unavailable (${error.message}); watching on this thread.`);
           },
@@ -3438,7 +3501,7 @@ function startCollector(options) {
       ? 'disabled'
       : watchIntervalFallback
         ? 'interval'
-        : (watchUsePolling || watchDescriptorFallback ? 'polling' : 'native');
+        : (watchUsePolling || watchDescriptorFallback || watchHostPolling ? 'polling' : 'native');
     const state = stopped
       ? 'stopped'
       : tickInFlight
@@ -3567,5 +3630,7 @@ module.exports = {
   watchAttributionRootsForClients,
   watcherOptions,
   watchIgnoreMatcher,
+  openWatch,
+  WATCH_POLLING_LIMIT_CODE,
   watchPathsForClients
 };

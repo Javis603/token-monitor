@@ -115,13 +115,18 @@ function createInProcessWatcherHost(config = {}, handlers = {}) {
   // Required lazily so a worker-hosted run never loads chokidar on the owning
   // thread, and so the collector's tests can still swap chokidar.watch.
   const chokidar = require('chokidar');
-  const { watcherOptions, watchIgnoreMatcher } = require('./collector');
-  const watcher = chokidar.watch(
-    config.dirs,
-    watcherOptions(config.usePolling === true, watchIgnoreMatcher(config.clients, {
-      customScanPaths: config.customScanPaths
-    }))
-  );
+  const { openWatch, WATCH_POLLING_LIMIT_CODE } = require('./collector');
+  let watcher;
+  try {
+    watcher = openWatch(chokidar, config);
+  } catch (error) {
+    // A refused polling bound is an outcome for the owner to act on, not a
+    // failure to build the host, so it arrives the way chokidar's own errors
+    // do: on the handler, after this host has been returned.
+    if (error?.code !== WATCH_POLLING_LIMIT_CODE) throw error;
+    setImmediate(() => handlers.onError?.(error));
+    return { kind: 'in-process', close() {} };
+  }
   watcher.on('all', (event, filePath) => handlers.onEvent?.(event, filePath));
   watcher.on('error', (error) => handlers.onError?.(error));
   watcher.on('ready', () => handlers.onReady?.());
@@ -219,7 +224,7 @@ function createWatcherCoordinator(deps = {}) {
     worker = null;
     workerDisabled = true;
     if (!current) return;
-    current.handlers.onHostFallback?.(error);
+    current.handlers.onHostFallback?.(error, { usePolling: fallbackConfig(current.config).usePolling === true });
     // A rejected terminate does not prove the old worker released its native
     // descriptors. Polling is the only safe fallback on that path; ordinary
     // startup/crash failures still retain the configured native mode because
