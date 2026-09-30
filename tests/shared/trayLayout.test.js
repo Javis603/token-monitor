@@ -953,7 +953,9 @@ test('provider account and window choices expose live data for visual pickers', 
   ]);
 });
 
-test('MiMo account choices distinguish two products of the same account', () => {
+test('MiMo account choices of one account name the product alone', () => {
+  // One Xiaomi account answering with both products needs no account name to
+  // tell its choices apart — the product word is the difference.
   const mimoStats = {
     limits: { providers: [
       { provider: 'mimo', status: 'ok', accountKey: 'console', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Console', windows: [] },
@@ -961,8 +963,23 @@ test('MiMo account choices distinguish two products of the same account', () => 
     ] }
   };
   assert.deepEqual(accountOptions(mimoStats, 'mimo').map((option) => option.label), [
+    'Console',
+    'Desktop Membership'
+  ]);
+});
+
+test('MiMo account choices of several accounts keep the account in the label', () => {
+  const mimoStats = {
+    limits: { providers: [
+      { provider: 'mimo', status: 'ok', accountKey: 'console', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Console', windows: [] },
+      { provider: 'mimo', status: 'ok', accountKey: 'membership', accountEmail: 'user@example.com', accountName: 'MiMo account', accountLabel: 'Desktop Membership', windows: [] },
+      { provider: 'mimo', status: 'ok', accountKey: 'console-2', accountEmail: 'other@example.com', accountName: 'Other account', accountLabel: 'Console', windows: [] }
+    ] }
+  };
+  assert.deepEqual(accountOptions(mimoStats, 'mimo').map((option) => option.label), [
     'user@example.com · MiMo account · Console',
-    'user@example.com · MiMo account · Desktop Membership'
+    'user@example.com · MiMo account · Desktop Membership',
+    'other@example.com · Other account · Console'
   ]);
 });
 

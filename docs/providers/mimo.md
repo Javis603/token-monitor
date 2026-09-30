@@ -10,7 +10,7 @@ read_when:
 
 # MiMo provider
 
-MiMo appears in Token Monitor in two independent planes. Keep them separate: they share a product name and nothing else.
+Token usage and limits use separate collectors and credentials.
 
 | Plane | What it measures | Runtime | Credential |
 |---|---|---|---|
@@ -20,16 +20,16 @@ MiMo appears in Token Monitor in two independent planes. Keep them separate: the
 
 The tracked client keeps its own identity rules: MiMo Code and MiMo Desktop are one row (`tokscaleClientMapping.js` maps both onto `mimo`), and the colour is black, not Xiaomi orange — both decided upstream (#772 / #775).
 
-Every endpoint, path and field below is read from the app's own bundle rather than guessed. What was observed live was observed on one macOS install, on an account with no membership.
+Desktop endpoints and subscription fields were checked against the unpacked client; Console behavior was also checked through live requests. Live observations cover one macOS install and an account without membership, not every platform or subscription state.
 
 ## Credentials and exchange
 
-Two hosts and four endpoints are involved. Every path below is from the app's own code, not guessed.
+The Desktop bundle registers these endpoints:
 
 | Purpose | Request | Notes |
 |---|---|---|
 | Account identity | `GET {base}/user/xiaomi/me` | The exchange driver (see below). Success is `code === 0` with `data.userId` |
-| Membership usage | `GET {base}/user/usage` | `{percent, resetDate}` — the app never renders it (see Membership window) |
+| Membership usage | `GET {base}/user/usage` | `{percent, resetDate}` — not the Settings weekly card (see Membership window) |
 | Subscription | `GET {base}/user/xiaomi/subscription/self` | `{groupCode, current, subscriptions}` |
 | Logout | `{base}/user/xiaomi/logout` | What the app calls when the user signs out; revokes server-side **and** clears the partition's cookies |
 
@@ -53,12 +53,12 @@ The hop through `/api/sts` is what **mints the service session**, and the cookie
 
 - **Exchange-minted service cookies stay in memory.** They are this exchange's output, and the membership lane's only credential is the account cookie it was minted from: the account cookie is read again on every refresh, and nothing minted here is stored.
 - **A service cookie is not a substitute for the identity hop.** Measured: a freshly minted `serviceToken` set answers `/user/xiaomi/subscription/self` and `/user/usage` with `code: 0`, and is answered by `/user/xiaomi/me` with a **302 back to the SSO**, so it carries no identity and no region reading. What makes that hop answer 200 is where `/sts` sends the client — `/api/user/xiaomi/me?userId=…`, a query the redirect carries — rather than the cookies: the minted set replayed against the bare path answers 302 whether it is sent whole or as `serviceToken` alone. Nothing else needs that distinction today — the lane has no paste — but the console lane's service cookie is a different service's and would not work here either.
-- **The account cookie uses a 30-day sliding server window.** An accepted exchange re-issues `passToken`, but Token Monitor discards the refreshed value and never writes it back. The reader is read-only, repeated exchanges leave the partition unchanged, and a row Chromium has purged becomes the normal silent fallback. An absolute server-side lifetime is not known.
+- **An accepted exchange re-issues `passToken`.** Observed expiry attributes extend 30 days; they do not establish the server's session lifetime. Token Monitor discards the refreshed value and never writes it back. A missing local cookie uses the normal silent fallback.
 - **The exchange is silent while the account cookie is valid.** When it is rejected, the chain stops at `account.xiaomi.com/fe/service/login` and **mints nothing** — the refusal signature, detectable with no interactive step.
 - The final followup was observed as `http://`, answering 200 with a `/sts` token not marked `Secure`. Do not force HTTPS on it: a `Secure` cookie is withheld from an `http:` hop.
 - **The account session is one named partition**, `persist:xiaomi-account`. The app sets `X-Client-Version` and `X-Mimo-Source` on those requests; **neither is required and nothing may key on either** — their values vary by build.
-- **Every request the walk makes is shaped like a MiMo client** — the header set `providers/mimo/browserHeaders.js` defines. Its `Origin` and `Referer` go to the console host alone: those name the console page, the console's own web UI sends them and the app's calls send neither, so a hop to the SSO carrying them is a shape no real client has. See Not verified: getting the client shape wrong does not merely fail the request.
-- **Redirects are allowlisted per hop.** HTTPS may stay on the original service host or move through Xiaomi login domains; the service host may also answer over plain HTTP, because its callback returns to the endpoint that started the walk (`/api/v1/balance?userId=…` for the console, `/user/xiaomi/me` for the membership) rather than to a `/sts` path. Cookies remain host/domain scoped and `Secure` cookies are withheld from HTTP.
+- **Keep the measured request headers.** `browserHeaders.js` sends Console `Origin` and `Referer` only to the Console host; Desktop's membership calls omit them. A causal link between omitted headers and account sign-out has not been established.
+- **Redirects are allowlisted per hop.** HTTPS may stay on the original service host or move through Xiaomi login domains; the service host may also answer over plain HTTP, because its callback returns to the endpoint that started the walk (`/api/v1/balance?userId=…` for the console, `/user/xiaomi/me` for the membership) rather than to a `/sts` path. Set-Cookie parsing uses undici’s public `parseCookie`; the exchange jar keeps host/domain scoping and withholds `Secure` cookies from HTTP.
 - The walk's transport is chosen at the **runtime boundary** like every other provider call; see Transport.
 
 ### Account cookie on disk
@@ -69,10 +69,10 @@ macOS is measured. Windows is unverified: the path follows Electron's documented
 
 Two facts about its **contents** are load-bearing, both measured:
 
-- **The account cookies are host-scoped, and the host is `.account.xiaomi.com`** — `passToken` and `userId` each exist on that host only. `.xiaomi.com` carries its own `cUserId`, so **selecting by cookie name alone is ambiguous**. `.xiaomimimo.com` cookies have never been present, because the service session is minted rather than stored.
+- **The measured account cookies are on `.account.xiaomi.com`.** `.xiaomi.com` carries its own `cUserId`, so selecting by cookie name alone is ambiguous. The measured partition contained no `.xiaomimimo.com` service cookies; the provider mints them instead of reading them from disk.
 - **The partition is not only MiMo's.** The same store holds unrelated third-party login cookies, so the read must be scoped to the account host rather than sweeping the store, and **anything forwarded must come from an exact allowlist** — the rule `providers/commandcode` states, that everything outside the session-cookie allowlist is a credential the endpoint has no business receiving.
 
-On the measured machine every row is **plaintext** (`value` populated, `encrypted_value` empty), so no keychain read is involved. An unreadable or encrypted store is a state the implementation reports, not an error.
+On the measured machine every row is **plaintext** (`value` populated, `encrypted_value` empty), so no keychain read is involved. An unreadable or encrypted store is not evidence that the user signed out; the status handling is described under Session reader.
 
 Two cookies are load-bearing: dropping **`passToken`** or **`userId`** stops the exchange at the login page and mints nothing, while dropping `cUserId` changes nothing.
 
@@ -106,6 +106,8 @@ Both hosts in that chain set cookies, and only the second hop's are in scope for
 
 `userId` is the one worth stating outright, because the console lane requires it beside `api-platform_serviceToken` and only one of the three copies can be sent: the account cookie's own `userId` is seeded host-only on `account.xiaomi.com`, and the SSO hop re-issues one under `.account.xiaomi.com` — neither scope matches the console host, so the `/sts` answer's copy is the one that answers the requirement. Measured on a live exchange, the header that host receives is exactly `api-platform_serviceToken`, `userId`, `api-platform_ph`, `api-platform_slh`. The last appears twice with different values, because the jar keys cookies by name and domain and this response set it under two; `normalizeMimoCookieHeader` collapses the pair to the last one. With that session, all five console reads answer `code: 0`: `/balance`, `/userProfile`, `/tokenPlan/detail`, `/tokenPlan/usage` and `/usage`.
 
+`/tokenPlan/detail` supplies the Console plan label: the existing reader prefers `planCode` / `plan_code`, then `planName` / `plan_name`. The shared display helper capitalizes a leading lowercase letter; it does not translate Console codes through the Desktop membership tier map. The `standard` test fixture therefore displays `Standard`, a tier listed in the [official Token Plan documentation](https://mimo.mi.com/docs/en-US/tokenplan/Token%20Plan/subscription). That fixture is not a live paid-subscription response, and `Standard` is not a default assigned to every account.
+
 `/usage` is the only console summary that reports spend. `costUsage.totalCost` is all-time money spent and `currentMonthCost` is the month figure shown by the row. The endpoint has no daily or weekly rollup, so the row's `todaySpend` and `weekSpend` are tracked locally as positive deltas of that cumulative total — the derivation z.ai's report also uses, and the one `docs/API.md` documents — while `monthSpend` and `allTimeSpend` stay the console's own figures. The paginated call ledger and monthly bill endpoint are intentionally not queried.
 
 The wallet itself reports money only: `{balance, frozenBalance, currency, overdraftLimit, remainingOverdraftLimit, giftBalance, cashBalance}` — no cap and no percentage of its own. The meter the row draws beside it is therefore **derived at display time** (`amount / (amount + monthSpend)`, `creditsMeterPercent` in `src/shared/limits/balanceDisplay.js`), never a wire value. That derivation is the fallback for a money window carrying no percentage of its own, which is what deepseek's balance window is; openrouter's credits window reports a real `usedPercent`, so `creditsMeterPercent` returns that instead and never reaches the rule.
@@ -114,19 +116,24 @@ Both lanes therefore resolve the same way: an account cookie already on the mach
 
 ### API keys
 
-An `sk-` key authorises inference and nothing else: every billing-shaped path on its host answers 404, and the console API refuses a Bearer token outright (`401 {"code":401,"loginUrl":…}`). There is no key-facing quota surface to find. **A key is an inference credential here, never a quota credential.**
+The tested `sk-` credential did not authorize the billing routes checked: those inference-host routes returned 404, and the Console API returned `401 {"code":401,"loginUrl":…}` for Bearer authentication. This integration supports Console Cookies for wallet and Token Plan limits, not inference keys. These checks do not rule out other or future key-authenticated billing endpoints.
 
 ## Response contracts
 
 ### Membership window
 
-`/user/usage` has a strict parser in the app and the app never calls it: nothing reads its result. Its contract is pinned here — the endpoint is live and may be wired later — but **no rendered behaviour can be derived from it**, and its `percent` direction has no rendering evidence.
+`/user/usage` has a separate parser in the app. It is not the source of the Settings billing panel's weekly card and Token Monitor does not query it.
 
-**What the user sees comes from `/user/xiaomi/subscription/self`.** The billing panel reads `current.percent` into a progress bar (`width: min(percent, 100)%`) and a `remainingPercent` string, and `current.nextResetTime` into the reset line, under a section titled "general usage limit" and one card titled "weekly usage limit" — a heading and a card title, not two quotas.
+**The weekly card reads `/user/xiaomi/subscription/self`.** The billing panel rounds `current.percent` for its progress bar and remaining-percentage text, and reads `current.nextResetTime` into the reset line. That same card uses `billing.weeklyLimit` and `billing.resetWeekly`; `renewalMode` supplies the separate monthly/yearly plan tag.
 
 - The percentage is therefore a **remaining** share on a 0–100 scale, not the platform console's used-ratio. Do not reuse the console lane's normalisation.
 - **Judge plan state by `current` being absent, never by `percent`.** The app's own test is the loose one (`t == null`), so a payload that omits `current` is the same answer as one that states it as null.
-- **There is exactly one window.** Nothing in the app reads a second one.
+- **Match Desktop's weekly display.** Publish `kind: 'weekly'` and let the shared window label name it. `resetsAt` comes from `current.nextResetTime`; do not invent `windowMinutes` or calculate a reset from `renewalMode`.
+- **There is one quota window in the parsed subscription.** Do not add a second window from `/user/usage`.
+
+This mapping follows the current client's display contract, not a measured server reset interval. Live reads on the test account return `current: null`; active percentages and reset times in the tests come from the app's E2E fixture. An active membership's reset cycle and timezone remain unverified.
+
+Timestamps with an explicit zone preserve the same instant as Desktop. Zone-less timestamps still follow the existing console reader's UTC convention; Desktop's date formatter instead treats them as local time. Controlled fixtures reproduce that difference, but no active live response establishes which timezone the service intends. Do not silently change the shared console convention to resolve this membership gap.
 
 ### Subscription response
 
@@ -158,7 +165,7 @@ The tier map is `{1: Starter, 2: Plus, 3: Pro, 4: Ultra}` (the app's `zh` locale
 
 ### Account classifier
 
-This is the exchange's driver *and* its verdict, so the lane's "is this session good" answer comes from here rather than from any status code on the quota endpoints.
+The exchange classifies its final identity response; subsequent quota requests classify their own failures separately.
 
 Success is exactly `code === 0` **and** a non-empty `String(data.userId)` — the app's own test. Anything else is not a session, and *which* refusal it is decides the status the row carries:
 
@@ -188,27 +195,32 @@ The rejected-account-cookie row is not hypothetical. Both lanes fail the same wa
 
 ## Not verified
 
+- **An active Console Token Plan response.** The active-plan values used in the mock matrix are controlled fixtures, not a live paid account; the public tier names do not establish the exact response shape of every subscription.
 - **An active membership payload.** No plan was available, so only the no-subscription branch above is real. The *direction* of `percent` is settled (see Membership window), but not the values or extra fields a live plan returns.
 - **The timezone of zoneless membership timestamps.** The app fixture carries no offset. Token Monitor keeps the console provider's existing UTC normalization so synced devices agree; a live active-membership response is still needed to confirm that instant.
-- **A request with the wrong client headers may invalidate the account session.** This was observed after omitting `User-Agent`, so the exchange keeps the measured header shape. A normally rejected credential did not have the same effect.
-- **The long-term exchange tolerance is unknown.** Controlled bursts well above the shipped five-minute cadence completed cleanly and left the partition byte-identical. If production evidence later justifies fewer exchanges, cache minted sessions in memory and re-mint on 401; do not persist them.
+- **Session effects of changing client headers.** Keep the measured header shape, but do not treat the earlier sign-out incident as proof that a missing `User-Agent` invalidates the session; that incident was later attributed to account removal by the user.
+- **Long-term exchange tolerance is unknown.** Successful short probes and an unchanged local store do not establish server-side tolerance over days. The current implementation mints on refresh without a service-session cache and does not re-mint after a quota request's auth failure.
 - **Windows on disk is unverified.** The measured install is macOS, where the cookie rows are plaintext. Whether a Windows install stores them in the clear or sealed is not known here — nothing about MiMo Desktop's Windows store has been observed. What the code does is fixed either way: a required cookie that arrives sealed is refused as `notConfigured` (fixture-covered), an unreadable store keeps the last reading instead of clearing it, and the manual paste stays available. Linux has no local source because MiMo Desktop has no Linux build.
 
 ## Wiring
 
 ### Rows and identity
 
-Every console credential names one account, keyed as `hashKey("mimo:" + userId)` — the key `mimoAccountKey` already computed for the console lane. A pasted console cookie, a saved account and the session this machine's own MiMo Desktop mints are therefore **three credentials for one identity, not three rows**, and discovery needs no precedence rule: a credential the user entered occupies its own account's entry, and the machine's session fills only the entries still empty.
+Console rows use the existing `hashKey("mimo:" + userId)` identity. An enabled saved credential wins for that account; Desktop discovery fills gaps and can add a different account beside it.
 
 In Settings, a disabled saved Console credential does not hide a detected Desktop session for the same account: the disabled manual source and active local source are listed separately, while Limits still reports only the membership product.
 
 The membership is that account's **second product**, so it gets a second row, keyed `hashKey("mimo:membership:" + userId)`. The two keys must differ: the hub collapses rows per account key (`aggregateLimits` → `pickBetterProvider`), so one key would publish one of the two products and drop the other — the reason `alibaba` separates its Team and Personal rows by variant. A Desktop session can publish this row for a current plan or a lane-specific failure; a successful no-plan answer omits it, and a machine with no Desktop session shows the console product alone.
 
-If the Desktop account signs out or changes while a pasted Console account still answers, the provider explicitly removes the vanished automatic row identities. Omitting them is insufficient because the limits runtime treats a missing identity in a mixed response as transient and retains its last good quota. The removal is a **control row** — `{ provider, accountKey, removed: true }`, carrying no reading — that `collectLimitsOnce` and the runtime's `commitRows` consume and that is stripped before normalization, so it never reaches a device record or the wire. The provider compares with the runtime's last accepted rows, so a superseded probe cannot consume a removal before it commits. It is the one row this provider emits that is an instruction rather than a reading.
+On a full refresh, a Desktop logout or account switch explicitly removes vanished automatic identities. Omitting them is insufficient because the limits runtime retains missing identities as transient. The runtime consumes a **control row** — `{ provider, accountKey, removed: true }` — before normalization; one-shot collection drops it. It never reaches the device or Hub wire. Removal compares against the runtime's last accepted rows, so a superseded probe cannot consume it before commit. Scoped refreshes return only their selected product; removals wait for the next full refresh.
 
-The two rows carry one account identity: the console profile name plus a short opaque suffix derived from the account key, or that suffix alone when the profile has no name. The console email is retained with that identity in the limits runtime's in-memory provider state, so a membership-only scoped refresh does not lose the association. Limits and Edge Dock show the provider heading with separate product rows; only multiple Xiaomi accounts add account headings and an account count. Tray selectors and the native Widget snapshot encode `account · product` for flat rows; the Widget's shared layout displays that label only when the provider has multiple snapshot rows, and automatic selection may show fewer rows than the snapshot contains.
+The two rows carry one account identity: the console profile name plus a short opaque suffix derived from the account key, or that suffix alone when the profile has no name. The console email is retained with that identity in the limits runtime's in-memory provider state, so a membership-only scoped refresh does not lose the association. A row collected before the suffix existed carries only its address: the grouping falls back to the address, and such a row groups apart from a suffix-named row until the collector rewrites it with the identity it derives from the account key — folding an anonymous row into a named one would merge two devices' accounts that merely share a mask.
 
-| Row | `accountLabel` (product) | `planLabel` | Source |
+Limits and Edge Dock reuse the provider heading and row layout. Healthy product rows identify themselves through Balance / Token Plan / Weekly and plan metadata; status-only rows carry `Console` / `Desktop Membership`, with the shared account-title fallback for legacy records. Multiple Xiaomi accounts add account headings and a logical account count. `mimoAccountGroups` groups by the identity suffix, then email, profile name and finally the row key.
+
+Home, tray and widget snapshot use the product label for one logical account and `account · product` for several. The composer's account selector always includes the identity, following its existing account-selection behavior. The widget's shared layout prints row labels only when it has several snapshot rows; automatic selection may display fewer rows than the snapshot contains.
+
+| Row | `accountLabel` (product identity) | `planLabel` | Source |
 |---|---|---|---|
 | Console | `Console` | the Token Plan name, else `Pay-as-you-go` | `web` + `managed` for a pasted credential, `local` + `app` for one minted from the machine |
 | Desktop membership | `Desktop Membership` | `Starter` / `Plus` / `Pro` / `Ultra`; an unknown tier uses the vendor's `planCode` | `local` + `app` |
@@ -217,7 +229,7 @@ The membership has no plan to name when the subscription answers `current: null`
 
 ### Failure isolation
 
-Each row carries its own lane's answer, so a lane that failed takes its own row's status instead of speaking through the other product's row. A membership whose session ended is an `unauthorized` membership row beside a live wallet row; before the split, both shared one row and the failure had to be smuggled in beside a wallet that was still true. A region the app's table does not carry resolves no membership endpoint at all, so that row is absent rather than mislabelled.
+Each product carries its own status: an unauthorized membership can remain beside a healthy wallet. An unsupported account region has no membership endpoint, so it emits no membership row.
 
 Limits uses the shared “Sign in again” status for rejected sessions, as it does for other Cookie-backed providers. Settings keeps one account-level row for a saved Console credential or a detected MiMo Desktop session and reuses that same shared status when the matching account-level row is rejected; a membership-only failure remains on its independent Limits row rather than creating a second Settings credential row. The manual form keeps its existing `settings.mimo.invalidCookie` detail for a Cookie rejected while saving. The source fields stay truthful (`web` + `managed` for a saved Console Cookie, `local` + `app` for the Desktop session).
 
@@ -225,7 +237,7 @@ When Desktop discovery is `notConfigured`, the provider emits no automatic row, 
 
 ### Session reader
 
-The local reader is shaped like `readClineSession` in one respect and not in another: it throws on a refusal, as that one does, but what it answers with is this lane's pair — `{userId, cookieHeader}` rather than an access token — and `fetchMimoLimits` reads it through a wrapper that turns the throw into `{ok: false, status}`, because discovery is one credential of two and a missing sign-in must not fail the tick:
+The local reader returns `{userId, cookieHeader}` or throws a status-bearing error, following the `readClineSession` convention. The provider catches it so discovery failure does not fail other accounts:
 
 | Store state | Answer |
 |---|---|
@@ -248,7 +260,7 @@ The cookie jar stays this module's either way. A Chromium *session* is not an al
 
 `mimoManagedAccounts`, its settings panel, its cookie allowlist, its account keys and its windows remain the stored console contract. Minting adds a credential *source* beside it; it does not replace, migrate or re-key saved accounts. The membership lane stays under the existing `mimo` provider and has **no manual entry**: the console cookie cannot mint a membership session because the service ids differ (see Session exchange).
 
-- **Console credential.** One paste covers the wallet and the Token Plan: both answer to the same session, which is why the four console endpoints share one allowlist. Nothing separate is needed for a Token Plan, and no `sk-` or `tp-` key could add it (see API keys).
+- **Console credential.** One Cookie covers the wallet and Token Plan endpoints. The existing form requires `api-platform_serviceToken` and `userId`; inference keys do not satisfy it.
 - **Membership credential.** The machine's own Desktop session, read on every refresh and never stored. No shape of it is accepted from the settings panel.
 - Saving validates with a read-only probe and keeps only allowlisted names. Discovered credentials and minted sessions are never saved, and nothing is written back to MiMo Desktop.
 - A scoped refresh executes only the selected product lane. Saving or refreshing a console credential therefore does not spend the Desktop account cookie on an unrelated membership exchange; a membership refresh likewise does not call the console.
@@ -261,4 +273,4 @@ Run the MiMo limits, credential and presentation tests when changing this note's
 node --test tests/shared/mimo*.test.js tests/electron/mimoExchangeFetch.test.js
 ```
 
-`tests/shared/mimoLimits.test.js` covers the existing console contract; `tests/shared/mimoDesktopLimits.test.js` covers the two-lane composition, exchange classification and local reader against an injected world, so neither test reaches MiMo. `tests/electron/mimoExchangeFetch.test.js` covers the widget's transport, including a real CONNECT proxy.
+`tests/shared/mimoLimits.test.js` covers the existing console contract; `tests/shared/mimoDesktopLimits.test.js` covers the two-lane composition and exchange classification with injected responses, and the local reader with a temporary SQLite store plus failure fixtures; neither suite reaches MiMo. `tests/electron/mimoExchangeFetch.test.js` covers the widget's transport, including a real CONNECT proxy.

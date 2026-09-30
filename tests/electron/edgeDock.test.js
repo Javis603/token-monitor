@@ -52,7 +52,7 @@ test('dock account choices distinguish MiMo products without changing sibling pr
     assert.deepEqual(labels('mimo', [
       { provider: 'mimo', accountKey: 'console', accountName: 'MiMo abcdef1', accountLabel: 'Console' },
       { provider: 'mimo', accountKey: 'membership', accountName: 'MiMo abcdef1', accountLabel: 'Desktop Membership' }
-    ]), ['Console · MiMo abcdef1', 'Desktop Membership · MiMo abcdef1']);
+    ]), ['MiMo abcdef1 · Console', 'MiMo abcdef1 · Desktop Membership']);
     assert.deepEqual(labels('mimo', [
       { provider: 'mimo', accountKey: 'console', accountLabel: 'Console', planLabel: 'Pay-as-you-go' },
       { provider: 'mimo', accountKey: 'membership', accountLabel: 'Desktop Membership', planLabel: 'Pro' }

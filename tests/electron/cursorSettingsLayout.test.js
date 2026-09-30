@@ -2728,7 +2728,7 @@ test('main settings migrateLimitProviders normalizes without expanding old defau
 test('Home limits groups multiple MiMo accounts like Codex', () => {
   const app = readRendererFile('app.js');
   const groupBody = viewBody('renderLimitProviderGroup');
-  const frameBody = viewBody('renderLimitProviderGroupFrame', 'mimoAccountGroups');
+  const frameBody = viewBody('renderLimitProviderGroupFrame', 'appendMimoAccountProducts');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   // accountGroup marks the synthetic header provider, so a subscription card on
   // it summarises the group instead of adopting one member's record — and
@@ -2765,13 +2765,13 @@ test('Limits groups the Volcengine Coding and Agent plans as rows of one card', 
   // plan — the plan cell hands back to the status label once the account is not
   // healthy — and the header counts plans rather than accounts.
   assert.match(view, /volcengine: \(provider, color, \{ grouped \}\) => \(\{\s*options: grouped \? \{ planText: provider\?\.status === 'ok' \? '' : undefined, showIcon: false \} : \{\}/);
-  assert.match(view, /GROUP_COUNT_KEYS = \{[\s\S]*?volcengine: 'settings\.volcengine\.nPlans',[\s\S]*?\}/);
+  assert.match(view, /GROUP_COUNT_KEYS = \{ volcengine: 'settings\.volcengine\.nPlans' \}/);
   assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
   assert.doesNotMatch(app, /renderVolcengineAccountGroup/);
   // Without an entry here the rows fall back to "Account 1"/"Account 2", since
   // accountTitleLabel reads accountName/accountEmail and these rows carry
   // neither — only accountLabel, which holds the plan name.
-  assert.match(view, /volcengine: \(provider, index, providers\) => planAccountTitle\(provider, index, providers\)/);
+  assert.match(view, /volcengine: \(provider, index, providers\) => volcenginePlanAccountTitle\(provider, index, providers\)/);
 });
 
 // Re-saving with the Agent fields empty deliberately preserves the stored

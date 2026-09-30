@@ -14,20 +14,10 @@ const MIMO_MEMBERSHIP_ENTRY = '/user/xiaomi/me';
 const MIMO_SUBSCRIPTION_ENTRY = '/user/xiaomi/subscription/self';
 const MIMO_MEMBERSHIP_REGION = 'CN';
 
-// The app's own card is the weekly usage limit, reset by the plan's next reset.
-const MIMO_MEMBERSHIP_WINDOW_MINUTES = 7 * 24 * 60;
-
-// Xiaomi's own plan names, from the tier table the pricing page renders
-// (mimo.xiaomimimo.com/pricing, `planTier` 1..4, the same four names on the CN
-// and global variants) and from the app's billing card, which names a tier by
-// the same four. The codes behind them are internal (`mibi-sub-mimo-cn-pro`).
+// Desktop's billing.planTier names; Console Token Plan labels come from its API.
 const MIMO_MEMBERSHIP_TIERS = Object.freeze({ 1: 'Starter', 2: 'Plus', 3: 'Pro', 4: 'Ultra' });
 
-// What this lane is called when no plan names it. The pricing page sells the
-// products as "Xiaomi MiMo Desktop Membership Plans", so the row is named for
-// the membership itself, the way opencode names Go and Zen and volcengine its
-// two plans. The word itself lives with the other display vocabulary
-// (`limitWindowLabels`), because five surfaces route on it.
+// Product identity is separate from the subscription's plan label.
 const MIMO_MEMBERSHIP_LABEL = MIMO_DESKTOP_MEMBERSHIP_PRODUCT;
 
 // The app's schema and its success condition. No `current` means no active
@@ -39,8 +29,7 @@ function readMimoMembershipPlan(body) {
     : body;
   if (!data || typeof data !== 'object') return { ok: false };
   const current = data.current;
-  // `== null` is the app's own test, and it is the loose one: a payload that
-  // omits `current` entirely is the same answer as one that states it as null.
+  // Desktop treats both an omitted current and null as no subscription.
   if (current == null) return { ok: true, plan: null };
   if (typeof current !== 'object' || Array.isArray(current)) return { ok: false };
   if (typeof current.planCode !== 'string' || !current.planCode
@@ -54,8 +43,7 @@ function readMimoMembershipPlan(body) {
     ok: true,
     plan: {
       tier: current.planTier,
-      // Kept for the name a tier outside the vendor's table has none of: this is
-      // the vendor's own string, and printing it beats printing nothing.
+      // Unknown tiers retain the vendor's planCode as the label fallback.
       code: current.planCode,
       source: typeof current.source === 'string' ? current.source : '',
       percent: Math.min(100, percent),
@@ -134,8 +122,6 @@ async function fetchMimoMembershipAccount(account, deps = {}) {
   return readMimoMembershipPlanFor(session.cookieHeader, session.userId, deps);
 }
 
-// The subscription read. An expired session answers 401 here, which is this
-// app's own auth-expired signal.
 async function readMimoMembershipPlanFor(cookieHeader, userId, deps = {}) {
   try {
     const body = await requestMimoMembership(MIMO_SUBSCRIPTION_ENTRY, cookieHeader, deps);
@@ -152,12 +138,13 @@ async function readMimoMembershipPlanFor(cookieHeader, userId, deps = {}) {
   }
 }
 
-// The plan's own usage card: one weekly window, `percent` being the share left.
+// Desktop's weekly card reads this subscription's percent and nextResetTime.
+// The shared weekly label names the window; renewalMode names billing cadence,
+// not this quota. Keep the server's reset time without inventing a duration.
 function mimoMembershipWindows(plan) {
   if (!plan) return [];
   return [{
     kind: 'weekly',
-    windowMinutes: MIMO_MEMBERSHIP_WINDOW_MINUTES,
     usedPercent: Math.max(0, 100 - plan.percent),
     resetsAt: plan.resetsAt
   }];

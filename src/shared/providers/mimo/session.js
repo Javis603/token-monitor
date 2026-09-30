@@ -1,5 +1,7 @@
 'use strict';
 
+const { parseCookie } = require('undici');
+
 const { throwIfAborted } = require('../../abortSignal');
 const { errorWithStatus } = require('../../limits/providerHelpers');
 const { mimoExchangeRequestHeaders } = require('./browserHeaders');
@@ -92,32 +94,6 @@ function createMimoCookieJar() {
     else cookies.push(stored);
   }
 
-  function parse(line) {
-    const parts = String(line || '').split(';');
-    const first = parts.shift() || '';
-    const separator = first.indexOf('=');
-    if (separator <= 0) return null;
-    const entry = {
-      name: first.slice(0, separator).trim(),
-      value: first.slice(separator + 1).trim(),
-      domain: '',
-      hostOnly: true,
-      secure: false
-    };
-    for (const attribute of parts) {
-      const trimmed = attribute.trim();
-      if (/^secure$/i.test(trimmed)) entry.secure = true;
-      else if (/^domain=/i.test(trimmed)) {
-        const domain = trimmed.slice(trimmed.indexOf('=') + 1).trim().replace(/^\./, '').toLowerCase();
-        if (domain) {
-          entry.domain = domain;
-          entry.hostOnly = false;
-        }
-      }
-    }
-    return entry;
-  }
-
   return {
     // A raw `Cookie:` value carries no attributes, so a credential that arrived
     // over HTTPS is kept on HTTPS here.
@@ -136,8 +112,8 @@ function createMimoCookieJar() {
     },
     absorb(setCookieLines, url) {
       for (const line of setCookieLines || []) {
-        const entry = parse(line);
-        if (entry) store(entry, url);
+        const entry = parseCookie(String(line || ''));
+        if (entry?.name) store({ ...entry, hostOnly: !entry.domain }, url);
       }
     },
     headerFor(url) {

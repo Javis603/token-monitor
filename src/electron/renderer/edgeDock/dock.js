@@ -22,7 +22,7 @@ const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const glassRenderingApi = window.TokenMonitorGlassRendering;
 const limitPresentationApi = window.TokenMonitorLimitProviderPresentation;
 const limitWindowLabels = window.TokenMonitorLimitWindowLabels;
-const { isMimoMembershipProduct, mimoProductLabel } = limitWindowLabels;
+const { mimoAccountGroups, mimoProductLabel } = limitWindowLabels;
 const limitWindowTextApi = window.TokenMonitorLimitWindowText;
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
 const limitWindowsViewApi = window.TokenMonitorLimitWindowsView;
@@ -388,7 +388,7 @@ const limitWindowsView = limitWindowsViewApi.createLimitWindowsView({
   isCreditsWindow: balanceDisplay.isCreditsWindow,
   spendWindow: balanceDisplay.spendWindow,
   limitWindowLabel: limitWindowLabels.limitWindowLabel,
-  isMimoMembershipProduct,
+  mimoAccountGroups,
   mimoProductLabel,
   limitWindowText: limitWindowTextApi.limitWindowText,
   accountIdentity: accountIdentityApi,

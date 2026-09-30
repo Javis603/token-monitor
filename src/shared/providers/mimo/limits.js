@@ -90,12 +90,7 @@ function mimoAccountKey(cookieHeader, account = {}) {
   return hashKey(`mimo:${identity}`);
 }
 
-// The membership is a second product of the same account, not a second account,
-// so its row is keyed by the same `userId` with the lane it came from appended.
-// One key for both would let the hub's collapse pass pick a single winner per
-// account key and drop one of the two rows. The lane rather than a counter keeps
-// the key stable across refreshes, which is what the runtime's identity and the
-// renderer's account grouping both need.
+// Separate product namespaces prevent the hub from collapsing both rows into one.
 function mimoMembershipAccountKey(userId) {
   return hashKey(`mimo:membership:${cleanText(userId)}`);
 }
@@ -493,15 +488,8 @@ function entryMatchesScope(entry, scope) {
   return true;
 }
 
-// Every console credential names one account, keyed as `mimo:<userId>`, so a
-// pasted cookie, a saved account and the session the machine's own MiMo Desktop
-// mints are three credentials for one identity — not three rows. The membership
-// rides the same entry and keys its own row off the lane.
-//
-// Discovery needs no precedence rule: a credential the user entered occupies its
-// own account's entry and the machine's session fills only the entries still
-// empty, which is what keeps a saved account's credential and puts a *different*
-// Desktop account beside it rather than behind it.
+// Saved Console credentials win per account; discovery fills gaps. Membership
+// shares the Xiaomi identity but keeps its own product key.
 function collectMimoCredentials(options, deps, scope, desktop) {
   const entries = new Map();
   const byUser = new Map();
@@ -617,16 +605,7 @@ async function fetchMimoMembershipSide(entry, deps) {
   );
 }
 
-// One account, one row per product it holds: the platform console (wallet and
-// Token Plan) and the Desktop membership. They are separate rows rather than one
-// merged row because the aggregate collapses per account key — two products under
-// one key would come out as one — and because each product's own answer is what
-// the row above it should show: a membership lane that failed no longer has to
-// speak through the wallet's row, and the wallet it never touched stays.
-//
-// Both rows carry one display identity for the Xiaomi account. The product and
-// plan stay in their own fields, so every limits surface can render
-// `account · product` without guessing from a plan name.
+// Scoped membership refreshes reuse the Console's non-secret display identity.
 function mimoAccountMetadata(deps = {}) {
   if (!(deps.providerRuntimeState instanceof Map)) return null;
   let cache = deps.providerRuntimeState.get(MIMO_ACCOUNT_METADATA_STATE_KEY);
@@ -728,11 +707,8 @@ function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, upd
 
   const label = mimoMembershipPlanLabel(membership.plan);
   const membershipWindows = mimoMembershipWindows(membership.plan);
-  // A subscription the account does not have is not a row: the same rule the
-  // console lane follows for a Token Plan it cannot find, and the reason a row
-  // would otherwise be left on screen with nothing in it but its product name.
-  // An account that *had* one and no longer does drops out of the response, and
-  // the removal pass below clears the identity it used to publish.
+  // No subscription means no membership row. The removal pass clears an older
+  // reading; INVITE plans still have a quota even without a plan label.
   if (!label && !membershipWindows.length) return rows;
   rows.push(normalizeLimitProvider({
     provider: 'mimo',

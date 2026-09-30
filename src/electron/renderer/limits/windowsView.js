@@ -74,6 +74,7 @@
       spendWindow,
       limitWindowLabel,
       limitWindowText,
+      mimoAccountGroups,
       mimoProductLabel,
       accountIdentity,
       accountControl,
@@ -1056,31 +1057,27 @@
       }
     } else if (provider.provider === 'mimo') {
       windows.classList.add('limit-windows-mimo');
-      // A Desktop membership answers with a single weekly window and no balance.
-      // The arms below draw a Token Plan and a balance only, so without one of
-      // its own the membership row would render empty. It takes the full width
-      // for the reason Grok's single Monthly does.
-      const weekly = windowForKind(provider, 'weekly');
-      if (weekly) {
-        const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68);
+      // Token Plan and membership quotas reuse the shared labels and wide rows.
+      const quotaWindows = (provider.windows || []).filter((window) => !isCreditsWindow(window));
+      for (const quotaWindow of quotaWindows) {
+        const node = limitWindowNode(providerWindowLabel(provider, quotaWindow), quotaWindow, color, 0.68);
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
       const balance = provider.balance || null;
-      // A balance is money and carries no percentage, so it is never the plan:
-      // reading it as one draws a plan row at 0% beside the balance row that
-      // shows the same money. The provider marks it `metric: 'credits'`, and this
-      // is the branch that has to honour that mark.
-      const tokenPlan = windowsForKind(provider, 'billing').find((window) => window.metric !== 'credits')
-        || mimoTokenPlanWindowFromBalance(balance);
-      if (tokenPlan) {
-        const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
-        node.classList.add('limit-window-wide');
-        windows.append(node);
-      } else if (balance?.planStatus === 'expired') {
-        const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
-        node.classList.add('limit-window-wide', 'limit-window-no-reset');
-        windows.append(node);
+      // Older Console records may carry Token Plan data only in balance.
+      // Credits windows are money, so they must not suppress this fallback.
+      if (!quotaWindows.some((window) => String(window?.label || '').trim())) {
+        const tokenPlan = mimoTokenPlanWindowFromBalance(balance);
+        if (tokenPlan) {
+          const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
+          node.classList.add('limit-window-wide');
+          windows.append(node);
+        } else if (balance?.planStatus === 'expired') {
+          const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
+          node.classList.add('limit-window-wide', 'limit-window-no-reset');
+          windows.append(node);
+        }
       }
       const creditsWindow = (provider.windows || []).find(isCreditsWindow) || null;
       const amount = creditsAmount(provider, creditsWindow);
@@ -1092,10 +1089,7 @@
         if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, currency)}`);
         if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, currency)}`);
         const balanceText = formatMoney(amount, currency) || '—';
-        // A wallet is money and carries no percentage of its own, so its meter is
-        // derived here from the console's reported month spend (`amount /
-        // (amount + monthSpend)`) — the display-only rule deepseek's and
-        // openrouter's balances follow, never a wire value.
+        // Reuse the shared display-only balance meter; do not put it on the wire.
         const balanceNode = limitWindowNode(
           'Balance',
           { remainingPercent: creditsMeterPercent(provider, creditsWindow) },
@@ -1473,7 +1467,7 @@
     opencode: opencodeAccountTitle,
     openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
     thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
-    volcengine: (provider, index, providers) => planAccountTitle(provider, index, providers),
+    volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers),
     mimo: (provider, index, providers) => mimoAccountTitle(provider, index, providers)
   };
 
@@ -1552,9 +1546,15 @@
     const name = document.createElement('div');
     name.className = 'limit-name';
     if (options.showIcon !== false) name.append(renderLimitProviderMark(options.markId || id, color));
-    const title = document.createElement('span');
-    title.className = 'limit-name-title';
-    title.textContent = options.title || label;
+    // A row that names nothing renders without the title line at all — its meta
+    // line ("Updated · source") becomes the row's first text — instead of
+    // leaving a blank heading behind.
+    const titleText = options.title || label;
+    const title = titleText ? document.createElement('span') : null;
+    if (title) {
+      title.className = 'limit-name-title';
+      title.textContent = titleText;
+    }
     const provenance = presentationApi.limitProviderProvenance(provider, provenanceContext());
     // The ✓ marks the account THIS device's Codex is signed into
     // (state.codexActiveAccount, derived locally by codexActiveAccountFromStats).
@@ -1564,7 +1564,7 @@
     // which would move the ✓ onto the wrong one.
     const activeCodexAccount = options.showActiveBadge && codexAccounts.matchesActive(provider);
     const switchAccount = options.allowSystemSwitch && !activeCodexAccount ? codexAccounts.switchTarget(provider) : null;
-    name.append(accountControl.render({
+    const control = accountControl.render({
       titleNode: title,
       active: Boolean(activeCodexAccount),
       switchAccount: codexAccounts.canSwitchSystemAccount() ? switchAccount : null,
@@ -1574,7 +1574,10 @@
       // entries carry — so the same control named the account on one surface and
       // fell back to the unnamed placeholder on the other.
       accountLabel: options.accountLabel || ''
-    }));
+    });
+    // A named row hands the title through the control (which returns it unchanged
+    // when there is nothing to switch); an unnamed row appends nothing.
+    if (control) name.append(control);
     titleBlock.append(name);
     // The multi-account group header has no quota of its own, and its accounts can
     // update at different times (different devices too), so it omits the meta line
@@ -1947,7 +1950,7 @@
   // renderLimitProviderRow, so the policy cannot be skipped by a caller that did
   // not know there was one to pass.
   function renderLimitProviderSolo(id, label, provider, color) {
-    // A single MiMo row still needs to say which of its two products it is.
+    // Keep the same provider frame when only one MiMo product remains.
     if (id === 'mimo' && mimoProductLabel(provider)) return renderMimoProviderGroup(label, [provider], color);
     const policy = limitAccountRowPolicy(id, provider, color, { grouped: false, sharedFamily: null });
     // Standing alone, the row is titled with the provider's name, so the account
@@ -2021,7 +2024,7 @@
 
   // Volcengine carries the plan in accountLabel; without it, both rows would
   // be named "Account N".
-  function planAccountTitle(provider, index, providers) {
+  function volcenginePlanAccountTitle(provider, index, providers) {
     return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
   }
 
@@ -2055,9 +2058,7 @@
 
   // Volcengine's two rows are one account's two subscriptions, so its header
   // counts plans; every other ordinary group counts accounts.
-  const GROUP_COUNT_KEYS = {
-    volcengine: 'settings.volcengine.nPlans',
-  };
+  const GROUP_COUNT_KEYS = { volcengine: 'settings.volcengine.nPlans' };
 
   // "4 accounts" on the group header. A caller that has a better phrase passes
   // one; leaving it to the caller is what let the dock card render a group with
@@ -2092,28 +2093,15 @@
     return { row, list, groupProvider };
   }
 
-  function mimoAccountGroups(providers) {
-    const groups = new Map();
-    providers.forEach((provider, index) => {
-      const name = String(provider.accountName || '').trim();
-      // Current MiMo rows share this suffix from their Console account key,
-      // even when two devices report different profile names for that account.
-      const suffix = name.match(/(?:^| · )(MiMo [a-f0-9]{7})$/i)?.[1];
-      const email = String(provider.accountEmail || '').trim().toLowerCase();
-      const key = suffix ? `suffix:${suffix.toLowerCase()}`
-        : email ? `email:${email}`
-          : name ? `name:${name.toLowerCase()}`
-            : `row:${provider.accountKey || index}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(provider);
-    });
-    return [...groups.values()];
-  }
-
   function appendMimoAccountProducts(list, providers, color) {
     providers.forEach((provider, index) => {
       const policy = limitAccountRowPolicy('mimo', provider, color, { grouped: true, sharedFamily: null });
-      const title = mimoProductLabel(provider) || limitAccountTitle('mimo', provider, index, providers);
+      // Readings and plan metadata identify healthy products. A status-only row
+      // needs its product title; older records fall back to the account title.
+      const statusOnly = Boolean(provider.status) && provider.status !== 'ok' && !provider.stale;
+      const title = statusOnly
+        ? (mimoProductLabel(provider) || limitAccountTitle('mimo', provider, index, providers))
+        : '';
       list.append(renderLimitProviderRow('mimo', title, provider, policy.color, {
         accountRow: true,
         ...policy.options

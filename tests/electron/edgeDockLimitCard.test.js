@@ -139,8 +139,8 @@ function dockView(appearance = {}, overrides = {}) {
     isCreditsWindow: balanceDisplay.isCreditsWindow,
     spendWindow: balanceDisplay.spendWindow,
     limitWindowLabel: limitWindowLabels.limitWindowLabel,
-    isMimoMembershipProduct: limitWindowLabels.isMimoMembershipProduct,
     mimoProductLabel: limitWindowLabels.mimoProductLabel,
+    mimoAccountGroups: limitWindowLabels.mimoAccountGroups,
     limitWindowText: limitWindowTextApi.limitWindowText,
     accountIdentity: accountIdentityApi,
     // Mirrored from the dock's own wiring: the device context rides the cell
@@ -186,6 +186,28 @@ test('the dock hands the shared view every dependency it destructures', () => {
   }
   // `document` is read off deps separately rather than destructured with the rest.
   assert.match(wiring, /^\s*document,$/m);
+});
+
+test('the page hands the shared view every dependency it destructures', () => {
+  // The same completeness check as the dock's, over the page's own wiring:
+  // neither host is guarded by the other, and a missing dependency is a
+  // TypeError the first time a MiMo group renders, not a test failure.
+  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
+  const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+  const required = view
+    .slice(view.indexOf('const {'), view.indexOf('} = deps;'))
+    .replace('const {', '')
+    .split('\n')
+    .map((line) => line.replace(/\/\/.*$/, '').trim())
+    .filter((line) => line && !line.includes('='))
+    .map((entry) => entry.split(':')[0].replace(',', '').trim())
+    .filter(Boolean);
+  const wiring = balancedCall(app, 'createLimitWindowsView({');
+
+  assert.ok(required.length > 10, 'the dependency list should have been parsed');
+  for (const name of required) {
+    assert.match(wiring, new RegExp(`(^|[\\s{,])${name}\\s*[,:]`, 'm'), `the page must supply ${name}`);
+  }
 });
 
 // The dependency list above is only half the wiring: the view also reads
@@ -304,7 +326,6 @@ test('a MiMo membership row meters like any percent quota, WorkBuddy included', 
     // What the collector's normalization produces from the vendor's percent.
     windows: [{
       kind: 'weekly',
-      windowMinutes: 10080,
       usedPercent: 21.5,
       remainingPercent: 78.5,
       resetsAt: new Date(Date.now() + 86_400_000).toISOString()
@@ -316,6 +337,8 @@ test('a MiMo membership row meters like any percent quota, WorkBuddy included', 
   // "left" mode is the default, so the bar shows the share still available.
   assert.equal(fill.style['--bar-scale'], '0.785');
   assert.match(card.text, /79% left/);
+  assert.match(card.text, /Weekly/);
+  assert.doesNotMatch(card.text, /Monthly/);
   assert.match(card.text, /Reset/);
 
   // The used-mode flip is the shared one, so the same row read the other way
@@ -392,9 +415,8 @@ test('one MiMo product failing still leaves the other row and its quota on the c
 });
 
 test('a MiMo wallet meters against its month spend and carries the spend line', () => {
-  // The wallet has no percentage of its own: the console reports the money and
-  // the month's spend, and the bar is the display-layer derivation deepseek's and
-  // openrouter's balances use — current / (current + month spend).
+  // No provider percentage: reuse the shared current / (current + month spend)
+  // fallback, as DeepSeek does.
   const row = {
     provider: 'mimo',
     status: 'ok',
@@ -703,9 +725,10 @@ test('MiMo groups products under each account and keeps their own plan and statu
   ]);
   assert.equal(group.find('limit-plan').textContent, '2 accounts');
   const products = accounts.map((account) => account.find('limit-account-list').children[0]);
-  assert.deepEqual(products.map((row) => row.find('limit-name-title').textContent), [
-    'Desktop Membership', 'Desktop Membership'
-  ]);
+  // Product rows name nothing: the plan cell and the readings carry what they are.
+  for (const row of products) {
+    assert.equal(row.find('limit-name-title'), null, 'the lane word stays off the screen');
+  }
   assert.equal(products[0].find('limit-plan').textContent, 'Pro');
   assert.equal(products[1].find('limit-plan')?.textContent ?? '', '');
 });
@@ -720,24 +743,49 @@ test('one MiMo account uses the provider heading and separate product rows', () 
   assert.equal(group.find('limit-name-title').textContent, 'Xiaomi MiMo');
   assert.equal(group.find('limit-plan').textContent, '');
   const products = group.find('limit-account-list').children;
-  assert.deepEqual(products.map((row) => row.find('limit-name-title').textContent), ['Console', 'Desktop Membership']);
+  // The healthy row names nothing; the refused lane has no reading left, so its
+  // row carries the lane word the wire gave it.
+  assert.equal(products[0].find('limit-name-title'), null);
+  assert.equal(products[1].find('limit-name-title').textContent, 'Desktop Membership');
   assert.match(products[0].text, /9\.95/);
   assert.match(products[1].text, /Sign in again/);
 });
 
-test('one MiMo product still names its product under the provider heading', () => {
+test('a healthy MiMo product row names nothing; a refused one keeps its lane word', () => {
   const view = dockView();
-  for (const [accountLabel, status, expectedPlan] of [
-    ['Console', 'ok', 'Pay-as-you-go'],
-    ['Desktop Membership', 'unauthorized', 'Sign in again']
-  ]) {
-    const row = {
-      provider: 'mimo', status, sourceDetail: 'app', accountLabel,
+  {
+    const card = view.renderLimitProviderSolo('mimo', 'Xiaomi MiMo', {
+      provider: 'mimo', status: 'ok', sourceDetail: 'app', accountLabel: 'Console',
       planLabel: 'Pay-as-you-go', windows: []
-    };
-    const card = view.renderLimitProviderSolo('mimo', 'Xiaomi MiMo', row, '#000000');
-    assert.deepEqual(card.textOf('limit-name-title'), ['Xiaomi MiMo', accountLabel]);
-    assert.equal(card.find('limit-account-list').children[0].find('limit-plan').textContent, expectedPlan);
+    }, '#000000');
+    // The readings and the plan cell say what the row is.
+    assert.deepEqual(card.textOf('limit-name-title'), ['Xiaomi MiMo']);
+    assert.equal(card.text.includes('Console'), false);
+    assert.equal(card.find('limit-account-list').children[0].find('limit-plan').textContent, 'Pay-as-you-go');
+  }
+  {
+    const card = view.renderLimitProviderSolo('mimo', 'Xiaomi MiMo', {
+      provider: 'mimo', status: 'unauthorized', sourceDetail: 'app', accountLabel: 'Desktop Membership',
+      planLabel: 'Pay-as-you-go', windows: []
+    }, '#000000');
+    assert.deepEqual(card.textOf('limit-name-title'), ['Xiaomi MiMo', 'Desktop Membership']);
+    assert.equal(card.find('limit-account-list').children[0].find('limit-plan').textContent, 'Sign in again');
+  }
+  {
+    // A status-only row synced before the lane words existed carries no
+    // recognized label; it still names itself through the account title rather
+    // than failing anonymously beside its named siblings.
+    const group = view.renderLimitProviderGroup('mimo', 'Xiaomi MiMo', [
+      { provider: 'mimo', status: 'ok', source: 'web', sourceDetail: 'managed', accountKey: 'sha256:mimoa', accountName: 'MiMo abcdefa', accountLabel: 'Console', planLabel: 'Pay-as-you-go', windows: [] },
+      { provider: 'mimo', status: 'unavailable', sourceDetail: 'app', accountKey: 'sha256:mimoa-membership', accountName: 'MiMo abcdefa', accountLabel: '', windows: [] }
+    ], '#000000');
+    // One logical account renders its products flat under the provider heading.
+    // The legacy row's title is the shared two-stage identity: the descriptive
+    // name, disambiguated by an opaque key fingerprint because both rows
+    // describe themselves identically.
+    const products = group.find('limit-account-list').children;
+    assert.equal(products[0].find('limit-name-title'), null);
+    assert.match(products[1].find('limit-name-title').textContent, /^MiMo abcdefa · #[a-z0-9]+$/);
   }
   const unconfigured = view.renderLimitProviderSolo('mimo', 'Xiaomi MiMo', {
     provider: 'mimo', status: 'notConfigured', windows: []
@@ -760,9 +808,11 @@ test('MiMo keeps different accounts apart when emails mask alike', () => {
     'j***s@example.com · Profile · MiMo abcdef6'
   ]);
   assert.equal(group.find('limit-plan').textContent, '2 accounts');
-  assert.deepEqual(accounts.map((account) => account.find('limit-account-list').children.map(
-    (product) => product.find('limit-name-title').textContent
-  )), [['Console', 'Desktop Membership'], ['Desktop Membership']]);
+  for (const account of accounts) {
+    for (const product of account.find('limit-account-list').children) {
+      assert.equal(product.find('limit-name-title'), null, 'the lane word stays off the screen');
+    }
+  }
 });
 
 test('a group-only plan replacement leaves a solo row its plan', () => {

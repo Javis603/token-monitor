@@ -602,11 +602,8 @@
   function limitProviderSettingsRecord(providers, id) {
     const rows = (providers || []).filter((row) => row.provider === id);
     if (id !== 'mimo') return rows.at(-1);
-    // MiMo's console and membership are independent products of one account, so
-    // one live product means the provider is connected even while the other needs
-    // its own recovery. With neither live, the row that speaks is the account's
-    // own product — the console, whose name the membership lane sets against its
-    // own — rather than whichever row the aggregate happened to sort last.
+    // Either healthy product keeps the provider connected. Otherwise prefer the
+    // Console status, since Settings manages that credential rather than membership.
     return rows.findLast((row) => row.status === 'ok')
       || rows.find((row) => !isMimoMembershipProduct(row))
       || rows.at(-1);

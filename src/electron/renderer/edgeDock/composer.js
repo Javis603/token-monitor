@@ -299,7 +299,7 @@
           const identity = account.accountName || maskEmail(account.accountEmail);
           const product = item.provider === 'mimo' ? mimoProductLabel(account) : '';
           const name = product
-            ? [product, identity].filter(Boolean).join(' · ')
+            ? [identity, product].filter(Boolean).join(' · ')
             : identity || account.planLabel || providerLabel(item.provider);
           const text = el('span', 'edge-dock-composer-account-name', name);
           text.title = name;

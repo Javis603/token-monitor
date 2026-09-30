@@ -2,17 +2,8 @@
 
 const { readJson, writeJsonAtomic } = require('../../config');
 
-// The console reports cumulative money spent and the current month, and nothing
-// finer: the per-call ledger behind it is a paginated POST, so Today and Week are
-// not questions this API answers. They are what the account spent between two
-// observations of that total, kept in a local day-bucket ledger — the derivation
-// Z.ai makes for its own cumulative report, with the retention DeepSeek's balance
-// history keeps, so one wire field means one thing across providers.
-//
-// Month and All time stay provider-reported: rebasing them onto local buckets
-// would trade a figure the console states for one this machine guessed. What the
-// ledger adds is the two periods the console cannot state, plus `trackingSince`
-// so a reader can tell a quiet day from a ledger that began today.
+// Derive Today and Week from positive cumulative-spend deltas, as Z.ai does.
+// Month and All time remain provider-reported; trackingSince marks local coverage.
 const MIMO_SPEND_STORE_VERSION = 1;
 // 40 days, the window DeepSeek's history and Z.ai's report both keep.
 const MIMO_SPEND_RETENTION_MS = 40 * 24 * 60 * 60 * 1000;
@@ -28,9 +19,7 @@ function localDayKey(ms) {
 // positive delta between observations. A drop (refund, plan reset) moves the
 // baseline without recording negative spend — the same rule Z.ai documents.
 function recordMimoCumulativeSpend({ accountKey, currency, totalCost, now, storePath, readJson: readOverride, writeJsonAtomic: writeOverride }) {
-  // A null total is a report that omitted the field, not a zero: Number(null)
-  // is 0, so the check must come before the finite one or a missing field would
-  // rebase the tracked total to zero.
+  // An omitted total must not rebase the ledger to zero.
   if (!accountKey || totalCost === null || !Number.isFinite(totalCost) || !storePath) return null;
   const nowMs = Number(now);
   const total = Math.max(0, totalCost);

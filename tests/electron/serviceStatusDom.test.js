@@ -231,6 +231,9 @@ test('Home limit provider settings stay compact and list only enabled providers'
   assert.match(homeLimitRows, /const hasConfiguredOrder = Boolean\(state\.settings\?\.homeLimitProviderOrder\)/);
   assert.doesNotMatch(homeLimitRows, /normalizeLimitProviderOrder\(state\.settings\?\.limitProviderOrder, LIMIT_PROVIDERS\)\.join\(','\) !== DEFAULT_LIMIT_PROVIDER_ORDER/);
   assert.match(homeLimitRows, /sort: hasConfiguredOrder \? 'configured' : 'remaining'/);
+  // MiMo's two products of one account are two rows: the name decision reads
+  // logical accounts (the grouping the Limits page uses), not raw row count.
+  assert.match(homeLimitRows, /const accountCount = id === 'mimo'\s*\? mimoAccountGroups\(providerEntries\)\.length\s*: providerEntries\.length;/);
   assert.match(homeLimitRows, /limitAccountTitle\(id, provider, index, providerEntries\)/);
   assert.match(homeLimitRows, /showHomeLimitProviderNames === true \|\| state\.settings\?\.showToolIcons === false/);
   assert.match(homeLimitRows, /`\$\{providerTitle\} · \$\{accountTitle\}`/);

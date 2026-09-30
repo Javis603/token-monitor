@@ -38,12 +38,8 @@
     billing: 'Monthly'
   });
 
-  // The products one MiMo account can answer for, and the word each row carries
-  // in `accountLabel`. Every surface that names or routes a MiMo row reads them
-  // here — the Limits title and plan cells, the settings record, the tray and the
-  // macOS widget — instead of repeating the literal, which is how the two
-  // spellings below drifted apart in the first place. `Membership` is the short
-  // form rows recorded before the rename still carry.
+  // MiMo product names belong to accountLabel, shared across display surfaces.
+  // Retain Membership for records produced before the rename.
   const MIMO_CONSOLE_PRODUCT = 'Console';
   const MIMO_DESKTOP_MEMBERSHIP_PRODUCT = 'Desktop Membership';
   const MIMO_LEGACY_MEMBERSHIP_PRODUCT = 'Membership';
@@ -64,13 +60,31 @@
       : '';
   }
 
-  function isMimoConsoleProduct(provider) {
-    return mimoProductLabel(provider) === MIMO_CONSOLE_PRODUCT;
-  }
-
   function isMimoMembershipProduct(provider) {
     const label = mimoProductLabel(provider);
     return label === MIMO_DESKTOP_MEMBERSHIP_PRODUCT || label === MIMO_LEGACY_MEMBERSHIP_PRODUCT;
+  }
+
+  // The logical accounts behind a provider's MiMo rows: the two products of one
+  // Xiaomi account are two rows that must not count as two accounts anywhere a
+  // surface decides whether an account name is needed. Rows of one account share
+  // the identity suffix the collector writes into `accountName` (which survives
+  // two devices reporting different profile names for one account), then fall
+  // back to the address, then the profile name, then the row itself.
+  function mimoAccountGroups(providers) {
+    const groups = new Map();
+    (providers || []).forEach((provider, index) => {
+      const name = String(provider.accountName || '').trim();
+      const suffix = name.match(/(?:^| · )(MiMo [a-f0-9]{7})$/i)?.[1];
+      const email = String(provider.accountEmail || '').trim().toLowerCase();
+      const key = suffix ? `suffix:${suffix.toLowerCase()}`
+        : email ? `email:${email}`
+          : name ? `name:${name.toLowerCase()}`
+            : `row:${provider.accountKey || index}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(provider);
+    });
+    return [...groups.values()];
   }
 
   // The name this provider gives a window of that kind when the window itself
@@ -97,10 +111,10 @@
     FIVE_HOUR_WINDOW_PROVIDERS,
     MIMO_CONSOLE_PRODUCT,
     MIMO_DESKTOP_MEMBERSHIP_PRODUCT,
-    isMimoConsoleProduct,
     isMimoMembershipProduct,
     limitWindowKindLabel,
     limitWindowLabel,
+    mimoAccountGroups,
     mimoProductLabel
   };
 });

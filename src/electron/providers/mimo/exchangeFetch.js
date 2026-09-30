@@ -23,10 +23,6 @@ function parseProxyResolveResults(value) {
   return (entries.length ? entries : ['DIRECT']).map(parseProxyRoute);
 }
 
-function parseProxyResolveResult(value) {
-  return parseProxyResolveResults(value)[0];
-}
-
 // The exchange's transport in the widget. It cannot be the runtime's own fetch:
 // Chromium answers a `redirect: 'manual'` request with `net::ERR_ABORTED`, and a
 // Chromium *session* is no substitute either — its cookie policy withholds every
@@ -71,4 +67,4 @@ function createMimoExchangeFetch({
   };
 }
 
-module.exports = { createMimoExchangeFetch, parseProxyResolveResult, parseProxyResolveResults };
+module.exports = { createMimoExchangeFetch, parseProxyResolveResults };

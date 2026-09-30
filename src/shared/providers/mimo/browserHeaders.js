@@ -5,11 +5,7 @@ const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const MIMO_CONSOLE_URL = 'https://platform.xiaomimimo.com/#/console/balance';
 const MIMO_CONSOLE_HOST = 'platform.xiaomimimo.com';
 
-// What a MiMo client sends. One definition, because both the console reads and the
-// service-login walk answer to the same question, and the walk depends on it: a
-// request that reaches the SSO without these does not merely fail, it takes the
-// signed-in session with it, so MiMo Desktop itself asks for a login afterwards.
-// The header set protects the session; a missing `User-Agent` loses one.
+// Keep the measured browser header shape for console reads and session exchange.
 function mimoRequestHeaders(cookieHeader) {
   return {
     Accept: 'application/json, text/plain, */*',
@@ -21,13 +17,8 @@ function mimoRequestHeaders(cookieHeader) {
   };
 }
 
-// The console's own web UI calls its API from the console page, so those requests
-// carry the page's Origin and Referer — which is what `mimoRequestHeaders` sends,
-// and what the console lane still uses. The app's own calls send neither: its
-// membership request is a bare `fetch(url, { method, signal })` through a session
-// wrapper that adds only `X-Client-Version`. So the exchange takes these headers
-// to the console host and leaves the two origin headers behind everywhere else,
-// which is what the account host and the membership host see from the real client.
+// Origin and Referer describe the console page. Desktop's membership calls omit
+// them, so do not forward them to the SSO or membership host.
 function mimoExchangeRequestHeaders(cookieHeader, url) {
   const headers = mimoRequestHeaders(cookieHeader);
   let host;

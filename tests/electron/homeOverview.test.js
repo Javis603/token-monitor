@@ -923,6 +923,33 @@ test('Home shows WorkBuddy credits through the shared credits contract', () => {
   });
 });
 
+test('Home bars a MiMo lane by lane, so all readings stay on their own bar', () => {
+  // Home is handed one entry per wire row, so each lane's readings keep a bar.
+  const rows = homeLimitAccounts([
+    {
+      key: 'mimo:console',
+      providerId: 'mimo',
+      name: 'Console',
+      windows: [
+        { kind: 'billing', label: 'Token Plan', usedPercent: 20, remainingPercent: 80 },
+        { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }
+      ],
+      balance: { amount: 9.95, currency: 'CNY', monthSpend: 0 }
+    },
+    {
+      key: 'mimo:membership',
+      providerId: 'mimo',
+      name: 'Desktop Membership',
+      windows: [{ kind: 'weekly', usedPercent: 22, remainingPercent: 78 }]
+    }
+  ]);
+
+  assert.deepEqual(rows.map((row) => row.windows.map((window) => [window.label, window.metric])), [
+    [['weekly', '']],
+    [['Token Plan', ''], ['Balance', 'credits']]
+  ]);
+});
+
 test('Home shows a MiMo token plan and balance side by side', () => {
   const [row] = homeLimitAccounts([{
     key: 'mimo',

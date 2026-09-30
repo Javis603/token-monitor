@@ -14,6 +14,7 @@
       ? require('./limits/windowLabels')
       : root?.TokenMonitorLimitWindowLabels
   );
+
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorTrayLayout = api;
 })(typeof window !== 'undefined' ? window : globalThis, function createTrayLayoutApi(currencyApi, trayTextApi, balanceDisplay, compactMoneyApi, limitWindowLabelsApi) {
@@ -652,11 +653,21 @@
     return options;
   }
 
-  function accountLabel(provider) {
+  function accountLabel(provider, siblings) {
     const email = clean(provider?.accountEmail);
     const name = clean(provider?.accountName);
     const product = providerId(provider) === 'mimo' ? mimoProductLabel(provider) : '';
-    if (product) return [email, name, product].filter(Boolean).join(' · ');
+    if (product) {
+      // The lane word alone tells one account's products apart; the account
+      // identity joins only when the provider holds several logical accounts.
+      // With no sibling rows to group by, keep the full form.
+      const rows = Array.isArray(siblings)
+        ? siblings.filter((row) => providerId(row) === providerId(provider))
+        : [];
+      const oneAccount = rows.length > 0 && limitWindowLabelsApi.mimoAccountGroups(rows).length === 1;
+      if (oneAccount) return product;
+      return [email, name, product].filter(Boolean).join(' · ');
+    }
     return clean(
       email
       || name
@@ -668,14 +679,14 @@
 
   function accountOptions(stats, selectedProvider) {
     const id = clean(selectedProvider, 48).toLowerCase();
+    const rows = providersFromStats(stats).filter((provider) => providerId(provider) === id);
     const seen = new Set();
     const options = [];
-    for (const provider of providersFromStats(stats)) {
-      if (providerId(provider) !== id) continue;
-      const key = clean(provider.accountKey) || `${id}:${accountLabel(provider)}`;
+    for (const provider of rows) {
+      const key = clean(provider.accountKey) || `${id}:${accountLabel(provider, rows)}`;
       if (!key || seen.has(key)) continue;
       seen.add(key);
-      options.push({ value: key, label: accountLabel(provider), provider });
+      options.push({ value: key, label: accountLabel(provider, rows), provider });
     }
     return options;
   }
@@ -983,7 +994,7 @@
     if (item.metric === 'percent') text = headline;
     else if (item.metric === 'percentReset') text = [headline, reset].filter(Boolean).join(' · ');
     else if (item.metric === 'reset') text = reset || '--';
-    else text = accountLabel(selection.providerRecord) || selection.provider;
+    else text = accountLabel(selection.providerRecord, providersFromStats(stats)) || selection.provider;
     return { ...item, available: Boolean(text && text !== '--'), text: text || '--', selection };
   }
 

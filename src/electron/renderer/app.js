@@ -4078,7 +4078,7 @@ const {
   spendWindow
 } = window.TokenMonitorLimitBalanceDisplay;
 
-const { limitWindowLabel, isMimoMembershipProduct, mimoProductLabel } = window.TokenMonitorLimitWindowLabels;
+const { limitWindowLabel, mimoAccountGroups, mimoProductLabel } = window.TokenMonitorLimitWindowLabels;
 const { limitWindowText } = window.TokenMonitorLimitWindowText;
 
 // The Limits rows are built by the shared view, which the edge dock also calls
@@ -4137,7 +4137,7 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   spendWindow,
   limitWindowLabel,
   limitWindowText,
-  isMimoMembershipProduct,
+  mimoAccountGroups,
   mimoProductLabel,
   accountIdentity: accountIdentityApi,
   accountControl: codexAccountControl,
@@ -5663,11 +5663,22 @@ function homeLimitRows() {
       const id = String(provider?.provider || '').trim().toLowerCase();
       const option = providerOptions.find((entry) => entry.id === id);
       const providerTitle = option?.label || id;
-      if (providerEntries.length > 1) {
+      const showProviderTitle = state.settings?.showHomeLimitProviderNames === true || state.settings?.showToolIcons === false;
+      // A provider's row count is its account count — except MiMo, whose two
+      // products of one account are two rows. Names resolve over the same
+      // logical-account grouping the Limits page groups by, so one account's
+      // lanes are told apart by their product word alone and only several
+      // accounts earn an account name.
+      const accountCount = id === 'mimo'
+        ? mimoAccountGroups(providerEntries).length
+        : providerEntries.length;
+      if (accountCount > 1) {
         const accountTitle = limitAccountTitle(id, provider, index, providerEntries);
-        return state.settings?.showHomeLimitProviderNames === true || state.settings?.showToolIcons === false
-          ? `${providerTitle} · ${accountTitle}`
-          : accountTitle;
+        return showProviderTitle ? `${providerTitle} · ${accountTitle}` : accountTitle;
+      }
+      if (id === 'mimo') {
+        const product = mimoProductLabel(provider);
+        if (product) return showProviderTitle ? `${providerTitle} · ${product}` : product;
       }
       return providerTitle;
     }

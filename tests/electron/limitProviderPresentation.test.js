@@ -2896,8 +2896,8 @@ test('MiMo settings stays connected while one independent product is live', () =
 
 test('MiMo Limits rows show the no-plan and shared session recovery text', () => {
   const view = createLimitWindowsView({
-    isMimoMembershipProduct: limitWindowLabels.isMimoMembershipProduct,
     mimoProductLabel: limitWindowLabels.mimoProductLabel,
+    mimoAccountGroups: limitWindowLabels.mimoAccountGroups,
     accountIdentity: require('../../src/electron/renderer/accountIdentity'),
     settings: () => ({}),
     t: (key) => key,
@@ -2919,8 +2919,8 @@ test('MiMo Limits rows show the no-plan and shared session recovery text', () =>
 
 test('MiMo product rows name the shared account and the product when both are known', () => {
   const view = createLimitWindowsView({
-    isMimoMembershipProduct: limitWindowLabels.isMimoMembershipProduct,
     mimoProductLabel: limitWindowLabels.mimoProductLabel,
+    mimoAccountGroups: limitWindowLabels.mimoAccountGroups,
     accountIdentity: require('../../src/electron/renderer/accountIdentity'),
     settings: () => ({}),
     t: (key) => key,
@@ -2936,8 +2936,8 @@ test('MiMo product rows name the shared account and the product when both are kn
 
 test('a healthy MiMo row keeps its meta line free of recovery prompts', () => {
   const view = createLimitWindowsView({
-    isMimoMembershipProduct: limitWindowLabels.isMimoMembershipProduct,
     mimoProductLabel: limitWindowLabels.mimoProductLabel,
+    mimoAccountGroups: limitWindowLabels.mimoAccountGroups,
     accountIdentity: require('../../src/electron/renderer/accountIdentity'),
     t: (key) => ({ 'settings.limits.status.signInAgain': '重新登录' })[key] || key,
     presentation,
@@ -2952,7 +2952,7 @@ test('a healthy MiMo row keeps its meta line free of recovery prompts', () => {
     planLabel: 'Pay-as-you-go',
     windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.96, currency: 'CNY' }]
   };
-  assert.doesNotMatch(view.limitProviderMeta(row), /请重新登录/);
+  assert.equal(view.limitProviderMeta(row), 'Update unknown');
   assert.equal(view.limitProviderPlan(row), 'Pay-as-you-go');
 });
 
@@ -4033,7 +4033,7 @@ test('the provider rollup appears once, on the row that stands for the provider'
   // that did not do the grouping.
   const head = viewBody('renderLimitProviderHead', 'codexResetForecastDate');
   const group = viewBody('renderLimitProviderGroup');
-  const frame = viewBody('renderLimitProviderGroupFrame', 'mimoAccountGroups');
+  const frame = viewBody('renderLimitProviderGroupFrame', 'appendMimoAccountProducts');
   assert.match(head, /decoratePlanWithSubscription\(plan, provider, !options\.accountRow\)/);
   assert.doesNotMatch(head, /state\.stats/);
   // The group's own head is drawn without the flag, and each member passes it —
@@ -5804,19 +5804,17 @@ test('Z.ai token-pool windows print an absolute token pair through the detail sl
 });
 
 test('every compact surface can draw a row that has only one window', () => {
-  // A MiMo Desktop membership answers with a single weekly window and no
-  // balance. Each surface selects windows its own way, and a selection that
-  // silently yields nothing leaves the row blank rather than showing a wrong
-  // number — which is what the MiMo render branch did before it had an arm.
+  // Membership has one weekly window and no balance. Each compact surface must
+  // retain it when selecting windows rather than leaving an empty reading.
   const trayTextApi = require('../../src/shared/trayText');
   const row = {
     provider: 'mimo',
     status: 'ok',
     accountKey: 'sha256:membership',
-    source: 'oauth',
+    source: 'local',
     sourceDetail: 'app',
     updatedAt: '2026-09-23T00:00:00.000Z',
-    windows: [{ kind: 'weekly', windowMinutes: 10080, usedPercent: 40, remainingPercent: 60, resetsAt: '2026-09-29T00:00:00.000Z' }]
+    windows: [{ kind: 'weekly', usedPercent: 40, remainingPercent: 60, resetsAt: '2026-09-29T00:00:00.000Z' }]
   };
 
   // Home and the compact tray both read the shared picker, and the tray's kinds

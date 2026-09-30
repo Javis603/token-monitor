@@ -7,30 +7,27 @@ const test = require('node:test');
 
 const {
   createMimoExchangeFetch,
-  parseProxyResolveResult,
   parseProxyResolveResults
 } = require('../../src/electron/providers/mimo/exchangeFetch');
 
-test('a PAC result is read as the proxy Chromium resolved, or as nothing at all', () => {
-  assert.deepEqual(parseProxyResolveResult('DIRECT'), { kind: 'direct', proxyUrl: '' });
-  assert.deepEqual(parseProxyResolveResult('PROXY 127.0.0.1:7890'), { kind: 'http', proxyUrl: 'http://127.0.0.1:7890' });
-  assert.deepEqual(parseProxyResolveResult('PROXY 127.0.0.1:7890; DIRECT'), { kind: 'http', proxyUrl: 'http://127.0.0.1:7890' });
+test('a PAC result preserves supported routes and their fallback order', () => {
+  assert.deepEqual(parseProxyResolveResults('DIRECT'), [{ kind: 'direct', proxyUrl: '' }]);
+  assert.deepEqual(parseProxyResolveResults('PROXY 127.0.0.1:7890'), [{ kind: 'http', proxyUrl: 'http://127.0.0.1:7890' }]);
   assert.deepEqual(parseProxyResolveResults('PROXY 127.0.0.1:7890; DIRECT'), [
     { kind: 'http', proxyUrl: 'http://127.0.0.1:7890' },
     { kind: 'direct', proxyUrl: '' }
   ]);
-  assert.deepEqual(parseProxyResolveResult(''), { kind: 'direct', proxyUrl: '' });
-  assert.equal(parseProxyResolveResult('SOCKS5 127.0.0.1:1080').kind, 'unsupported');
+  assert.deepEqual(parseProxyResolveResults(''), [{ kind: 'direct', proxyUrl: '' }]);
+  assert.deepEqual(parseProxyResolveResults('SOCKS5 127.0.0.1:1080'), [{ kind: 'unsupported', proxyUrl: '' }]);
   // TLS to the proxy is a different scheme, not a different host.
-  assert.deepEqual(parseProxyResolveResult('HTTPS proxy.example:8443'), { kind: 'http', proxyUrl: 'https://proxy.example:8443' });
-  assert.deepEqual(parseProxyResolveResult('HTTP proxy.example:8080'), { kind: 'http', proxyUrl: 'http://proxy.example:8080' });
+  assert.deepEqual(parseProxyResolveResults('HTTPS proxy.example:8443'), [{ kind: 'http', proxyUrl: 'https://proxy.example:8443' }]);
+  assert.deepEqual(parseProxyResolveResults('HTTP proxy.example:8080'), [{ kind: 'http', proxyUrl: 'http://proxy.example:8080' }]);
 });
 
+// Empty env keeps system-proxy tests independent of the runner's proxy variables.
 test('a direct resolution reaches the origin without a dispatcher', async () => {
   const seen = [];
   const fetch = createMimoExchangeFetch({
-    // Pinned so an ambient HTTP(S)_PROXY on the machine running the
-    // suite cannot take the env branch and bypass the injected session.
     env: {},
     session: { resolveProxy: async () => 'DIRECT' },
     fetch: async (url, init) => { seen.push(init); return { status: 200 }; }
@@ -58,8 +55,6 @@ test('an explicit proxy environment wins before Chromium proxy resolution', asyn
 test('a resolved proxy becomes a dispatcher on the request', async () => {
   const seen = [];
   const fetch = createMimoExchangeFetch({
-    // Pinned so an ambient HTTP(S)_PROXY on the machine running the
-    // suite cannot take the env branch and bypass the injected session.
     env: {},
     session: { resolveProxy: async () => 'PROXY 127.0.0.1:7890' },
     fetch: async (url, init) => { seen.push(init); return { status: 200 }; }
@@ -71,8 +66,6 @@ test('a resolved proxy becomes a dispatcher on the request', async () => {
 test('a proxy undici cannot speak fails closed instead of going direct', async () => {
   let fetched = false;
   const fetch = createMimoExchangeFetch({
-    // Pinned so an ambient HTTP(S)_PROXY on the machine running the
-    // suite cannot take the env branch and bypass the injected session.
     env: {},
     session: { resolveProxy: async () => 'SOCKS5 127.0.0.1:1080' },
     fetch: async () => { fetched = true; return { status: 200 }; }
@@ -84,8 +77,6 @@ test('a proxy undici cannot speak fails closed instead of going direct', async (
 test('a failed PAC proxy advances to Chromium’s direct fallback', async () => {
   const attempts = [];
   const fetch = createMimoExchangeFetch({
-    // Pinned so an ambient HTTP(S)_PROXY on the machine running the
-    // suite cannot take the env branch and bypass the injected session.
     env: {},
     session: { resolveProxy: async () => 'PROXY 127.0.0.1:1; DIRECT' },
     fetch: async (url, init) => {
@@ -98,8 +89,7 @@ test('a failed PAC proxy advances to Chromium’s direct fallback', async () => 
   assert.deepEqual(attempts, [true, false]);
 });
 
-// A CONNECT proxy in twenty lines, so the routing above is verified against a
-// real tunnel rather than against a stub's constructor name.
+// Verify routing through a real CONNECT tunnel, beyond the dispatcher type.
 function startConnectProxy() {
   const tunnels = [];
   const server = net.createServer((socket) => {
@@ -137,8 +127,6 @@ test('a request resolved to a proxy really travels through it', async () => {
   const originPort = origin.address().port;
   const proxyPort = proxy.server.address().port;
   const fetch = createMimoExchangeFetch({
-    // Pinned so an ambient HTTP(S)_PROXY on the machine running the
-    // suite cannot take the env branch and bypass the injected session.
     env: {},
     session: { resolveProxy: async (url) => (String(url).includes(`:${originPort}`) ? `PROXY 127.0.0.1:${proxyPort}` : 'DIRECT') }
   });

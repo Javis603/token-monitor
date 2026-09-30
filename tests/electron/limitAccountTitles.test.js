@@ -23,7 +23,7 @@ const TITLE_FUNCTIONS = [
   'codexAccountTitle',
   'opencodeAccountTitle',
   'namedApiAccountTitle',
-  'planAccountTitle',
+  'volcenginePlanAccountTitle',
   'mimoAccountTitle'
 ];
 
@@ -72,10 +72,9 @@ function runTitle(source, expression, context = {}) {
 function titleContext(maskLimitAccountEmails) {
   return {
     accountIdentity: { accountEmailLabel, accountTitleLabel, codexAccountDisplayLabel, maskEmailAddress },
-    // MiMo's title path takes the product words from the shared display
-    // vocabulary, the way the view receives them from its host.
+    // MiMo's title path takes its words from the shared display vocabulary,
+    // the way the view receives them from its host.
     mimoProductLabel: limitWindowLabels.mimoProductLabel,
-    isMimoMembershipProduct: limitWindowLabels.isMimoMembershipProduct,
     settings: () => ({ maskLimitAccountEmails }),
     t: (key) => (key === 'settings.codex.personalWorkspace' ? 'Personal' : key)
   };
@@ -160,7 +159,7 @@ test('title resolution matches between the limits panel and Home', () => {
   assert.match(view, /limitAccountTitle\(providerId, provider, index, providers\)/);
   assert.match(app, /limitAccountTitle\(id, provider, index, providerEntries\)/);
   assert.equal(dock.match(/limitAccountTitle/g), null, 'the card titles accounts through the view');
-  for (const name of ['codexAccountTitle', 'opencodeAccountTitle', 'namedApiAccountTitle', 'planAccountTitle']) {
+  for (const name of ['codexAccountTitle', 'opencodeAccountTitle', 'namedApiAccountTitle', 'volcenginePlanAccountTitle']) {
     assert.doesNotMatch(app, new RegExp(`${name}\\(provider, index`), `${name} should not be called from the page`);
   }
   // The tray renders account text outside the title resolver, so it reads the
