@@ -21,6 +21,7 @@ test('dock account choices distinguish MiMo products without changing sibling pr
     replaceChildren(...children) { this.children = children; }
     addEventListener(name, listener) { this.events[name] = listener; }
     setAttribute() {}
+    contains(target) { return target === this || this.children.some((child) => child.contains?.(target)); }
     *walk() { yield this; for (const child of this.children) yield* child.walk(); }
     find(className) { return [...this.walk()].find((node) => node.className === className); }
     all(className) { return [...this.walk()].filter((node) => node.className === className); }
