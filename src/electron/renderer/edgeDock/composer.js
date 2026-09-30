@@ -230,24 +230,35 @@
       return [...choices.values()];
     }
 
-    function windowRow(item, id) {
-      const row = el('label', 'settings-item edge-dock-composer-window');
-      row.append(el('span', 'settings-item-title', t('settings.edgeDock.window')));
-      const select = document.createElement('select');
+    function refreshWindowPicker(select, item) {
       const choices = [{ value: '', label: t('settings.edgeDock.window.auto') }, ...windowChoices(item)];
       const matchingChoices = item.windowKey ? choices.filter((choice) => choice.keys?.includes(item.windowKey)) : [];
       const selectedValue = matchingChoices.length === 1 ? matchingChoices[0].value : item.windowKey || '';
       if (item.windowKey && matchingChoices.length !== 1) {
         choices.push({ value: item.windowKey, label: t('settings.edgeDock.window.unavailable') });
       }
-      for (const choice of choices) {
+      const options = choices.map((choice) => {
         const option = document.createElement('option');
         option.value = choice.value;
         option.textContent = choice.label;
-        select.append(option);
-      }
+        return option;
+      });
+      select.replaceChildren(...options);
       select.value = selectedValue;
+    }
+
+    function windowRow(item, id) {
+      const row = el('label', 'settings-item edge-dock-composer-window');
+      row.append(el('span', 'settings-item-title', t('settings.edgeDock.window')));
+      const select = document.createElement('select');
+      refreshWindowPicker(select, item);
       select.addEventListener('change', () => { void updateItem(id, { windowKey: select.value }); });
+      select.addEventListener('blur', () => {
+        // Blur precedes the click on the next control. Refresh only the options
+        // so that control stays attached and receives its click and focus.
+        const currentItem = effectiveItems().find((entry) => itemsApi.itemId(entry) === id);
+        if (currentItem && root.contains(select)) refreshWindowPicker(select, currentItem);
+      });
       row.append(select);
       return row;
     }

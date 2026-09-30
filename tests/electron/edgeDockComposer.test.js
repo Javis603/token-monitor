@@ -38,6 +38,7 @@ test('a stats-only repaint keeps an open window picker and its labels match the 
   global.document = document;
   try {
     const root = new Element('div');
+    const saves = [];
     const settings = { edgeDockItems: [{ type: 'limit', provider: 'claude' }] };
     let stats = { limits: { providers: [{ provider: 'claude', status: 'ok', windows: [
       { kind: 'session', label: 'Session', remainingPercent: 100 },
@@ -49,7 +50,7 @@ test('a stats-only repaint keeps an open window picker and its labels match the 
       presentationApi: {},
       getSettings: () => settings,
       getStats: () => stats,
-      save: () => {},
+      save: (change) => saves.push(change),
       providerLabel: (id) => id,
       providerColor: () => '#fff',
       windowLabel: (record, quotaWindow) => limitWindowLabel(record.provider, quotaWindow),
@@ -76,10 +77,27 @@ test('a stats-only repaint keeps an open window picker and its labels match the 
     ] }] } };
     composer.render();
     assert.equal(find(root, 'SELECT'), select);
-    document.activeElement = null;
+    const nextControl = find(root, 'INPUT');
+    document.activeElement = nextControl;
+    select.listeners.blur();
+    assert.equal(find(root, 'SELECT'), select);
+    assert.equal(select.children.at(-1).textContent, 'Monthly');
+    assert.equal(root.contains(nextControl), true);
+    assert.equal(document.activeElement, nextControl);
+    assert.equal(saves.length, 0, 'refreshing options must not save a selection');
+    nextControl.checked = false;
+    nextControl.listeners.change();
+    assert.equal(saves.at(-1).edgeDockItems[0].showUsage, false);
+
+    document.activeElement = select;
+    stats.limits.providers[0].windows.pop();
     composer.render();
-    assert.notEqual(find(root, 'SELECT'), select);
-    assert.equal(find(root, 'SELECT').children.at(-1).textContent, 'Monthly');
+    assert.equal(select.children.at(-1).textContent, 'Monthly');
+    document.activeElement = null;
+    select.listeners.blur();
+    assert.deepEqual(select.children.map((option) => option.textContent), [
+      'settings.edgeDock.window.auto', 'Session', 'Weekly'
+    ]);
 
     const first = { kind: 'session', label: 'Some quota', limitId: 'feature-a', windowMinutes: 300, additional: true };
     const second = { ...first, limitId: 'feature-b' };
@@ -103,6 +121,23 @@ test('a stats-only repaint keeps an open window picker and its labels match the 
     settings.showCodexAdditionalLimits = true;
     composer.render();
     assert.equal(find(root, 'SELECT').value, itemsApi.limitWindowKey(second));
+    const restoredSelect = find(root, 'SELECT');
+    document.activeElement = restoredSelect;
+    stats.limits.providers[0].windows[1] = { ...second, label: 'Latest quota label' };
+    settings.showCodexAdditionalLimits = false;
+    composer.render();
+    assert.equal(find(root, 'SELECT'), restoredSelect);
+    document.activeElement = null;
+    restoredSelect.listeners.blur();
+    assert.equal(restoredSelect.children.at(-1).textContent, 'settings.edgeDock.window.unavailable');
+    assert.equal(restoredSelect.value, itemsApi.limitWindowKey(second));
+    document.activeElement = restoredSelect;
+    settings.showCodexAdditionalLimits = true;
+    composer.render();
+    document.activeElement = null;
+    restoredSelect.listeners.blur();
+    assert.equal(restoredSelect.children[2].textContent, 'Latest quota label');
+    assert.equal(restoredSelect.value, itemsApi.limitWindowKey(second));
   } finally {
     global.document = previousDocument;
   }
