@@ -1057,7 +1057,7 @@ function relativeAgo(value) {
 // runs out. Absent for a session whose transcript states no window, which is the
 // normal case rather than an error.
 function contextNode(session) {
-  const context = session?.context;
+  const context = sessionLive.sessionActivityState(session) !== 'idle' ? session?.context : null;
   if (!context) return null;
   const showUsed = appearance().sessionContextMetric !== 'remaining';
   const percent = showUsed ? context.percentUsed : context.percentLeft;
@@ -1065,12 +1065,12 @@ function contextNode(session) {
   node.dataset.tone = String(context.tone || '');
   // The full phrase lives in the tooltip; the line itself stays a bar and a
   // number so it reads at a glance in the meta row.
-  node.title = t(showUsed ? 'session.contextUsed' : 'session.contextLeft', { percent });
   const meter = el('span', 'edge-dock-session-context-meter');
   const fill = el('span', 'edge-dock-session-context-fill');
   fill.style.setProperty('--bar-scale', String(percent / 100));
   meter.append(fill);
   node.append(meter, el('span', 'edge-dock-session-context-value', `${percent}%`));
+  sessionRowsApi.setSessionTooltip(node, context, sessionLive.sessionPromptCacheForRow(session), t, limitWindowsView);
   return node;
 }
 
@@ -1195,6 +1195,12 @@ function sessionsContainer(sessions, options = {}) {
     // for the same session.
     meta.append(document.createTextNode([sessionRowsApi.sessionModelLabel(session), relativeAgo(session.lastUsedAt || session.startedAt)].filter(Boolean).join(' · ')));
     const context = contextNode(session);
+    const cache = context ? null : sessionLive.sessionPromptCacheForRow(session);
+    if (cache) {
+      const badge = el('span', 'edge-dock-session-cache', t('session.cacheEstimate', { minutes: cache.minutes }));
+      sessionRowsApi.setSessionTooltip(badge, session, cache, t, limitWindowsView);
+      meta.append(badge);
+    }
     if (context) meta.append(context);
     row.append(
       nameNode,
@@ -1605,7 +1611,9 @@ function sessionsExpiryDelayMs() {
     // recomputed each time, which is also what makes a second and third expiry wake the
     // surface in turn. Only an expiry still ahead can shorten a wait; a stale one would
     // otherwise pin the delay to the floor and re-arm on every pass.
-    const expiresAt = presentation.nextRunningExpiryAt(cell.sessions, now);
+    const runningExpiry = presentation.nextRunningExpiryAt(cell.sessions, now);
+    const cacheExpiry = sessionLive.nextSessionStatusChangeAt(cell.sessions, now);
+    const expiresAt = [runningExpiry, cacheExpiry].filter((at) => at > now).sort((a, b) => a - b)[0] || 0;
     if (expiresAt > now && (!soonest || expiresAt < soonest)) soonest = expiresAt;
   }
   if (!soonest) return 0;

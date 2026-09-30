@@ -414,6 +414,7 @@
     tooltip.setAttribute('popover', 'manual');
 
     const open = () => {
+      if (!tooltip.childElementCount) return;
       tooltipHost.markOpened();
       wrap.classList.add('has-opened');
       if (!wrap.isConnected) return;
@@ -429,6 +430,7 @@
     wrap.addEventListener('focusin', open);
     wrap.addEventListener('pointerleave', close);
     wrap.addEventListener('focusout', close);
+    wrap.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); });
   }
 
   // Entries are rows of cells: `[label, value]`, or `[label, middle, value]` when
@@ -460,6 +462,13 @@
         .map(([entryLabel, ...rest]) => `${entryLabel}: ${rest.filter(Boolean).join(' ')}`)
         .join(', ')
     );
+    const tooltip = detailTooltipNode(entries, columns);
+    infoWrap.append(info, tooltip);
+    attachLimitDetailTooltip(infoWrap, tooltip);
+    return infoWrap;
+  }
+
+  function detailTooltipNode(entries, columns = 2) {
     const tooltip = document.createElement('span');
     tooltip.className = ['limit-detail-tooltip', columns > 2 ? 'limit-detail-tooltip-triple' : '']
       .filter(Boolean).join(' ');
@@ -485,9 +494,32 @@
       }
       tooltip.append(row);
     });
-    infoWrap.append(info, tooltip);
-    attachLimitDetailTooltip(infoWrap, tooltip);
-    return infoWrap;
+    return tooltip;
+  }
+
+  // A gauge or plan label can be the trigger itself; no extra info icon needed.
+  function setDetailTooltip(wrap, entries) {
+    wrap.removeAttribute('title');
+    let tooltip = wrap.querySelector('.limit-detail-tooltip');
+    if (!entries?.length) {
+      tooltip?.hidePopover?.();
+      tooltip?.replaceChildren();
+      wrap.classList.remove('limit-detail-tooltip-wrap');
+      wrap.removeAttribute('tabindex');
+      return;
+    }
+    wrap.classList.add('limit-detail-tooltip-wrap');
+    wrap.style.setProperty('-webkit-app-region', 'no-drag');
+    wrap.setAttribute('aria-label', entries.map((entry) => Array.isArray(entry) ? entry.join(': ') : entry.full).join(', '));
+    wrap.tabIndex = 0;
+    const next = detailTooltipNode(entries);
+    if (tooltip) {
+      tooltip.replaceChildren(...next.children);
+    } else {
+      tooltip = next;
+      wrap.append(tooltip);
+      attachLimitDetailTooltip(wrap, tooltip);
+    }
   }
 
   function providerSpendNode(balance, provider = null) {
@@ -2406,6 +2438,7 @@
   return {
     antigravityQuotaGroups,
     attachLimitDetailTooltip,
+    setDetailTooltip,
     codexResetForecastExpired,
     limitAccountTitle,
     limitProviderMeta,

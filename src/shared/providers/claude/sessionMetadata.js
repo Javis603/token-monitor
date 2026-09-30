@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const { readSessionPromptCache } = require('../../sessionPromptCache');
 const { claudeSessionRoots } = require('./paths');
 const { findSessionFiles } = require('../../sessionFiles');
 const { normalizeSessionContext, shouldReadSessionContext } = require('../../sessionContext');
@@ -575,6 +576,7 @@ function resolveSessionMetadata(sessionIds, context) {
       : undefined;
     result.set(sessionId, {
       ...meta,
+      promptCache: readSessionPromptCache(filePath, 'claude', context.now),
       ...(title ? { title } : {}),
       ...(turnEnded === undefined ? {} : { turnEnded }),
       ...(sessionContext || {})

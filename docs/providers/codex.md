@@ -19,6 +19,8 @@ Codex combines a tokscale-backed usage client, local rollout enrichment and a mu
 
 Do not replace the transcript-reported window with a model table. User configuration can change the window for the exact sessions being measured.
 
+Cache warmth is an optional `promptCache: { observedAt, ttlSeconds }` estimate from a bounded rollout tail (1 MiB, widened up to 8 MiB when a long turn pushes its model declaration outside the initial tail). It requires a recognized GPT-5.6 or GPT-6.0/6.1 model and cache read/write activity, and applies the documented 30-minute API lifetime as an explicitly labeled estimate, not a Codex expiry receipt. Unknown models, cold responses and compaction hide it. Repeated unchanged `token_count` accounting never refreshes the anchor. The anchor is a response observation, so remaining time may be overstated; quota accounting and successful reuse are not implied. Home, Edge Dock and Sessions share one metrics slot: recent context takes priority, with the context token/window counts and cache countdown available in the shared detail tooltip by hovering its bar or percentage; then a still-valid cache estimate appears after 10 minutes of inactivity, with the last recorded context counts still available on hover. Turn completion alone clears neither reading; the cache countdown ends at the observed TTL.
+
 ## Limits sources
 
 The live account normally reads the ChatGPT/Codex backend with the current `auth.json`. The configured `chatgpt_base_url` selects the matching backend path family. The app-server RPC path is a fallback, not an interchangeable authority.

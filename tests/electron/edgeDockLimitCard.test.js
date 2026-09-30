@@ -54,6 +54,8 @@ class FakeElement {
   append(...children) { this.children.push(...children.filter(Boolean)); }
   addEventListener() {}
   setAttribute(name, value) { this.attributes[name] = value; }
+  removeAttribute(name) { delete this.attributes[name]; }
+  replaceChildren(...children) { this.children = [...children]; }
   querySelector(selector) { return this.find(selector.replace('.', '')); }
 
   // Depth-first walk, so an assertion can ask what the card actually drew
@@ -184,6 +186,23 @@ test('the dock hands the shared view every dependency it destructures', () => {
   }
   // `document` is read off deps separately rather than destructured with the rest.
   assert.match(wiring, /^\s*document,$/m);
+});
+
+test('session gauges reuse the detail tooltip builder without an info icon', () => {
+  const view = dockView();
+  const gauge = new FakeElement('span');
+  gauge.className = 'edge-dock-session-cache';
+  const { setSessionTooltip } = require('../../src/electron/renderer/sessionRows');
+  setSessionTooltip(gauge, { contextTokens: 123000, contextWindow: 200000 }, { minutes: 28 }, (key, params) => i18n.translate('en', key, params), view);
+  const tooltip = gauge.find('limit-detail-tooltip');
+  assert.ok(tooltip);
+  assert.equal(tooltip.text, '123K / 200K Cache ~28m left');
+  assert.equal(gauge.find('limit-detail-tooltip-trigger'), null);
+  const eventCount = gauge.children.length;
+  setSessionTooltip(gauge, null, { minutes: 27 }, (key, params) => i18n.translate('en', key, params), view);
+  assert.equal(gauge.children.length, eventCount);
+  assert.equal(gauge.find('limit-detail-tooltip'), tooltip);
+  assert.equal(tooltip.text, 'Cache ~27m left');
 });
 
 // The dependency list above is only half the wiring: the view also reads

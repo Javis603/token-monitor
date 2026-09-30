@@ -2322,16 +2322,20 @@ function setActiveToolDetailMode(mode) {
 // right now", and a fuel gauge for how much of its context window is left. The
 // dot is drawn only while the agent is working and the gauge only while the
 // session is recent, so a list of several hundred past sessions is untouched.
-function updateRowContext(row, context) {
+function updateRowContext(row, context, promptCache, contextSnapshot) {
   const gauge = row.querySelector('.row-context');
   if (!gauge) return;
   const percentLeft = context ? Number(context.percentLeft) : NaN;
   if (!Number.isFinite(percentLeft)) {
-    gauge.classList.add('hidden');
-    gauge.removeAttribute('title');
+    gauge.classList.toggle('hidden', !promptCache);
+    gauge.dataset.tone = '';
+    gauge.querySelector('.row-context-meter').classList.add('hidden');
+    gauge.querySelector('.row-context-value').textContent = promptCache ? t('session.cacheEstimate', { minutes: promptCache.minutes }) : '';
+    sessionRowsApi.setSessionTooltip(gauge, promptCache ? contextSnapshot : null, promptCache, t, limitWindowsView);
     return;
   }
   gauge.classList.remove('hidden');
+  gauge.querySelector('.row-context-meter').classList.remove('hidden');
   // Headroom is what decides the colour whichever way the number is written:
   // a gauge reading "93% used" is the same emergency as one reading "7% left".
   gauge.dataset.tone = String(context.tone || '');
@@ -2342,7 +2346,7 @@ function updateRowContext(row, context) {
   // Default is used, matching Codex and Claude Code's own readouts.
   const showUsed = state.settings?.sessionContextMetric !== 'remaining';
   const percent = showUsed ? Number(context.percentUsed) : percentLeft;
-  gauge.title = t(showUsed ? 'session.contextUsed' : 'session.contextLeft', { percent }) || `${percent}%`;
+  sessionRowsApi.setSessionTooltip(gauge, context, promptCache, t, limitWindowsView);
   gauge.querySelector('.row-context-value').textContent = `${percent}%`;
   gauge.querySelector('.row-context-fill').style.setProperty('--bar-scale', String(percent / 100));
 }
@@ -2385,7 +2389,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, sortTime }) {
+function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2450,7 +2454,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   // reading), so this draws whatever arrived rather than re-deciding from
   // `running` - that second gate is exactly what made the dock card and this
   // list disagree about whether a session still had a gauge.
-  updateRowContext(row, context);
+  updateRowContext(row, context, promptCache, contextSnapshot);
   updateRowLive(row, activityState || (running === true ? 'running' : 'idle'), sortTime);
   const fill = row.querySelector('.bar-fill');
   fill.style.background = barBackground || color;
@@ -2604,6 +2608,7 @@ function renderSessionPager(page) {
 }
 
 function renderRows(rows, { incompleteHint = '' } = {}) {
+  if (sessionTooltipShouldHoldRender()) return;
   if (rows.length === 0 && !incompleteHint) {
     els.breakdown.replaceChildren();
     renderSessionPager(null);
@@ -3999,6 +4004,10 @@ function limitDetailTooltipShouldHoldRender() {
   return Boolean(els.limitsPanel.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
 }
 
+function sessionTooltipShouldHoldRender() {
+  return Boolean(document.querySelector('.home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within'));
+}
+
 function flushPendingLimitDetailTooltipRender() {
   if (!state.limitDetailTooltipRenderPending || state.breakdown !== 'limits') return;
   state.limitDetailTooltipRenderPending = false;
@@ -4055,6 +4064,7 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
         if (limitDetailTooltipShouldHoldRender()) return;
         state.limitDetailTooltipActive = false;
         flushPendingLimitDetailTooltipRender();
+        if (state.breakdown === 'home' || state.breakdown === 'session') render();
       });
     }
   },
@@ -5718,13 +5728,12 @@ function homeSessionAgo(value) {
   return t('edgeDock.agoDays', { count: Math.round(hours / 24) });
 }
 
-function homeSessionContext(context) {
+function homeSessionContext(context, promptCache) {
   const showUsed = state.settings?.sessionContextMetric !== 'remaining';
   const percent = showUsed ? context.percentUsed : context.percentLeft;
   const node = document.createElement('span');
   node.className = 'home-session-context';
   node.dataset.tone = context.tone || '';
-  node.title = t(showUsed ? 'session.contextUsed' : 'session.contextLeft', { percent });
   const meter = document.createElement('span');
   meter.className = 'home-session-context-meter';
   const fill = document.createElement('span');
@@ -5734,6 +5743,7 @@ function homeSessionContext(context) {
   const value = document.createElement('span');
   value.textContent = `${percent}%`;
   node.append(meter, value);
+  sessionRowsApi.setSessionTooltip(node, context, promptCache, t, limitWindowsView);
   return node;
 }
 
@@ -5749,7 +5759,9 @@ function scheduleHomeSessionRepaint() {
   const now = Date.now();
   const expiry = window.TokenMonitorEdgeDockPresentation.nextRunningExpiryAt(rows, now);
   // Refresh relative ages once a minute, or sooner when a running session expires.
-  const delay = expiry > now ? Math.min(60_000, Math.max(1_000, expiry - now + 50)) : 60_000;
+  const cacheExpiry = window.TokenMonitorSessionLive?.nextSessionStatusChangeAt(rows, now) || 0;
+  const nextExpiry = [expiry, cacheExpiry].filter((at) => at > now).sort((a, b) => a - b)[0];
+  const delay = nextExpiry ? Math.min(60_000, Math.max(1_000, nextExpiry - now + 50)) : 60_000;
   state.homeSessionRepaintTimer = setTimeout(() => {
     state.homeSessionRepaintTimer = null;
     if (visibleStatsSurface() !== 'main' || state.breakdown !== 'home') return;
@@ -5763,7 +5775,28 @@ function scheduleHomeSessionRepaint() {
   }, delay);
 }
 
+// Keep the Sessions metrics slot current even when no collection arrives.
+let sessionStatusRepaintTimer = null;
+function stopSessionStatusRepaint() {
+  clearTimeout(sessionStatusRepaintTimer);
+  sessionStatusRepaintTimer = null;
+}
+function scheduleSessionStatusRepaint(period, incompleteHint = '') {
+  stopSessionStatusRepaint();
+  const now = Date.now();
+  const next = window.TokenMonitorSessionLive.nextSessionStatusChangeAt(Object.values(period?.sessions || {}), now);
+  if (!next) return;
+  sessionStatusRepaintTimer = setTimeout(() => {
+    sessionStatusRepaintTimer = null;
+    if (visibleStatsSurface() !== 'main' || state.breakdown !== 'session' || state.openSession) return;
+    renderRows(sessionRowsForPeriod(period), { incompleteHint });
+    scheduleSessionStatusRepaint(period, incompleteHint);
+  }, Math.min(60_000, Math.max(1_000, next - now + 50)));
+}
+
 function renderHomeSessionModule() {
+  const current = els.homePanel?.querySelector('.home-module-session');
+  if (current && sessionTooltipShouldHoldRender()) return current;
   const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
   const runningCount = rows.filter((row) => window.TokenMonitorSessionLive.sessionActivityState(row) === 'running').length;
   const meta = runningCount > 0 ? t('home.runningSessions', { count: runningCount }) : '';
@@ -5805,7 +5838,16 @@ function renderHomeSessionModule() {
     description.className = 'home-list-sub';
     description.textContent = [sessionRowsApi.sessionModelLabel(row), age].filter(Boolean).join(' · ');
     meta.append(description);
-    if (row.context) meta.append(homeSessionContext(row.context));
+    const context = window.TokenMonitorSessionLive.sessionActivityState(row) !== 'idle' ? row.context : null;
+    const cache = window.TokenMonitorSessionLive.sessionPromptCacheForRow(row);
+    if (cache && !context) {
+      const badge = document.createElement('span');
+      badge.className = 'home-session-cache';
+      badge.textContent = t('session.cacheEstimate', { minutes: cache.minutes });
+      sessionRowsApi.setSessionTooltip(badge, row, cache, t, limitWindowsView);
+      meta.append(badge);
+    }
+    if (context) meta.append(homeSessionContext(context, cache));
     item.append(mark, stateMark, name, value, meta);
     body.append(item);
   }
@@ -6271,6 +6313,7 @@ function renderHomeTrendsModule() {
 
 function renderHome() {
   if (!els.homePanel) return;
+  if (sessionTooltipShouldHoldRender()) return;
   // The previous scroller (and its ResizeObserver) is about to be replaced; drop the
   // observer so at most one is live. Keep the active tooltip visible while the
   // replacement heatmap reconnects it to the same date cell.
@@ -6331,6 +6374,7 @@ function render() {
   if (!state.stats) return;
   allTimeSessions.ensure();
   stopHomeSessionRepaint();
+  stopSessionStatusRepaint();
   els.toolDetailFooter.classList.add('hidden');
   syncLiveTokenRateFooterState();
   renderSessionUsageArchiveStatus();
@@ -6471,6 +6515,7 @@ function render() {
       incompleteHint = 'sessions.incomplete';
     }
     renderRows(rows, { incompleteHint });
+    if (state.breakdown === 'session') scheduleSessionStatusRepaint(period, incompleteHint);
   }
   
   renderFloatingBubbleContent();

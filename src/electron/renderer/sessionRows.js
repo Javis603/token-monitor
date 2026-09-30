@@ -19,6 +19,16 @@
   const sessionContextForRow = sessionLive.sessionContextForRow;
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
 
+  function setSessionTooltip(node, context, promptCache, translate, view) {
+    const entries = [];
+    if (context?.contextTokens > 0 && context?.contextWindow > 0) {
+      const compact = (value) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+      entries.push({ full: `${compact(context.contextTokens)} / ${compact(context.contextWindow)}` });
+    }
+    if (promptCache) entries.push({ full: translate('session.cacheEstimateTooltip', { minutes: promptCache.minutes }) });
+    view.setDetailTooltip(node, entries);
+  }
+
   function finiteNumber(value) {
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
@@ -264,6 +274,8 @@
           running: running || undefined,
           activityState,
           context: sessionContextForRow(session, now),
+          contextSnapshot: !archived ? sessionLive.sessionContextRow(session) : undefined,
+          promptCache: sessionLive.sessionPromptCacheForRow(session, now),
           client,
           backgroundReview: isBackgroundReviewSession(session) || undefined,
           sortTime: sessionTimestampValue(session),
@@ -340,6 +352,7 @@
   }
 
   return {
+    setSessionTooltip,
     applyBreakdownRowSemantics,
     archivedSessionCount,
     compactSessionTime,

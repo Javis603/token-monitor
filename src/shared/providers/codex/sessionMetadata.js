@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const { readSessionPromptCache } = require('../../sessionPromptCache');
 const os = require('node:os');
 const path = require('node:path');
 const { findSessionFiles, codexSessionFile } = require('../../sessionFiles');
@@ -357,7 +358,10 @@ function resolveSessionMetadata(sessionIds, context) {
   // attempted only once that timestamp says the session could still be open —
   // `fileSessionMetadata` has to run first for that reason.
   const decorate = (sessionId, filePath) => {
-    const meta = context.fileSessionMetadata(sessionId, filePath, result.get(sessionId));
+    const meta = {
+      ...context.fileSessionMetadata(sessionId, filePath, result.get(sessionId)),
+      promptCache: readSessionPromptCache(filePath, 'codex', context.now)
+    };
     if (!shouldReadSessionContext(meta.lastUsedAt, context.now)) return meta;
     const sessionContext = readContext(filePath);
     // The turn boundary rides the same tail and answers the other half of the

@@ -533,6 +533,9 @@ function mergeSession(target, source) {
   const sourceLastUsed = timestampMs(source.lastUsedAt);
   const targetLastUsed = timestampMs(target.lastUsedAt);
   if (sourceLastUsed && sourceLastUsed > targetLastUsed) target.lastUsedAt = new Date(sourceLastUsed).toISOString();
+  if (hasOwn(source, 'promptCache') && sourceLastUsed >= targetLastUsed) {
+    target.promptCache = normalizePromptCache(source.promptCache);
+  }
   const sourceProjectId = String(source.projectId || '');
   if (!target.projectId && sourceProjectId) {
     target.projectId = sourceProjectId;
@@ -632,6 +635,13 @@ function sessionFromRow(row) {
   return session;
 }
 
+function normalizePromptCache(input) {
+  const observedAt = normalizeIsoTimestamp(input?.observedAt);
+  const ttlSeconds = input?.ttlSeconds;
+  return observedAt && [300, 1800, 3600].includes(ttlSeconds)
+    ? { observedAt, ttlSeconds } : null;
+}
+
 function normalizeSession(input, fallbackKey) {
   if (!input || typeof input !== 'object') return null;
   if (isReasonixSyntheticSession(input, fallbackKey)) return null;
@@ -647,6 +657,7 @@ function normalizeSession(input, fallbackKey) {
   session.messageCount = Math.max(0, Math.round(firstNumber(input, MESSAGE_COUNT_KEYS)));
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
+  if (hasOwn(input, 'promptCache')) session.promptCache = normalizePromptCache(input.promptCache);
   session.contextTokens = Math.max(0, Math.round(asNumber(input.contextTokens ?? input.context_tokens ?? 0)));
   session.contextWindow = Math.max(0, Math.round(asNumber(input.contextWindow ?? input.context_window ?? 0)));
   // Carried rather than summed, and only when the source actually states it:

@@ -3269,6 +3269,7 @@ html.is-windows .settings-panel select option {
   gap: 6px;
 }
 .home-session-meta .home-list-sub { min-width: 0; }
+.home-session-cache { margin-left: auto; flex: 0 0 auto; color: var(--muted); font-size: 10px; white-space: nowrap; }
 .home-session-context { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; margin-left: auto; color: var(--muted); font-size: 10px; }
 .home-session-context-meter { width: 16px; height: 3px; overflow: hidden; border-radius: 2px; background: rgba(var(--overlay-rgb), 0.18); }
 .home-session-context-fill { display: block; width: 100%; height: 100%; background: rgba(var(--overlay-rgb), 0.5); transform: scaleX(var(--bar-scale, 0)); transform-origin: left center; }
@@ -3833,6 +3834,7 @@ html.is-windows .settings-panel select option {
   color: var(--muted);
   font-size: 9px;
   line-height: 1.1;
+  white-space: nowrap;
 }
 .row-context-meter {
   width: 20px;
@@ -3841,6 +3843,7 @@ html.is-windows .settings-panel select option {
   border-radius: 2px;
   background: rgba(var(--sunken-rgb), 0.46);
 }
+
 .row-context-fill {
   display: block;
   width: 100%;
@@ -4581,6 +4584,16 @@ html.is-windows .limit-live-badge {
   height: 14px;
   flex: 0 0 14px;
   place-items: center;
+}
+.row-context.limit-detail-tooltip-wrap,
+.home-session-context.limit-detail-tooltip-wrap,
+.home-session-cache.limit-detail-tooltip-wrap,
+.edge-dock-session-context.limit-detail-tooltip-wrap,
+.edge-dock-session-cache.limit-detail-tooltip-wrap {
+  display: inline-flex;
+  width: auto;
+  height: auto;
+  flex: 0 0 auto;
 }
 .limit-detail-tooltip-trigger {
   display: inline-grid;

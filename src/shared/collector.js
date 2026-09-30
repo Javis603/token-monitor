@@ -950,6 +950,13 @@ function propagateTodayProjects(today, periods) {
       // dock card reads month first, so it was the surface that displayed it.
       target.contextWindow = Number(session.contextWindow) || 0;
       target.contextTokens = Number(session.contextTokens) || 0;
+      // Home and Dock prefer month rows; carry the fresh observation (including
+      // an explicit cold reading) through anchored watch updates as well.
+      if (Object.prototype.hasOwnProperty.call(session, 'promptCache')) {
+        target.promptCache = session.promptCache;
+      } else {
+        delete target.promptCache;
+      }
       // The turn boundary is copied in all three states, matching what the
       // fresh scan said: `true` finished, `false` open, absent unknown. Copying
       // only `true` left a stale `true` in a derived period after its session

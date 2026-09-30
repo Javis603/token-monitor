@@ -194,6 +194,9 @@
         // "N models" for a multi-model session — a reading this projection
         // could not reproduce from a flattened winner.
         models: session.models || {},
+        promptCache: session.promptCache || null,
+        contextTokens: finite(session.contextTokens),
+        contextWindow: finite(session.contextWindow),
         totalTokens: finite(session.totalTokens) || 0,
         costUsd: finite(session.costUsd) || 0,
         lastUsedAt: session.lastUsedAt || null,
