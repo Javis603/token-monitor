@@ -273,7 +273,7 @@
     const byId = providerEntriesById(providers);
     return (providerOptions || []).some(({ id: rawId }) => {
       const id = String(rawId || '').trim().toLowerCase();
-      if (!id || hidden.has(id) || (enabled.size > 0 && !enabled.has(id))) return false;
+      if (!id || hidden.has(id) || !enabled.has(id)) return false;
       return !byId.has(id);
     });
   }

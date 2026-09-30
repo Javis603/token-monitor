@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   homeActivityHeatmapLayout,
@@ -28,6 +29,7 @@ const {
   homeHistoryFetchOutcome
 } = require('../../src/electron/renderer/homeOverview');
 const { limitProviderCompactWindows } = require('../../src/electron/renderer/limitProviderPresentation');
+const limitProviderOrderApi = require('../../src/electron/renderer/limitProviderOrder');
 
 const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], monthly: [], summary: {} };
 const emptyHistory = { daily: [], monthly: [], summary: {} };
@@ -345,9 +347,6 @@ test('homeLimitsAwaitingFirstData is true when an enabled provider has no entry 
 });
 
 test('homeLimitsAwaitingFirstData is false when every candidate provider is hidden', () => {
-  // An empty enabledProviderIds means "no restriction" here, matching
-  // homeLimitAccountsForProviders' own convention -- hiding is what actually
-  // excludes a provider from the check.
   assert.equal(homeLimitsAwaitingFirstData({
     providers: [],
     providerOptions: [{ id: 'claude' }],
@@ -355,6 +354,47 @@ test('homeLimitsAwaitingFirstData is false when every candidate provider is hidd
     hiddenProviderIds: ['claude']
   }), false);
 });
+
+test('homeLimitsAwaitingFirstData is false when no provider is enabled', () => {
+  assert.equal(homeLimitsAwaitingFirstData({
+    providers: [],
+    providerOptions: [{ id: 'claude' }],
+    enabledProviderIds: []
+  }), false);
+});
+
+for (const { name, settings, expected } of [
+  { name: 'limits are globally disabled', settings: { limitsEnabled: false, limitProviders: 'claude' }, expected: 'home.noLimits' },
+  { name: 'all providers are deselected', settings: { limitsEnabled: true, limitProviders: '' }, expected: 'home.noLimits' },
+  { name: 'an enabled provider is awaiting its first data', settings: { limitsEnabled: true, limitProviders: 'claude' }, expected: 'home.limitsInitializing' }
+]) {
+  test(`Home limits empty-state copy when ${name}`, () => {
+    const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+    const functions = ['configuredLimitProviderSelection', 'enabledLimitProviderSet', 'homeLimitRows', 'renderHomeLimitModule']
+      .map((functionName) => {
+        const start = source.indexOf(`function ${functionName}(`);
+        assert.notEqual(start, -1, `${functionName} exists`);
+        const end = source.indexOf('\n}\n', start);
+        assert.notEqual(end, -1, `${functionName} closes`);
+        return source.slice(start, end + 2);
+      }).join('\n');
+    const body = { children: [], append(element) { this.children.push(element); } };
+    vm.runInNewContext(`${functions}\nrenderHomeLimitModule();`, {
+      state: { settings, stats: { limits: { providers: [] } } },
+      LIMIT_PROVIDERS: [{ id: 'claude', label: 'Claude' }],
+      DEFAULT_LIMIT_PROVIDER_ORDER: 'claude',
+      limitProviderOrderApi,
+      homeOverviewApi: { homeLimitAccountsForProviders, homeLimitsAwaitingFirstData },
+      clientColors: {},
+      hiddenHomeLimitProviderSet: () => new Set(),
+      homeModuleShell: () => ({ module: {}, body }),
+      document: { createElement: () => ({}) },
+      t: (key) => key
+    });
+    assert.equal(body.children.length, 1);
+    assert.equal(body.children[0].textContent, expected);
+  });
+}
 
 test('homeLimitAccountsForProviders includes MiMo Token Plan status and balance', () => {
   const rows = homeLimitAccountsForProviders({
