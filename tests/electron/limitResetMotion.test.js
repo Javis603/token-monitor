@@ -116,7 +116,7 @@ test('renderer wires reset motion before app boot and respects reduced motion', 
   assert.match(app, /LIMIT_RESET_MOTION_EASING/);
   assert.match(app, /const duration = limitResetMotionApi\.durationMs\(from, to\);/);
   assert.match(app, /limitResetMotionApi\.groupDurationMs\(/);
-  assert.match(app, /for \(const \{ fill, item, motion \} of motions\)/);
+  assert.match(app, /function startMotion\(\{ fill, item, motion \}, now\)/);
   assert.match(app, /animateLimitResetCompletion\(fill, duration, startedAt\);/);
   // The meter itself is built by the shared view the edge dock also renders
   // from, so the motion module reaches it as an injected dependency.

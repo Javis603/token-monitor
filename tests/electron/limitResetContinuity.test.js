@@ -99,6 +99,10 @@ test('a mid-refill stats refresh keeps the original bar, counter and glow timeli
   h.frame(100);
   h.frame(1200);
   const replacements = h.refresh();
+  // Replacement nodes must already be covered in the refresh task, before RAF.
+  assert.equal(replacements[1].fill.animations.length, 1);
+  assert.equal(replacements[1].fill.animations[0].startTime, 100);
+  assert.equal(replacements[1].value.textContent, '90% left');
   h.frame(1216);
 
   for (const item of replacements) {

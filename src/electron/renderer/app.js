@@ -4455,33 +4455,38 @@ function animateLimitResets(snapshot) {
     if (motion.startedAt === null) motion.duration = duration;
     limitResetMotions.set(fill, motion);
   }
-  // Start only after the replacement DOM is paintable. The rest of the refresh render
-  // can delay this first frame; excluding that delay prevents the motion from visibly
-  // catching up by skipping its opening values.
-  requestAnimationFrame((now) => {
-    if (prefersReducedMotion()) return;
-    for (const { fill, item, motion } of motions) {
-      if (!fill.isConnected || !item.isConnected) continue;
-      if (motion.startedAt === null) motion.startedAt = now;
-      const { from, to, duration, startedAt } = motion;
-      animateBarBetween(
-        fill,
-        from / 100,
-        to / 100,
-        0,
-        duration,
-        LIMIT_RESET_MOTION_EASING,
-        startedAt
-      );
-      animateLimitResetCompletion(fill, duration, startedAt);
-      animateLimitResetPercent(
-        item.querySelector('[data-limit-motion-value]'),
-        from,
-        to,
-        duration,
-        startedAt
-      );
-    }
+  function startMotion({ fill, item, motion }, now) {
+    if (!fill.isConnected || !item.isConnected || prefersReducedMotion()) return;
+    if (motion.startedAt === null) motion.startedAt = now;
+    const { from, to, duration, startedAt } = motion;
+    animateBarBetween(
+      fill,
+      from / 100,
+      to / 100,
+      0,
+      duration,
+      LIMIT_RESET_MOTION_EASING,
+      startedAt
+    );
+    animateLimitResetCompletion(fill, duration, startedAt);
+    animateLimitResetPercent(
+      item.querySelector('[data-limit-motion-value]'),
+      from,
+      to,
+      duration,
+      startedAt
+    );
+  }
+  // Resumed effects must cover the replacement DOM before it can paint its
+  // static target. Waiting one frame would flash full, then jump backward.
+  const pending = [];
+  for (const entry of motions) {
+    if (entry.motion.startedAt === null) pending.push(entry);
+    else startMotion(entry, entry.motion.startedAt);
+  }
+  // New refills still begin after the rest of the refresh render has finished.
+  if (pending.length) requestAnimationFrame((now) => {
+    for (const entry of pending) startMotion(entry, now);
   });
 }
 
