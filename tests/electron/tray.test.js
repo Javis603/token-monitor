@@ -479,7 +479,7 @@ test('tray context menu offers edge dock controls only where the dock is support
   assert.equal(show.checked, false);
   assert.equal(always.checked, true);
   assert.equal(autoHide.checked, false);
-  assert.equal(exceptFullScreen.label, 'Always, hide in full screen');
+  assert.equal(exceptFullScreen.label, 'Fullscreen auto-hide');
   assert.equal(exceptFullScreen.checked, false);
   assert.equal(left.checked, true);
   show.click();
