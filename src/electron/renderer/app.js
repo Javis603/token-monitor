@@ -126,6 +126,7 @@ const TRAY_ICON_PROVIDERS = [
 const DEFAULT_LIMIT_PROVIDER_ORDER = LIMIT_PROVIDERS.map((provider) => provider.id).join(',');
 const limitProviderOrderApi = window.TokenMonitorLimitProviderOrder;
 const limitProviderPresentationApi = window.TokenMonitorLimitProviderPresentation;
+const usageItemsApi = window.TokenMonitorLimitUsageItems;
 const codexAccountControlApi = window.TokenMonitorCodexAccountControl;
 
 function limitProviderColor(providerId) {
@@ -5678,7 +5679,10 @@ function homeLimitRows() {
   return homeOverviewApi.homeLimitAccountsForProviders({
     providers: (state.stats?.limits?.providers || []).map((provider) => ({
       ...provider,
-      windows: limitProviderPresentationApi.limitProviderCompactWindows(provider, provider.windows)
+      windows: limitProviderPresentationApi.limitProviderCompactWindows(
+        provider,
+        usageItemsApi.visibleLimitUsageWindows(provider, state.settings?.limitProviderHiddenItems)
+      )
     })),
     providerOptions,
     enabledProviderIds: Array.from(enabled),
@@ -10328,6 +10332,13 @@ function renderLimitProviderCheckboxesNow() {
       const input = inputs[index];
       if (input) reusableSettingInputs.set(`${providerId}:${setting.key}`, input);
     });
+    const itemInputs = row.querySelectorAll?.(
+      ':scope > .accordion-animated-container .limit-provider-usage-items-list > .settings-item > input[type="checkbox"]'
+    ) || [];
+    usageItemsApi.limitProviderUsageItems(providerId).forEach((entry, index) => {
+      const input = itemInputs[index];
+      if (input) reusableSettingInputs.set(`${providerId}:item:${entry.id}`, input);
+    });
   }
   const enabled = enabledLimitProviderSet();
   const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
@@ -10408,7 +10419,8 @@ function renderLimitProviderCheckboxesNow() {
       actions.append(mode);
     }
     const settings = LIMIT_PROVIDER_SETTINGS[id];
-    const hasOptions = Boolean(accountGroup || settings || connectionDetailKey);
+    const usageItems = usageItemsApi.limitProviderUsageItems(id);
+    const hasOptions = Boolean(accountGroup || settings || connectionDetailKey || usageItems.length);
     let optionsContainer = null;
     let optionsInner = null;
     let main = null;
@@ -10438,6 +10450,7 @@ function renderLimitProviderCheckboxesNow() {
       }
       if (connectionDetailKey) optionsInner.append(limitProviderConnectionDetail(connectionDetailKey));
       if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
+      if (usageItems.length) optionsInner.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
       optionsContainer.append(optionsInner);
       const toggleOptions = () => {
         const opening = state.limitProviderSettingsExpanded !== id;
@@ -10826,6 +10839,7 @@ function limitProviderSettingsRenderSignature() {
       limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, settings.limitProviderOrder).map(({ id }) => id),
       settings.deviceId || '',
       settingValues,
+      settings.limitProviderHiddenItems || {},
       state.limitProviderSettingsExpanded
     ],
     query: limitProviderQuery(),
@@ -10878,6 +10892,54 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
     list.append(item);
   }
   return list;
+}
+
+// CodexBar's "visible usage items": a per-provider checklist of the rows the
+// limits card can draw. Unchecking one drops that row from the Limits page,
+// the edge dock card and the Home module; the provider switch stays the way to
+// turn a provider off entirely.
+function limitProviderUsageItemsList(providerId, items, reusableInputs = null) {
+  const group = document.createElement('div');
+  group.className = 'limit-provider-usage-items';
+  const header = document.createElement('div');
+  header.className = 'limit-provider-usage-items-title';
+  header.textContent = t('settings.limits.usageItems');
+  const list = document.createElement('div');
+  list.className = 'settings-nested-list limit-provider-settings-list limit-provider-usage-items-list';
+  group.append(header, list);
+  const hidden = usageItemsApi.hiddenLimitUsageItemSet(state.settings?.limitProviderHiddenItems, providerId);
+  for (const entry of items) {
+    const item = document.createElement('label');
+    item.className = 'checkbox-label settings-item';
+    const copy = document.createElement('span');
+    copy.className = 'settings-item-text';
+    const title = document.createElement('span');
+    title.className = 'settings-item-title';
+    title.textContent = t(entry.labelKey || `settings.limits.items.${entry.id}`);
+    copy.append(title);
+    const inputKey = `${providerId}:item:${entry.id}`;
+    const existingInput = reusableInputs?.get(inputKey);
+    const input = existingInput || document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = !hidden.has(entry.id);
+    if (!existingInput) {
+      input.addEventListener('change', async () => {
+        // Compose on the local value so two quick toggles don't race the
+        // settings round-trip, the same local-first write the other
+        // provider-level checkboxes make.
+        const next = usageItemsApi.toggleLimitUsageItem(
+          state.settings?.limitProviderHiddenItems,
+          providerId,
+          entry.id
+        );
+        state.settings = { ...(state.settings || {}), limitProviderHiddenItems: next };
+        await saveSettings({ limitProviderHiddenItems: next });
+      });
+    }
+    item.append(copy, input);
+    list.append(item);
+  }
+  return group;
 }
 
 async function onToolTrackingToggle() {
@@ -11974,6 +12036,7 @@ const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComp
     t,
     itemsApi: window.TokenMonitorEdgeDockItems,
     presentationApi: window.TokenMonitorEdgeDockPresentation,
+    usageItemsApi,
     getSettings: () => state.settings,
     getStats: () => state.stats,
     save: (patch) => saveSettings(patch),

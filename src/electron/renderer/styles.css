@@ -2555,6 +2555,11 @@ span.settings-note.settings-item-desc {
   color: var(--text);
   font-size: 10px;
 }
+.limit-provider-usage-items-title {
+  color: var(--text);
+  font-size: 10px;
+  padding: 2px 0 0;
+}
 .limit-provider-connection-detail > .settings-note {
   margin: 0;
 }

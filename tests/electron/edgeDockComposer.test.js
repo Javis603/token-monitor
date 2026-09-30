@@ -187,3 +187,61 @@ test('the composer is handed the enabled providers in the user\'s limits order',
   assert.match(app, /\.orderedLimitProviders\(LIMIT_PROVIDERS, state\.settings\?\.limitProviderOrder\)/);
   assert.match(app, /\.filter\(\(\{ id \}\) => enabledLimitProviderSet\(\)\.has\(id\)\)/);
 });
+
+// A hidden usage item keeps an existing pin (the pin was the user's explicit
+// pick) but is never offered for a new one — the picker reads the same
+// `limitProviderHiddenItems` map the card filters by.
+test('the window picker does not offer items the provider hides', () => {
+  class Element {
+    constructor(tagName) {
+      this.tagName = tagName.toUpperCase();
+      this.children = [];
+      this.listeners = {};
+      this.dataset = {};
+      this.style = { setProperty() {} };
+      this.classList = { toggle() {}, add() {} };
+    }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = []; this.append(...children); }
+    addEventListener(name, handler) { this.listeners[name] = handler; }
+    setAttribute() {}
+    contains(node) { return this === node || this.children.some((child) => child.contains(node)); }
+  }
+  const previousDocument = global.document;
+  global.document = { createElement: (tag) => new Element(tag), activeElement: null };
+  try {
+    const usageItemsApi = require('../../src/shared/limits/usageItems');
+    const root = new Element('div');
+    const settings = {
+      edgeDockItems: [{ type: 'limit', provider: 'codex' }],
+      limitProviderHiddenItems: { codex: 'weekly' }
+    };
+    const stats = { limits: { providers: [{ provider: 'codex', status: 'ok', windows: [
+      { kind: 'session', label: 'Session', remainingPercent: 90 },
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 19 },
+      { kind: 'billing', label: 'Monthly', remainingPercent: 70 }
+    ] }] } };
+    const composer = createEdgeDockComposer({
+      root, itemsApi, usageItemsApi,
+      t: (key) => key,
+      presentationApi: {},
+      getSettings: () => settings,
+      getStats: () => stats,
+      save: () => {},
+      providerLabel: (id) => id,
+      providerColor: () => '#fff',
+      windowLabel: (record, quotaWindow) => limitWindowLabel(record.provider, quotaWindow),
+      hasProviderMark: () => true,
+      maskEmail: (email) => email,
+      createRowDrag: () => ({ deferRender: () => false })
+    });
+    const find = (node, tag) => node.tagName === tag ? node : node.children.map((child) => find(child, tag)).find(Boolean);
+    composer.render();
+    root.children[1].children[0].children.find((node) => node.dataset.itemId).listeners.click();
+    assert.deepEqual(find(root, 'SELECT').children.map((option) => option.textContent), [
+      'settings.edgeDock.window.auto', 'Session', 'Monthly'
+    ]);
+  } finally {
+    global.document = previousDocument;
+  }
+});

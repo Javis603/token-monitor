@@ -14,6 +14,7 @@ const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore')
 const limitProviderOrderApi = require('../../src/electron/renderer/limits/providerOrder');
 const settingsListFilterApi = require('../../src/electron/renderer/settingsListFilter');
 const { LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
+const usageItems = require('../../src/shared/limits/usageItems');
 const { limitWindowLabel } = require('../../src/shared/limits/windowLabels');
 const { limitWindowText } = require('../../src/shared/limits/windowText');
 const mainProcessSource = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
@@ -338,7 +339,7 @@ function runCodexAdditionalWindowLabel(window, siblingWindows) {
 test('Cursor limits render every normalized quota and format on-demand spend explicitly', () => {
   const windows = viewBody('renderProviderWindows');
 
-  assert.match(windows, /for \(const quotaWindow of provider\.windows \|\| \[\]\)/);
+  assert.match(windows, /for \(const quotaWindow of view\.windows \|\| \[\]\)/);
   assert.doesNotMatch(windows, /visibleWindows = billingWindows\.length > 0 \? billingWindows : \[null\]/);
 
   // A spend meter's headline is the money, keyed on the wire metric rather than
@@ -1018,8 +1019,8 @@ test('Grok renders its single Monthly billing window full-width instead of an em
   const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'grok'/);
-  assert.match(renderProviderWindows, /windowForKind\(provider, 'billing'\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, monthly\), monthly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /windowForKind\(view, 'billing'\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(view, monthly\), monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /limit-window-wide/);
 });
 
@@ -1028,14 +1029,14 @@ test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with
   const css = rendererStyles();
 
   assert.match(renderProviderWindows, /provider\.provider === 'zed'/);
-  assert.match(renderProviderWindows, /windowsForKind\(provider, 'billing'\)/);
+  assert.match(renderProviderWindows, /windowsForKind\(view, 'billing'\)/);
   assert.match(renderProviderWindows, /billing\?\.limitId === 'zed\.edit-predictions'/);
   assert.match(renderProviderWindows, /billing\?\.label \|\| 'Token Spend'/);
   // The money belongs in the detail slot under the bar, not in the headline
   // value: a valueOverride also disables the showLimitUsed flip for the row.
   assert.match(
     renderProviderWindows,
-    /limitWindowNode\(\s*billing\?\.label \|\| 'Token Spend',\s*billing,\s*color,\s*0\.95,\s*null,\s*providerWindowText\(provider, billing\)\.detail\s*\)/
+    /limitWindowNode\(\s*billing\?\.label \|\| 'Token Spend',\s*billing,\s*color,\s*0\.95,\s*null,\s*providerWindowText\(view, billing\)\.detail\s*\)/
   );
   assert.doesNotMatch(renderProviderWindows, /settings\.subscriptions\.renewsOn|renewalDetail/);
   assert.doesNotMatch(renderProviderWindows, /zed\.billing-cycle|zed\.overdue-invoices/);
@@ -1092,7 +1093,7 @@ test('WorkBuddy renders unlimited enterprise credits without requiring a numeric
   );
 
   assert.equal(value, 'Unlimited');
-  assert.match(renderProviderWindows, /const value = creditsBalanceValue\(provider, credits\);/);
+  assert.match(renderProviderWindows, /const value = creditsBalanceValue\(view, credits\);/);
   assert.match(renderProviderWindows, /if \(credits && value\)/);
   assert.doesNotMatch(renderProviderWindows, /if \(credits && amount !== null\)/);
   assert.match(
@@ -1141,7 +1142,7 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
   assert.match(quotaGroups, /groups\.set\(entry\.groupLabel, \[\]\)/);
   assert.match(quotaGroups, /entries\.some\(\(entry\) => entry === null\)/);
   assert.match(renderProviderWindows, /provider\.provider === 'antigravity'/);
-  assert.match(renderProviderWindows, /const quotaGroups = antigravityQuotaGroups\(provider\)/);
+  assert.match(renderProviderWindows, /const quotaGroups = antigravityQuotaGroups\(view\)/);
   assert.match(renderProviderWindows, /title\.textContent = group\.label/);
   assert.match(renderProviderWindows, /entry\.windowLabel/);
   assert.match(css, /\.limit-windows-antigravity-grouped \{[\s\S]*grid-template-columns: 1fr;[\s\S]*gap: 10px;/);
@@ -1154,8 +1155,8 @@ test('Qoder renders its single Credits billing window full-width', () => {
   const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'qoder'/);
-  assert.match(renderProviderWindows, /const credits = windowForKind\(provider, 'billing'\);/);
-  assert.match(renderProviderWindows, /providerWindowText\(provider, credits\)\.detail/);
+  assert.match(renderProviderWindows, /const credits = windowForKind\(view, 'billing'\);/);
+  assert.match(renderProviderWindows, /providerWindowText\(view, credits\)\.detail/);
   assert.match(renderProviderWindows, /limit-window-wide/);
 
   // Raw units under the bar, following the display mode.
@@ -1168,10 +1169,10 @@ test('Kimi renders 5-hour and Weekly above one full-width Monthly window', () =>
   const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'kimi'/);
-  assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
-  assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
-  assert.match(renderProviderWindows, /const monthly = windowForKind\(provider, 'billing'\);/);
-  assert.match(renderProviderWindows, /providerWindowText\(provider, monthly\)\.detail/);
+  assert.match(renderProviderWindows, /const fiveHour = windowForKind\(view, 'session'\);/);
+  assert.match(renderProviderWindows, /const weekly = windowForKind\(view, 'weekly'\);/);
+  assert.match(renderProviderWindows, /const monthly = windowForKind\(view, 'billing'\);/);
+  assert.match(renderProviderWindows, /providerWindowText\(view, monthly\)\.detail/);
   // Kimi is one of only two providers whose window `detail` is shown under the
   // bar; for everyone else the field serves another purpose and stays hidden.
   assert.equal(windowText('kimi', { kind: 'billing', detail: 'Kimi 40% · Code 60%' }).detail, 'Kimi 40% · Code 60%');
@@ -1183,12 +1184,12 @@ test('Command Code renders 5-hour and Weekly above full-width credit windows', (
   const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'commandcode'/);
-  assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
-  assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
+  assert.match(renderProviderWindows, /const fiveHour = windowForKind\(view, 'session'\);/);
+  assert.match(renderProviderWindows, /const weekly = windowForKind\(view, 'weekly'\);/);
   // The monthly grant and any rollover top-up are both billing windows, so the
   // branch loops rather than picking one.
-  assert.match(renderProviderWindows, /for \(const credits of windowsForKind\(provider, 'billing'\)\)/);
-  assert.match(renderProviderWindows, /providerWindowText\(provider, credits\)\.detail/);
+  assert.match(renderProviderWindows, /for \(const credits of windowsForKind\(view, 'billing'\)\)/);
+  assert.match(renderProviderWindows, /providerWindowText\(view, credits\)\.detail/);
   assert.match(renderProviderWindows, /if \(credits\.showMeter === false\) node\.classList\.add\('limit-window-no-reset'\);/);
 
   // Money, not raw credit counts, and the percentage keeps the headline: the
@@ -1204,24 +1205,24 @@ test('Command Code renders 5-hour and Weekly above full-width credit windows', (
 test('Ollama renders Session and Weekly usage windows', () => {
   const renderProviderWindows = viewBody('renderProviderWindows');
   assert.match(renderProviderWindows, /provider\.provider === 'ollama'/);
-  assert.match(renderProviderWindows, /windowForKind\(provider, 'session'\)/);
-  assert.match(renderProviderWindows, /windowForKind\(provider, 'weekly'\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, session\), session/);
-  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, weekly\), weekly/);
+  assert.match(renderProviderWindows, /windowForKind\(view, 'session'\)/);
+  assert.match(renderProviderWindows, /windowForKind\(view, 'weekly'\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(view, session\), session/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(view, weekly\), weekly/);
 });
 
 test('Volcengine renders quota windows as paired rows with an odd final window full-width', () => {
   const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'volcengine'/);
-  assert.match(renderProviderWindows, /const session = windowForKind\(provider, 'session'\);/);
-  assert.match(renderProviderWindows, /const daily = windowForKind\(provider, 'daily'\);/);
-  assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
-  assert.match(renderProviderWindows, /const monthly = windowForKind\(provider, 'billing'\);/);
-  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, session\), session, color, 0\.95\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, daily\), daily, color, 0\.78\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, weekly\), weekly, color, 0\.68\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, monthly\), monthly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /const session = windowForKind\(view, 'session'\);/);
+  assert.match(renderProviderWindows, /const daily = windowForKind\(view, 'daily'\);/);
+  assert.match(renderProviderWindows, /const weekly = windowForKind\(view, 'weekly'\);/);
+  assert.match(renderProviderWindows, /const monthly = windowForKind\(view, 'billing'\);/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(view, session\), session, color, 0\.95\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(view, daily\), daily, color, 0\.78\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(view, weekly\), weekly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(view, monthly\), monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /if \(nodes\.length % 2 === 1\) nodes\.at\(-1\)\.classList\.add\('limit-window-wide'\)/);
   assert.match(renderProviderWindows, /windows\.append\(\.\.\.nodes\)/);
 });
@@ -1235,6 +1236,9 @@ test('Z.ai and Team keep all billing windows and render MCP full width after pai
   for (const provider of ['zai', 'zaiteam']) {
     const context = {
       document: { createElement: makeNode },
+      settings: () => ({}),
+      usageItems,
+      providerSpendNode: () => null,
       windowForKind: (p, kind) => p.windows.find(w => w.kind === kind),
       windowsForKind: (p, kind) => p.windows.filter(w => w.kind === kind),
       limitWindowNode: (label, window, _color, _tone, _value, detail) => Object.assign(makeNode(), { label, window, detail }),
@@ -1281,6 +1285,8 @@ test('OpenCode reads the Zen balance from its credits window without metering it
   };
   const context = {
     document: { createElement: makeNode },
+    settings: () => ({}),
+    usageItems,
     windowForKind: (p, kind) => p.windows.find((w) => w.kind === kind) || null,
     windowsForKind: (p, kind) => p.windows.filter((w) => w.kind === kind),
     isCreditsWindow: (w) => w?.metric === 'credits',
@@ -1326,9 +1332,9 @@ test('Copilot renders monthly Premium and Chat quotas as billing windows', () =>
   const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /provider\.provider === 'copilot'/);
-  assert.match(renderProviderWindows, /const billingWindows = windowsForKind\(provider, 'billing'\);/);
+  assert.match(renderProviderWindows, /const billingWindows = windowsForKind\(view, 'billing'\);/);
   assert.match(renderProviderWindows, /for \(const billing of billingWindows\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, billing\), billing, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(view, billing\), billing, color, 0\.68\)/);
 });
 
 test('Codex renders Monthly quota and manual reset credits below rolling windows', () => {
@@ -1350,12 +1356,12 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
 
   assert.match(renderProviderWindows, /provider\.provider === 'codex'/);
-  assert.match(renderProviderWindows, /const session = codexCanonicalWindow\(provider, 'session'\);/);
-  assert.match(renderProviderWindows, /const weekly = codexCanonicalWindow\(provider, 'weekly'\);/);
-  assert.match(renderProviderWindows, /const monthly = codexCanonicalWindow\(provider, 'billing'\);/);
+  assert.match(renderProviderWindows, /const session = codexCanonicalWindow\(view, 'session'\);/);
+  assert.match(renderProviderWindows, /const weekly = codexCanonicalWindow\(view, 'weekly'\);/);
+  assert.match(renderProviderWindows, /const monthly = codexCanonicalWindow\(view, 'billing'\);/);
   assert.match(renderProviderWindows, /if \(!weekly && !monthly\) sessionNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(renderProviderWindows, /if \(!session && !monthly\) weeklyNode\.classList\.add\('limit-window-wide'\);/);
-  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, monthly\), monthly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(view, monthly\), monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /monthlyNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(main, /showCodexAdditionalLimits: true/);
   assert.match(main, /showCodexAdditionalLimits = parseBoolean\(merged\.showCodexAdditionalLimits, true\)/);
@@ -1364,7 +1370,7 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   // reaches that renderer through its appearance projection.
   assert.match(main, /showCodexAdditionalLimits: source\.showCodexAdditionalLimits,/);
   assert.match(app, /key: 'showCodexAdditionalLimits',[\s\S]*?defaultValue: true/);
-  assert.match(renderProviderWindows, /settings\(\)\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
+  assert.match(renderProviderWindows, /settings\(\)\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(view\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
   assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);
   assert.match(renderProviderWindows, /additionalNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(codexAdditionalWindowLabel, /if \(!name\) return period \|\| 'Additional limit';/);
@@ -1373,7 +1379,7 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(codexAdditionalWindowLabel, /codexAdditionalWindowPeriodLabel\(window\)/);
   assert.match(codexAdditionalWindowLabel, /minutes % 60 === 0/);
   assert.match(styles, /\.limit-window-text span:first-child \{[\s\S]*text-overflow: ellipsis;/);
-  assert.match(renderProviderWindows, /const resetNode = codexResetCreditsNode\(provider\.resetCredits\);/);
+  assert.match(renderProviderWindows, /const resetNode = codexResetCreditsNode\(view\.resetCredits\);/);
   assert.doesNotMatch(renderProviderWindows, /limitWindowNode\('Reset credits'/);
   assert.match(resetCreditsValue, /if \(count <= 0\) return '';/);
   assert.match(resetCreditsValue, /return `\$\{count\} reset\$\{count === 1 \? '' : 's'\}`;/);
@@ -1607,7 +1613,7 @@ test('Claude reset grants wrap their label and clears as full-width lines', () =
     ['Clears', 'Fable weekly']
   ]);
 
-  assert.match(renderProviderWindows, /claudeResetCreditsNode\(provider\.resetCredits\)/);
+  assert.match(renderProviderWindows, /claudeResetCreditsNode\(view\.resetCredits\)/);
   assert.match(claudeNode, /if \(grants\.length === 0\) return codexResetCreditsNode\(resetCredits\);/);
   // The spoken label must carry the same rows the tooltip shows — expiry,
   // cleared windows, usability — so grant restrictions are not silent.
@@ -1631,7 +1637,7 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
 
   assert.match(homeLabel, /if \(window\?\.kind === 'billing'\) \{/);
   assert.match(homeLabel, /limitProviderCompactWindowLabel\(providerId, window, visibleWindows\)/);
-  assert.match(homeRows, /limitProviderCompactWindows\(provider, provider\.windows\)/);
+  assert.match(homeRows, /limitProviderCompactWindows\(\s*provider,\s*usageItemsApi\.visibleLimitUsageWindows\(provider, state\.settings\?\.limitProviderHiddenItems\)\s*\)/);
   assert.match(homeLabel, /const label = String\(window\?\.label \|\| ''\)\.trim\(\);/);
   assert.match(homeLabel, /if \(label\) return label;/);
   assert.match(homeLabel, /billing: 'home\.limit\.billing'/);
@@ -1669,10 +1675,10 @@ test('DeepSeek main Limits row preserves the intentional month-spend balance met
 
   // The two providers share the balance meter; TypeSafe adds a grant expiry
   // only when the billing response contains one.
-  assert.match(renderProviderWindows, /creditsMeterPercent\(provider, creditsWindow\)/);
+  assert.match(renderProviderWindows, /creditsMeterPercent\(view, creditsWindow\)/);
   assert.match(renderProviderWindows, /balanceNode\.classList\.add\('limit-window-wide'\);/);
   assert.match(renderProviderWindows, /if \(!boundaryAt\) balanceNode\.classList\.add\('limit-window-no-reset'\);/);
-  assert.match(renderProviderWindows, /const spendNode = providerSpendNode\(balance, provider\);/);
+  assert.match(renderProviderWindows, /const spendNode = showSpend \? providerSpendNode\(provider\.balance, provider\) : null;/);
   assert.match(limitsViewSource(), /\['Week', optionalFiniteNumber\(balance\?\.weekSpend\)\]/);
   assert.match(limitsViewSource(), /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
   assert.doesNotMatch(renderProviderWindows, /Month \(since tracking\)/);
@@ -1765,7 +1771,7 @@ test('Balance and token quota values omit the redundant left suffix', () => {
   const renderProviderWindows = viewBody('renderProviderWindows');
 
   assert.match(renderProviderWindows, /'Balance',\s*\{ \.\.\.balanceWindow, label: 'Balance' \},\s*color,\s*0\.95,\s*formatMoney\(balanceAmount, currency\)/);
-  assert.match(renderProviderWindows, /const meterPercent = creditsMeterPercent\(provider, quotaWindow\);/);
+  assert.match(renderProviderWindows, /const meterPercent = creditsMeterPercent\(view, quotaWindow\);/);
   assert.match(renderProviderWindows, /\{\s*\.\.\.\(quotaWindow \|\| \{ showMeter: false \}\),\s*label: balanceLabel,/);
   assert.match(renderProviderWindows, /\.\.\.\(meterPercent !== null \? \{ remainingPercent: meterPercent, showMeter: true \} : \{\}\)/);
   assert.match(renderProviderWindows, /\},\s*color,\s*0\.95,\s*balanceValue/);
@@ -1777,8 +1783,8 @@ test('MiMo main Limits row falls back to balance plan fields for Token Plan', ()
   const renderProviderWindows = viewBody('renderProviderWindows');
   const tokenPlanFallback = viewBody('mimoTokenPlanWindowFromBalance', 'limitWindowNode');
 
-  assert.match(renderProviderWindows, /const balance = provider\.balance \|\| null;/);
-  assert.match(renderProviderWindows, /const tokenPlan = windowForKind\(provider, 'billing'\) \|\| mimoTokenPlanWindowFromBalance\(balance\);/);
+  assert.match(renderProviderWindows, /const balance = view\.balance \|\| null;/);
+  assert.match(renderProviderWindows, /const tokenPlan = windowForKind\(view, 'billing'\) \|\| mimoTokenPlanWindowFromBalance\(provider\.balance\);/);
   assert.match(renderProviderWindows, /limitWindowNode\(tokenPlan\.label \|\| 'Token Plan', tokenPlan, color, 0\.68\)/);
   assert.match(renderProviderWindows, /const giftBalance = optionalFiniteNumber\(balance\?\.giftBalance\);/);
   assert.match(renderProviderWindows, /const cashBalance = optionalFiniteNumber\(balance\?\.cashBalance\);/);
@@ -2038,7 +2044,7 @@ test('Cline exposes its API key through the settings and credential-store patter
   assert.match(windowsView, /const clineMonthly = clineBilling\.find\(\(window\) => !isCreditsWindow\(window\) && window\.metric !== 'spend'\)/);
   assert.match(windowsView, /const clineCredits = clineBilling\.find\(\(window\) => isCreditsWindow\(window\)\)/);
   assert.match(windowsView, /const clineSpend = clineBilling\.find\(\(window\) => window\.metric === 'spend'\)/);
-  assert.match(windowsView, /clineCredits[\s\S]{0,200}clineCreditsNode\(provider, clineCredits, clineSpend\)/);
+  assert.match(windowsView, /clineCredits[\s\S]{0,200}clineCreditsNode\(view, clineCredits, clineSpend\)/);
   assert.match(windowsView, /function clineCreditsNode[\s\S]{0,500}\[\['Month spent', spendValue\]\]/);
   assert.match(windowsView, /clineMonthly[\s\S]{0,200}limit-window-wide/);
 });

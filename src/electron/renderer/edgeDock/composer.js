@@ -15,6 +15,7 @@
       t,
       itemsApi,
       presentationApi,
+      usageItemsApi,
       getSettings,
       getStats,
       save,
@@ -217,7 +218,14 @@
       for (const record of getStats()?.limits?.providers || []) {
         if (String(record?.provider || '').toLowerCase() !== item.provider
           || (record.accountKey && hidden.has(record.accountKey))) continue;
+        // Hidden usage items stay pinned (an explicit choice the user already
+        // made) but are never offered for a new pin.
+        const hiddenItems = usageItemsApi
+          ? usageItemsApi.hiddenLimitUsageItemSet(getSettings()?.limitProviderHiddenItems, record.provider)
+          : new Set();
         for (const window of itemsApi.selectableLimitWindows(record, getSettings())) {
+          if (hiddenItems.size
+            && hiddenItems.has(usageItemsApi.limitUsageItemIdForWindow(window))) continue;
           const key = itemsApi.limitWindowKey(window);
           if (!key || choices.has(key)) continue;
           choices.set(key, {

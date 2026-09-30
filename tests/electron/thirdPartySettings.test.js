@@ -136,7 +136,7 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /provider\.provider === 'thirdparty'/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /function thirdPartyQuotaWindow/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /quotaWindow\?\.label \|\| 'Balance'/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /const meterPercent = creditsMeterPercent\(provider, quotaWindow\)/);
+  assert.match(read('src/electron/renderer/limits/windowsView.js'), /const meterPercent = creditsMeterPercent\(view, quotaWindow\)/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /\.\.\.\(meterPercent !== null \? \{ remainingPercent: meterPercent, showMeter: true \} : \{\}\)/);
   // The adapter's own name, mark and colour are provider presentation, so they
   // live in the module both surfaces load rather than in the page that happened

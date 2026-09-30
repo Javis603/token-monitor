@@ -368,6 +368,75 @@ test('a Codex card keeps the page ordering and the banked resets', () => {
   assert.match(windows[0].text, /Reset 1h 0m/);
 });
 
+// `limitProviderHiddenItems` is the per-provider "visible usage items"
+// checklist: the hidden half, keyed by provider, of the card's row vocabulary.
+// Rows filter out in the shared view, so the card and the page hide the same
+// thing for one setting write.
+test('hidden usage items drop rows from a Codex card but keep the rest', () => {
+  const provider = {
+    provider: 'codex',
+    windows: [
+      { kind: 'session', label: 'Session', remainingPercent: 70 },
+      { kind: 'weekly', label: '', remainingPercent: 55 },
+      { kind: 'billing', label: 'Monthly', remainingPercent: 40 }
+    ],
+    resetCredits: { availableCount: 2 }
+  };
+  const rowLabels = (hidden) => [...dockView({ limitProviderHiddenItems: hidden })
+    .renderProviderWindows(provider, '#10A37F')
+    .walk()]
+    .filter((node) => node.classNames.has('limit-window'))
+    .map((node) => node.children[0].children[0].textContent);
+
+  assert.deepEqual(rowLabels({}), ['Session', 'Weekly', 'Monthly', '2 resets']);
+  assert.deepEqual(rowLabels({ codex: 'weekly,resets' }), ['Session', 'Monthly']);
+  assert.deepEqual(rowLabels({ codex: 'session,weekly,monthly,resets' }), []);
+  // Another provider's selection never touches this card.
+  assert.deepEqual(rowLabels({ claude: 'weekly' }), ['Session', 'Weekly', 'Monthly', '2 resets']);
+});
+
+test('hiding the balance keeps the spend row; hiding spend keeps the balance', () => {
+  const provider = {
+    provider: 'deepseek',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 4.2, currency: 'USD', showMeter: false }],
+    balance: { amount: 4.2, currency: 'USD', todaySpend: 0.12, monthSpend: 1.4 }
+  };
+  const text = (hidden) => dockView({ limitProviderHiddenItems: hidden })
+    .renderProviderWindows(provider, '#4D6BFE').text;
+
+  assert.match(text({ deepseek: 'credits' }), /Spend/);
+  assert.doesNotMatch(text({ deepseek: 'credits' }), /\$4\.20/);
+  assert.match(text({ deepseek: 'spend' }), /\$4\.20/);
+  assert.doesNotMatch(text({ deepseek: 'spend' }), /Spend/);
+});
+
+test('a Codex card never lets the additional pools hide through this setting', () => {
+  // `additional` windows answer to showCodexAdditionalLimits alone; the item id
+  // exists so filtering can leave them alone, and the normalizer refuses to
+  // store it as a hidden choice.
+  const provider = {
+    provider: 'codex',
+    windows: [{ kind: 'daily', label: 'GPT-5.3-Codex-Spark', remainingPercent: 40, additional: true }]
+  };
+  const card = dockView({ limitProviderHiddenItems: { codex: 'daily' } })
+    .renderProviderWindows(provider, '#10A37F');
+  assert.match(card.text, /GPT-5\.3-Codex-Spark/);
+});
+
+test('a Cline card drops the spend tooltip when its item is hidden', () => {
+  const provider = {
+    provider: 'cline',
+    windows: [
+      { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 0.5, currency: 'CREDITS', showMeter: false },
+      { kind: 'billing', metric: 'spend', label: 'Usage credits', used: 0.13, limit: null, currency: 'USD', showMeter: false }
+    ]
+  };
+  const card = dockView({ limitProviderHiddenItems: { cline: 'spend' } })
+    .renderProviderWindows(provider, '#9D4EDD');
+  assert.match(card.text, /Credits/);
+  assert.doesNotMatch(card.text, /Month spent/);
+});
+
 test('the Codex additional-limit preference reaches the card through its own settings', () => {
   const provider = {
     provider: 'codex',

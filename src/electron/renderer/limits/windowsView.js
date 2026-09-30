@@ -37,10 +37,13 @@
 // give three hosts three chances to supply a different one.
 (function exposeLimitWindowsView(root, factory) {
   const node = typeof module === 'object' && module.exports;
-  const api = factory(node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders);
+  const api = factory(
+    node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders,
+    node ? require('../../../shared/limits/usageItems') : root?.TokenMonitorLimitUsageItems
+  );
   if (node) module.exports = api;
   if (root) root.TokenMonitorLimitWindowsView = api;
-})(typeof window !== 'undefined' ? window : globalThis, function createLimitWindowsViewApi(limitProviders) {
+})(typeof window !== 'undefined' ? window : globalThis, function createLimitWindowsViewApi(limitProviders, usageItems) {
   function createLimitWindowsView(deps) {
     const {
       t,
@@ -815,25 +818,41 @@
   function renderProviderWindows(provider, color) {
     const windows = document.createElement('div');
     windows.className = 'limit-windows';
+    // The provider's hidden usage items, as a filtered view of its record:
+    // windows whose item is hidden leave the list, `resetCredits` is nulled for
+    // 'resets', and `balance`/`balanceUsd` for 'credits'. Spend rows keep
+    // reading `provider` itself — a spend summary is not a balance row, so
+    // hiding the balance must not take the spend line with it.
+    const hiddenItems = usageItems.hiddenLimitUsageItemSet(settings()?.limitProviderHiddenItems, provider?.provider);
+    const showSpend = !hiddenItems.has('spend');
+    const view = {
+      ...provider,
+      windows: (provider?.windows || []).filter((window) => (
+        !hiddenItems.has(usageItems.limitUsageItemIdForWindow(window))
+      )),
+      resetCredits: hiddenItems.has('resets') ? null : provider?.resetCredits,
+      balance: hiddenItems.has('credits') ? null : provider?.balance,
+      balanceUsd: hiddenItems.has('credits') ? null : provider?.balanceUsd
+    };
     if (provider.provider === 'codex') {
-      const session = codexCanonicalWindow(provider, 'session');
-      const weekly = codexCanonicalWindow(provider, 'weekly');
-      const monthly = codexCanonicalWindow(provider, 'billing');
+      const session = codexCanonicalWindow(view, 'session');
+      const weekly = codexCanonicalWindow(view, 'weekly');
+      const monthly = codexCanonicalWindow(view, 'billing');
       const additionalWindows = settings()?.showCodexAdditionalLimits === false
         ? []
-        : (provider.windows || []).filter((window) => window?.additional === true);
+        : (view.windows || []).filter((window) => window?.additional === true);
       if (session) {
-        const sessionNode = limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95);
+        const sessionNode = limitWindowNode(providerWindowLabel(view, session), session, color, 0.95);
         if (!weekly && !monthly) sessionNode.classList.add('limit-window-wide');
         windows.append(sessionNode);
       }
       if (weekly) {
-        const weeklyNode = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68);
+        const weeklyNode = limitWindowNode(providerWindowLabel(view, weekly), weekly, color, 0.68);
         if (!session && !monthly) weeklyNode.classList.add('limit-window-wide');
         windows.append(weeklyNode);
       }
       if (monthly) {
-        const monthlyNode = limitWindowNode(providerWindowLabel(provider, monthly), monthly, color, 0.68);
+        const monthlyNode = limitWindowNode(providerWindowLabel(view, monthly), monthly, color, 0.68);
         monthlyNode.classList.add('limit-window-wide');
         windows.append(monthlyNode);
       }
@@ -847,19 +866,19 @@
         additionalNode.classList.add('limit-window-wide');
         windows.append(additionalNode);
       }
-      const resetNode = codexResetCreditsNode(provider.resetCredits);
+      const resetNode = codexResetCreditsNode(view.resetCredits);
       if (resetNode) windows.append(resetNode);
     } else if (provider.provider === 'cursor') {
       windows.classList.add('limit-windows-cursor');
-      for (const quotaWindow of provider.windows || []) {
-        const text = providerWindowText(provider, quotaWindow);
+      for (const quotaWindow of view.windows || []) {
+        const text = providerWindowText(view, quotaWindow);
         const node = limitWindowNode(quotaWindow.label || 'Quota', quotaWindow, color, 0.68, text.value, text.detail);
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
     } else if (provider.provider === 'antigravity') {
       windows.classList.add('limit-windows-antigravity');
-      const quotaGroups = antigravityQuotaGroups(provider);
+      const quotaGroups = antigravityQuotaGroups(view);
       if (quotaGroups.length > 0) {
         windows.classList.add('limit-windows-antigravity-grouped');
         for (const group of quotaGroups) {
@@ -885,10 +904,10 @@
           windows.append(groupNode);
         }
       } else {
-        const weeklyWindows = windowsForKind(provider, 'weekly');
+        const weeklyWindows = windowsForKind(view, 'weekly');
         const visibleWindows = weeklyWindows.length > 0 ? weeklyWindows : [null];
         for (const quotaWindow of visibleWindows) {
-          const node = limitWindowNode(providerWindowLabel(provider, quotaWindow, 'Weekly'), quotaWindow, color, 0.78);
+          const node = limitWindowNode(providerWindowLabel(view, quotaWindow, 'Weekly'), quotaWindow, color, 0.78);
           node.classList.add('limit-window-wide');
           windows.append(node);
         }
@@ -898,20 +917,20 @@
       // when the account is active, rolling/weekly). The monthly window normalizes to kind 'billing'
       // (see normalizeWindowKind). Show only the windows that exist — no empty `--` placeholders — and
       // surface the Zen balance as a full-width, no-meter note when present.
-      const session = windowForKind(provider, 'session');
-      const weekly = windowForKind(provider, 'weekly');
+      const session = windowForKind(view, 'session');
+      const weekly = windowForKind(view, 'weekly');
       // The Zen balance is a billing-kind `credits` window, so it has to come out
       // of the list before the Go grant is looked up by kind: on a Zen-only
       // account it is the only billing window there is, and metering money as a
       // monthly quota is exactly the mistake the `credits` marker exists to stop.
-      const balanceWindow = (provider.windows || []).find((window) => isCreditsWindow(window)) || null;
-      const monthly = (provider.windows || [])
+      const balanceWindow = (view.windows || []).find((window) => isCreditsWindow(window)) || null;
+      const monthly = (view.windows || [])
         .find((window) => window.kind === 'billing' && window !== balanceWindow) || null;
-      if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
-      if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
+      if (session) windows.append(limitWindowNode(providerWindowLabel(view, session), session, color, 0.95));
+      if (weekly) windows.append(limitWindowNode(providerWindowLabel(view, weekly), weekly, color, 0.68));
       // Monthly spans the full row (like Balance) so it never leaves a half-empty grid cell.
       if (monthly) {
-        const node = limitWindowNode(providerWindowLabel(provider, monthly), monthly, color, 0.5);
+        const node = limitWindowNode(providerWindowLabel(view, monthly), monthly, color, 0.5);
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
@@ -922,11 +941,11 @@
       // provider-level `balanceUsd`, which stays readable so a record synced from a
       // device on an older build still shows its balance.
       const balanceAmount = balanceWindow
-        ? creditsAmount(provider, balanceWindow)
-        : optionalFiniteNumber(provider.balanceUsd);
+        ? creditsAmount(view, balanceWindow)
+        : optionalFiniteNumber(view.balanceUsd);
       if (balanceAmount !== null) {
         const node = limitWindowNode(
-          providerWindowLabel(provider, balanceWindow, 'Balance'),
+          providerWindowLabel(view, balanceWindow, 'Balance'),
           { showMeter: false },
           color,
           0.68,
@@ -937,10 +956,10 @@
       }
     } else if (provider.provider === 'openrouter') {
       windows.classList.add('limit-windows-openrouter');
-      const balance = provider.balance || null;
+      const balance = view.balance || null;
       const currency = balance?.currency || 'USD';
       const balanceAmount = optionalFiniteNumber(balance?.amount);
-      const creditsWindow = openrouterCreditsWindow(provider);
+      const creditsWindow = openrouterCreditsWindow(view);
       if (balanceAmount !== null) {
         const balanceWindow = creditsWindow || (balanceAmount === 0
           ? { usedPercent: 100, remainingPercent: 0, showMeter: true }
@@ -955,7 +974,7 @@
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(balanceNode);
       }
-      for (const quotaWindow of (provider.windows || []).filter((window) => window !== creditsWindow)) {
+      for (const quotaWindow of (view.windows || []).filter((window) => window !== creditsWindow)) {
         const hasMeter = quotaWindow?.showMeter !== false;
         const remaining = optionalFiniteNumber(quotaWindow?.remaining);
         const limit = optionalFiniteNumber(quotaWindow?.limit);
@@ -975,14 +994,14 @@
         if (!hasMeter) node.classList.add('limit-window-no-reset');
         windows.append(node);
       }
-      const spendNode = providerSpendNode(balance);
+      const spendNode = showSpend ? providerSpendNode(provider.balance) : null;
       if (spendNode) windows.append(spendNode);
     } else if (provider.provider === 'thirdparty') {
       windows.classList.add('limit-windows-thirdparty');
-      const balance = provider.balance || null;
+      const balance = view.balance || null;
       const currency = balance?.currency || 'USD';
       const balanceAmount = optionalFiniteNumber(balance?.amount);
-      const quotaWindow = thirdPartyQuotaWindow(provider);
+      const quotaWindow = thirdPartyQuotaWindow(view);
       const balanceLabel = quotaWindow?.label || 'Balance';
       if (balanceAmount !== null) {
         const balanceValue = formatMoney(balanceAmount, currency);
@@ -990,7 +1009,7 @@
         // remaining USD balance plus an observed monthSpend) get the same
         // display-layer meter DeepSeek uses: balance / (balance + month spend).
         // Windows that already carry provider percentages pass through unchanged.
-        const meterPercent = creditsMeterPercent(provider, quotaWindow);
+        const meterPercent = creditsMeterPercent(view, quotaWindow);
         const balanceNode = limitWindowNode(
           balanceLabel,
           {
@@ -1018,17 +1037,17 @@
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(balanceNode);
       }
-      const spendNode = thirdPartySpendNode(provider, quotaWindow);
+      const spendNode = showSpend ? thirdPartySpendNode(provider, quotaWindow) : null;
       if (spendNode) windows.append(spendNode);
     } else if (provider.provider === 'deepseek' || provider.provider === 'typesafe') {
       // DeepSeek does not expose a fixed quota denominator. This intentionally
       // visualizes the balance relative to this month's inferred starting funds:
       // current / (current + observed month spend).
       windows.classList.add('limit-windows-deepseek');
-      const balance = provider.balance || null;
+      const balance = view.balance || null;
       if (balance) {
         const currency = balance.currency;
-        const creditsWindow = (provider.windows || []).find((window) => isCreditsWindow(window));
+        const creditsWindow = (view.windows || []).find((window) => isCreditsWindow(window));
         const nextGrant = provider.provider === 'typesafe' && Array.isArray(balance.tranches)
           ? balance.tranches.find((grant) => grant.expiresAt && Date.parse(grant.expiresAt) > Date.now())
           : null;
@@ -1038,7 +1057,7 @@
           : '';
         const balanceNode = limitWindowNode(
           'Balance',
-          { remainingPercent: creditsMeterPercent(provider, creditsWindow),
+          { remainingPercent: creditsMeterPercent(view, creditsWindow),
             resetsAt: boundaryAt, boundaryKind: creditsWindow?.boundaryKind },
           color,
           0.95,
@@ -1048,14 +1067,16 @@
         balanceNode.classList.add('limit-window-wide');
         if (!boundaryAt) balanceNode.classList.add('limit-window-no-reset');
         windows.append(balanceNode);
-
-        const spendNode = providerSpendNode(balance, provider);
-        if (spendNode) windows.append(spendNode);
       }
+      const spendNode = showSpend ? providerSpendNode(provider.balance, provider) : null;
+      if (spendNode) windows.append(spendNode);
     } else if (provider.provider === 'mimo') {
       windows.classList.add('limit-windows-mimo');
-      const balance = provider.balance || null;
-      const tokenPlan = windowForKind(provider, 'billing') || mimoTokenPlanWindowFromBalance(balance);
+      const balance = view.balance || null;
+      // The Token Plan line derives from the balance record but renders as a
+      // 'monthly' item, so it reads the unfiltered `provider.balance` — hiding
+      // 'credits' removes the money row, not the plan meter.
+      const tokenPlan = windowForKind(view, 'billing') || mimoTokenPlanWindowFromBalance(provider.balance);
       if (tokenPlan) {
         const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
         node.classList.add('limit-window-wide');
@@ -1089,23 +1110,23 @@
       // full-width so it doesn't share a row with an empty placeholder. This mirrors
       // how Cursor's billing cycle and OpenCode's Monthly are handled.
       windows.classList.add('limit-windows-grok');
-      const monthly = windowForKind(provider, 'billing');
+      const monthly = windowForKind(view, 'billing');
       if (monthly) {
-        const node = limitWindowNode(providerWindowLabel(provider, monthly), monthly, color, 0.68);
+        const node = limitWindowNode(providerWindowLabel(view, monthly), monthly, color, 0.68);
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
     } else if (provider.provider === 'copilot') {
       windows.classList.add('limit-windows-copilot');
-      const billingWindows = windowsForKind(provider, 'billing');
+      const billingWindows = windowsForKind(view, 'billing');
       for (const billing of billingWindows) {
-        const node = limitWindowNode(providerWindowLabel(provider, billing), billing, color, 0.68);
+        const node = limitWindowNode(providerWindowLabel(view, billing), billing, color, 0.68);
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
     } else if (provider.provider === 'zed') {
       windows.classList.add('limit-windows-zed');
-      for (const billing of windowsForKind(provider, 'billing')) {
+      for (const billing of windowsForKind(view, 'billing')) {
         const unlimitedEditPredictions = billing?.limitId === 'zed.edit-predictions'
           && String(billing?.detail || '').trim().toLowerCase() === 'unlimited';
         const node = limitWindowNode(
@@ -1114,7 +1135,7 @@
           color,
           0.95,
           null,
-          providerWindowText(provider, billing).detail
+          providerWindowText(view, billing).detail
         );
         node.classList.add('limit-window-wide');
         if (unlimitedEditPredictions) node.classList.add('limit-window-no-reset');
@@ -1125,31 +1146,31 @@
       // monthly bucket (no metric, no limitId), ZCode Start/Weekend plan
       // buckets (limitId set, per-model labels), or the cash balance
       // (metric 'credits'). Each renders in its own slot below.
-      const session = windowForKind(provider, 'session');
-      const weekly = windowForKind(provider, 'weekly');
-      const billingWindows = windowsForKind(provider, 'billing');
-      const dailyWindows = windowsForKind(provider, 'daily');
+      const session = windowForKind(view, 'session');
+      const weekly = windowForKind(view, 'weekly');
+      const billingWindows = windowsForKind(view, 'billing');
+      const dailyWindows = windowsForKind(view, 'daily');
       const planBuckets = billingWindows.filter((window) => window?.limitId && !window?.metric);
       const monthlyWindows = billingWindows.filter((window) => !window?.metric && !window?.limitId);
-      const balanceWindow = (provider.windows || []).find((window) => window?.metric === 'credits');
+      const balanceWindow = (view.windows || []).find((window) => window?.metric === 'credits');
       const nodes = [
-        session && limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95),
+        session && limitWindowNode(providerWindowLabel(view, session), session, color, 0.95),
         ...dailyWindows.map((window, index) => limitWindowNode(
           window.label || (dailyWindows.length > 1 ? `Daily ${index + 1}` : 'Daily'),
           window,
           color,
           0.78,
           null,
-          providerWindowText(provider, window).detail
+          providerWindowText(view, window).detail
         )),
-        weekly && limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68),
+        weekly && limitWindowNode(providerWindowLabel(view, weekly), weekly, color, 0.68),
         ...planBuckets.map((window) => limitWindowNode(
           window.label || 'Start Plan',
           window,
           color,
           0.68,
           null,
-          providerWindowText(provider, window).detail
+          providerWindowText(view, window).detail
         ))
       ].filter(Boolean);
       if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
@@ -1167,48 +1188,48 @@
       if (balanceWindow) {
         const balanceNode = limitWindowNode(
           'Balance',
-          { remainingPercent: creditsMeterPercent(provider, balanceWindow) },
+          { remainingPercent: creditsMeterPercent(view, balanceWindow) },
           color,
           0.95,
           formatMoney(balanceWindow.remaining, balanceWindow.currency)
         );
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(balanceNode);
-        const spendNode = provider.balance && providerSpendNode(provider.balance);
-        if (spendNode) windows.append(spendNode);
       }
+      const spendNode = showSpend ? providerSpendNode(provider.balance) : null;
+      if (spendNode) windows.append(spendNode);
     } else if (provider.provider === 'volcengine') {
-      const session = windowForKind(provider, 'session');
-      const daily = windowForKind(provider, 'daily');
-      const weekly = windowForKind(provider, 'weekly');
-      const monthly = windowForKind(provider, 'billing');
+      const session = windowForKind(view, 'session');
+      const daily = windowForKind(view, 'daily');
+      const weekly = windowForKind(view, 'weekly');
+      const monthly = windowForKind(view, 'billing');
       const nodes = [
-        session && limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95),
-        daily && limitWindowNode(providerWindowLabel(provider, daily), daily, color, 0.78),
+        session && limitWindowNode(providerWindowLabel(view, session), session, color, 0.95),
+        daily && limitWindowNode(providerWindowLabel(view, daily), daily, color, 0.78),
         weekly && limitWindowNode('Weekly', weekly, color, 0.68),
-        monthly && limitWindowNode(providerWindowLabel(provider, monthly), monthly, color, 0.68)
+        monthly && limitWindowNode(providerWindowLabel(view, monthly), monthly, color, 0.68)
       ].filter(Boolean);
       if (nodes.length % 2 === 1) nodes.at(-1).classList.add('limit-window-wide');
       windows.append(...nodes);
     } else if (provider.provider === 'devin') {
-      const daily = windowForKind(provider, 'daily');
-      const weekly = windowForKind(provider, 'weekly');
-      const balanceWindow = (provider.windows || []).find(isCreditsWindow) || null;
+      const daily = windowForKind(view, 'daily');
+      const weekly = windowForKind(view, 'weekly');
+      const balanceWindow = (view.windows || []).find(isCreditsWindow) || null;
       const quotaNodes = [
-        daily && limitWindowNode(providerWindowLabel(provider, daily), daily, color, 0.95),
-        weekly && limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68)
+        daily && limitWindowNode(providerWindowLabel(view, daily), daily, color, 0.95),
+        weekly && limitWindowNode(providerWindowLabel(view, weekly), weekly, color, 0.68)
       ].filter(Boolean);
       if (quotaNodes.length === 1) quotaNodes[0].classList.add('limit-window-wide');
       windows.append(...quotaNodes);
       if (balanceWindow) {
-        const amount = creditsAmount(provider, balanceWindow);
+        const amount = creditsAmount(view, balanceWindow);
         if (amount !== null) {
           const balanceNode = limitWindowNode(
-            providerWindowLabel(provider, balanceWindow, 'Extra usage balance'),
+            providerWindowLabel(view, balanceWindow, 'Extra usage balance'),
             { ...balanceWindow, showMeter: false },
             color,
             0.68,
-            formatMoney(amount, balanceWindow.currency || provider.balance?.currency)
+            formatMoney(amount, balanceWindow.currency || view.balance?.currency)
           );
           balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
           windows.append(balanceNode);
@@ -1218,12 +1239,12 @@
       // Kiro exposes monthly credits (plus an optional bonus pool), both billing
       // windows. Render them full-width like Copilot's quota windows.
       windows.classList.add('limit-windows-kiro');
-      const billingWindows = windowsForKind(provider, 'billing');
+      const billingWindows = windowsForKind(view, 'billing');
       for (const billing of billingWindows) {
         if (billing?.showMeter === false) {
           // Overage: a single compact line like Cursor's "Credits $0.00" (no bar,
           // no reset) with the credits used and estimated cost joined on the right.
-          const node = limitWindowNode(billing.label || 'Overage', billing, color, 0.6, providerWindowText(provider, billing).value);
+          const node = limitWindowNode(billing.label || 'Overage', billing, color, 0.6, providerWindowText(view, billing).value);
           node.classList.add('limit-window-wide', 'limit-window-no-reset');
           windows.append(node);
         } else {
@@ -1233,7 +1254,7 @@
             color,
             0.68,
             null,
-            providerWindowText(provider, billing).detail
+            providerWindowText(view, billing).detail
           );
           node.classList.add('limit-window-wide');
           windows.append(node);
@@ -1241,7 +1262,7 @@
       }
     } else if (provider.provider === 'qoder') {
       windows.classList.add('limit-windows-qoder');
-      const credits = windowForKind(provider, 'billing');
+      const credits = windowForKind(view, 'billing');
       if (credits) {
         const node = limitWindowNode(
           credits?.label || 'Credits',
@@ -1249,15 +1270,14 @@
           color,
           0.68,
           null,
-          providerWindowText(provider, credits).detail
+          providerWindowText(view, credits).detail
         );
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
     } else if (provider.provider === 'workbuddy' || provider.provider === 'trae') {
-      const credits = windowForKind(provider, 'billing');
-      const balance = provider.balance || null;
-      const value = creditsBalanceValue(provider, credits);
+      const credits = windowForKind(view, 'billing');
+      const value = creditsBalanceValue(view, credits);
       if (credits && value) {
         const displayWindow = {
           ...credits,
@@ -1275,33 +1295,33 @@
           node.classList.add('limit-window-no-reset');
         }
         windows.append(node);
-        const spendNode = providerSpendNode(balance);
-        if (spendNode) windows.append(spendNode);
       }
+      const spendNode = showSpend ? providerSpendNode(provider.balance) : null;
+      if (spendNode) windows.append(spendNode);
     } else if (provider.provider === 'commandcode') {
       // 5-hour and weekly are rate-limit windows (percent); the monthly grant and
       // any rollover top-up are money, so they get the amount on the right of the
       // reset line and span the row like Kimi's Monthly.
-      const fiveHour = windowForKind(provider, 'session');
-      const weekly = windowForKind(provider, 'weekly');
+      const fiveHour = windowForKind(view, 'session');
+      const weekly = windowForKind(view, 'weekly');
       if (fiveHour) {
-        const node = limitWindowNode(providerWindowLabel(provider, fiveHour), fiveHour, color, 0.95);
+        const node = limitWindowNode(providerWindowLabel(view, fiveHour), fiveHour, color, 0.95);
         if (!weekly) node.classList.add('limit-window-wide');
         windows.append(node);
       }
       if (weekly) {
-        const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68);
+        const node = limitWindowNode(providerWindowLabel(view, weekly), weekly, color, 0.68);
         if (!fiveHour) node.classList.add('limit-window-wide');
         windows.append(node);
       }
-      for (const credits of windowsForKind(provider, 'billing')) {
+      for (const credits of windowsForKind(view, 'billing')) {
         const node = limitWindowNode(
-          providerWindowLabel(provider, credits),
+          providerWindowLabel(view, credits),
           credits,
           color,
           0.5,
           null,
-          providerWindowText(provider, credits).detail
+          providerWindowText(view, credits).detail
         );
         node.classList.add('limit-window-wide');
         // A grant with no known plan allowance has no meter, so there is no bar
@@ -1310,27 +1330,27 @@
         windows.append(node);
       }
     } else if (provider.provider === 'kimi') {
-      const fiveHour = windowForKind(provider, 'session');
-      const weekly = windowForKind(provider, 'weekly');
-      const monthly = windowForKind(provider, 'billing');
+      const fiveHour = windowForKind(view, 'session');
+      const weekly = windowForKind(view, 'weekly');
+      const monthly = windowForKind(view, 'billing');
       if (fiveHour) {
-        const node = limitWindowNode(providerWindowLabel(provider, fiveHour), fiveHour, color, 0.95);
+        const node = limitWindowNode(providerWindowLabel(view, fiveHour), fiveHour, color, 0.95);
         if (!weekly) node.classList.add('limit-window-wide');
         windows.append(node);
       }
       if (weekly) {
-        const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68);
+        const node = limitWindowNode(providerWindowLabel(view, weekly), weekly, color, 0.68);
         if (!fiveHour) node.classList.add('limit-window-wide');
         windows.append(node);
       }
       if (monthly) {
         const node = limitWindowNode(
-          providerWindowLabel(provider, monthly),
+          providerWindowLabel(view, monthly),
           monthly,
           color,
           0.5,
           null,
-          providerWindowText(provider, monthly).detail
+          providerWindowText(view, monthly).detail
         );
         node.classList.add('limit-window-wide');
         windows.append(node);
@@ -1339,25 +1359,25 @@
       // Alibaba Team / StepFun Token Plan return one credit window; their
       // rolling plans return 5-hour and weekly windows. The payload shape
       // decides the layout, including on a device receiving a synced row.
-      const billing = windowForKind(provider, 'billing');
-      const session = windowForKind(provider, 'session');
-      const weekly = windowForKind(provider, 'weekly');
+      const billing = windowForKind(view, 'billing');
+      const session = windowForKind(view, 'session');
+      const weekly = windowForKind(view, 'weekly');
       if (billing) {
-        const node = limitWindowNode(providerWindowLabel(provider, billing), billing, color, 0.68);
+        const node = limitWindowNode(providerWindowLabel(view, billing), billing, color, 0.68);
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
       if (session) {
-        const node = limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95);
+        const node = limitWindowNode(providerWindowLabel(view, session), session, color, 0.95);
         if (!weekly) node.classList.add('limit-window-wide');
         windows.append(node);
       }
-      if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
+      if (weekly) windows.append(limitWindowNode(providerWindowLabel(view, weekly), weekly, color, 0.68));
     } else if (provider.provider === 'ollama') {
-      const session = windowForKind(provider, 'session');
-      const weekly = windowForKind(provider, 'weekly');
+      const session = windowForKind(view, 'session');
+      const weekly = windowForKind(view, 'weekly');
       if (session) {
-        const node = limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95);
+        const node = limitWindowNode(providerWindowLabel(view, session), session, color, 0.95);
         if (!weekly) node.classList.add('limit-window-wide');
         windows.append(node);
       }
@@ -1367,10 +1387,10 @@
       // model-scoped weekly (the temporary "Fable only" promo cap). Render every
       // weekly the response actually has, and nothing when a bucket is absent — no
       // empty placeholder — so the scoped bar appears only while the promo is live.
-      const session = windowForKind(provider, 'session');
-      if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
-      for (const weekly of windowsForKind(provider, 'weekly')) {
-        const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68);
+      const session = windowForKind(view, 'session');
+      if (session) windows.append(limitWindowNode(providerWindowLabel(view, session), session, color, 0.95));
+      for (const weekly of windowsForKind(view, 'weekly')) {
+        const node = limitWindowNode(providerWindowLabel(view, weekly), weekly, color, 0.68);
         // The all-models weekly pairs with Session in the two-column grid; a
         // model-scoped weekly (the "Fable only" promo cap) has no partner, so span
         // the full row instead of leaving a half-empty cell.
@@ -1379,23 +1399,23 @@
       }
       // Usage credits: "$2.35 / $20.00" with a meter when a monthly spend limit is
       // set, "$2.35 spent" without one. Absent entirely when credits are off.
-      const usageCredits = spendWindow(provider);
+      const usageCredits = spendWindow(view);
       if (usageCredits) {
         const node = limitWindowNode(
           'Usage credits',
           usageCredits,
           color,
           0.5,
-          providerWindowText(provider, usageCredits).value
+          providerWindowText(view, usageCredits).value
         );
         node.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(node);
       }
-      const balanceNode = claudeBalanceNode(provider);
+      const balanceNode = claudeBalanceNode(view);
       if (balanceNode) windows.append(balanceNode);
       // Usage-limit reset grants (Anthropic's "reset coupon") share Codex's
       // compact line; the ⓘ tooltip carries each grant's label and coverage.
-      const resetNode = claudeResetCreditsNode(provider.resetCredits);
+      const resetNode = claudeResetCreditsNode(view.resetCredits);
       if (resetNode) windows.append(resetNode);
     } else if (provider.provider === 'cline') {
       // ClinePass measures three quota windows, and the account's credit arrives as
@@ -1403,25 +1423,25 @@
       // kind, and rendered the way WorkBuddy's and Trae's balance is. The default
       // branch below renders session and weekly only, which would silently drop a
       // third of the subscription.
-      const clineSession = windowForKind(provider, 'session');
-      const clineWeekly = windowForKind(provider, 'weekly');
-      const clineBilling = windowsForKind(provider, 'billing');
+      const clineSession = windowForKind(view, 'session');
+      const clineWeekly = windowForKind(view, 'weekly');
+      const clineBilling = windowsForKind(view, 'billing');
       const clineMonthly = clineBilling.find((window) => !isCreditsWindow(window) && window.metric !== 'spend') || null;
       const clineCredits = clineBilling.find((window) => isCreditsWindow(window)) || null;
       const clineSpend = clineBilling.find((window) => window.metric === 'spend') || null;
       if (clineSession) {
-        windows.append(limitWindowNode(providerWindowLabel(provider, clineSession), clineSession, color, 0.95));
+        windows.append(limitWindowNode(providerWindowLabel(view, clineSession), clineSession, color, 0.95));
       }
       if (clineWeekly) {
-        windows.append(limitWindowNode(providerWindowLabel(provider, clineWeekly), clineWeekly, color, 0.68));
+        windows.append(limitWindowNode(providerWindowLabel(view, clineWeekly), clineWeekly, color, 0.68));
       }
       if (clineMonthly) {
-        const node = limitWindowNode(providerWindowLabel(provider, clineMonthly), clineMonthly, color, 0.5);
+        const node = limitWindowNode(providerWindowLabel(view, clineMonthly), clineMonthly, color, 0.5);
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
       if (clineCredits) {
-        const node = clineCreditsNode(provider, clineCredits, clineSpend);
+        const node = clineCreditsNode(view, clineCredits, clineSpend);
         if (node) windows.append(node);
       }
     } else {
@@ -1429,10 +1449,10 @@
       // that only expose a single window shouldn't leave a half-empty bar next to
       // the real one. (Grok is handled above; this branch covers minimax's
       // session + weekly pair and any future session/weekly provider.)
-      const session = windowForKind(provider, 'session');
-      const weekly = windowForKind(provider, 'weekly');
-      if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
-      if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
+      const session = windowForKind(view, 'session');
+      const weekly = windowForKind(view, 'weekly');
+      if (session) windows.append(limitWindowNode(providerWindowLabel(view, session), session, color, 0.95));
+      if (weekly) windows.append(limitWindowNode(providerWindowLabel(view, weekly), weekly, color, 0.68));
     }
     return windows;
   }
