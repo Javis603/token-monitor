@@ -455,15 +455,19 @@ test('a Cline card renders the spend row alone when credits is hidden', () => {
 });
 
 test('a Factory card lets Standard and Core pools hide on their own items', () => {
-  // Factory renders the default session + weekly rows; Core pools carry
-  // `additional: true` and answer to the Core pools item — not to Standard's.
+  // Factory renders every window it ships: Standard session/weekly/monthly
+  // answer to their kind items and the three `additional: true` Core windows
+  // to 'additional' — hiding 'session' must not let Core 5-hour claim the
+  // vacated Standard slot through a first-match lookup.
   const provider = {
     provider: 'factory',
     windows: [
       { kind: 'session', label: '5-hour', remainingPercent: 60 },
       { kind: 'weekly', label: 'Weekly', remainingPercent: 45 },
+      { kind: 'billing', label: 'Monthly', remainingPercent: 30 },
       { kind: 'session', label: 'Core 5-hour', remainingPercent: 30, additional: true },
-      { kind: 'weekly', label: 'Core Weekly', remainingPercent: 25, additional: true }
+      { kind: 'weekly', label: 'Core Weekly', remainingPercent: 25, additional: true },
+      { kind: 'billing', label: 'Core Monthly', remainingPercent: 20, additional: true }
     ]
   };
   const rowLabels = (hidden) => [...dockView({ limitProviderHiddenItems: hidden })
@@ -472,13 +476,11 @@ test('a Factory card lets Standard and Core pools hide on their own items', () =
     .filter((node) => node.classNames.has('limit-window'))
     .map((node) => node.children[0].children[0].textContent);
 
-  assert.deepEqual(rowLabels({}), ['5-hour', 'Weekly']);
-  // The session slot takes the first visible session-kind window — hiding
-  // Standard's session leaves Core's in its place, since the two are
-  // different items.
-  assert.deepEqual(rowLabels({ factory: 'session' }), ['Core 5-hour', 'Weekly']);
-  assert.deepEqual(rowLabels({ factory: 'additional' }), ['5-hour', 'Weekly']);
-  assert.deepEqual(rowLabels({ factory: 'session,additional' }), ['Weekly']);
+  assert.deepEqual(rowLabels({}), ['5-hour', 'Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly']);
+  assert.deepEqual(rowLabels({ factory: 'session' }), ['Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly']);
+  assert.deepEqual(rowLabels({ factory: 'monthly' }), ['5-hour', 'Weekly', 'Core 5-hour', 'Core Weekly', 'Core Monthly']);
+  assert.deepEqual(rowLabels({ factory: 'additional' }), ['5-hour', 'Weekly', 'Monthly']);
+  assert.deepEqual(rowLabels({ factory: 'session,weekly,monthly,additional' }), []);
 });
 
 test('a MiMo card hides the Token Plan rows with its monthly item', () => {

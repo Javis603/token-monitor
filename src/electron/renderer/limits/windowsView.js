@@ -1469,6 +1469,22 @@
         const node = clineSpendNode(clineSpend);
         if (node) windows.append(node);
       }
+    } else if (provider.provider === 'factory') {
+      // Token-rate-limits accounts carry two pools of three windows — Standard
+      // first, then Core marked `additional: true`. Every window the caller
+      // left renders its own row: each checklist item hides exactly its group,
+      // and a generic first-match lookup would let a Core window claim a
+      // vacated Standard slot.
+      for (const window of view.windows || []) {
+        const node = limitWindowNode(
+          providerWindowLabel(view, window),
+          window,
+          color,
+          window.kind === 'billing' ? 0.5 : (window.kind === 'session' ? 0.95 : 0.68)
+        );
+        if (window.kind === 'billing') node.classList.add('limit-window-wide');
+        windows.append(node);
+      }
     } else {
       // Default: render only the windows the provider actually has. Providers
       // that only expose a single window shouldn't leave a half-empty bar next to
