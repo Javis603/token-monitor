@@ -6,20 +6,12 @@ const fs = require('node:fs');
 // files. These are observations of cache activity, not server expiry receipts.
 const READ_WINDOW_MS = 60 * 60 * 1000;
 const TAIL_BYTES = 1024 * 1024;
-const CODEX_MAX_TAIL_BYTES = 8 * TAIL_BYTES;
+// A display estimate for every Codex route, not a model or provider TTL claim.
+const CODEX_ESTIMATE_TTL_SECONDS = 30 * 60;
 const cache = new Map();
 
 function count(value) {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
-}
-
-function codexTtl(model) {
-  if (['gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra'].includes(model)) return 1800;
-  const match = /^gpt-(\d+)\.(\d+)(?:$|[-.])/.exec(String(model || ''));
-  if (!match) return 0;
-  const major = Number(match[1]);
-  const minor = Number(match[2]);
-  return (major === 6 && minor <= 1) || (major === 5 && minor === 6) ? 1800 : 0;
 }
 
 function promptCacheFromTranscript(text, client) {
@@ -86,9 +78,8 @@ function promptCacheFromTranscript(text, client) {
       previousUsage = identity;
       const read = count(usage.cached_input_tokens);
       const write = count(usage.cache_write_input_tokens ?? 0);
-      const ttlSeconds = codexTtl(model);
-      observation = ttlSeconds && read !== null && write !== null && read + write > 0
-        ? { observedAt: new Date(at).toISOString(), ttlSeconds } : null;
+      observation = read !== null && write !== null && read + write > 0
+        ? { observedAt: new Date(at).toISOString(), ttlSeconds: CODEX_ESTIMATE_TTL_SECONDS } : null;
     }
   }
   return observation;
@@ -103,21 +94,10 @@ function readSessionPromptCache(filePath, client, now = Date.now()) {
     const cached = cache.get(filePath);
     if (cached?.fingerprint === fingerprint) return cached.value;
     fd = fs.openSync(filePath, 'r');
-    let length = Math.min(stat.size, TAIL_BYTES);
-    let text;
-    for (;;) {
-      const bytes = Buffer.alloc(length);
-      fs.readSync(fd, bytes, 0, length, stat.size - length);
-      text = bytes.toString('utf8');
-      if (client !== 'codex') break;
-      // A long Codex turn can write over 1 MiB after its model declaration.
-      // Widen only when that declaration is absent; never guess the model.
-      const hasModel = text.split('\n').some((line) => {
-        try { return JSON.parse(line).type === 'turn_context'; } catch (_) { return false; }
-      });
-      if (hasModel || length >= Math.min(stat.size, CODEX_MAX_TAIL_BYTES)) break;
-      length = Math.min(stat.size, CODEX_MAX_TAIL_BYTES, length * 2);
-    }
+    const length = Math.min(stat.size, TAIL_BYTES);
+    const bytes = Buffer.alloc(length);
+    fs.readSync(fd, bytes, 0, length, stat.size - length);
+    const text = bytes.toString('utf8');
     const value = promptCacheFromTranscript(text, client);
     if (cache.size >= 512) cache.delete(cache.keys().next().value);
     cache.set(filePath, { fingerprint, value });
@@ -129,4 +109,4 @@ function readSessionPromptCache(filePath, client, now = Date.now()) {
   }
 }
 
-module.exports = { codexTtl, promptCacheFromTranscript, readSessionPromptCache };
+module.exports = { promptCacheFromTranscript, readSessionPromptCache };

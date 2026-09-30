@@ -1,7 +1,7 @@
 'use strict';
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { promptCacheFromTranscript, codexTtl } = require('../../src/shared/sessionPromptCache');
+const { promptCacheFromTranscript } = require('../../src/shared/sessionPromptCache');
 const { sessionPromptCacheForRow } = require('../../src/shared/sessionLive');
 const { normalizePeriod } = require('../../src/shared/usage');
 const at = '2026-09-30T09:00:00.000Z';
@@ -32,31 +32,30 @@ test('Claude mixed tiers use the shorter lifetime; absent tier and compaction cl
   assert.equal(promptCacheFromTranscript(jsonl([item, unknown]), 'claude'), null);
   assert.equal(promptCacheFromTranscript(jsonl([item, { timestamp: later, subtype: 'compact_boundary' }]), 'claude'), null);
 });
-test('Codex requires a supported model and cache activity; duplicate usage is not a request', () => {
-  const context = { timestamp: at, type: 'turn_context', payload: { model: 'gpt-6.1-sol' } };
-  assert.deepEqual(promptCacheFromTranscript(jsonl([context, codex(at), codex(later)]), 'codex'), { observedAt: at, ttlSeconds: 1800 });
-  assert.equal(promptCacheFromTranscript(jsonl([codex(at)]), 'codex'), null);
-  assert.equal(codexTtl('gpt-5.4'), 0);
-  assert.equal(codexTtl('custom-gpt-6.1'), 0);
+test('Codex cache activity starts an estimate without requiring a model declaration', () => {
+  assert.deepEqual(promptCacheFromTranscript(jsonl([codex(at), codex(later)]), 'codex'), { observedAt: at, ttlSeconds: 1800 });
   const cold = codex(later);
   cold.payload.info.last_token_usage.cached_input_tokens = 0;
-  assert.equal(promptCacheFromTranscript(jsonl([context, codex(at), cold]), 'codex'), null);
+  assert.equal(promptCacheFromTranscript(jsonl([codex(at), cold]), 'codex'), null);
 });
-test('Codex recognizes canonical GPT-6 model IDs without inferring unknown names', () => {
-  for (const model of ['gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra', 'gpt-6.0-sol', 'gpt-6.1-sol', 'gpt-5.6-sol']) {
-    assert.equal(codexTtl(model), 1800, model);
-  }
-  for (const model of ['gpt-6', 'gpt-6-custom', 'gpt-6-sol-custom', 'custom-gpt-6-sol', 'gpt-6.2-sol', 'gpt-5.4', '']) {
-    assert.equal(codexTtl(model), 0, model);
-  }
-});
-test('canonical GPT-6 transcripts produce a cache estimate and clear it on a cold response', () => {
-  for (const model of ['gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra']) {
+test('Codex cache estimates do not depend on official, third-party or custom model names', () => {
+  for (const model of ['gpt-6-sol', 'gpt-6.1-sol', 'gpt-5.4', 'deepseek-v4.1-flash', 'custom-gpt-6-sol', '']) {
     const context = { timestamp: at, type: 'turn_context', payload: { model } };
     assert.deepEqual(promptCacheFromTranscript(jsonl([context, codex(at)]), 'codex'), { observedAt: at, ttlSeconds: 1800 }, model);
-    const cold = codex(later);
-    cold.payload.info.last_token_usage.cached_input_tokens = 0;
-    assert.equal(promptCacheFromTranscript(jsonl([context, codex(at), cold]), 'codex'), null, model);
+  }
+});
+test('Codex clears a previous estimate on model changes or compaction and requires valid cache counts', () => {
+  const context = { timestamp: at, type: 'turn_context', payload: { model: 'gpt-6-sol' } };
+  const changed = { timestamp: later, type: 'turn_context', payload: { model: 'custom-model' } };
+  assert.equal(promptCacheFromTranscript(jsonl([context, codex(at), changed]), 'codex'), null);
+  const next = codex(later);
+  next.payload.info.total_token_usage.input_tokens = 2000;
+  assert.deepEqual(promptCacheFromTranscript(jsonl([context, codex(at), changed, next]), 'codex'), { observedAt: later, ttlSeconds: 1800 });
+  assert.equal(promptCacheFromTranscript(jsonl([codex(at), { timestamp: later, type: 'event_msg', payload: { type: 'context_compacted' } }]), 'codex'), null);
+  for (const invalid of [undefined, '900', -1, 0.5, null]) {
+    const item = codex(later);
+    item.payload.info.last_token_usage.cached_input_tokens = invalid;
+    assert.equal(promptCacheFromTranscript(jsonl([codex(at), item]), 'codex'), null);
   }
 });
 test('cache display expires without a stats update and excludes archives and future clocks', () => {
@@ -107,7 +106,7 @@ test('turn completion keeps cache valid and an ended row still schedules its con
   assert.equal(sessionPromptCacheForRow(session, Date.parse(at) + 1800_000), null);
 });
 
-test('Codex long-turn tail finds its model without falling back to a stale model', (t) => {
+test('Codex long-turn tail estimates cache activity even when the model declaration is outside it', (t) => {
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
@@ -118,8 +117,8 @@ test('Codex long-turn tail finds its model without falling back to a stale model
   const padding = { timestamp: at, type: 'response_item', payload: { text: 'x'.repeat(1200_000) } };
   const cases = [
     { name: 'long', rows: [context, padding, codex(at)], expected: { observedAt: at, ttlSeconds: 1800 } },
-    { name: 'switched', rows: [context, { ...context, payload: { model: 'custom-model' } }, padding, codex(at)], expected: null },
-    { name: 'missing', rows: [padding, codex(at)], expected: null },
+    { name: 'switched', rows: [context, { ...context, payload: { model: 'custom-model' } }, padding, codex(at)], expected: { observedAt: at, ttlSeconds: 1800 } },
+    { name: 'missing', rows: [padding, codex(at)], expected: { observedAt: at, ttlSeconds: 1800 } },
     { name: 'cold', rows: [context, padding, codex(at, { info: { last_token_usage: { cached_input_tokens: 0 } } })], expected: null }
   ];
   for (const item of cases) {
