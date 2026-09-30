@@ -80,6 +80,29 @@ test('a stats-only repaint keeps an open window picker and its labels match the 
     composer.render();
     assert.notEqual(find(root, 'SELECT'), select);
     assert.equal(find(root, 'SELECT').children.at(-1).textContent, 'Monthly');
+
+    const first = { kind: 'session', label: 'Some quota', limitId: 'feature-a', windowMinutes: 300, additional: true };
+    const second = { ...first, limitId: 'feature-b' };
+    const secondary = { ...second, windowMinutes: 600 };
+    settings.edgeDockItems = [{ type: 'limit', provider: 'codex', windowKey: itemsApi.limitWindowKey(second) }];
+    stats = { limits: { providers: [{ provider: 'codex', windows: [first, second, secondary] }] } };
+    composer.render();
+    root.children[1].children[0].children.find((node) => node.dataset.itemId).listeners.click();
+    const pinnedSelect = find(root, 'SELECT');
+    assert.equal(new Set(pinnedSelect.children.map((option) => option.value)).size, 4);
+    assert.equal(pinnedSelect.value, itemsApi.limitWindowKey(second));
+    stats.limits.providers[0].windows[1] = { ...second, label: 'Renamed quota' };
+    composer.render();
+    assert.equal(find(root, 'SELECT').value, itemsApi.limitWindowKey(second));
+    assert.equal(find(root, 'SELECT').children[2].textContent, 'Renamed quota');
+    settings.showCodexAdditionalLimits = false;
+    composer.render();
+    assert.deepEqual(find(root, 'SELECT').children.map((option) => option.textContent), [
+      'settings.edgeDock.window.auto', 'settings.edgeDock.window.unavailable'
+    ]);
+    settings.showCodexAdditionalLimits = true;
+    composer.render();
+    assert.equal(find(root, 'SELECT').value, itemsApi.limitWindowKey(second));
   } finally {
     global.document = previousDocument;
   }

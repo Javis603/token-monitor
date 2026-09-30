@@ -217,14 +217,12 @@
       for (const record of getStats()?.limits?.providers || []) {
         if (String(record?.provider || '').toLowerCase() !== item.provider
           || (record.accountKey && hidden.has(record.accountKey))) continue;
-        for (const window of record.windows || []) {
-          if (!window || window.showMeter === false
-            || (item.provider === 'codex' && window.additional === true
-              && getSettings()?.showCodexAdditionalLimits === false)) continue;
+        for (const window of itemsApi.selectableLimitWindows(record, getSettings())) {
           const key = itemsApi.limitWindowKey(window);
           if (!key || choices.has(key)) continue;
           choices.set(key, {
             value: key,
+            keys: itemsApi.limitWindowKeys(window),
             label: windowLabel(record, window)
           });
         }
@@ -237,7 +235,9 @@
       row.append(el('span', 'settings-item-title', t('settings.edgeDock.window')));
       const select = document.createElement('select');
       const choices = [{ value: '', label: t('settings.edgeDock.window.auto') }, ...windowChoices(item)];
-      if (item.windowKey && !choices.some((choice) => choice.value === item.windowKey)) {
+      const matchingChoices = item.windowKey ? choices.filter((choice) => choice.keys?.includes(item.windowKey)) : [];
+      const selectedValue = matchingChoices.length === 1 ? matchingChoices[0].value : item.windowKey || '';
+      if (item.windowKey && matchingChoices.length !== 1) {
         choices.push({ value: item.windowKey, label: t('settings.edgeDock.window.unavailable') });
       }
       for (const choice of choices) {
@@ -246,7 +246,7 @@
         option.textContent = choice.label;
         select.append(option);
       }
-      select.value = item.windowKey || '';
+      select.value = selectedValue;
       select.addEventListener('change', () => { void updateItem(id, { windowKey: select.value }); });
       row.append(select);
       return row;

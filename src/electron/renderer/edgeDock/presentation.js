@@ -76,16 +76,15 @@
       : null;
   }
 
-  function accountSummary(provider, windowKey = '') {
+  function accountSummary(provider, options = {}) {
+    const windowKey = options.windowKey || '';
     const selection = trayText.compactLimitSelection(provider);
     const chosenWindow = windowKey && provider?.status === 'ok' && !provider?.stale
-      ? (provider.windows || []).find((window) => (
-        dockItems.limitWindowKey(window) === windowKey && window.showMeter !== false
-        && trayText.remainingPercent(window, provider) !== null
-      ))
+      ? dockItems.selectedLimitWindow(provider, windowKey, options)
       : null;
     const headline = windowKey
-      ? (chosenWindow ? { window: chosenWindow, remaining: trayText.remainingPercent(chosenWindow, provider) } : null)
+      ? (chosenWindow && trayText.remainingPercent(chosenWindow, provider) !== null
+        ? { window: chosenWindow, remaining: trayText.remainingPercent(chosenWindow, provider) } : null)
       : headlinePick(selection);
     return {
       status: provider?.status === 'ok' && !provider?.stale ? 'ok' : (provider?.stale ? 'stale' : 'error'),
@@ -333,7 +332,7 @@
     const hidden = new Set(options.hiddenAccounts || []);
     const accounts = records
       .filter((record) => !record?.accountKey || !hidden.has(record.accountKey))
-      .map((record) => ({ record, summary: accountSummary(record, options.windowKey) }));
+      .map((record) => ({ record, summary: accountSummary(record, options) }));
     // Accounts keep the collector's order, as the Limits view lists them. The
     // live Codex account is taken from this device's records alone, so a synced
     // device's login is never marked as the one in use here.
@@ -612,6 +611,7 @@
         // every time an account refreshes or signs out.
         cells.push(providerCell(item.provider, byId.get(item.provider) || [], {
           ...item,
+          showCodexAdditionalLimits: options.showCodexAdditionalLimits,
           subscriptionAccounts: allById.get(item.provider) || [],
           stats,
           localDeviceId: options.localDeviceId,

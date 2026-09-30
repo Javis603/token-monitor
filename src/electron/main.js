@@ -5344,6 +5344,7 @@ function edgeDockCellsFor(visibleStats) {
     // dock window is handed cells and nothing else, so both ride the cell.
     syncActive: syncProvenanceActive(),
     items: settings?.edgeDockItems,
+    showCodexAdditionalLimits: settings?.showCodexAdditionalLimits,
     codexManagedAccounts: codexAccountsForRenderer(),
     activeCodexAccountId: codexPresentationPendingAccountId || codexPresentationActiveAccountId,
     limitsEnabled: settings?.limitsEnabled !== false,

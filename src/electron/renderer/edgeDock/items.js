@@ -46,9 +46,7 @@
     return String(value || '').trim().toLowerCase();
   }
 
-  // A window's identity must survive refreshes and account changes. The label
-  // distinguishes scoped pools of the same kind without storing an array index.
-  function limitWindowKey(window) {
+  function legacyLimitWindowKey(window) {
     if (!window || typeof window !== 'object' || !window.kind) return '';
     return JSON.stringify([
       String(window.kind), String(window.label || ''),
@@ -56,10 +54,54 @@
     ]);
   }
 
+  // Backend ids survive display-name changes. Cadence separates primary and
+  // secondary windows belonging to the same metered feature.
+  function limitWindowKey(window) {
+    const legacy = legacyLimitWindowKey(window);
+    if (!legacy) return '';
+    const limitId = String(window.limitId || '').trim();
+    if (!limitId) return legacy;
+    const minutes = Number(window.windowMinutes);
+    return JSON.stringify([
+      'id', limitId, String(window.kind), String(window.metric || ''),
+      window.additional === true,
+      Number.isFinite(minutes) && minutes > 0 ? minutes : null
+    ]);
+  }
+
+  function limitWindowKeys(window) {
+    return [...new Set([limitWindowKey(window), legacyLimitWindowKey(window)])].filter(Boolean);
+  }
+
+  function selectableLimitWindows(provider, options = {}) {
+    return (provider?.windows || []).filter((window) => (
+      window && window.showMeter !== false
+      && !(provider.provider === 'codex' && window.additional === true
+        && options.showCodexAdditionalLimits === false)
+    ));
+  }
+
+  function selectedLimitWindow(provider, key, options = {}) {
+    const candidates = selectableLimitWindows(provider, options)
+      .filter((window) => limitWindowKeys(window).includes(key));
+    // Old label-based pins can migrate only when their identity is unambiguous.
+    return candidates.length === 1 ? candidates[0] : null;
+  }
+
   function normalizeWindowKey(value) {
     if (typeof value !== 'string' || value.length > 400) return '';
     try {
-      const [kind, label, metric, additional] = JSON.parse(value);
+      const parts = JSON.parse(value);
+      if (!Array.isArray(parts)) return '';
+      if (parts.length === 6 && parts[0] === 'id') {
+        const [, limitId, kind, metric, additional, windowMinutes] = parts;
+        if (typeof limitId !== 'string' || !limitId.trim() || typeof kind !== 'string' || !kind
+          || typeof metric !== 'string' || typeof additional !== 'boolean'
+          || !(windowMinutes === null || (typeof windowMinutes === 'number' && windowMinutes > 0))) return '';
+        return limitWindowKey({ limitId, kind, metric, additional, windowMinutes });
+      }
+      if (parts.length !== 4) return '';
+      const [kind, label, metric, additional] = parts;
       if (typeof kind !== 'string' || !kind || typeof label !== 'string'
         || typeof metric !== 'string' || typeof additional !== 'boolean') return '';
       return limitWindowKey({ kind, label, metric, additional });
@@ -177,6 +219,9 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
     defaultEdgeDockItems,
     itemId,
     limitWindowKey,
+    limitWindowKeys,
+    selectableLimitWindows,
+    selectedLimitWindow,
     normalizeEdgeDockItems,
     reorderEdgeDockItems
   };
