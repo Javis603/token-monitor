@@ -622,3 +622,34 @@ test('display metric changes hide and remeasure an open card against the new wor
   assert.equal(bubble.bounds.height, 300 - EDGE_DOCK_METRICS.screenMargin * 2);
   assert.equal(bubble.opacity, 1);
 });
+
+test('a settings-only change repaints an open card, and its new size re-commits it', (t) => {
+  const fixture = createFixture();
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const bubble = fixture.windowFor('bubble');
+  const renders = () => bubble.webContents.messages
+    .filter((message) => message.channel === 'edgeDock:render').length;
+
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 180 });
+  const before = renders();
+
+  // No stats change rides this push: the card re-derives from the appearance, so
+  // a hidden-usage-item toggle repaints an open card only if the appearance
+  // projection is pushed to the bubble surface too.
+  fixture.controller.setAppearance({ language: 'en', limitProviderHiddenItems: { codex: 'weekly' } });
+  assert.ok(renders() > before, 'an appearance-only change still has to push the open card');
+  const repainted = sentPayload(bubble, 'bubble');
+  assert.deepEqual(repainted.appearance.limitProviderHiddenItems, { codex: 'weekly' });
+  assert.equal(repainted.cell.id, 'codex');
+  assert.equal(bubble.opacity, 1, 'the card stays visible while it repaints');
+
+  // The hidden row leaves the card shorter: the renderer measures the new size
+  // off-screen, reports it, and the controller re-renders against it rather than
+  // leaving the reader on the card committed at the old height.
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 150 });
+  assert.deepEqual(sentPayload(bubble, 'bubble').placed, { cellId: 'codex', height: 150 });
+  assert.equal(bubble.bounds.height, 150);
+  assert.equal(bubble.opacity, 1);
+});
