@@ -4422,12 +4422,15 @@ function animateLimitResets(snapshot) {
     }
   }
   if (!motions.length) return;
+  // Refills rendered in one pass land on full together: the batch paces
+  // itself by the longest meter rather than each bar's own distance.
+  const duration = limitResetMotionApi.groupDurationMs(motions.map((motion) => motion.duration));
   // Start only after the replacement DOM is paintable. The rest of the refresh render
   // can delay this first frame; excluding that delay prevents the motion from visibly
   // catching up by skipping its opening values.
   requestAnimationFrame((startedAt) => {
     if (prefersReducedMotion()) return;
-    for (const { fill, from, item, to, duration } of motions) {
+    for (const { fill, from, item, to } of motions) {
       if (!fill.isConnected || !item.isConnected) continue;
       animateBarBetween(
         fill,

@@ -8,6 +8,7 @@ const test = require('node:test');
 const {
   displayPercent,
   durationMs,
+  groupDurationMs,
   providerKey,
   remainingPercent,
   shouldAnimateReset,
@@ -55,6 +56,13 @@ test('refill duration follows the distance while preserving the approved short r
   assert.equal(durationMs(0, 100), 1600);
   assert.equal(durationMs(69, 100), 1117);
   assert.equal(durationMs(null, 100), 1100);
+});
+
+test('a refill batch lands on full together at the longest member\'s pace', () => {
+  assert.equal(groupDurationMs([durationMs(0, 100), durationMs(69, 100)]), 1600);
+  assert.equal(groupDurationMs([durationMs(99, 100)]), 907);
+  assert.equal(groupDurationMs([1100, Number.NaN, Number.POSITIVE_INFINITY]), 1100);
+  assert.equal(groupDurationMs([]), 0);
 });
 
 test('known reset boundaries must advance before a refill animates', () => {
@@ -107,6 +115,8 @@ test('renderer wires reset motion before app boot and respects reduced motion', 
   assert.match(app, /previous\.displayPercent === ''/);
   assert.match(app, /LIMIT_RESET_MOTION_EASING/);
   assert.match(app, /const duration = limitResetMotionApi\.durationMs\(from, to\);/);
+  assert.match(app, /limitResetMotionApi\.groupDurationMs\(motions\.map\(\(motion\) => motion\.duration\)\)/);
+  assert.match(app, /for \(const \{ fill, from, item, to \} of motions\)/);
   assert.match(app, /animateLimitResetCompletion\(fill, duration\);/);
   // The meter itself is built by the shared view the edge dock also renders
   // from, so the motion module reaches it as an injected dependency.
