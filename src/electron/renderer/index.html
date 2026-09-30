@@ -267,6 +267,18 @@
                 </div>
                 <p id="windowToggleShortcutNote" class="settings-note settings-item-desc" data-i18n="settings.display.windowShortcutNote">Record a global shortcut to show or hide the window.</p>
               </div>
+              <div class="settings-item" id="widgetSizeRow">
+                <span class="settings-item-text">
+                  <span class="settings-item-title" data-i18n="settings.display.widgetSize">Widget size</span>
+                  <span class="settings-note settings-item-desc" data-i18n="settings.display.widgetSizeHint">Custom width and height in pixels (e.g. 600 × 80). Saved automatically.</span>
+                </span>
+                <span class="widget-size-fields">
+                  <input type="number" id="widgetWidthInput" class="widget-size-input" min="240" max="1600" step="2" inputmode="numeric" data-i18n-aria-label="settings.display.widgetWidth" aria-label="Widget width" />
+                  <span class="widget-size-times" aria-hidden="true">×</span>
+                  <input type="number" id="widgetHeightInput" class="widget-size-input" min="56" max="1400" step="2" inputmode="numeric" data-i18n-aria-label="settings.display.widgetHeight" aria-label="Widget height" />
+                  <button type="button" id="widgetSizeResetButton" class="widget-size-reset" data-i18n="settings.display.widgetSizeReset">Reset</button>
+                </span>
+              </div>
             </div>
             <div class="settings-subgroup settings-presence-group">
               <div class="settings-group-header"><span data-i18n="settings.display.presenceTitle">Floating & Tray</span></div>

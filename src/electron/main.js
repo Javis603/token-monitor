@@ -34,10 +34,12 @@ const {
 } = require('./providers/workbuddy/localAuth');
 const { createElectronLimitsFetch } = require('./limits/fetch');
 const {
+  WIDGET_SIZE_LIMITS,
   expandedBoundsForCollapse,
   normalWindowBounds,
   persistWindowState,
   rebuildWindowBounds,
+  resizeWidgetBounds,
   restoreWindowMaximized,
   restoreWindowMaximizedForReveal,
   setWindowMaximizable,
@@ -450,7 +452,11 @@ function appWindowIcon() {
 }
 
 const DEFAULT_WINDOW = { width: 340, height: 650 };
-const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
+// Shared with the explicit Settings width/height inputs (windowState): the
+// height floor must admit the compact horizontal bar (issue #873, e.g.
+// 600x80), otherwise setBounds() would silently clamp a saved short widget
+// back to 140px on the next launch.
+const WINDOW_LIMITS = WIDGET_SIZE_LIMITS;
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
 const CSP_HEADER = [
   "default-src 'self'",
@@ -7527,6 +7533,23 @@ app.whenReady().then(() => {
   });
   ipcMain.on('window:viewState', (_event, patch) => {
     updateRendererViewState(patch);
+  });
+  ipcMain.handle('window:setSize', (_event, requested) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    // A maximized/minimized window or a collapsed floating bubble has no
+    // normal bounds to resize; ignore the Settings input until it is a normal
+    // interactive widget again.
+    if (typeof mainWindow.isMaximized === 'function' && mainWindow.isMaximized()) return false;
+    if (typeof mainWindow.isMinimized === 'function' && mainWindow.isMinimized()) return false;
+    if (floatingBubbleState.collapsed) return false;
+    const current = normalWindowBounds(mainWindow) || mainWindow.getBounds();
+    const display = displayForBounds(current) || screen.getPrimaryDisplay();
+    const desired = requested === null || requested?.reset === true ? DEFAULT_WINDOW : requested;
+    const target = resizeWidgetBounds(current, desired, display.workArea, WIDGET_SIZE_LIMITS);
+    if (!target) return false;
+    mainWindow.setBounds(target);
+    persistWindowBounds(target);
+    return target;
   });
   ipcMain.handle('floatingBubble:expand', () => expandFloatingBubble());
   ipcMain.handle('floatingBubble:peek', () => expandFloatingBubble({ focus: false }));

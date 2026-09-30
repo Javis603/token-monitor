@@ -1,5 +1,39 @@
 'use strict';
 
+// Single source of truth for the main widget's BrowserView size limits, used
+// both by the explicit width/height inputs in Settings and by main.js's
+// WINDOW_LIMITS (restore + drag resize). The height floor (56) admits the
+// compact horizontal bar shown in issue #873 (e.g. 600x80, 800x100); the
+// renderer already lays that compact surface out at these heights.
+const WIDGET_SIZE_LIMITS = { minWidth: 240, minHeight: 56, maxWidth: 1600, maxHeight: 1400 };
+
+function normalizeWidgetDimensions(input, limits = WIDGET_SIZE_LIMITS) {
+  if (!input || typeof input !== 'object') return null;
+  const width = Math.round(Number(input.width));
+  const height = Math.round(Number(input.height));
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return {
+    width: Math.min(limits.maxWidth, Math.max(limits.minWidth, width)),
+    height: Math.min(limits.maxHeight, Math.max(limits.minHeight, height))
+  };
+}
+
+// Keeps the window's current top-left anchor when applying an explicit size,
+// then pulls it back inside the work area so growing the widget can never push
+// it off-screen.
+function resizeWidgetBounds(current, desired, workArea, limits = WIDGET_SIZE_LIMITS) {
+  const size = normalizeWidgetDimensions(desired, limits);
+  if (!size || !current || !workArea) return null;
+  const minX = Number(workArea.x);
+  const minY = Number(workArea.y);
+  const maxX = Number(workArea.x) + Number(workArea.width) - size.width;
+  const maxY = Number(workArea.y) + Number(workArea.height) - size.height;
+  const x = Math.min(Math.max(Number(current.x), minX), Math.max(minX, maxX));
+  const y = Math.min(Math.max(Number(current.y), minY), Math.max(minY, maxY));
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { x: Math.round(x), y: Math.round(y), width: size.width, height: size.height };
+}
+
 function isWindowMaximized(window) {
   return Boolean(
     window &&
@@ -113,11 +147,14 @@ function rebuildWindowBounds(window, state = {}) {
 }
 
 module.exports = {
+  WIDGET_SIZE_LIMITS,
   expandedBoundsForCollapse,
   isWindowMaximized,
   normalWindowBounds,
+  normalizeWidgetDimensions,
   persistWindowState,
   rebuildWindowBounds,
+  resizeWidgetBounds,
   restoreWindowMaximized,
   restoreWindowMaximizedForReveal,
   setWindowMaximizable,

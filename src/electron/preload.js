@@ -132,6 +132,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   downloadAppUpdate: () => ipcRenderer.invoke('appUpdate:download'),
   installAppUpdate: () => ipcRenderer.invoke('appUpdate:install'),
   dismissAppUpdate: (version) => ipcRenderer.invoke('appUpdate:dismiss', version),
+  setWidgetSize: (size) => ipcRenderer.invoke('window:setSize', size),
   expandFloatingBubble: () => ipcRenderer.invoke('floatingBubble:expand'),
   moveFloatingBubble: (delta) => ipcRenderer.invoke('floatingBubble:move', delta),
   signalContentReady: () => ipcRenderer.send('window:contentReady'),
