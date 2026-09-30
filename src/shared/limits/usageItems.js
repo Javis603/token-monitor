@@ -144,7 +144,7 @@
       item('spend')
     ],
     kiro: [item('monthly', 'settings.limits.items.monthlyCredits')],
-    workbuddy: [item('credits', 'settings.limits.items.creditsLabel'), item('spend')],
+    workbuddy: [item('credits', 'settings.limits.items.creditsLabel')],
     qoder: [item('monthly', 'settings.limits.items.creditsLabel')],
     deepseek: [item('credits'), item('spend')],
     devin: [
@@ -163,7 +163,7 @@
     minimax: [item('session'), item('weekly')],
     volcengine: [item('session'), item('daily'), item('weekly'), item('monthly')],
     ollama: [item('session'), item('weekly')],
-    trae: [item('credits', 'settings.limits.items.creditsLabel'), item('spend')],
+    trae: [item('credits', 'settings.limits.items.creditsLabel')],
     alibaba: [item('session'), item('weekly'), item('monthly')],
     stepfun: [item('session'), item('weekly'), item('monthly')],
     thirdparty: [item('credits'), item('spend')]
