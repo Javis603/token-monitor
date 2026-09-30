@@ -11923,6 +11923,11 @@ async function applyWidgetSizeFromInputs() {
     if (target) {
       els.widgetWidthInput.value = Math.round(target.width);
       els.widgetHeightInput.value = Math.round(target.height);
+    } else {
+      // Resize rejected (window minimized/maximized or bubble collapsed): the
+      // window never took the typed size, so refresh the inputs from settings
+      // instead of leaving them showing a value that was never applied.
+      preserveSettingsPanelScroll(syncSettingsForm);
     }
   } catch (error) {
     console.error('Could not resize widget:', error);

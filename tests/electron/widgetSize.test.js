@@ -62,6 +62,19 @@ test('resizeWidgetBounds pulls a grown widget back inside the work area', () => 
   assert.ok(resized.y + resized.height <= workArea.y + workArea.height);
 });
 
+test('resizeWidgetBounds fits oversized requests to the work area', () => {
+  // The global ceilings (1600×1400) can exceed a display's work area; the
+  // window must never end up bigger than the screen it is anchored inside.
+  const current = { x: 100, y: 100, width: 340, height: 650 };
+  const resized = resizeWidgetBounds(current, { width: 1600, height: 1400 }, workArea);
+  assert.deepEqual(resized, {
+    x: workArea.x,
+    y: workArea.y,
+    width: workArea.width,
+    height: workArea.height
+  });
+});
+
 test('resizeWidgetBounds returns null for invalid input', () => {
   assert.equal(resizeWidgetBounds(null, { width: 600, height: 80 }, workArea), null);
   assert.equal(resizeWidgetBounds({ x: 0, y: 0, width: 340, height: 650 }, { width: 0, height: 0 }, workArea), null);
@@ -92,6 +105,10 @@ test('widget size Settings surface, preload bridge and IPC handler are wired', (
   assert.match(styles, /@media \(max-height: 200px\) and \(min-aspect-ratio: 3 \/ 1\)/);
   assert.match(styles, /\.limits-panel\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(styles, /\.shell\.limits-mode \.total-panel/);
+  // Multi-account providers lay their account chips on the same horizontal
+  // rail inside the bar layout, instead of stacking vertically.
+  assert.match(styles, /\.limit-row-group\s*\{[^}]*display:\s*flex/s);
+  assert.ok((styles.match(/\.limit-account-list\s*\{/g) || []).length >= 2);
   // The active view is exposed as a shell class in the renderer.
   const appJs = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   assert.match(appJs, /classList\.toggle\('limits-mode',\s*state\.breakdown === 'limits'\)/);

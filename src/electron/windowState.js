@@ -24,14 +24,22 @@ function normalizeWidgetDimensions(input, limits = WIDGET_SIZE_LIMITS) {
 function resizeWidgetBounds(current, desired, workArea, limits = WIDGET_SIZE_LIMITS) {
   const size = normalizeWidgetDimensions(desired, limits);
   if (!size || !current || !workArea) return null;
+  const areaWidth = Number(workArea.width);
+  const areaHeight = Number(workArea.height);
+  if (!Number.isFinite(areaWidth) || !Number.isFinite(areaHeight) || areaWidth <= 0 || areaHeight <= 0) return null;
+  // The global limits can be wider/taller than a display's work area, so fit
+  // the requested size to the work area before anchoring; otherwise a large
+  // request would produce a window bigger than the screen it lives on.
+  const fitWidth = Math.min(size.width, areaWidth);
+  const fitHeight = Math.min(size.height, areaHeight);
   const minX = Number(workArea.x);
   const minY = Number(workArea.y);
-  const maxX = Number(workArea.x) + Number(workArea.width) - size.width;
-  const maxY = Number(workArea.y) + Number(workArea.height) - size.height;
+  const maxX = minX + areaWidth - fitWidth;
+  const maxY = minY + areaHeight - fitHeight;
   const x = Math.min(Math.max(Number(current.x), minX), Math.max(minX, maxX));
   const y = Math.min(Math.max(Number(current.y), minY), Math.max(minY, maxY));
   if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  return { x: Math.round(x), y: Math.round(y), width: size.width, height: size.height };
+  return { x: Math.round(x), y: Math.round(y), width: Math.round(fitWidth), height: Math.round(fitHeight) };
 }
 
 function isWindowMaximized(window) {

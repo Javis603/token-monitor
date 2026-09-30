@@ -5760,6 +5760,27 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   /* Signed-out providers carry no windows; size the chip to its full header
      ("Claude / Not signed in") instead of reserving window-row width. */
   .limit-row:has(> .limit-windows:empty) { min-width: 0; }
+  /* Multi-account providers draw one chip per account; lay those chips on the
+     same horizontal rail instead of stacking them vertically (a vertical
+     stack would overflow the short bar and be clipped, with no way to scroll
+     to the missing accounts). The group's own header repeats each account's
+     name, so drop it at this height. */
+  .limit-row-group {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    min-width: 0;
+    max-width: none;
+    margin-right: 0;
+    padding: 0;
+    border-right: 1px solid rgba(var(--line-rgb), 0.12);
+  }
+  .limit-row-group > .limit-head { display: none; }
+  .limit-account-list {
+    display: flex;
+    flex-direction: row;
+    gap: 0;
+  }
   .limit-head { gap: 6px; align-items: baseline; }
   .limit-title { flex: 1 1 auto; }
   .limit-name { gap: 6px; font-size: 11px; }
