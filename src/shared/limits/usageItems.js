@@ -92,9 +92,16 @@
     return window ? limitWindowKey(window) : '';
   }
 
-  // The item a window's row belongs to.
-  function limitUsageItemId(window) {
+  // The item a window's row belongs to. `providerId` covers the rows the card
+  // draws from a window under another item: Cline folds its spend into the
+  // credits row, and older hubs send Claude's spend window without a metric.
+  function limitUsageItemId(window, providerId = '') {
+    const provider = normalizedId(providerId);
     const metric = normalizedId(window?.metric);
+    if (provider === 'cline' && metric === 'spend') return 'credits';
+    if (provider === 'claude' && !metric && window?.kind === 'billing' && window?.label === 'Usage credits') {
+      return 'spend';
+    }
     if (metric === 'credits' || metric === 'spend') return metric;
     return limitWindowKey(window);
   }
@@ -161,7 +168,7 @@
   function isLimitWindowHidden(value, providerId, window) {
     if (normalizedId(providerId) === 'codex' && window?.additional === true) return false;
     const hidden = hiddenUsageItemSet(value, providerId);
-    return hidden.size > 0 && hidden.has(limitUsageItemId(window));
+    return hidden.size > 0 && hidden.has(limitUsageItemId(window, providerId));
   }
 
   return {

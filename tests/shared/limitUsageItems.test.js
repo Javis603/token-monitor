@@ -65,6 +65,17 @@ test('a window is hidden only by its own provider\'s list, and never a Codex add
   assert.equal(isLimitWindowHidden(undefined, 'codex', weekly), false);
 });
 
+// Home and the dock picker filter raw windows, so they must land on the item
+// the card drew them under.
+test('a window drawn under another item is hidden with that item', () => {
+  const clineSpend = { kind: 'billing', metric: 'spend', label: 'Monthly spend' };
+  assert.equal(isLimitWindowHidden({ cline: ['credits'] }, 'cline', clineSpend), true);
+  assert.equal(isLimitWindowHidden({ cline: ['spend'] }, 'cline', clineSpend), false);
+  const legacyClaudeSpend = { kind: 'billing', label: 'Usage credits' };
+  assert.equal(isLimitWindowHidden({ claude: ['spend'] }, 'claude', legacyClaudeSpend), true);
+  assert.equal(limitUsageItemId(legacyClaudeSpend), limitWindowKey(legacyClaudeSpend));
+});
+
 test('a hidden window the payload no longer draws is still named', () => {
   assert.equal(usageItemFallbackLabel('codex', weeklyKey), 'Weekly');
   assert.equal(usageItemFallbackLabel('codex', 'credits'), '', 'fixed items are localized by the caller');
