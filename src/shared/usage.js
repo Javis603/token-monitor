@@ -1631,6 +1631,9 @@ function applyPeriodDelta(base, freshToday, anchorToday) {
 }
 
 function deltaValue(base, fresh, anchor, key) {
+  // Cache observations are snapshots, never additive accounting. Missing
+  // metadata retains the base; only an explicit null clears an observation.
+  if (key === 'promptCache') return fresh === undefined ? base : normalizePromptCache(fresh);
   if (key === 'tokenComponents') {
     // A warm tick may introduce aggregate-only fallback data. Boolean
     // provenance is not arithmetically subtractable, so retain exactness only

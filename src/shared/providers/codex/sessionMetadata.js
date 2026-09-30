@@ -1,12 +1,11 @@
 'use strict';
 
 const fs = require('node:fs');
-const { readSessionPromptCache } = require('../../sessionPromptCache');
 const os = require('node:os');
 const path = require('node:path');
 const { findSessionFiles, codexSessionFile } = require('../../sessionFiles');
 const { shouldReadSessionContext } = require('../../sessionContext');
-const { readCodexSessionContext, readCodexTurnEnded } = require('./sessionContext');
+const { readCodexSessionState, readCodexSessionContext, readCodexTurnEnded } = require('./sessionContext');
 
 let sqlite = null;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
@@ -358,15 +357,14 @@ function resolveSessionMetadata(sessionIds, context) {
   // attempted only once that timestamp says the session could still be open —
   // `fileSessionMetadata` has to run first for that reason.
   const decorate = (sessionId, filePath) => {
-    const meta = {
-      ...context.fileSessionMetadata(sessionId, filePath, result.get(sessionId)),
-      promptCache: readSessionPromptCache(filePath, 'codex', context.now)
-    };
+    const meta = context.fileSessionMetadata(sessionId, filePath, result.get(sessionId));
     if (!shouldReadSessionContext(meta.lastUsedAt, context.now)) return meta;
-    const sessionContext = readContext(filePath);
+    const state = readCodexSessionState(filePath, deps.codexDeps);
+    if (state.promptCacheState?.observation !== undefined) meta.promptCache = state.promptCacheState.observation;
+    const sessionContext = deps.readCodexSessionContext ? readContext(filePath) : state.context;
     // The turn boundary rides the same tail and answers the other half of the
     // question the window cannot: whether the agent is still generating.
-    const turnEnded = readTurnEnded(filePath);
+    const turnEnded = deps.readCodexTurnEnded ? readTurnEnded(filePath) : state.turnEnded;
     const decorated = sessionContext ? { ...meta, ...sessionContext } : meta;
     // Forwarded in all three states, so a \' + BT + 'false\' + BT + ' can clear a \' + BT + 'true\' + BT + ' from an
     // earlier tick and an unknown transcript leaves the reading alone.

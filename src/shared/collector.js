@@ -952,10 +952,9 @@ function propagateTodayProjects(today, periods) {
       target.contextTokens = Number(session.contextTokens) || 0;
       // Home and Dock prefer month rows; carry the fresh observation (including
       // an explicit cold reading) through anchored watch updates as well.
+      // An omitted observation is a metadata miss, not evidence of a cold cache.
       if (Object.prototype.hasOwnProperty.call(session, 'promptCache')) {
         target.promptCache = session.promptCache;
-      } else {
-        delete target.promptCache;
       }
       // The turn boundary is copied in all three states, matching what the
       // fresh scan said: `true` finished, `false` open, absent unknown. Copying

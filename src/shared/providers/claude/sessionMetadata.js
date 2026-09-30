@@ -1,7 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
-const { readSessionPromptCache } = require('../../sessionPromptCache');
+const { createPromptCacheState, applyPromptCacheEntry } = require('../../sessionPromptCache');
 const { claudeSessionRoots } = require('./paths');
 const { findSessionFiles } = require('../../sessionFiles');
 const { normalizeSessionContext, shouldReadSessionContext } = require('../../sessionContext');
@@ -222,6 +222,7 @@ function applyMetadataLine(state, line) {
   if (!line.length) return;
   try {
     const entry = JSON.parse(line.toString('utf8'));
+    applyPromptCacheEntry(state.promptCacheState, entry, 'claude');
     if (entry?.type === 'custom-title') {
       const candidate = cleanTitle(entry.customTitle);
       if (candidate) state.customTitle = candidate;
@@ -350,6 +351,7 @@ function emptyIndex() {
     droppingLongLine: false,
     longLineHead: Buffer.alloc(0),
     longLineTail: Buffer.alloc(0),
+    promptCacheState: createPromptCacheState(),
     contextObserved: false,
     contextTokens: 0,
     contextWindow: 0
@@ -406,7 +408,21 @@ function applyLongLineFragments(state) {
     // precedes `usage` in `message`, so a tail carrying usage has already
     // written the statement, and a record still being written yields no usage.
     const contextUsage = contextUsageFromFragments(head, tail);
-    if (contextUsage) applyContextUsage(state, contextUsage.model, contextUsage.usage);
+    if (contextUsage) {
+      applyContextUsage(state, contextUsage.model, contextUsage.usage);
+      // Response metadata can trail large content. Use the existing bounded
+      // fragments, never a second file read or a parse of the content itself.
+      const fragments = `${head}\n${tail}`;
+      const timestamp = /"timestamp"\s*:\s*"([^"]+)"/.exec(tail)?.[1]
+        || /"timestamp"\s*:\s*"([^"]+)"/.exec(head)?.[1];
+      const id = /"id"\s*:\s*"([^"]+)"/.exec(head)?.[1];
+      applyPromptCacheEntry(state.promptCacheState, {
+        timestamp, type: 'assistant',
+        isSidechain: /"isSidechain"\s*:\s*true/.test(fragments),
+        isApiErrorMessage: /"isApiErrorMessage"\s*:\s*true/.test(fragments),
+        message: { id, usage: contextUsage.usage }
+      }, 'claude');
+    }
     // stop_reason is the last occurrence, and it trails the assistant text.
     const matches = [...tail.matchAll(/"stop_reason"\s*:\s*"([^"]*)"/g)];
     const reason = matches.length ? matches[matches.length - 1][1] : '';
@@ -428,6 +444,8 @@ function applyLongLineFragments(state) {
   if (/"isMeta"\s*:\s*true/.test(flags)) return;
   if (/"isCompactSummary"\s*:\s*true/.test(flags)) {
     clearContextUsage(state);
+    state.promptCacheState.observation = null;
+    state.promptCacheState.previousMessage = '';
     return;
   }
   // This has to agree with what isUserPrompt() accepts, or the same record is a
@@ -483,6 +501,7 @@ function readSessionTitle(filePath, deps = {}) {
         // to finish reading that record's boundary from the fragments it kept.
         longLineHead: Buffer.isBuffer(cached.longLineHead) ? Buffer.from(cached.longLineHead) : Buffer.alloc(0),
         longLineTail: Buffer.isBuffer(cached.longLineTail) ? Buffer.from(cached.longLineTail) : Buffer.alloc(0),
+        promptCacheState: { ...cached.promptCacheState },
         contextObserved: cached.contextObserved === true,
         contextTokens: tokenCount(cached.contextTokens),
         contextWindow: tokenCount(cached.contextWindow)
@@ -545,6 +564,11 @@ function readSessionContext(filePath, deps = {}) {
   return normalizeSessionContext(cached) || { contextTokens: 0, contextWindow: 0 };
 }
 
+function readSessionPromptCache(filePath, deps = {}) {
+  readSessionTitle(filePath, deps);
+  return (deps.cache || titleCache).get(String(filePath || ''))?.promptCacheState?.observation;
+}
+
 function resolveSessionMetadata(sessionIds, context) {
   const { deps, home, metadata } = context;
   const result = new Map();
@@ -570,13 +594,15 @@ function resolveSessionMetadata(sessionIds, context) {
     // has to reach the merge to clear a `true` from an earlier tick; omitting it
     // left the stale completion in place and the row read Finished while the
     // model was generating. `undefined` is reserved for "no evidence".
-    const turnEnded = readSessionTurnEnded(filePath, deps.claudeMetadataDeps);
-    const sessionContext = shouldReadSessionContext(meta.lastUsedAt, context.now)
-      ? readSessionContext(filePath, deps.claudeMetadataDeps)
-      : undefined;
+    const index = (deps.claudeMetadataDeps?.cache || titleCache).get(filePath);
+    const turnEnded = index?.stopReason
+      ? index.stopReason !== 'tool_use' && index.userSinceStop !== true : undefined;
+    const sessionContext = shouldReadSessionContext(meta.lastUsedAt, context.now) && index?.contextObserved
+      ? normalizeSessionContext(index) || { contextTokens: 0, contextWindow: 0 } : undefined;
     result.set(sessionId, {
       ...meta,
-      promptCache: readSessionPromptCache(filePath, 'claude', context.now),
+      ...(index?.promptCacheState?.observation === undefined ? {}
+        : { promptCache: index.promptCacheState.observation }),
       ...(title ? { title } : {}),
       ...(turnEnded === undefined ? {} : { turnEnded }),
       ...(sessionContext || {})
@@ -596,6 +622,7 @@ module.exports = {
   claudeContextWindow,
   cleanTitle,
   readSessionContext,
+  readSessionPromptCache,
   readSessionTitle,
   readSessionTurnEnded,
   resolveSessionMetadata

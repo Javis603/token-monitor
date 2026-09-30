@@ -110,7 +110,8 @@ test('Codex long-turn tail estimates cache activity even when the model declarat
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
-  const { readSessionPromptCache } = require('../../src/shared/sessionPromptCache');
+  const { readCodexSessionState } = require('../../src/shared/providers/codex/sessionContext');
+  const readSessionPromptCache = (file) => readCodexSessionState(file).promptCacheState?.observation ?? null;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'prompt-cache-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const context = { timestamp: at, type: 'turn_context', payload: { model: 'gpt-6.1-sol' } };
@@ -126,4 +127,110 @@ test('Codex long-turn tail estimates cache activity even when the model declarat
     fs.writeFileSync(file, jsonl(item.rows));
     assert.deepEqual(readSessionPromptCache(file, 'codex', Date.parse(at)), item.expected, item.name);
   }
+});
+
+test('Codex shares one read for context, turn and cache, and duplicate accounting survives tail eviction', (t) => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { readCodexSessionState, readCodexSessionContext, readCodexTurnEnded } = require('../../src/shared/providers/codex/sessionContext');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-shared-read-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'session.jsonl');
+  const usage = codex(at);
+  usage.payload.info.last_token_usage.total_tokens = 123_000;
+  usage.payload.info.model_context_window = 200_000;
+  fs.writeFileSync(file, `${jsonl([usage, { timestamp: at, type: 'event_msg', payload: { type: 'task_complete' } }])}\n`);
+  let bytesRead = 0;
+  let reads = 0;
+  const deps = { cache: new Map(), fs: { ...fs, readSync(...args) {
+    reads += 1;
+    const result = fs.readSync(...args);
+    bytesRead += result;
+    return result;
+  } } };
+  const first = readCodexSessionState(file, deps);
+  assert.deepEqual(first.promptCacheState.observation, { observedAt: at, ttlSeconds: 1800 });
+  assert.equal(bytesRead, fs.statSync(file).size);
+  assert.equal(reads, 1);
+  assert.deepEqual(readCodexSessionContext(file, deps), { contextTokens: 123_000, contextWindow: 200_000 });
+  assert.equal(readCodexTurnEnded(file, deps), true);
+  assert.equal(reads, 1, 'context and boundary reuse the decoded cache observation');
+
+  const padding = `${JSON.stringify({ type: 'response_item', payload: { text: 'x'.repeat(1200_000) } })}\n`;
+  fs.appendFileSync(file, padding);
+  readCodexSessionState(file, deps);
+  assert.equal(bytesRead, fs.statSync(file).size, 'append reads only new bytes');
+  const duplicate = { ...usage, timestamp: later };
+  fs.appendFileSync(file, `${JSON.stringify(duplicate)}\n`);
+  assert.deepEqual(readCodexSessionState(file, deps).promptCacheState.observation, { observedAt: at, ttlSeconds: 1800 });
+  assert.equal(bytesRead, fs.statSync(file).size);
+  const next = structuredClone(duplicate);
+  next.payload.info.total_token_usage.input_tokens += 100;
+  fs.appendFileSync(file, `${JSON.stringify(next)}\n`);
+  assert.deepEqual(readCodexSessionState(file, deps).promptCacheState.observation, { observedAt: later, ttlSeconds: 1800 });
+
+  fs.writeFileSync(file, `${JSON.stringify(duplicate)}\n`);
+  assert.deepEqual(readCodexSessionState(file, deps).promptCacheState.observation, { observedAt: later, ttlSeconds: 1800 }, 'truncation resets identity');
+  const compact = { timestamp: later, type: 'event_msg', payload: { type: 'context_compacted' } };
+  fs.appendFileSync(file, `${JSON.stringify(compact)}\n`);
+  assert.equal(readCodexSessionState(file, deps).promptCacheState.observation, null);
+});
+
+test('Claude cache reuses the title/context scan, including oversized records and append deduplication', (t) => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { readSessionTitle, readSessionContext, readSessionTurnEnded, readSessionPromptCache } = require('../../src/shared/providers/claude/sessionMetadata');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-shared-read-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'session.jsonl');
+  const item = claude(at);
+  item.message = { id: 'msg', role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(1200_000) }], model: 'claude-sonnet-5-5', stop_reason: 'end_turn', usage: { input_tokens: 10, ...item.message.usage } };
+  fs.writeFileSync(file, `${jsonl([{ type: 'custom-title', customTitle: 'Shared scan' }, item])}\n`);
+  let bytesRead = 0;
+  const deps = { cache: new Map(), fs: { ...fs, readSync(...args) {
+    const result = fs.readSync(...args);
+    bytesRead += result;
+    return result;
+  } } };
+  assert.equal(readSessionTitle(file, deps), 'Shared scan');
+  const initialBytes = bytesRead;
+  assert.deepEqual(readSessionPromptCache(file, deps), { observedAt: at, ttlSeconds: 3600 });
+  assert.deepEqual(readSessionContext(file, deps), { contextTokens: 1030, contextWindow: 1_000_000 });
+  assert.equal(readSessionTurnEnded(file, deps), true);
+  assert.equal(bytesRead, initialBytes, 'cache/context/boundary perform no extra read');
+  fs.appendFileSync(file, `${JSON.stringify({ ...item, timestamp: later })}\n`);
+  assert.deepEqual(readSessionPromptCache(file, deps), { observedAt: at, ttlSeconds: 3600 });
+  assert.equal(bytesRead, fs.statSync(file).size, 'only appended bytes are read');
+  fs.appendFileSync(file, `${JSON.stringify({ timestamp: later, subtype: 'compact_boundary' })}\n`);
+  assert.equal(readSessionPromptCache(file, deps), null);
+});
+
+test('Codex shared index completes partial records and resets state on file replacement', (t) => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { readCodexSessionState } = require('../../src/shared/providers/codex/sessionContext');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-partial-index-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'session.jsonl');
+  const deps = { cache: new Map() };
+  fs.writeFileSync(file, `${JSON.stringify(codex(at))}\n`);
+  assert.equal(readCodexSessionState(file, deps).promptCacheState.observation.observedAt, at);
+  const next = codex(later);
+  next.payload.info.total_token_usage.input_tokens += 10;
+  const line = JSON.stringify(next);
+  const cut = line.indexOf('last_token_usage');
+  fs.appendFileSync(file, line.slice(0, cut));
+  assert.equal(readCodexSessionState(file, deps).promptCacheState.observation.observedAt, at);
+  fs.appendFileSync(file, line.slice(cut));
+  assert.equal(readCodexSessionState(file, deps).promptCacheState.observation.observedAt, later);
+  fs.appendFileSync(file, '\n');
+  assert.equal(readCodexSessionState(file, deps).promptCacheState.observation.observedAt, later);
+
+  const replacement = path.join(dir, 'replacement.jsonl');
+  fs.writeFileSync(replacement, `${JSON.stringify({ ...next, timestamp: at })}\n`);
+  fs.renameSync(replacement, file);
+  assert.equal(readCodexSessionState(file, deps).promptCacheState.observation.observedAt, at, 'a new inode does not inherit dedup state');
 });
