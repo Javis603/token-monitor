@@ -357,6 +357,41 @@ test('homeLimitAccountsForProviders includes MiMo Token Plan status and balance'
   ]);
 });
 
+test('homeLimitAccountsForProviders never resurrects a hidden MiMo Token Plan', () => {
+  // The caller filters windows by the hidden-items map first, so a hidden
+  // Token Plan window is already gone — the balance-derived placeholder and
+  // the expired notice must not bring it back on this surface.
+  const hiddenMonthly = (providerId, itemId) => providerId === 'mimo' && itemId === 'monthly';
+  const rows = homeLimitAccountsForProviders({
+    providers: [
+      {
+        provider: 'mimo',
+        windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 7.51, currency: 'CNY' }],
+        balance: { amount: 7.51, currency: 'CNY', planStatus: 'active', planUsed: 250, planLimit: 1000 }
+      },
+      {
+        provider: 'mimo',
+        windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 7.51, currency: 'CNY' }],
+        balance: { amount: 7.51, currency: 'CNY', planStatus: 'expired' }
+      }
+    ],
+    providerOptions: [{ id: 'mimo', label: 'MiMo' }],
+    enabledProviderIds: ['mimo'],
+    colors: { mimo: '#5daeea' },
+    limit: 5,
+    isUsageItemHidden: hiddenMonthly
+  });
+
+  assert.deepEqual(rows.map((row) => row.windows.map((window) => window.metric)), [
+    ['credits'],
+    ['credits']
+  ]);
+  assert.deepEqual(rows.map((row) => row.windows.map((window) => window.planStatus)), [
+    [''],
+    ['']
+  ]);
+});
+
 test('MiMo balance without plan data does not synthesize a Token Plan meter', () => {
   const rows = homeLimitAccountsForProviders({
     providers: [{

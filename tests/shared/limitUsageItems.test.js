@@ -11,13 +11,15 @@ const test = require('node:test');
 const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
 const usageItems = require('../../src/shared/limits/usageItems');
 
-test('every catalog provider offers a checklist of canonical item ids', () => {
-  const canonical = new Set(usageItems.LIMIT_USAGE_ITEM_IDS);
+test('every catalog provider offers a checklist of real item ids', () => {
+  // Canonical ids plus the extra-pools id — 'additional' is a real item (a
+  // window can map to it) even though it stays off the canonical list.
+  const known = new Set([...usageItems.LIMIT_USAGE_ITEM_IDS, 'additional']);
   for (const id of LIMIT_PROVIDER_IDS) {
     const items = usageItems.limitProviderUsageItems(id);
     assert.ok(items.length > 0, `${id} should offer at least one item`);
     for (const entry of items) {
-      assert.ok(canonical.has(entry.id), `${id} lists unknown item ${entry.id}`);
+      assert.ok(known.has(entry.id), `${id} lists unknown item ${entry.id}`);
       assert.ok(typeof entry.labelKey === 'string', `${id}.${entry.id} needs a labelKey field`);
     }
   }
@@ -57,7 +59,40 @@ test('the normalizer keeps only items the provider actually offers', () => {
   assert.equal(usageItems.normalizeProviderItemCsv('weekly,session', 'codex'), 'session,weekly');
   assert.equal(usageItems.normalizeProviderItemCsv('session,spend', 'codex'), 'session');
   assert.equal(usageItems.normalizeProviderItemCsv('additional', 'codex'), '');
+  // Factory's Core pools are an `additional` group with no switch of their
+  // own, so the id is a real checklist item there — and only there.
+  assert.equal(usageItems.normalizeProviderItemCsv('additional', 'factory'), 'additional');
   assert.equal(usageItems.normalizeProviderItemCsv('credits', 'grok'), '');
+});
+
+test('Factory checklists Standard rows and the Core pools item', () => {
+  assert.deepEqual(
+    usageItems.limitProviderUsageItems('factory').map((entry) => entry.id),
+    ['session', 'weekly', 'monthly', 'additional']
+  );
+  const windows = [
+    { kind: 'session', label: '5-hour' },
+    { kind: 'weekly', label: 'Weekly' },
+    { kind: 'billing', label: 'Monthly' },
+    { kind: 'session', label: 'Core 5-hour', additional: true },
+    { kind: 'weekly', label: 'Core Weekly', additional: true },
+    { kind: 'billing', label: 'Core Monthly', additional: true }
+  ];
+  assert.deepEqual(
+    usageItems.visibleLimitUsageWindows({ provider: 'factory', windows }, { factory: 'additional' })
+      .map((window) => window.label),
+    ['5-hour', 'Weekly', 'Monthly']
+  );
+  assert.deepEqual(
+    usageItems.visibleLimitUsageWindows({ provider: 'factory', windows }, { factory: 'monthly' })
+      .map((window) => window.label),
+    ['5-hour', 'Weekly', 'Core 5-hour', 'Core Weekly', 'Core Monthly']
+  );
+  assert.deepEqual(
+    usageItems.visibleLimitUsageWindows({ provider: 'factory', windows }, { factory: 'monthly,additional' })
+      .map((window) => window.label),
+    ['5-hour', 'Weekly']
+  );
 });
 
 test('the setting normalizer drops unknown providers and empty selections', () => {

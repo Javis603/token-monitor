@@ -437,6 +437,50 @@ test('a Cline card drops the spend tooltip when its item is hidden', () => {
   assert.doesNotMatch(card.text, /Month spent/);
 });
 
+test('a Cline card renders the spend row alone when credits is hidden', () => {
+  // The checklist sells 'credits' and 'spend' as independent items: hiding the
+  // Credits balance must not take the month-spend figure down with it.
+  const provider = {
+    provider: 'cline',
+    windows: [
+      { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 0.5, currency: 'CREDITS', showMeter: false },
+      { kind: 'billing', metric: 'spend', label: 'Usage credits', used: 0.13, limit: null, currency: 'USD', showMeter: false }
+    ]
+  };
+  const card = dockView({ limitProviderHiddenItems: { cline: 'credits' } })
+    .renderProviderWindows(provider, '#9D4EDD');
+  assert.match(card.text, /Usage credits/);
+  assert.doesNotMatch(card.text, /Credits(\s*\n|\s*$|\s*0\.5)/);
+  assert.match(card.text, /0\.13|\$0\.13/);
+});
+
+test('a Factory card lets Standard and Core pools hide on their own items', () => {
+  // Factory renders the default session + weekly rows; Core pools carry
+  // `additional: true` and answer to the Core pools item — not to Standard's.
+  const provider = {
+    provider: 'factory',
+    windows: [
+      { kind: 'session', label: '5-hour', remainingPercent: 60 },
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 45 },
+      { kind: 'session', label: 'Core 5-hour', remainingPercent: 30, additional: true },
+      { kind: 'weekly', label: 'Core Weekly', remainingPercent: 25, additional: true }
+    ]
+  };
+  const rowLabels = (hidden) => [...dockView({ limitProviderHiddenItems: hidden })
+    .renderProviderWindows(provider, '#FF6F00')
+    .walk()]
+    .filter((node) => node.classNames.has('limit-window'))
+    .map((node) => node.children[0].children[0].textContent);
+
+  assert.deepEqual(rowLabels({}), ['5-hour', 'Weekly']);
+  // The session slot takes the first visible session-kind window — hiding
+  // Standard's session leaves Core's in its place, since the two are
+  // different items.
+  assert.deepEqual(rowLabels({ factory: 'session' }), ['Core 5-hour', 'Weekly']);
+  assert.deepEqual(rowLabels({ factory: 'additional' }), ['5-hour', 'Weekly']);
+  assert.deepEqual(rowLabels({ factory: 'session,additional' }), ['Weekly']);
+});
+
 test('a MiMo card hides the Token Plan rows with its monthly item', () => {
   // Two windows share kind 'billing': the Token Plan and the wallet's credits
   // window. Hiding 'monthly' must remove the plan — real window, synthesized

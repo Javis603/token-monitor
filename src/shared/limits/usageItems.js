@@ -30,10 +30,10 @@
     'session', 'daily', 'weekly', 'monthly', 'credits', 'spend', 'resets'
   ]);
 
-  // Codex's extra quota pools are already governed by their own
-  // `showCodexAdditionalLimits` setting, so they are an id but not a checklist
-  // item — putting them on the list too would give one row two switches that
-  // can disagree.
+  // `additional` marks a provider's extra quota pools. Codex's answer to their
+  // own `showCodexAdditionalLimits` setting, so the id stays off its checklist
+  // — two switches on one row could disagree — but a provider with no such
+  // switch (Factory's Core pools) offers it as a regular checklist item.
   const EXTRA_ITEM_IDS = new Set(['additional']);
   const VALID_ITEM_IDS = new Set([...LIMIT_USAGE_ITEM_IDS, ...EXTRA_ITEM_IDS]);
 
@@ -43,8 +43,8 @@
   }
 
   // The item one window renders as. A window's kind alone cannot place it:
-  // `metric` marks money windows that share the billing kind, and Codex's
-  // additional pools answer to their own setting rather than to this list.
+  // `metric` marks money windows that share the billing kind, and `additional`
+  // pools are their own item regardless of kind.
   function limitUsageItemIdForWindow(window) {
     if (!window || typeof window !== 'object') return null;
     if (window.additional === true) return 'additional';
@@ -105,7 +105,14 @@
       item('credits', 'settings.limits.items.creditsLabel'),
       item('spend', 'settings.limits.items.usageCredits')
     ],
-    factory: [item('monthly')],
+    factory: [
+      item('session'),
+      item('weekly'),
+      item('monthly'),
+      // Core pools ship `additional: true` like Codex's extras, but Factory
+      // has no own switch for them — 'additional' is their checklist item.
+      item('additional', 'settings.limits.items.corePools')
+    ],
     kimi: [item('session'), item('weekly'), item('monthly')],
     grok: [item('monthly')],
     copilot: [item('monthly')],
@@ -176,7 +183,7 @@
         .map(normalizeItemId)
         .filter(Boolean)
     );
-    return LIMIT_USAGE_ITEM_IDS
+    return [...VALID_ITEM_IDS]
       .filter((id) => offered.has(id) && requested.has(id))
       .join(',');
   }

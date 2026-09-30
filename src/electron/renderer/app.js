@@ -5688,6 +5688,11 @@ function homeLimitRows() {
         usageItemsApi.visibleLimitUsageWindows(provider, state.settings?.limitProviderHiddenItems)
       )
     })),
+    // Rows synthesized from the balance record (MiMo's Token Plan) need the
+    // same answer: a hidden item stays hidden on this surface too.
+    isUsageItemHidden: (providerId, itemId) => (
+      usageItemsApi.hiddenLimitUsageItemSet(state.settings?.limitProviderHiddenItems, providerId).has(itemId)
+    ),
     providerOptions,
     enabledProviderIds: Array.from(enabled),
     hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet()),

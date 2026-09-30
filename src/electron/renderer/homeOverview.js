@@ -67,27 +67,31 @@
       && !balanceDisplay.isCreditsWindow(window);
   }
 
-  function accountWindows(account) {
+  function accountWindows(account, isUsageItemHidden) {
     const providerId = String(account?.providerId || '').trim().toLowerCase();
     const windows = Array.isArray(account?.windows) ? [...account.windows] : [];
-    if (providerId === 'mimo' && account?.balance?.planStatus === 'expired') {
+    // The Token Plan is the 'monthly' item on every surface: once it is hidden
+    // its window is gone, and the balance-derived placeholder must not
+    // resurrect it here either.
+    const planHidden = isUsageItemHidden?.(providerId, 'monthly') === true;
+    if (providerId === 'mimo' && !planHidden && account?.balance?.planStatus === 'expired') {
       const withoutStalePlan = windows.filter((window) => !isPlanWindow(window));
       // Keep the plan ahead of the balance, matching the live-plan ordering.
       withoutStalePlan.unshift({ kind: 'billing', label: 'Token Plan', showMeter: false, planStatus: 'expired' });
       return withoutStalePlan;
     }
-    if (providerId === 'mimo' && !windows.some(isPlanWindow)) {
+    if (providerId === 'mimo' && !planHidden && !windows.some(isPlanWindow)) {
       const plan = mimoPlanWindow(account.balance);
       if (plan) windows.unshift(plan);
     }
     return windows;
   }
 
-  function homeLimitAccounts(accounts, limit = 3, { sort = 'remaining' } = {}) {
+  function homeLimitAccounts(accounts, limit = 3, { sort = 'remaining', isUsageItemHidden } = {}) {
     return (accounts || [])
       .map((account, index) => {
         const providerId = String(account?.providerId || '').trim().toLowerCase();
-        const windows = accountWindows(account)
+        const windows = accountWindows(account, isUsageItemHidden)
           .map((window, windowIndex) => {
             const credits = balanceDisplay.isCreditsWindow(window);
             return {
@@ -229,7 +233,8 @@
     sort = 'remaining',
     accountName,
     accountColor,
-    accountIcon
+    accountIcon,
+    isUsageItemHidden
   } = {}) {
     const enabled = new Set((enabledProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
     const hidden = new Set((hiddenProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
@@ -253,7 +258,7 @@
         });
       });
     }
-    return homeLimitAccounts(accounts, limit, { sort });
+    return homeLimitAccounts(accounts, limit, { sort, isUsageItemHidden });
   }
 
   function homeTrendSummary(points) {

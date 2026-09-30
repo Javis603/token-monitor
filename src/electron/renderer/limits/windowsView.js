@@ -716,6 +716,19 @@
     });
   }
 
+  // The 'spend' item outlives the credits row it usually annotates: with
+  // 'credits' hidden it still renders, as its own note row.
+  function clineSpendNode(spend) {
+    const monthSpend = optionalFiniteNumber(spend?.used);
+    if (monthSpend === null) return null;
+    const spendValue = formatBalanceSpendAmount(monthSpend, spend);
+    return limitNoteRowNode({
+      label: spend.label || 'Usage credits',
+      summary: spendValue,
+      ariaParts: [`Month spent ${spendValue}`]
+    });
+  }
+
   function mimoTokenPlanWindowFromBalance(balance) {
     if (!balance) return null;
     if (balance.planStatus === 'expired') return null;
@@ -1449,6 +1462,11 @@
       }
       if (clineCredits) {
         const node = clineCreditsNode(view, clineCredits, clineSpend);
+        if (node) windows.append(node);
+      } else if (clineSpend) {
+        // Hiding 'credits' must not take the spend figure with it — the
+        // checklist offers the two rows independently.
+        const node = clineSpendNode(clineSpend);
         if (node) windows.append(node);
       }
     } else {
