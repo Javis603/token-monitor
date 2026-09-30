@@ -26,7 +26,7 @@
 
 ## Token Monitor란?
 
-Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 41개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 위젯입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다.
+Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 42개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 위젯입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다.
 
 ## 지원 도구
 
@@ -48,6 +48,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/` (`sessions/`, `logs/unified.jsonl`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`, `~/.copilot/` (`otel/`, `data.db`, `session-store.db`) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/gcmp.png" width="28" alt="AI Chat Models" /> | AI Chat Models | VS Code `globalStorage/vicanent.gcmp/usages/` 시간별 JSONL(AI Chat Models 확장을 통한 Copilot Chat 사용량, 옵트인) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
@@ -96,6 +97,12 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습니다. Settings → tools에서 활성화합니다(옵트인, 기본 꺼짐). 현재 버전은 Qoder 설정 디렉터리의 `projects` JSONL(보통 `~/.qoder-cn/projects`)을, 이전 버전은 SQLite를 사용하며 어댑터는 둘 다 읽습니다. JSONL 경로 우선순위는 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, `QODERCN_CONFIG_DIR/projects`, 기본 경로 순입니다. 이전 데이터베이스는 `TOKEN_MONITOR_QODER_CN_DB_PATH`로 재정의할 수 있습니다. [Qoder 데이터 소스 설명](docs/providers/qodercn.md)을 참고하세요.
 
 고급 로컬 통합입니다. JSONL에는 추가 런타임이 필요 없지만 이전 SQLite를 읽으려면 PATH의 `sqlite3` CLI 또는 플래그 없는 `node:sqlite`를 갖춘 Node 런타임(Node ≥ 22.15, Electron에서는 CLI가 필요할 수 있음)이 필요합니다. 읽기 실패 시 마지막 완전한 스냅샷을 유지합니다. 실제 토큰 필드가 있는 JSONL 행만 집계합니다. 현재 자사 플랜 행은 credits와 context 비율만 기록할 수 있고 신뢰할 수 있는 세션별 context window가 없으므로 토큰을 추측하지 않습니다. Credits는 AI Tool Limits에 표시되며 실제 토큰이 있는 BYOK/사용자 지정 모델은 정상 집계됩니다.
+
+#### AI Chat Models(로컬 어댑터)
+
+AI Chat Models(`vicanent.gcmp`) 토큰 사용량은 VS Code globalStorage 아래 시간별로 기록되는 usage JSONL에서 읽습니다. Settings → tools에서 활성화합니다(옵트인, 기본 꺼짐). 최종 상태가 `completed`인 기록만 집계하고 estimated 자리표시자 행은 무시하며, 기록된 캐시 토큰과 비용 추정치는 그대로 사용합니다.
+
+이 확장이 기록한 각 요청은 GitHub Copilot 행의 데이터 소스인 VS Code 자체 `workspaceStorage/*/chatSessions/`에도 나타납니다. 둘을 동시에 활성화하면 같은 요청이 이중으로 집계되므로 둘 중 하나만 활성화하세요.
 </details>
 
 ## 쇼케이스
@@ -128,7 +135,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 
 ### 사용량 추적
 
-- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 33개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
+- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 34개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
 - **실시간 토큰 속도** — 생성 속도를 `tok/s`로, 총 소모를 `tok/min`으로 보여주는 선택형 실시간 표시
 - **세션별 상세** — 세션을 열면 프롬프트별 토큰, 응답별 토큰 분할·사용 도구까지 확장 (로컬 transcript/DB를 필요할 때만 읽으며 동기화하지 않음)
 - **캐시 히트 통계** — 도구·모델 클릭 시 입력 토큰(캐시 hit/miss), 출력 토큰, 히트율 상세
