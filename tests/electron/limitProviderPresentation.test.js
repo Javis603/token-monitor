@@ -1788,7 +1788,7 @@ test('MiMo main Limits row falls back to balance plan fields for Token Plan', ()
   // window comes first, which could be the wallet's own credits window — and
   // the balance fallback stays gated on 'monthly' like the rest of the block.
   assert.match(renderProviderWindows, /if \(!hiddenItems\.has\('monthly'\)\) \{/);
-  assert.match(renderProviderWindows, /usageItems\.limitUsageItemIdForWindow\(window\) === 'monthly'\s*\) \|\| mimoTokenPlanWindowFromBalance\(provider\.balance\);/);
+  assert.match(renderProviderWindows, /usageItems\.limitUsageRowId\(provider\.provider, window\) === 'monthly'\s*\) \|\| mimoTokenPlanWindowFromBalance\(provider\.balance\);/);
   assert.match(renderProviderWindows, /limitWindowNode\(tokenPlan\.label \|\| 'Token Plan', tokenPlan, color, 0\.68\)/);
   assert.match(renderProviderWindows, /const giftBalance = optionalFiniteNumber\(balance\?\.giftBalance\);/);
   assert.match(renderProviderWindows, /const cashBalance = optionalFiniteNumber\(balance\?\.cashBalance\);/);

@@ -225,7 +225,7 @@
           : new Set();
         for (const window of itemsApi.selectableLimitWindows(record, getSettings())) {
           if (hiddenItems.size
-            && hiddenItems.has(usageItemsApi.limitUsageItemIdForWindow(window))) continue;
+            && hiddenItems.has(usageItemsApi.limitUsageRowId(record.provider, window))) continue;
           const key = itemsApi.limitWindowKey(window);
           if (!key || choices.has(key)) continue;
           choices.set(key, {

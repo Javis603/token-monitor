@@ -23,6 +23,7 @@ const limitPresentationApi = require('../../src/electron/renderer/limits/provide
 const limitResetMotionApi = require('../../src/electron/renderer/limits/resetMotion');
 const limitWindowLabels = require('../../src/shared/limits/windowLabels');
 const limitWindowTextApi = require('../../src/shared/limits/windowText');
+const usageItems = require('../../src/shared/limits/usageItems');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
 const i18n = require('../../src/electron/renderer/i18n');
 const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
@@ -387,12 +388,17 @@ test('hidden usage items drop rows from a Codex card but keep the rest', () => {
     .walk()]
     .filter((node) => node.classNames.has('limit-window'))
     .map((node) => node.children[0].children[0].textContent);
+  const [sessionWindow, weeklyWindow, monthlyWindow] = provider.windows;
+  const keyOf = (window) => usageItems.limitWindowKey(window);
 
   assert.deepEqual(rowLabels({}), ['Session', 'Weekly', 'Monthly', '2 resets']);
-  assert.deepEqual(rowLabels({ codex: 'weekly,resets' }), ['Session', 'Monthly']);
-  assert.deepEqual(rowLabels({ codex: 'session,weekly,monthly,resets' }), []);
+  assert.deepEqual(rowLabels({ codex: [keyOf(weeklyWindow), 'resets'] }), ['Session', 'Monthly']);
+  assert.deepEqual(
+    rowLabels({ codex: [keyOf(sessionWindow), keyOf(weeklyWindow), keyOf(monthlyWindow), 'resets'] }),
+    []
+  );
   // Another provider's selection never touches this card.
-  assert.deepEqual(rowLabels({ claude: 'weekly' }), ['Session', 'Weekly', 'Monthly', '2 resets']);
+  assert.deepEqual(rowLabels({ claude: [keyOf(weeklyWindow)] }), ['Session', 'Weekly', 'Monthly', '2 resets']);
 });
 
 test('hiding the balance keeps the spend row; hiding spend keeps the balance', () => {
@@ -411,14 +417,16 @@ test('hiding the balance keeps the spend row; hiding spend keeps the balance', (
 });
 
 test('a Codex card never lets the additional pools hide through this setting', () => {
-  // `additional` windows answer to showCodexAdditionalLimits alone; the item id
-  // exists so filtering can leave them alone, and the normalizer refuses to
-  // store it as a hidden choice.
+  // `additional` windows answer to showCodexAdditionalLimits alone: they are
+  // never enumerated on the checklist, and the shared filter exempts them so
+  // even a stored row key cannot hide them.
   const provider = {
     provider: 'codex',
     windows: [{ kind: 'daily', label: 'GPT-5.3-Codex-Spark', remainingPercent: 40, additional: true }]
   };
-  const card = dockView({ limitProviderHiddenItems: { codex: 'daily' } })
+  const card = dockView({
+    limitProviderHiddenItems: { codex: [usageItems.limitWindowKey(provider.windows[0])] }
+  })
     .renderProviderWindows(provider, '#10A37F');
   assert.match(card.text, /GPT-5\.3-Codex-Spark/);
 });
@@ -454,12 +462,13 @@ test('a Cline card renders the spend row alone when credits is hidden', () => {
   assert.match(card.text, /0\.13|\$0\.13/);
 });
 
-test('a Factory card lets Standard, Core pools and the balance hide on their own items', () => {
+test('a Factory card lets every row hide on its own window key', () => {
   // The real payload is seven windows: Standard session/weekly/monthly, the
   // three `additional: true` Core windows, and an extra-usage balance
   // synthesized into a `metric: 'credits'` window (see factoryLimits.test).
-  // Quota rows answer to their kind items, Core to 'additional', and the
-  // balance to 'credits' — rendered as a money row, not a quota meter.
+  // Each quota row answers to its own window key — the checklist is the
+  // rendered rows, not a kind group — and the balance to 'credits',
+  // rendered as a money row, not a fake quota meter.
   const provider = {
     provider: 'factory',
     windows: [
@@ -481,13 +490,21 @@ test('a Factory card lets Standard, Core pools and the balance hide on their own
       meter: node.classNames.has('limit-window-no-reset') === false
     }));
   const rowLabels = (hidden) => renderRows(hidden).map((row) => row.label);
+  const keyOf = (index) => usageItems.limitUsageRowId('factory', provider.windows[index]);
+  const coreKeys = [keyOf(3), keyOf(4), keyOf(5)];
 
   assert.deepEqual(rowLabels({}), ['5-hour', 'Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly', 'Balance']);
-  assert.deepEqual(rowLabels({ factory: 'session' }), ['Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly', 'Balance']);
-  assert.deepEqual(rowLabels({ factory: 'monthly' }), ['5-hour', 'Weekly', 'Core 5-hour', 'Core Weekly', 'Core Monthly', 'Balance']);
-  assert.deepEqual(rowLabels({ factory: 'additional' }), ['5-hour', 'Weekly', 'Monthly', 'Balance']);
-  assert.deepEqual(rowLabels({ factory: 'credits' }), ['5-hour', 'Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly']);
-  assert.deepEqual(rowLabels({ factory: 'session,weekly,monthly,additional,credits' }), []);
+  // Hiding Standard's 5-hour leaves Core 5-hour — a separate row, not a
+  // fallback slot — and the balance answers to 'credits'.
+  assert.deepEqual(rowLabels({ factory: [keyOf(0)] }), ['Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly', 'Balance']);
+  assert.deepEqual(rowLabels({ factory: [keyOf(2)] }), ['5-hour', 'Weekly', 'Core 5-hour', 'Core Weekly', 'Core Monthly', 'Balance']);
+  assert.deepEqual(rowLabels({ factory: coreKeys }), ['5-hour', 'Weekly', 'Monthly', 'Balance']);
+  assert.deepEqual(rowLabels({ factory: [keyOf(3)] }), ['5-hour', 'Weekly', 'Monthly', 'Core Weekly', 'Core Monthly', 'Balance']);
+  assert.deepEqual(rowLabels({ factory: ['credits'] }), ['5-hour', 'Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly']);
+  assert.deepEqual(
+    rowLabels({ factory: [keyOf(0), keyOf(1), keyOf(2), ...coreKeys, 'credits'] }),
+    []
+  );
   // The balance renders its dollar amount, not a quota meter.
   const balanceRow = renderRows({}).at(-1);
   assert.equal(balanceRow.meter, false);
@@ -1242,7 +1259,15 @@ test('Codex additional-pool visibility remains independent when all canonical ro
       { kind: 'session', label: 'Extra pool', remainingPercent: 20, additional: true }
     ]
   };
-  const settings = { limitProviderHiddenItems: { codex: 'session,weekly,monthly,resets' } };
+  const settings = {
+    limitProviderHiddenItems: {
+      codex: [
+        usageItems.limitWindowKey(provider.windows[0]),
+        usageItems.limitWindowKey(provider.windows[1]),
+        'resets'
+      ]
+    }
+  };
   const visible = dockView(settings).renderProviderWindows(provider, '#123456');
   assert.equal(visible.children.length, 1);
   assert.match(visible.text, /Extra pool/);

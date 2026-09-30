@@ -213,15 +213,19 @@ test('the window picker does not offer items the provider hides', () => {
     const usageItemsApi = require('../../src/shared/limits/usageItems');
     const root = new Element('div');
     const saves = [];
-    const settings = {
-      edgeDockItems: [{ type: 'limit', provider: 'codex' }],
-      limitProviderHiddenItems: { codex: 'weekly' }
-    };
     const stats = { limits: { providers: [{ provider: 'codex', status: 'ok', windows: [
       { kind: 'session', label: 'Session', remainingPercent: 90 },
       { kind: 'weekly', label: 'Weekly', remainingPercent: 19 },
       { kind: 'billing', label: 'Monthly', remainingPercent: 70 }
     ] }] } };
+    const windows = stats.limits.providers[0].windows;
+    const hiddenKeys = (...indexes) => indexes.map((index) => (
+      usageItemsApi.limitUsageRowId('codex', windows[index])
+    ));
+    const settings = {
+      edgeDockItems: [{ type: 'limit', provider: 'codex' }],
+      limitProviderHiddenItems: { codex: hiddenKeys(1) }
+    };
     const composer = createEdgeDockComposer({
       root, itemsApi, usageItemsApi,
       t: (key) => key,
@@ -244,7 +248,7 @@ test('the window picker does not offer items the provider hides', () => {
     ]);
 
     // A settings-only update must refresh the open picker against the same stats.
-    settings.limitProviderHiddenItems = { codex: 'session,weekly,monthly' };
+    settings.limitProviderHiddenItems = { codex: hiddenKeys(0, 1, 2) };
     composer.render();
     assert.deepEqual(find(root, 'SELECT').children.map((option) => option.textContent), [
       'settings.edgeDock.window.auto'
@@ -257,16 +261,16 @@ test('the window picker does not offer items the provider hides', () => {
     ]);
 
     // An existing pin stays selected even while that choice is unavailable.
-    const weeklyKey = itemsApi.limitWindowKey(stats.limits.providers[0].windows[1]);
+    const weeklyKey = itemsApi.limitWindowKey(windows[1]);
     settings.edgeDockItems = [{ type: 'limit', provider: 'codex', windowKey: weeklyKey }];
-    settings.limitProviderHiddenItems = { codex: 'weekly' };
+    settings.limitProviderHiddenItems = { codex: hiddenKeys(1) };
     composer.render();
     const pinned = find(root, 'SELECT');
     assert.equal(pinned.value, weeklyKey);
     assert.deepEqual(pinned.children.map((option) => option.textContent), [
       'settings.edgeDock.window.auto', 'Session', 'Monthly', 'settings.edgeDock.window.unavailable'
     ]);
-    settings.limitProviderHiddenItems = { claude: 'weekly' };
+    settings.limitProviderHiddenItems = { claude: hiddenKeys(1) };
     composer.render();
     assert.equal(find(root, 'SELECT').value, weeklyKey);
     assert.deepEqual(find(root, 'SELECT').children.map((option) => option.textContent), [

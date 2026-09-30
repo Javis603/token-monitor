@@ -832,20 +832,23 @@
     const windows = document.createElement('div');
     windows.className = 'limit-windows';
     // The provider's hidden usage items, as a filtered view of its record:
-    // windows whose item is hidden leave the list, `resetCredits` is nulled for
-    // 'resets', and `balance`/`balanceUsd` for 'credits'. Spend rows keep
-    // reading `provider` itself — a spend summary is not a balance row, so
-    // hiding the balance must not take the spend line with it.
-    const hiddenItems = usageItems.hiddenLimitUsageItemSet(settings()?.limitProviderHiddenItems, provider?.provider);
+    // hidden rows leave the window list, `resetCredits` is nulled for
+    // 'resets', and `balance`/`balanceUsd` when the balance row is hidden.
+    // Spend rows keep reading `provider` itself — a spend summary is not a
+    // balance row, so hiding the balance must not take the spend line with it.
+    const hiddenValue = settings()?.limitProviderHiddenItems;
+    const hiddenItems = usageItems.hiddenLimitUsageItemSet(hiddenValue, provider?.provider);
     const showSpend = !hiddenItems.has('spend');
+    // 'credits' is the balance row whatever its payload shape — a credits
+    // window or the provider-level balanceUsd fallback. Spend keeps reading
+    // `provider` itself so hiding the balance leaves the spend line.
+    const creditsHidden = hiddenItems.has('credits');
     const view = {
       ...provider,
-      windows: (provider?.windows || []).filter((window) => (
-        !hiddenItems.has(usageItems.limitUsageItemIdForWindow(window))
-      )),
+      windows: usageItems.visibleLimitUsageWindows(provider, hiddenValue),
       resetCredits: hiddenItems.has('resets') ? null : provider?.resetCredits,
-      balance: hiddenItems.has('credits') ? null : provider?.balance,
-      balanceUsd: hiddenItems.has('credits') ? null : provider?.balanceUsd
+      balance: creditsHidden ? null : provider?.balance,
+      balanceUsd: creditsHidden ? null : provider?.balanceUsd
     };
     if (provider.provider === 'codex') {
       const session = codexCanonicalWindow(view, 'session');
@@ -1094,7 +1097,7 @@
       // row, not the plan meter; the expired status comes from the same record.
       if (!hiddenItems.has('monthly')) {
         const tokenPlan = (view.windows || []).find(
-          (window) => usageItems.limitUsageItemIdForWindow(window) === 'monthly'
+          (window) => usageItems.limitUsageRowId(provider.provider, window) === 'monthly'
         ) || mimoTokenPlanWindowFromBalance(provider.balance);
         if (tokenPlan) {
           const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);

@@ -13,10 +13,13 @@
 //                              and groupBy; see normalizeItem)
 (function exposeEdgeDockItems(root, factory) {
   const node = typeof module === 'object' && module.exports;
-  const api = factory(node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders);
+  const api = factory(
+    node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders,
+    node ? require('../../../shared/limits/usageItems') : root?.TokenMonitorLimitUsageItems
+  );
   if (node) module.exports = api;
   if (root) root.TokenMonitorEdgeDockItems = api;
-})(typeof window !== 'undefined' ? window : null, function createEdgeDockItems(limitProviders) {
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockItems(limitProviders, usageItems) {
   // Usage readouts follow the widget's own period choices; each shows tokens
   // with its cost beneath, so tokens and cost are no longer separate items.
   const USAGE_PERIODS = Object.freeze(['today', 'week', 'last7', 'last30', 'month', 'allTime']);
@@ -46,32 +49,9 @@
     return String(value || '').trim().toLowerCase();
   }
 
-  function legacyLimitWindowKey(window) {
-    if (!window || typeof window !== 'object' || !window.kind) return '';
-    return JSON.stringify([
-      String(window.kind), String(window.label || ''),
-      String(window.metric || ''), window.additional === true
-    ]);
-  }
-
-  // Backend ids survive display-name changes. Cadence separates primary and
-  // secondary windows belonging to the same metered feature.
-  function limitWindowKey(window) {
-    const legacy = legacyLimitWindowKey(window);
-    if (!legacy) return '';
-    const limitId = String(window.limitId || '').trim();
-    if (!limitId) return legacy;
-    const minutes = Number(window.windowMinutes);
-    return JSON.stringify([
-      'id', limitId, String(window.kind), String(window.metric || ''),
-      window.additional === true,
-      Number.isFinite(minutes) && minutes > 0 ? minutes : null
-    ]);
-  }
-
-  function limitWindowKeys(window) {
-    return [...new Set([limitWindowKey(window), legacyLimitWindowKey(window)])].filter(Boolean);
-  }
+  // Window-key identity lives in shared/limits/usageItems — the checklist's
+  // hidden rows and the pinned-window picker must agree on what one row is.
+  const { limitWindowKey, limitWindowKeys, normalizeWindowKey } = usageItems;
 
   function selectableLimitWindows(provider, options = {}) {
     return (provider?.windows || []).filter((window) => (
@@ -86,26 +66,6 @@
       .filter((window) => limitWindowKeys(window).includes(key));
     // Old label-based pins can migrate only when their identity is unambiguous.
     return candidates.length === 1 ? candidates[0] : null;
-  }
-
-  function normalizeWindowKey(value) {
-    if (typeof value !== 'string' || value.length > 400) return '';
-    try {
-      const parts = JSON.parse(value);
-      if (!Array.isArray(parts)) return '';
-      if (parts.length === 6 && parts[0] === 'id') {
-        const [, limitId, kind, metric, additional, windowMinutes] = parts;
-        if (typeof limitId !== 'string' || !limitId.trim() || typeof kind !== 'string' || !kind
-          || typeof metric !== 'string' || typeof additional !== 'boolean'
-          || !(windowMinutes === null || (typeof windowMinutes === 'number' && windowMinutes > 0))) return '';
-        return limitWindowKey({ limitId, kind, metric, additional, windowMinutes });
-      }
-      if (parts.length !== 4) return '';
-      const [kind, label, metric, additional] = parts;
-      if (typeof kind !== 'string' || !kind || typeof label !== 'string'
-        || typeof metric !== 'string' || typeof additional !== 'boolean') return '';
-      return limitWindowKey({ kind, label, metric, additional });
-    } catch (_) { return ''; }
   }
 
   function itemId(item) {

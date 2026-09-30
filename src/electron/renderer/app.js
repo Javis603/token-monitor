@@ -10330,6 +10330,7 @@ function renderLimitProviderCheckboxesNow() {
   }
   const previousRows = Array.from(els.limitProviderCheckboxes.children);
   const focusedId = document.activeElement?.id || '';
+  const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
   const reusableSettingInputs = new Map();
   for (const row of previousRows) {
     const providerId = row.dataset?.provider || '';
@@ -10344,13 +10345,15 @@ function renderLimitProviderCheckboxesNow() {
     const itemInputs = row.querySelectorAll?.(
       ':scope > .accordion-animated-container .limit-provider-usage-items-list > .client-checkbox > input[type="checkbox"]'
     ) || [];
-    usageItemsApi.limitProviderUsageItems(providerId).forEach((entry, index) => {
+    usageItemsApi.limitProviderUsageRows(
+      collected.get(providerId) || { provider: providerId },
+      state.settings?.limitProviderHiddenItems
+    ).forEach((entry, index) => {
       const input = itemInputs[index];
       if (input) reusableSettingInputs.set(`${providerId}:item:${entry.id}`, input);
     });
   }
   const enabled = enabledLimitProviderSet();
-  const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
   const filtering = Boolean(limitProviderQuery());
   for (const { id, label, settingsLabel } of providers) {
     const isEnabled = enabled.has(id);
@@ -10428,7 +10431,7 @@ function renderLimitProviderCheckboxesNow() {
       actions.append(mode);
     }
     const settings = LIMIT_PROVIDER_SETTINGS[id];
-    const usageItems = usageItemsApi.limitProviderUsageItems(id);
+    const usageItems = usageItemsApi.limitProviderUsageRows(provider, state.settings?.limitProviderHiddenItems);
     const hasOptions = Boolean(accountGroup || settings || connectionDetailKey || usageItems.length);
     let optionsContainer = null;
     let optionsInner = null;
@@ -10921,7 +10924,7 @@ function limitProviderUsageItemsList(providerId, items, reusableInputs = null) {
     const item = document.createElement('label');
     item.className = 'client-checkbox';
     const title = document.createElement('span');
-    title.textContent = t(entry.labelKey || `settings.limits.items.${entry.id}`);
+    title.textContent = entry.label || t(entry.labelKey || '');
     const inputKey = `${providerId}:item:${entry.id}`;
     const existingInput = reusableInputs?.get(inputKey);
     const input = existingInput || document.createElement('input');
