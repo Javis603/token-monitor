@@ -28,6 +28,8 @@ const i18n = require('../../src/electron/renderer/i18n');
 const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
 const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
 const { parseStepfunUsage } = require('../../src/shared/providers/stepfun/limits');
+const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../src/shared/providers/factory/limits');
+const { normalizeLimitProvider } = require('../../src/shared/limits/core');
 
 const root = path.join(__dirname, '../..');
 
@@ -324,6 +326,63 @@ test('a Devin card keeps Daily, Weekly, and the extra usage balance', () => {
   assert.match(windows[2].text, /\$10\.00/);
   assert.equal(windows[2].classNames.has('limit-window-wide'), true);
   assert.equal(windows[2].classNames.has('limit-window-no-reset'), true);
+});
+
+test('a Factory card draws both pools and the extra usage balance', () => {
+  // The collector's real output: normalizeLimitProvider() sorts windows by
+  // kind, interleaving the Standard and Core pools, and turns the balance
+  // into a credits window.
+  const now = Date.parse('2026-09-10T12:00:00Z');
+  const parsed = parseFactoryTokenRateLimits({
+    usesTokenRateLimitsBilling: true,
+    limits: {
+      standard: {
+        fiveHour: { usedPercent: 12.5, secondsRemaining: 1800 },
+        weekly: { usedPercent: 25, windowEnd: '2026-09-14T12:00:00Z' },
+        monthly: { usedPercent: 40, windowEnd: 1788192000000 }
+      },
+      core: {
+        fiveHour: { usedPercent: 5, secondsRemaining: 900 },
+        weekly: { usedPercent: 10 },
+        monthly: { usedPercent: 0, secondsRemaining: 86400 }
+      }
+    },
+    extraUsageBalanceCents: 1234
+  }, now);
+  const card = dockView().renderProviderWindows(
+    normalizeLimitProvider({ provider: 'factory', status: 'ok', ...parsed }),
+    '#FF6F00'
+  );
+
+  const windows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.deepEqual(
+    windows.map((node) => node.children[0].children[0].textContent),
+    ['5-hour', 'Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly', 'Balance']
+  );
+  assert.deepEqual(
+    windows.map((node) => node.classNames.has('limit-window-wide')),
+    [false, false, true, false, false, true, true]
+  );
+  assert.match(windows[6].text, /\$12\.34/);
+  assert.equal(windows[6].classNames.has('limit-window-no-reset'), true);
+});
+
+test('a legacy Factory card draws its Standard and Premium billing windows', () => {
+  const card = dockView().renderProviderWindows(normalizeLimitProvider({
+    provider: 'factory',
+    status: 'ok',
+    ...parseFactoryLegacyUsage({
+      usage: {
+        endDate: '2026-10-01T00:00:00Z',
+        standard: { userTokens: 250, totalAllowance: 1000 },
+        premium: { userTokens: 50, totalAllowance: 100 }
+      }
+    })
+  }), '#FF6F00');
+
+  const windows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.deepEqual(windows.map((node) => node.children[0].children[0].textContent), ['Standard', 'Premium']);
+  assert.ok(windows.every((node) => node.classNames.has('limit-window-wide')));
 });
 
 test('a Cline card folds month spend into the credit detail tooltip', () => {
