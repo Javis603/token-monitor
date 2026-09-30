@@ -88,8 +88,8 @@
     { id: 'ollama', label: 'Ollama', color: '#888888', widgetInk: true },
     { id: 'trae', label: 'Trae CN', color: '#32F08C' },
     { id: 'alibaba', label: 'Alibaba Cloud', color: '#615CED', widgetColor: '#7771F4' },
-    { id: 'nvidia', label: 'NVIDIA', color: '#74B71B' },
     { id: 'stepfun', label: 'StepFun', color: '#000000', widgetInk: true },
+    { id: 'nvidia', label: 'NVIDIA', color: '#74B71B' },
     { id: 'typesafe', label: 'TypeSafe', color: '#000000', widgetInk: true },
     { id: 'thirdparty', label: 'Third-party APIs', color: '#8090A6' },
     // Marks without a colour of their own. Factory is the limits provider for

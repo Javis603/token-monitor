@@ -37,13 +37,13 @@
     qoder: { web: 'Web' },
     deepseek: { api: 'API' },
     devin: { web: 'Web' },
-    stepfun: { web: 'Web' },
     openrouter: { api: 'API' },
     minimax: { api: 'API' },
     volcengine: { api: 'API', cli: 'arkcli' },
     ollama: { web: 'Web' },
     trae: { api: 'Web' },
     alibaba: { web: 'Web' },
+    stepfun: { web: 'Web' },
     thirdparty: { api: 'API' }
   };
 
@@ -76,13 +76,13 @@
     deepseek: ['Pay-as-you-go', 'API key'],
     devin: ['Manual login', 'Web'],
     typesafe: ['Manual login', 'Web'],
-    stepfun: ['Coding/Token Plan', 'Web'],
     openrouter: ['Pay-as-you-go', 'API key'],
     minimax: ['Token Plan', 'API key'],
     volcengine: ['Auto', 'API key', 'CLI'],
     ollama: ['Manual login', 'Web'],
     trae: ['Manual login', 'Web'],
     alibaba: ['Token Plan', 'Web'],
+    stepfun: ['Coding/Token Plan', 'Web'],
     thirdparty: ['Relay', 'API']
   };
 

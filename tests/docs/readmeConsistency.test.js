@@ -85,13 +85,13 @@ const supportedToolOrder = [
   'Unsloth Studio',
   'Devin CLI / Devin Desktop',
   'TypeSafe',
-  'StepFun',
   'OpenRouter',
   'Minimax',
   'Volcengine',
   'Ollama',
   'Trae CN',
   'Alibaba Cloud',
+  'StepFun',
   'Third-party APIs'
 ];
 
@@ -130,13 +130,13 @@ const supportedToolIdOrder = [
   'unsloth',
   'devin',
   'typesafe',
-  'stepfun',
   'openrouter',
   'minimax',
   'volcengine',
   'ollama',
   'trae',
   'alibaba',
+  'stepfun',
   'thirdparty'
 ];
 

@@ -50,13 +50,13 @@ test('default provider order follows tracked tools, named services, then third-p
     'deepseek',
     'devin',
     'typesafe',
-    'stepfun',
     'openrouter',
     'minimax',
     'volcengine',
     'ollama',
     'trae',
     'alibaba',
+    'stepfun',
     'thirdparty'
   ]);
 });
