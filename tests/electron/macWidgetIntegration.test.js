@@ -74,7 +74,7 @@ const {
   MAC_APP_MIN_VERSION,
   MAC_WIDGET_MIN_VERSION
 } = require('../../src/shared/macSystemRequirements');
-const { projectLimitStatsForDisplay } = require('../../src/electron/limitStatsPresentation');
+const { projectLimitStatsForDisplay } = require('../../src/electron/limits/statsPresentation');
 
 function functionSource(name, nextName) {
   const start = mainSource.indexOf(`function ${name}(`);
@@ -111,21 +111,37 @@ test('publishes projected stats to the macOS Widget on collection and presentati
   assert.match(mainSource, /compactTokenUnits: settings\?\.compactTokenUnits/);
 });
 
+function mainFunctionSource(signature) {
+  const start = mainSource.indexOf(signature);
+  const end = mainSource.indexOf('\nfunction ', start + signature.length);
+  assert.ok(start >= 0, `${signature} should exist`);
+  return mainSource.slice(start, end === -1 ? mainSource.length : end);
+}
+
 test('Widget producers carry lifetime ownership through the sendPush outlet', () => {
   for (const signature of [
-    'function startSyncCollector()',
     'function startHostStats()',
     'function startLocalCollector()',
-    'async function startStatsStream(options = {})',
     'async function refreshFromTray()'
   ]) {
-    const start = mainSource.indexOf(signature);
-    const end = mainSource.indexOf('\nfunction ', start + signature.length);
-    assert.ok(start >= 0, `${signature} should exist`);
-    const source = mainSource.slice(start, end === -1 ? mainSource.length : end);
+    const source = mainFunctionSource(signature);
     assert.match(source, /const widgetProducerOwner = captureMacWidgetProducerOwner\(\);/);
     assert.match(source, /sendPush\([\s\S]*\{ widgetProducerOwner \}\)/);
   }
+  // Client mode batches its publications, so its producers hand the owner to the
+  // batch and the publisher passes it on to sendPush.
+  for (const signature of [
+    'function startSyncCollector()',
+    'async function startStatsStream(options = {})'
+  ]) {
+    const source = mainFunctionSource(signature);
+    assert.match(source, /const widgetProducerOwner = captureMacWidgetProducerOwner\(\);/);
+    assert.match(source, /requestSyncDisplayStats\(\{[\s\S]*widgetProducerOwner\s*\}\)/);
+  }
+  assert.match(
+    mainFunctionSource('function publishSyncDisplayStats('),
+    /sendPush\([\s\S]*\{ widgetProducerOwner \}\)/
+  );
 });
 
 test('Widget ownership advances producer lifetime only for mode transitions', () => {
@@ -783,6 +799,20 @@ test('each Widget family has a purpose-built composition', () => {
   assert.match(widgetActivitySource, /fallback: WidgetL10n\.format\("%lld active days", snapshot\.activity\.activeDays\)/);
   assert.doesNotMatch(widgetDashboardSource, /WidgetFormat\.reset\(/);
   assert.match(widgetDashboardSource, /\(width\|height\)=\["'\]1em\["'\]/);
+});
+
+test('macOS Widget model vendor marks cover the Kimi coding-plan ids', () => {
+  // The widget classifies raw model names itself (the snapshot ships display
+  // names), so its Kimi rule has to stay in step with the renderer's
+  // modelVendorFor — the `k2d6-agent`/`k3-agent` forms whose suffix is
+  // alphanumeric, plus the bare `k2`/`k3` coding-plan ids behind a delimited
+  // token alternative. widgetVendorParity.test.js already locks the pattern to
+  // the renderer's verbatim; this pins that the delimited rule is in it.
+  assert.ok(
+    widgetDashboardSource.includes(
+      'if matches("kimi|moonshot|k2d6-agent|k3-agent|(?:^|[^a-z0-9])k[23](?:[^a-z0-9]|$)") { return "kimi" }'
+    )
+  );
 });
 
 test('macOS Widget packaging keeps the canonical Token Monitor app identity', () => {

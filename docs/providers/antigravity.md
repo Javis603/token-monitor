@@ -33,13 +33,15 @@ Token Monitor recognizes these native Antigravity roots under `~/.gemini/`:
 
 When Antigravity tracking is enabled and at least one native root exists, `maybeSyncAntigravity()` in `src/shared/providers/antigravity/selfSync.js` runs `tokscale antigravity sync` before the relevant scan. It is built once by the collector, which injects the process-wide self-sync throttle and the tokscale command resolver rather than letting this module create either. `tokscale` writes the normalized cache under its configured `antigravity-cache` directory.
 
-The normalized client id is `antigravity`. The tokscale alias `antigravity-cli` must continue to normalize and filter back to that parent id so targeted scans do not clear one partition and write another.
+The normalized client id is `antigravity`. The tokscale aliases `antigravity-cli` and `antigravity-extension` must continue to normalize and filter back to that parent id so targeted scans do not clear one partition and write another.
 
-The parse-local CLI source lives under `${GEMINI_CLI_HOME || ~/.gemini}/antigravity-cli/conversations`. It is a direct scan source rather than part of the native self-sync roots.
+The parse-local CLI source lives under `${GEMINI_CLI_HOME || ~/.gemini}/antigravity-cli/conversations`. The IDE extension's generation databases are read directly from `~/.gemini/antigravity/conversations/*.db`; this source follows the home directory and not `GEMINI_CLI_HOME`. Neither source depends on a successful `antigravity sync`. The extension directory is already inside a watched native root, while the CLI directory is watched separately.
+
+Normal scans include both database identities. A custom Antigravity root is passed only to `antigravity` and `antigravity-cli`: the CLI and extension use the same `*.db` parser, so passing one custom directory to both would count rows without response IDs twice. When a persisted custom root is inside the built-in extension directory — the pre-upgrade workaround for reading it — the `antigravity-cli` leg is dropped for that root so its files are not parsed a second time. A custom root that contains the extension directory keeps the leg because it may hold databases outside it; the shared subtree can still count rows without response IDs twice until Tokscale dedupes on canonical file paths.
 
 ### Watch behavior
 
-The native roots are watched because tokscale reads them without writing back to them. A change can therefore trigger an Antigravity-targeted refresh safely.
+The native roots are watched so that a change there triggers an Antigravity-targeted refresh. Reading them is not quite write-free: the extension keeps one SQLite database per conversation in WAL mode, and each read-only scan rewrites every conversation's `*.db-shm` wal-index. The collector therefore drops `-shm` events for Antigravity (`SELF_WATCHED_SQLITE_SIDECAR_CLIENTS`); otherwise every scan would schedule the next one, about every 2 s, with nothing new to collect. Real activity still arrives through the `*.db` and `*.db-wal` files.
 
 The generated `antigravity-cache` directory is deliberately not watched. Token Monitor's own sync writes it, so watching it would create a refresh loop.
 
@@ -138,13 +140,13 @@ Token/session tracking remains dependent on local source data. OAuth does not ma
 
 | Concern | Primary files |
 | --- | --- |
-| Usage source roots and watch mapping | `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/clientHealth.js`, `src/shared/usage.js` |
+| Usage source roots, health and watch mapping | `src/shared/clientSources.js`, `src/shared/clientSourceObservations.js`, `src/shared/collector.js`, `src/shared/clientTracking.js`, `src/shared/clientHealth.js`, `src/shared/usage.js` |
 | Self-sync and the tokscale sync lock | `src/shared/providers/antigravity/selfSync.js`, `src/shared/selfSyncThrottle.js` |
 | Local RPC and remote quota requests | `src/shared/providers/antigravity/probe.js`, `src/shared/providers/antigravity/oauth.js`, `src/shared/providers/antigravity/limits.js` |
 | Browser OAuth lifecycle | `src/electron/providers/antigravity/oauthLogin.js`, `src/electron/main.js`, `src/electron/preload.js` |
 | Account settings and credentials | `src/shared/credentialStore.js`, `src/electron/main.js`, renderer settings files |
 | Normalization and cross-device aggregation | `src/shared/limits/core.js`, generated `worker/src/shared/limits/core.js` |
-| Limits presentation | `src/electron/renderer/limitProviderPresentation.js`, `src/electron/renderer/app.js`, localized strings |
+| Limits presentation | `src/electron/renderer/limits/providerPresentation.js`, `src/electron/renderer/app.js`, localized strings |
 | Hub build identity after shared changes | `src/shared/hubBuildRegistry.json`, generated Worker registry |
 
 ## Verification checklist

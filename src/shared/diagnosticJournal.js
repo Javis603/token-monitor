@@ -20,6 +20,7 @@ const VALID_CODES = new Set([
   'storage-archive-update-failed',
   'stream-disconnected',
   'stream-reconnected',
+  'watcher-interval-fallback',
   'watcher-polling-fallback',
   'watcher-rebuild-failed'
 ]);

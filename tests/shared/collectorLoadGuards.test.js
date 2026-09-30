@@ -557,7 +557,7 @@ test('Antigravity source events target its umbrella client without watching sync
     await waitForCondition(() => updates.length === 2);
     assert.equal(syncCalls, 1, 'a source event inside the floor reuses the fresh cache');
     const targeted = calls[calls.length - 1];
-    assert.equal(targeted[targeted.indexOf('--client') + 1], 'antigravity,antigravity-cli');
+    assert.equal(targeted[targeted.indexOf('--client') + 1], 'antigravity,antigravity-cli,antigravity-extension');
     assert.ok(targeted.includes('--today'));
 
     // The floor defers that sync, it does not drop it. No second event follows —
@@ -567,7 +567,7 @@ test('Antigravity source events target its umbrella client without watching sync
     await waitForCondition(() => syncCalls === 2);
     await waitForCondition(() => updates.length === 3);
     const caughtUp = calls[calls.length - 1];
-    assert.equal(caughtUp[caughtUp.indexOf('--client') + 1], 'antigravity,antigravity-cli');
+    assert.equal(caughtUp[caughtUp.indexOf('--client') + 1], 'antigravity,antigravity-cli,antigravity-extension');
     assert.ok(caughtUp.includes('--today'), 'the catch-up rescans behind the sync it waited for');
   } finally {
     Date.now = originalNow;
@@ -690,7 +690,7 @@ test('a catch-up that comes due mid-tick keeps its targeted scan scope', async (
     await waitForCondition(() => syncCalls === 2, 4000);
     const caughtUp = calls[calls.length - 1];
     const scanned = caughtUp[caughtUp.indexOf('--client') + 1];
-    assert.equal(scanned, 'antigravity,antigravity-cli', 'the catch-up stays targeted');
+    assert.equal(scanned, 'antigravity,antigravity-cli,antigravity-extension', 'the catch-up stays targeted');
     assert.equal(scanned.includes('claude'), false, 'and never widens to every tracked client');
   } finally {
     Date.now = originalNow;
@@ -883,7 +883,7 @@ test('a failed forced sync hands the source event back instead of eating it', as
     t.mock.timers.reset();
     await waitForCondition(() => syncCalls === 3, 4000);
     const retried = calls[calls.length - 1];
-    assert.equal(retried[retried.indexOf('--client') + 1], 'antigravity,antigravity-cli');
+    assert.equal(retried[retried.indexOf('--client') + 1], 'antigravity,antigravity-cli,antigravity-extension');
   } finally {
     Date.now = originalNow;
     if (handle) handle.stop();
@@ -1352,7 +1352,7 @@ test('an Antigravity CLI event rescans without paying for an IDE sync', async ()
     await waitForCondition(() => updates.length === 2);
     assert.equal(syncCalls, 1, 'a CLI-only event leaves the sync on its idle cadence');
     const targeted = calls[calls.length - 1];
-    assert.equal(targeted[targeted.indexOf('--client') + 1], 'antigravity,antigravity-cli');
+    assert.equal(targeted[targeted.indexOf('--client') + 1], 'antigravity,antigravity-cli,antigravity-extension');
     assert.ok(targeted.includes('--today'));
   } finally {
     if (handle) handle.stop();
@@ -1502,6 +1502,7 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
   try {
     delete process.env.KIMI_CODE_HOME;
     const { applySessionTimestamps } = freshCollector();
+    const { TITLE_MAX_CODE_POINTS } = require('../../src/shared/providers/kimi/sessionMetadata');
     const period = { sessions: {} };
     // Kimi Code CLI: ~/.kimi-code/sessions/<workspace>/<session_*>/state.json
     const cliSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_xyz');
@@ -1521,6 +1522,145 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
     fs.mkdirSync(malformedSess, { recursive: true });
     fs.writeFileSync(path.join(malformedSess, 'state.json'), JSON.stringify({ workDir: { malformed: true } }));
     period.sessions['kimi:session_malformed'] = { client: 'kimi', sessionId: 'session_malformed', totalTokens: 100 };
+    // Kimi Code (CLI and desktop alike) writes the current `version: 2`
+    // document: `cwd` plus epoch-millisecond timestamps, with no `workDir`.
+    const v2Sess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_v2');
+    fs.mkdirSync(v2Sess, { recursive: true });
+    fs.writeFileSync(path.join(v2Sess, 'state.json'), JSON.stringify({
+      id: 'session_v2',
+      version: 2,
+      cwd: path.join(tmp, 'V2Proj'),
+      createdAt: Date.parse('2000-01-01T07:20:51.201Z'),
+      updatedAt: Date.parse('2000-01-01T07:21:09.024Z')
+    }));
+    period.sessions['kimi:session_v2'] = { client: 'kimi', sessionId: 'session_v2', totalTokens: 100 };
+    // A document migrated from the legacy shape keeps both spellings until its
+    // next write; the runtime prefers `cwd`, so this reader has to as well.
+    const migratedSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_migrated');
+    fs.mkdirSync(migratedSess, { recursive: true });
+    fs.writeFileSync(path.join(migratedSess, 'state.json'), JSON.stringify({
+      version: 2,
+      workDir: path.join(tmp, 'LegacyWorkDir'),
+      cwd: path.join(tmp, 'V2Cwd'),
+      createdAt: '2000-01-01T00:00:00.000Z',
+      updatedAt: '2000-01-01T01:00:00.000Z'
+    }));
+    period.sessions['kimi:session_migrated'] = { client: 'kimi', sessionId: 'session_migrated', totalTokens: 100 };
+    // The runtime's own session name, in all three kinds. Only `generated` (its
+    // `chat_title` summary) and `custom` (a user rename) are names; `replaceable`
+    // holds whatever the caller called a prompt, so that one — and the
+    // placeholder further down — must stay title-less.
+    const titledSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_titled');
+    fs.mkdirSync(titledSess, { recursive: true });
+    fs.writeFileSync(path.join(titledSess, 'state.json'), JSON.stringify({
+      version: 2,
+      cwd: path.join(tmp, 'TitledProj'),
+      title: '  explain the collector pipeline  ',
+      titleKind: 'replaceable',
+      createdAt: Date.parse('2000-01-01T02:00:00.000Z'),
+      updatedAt: Date.parse('2000-01-01T02:00:00.000Z')
+    }));
+    period.sessions['kimi:session_titled'] = { client: 'kimi', sessionId: 'session_titled', totalTokens: 100 };
+    const generatedSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_generated');
+    fs.mkdirSync(generatedSess, { recursive: true });
+    fs.writeFileSync(path.join(generatedSess, 'state.json'), JSON.stringify({
+      version: 2,
+      cwd: path.join(tmp, 'TitledProj'),
+      title: '  Collector pipeline walkthrough  ',
+      titleKind: 'generated',
+      createdAt: Date.parse('2000-01-01T03:00:00.000Z'),
+      updatedAt: Date.parse('2000-01-01T03:00:00.000Z')
+    }));
+    period.sessions['kimi:session_generated'] = { client: 'kimi', sessionId: 'session_generated', totalTokens: 100 };
+    const customTitleSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_custom_title');
+    fs.mkdirSync(customTitleSess, { recursive: true });
+    fs.writeFileSync(path.join(customTitleSess, 'state.json'), JSON.stringify({
+      workDir: path.join(tmp, 'CliProj'),
+      title: 'renamed by hand',
+      isCustomTitle: true,
+      createdAt: '2000-01-01T04:00:00.000Z',
+      updatedAt: '2000-01-01T04:00:00.000Z'
+    }));
+    period.sessions['kimi:session_custom_title'] = { client: 'kimi', sessionId: 'session_custom_title', totalTokens: 100 };
+    // The v2 spelling of a user rename — the path a rename in the Kimi app takes
+    // today, and the one that carries dirty text if the value was ever edited by
+    // hand: the persistence layer stores it verbatim, so the reader owns the
+    // display cleaning (collapse to one line, cap the length).
+    const customV2Sess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_custom_v2');
+    fs.mkdirSync(customV2Sess, { recursive: true });
+    fs.writeFileSync(path.join(customV2Sess, 'state.json'), JSON.stringify({
+      version: 2,
+      cwd: path.join(tmp, 'TitledProj'),
+      titleKind: 'custom',
+      title: `  renamed\n\tby   hand ${'x'.repeat(200)}  `,
+      createdAt: Date.parse('2000-01-01T04:30:00.000Z'),
+      updatedAt: Date.parse('2000-01-01T04:30:00.000Z')
+    }));
+    period.sessions['kimi:session_custom_v2'] = { client: 'kimi', sessionId: 'session_custom_v2', totalTokens: 100 };
+    const badTypeSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_title_type');
+    fs.mkdirSync(badTypeSess, { recursive: true });
+    fs.writeFileSync(path.join(badTypeSess, 'state.json'), JSON.stringify({
+      version: 2,
+      cwd: path.join(tmp, 'TitledProj'),
+      titleKind: 'custom',
+      title: { malformed: true },
+      createdAt: Date.parse('2000-01-01T04:45:00.000Z'),
+      updatedAt: Date.parse('2000-01-01T04:45:00.000Z')
+    }));
+    period.sessions['kimi:session_title_type'] = { client: 'kimi', sessionId: 'session_title_type', totalTokens: 100 };
+    // `Number.MAX_VALUE` is finite and positive, so it passes the numeric guard
+    // while landing outside the Date range; converting it must leave the field
+    // unset rather than throw, or one corrupt document takes the pass down.
+    const outOfRangeSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_out_of_range');
+    fs.mkdirSync(outOfRangeSess, { recursive: true });
+    fs.writeFileSync(path.join(outOfRangeSess, 'state.json'), JSON.stringify({
+      version: 2,
+      cwd: path.join(tmp, 'OutOfRangeProj'),
+      createdAt: Number.MAX_VALUE,
+      updatedAt: 1e16,
+      title: 'still resolved',
+      titleKind: 'generated'
+    }));
+    period.sessions['kimi:session_out_of_range'] = { client: 'kimi', sessionId: 'session_out_of_range', totalTokens: 100 };
+    // The pre-prompt placeholder is what an unnamed session holds, and must not
+    // become a row label even when it is marked custom-proof (it is not custom).
+    const placeholderSess = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'session_placeholder');
+    fs.mkdirSync(placeholderSess, { recursive: true });
+    fs.writeFileSync(path.join(placeholderSess, 'state.json'), JSON.stringify({
+      version: 2,
+      cwd: path.join(tmp, 'TitledProj'),
+      title: 'New Session',
+      titleKind: 'replaceable',
+      createdAt: Date.parse('2000-01-01T05:00:00.000Z'),
+      updatedAt: Date.parse('2000-01-01T05:00:00.000Z')
+    }));
+    period.sessions['kimi:session_placeholder'] = { client: 'kimi', sessionId: 'session_placeholder', totalTokens: 100 };
+    // Kimi Work: the envelope shape and the generator prompt are taken from a
+    // live install (the timestamps are synthesised). A conversation's
+    // `replaceable` title is the daimon kernel's prompt envelope, and the
+    // `ctitle-*` sessions the runtime spawns to name it carry the title
+    // generator's system prompt. Neither is a session name, so neither may
+    // reach a row.
+    const workConv = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'conv-envelope');
+    fs.mkdirSync(workConv, { recursive: true });
+    fs.writeFileSync(path.join(workConv, 'state.json'), JSON.stringify({
+      workDir: path.join(tmp, 'WorkConvProj'),
+      title: '<meta awareness="low" timestamp="2000-01-01 00:00" /> hi',
+      isCustomTitle: false,
+      createdAt: '2000-01-01T00:00:00.000Z',
+      updatedAt: '2000-01-01T00:00:00.000Z'
+    }));
+    period.sessions['kimi:conv-envelope'] = { client: 'kimi', sessionId: 'conv-envelope', totalTokens: 100 };
+    const workTitleJob = path.join(tmp, '.kimi-code', 'sessions', 'wd_cli_b', 'ctitle-generator');
+    fs.mkdirSync(workTitleJob, { recursive: true });
+    fs.writeFileSync(path.join(workTitleJob, 'state.json'), JSON.stringify({
+      workDir: path.join(tmp, 'WorkConvProj'),
+      title: 'Generate a concise title for the conversation below in the user\'s primary language.',
+      isCustomTitle: false,
+      createdAt: '2000-01-01T00:01:00.000Z',
+      updatedAt: '2000-01-01T00:01:00.000Z'
+    }));
+    period.sessions['kimi:ctitle-generator'] = { client: 'kimi', sessionId: 'ctitle-generator', totalTokens: 100 };
     // Kimi Work: <desktop runtime>/sessions/<workspace>/<conv-*>/state.json,
     // only reachable on darwin because kimiWorkSessionsRoots follows process.platform.
     if (process.platform === 'darwin') {
@@ -1543,16 +1683,50 @@ test('Kimi sessions gain project identity from sibling state.json', () => {
     assert.equal(period.sessions['kimi:session_fallback'].startedAt || '', '', 'malformed timestamps must stay unset');
     assert.equal(period.sessions['kimi:session_fallback'].lastUsedAt || '', '', 'malformed timestamps must stay unset');
     assert.equal(period.sessions['kimi:session_malformed'].projectId || '', '', 'non-string project metadata must stay unset');
+    assert.equal(period.sessions['kimi:session_v2'].projectLabel, 'V2Proj');
+    assert.ok(period.sessions['kimi:session_v2'].projectId, 'v2 session should resolve a projectId');
+    assert.equal(period.sessions['kimi:session_v2'].startedAt, '2000-01-01T07:20:51.201Z', 'epoch-millisecond timestamps must be read');
+    assert.equal(period.sessions['kimi:session_v2'].lastUsedAt, '2000-01-01T07:21:09.024Z', 'epoch-millisecond timestamps must be read');
+    assert.equal(period.sessions['kimi:session_migrated'].projectLabel, 'V2Cwd', 'cwd must outrank the legacy workDir');
+    assert.equal(period.sessions['kimi:session_migrated'].startedAt, '2000-01-01T00:00:00.000Z');
+    assert.equal(period.sessions['kimi:session_generated'].title, 'Collector pipeline walkthrough', 'a generated name must be read and trimmed');
+    assert.equal(period.sessions['kimi:session_custom_title'].title, 'renamed by hand', 'a v1 isCustomTitle rename must be read');
+    const customV2Title = period.sessions['kimi:session_custom_v2'].title;
+    assert.ok(customV2Title.startsWith('renamed by hand xxx'), `a v2 custom rename must be read and collapsed: ${customV2Title}`);
+    assert.ok(!/\s\s|\n|\t/.test(customV2Title), 'a dirty title must be collapsed to one line');
+    assert.equal(
+      Array.from(customV2Title).length,
+      TITLE_MAX_CODE_POINTS,
+      'a title must be capped at the resolver family’s code-point limit'
+    );
+    assert.ok(customV2Title.endsWith('…'), 'a capped title must be marked as truncated');
+    assert.equal(period.sessions['kimi:session_title_type'].title || '', '', 'a non-string title must stay unset');
+    assert.equal(period.sessions['kimi:session_out_of_range'].startedAt || '', '', 'an out-of-range timestamp must stay unset');
+    assert.equal(period.sessions['kimi:session_out_of_range'].lastUsedAt || '', '', 'an out-of-range timestamp must stay unset');
+    assert.equal(period.sessions['kimi:session_out_of_range'].projectLabel, 'OutOfRangeProj', 'one bad timestamp must not abort the rest of the document');
+    assert.equal(period.sessions['kimi:session_out_of_range'].title, 'still resolved', 'one bad timestamp must not abort the rest of the document');
+    assert.equal(period.sessions['kimi:session_titled'].title || '', '', 'a replaceable prompt copy must stay unset');
+    assert.equal(period.sessions['kimi:session_placeholder'].title || '', '', 'the "New Session" placeholder must stay unset');
+    assert.equal(period.sessions['kimi:conv-envelope'].title || '', '', 'the Work prompt envelope must stay unset');
+    assert.equal(period.sessions['kimi:ctitle-generator'].title || '', '', 'the title generator system prompt must stay unset');
+    assert.equal(period.sessions['kimi:session_xyz'].title || '', '', 'sessions without a title must stay title-less');
     assert.equal(period.sessions['kimi:conv-missing'].projectId || '', '', 'sessions without state.json must stay project-less');
     if (process.platform === 'darwin') {
       assert.equal(period.sessions['kimi:conv-abc'].projectLabel, 'WorkProj');
       assert.ok(period.sessions['kimi:conv-abc'].projectId, 'Kimi Work conv-* session should resolve a projectId');
     }
 
-    // Projects opt-out must strip identity, not just skip it (issue #182).
-    const disabled = { sessions: { 'kimi:session_xyz': { client: 'kimi', sessionId: 'session_xyz', totalTokens: 100 } } };
+    // Projects opt-out must strip identity, not just skip it (issue #182) — and
+    // must keep the session name, which is not identity.
+    const disabled = {
+      sessions: {
+        'kimi:session_xyz': { client: 'kimi', sessionId: 'session_xyz', totalTokens: 100 },
+        'kimi:session_generated': { client: 'kimi', sessionId: 'session_generated', totalTokens: 100 }
+      }
+    };
     applySessionTimestamps({ today: disabled }, tmp, { resolveProjects: false });
     assert.equal(disabled.sessions['kimi:session_xyz'].projectId || '', '', 'resolveProjects=false must not attach a projectId');
+    assert.equal(disabled.sessions['kimi:session_generated'].title, 'Collector pipeline walkthrough', 'resolveProjects=false must keep the session name');
   } finally {
     os.homedir = originalHomedir;
     if (previousKimiCodeHome === undefined) delete process.env.KIMI_CODE_HOME;
@@ -2079,7 +2253,7 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
   os.homedir = () => tmp;
   try {
     const { clientDataDirPresence, watchPathsForClients } = freshCollector();
-    const dirs = watchPathsForClients('pi,zed,kilo,mimo,zcode,kiro,codebuddy,workbuddy');
+    const dirs = watchPathsForClients('pi,omp,zed,kilo,mimo,zcode,kiro,codebuddy,workbuddy');
     assert.ok(dirs.includes(path.join(tmp, '.pi', 'agent', 'sessions')));
     assert.ok(dirs.includes(path.join(tmp, '.omp', 'agent', 'sessions')));
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'zed', 'threads')));
@@ -2104,8 +2278,8 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     assert.ok(dirs.includes(path.join(tmp, '.codebuddy', 'projects')));
     assert.ok(dirs.includes(path.join(tmp, '.workbuddy', 'projects')));
     assert.ok(dirs.includes(path.join(tmp, '.workbuddy-ai', 'projects')));
-    assert.deepEqual(clientDataDirPresence('pi,zed,kilo,mimo,zcode,kiro,codebuddy,workbuddy'), {
-      pi: true, zed: true, kilo: true, mimo: true, zcode: true, kiro: true, codebuddy: true, workbuddy: true
+    assert.deepEqual(clientDataDirPresence('pi,omp,zed,kilo,mimo,zcode,kiro,codebuddy,workbuddy'), {
+      pi: true, omp: true, zed: true, kilo: true, mimo: true, zcode: true, kiro: true, codebuddy: true, workbuddy: true
     });
   } finally {
     os.homedir = originalHomedir;
@@ -2327,7 +2501,7 @@ test('antigravity sync runs at most once per throttle window across ticks', asyn
   }
 });
 
-test('collectUsageOnce scans tokscale for antigravity-cli when antigravity is tracked', async () => {
+test('collectUsageOnce scans tokscale for both Antigravity parse-local clients when tracked', async () => {
   // tokscale 4.x exposes Antigravity CLI (`agy`) under its own parse-local client
   // id `antigravity-cli`; our tracked-client list only knows the umbrella
   // `antigravity` id, so the scan filter must be widened or the CLI rows are
@@ -2356,6 +2530,7 @@ test('collectUsageOnce scans tokscale for antigravity-cli when antigravity is tr
       const ids = filter.split(',');
       assert.ok(ids.includes('antigravity'), `antigravity missing from --client ${filter}`);
       assert.ok(ids.includes('antigravity-cli'), `antigravity-cli missing from --client ${filter}`);
+      assert.ok(ids.includes('antigravity-extension'), `antigravity-extension missing from --client ${filter}`);
     }
   } finally {
     childProcess.spawn = originalSpawn;
@@ -2982,11 +3157,18 @@ test('self-watch db-shm events are ignored for every client whose scan recreates
   const { isSelfWatchSqliteSidecarEvent } = freshCollector();
   const qoderRoot = path.join(os.tmpdir(), 'QoderCN', 'db');
   const zcodeRoot = path.join(os.tmpdir(), 'zcode', 'cli', 'db');
-  const roots = { qodercn: [qoderRoot], zcode: [zcodeRoot] };
+  const antigravityRoot = path.join(os.tmpdir(), '.gemini', 'antigravity');
+  const antigravityConversation = path.join(antigravityRoot, 'conversations');
+  const roots = { antigravity: [antigravityRoot], qodercn: [qoderRoot], zcode: [zcodeRoot] };
 
   // Each client keeps its own database basename: Qoder CN names it local.db,
-  // ZCode names it db.sqlite.
-  for (const [root, base] of [[qoderRoot, 'local.db'], [zcodeRoot, 'db.sqlite']]) {
+  // ZCode names it db.sqlite, Antigravity names one per conversation, below its
+  // watch root.
+  for (const [root, base] of [
+    [qoderRoot, 'local.db'],
+    [zcodeRoot, 'db.sqlite'],
+    [antigravityConversation, '1f17ba78-fe78-4ed6-9f69-07387625fdad.db']
+  ]) {
     assert.equal(isSelfWatchSqliteSidecarEvent(path.join(root, base + '-shm'), roots), true);
     assert.equal(isSelfWatchSqliteSidecarEvent(path.join(root, base + '-wal'), roots), false,
       'the -wal carries real data and must still trigger a scan');
@@ -3105,7 +3287,9 @@ test('collector preserves Qoder CN while publishing other clients after a bounde
   const originalPeriods = qoderCnUsage.buildQoderCnPeriods;
   let failReads = false;
   let claudeTokens = 3;
-  qoderCnUsage.collectQoderCnRows = async () => {
+  const qoderCnReadOptions = [];
+  qoderCnUsage.collectQoderCnRows = async (options) => {
+    qoderCnReadOptions.push(options);
     if (failReads) {
       const error = new Error('qodercn sqlite read budget exceeded (rows limit 100000)');
       error.code = 'QODER_CN_READ_BUDGET_EXCEEDED';
@@ -3144,6 +3328,7 @@ test('collector preserves Qoder CN while publishing other clients after a bounde
     });
 
     await waitForCondition(() => updates.length === 1);
+    assert.equal(qoderCnReadOptions[0].includeJsonl, true, 'production collection includes current JSONL transcripts');
     const anchorPath = path.join(tmp, 'collector-anchor.json');
     const firstAnchor = JSON.parse(fs.readFileSync(anchorPath, 'utf8'));
     assert.equal(firstAnchor.qoderCnPeriods.today.clients.qodercn, 7);
@@ -3690,6 +3875,96 @@ test('watch-descriptor exhaustion degrades to polling and stays there', async ()
   }
 });
 
+test('descriptor exhaustion over a tree too large to poll degrades to interval collection', async () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  for (let index = 0; index < 5; index += 1) {
+    fs.writeFileSync(path.join(tmp, '.claude', 'projects', `session-${index}.jsonl`), '');
+  }
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  const watchOptions = [];
+  const errorHandlers = [];
+  let closed = 0;
+  chokidar.watch = (_dirs, options) => {
+    watchOptions.push(options);
+    return {
+      on: (event, handler) => { if (event === 'error') errorHandlers.push(handler); },
+      close: () => { closed += 1; }
+    };
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  let handle = null;
+  const logs = [];
+  const events = [];
+  const updates = [];
+  try {
+    const { startCollector } = freshCollector();
+    handle = startCollector({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 80,
+      watchEnabled: true,
+      watchTriggersCollection: false,
+      intervalRequiresActivity: true,
+      watchPollingEntryLimit: 3,
+      limitsEnabled: false,
+      historyEnabled: false,
+      logger: (line) => logs.push(line),
+      onDiagnosticEvent: (event) => events.push(event),
+      onUpdate: (_summary, reason) => updates.push(reason)
+    });
+
+    await waitForCondition(() => errorHandlers.length === 1 && updates.length === 1);
+    const emfile = new Error('EMFILE: too many open files, watch');
+    emfile.code = 'EMFILE';
+    errorHandlers[0](emfile);
+
+    await waitForCondition(() => events.some((event) => event.code === 'watcher-interval-fallback'));
+    assert.equal(watchOptions.length, 1, 'no polling watcher is built over the oversized tree');
+    assert.equal(closed, 1, 'the exhausted native watcher is still released');
+    assert.deepEqual(events.at(-1), { subsystem: 'watcher', code: 'watcher-interval-fallback', detailCode: 'EMFILE' });
+    const diagnostics = handle.getDiagnostics();
+    assert.equal(diagnostics.watchMode, 'interval');
+    assert.equal(diagnostics.watchFallbackCode, 'EMFILE');
+    assert.ok(logs.some((line) => line.includes('Cannot watch safely')));
+
+    // Smart mode would otherwise wait for watch activity that can no longer
+    // arrive, and scan nothing but the hourly reconciliation.
+    const scansBefore = calls.length;
+    await waitForCondition(() => calls.length > scansBefore);
+    const interval = calls.at(-1);
+    assert.equal(interval.includes('--client') ? interval[interval.indexOf('--client') + 1] : 'claude', 'claude');
+
+    // Sticky: a later rebuild must not bring a watcher back.
+    fs.mkdirSync(path.join(tmp, '.claude', 'transcripts'), { recursive: true });
+    await handle.tick('manual');
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(watchOptions.length, 1);
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('a successful watcher rebuild clears the current watcher failure', async () => {
   const tmp = withTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;
@@ -3904,14 +4179,17 @@ test('the ignore matcher agrees with the roots chokidar was actually handed', as
   }
 });
 
-test('TOKEN_MONITOR_WATCH_POLLING=0 opts out of the descriptor fallback', async () => {
+// chokidar's own variable forbids polling just as ours does: it overrides the
+// options chokidar is handed, so a fallback that asked for polling would still
+// run native while diagnostics claimed otherwise.
+for (const pollingEnv of ['TOKEN_MONITOR_WATCH_POLLING', 'CHOKIDAR_USEPOLLING']) test(`${pollingEnv}=0 opts out of the descriptor fallback`, async () => {
   const tmp = withTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  const originalPolling = process.env.TOKEN_MONITOR_WATCH_POLLING;
+  const originalPolling = process.env[pollingEnv];
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
-  process.env.TOKEN_MONITOR_WATCH_POLLING = '0';
+  process.env[pollingEnv] = '0';
 
   const chokidar = require('chokidar');
   const originalWatch = chokidar.watch;
@@ -3953,6 +4231,7 @@ test('TOKEN_MONITOR_WATCH_POLLING=0 opts out of the descriptor fallback', async 
 
     await new Promise((resolve) => setTimeout(resolve, 40));
     assert.equal(watchOptions.length, 1, 'an explicit "never poll" must survive descriptor exhaustion');
+    assert.equal(handle.getDiagnostics().watchMode, 'native');
   } finally {
     if (handle) handle.stop();
     childProcess.spawn = originalSpawn;
@@ -3960,8 +4239,8 @@ test('TOKEN_MONITOR_WATCH_POLLING=0 opts out of the descriptor fallback', async 
     os.homedir = originalHomedir;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
-    if (originalPolling === undefined) delete process.env.TOKEN_MONITOR_WATCH_POLLING;
-    else process.env.TOKEN_MONITOR_WATCH_POLLING = originalPolling;
+    if (originalPolling === undefined) delete process.env[pollingEnv];
+    else process.env[pollingEnv] = originalPolling;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -4748,6 +5027,164 @@ test('custom Tokscale scan paths stay visible and use recursive extra-root watch
   }
 });
 
+test('custom roots prune dependency and VCS trees without touching built-in roots', () => {
+  const tmp = withTmpHome([path.join('.codex', 'sessions')]);
+  const originalHomedir = os.homedir;
+  const originalCodexHome = process.env.CODEX_HOME;
+  delete process.env.CODEX_HOME;
+  os.homedir = () => tmp;
+  try {
+    const { watchIgnoreMatcher } = freshCollector();
+    // #857: the custom root was a whole projects directory.
+    const projects = path.join(tmp, 'projects');
+    fs.mkdirSync(projects, { recursive: true });
+    const ignored = watchIgnoreMatcher('codex', { customScanPaths: { codex: [projects] } });
+
+    assert.equal(ignored(projects), false, 'the root itself is always kept');
+    assert.equal(ignored(path.join(projects, 'agent', 'sessions', 'rollout.jsonl')), false);
+    for (const pruned of ['node_modules', '.git', '.venv', '__pycache__']) {
+      assert.equal(ignored(path.join(projects, 'app', pruned)), true, `${pruned} is pruned`);
+      assert.equal(ignored(path.join(projects, 'app', pruned, 'deep', 'x.jsonl')), true, `below ${pruned} is pruned`);
+    }
+
+    // The built-in root beside it keeps its whole-tree contract.
+    const builtIn = path.join(tmp, '.codex', 'sessions');
+    assert.equal(ignored(path.join(builtIn, 'node_modules', 'x.jsonl')), false);
+
+    // A custom root nested in a pruned directory is its own source and survives.
+    const nested = path.join(projects, 'app', '.git', 'captured');
+    fs.mkdirSync(nested, { recursive: true });
+    const nestedIgnored = watchIgnoreMatcher('codex', { customScanPaths: { codex: [projects, nested] } });
+    assert.equal(nestedIgnored(path.join(nested, 'rollout.jsonl')), false);
+    assert.equal(nestedIgnored(path.join(projects, 'app', '.git', 'objects')), true);
+
+    // A client naming its own built-in root as a custom path does not turn
+    // that root into a pruned one.
+    const duplicateIgnored = watchIgnoreMatcher('codex', { customScanPaths: { codex: [projects, builtIn] } });
+    assert.equal(duplicateIgnored(path.join(builtIn, 'node_modules', 'x.jsonl')), false);
+    assert.equal(duplicateIgnored(path.join(projects, 'node_modules')), true);
+
+    // A directory that is a built-in root for any client keeps everything, even
+    // where another client names it as a custom root.
+    const sharedIgnored = watchIgnoreMatcher('codex,claude', { customScanPaths: { codex: [projects], claude: [builtIn] } });
+    assert.equal(sharedIgnored(path.join(builtIn, 'node_modules', 'x.jsonl')), false);
+    assert.equal(sharedIgnored(path.join(projects, 'node_modules')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('the polling bound follows symlinked directories the way chokidar does', () => {
+  const tmp = withTmpHome([]);
+  try {
+    const { openWatch } = freshCollector();
+    const root = path.join(tmp, 'root');
+    const elsewhere = path.join(tmp, 'elsewhere');
+    fs.mkdirSync(root, { recursive: true });
+    fs.mkdirSync(elsewhere, { recursive: true });
+    for (let index = 0; index < 10; index += 1) fs.writeFileSync(path.join(elsewhere, `f${index}`), '');
+    const built = [];
+    const chokidar = { watch: (dirs, options) => { built.push(options); return {}; } };
+    const config = { dirs: [root], clients: 'claude', usePolling: true, pollingEntryLimit: 15 };
+
+    // chokidar follows symlinks by default, so a link into a large tree counts
+    // toward the bound like the tree itself.
+    fs.symlinkSync(elsewhere, path.join(root, 'first'), 'junction');
+    openWatch(chokidar, config);
+    assert.equal(built.length, 1, 'one link into a 10-entry tree fits under 15');
+
+    // chokidar dedupes links by their own path, not their target, so a second
+    // alias of the same tree is a second tree to poll.
+    fs.symlinkSync(elsewhere, path.join(root, 'second'), 'junction');
+    assert.throws(() => openWatch(chokidar, config), { code: 'watch-polling-limit' });
+    assert.equal(built.length, 1);
+
+    // Native watching is not bounded here; the descriptor fallback covers it.
+    openWatch(chokidar, { ...config, usePolling: false });
+    assert.equal(built.length, 2);
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a symlink cycle ends the polling count instead of hanging it', () => {
+  const tmp = withTmpHome([]);
+  try {
+    const { openWatch } = freshCollector();
+    const root = path.join(tmp, 'root');
+    fs.mkdirSync(root, { recursive: true });
+    fs.symlinkSync(root, path.join(root, 'loop'), 'junction');
+    const chokidar = { watch: () => ({}) };
+    // Where the walk stops is the platform's symlink limit or the counter,
+    // whichever comes first; either answer is acceptable, never returning is not.
+    try {
+      openWatch(chokidar, { dirs: [root], clients: 'claude', usePolling: true, pollingEntryLimit: 20000 });
+    } catch (error) {
+      assert.equal(error.code, 'watch-polling-limit');
+    }
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('CHOKIDAR_USEPOLLING cannot switch chokidar to polling around the bound', () => {
+  const tmp = withTmpHome([]);
+  const original = process.env.CHOKIDAR_USEPOLLING;
+  try {
+    const { openWatch, resolveWatchUsePolling } = freshCollector();
+    const root = path.join(tmp, 'root');
+    fs.mkdirSync(root, { recursive: true });
+    for (let index = 0; index < 5; index += 1) fs.writeFileSync(path.join(root, `f${index}`), '');
+    const built = [];
+    const chokidar = { watch: (dirs, options) => { built.push(options); return {}; } };
+    const config = { dirs: [root], clients: 'claude', usePolling: false, pollingEntryLimit: 3 };
+
+    process.env.CHOKIDAR_USEPOLLING = 'true';
+    // chokidar applies the variable after our options, so native was asked for
+    // and polling is what would run.
+    assert.throws(() => openWatch(chokidar, config), { code: 'watch-polling-limit' });
+    assert.equal(built.length, 0);
+    // Diagnostics must report the mode chokidar really runs, over our own
+    // override as well.
+    assert.equal(resolveWatchUsePolling(false, { CHOKIDAR_USEPOLLING: '1', TOKEN_MONITOR_WATCH_POLLING: '0' }), true);
+    assert.equal(resolveWatchUsePolling(true, { CHOKIDAR_USEPOLLING: 'false' }), false);
+
+    process.env.CHOKIDAR_USEPOLLING = '0';
+    openWatch(chokidar, { ...config, usePolling: true });
+    assert.equal(built.length, 1, 'turned off, a polling request over the limit runs native');
+    assert.equal(built[0].usePolling, false);
+    // A host that must not open native descriptors gets no watcher at all.
+    assert.throws(
+      () => openWatch(chokidar, { ...config, usePolling: true, requirePolling: true }),
+      { code: 'watch-polling-unavailable' }
+    );
+    assert.equal(built.length, 1);
+
+    // chokidar's variable outranks ours, so it can still permit what ours forbids.
+    process.env.CHOKIDAR_USEPOLLING = '1';
+    const originalOwn = process.env.TOKEN_MONITOR_WATCH_POLLING;
+    process.env.TOKEN_MONITOR_WATCH_POLLING = '0';
+    try {
+      openWatch(chokidar, { ...config, pollingEntryLimit: 100, requirePolling: true });
+      assert.equal(built.at(-1).usePolling, true);
+    } finally {
+      if (originalOwn === undefined) delete process.env.TOKEN_MONITOR_WATCH_POLLING;
+      else process.env.TOKEN_MONITOR_WATCH_POLLING = originalOwn;
+    }
+  } finally {
+    if (original === undefined) delete process.env.CHOKIDAR_USEPOLLING;
+    else process.env.CHOKIDAR_USEPOLLING = original;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('custom Antigravity roots remain watchable without watching its self-sync cache', () => {
   const tmp = withTmpHome([]);
   const originalHomedir = os.homedir;
@@ -4943,6 +5380,104 @@ test('locally parsed clients fold Pi Desktop into pi and surface every history g
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+// A watch event clears the pending debounce timer and re-arms a fresh window, so
+// a source that changes more often than once per `watchDebounceMs` defers the
+// watch tick until the interval fallback runs. `watchMaxWaitMs` caps the
+// total deferral: once a storm has held the tick back for that long, the tick
+// runs even though events are still arriving.
+test('a watch-event storm faster than the debounce still ticks within the max-wait ceiling', async () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => ({
+    on: (event, handler) => { if (event === 'all') watchHandler = handler; },
+    close: () => {}
+  });
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    setTimeout(() => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    }, 5);
+    return child;
+  };
+
+  let handle = null;
+  let storm = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 5000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      watchDebounceMs: 10,
+      // Every other case here runs a 10ms debounce, so a ceiling left at its
+      // 5000ms default would never come due inside the test's own timeout.
+      watchMaxWaitMs: 50,
+      limitsEnabled: false,
+      historyEnabled: false,
+      onUpdate: (_summary, reason) => updates.push(reason)
+    });
+
+    // The startup tick is the interval one and says so. Every assertion below
+    // counts only `watch:` reasons, so a tick from startup — or from the hourly
+    // reconciliation — cannot stand in for a ceiling that never fired.
+    await waitForCondition(() => updates.length === 1);
+    assert.deepEqual(updates, ['interval']);
+    assert.ok(watchHandler, 'watcher handler captured');
+
+    // Events every 5ms, faster than the 10ms debounce: the un-ceilinged timer
+    // is cleared and re-armed before it can ever come due.
+    storm = setInterval(() => {
+      if (watchHandler) watchHandler('change', '/fake/session.jsonl');
+    }, 5);
+
+    const watchTicks = () => updates.filter((reason) => reason.startsWith('watch:'));
+    // Wide bound on purpose: this pins that the ceiling fires at all, not when.
+    // The ceiling is 50ms and the window is 40x that, so CI scheduling noise on
+    // Node 22 or 24 cannot decide the outcome.
+    const ticked = await waitForCondition(() => watchTicks().length > 0, 2000)
+      .then(() => true, () => false);
+    clearInterval(storm);
+    storm = null;
+
+    assert.ok(
+      ticked,
+      `no watch tick in 2000ms of a 5ms event storm against a 50ms ceiling; reasons: ${updates.join(', ') || '(none)'}`
+    );
+    assert.ok(calls.length > 3, 'the ceiling tick spawned a scan');
+  } finally {
+    if (storm) clearInterval(storm);
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
 
 test('LiveAgent custom scan roots extend the default database instead of replacing it', async () => {
   const tmp = withTmpHome([]);
@@ -5012,6 +5547,85 @@ test('LiveAgent custom scan roots extend the default database instead of replaci
   } finally {
     Object.assign(liveAgent, originals.liveAgent);
     Object.assign(piDesktop, originals.piDesktop);
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+// The ceiling bounds a storm and must not touch the ordinary path: one event
+// with nothing behind it still waits out the whole debounce before it scans.
+test('a single watch event still waits out the debounce and does not fire early', async () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  const originalHomedir = os.homedir;
+  os.homedir = () => tmp;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let watchHandler = null;
+  chokidar.watch = () => ({
+    on: (event, handler) => { if (event === 'all') watchHandler = handler; },
+    close: () => {}
+  });
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (_bin, args) => {
+    calls.push(args);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = { end: () => {} };
+    child.kill = () => {};
+    setTimeout(() => {
+      child.stdout.emit('data', Buffer.from(JSON.stringify({ entries: [] })));
+      child.emit('close', 0);
+    }, 5);
+    return child;
+  };
+
+  let handle = null;
+  try {
+    const { startCollector } = freshCollector();
+    const updates = [];
+    handle = startCollector({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 5000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 60 * 60 * 1000,
+      watchEnabled: true,
+      // A 10ms debounce leaves no honest window to observe "not yet", so this
+      // case runs a slower one. The ceiling sits above it, where a ceiling
+      // floored at the debounce has to sit.
+      watchDebounceMs: 120,
+      watchMaxWaitMs: 400,
+      limitsEnabled: false,
+      historyEnabled: false,
+      onUpdate: (_summary, reason) => updates.push(reason)
+    });
+
+    await waitForCondition(() => updates.length === 1);
+    assert.deepEqual(updates, ['interval']);
+    assert.ok(watchHandler, 'watcher handler captured');
+
+    const watchTicks = () => updates.filter((reason) => reason.startsWith('watch:'));
+    watchHandler('change', '/fake/session.jsonl');
+    // Well inside the 120ms debounce. Timers never fire early, so a short wait
+    // here is a real observation rather than a race.
+    await new Promise((resolve) => { setTimeout(resolve, 30); });
+    assert.equal(watchTicks().length, 0, 'a lone event scanned before its debounce elapsed');
+
+    await waitForCondition(() => watchTicks().length > 0, 2000);
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
     os.homedir = originalHomedir;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;

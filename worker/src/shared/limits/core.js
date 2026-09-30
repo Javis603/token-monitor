@@ -4,7 +4,7 @@
 'use strict';
 
 const { staleAfterMsForSyncUpload } = require('../syncUploadInterval');
-const { LIMIT_PROVIDER_IDS, VALID_LIMIT_WINDOW_METRICS } = require('../limitProviders');
+const { LIMIT_PROVIDER_IDS, VALID_LIMIT_WINDOW_METRICS } = require('./providers');
 
 const DEFAULT_LIMITS_REFRESH_MS = 5 * 60 * 1000;
 const VALID_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
@@ -436,6 +436,8 @@ function normalizeProviderUsageSummary(input) {
   const summary = {
     period,
     requests: count(input.requests),
+    todayTokens: count(input.todayTokens ?? input.today_tokens),
+    weekTokens: count(input.weekTokens ?? input.week_tokens),
     inputTokens: count(input.inputTokens ?? input.input_tokens),
     outputTokens: count(input.outputTokens ?? input.output_tokens),
     cacheReadTokens: count(input.cacheReadTokens ?? input.cache_read_tokens),

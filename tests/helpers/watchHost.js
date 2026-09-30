@@ -1,10 +1,10 @@
 'use strict';
 
-// The collector's default watch host is a worker thread, because chokidar's
-// close() is synchronous and superlinear in watched-directory count and would
-// otherwise freeze the UI thread on every tracked-client change.
+// The collector's default watch host is a child process, because chokidar's
+// close() is synchronous and superlinear in watched-directory count, and its
+// per-file descriptors would otherwise fill the app's own table (#520).
 //
-// A worker has its own module registry, so the `chokidar.watch` stubs these
+// A child process has its own module registry, so the `chokidar.watch` stubs these
 // tests install cannot reach it — an unpinned test would silently watch the
 // real filesystem and hold the process open. What those tests actually cover is
 // the collector's reaction to watch events (debounce, targeted scope, self-sync

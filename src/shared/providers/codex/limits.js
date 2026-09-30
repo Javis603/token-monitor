@@ -55,11 +55,15 @@ function codexPlanLabelFromParts(...parts) {
   const text = parts.map((part) => String(part || '').trim()).find(Boolean) || '';
   if (!text || text.includes('@')) return '';
   const exact = {
-    pro: 'Pro 20x',
-    prolite: 'Pro 5x',
-    pro_lite: 'Pro 5x',
-    'pro-lite': 'Pro 5x',
-    'pro lite': 'Pro 5x'
+    pro: 'Pro More',
+    prolite: 'Pro',
+    pro_lite: 'Pro',
+    'pro-lite': 'Pro',
+    'pro lite': 'Pro',
+    promax: 'Pro Max',
+    pro_max: 'Pro Max',
+    'pro-max': 'Pro Max',
+    'pro max': 'Pro Max'
   };
   const raw = text.toLowerCase();
   if (exact[raw]) return exact[raw];
@@ -886,6 +890,7 @@ function codexCommandCandidates(env = process.env, platform = process.platform, 
   if (platform === 'darwin') {
     candidates.push(
       '/Applications/Codex.app/Contents/Resources/codex',
+      '/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex',
       '/Applications/ChatGPT.app/Contents/Resources/codex'
     );
   } else if (platform === 'win32') {

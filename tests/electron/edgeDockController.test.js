@@ -129,7 +129,10 @@ function createFixture(options = {}) {
     preloadPath: '/preload.js',
     getSettings: () => settings,
     nativeGlass: () => options.nativeGlass === true,
+    liquidGlass: () => (typeof options.liquidGlass === 'function' ? options.liquidGlass() : options.liquidGlass || null),
+    createGlass: options.createGlass,
     prefersReducedMotion: () => true,
+    isFullScreen: options.isFullScreen,
     applyShapeMask: (win) => {
       maskWindows.push(win);
       return options.maskAvailable !== false;
@@ -366,6 +369,79 @@ test('macOS drops rectangular vibrancy when a surface mask cannot be applied', (
   assert.equal(fixture.maskWindows.length, attemptedMasks, 'the no-material fallback remains stable for this window');
 });
 
+function fakeGlassFactory({ failCreate = false, failShape = false } = {}) {
+  const glasses = [];
+  const create = (win) => {
+    if (failCreate) throw new Error('NSGlassEffectView unavailable');
+    const glass = { win, updates: [], disposed: null };
+    glass.update = (update) => {
+      if (update.shape && failShape) throw new Error('shape rejected');
+      glass.updates.push(update);
+    };
+    glass.dispose = (options = {}) => { glass.disposed = options; };
+    glasses.push(glass);
+    return glass;
+  };
+  return { create, glasses };
+}
+
+test('macOS Liquid Glass shapes the rail and card while the peek keeps its masked HUD grip', (t) => {
+  const factory = fakeGlassFactory();
+  const fixture = createFixture({ platform: 'darwin', nativeGlass: true, liquidGlass: { dark: true }, createGlass: factory.create });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+
+  assert.equal(FakeBrowserWindow.instances.length, 3);
+  const peek = fixture.windowFor('peek');
+  assert.equal(peek.options.vibrancy, 'hud');
+  assert.ok(fixture.maskWindows.includes(peek));
+  assert.equal(sentPayload(peek, 'peek').liquidGlass, false);
+  assert.ok(['rail', 'bubble'].every((surface) => fixture.windowFor(surface).options.vibrancy === undefined));
+  assert.equal(factory.glasses.length, 2);
+  assert.equal(fixture.maskWindows.length, 1);
+  const shaped = factory.glasses.find((glass) => glass.win === rail).updates.find((update) => update.shape);
+  assert.equal(shaped.dark, true);
+  assert.equal(shaped.shape.height, rail.bounds.height);
+  assert.equal(shaped.shape.commands[0][0], 'M');
+  const payload = sentPayload(rail, 'rail');
+  assert.equal(payload.glass, true);
+  assert.equal(payload.liquidGlass, true);
+});
+
+test('macOS falls back to the masked HUD material when Liquid Glass cannot be built or shaped', (t) => {
+  for (const failure of [{ failCreate: true }, { failShape: true }]) {
+    const factory = fakeGlassFactory(failure);
+    const fixture = createFixture({ platform: 'darwin', nativeGlass: true, liquidGlass: { dark: false }, createGlass: factory.create });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail');
+
+    assert.deepEqual(rail.vibrancyCalls, ['hud'], JSON.stringify(failure));
+    assert.equal(rail.options.visualEffectState, 'active');
+    assert.ok(fixture.maskWindows.includes(rail));
+    assert.ok(factory.glasses.filter((glass) => glass.win === rail).every((glass) => glass.disposed !== null));
+    const payload = sentPayload(rail, 'rail');
+    assert.equal(payload.glass, true);
+    assert.equal(payload.liquidGlass, false);
+  }
+});
+
+test('switching the glass style rebuilds the dock and releases its Liquid Glass', (t) => {
+  const factory = fakeGlassFactory();
+  let wanted = { dark: true };
+  const fixture = createFixture({ platform: 'darwin', nativeGlass: true, liquidGlass: () => wanted, createGlass: factory.create });
+  t.after(() => fixture.controller.stop());
+  const first = fixture.windowFor('rail');
+
+  wanted = null;
+  fixture.controller.sync();
+  const rebuilt = fixture.windowFor('rail');
+  assert.notEqual(rebuilt, first);
+  assert.equal(rebuilt.options.vibrancy, 'hud');
+  assert.equal(factory.glasses.length, 2);
+  assert.ok(factory.glasses.every((glass) => glass.disposed?.windowClosed !== true));
+  assert.ok(factory.glasses.every((glass) => glass.disposed !== null));
+});
+
 // The rail's entrance is keyed to the reveal rather than to the push, so the page
 // has to be able to tell which payload is the reveal: without that it has neither
 // a transition to fire on nor a way to keep a stats update from replaying the
@@ -440,6 +516,92 @@ test('a peek payload carries the handle, and an open rail keeps it away', (t) =>
   fixture.controller.sync();
   assert.equal(sentPayload(peek, 'peek').peeking, true);
   assert.equal(peek.ignoreMouse, false);
+});
+
+test('always-except-full-screen keeps the rail up on the desktop and auto-hides over a full-screen app', async (t) => {
+  let fullScreen = false;
+  const probed = [];
+  const fixture = createFixture({
+    settings: { edgeDockMode: 'alwaysExceptFullScreen' },
+    isFullScreen: (display) => {
+      probed.push(display);
+      return fullScreen;
+    }
+  });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const peek = fixture.windowFor('peek');
+  assert.equal(probed[0], fixture.screen.displays[0], 'the probe is asked about the dock display');
+  assert.equal(rail.opacity, 1);
+  assert.equal(sentPayload(rail, 'rail').always, true);
+  assert.equal(sentPayload(peek, 'peek').peeking, false);
+
+  // The pointer is away from the edge; the poll alone notices the full-screen app.
+  fixture.screen.point = { x: 10, y: 10 };
+  fullScreen = true;
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  assert.equal(rail.opacity, 0, 'a full-screen app retracts the rail');
+  assert.equal(sentPayload(rail, 'rail').always, false);
+  assert.equal(sentPayload(peek, 'peek').peeking, true);
+
+  fullScreen = false;
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  assert.equal(rail.opacity, 1, 'back on the desktop the rail returns');
+  assert.equal(sentPayload(rail, 'rail').always, true);
+  assert.equal(sentPayload(peek, 'peek').peeking, false);
+});
+
+test('a display change re-checks full screen for the display the dock lands on', (t) => {
+  const primary = {
+    id: 1,
+    scaleFactor: 1,
+    bounds: { x: 0, y: 0, width: 1200, height: 900 },
+    workArea: { x: 0, y: 0, width: 1200, height: 860 }
+  };
+  const secondary = {
+    id: 2,
+    scaleFactor: 1,
+    bounds: { x: 1200, y: 0, width: 1600, height: 1000 },
+    workArea: { x: 1200, y: 0, width: 1600, height: 960 }
+  };
+  const fixture = createFixture({
+    displays: [primary, secondary],
+    settings: { edgeDockMode: 'alwaysExceptFullScreen', edgeDockDisplayId: '2' },
+    // Only the primary display has a full-screen app.
+    isFullScreen: (display) => display.id === 1
+  });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const peek = fixture.windowFor('peek');
+  assert.equal(rail.opacity, 1, 'the dock display is on its desktop');
+
+  // Unplugging the dock's display moves it to the primary, and the primary's
+  // full-screen app applies at once rather than on the next poll.
+  fixture.screen.displays.splice(1, 1);
+  fixture.screen.emit('display-removed');
+  assert.equal(rail.opacity, 0);
+  assert.equal(sentPayload(rail, 'rail').always, false);
+  assert.equal(sentPayload(peek, 'peek').peeking, true);
+});
+
+test('only the full-screen mode probes for full-screen apps', async (t) => {
+  let probes = 0;
+  const fixture = createFixture({
+    settings: { edgeDockMode: 'always' },
+    isFullScreen: () => {
+      probes += 1;
+      return true;
+    }
+  });
+  t.after(() => fixture.controller.stop());
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(probes, 0);
+  assert.equal(fixture.windowFor('rail').opacity, 1, 'plain always-visible ignores full-screen apps');
+
+  fixture.settings.edgeDockMode = 'alwaysExceptFullScreen';
+  fixture.controller.sync();
+  assert.equal(probes, 1, 'switching into the mode checks straight away');
+  assert.equal(fixture.windowFor('rail').opacity, 0);
 });
 
 test('display metric changes hide and remeasure an open card against the new work area', (t) => {

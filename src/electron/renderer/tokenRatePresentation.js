@@ -249,9 +249,13 @@
     return { getSample, nextExpiryAt, observe, reset };
   }
 
+  function isSharedSyncMode(hubMode) {
+    return hubMode === 'client' || hubMode === 'host' || hubMode === 'icloud';
+  }
+
   function selectLiveTokenRatePeriods(stats, deviceId, hubMode = 'local', scope = 'all') {
     const normalizedDeviceId = String(deviceId || '').trim();
-    const syncMode = hubMode === 'client' || hubMode === 'host';
+    const syncMode = isSharedSyncMode(hubMode);
     const devices = Array.isArray(stats?.devices) ? stats.devices : [];
 
     if (syncMode && scope !== 'device') {
@@ -496,6 +500,7 @@
     createLiveTokenRateGroupTracker,
     createLiveTokenRateTracker,
     createTokenRateBoostController,
+    isSharedSyncMode,
     positiveNumber,
     selectLiveTokenRatePeriods,
     tokenBurnPerMinute,

@@ -11,8 +11,8 @@
 //
 //   cn             Bailian       Team      GetSubscriptionSummary -> account billing total
 //   intl           Model Studio  Team      GetSubscriptionSummary -> account billing total
-//   cn-personal    Bailian       Personal  rolling-window API     -> 5h + 7d windows
-//   intl-personal  Model Studio  Personal  rolling-window API     -> 5h + 7d windows
+//   cn-personal    Bailian       Personal  rolling-window API     -> reported windows
+//   intl-personal  Model Studio  Personal  rolling-window API     -> reported windows
 //
 // Auth is a console Cookie header, not an API token. The Personal variants read
 // their quota from a *different host* than the dashboard, so a Personal cookie
@@ -555,9 +555,10 @@ function teamWindows(summary) {
 // Personal/Solo: rolling-window API
 //
 // Percentage-first, unlike Team: the usage endpoint reports fractions of the
-// 5-hour and 7-day windows, and absolute totals only exist if the separate
-// quota-config endpoint recognises the plan. Both extra endpoints are
-// best-effort — losing them costs the totals, not the windows.
+// plan's windows — historically 5-hour and 7-day, now a monthly window on
+// plans where Alibaba retired the weekly cap. Absolute totals only exist if
+// the separate quota-config endpoint recognises the plan. Both extra
+// endpoints are best-effort — losing them costs the totals, not the windows.
 // --------------------------------------------------------------------------
 
 const PERSONAL_PLAN_LABELS = Object.freeze({
@@ -572,19 +573,24 @@ function personalPlanCode(payload) {
 }
 
 function personalQuotaTotals(payload, planCode) {
-  if (!planCode || !isPlainObject(payload)) return { fiveHour: null, weekly: null };
+  if (!planCode || !isPlainObject(payload)) return { fiveHour: null, weekly: null, monthly: null };
   const quota = findByKey(payload, planCode, (value) => (isPlainObject(value) ? value : null));
-  if (!isPlainObject(quota)) return { fiveHour: null, weekly: null };
+  if (!isPlainObject(quota)) return { fiveHour: null, weekly: null, monthly: null };
   return {
     fiveHour: firstNumber(quota, ['five_hour', 'fiveHour']),
-    weekly: firstNumber(quota, ['weekly'])
+    weekly: firstNumber(quota, ['weekly']),
+    monthly: firstNumber(quota, ['monthly'])
   };
 }
 
 function parsePersonalUsage(usagePayload, subscriptionPayload, quotaConfigPayload) {
+  // The reported window set moves with Alibaba's quota policy: the 5-hour cap
+  // was lifted first, then the weekly cap was retired, so a live response may
+  // carry only per1Month*. Read all three and surface whichever arrive.
   const fiveHourPercent = percentagePoints(firstNumber(usagePayload, ['per5HourPercentage']));
   const weeklyPercent = percentagePoints(firstNumber(usagePayload, ['per1WeekPercentage']));
-  if (fiveHourPercent === null && weeklyPercent === null) {
+  const monthlyPercent = percentagePoints(firstNumber(usagePayload, ['per1MonthPercentage']));
+  if (fiveHourPercent === null && weeklyPercent === null && monthlyPercent === null) {
     throw new AlibabaLimitsError('windowsUnavailable', 'Alibaba Token Plan returned no usage windows');
   }
 
@@ -606,7 +612,10 @@ function parsePersonalUsage(usagePayload, subscriptionPayload, quotaConfigPayloa
     fiveHourResetsAt: firstDate(usagePayload, ['per5HourResetTime']),
     weeklyPercent,
     weeklyTotal: quota.weekly,
-    weeklyResetsAt: firstDate(usagePayload, ['per1WeekResetTime'])
+    weeklyResetsAt: firstDate(usagePayload, ['per1WeekResetTime']),
+    monthlyPercent,
+    monthlyTotal: quota.monthly,
+    monthlyResetsAt: firstDate(usagePayload, ['per1MonthResetTime'])
   };
 }
 
@@ -632,6 +641,18 @@ function personalWindows(usage) {
       resetsAt: usage.weeklyResetsAt
     });
   }
+  if (usage.monthlyPercent !== null) {
+    // A monthly-only plan reports no rolling windows at all, so this ends up
+    // as the row's single window — the same 'billing' kind the Team pool uses,
+    // which every surface already labels "Monthly".
+    windows.push({
+      kind: 'billing',
+      usedPercent: usage.monthlyPercent,
+      limit: usage.monthlyTotal,
+      windowMinutes: 30 * 24 * 60,
+      resetsAt: usage.monthlyResetsAt
+    });
+  }
   return windows;
 }
 
@@ -651,7 +672,7 @@ function consoleHeaders(cookieHeader, variant, extra = {}) {
     Cookie: cookieHeader,
     Origin: variant.gatewayOrigin,
     // Bare origin on purpose. The dashboard URL carries a path, and Chromium
-    // cancels a cross-origin Referer that does. See src/electron/limitsFetch.js.
+    // cancels a cross-origin Referer that does. See src/electron/limits/fetch.js.
     Referer: `${variant.gatewayOrigin}/`,
     'User-Agent': BROWSER_USER_AGENT,
     'X-Requested-With': 'XMLHttpRequest',

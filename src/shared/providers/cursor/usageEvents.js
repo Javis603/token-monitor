@@ -8,7 +8,7 @@ const { tokscaleHomeDir } = require('../../tokscaleConfig');
 // timestamp, its tokens and the conversation it belongs to, which is exactly
 // what a legacy CSV row lacks. Tokscale reads `<home>/.config/tokscale/
 // cursor-cache` regardless of TOKSCALE_CONFIG_DIR (see clientSourceRoots in
-// collector.js), and moves a removed account's cache into its `archive/`.
+// clientSources.js), and moves a removed account's cache into its `archive/`.
 
 function cursorCacheDir(options = {}) {
   return path.join(tokscaleHomeDir(options), '.config', 'tokscale', 'cursor-cache');

@@ -368,6 +368,16 @@ test('dashboard shares localized token units and repaints when the setting or la
   assert.match(handler[1], /needsRender = true/);
 });
 
+test('dashboard repaints when a settings push changes the motion preference', () => {
+  // applyAppearance applies reduceMotion itself, so the change check must
+  // compare against the value captured before it runs or it never fires.
+  const js = read('src', 'electron', 'renderer', 'dashboard.js');
+  const handler = /window\.tokenMonitor\.onSettingsPush\?\.\(\(next\)\s*=>\s*\{([\s\S]*?)\n\}\);/.exec(js);
+  assert.ok(handler, 'dashboard should subscribe to settings pushes');
+  assert.match(handler[1], /const previousReduceMotion = state\.reduceMotion;\s*(?:\/\/[^\n]*\n\s*)*applyAppearance\(state\.settings\)/);
+  assert.match(handler[1], /if \(state\.reduceMotion !== previousReduceMotion\) needsRender = true/);
+});
+
 test('the trends preview opens the dashboard via IPC', () => {
   const app = read('src', 'electron', 'renderer', 'app.js');
   assert.match(app, /trendsPanel\.addEventListener/);

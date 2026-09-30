@@ -258,11 +258,12 @@ Current agents and widgets include `osName` and, when known, `osVersion` so devi
         "source": {
           "state": "detected",
           "detectedCount": 2,
-          "checkedCount": 3,
+          "checkedCount": 4,
           "checks": [
             { "id": "tokscale-antigravity-cache", "exists": true },
             { "id": "antigravity-ide-source", "exists": true },
-            { "id": "antigravity-cli-data", "exists": false }
+            { "id": "antigravity-cli-data", "exists": false },
+            { "id": "antigravity-extension-data", "exists": false }
           ]
         },
         "collection": {

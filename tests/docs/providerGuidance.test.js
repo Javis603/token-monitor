@@ -47,7 +47,7 @@ test('provider notes expose routing metadata', () => {
 
 test('provider notes route by catalog ids', () => {
   const { CLIENT_IDS } = require('../../src/shared/clientCatalog.js');
-  const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders.js');
+  const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers.js');
   const catalogIds = new Set([...CLIENT_IDS, ...LIMIT_PROVIDER_IDS]);
   const owners = new Map();
 

@@ -3,42 +3,21 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { providerCredentialSettingPaths } = require('./limits/accounts');
 
 const CREDENTIALS_VERSION = 1;
 const SETTINGS_MIGRATION_VERSION = 1;
 const MIMO_MIGRATION_VERSION = 1;
 
+// Provider-owned keys come from the account declarations (each field's
+// storePath), so adding a provider credential never edits this file. The two
+// hub secrets stay literal — they are not provider account fields. The
+// declarations are leaf modules, which is what lets this file sit inside the
+// require cycle providers/factory/limits.js → credentialStore creates.
 const CREDENTIAL_SETTING_PATHS = Object.freeze({
   hubHostSecret: ['hub', 'hostSecret'],
   secret: ['hub', 'clientSecret'],
-  claudeWebCookie: ['providers', 'claude', 'webCookie'],
-  opencodeCookie: ['providers', 'opencode', 'cookie'],
-  opencodeProfiles: ['providers', 'opencode', 'profiles'],
-  clineApiKey: ['providers', 'cline', 'apiKey'],
-  factoryApiKey: ['providers', 'factory', 'apiKey'],
-  kimiApiKey: ['providers', 'kimi', 'apiKey'],
-  kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
-  copilotApiToken: ['providers', 'copilot', 'apiToken'],
-  zedCookie: ['providers', 'zed', 'cookie'],
-  commandcodeCookie: ['providers', 'commandcode', 'cookie'],
-  zaiApiKey: ['providers', 'zai', 'apiKey'],
-  zaiTeamApiKey: ['providers', 'zaiTeam', 'apiKey'],
-  zaiTeamOrganizationId: ['providers', 'zaiTeam', 'organizationId'],
-  zaiTeamProjectId: ['providers', 'zaiTeam', 'projectId'],
-  qoderCookie: ['providers', 'qoder', 'cookie'],
-  devinBearerToken: ['providers', 'devin', 'bearerToken'],
-  deepseekApiKey: ['providers', 'deepseek', 'apiKey'],
-  openrouterProfiles: ['providers', 'openrouter', 'profiles'],
-  minimaxApiKey: ['providers', 'minimax', 'apiKey'],
-  volcengineAccessKeyId: ['providers', 'volcengine', 'accessKeyId'],
-  volcengineSecretAccessKey: ['providers', 'volcengine', 'secretAccessKey'],
-  volcengineAgentAccessKeyId: ['providers', 'volcengine', 'agentAccessKeyId'],
-  volcengineAgentSecretAccessKey: ['providers', 'volcengine', 'agentSecretAccessKey'],
-  ollamaCookie: ['providers', 'ollama', 'cookie'],
-  traeAccessToken: ['providers', 'trae', 'accessToken'],
-  traeDeviceId: ['providers', 'trae', 'deviceId'],
-  alibabaCookie: ['providers', 'alibaba', 'cookie'],
-  thirdPartyProfiles: ['providers', 'thirdparty', 'profiles']
+  ...providerCredentialSettingPaths()
 });
 
 function emptyDocument() {

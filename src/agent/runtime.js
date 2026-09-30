@@ -1,6 +1,6 @@
 'use strict';
 
-const { createDeviceRuntime } = require('../shared/deviceRuntime');
+const { createDeviceRuntime } = require('../shared/usage/deviceRuntime');
 const { createOrderedSink } = require('../shared/orderedSink');
 
 function createAgentDeviceRuntime(options = {}, deps = {}, overrides = {}) {

@@ -338,6 +338,22 @@ test('parsePersonalUsage accepts a weekly-only response', () => {
   assert.equal(usage.planName, 'Personal');
 });
 
+// Bailian retired the weekly cap for Personal plans; a live usage response now
+// carries only the monthly window (shape captured on steipete/CodexBar#3903).
+test('parsePersonalUsage accepts a monthly-only response', () => {
+  const usage = parsePersonalUsage(
+    { data: { DataV2: { data: { success: true, data: { per1MonthPercentage: 0.01747343981406667, per1MonthResetTime: 1791043200000 } } } } },
+    { data: { specCode: 'standard' } },
+    { data: { standard: { five_hour: 3000, monthly: 45000 } } }
+  );
+  assert.equal(usage.fiveHourPercent, null);
+  assert.equal(usage.weeklyPercent, null);
+  assert.ok(Math.abs(usage.monthlyPercent - 1.747343981406667) < 1e-9);
+  assert.equal(usage.monthlyTotal, 45000);
+  assert.equal(usage.monthlyResetsAt, new Date(1791043200000).toISOString());
+  assert.equal(usage.planName, 'Standard');
+});
+
 test('parsePersonalUsage rejects a payload with no window fields', () => {
   assert.throws(
     () => parsePersonalUsage({ data: { success: true, data: {} } }, null, null),
@@ -384,7 +400,7 @@ test('fetchAlibabaLimits posts GetSubscriptionSummary and normalizes the Team po
 });
 
 // Chromium cancels a cross-origin Referer that carries a path, so the console
-// requests send a bare origin. See src/electron/limitsFetch.js.
+// requests send a bare origin. See src/electron/limits/fetch.js.
 test('fetchAlibabaLimits sends a bare-origin Referer', async () => {
   const { calls, fetchFn } = routedFetch([
     ...NO_SEC_TOKEN,
@@ -495,6 +511,75 @@ test('fetchAlibabaLimits reads Personal rolling windows from the quota host', as
   assert.equal(provider.windows[0].limit, 900);
   assert.equal(provider.windows[1].usedPercent, 20);
   assert.equal(provider.windows[1].limit, 12000);
+});
+
+// A Personal plan whose weekly cap is gone answers with the monthly window
+// alone; the row must still render instead of reporting windowsUnavailable.
+test('fetchAlibabaLimits reads a monthly-only Personal window', async () => {
+  const { fetchFn } = routedFetch([
+    ['token-plan/personal', ok('<html>shell</html>')],
+    ['/tool/user/info.json', ok({})],
+    ['api/v2/subscription', ok({ data: { specCode: 'standard' } })],
+    ['api/v2/quota-config', ok({ data: { standard: { five_hour: 3000, monthly: 45000 } } })],
+    ['api/v2/usage', ok({
+      successResponse: true,
+      data: {
+        DataV2: {
+          data: {
+            success: true,
+            data: { per1MonthPercentage: 0.25, per1MonthResetTime: 1791043200000 }
+          }
+        }
+      }
+    })]
+  ]);
+
+  const [provider] = await fetchAlibabaLimits(
+    { alibabaCookie: 'a=b', alibabaVariant: 'cn-personal' },
+    { env: {}, fetch: fetchFn }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.deepEqual(provider.windows.map((window) => window.kind), ['billing']);
+  assert.equal(provider.windows[0].usedPercent, 25);
+  assert.equal(provider.windows[0].limit, 45000);
+  assert.equal(provider.windows[0].windowMinutes, 30 * 24 * 60);
+  assert.equal(provider.windows[0].resetsAt, new Date(1791043200000).toISOString());
+});
+
+// A response that still carries rolling windows alongside the new monthly one
+// keeps all of them, ordered session → weekly → monthly.
+test('fetchAlibabaLimits keeps a monthly window beside the rolling pair', async () => {
+  const { fetchFn } = routedFetch([
+    ['token-plan/personal', ok('<html>shell</html>')],
+    ['/tool/user/info.json', ok({})],
+    ['api/v2/subscription', ok({})],
+    ['api/v2/usage', ok({
+      successResponse: true,
+      data: {
+        DataV2: {
+          data: {
+            success: true,
+            data: {
+              per5HourPercentage: 0.4,
+              per1WeekPercentage: 0.2,
+              per1MonthPercentage: 0.1,
+              per1MonthResetTime: 1791043200000
+            }
+          }
+        }
+      }
+    })]
+  ]);
+
+  const [provider] = await fetchAlibabaLimits(
+    { alibabaCookie: 'a=b', alibabaVariant: 'cn-personal' },
+    { env: {}, fetch: fetchFn }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.deepEqual(provider.windows.map((window) => window.kind), ['session', 'weekly', 'billing']);
+  assert.equal(provider.windows[2].usedPercent, 10);
 });
 
 // The Personal gateway intermittently answers 200 with no rolling-window

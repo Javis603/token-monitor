@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { widgetVendorPalette } = require('../../src/shared/vendorPresentation');
 
 const root = path.resolve(__dirname, '..', '..');
 const chartSource = fs.readFileSync(path.join(root, 'src', 'electron', 'renderer', 'usageCharts.js'), 'utf8');
@@ -44,16 +45,11 @@ function widgetRules() {
     .map(([, pattern, vendor]) => [pattern.replace(/\\\\/g, '\\'), vendor]);
 }
 
-// Ids the widget can render without falling back to its "default" colour: an entry in the
-// colour dictionary, or membership of `adaptiveInk` (black marks are repainted as light ink
-// there, so they never reach the dictionary).
+// Ids the widget can render without falling back to its "default" colour: the palette the
+// app writes into the snapshot, from the vendor presentation table.
 function widgetPalette() {
-  const colors = sliceFunction(widgetSource, 'let colors: [String: String] = [', '"default": "#6AB4F0"');
-  const ink = sliceFunction(widgetSource, 'let adaptiveInk = [', ']');
-  return new Set([
-    ...[...colors.matchAll(/"([^"]+)":\s*"#[0-9a-fA-F]{3,8}"/g)].map(([, id]) => id),
-    ...[...ink.matchAll(/"([^"]+)"/g)].map(([, id]) => id)
-  ]);
+  const palette = widgetVendorPalette();
+  return new Set(Object.keys(palette).filter((id) => id !== 'default' && (palette[id].color || palette[id].ink)));
 }
 
 test('the widget resolver mirrors the chart resolver rule for rule', () => {

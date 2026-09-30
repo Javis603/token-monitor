@@ -13,7 +13,7 @@ const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'ut
 // The Codex forecast row is one of the Limits rows, so the view builds it and
 // the page only holds the fetch/cache machinery behind it. Guards that slice a
 // builder read the view; the ones about state read the page.
-const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limitWindowsView.js'), 'utf8');
+const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
 const styles = fs.readFileSync(path.join(root, 'src/electron/renderer/styles.css'), 'utf8');
 
 test('Codex reset forecast is opt-in at both persistence and provider UI boundaries', () => {

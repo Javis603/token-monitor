@@ -1,6 +1,6 @@
 'use strict';
 
-const { aggregateDevices } = require('../shared/usage');
+const { aggregateDevices, normalizeDeviceRecord, normalizePeriod } = require('../shared/usage');
 const { deviceHistoryRevision } = require('../shared/history');
 const { pickRecentUsageActivity } = require('../shared/trayText');
 
@@ -46,6 +46,64 @@ function attachLocalPresentationNativeViews(stats, options = {}) {
   return attachLocalNativeViews(stats, localDevice);
 }
 
+// Each local collection replaces the record rather than mutating it, and every
+// Hub event in between recomposes it again. Normalizing it once per record takes
+// the largest share of a recompose off the main thread. A summary normalizes the
+// record with its all-time session list already emptied: those sessions are
+// most of the normalization, and a summary would only drop them afterwards. The
+// full normalization then adds just the all-time period to the summary's, so a
+// view that completes every summary does not normalize today and month twice.
+const normalizedLocalSummaries = new WeakMap();
+const normalizedLocalRecords = new WeakMap();
+
+// A local record carries its periods at the top level, a wire record under
+// `periods`; normalizeDeviceRecord() reads either, preferring the top level.
+function rawAllTime(record) {
+  return record.allTime || record.periods?.allTime;
+}
+
+function withoutRawAllTimeSessions(record) {
+  const stripped = { ...record };
+  if (record.allTime?.sessions) stripped.allTime = { ...record.allTime, sessions: {} };
+  if (record.periods?.allTime?.sessions) {
+    stripped.periods = { ...record.periods, allTime: { ...record.periods.allTime, sessions: {} } };
+  }
+  return stripped;
+}
+
+function normalizedLocalSummary(localDevice) {
+  let normalized = normalizedLocalSummaries.get(localDevice);
+  if (!normalized) {
+    normalized = normalizeDeviceRecord(withoutRawAllTimeSessions(localDevice));
+    normalizedLocalSummaries.set(localDevice, normalized);
+  }
+  return normalized;
+}
+
+function normalizedLocalRecord(localDevice) {
+  let normalized = normalizedLocalRecords.get(localDevice);
+  if (!normalized) {
+    const summary = normalizedLocalSummary(localDevice);
+    const allTime = normalizePeriod(rawAllTime(localDevice), { projectsEnabled: summary.projectsEnabled !== false });
+    normalized = { ...summary, periods: { ...summary.periods, allTime } };
+    normalizedLocalRecords.set(localDevice, normalized);
+  }
+  return normalized;
+}
+
+const summaryRecords = new WeakMap();
+
+function withoutAllTimeSessions(record) {
+  const allTime = record?.periods?.allTime;
+  if (!allTime?.sessions) return record;
+  let summary = summaryRecords.get(record);
+  if (!summary) {
+    summary = { ...record, periods: { ...record.periods, allTime: { ...allTime, sessions: {} } } };
+    summaryRecords.set(record, summary);
+  }
+  return summary;
+}
+
 function composeLocalSyncStats(hubStats, localDevice, options = {}) {
   if (!localDevice?.deviceId) return hubStats;
   if (hubStats && !Array.isArray(hubStats.devices)) return hubStats;
@@ -58,7 +116,13 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     .concat(localDevice);
   const hubStaleAfterMs = nonNegativeNumber(hubStats?.staleAfterMs);
   const hasHubStaleAfterMs = hubStaleAfterMs !== null;
-  const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs);
+  const normalize = (record) => (record === localDevice ? normalizedLocalRecord(localDevice) : normalizeDeviceRecord(record));
+  const summarize = (record) => (record === localDevice
+    ? normalizedLocalSummary(localDevice)
+    : withoutAllTimeSessions(normalizeDeviceRecord(record)));
+  const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs, {
+    normalizeRecord: options.allTimeSessions === false ? summarize : normalize
+  });
 
   aggregate.devices = aggregate.devices.map((device) => {
     const previous = previousDevices.get(device.deviceId);
@@ -97,4 +161,47 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
   return displayStats;
 }
 
-module.exports = { attachLocalNativeViews, attachLocalPresentationNativeViews, composeLocalSyncStats };
+// Most of a recompose is merging this machine's all-time sessions, which no
+// per-publish reader needs: the Hub strips them from uploads (#118), so the list
+// is only ever shown whole, on request. A publish composes without them, and the
+// exporter and the renderer's session list complete that same snapshot when
+// they ask. The completion is composed from the publish's own inputs and clock,
+// so it agrees with the summary it completes.
+const completions = new WeakMap();
+
+function composeLocalSyncSummary(hubStats, localDevice, options = {}) {
+  const nowMs = options.nowMs ?? Date.now();
+  const summary = composeLocalSyncStats(hubStats, localDevice, { nowMs, allTimeSessions: false });
+  if (summary && summary !== hubStats) {
+    completions.set(summary, { compose: () => composeLocalSyncStats(hubStats, localDevice, { nowMs }), complete: null });
+  }
+  return summary;
+}
+
+// Local mode's publish: this machine's record alone, summarised the same way.
+// `finish` adds what main layers on top of the aggregate, to the summary now and
+// to its completion when that is asked for.
+function composeLocalOnlySummary(localDevice, finish, options = {}) {
+  const nowMs = options.nowMs ?? Date.now();
+  const compose = (normalizeRecord) => finish(aggregateDevices([localDevice], 0, nowMs, { normalizeRecord }));
+  const summary = compose(normalizedLocalSummary);
+  completions.set(summary, { compose: () => compose(normalizedLocalRecord), complete: null });
+  return summary;
+}
+
+// Any other stats object is already complete and comes back as it is.
+function completeLocalSyncStats(stats) {
+  const entry = stats && typeof stats === 'object' ? completions.get(stats) : null;
+  if (!entry) return stats;
+  if (!entry.complete) entry.complete = entry.compose();
+  return entry.complete;
+}
+
+module.exports = {
+  attachLocalNativeViews,
+  attachLocalPresentationNativeViews,
+  completeLocalSyncStats,
+  composeLocalOnlySummary,
+  composeLocalSyncStats,
+  composeLocalSyncSummary
+};

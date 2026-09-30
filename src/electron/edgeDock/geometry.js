@@ -31,8 +31,7 @@ const EDGE_DOCK_METRICS = Object.freeze({
   hitRadius: 28,
   edgeInset: 0,
   peekWidth: 7,
-  peekLength: 34,
-  peekShoulder: 12,
+  peekLength: 48,
   bubbleWidth: 280,
   bubbleTail: 12,
   bubbleNeck: 18,
@@ -53,6 +52,14 @@ const EDGE_DOCK_TIMING = Object.freeze({
   // already open switches immediately.
   bubbleDelayMs: 70
 });
+
+// `alwaysExceptFullScreen` behaves as `always` on the desktop and as
+// `autoHide` while a full-screen app covers the dock's display.
+const EDGE_DOCK_MODES = Object.freeze(['autoHide', 'always', 'alwaysExceptFullScreen']);
+
+function normalizeEdgeDockMode(value) {
+  return EDGE_DOCK_MODES.includes(value) ? value : 'autoHide';
+}
 
 function normalizeEdgeDockSide(value) {
   return EDGE_DOCK_SIDES.includes(value) ? value : 'right';
@@ -164,7 +171,7 @@ function edgeDockPeekBounds({ workArea, side, railBounds, metrics = EDGE_DOCK_ME
   const x = normalizeEdgeDockSide(side) === 'left'
     ? workArea.x
     : workArea.x + workArea.width - metrics.peekWidth;
-  const height = metrics.peekLength + metrics.peekShoulder * 2;
+  const height = metrics.peekLength;
   const y = railBounds.y + Math.round((railBounds.height - height) / 2);
   return { x: Math.round(x), y, width: metrics.peekWidth, height };
 }
@@ -417,6 +424,7 @@ function createEdgeDockIntent(timing = EDGE_DOCK_TIMING) {
 module.exports = {
   EDGE_DOCK_DEFAULT_OFFSET,
   EDGE_DOCK_METRICS,
+  EDGE_DOCK_MODES,
   EDGE_DOCK_SIDES,
   EDGE_DOCK_TIMING,
   createEdgeDockIntent,
@@ -429,6 +437,7 @@ module.exports = {
   edgeDockRailBounds,
   edgeDockTriggerBounds,
   normalizeEdgeDockDisplayId,
+  normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
   railLength,

@@ -15,7 +15,18 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   clearSessionUsageArchive: () => ipcRenderer.invoke('sessionUsageArchive:clear'),
   lookupModelPricing: (modelId) => ipcRenderer.invoke('pricing:lookup', modelId),
   previewAppearance: (patch) => ipcRenderer.invoke('appearance:preview', patch),
+  getBackgroundImage: () => ipcRenderer.invoke('appearance:getBackgroundImage'),
+  chooseBackgroundImage: () => ipcRenderer.invoke('appearance:chooseBackgroundImage'),
+  clearBackgroundImage: () => ipcRenderer.invoke('appearance:clearBackgroundImage'),
+  getNativeMaterialState: () => ipcRenderer.invoke('appearance:getNativeMaterial'),
+  onNativeMaterialState: (callback) => {
+    const listener = (_event, state) => { try { callback(state); } catch (_) {} };
+    ipcRenderer.on('appearance:nativeMaterial', listener);
+    return () => ipcRenderer.removeListener('appearance:nativeMaterial', listener);
+  },
   getStats: (options) => ipcRenderer.invoke('stats:get', options),
+  deleteDevice: (deviceId) => ipcRenderer.invoke('devices:delete', deviceId),
+  getAllTimeSessions: (snapshotId) => ipcRenderer.invoke('stats:allTimeSessions', snapshotId),
   getSessionDetail: (args) => ipcRenderer.invoke('session:getDetail', args),
   getStreamStatus: () => ipcRenderer.invoke('stream:status'),
   getServiceStatus: (options) => ipcRenderer.invoke('serviceStatus:get', options),
@@ -145,17 +156,10 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     logout: (accountId) => ipcRenderer.invoke('cursor:logout', accountId),
     status: (options = {}) => ipcRenderer.invoke('cursor:status', options)
   },
-  claude: {
-    saveCookie: (cookie) => ipcRenderer.invoke('claude:saveCookie', cookie)
-  },
-  ollama: {
-    validateCookie: (cookie) => ipcRenderer.invoke('ollama:validateCookie', cookie)
-  },
-  cline: {
-    validateApiKey: (apiKey) => ipcRenderer.invoke('cline:validateApiKey', apiKey)
-  },
-  factory: {
-    validateApiKey: (apiKey) => ipcRenderer.invoke('factory:validateApiKey', apiKey)
+  limits: {
+    saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
+    listOrganizationChoices: (providerId) => ipcRenderer.invoke('limits:listOrganizationChoices', providerId),
+    clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId)
   },
   opencode: {
     saveCookie: (cookie) => ipcRenderer.invoke('opencode:saveCookie', cookie),

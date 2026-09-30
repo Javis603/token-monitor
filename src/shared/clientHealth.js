@@ -166,7 +166,7 @@ function classifyClientSyncDetailCode({ client = '', text = '' } = {}) {
 // several paths of the same kind — Copilot's workspaceStorage has a variant per
 // platform, Kiro's IDE globalStorage has four — because "the VS Code workspace
 // storage is missing" is the useful statement, not which spelling was tried.
-// clientSourceRoots() in collector.js is where they are assigned;
+// clientSourceRoots() in clientSources.js is where they are assigned;
 // tests/shared/clientHealth.test.js fails if the two lists drift apart.
 const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   // Not a host path: a marker found inside a running WSL distro. A client
@@ -175,6 +175,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'wsl-home',
   'amp-threads',
   'antigravity-cli-data',
+  'antigravity-extension-data',
   'antigravity-ide-source',
   'cherrystudio-transcripts',
   'claude-projects',
@@ -194,6 +195,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   DEVIN_DESKTOP_SOURCE_CHECK_ID,
   'droid-sessions',
   DSH_SOURCE_CHECK_ID,
+  'fx-sessions',
   'grok-sessions',
   'grok-unified-log',
   'hermes-home',
@@ -205,17 +207,19 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'kiro-cli-data',
   'kiro-ide-globalstorage',
   'kiro-sessions',
+  'liveagent-db',
   'lmstudio-server-logs',
   'mimocode-data',
   'mimocode-orca-data',
+  'muse-sessions',
   'omp-sessions',
   'opencode-data',
   'openclaw-agents',
+  'pi-desktop-db',
   'pi-sessions',
   'proma-sessions',
   'qodercn-db',
-  'liveagent-db',
-  'pi-desktop-db',
+  'qodercn-projects',
   REASONIX_SOURCE_CHECK_ID,
   'qwen-projects',
   'tokscale-antigravity-cache',

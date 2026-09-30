@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
-const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limitProviders');
+const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
 
 const rootDir = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(rootDir, file), 'utf8');
@@ -56,7 +56,7 @@ const supportedToolOrder = [
   'OpenCode',
   'Hermes Agent',
   'OpenClaw',
-  'Cursor IDE / Cursor CLI',
+  'Cursor IDE / Cursor CLI / Grok Bot',
   'Antigravity',
   'Cline',
   'Amp',
@@ -65,11 +65,13 @@ const supportedToolOrder = [
   'Qwen CLI',
   'Grok Build',
   'GitHub Copilot',
-  'Pi / Oh My Pi',
+  'Pi',
+  'Oh My Pi',
   'Zed',
   'Kilo',
   'Command Code',
   'MiMo Code / MiMo Desktop',
+  'Muse Code',
   'ZCode / GLM',
   'Kiro',
   'CodeBuddy',
@@ -83,12 +85,15 @@ const supportedToolOrder = [
   'LM Studio',
   'Unsloth Studio',
   'Devin CLI / Devin Desktop',
+  'fx',
+  'TypeSafe',
   'OpenRouter',
   'Minimax',
   'Volcengine',
   'Ollama',
   'Trae CN',
   'Alibaba Cloud',
+  'StepFun',
   'Third-party APIs'
 ];
 
@@ -108,10 +113,12 @@ const supportedToolIdOrder = [
   'xai',
   'copilot',
   'pi',
+  'omp',
   'zed',
   'kilo',
   'commandcode',
   'mimo',
+  'muse',
   'zcode',
   'kiro',
   'codebuddy',
@@ -125,12 +132,15 @@ const supportedToolIdOrder = [
   'lmstudio',
   'unsloth',
   'devin',
+  'fx',
+  'typesafe',
   'openrouter',
   'minimax',
   'volcengine',
   'ollama',
   'trae',
   'alibaba',
+  'stepfun',
   'thirdparty'
 ];
 
