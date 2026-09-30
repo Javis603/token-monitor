@@ -1073,18 +1073,25 @@
     } else if (provider.provider === 'mimo') {
       windows.classList.add('limit-windows-mimo');
       const balance = view.balance || null;
-      // The Token Plan line derives from the balance record but renders as a
-      // 'monthly' item, so it reads the unfiltered `provider.balance` — hiding
-      // 'credits' removes the money row, not the plan meter.
-      const tokenPlan = windowForKind(view, 'billing') || mimoTokenPlanWindowFromBalance(provider.balance);
-      if (tokenPlan) {
-        const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
-        node.classList.add('limit-window-wide');
-        windows.append(node);
-      } else if (balance?.planStatus === 'expired') {
-        const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
-        node.classList.add('limit-window-wide', 'limit-window-no-reset');
-        windows.append(node);
+      // The Token Plan renders as the 'monthly' item, so the whole block gates
+      // on it — the synthesized fallback included. The window lookup matches
+      // the item id rather than the shared 'billing' kind, which the wallet's
+      // own credits window would otherwise claim. The fallback reads the
+      // unfiltered `provider.balance` so hiding 'credits' removes the money
+      // row, not the plan meter; the expired status comes from the same record.
+      if (!hiddenItems.has('monthly')) {
+        const tokenPlan = (view.windows || []).find(
+          (window) => usageItems.limitUsageItemIdForWindow(window) === 'monthly'
+        ) || mimoTokenPlanWindowFromBalance(provider.balance);
+        if (tokenPlan) {
+          const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
+          node.classList.add('limit-window-wide');
+          windows.append(node);
+        } else if (provider.balance?.planStatus === 'expired') {
+          const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
+          node.classList.add('limit-window-wide', 'limit-window-no-reset');
+          windows.append(node);
+        }
       }
       const amount = optionalFiniteNumber(balance?.amount);
       const giftBalance = optionalFiniteNumber(balance?.giftBalance);

@@ -437,6 +437,44 @@ test('a Cline card drops the spend tooltip when its item is hidden', () => {
   assert.doesNotMatch(card.text, /Month spent/);
 });
 
+test('a MiMo card hides the Token Plan rows with its monthly item', () => {
+  // Two windows share kind 'billing': the Token Plan and the wallet's credits
+  // window. Hiding 'monthly' must remove the plan — real window, synthesized
+  // fallback and expired notice alike — without the wallet window claiming
+  // the vacated slot or the wallet row disappearing.
+  const planned = {
+    provider: 'mimo',
+    windows: [
+      { kind: 'billing', label: 'Token Plan', used: 40, limit: 100, usedPercent: 40 },
+      { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 4.2, currency: 'USD', showMeter: false }
+    ],
+    balance: { amount: 4.2, currency: 'USD', planUsed: 40, planLimit: 100, planPercent: 40 }
+  };
+  const balanceOnly = {
+    provider: 'mimo',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 4.2, currency: 'USD', showMeter: false }],
+    balance: { amount: 4.2, currency: 'USD', planUsed: 40, planLimit: 100, planPercent: 40 }
+  };
+  const expired = {
+    provider: 'mimo',
+    windows: [],
+    balance: { amount: 4.2, currency: 'USD', planStatus: 'expired' }
+  };
+  const text = (provider, hidden) => dockView({ limitProviderHiddenItems: hidden })
+    .renderProviderWindows(provider, '#FF6F00').text;
+
+  assert.match(text(planned, {}), /Token Plan/);
+  assert.match(text(balanceOnly, {}), /Token Plan/);
+  assert.match(text(expired, {}), /Expired/);
+  assert.doesNotMatch(text(planned, { mimo: 'monthly' }), /Token Plan/);
+  assert.doesNotMatch(text(balanceOnly, { mimo: 'monthly' }), /Token Plan/);
+  assert.doesNotMatch(text(expired, { mimo: 'monthly' }), /Expired/);
+  // The wallet row survives; its window never doubles up in the plan slot.
+  assert.equal(text(planned, { mimo: 'monthly' }).match(/Balance/g)?.length ?? 0, 1);
+  // And hiding 'credits' keeps the plan meter reading the real balance.
+  assert.match(text(balanceOnly, { mimo: 'credits' }), /Token Plan/);
+});
+
 test('the Codex additional-limit preference reaches the card through its own settings', () => {
   const provider = {
     provider: 'codex',
