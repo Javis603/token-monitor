@@ -10757,16 +10757,14 @@ function limitProviderUsageItemRows(providerId) {
   }
   const cached = limitUsageItemsCache.byProvider.get(providerId);
   if (cached) return cached;
-  const fixedLabel = (itemId) => (
-    limitUsageItemsApi.USAGE_ITEM_IDS.includes(itemId) ? t(`settings.limits.items.${itemId}`) : ''
-  );
+  const fallbackLabel = (itemId) => limitUsageItemsApi.usageItemFallbackLabel(providerId, itemId);
   const hidden = limitUsageItemsApi.hiddenUsageItemSet(state.settings?.limitProviderHiddenItems, providerId);
   const drawn = limitWindowsView.limitProviderUsageItems(records.filter((record) => record?.provider === providerId));
-  const rows = drawn.map(({ id, label }) => ({ id, label: label || fixedLabel(id), hidden: hidden.has(id), available: true }));
+  const rows = drawn.map(({ id, label }) => ({ id, label: label || fallbackLabel(id), hidden: hidden.has(id), available: true }));
   const drawnIds = new Set(drawn.map(({ id }) => id));
   for (const id of hidden) {
     if (drawnIds.has(id)) continue;
-    const label = limitUsageItemsApi.usageItemFallbackLabel(providerId, id) || fixedLabel(id) || id;
+    const label = fallbackLabel(id) || id;
     rows.push({ id, label, hidden: true, available: false });
   }
   limitUsageItemsCache.byProvider.set(providerId, rows);

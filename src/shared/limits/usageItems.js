@@ -32,6 +32,9 @@
   // reset-credit line ('resets'). Every other row is keyed by its window.
   const USAGE_ITEM_IDS = Object.freeze(['credits', 'spend', 'resets']);
   const USAGE_ITEM_ID_SET = new Set(USAGE_ITEM_IDS);
+  // Their names on the settings checklist, in the card's own fixed English so
+  // the list reads like the rows it controls.
+  const USAGE_ITEM_LABELS = Object.freeze({ credits: 'Balance', spend: 'Spend', resets: 'Resets' });
   const MAX_HIDDEN_ITEMS = 64;
 
   function normalizedId(value) {
@@ -111,11 +114,11 @@
     return USAGE_ITEM_ID_SET.has(id) ? id : normalizeWindowKey(id);
   }
 
-  // What a hidden item is called while nothing in the payload draws it, so it
-  // can still be listed and shown again. Window keys name themselves from
-  // their kind; the fixed items return '' and the caller localizes them.
+  // What an item is called when its row gives no name, or while nothing in
+  // the payload draws it, so it can still be listed and shown again. Window
+  // keys name themselves from their kind.
   function usageItemFallbackLabel(providerId, itemId) {
-    if (USAGE_ITEM_ID_SET.has(itemId)) return '';
+    if (USAGE_ITEM_ID_SET.has(itemId)) return USAGE_ITEM_LABELS[itemId];
     const window = parseWindowKey(itemId);
     if (!window) return '';
     return windowLabels?.limitWindowLabel(normalizedId(providerId), window) || String(window.kind);

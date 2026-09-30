@@ -250,8 +250,8 @@
       : null;
     const item = document.createElement('div');
     item.className = 'limit-window limit-window-wide limit-window-note limit-reset-credits';
-    // The line has no name of its own; the checklist localizes one.
-    tagUsageItem(item, 'resets');
+    // The line has no name of its own; the checklist calls it `Resets`.
+    tagUsageItem(item, 'resets', 'Resets');
     const line = document.createElement('div');
     line.className = 'limit-reset-credits-line';
     const value = document.createElement('span');

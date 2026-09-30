@@ -78,7 +78,7 @@ test('a window drawn under another item is hidden with that item', () => {
 
 test('a hidden window the payload no longer draws is still named', () => {
   assert.equal(usageItemFallbackLabel('codex', weeklyKey), 'Weekly');
-  assert.equal(usageItemFallbackLabel('codex', 'credits'), '', 'fixed items are localized by the caller');
+  assert.equal(usageItemFallbackLabel('codex', 'credits'), 'Balance', 'fixed items keep the card\'s English name');
 });
 
 test('main stores the setting normalized and pushes it to the dock', () => {

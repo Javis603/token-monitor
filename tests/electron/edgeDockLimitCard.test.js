@@ -1083,7 +1083,7 @@ test('the checklist lists what the card draws, in card order, without Codex addi
     usageItems.limitWindowKey({ kind: 'billing', label: 'Monthly' }),
     'resets'
   ]);
-  assert.deepEqual(items.map((item) => item.label), ['Session', 'Weekly', 'Monthly', '']);
+  assert.deepEqual(items.map((item) => item.label), ['Session', 'Weekly', 'Monthly', 'Resets']);
 });
 
 test('the checklist names each row once across accounts', () => {
