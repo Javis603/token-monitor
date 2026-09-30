@@ -10337,7 +10337,7 @@ function renderLimitProviderCheckboxesNow() {
       if (input) reusableSettingInputs.set(`${providerId}:${setting.key}`, input);
     });
     const itemInputs = row.querySelectorAll?.(
-      ':scope > .accordion-animated-container .limit-provider-usage-items-list > .settings-item > input[type="checkbox"]'
+      ':scope > .accordion-animated-container .limit-provider-usage-items-list > .client-checkbox > input[type="checkbox"]'
     ) || [];
     usageItemsApi.limitProviderUsageItems(providerId).forEach((entry, index) => {
       const input = itemInputs[index];
@@ -10914,13 +10914,9 @@ function limitProviderUsageItemsList(providerId, items, reusableInputs = null) {
   const hidden = usageItemsApi.hiddenLimitUsageItemSet(state.settings?.limitProviderHiddenItems, providerId);
   for (const entry of items) {
     const item = document.createElement('label');
-    item.className = 'checkbox-label settings-item';
-    const copy = document.createElement('span');
-    copy.className = 'settings-item-text';
+    item.className = 'client-checkbox';
     const title = document.createElement('span');
-    title.className = 'settings-item-title';
     title.textContent = t(entry.labelKey || `settings.limits.items.${entry.id}`);
-    copy.append(title);
     const inputKey = `${providerId}:item:${entry.id}`;
     const existingInput = reusableInputs?.get(inputKey);
     const input = existingInput || document.createElement('input');
@@ -10940,7 +10936,7 @@ function limitProviderUsageItemsList(providerId, items, reusableInputs = null) {
         await saveSettings({ limitProviderHiddenItems: next });
       });
     }
-    item.append(copy, input);
+    item.append(input, title);
     list.append(item);
   }
   return group;

@@ -2560,6 +2560,37 @@ span.settings-note.settings-item-desc {
   font-size: 10px;
   padding: 2px 0 0;
 }
+/* The usage-items checklist borrows the compact client-checkbox control: a
+   native accent box on the left, not the settings switch — a multi-item list
+   reads as checkboxes, and the switch would outweigh it. */
+.settings-panel .limit-provider-usage-items-list > .client-checkbox {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 24px;
+  margin: 0;
+  padding: 2px 0;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+.settings-panel .limit-provider-usage-items-list > .client-checkbox > input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.settings-panel .limit-provider-usage-items-list > .client-checkbox > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .limit-provider-connection-detail > .settings-note {
   margin: 0;
 }
