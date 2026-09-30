@@ -454,11 +454,12 @@ test('a Cline card renders the spend row alone when credits is hidden', () => {
   assert.match(card.text, /0\.13|\$0\.13/);
 });
 
-test('a Factory card lets Standard and Core pools hide on their own items', () => {
-  // Factory renders every window it ships: Standard session/weekly/monthly
-  // answer to their kind items and the three `additional: true` Core windows
-  // to 'additional' — hiding 'session' must not let Core 5-hour claim the
-  // vacated Standard slot through a first-match lookup.
+test('a Factory card lets Standard, Core pools and the balance hide on their own items', () => {
+  // The real payload is seven windows: Standard session/weekly/monthly, the
+  // three `additional: true` Core windows, and an extra-usage balance
+  // synthesized into a `metric: 'credits'` window (see factoryLimits.test).
+  // Quota rows answer to their kind items, Core to 'additional', and the
+  // balance to 'credits' — rendered as a money row, not a quota meter.
   const provider = {
     provider: 'factory',
     windows: [
@@ -467,20 +468,29 @@ test('a Factory card lets Standard and Core pools hide on their own items', () =
       { kind: 'billing', label: 'Monthly', remainingPercent: 30 },
       { kind: 'session', label: 'Core 5-hour', remainingPercent: 30, additional: true },
       { kind: 'weekly', label: 'Core Weekly', remainingPercent: 25, additional: true },
-      { kind: 'billing', label: 'Core Monthly', remainingPercent: 20, additional: true }
+      { kind: 'billing', label: 'Core Monthly', remainingPercent: 20, additional: true },
+      { kind: 'billing', label: 'Balance', metric: 'credits', remaining: 12.34, currency: 'USD' }
     ]
   };
-  const rowLabels = (hidden) => [...dockView({ limitProviderHiddenItems: hidden })
+  const renderRows = (hidden) => [...dockView({ limitProviderHiddenItems: hidden })
     .renderProviderWindows(provider, '#FF6F00')
     .walk()]
     .filter((node) => node.classNames.has('limit-window'))
-    .map((node) => node.children[0].children[0].textContent);
+    .map((node) => ({
+      label: node.children[0].children[0].textContent,
+      meter: node.classNames.has('limit-window-no-reset') === false
+    }));
+  const rowLabels = (hidden) => renderRows(hidden).map((row) => row.label);
 
-  assert.deepEqual(rowLabels({}), ['5-hour', 'Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly']);
-  assert.deepEqual(rowLabels({ factory: 'session' }), ['Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly']);
-  assert.deepEqual(rowLabels({ factory: 'monthly' }), ['5-hour', 'Weekly', 'Core 5-hour', 'Core Weekly', 'Core Monthly']);
-  assert.deepEqual(rowLabels({ factory: 'additional' }), ['5-hour', 'Weekly', 'Monthly']);
-  assert.deepEqual(rowLabels({ factory: 'session,weekly,monthly,additional' }), []);
+  assert.deepEqual(rowLabels({}), ['5-hour', 'Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly', 'Balance']);
+  assert.deepEqual(rowLabels({ factory: 'session' }), ['Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly', 'Balance']);
+  assert.deepEqual(rowLabels({ factory: 'monthly' }), ['5-hour', 'Weekly', 'Core 5-hour', 'Core Weekly', 'Core Monthly', 'Balance']);
+  assert.deepEqual(rowLabels({ factory: 'additional' }), ['5-hour', 'Weekly', 'Monthly', 'Balance']);
+  assert.deepEqual(rowLabels({ factory: 'credits' }), ['5-hour', 'Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly']);
+  assert.deepEqual(rowLabels({ factory: 'session,weekly,monthly,additional,credits' }), []);
+  // The balance renders its dollar amount, not a quota meter.
+  const balanceRow = renderRows({}).at(-1);
+  assert.equal(balanceRow.meter, false);
 });
 
 test('a MiMo card hides the Token Plan rows with its monthly item', () => {

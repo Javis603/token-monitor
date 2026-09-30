@@ -111,7 +111,8 @@
       item('monthly'),
       // Core pools ship `additional: true` like Codex's extras, but Factory
       // has no own switch for them — 'additional' is their checklist item.
-      item('additional', 'settings.limits.items.corePools')
+      item('additional', 'settings.limits.items.corePools'),
+      item('credits', 'settings.limits.items.extraUsageBalance')
     ],
     kimi: [item('session'), item('weekly'), item('monthly')],
     grok: [item('monthly')],

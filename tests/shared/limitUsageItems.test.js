@@ -65,10 +65,10 @@ test('the normalizer keeps only items the provider actually offers', () => {
   assert.equal(usageItems.normalizeProviderItemCsv('credits', 'grok'), '');
 });
 
-test('Factory checklists Standard rows and the Core pools item', () => {
+test('Factory checklists Standard rows, the Core pools item and the balance', () => {
   assert.deepEqual(
     usageItems.limitProviderUsageItems('factory').map((entry) => entry.id),
-    ['session', 'weekly', 'monthly', 'additional']
+    ['session', 'weekly', 'monthly', 'additional', 'credits']
   );
   const windows = [
     { kind: 'session', label: '5-hour' },
@@ -76,22 +76,28 @@ test('Factory checklists Standard rows and the Core pools item', () => {
     { kind: 'billing', label: 'Monthly' },
     { kind: 'session', label: 'Core 5-hour', additional: true },
     { kind: 'weekly', label: 'Core Weekly', additional: true },
-    { kind: 'billing', label: 'Core Monthly', additional: true }
+    { kind: 'billing', label: 'Core Monthly', additional: true },
+    { kind: 'billing', label: 'Balance', metric: 'credits' }
   ];
   assert.deepEqual(
     usageItems.visibleLimitUsageWindows({ provider: 'factory', windows }, { factory: 'additional' })
       .map((window) => window.label),
-    ['5-hour', 'Weekly', 'Monthly']
+    ['5-hour', 'Weekly', 'Monthly', 'Balance']
   );
   assert.deepEqual(
     usageItems.visibleLimitUsageWindows({ provider: 'factory', windows }, { factory: 'monthly' })
       .map((window) => window.label),
-    ['5-hour', 'Weekly', 'Core 5-hour', 'Core Weekly', 'Core Monthly']
+    ['5-hour', 'Weekly', 'Core 5-hour', 'Core Weekly', 'Core Monthly', 'Balance']
+  );
+  assert.deepEqual(
+    usageItems.visibleLimitUsageWindows({ provider: 'factory', windows }, { factory: 'credits' })
+      .map((window) => window.label),
+    ['5-hour', 'Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly']
   );
   assert.deepEqual(
     usageItems.visibleLimitUsageWindows({ provider: 'factory', windows }, { factory: 'monthly,additional' })
       .map((window) => window.label),
-    ['5-hour', 'Weekly']
+    ['5-hour', 'Weekly', 'Balance']
   );
 });
 

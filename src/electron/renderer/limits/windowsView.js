@@ -1471,11 +1471,14 @@
       }
     } else if (provider.provider === 'factory') {
       // Token-rate-limits accounts carry two pools of three windows — Standard
-      // first, then Core marked `additional: true`. Every window the caller
-      // left renders its own row: each checklist item hides exactly its group,
-      // and a generic first-match lookup would let a Core window claim a
-      // vacated Standard slot.
+      // first, then Core marked `additional: true` — plus an extra-usage
+      // balance synthesized into a credits window. Quota rows map one-to-one
+      // to their checklist items (a generic first-match lookup would let a
+      // Core window claim a vacated Standard slot); the balance renders as a
+      // money row under 'credits', not a fake quota meter.
+      const balanceWindow = (view.windows || []).find(isCreditsWindow) || null;
       for (const window of view.windows || []) {
+        if (window === balanceWindow) continue;
         const node = limitWindowNode(
           providerWindowLabel(view, window),
           window,
@@ -1484,6 +1487,20 @@
         );
         if (window.kind === 'billing') node.classList.add('limit-window-wide');
         windows.append(node);
+      }
+      if (balanceWindow) {
+        const amount = creditsAmount(view, balanceWindow);
+        if (amount !== null) {
+          const node = limitWindowNode(
+            providerWindowLabel(view, balanceWindow, 'Balance'),
+            { ...balanceWindow, showMeter: false },
+            color,
+            0.68,
+            formatMoney(amount, balanceWindow.currency || view.balance?.currency)
+          );
+          node.classList.add('limit-window-wide', 'limit-window-no-reset');
+          windows.append(node);
+        }
       }
     } else {
       // Default: render only the windows the provider actually has. Providers
