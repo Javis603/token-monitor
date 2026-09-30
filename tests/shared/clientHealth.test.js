@@ -343,7 +343,16 @@ test('shared home-relative directories retain exact source roots, checks and wat
   const expected = {
     droid: [{ id: 'droid-sessions', dir: path.join(homeDir, '.factory', 'sessions') }],
     qwen: [{ id: 'qwen-projects', dir: path.join(homeDir, '.qwen', 'projects') }],
-    pi: [{ id: 'pi-sessions', dir: path.join(homeDir, '.pi', 'agent', 'sessions') }],
+    pi: [
+      { id: 'pi-sessions', dir: path.join(homeDir, '.pi', 'agent', 'sessions') },
+      // Pi Desktop is a second, locally parsed source behind the same client:
+      // its SQLite store is watched as well, so the root is part of `pi`.
+      {
+        id: 'pi-desktop-db',
+        dir: path.join(homeDir, '.pi-desktop'),
+        sourcePath: path.join(homeDir, '.pi-desktop', 'pi.sqlite')
+      }
+    ],
     omp: [{ id: 'omp-sessions', dir: path.join(homeDir, '.omp', 'agent', 'sessions') }],
     commandcode: [{ id: 'commandcode-projects', dir: path.join(homeDir, '.commandcode', 'projects') }]
   };

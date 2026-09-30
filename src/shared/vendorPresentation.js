@@ -61,6 +61,7 @@
     { id: 'workbuddy', color: '#0DC8A5' },
     { id: 'proma', color: '#000000', widgetInk: true },
     { id: 'qodercn', color: '#2ADB5C' },
+    { id: 'liveagent', color: '#22c55e' },
     { id: 'reasonix', color: '#4d6bfe' },
     { id: 'dsh', color: '#4d6bfe' },
     { id: 'cherrystudio', color: '#EA5E5D' },

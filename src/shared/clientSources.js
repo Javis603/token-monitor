@@ -18,6 +18,11 @@ const {
   devinCliDbDirs,
   devinDesktopAcpDirs
 } = require('./providers/devin/paths');
+// Locally parsed adapters: these clients are read by Token Monitor itself, not
+// by Tokscale, so their roots are registered here purely so the watcher, the
+// presence dot and the health check know where they live.
+const { liveAgentDataPaths } = require('./providers/liveagent/usage');
+const { piDesktopDataPaths } = require('./providers/pi/desktopUsage');
 
 // Windows only: libuv asserts that the filename ReadDirectoryChangesW hands
 // back starts with the directory string it was given, and calls abort() when it
@@ -269,7 +274,12 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // PI_CODING_AGENT_DIR too, but so does Pi — which is exactly why Tokscale
   // keeps its root fixed and ignores that variable for `omp`; mirror that here
   // rather than inventing an env override the scan does not honor.
-  add('pi', ...simpleHostSourceRoots('pi', home));
+  // Pi Desktop is a second, local source behind the same `pi` client: its
+  // SQLite turns table is read by Token Monitor's own adapter, while the
+  // simpleHostSourceRoots above stay the Tokscale session roots.
+  const piDesktopPaths = piDesktopDataPaths({ homeDir: home, env });
+  const piDesktopDbPath = piDesktopPaths.dbPaths[0] || path.join(home, '.pi-desktop', 'pi.sqlite');
+  add('pi', ...simpleHostSourceRoots('pi', home), ['pi-desktop-db', path.dirname(piDesktopDbPath), piDesktopDbPath]);
   add('omp', ...simpleHostSourceRoots('omp', home));
   // Zed: tokscale reads the XdgData root on every platform AND the native macOS
   // (Application Support) / Windows (LOCALAPPDATA) roots (see tokscale scanner.rs
@@ -364,6 +374,10 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]),
     ['qodercn-projects', qoderCnPaths.projectsDir]
   );
+  // LiveAgent — SQLite chat history read by Token Monitor's own adapter. Extra
+  // data folders come from the Custom scan paths setting; the default lives at
+  // ~/.liveagent/chat-history.sqlite3.
+  add('liveagent', ...liveAgentDataPaths({ homeDir: home }).dbPaths.map((dbPath) => ['liveagent-db', path.dirname(dbPath), dbPath]));
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
     resolveReasonixStatsDir({ env: process.env, homeDir: home, platform: process.platform, cwdDir: process.cwd() })
