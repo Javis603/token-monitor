@@ -133,6 +133,15 @@ function limitProviderColor(providerId) {
   return clientColors[providerId] || clientColors.default;
 }
 const limitResetMotionApi = window.TokenMonitorLimitResetMotion;
+const limitResetAnimator = window.TokenMonitorLimitResetAnimator.createLimitResetAnimator({
+  document,
+  motion: limitResetMotionApi,
+  prefersReducedMotion: () => prefersReducedMotion(),
+  formatPercent: (value) => formatPercent(value),
+  requestAnimationFrame: (frame) => requestAnimationFrame(frame),
+  cancelAnimationFrame: (handle) => cancelAnimationFrame(handle),
+  performance
+});
 const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
@@ -277,9 +286,6 @@ const REFRESH_BUTTON_FEEDBACK_MS = 700;
 const LIVE_TOKEN_RATE_ACTIVE_MS = 8000;
 const LIVE_TOKEN_RATE_CLEAR_MS = 3 * 60 * 1000;
 const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;
-const LIMIT_RESET_MOTION_EASING = 'cubic-bezier(0.333, 0.667, 0.667, 1)';
-const LIMIT_RESET_GLOW_MS = 700;
-const LIMIT_RESET_GLOW_LEAD_MS = 252;
 const initialFloatingBubble = window.__TOKEN_MONITOR_INITIAL_FLOATING_BUBBLE__ || { collapsed: false, side: null };
 const initialViewState = window.__TOKEN_MONITOR_INITIAL_VIEW_STATE__ || {};
 let initialBreakdownPreferenceApplied = typeof initialViewState.breakdown === 'string';
@@ -1694,8 +1700,6 @@ function animateTotalNumber(el, from, to, duration) {
 
 const rowNumberAnimations = new Map();
 const rowBarAnimations = new Map();
-const limitResetNumberAnimations = new Map();
-const limitResetMotions = new WeakMap();
 const rowRenderFingerprints = new WeakMap();
 const toolDetailData = new WeakMap();
 
@@ -1717,11 +1721,7 @@ function settleMotionAnimations() {
     delete el.dataset.motionTarget;
   }
   rowNumberAnimations.clear();
-  for (const [el, motion] of limitResetNumberAnimations) {
-    cancelAnimationFrame(motion.handle);
-    el.textContent = `${formatPercent(motion.target)} ${motion.suffix}`;
-  }
-  limitResetNumberAnimations.clear();
+  limitResetAnimator.settle(els.limitsPanel);
   for (const animation of document.getAnimations?.() || []) {
     try { animation.finish(); } catch (_) { animation.cancel(); }
   }
@@ -1880,71 +1880,6 @@ function animateBarBetween(
   animation.onfinish = forget;
   animation.oncancel = forget;
   rowBarAnimations.set(fill, motion);
-}
-
-function animateLimitResetPercent(el, from, to, duration, startedAt = performance.now()) {
-  if (!el) return;
-  const suffix = el.dataset.limitMotionSuffix || '';
-  if (prefersReducedMotion() || !Number.isFinite(from) || !Number.isFinite(to) || from === to) {
-    el.textContent = `${formatPercent(to)} ${suffix}`;
-    return;
-  }
-  const delta = to - from;
-  const motion = { handle: 0, target: to, suffix };
-  const initialProgress = Math.max(0, Math.min(1, (performance.now() - startedAt) / duration));
-  const initialValue = from + delta * (1 - ((1 - initialProgress) ** 2));
-  let renderedText = `${formatPercent(initialValue)} ${suffix}`;
-  el.textContent = renderedText;
-  function frame(now) {
-    if (!el.isConnected) {
-      if (limitResetNumberAnimations.get(el) === motion) limitResetNumberAnimations.delete(el);
-      return;
-    }
-    if (prefersReducedMotion()) {
-      el.textContent = `${formatPercent(to)} ${suffix}`;
-      if (limitResetNumberAnimations.get(el) === motion) limitResetNumberAnimations.delete(el);
-      return;
-    }
-    const progress = Math.min(1, (now - startedAt) / duration);
-    const eased = 1 - ((1 - progress) * (1 - progress));
-    const nextText = `${formatPercent(from + delta * eased)} ${suffix}`;
-    // The displayed value is integer-rounded, so several animation frames can
-    // resolve to the same string. Avoid invalidating text layout on those frames.
-    if (nextText !== renderedText) {
-      renderedText = nextText;
-      el.textContent = nextText;
-    }
-    if (progress < 1) {
-      motion.handle = requestAnimationFrame(frame);
-    } else if (limitResetNumberAnimations.get(el) === motion) {
-      limitResetNumberAnimations.delete(el);
-    }
-  }
-  motion.handle = requestAnimationFrame(frame);
-  limitResetNumberAnimations.set(el, motion);
-}
-
-function animateLimitResetCompletion(fill, duration, startedAt = null) {
-  if (!fill?.animate || prefersReducedMotion()) return;
-  const highlight = document.createElement('span');
-  highlight.className = 'limit-meter-completion';
-  fill.append(highlight);
-  const animation = highlight.animate([
-    { opacity: 0 },
-    {
-      offset: LIMIT_RESET_GLOW_LEAD_MS / LIMIT_RESET_GLOW_MS,
-      opacity: 0.52
-    },
-    { opacity: 0 }
-  ], {
-    duration: LIMIT_RESET_GLOW_MS,
-    delay: Math.max(0, duration - LIMIT_RESET_GLOW_LEAD_MS),
-    easing: 'linear'
-  });
-  if (startedAt !== null) animation.startTime = startedAt;
-  const removeHighlight = () => highlight.remove();
-  animation.onfinish = removeHighlight;
-  animation.oncancel = removeHighlight;
 }
 
 function captureTrendBarMotion() {
@@ -4382,112 +4317,14 @@ function maybeFetchCodexResetForecast() {
 }
 
 function captureLimitResetMotion() {
-  const snapshot = new Map();
-  for (const row of els.limitsPanel?.querySelectorAll('.limit-row[data-limit-motion-key]') || []) {
-    for (const item of row.querySelectorAll('.limit-window[data-limit-motion-key]')) {
-      const key = `${row.dataset.limitMotionKey}\0${item.dataset.limitMotionKey}`;
-      const entry = {
-        remainingPercent: item.dataset.limitRemainingPercent,
-        displayPercent: item.dataset.limitDisplayPercent,
-        resetsAt: item.dataset.limitResetAt,
-        motion: limitResetMotions.get(item.querySelector('.limit-meter-fill'))
-      };
-      // Ambiguous identities are safer left static than animated on the wrong row.
-      snapshot.set(key, snapshot.has(key) ? null : entry);
-    }
-  }
-  return snapshot;
+  // The refill motion itself lives in limits/resetAnimator.js — the edge
+  // dock's card plays it through the same animator, so this page keeps a
+  // scope-bound wrapper rather than a second copy.
+  return limitResetAnimator.capture(els.limitsPanel);
 }
 
 function animateLimitResets(snapshot) {
-  if (!snapshot?.size || prefersReducedMotion()) return;
-  const motions = [];
-  for (const row of els.limitsPanel?.querySelectorAll('.limit-row[data-limit-motion-key]') || []) {
-    for (const item of row.querySelectorAll('.limit-window[data-limit-motion-key]')) {
-      const key = `${row.dataset.limitMotionKey}\0${item.dataset.limitMotionKey}`;
-      const previous = snapshot.get(key);
-      const current = {
-        remainingPercent: item.dataset.limitRemainingPercent,
-        displayPercent: item.dataset.limitDisplayPercent,
-        resetsAt: item.dataset.limitResetAt
-      };
-      if (!previous) continue;
-      const fill = item.querySelector('.limit-meter-fill');
-      const active = previous.motion;
-      // A stats refresh replaces these nodes even when only updatedAt changes.
-      // Carry the original timeline across that replacement, including its glow.
-      if (
-        active
-        && fill
-        && previous.remainingPercent === current.remainingPercent
-        && previous.displayPercent === current.displayPercent
-        && previous.resetsAt === current.resetsAt
-        && (active.startedAt === null || performance.now() - active.startedAt < active.duration + LIMIT_RESET_GLOW_MS - LIMIT_RESET_GLOW_LEAD_MS)
-      ) {
-        motions.push({ fill, item, motion: active });
-        continue;
-      }
-      if (!limitResetMotionApi.shouldAnimateReset(previous, current)) continue;
-      const from = Number(previous.displayPercent);
-      const to = Number(current.displayPercent);
-      if (
-        previous.displayPercent === ''
-        || current.displayPercent === ''
-        || !Number.isFinite(from)
-        || !Number.isFinite(to)
-        || !fill
-      ) continue;
-      const duration = limitResetMotionApi.durationMs(from, to);
-      motions.push({
-        fill,
-        item,
-        motion: { from, to, duration, startedAt: null }
-      });
-    }
-  }
-  if (!motions.length) return;
-  // Refills rendered in one pass land on full together: the batch paces
-  // itself by the longest meter rather than each bar's own distance.
-  const duration = limitResetMotionApi.groupDurationMs(
-    motions.filter(({ motion }) => motion.startedAt === null).map(({ motion }) => motion.duration)
-  );
-  for (const { fill, motion } of motions) {
-    if (motion.startedAt === null) motion.duration = duration;
-    limitResetMotions.set(fill, motion);
-  }
-  function startMotion({ fill, item, motion }, now) {
-    if (!fill.isConnected || !item.isConnected || prefersReducedMotion()) return;
-    if (motion.startedAt === null) motion.startedAt = now;
-    const { from, to, duration, startedAt } = motion;
-    animateBarBetween(
-      fill,
-      from / 100,
-      to / 100,
-      0,
-      duration,
-      LIMIT_RESET_MOTION_EASING,
-      startedAt
-    );
-    animateLimitResetCompletion(fill, duration, startedAt);
-    animateLimitResetPercent(
-      item.querySelector('[data-limit-motion-value]'),
-      from,
-      to,
-      duration,
-      startedAt
-    );
-  }
-  // Resumed effects must cover the replacement DOM before it can paint its
-  // static target. Waiting one frame would flash full, then jump backward.
-  const pending = [];
-  for (const entry of motions) {
-    if (entry.motion.startedAt === null) pending.push(entry);
-    else startMotion(entry, entry.motion.startedAt);
-  }
-  // New refills still begin after the rest of the refresh render has finished.
-  if (pending.length) requestAnimationFrame((now) => {
-    for (const entry of pending) startMotion(entry, now);
-  });
+  limitResetAnimator.animate(els.limitsPanel, snapshot);
 }
 
 function renderLimits() {

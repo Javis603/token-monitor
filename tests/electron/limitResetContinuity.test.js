@@ -1,22 +1,18 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
-const vm = require('node:vm');
 const limitResetMotionApi = require('../../src/electron/renderer/limits/resetMotion');
+const { createLimitResetAnimator } = require('../../src/electron/renderer/limits/resetAnimator');
 
-const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-const source = app.slice(app.indexOf('function animateBarBetween('), app.indexOf('function captureTrendBarMotion('))
-  + app.slice(app.indexOf('function captureLimitResetMotion('), app.indexOf('function renderLimits('));
+// The refill driver itself — the surface is a stand-in for both real callers
+// (the limits panel and the dock card), which bind the same animator.
 
 function harness({ used = false } = {}) {
   let now = 0;
   let reduced = false;
   let nextHandle = 0;
   const frames = new Map();
-  const numberAnimations = new Map();
   function node() {
     return {
       isConnected: true,
@@ -35,22 +31,15 @@ function harness({ used = false } = {}) {
     };
   }
   const panel = { rows: [], querySelectorAll() { return this.rows; } };
-  const context = vm.createContext({
-    limitResetMotionApi,
-    limitResetMotions: new WeakMap(),
-    rowBarAnimations: new Map(),
-    limitResetNumberAnimations: numberAnimations,
-    els: { limitsPanel: panel },
-    performance: { now: () => now },
+  const animator = createLimitResetAnimator({
+    document: { createElement: node },
+    motion: limitResetMotionApi,
     prefersReducedMotion: () => reduced,
     formatPercent: (value) => `${Math.round(value)}%`,
-    document: { createElement: node },
+    performance: { now: () => now },
     requestAnimationFrame(callback) { frames.set(++nextHandle, callback); return nextHandle; },
-    LIMIT_RESET_MOTION_EASING: 'cubic-bezier(0.333, 0.667, 0.667, 1)',
-    LIMIT_RESET_GLOW_MS: 700,
-    LIMIT_RESET_GLOW_LEAD_MS: 252
+    cancelAnimationFrame(handle) { frames.delete(handle); }
   });
-  vm.runInContext(source, context);
   function replace(percentages, { account = 'account', resetsAt = '2026-10-01' } = {}) {
     for (const row of panel.rows) {
       for (const item of row.items) {
@@ -84,13 +73,13 @@ function harness({ used = false } = {}) {
     pending.forEach((callback) => callback(now));
   }
   function refresh(percentages = [100, 100], options) {
-    const snapshot = context.captureLimitResetMotion();
+    const snapshot = animator.capture(panel);
     const items = replace(percentages, options);
-    context.animateLimitResets(snapshot);
+    animator.animate(panel, snapshot);
     return items;
   }
   replace([77, 0], { resetsAt: '2026-09-30' });
-  return { context, frame, refresh, numberAnimations, reduce: () => { reduced = true; } };
+  return { animator, frame, panel, refresh, reduce: () => { reduced = true; } };
 }
 
 test('a mid-refill stats refresh keeps the original bar, counter and glow timeline', () => {
@@ -112,7 +101,10 @@ test('a mid-refill stats refresh keeps the original bar, counter and glow timeli
     assert.equal(item.fill.children[0].animations[0].options.delay, 1348);
   }
   assert.equal(replacements[1].value.textContent, '91% left');
-  assert.equal(h.numberAnimations.has(first[1].value), false);
+  // The detached generation's count-up was dropped on its first frame — a
+  // settle must not be able to reach back and rewrite its text.
+  h.animator.settle(h.panel);
+  assert.equal(first[1].value.textContent, '90% left');
   h.frame(1700);
   assert.equal(replacements[1].value.textContent, '100% left');
 });

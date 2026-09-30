@@ -218,6 +218,20 @@ html.edge-dock-liquid-glass .edge-dock-shape-line { stroke: transparent; }
   50%      { opacity: 0.66; transform: scale(1.06); }
 }
 
+/* The flare a quota refill lands with — the ring's counterpart to the meter's
+   `.limit-meter-completion` (its keyframes and timing are driven by the same
+   WAAPI pass, see animateRingCompletion). A disc clipped to the ring's own
+   bounds rather than the meter's bar end. */
+.edge-dock-ring-complete {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(closest-side, var(--ring-color, var(--accent)), transparent 72%);
+}
+
 .edge-dock-mark {
   width: 17px;
   height: 17px;

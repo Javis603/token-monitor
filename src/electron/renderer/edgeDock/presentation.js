@@ -13,11 +13,12 @@
     node ? require('./items') : root?.TokenMonitorEdgeDockItems,
     node ? require('../accountIdentity') : root?.TokenMonitorAccountIdentity,
     node ? require('../../../shared/sessionLive') : root?.TokenMonitorSessionLive,
-    node ? require('../usageAttributionRows') : root?.TokenMonitorUsageAttributionRows
+    node ? require('../usageAttributionRows') : root?.TokenMonitorUsageAttributionRows,
+    node ? require('../limits/resetMotion') : root?.TokenMonitorLimitResetMotion
   );
   if (node) module.exports = api;
   if (root) root.TokenMonitorEdgeDockPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive, usageAttributionRows) {
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive, usageAttributionRows, limitResetMotion) {
   // Every account is listed; the card scrolls when they outgrow the screen.
   const MAX_BUBBLE_ACCOUNTS = 50;
 
@@ -409,6 +410,15 @@
       remainingPercent: headline ? headline.summary.headlineRemaining : null,
       severityPercent: headline ? headline.summary.severityPercent : null,
       windowKind: headlineWindow ? String(headlineWindow.kind || '') : '',
+      // The headline window's cycle boundary plus the identities the Limits
+      // view keys its rows on. The rail's refill motion needs them to tell a
+      // real reset apart from a headline that moved to another account or
+      // window — a swap animates nothing, a reset animates the ring.
+      resetsAt: headlineWindow?.resetsAt || null,
+      headlineAccount: headline ? limitResetMotion.providerKey(headline.record) : '',
+      headlineWindowKey: headlineWindow
+        ? limitResetMotion.windowKey(headlineWindow.label || '', headlineWindow)
+        : '',
       credits: headlineCredits,
       accountCount: accounts.length,
       accounts: projected.slice(0, MAX_BUBBLE_ACCOUNTS).map((account) => account.summary),
