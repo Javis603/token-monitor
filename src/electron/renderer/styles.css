@@ -2558,6 +2558,39 @@ span.settings-note.settings-item-desc {
 .limit-provider-connection-detail > .settings-note {
   margin: 0;
 }
+.limit-provider-usage-items {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 4px 0 2px;
+}
+.limit-provider-usage-items-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.limit-provider-usage-items-title {
+  color: var(--text);
+  font-size: 10px;
+}
+.settings-panel .limit-provider-usage-items-list > .client-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 24px;
+  font-size: 11px;
+}
+.settings-panel .limit-provider-usage-items-list > .client-checkbox > input {
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+.settings-panel .limit-provider-usage-items-list > .client-checkbox > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .preference-order-handle {
   display: inline-flex;
   align-items: center;

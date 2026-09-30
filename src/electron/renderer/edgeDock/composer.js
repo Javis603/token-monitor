@@ -24,7 +24,8 @@
       hasProviderMark,
       maskEmail,
       createRowDrag,
-      enabledLimitProviders
+      enabledLimitProviders,
+      isWindowHidden = () => false
     } = deps;
 
     // Selection and the open add menu live here rather than in the DOM, because
@@ -220,9 +221,14 @@
         for (const window of itemsApi.selectableLimitWindows(record, getSettings())) {
           const key = itemsApi.limitWindowKey(window);
           if (!key || choices.has(key)) continue;
+          // A row hidden from the provider's card is not offered as a new pin;
+          // a pin made before it was hidden keeps its name rather than turning
+          // into "unavailable".
+          const keys = itemsApi.limitWindowKeys(window);
+          if (isWindowHidden(item.provider, window) && !keys.includes(item.windowKey)) continue;
           choices.set(key, {
             value: key,
-            keys: itemsApi.limitWindowKeys(window),
+            keys,
             label: windowLabel(record, window)
           });
         }

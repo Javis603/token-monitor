@@ -1034,3 +1034,29 @@ test('Home sorts a nearly drained balance ahead of a healthy percentage quota', 
   assert.equal(rows[0].key, 'deepseek');
   assert.equal(rows[1].key, 'claude');
 });
+
+test('Home drops the rows unchecked on a provider\'s usage-item list, MiMo\'s synthesized plan included', () => {
+  const usageItems = require('../../src/shared/limits/usageItems');
+  const hidden = {
+    claude: [usageItems.limitWindowKey({ kind: 'weekly', label: 'Weekly' })],
+    mimo: [usageItems.limitWindowKey({ kind: 'billing', label: 'Token Plan' })]
+  };
+  const rows = homeLimitAccountsForProviders({
+    providers: [
+      { provider: 'claude', windows: [
+        { kind: 'session', label: 'Session', remainingPercent: 80 },
+        { kind: 'weekly', label: 'Weekly', remainingPercent: 10 }
+      ] },
+      { provider: 'mimo', balance: { amount: 3, currency: 'USD', planUsed: 20, planLimit: 100 }, windows: [
+        { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 3, currency: 'USD' }
+      ] }
+    ],
+    providerOptions: [{ id: 'claude', label: 'Claude' }, { id: 'mimo', label: 'MiMo' }],
+    enabledProviderIds: ['claude', 'mimo'],
+    limit: 5,
+    isWindowHidden: (providerId, window) => usageItems.isLimitWindowHidden(hidden, providerId, window)
+  });
+  const byProvider = Object.fromEntries(rows.map((row) => [row.providerId, row.windows.map((window) => window.label)]));
+  assert.deepEqual(byProvider.claude, ['Session']);
+  assert.deepEqual(byProvider.mimo, ['Balance']);
+});

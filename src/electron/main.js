@@ -116,6 +116,7 @@ const {
 } = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 const { limitProviderUrlAllowed } = require('../shared/limits/accounts');
+const { normalizeLimitProviderHiddenItems } = require('../shared/limits/usageItems');
 const {
   accountFieldProjection,
   accountStatusProjection,
@@ -626,6 +627,9 @@ function defaultSettings() {
     limitProviderOrder: defaultLimitProviderOrder(),
     homeLimitProviderOrder: '',
     hiddenHomeLimitProviders: '',
+    // Rows of a provider's limits card the user has hidden, as
+    // `{ providerId: [itemId, ...] }` (see shared/limits/usageItems).
+    limitProviderHiddenItems: {},
     homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
     limitsRefreshMode: normalizeLimitsRefreshMode(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE),
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
@@ -2473,6 +2477,7 @@ function readSettings() {
     if (saved.hiddenHomeLimitProviders !== undefined) {
       merged.hiddenHomeLimitProviders = normalizeHiddenLimitProviders(saved.hiddenHomeLimitProviders);
     }
+    merged.limitProviderHiddenItems = normalizeLimitProviderHiddenItems(merged.limitProviderHiddenItems);
     merged.homeLimitAccountCount = normalizeHomeLimitAccountCount(merged.homeLimitAccountCount);
     merged.periodMonthMode = normalizePeriodMonthMode(merged.periodMonthMode);
     if (saved.historyEnabled !== undefined) {
@@ -5165,6 +5170,7 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     // every preference that view reads has to reach this renderer as well —
     // otherwise the card silently renders a different page's answer.
     showCodexAdditionalLimits: source.showCodexAdditionalLimits,
+    limitProviderHiddenItems: source.limitProviderHiddenItems,
     showLimitSource: source.showLimitSource,
     codexResetForecastEnabled: source.codexResetForecastEnabled,
     claudePrepaidBalanceEnabled: source.claudePrepaidBalanceEnabled,
@@ -7340,6 +7346,7 @@ app.whenReady().then(() => {
       showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
+      limitProviderHiddenItems: normalizeLimitProviderHiddenItems(patch.limitProviderHiddenItems ?? settings.limitProviderHiddenItems),
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),

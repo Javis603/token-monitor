@@ -83,11 +83,15 @@
     return windows;
   }
 
-  function homeLimitAccounts(accounts, limit = 3, { sort = 'remaining' } = {}) {
+  // `isWindowHidden(providerId, window)` drops the rows the user unchecked on
+  // the provider's usage-item list. It runs after the MiMo plan is synthesized,
+  // so hiding the plan hides the placeholder built from the balance as well.
+  function homeLimitAccounts(accounts, limit = 3, { sort = 'remaining', isWindowHidden = null } = {}) {
     return (accounts || [])
       .map((account, index) => {
         const providerId = String(account?.providerId || '').trim().toLowerCase();
         const windows = accountWindows(account)
+          .filter((window) => typeof isWindowHidden !== 'function' || !isWindowHidden(providerId, window))
           .map((window, windowIndex) => {
             const credits = balanceDisplay.isCreditsWindow(window);
             return {
@@ -229,7 +233,8 @@
     sort = 'remaining',
     accountName,
     accountColor,
-    accountIcon
+    accountIcon,
+    isWindowHidden = null
   } = {}) {
     const enabled = new Set((enabledProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
     const hidden = new Set((hiddenProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
@@ -253,7 +258,7 @@
         });
       });
     }
-    return homeLimitAccounts(accounts, limit, { sort });
+    return homeLimitAccounts(accounts, limit, { sort, isWindowHidden });
   }
 
   // True when at least one enabled, unhidden limit provider has no entry yet in

@@ -11,6 +11,7 @@ const {
 // than at its first use below because the icon tables are derived from it.
 const { LIMIT_PROVIDER_CATALOG: LIMIT_PROVIDERS, LIMIT_PROVIDER_IDS } = window.TokenMonitorLimitProviders;
 const limitAccountPanelsApi = window.TokenMonitorLimitAccountPanels;
+const limitUsageItemsApi = window.TokenMonitorLimitUsageItems;
 const accountShellApi = window.TokenMonitorAccountShell;
 const accountProfileRequests = accountShellApi.createRequestGuard();
 const accountProfileStatuses = accountShellApi.createRequestGuard();
@@ -4362,6 +4363,7 @@ function renderLimits() {
       state.settings?.claudePrepaidBalanceEnabled !== false,
       state.settings?.codexResetForecastEnabled === true,
       state.settings?.showCodexAdditionalLimits !== false,
+      state.settings?.limitProviderHiddenItems || {},
       state.settings?.currency || '',
       state.settings?.currencyRatesEffective || null,
       state.settings?.subscriptions || [],
@@ -5512,14 +5514,23 @@ function homeLimitRows() {
   const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
   const providerOptions = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, providerOrder);
   const hasConfiguredOrder = Boolean(state.settings?.homeLimitProviderOrder);
+  const isWindowHidden = (providerId, window) => limitUsageItemsApi.isLimitWindowHidden(
+    state.settings?.limitProviderHiddenItems, providerId, window
+  );
   return homeOverviewApi.homeLimitAccountsForProviders({
+    // Hidden rows go before the compact pick, so Antigravity's tightest window
+    // per group is chosen among the ones the user still shows.
     providers: (state.stats?.limits?.providers || []).map((provider) => ({
       ...provider,
-      windows: limitProviderPresentationApi.limitProviderCompactWindows(provider, provider.windows)
+      windows: limitProviderPresentationApi.limitProviderCompactWindows(
+        provider,
+        (provider.windows || []).filter((window) => !isWindowHidden(provider.provider, window))
+      )
     })),
     providerOptions,
     enabledProviderIds: Array.from(enabled),
     hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet()),
+    isWindowHidden,
     colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
@@ -10172,6 +10183,9 @@ function renderLimitProviderCheckboxesNow() {
       const input = inputs[index];
       if (input) reusableSettingInputs.set(`${providerId}:${setting.key}`, input);
     });
+    for (const input of row.querySelectorAll?.('.limit-provider-usage-items-list input[data-item-id]') || []) {
+      reusableSettingInputs.set(`${providerId}:item:${input.dataset.itemId}`, input);
+    }
   }
   const enabled = enabledLimitProviderSet();
   const collected = new Map((state.stats?.limits?.providers || []).map((provider) => [provider.provider, provider]));
@@ -10252,7 +10266,8 @@ function renderLimitProviderCheckboxesNow() {
       actions.append(mode);
     }
     const settings = LIMIT_PROVIDER_SETTINGS[id];
-    const hasOptions = Boolean(accountGroup || settings || connectionDetailKey);
+    const usageItems = isEnabled ? limitProviderUsageItemRows(id) : [];
+    const hasOptions = Boolean(accountGroup || settings || connectionDetailKey || usageItems.length);
     let optionsContainer = null;
     let optionsInner = null;
     let main = null;
@@ -10282,6 +10297,7 @@ function renderLimitProviderCheckboxesNow() {
       }
       if (connectionDetailKey) optionsInner.append(limitProviderConnectionDetail(connectionDetailKey));
       if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
+      if (usageItems.length) optionsInner.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
       optionsContainer.append(optionsInner);
       const toggleOptions = () => {
         const opening = state.limitProviderSettingsExpanded !== id;
@@ -10672,6 +10688,7 @@ function limitProviderSettingsRenderSignature() {
       settingValues,
       state.limitProviderSettingsExpanded
     ],
+    usageItems: [...enabledLimitProviderSet()].sort().map((id) => [id, limitProviderUsageItemRows(id)]),
     query: limitProviderQuery(),
     providers: (state.stats?.limits?.providers || []).map(providerSignature),
     devices: (state.stats?.devices || []).map(deviceSignature)
@@ -10722,6 +10739,92 @@ function limitProviderSettingsList(providerId, settings, reusableInputs = null) 
     list.append(item);
   }
   return list;
+}
+
+// The checklist of what a provider's card draws, read off an unfiltered render
+// of its records so it can only name rows the card really has (see
+// shared/limits/usageItems). A hidden item the records no longer draw stays
+// listed, marked unavailable, so it can still be shown again. The renders are
+// kept until the records, the settings or the locale change: the list's render
+// signature asks for them on every pass.
+let limitUsageItemsCache = null;
+function limitProviderUsageItemRows(providerId) {
+  const records = state.stats?.limits?.providers || [];
+  const locale = currentLocale();
+  const cache = limitUsageItemsCache;
+  if (!cache || cache.records !== records || cache.settings !== state.settings || cache.locale !== locale) {
+    limitUsageItemsCache = { records, settings: state.settings, locale, byProvider: new Map() };
+  }
+  const cached = limitUsageItemsCache.byProvider.get(providerId);
+  if (cached) return cached;
+  const fixedLabel = (itemId) => (
+    limitUsageItemsApi.USAGE_ITEM_IDS.includes(itemId) ? t(`settings.limits.items.${itemId}`) : ''
+  );
+  const hidden = limitUsageItemsApi.hiddenUsageItemSet(state.settings?.limitProviderHiddenItems, providerId);
+  const drawn = limitWindowsView.limitProviderUsageItems(records.filter((record) => record?.provider === providerId));
+  const rows = drawn.map(({ id, label }) => ({ id, label: label || fixedLabel(id), hidden: hidden.has(id), available: true }));
+  const drawnIds = new Set(drawn.map(({ id }) => id));
+  for (const id of hidden) {
+    if (drawnIds.has(id)) continue;
+    const label = limitUsageItemsApi.usageItemFallbackLabel(providerId, id) || fixedLabel(id) || id;
+    rows.push({ id, label, hidden: true, available: false });
+  }
+  limitUsageItemsCache.byProvider.set(providerId, rows);
+  return rows;
+}
+
+function limitProviderUsageItemsList(providerId, items, reusableInputs = null) {
+  const section = document.createElement('div');
+  section.className = 'limit-provider-usage-items';
+  const head = document.createElement('div');
+  head.className = 'limit-provider-usage-items-head';
+  const title = document.createElement('span');
+  title.className = 'limit-provider-usage-items-title';
+  title.textContent = t('settings.limits.usageItems');
+  head.append(title);
+  if (items.some((item) => item.hidden)) {
+    const restore = document.createElement('button');
+    restore.type = 'button';
+    restore.className = 'reset-appearance-button reset-inline';
+    restore.textContent = '↺';
+    restore.title = t('settings.limits.usageItemsRestore');
+    restore.setAttribute('aria-label', restore.title);
+    restore.addEventListener('click', () => commitLimitProviderHiddenItems(
+      limitUsageItemsApi.restoreUsageItemDefaults(state.settings?.limitProviderHiddenItems, providerId)
+    ));
+    head.append(restore);
+  }
+  const list = document.createElement('div');
+  list.className = 'limit-provider-usage-items-list';
+  for (const entry of items) {
+    const item = document.createElement('label');
+    item.className = 'client-checkbox';
+    const inputKey = `${providerId}:item:${entry.id}`;
+    const existingInput = reusableInputs?.get(inputKey);
+    const input = existingInput || document.createElement('input');
+    input.type = 'checkbox';
+    input.dataset.itemId = entry.id;
+    input.checked = !entry.hidden;
+    if (!existingInput) {
+      input.addEventListener('change', () => commitLimitProviderHiddenItems(
+        limitUsageItemsApi.setUsageItemHidden(state.settings?.limitProviderHiddenItems, providerId, entry.id, !input.checked)
+      ));
+    }
+    const text = document.createElement('span');
+    text.textContent = entry.available ? entry.label : t('settings.limits.usageItemUnavailable', { item: entry.label });
+    item.title = text.textContent;
+    item.append(input, text);
+    list.append(item);
+  }
+  section.append(head, list);
+  return section;
+}
+
+// Applied locally before the write, so a second click made while the first is
+// still in flight builds on it instead of on the value the first replaces.
+function commitLimitProviderHiddenItems(next) {
+  state.settings = { ...state.settings, limitProviderHiddenItems: next };
+  saveSettings({ limitProviderHiddenItems: next }).catch(() => {});
 }
 
 async function onToolTrackingToggle() {
@@ -11836,6 +11939,9 @@ const edgeDockComposer = els.edgeDockComposer && window.TokenMonitorEdgeDockComp
       .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
       .filter(({ id }) => enabledLimitProviderSet().has(id))
       .map(({ id }) => id),
+    isWindowHidden: (providerId, quotaWindow) => limitUsageItemsApi.isLimitWindowHidden(
+      state.settings?.limitProviderHiddenItems, providerId, quotaWindow
+    ),
     maskEmail: (email) => (state.settings?.maskLimitAccountEmails === true
       ? accountIdentityApi.maskEmailAddress(email)
       : String(email || '')),

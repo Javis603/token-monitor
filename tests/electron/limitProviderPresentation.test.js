@@ -303,7 +303,8 @@ function runProviderSpendNode(source, balance, provider = null) {
       'settings.thirdparty.outputTokens': 'Output tokens',
       'settings.thirdparty.requests': 'Requests'
     })[key] || key,
-    limitNoteRowNode: (options) => options
+    limitNoteRowNode: (options) => options,
+    tagUsageItem: (node) => node
   };
   vm.runInNewContext(
     `${optionalNumber}\n${spendEntries}\n${spendNode}\n`
@@ -1240,6 +1241,10 @@ test('Z.ai and Team keep all billing windows and render MCP full width after pai
       limitWindowNode: (label, window, _color, _tone, _value, detail) => Object.assign(makeNode(), { label, window, detail }),
       providerWindowLabel: (p, window, fallback = '') => limitWindowLabel(p?.provider, window, fallback),
       providerWindowText: (p, window) => limitWindowText(p, window, { showLimitUsed: false }),
+      tagUsageItem: (node) => node,
+      hideUsageItems() {},
+      usageItems: { hiddenUsageItemSet: () => new Set() },
+      settings: () => ({}),
       provider: { provider, windows: [
         { kind: 'weekly', label: 'Weekly' },
         { kind: 'billing', label: 'MCP' },
@@ -1288,7 +1293,11 @@ test('OpenCode reads the Zen balance from its credits window without metering it
     optionalFiniteNumber: (value) => (Number.isFinite(Number(value)) && value !== null && value !== '' ? Number(value) : null),
     formatLimitAmount: (value) => `$${Number(value).toFixed(2)}`,
     providerWindowLabel: (p, window, fallback = '') => limitWindowLabel(p?.provider, window, fallback),
-    limitWindowNode: (label, window, _color, _tone, value) => Object.assign(makeNode(), { label, window, value })
+    limitWindowNode: (label, window, _color, _tone, value) => Object.assign(makeNode(), { label, window, value }),
+    tagUsageItem: (node) => node,
+    hideUsageItems() {},
+    usageItems: { hiddenUsageItemSet: () => new Set() },
+    settings: () => ({})
   };
   const balanceWindow = { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 8.5, currency: 'USD', showMeter: false };
 
@@ -1631,7 +1640,7 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
 
   assert.match(homeLabel, /if \(window\?\.kind === 'billing'\) \{/);
   assert.match(homeLabel, /limitProviderCompactWindowLabel\(providerId, window, visibleWindows\)/);
-  assert.match(homeRows, /limitProviderCompactWindows\(provider, provider\.windows\)/);
+  assert.match(homeRows, /limitProviderCompactWindows\(\s*provider,\s*\(provider\.windows \|\| \[\]\)\.filter\(/);
   assert.match(homeLabel, /const label = String\(window\?\.label \|\| ''\)\.trim\(\);/);
   assert.match(homeLabel, /if \(label\) return label;/);
   assert.match(homeLabel, /billing: 'home\.limit\.billing'/);

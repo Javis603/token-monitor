@@ -44,6 +44,7 @@ class FakeElement {
     this.classNames = new Set();
     this.classList = {
       add: (...names) => names.forEach((name) => this.classNames.add(name)),
+      contains: (name) => this.classNames.has(name),
       toggle: (name, enabled) => {
         if (enabled) this.classNames.add(name);
         else this.classNames.delete(name);
@@ -53,7 +54,17 @@ class FakeElement {
 
   get className() { return [...this.classNames].join(' '); }
   set className(value) { this.classNames = new Set(String(value).split(' ').filter(Boolean)); }
-  append(...children) { this.children.push(...children.filter(Boolean)); }
+  append(...children) {
+    for (const child of children.filter(Boolean)) {
+      if (child instanceof FakeElement) child.parent = this;
+      this.children.push(child);
+    }
+  }
+  remove() {
+    if (!this.parent) return;
+    this.parent.children = this.parent.children.filter((child) => child !== this);
+    this.parent = null;
+  }
   addEventListener() {}
   setAttribute(name, value) { this.attributes[name] = value; }
   querySelector(selector) { return this.find(selector.replace('.', '')); }
@@ -1041,4 +1052,110 @@ test('a stale row is dimmed by the page rule, not recoloured', () => {
   assert.equal(row.classNames.has('stale'), true);
   const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
   assert.doesNotMatch(dock, /freshness\.tone === 'stale'/, 'the card no longer paints staleness orange on its own');
+});
+
+// ---- Visible usage items ----------------------------------------------------
+// The checklist is read off the card itself, so these check both halves: what
+// the card tags, and what an unchecked tag removes.
+
+const usageItems = require('../../src/shared/limits/usageItems');
+
+const codexRecord = () => ({
+  provider: 'codex',
+  windows: [
+    { kind: 'session', label: 'Session', remainingPercent: 70 },
+    { kind: 'weekly', label: '', remainingPercent: 55 },
+    { kind: 'billing', label: 'Monthly', remainingPercent: 40 },
+    { kind: 'session', label: 'Spark', remainingPercent: 90, additional: true }
+  ],
+  resetCredits: { availableCount: 2, expirations: [new Date(Date.now() + 86_400_000).toISOString()] }
+});
+
+const windowTitles = (card) => [...card.walk()]
+  .filter((node) => node.classNames.has('limit-window'))
+  .map((node) => node.children[0].children[0].textContent);
+
+test('the checklist lists what the card draws, in card order, without Codex additional pools', () => {
+  const items = dockView().limitProviderUsageItems([codexRecord()]);
+  assert.deepEqual(items.map((item) => item.id), [
+    usageItems.limitWindowKey({ kind: 'session', label: 'Session' }),
+    usageItems.limitWindowKey({ kind: 'weekly', label: '' }),
+    usageItems.limitWindowKey({ kind: 'billing', label: 'Monthly' }),
+    'resets'
+  ]);
+  assert.deepEqual(items.map((item) => item.label), ['Session', 'Weekly', 'Monthly', '']);
+});
+
+test('the checklist names each row once across accounts', () => {
+  const items = dockView().limitProviderUsageItems([codexRecord(), codexRecord()]);
+  assert.equal(items.length, 4);
+});
+
+test('an unchecked row leaves the card and its partner takes the full width', () => {
+  const card = dockView({
+    limitProviderHiddenItems: { codex: [usageItems.limitWindowKey({ kind: 'weekly', label: '' }), 'resets'] }
+  }).renderProviderWindows(codexRecord(), '#10A37F');
+
+  assert.deepEqual(windowTitles(card), ['Session', 'Monthly', 'Spark']);
+  assert.equal(card.find('limit-reset-credits'), null);
+  const [session] = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.equal(session.classNames.has('limit-window-wide'), true, 'a row left alone spans its grid row');
+});
+
+test('the Codex additional pools answer to their own switch, not the checklist', () => {
+  const spark = { kind: 'session', label: 'Spark', additional: true };
+  const card = dockView({
+    limitProviderHiddenItems: { codex: [usageItems.limitWindowKey(spark)] }
+  }).renderProviderWindows(codexRecord(), '#10A37F');
+  assert.ok(windowTitles(card).includes('Spark'));
+});
+
+test('another provider\'s hidden items leave this card alone', () => {
+  const card = dockView({ limitProviderHiddenItems: { claude: ['resets'] } })
+    .renderProviderWindows(codexRecord(), '#10A37F');
+  assert.ok(card.find('limit-reset-credits'));
+});
+
+test('Cline\'s credits and month spend are one item, since they are one row', () => {
+  const record = {
+    provider: 'cline',
+    windows: [
+      { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 0.5, currency: 'CREDITS', showMeter: false },
+      { kind: 'billing', metric: 'spend', label: 'Usage credits', used: 0.13, limit: null, currency: 'USD', showMeter: false }
+    ]
+  };
+  assert.deepEqual(dockView().limitProviderUsageItems([record]), [{ id: 'credits', label: 'Credits' }]);
+  const card = dockView({ limitProviderHiddenItems: { cline: ['credits'] } }).renderProviderWindows(record, '#9D4EDD');
+  assert.equal([...card.walk()].filter((node) => node.classNames.has('limit-window')).length, 0);
+});
+
+test('an Antigravity group whose rows are all unchecked goes with them', () => {
+  const record = {
+    provider: 'antigravity',
+    windows: [
+      { kind: 'session', label: 'Gemini Pro 5-hour', remainingPercent: 80 },
+      { kind: 'weekly', label: 'Gemini Pro weekly', remainingPercent: 60 },
+      { kind: 'session', label: 'Claude 5-hour', remainingPercent: 90 },
+      { kind: 'weekly', label: 'Claude weekly', remainingPercent: 70 }
+    ]
+  };
+  const items = dockView().limitProviderUsageItems([record]);
+  assert.equal(items.length, 4);
+  assert.match(items[0].label, /Gemini Pro/);
+  const hidden = items.filter((item) => /Claude/.test(item.label)).map((item) => item.id);
+  const card = dockView({ limitProviderHiddenItems: { antigravity: hidden } }).renderProviderWindows(record, '#4285F4');
+  const groups = [...card.walk()].filter((node) => node.classNames.has('limit-window-group'));
+  assert.equal(groups.length, 1);
+  assert.doesNotMatch(card.text, /Claude/);
+});
+
+test('a MiMo plan drawn from the balance is the same item as the plan window', () => {
+  const planKey = usageItems.limitWindowKey({ kind: 'billing', label: 'Token Plan' });
+  const record = {
+    provider: 'mimo',
+    balance: { amount: 3, currency: 'USD', planUsed: 20, planLimit: 100 },
+    windows: []
+  };
+  const ids = dockView().limitProviderUsageItems([record]).map((item) => item.id);
+  assert.ok(ids.includes(planKey), `expected ${planKey} in ${ids.join(', ')}`);
 });
