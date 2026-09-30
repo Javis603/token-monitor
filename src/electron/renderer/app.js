@@ -1695,6 +1695,7 @@ function animateTotalNumber(el, from, to, duration) {
 const rowNumberAnimations = new Map();
 const rowBarAnimations = new Map();
 const limitResetNumberAnimations = new Map();
+const limitResetMotions = new WeakMap();
 const rowRenderFingerprints = new WeakMap();
 const toolDetailData = new WeakMap();
 
@@ -1852,7 +1853,8 @@ function animateBarBetween(
   toScale,
   delay = 0,
   duration = 420,
-  easing = 'cubic-bezier(0.22, 1, 0.36, 1)'
+  easing = 'cubic-bezier(0.22, 1, 0.36, 1)',
+  startedAt = null
 ) {
   if (!fill?.animate) return;
   const previous = rowBarAnimations.get(fill);
@@ -1870,6 +1872,7 @@ function animateBarBetween(
     easing,
     fill: 'backwards'
   });
+  if (startedAt !== null) animation.startTime = startedAt;
   const motion = { animation, target: toScale };
   const forget = () => {
     if (rowBarAnimations.get(fill) === motion) rowBarAnimations.delete(fill);
@@ -1888,9 +1891,15 @@ function animateLimitResetPercent(el, from, to, duration, startedAt = performanc
   }
   const delta = to - from;
   const motion = { handle: 0, target: to, suffix };
-  let renderedText = `${formatPercent(from)} ${suffix}`;
+  const initialProgress = Math.max(0, Math.min(1, (performance.now() - startedAt) / duration));
+  const initialValue = from + delta * (1 - ((1 - initialProgress) ** 2));
+  let renderedText = `${formatPercent(initialValue)} ${suffix}`;
   el.textContent = renderedText;
   function frame(now) {
+    if (!el.isConnected) {
+      if (limitResetNumberAnimations.get(el) === motion) limitResetNumberAnimations.delete(el);
+      return;
+    }
     if (prefersReducedMotion()) {
       el.textContent = `${formatPercent(to)} ${suffix}`;
       if (limitResetNumberAnimations.get(el) === motion) limitResetNumberAnimations.delete(el);
@@ -1915,7 +1924,7 @@ function animateLimitResetPercent(el, from, to, duration, startedAt = performanc
   limitResetNumberAnimations.set(el, motion);
 }
 
-function animateLimitResetCompletion(fill, duration) {
+function animateLimitResetCompletion(fill, duration, startedAt = null) {
   if (!fill?.animate || prefersReducedMotion()) return;
   const highlight = document.createElement('span');
   highlight.className = 'limit-meter-completion';
@@ -1932,6 +1941,7 @@ function animateLimitResetCompletion(fill, duration) {
     delay: Math.max(0, duration - LIMIT_RESET_GLOW_LEAD_MS),
     easing: 'linear'
   });
+  if (startedAt !== null) animation.startTime = startedAt;
   const removeHighlight = () => highlight.remove();
   animation.onfinish = removeHighlight;
   animation.oncancel = removeHighlight;
@@ -4379,7 +4389,8 @@ function captureLimitResetMotion() {
       const entry = {
         remainingPercent: item.dataset.limitRemainingPercent,
         displayPercent: item.dataset.limitDisplayPercent,
-        resetsAt: item.dataset.limitResetAt
+        resetsAt: item.dataset.limitResetAt,
+        motion: limitResetMotions.get(item.querySelector('.limit-meter-fill'))
       };
       // Ambiguous identities are safer left static than animated on the wrong row.
       snapshot.set(key, snapshot.has(key) ? null : entry);
@@ -4400,10 +4411,25 @@ function animateLimitResets(snapshot) {
         displayPercent: item.dataset.limitDisplayPercent,
         resetsAt: item.dataset.limitResetAt
       };
-      if (!previous || !limitResetMotionApi.shouldAnimateReset(previous, current)) continue;
+      if (!previous) continue;
+      const fill = item.querySelector('.limit-meter-fill');
+      const active = previous.motion;
+      // A stats refresh replaces these nodes even when only updatedAt changes.
+      // Carry the original timeline across that replacement, including its glow.
+      if (
+        active
+        && fill
+        && previous.remainingPercent === current.remainingPercent
+        && previous.displayPercent === current.displayPercent
+        && previous.resetsAt === current.resetsAt
+        && (active.startedAt === null || performance.now() - active.startedAt < active.duration + LIMIT_RESET_GLOW_MS - LIMIT_RESET_GLOW_LEAD_MS)
+      ) {
+        motions.push({ fill, item, motion: active });
+        continue;
+      }
+      if (!limitResetMotionApi.shouldAnimateReset(previous, current)) continue;
       const from = Number(previous.displayPercent);
       const to = Number(current.displayPercent);
-      const fill = item.querySelector('.limit-meter-fill');
       if (
         previous.displayPercent === ''
         || current.displayPercent === ''
@@ -4414,33 +4440,40 @@ function animateLimitResets(snapshot) {
       const duration = limitResetMotionApi.durationMs(from, to);
       motions.push({
         fill,
-        from,
         item,
-        to,
-        duration
+        motion: { from, to, duration, startedAt: null }
       });
     }
   }
   if (!motions.length) return;
   // Refills rendered in one pass land on full together: the batch paces
   // itself by the longest meter rather than each bar's own distance.
-  const duration = limitResetMotionApi.groupDurationMs(motions.map((motion) => motion.duration));
+  const duration = limitResetMotionApi.groupDurationMs(
+    motions.filter(({ motion }) => motion.startedAt === null).map(({ motion }) => motion.duration)
+  );
+  for (const { fill, motion } of motions) {
+    if (motion.startedAt === null) motion.duration = duration;
+    limitResetMotions.set(fill, motion);
+  }
   // Start only after the replacement DOM is paintable. The rest of the refresh render
   // can delay this first frame; excluding that delay prevents the motion from visibly
   // catching up by skipping its opening values.
-  requestAnimationFrame((startedAt) => {
+  requestAnimationFrame((now) => {
     if (prefersReducedMotion()) return;
-    for (const { fill, from, item, to } of motions) {
+    for (const { fill, item, motion } of motions) {
       if (!fill.isConnected || !item.isConnected) continue;
+      if (motion.startedAt === null) motion.startedAt = now;
+      const { from, to, duration, startedAt } = motion;
       animateBarBetween(
         fill,
         from / 100,
         to / 100,
         0,
         duration,
-        LIMIT_RESET_MOTION_EASING
+        LIMIT_RESET_MOTION_EASING,
+        startedAt
       );
-      animateLimitResetCompletion(fill, duration);
+      animateLimitResetCompletion(fill, duration, startedAt);
       animateLimitResetPercent(
         item.querySelector('[data-limit-motion-value]'),
         from,

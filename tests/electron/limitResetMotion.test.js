@@ -115,13 +115,13 @@ test('renderer wires reset motion before app boot and respects reduced motion', 
   assert.match(app, /previous\.displayPercent === ''/);
   assert.match(app, /LIMIT_RESET_MOTION_EASING/);
   assert.match(app, /const duration = limitResetMotionApi\.durationMs\(from, to\);/);
-  assert.match(app, /limitResetMotionApi\.groupDurationMs\(motions\.map\(\(motion\) => motion\.duration\)\)/);
-  assert.match(app, /for \(const \{ fill, from, item, to \} of motions\)/);
-  assert.match(app, /animateLimitResetCompletion\(fill, duration\);/);
+  assert.match(app, /limitResetMotionApi\.groupDurationMs\(/);
+  assert.match(app, /for \(const \{ fill, item, motion \} of motions\)/);
+  assert.match(app, /animateLimitResetCompletion\(fill, duration, startedAt\);/);
   // The meter itself is built by the shared view the edge dock also renders
   // from, so the motion module reaches it as an injected dependency.
   assert.match(view, /const fillPercent = motion\.displayPercent\([\s\S]*limitFillPercent\(remaining, used, showUsed\)[\s\S]*\);/);
-  assert.match(app, /requestAnimationFrame\(\(startedAt\) => \{/);
+  assert.match(app, /requestAnimationFrame\(\(now\) => \{/);
   assert.match(app, /duration,\s*startedAt\s*\);/);
   assert.match(app, /delay: Math\.max\(0, duration - LIMIT_RESET_GLOW_LEAD_MS\)/);
   assert.match(app, /highlight\.className = 'limit-meter-completion'/);
