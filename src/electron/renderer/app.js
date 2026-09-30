@@ -4526,6 +4526,10 @@ function renderLimits() {
       state.settings?.claudePrepaidBalanceEnabled !== false,
       state.settings?.codexResetForecastEnabled === true,
       state.settings?.showCodexAdditionalLimits !== false,
+      // Hidden usage items repaint the same rows this signature guards, so the
+      // map belongs inside it — otherwise a toggle writes the setting and the
+      // page keeps its stale DOM.
+      state.settings?.limitProviderHiddenItems || {},
       state.settings?.currency || '',
       state.settings?.currencyRatesEffective || null,
       state.settings?.subscriptions || [],
