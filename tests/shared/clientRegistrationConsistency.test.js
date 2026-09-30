@@ -60,7 +60,7 @@ test('source markers declare each WSL path once and preserve discovery order', (
   assert.deepEqual(WSL_DATA_MARKERS, SOURCE_MARKERS.map(({ marker }) => marker));
   assert.deepEqual(Object.entries(MARKER_CLIENTS), SOURCE_MARKERS.map(({ marker, client }) => [marker, client]));
   assert.deepEqual(SOURCE_MARKERS.filter(({ hostCheckId }) => hostCheckId).map(({ client }) => client), [
-    'qwen', 'pi', 'omp', 'commandcode', 'droid'
+    'qwen', 'pi', 'omp', 'commandcode', 'droid', 'fx'
   ]);
   assert.deepEqual(WSL_DATA_MARKERS, [
     '.claude/projects', '.claude/transcripts', '.codex/sessions', '.local/share/opencode',
@@ -83,6 +83,7 @@ test('source markers declare each WSL path once and preserve discovery order', (
     '.lmstudio/server-logs', '.unsloth/studio/studio.db',
     '.local/share/devin/cli/sessions.db', 'AppData/Roaming/devin/cli/sessions.db',
     '.config/Devin/User/acp-events', '.config/devin/User/acp-events',
-    'AppData/Roaming/Devin/User/acp-events', 'Library/Application Support/Devin/User/acp-events'
+    'AppData/Roaming/Devin/User/acp-events', 'Library/Application Support/Devin/User/acp-events',
+    '.fx/sessions'
   ]);
 });
