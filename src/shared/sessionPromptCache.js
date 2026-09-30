@@ -14,6 +14,7 @@ function count(value) {
 }
 
 function codexTtl(model) {
+  if (['gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra'].includes(model)) return 1800;
   const match = /^gpt-(\d+)\.(\d+)(?:$|[-.])/.exec(String(model || ''));
   if (!match) return 0;
   const major = Number(match[1]);

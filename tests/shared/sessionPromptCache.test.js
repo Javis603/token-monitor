@@ -42,6 +42,23 @@ test('Codex requires a supported model and cache activity; duplicate usage is no
   cold.payload.info.last_token_usage.cached_input_tokens = 0;
   assert.equal(promptCacheFromTranscript(jsonl([context, codex(at), cold]), 'codex'), null);
 });
+test('Codex recognizes canonical GPT-6 model IDs without inferring unknown names', () => {
+  for (const model of ['gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra', 'gpt-6.0-sol', 'gpt-6.1-sol', 'gpt-5.6-sol']) {
+    assert.equal(codexTtl(model), 1800, model);
+  }
+  for (const model of ['gpt-6', 'gpt-6-custom', 'gpt-6-sol-custom', 'custom-gpt-6-sol', 'gpt-6.2-sol', 'gpt-5.4', '']) {
+    assert.equal(codexTtl(model), 0, model);
+  }
+});
+test('canonical GPT-6 transcripts produce a cache estimate and clear it on a cold response', () => {
+  for (const model of ['gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra']) {
+    const context = { timestamp: at, type: 'turn_context', payload: { model } };
+    assert.deepEqual(promptCacheFromTranscript(jsonl([context, codex(at)]), 'codex'), { observedAt: at, ttlSeconds: 1800 }, model);
+    const cold = codex(later);
+    cold.payload.info.last_token_usage.cached_input_tokens = 0;
+    assert.equal(promptCacheFromTranscript(jsonl([context, codex(at), cold]), 'codex'), null, model);
+  }
+});
 test('cache display expires without a stats update and excludes archives and future clocks', () => {
   const session = { client: 'claude', promptCache: { observedAt: at, ttlSeconds: 3600 } };
   assert.equal(sessionPromptCacheForRow(session, Date.parse(at) + 29 * 60_000).minutes, 31);
