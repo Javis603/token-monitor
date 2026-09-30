@@ -5781,6 +5781,15 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
     flex-direction: row;
     gap: 0;
   }
+  /* The rule that opens a separator band above each later account belongs to the
+     stacked layout: on the one-row rail its 10px margin + 10px padding push
+     every account after the first out of a 56px bar, and its hairline is drawn
+     across the chip with nothing left to separate. */
+  .limit-account-row + .limit-account-row {
+    margin-top: 0;
+    padding-top: 0;
+  }
+  .limit-account-row + .limit-account-row::before { display: none; }
   .limit-head { gap: 6px; align-items: baseline; }
   .limit-title { flex: 1 1 auto; }
   .limit-name { gap: 6px; font-size: 11px; }

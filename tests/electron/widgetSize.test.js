@@ -109,7 +109,15 @@ test('widget size Settings surface, preload bridge and IPC handler are wired', (
   // rail inside the bar layout, instead of stacking vertically.
   assert.match(styles, /\.limit-row-group\s*\{[^}]*display:\s*flex/s);
   assert.ok((styles.match(/\.limit-account-list\s*\{/g) || []).length >= 2);
+  // The sibling-account separator band belongs to the stacked layout; on the
+  // rail it would push every account after the first out of a short bar.
+  assert.match(styles, /\.limit-account-row \+ \.limit-account-row\s*\{[^}]*margin-top:\s*0/s);
+  assert.match(styles, /\.limit-account-row \+ \.limit-account-row::before\s*\{\s*display:\s*none/);
   // The active view is exposed as a shell class in the renderer.
   const appJs = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   assert.match(appJs, /classList\.toggle\('limits-mode',\s*state\.breakdown === 'limits'\)/);
+  // A rejected size must refresh the fields even while one of them still holds
+  // focus, or the value that was never applied stays on screen.
+  assert.match(appJs, /function syncSettingsForm\(\{\s*forceWidgetSize = false\s*\} = \{\}\)/);
+  assert.match(appJs, /syncSettingsForm\(\{ forceWidgetSize: true \}\)/);
 });

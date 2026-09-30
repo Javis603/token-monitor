@@ -1973,7 +1973,7 @@ function loadHubSettingsWiring(els, context) {
   const modeStart = app.indexOf('function syncHubModeUi()');
   const modeEnd = app.indexOf('function renderHubStatus()', modeStart);
   const draftStart = app.indexOf('const HUB_DRAFT_FIELDS = [');
-  const draftEnd = app.indexOf('function syncSettingsForm()', draftStart);
+  const draftEnd = app.indexOf('function syncSettingsForm(', draftStart);
   const saveStart = app.indexOf("els.saveSettingsButton.addEventListener('click'");
   const saveEnd = app.indexOf("els.hubModeOptions.addEventListener('change'", saveStart);
   const intervalStart = app.indexOf('for (const input of els.showLimitUsedInputs || [])', saveEnd);

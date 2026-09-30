@@ -8192,7 +8192,7 @@ function syncHideAppIconControl(showTrayIcon, trayMode) {
   els.hideAppIconOptions?.classList.toggle('hidden', !els.hideAppIconInput.checked);
 }
 
-function syncSettingsForm() {
+function syncSettingsForm({ forceWidgetSize = false } = {}) {
   if (isRendererWindowHidden()) {
     applyInitialBreakdownPreference();
     applyVendorColorOverrides(state.settings.vendorColors);
@@ -8311,9 +8311,12 @@ function syncSettingsForm() {
     const fallbackHeight = typeof window !== 'undefined' && window.innerHeight ? Math.round(window.innerHeight) : '';
     const width = Number.isFinite(configured.width) ? Math.round(configured.width) : fallbackWidth;
     const height = Number.isFinite(configured.height) ? Math.round(configured.height) : fallbackHeight;
-    // Never rewrite a field the user is typing in.
-    if (document.activeElement !== els.widgetWidthInput) els.widgetWidthInput.value = width;
-    if (document.activeElement !== els.widgetHeightInput) els.widgetHeightInput.value = height;
+    // Never rewrite a field the user is typing in — except when the caller knows
+    // the typed size was never applied, where the field has to show the size the
+    // window actually has even while it still holds focus (committing with Enter
+    // leaves it focused).
+    if (forceWidgetSize || document.activeElement !== els.widgetWidthInput) els.widgetWidthInput.value = width;
+    if (forceWidgetSize || document.activeElement !== els.widgetHeightInput) els.widgetHeightInput.value = height;
   }
   syncEdgeDockControls();
   const showTrayIcon = state.settings.showTrayIcon !== false;
@@ -11914,8 +11917,13 @@ async function applyWidgetSizeFromInputs() {
   if (!els.widgetWidthInput || !els.widgetHeightInput) return;
   const width = Number(els.widgetWidthInput.value);
   const height = Number(els.widgetHeightInput.value);
+  // Every failure path below leaves the window at its previous size, so the
+  // fields have to be refreshed from settings even while one of them is focused
+  // — a size committed with Enter keeps its focus, and a value that was never
+  // applied must not stay on screen.
+  const resyncInputs = () => preserveSettingsPanelScroll(() => syncSettingsForm({ forceWidgetSize: true }));
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    preserveSettingsPanelScroll(syncSettingsForm);
+    resyncInputs();
     return;
   }
   try {
@@ -11924,14 +11932,12 @@ async function applyWidgetSizeFromInputs() {
       els.widgetWidthInput.value = Math.round(target.width);
       els.widgetHeightInput.value = Math.round(target.height);
     } else {
-      // Resize rejected (window minimized/maximized or bubble collapsed): the
-      // window never took the typed size, so refresh the inputs from settings
-      // instead of leaving them showing a value that was never applied.
-      preserveSettingsPanelScroll(syncSettingsForm);
+      // Resize rejected (window minimized/maximized or bubble collapsed).
+      resyncInputs();
     }
   } catch (error) {
     console.error('Could not resize widget:', error);
-    preserveSettingsPanelScroll(syncSettingsForm);
+    resyncInputs();
   }
 }
 els.widgetWidthInput?.addEventListener('change', applyWidgetSizeFromInputs);
