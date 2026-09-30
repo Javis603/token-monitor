@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const {
-  sumTokens, num, parseGraphResult, computeIntensities, localDayKey,
+  sumTokens, sumOutputTokens, num, parseGraphResult, computeIntensities, localDayKey,
   computeStreaks, monthlyRollup, normalizeHistory, mergeHistories
 } = require('../../src/shared/history');
 
@@ -41,9 +41,21 @@ test('sumTokens adds disjoint Tokscale reasoning only for opted-in clients', () 
   assert.equal(sumTokens(b, 'codex'), 1134);
   assert.equal(sumTokens(b, 'dsh'), 1134);
   assert.equal(sumTokens(b, 'reasonix'), 1134);
+  assert.equal(sumTokens(b, 'zcode'), 1134);
+  assert.equal(sumTokens(b, 'opencode'), 1134);
+  assert.equal(sumTokens(b, 'muse'), 1134);
   assert.equal(sumTokens(b, 'claude'), 135);
   assert.equal(sumTokens({}), 0);
   assert.equal(sumTokens(null), 0);
+});
+
+test('sumOutputTokens folds disjoint reasoning into output only for opted-in clients', () => {
+  const b = { input: 10, output: 20, cacheRead: 100, cacheWrite: 5, reasoning: 999 };
+  assert.equal(sumOutputTokens(b), 20);
+  assert.equal(sumOutputTokens(b, 'zcode'), 1019);
+  assert.equal(sumOutputTokens(b, 'opencode'), 1019);
+  assert.equal(sumOutputTokens(b, 'muse'), 1019);
+  assert.equal(sumOutputTokens(b, 'claude'), 20);
 });
 
 const SAMPLE = {
@@ -101,7 +113,45 @@ test('parseGraphResult folds client rows into perClient/perModel and derives day
   });
 });
 
-test('parseGraphResult folds OMP graph rows into the existing Pi history identity', () => {
+test('Cursor Auto and default graph rows share one model without renaming other clients', () => {
+  const rows = [
+    { client: 'cursor', modelId: 'auto', tokens: { input: 3 }, cost: 0.01 },
+    { client: 'cursor', modelId: 'default', tokens: { input: 7 }, cost: 0.02 },
+    { client: 'claude', modelId: 'default', tokens: { input: 11 }, cost: 0.03 }
+  ];
+  const graph = { contributions: [{ date: '2026-09-27', clients: rows }] };
+  const day = normalizeHistory(parseGraphResult(graph), { todayKey: '2026-09-28' }).daily[0];
+
+  assert.equal(day.perModel['cursor-auto'].tokens, 10);
+  assert.equal(day.perModel.default.tokens, 11);
+  assert.equal(day.perModel['cursor-auto'].cost, 0.03);
+  assert.equal(day.tokens, 21);
+});
+
+test('Cursor graph summary retains exact components after default is renamed', () => {
+  const row = {
+    date: '2026-09-27',
+    clients: [{ client: 'cursor', modelId: 'default', tokens: { input: 2, output: 3 } }],
+    tokenComponentSummary: {
+      tokenComponentsAvailable: true,
+      outputTokens: 3,
+      perClient: { cursor: { outputTokens: 3 } },
+      perModel: { default: { outputTokens: 3 } }
+    }
+  };
+  const day = parseGraphResult({ contributions: [row] }).contributions[0];
+  assert.equal(day.perModel['cursor-auto'].outputTokens, 3);
+  assert.equal(day.outputTokens, 3);
+
+  const mixed = parseGraphResult({ contributions: [{
+    ...row,
+    clients: [...row.clients, { client: 'claude', modelId: 'default', tokens: { input: 1, output: 4 } }]
+  }] }).contributions[0];
+  assert.equal(mixed.perModel['cursor-auto'].outputTokens, 3);
+  assert.equal(mixed.perModel.default.outputTokens, 4);
+});
+
+test('parseGraphResult keeps Oh My Pi and Pi as separate history identities', () => {
   const { contributions } = parseGraphResult({
     contributions: [{
       date: '2026-08-25',
@@ -121,9 +171,9 @@ test('parseGraphResult folds OMP graph rows into the existing Pi history identit
   });
 
   assert.deepEqual(contributions[0].perClient, {
-    pi: { tokens: 30, cost: 3, messages: 2, unclassifiedTokens: 0 }
+    pi: { tokens: 10, cost: 1, messages: 1, unclassifiedTokens: 0 },
+    omp: { tokens: 20, cost: 2, messages: 1, unclassifiedTokens: 0 }
   });
-  assert.equal(Object.hasOwn(contributions[0].perClient, 'omp'), false);
 });
 
 test('parseGraphResult folds Kilo extension and CLI rows into one history identity', () => {
@@ -149,6 +199,37 @@ test('parseGraphResult folds Kilo extension and CLI rows into one history identi
     kilo: { tokens: 30, cost: 3, messages: 2, unclassifiedTokens: 0 }
   });
   assert.equal(Object.hasOwn(contributions[0].perClient, 'kilocode'), false);
+});
+
+test('parseGraphResult folds Antigravity CLI and extension graph rows into the tracked identity', () => {
+  const { contributions } = parseGraphResult({
+    contributions: [{
+      date: '2026-09-18',
+      clients: [
+        {
+          client: 'antigravity', modelId: 'gemini-3.8-flash',
+          tokens: { input: 10, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+          cost: 1, messages: 1
+        },
+        {
+          client: 'antigravity-cli', modelId: 'gemini-3.8-flash',
+          tokens: { input: 20, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+          cost: 2, messages: 1
+        },
+        {
+          client: 'antigravity-extension', modelId: 'gemini-3.8-flash',
+          tokens: { input: 30, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 },
+          cost: 3, messages: 1
+        }
+      ]
+    }]
+  });
+
+  assert.deepEqual(contributions[0].perClient, {
+    antigravity: { tokens: 60, cost: 6, messages: 3, unclassifiedTokens: 0 }
+  });
+  assert.equal(Object.hasOwn(contributions[0].perClient, 'antigravity-cli'), false);
+  assert.equal(Object.hasOwn(contributions[0].perClient, 'antigravity-extension'), false);
 });
 
 test('parseGraphResult is defensive about missing/garbage input', () => {

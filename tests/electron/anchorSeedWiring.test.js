@@ -33,6 +33,18 @@ test('the anchor seed publishes through sendPush, not straight to the renderer',
   assert.match(prime, /deferToRenderer: true/);
 });
 
+// The read-only rule itself is covered in tests/shared/usageTransform.test.js;
+// this pins that main hands the transform the real agent check and store.
+test('an external agent keeps anchor archive loading read-only', () => {
+  const start = main.indexOf('const usageTransform = createUsageTransform({');
+  assert.ok(start >= 0, 'createUsageTransform call not found');
+  const call = main.slice(start, main.indexOf('});', start));
+  assert.match(call, /store: sessionUsageArchiveStore/);
+  assert.match(call, /isExternalAgentActive[,\n]/);
+  const prime = functionSource('function primeLocalStatsFromAnchor(');
+  assert.match(prime, /usageTransform\.ensureLoaded\(\)/);
+});
+
 test('only the seed waits for the renderer, so the deferral cannot queue up', () => {
   const push = functionSource('function sendPush(');
   // Live stats send directly. Deferring all of them would add a

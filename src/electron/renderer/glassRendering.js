@@ -23,5 +23,42 @@
     return transparentMacFallback && requested < 0.05 ? 0.05 : requested;
   }
 
-  return { renderedGlassOpacity };
+  // Main normalizes the stored value on load and on every save, so a
+  // hand-edited settings.json never reaches the renderer as NaN — which CSS
+  // would resolve to opacity 1, hiding the glass behind the image.
+  function normalizeBackgroundImageOpacity(value) {
+    const opacity = Number(value ?? 28);
+    return Number.isFinite(opacity) ? Math.max(0, Math.min(100, opacity)) : 28;
+  }
+
+  const MATERIAL_TYPES = new Set(['liquid-glass', 'vibrancy', 'transparent', 'opaque']);
+
+  function normalizeNativeMaterialState(value) {
+    const type = MATERIAL_TYPES.has(value?.type) ? value.type : 'transparent';
+    return {
+      type,
+      reducedTransparency: value?.reducedTransparency === true,
+      highContrast: value?.highContrast === true,
+      fallbackReason: value?.fallbackReason == null ? null : String(value.fallbackReason),
+      liquidGlassSupported: value?.liquidGlassSupported === true
+    };
+  }
+
+  function usesNativeMaterial(state) {
+    return state?.type === 'liquid-glass' || state?.reducedTransparency === true;
+  }
+
+  function applyNativeMaterialClasses(state, root = document.documentElement, body = document.body) {
+    const material = normalizeNativeMaterialState(state);
+    for (const node of [root, body]) {
+      if (!node) continue;
+      node.classList.toggle('native-liquid-glass', material.type === 'liquid-glass');
+      node.classList.toggle('native-material-opaque', material.type === 'opaque');
+      node.classList.toggle('native-reduced-transparency', material.reducedTransparency);
+      node.classList.toggle('native-high-contrast', material.highContrast);
+    }
+    return material;
+  }
+
+  return { renderedGlassOpacity, normalizeBackgroundImageOpacity, normalizeNativeMaterialState, usesNativeMaterial, applyNativeMaterialClasses };
 });

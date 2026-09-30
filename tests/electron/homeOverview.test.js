@@ -28,8 +28,8 @@ const {
   shouldRetryHomeHistory,
   homeHistoryFetchOutcome
 } = require('../../src/electron/renderer/homeOverview');
-const { limitProviderCompactWindows } = require('../../src/electron/renderer/limitProviderPresentation');
-const limitProviderOrderApi = require('../../src/electron/renderer/limitProviderOrder');
+const { limitProviderCompactWindows } = require('../../src/electron/renderer/limits/providerPresentation');
+const limitProviderOrderApi = require('../../src/electron/renderer/limits/providerOrder');
 
 const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], monthly: [], summary: {} };
 const emptyHistory = { daily: [], monthly: [], summary: {} };

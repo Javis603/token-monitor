@@ -5,13 +5,13 @@ import { build as bundle } from "esbuild";
 const siteRoot = new URL("./", import.meta.url);
 const outputRoot = new URL("../_site/", import.meta.url);
 
-const cssFiles = ["styles/tokens.css", "styles/base.css", "styles/components.css", "styles/sections.css"];
+const cssFiles = ["styles/tokens.css", "styles/base.css", "styles/components.css", "styles/edgedock.css", "styles/sections.css"];
 const jsFiles = ["scripts/i18n.js", "scripts/main.js"];
-const assetVersion = "20260730-story29";
+const assetVersion = "20260929-v063";
 // Icons are the site's own brand-colored copies under site/assets/icons/ (the app's
 // assets/icons/ stay mask-only currentColor and must not be mutated to serve the web).
 // tray-claude / tray-codex are the real tray glyphs, masked to monochrome in the surfaces section.
-const iconNames = ["claude", "codex", "cursor", "antigravity", "hermes-agent", "opencode", "openclaw", "codebuddy", "workbuddy", "reasonix", "dsh", "openrouter", "newapi", "volcengine", "os-apple", "os-windows", "os-linux", "tray-claude", "tray-codex", "gemini", "xai", "deepseek", "qwen", "kimi", "mistral", "meta", "zai", "minimax", "cline", "copilot", "pi", "zed", "kilo", "kiro", "mimo-code"];
+const iconNames = ["claude", "codex", "cursor", "antigravity", "hermes-agent", "opencode", "openclaw", "codebuddy", "workbuddy", "reasonix", "dsh", "openrouter", "newapi", "volcengine", "os-apple", "os-windows", "os-linux", "tray-claude", "tray-codex", "gemini", "xai", "deepseek", "qwen", "kimi", "mistral", "meta", "zai", "minimax", "cline", "copilot", "pi", "zed", "kilo", "kiro", "mimo", "devin", "amp", "droid", "omp", "commandcode", "qoder", "trae", "cherrystudio", "lmstudio", "unsloth", "alibaba", "typesafe", "ollama", "proma", "spinner", "token-monitor"];
 const viewIconNames = ["home", "limits", "tool", "model", "device", "session", "project", "trends", "status"];
 const assets = [
   ["assets/app.png", "assets/app.png"], // full app icon used by the Discord mockup

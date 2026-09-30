@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { resolveSessionFile } = require('../../src/shared/sessionFiles');
+const { findSessionFiles, isSafeSessionId, resolveSessionFile } = require('../../src/shared/sessionFiles');
 
 function tmpHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'tm-home-'));
@@ -117,5 +117,70 @@ test('returns empty string when not found or unknown client', () => {
   try {
     assert.equal(resolveSessionFile('claude', 'missing', home), '');
     assert.equal(resolveSessionFile('hermes', 'whatever', home), '');
+  } finally { cleanup(home); }
+});
+
+test('isSafeSessionId allows a single segment and rejects empty or parent refs', () => {
+  assert.equal(isSafeSessionId('abc-123'), true);
+  assert.equal(isSafeSessionId('rollout-2026-05-30T11-44-50-019e76fc-0d58'), true);
+  assert.equal(isSafeSessionId('legacy-session-xyz'), true);
+  assert.equal(isSafeSessionId('.hidden-id'), true);
+  assert.equal(isSafeSessionId('..not-parent'), true);
+  assert.equal(isSafeSessionId(''), false);
+  assert.equal(isSafeSessionId(undefined), false);
+  assert.equal(isSafeSessionId(null), false);
+  assert.equal(isSafeSessionId('.'), false);
+  assert.equal(isSafeSessionId('..'), false);
+  assert.equal(isSafeSessionId('../secret'), false);
+  assert.equal(isSafeSessionId('foo/bar'), false);
+  assert.equal(isSafeSessionId('foo\\bar'), false);
+  assert.equal(isSafeSessionId('foo/../bar'), false);
+  assert.equal(isSafeSessionId('/etc/passwd'), false);
+  assert.equal(isSafeSessionId('\\Windows\\system32'), false);
+  assert.equal(isSafeSessionId('C:\\Windows\\secret'), false);
+  assert.equal(isSafeSessionId('foo\0bar'), false);
+});
+
+test('resolveSessionFile rejects empty, absolute, and parent-segment ids', () => {
+  const home = tmpHome();
+  try {
+    assert.equal(resolveSessionFile('codex', '', home), '');
+    assert.equal(resolveSessionFile('codex', '.', home), '');
+    assert.equal(resolveSessionFile('codex', '..', home), '');
+    assert.equal(resolveSessionFile('codex', '/etc/passwd', home), '');
+    assert.equal(resolveSessionFile('claude', '/tmp/secret', home), '');
+    assert.equal(resolveSessionFile('codex', path.join(home, 'secret'), home), '');
+    assert.equal(resolveSessionFile('claude', null, home), '');
+    assert.equal(resolveSessionFile('claude', undefined, home), '');
+  } finally { cleanup(home); }
+});
+
+test('rejects a sessionId that would leave the session root', () => {
+  const home = tmpHome();
+  try {
+    const outside = path.join(home, 'secret.jsonl');
+    fs.writeFileSync(outside, '{}\n');
+    const escaped = 'rollout-2026-05-30T../../../../../secret';
+    assert.equal(resolveSessionFile('codex', escaped, home), '');
+    assert.equal(resolveSessionFile('codex', '../secret', home), '');
+    assert.equal(resolveSessionFile('codex', '..\\secret', home), '');
+    assert.equal(resolveSessionFile('codex', 'foo/../secret', home), '');
+    assert.equal(resolveSessionFile('claude', '../secret', home), '');
+    assert.equal(resolveSessionFile('claude', '..\\secret', home), '');
+    assert.equal(resolveSessionFile('claude', 'proj/../secret', home), '');
+  } finally { cleanup(home); }
+});
+
+test('findSessionFiles skips unsafe ids even when a sibling file exists', () => {
+  const home = tmpHome();
+  try {
+    const root = path.join(home, '.codex', 'sessions');
+    fs.mkdirSync(root, { recursive: true });
+    const safe = path.join(root, 'keep.jsonl');
+    fs.writeFileSync(safe, '{}\n');
+    fs.writeFileSync(path.join(home, 'secret.jsonl'), '{}\n');
+    const found = findSessionFiles(root, ['keep', '../secret', '/etc/passwd', '.', '..', '']);
+    assert.deepEqual([...found.keys()], ['keep']);
+    assert.equal(found.get('keep'), safe);
   } finally { cleanup(home); }
 });

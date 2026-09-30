@@ -7,7 +7,7 @@ const test = require('node:test');
 
 let archiveApi = {};
 try {
-  archiveApi = require('../../src/shared/sessionUsageArchive');
+  archiveApi = require('../../src/shared/usage/sessionUsageArchive');
 } catch (_) {}
 
 const {
@@ -18,8 +18,10 @@ const {
   readSessionUsageArchive,
   sessionUsageArchiveDate,
   sessionUsageArchivePath,
+  updateSessionUsageArchive,
   writeSessionUsageArchive
 } = archiveApi;
+const { normalizePeriod } = require('../../src/shared/usage');
 
 const { localDate } = require('../helpers/localTime');
 
@@ -333,12 +335,138 @@ test('normalizes legacy and malformed archive entries without losing usable sess
   assert.equal(normalized.sessions['opencode:o1'].periods.today, undefined);
 });
 
+test('replayed Cursor default sessions use cursor-auto while other clients keep default', () => {
+  const archive = normalizeSessionUsageArchive({ sessions: {
+    'cursor:old': {
+      capturedAt: '2026-09-20T12:00:00.000Z',
+      periods: { allTime: { client: 'cursor', sessionId: 'old', totalTokens: 5, models: { default: 5 } } }
+    },
+    'claude:old': {
+      capturedAt: '2026-09-20T12:00:00.000Z',
+      periods: { allTime: { client: 'claude', sessionId: 'old', totalTokens: 11, models: { default: 11 } } }
+    }
+  } });
+  const visible = applySessionUsageArchive({ allTime: { sessions: {} } }, archive);
+
+  assert.equal(visible.allTime.clientModels.cursor['cursor-auto'], 5);
+  assert.equal(visible.allTime.clientModels.claude.default, 11);
+  assert.equal(visible.allTime.models['cursor-auto'], 5);
+  assert.equal(visible.allTime.models.default, 11);
+});
+
 test('capture does not churn timestamps when session data is unchanged', () => {
   const first = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
   const second = captureSessionUsageArchive(first, liveSummary(), new Date('2026-07-09T08:30:00.000Z'));
 
   assert.equal(second.sessions['opencode:o1'].capturedAt, '2026-07-09T08:15:00.000Z');
   assert.deepEqual(second, first);
+});
+
+test('canonical capture updates only changed rows in place', () => {
+  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  const changedSummary = liveSummary();
+  changedSummary.allTime.sessions['opencode:o1'].totalTokens = 101;
+  const result = updateSessionUsageArchive(archive, changedSummary, new Date('2026-07-09T08:30:00.000Z'));
+
+  assert.equal(result.archive, archive);
+  assert.deepEqual([...result.changedKeys], ['opencode:o1']);
+  assert.equal(result.archive.sessions['opencode:o1'].periods.allTime.totalTokens, 101);
+});
+
+// The shape the archive store hands over: periods already normalized, which is
+// what lets capture read sessions without normalizing them again.
+function canonicalLiveSummary() {
+  const summary = liveSummary();
+  for (const periodName of ['today', 'month', 'allTime']) summary[periodName] = normalizePeriod(summary[periodName]);
+  return summary;
+}
+
+test('canonical capture does not copy a session that has not changed', () => {
+  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  const summary = canonicalLiveSummary();
+  let copies = 0;
+  // Invisible to the comparison, which reads enumerable keys only, but called
+  // by every JSON round-trip of the session.
+  Object.defineProperty(summary.allTime.sessions['opencode:o1'], 'toJSON', {
+    enumerable: false,
+    value() {
+      copies += 1;
+      return { ...this };
+    }
+  });
+
+  const result = updateSessionUsageArchive(archive, summary, new Date('2026-07-09T08:30:00.000Z'), { canonicalSummary: true });
+
+  assert.deepEqual([...result.changedKeys], []);
+  assert.equal(copies, 0);
+});
+
+test('canonical capture ignores a difference the stored copy could not hold', () => {
+  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  const summary = canonicalLiveSummary();
+  summary.allTime.sessions['opencode:o1'].unset = undefined;
+
+  const result = updateSessionUsageArchive(archive, summary, new Date('2026-07-09T08:30:00.000Z'), { canonicalSummary: true });
+
+  assert.deepEqual([...result.changedKeys], []);
+});
+
+test('canonical capture stores a changed session as its own copy', () => {
+  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  const summary = canonicalLiveSummary();
+  summary.allTime.sessions['opencode:o1'].totalTokens = 101;
+
+  const result = updateSessionUsageArchive(archive, summary, new Date('2026-07-09T08:30:00.000Z'), { canonicalSummary: true });
+  summary.allTime.sessions['opencode:o1'].totalTokens = 999;
+
+  assert.deepEqual([...result.changedKeys], ['opencode:o1']);
+  assert.equal(archive.sessions['opencode:o1'].periods.allTime.totalTokens, 101);
+});
+
+test('canonical capture safely prunes malformed entries without period windows', () => {
+  const archive = {
+    version: 1,
+    sessions: {
+      'opencode:o1': {
+        client: 'opencode',
+        sessionId: 'o1',
+        day: '2026-07-08',
+        month: '2026-06',
+        periods: {
+          today: { client: 'opencode', sessionId: 'o1', totalTokens: 10 },
+          month: { client: 'opencode', sessionId: 'o1', totalTokens: 20 },
+          allTime: { client: 'opencode', sessionId: 'o1', totalTokens: 30 }
+        }
+      }
+    }
+  };
+
+  const result = updateSessionUsageArchive(archive, null, new Date(2026, 6, 9, 8, 30));
+
+  assert.deepEqual([...result.changedKeys], ['opencode:o1']);
+  assert.equal(archive.sessions['opencode:o1'].periods.today, undefined);
+  assert.equal(archive.sessions['opencode:o1'].periods.month, undefined);
+  assert.equal(archive.sessions['opencode:o1'].periods.allTime.totalTokens, 30);
+});
+
+test('canonical summary apply can reuse the caller-owned normalized record', () => {
+  const archive = captureSessionUsageArchive({}, liveSummary(), new Date('2026-07-09T08:15:00.000Z'));
+  const summary = {
+    allTime: normalizePeriod({
+      sessions: {
+        'codex:c1': liveSummary().today.sessions['codex:c1']
+      }
+    })
+  };
+  const visible = applySessionUsageArchive(summary, archive, {
+    now: new Date('2026-07-09T08:20:00.000Z'),
+    canonical: true,
+    canonicalSummary: true,
+    mutate: true
+  });
+
+  assert.equal(visible, summary);
+  assert.equal(visible.allTime.sessions['opencode:o1'].archived, true);
 });
 
 test('persists archive data outside settings via injectable storage helpers', () => {
@@ -467,4 +595,360 @@ test('reapplying an archive never invents a period the preview omitted', () => {
   assert.equal('month' in visible, false);
   assert.equal('allTime' in visible, false);
   assert.equal(visible.today.sessions['opencode:o1'].archived, true);
+});
+
+// A client identity split (clientIdentitySplits.js) reverses a merge. A session
+// captured while two clients shared one row is keyed under the merged id, so the
+// split id reporting the same session live is a different key — and `allTime`
+// never expires, so counting both would inflate the lifetime total permanently.
+// The session id is written by the producing client, so one id belongs to exactly
+// one product, which is what makes this an identity question rather than a guess.
+test('a session captured before the split is not counted twice once it is live under the split id', () => {
+  const session = (client, id, tokens) => ({
+    client, sessionId: id, totalTokens: tokens, costUsd: 0, models: { gpt: tokens }
+  });
+  const record = (sessions) => ({
+    updatedAt: '2026-09-05T10:00:00.000Z',
+    periods: { today: { sessions }, month: { sessions }, allTime: { sessions } }
+  });
+
+  // Archived while Pi and Oh My Pi shared the `pi` identity.
+  const archive = captureSessionUsageArchive({}, record({ 'pi:ompSes1': session('pi', 'ompSes1', 500) }), new Date('2026-09-05T10:00:00.000Z'));
+  assert.deepEqual(Object.keys(archive.sessions), ['pi:ompSes1']);
+
+  // The same session is now reported by the split client.
+  const live = {
+    today: { totalTokens: 500, sessions: { 'omp:ompSes1': session('omp', 'ompSes1', 500) } },
+    month: { totalTokens: 500, sessions: { 'omp:ompSes1': session('omp', 'ompSes1', 500) } },
+    allTime: { totalTokens: 500, sessions: { 'omp:ompSes1': session('omp', 'ompSes1', 500) } }
+  };
+  const visible = applySessionUsageArchive(live, archive, { now: new Date('2026-09-05T12:00:00.000Z') });
+  assert.equal(visible.allTime.totalTokens, 500);
+  assert.deepEqual(Object.keys(visible.allTime.sessions), ['omp:ompSes1']);
+
+  // allTime is the period that matters: it never expires, so a next-day apply
+  // must not resurrect the archived copy either.
+  const nextDay = applySessionUsageArchive(live, archive, { now: new Date('2026-09-06T12:00:00.000Z') });
+  assert.equal(nextDay.allTime.totalTokens, 500);
+});
+
+// The archived copy is still how a genuinely deleted split-client session stays
+// counted: suppression keys off the session being live under the split id.
+test('a deleted split-client session is still restored from the archive', () => {
+  const session = { client: 'pi', sessionId: 'ompGone1', totalTokens: 500, costUsd: 0, models: { gpt: 500 } };
+  const archive = captureSessionUsageArchive({}, {
+    updatedAt: '2026-09-05T10:00:00.000Z',
+    periods: { today: { sessions: { 'pi:ompGone1': session } }, month: { sessions: { 'pi:ompGone1': session } }, allTime: { sessions: { 'pi:ompGone1': session } } }
+  }, new Date('2026-09-05T10:00:00.000Z'));
+  const empty = { today: { totalTokens: 0, sessions: {} }, month: { totalTokens: 0, sessions: {} }, allTime: { totalTokens: 0, sessions: {} } };
+  const visible = applySessionUsageArchive(empty, archive, { now: new Date('2026-09-06T12:00:00.000Z') });
+  assert.equal(visible.allTime.totalTokens, 500);
+  assert.deepEqual(Object.keys(visible.allTime.sessions), ['pi:ompGone1']);
+});
+
+// A genuine Pi session must never be suppressed by the split rule.
+test('a Pi session is unaffected by the Oh My Pi split', () => {
+  const session = { client: 'pi', sessionId: 'piSes7', totalTokens: 700, costUsd: 0, models: { gpt: 700 } };
+  const archive = captureSessionUsageArchive({}, {
+    updatedAt: '2026-09-05T10:00:00.000Z',
+    periods: { today: { sessions: { 'pi:piSes7': session } }, month: { sessions: { 'pi:piSes7': session } }, allTime: { sessions: { 'pi:piSes7': session } } }
+  }, new Date('2026-09-05T10:00:00.000Z'));
+  const empty = { today: { totalTokens: 0, sessions: {} }, month: { totalTokens: 0, sessions: {} }, allTime: { totalTokens: 0, sessions: {} } };
+  const visible = applySessionUsageArchive(empty, archive, { now: new Date('2026-09-06T12:00:00.000Z') });
+  assert.equal(visible.allTime.totalTokens, 700);
+});
+
+// The archived split-id copy of a session must suppress its merged-era row even
+// though the merged row sits earlier in the archive: insertion order is capture
+// order, and the merged `pi` row is always the older one. Replaying in that
+// order would count the same session once under each id.
+test('an archived split-id session suppresses its merged-era row whatever the archive order', () => {
+  const session = (client, id, tokens) => ({
+    client, sessionId: id, totalTokens: tokens, costUsd: 0, models: { gpt: tokens }
+  });
+  const record = (sessions) => ({
+    updatedAt: '2026-09-05T10:00:00.000Z',
+    periods: { today: { sessions }, month: { sessions }, allTime: { sessions } }
+  });
+
+  // Merged-era capture: both products under `pi`.
+  let archive = captureSessionUsageArchive({}, record({
+    'pi:piSes1': session('pi', 'piSes1', 60),
+    'pi:ompSes1': session('pi', 'ompSes1', 40)
+  }), new Date('2026-09-05T10:00:00.000Z'));
+  // Post-split capture while Oh My Pi was untracked: the same session, split id.
+  archive = captureSessionUsageArchive(archive, record({
+    'omp:ompSes1': session('omp', 'ompSes1', 40)
+  }), new Date('2026-09-05T11:00:00.000Z'));
+  assert.deepEqual(Object.keys(archive.sessions), ['pi:piSes1', 'pi:ompSes1', 'omp:ompSes1']);
+
+  const empty = { today: { totalTokens: 0, sessions: {} }, month: { totalTokens: 0, sessions: {} }, allTime: { totalTokens: 0, sessions: {} } };
+  const visible = applySessionUsageArchive(empty, archive, { now: new Date('2026-09-06T12:00:00.000Z') });
+  assert.equal(visible.allTime.totalTokens, 100, '60 Pi + 40 Oh My Pi, once');
+  assert.deepEqual(Object.keys(visible.allTime.sessions).sort(), ['omp:ompSes1', 'pi:piSes1']);
+});
+
+const CURSOR_MODEL = 'cursor-grok-4.6-high';
+const CURSOR_UUID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+const NOW = new Date('2026-09-12T12:00:00.000Z');
+
+function cursorSession(sessionId, tokens) {
+  return {
+    client: 'cursor',
+    sessionId,
+    totalTokens: tokens,
+    costUsd: tokens / 100,
+    models: { [CURSOR_MODEL]: tokens },
+    modelCosts: { [CURSOR_MODEL]: tokens / 100 }
+  };
+}
+
+function cursorSummary(sessions) {
+  const totalTokens = sessions.reduce((sum, session) => sum + session.totalTokens, 0);
+  const costUsd = sessions.reduce((sum, session) => sum + session.costUsd, 0);
+  return {
+    allTime: {
+      totalTokens,
+      costUsd,
+      clients: { cursor: totalTokens },
+      clientCosts: { cursor: costUsd },
+      models: { [CURSOR_MODEL]: totalTokens },
+      modelCosts: { [CURSOR_MODEL]: costUsd },
+      sessions: Object.fromEntries(sessions.map((session) => [`cursor:${session.sessionId}`, session]))
+    }
+  };
+}
+
+function legacyEventArchive(events) {
+  return {
+    sessions: Object.fromEntries(events.map(([sessionId, tokens]) => [`cursor:${sessionId}`, {
+      client: 'cursor',
+      sessionId,
+      capturedAt: '2026-08-30T06:33:52.626Z',
+      day: '2026-08-30',
+      month: '2026-08',
+      periods: { allTime: cursorSession(sessionId, tokens) }
+    }]))
+  };
+}
+
+// A Cursor JSON cache index holding `[isoTimestamp, sessionId, totalTokens]`.
+function cursorUsageEvents(events, signature = 'cache-v1') {
+  let lookups = 0;
+  const read = () => {
+    return {
+      signature,
+      sessionsAt(time, totalTokens) {
+        lookups += 1;
+        return [...new Set(events
+          .filter(([at, , tokens]) => Date.parse(at) === time && tokens === totalTokens)
+          .map(([, sessionId]) => sessionId))];
+      }
+    };
+  };
+  read.lookups = () => lookups;
+  return read;
+}
+
+const LEGACY_EVENTS = [
+  ['cursor-active-2026-08-13T02:10:00.000Z', 300],
+  ['cursor-active-2026-08-13T02:42:39.510Z', 700]
+];
+const CACHED_EVENTS = [
+  ['2026-08-13T02:10:00.000Z', CURSOR_UUID, 300],
+  ['2026-08-13T02:42:39.510Z', CURSOR_UUID, 700]
+];
+
+function linkedArchive(events = CACHED_EVENTS) {
+  return updateSessionUsageArchive(
+    normalizeSessionUsageArchive(legacyEventArchive(LEGACY_EVENTS)),
+    cursorSummary([cursorSession(CURSOR_UUID, 1000)]),
+    NOW,
+    { cursorUsageEvents: cursorUsageEvents(events) }
+  );
+}
+
+test('legacy Cursor events are linked to the session the JSON cache files them under', () => {
+  const { archive, changedKeys } = linkedArchive();
+
+  for (const [sessionId] of LEGACY_EVENTS) {
+    assert.equal(archive.sessions[`cursor:${sessionId}`].supersededBy, `cursor:${CURSOR_UUID}`);
+    assert.equal(archive.sessions[`cursor:${sessionId}`].periods.allTime.totalTokens > 0, true);
+    assert.equal(changedKeys.has(`cursor:${sessionId}`), true);
+  }
+  const visible = applySessionUsageArchive(cursorSummary([cursorSession(CURSOR_UUID, 1000)]), archive, { now: NOW });
+  assert.equal(visible.allTime.totalTokens, 1000);
+});
+
+test('linked legacy Cursor events stay skipped once their session only survives in the archive', () => {
+  const { archive } = linkedArchive();
+  const visible = applySessionUsageArchive(cursorSummary([]), archive, { now: NOW });
+
+  assert.equal(visible.allTime.totalTokens, 1000);
+  assert.equal(visible.allTime.sessions[`cursor:${CURSOR_UUID}`].archived, true);
+});
+
+test('linked legacy Cursor events replay when their session is nowhere to be found', () => {
+  const archive = normalizeSessionUsageArchive(legacyEventArchive(LEGACY_EVENTS));
+  for (const entry of Object.values(archive.sessions)) entry.supersededBy = `cursor:${CURSOR_UUID}`;
+  const visible = applySessionUsageArchive(cursorSummary([]), archive, { now: NOW });
+
+  assert.equal(visible.allTime.totalTokens, 1000);
+  assert.equal(visible.allTime.sessions['cursor:cursor-active-2026-08-13T02:10:00.000Z'].archived, true);
+});
+
+for (const [name, events] of [
+  ['no cached event has its timestamp and tokens', [['2026-08-13T02:42:39.510Z', CURSOR_UUID, 699]]],
+  ['cached events in two sessions match it', [
+    ['2026-08-13T02:42:39.510Z', CURSOR_UUID, 700],
+    ['2026-08-13T02:42:39.510Z', 'bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee', 700]
+  ]]
+]) {
+  test(`a legacy Cursor event stays unlinked and replays when ${name}`, () => {
+    const { archive } = linkedArchive(events);
+    const key = 'cursor:cursor-active-2026-08-13T02:42:39.510Z';
+    assert.equal(archive.sessions[key].supersededBy, undefined);
+
+    const visible = applySessionUsageArchive(cursorSummary([cursorSession(CURSOR_UUID, 1000)]), archive, { now: NOW });
+    assert.equal(visible.allTime.sessions[key].archived, true);
+  });
+}
+
+test('a legacy Cursor row captured later is linked from the cache already read', () => {
+  const archive = normalizeSessionUsageArchive(legacyEventArchive([LEGACY_EVENTS[0]]));
+  const cache = cursorUsageEvents(CACHED_EVENTS);
+  updateSessionUsageArchive(archive, cursorSummary([]), NOW, { cursorUsageEvents: cache });
+  assert.equal(archive.sessions[`cursor:${LEGACY_EVENTS[0][0]}`].supersededBy, `cursor:${CURSOR_UUID}`);
+
+  const [lateId, lateTokens] = LEGACY_EVENTS[1];
+  const late = updateSessionUsageArchive(
+    archive,
+    cursorSummary([cursorSession(lateId, lateTokens)]),
+    NOW,
+    { cursorUsageEvents: cache }
+  );
+
+  assert.equal(late.archive.sessions[`cursor:${lateId}`].supersededBy, `cursor:${CURSOR_UUID}`);
+});
+
+test('a pending legacy Cursor row grown by a later capture is looked up again', () => {
+  const [legacyId, tokens] = LEGACY_EVENTS[1];
+  const archive = normalizeSessionUsageArchive(legacyEventArchive([[legacyId, tokens - 1]]));
+  const cache = cursorUsageEvents(CACHED_EVENTS);
+  updateSessionUsageArchive(archive, cursorSummary([]), NOW, { cursorUsageEvents: cache });
+  assert.equal(archive.sessions[`cursor:${legacyId}`].supersededBy, undefined);
+
+  const grown = updateSessionUsageArchive(
+    archive,
+    cursorSummary([cursorSession(legacyId, tokens)]),
+    NOW,
+    { cursorUsageEvents: cache }
+  );
+
+  assert.equal(grown.archive.sessions[`cursor:${legacyId}`].supersededBy, `cursor:${CURSOR_UUID}`);
+});
+
+function linkedLegacyArchive(periodNames = ['allTime']) {
+  const [legacyId, tokens] = LEGACY_EVENTS[1];
+  const entry = legacyEventArchive([[legacyId, tokens]]).sessions[`cursor:${legacyId}`];
+  entry.periods = Object.fromEntries(periodNames.map((period) => [period, cursorSession(legacyId, tokens)]));
+  const archive = normalizeSessionUsageArchive({ sessions: { [`cursor:${legacyId}`]: entry } });
+  updateSessionUsageArchive(archive, cursorSummary([]), NOW, { cursorUsageEvents: cursorUsageEvents(CACHED_EVENTS) });
+  assert.equal(archive.sessions[`cursor:${legacyId}`].supersededBy, `cursor:${CURSOR_UUID}`);
+  return { archive, legacyId, tokens };
+}
+
+test('linking reads the Cursor cache only while a row is still unlinked', () => {
+  const archive = normalizeSessionUsageArchive(legacyEventArchive(LEGACY_EVENTS));
+  const cache = cursorUsageEvents(CACHED_EVENTS);
+  updateSessionUsageArchive(archive, cursorSummary([]), NOW, { cursorUsageEvents: cache });
+  const lookups = cache.lookups();
+  assert.equal(lookups, LEGACY_EVENTS.length);
+
+  updateSessionUsageArchive(archive, cursorSummary([]), NOW, { cursorUsageEvents: cache });
+  assert.equal(cache.lookups(), lookups);
+});
+
+test('a legacy Cursor row that grows after it was linked keeps that link', () => {
+  const { archive, legacyId, tokens } = linkedLegacyArchive();
+
+  const grown = updateSessionUsageArchive(
+    archive,
+    cursorSummary([cursorSession(legacyId, tokens + 40)]),
+    NOW,
+    { cursorUsageEvents: cursorUsageEvents([], 'cache-purged') }
+  );
+
+  assert.equal(grown.archive.sessions[`cursor:${legacyId}`].supersededBy, `cursor:${CURSOR_UUID}`);
+});
+
+test('a repriced legacy Cursor row keeps its link after the cache is gone', () => {
+  const { archive, legacyId, tokens } = linkedLegacyArchive();
+  const repriced = { ...cursorSession(legacyId, tokens), costUsd: 99, modelCosts: { [CURSOR_MODEL]: 99 } };
+
+  const next = updateSessionUsageArchive(archive, cursorSummary([repriced]), NOW, {
+    cursorUsageEvents: cursorUsageEvents([], 'cache-purged')
+  });
+
+  assert.equal(next.archive.sessions[`cursor:${legacyId}`].supersededBy, `cursor:${CURSOR_UUID}`);
+  const visible = applySessionUsageArchive(cursorSummary([cursorSession(CURSOR_UUID, 1000)]), next.archive, { now: NOW });
+  assert.equal(visible.allTime.totalTokens, 1000);
+});
+
+test('pruning an expired period keeps a legacy Cursor link after the cache is gone', () => {
+  const { archive, legacyId } = linkedLegacyArchive(['today', 'allTime']);
+  const nextDay = new Date(NOW.getTime() + 36 * 60 * 60 * 1000);
+
+  const next = updateSessionUsageArchive(archive, cursorSummary([]), nextDay, {
+    cursorUsageEvents: cursorUsageEvents([], 'cache-purged')
+  });
+
+  assert.equal(next.archive.sessions[`cursor:${legacyId}`].periods.today, undefined);
+  assert.equal(next.archive.sessions[`cursor:${legacyId}`].supersededBy, `cursor:${CURSOR_UUID}`);
+});
+
+test('the Cursor session link survives normalization and is ignored on other rows', () => {
+  const archive = legacyEventArchive([['cursor-team-a-2026-08-13T02:42:39', 700]]);
+  archive.sessions['cursor:cursor-team-a-2026-08-13T02:42:39'].supersededBy = `cursor:${CURSOR_UUID}`;
+  archive.sessions[`cursor:${CURSOR_UUID}`] = {
+    ...legacyEventArchive([[CURSOR_UUID, 1000]]).sessions[`cursor:${CURSOR_UUID}`],
+    supersededBy: 'cursor:other'
+  };
+  const normalized = normalizeSessionUsageArchive(archive);
+
+  assert.equal(normalized.sessions['cursor:cursor-team-a-2026-08-13T02:42:39'].supersededBy, `cursor:${CURSOR_UUID}`);
+  assert.equal(normalized.sessions[`cursor:${CURSOR_UUID}`].supersededBy, undefined);
+});
+
+test('legacy Cursor CSV timestamps without Z or fraction parse as UTC', () => {
+  const { legacyCursorEventTime } = require('../../src/shared/providers/cursor/sessionGuard');
+  const previousTimeZone = process.env.TZ;
+  process.env.TZ = 'Asia/Hong_Kong';
+  try {
+    const expected = Date.UTC(2026, 7, 13, 2, 42, 39);
+    for (const sessionId of [
+      'cursor-active-2026-08-13T02:42:39Z',
+      'cursor-active-2026-08-13T02:42:39',
+      'cursor-team-a-2026-08-13T02:42:39.000',
+      'cursor-team-a-2026-08-13T02:42:39.000Z'
+    ]) {
+      assert.equal(legacyCursorEventTime({ client: 'cursor', sessionId }), expected, sessionId);
+    }
+    assert.equal(legacyCursorEventTime({ client: 'cursor', sessionId: 'cursor-active-2026-08-13' }), null);
+    assert.equal(legacyCursorEventTime({ client: 'cursor', sessionId: CURSOR_UUID }), null);
+  } finally {
+    if (previousTimeZone === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTimeZone;
+  }
+});
+
+test('still preserves Cursor conversation sessions after the live source drops them', () => {
+  const archive = captureSessionUsageArchive({}, cursorSummary([cursorSession(CURSOR_UUID, 1000)]), NOW);
+  const visible = applySessionUsageArchive({ allTime: { sessions: {} } }, archive, {
+    now: new Date('2026-09-12T12:05:00.000Z')
+  });
+
+  assert.equal(visible.allTime.totalTokens, 1000);
+  assert.equal(visible.allTime.clients.cursor, 1000);
+  assert.equal(visible.allTime.sessions[`cursor:${CURSOR_UUID}`].archived, true);
 });

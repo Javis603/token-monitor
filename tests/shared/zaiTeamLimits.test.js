@@ -115,6 +115,37 @@ test('fetchZaiTeamLimits surfaces an invalid key as unauthorized', async () => {
   assert.equal(provider.region, 'bigmodel-cn');
 });
 
+// The same BigModel gateway answers HTTP 200 with the failure in the body; a
+// refused credential must not read as "answered with no windows", which would
+// land on unavailable and lose the invalid-key signal the pill renders.
+for (const code of [401, 403]) {
+  test(`fetchZaiTeamLimits classifies a body code ${code} under HTTP 200 as unauthorized`, async () => {
+    const provider = await fetchZaiTeamLimits(
+      { zaiTeamApiKey: 'bad-key', zaiTeamOrganizationId: 'org-1', zaiTeamProjectId: 'proj-1' },
+      {
+        env: {},
+        now: () => Date.parse('2026-07-06T00:00:00Z'),
+        fetch: async () => ({ ok: true, status: 200, json: async () => ({ code, msg: 'token expired or incorrect' }) })
+      }
+    );
+    assert.equal(provider.status, 'unauthorized');
+    assert.deepEqual(provider.windows, []);
+  });
+}
+
+test('fetchZaiTeamLimits keeps a no-plan body code 500 as a state, not an auth failure', async () => {
+  const provider = await fetchZaiTeamLimits(
+    { zaiTeamApiKey: 'no-plan-key', zaiTeamOrganizationId: 'org-1', zaiTeamProjectId: 'proj-1' },
+    {
+      env: {},
+      now: () => Date.parse('2026-07-06T00:00:00Z'),
+      fetch: async () => ({ ok: true, status: 200, json: async () => ({ code: 500, msg: '当前用户不存在coding plan' }) })
+    }
+  );
+  assert.equal(provider.status, 'unavailable');
+  assert.deepEqual(provider.windows, []);
+});
+
 test('fetchZaiTeamLimits falls back to ZAI_TEAM_* env vars', async () => {
   const urls = [];
   const provider = await fetchZaiTeamLimits({}, {

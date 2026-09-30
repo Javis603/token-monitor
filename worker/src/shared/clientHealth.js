@@ -30,6 +30,7 @@
 
 const { REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
+const { DEVIN_CLI_SOURCE_CHECK_ID, DEVIN_DESKTOP_SOURCE_CHECK_ID } = require('./providers/devin/paths');
 
 const CLIENT_HEALTH_VERSION = 1;
 
@@ -168,14 +169,16 @@ function classifyClientSyncDetailCode({ client = '', text = '' } = {}) {
 // several paths of the same kind — Copilot's workspaceStorage has a variant per
 // platform, Kiro's IDE globalStorage has four — because "the VS Code workspace
 // storage is missing" is the useful statement, not which spelling was tried.
-// clientSourceRoots() in collector.js is where they are assigned;
+// clientSourceRoots() in clientSources.js is where they are assigned;
 // tests/shared/clientHealth.test.js fails if the two lists drift apart.
 const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   // Not a host path: a marker found inside a running WSL distro. A client
   // installed only there has no host directory, and its usage is merged into the
   // same periods, so it has to count as a source that exists.
   'wsl-home',
+  'amp-threads',
   'antigravity-cli-data',
+  'antigravity-extension-data',
   'antigravity-ide-source',
   'cherrystudio-transcripts',
   'claude-projects',
@@ -190,6 +193,9 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'copilot-data',
   'copilot-otel',
   'copilot-otel-exporter',
+  'copilot-session-store',
+  DEVIN_CLI_SOURCE_CHECK_ID,
+  DEVIN_DESKTOP_SOURCE_CHECK_ID,
   'droid-sessions',
   DSH_SOURCE_CHECK_ID,
   'grok-sessions',
@@ -206,12 +212,14 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'lmstudio-server-logs',
   'mimocode-data',
   'mimocode-orca-data',
+  'muse-sessions',
   'omp-sessions',
   'opencode-data',
   'openclaw-agents',
   'pi-sessions',
   'proma-sessions',
   'qodercn-db',
+  'qodercn-projects',
   REASONIX_SOURCE_CHECK_ID,
   'qwen-projects',
   'tokscale-antigravity-cache',

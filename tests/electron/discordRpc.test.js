@@ -16,6 +16,7 @@ function loadBuildPayload() {
       if (name === '@xhayper/discord-rpc') return { Client: class {} };
       if (name === '../shared/currency') return require('../../src/shared/currency');
       if (name === '../shared/compactTokens') return require('../../src/shared/compactTokens');
+      if (name === '../shared/clientCatalog') return require('../../src/shared/clientCatalog');
       return require(name);
     },
     setTimeout,
@@ -27,7 +28,7 @@ function loadBuildPayload() {
   return sandbox.module.exports.__buildPayload;
 }
 
-test('Discord Rich Presence uses Antigravity label and uploaded asset key', () => {
+test('Discord Rich Presence uses Antigravity label and asset key', () => {
   const buildPayload = loadBuildPayload();
   const payload = buildPayload({
     periods: {
@@ -44,7 +45,7 @@ test('Discord Rich Presence uses Antigravity label and uploaded asset key', () =
   assert.equal(payload.smallImageText, 'Antigravity');
 });
 
-test('Discord Rich Presence uses Cline label and uploaded asset key', () => {
+test('Discord Rich Presence uses Cline label and asset key', () => {
   const buildPayload = loadBuildPayload();
   const payload = buildPayload({
     periods: {
@@ -73,7 +74,7 @@ test('Discord Rich Presence follows localized compact token units', () => {
     }
   }, 'USD', 'localized', 'zh-TW');
 
-  assert.equal(payload.details, 'Claude · 1.5萬 tokens');
+  assert.equal(payload.details, 'Claude Code · 1.5萬 tokens');
 });
 
 test('Discord Rich Presence uses labels and asset keys for tracked clients', () => {
@@ -97,7 +98,7 @@ test('Discord Rich Presence uses labels and asset keys for tracked clients', () 
 
 test('Discord Rich Presence uses labels and asset keys for newer tracked clients', () => {
   const buildPayload = loadBuildPayload();
-  for (const [client, label] of [['pi', 'Pi'], ['zed', 'Zed'], ['kilo', 'Kilo'], ['commandcode', 'Command Code'], ['micode', 'MiMo Code'], ['zcode', 'ZCode'], ['kiro', 'Kiro'], ['codebuddy', 'CodeBuddy'], ['workbuddy', 'WorkBuddy'], ['reasonix', 'Reasonix'], ['dsh', 'DeepSeek Harness'], ['lmstudio', 'LM Studio']]) {
+  for (const [client, label] of [['pi', 'Pi'], ['zed', 'Zed'], ['kilo', 'Kilo'], ['commandcode', 'Command Code'], ['mimo', 'Xiaomi MiMo'], ['zcode', 'ZCode'], ['kiro', 'Kiro'], ['codebuddy', 'CodeBuddy'], ['workbuddy', 'WorkBuddy'], ['reasonix', 'Reasonix'], ['dsh', 'DeepSeek Harness'], ['lmstudio', 'LM Studio']]) {
     const payload = buildPayload({
       periods: {
         today: {
@@ -114,7 +115,7 @@ test('Discord Rich Presence uses labels and asset keys for newer tracked clients
   }
 });
 
-test('Discord Rich Presence uses the Unsloth label and uploaded asset key', () => {
+test('Discord Rich Presence uses the Unsloth label and asset key', () => {
   const payload = loadBuildPayload()({
     periods: { today: { totalTokens: 12345, costUsd: 0, clients: { unsloth: 12345 } } }
   });
@@ -136,4 +137,31 @@ test('Discord Rich Presence formats today cost with selected currency', () => {
   }, 'CNY');
 
   assert.equal(payload.state, '¥6.80 today');
+});
+
+test('Discord Rich Presence derives client labels and image keys from the catalog', () => {
+  const { CLIENT_CATALOG } = require('../../src/shared/clientCatalog');
+  const buildPayload = loadBuildPayload();
+  for (const { id, label } of CLIENT_CATALOG) {
+    const payload = buildPayload({
+      periods: { today: { totalTokens: 100, costUsd: 0, clients: { [id]: 100 } } }
+    });
+    assert.equal(payload.details, `${label} · 100 tokens`, id);
+    assert.equal(payload.smallImageKey, id);
+    assert.equal(payload.smallImageText, label);
+  }
+});
+
+test('Discord Rich Presence preserves non-catalog labels and omits unknown image keys', () => {
+  const buildPayload = loadBuildPayload();
+  const today = (id) => ({ periods: { today: { totalTokens: 100, costUsd: 0, clients: { [id]: 100 } } } });
+  const gemini = buildPayload(today('gemini'));
+  assert.equal(gemini.smallImageKey, 'gemini');
+  assert.equal(gemini.smallImageText, 'Gemini');
+  const unknown = buildPayload(today('other-client'));
+  assert.equal(unknown.details, 'other-client · 100 tokens');
+  assert.equal(unknown.smallImageKey, undefined);
+  const inheritedName = buildPayload(today('constructor'));
+  assert.equal(inheritedName.details, 'constructor · 100 tokens');
+  assert.equal(inheritedName.smallImageKey, undefined);
 });

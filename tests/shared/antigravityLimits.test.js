@@ -358,3 +358,299 @@ test('fetchAntigravityLimits keeps the OAuth plan when quota data is unavailable
   assert.equal(result[0].status, 'unavailable');
   assert.deepEqual(result[0].windows, []);
 });
+
+test('fetchAntigravityLimits preserves grouped OAuth quota over legacy 3-pool RPC fallback', async () => {
+  const result = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'same-account',
+      accountEmail: 'Same@Example.com',
+      enabled: true,
+      credentials: {
+        accessToken: 'token-same',
+        refreshToken: 'refresh-same',
+        expiresAt: Date.now() + 3600_000,
+        clientId: 'client',
+        clientSecret: 'secret',
+        projectId: 'project-same'
+      }
+    }]
+  }, {
+    antigravityProbe: async () => ({
+      accountPlan: 'Google AI Pro',
+      accountEmail: 'same@example.com',
+      sourceDetail: 'app',
+      pools: [
+        { name: 'Gemini Pro', remainingFraction: 1, resetTime: '2026-06-03T02:00:00Z' },
+        { name: 'Gemini Flash', remainingFraction: 1, resetTime: '2026-06-03T02:00:00Z' },
+        { name: 'Claude', remainingFraction: 1, resetTime: '2026-06-03T02:00:00Z' }
+      ]
+    }),
+    fetch: async (url) => {
+      if (url.endsWith(':loadCodeAssist')) {
+        return { ok: true, status: 200, json: async () => ({ currentTier: { id: 'standard-tier' } }) };
+      }
+      if (url.endsWith(':retrieveUserQuotaSummary')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            groups: [
+              {
+                displayName: 'Gemini Models',
+                buckets: [
+                  { displayName: '5-Hour Limit', window: 'session', remainingFraction: 0.65 },
+                  { displayName: 'Weekly Limit', window: 'weekly', remainingFraction: 0.92 }
+                ]
+              },
+              {
+                displayName: 'Claude/GPT Models',
+                buckets: [
+                  { displayName: '5-Hour Limit', window: 'session', remainingFraction: 0.80 },
+                  { displayName: 'Weekly Limit', window: 'weekly', remainingFraction: 0.85 }
+                ]
+              }
+            ]
+          })
+        };
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].accountEmail, 'same@example.com');
+  assert.equal(result[0].source, 'oauth');
+  assert.equal(result[0].windows.length, 4);
+  assert.equal(result[0].windows.some((w) => w.windowMinutes === 300), true);
+  assert.equal(result[0].windows[0].remainingPercent, 65);
+});
+
+test('fetchAntigravityLimits does not replace healthy OAuth quota when local RPC returns empty windows', async () => {
+  const result = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'same-account',
+      accountEmail: 'Same@Example.com',
+      enabled: true,
+      credentials: {
+        accessToken: 'token-same',
+        refreshToken: 'refresh-same',
+        expiresAt: Date.now() + 3600_000,
+        clientId: 'client',
+        clientSecret: 'secret',
+        projectId: 'project-same'
+      }
+    }]
+  }, {
+    // Probe returns a valid snapshot but with no windows — mapAntigravitySnapshot
+    // will set status: 'unavailable', which causes localIsHealthy to be false.
+    antigravityProbe: async () => ({
+      accountPlan: 'Google AI Pro',
+      accountEmail: 'same@example.com',
+      sourceDetail: 'app',
+      windows: []
+    }),
+    fetch: async (url) => {
+      if (url.endsWith(':loadCodeAssist')) {
+        return { ok: true, status: 200, json: async () => ({ currentTier: { id: 'standard-tier' } }) };
+      }
+      if (url.endsWith(':retrieveUserQuotaSummary')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            groups: [{
+              displayName: 'Gemini Models',
+              buckets: [{ displayName: 'Weekly Limit', window: 'weekly', remainingFraction: 0.41 }]
+            }]
+          })
+        };
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].accountEmail, 'same@example.com');
+  assert.equal(result[0].source, 'oauth');
+  assert.equal(result[0].status, 'ok');
+  assert.equal(result[0].windows[0].remainingPercent, 41);
+});
+
+test('fetchAntigravityLimits replaces grouped OAuth quota with a healthier grouped RPC snapshot', async () => {
+  // When both local RPC and OAuth return grouped windows, the live local result
+  // (localIsHealthy && localHasGrouped) should win — it is more real-time.
+  const result = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'same-account',
+      accountEmail: 'Same@Example.com',
+      enabled: true,
+      credentials: {
+        accessToken: 'token-same',
+        refreshToken: 'refresh-same',
+        expiresAt: Date.now() + 3600_000,
+        clientId: 'client',
+        clientSecret: 'secret',
+        projectId: 'project-same'
+      }
+    }]
+  }, {
+    antigravityProbe: async () => ({
+      accountPlan: 'Google AI Pro',
+      accountEmail: 'same@example.com',
+      sourceDetail: 'app',
+      windows: [
+        { name: 'Session', kind: 'session', remainingFraction: 0.55 },
+        { name: 'Weekly', kind: 'weekly', remainingFraction: 0.80 }
+      ]
+    }),
+    fetch: async (url) => {
+      if (url.endsWith(':loadCodeAssist')) {
+        return { ok: true, status: 200, json: async () => ({ currentTier: { id: 'standard-tier' } }) };
+      }
+      if (url.endsWith(':retrieveUserQuotaSummary')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            groups: [{
+              displayName: 'Gemini Models',
+              buckets: [
+                { displayName: '5-Hour Limit', window: 'session', remainingFraction: 0.30 },
+                { displayName: 'Weekly Limit', window: 'weekly', remainingFraction: 0.60 }
+              ]
+            }]
+          })
+        };
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].accountEmail, 'same@example.com');
+  // Local RPC wins because it is healthy and also has grouped windows.
+  assert.equal(result[0].source, 'rpc');
+  assert.equal(result[0].windows.some((w) => w.windowMinutes === 300), true);
+  assert.equal(result[0].windows[0].remainingPercent, 55); // remainingFraction: 0.55 → remainingPercent: 55
+});
+
+test('fetchAntigravityLimits unshifts local RPC when account does not match managed OAuth accounts', async () => {
+  const result = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'oauth-account',
+      accountEmail: 'oauth@example.com',
+      enabled: true,
+      credentials: {
+        accessToken: 'token-oauth',
+        refreshToken: 'refresh-oauth',
+        expiresAt: Date.now() + 3600_000,
+        clientId: 'client',
+        clientSecret: 'secret',
+        projectId: 'project-oauth'
+      }
+    }]
+  }, {
+    antigravityProbe: async () => ({
+      accountPlan: 'Google AI Pro',
+      accountEmail: 'local@example.com',
+      sourceDetail: 'app',
+      windows: [
+        { name: 'Gemini weekly', kind: 'weekly', remainingFraction: 0.73 }
+      ]
+    }),
+    fetch: async (url) => {
+      if (url.endsWith(':loadCodeAssist')) {
+        return { ok: true, status: 200, json: async () => ({ currentTier: { id: 'standard-tier' } }) };
+      }
+      if (url.endsWith(':retrieveUserQuotaSummary')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            groups: [{
+              displayName: 'Gemini Models',
+              buckets: [{ displayName: 'Weekly Limit', window: 'weekly', remainingFraction: 0.41 }]
+            }]
+          })
+        };
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }
+  });
+
+  assert.equal(result.length, 2);
+  assert.equal(result[0].accountEmail, 'local@example.com');
+  assert.equal(result[0].source, 'rpc');
+  assert.equal(result[1].accountEmail, 'oauth@example.com');
+  assert.equal(result[1].source, 'oauth');
+});
+
+test('fetchAntigravityLimits replaces OAuth quota when both local RPC and OAuth only have legacy pools', async () => {
+  const result = await fetchAntigravityLimits({
+    antigravityManagedAccounts: [{
+      id: 'same-account',
+      accountEmail: 'Same@Example.com',
+      enabled: true,
+      credentials: {
+        accessToken: 'token-same',
+        refreshToken: 'refresh-same',
+        expiresAt: Date.now() + 3600_000,
+        clientId: 'client',
+        clientSecret: 'secret',
+        projectId: 'project-same'
+      }
+    }]
+  }, {
+    antigravityProbe: async () => ({
+      accountPlan: 'Google AI Pro',
+      accountEmail: 'same@example.com',
+      sourceDetail: 'app',
+      pools: [
+        { name: 'Gemini Pro', remainingFraction: 0.8, resetTime: '2026-06-03T02:00:00Z' }
+      ]
+    }),
+    fetch: async (url) => {
+      if (url.endsWith(':loadCodeAssist')) {
+        return { ok: true, status: 200, json: async () => ({ currentTier: { id: 'standard-tier' } }) };
+      }
+      if (url.endsWith(':retrieveUserQuotaSummary')) {
+        return { ok: false, status: 404, json: async () => ({ error: 'Not Found' }) };
+      }
+      if (url.endsWith(':fetchAvailableModels')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            models: {
+              'gemini-2.5-pro': {
+                displayName: 'Gemini Pro',
+                quotaInfo: { remainingFraction: 0.4, resetTime: '2026-06-03T02:00:00Z' }
+              }
+            }
+          })
+        };
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }
+  });
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0].accountEmail, 'same@example.com');
+  // When OAuth also only has legacy pools, the live local RPC replaces OAuth
+  assert.equal(result[0].source, 'rpc');
+  assert.equal(result[0].windows[0].remainingPercent, 80);
+});
+
+test('fetchAntigravityLimits returns unauthorized when probe throws unauthorized status', async () => {
+  const result = await fetchAntigravityLimits({}, {
+    antigravityProbe: async () => {
+      const err = new Error('missing CSRF token');
+      err.status = 'unauthorized';
+      throw err;
+    }
+  });
+  assert.equal(result.provider, 'antigravity');
+  assert.equal(result.status, 'unauthorized');
+  assert.equal(result.windows.length, 0);
+});
+

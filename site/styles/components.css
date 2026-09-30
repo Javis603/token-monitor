@@ -1015,36 +1015,9 @@
 .tm-balance .lbl { color: var(--widget-muted); }
 .tm-balance .val { color: var(--widget-text); }
 
-/* per-session detail view */
+/* sessions view header: sort pill row above the live session list */
 .tm-crumb { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .tm-pill { padding: 6px 11px; border: 1px solid rgba(232,238,244,0.16); border-radius: 999px; background: rgba(255,255,255,0.045); color: var(--widget-muted); font-size: 11px; font-weight: 800; }
-.tm-back { color: var(--widget-muted); font-size: 14px; font-weight: 800; }
-
-/* detail page — one session, expanded; caret in a left gutter, body indented past it */
-.tm-sess { display: grid; grid-template-columns: auto 1fr; align-items: start; column-gap: 9px; padding: 2px 0 0; }
-.tm-caret { padding-top: 2px; color: #8b94a1; font-size: 10px; }
-.tm-caret::before { content: "\25BE"; }
-.tm-caret-closed::before { content: "\25B8"; }
-.tm-sess + .tm-sess { margin-top: 13px; }
-.tm-sess-body { min-width: 0; }
-.tm-sess-head { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 8px; }
-.tm-sess-title { min-width: 0; overflow: hidden; font-size: 14px; font-weight: 800; white-space: nowrap; text-overflow: ellipsis; }
-.tm-sess-title .you { color: #a99bf5; }
-.tm-sess-title .sep { margin: 0 5px; color: #8b94a1; }
-.tm-sess-val { font-size: 14px; font-weight: 800; text-align: right; white-space: nowrap; }
-/* time · turns · tools on the left, cost on the right — one line, like the app */
-.tm-sess-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 2px; color: #8b94a1; font-size: 11px; }
-.tm-sess-cost { color: #b8c0ce; }
-.tm-sess-body .tm-bar { margin-top: 6px; }
-.tm-replies { margin-top: 11px; padding-left: 12px; border-left: 1px solid rgba(232,238,244,0.12); }
-.tm-reply { margin-top: 10px; }
-.tm-reply:first-child { margin-top: 0; }
-.tm-reply-head { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 8px; }
-.tm-reply-name { font-size: 13px; font-weight: 800; }
-.tm-reply-val { font-size: 13px; font-weight: 800; text-align: right; white-space: nowrap; }
-.tm-reply-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-top: 2px; color: #8b94a1; font-size: 10.5px; }
-.tm-reply-cost { color: #b8c0ce; }
-.tm-tool-line { color: #8b94a1; font-size: 10.5px; line-height: 1.25; }
 
 /* terminal (always-dark window for shell commands) */
 .window.term { background: #0d1117; border-color: rgba(255,255,255,0.08); backdrop-filter: none; }
@@ -1080,7 +1053,7 @@
 .tool-chip img[src$="kilo.svg"],
 .tool-chip img[src$="kiro.svg"],
 .tool-chip img[src$="meta.svg"],
-.tool-chip img[src$="mimo-code.svg"],
+.tool-chip img[src$="mimo.svg"],
 .tool-chip img[src$="mistral.svg"],
 .tool-chip img[src$="kimi.svg"],
 .tool-chip img[src$="opencode.svg"],
@@ -1089,7 +1062,11 @@
 .tool-chip img[src$="workbuddy.svg"],
 .tool-chip img[src$="xai.svg"],
 .tool-chip img[src$="zai.svg"],
-.tool-chip img[src$="cline.svg"] {
+.tool-chip img[src$="cline.svg"],
+.tool-chip img[src$="devin.svg"],
+.tool-chip img[src$="droid.svg"],
+.tool-chip img[src$="ollama.svg"],
+.tool-chip img[src$="typesafe.svg"] {
   filter: brightness(0) invert(1);
   opacity: .88;
 }

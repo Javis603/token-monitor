@@ -7,7 +7,7 @@ const {
   macWidgetHistorySourceKey,
   resetMacWidgetHistoryCache,
   resolveMacWidgetHistory
-} = require('../../src/electron/macWidgetHistory');
+} = require('../../src/electron/macWidget/history');
 
 function history(label) {
   return { daily: [{ date: '2026-08-09', totalTokens: 1, label }], monthly: [], summary: { label } };
@@ -38,6 +38,16 @@ test('the source key identifies the Hub data store, not its bearer secret', () =
   assert.equal(
     macWidgetHistorySourceKey({ ...config, secret: 'old-secret' }),
     macWidgetHistorySourceKey({ ...config, secret: 'rotated-secret' })
+  );
+});
+
+test('iCloud is an in-process Widget history source with its own cache identity', () => {
+  const { completeHistorySource } = require('../../src/electron/historySource');
+  const icloud = { mode: 'sync', hubMode: 'icloud', icloudSync: { getHistory() {} } };
+  assert.equal(completeHistorySource(icloud), 'icloud');
+  assert.notEqual(
+    macWidgetHistorySourceKey(icloud),
+    macWidgetHistorySourceKey({ ...icloud, hubMode: 'client', hubUrl: 'http://hub' })
   );
 });
 

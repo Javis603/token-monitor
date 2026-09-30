@@ -1223,3 +1223,63 @@ test('a retained transient previous row seeds lastGood windows after restart', (
   assert.equal(row.windows[0].usedPercent, 20);
   runtime.stop();
 });
+
+test('unauthorized status clears lastGood so UI shows fresh failure state', async () => {
+  const results = [
+    [providerRow('antigravity', 'account', 'Account', { status: 'ok' })],
+    { error: new Error('unauthorized'), errorStatus: 'unauthorized' }
+  ];
+  const runtime = createLimitsRuntime({ limitProviders: ['antigravity'] }, runtimeDeps({
+    probeProvider: async () => {
+      const next = results.shift();
+      if (next.error) {
+        const err = next.error;
+        err.status = next.errorStatus;
+        throw err;
+      }
+      return next;
+    }
+  }));
+
+  await runtime.refresh({ provider: 'antigravity' }, 'startup');
+  let row = runtime.getSnapshot().providers[0];
+  assert.equal(row.status, 'ok');
+  assert.equal(row.windows.length, 1);
+
+  await runtime.refresh({ provider: 'antigravity' }, 'manual');
+  row = runtime.getSnapshot().providers[0];
+  assert.equal(row.status, 'unauthorized');
+  assert.equal(row.windows.length, 0);
+  runtime.stop();
+});
+
+test('transient status (unavailable) preserves lastGood windows so stale data is visible', async () => {
+  const results = [
+    [providerRow('antigravity', 'account', 'Account', { status: 'ok' })],
+    { error: new Error('unavailable'), errorStatus: 'unavailable' }
+  ];
+  const runtime = createLimitsRuntime({ limitProviders: ['antigravity'] }, runtimeDeps({
+    probeProvider: async () => {
+      const next = results.shift();
+      if (next.error) {
+        const err = next.error;
+        err.status = next.errorStatus;
+        throw err;
+      }
+      return next;
+    }
+  }));
+
+  await runtime.refresh({ provider: 'antigravity' }, 'startup');
+  let row = runtime.getSnapshot().providers[0];
+  assert.equal(row.status, 'ok');
+  assert.equal(row.windows.length, 1);
+  assert.equal(row.windows[0].usedPercent, 20);
+
+  await runtime.refresh({ provider: 'antigravity' }, 'manual');
+  row = runtime.getSnapshot().providers[0];
+  assert.equal(row.status, 'unavailable');
+  assert.equal(row.windows.length, 1);
+  assert.equal(row.windows[0].usedPercent, 20);
+  runtime.stop();
+});

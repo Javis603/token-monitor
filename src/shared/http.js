@@ -1,5 +1,6 @@
 ﻿'use strict';
 
+const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const { acceptsEncoding } = require('./hubProtocol');
 
@@ -73,9 +74,24 @@ function requestSecret(req) {
   return String(req.headers['x-token-monitor-secret'] || '').trim();
 }
 
-function isAuthorized(req, expectedSecret) {
-  if (!expectedSecret) return true;
-  return requestSecret(req) === expectedSecret;
+// Compare SHA-256 digests rather than the raw strings: timingSafeEqual needs
+// equal-length inputs, and hashing both sides first gives it that without
+// leaking the secret's length through a padded compare.
+function timingSafeEqualText(actual, expected) {
+  const digest = (value) => crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest();
+  return crypto.timingSafeEqual(digest(actual), digest(expected));
 }
 
-module.exports = { MAX_JSON_BODY_BYTES, isAuthorized, readJsonBody, sendJson, sendText };
+function isAuthorized(req, expectedSecret) {
+  if (!expectedSecret) return true;
+  return timingSafeEqualText(requestSecret(req), expectedSecret);
+}
+
+module.exports = {
+  MAX_JSON_BODY_BYTES,
+  isAuthorized,
+  readJsonBody,
+  sendJson,
+  sendText,
+  timingSafeEqualText
+};

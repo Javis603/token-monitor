@@ -7,7 +7,7 @@ const {
   DEFAULT_PROVISIONAL_LEASE_MS,
   DEFAULT_RECONCILE_MS,
   createMacWidgetDemandState
-} = require('../../src/electron/macWidgetDemand');
+} = require('../../src/electron/macWidget/demand');
 
 const BASE_CLOCK = 1_000_000;
 const MARKER_PATH = '/home/Library/Group Containers/group.com.tokenmonitor/widget-demand';

@@ -41,10 +41,63 @@ function fixtureProfiles() {
   };
 }
 
-test('reads fixture provisioning profiles on macOS', { skip: process.platform !== 'darwin' }, () => {
+test('reads realistic fixture provisioning profiles with opaque Apple metadata', () => {
   const { readProvisioningProfile } = require('../../scripts/macos-provisioning');
   assert.equal(readProvisioningProfile(appPath, { plainPlist: true }).teamIdentifier, 'ABCDE12345');
   assert.equal(readProvisioningProfile(widgetPath, { plainPlist: true }).applicationIdentifier, 'ABCDE12345.com.example.tokenmonitor.widget');
+});
+
+test('parses NSDate and NSData plist values that JSON converters reject', () => {
+  const { parsePlistXml } = require('../../scripts/macos-provisioning');
+  const document = parsePlistXml([
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<plist version="1.0">',
+    '<dict>',
+    '<key>ProvisionsAllDevices</key><true/>',
+    '<key>TeamIdentifier</key><array><string>ABCDE12345</string></array>',
+    '<key>CreationDate</key><date>2026-01-01T00:00:00Z</date>',
+    '<key>DeveloperCertificates</key><array><data>AQIDBA==</data></array>',
+    '<key>Entitlements</key><dict>',
+    '<key>com.apple.security.application-groups</key>',
+    '<array><string>group.com.example.tokenmonitor</string></array>',
+    '<key>get-task-allow</key><false/>',
+    '</dict>',
+    '</dict>',
+    '</plist>'
+  ].join(''));
+  assert.equal(document.TeamIdentifier[0], 'ABCDE12345');
+  assert.equal(document.ProvisionsAllDevices, true);
+  assert.equal(document.CreationDate, '2026-01-01T00:00:00Z');
+  assert.deepEqual(document.DeveloperCertificates, ['AQIDBA==']);
+  assert.equal(document.Entitlements['get-task-allow'], false);
+  assert.deepEqual(parseProvisioningProfileDocument(document).applicationGroups, ['group.com.example.tokenmonitor']);
+});
+
+test('decodes XML entities exactly once', () => {
+  const { parsePlistXml } = require('../../scripts/macos-provisioning');
+  const document = parsePlistXml([
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<plist version="1.0"><dict>',
+    '<key>direct</key><string>&lt;widget&gt; &quot;ok&quot; &apos;yes&apos; &amp;</string>',
+    '<key>nested</key><string>&amp;lt;widget&amp;gt;</string>',
+    '</dict></plist>'
+  ].join(''));
+  assert.equal(document.direct, '<widget> "ok" \'yes\' &');
+  assert.equal(document.nested, '&lt;widget&gt;');
+});
+
+test('parses ignorable XML markup without rewriting the source string', () => {
+  const { parsePlistXml } = require('../../scripts/macos-provisioning');
+  const document = parsePlistXml([
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<!-- before plist -->',
+    '<plist version="1.0"><dict>',
+    '<!-- before key --><key>TeamIdentifier</key>',
+    '<!-- before value --><array><string>ABCDE12345</string><!-- before close --></array>',
+    '</dict><!-- before plist close --></plist>'
+  ].join(''));
+  assert.deepEqual(document.TeamIdentifier, ['ABCDE12345']);
 });
 
 test('validates fixture app and Widget profiles for the production App Group', () => {

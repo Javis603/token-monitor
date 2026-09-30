@@ -462,3 +462,86 @@ test('the limits collector dispatches the WorkBuddy provider through the shared 
   assert.equal(summary.providers[0].windows[0].remaining, 15);
   assert.equal(summary.providers[0].balance.currency, 'CREDITS');
 });
+
+// The app owns the credential and sealed it, so signing in again cannot change
+// the outcome. The row has to name that instead of reusing the sign-in prompt.
+test('fetchWorkbuddyLimits names an app-sealed credential instead of asking for a sign-in', async () => {
+  let requests = 0;
+  const provider = await fetchWorkbuddyLimits(
+    {
+      workbuddyDesktopSessionEnabled: true,
+      workbuddyLocalSessionReason: 'encrypted'
+    },
+    {
+      env: {},
+      workbuddyFetch: async () => {
+        requests += 1;
+        return response({});
+      }
+    }
+  );
+
+  assert.equal(requests, 0);
+  assert.equal(provider.status, 'notConfigured');
+  assert.equal(provider.actionRequired, 'appSessionEncrypted');
+  assert.equal(provider.source, 'local');
+  assert.equal(provider.sourceDetail, 'app');
+  assert.doesNotMatch(JSON.stringify(provider), /encrypted"|envelope|eyJ/);
+});
+
+test('other WorkBuddy session read reasons keep the existing sign-in row', async () => {
+  const provider = await fetchWorkbuddyLimits(
+    {
+      workbuddyDesktopSessionEnabled: true,
+      workbuddyLocalSessionReason: 'absent'
+    },
+    {
+      env: {},
+      workbuddyFetch: async () => {
+        throw Object.assign(new Error('WorkBuddy app sign-in is required'), { status: 'notConfigured' });
+      }
+    }
+  );
+
+  assert.equal(provider.status, 'notConfigured');
+  assert.equal(Object.hasOwn(provider, 'actionRequired'), false);
+});
+
+test('a sealed app credential never outranks the explicit WorkBuddy billing token', async () => {
+  const provider = await fetchWorkbuddyLimits(
+    {
+      workbuddyAccessToken: 'explicit-token',
+      workbuddyUserId: 'user-1',
+      workbuddyDesktopSessionEnabled: true,
+      workbuddyLocalSessionReason: 'encrypted'
+    },
+    {
+      env: {},
+      fetch: async () => response({ data: { Response: { Data: { Accounts: [] } } } })
+    }
+  );
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(Object.hasOwn(provider, 'actionRequired'), false);
+});
+
+test('the sealed-credential hint stays inside the desktop provider lane', async () => {
+  let requests = 0;
+  const provider = await fetchWorkbuddyLimits(
+    {
+      workbuddyDesktopSessionEnabled: false,
+      workbuddyLocalSessionReason: 'encrypted'
+    },
+    {
+      env: {},
+      fetch: async () => {
+        requests += 1;
+        return response({});
+      }
+    }
+  );
+
+  assert.equal(requests, 0);
+  assert.equal(provider.status, 'notConfigured');
+  assert.equal(Object.hasOwn(provider, 'actionRequired'), false);
+});

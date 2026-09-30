@@ -31,6 +31,16 @@ const {
 
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile';
+// `cedar_ember` is Anthropic's codename for usage-limit reset grants — the
+// "reset coupon" issued for promos such as a model launch. Both usage
+// endpoints carry the block only when asked, so every usage request takes the
+// same flag; without it the key is present but null.
+const CLAUDE_RESET_GRANTS_QUERY = 'cedar_ember=1';
+// Anthropic gates `cedar_ember` on the client surface: the OAuth usage
+// endpoint answers `eligible: false, ineligible_reason: "surface"` — no
+// grants — unless the request presents as Claude Code. The credential is a
+// Claude Code OAuth token, so the usage call identifies as that CLI.
+const CLAUDE_CLI_USER_AGENT = 'claude-cli/2.1.280 (external, cli)';
 const CLAUDE_WEB_BASE_URL = 'https://claude.ai';
 const CLAUDE_OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
 const CLAUDE_OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
@@ -499,6 +509,48 @@ function claudeUsageCreditsWindow(usage) {
   };
 }
 
+// Usage-limit reset grants live in the `cedar_ember` block (see
+// CLAUDE_RESET_GRANTS_QUERY). Each grant is one coupon: a label saying why it
+// was issued, how many resets it still holds, the windows it clears, and when
+// it lapses. Grants with nothing left or already past `ends_at` are spent —
+// counting them would promise a reset the account can no longer use.
+function claudeResetCredits(usage, now) {
+  const block = usage?.cedar_ember;
+  if (!block || typeof block !== 'object') return null;
+  const nowMs = Number.isFinite(now) ? now : (typeof now === 'function' ? now() : Date.now());
+  const grants = (Array.isArray(block.grants) ? block.grants : [])
+    .filter((grant) => grant && Number(grant.resets_left) > 0)
+    .filter((grant) => {
+      const endsAt = Date.parse(grant.ends_at || '');
+      return !Number.isFinite(endsAt) || endsAt > nowMs;
+    });
+  if (grants.length === 0) return null;
+  const expirations = grants
+    .map((grant) => grant.ends_at)
+    .filter((value) => value && Number.isFinite(Date.parse(value)))
+    .sort((a, b) => Date.parse(a) - Date.parse(b));
+  return {
+    availableCount: grants.reduce((sum, grant) => sum + Math.floor(Number(grant.resets_left)), 0),
+    nextExpiresAt: expirations[0] || null,
+    expirations,
+    // Per-grant detail rides inside the same field so the renderer can show why
+    // each reset exists and what it covers — Codex credits are anonymous, these
+    // are not.
+    grants: grants.map((grant) => ({
+      id: grant.id,
+      label: grant.label,
+      resetsLeft: grant.resets_left,
+      resetsTotal: grant.resets_total,
+      startsAt: grant.starts_at,
+      endsAt: grant.ends_at,
+      clears: grant.clears,
+      usableNow: grant.usable_now,
+      useRequiresLimit: grant.use_requires_limit,
+      paused: grant.paused
+    }))
+  };
+}
+
 function mapClaudeUsageToProvider(usage, meta = {}) {
   const windows = [];
   const session = valueFromAliases(usage, ['five_hour', 'fiveHour']);
@@ -530,7 +582,8 @@ function mapClaudeUsageToProvider(usage, meta = {}) {
     source: meta.source || 'oauth',
     status: 'ok',
     updatedAt: meta.updatedAt,
-    windows
+    windows,
+    resetCredits: claudeResetCredits(usage, meta.now)
   });
 }
 
@@ -609,11 +662,11 @@ async function persistClaudeRefresh(credentials, refreshed, deps = {}) {
 }
 
 function callClaudeUsage(accessToken, deps = {}) {
-  return fetchJson(CLAUDE_USAGE_URL, {
+  return fetchJson(`${CLAUDE_USAGE_URL}?${CLAUDE_RESET_GRANTS_QUERY}`, {
     accept: 'application/json',
     authorization: `Bearer ${accessToken}`,
     'anthropic-beta': 'oauth-2025-04-20',
-    'user-agent': TOKEN_MONITOR_USER_AGENT
+    'user-agent': CLAUDE_CLI_USER_AGENT
   }, deps);
 }
 
@@ -634,6 +687,16 @@ function claudeWebOrganizations(body) {
 
 function claudeWebOrganizationId(organization) {
   return String(organization?.uuid || organization?.id || organization?.organization_uuid || '').trim();
+}
+
+function normalizeClaudeWebOrganizationId(value) {
+  const id = String(value || '').trim();
+  if (id && (id.length > 128 || !/^[\w-]+$/.test(id))) {
+    const error = new Error('Invalid Claude Web organization ID');
+    error.code = 'INVALID_CLAUDE_WEB_ORGANIZATION_ID';
+    throw error;
+  }
+  return id;
 }
 
 function claudeWebOrganizationCapabilities(organization) {
@@ -679,19 +742,39 @@ function claudeSeatTier(membership) {
   return PLAN_LABEL_ALIASES[plan] ? plan : '';
 }
 
-function selectClaudeWebOrganization(organizations) {
+function claudeWebEligibleOrganizations(organizations) {
   const candidates = organizations.filter((candidate) => claudeWebOrganizationId(candidate));
-  const hasChatCapability = (candidate) => (
-    claudeWebOrganizationCapabilities(candidate).has('chat')
-  );
-  const isApiOnly = (candidate) => {
+  const chat = candidates.filter((candidate) => claudeWebOrganizationCapabilities(candidate).has('chat'));
+  if (chat.length) return chat;
+  const nonApiOnly = candidates.filter((candidate) => {
     const capabilities = claudeWebOrganizationCapabilities(candidate);
-    return capabilities.size === 1 && capabilities.has('api');
-  };
-  return candidates.find(hasChatCapability)
-    || candidates.find((candidate) => !isApiOnly(candidate))
-    || candidates[0]
-    || null;
+    return capabilities.size !== 1 || !capabilities.has('api');
+  });
+  return nonApiOnly.length ? nonApiOnly : candidates;
+}
+
+function claudeWebOrganizationChoices(organizations) {
+  return claudeWebEligibleOrganizations(organizations).map((candidate) => ({
+    id: claudeWebOrganizationId(candidate),
+    name: String(candidate.name || candidate.display_name || '').trim(),
+    plan: claudeCapabilityPlan(claudeWebOrganizationCapabilities(candidate), candidate)
+  }));
+}
+
+function selectClaudeWebOrganization(organizations, selectedId = '') {
+  const eligible = claudeWebEligibleOrganizations(organizations);
+  if (selectedId) {
+    const selected = eligible.find((candidate) => claudeWebOrganizationId(candidate) === selectedId);
+    if (selected) return selected;
+    const error = errorWithStatus('unavailable', 'Selected Claude Web organization is no longer available');
+    error.code = 'CLAUDE_WEB_ORGANIZATION_NOT_FOUND';
+    throw error;
+  }
+  if (eligible.length <= 1) return eligible[0] || null;
+  const error = errorWithStatus('unavailable', 'Choose a Claude Web organization');
+  error.code = 'CLAUDE_WEB_ORGANIZATION_SELECTION_REQUIRED';
+  error.organizationChoices = claudeWebOrganizationChoices(organizations);
+  throw error;
 }
 
 // Exact matches only. Everything read off a membership is scoped to its own
@@ -715,6 +798,7 @@ function claudeWebMembership(accountBody, organizationId) {
 }
 
 function claudeStableIdentity(accountId, organizationId, accountEmail) {
+  if (accountId && organizationId) return `account:${accountId}:organization:${organizationId}`;
   if (accountId) return `account:${accountId}`;
   if (organizationId) return `organization:${organizationId}`;
   return accountEmail;
@@ -806,7 +890,9 @@ function cacheClaudeIdentity(fingerprint, entry, deps = {}) {
     ...entry,
     identity: {
       ...entry.identity,
-      ...(previous?.identity?.accountKey ? { accountKey: previous.identity.accountKey } : {})
+      ...(previous?.organizationId && previous.organizationId === entry.organizationId && previous.identity?.accountKey
+        ? { accountKey: previous.identity.accountKey }
+        : {})
     },
     resolvedAt: (deps.now || Date.now)()
   };
@@ -868,6 +954,24 @@ function createClaudeWebSession(cookie) {
     },
     initialCookie
   };
+}
+
+async function listClaudeWebOrganizations(cookie, deps = {}) {
+  const session = createClaudeWebSession(cookie);
+  const baseUrl = String(deps.claudeWebBaseUrl || CLAUDE_WEB_BASE_URL).replace(/\/$/, '');
+  const body = await fetchClaudeWebJson(`${baseUrl}/api/organizations`, session.headers(), deps, {
+    onResponse: async (response) => {
+      session.observe(response);
+      if (session.cookie() !== session.initialCookie) {
+        try {
+          await deps.onClaudeWebCookieRenewed?.({ previousCookie: session.initialCookie, cookie: session.cookie() });
+        } catch (error) {
+          deps.logger?.(`[limits] Claude Web session renewal could not be persisted: ${error.message}`);
+        }
+      }
+    }
+  });
+  return claudeWebOrganizationChoices(claudeWebOrganizations(body));
 }
 
 function claudeOauthIdentityFingerprint(credentials) {
@@ -1053,37 +1157,41 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
     onResponse: observeResponse
   });
   const fingerprint = claudeWebIdentityFingerprint(cookie);
+  const selectedId = normalizeClaudeWebOrganizationId(options.claudeWebOrganizationId);
   let context = claudeCachedIdentity(fingerprint, deps);
+  if (context && context.selectedOrganizationId !== selectedId) context = null;
   let usage;
   if (!context) {
     const stale = claudeCachedIdentity(fingerprint, deps, { allowStale: true });
     const organizationsBody = await fetchWebJson(`${baseUrl}/api/organizations`);
     const organizations = claudeWebOrganizations(organizationsBody);
-    const organization = selectClaudeWebOrganization(organizations);
+    const organization = selectClaudeWebOrganization(organizations, selectedId);
     const organizationId = claudeWebOrganizationId(organization);
     if (!organizationId) throw errorWithStatus('unavailable', 'Claude Web organization not found');
     usage = await fetchWebJson(
-      `${baseUrl}/api/organizations/${encodeURIComponent(organizationId)}/usage`
+      `${baseUrl}/api/organizations/${encodeURIComponent(organizationId)}/usage?${CLAUDE_RESET_GRANTS_QUERY}`
     );
     try {
       const accountBody = await fetchWebJson(`${baseUrl}/api/account`);
       context = cacheClaudeIdentity(fingerprint, {
         organizationId,
+        selectedOrganizationId: selectedId,
         identity: claudeWebAccountIdentity(accountBody, organization)
       }, deps);
     } catch (error) {
-      if (!stale) {
+      if (!stale || stale.organizationId !== organizationId) {
         throw claudeIdentityUnavailable('Claude Web usage is available, but stable account identity could not be resolved', error);
       }
       context = {
         organizationId,
+        selectedOrganizationId: selectedId,
         identity: stale.identity,
         resolvedAt: stale.resolvedAt
       };
     }
   } else {
     usage = await fetchWebJson(
-      `${baseUrl}/api/organizations/${encodeURIComponent(context.organizationId)}/usage`
+      `${baseUrl}/api/organizations/${encodeURIComponent(context.organizationId)}/usage?${CLAUDE_RESET_GRANTS_QUERY}`
     );
   }
   const renewedCookie = session.cookie();
@@ -1132,6 +1240,9 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
   const provider = mapClaudeUsageToProvider(usage, {
     ...context.identity,
     updatedAt: nowIso(nowMs),
+    // Pass the clock itself, not nowMs: the request is awaited between them,
+    // and a grant that lapses mid-flight must not still count as available.
+    now: deps.now,
     source: 'web'
   });
   if (!balance) return provider;
@@ -1284,6 +1395,7 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
       ...oauthIdentity,
       accountLabel: credentials.accountLabel,
       updatedAt: nowIso(nowMs),
+      now: deps.now,
       source: 'oauth'
     });
     return provider;
@@ -1815,10 +1927,12 @@ module.exports = {
   claudeWebCookie,
   delegatedClaudeRefresh,
   fetchClaudeLimits,
+  listClaudeWebOrganizations,
   isClaudeCliAuthenticated,
   mapClaudeCliUsageToProvider,
   mapClaudeUsageToProvider,
   normalizeClaudeWebCookieInput,
+  normalizeClaudeWebOrganizationId,
   parseClaudeCliUsageText,
   rankClaudeCredentialFiles,
   refreshClaudeAccessToken,

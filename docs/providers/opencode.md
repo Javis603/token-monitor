@@ -1,0 +1,44 @@
+---
+summary: "OpenCode provider notes: profile ownership, API/Web/local quota authority, ambient credentials and session detail."
+ids: [opencode]
+read_when:
+  - Changing OpenCode profiles, credential moves/merges or ambient auth discovery
+  - Changing OpenCode Go API, Web cookie or local usage fallback precedence
+  - Changing OpenCode session metadata/detail or cross-device aggregation
+---
+
+# OpenCode
+
+OpenCode limits can combine a Go API key, a Web cookie and local auth/usage. The provider treats them as components of named accounts rather than one global credential bag.
+
+## Profiles and credential ownership
+
+Each stored credential belongs to at most one profile. Move, rename, merge and remove operations are immutable transforms and refuse collisions that would overwrite another credential. Disabling a profile does not free its credentials for another account.
+
+The auto-detected API key is represented by a pinned reference, not copied blindly into every profile. A bound reference stops resolving when the machine key changes. An unclaimed ambient key may appear as its own account; binding it into a profile stops the duplicate observation. A configured profile always outranks ambient association.
+
+Profile names are user labels, not stable account identity. API keys and Web responses provide canonical identity where possible, and aggregation keeps aliases bounded when older observations used legacy labels.
+
+## Source authority
+
+Single-account mode resolves Go quota in API, then Web, then local order when local estimates are enabled. Multi-account profiles use API then Web only: the device-wide local ledger cannot be safely attributed to an individual profile. Each component remains authoritative only for the windows it actually answers. Supplemental windows fill only kinds not already answered by the selected Go source; merge order must not duplicate quota.
+
+An explicit credential is never replaced by an unrelated ambient credential. Remote credential errors surface only when the final single-account result remains unsuccessful. A lower-priority Web result, an accepted Zen response or an explicitly enabled local estimate may therefore mask an earlier API error. A missing Go subscription is not an authorization failure and may fall through quietly. Cancellation discards the scoped result rather than publishing an error row or papering it over with local estimates.
+
+Do not label a merged row `Web` when any local-only window remains in it. Source presentation follows the components that survived aggregation.
+
+## Sessions
+
+Session metadata and detail read OpenCode's local storage on demand. Keep profile/limits identity out of session attribution: local token sessions are not proof of the billing account selected by a credential profile.
+
+## Transport
+
+Every Web probe must receive the runtime-injected transport. Do not bypass proxy and Electron behavior by constructing provider-local fetch implicitly.
+
+## Verification
+
+Run the OpenCode profile, source-precedence and session tests when changing this note's scope:
+
+```bash
+node --test tests/shared/opencode*.test.js tests/shared/limitCollector.opencode.test.js tests/shared/sessionDetail.opencode.test.js
+```

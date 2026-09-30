@@ -11,6 +11,12 @@ const WORKBUDDY_PERSONAL_PATH = '/v2/billing/meter/get-user-resource';
 const WORKBUDDY_ENTERPRISE_PATH = '/v2/billing/meter/get-enterprise-user-usage';
 const WORKBUDDY_PRODUCT_CODE = 'p_tcaca';
 const WORKBUDDY_PERSONAL_RANGE_MS = 101 * 365 * 24 * 60 * 60 * 1000;
+// The Electron reader reports why the app-owned session is unusable. Only the
+// encrypted case changes the limits outcome — signing in again cannot fix a
+// credential the app sealed with a key Token Monitor does not hold — so it is
+// the one reason both layers have to agree on.
+const WORKBUDDY_SESSION_REASON_ENCRYPTED = 'encrypted';
+const WORKBUDDY_SESSION_ENCRYPTED_ACTION = 'appSessionEncrypted';
 
 // WorkBuddy is the only provider reading a credential this way: Trae needs the
 // same precedence but its own stricter cleaner, so this stays local rather than
@@ -349,7 +355,13 @@ async function fetchWorkbuddyLimits(options = {}, deps = {}) {
   const domain = workbuddyDomain(env, options);
   const departmentInfo = workbuddyDepartmentInfo(env, options);
   const accountType = cleanSecret(options.workbuddyAccountType);
+  const sessionReason = cleanSecret(options.workbuddyLocalSessionReason);
   const localAppUnsupported = !token && options.workbuddyDesktopSessionSupported === false;
+  // The app owns the credential and sealed it: the generic not-configured row
+  // would tell the user to sign in again, which cannot change this outcome.
+  const localAppSessionEncrypted = !token
+    && options.workbuddyDesktopSessionEnabled === true
+    && sessionReason === WORKBUDDY_SESSION_REASON_ENCRYPTED;
   // The desktop widget reads the session owned by the installed WorkBuddy
   // app. If an advanced/headless token is present, keep the explicit token
   // path deterministic rather than mixing its metadata with the app session.
@@ -366,6 +378,13 @@ async function fetchWorkbuddyLimits(options = {}, deps = {}) {
   };
 
   if (localAppUnsupported) return normalizeLimitProvider({ ...source, status: 'unavailable' });
+  if (localAppSessionEncrypted) {
+    return normalizeLimitProvider({
+      ...source,
+      status: 'notConfigured',
+      actionRequired: WORKBUDDY_SESSION_ENCRYPTED_ACTION
+    });
+  }
   if (!token && !useLocalApp) return normalizeLimitProvider({ ...source, status: 'notConfigured' });
 
   const endpoint = WORKBUDDY_DEFAULT_ENDPOINT;
@@ -438,6 +457,8 @@ module.exports = {
   WORKBUDDY_FETCH_TIMEOUT_MS,
   WORKBUDDY_PERSONAL_PATH,
   WORKBUDDY_PRODUCT_CODE,
+  WORKBUDDY_SESSION_ENCRYPTED_ACTION,
+  WORKBUDDY_SESSION_REASON_ENCRYPTED,
   fetchWorkbuddyLimits,
   parseEnterpriseUsage,
   parsePersonalAccounts,
