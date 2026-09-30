@@ -998,3 +998,32 @@ test('Home sorts a nearly drained balance ahead of a healthy percentage quota', 
   assert.equal(rows[0].key, 'deepseek');
   assert.equal(rows[1].key, 'claude');
 });
+
+for (const planStatus of ['active', 'expired']) {
+  test(`Home restores an ${planStatus} MiMo plan after hiding every item`, () => {
+    const usageItems = require('../../src/shared/limits/usageItems');
+    const provider = {
+      provider: 'mimo',
+      windows: [{ kind: 'billing', metric: 'credits', remaining: 4.2, currency: 'USD' }],
+      balance: { amount: 4.2, currency: 'USD', planStatus, planUsed: 25, planLimit: 100 }
+    };
+    const original = structuredClone(provider);
+    const render = (hidden) => homeLimitAccountsForProviders({
+      providers: [{ ...provider, windows: usageItems.visibleLimitUsageWindows(provider, hidden) }],
+      providerOptions: [{ id: 'mimo', label: 'MiMo' }],
+      enabledProviderIds: ['mimo'],
+      isUsageItemHidden: (id, item) => usageItems.hiddenLimitUsageItemSet(hidden, id).has(item)
+    });
+    assert.deepEqual(render({ mimo: 'monthly,credits' }), []);
+    const planOnly = render({ mimo: 'credits' });
+    assert.equal(planOnly.length, 1);
+    assert.deepEqual(planOnly[0].windows.map((window) => window.label), ['Token Plan']);
+    if (planStatus === 'active') assert.equal(planOnly[0].windows[0].remainingPercent, 75);
+    else assert.equal(planOnly[0].windows[0].planStatus, 'expired');
+    const restored = render({});
+    assert.equal(restored[0].windows.length, 2);
+    assert.equal(restored[0].windows[1].metric, 'credits');
+    assert.equal(restored[0].windows[1].remaining, 4.2);
+    assert.deepEqual(provider, original, 'rendering must preserve the balance used to restore the plan');
+  });
+}

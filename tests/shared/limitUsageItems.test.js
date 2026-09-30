@@ -157,3 +157,91 @@ test('visible windows drop the hidden item ids', () => {
   assert.deepEqual(labels({ other: 'session' }), ['5-hour', 'Daily', 'Weekly', 'MCP', 'Balance']);
   assert.deepEqual(usageItems.visibleLimitUsageWindows(null, { zai: 'session' }), []);
 });
+
+test('window classification normalizes text and gives additional pools precedence over money', () => {
+  for (const [window, expected] of [
+    [{ kind: ' WEEKLY ' }, 'weekly'],
+    [{ kind: 'session', metric: ' CREDITS ' }, 'credits'],
+    [{ kind: 'daily', metric: ' Spend ' }, 'spend'],
+    [{ kind: 'billing', metric: 'credits', additional: true }, 'additional'],
+    [{ kind: 'weekly', additional: false }, 'weekly'],
+    [{ kind: 'weekly', additional: 'true' }, 'weekly'],
+    [{ kind: 'future-window', metric: 'tokens' }, null],
+    [undefined, null],
+    ['weekly', null]
+  ]) {
+    assert.equal(usageItems.limitUsageItemIdForWindow(window), expected, JSON.stringify(window));
+  }
+});
+
+test('CSV normalization accepts arrays, deduplicates and rejects unsupported selections', () => {
+  const selections = Object.freeze([' WEEKLY ', 'session', 'weekly', '', null, 'SPEND', 'additional']);
+  assert.equal(usageItems.normalizeProviderItemCsv(selections, ' CODEX '), 'session,weekly');
+  assert.equal(usageItems.normalizeProviderItemCsv(' , WEEKLY, weekly, Session, ', 'codex'), 'session,weekly');
+  for (const value of [undefined, null, false, 0, {}, [], 'bogus']) {
+    assert.equal(usageItems.normalizeProviderItemCsv(value, 'codex'), '');
+  }
+  assert.equal(usageItems.normalizeProviderItemCsv('session,credits', 'unknown-provider'), '');
+  for (const provider of ['workbuddy', 'trae']) {
+    assert.equal(usageItems.normalizeProviderItemCsv('spend,credits', provider), 'credits');
+  }
+});
+
+test('setting normalization is immutable and idempotent across a JSON round trip', () => {
+  const input = Object.freeze({
+    ' CODEX ': Object.freeze([' WEEKLY ', 'session', 'weekly', 'additional']),
+    'DeepSeek': ' SPEND,credits,spend ',
+    'factory': 'additional,monthly',
+    'unknown-provider': 'weekly',
+    'claude': null
+  });
+  const expected = { codex: 'session,weekly', deepseek: 'credits,spend', factory: 'monthly,additional' };
+  const normalized = usageItems.normalizeLimitProviderHiddenItems(input);
+  assert.deepEqual(normalized, expected);
+  assert.deepEqual(usageItems.normalizeLimitProviderHiddenItems(JSON.parse(JSON.stringify(normalized))), expected);
+  assert.deepEqual(input[' CODEX '], [' WEEKLY ', 'session', 'weekly', 'additional']);
+});
+
+test('checklist and hidden-set callers cannot change subsequent reads', () => {
+  const checklist = usageItems.limitProviderUsageItems('codex');
+  const original = checklist.map((entry) => entry.id);
+  checklist.pop();
+  checklist.reverse();
+  assert.deepEqual(usageItems.limitProviderUsageItems(' CODEX ').map((entry) => entry.id), original);
+  assert.deepEqual(usageItems.limitProviderUsageItems('unknown-provider'), []);
+  const setting = Object.freeze({ codex: ' WEEKLY,session,weekly,bogus ' });
+  const hidden = usageItems.hiddenLimitUsageItemSet(setting, ' CODEX ');
+  assert.deepEqual([...hidden], ['weekly', 'session']);
+  hidden.clear();
+  assert.equal(usageItems.hiddenLimitUsageItemSet(setting, 'codex').size, 2);
+});
+
+test('toggles preserve other providers and restoring the last item removes only its own entry', () => {
+  const initial = Object.freeze({ codex: 'weekly', deepseek: 'credits' });
+  const hidden = usageItems.toggleLimitUsageItem(initial, ' CODEX ', 'session');
+  assert.deepEqual(hidden, { codex: 'session,weekly', deepseek: 'credits' });
+  assert.deepEqual(usageItems.toggleLimitUsageItem(hidden, 'codex', 'session'), initial);
+  assert.deepEqual(usageItems.toggleLimitUsageItem(initial, 'codex', 'weekly'), { deepseek: 'credits' });
+  for (const [provider, item] of [['codex', 'additional'], ['unknown-provider', 'weekly'], ['codex', 'bogus']]) {
+    assert.deepEqual(usageItems.toggleLimitUsageItem(initial, provider, item), initial);
+  }
+});
+
+test('filtering preserves input, window identity and future row types', () => {
+  const windows = Object.freeze([
+    Object.freeze({ kind: 'weekly', label: 'All models' }),
+    Object.freeze({ kind: 'weekly', label: 'Model-specific' }),
+    Object.freeze({ kind: 'billing', label: 'New monthly pool' }),
+    Object.freeze({ kind: 'future-window', label: 'New kind' })
+  ]);
+  const provider = Object.freeze({ provider: 'claude', windows });
+  const filtered = usageItems.visibleLimitUsageWindows(provider, { claude: 'weekly' });
+  assert.deepEqual(filtered, windows.slice(2));
+  assert.equal(filtered[0], windows[2]);
+  assert.equal(filtered[1], windows[3]);
+  const all = usageItems.visibleLimitUsageWindows(provider, {});
+  assert.notEqual(all, windows);
+  all.pop();
+  assert.equal(windows.length, 4);
+  assert.deepEqual(usageItems.visibleLimitUsageWindows({ provider: 'claude' }, { claude: 'weekly' }), []);
+});

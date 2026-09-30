@@ -212,6 +212,7 @@ test('the window picker does not offer items the provider hides', () => {
   try {
     const usageItemsApi = require('../../src/shared/limits/usageItems');
     const root = new Element('div');
+    const saves = [];
     const settings = {
       edgeDockItems: [{ type: 'limit', provider: 'codex' }],
       limitProviderHiddenItems: { codex: 'weekly' }
@@ -227,7 +228,7 @@ test('the window picker does not offer items the provider hides', () => {
       presentationApi: {},
       getSettings: () => settings,
       getStats: () => stats,
-      save: () => {},
+      save: (patch) => saves.push(patch),
       providerLabel: (id) => id,
       providerColor: () => '#fff',
       windowLabel: (record, quotaWindow) => limitWindowLabel(record.provider, quotaWindow),
@@ -241,6 +242,37 @@ test('the window picker does not offer items the provider hides', () => {
     assert.deepEqual(find(root, 'SELECT').children.map((option) => option.textContent), [
       'settings.edgeDock.window.auto', 'Session', 'Monthly'
     ]);
+
+    // A settings-only update must refresh the open picker against the same stats.
+    settings.limitProviderHiddenItems = { codex: 'session,weekly,monthly' };
+    composer.render();
+    assert.deepEqual(find(root, 'SELECT').children.map((option) => option.textContent), [
+      'settings.edgeDock.window.auto'
+    ]);
+    settings.limitProviderHiddenItems = {};
+    composer.render();
+    const restored = find(root, 'SELECT');
+    assert.deepEqual(restored.children.map((option) => option.textContent), [
+      'settings.edgeDock.window.auto', 'Session', 'Weekly', 'Monthly'
+    ]);
+
+    // An existing pin stays selected even while that choice is unavailable.
+    const weeklyKey = itemsApi.limitWindowKey(stats.limits.providers[0].windows[1]);
+    settings.edgeDockItems = [{ type: 'limit', provider: 'codex', windowKey: weeklyKey }];
+    settings.limitProviderHiddenItems = { codex: 'weekly' };
+    composer.render();
+    const pinned = find(root, 'SELECT');
+    assert.equal(pinned.value, weeklyKey);
+    assert.deepEqual(pinned.children.map((option) => option.textContent), [
+      'settings.edgeDock.window.auto', 'Session', 'Monthly', 'settings.edgeDock.window.unavailable'
+    ]);
+    settings.limitProviderHiddenItems = { claude: 'weekly' };
+    composer.render();
+    assert.equal(find(root, 'SELECT').value, weeklyKey);
+    assert.deepEqual(find(root, 'SELECT').children.map((option) => option.textContent), [
+      'settings.edgeDock.window.auto', 'Session', 'Weekly', 'Monthly'
+    ]);
+    assert.deepEqual(saves, [], 'visibility changes must not rewrite an existing pin');
   } finally {
     global.document = previousDocument;
   }

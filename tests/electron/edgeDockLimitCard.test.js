@@ -1146,3 +1146,107 @@ test('a stale row is dimmed by the page rule, not recoloured', () => {
   const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
   assert.doesNotMatch(dock, /freshness\.tone === 'stale'/, 'the card no longer paints staleness orange on its own');
 });
+
+for (const providerId of ['openrouter', 'deepseek', 'zai', 'zaiteam', 'thirdparty']) {
+  test(`${providerId} keeps spend and credits independently visible, including zero spend`, () => {
+    const provider = Object.freeze({
+      provider: providerId,
+      windows: Object.freeze([Object.freeze({
+        kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.34, currency: 'USD'
+      })]),
+      balance: Object.freeze({ amount: 12.34, currency: 'USD', todaySpend: 0, monthSpend: 0 })
+    });
+    const render = (hidden) => dockView({ limitProviderHiddenItems: { [providerId]: hidden } })
+      .renderProviderWindows(provider, '#123456');
+    const balanceOnly = render('spend');
+    assert.match(balanceOnly.text, /\$12\.34/);
+    assert.doesNotMatch(balanceOnly.text, /Spend/);
+    const spendOnly = render('credits');
+    assert.match(spendOnly.text, /Spend/);
+    assert.match(spendOnly.text, /Month \$0\.00/);
+    assert.doesNotMatch(spendOnly.text, /\$12\.34/);
+    assert.equal(render('credits,spend').children.length, 0);
+    const restored = render('');
+    assert.match(restored.text, /\$12\.34/);
+    assert.match(restored.text, /Spend/);
+  });
+}
+
+test('Typesafe token usage survives hiding credits and disappears with spend', () => {
+  const provider = {
+    provider: 'typesafe',
+    windows: [{ kind: 'billing', metric: 'credits', remaining: 4.2, currency: 'USD' }],
+    balance: { amount: 4.2, currency: 'USD' },
+    usageSummary: { period: 'month', totalTokens: 123, inputTokens: 100, outputTokens: 23, requests: 2 }
+  };
+  const render = (hidden) => dockView({ limitProviderHiddenItems: { typesafe: hidden } })
+    .renderProviderWindows(provider, '#123456');
+  assert.match(render('credits').text, /Tokens.*Month 123/);
+  assert.doesNotMatch(render('credits').text, /\$4\.20/);
+  assert.match(render('spend').text, /\$4\.20/);
+  assert.doesNotMatch(render('spend').text, /Tokens/);
+  assert.equal(render('credits,spend').children.length, 0);
+});
+
+for (const [name, used, expected] of [
+  ['zero', 0, '$0.00'],
+  ['numeric string', '0.25', '$0.25'],
+  ['missing', undefined, null],
+  ['null', null, null],
+  ['empty', '', null],
+  ['non-numeric', 'unknown', null],
+  ['infinite', Infinity, null]
+]) {
+  test(`standalone Cline spend handles a ${name} amount`, () => {
+    const provider = {
+      provider: 'cline',
+      windows: [
+        { kind: 'billing', metric: 'credits', remaining: 5, currency: 'CREDITS' },
+        { kind: 'billing', metric: 'spend', label: 'Usage credits', used, currency: 'USD' }
+      ]
+    };
+    const card = dockView({ limitProviderHiddenItems: { cline: 'credits' } })
+      .renderProviderWindows(provider, '#123456');
+    if (expected === null) {
+      assert.equal(card.children.length, 0, 'invalid spend must not produce a phantom row');
+    } else {
+      assert.equal(card.children.length, 1);
+      assert.match(card.text, /Usage credits/);
+      assert.ok(card.text.includes(expected));
+      assert.ok(card.find('limit-window-note'), 'spend alone is a note');
+      assert.equal(card.find('limit-meter'), null, 'spend alone must not draw a quota meter');
+    }
+  });
+}
+
+test('hiding OpenCode credits suppresses the legacy balance fallback without hiding monthly quota', () => {
+  const provider = Object.freeze({
+    provider: 'opencode',
+    balanceUsd: 9.87,
+    windows: Object.freeze([Object.freeze({ kind: 'billing', label: 'Monthly', remainingPercent: 60 })])
+  });
+  const view = dockView({ limitProviderHiddenItems: { opencode: 'credits' } });
+  const card = view.renderProviderWindows(provider, '#123456');
+  assert.match(card.text, /Monthly/);
+  assert.doesNotMatch(card.text, /Balance|9\.87/);
+  const restored = dockView().renderProviderWindows(provider, '#123456');
+  assert.match(restored.text, /9\.87/);
+});
+
+test('Codex additional-pool visibility remains independent when all canonical rows are hidden', () => {
+  const provider = {
+    provider: 'codex',
+    windows: [
+      { kind: 'session', label: 'Session', remainingPercent: 70 },
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 50 },
+      { kind: 'session', label: 'Extra pool', remainingPercent: 20, additional: true }
+    ]
+  };
+  const settings = { limitProviderHiddenItems: { codex: 'session,weekly,monthly,resets' } };
+  const visible = dockView(settings).renderProviderWindows(provider, '#123456');
+  assert.equal(visible.children.length, 1);
+  assert.match(visible.text, /Extra pool/);
+  const hidden = dockView({ ...settings, showCodexAdditionalLimits: false })
+    .renderProviderWindows(provider, '#123456');
+  assert.equal(hidden.children.length, 0);
+});
