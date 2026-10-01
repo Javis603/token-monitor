@@ -379,10 +379,13 @@ if (require.main === module) {
   const secret = String(args.secret || process.env.TOKEN_MONITOR_SECRET || '').trim();
   const staleAfterMs = Number(args.staleAfterMs || process.env.TOKEN_MONITOR_STALE_AFTER_MS || DEFAULT_STALE_AFTER_MS);
   const dataFile = String(args.dataFile || process.env.TOKEN_MONITOR_DATA_FILE || path.join(projectRoot(), 'data', 'devices.json'));
+  const syncSessionTitlesValue = args.syncSessionTitles ?? args['sync-session-titles'] ?? process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES;
+  const syncSessionTitles = syncSessionTitlesValue === true
+    || ['1', 'true', 'yes', 'on'].includes(String(syncSessionTitlesValue || '').trim().toLowerCase());
 
   const hub = createHub({
     port, host, secret, staleAfterMs, dataFile,
-    syncSessionTitles: process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES === '1'
+    syncSessionTitles
   });
   hub.start().then(() => {
     console.log(`Token Monitor hub listening on http://${hub.bindHost}:${port}`);

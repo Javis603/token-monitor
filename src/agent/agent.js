@@ -57,7 +57,10 @@ const limitsRefreshMs = normalizeLimitsRefreshMs(args.limitsRefreshMs || process
 const limitsRefreshMode = normalizeLimitsRefreshMode(args.limitsRefreshMode || process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE);
 const historyEnabled = parseBoolean(args.history ?? args.historyEnabled ?? process.env.TOKEN_MONITOR_HISTORY_ENABLED, true);
 const projectsEnabled = parseBoolean(args.projects ?? args.projectsEnabled ?? process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true);
-const syncSessionTitles = parseBoolean(process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES, false);
+const syncSessionTitles = parseBoolean(
+  args.syncSessionTitles ?? args['sync-session-titles'] ?? process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES,
+  false
+);
 const sessionUsageArchiveEnabled = parseBoolean(args.sessionArchive ?? args.sessionUsageArchiveEnabled ?? process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true);
 const wslScanEnabled = parseBoolean(args.wslScan ?? args.wslScanEnabled ?? process.env.TOKEN_MONITOR_WSL_SCAN, true);
 const opencodeLocalLimitsEnabled = parseBoolean(
