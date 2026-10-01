@@ -1177,7 +1177,8 @@ const everyShapeRecord = (provider) => ({
   ],
   balance: { amount: 12, currency: 'USD', todaySpend: 1, monthSpend: 4, giftBalance: 2, cashBalance: 10 },
   balanceUsd: 12,
-  resetCredits: { availableCount: 2, expirations: [new Date(Date.now() + 86_400_000).toISOString()] }
+  resetCredits: { availableCount: 2, expirations: [new Date(Date.now() + 86_400_000).toISOString()] },
+  usageSummary: { period: 'month', totalTokens: 1200, todayTokens: 100, weekTokens: 500, inputTokens: 700, outputTokens: 500, requests: 12, standardCost: 0.01 }
 });
 const legacyShapeRecord = (provider) => ({
   provider,
@@ -1187,6 +1188,23 @@ const legacyShapeRecord = (provider) => ({
   ],
   balance: { amount: 12, currency: 'USD' }
 });
+// Shapes that only some branches draw, each from a window the card renames or
+// a row it builds with no window at all: Antigravity's grouped pools, a
+// label-less credits pool and an unlimited quota with no balance; then an
+// expired plan with no window at all.
+const sparseShapeRecord = (provider) => ({
+  provider,
+  windows: [
+    { kind: 'session', label: 'Gemini Pro 5-hour', remainingPercent: 60 },
+    { kind: 'weekly', label: 'Gemini Pro weekly', remainingPercent: 50 },
+    { kind: 'billing', remaining: 5, limit: 10 },
+    { kind: 'billing', metric: 'credits', label: 'Quota', showMeter: false, detail: 'unlimited' }
+  ]
+});
+const windowlessRecord = (provider) => ({ provider, windows: [], balance: { currency: 'USD', planStatus: 'expired' } });
+const shapeRecords = (provider) => [
+  everyShapeRecord(provider), legacyShapeRecord(provider), sparseShapeRecord(provider), windowlessRecord(provider)
+];
 // Rows deliberately off the checklist: Codex's additional pools answer to
 // showCodexAdditionalLimits, and Antigravity's `--` Weekly stands in for a
 // payload with no weekly window at all.
@@ -1204,7 +1222,7 @@ test('every row any provider draws is a usage item the card can hide', () => {
   const problems = [];
   const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
   for (const provider of LIMIT_PROVIDER_IDS) {
-    for (const record of [everyShapeRecord(provider), legacyShapeRecord(provider)]) {
+    for (const record of shapeRecords(provider)) {
       for (const row of cardRows(dockView().renderProviderWindows(record, '#888888'))) {
         if ((offChecklist[provider] || []).includes(rowTitle(row))) continue;
         if (!row.dataset.usageItem) problems.push(`${provider}: row "${rowTitle(row)}" is not a usage item`);
@@ -1226,7 +1244,7 @@ test('with every item unchecked, Home and the picker keep no window the card dre
   const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
   const view = dockView();
   for (const provider of LIMIT_PROVIDER_IDS) {
-    for (const record of [everyShapeRecord(provider), legacyShapeRecord(provider)]) {
+    for (const record of shapeRecords(provider)) {
       const full = cardSnapshot(view.renderProviderWindows(record, '#888888'));
       const hidden = { [provider]: view.limitProviderUsageItems([record]).map((item) => item.id) };
       for (const [index, window] of record.windows.entries()) {
