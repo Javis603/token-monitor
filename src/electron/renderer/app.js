@@ -10676,11 +10676,6 @@ const LIMIT_PROVIDER_SETTINGS = {
     defaultValue: true
   }],
   codex: [{
-    key: 'showCodexAdditionalLimits',
-    titleKey: 'settings.limits.codexAdditionalLimits',
-    descKey: 'settings.limits.codexAdditionalLimitsDesc',
-    defaultValue: true
-  }, {
     key: 'codexResetForecastEnabled',
     titleKey: 'settings.limits.codexResetForecast',
     descKey: 'settings.limits.codexResetForecastDesc',

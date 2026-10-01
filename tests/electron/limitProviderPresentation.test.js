@@ -1372,7 +1372,9 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   // The edge dock builds the same rows from the same view, so the preference
   // reaches that renderer through its appearance projection.
   assert.match(main, /showCodexAdditionalLimits: source\.showCodexAdditionalLimits,/);
-  assert.match(app, /key: 'showCodexAdditionalLimits',[\s\S]*?defaultValue: true/);
+  // The switch is retired from the options in favour of the usage-items
+  // checklist; a stored `false` is carried over by codexAdditionalLimitsMigration.
+  assert.doesNotMatch(app, /key: 'showCodexAdditionalLimits'/);
   assert.match(renderProviderWindows, /settings\(\)\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
   assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);
   assert.match(renderProviderWindows, /additionalNode\.classList\.add\('limit-window-wide'\);/);

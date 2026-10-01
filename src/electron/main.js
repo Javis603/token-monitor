@@ -91,6 +91,7 @@ const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { actionWindowForEvent, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
+const { applyCodexAdditionalLimitsMigration } = require('./codexAdditionalLimitsMigration');
 const { createDeviceRuntime } = require('../shared/usage/deviceRuntime');
 const { externalAgentActive } = require('../shared/usage/agentPid');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
@@ -2609,6 +2610,16 @@ function seedInitialLimitProviders(summary) {
   });
 }
 
+// Runs on the presented stats rather than this device's record, so a Codex
+// account another device reports carries the switch over too.
+function migrateCodexAdditionalLimits(visibleStats) {
+  return applyCodexAdditionalLimitsMigration(visibleStats, {
+    settings,
+    saveSettings,
+    onPersisted: pushSettingsToRenderer
+  });
+}
+
 function loginItemEnabledHere() {
   if (!app.isPackaged) return false;
   // Electron login items only cover macOS/Windows; on Linux we manage an XDG
@@ -4545,6 +4556,7 @@ function sendPush(payload, options = {}) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
     const visibleStats = electronPresentationStats(latestStats);
+    migrateCodexAdditionalLimits(visibleStats);
     rendererPayload = {
       ...payload,
       data: { ...payload.data, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
@@ -5510,6 +5522,7 @@ function syncEdgeDock(rendererSettings) {
 function refreshLimitStatsPresentation() {
   if (!latestStats) return;
   const visibleStats = electronPresentationStats(latestStats);
+  migrateCodexAdditionalLimits(visibleStats);
   scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
   updateEdgeDockCells(visibleStats);
   updateTrayDisplay();

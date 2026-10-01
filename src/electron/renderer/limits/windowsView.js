@@ -879,6 +879,9 @@
       const session = codexCanonicalWindow(provider, 'session');
       const weekly = codexCanonicalWindow(provider, 'weekly');
       const monthly = codexCanonicalWindow(provider, 'billing');
+      // Each additional pool is a checklist item of its own. An install still
+      // carrying the retired `showCodexAdditionalLimits: false` hides them all
+      // until main carries the switch over (codexAdditionalLimitsMigration.js).
       const additionalWindows = settings()?.showCodexAdditionalLimits === false
         ? []
         : (provider.windows || []).filter((window) => window?.additional === true);
@@ -898,14 +901,10 @@
         windows.append(monthlyNode);
       }
       for (const additional of additionalWindows) {
-        const additionalNode = limitWindowNode(
-          codexAdditionalWindowLabel(additional, additionalWindows),
-          { ...additional, label: '' },
-          color,
-          0.78
-        );
-        // Additional pools answer to showCodexAdditionalLimits, not the checklist.
-        tagUsageItem(additionalNode, '');
+        const additionalLabel = codexAdditionalWindowLabel(additional, additionalWindows);
+        const additionalNode = limitWindowNode(additionalLabel, { ...additional, label: '' }, color, 0.78);
+        // Drawn from a relabelled copy, so the row is named by the pool itself.
+        tagUsageItem(additionalNode, usageItems.limitUsageItemId(additional), additionalLabel);
         additionalNode.classList.add('limit-window-wide');
         windows.append(additionalNode);
       }
