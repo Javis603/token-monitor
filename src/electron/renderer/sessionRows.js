@@ -68,22 +68,34 @@
       : `${pad2(date.getMonth() + 1)}/${pad2(date.getDate())} ${time}`;
   }
 
-  function sessionIdLabel(id) {
+  function sessionIds(id) {
     const raw = String(id || '').trim();
-    if (!raw) return '';
+    if (!raw) return [];
     const reasonixPrefix = raw.match(/^reasonix:/i);
     const reasonixLabel = reasonixPrefix ? raw.slice(reasonixPrefix[0].length) : raw;
-    if (reasonixLabel.toLowerCase().startsWith('reasonix-stats:')) return '';
-    if (reasonixPrefix) return reasonixLabel;
-    if (raw.toLowerCase().startsWith('reasonix-stats:')) return '';
+    if (reasonixLabel.toLowerCase().startsWith('reasonix-stats:')) return [];
+    if (reasonixPrefix) return [reasonixLabel];
+    if (raw.toLowerCase().startsWith('reasonix-stats:')) return [];
     const uuids = raw.match(/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}/gi) || [];
-    // Tokscale can merge resumed Codex rollouts into one session key. Keep that
-    // identity useful without exposing the rollout timestamps or join syntax.
-    if (uuids.length > 1) return uuids.join(' · ');
+    // Rollout filenames can contain multiple UUIDs. These are display labels,
+    // not proof that each UUID is a conversation identity.
+    if (uuids.length > 1) return uuids;
     const rollout = raw.match(/^rollout-\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}[:-]\d{2}-(.+)$/);
-    if (rollout) return uuids[0] || rollout[1];
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}/.test(raw)) return '';
-    return raw;
+    if (rollout) return [uuids[0] || rollout[1]];
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}[:-]\d{2}/.test(raw)) return [];
+    return [raw];
+  }
+
+  function sessionIdLabel(id) {
+    return sessionIds(id).join(' · ');
+  }
+
+  function sessionDetailIdLabel(client, id, detail) {
+    if (client !== 'codex') return sessionIdLabel(id);
+    const canonical = detail?.found === true ? detail.canonicalSessionId : '';
+    if (typeof canonical === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(canonical)) return canonical;
+    const candidates = sessionIds(id);
+    return candidates.length === 1 ? candidates[0] : '';
   }
 
   function sessionModelLabel(session) {
@@ -274,14 +286,17 @@
     // matching the detail reader's split without counting those hits twice.
     const cacheRead = Math.max(0, finiteNumber(session?.cacheHitTokens));
     const cacheInput = session?.cacheMissTokens ?? Math.max(0, finiteNumber(session?.promptTokens) - cacheRead);
+    // Positive explicit misses prove a cold-cache reading; prompt-only or
+    // all-zero counters do not prove that cache telemetry is available.
+    const cacheLabel = cacheHitLabel({
+      inputTokens: cacheInput,
+      cacheReadTokens: cacheRead,
+      cacheWriteTokens: session?.cacheWriteTokens
+    }) || (finiteNumber(session?.cacheMissTokens) > 0 ? '0%' : '');
     const subtitleParts = [
       sessionActivityLabel(session, now),
       messageLabel(session),
-      tokenDataUnavailable ? '' : cacheHitLabel({
-        inputTokens: cacheInput,
-        cacheReadTokens: cacheRead,
-        cacheWriteTokens: session?.cacheWriteTokens
-      }),
+      tokenDataUnavailable ? '' : cacheLabel,
       tokenRateLabel(session)
     ].filter(Boolean);
     // One derivation, not two: the boolean is a projection of the three-state
@@ -458,6 +473,7 @@
     sessionBreakdownIncomplete,
     sessionCacheHitPercent,
     sessionIdLabel,
+    sessionDetailIdLabel,
     // Exported for the edge dock's session rows: a card that shows the top
     // model reads a different name than the list's "N models" for the same
     // session, so both surfaces compose the label from this one helper.

@@ -4702,7 +4702,7 @@ function renderSessionDetail({ detail, loading, error } = {}) {
     back.append(arrow, heading);
   }
 
-  const idLabel = sessionRowsApi.sessionIdLabel(state.openSession?.sessionId);
+  const idLabel = sessionRowsApi.sessionDetailIdLabel(state.openSession?.client, state.openSession?.sessionId, detail);
   if (idLabel) container.append(sessionIdLine(idLabel));
 
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
@@ -4724,8 +4724,7 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   for (const row of rows) container.append(exchangeNode(row, max));
 }
 
-// The id the Sessions list no longer prints: selectable, with a copy button
-// for pasting into a client's resume command or an issue.
+// Copy the conversation identity, not a multi-UUID rollout filename.
 function sessionIdLine(idLabel) {
   const line = document.createElement('div');
   line.className = 'detail-session-id';

@@ -12,6 +12,7 @@ const {
   handleBreakdownRowKeydown,
   sessionBreakdownIncomplete,
   sessionIdLabel,
+  sessionDetailIdLabel,
   sessionModelTooltipEntries,
   sessionRowsForPeriod
 } = require('../../src/electron/renderer/sessionRows');
@@ -319,6 +320,35 @@ test('Codex merged rollout labels contain UUIDs only', () => {
   );
 });
 
+test('detail identities use Codex metadata without guessing a UUID position', () => {
+  const first = '01a084ff-20ff-7563-beb4-045b31e5a47a';
+  const second = '01a0876b-d178-7be2-a485-529a745ea1b0';
+  for (const [raw, expected] of [
+    [`rollout-2026-09-10T02-33-00-${first}_rollout-2026-09-10T02-40-00-${second}`, [first, second]],
+    [`rollout-2026-09-10T02-33-00-${first}`, [first]],
+    [first, [first]],
+    ['ordinary · label', ['ordinary · label']],
+    ['reasonix:ABC123', ['ABC123']],
+    ['reasonix-stats:/private/stats/day.jsonl', []],
+    ['reasonix:reasonix-stats:/private/stats/day.jsonl', []],
+    ['2026-09-10T02-33-00', []],
+    ['', []],
+    [undefined, []]
+  ]) {
+    assert.equal(sessionIdLabel(raw), expected.join(' · '));
+    assert.equal(sessionDetailIdLabel('claude', raw), expected.join(' · '));
+    assert.equal(sessionDetailIdLabel('codex', raw), expected.length === 1 ? expected[0] : '');
+  }
+  const raw = `rollout-2026-09-10T02-33-00-${first}_${second}`;
+  for (const canonicalSessionId of [first, second]) {
+    assert.equal(sessionDetailIdLabel('codex', raw, { found: true, canonicalSessionId }), canonicalSessionId);
+  }
+  for (const detail of [undefined, { found: false, canonicalSessionId: first },
+    { found: true }, { found: true, canonicalSessionId: `${first} · ${second}` }]) {
+    assert.equal(sessionDetailIdLabel('codex', raw, detail), '');
+  }
+});
+
 test('background review sessions collapse into one interactive aggregate row with newest-run context', () => {
   const rows = sessionRowsForPeriod({ sessions: {
     'codex:ordinary': {
@@ -556,7 +586,11 @@ test('Reasonix cache percentages use native hits and misses without double-count
     [{ promptTokens: 1000, cacheHitTokens: 900, cacheMissTokens: 0 }, '100%'],
     [{ promptTokens: 1000, cacheHitTokens: 0, cacheMissTokens: 500, cacheWriteTokens: 500 }, '0%'],
     [{ promptTokens: 1000, cacheHitTokens: 5, cacheMissTokens: 995 }, '<1%'],
-    [{ promptTokens: 1000, cacheHitTokens: 0, cacheMissTokens: 1000, cacheWriteTokens: 0 }, ''],
+    [{ promptTokens: 1000, cacheHitTokens: 0, cacheMissTokens: 1000, cacheWriteTokens: 0 }, '0%'],
+    [{ promptTokens: 1000, cacheHitTokens: 0, cacheMissTokens: 0, cacheWriteTokens: 0 }, ''],
+    [{ promptTokens: 1000 }, ''],
+    [{ cacheHitTokens: 0, cacheMissTokens: 0, cacheWriteTokens: 0 }, ''],
+    [{ tokenDataUnavailable: true, cacheHitTokens: 0, cacheMissTokens: 1000 }, ''],
     [{ tokenDataUnavailable: true, cacheHitTokens: 900, cacheMissTokens: 100 }, '']
   ]) {
     const [row] = sessionRowsForPeriod({ sessions: {} }, { nativeSessions: {
