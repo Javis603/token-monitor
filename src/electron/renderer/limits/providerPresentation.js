@@ -395,12 +395,16 @@
     if (diffMs < 45_000) {
       age = 'just now';
     } else {
-      const minutes = Math.round(diffMs / 60000);
+      // Floor every unit off the raw elapsed time. Rounding twice — minutes
+      // first, then the hours or days read off those already-rounded minutes —
+      // counts the same fraction twice, and an age can only be rounded down:
+      // 59.6 minutes is "59m ago", and 23.6 hours has not yet been a day.
+      const minutes = Math.max(1, Math.floor(diffMs / 60000));
       if (minutes < 60) {
         age = `${minutes}m ago`;
       } else {
-        const hours = Math.round(minutes / 60);
-        age = hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
+        const hours = Math.floor(minutes / 60);
+        age = hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
       }
     }
     return provider?.stale

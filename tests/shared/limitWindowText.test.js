@@ -121,6 +121,21 @@ test('freshness reads the same on every surface', () => {
   assert.equal(limitProviderFreshness({}, { nowMs }).text, 'Update unknown');
 });
 
+// An age is read as "how long ago", so it can only ever understate: rounding
+// the minutes and then rounding the hours read off those minutes counts the
+// same fraction twice and pushed a 23.6h-old reading past the day boundary it
+// had not reached yet.
+test('an age never rounds up into a unit the reading has not completed', () => {
+  const nowMs = Date.parse('2026-09-19T12:00:00.000Z');
+  const ago = (ms) => new Date(nowMs - ms).toISOString();
+
+  assert.equal(limitProviderFreshness({ updatedAt: ago(46_000) }, { nowMs }).age, '1m ago');
+  assert.equal(limitProviderFreshness({ updatedAt: ago(59.6 * 60_000) }, { nowMs }).age, '59m ago');
+  assert.equal(limitProviderFreshness({ updatedAt: ago(23.6 * 3_600_000) }, { nowMs }).age, '23h ago');
+  assert.equal(limitProviderFreshness({ updatedAt: ago(36 * 3_600_000) }, { nowMs }).age, '1d ago');
+  assert.equal(limitProviderFreshness({ updatedAt: ago(72 * 3_600_000) }, { nowMs }).age, '3d ago');
+});
+
 test('both renderers paint from the shared modules, not their own copies', () => {
   const app = read('src/electron/renderer/app.js');
   const dock = read('src/electron/renderer/edgeDock/dock.js');
