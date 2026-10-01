@@ -1159,3 +1159,85 @@ test('a MiMo plan drawn from the balance is the same item as the plan window', (
   const ids = dockView().limitProviderUsageItems([record]).map((item) => item.id);
   assert.ok(ids.includes(planKey), `expected ${planKey} in ${ids.join(', ')}`);
 });
+
+// Every provider branch must tag the rows it draws, or a row can be neither
+// listed nor hidden. One payload carrying every window shape the card knows —
+// and one with the metric-less shapes older hubs send — goes through each
+// branch.
+const everyShapeRecord = (provider) => ({
+  provider,
+  windows: [
+    { kind: 'session', label: 'Session', remainingPercent: 70 },
+    { kind: 'daily', label: 'Daily', remainingPercent: 65 },
+    { kind: 'weekly', label: 'Weekly', remainingPercent: 55 },
+    { kind: 'billing', label: 'Monthly', remainingPercent: 40 },
+    { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 8, limit: 20, currency: 'USD' },
+    { kind: 'billing', metric: 'spend', label: 'Usage credits', used: 3, limit: 10, currency: 'USD' },
+    { kind: 'session', label: 'Spark', remainingPercent: 90, additional: true }
+  ],
+  balance: { amount: 12, currency: 'USD', todaySpend: 1, monthSpend: 4, giftBalance: 2, cashBalance: 10 },
+  balanceUsd: 12,
+  resetCredits: { availableCount: 2, expirations: [new Date(Date.now() + 86_400_000).toISOString()] }
+});
+const legacyShapeRecord = (provider) => ({
+  provider,
+  windows: [
+    { kind: 'billing', label: 'Credits', remaining: 8, currency: 'USD' },
+    { kind: 'billing', label: 'Usage credits', used: 3, limit: 10, currency: 'USD' }
+  ],
+  balance: { amount: 12, currency: 'USD' }
+});
+// Rows deliberately off the checklist: Codex's additional pools answer to
+// showCodexAdditionalLimits, and Antigravity's `--` Weekly stands in for a
+// payload with no weekly window at all.
+const offChecklist = { codex: ['Spark'], antigravity: ['Weekly'] };
+// The whole drawn tree, so a window that only moves a meter still counts as
+// drawn. Tooltip anchor names count up on every render, so they are masked.
+const cardSnapshot = (node) => (node instanceof FakeElement
+  ? JSON.stringify([node.className, node.textContent, node.style, node.attributes, node.children.map(cardSnapshot)])
+    .replace(/--limit-detail-anchor-\d+/g, '--limit-detail-anchor')
+  : String(node?.textContent ?? ''));
+const cardRows = (card) => [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+const rowTitle = (row) => row.children[0]?.children[0]?.textContent || row.text;
+
+test('every row any provider draws is a usage item the card can hide', () => {
+  const problems = [];
+  const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
+  for (const provider of LIMIT_PROVIDER_IDS) {
+    for (const record of [everyShapeRecord(provider), legacyShapeRecord(provider)]) {
+      for (const row of cardRows(dockView().renderProviderWindows(record, '#888888'))) {
+        if ((offChecklist[provider] || []).includes(rowTitle(row))) continue;
+        if (!row.dataset.usageItem) problems.push(`${provider}: row "${rowTitle(row)}" is not a usage item`);
+      }
+      const hidden = { [provider]: dockView().limitProviderUsageItems([record]).map((item) => item.id) };
+      const left = cardRows(dockView({ limitProviderHiddenItems: hidden }).renderProviderWindows(record, '#888888'))
+        .filter((row) => row.dataset.usageItem);
+      for (const row of left) problems.push(`${provider}: unchecked row "${rowTitle(row)}" is still drawn`);
+    }
+  }
+  assert.deepEqual(problems, []);
+});
+
+// Home and the dock picker filter raw windows rather than card rows, so every
+// window the card draws from has to land on an item the card lists — or a row
+// gone from the card would stay on Home.
+test('with every item unchecked, Home and the picker keep no window the card drew from', () => {
+  const problems = [];
+  const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
+  const view = dockView();
+  for (const provider of LIMIT_PROVIDER_IDS) {
+    for (const record of [everyShapeRecord(provider), legacyShapeRecord(provider)]) {
+      const full = cardSnapshot(view.renderProviderWindows(record, '#888888'));
+      const hidden = { [provider]: view.limitProviderUsageItems([record]).map((item) => item.id) };
+      for (const [index, window] of record.windows.entries()) {
+        if (provider === 'codex' && window.additional) continue;
+        if (usageItems.isLimitWindowHidden(hidden, provider, window)) continue;
+        const without = { ...record, windows: record.windows.filter((_, other) => other !== index) };
+        if (cardSnapshot(view.renderProviderWindows(without, '#888888')) !== full) {
+          problems.push(`${provider}: the card draws "${window.label}" but Home would keep it`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(problems, []);
+});
