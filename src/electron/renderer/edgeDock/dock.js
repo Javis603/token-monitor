@@ -41,12 +41,7 @@ const { CLIENT_LABELS } = window.TokenMonitorClientCatalog;
 const sessionLive = window.TokenMonitorSessionLive;
 const sessionRowsApi = window.TokenMonitorSessionRows;
 const overflowText = window.TokenMonitorOverflowText.create({
-  document, window, prefersReducedMotion,
-  onLeave: () => requestAnimationFrame(() => {
-    if (!limitTooltip.pending || limitTooltipShouldHoldRender()) return;
-    limitTooltip.pending = false;
-    if (state.payload?.cell) renderBubble(state.payload);
-  })
+  document, window, prefersReducedMotion
 });
 const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
   spin: 'edge-dock-session-spin',
@@ -341,7 +336,6 @@ const limitTooltip = {
 };
 
 function limitTooltipShouldHoldRender() {
-  if (contentLayer.querySelector('.fade-overflow:hover')) return true;
   if (!limitTooltip.active) return false;
   return Boolean(contentLayer.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
 }
@@ -1187,6 +1181,7 @@ function sessionsContainer(sessions, options = {}) {
     // more information than the dot does.
     nameNode.append(stateMark(session, key, state));
     const title = el('span', 'edge-dock-session-title', name);
+    title.dataset.overflowKey = key;
     overflowText.bind(title);
     nameNode.append(title);
     // The glyph is decorative and its `title` only reaches pointer users, so the
@@ -1494,6 +1489,8 @@ function commitCard(card, cellId) {
   overflowText.refresh();
   const list = card.querySelector(CARD_SCROLL_SELECTOR);
   if (list) list.scrollTop = scrollTop;
+  // Measure reading targets only after mounting and restoring their scroll position.
+  if (sameCard) overflowText.preserveReading(previous, card);
   cardResetAnimator.animate(card, resetSnapshot);
 }
 

@@ -45,24 +45,30 @@
       element.scrollLeft = 0;
       update(element);
     }
-    function start(element) {
+    function start(element, event) {
+      // A replacement card may hand this element an existing hover motion.
+      if (motions.has(element)) return;
       stop(element);
       if (!enabled(element) || prefersReducedMotion()) return;
       const distance = distanceFor(element);
       if (distance <= 1) return;
       element.classList.add('is-hover-reading');
-      const motion = { delayId: 0, frameId: 0 };
+      const motion = {
+        element, delayId: 0, frameId: 0,
+        point: event ? { x: event.clientX, y: event.clientY } : null
+      };
       motions.set(element, motion);
       motion.delayId = window.setTimeout(() => {
         motion.delayId = 0;
         const startedAt = window.performance.now();
         const duration = Math.max(240, Math.min(8000, distance * 22));
-        element.classList.add('is-hover-scrolling');
+        motion.element.classList.add('is-hover-scrolling');
         const step = now => {
-          if (!element.isConnected || !enabled(element) || prefersReducedMotion()) { stop(element); return; }
+          const current = motion.element;
+          if (!current.isConnected || !enabled(current) || prefersReducedMotion()) { stop(current); return; }
           const progress = Math.min(1, (now - startedAt) / duration);
-          move(element, distance * progress);
-          update(element);
+          move(current, distance * progress);
+          update(current);
           motion.frameId = progress < 1 ? window.requestAnimationFrame(step) : 0;
         };
         motion.frameId = window.requestAnimationFrame(step);
@@ -77,8 +83,16 @@
       contents.set(element, content);
       element.classList.add('fade-overflow');
       element.title = element.textContent || '';
-      element.addEventListener('mouseenter', () => start(element));
-      element.addEventListener('mouseleave', () => { stop(element); onLeave(); });
+      element.addEventListener('mouseenter', event => start(element, event));
+      element.addEventListener('mousemove', event => {
+        const motion = motions.get(element);
+        if (motion) motion.point = { x: event.clientX, y: event.clientY };
+      });
+      element.addEventListener('mouseleave', () => {
+        const wasReading = element.classList.contains('is-hover-reading');
+        stop(element);
+        if (wasReading) onLeave();
+      });
       refresh();
     }
     function setText(element, value) {
@@ -92,11 +106,36 @@
       element.title = element.textContent;
       refresh();
     }
+    function preserveReading(previous, next) {
+      const replacements = new Map(Array.from(next.querySelectorAll('.fade-overflow'))
+        .filter(element => element.dataset.overflowKey)
+        .map(element => [element.dataset.overflowKey, element]));
+      for (const element of previous.querySelectorAll('.fade-overflow.is-hover-reading')) {
+        const replacement = replacements.get(element.dataset.overflowKey);
+        const motion = motions.get(element);
+        if (!motion || !replacement || !contents.has(replacement)
+          || replacement.textContent !== element.textContent) continue;
+        // A reordered or resized row may no longer contain the stationary pointer.
+        const rect = replacement.getBoundingClientRect();
+        if (motion.point && (motion.point.x < rect.left || motion.point.x >= rect.right
+          || motion.point.y < rect.top || motion.point.y >= rect.bottom)) continue;
+        stop(replacement);
+        motions.delete(element);
+        motions.set(replacement, motion);
+        motion.element = replacement;
+        replacement.classList.add('is-hover-reading');
+        replacement.classList.toggle('is-hover-scrolling', element.classList.contains('is-hover-scrolling'));
+        move(replacement, offsets.get(element) || 0);
+        element.classList.remove('is-hover-reading');
+        element.classList.remove('is-hover-scrolling');
+        update(replacement);
+      }
+    }
     window.addEventListener('resize', refresh);
     if (typeof window.ResizeObserver === 'function') {
       new window.ResizeObserver(refresh).observe(document.body);
     }
-    return { bind, setText, refresh, stop, update };
+    return { bind, setText, refresh, stop, update, preserveReading };
   }
   return { create };
 });

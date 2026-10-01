@@ -2035,11 +2035,13 @@ document.addEventListener('pointerdown', (event) => {
   }
 });
 
+let homeSessionRenderPending = false;
 const overflowText = window.TokenMonitorOverflowText.create({
   document, window, prefersReducedMotion,
   enabled: element => Boolean(element.closest('.session-mode, .home-session-row')),
   onLeave: () => requestAnimationFrame(() => {
-    if (state.breakdown === 'home' && visibleStatsSurface() === 'main' && state.stats) renderHome();
+    if (homeSessionRenderPending && state.breakdown === 'home'
+      && visibleStatsSurface() === 'main' && state.stats) renderHome();
   })
 });
 
@@ -5809,7 +5811,10 @@ function scheduleSessionStatusRepaint(period, incompleteHint = '') {
 
 function renderHomeSessionModule() {
   const current = els.homePanel?.querySelector('.home-module-session');
-  if (current && sessionTooltipShouldHoldRender()) return current;
+  if (current && sessionTooltipShouldHoldRender()) {
+    homeSessionRenderPending = true;
+    return current;
+  }
   const rows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, 5, { includeRunningBeyondCap: true });
   const runningCount = rows.filter((row) => window.TokenMonitorSessionLive.sessionActivityState(row) === 'running').length;
   const meta = runningCount > 0 ? t('home.runningSessions', { count: runningCount }) : '';
@@ -6327,7 +6332,11 @@ function renderHomeTrendsModule() {
 
 function renderHome() {
   if (!els.homePanel) return;
-  if (sessionTooltipShouldHoldRender()) return;
+  if (sessionTooltipShouldHoldRender()) {
+    homeSessionRenderPending = true;
+    return;
+  }
+  homeSessionRenderPending = false;
   // The previous scroller (and its ResizeObserver) is about to be replaced; drop the
   // observer so at most one is live. Keep the active tooltip visible while the
   // replacement heatmap reconnects it to the same date cell.

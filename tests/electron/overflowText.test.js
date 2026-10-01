@@ -21,7 +21,7 @@ function harness(distance = 7, options = {}) {
       set textContent(text) { this.children = [{ textContent: text }]; },
       append(...children) { this.children = children; },
       replaceChildren(...children) { this.children = children; },
-      getBoundingClientRect: () => ({ width: 200 + distance }),
+      getBoundingClientRect: () => ({ width: 200 + distance, left: 0, right: 200, top: 0, bottom: 20 }),
       classList: {
         add: value => classes.add(value), remove: value => classes.delete(value),
         contains: value => classes.has(value),
@@ -49,8 +49,9 @@ function harness(distance = 7, options = {}) {
     frames.clear();
     pending.forEach(callback => callback(at));
   }
-  function hover() {
-    element.mouseenter();
+  function hover(event) {
+    element.mouseenter(event);
+    assert.equal(timers.size, 1, 'hover schedules one delay timer');
     const [id, timer] = [...timers][0];
     assert.equal(timer.delay, 240);
     timers.delete(id);
@@ -81,8 +82,10 @@ test('unchanged text preserves pending, active and completed hover motion', () =
   const h = harness(100);
   const content = h.element.children[0];
   h.element.mouseenter();
+  assert.equal(h.timers.size, 1, 'reading starts with a scheduled hover delay');
   const delayId = [...h.timers.keys()][0];
   h.api.setText(h.element, h.element.textContent);
+  assert.equal(h.timers.size, 1, 'an unchanged title retains exactly one delay timer');
   assert.equal([...h.timers.keys()][0], delayId, 'an update during the hover delay keeps the original timer');
   h.element.mouseleave();
   h.hover();
@@ -116,9 +119,122 @@ test('leaving before the delay cancels motion, and reduced motion keeps the full
   assert.equal(releases, 1);
   reduced = true;
   h.element.mouseenter();
+  h.element.mouseleave();
   assert.equal(h.timers.size, 0);
+  assert.equal(releases, 1, 'reduced-motion hover exits do not notify a reading release');
   assert.equal(h.element.classList.contains('is-hover-reading'), false);
   assert.equal(h.element.title, h.element.textContent);
+});
+
+test('fitting titles do not notify a reading release on ordinary hover exits', () => {
+  let releases = 0;
+  const h = harness(0, { onLeave: () => { releases++; } });
+  h.element.mouseenter();
+  h.element.mouseleave();
+  assert.equal(h.timers.size, 0);
+  assert.equal(releases, 0);
+});
+
+for (const phase of ['pending', 'active', 'completed']) {
+  test(`card replacement preserves ${phase} reading motion through commitCard`, () => {
+    let releases = 0;
+    const h = harness(100, { onLeave: () => { releases++; } });
+    h.element.dataset.overflowKey = 'codex:session-1';
+    const pointer = { clientX: 50, clientY: 10 };
+    if (phase === 'pending') h.element.mouseenter(pointer);
+    else {
+      h.hover(pointer);
+      h.frame(phase === 'active' ? 500 : 2200);
+    }
+    const before = h.element.children[0].style.transform;
+    const delayId = [...h.timers.keys()][0];
+    const replacement = h.node();
+    replacement.textContent = h.element.textContent;
+    replacement.dataset.overflowKey = h.element.dataset.overflowKey;
+    replacement.isConnected = false;
+    h.api.bind(replacement);
+    // A detached replacement has no text geometry until commitCard mounts it.
+    const content = replacement.children[0];
+    content.getBoundingClientRect = () => ({ width: replacement.isConnected ? 300 : 0 });
+    const previousList = { scrollTop: 37 };
+    const nextList = { scrollTop: 0 };
+    function card(title, list) {
+      return {
+        dataset: { cellId: 'sessions', breakdownMode: 'session' },
+        querySelector: () => list,
+        querySelectorAll: selector => selector === '.fade-overflow'
+          || (selector === '.fade-overflow.is-hover-reading' && title.classList.contains('is-hover-reading'))
+          ? [title] : []
+      };
+    }
+    const previous = card(h.element, previousList);
+    const next = card(replacement, nextList);
+    const contentLayer = {
+      firstElementChild: previous,
+      querySelector: () => previous,
+      replaceChildren(value) {
+        assert.equal(value, next);
+        this.firstElementChild = value;
+        h.element.isConnected = false;
+        replacement.isConnected = true;
+        h.document.querySelectorAll = () => [replacement];
+      }
+    };
+    const dock = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+    const start = dock.indexOf('function commitCard(');
+    const end = dock.indexOf('\n}', start) + 2;
+    assert.ok(start >= 0 && end > start, 'commitCard source boundaries exist');
+    const context = {
+      contentLayer, overflowText: h.api, CARD_SCROLL_SELECTOR: '.scroll',
+      cardResetAnimator: { capture: () => null, animate() {} }
+    };
+    vm.runInNewContext(`${dock.slice(start, end)}\nglobalThis.commit = commitCard;`, context);
+    context.commit(next, 'sessions');
+    assert.equal(nextList.scrollTop, 37, 'reading handoff preserves card scroll position');
+    assert.equal(content.style.transform, before);
+    assert.equal(replacement.classList.contains('is-hover-reading'), true);
+    h.element.mouseleave();
+    replacement.mouseenter(pointer);
+    assert.equal(releases, 0, 'old-node leave does not interrupt the replacement');
+    if (phase === 'pending') {
+      assert.equal(h.timers.size, 1);
+      assert.equal([...h.timers.keys()][0], delayId, 'the original delay continues');
+      const timer = h.timers.get(delayId);
+      h.timers.delete(delayId);
+      timer.callback();
+      h.frame(500);
+      assert.notEqual(content.style.transform, before);
+    } else {
+      assert.equal(h.timers.size, 0, 'mouseenter on a replacement does not restart reading');
+      h.frame(1000);
+      if (phase === 'active') assert.notEqual(content.style.transform, before);
+      else assert.equal(content.style.transform, before, 'completed reading remains at the end');
+    }
+    replacement.mouseleave();
+    assert.equal(releases, 1);
+    assert.equal(content.style.transform, 'translate3d(0px, 0, 0)');
+  });
+}
+
+test('reading handoff ignores renamed, different and moved session titles', () => {
+  for (const change of ['title', 'key', 'position']) {
+    const h = harness(100);
+    h.element.dataset.overflowKey = 'codex:session-1';
+    if (change === 'position') h.hover({ clientX: 50, clientY: 10 });
+    else h.hover();
+    h.frame(500);
+    const replacement = h.node();
+    replacement.textContent = change === 'title' ? 'Renamed session' : h.element.textContent;
+    replacement.dataset.overflowKey = change === 'key' ? 'codex:session-2' : h.element.dataset.overflowKey;
+    h.api.bind(replacement);
+    replacement.getBoundingClientRect = () => ({ left: 0, right: 200, top: 40, bottom: 60, width: 200 });
+    h.api.preserveReading({ querySelectorAll: () => [h.element] }, { querySelectorAll: () => [replacement] });
+    assert.equal(replacement.classList.contains('is-hover-reading'), false);
+    assert.equal(replacement.children[0].style.transform, undefined);
+    h.element.isConnected = false;
+    h.frame(1000);
+    assert.equal(h.element.classList.contains('is-hover-reading'), false);
+  }
 });
 
 test('resizing clamps the offset and detaching a hovered title stops its animation', () => {
@@ -148,7 +264,10 @@ test('a token and cost update through updateRow keeps the hovered title moving',
     return selectors.get(selector);
   };
   const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-  const body = app.slice(app.indexOf('function updateRow('), app.indexOf('function applyHomeListMark('));
+  const start = app.indexOf('function updateRow(');
+  const end = app.indexOf('function applyHomeListMark(');
+  assert.ok(start >= 0 && end > start, 'updateRow source boundaries exist in the expected order');
+  const body = app.slice(start, end);
   const context = {
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
