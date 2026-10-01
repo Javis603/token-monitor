@@ -42,6 +42,9 @@ test('syncPayload keeps locally resolved conversation titles off the hub wire', 
           client: 'codex',
           sessionId: 'thread-a',
           title: 'Private local title',
+          preview: 'Private preview',
+          firstUserMessage: 'Private prompt',
+          name: 'Private name',
           sessionKind: 'background-review',
           totalTokens: 10
         }
@@ -65,9 +68,31 @@ test('syncPayload keeps locally resolved conversation titles off the hub wire', 
   const payload = syncPayload(summary);
 
   assert.equal(Object.hasOwn(payload.today.sessions['codex:thread-a'], 'title'), false);
+  assert.equal(Object.hasOwn(payload.today.sessions['codex:thread-a'], 'preview'), false);
+  assert.equal(Object.hasOwn(payload.today.sessions['codex:thread-a'], 'firstUserMessage'), false);
+  assert.equal(Object.hasOwn(payload.today.sessions['codex:thread-a'], 'name'), false);
   assert.equal(Object.hasOwn(payload.month.sessions['codex:thread-a'], 'title'), false);
   assert.equal(payload.today.sessions['codex:thread-a'].sessionKind, 'background-review');
   assert.equal(summary.today.sessions['codex:thread-a'].title, 'Private local title');
+});
+
+test('syncPayload includes session titles only when explicitly enabled', () => {
+  const summary = {
+    today: { sessions: { one: {
+      title: '  Session   title  ', preview: 'Private preview',
+      firstUserMessage: 'Private prompt', name: 'Private name'
+    } } },
+    month: { sessions: { one: { title: 'Session title' } } },
+    limits: { providers: [] }
+  };
+
+  const payload = syncPayload(summary, { syncSessionTitles: true });
+
+  assert.equal(payload.today.sessions.one.title, 'Session title');
+  assert.equal(Object.hasOwn(payload.today.sessions.one, 'preview'), false);
+  assert.equal(Object.hasOwn(payload.today.sessions.one, 'firstUserMessage'), false);
+  assert.equal(Object.hasOwn(payload.today.sessions.one, 'name'), false);
+  assert.equal(payload.month.sessions.one.title, 'Session title');
 });
 
 test('syncPayload bounds uploads by omitting all-time sessions', () => {

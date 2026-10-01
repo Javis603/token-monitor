@@ -135,7 +135,7 @@ function normalizeSessionKind(value) {
   return String(value || '').trim() === 'background-review' ? 'background-review' : '';
 }
 
-function stripSessionTextFromPeriod(period) {
+function stripSessionTextFromPeriod(period, { preserveSessionTitles = false } = {}) {
   if (!period || typeof period !== 'object' || !period.sessions || typeof period.sessions !== 'object') {
     return period;
   }
@@ -147,6 +147,7 @@ function stripSessionTextFromPeriod(period) {
     }
     const session = { ...value };
     for (const field of SESSION_TEXT_KEYS) delete session[field];
+    if (preserveSessionTitles && value.title) session.title = normalizeSessionTitle(value.title);
     sessions[key] = session;
   }
   return { ...period, sessions };
@@ -155,19 +156,19 @@ function stripSessionTextFromPeriod(period) {
 // Hub ingress is a trust boundary. Current clients already omit local titles,
 // but the Hub must enforce that privacy contract even for stale, buggy, or
 // custom senders. Preserve non-text classification such as `sessionKind`.
-function stripSessionTextFromDeviceRecord(record) {
+function stripSessionTextFromDeviceRecord(record, { preserveSessionTitles = false } = {}) {
   if (!record || typeof record !== 'object') return record;
   const stripped = { ...record };
   for (const periodName of PERIODS) {
     if (hasOwn(stripped, periodName)) {
-      stripped[periodName] = stripSessionTextFromPeriod(stripped[periodName]);
+      stripped[periodName] = stripSessionTextFromPeriod(stripped[periodName], { preserveSessionTitles });
     }
   }
   if (stripped.periods && typeof stripped.periods === 'object') {
     stripped.periods = { ...stripped.periods };
     for (const periodName of PERIODS) {
       if (hasOwn(stripped.periods, periodName)) {
-        stripped.periods[periodName] = stripSessionTextFromPeriod(stripped.periods[periodName]);
+        stripped.periods[periodName] = stripSessionTextFromPeriod(stripped.periods[periodName], { preserveSessionTitles });
       }
     }
   }

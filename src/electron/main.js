@@ -3239,6 +3239,7 @@ async function startEmbeddedHub() {
       port,
       host: '0.0.0.0',
       secret: settings.hubHostSecret,
+      syncSessionTitles: parseBoolean(process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES, false),
       dataFile: hubDataFile(),
       logger: { error: (err) => console.log(`[hub] ${err?.message || err}`) }
     });
