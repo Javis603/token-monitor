@@ -73,6 +73,12 @@
     return Object.values(counters).every((value) => value !== null) ? counters : null;
   }
 
+  function modelCounters(period) {
+    return Object.fromEntries(Object.entries(period.modelThroughput || {})
+      .map(([model, counters]) => [model, usageCounters(counters)])
+      .filter(([, counters]) => counters));
+  }
+
   // A period is cumulative, so its ratio is necessarily an average. Live rate is the ratio
   // of the counters added by one successful snapshot: the duration comes from the same
   // tokscale performance entries as both token numerators, never from watcher or wall time.
@@ -81,16 +87,21 @@
   function createLiveTokenRateTracker({ now = defaultNow } = {}) {
     if (typeof now !== 'function') throw new TypeError('now must be a function');
     let baseline = null;
+    let modelBaseline = null;
     let sample = null;
     let revision = 0;
 
     function reset(period) {
       baseline = period ? usageCounters(period) : null;
+      modelBaseline = period?.modelThroughput ? modelCounters(period) : null;
       sample = null;
     }
 
     function observe(period) {
       const current = usageCounters(period);
+      const models = period?.modelThroughput ? modelCounters(period) : null;
+      const previousModels = modelBaseline;
+      modelBaseline = models;
       if (!current) {
         baseline = null;
         sample = null;
@@ -120,6 +131,14 @@
         burn: tokenBurnPerMinute(delta),
         sampledAt: Number(now()) || 0,
         revision,
+        models: Object.entries(models || {}).flatMap(([model, counters]) => {
+          // No model map on an older producer means unavailable attribution, not zero.
+          if (!previousModels) return [];
+          const previous = previousModels[model] || { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+          const change = Object.fromEntries(Object.keys(counters).map((field) => [field, counters[field] - previous[field]]));
+          if (Object.values(change).some((value) => value < 0) || !(change.timedDurationMs > 0)) return [];
+          return [{ model, speed: tokenRatePerSecond(change), burn: tokenBurnPerMinute(change) }];
+        }),
         ...delta
       };
       return sample;
@@ -148,6 +167,7 @@
     const clearAfter = positiveNumber(clearMs);
     if (!clearAfter || clearAfter <= lifetime) throw new TypeError('clearMs must be greater than activeMs');
     const trackers = new Map();
+    const deviceNames = new Map();
     let revision = 0;
     let lastDisplaySample = null;
 
@@ -158,17 +178,19 @@
         const id = String(entry?.id || '').trim();
         if (!id || seen.has(id)) continue;
         seen.add(id);
-        result.push({ id, period: entry?.period });
+        result.push({ id, name: String(entry?.name || id), period: entry?.period });
       }
       return result;
     }
 
     function reset(entries = []) {
       trackers.clear();
+      deviceNames.clear();
       lastDisplaySample = null;
       for (const entry of normalizedEntries(entries)) {
         const tracker = createLiveTokenRateTracker({ now });
         tracker.reset(entry.period);
+        deviceNames.set(entry.id, entry.name);
         trackers.set(entry.id, tracker);
       }
     }
@@ -186,9 +208,11 @@
           changed = true;
         }
         trackers.delete(id);
+        deviceNames.delete(id);
       }
 
       for (const entry of nextEntries) {
+        deviceNames.set(entry.id, entry.name);
         let tracker = trackers.get(entry.id);
         if (!tracker) {
           tracker = createLiveTokenRateTracker({ now });
@@ -211,8 +235,11 @@
 
     function activeSamples() {
       const timestamp = Number(now()) || 0;
-      return [...trackers.values()]
-        .map((tracker) => tracker.getSample())
+      return [...trackers.entries()]
+        .map(([id, tracker]) => {
+          const sample = tracker.getSample();
+          return sample ? { ...sample, id, name: deviceNames.get(id) || id } : null;
+        })
         .filter((sample) => sample && timestamp < sample.sampledAt + lifetime);
     }
 
@@ -223,6 +250,19 @@
           speed: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.speed, 0)),
           burn: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.burn, 0)),
           sampledAt: Math.max(...samples.map((sample) => sample.sampledAt)),
+          models: [...samples.reduce((models, sample) => {
+            for (const entry of sample.models || []) {
+              const previous = models.get(entry.model) || { model: entry.model, speed: 0, burn: 0 };
+              previous.speed = cappedTokenRate(previous.speed + entry.speed);
+              previous.burn = cappedTokenRate(previous.burn + entry.burn);
+              models.set(entry.model, previous);
+            }
+            return models;
+          }, new Map()).values()],
+          ...(samples.some((sample) => sample.models?.length) ? {
+            devices: samples.filter((sample) => sample.models?.length)
+              .map(({ id, name, models }) => ({ id, name, models }))
+          } : {}),
           deviceCount: samples.length,
           revision
         };
@@ -262,7 +302,7 @@
       return {
         entries: devices
           .filter((device) => device?.stale !== true && device?.periods?.today && typeof device.periods.today === 'object')
-          .map((device) => ({ id: `device:${String(device.deviceId || 'unknown')}`, period: device.periods.today })),
+          .map((device) => ({ id: `device:${String(device.deviceId || 'unknown')}`, ...(device.hostname ? { name: device.hostname } : {}), period: device.periods.today })),
         source: 'devices:all'
       };
     }
@@ -277,11 +317,26 @@
       || (!syncMode ? stats?.periods?.today : null);
     if (localPeriod && typeof localPeriod === 'object') {
       return {
-        entries: [{ id: `device:${normalizedDeviceId}`, period: localPeriod }],
+        entries: [{ id: `device:${normalizedDeviceId}`, ...(localDevice?.hostname ? { name: localDevice.hostname } : {}), period: localPeriod }],
         source: `device:${normalizedDeviceId}`
       };
     }
     return { entries: [], source: `device:${normalizedDeviceId || 'unavailable'}` };
+  }
+
+  function liveTokenRateTooltipEntries(sample, mode, formatRate) {
+    const burn = mode === 'burn';
+    const unit = burn ? 'TPM' : 'tok/s';
+    const devices = sample?.devices || [];
+    const grouped = devices.length > 1;
+    const entries = [];
+    for (const [index, device] of devices.entries()) {
+      if (grouped) entries.push({ full: device.name, separated: index > 0 });
+      const models = device.models.slice().sort((a, b) =>
+        (burn ? b.burn - a.burn : b.speed - a.speed) || a.model.localeCompare(b.model));
+      entries.push(...models.map((entry) => [entry.model, `${formatRate(burn ? entry.burn : entry.speed)} ${unit}`]));
+    }
+    return devices.length ? entries : [];
   }
 
   function defaultNow() {
@@ -501,6 +556,7 @@
     createLiveTokenRateTracker,
     createTokenRateBoostController,
     isSharedSyncMode,
+    liveTokenRateTooltipEntries,
     positiveNumber,
     selectLiveTokenRatePeriods,
     tokenBurnPerMinute,

@@ -1078,7 +1078,10 @@ function formatLiveTokenRate(value) {
 function renderLiveTokenRate() {
   if (!els.liveTokenRate || !els.liveTokenRateValue) return;
   const enabled = state.settings?.showLiveTokenRate === true;
-  if (!enabled) resetLiveTokenRateTracking();
+  if (!enabled) {
+    resetLiveTokenRateTracking();
+    limitWindowsView.setDetailTooltip(els.liveTokenRate, null);
+  }
   els.liveTokenRate.classList.toggle('hidden', !enabled);
   syncLiveTokenRateFooterState();
   if (!enabled) return;
@@ -1101,8 +1104,22 @@ function renderLiveTokenRate() {
     ? (burn ? 'home.liveTokenRate.burnIdleTitle' : 'home.liveTokenRate.speedIdleTitle')
     : (burn ? 'home.liveTokenRate.burnTitle' : 'home.liveTokenRate.speedTitle');
   const label = t(labelKey, { value: text, scope });
-  els.liveTokenRate.title = label;
-  els.liveTokenRate.setAttribute('aria-label', label);
+  const detailEntries = tokenRateApi.liveTokenRateTooltipEntries(
+    sample, burn ? 'burn' : 'speed', formatLiveTokenRate
+  );
+  limitWindowsView.setDetailTooltip(els.liveTokenRate, detailEntries.length ? detailEntries : null);
+  for (const cell of els.liveTokenRate.querySelectorAll('.limit-detail-tooltip-row span:first-child')) {
+    const model = cell.textContent;
+    const icon = document.createElement('span');
+    icon.className = `row-icon row-icon-${modelVendorFor(model) || 'token-monitor'}`;
+    icon.setAttribute('aria-hidden', 'true');
+    cell.classList.add('live-token-rate-model-name');
+    cell.replaceChildren(icon, document.createTextNode(model));
+  }
+  if (!detailEntries.length) els.liveTokenRate.title = label;
+  els.liveTokenRate.setAttribute('aria-label', [label, ...detailEntries.map((entry) =>
+    Array.isArray(entry) ? entry.join(': ') : entry.full)].join(', '));
+  syncLiveTokenRateFooterState();
 
   if (!idle && sample.revision !== liveTokenRateRenderedRevision) {
     liveTokenRateRenderedRevision = sample.revision;

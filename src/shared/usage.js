@@ -204,6 +204,7 @@ function emptyPeriod() {
     timedTokens: 0,
     timedOutputTokens: 0,
     timedDurationMs: 0,
+    modelThroughput: Object.create(null),
     clients: {},
     clientCosts: {},
     clientCacheReads: {},
@@ -817,6 +818,15 @@ function normalizePeriod(input, options = {}) {
     Math.max(0, Math.round(asNumber(input.timedOutputTokens ?? input.timed_output_tokens ?? 0)))
   );
   period.timedDurationMs = Math.max(0, Math.round(asNumber(input.timedDurationMs ?? input.timed_duration_ms ?? 0)));
+  if (!input.modelThroughput) delete period.modelThroughput;
+  for (const [model, counters] of Object.entries(input.modelThroughput || {})) {
+    const key = normalizeModelName(model);
+    if (!key || !counters || typeof counters !== 'object') continue;
+    const fields = ['timedTokens', 'timedOutputTokens', 'timedDurationMs'];
+    if (!fields.every((field) => typeof counters[field] === 'number' && Number.isFinite(counters[field]) && counters[field] >= 0)) continue;
+    const target = period.modelThroughput[key] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+    for (const field of fields) target[field] += Math.round(counters[field]);
+  }
   if (input.clients && typeof input.clients === 'object') {
     for (const [client, value] of Object.entries(input.clients)) {
       const key = normalizeClientName(client);
@@ -961,6 +971,12 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   period.timedTokens += timedTokens;
   period.timedOutputTokens += timedOutputTokens;
   period.timedDurationMs += timedDurationMs;
+  if (model && timedDurationMs > 0) {
+    const counters = period.modelThroughput[model] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+    counters.timedTokens += timedTokens;
+    counters.timedOutputTokens += timedOutputTokens;
+    counters.timedDurationMs += timedDurationMs;
+  }
   if (client && tokens > 0) {
     period.clients[client] = (period.clients[client] || 0) + Math.round(tokens);
     if (cacheRead > 0) period.clientCacheReads[client] = (period.clientCacheReads[client] || 0) + cacheRead;
@@ -1473,6 +1489,10 @@ function addPeriodInto(target, source) {
   target.timedTokens += source.timedTokens;
   target.timedOutputTokens += source.timedOutputTokens;
   target.timedDurationMs += source.timedDurationMs;
+  for (const [model, counters] of Object.entries(source.modelThroughput || {})) {
+    const merged = target.modelThroughput[model] ||= { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+    for (const field of ['timedTokens', 'timedOutputTokens', 'timedDurationMs']) merged[field] += counters[field];
+  }
   for (const [client, tokens] of Object.entries(source.clients)) {
     target.clients[client] = (target.clients[client] || 0) + tokens;
     if (source.clientCacheReads?.[client]) target.clientCacheReads[client] = (target.clientCacheReads[client] || 0) + source.clientCacheReads[client];

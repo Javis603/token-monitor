@@ -963,3 +963,23 @@ html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge
   white-space: nowrap;
   border: 0;
 }
+
+.edge-dock-rate-details {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.16);
+  gap: 8px;
+}
+.edge-dock-rate-model {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) max-content;
+  align-items: center;
+  column-gap: 7px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.edge-dock-rate-model .edge-dock-mark { width: 12px; height: 12px; }
+.edge-dock-rate-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edge-dock-rate-model-value { color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.edge-dock-rate-device { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.edge-dock-rate-device.is-separated { margin-top: 2px; padding-top: 8px; border-top: 1px solid rgba(var(--line-rgb), 0.16); }

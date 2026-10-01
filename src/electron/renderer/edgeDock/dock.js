@@ -1313,6 +1313,29 @@ function appendLiveRate(card, head, cell) {
   if (cell.deviceCount > 1) secondary.push(t('edgeDock.rate.devices', { count: cell.deviceCount }));
   if (secondary.length) headline.append(el('span', '', secondary.join(' · ')));
   card.append(headline);
+  appendLiveRateDetails(card, cell);
+}
+
+function appendLiveRateDetails(card, cell) {
+  const entries = window.TokenMonitorTokenRate.liveTokenRateTooltipEntries(
+    { devices: cell.rateDevices }, cell.rateMode, formatRate
+  );
+  if (!entries.length) return;
+  const list = el('div', 'edge-dock-accounts edge-dock-clients edge-dock-rate-details');
+  for (const entry of entries) {
+    if (!Array.isArray(entry)) {
+      const heading = el('div', 'edge-dock-rate-device', entry.full);
+      heading.classList.toggle('is-separated', entry.separated === true);
+      list.append(heading);
+      continue;
+    }
+    const row = el('div', 'edge-dock-rate-model');
+    const mark = markNode(modelVendorFor(entry[0]) || 'token-monitor');
+    mark.setAttribute('aria-hidden', 'true');
+    row.append(mark, el('span', 'edge-dock-rate-model-name', entry[0]), el('span', 'edge-dock-rate-model-value', entry[1]));
+    list.append(row);
+  }
+  card.append(list);
 }
 
 function statCard(cell) {

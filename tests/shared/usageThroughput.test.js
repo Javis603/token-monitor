@@ -542,3 +542,20 @@ test('session throughput survives the wire, device aggregation and the today-del
   assert.equal(month.sessions['claude:s1'].timedOutputTokens, 428);
   assert.equal(month.sessions['claude:s1'].timedDurationMs, 8600);
 });
+
+test('model throughput survives extraction, normalization, merge, sync and exact deltas', () => {
+  const first = extractUsageFromTokscale({ entries: [tokscaleEntry(), tokscaleEntry({ model: 'untimed', performance: undefined })] });
+  assert.deepEqual(first.modelThroughput['claude-opus-4-8'], { timedTokens: 900, timedOutputTokens: 40, timedDurationMs: 1000 });
+  assert.equal(first.modelThroughput.untimed, undefined);
+  assert.deepEqual(normalizePeriod(first).modelThroughput, first.modelThroughput);
+  const fresh = extractUsageFromTokscale({ entries: [tokscaleEntry(), tokscaleEntry({ sessionId: 's2' })] });
+  const merged = mergePeriods(first, fresh);
+  assert.equal(merged.modelThroughput['claude-opus-4-8'].timedOutputTokens, 120);
+  const updated = applyPeriodDelta(merged, fresh, first);
+  assert.equal(updated.modelThroughput['claude-opus-4-8'].timedOutputTokens, 160);
+  const record = normalizeDeviceRecord({ deviceId: 'a', periods: { today: fresh } });
+  assert.deepEqual(record.periods.today.modelThroughput, fresh.modelThroughput);
+  const synced = normalizeDeviceRecord(JSON.parse(JSON.stringify(syncPayload(record))));
+  assert.deepEqual(synced.periods.today.modelThroughput, fresh.modelThroughput);
+  assert.equal(normalizePeriod({ totalTokens: 1 }).modelThroughput, undefined, 'legacy absence must not imply a zero baseline');
+});

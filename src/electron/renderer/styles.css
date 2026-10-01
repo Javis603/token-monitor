@@ -4654,7 +4654,8 @@ html.is-windows .limit-live-badge {
 .edge-dock-session-cache.limit-detail-tooltip-wrap,
 .session-models.limit-detail-tooltip-wrap,
 .row-title.limit-detail-tooltip-wrap,
-.detail-ex-title.limit-detail-tooltip-wrap {
+.detail-ex-title.limit-detail-tooltip-wrap,
+.live-token-rate.limit-detail-tooltip-wrap {
   display: inline-flex;
   width: auto;
   height: auto;
@@ -5272,6 +5273,36 @@ html.is-windows .limit-live-badge {
   line-height: 1;
   white-space: nowrap;
   transition: color 140ms ease, background-color 140ms ease, opacity 180ms ease;
+}
+.live-token-rate.limit-detail-tooltip-wrap {
+  position: absolute;
+  height: 30px;
+}
+.live-token-rate .limit-detail-tooltip {
+  right: auto;
+  left: anchor(center);
+  translate: -50% 0;
+  max-width: min(360px, calc(100vw - 24px));
+  grid-template-columns: minmax(0, 1fr) max-content;
+  column-gap: 16px;
+  row-gap: 6px;
+  padding: 10px 12px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+}
+.live-token-rate .limit-detail-tooltip::after {
+  right: auto;
+  left: calc(50% - 4px);
+}
+.live-token-rate .limit-detail-tooltip-row span:first-child {
+  text-align: left;
+}
+.live-token-rate .limit-detail-tooltip-full.is-caption {
+  max-width: 240px;
+  margin-bottom: 2px;
+  font-size: 10px;
 }
 .live-token-rate:hover {
   background: rgba(var(--overlay-rgb), 0.055);
@@ -7494,3 +7525,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 [hidden] {
   display: none !important;
 }
+
+.live-token-rate-model-name { display: flex; align-items: center; gap: 7px; }
+.live-token-rate-model-name .row-icon { width: 12px; height: 12px; flex: 0 0 12px; }

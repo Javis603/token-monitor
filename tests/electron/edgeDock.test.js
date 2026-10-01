@@ -2442,3 +2442,26 @@ test('the handle retreats into the edge while the window can still show it', () 
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   assert.match(dock, /root\.classList\.toggle\('is-handle-hidden', payload\.peeking !== true\);/);
 });
+
+test('live rate card renders device model rows with vendor marks and retains every row', () => {
+  const devices = [{ id: 'a', name: 'MacBook', models: [{ model: 'gpt-6.1-sol', speed: 40, burn: 2400 }] }, { id: 'b', name: 'Desktop', models: Array.from({ length: 8 }, (_, i) => ({ model: `claude-${i}`, speed: i + 1, burn: 60 * (i + 1) })) }];
+  const [cell] = buildEdgeDockCells({}, { items: [{ type: 'stat', metric: 'liveRate' }], liveRate: { speed: 76, burn: 4560, idle: false, devices } });
+  assert.deepEqual(cell.rateDevices, devices);
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const body = dock.slice(dock.indexOf('function appendLiveRateDetails('), dock.indexOf('function statCard('));
+  const node = (tag, className, text) => ({ tag, className, text, children: [], classList: { toggle() {} }, setAttribute() {}, append(...children) { this.children.push(...children); } });
+  const render = Function('window', 'el', 'formatRate', 'markNode', 'modelVendorFor', `return (${body})`)(
+    { TokenMonitorTokenRate: require('../../src/electron/renderer/tokenRatePresentation') }, node, String,
+    (vendor) => node('span', vendor), require('../../src/electron/renderer/usageCharts').modelVendorFor
+  );
+  const card = node('section', '');
+  render(card, cell);
+  const rows = card.children[0].children.filter((row) => row.className === 'edge-dock-rate-model');
+  assert.equal(rows.length, 9);
+  assert.equal(rows[0].children[0].className, 'codex');
+  assert.equal(rows[0].children[2].text, '40 tok/s');
+  assert.equal(rows[1].children[0].className, 'claude');
+  const empty = node('section', '');
+  render(empty, { rateDevices: [] });
+  assert.equal(empty.children.length, 0);
+});

@@ -497,6 +497,7 @@
         id: `stat:${metric}`,
         kind: 'stat',
         metric,
+        rateDevices: sample?.devices || [],
         rateMode: options.tokenRateMode === 'burn' ? 'burn' : 'speed',
         rate: sample ? (options.tokenRateMode === 'burn' ? sample.burn : sample.speed) : null,
         speed: sample ? finite(sample.speed) : null,

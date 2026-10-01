@@ -213,6 +213,7 @@ test('live rate sums active device samples, then retains the last value dimmed f
     burn: 6000,
     sampledAt: 100,
     expiresAt: 8100,
+    models: [],
     deviceCount: 1,
     revision: 1,
     idle: false
@@ -229,6 +230,7 @@ test('live rate sums active device samples, then retains the last value dimmed f
     burn: 13200,
     sampledAt: 200,
     expiresAt: 8100,
+    models: [],
     deviceCount: 2,
     revision: 2,
     idle: false
@@ -241,6 +243,7 @@ test('live rate sums active device samples, then retains the last value dimmed f
     burn: 7200,
     sampledAt: 200,
     expiresAt: 8200,
+    models: [],
     deviceCount: 1,
     revision: 2,
     idle: false
@@ -251,6 +254,7 @@ test('live rate sums active device samples, then retains the last value dimmed f
     burn: 7200,
     sampledAt: 200,
     expiresAt: 180200,
+    models: [],
     deviceCount: 1,
     revision: 2,
     idle: true
@@ -303,6 +307,7 @@ test('live rate retains the last aggregate when its only device becomes stale', 
       burn: 6000,
       sampledAt: 100,
       expiresAt: 180100,
+      models: [],
       deviceCount: 1,
       revision: 1,
       idle: true
@@ -648,7 +653,7 @@ test('the live footer rate is opt-in, accessible, and shares the persisted mode'
   assert.match(app, /idle && sample[\s\S]*home\.liveTokenRate\.burnIdleTitle[\s\S]*home\.liveTokenRate\.speedIdleTitle/);
   assert.match(app, /els\.liveTokenRate\.tabIndex = enabled && !obscured \? 0 : -1;/);
   assert.match(app, /els\.liveTokenRate\.setAttribute\('aria-hidden', String\(!enabled \|\| obscured\)\);/);
-  assert.match(app, /if \(!enabled\) resetLiveTokenRateTracking\(\);/);
+  assert.match(app, /if \(!enabled\) \{\s*resetLiveTokenRateTracking\(\);/);
   assert.match(app, /if \(state\.settings\.showLiveTokenRate\) observeLiveTokenRate\(state\.stats\);/);
   assert.match(app, /els\.liveTokenRateScopeInput\?\.addEventListener\('change'/);
   assert.match(css, /\.live-token-rate-icon[\s\S]*icons\/actions\/zap\.svg/);
@@ -794,4 +799,78 @@ test('the no-drag hit area stays scoped to the collapsed title states', () => {
   for (const { selector } of rules) {
     assert.match(selector, /\.shell\.title-(collapsed|icon-only)/, `unscoped no-drag rule: ${selector}`);
   }
+});
+
+function modelRatePeriod(models) {
+  const counters = { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+  for (const entry of Object.values(models)) {
+    for (const field of Object.keys(counters)) counters[field] += entry[field];
+  }
+  return { ...counters, modelThroughput: models };
+}
+
+test('live model rates use matched model deltas and follow device expiry', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now });
+  const base = modelRatePeriod({});
+  const a = modelRatePeriod({ alpha: { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000 }, beta: { timedTokens: 200, timedOutputTokens: 20, timedDurationMs: 2000 } });
+  const b = modelRatePeriod({ alpha: { timedTokens: 50, timedOutputTokens: 30, timedDurationMs: 1000 } });
+  tracker.reset([{ id: 'a', period: base }, { id: 'b', period: base }]);
+  now = 100;
+  tracker.observe([{ id: 'a', period: a }, { id: 'b', period: base }]);
+  assert.deepEqual(tracker.getSample().models, [{ model: 'alpha', speed: 40, burn: 6000 }, { model: 'beta', speed: 10, burn: 6000 }]);
+  assert.equal(tracker.getSample().speed, 20, 'headline remains the matched overall ratio');
+  now = 200;
+  tracker.observe([{ id: 'a', period: a }, { id: 'b', period: b }]);
+  assert.deepEqual(tracker.getSample().models, [{ model: 'alpha', speed: 70, burn: 9000 }, { model: 'beta', speed: 10, burn: 6000 }]);
+  tracker.observe([{ id: 'a', period: a }, { id: 'b', period: b }]);
+  now = 8100;
+  assert.deepEqual(tracker.getSample().models, [{ model: 'alpha', speed: 30, burn: 3000 }]);
+  now = 8200;
+  assert.equal(tracker.getSample().idle, true);
+  assert.deepEqual(tracker.getSample().models, [{ model: 'alpha', speed: 30, burn: 3000 }]);
+  now = 180200;
+  assert.equal(tracker.getSample(), null);
+});
+
+test('legacy model attribution establishes a baseline and regressions reset it', () => {
+  const tracker = tokenRateApi.createLiveTokenRateTracker({ now: () => 100 });
+  tracker.reset({ timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 });
+  const first = modelRatePeriod({ alpha: { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000 } });
+  assert.deepEqual(tracker.observe(first).models, []);
+  const second = modelRatePeriod({ alpha: { timedTokens: 200, timedOutputTokens: 60, timedDurationMs: 2000 } });
+  assert.deepEqual(tracker.observe(second).models, [{ model: 'alpha', speed: 20, burn: 6000 }]);
+  assert.equal(tracker.observe(first), null);
+  assert.deepEqual(tracker.observe(second).models, [{ model: 'alpha', speed: 20, burn: 6000 }]);
+});
+
+test('live hover keeps the same model separate by device and simplifies a single device', () => {
+  let now = 0;
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker({ now: () => now });
+  const base = modelRatePeriod({});
+  const a = modelRatePeriod({ alpha: { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000 } });
+  const b = modelRatePeriod({ alpha: { timedTokens: 100, timedOutputTokens: 30, timedDurationMs: 1000 } });
+  tracker.reset([{ id: 'a', name: 'MacBook', period: base }, { id: 'b', name: 'Desktop', period: base }]);
+  now = 100;
+  tracker.observe([{ id: 'a', name: 'MacBook', period: a }, { id: 'b', name: 'Desktop', period: base }]);
+  const entries = (mode = 'speed') => tokenRateApi.liveTokenRateTooltipEntries(tracker.getSample(), mode, String);
+  assert.deepEqual(entries(), [['alpha', '40 tok/s']]);
+  now = 200;
+  tracker.observe([{ id: 'a', name: 'MacBook', period: a }, { id: 'b', name: 'Desktop', period: b }]);
+  assert.deepEqual(entries(), [{ full: 'MacBook', separated: false }, ['alpha', '40 tok/s'], { full: 'Desktop', separated: true }, ['alpha', '30 tok/s']]);
+  assert.equal(tracker.getSample().speed, 70);
+  assert.deepEqual(entries('burn').filter(Array.isArray), [['alpha', '6000 TPM'], ['alpha', '6000 TPM']]);
+  now = 8100;
+  assert.deepEqual(entries(), [['alpha', '30 tok/s']]);
+  now = 8200;
+  assert.deepEqual(entries(), [['alpha', '30 tok/s']]);
+  now = 180200;
+  assert.deepEqual(entries(), []);
+});
+
+test('live rate selection carries device hostnames for hover groups', () => {
+  const period = modelRatePeriod({});
+  const stats = { devices: [{ deviceId: 'a', hostname: 'MacBook', periods: { today: period } }] };
+  assert.equal(tokenRateApi.selectLiveTokenRatePeriods(stats, 'a', 'host', 'all').entries[0].name, 'MacBook');
+  assert.equal(tokenRateApi.selectLiveTokenRatePeriods(stats, 'a', 'local', 'device').entries[0].name, 'MacBook');
 });
