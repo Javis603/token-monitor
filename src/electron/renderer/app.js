@@ -2434,10 +2434,9 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   const activityEl = row.querySelector('.row-activity');
   setHoverMarqueeText(activityEl, activity);
   activityEl.classList.toggle('hidden', !activity);
-  // A session's id is an identity, not a reading: it lives in Session Details,
-  // which leaves the list row its three lines of usage. Other rows (the review
-  // group's count, say) still print their detail here.
-  const shownDetail = kind === 'session' ? '' : detail;
+  // Move the id into Session Details only when the row can open them; clients
+  // without a detail reader still need their id here to distinguish sessions.
+  const shownDetail = kind === 'session' && interactive ? '' : detail;
   const detailEl = row.querySelector('.row-detail');
   setHoverMarqueeText(detailEl, shownDetail);
   detailEl.classList.toggle('hidden', !shownDetail);

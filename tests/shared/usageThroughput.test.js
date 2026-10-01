@@ -493,6 +493,28 @@ test('each session carries the throughput counters of its own entries', () => {
   assert.equal(untimed.timedDurationMs, 0);
 });
 
+test('session normalization caps malformed timed output at the session output total', () => {
+  for (const fields of [
+    { outputTokens: 10, timedOutputTokens: 1_000_000, timedDurationMs: 1000 },
+    { output_tokens: 10, timed_output_tokens: 1_000_000, timed_duration_ms: 1000 },
+    { timedOutputTokens: 1_000_000, timedDurationMs: 1000 },
+    { outputTokens: 10, timedOutputTokens: 1_000_000, timedDurationMs: 0 },
+    { outputTokens: 10, timedOutputTokens: 6, timedDurationMs: 1000 }
+  ]) {
+    const record = normalizeDeviceRecord({
+      deviceId: 'malformed',
+      periods: { today: { sessions: { 'claude:s1': { client: 'claude', sessionId: 's1', ...fields } } } }
+    });
+    const session = record.periods.today.sessions['claude:s1'];
+    const expected = session.timedDurationMs > 0
+      ? Math.min(session.outputTokens, fields.timedOutputTokens ?? fields.timed_output_tokens) : 0;
+    assert.equal(session.timedOutputTokens, expected);
+    const merged = aggregateDevices([record, { ...record, deviceId: 'second' }]).periods.today.sessions['claude:s1'];
+    assert.equal(merged.timedOutputTokens, expected * 2);
+    assert.ok(merged.timedOutputTokens <= merged.outputTokens);
+  }
+});
+
 test('session throughput survives the wire, device aggregation and the today-delta', () => {
   const session = { client: 'claude', sessionId: 's1', totalTokens: 1000, outputTokens: 40, timedOutputTokens: 40, timedDurationMs: 800 };
   const wire = normalizePeriod({ totalTokens: 1000, sessions: { 'claude:s1': session } });
@@ -505,7 +527,7 @@ test('session throughput survives the wire, device aggregation and the today-del
 
   const device = (deviceId, timedOutputTokens, timedDurationMs) => normalizeDeviceRecord({
     deviceId,
-    periods: { today: { totalTokens: 1000, sessions: { 'claude:s1': { ...session, timedOutputTokens, timedDurationMs } } } }
+    periods: { today: { totalTokens: 1000, sessions: { 'claude:s1': { ...session, outputTokens: timedOutputTokens, timedOutputTokens, timedDurationMs } } } }
   });
   const aggregate = aggregateDevices([device('a', 40, 800), device('b', 60, 400)]);
   const merged = aggregate.periods.today.sessions['claude:s1'];
@@ -513,9 +535,9 @@ test('session throughput survives the wire, device aggregation and the today-del
   assert.equal(merged.timedDurationMs, 1200);
 
   const month = applyPeriodDelta(
-    period({ sessions: { 'claude:s1': { ...session, timedOutputTokens: 400, timedDurationMs: 8000 } } }),
-    period({ sessions: { 'claude:s1': { ...session, timedOutputTokens: 66, timedDurationMs: 1500 } } }),
-    period({ sessions: { 'claude:s1': { ...session, timedOutputTokens: 38, timedDurationMs: 900 } } })
+    period({ sessions: { 'claude:s1': { ...session, outputTokens: 400, timedOutputTokens: 400, timedDurationMs: 8000 } } }),
+    period({ sessions: { 'claude:s1': { ...session, outputTokens: 70, timedOutputTokens: 66, timedDurationMs: 1500 } } }),
+    period({ sessions: { 'claude:s1': { ...session, outputTokens: 40, timedOutputTokens: 38, timedDurationMs: 900 } } })
   );
   assert.equal(month.sessions['claude:s1'].timedOutputTokens, 428);
   assert.equal(month.sessions['claude:s1'].timedDurationMs, 8600);

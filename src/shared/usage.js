@@ -666,7 +666,7 @@ function normalizeSession(input, fallbackKey) {
   session.messageCount = Math.max(0, Math.round(firstNumber(input, MESSAGE_COUNT_KEYS)));
   session.timedDurationMs = Math.max(0, Math.round(asNumber(input.timedDurationMs ?? input.timed_duration_ms ?? 0)));
   session.timedOutputTokens = session.timedDurationMs > 0
-    ? Math.max(0, Math.round(asNumber(input.timedOutputTokens ?? input.timed_output_tokens ?? 0)))
+    ? Math.min(session.outputTokens, Math.max(0, Math.round(asNumber(input.timedOutputTokens ?? input.timed_output_tokens ?? 0))))
     : 0;
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));

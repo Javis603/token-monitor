@@ -212,7 +212,10 @@
   // both counters at 0 and the row without a reading.
   function sessionTokenRate(session) {
     const durationMs = finiteNumber(session?.timedDurationMs);
-    const output = finiteNumber(session?.timedOutputTokens);
+    const output = Math.min(
+      Math.max(0, finiteNumber(session?.outputTokens)),
+      Math.max(0, finiteNumber(session?.timedOutputTokens))
+    );
     return durationMs > 0 && output > 0 ? output * 1000 / durationMs : 0;
   }
 
@@ -267,10 +270,18 @@
       'Reasonix',
       session?.model
     );
+    // Native Reasonix prompt totals include cache hits; explicit misses win,
+    // matching the detail reader's split without counting those hits twice.
+    const cacheRead = Math.max(0, finiteNumber(session?.cacheHitTokens));
+    const cacheInput = session?.cacheMissTokens ?? Math.max(0, finiteNumber(session?.promptTokens) - cacheRead);
     const subtitleParts = [
       sessionActivityLabel(session, now),
       messageLabel(session),
-      cacheHitLabel(session),
+      tokenDataUnavailable ? '' : cacheHitLabel({
+        inputTokens: cacheInput,
+        cacheReadTokens: cacheRead,
+        cacheWriteTokens: session?.cacheWriteTokens
+      }),
       tokenRateLabel(session)
     ].filter(Boolean);
     // One derivation, not two: the boolean is a projection of the three-state

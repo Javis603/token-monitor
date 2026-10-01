@@ -326,6 +326,45 @@ test('resizing clamps the offset and detaching a hovered title stops its animati
   assert.equal(h.element.classList.contains('is-hover-reading'), false);
 });
 
+test('updateRow moves ids into Details only for sessions that can open them', () => {
+  const h = harness();
+  const row = h.node();
+  const selectors = new Map();
+  row.querySelector = selector => {
+    if (!selectors.has(selector)) selectors.set(selector, h.node());
+    return selectors.get(selector);
+  };
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = app.indexOf('function updateRow(');
+  const end = app.indexOf('function applyHomeListMark(');
+  let interactive;
+  const context = {
+    state: { breakdown: 'session' }, rowWidth: () => 50,
+    iconKindFor: () => ({ kind: 'dot' }),
+    setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
+    updateRowContext() {}, updateRowLive() {}, applyBarScale() {},
+    sessionRowsApi: { applyBreakdownRowSemantics(_row, _head, options) { interactive = options.interactive; } },
+    t: key => key
+  };
+  vm.runInNewContext(`${app.slice(start, end)}\nglobalThis.update = updateRow;`, context);
+  for (const [client, sessionDetailAvailable, expectedInteractive] of [
+    ['claude', undefined, true], ['codex', undefined, true],
+    ['opencode', undefined, true], ['dsh', undefined, true],
+    ['cursor', undefined, false], ['copilot', undefined, false], ['zed', undefined, false],
+    ['reasonix', false, false], ['reasonix', true, true], ['reasonix', false, false]
+  ]) {
+    context.update(row, { name: 'Session', detail: 'session-id', kind: 'session', client, sessionDetailAvailable, value: 100 });
+    const detail = row.querySelector('.row-detail');
+    assert.equal(interactive, expectedInteractive, client);
+    assert.equal(detail.textContent, expectedInteractive ? '' : 'session-id', client);
+    assert.equal(detail.classList.contains('hidden'), expectedInteractive, client);
+  }
+  context.update(row, { name: 'Reviews', detail: '3 runs', kind: 'summary', reviewGroup: true, value: 100 });
+  assert.equal(interactive, true);
+  assert.equal(row.querySelector('.row-detail').textContent, '3 runs');
+  assert.equal(row.querySelector('.row-detail').classList.contains('hidden'), false);
+});
+
 test('a token and cost update through updateRow keeps the hovered title moving', () => {
   const h = harness(100);
   const selectors = new Map();

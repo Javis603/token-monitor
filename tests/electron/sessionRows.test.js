@@ -163,11 +163,11 @@ test('session activity ends with the session own generation speed after its cach
     outputTokens: 50
   };
   const rows = sessionRowsForPeriod({ sessions: {
-    'codex:timed': { ...base, sessionId: 'timed', title: 'timed', timedOutputTokens: 1_850, timedDurationMs: 20_000 },
+    'codex:timed': { ...base, sessionId: 'timed', title: 'timed', outputTokens: 1_850, timedOutputTokens: 1_850, timedDurationMs: 20_000 },
     // The client reported no durations: no reading rather than "0 tok/s".
     'codex:untimed': { ...base, sessionId: 'untimed', title: 'untimed' },
     // Untitled rows carry the same line as their subtitle.
-    'codex:untitled': { ...base, sessionId: 'untitled', timedOutputTokens: 1_200, timedDurationMs: 1_000 }
+    'codex:untitled': { ...base, sessionId: 'untitled', outputTokens: 1_200, timedOutputTokens: 1_200, timedDurationMs: 1_000 }
   } }, { clientLabels, clientColors, now });
   const byId = Object.fromEntries(rows.map((row) => [row.detail, row]));
 
@@ -176,6 +176,21 @@ test('session activity ends with the session own generation speed after its cach
   assert.equal(byId.timed.activity, '12:07 · 4 calls · 94% · 93 tok/s');
   assert.equal(byId.untimed.activity, '12:07 · 4 calls · 94%');
   assert.equal(byId.untitled.subtitle, '12:07 · 4 calls · 94% · 1,200 tok/s');
+});
+
+test('session rows bound malformed generation speeds even without wire normalization', () => {
+  for (const [outputTokens, timedOutputTokens, timedDurationMs, expected] of [
+    [10, 1_000_000, 1000, '10 tok/s'],
+    [10, 6, 1000, '6 tok/s'],
+    [undefined, 1_000_000, 1000, ''],
+    [10, -1, 1000, ''],
+    [10, 10, 0, '']
+  ]) {
+    const [row] = sessionRowsForPeriod({ sessions: {
+      'codex:malformed': { client: 'codex', sessionId: 'malformed', totalTokens: 100, outputTokens, timedOutputTokens, timedDurationMs }
+    } });
+    assert.equal(row.subtitle, expected);
+  }
 });
 
 test('multi-model sessions expose every model with its tokens and share of the session', () => {
@@ -500,7 +515,7 @@ test('Reasonix native rows reuse the common session schema without a native acco
   assert.equal(row.kind, 'session');
   assert.equal(row.key, 'session:reasonix:ABC123');
   assert.equal(row.name, 'Reasonix · deepseek/deepseek-v4-flash');
-  assert.equal(row.subtitle, '14:10 · 2 calls');
+  assert.equal(row.subtitle, '14:10 · 2 calls · 20%');
   assert.equal(row.detail, 'ABC123');
   assert.equal(row.value, 15382);
   assert.equal(row.cost, 0.25);
@@ -532,6 +547,24 @@ test('Reasonix native rows reuse the common session schema without a native acco
   }
   assert.equal(ordinary.name, 'Codex · gpt-5.6-luna');
   assert.equal(ordinary.subtitle, '14:09 · 1 call');
+});
+
+test('Reasonix cache percentages use native hits and misses without double-counting prompt tokens', () => {
+  for (const [fields, expected] of [
+    [{ promptTokens: 1000, cacheHitTokens: 900, cacheMissTokens: 80, cacheWriteTokens: 20 }, '90%'],
+    [{ promptTokens: 1000, cacheHitTokens: 900 }, '90%'],
+    [{ promptTokens: 1000, cacheHitTokens: 900, cacheMissTokens: 0 }, '100%'],
+    [{ promptTokens: 1000, cacheHitTokens: 0, cacheMissTokens: 500, cacheWriteTokens: 500 }, '0%'],
+    [{ promptTokens: 1000, cacheHitTokens: 5, cacheMissTokens: 995 }, '<1%'],
+    [{ promptTokens: 1000, cacheHitTokens: 0, cacheMissTokens: 1000, cacheWriteTokens: 0 }, ''],
+    [{ tokenDataUnavailable: true, cacheHitTokens: 900, cacheMissTokens: 100 }, '']
+  ]) {
+    const [row] = sessionRowsForPeriod({ sessions: {} }, { nativeSessions: {
+      'reasonix:cache': { client: 'reasonix', sessionId: 'reasonix:cache', totalTokens: 1000, ...fields }
+    } });
+    assert.equal(row.subtitle, expected);
+    assert.equal(row.sessionDetailAvailable, false, 'cache data does not enable per-turn details');
+  }
 });
 
 test('Reasonix native rows omit turns from the compact subtitle when turns are unavailable', () => {
