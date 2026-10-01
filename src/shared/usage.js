@@ -493,6 +493,12 @@ function emptySession(client, id) {
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
     reasoningTokens: 0,
+    // The session's share of the period throughput counters: raw sums, gated
+    // per tokscale entry exactly as the period's are, so a row divides them at
+    // display time into its own tok/s. 0/0 means the client reported no
+    // durations for this session, not that it generated nothing.
+    timedOutputTokens: 0,
+    timedDurationMs: 0,
     startedAt: '',
     lastUsedAt: '',
     // What the session's context window currently holds and how big it is.
@@ -527,6 +533,8 @@ function mergeSession(target, source) {
   target.cacheReadTokens += Math.max(0, Math.round(asNumber(source.cacheReadTokens)));
   target.cacheWriteTokens += Math.max(0, Math.round(asNumber(source.cacheWriteTokens)));
   target.reasoningTokens += Math.max(0, Math.round(asNumber(source.reasoningTokens)));
+  target.timedOutputTokens += Math.max(0, Math.round(asNumber(source.timedOutputTokens)));
+  target.timedDurationMs += Math.max(0, Math.round(asNumber(source.timedDurationMs)));
   const sourceStarted = timestampMs(source.startedAt);
   const targetStarted = timestampMs(target.startedAt);
   if (sourceStarted && (!targetStarted || sourceStarted < targetStarted)) target.startedAt = new Date(sourceStarted).toISOString();
@@ -621,6 +629,7 @@ function sessionFromRow(row) {
   session.messageCount = Math.max(0, Math.round(firstNumber(row, MESSAGE_COUNT_KEYS)));
   Object.assign(session, sessionTokenComponents(row));
   session.outputTokens = Math.max(0, Math.round(outputValueForClient(row, client)));
+  Object.assign(session, entryThroughput(row, session.outputTokens));
   session.startedAt = normalizeIsoTimestamp(firstString(row, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(row, LAST_USED_AT_KEYS));
   session.projectId = String(row.projectId || row.project_id || '').trim();
@@ -655,6 +664,10 @@ function normalizeSession(input, fallbackKey) {
   session.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? input.tokens ?? componentTotal)));
   session.costUsd = asNumber(input.costUsd ?? input.cost_usd ?? input.cost ?? 0);
   session.messageCount = Math.max(0, Math.round(firstNumber(input, MESSAGE_COUNT_KEYS)));
+  session.timedDurationMs = Math.max(0, Math.round(asNumber(input.timedDurationMs ?? input.timed_duration_ms ?? 0)));
+  session.timedOutputTokens = session.timedDurationMs > 0
+    ? Math.max(0, Math.round(asNumber(input.timedOutputTokens ?? input.timed_output_tokens ?? 0)))
+    : 0;
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
   if (hasOwn(input, 'promptCache')) session.promptCache = normalizePromptCache(input.promptCache);
@@ -918,6 +931,17 @@ function normalizePeriod(input, options = {}) {
 const UNATTRIBUTED_USAGE_CLIENT = '__unattributed';
 
 
+// One tokscale entry's throughput counters. An entry contributes its output to
+// the numerator exactly when it contributes a duration to the denominator, so
+// the two always describe the same entries. Gating rather than scaling by
+// tokscale's `tokenCoverage` keeps both plain counters that merge and delta
+// like every other token field.
+function entryThroughput(row, output) {
+  const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
+  const timedDurationMs = Math.max(0, Math.round(firstNumber(performance, TIMED_DURATION_KEYS)));
+  return { timedOutputTokens: timedDurationMs > 0 ? output : 0, timedDurationMs };
+}
+
 function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const client = detectedClient;
   const tokens = tokenValueForClient(row, client);
@@ -927,11 +951,7 @@ function addUsageRowToPeriod(period, row, detectedClient = detectClient(row)) {
   const output = Math.max(0, Math.round(outputValueForClient(row, client)));
   const performance = row?.performance && typeof row.performance === 'object' ? row.performance : null;
   const timedTokens = Math.max(0, Math.round(firstNumber(performance, TIMED_TOKEN_KEYS)));
-  const timedDurationMs = Math.max(0, Math.round(firstNumber(performance, TIMED_DURATION_KEYS)));
-  // A row contributes its output to the throughput numerator exactly when it contributes to
-  // the denominator. Gating rather than scaling by tokscale's `tokenCoverage` keeps this a
-  // plain counter, which is what lets it merge and delta like every other token field.
-  const timedOutputTokens = timedDurationMs > 0 ? output : 0;
+  const { timedOutputTokens, timedDurationMs } = entryThroughput(row, output);
   const model = detectModel(row, client);
   period.totalTokens += Math.max(0, Math.round(tokens));
   period.costUsd += cost;

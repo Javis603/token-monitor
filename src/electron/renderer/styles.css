@@ -3942,14 +3942,20 @@ html.is-windows .settings-panel select option {
   white-space: nowrap;
 }
 .shell.session-mode .row-title,
+.shell.session-mode .row-subtitle,
+.shell.session-mode .row-activity,
 .shell.session-mode .row-detail {
   scrollbar-width: none;
 }
 .shell.session-mode .row-title::-webkit-scrollbar,
+.shell.session-mode .row-subtitle::-webkit-scrollbar,
+.shell.session-mode .row-activity::-webkit-scrollbar,
 .shell.session-mode .row-detail::-webkit-scrollbar {
   display: none;
 }
 .shell.session-mode .row-title.is-hover-scrolling,
+.shell.session-mode .row-subtitle.is-hover-scrolling,
+.shell.session-mode .row-activity.is-hover-scrolling,
 .shell.session-mode .row-detail.is-hover-scrolling {
   text-overflow: clip;
 }
@@ -3967,10 +3973,11 @@ html.is-windows .settings-panel select option {
    a third right-hand line (context / cache) leaves no corner for a chevron.
    `role="button"` is set only on rows that actually open something (see
    applyBreakdownRowSemantics), so a row with no detail stays inert. The list
-   gets a little inline room so the wash can reach past the text it frames. */
+   gets a little room (cancelled by its margin) so the wash can reach past the
+   text it frames without the scroller clipping the first row's. */
 .shell.session-mode .breakdown {
-  margin-inline: -6px;
-  padding-inline: 6px 8px;
+  margin: -5px -6px 0;
+  padding: 5px 8px 0 6px;
 }
 .shell.session-mode .row[role="button"] {
   position: relative;

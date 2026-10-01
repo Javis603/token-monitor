@@ -207,6 +207,21 @@
     return `${formatNumber(count)} ${count === 1 ? 'call' : 'calls'}`;
   }
 
+  // The session's own generation speed: the footer's tok/s ratio over just
+  // this session's timed entries. A client that reports no durations leaves
+  // both counters at 0 and the row without a reading.
+  function sessionTokenRate(session) {
+    const durationMs = finiteNumber(session?.timedDurationMs);
+    const output = finiteNumber(session?.timedOutputTokens);
+    return durationMs > 0 && output > 0 ? output * 1000 / durationMs : 0;
+  }
+
+  // Not localized, like the footer's rate and `calls`: tok/s is a unit.
+  function tokenRateLabel(session) {
+    const rate = Math.round(sessionTokenRate(session));
+    return rate > 0 ? `${formatNumber(rate)} tok/s` : '';
+  }
+
   // Share of the session's input the provider served from cache - the same
   // split the Tool detail prints as "Input (Cache Hit)". A session with no
   // cache traffic either way says nothing about caching (several clients never
@@ -253,6 +268,7 @@
     const subtitleParts = [
       sessionActivityLabel(session, now),
       messageLabel(session),
+      tokenRateLabel(session),
       cacheHitLabel(session, options)
     ].filter(Boolean);
     // One derivation, not two: the boolean is a projection of the three-state
@@ -320,6 +336,7 @@
           archived ? archivedLabel : '',
           sessionActivityLabel(session, now),
           messageLabel(session),
+          tokenRateLabel(session),
           cacheHitLabel(session, options)
         ].filter(Boolean);
         return {
@@ -433,6 +450,7 @@
     // session, so both surfaces compose the label from this one helper.
     sessionModelLabel,
     sessionModelTooltipEntries,
-    sessionRowsForPeriod
+    sessionRowsForPeriod,
+    sessionTokenRate
   };
 });

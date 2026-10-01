@@ -470,3 +470,53 @@ test('applyPeriodDelta never drives throughput negative when the anchor is stale
   assert.equal(month.timedOutputTokens, 0);
   assert.equal(month.timedDurationMs, 0);
 });
+
+// Each session keeps its own share of the counters, under the same per-entry gate, so a
+// Sessions row can divide them into that session's tok/s. They have to survive every hop
+// a session takes: merging entries, the wire normalizer, cross-device aggregation, and the
+// today-delta.
+test('each session carries the throughput counters of its own entries', () => {
+  const result = extractUsageFromTokscale({
+    entries: [
+      tokscaleEntry({ sessionId: 'timed', model: 'claude-opus-4-8', output: 40, performance: { totalDurationMs: 1000, timedTokens: 900 } }),
+      tokscaleEntry({ sessionId: 'timed', model: 'claude-sonnet-5', output: 60, performance: { totalDurationMs: 500, timedTokens: 400 } }),
+      tokscaleEntry({ client: 'copilot', sessionId: 'untimed', output: 70, performance: undefined })
+    ]
+  });
+  const timed = result.sessions['claude:timed'];
+  assert.equal(timed.timedOutputTokens, 100, 'both entries of one session are summed');
+  assert.equal(timed.timedDurationMs, 1500);
+  assert.equal(speed(timed).toFixed(2), '66.67');
+  const untimed = result.sessions['copilot:untimed'];
+  assert.equal(untimed.outputTokens, 70);
+  assert.equal(untimed.timedOutputTokens, 0, 'an untimed entry puts no output on the clock');
+  assert.equal(untimed.timedDurationMs, 0);
+});
+
+test('session throughput survives the wire, device aggregation and the today-delta', () => {
+  const session = { client: 'claude', sessionId: 's1', totalTokens: 1000, outputTokens: 40, timedOutputTokens: 40, timedDurationMs: 800 };
+  const wire = normalizePeriod({ totalTokens: 1000, sessions: { 'claude:s1': session } });
+  assert.equal(wire.sessions['claude:s1'].timedOutputTokens, 40);
+  assert.equal(wire.sessions['claude:s1'].timedDurationMs, 800);
+
+  // A duration-less reading cannot carry output on its own.
+  const orphan = normalizePeriod({ totalTokens: 1000, sessions: { 'claude:s1': { ...session, timedDurationMs: 0 } } });
+  assert.equal(orphan.sessions['claude:s1'].timedOutputTokens, 0);
+
+  const device = (deviceId, timedOutputTokens, timedDurationMs) => normalizeDeviceRecord({
+    deviceId,
+    periods: { today: { totalTokens: 1000, sessions: { 'claude:s1': { ...session, timedOutputTokens, timedDurationMs } } } }
+  });
+  const aggregate = aggregateDevices([device('a', 40, 800), device('b', 60, 400)]);
+  const merged = aggregate.periods.today.sessions['claude:s1'];
+  assert.equal(merged.timedOutputTokens, 100);
+  assert.equal(merged.timedDurationMs, 1200);
+
+  const month = applyPeriodDelta(
+    period({ sessions: { 'claude:s1': { ...session, timedOutputTokens: 400, timedDurationMs: 8000 } } }),
+    period({ sessions: { 'claude:s1': { ...session, timedOutputTokens: 66, timedDurationMs: 1500 } } }),
+    period({ sessions: { 'claude:s1': { ...session, timedOutputTokens: 38, timedDurationMs: 900 } } })
+  );
+  assert.equal(month.sessions['claude:s1'].timedOutputTokens, 428);
+  assert.equal(month.sessions['claude:s1'].timedDurationMs, 8600);
+});

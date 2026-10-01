@@ -1995,6 +1995,8 @@ function rowTemplate(rowData) {
   row.querySelector('.row-activity').textContent = activity || '';
   row.querySelector('.row-detail').textContent = detail || '';
   bindHoverMarquee(row.querySelector('.row-title'));
+  bindHoverMarquee(row.querySelector('.row-subtitle'));
+  bindHoverMarquee(row.querySelector('.row-activity'));
   bindHoverMarquee(row.querySelector('.row-detail'));
   return row;
 }
@@ -2413,10 +2415,13 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
     const models = document.createElement('span');
     models.className = 'session-models';
     models.textContent = modelLabel;
-    subtitleEl.replaceChildren(document.createTextNode(subtitle.slice(0, -modelLabel.length)), models);
+    // Inside the marquee's own wrapper, so a long line still scrolls on hover.
+    const subtitleContent = subtitleEl.querySelector('.overflow-text-content') || subtitleEl;
+    subtitleContent.replaceChildren(document.createTextNode(subtitle.slice(0, -modelLabel.length)), models);
+    overflowText.update(subtitleEl);
     limitWindowsView.setDetailTooltip(models, modelEntries);
   } else {
-    subtitleEl.textContent = subtitle || '';
+    setHoverMarqueeText(subtitleEl, subtitle);
   }
   if (!subtitleShowsModel && modelEntries && modelLabel && String(name || '').endsWith(modelLabel)) {
     limitWindowsView.setDetailTooltip(titleEl, modelEntries);
@@ -2424,8 +2429,10 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
     limitWindowsView.setDetailTooltip(titleEl, null);
   }
   subtitleEl.classList.toggle('hidden', !subtitle);
+  // The activity line carries time, calls, tok/s and cache hit; a narrow window
+  // fades and scrolls it on hover the way the title does rather than wrapping.
   const activityEl = row.querySelector('.row-activity');
-  activityEl.textContent = activity || '';
+  setHoverMarqueeText(activityEl, activity);
   activityEl.classList.toggle('hidden', !activity);
   // A session's id is an identity, not a reading: it lives in Session Details,
   // which leaves the list row its three lines of usage. Other rows (the review

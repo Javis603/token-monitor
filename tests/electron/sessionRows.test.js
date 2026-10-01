@@ -150,6 +150,33 @@ test('session activity ends with the share of input served from cache', () => {
   assert.equal(activity.unreported, '12:07 · 4 calls');
 });
 
+test('session activity reads the session own generation speed between calls and cache', () => {
+  const now = new Date(2026, 4, 30, 12, 30);
+  const base = {
+    client: 'codex',
+    totalTokens: 1_000,
+    models: { 'gpt-5.6-sol': 1_000 },
+    messageCount: 4,
+    lastUsedAt: localIso(2026, 5, 30, 12, 7),
+    inputTokens: 40,
+    cacheReadTokens: 940,
+    cacheWriteTokens: 20,
+    outputTokens: 50
+  };
+  const rows = sessionRowsForPeriod({ sessions: {
+    'codex:timed': { ...base, sessionId: 'timed', title: 'timed', timedOutputTokens: 1_850, timedDurationMs: 20_000 },
+    // The client reported no durations: no reading rather than "0 tok/s".
+    'codex:untimed': { ...base, sessionId: 'untimed', title: 'untimed' },
+    // Untitled rows carry the same line as their subtitle.
+    'codex:untitled': { ...base, sessionId: 'untitled', timedOutputTokens: 1_200, timedDurationMs: 1_000 }
+  } }, { clientLabels, clientColors, now });
+  const byId = Object.fromEntries(rows.map((row) => [row.detail, row]));
+
+  assert.equal(byId.timed.activity, '12:07 · 4 calls · 93 tok/s · 94% cached');
+  assert.equal(byId.untimed.activity, '12:07 · 4 calls · 94% cached');
+  assert.equal(byId.untitled.subtitle, '12:07 · 4 calls · 1,200 tok/s · 94% cached');
+});
+
 test('multi-model sessions expose every model with its tokens and share of the session', () => {
   const session = {
     totalTokens: 100,
