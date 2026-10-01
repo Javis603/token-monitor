@@ -13,6 +13,7 @@ tmp/
 .env
 .env.*
 !.env.example
+.mise.local.toml
 *.log
 npm-debug.log*
 yarn-debug.log*

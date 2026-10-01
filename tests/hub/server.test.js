@@ -208,8 +208,10 @@ test('Node Hub preserves titles only when explicitly enabled', () => {
   const dataFile = tempDataFile();
   const hub = createHub({ port: 0, host: '127.0.0.1', dataFile, syncSessionTitles: true, logger: { error() {} } });
   try {
-    hub.ingest({ deviceId: 'dev-titles', today: { sessions: { one: { title: 'Useful title' } } } });
-    assert.equal(hub.getDevices()[0].periods.today.sessions.one.title, 'Useful title');
+    hub.ingest({ deviceId: 'dev-titles', today: { sessions: {
+      'codex:one': { client: 'codex', sessionId: 'one', totalTokens: 5, title: 'Useful title' }
+    } } });
+    assert.equal(hub.getDevices()[0].periods.today.sessions['codex:one'].title, 'Useful title');
   } finally {
     fs.rmSync(dataFile, { force: true });
   }
