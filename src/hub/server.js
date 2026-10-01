@@ -161,7 +161,7 @@ function createHub({
     }
     const deviceId = String(payload.deviceId || payload.id);
     const existing = syncSessionTitles ? store.devices[deviceId] : stripSessionTextFromDeviceRecord(store.devices[deviceId]);
-    const incoming = syncSessionTitles ? payload : stripSessionTextFromDeviceRecord(payload);
+    const incoming = stripSessionTextFromDeviceRecord(payload, { preserveSessionTitles: syncSessionTitles });
     const record = mergeDeviceRecord(existing, { ...incoming, receivedAt: new Date().toISOString() });
     store.devices[record.deviceId] = record;
     persist();

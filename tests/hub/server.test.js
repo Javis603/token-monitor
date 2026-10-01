@@ -209,9 +209,15 @@ test('Node Hub preserves titles only when explicitly enabled', () => {
   const hub = createHub({ port: 0, host: '127.0.0.1', dataFile, syncSessionTitles: true, logger: { error() {} } });
   try {
     hub.ingest({ deviceId: 'dev-titles', today: { sessions: {
-      'codex:one': { client: 'codex', sessionId: 'one', totalTokens: 5, title: 'Useful title' }
+      'codex:one': {
+        client: 'codex', sessionId: 'one', totalTokens: 5, title: 'Useful title',
+        preview: 'Private preview', firstUserMessage: 'Private prompt', name: 'Private name'
+      }
     } } });
     assert.equal(hub.getDevices()[0].periods.today.sessions['codex:one'].title, 'Useful title');
+    const persisted = fs.readFileSync(dataFile, 'utf8');
+    assert.match(persisted, /Useful title/);
+    assert.doesNotMatch(persisted, /Private preview|Private prompt|Private name/);
   } finally {
     fs.rmSync(dataFile, { force: true });
   }

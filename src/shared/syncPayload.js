@@ -3,6 +3,7 @@
 const { MAX_JSON_BODY_BYTES } = require('./http');
 const { syncLimits } = require('./limits/core');
 const { isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
+const { stripSessionTextFromDeviceRecord } = require('./usage');
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
 const SYNC_PAYLOAD_BUDGET_BYTES = MAX_JSON_BODY_BYTES - SYNC_PAYLOAD_MARGIN_BYTES;
@@ -161,20 +162,6 @@ function sessionsWithoutProjectMetadata(sessions) {
   return sanitized;
 }
 
-function sessionsWithoutLocalTitles(sessions) {
-  if (!sessions || typeof sessions !== 'object') return sessions;
-  const sanitized = {};
-  for (const [key, session] of Object.entries(sessions)) {
-    if (!session || typeof session !== 'object') {
-      sanitized[key] = session;
-      continue;
-    }
-    sanitized[key] = { ...session };
-    delete sanitized[key].title;
-  }
-  return sanitized;
-}
-
 function sessionsWithoutReasonix(sessions) {
   if (!sessions || typeof sessions !== 'object') return sessions;
   const sanitized = {};
@@ -221,8 +208,11 @@ function buildSyncPayload(summary, {
     delete payload[periodName].projects;
     if (hasOwn(payload[periodName], 'sessions')) {
       payload[periodName].sessions = sessionsWithoutReasonix(payload[periodName].sessions);
-      // Titles are local metadata and stay off the wire unless the operator opts in.
-      if (!syncSessionTitles) payload[periodName].sessions = sessionsWithoutLocalTitles(payload[periodName].sessions);
+      // Session text stays off the wire except for normalized titles when opted in.
+      payload[periodName] = stripSessionTextFromDeviceRecord(
+        { [periodName]: payload[periodName] },
+        { preserveSessionTitles: syncSessionTitles }
+      )[periodName];
       if (!projectsEnabled) payload[periodName].sessions = sessionsWithoutProjectMetadata(payload[periodName].sessions);
     }
   }
