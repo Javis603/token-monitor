@@ -13,7 +13,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const { CREDENTIAL_SETTING_PATHS, credentialSettingsForRenderer } = require('../../src/shared/credentialStore');
-const { LIMIT_PROVIDER_SETTING_KEYS, limitsConfigFromSettings } = require('../../src/electron/runtimeConfig');
+const { LIMIT_PROVIDER_SETTING_KEYS, limitsConfigFromSettings, classifySettingsChange } = require('../../src/electron/runtimeConfig');
 const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
 const { isAllowedVerificationUrl } = require('../../src/shared/providers/copilot/deviceFlow');
 const { isAllowedCodexLoginUrl } = require('../../src/shared/providers/codex/login');
@@ -288,7 +288,7 @@ test('settings:update normalizes provider fields and strips separately managed a
   }
   assert.equal(finalAccountSettings({}, {}).zaiApiRegion, 'global');
   assert.equal(finalAccountSettings({}, {}).qoderSite, 'global');
-  assert.equal(finalAccountSettings({}, {}).minimaxApiRegion, 'auto');
+  assert.equal(finalAccountSettings({}, {}).minimaxApiRegion, '');
   // A stored value the normalizer no longer accepts is re-canonicalized against
   // persistFallback rather than kept verbatim.
   assert.equal(finalAccountSettings({}, { minimaxApiRegion: '  CN  ' }).minimaxApiRegion, 'cn');
@@ -521,4 +521,26 @@ test('every provider with an account panel has its group and status markup in in
   for (const [provider, { status }] of Object.entries(nodes)) {
     assert.match(indexHtml, new RegExp(`id="${status}"`), `${provider} status pill exists in index.html`);
   }
+});
+
+test('MiniMax implicit region remains env-driven after unrelated saves and reloads', () => {
+  const { initialAccountSettings } = require('../../src/electron/limits/accountSettings');
+  const first = initialAccountSettings({ MINIMAX_API_REGION: 'cn' });
+  const saved = JSON.parse(JSON.stringify({ ...first, ...finalAccountSettings({ language: 'en' }, first) }));
+  assert.equal(saved.minimaxApiRegion, '');
+  const env = { MINIMAX_API_REGION: 'intl' };
+  assert.equal(limitsConfigFromSettings(saved, { env }).minimaxApiRegion, 'intl');
+  assert.equal(accountFieldProjection(saved, env).minimaxApiRegion, 'intl');
+  const explicit = { ...saved, ...finalAccountSettings({ minimaxApiRegion: 'auto' }, saved) };
+  const reloaded = JSON.parse(JSON.stringify(explicit));
+  assert.equal(limitsConfigFromSettings(reloaded, { env }).minimaxApiRegion, 'auto');
+  assert.equal(accountFieldProjection(reloaded, env).minimaxApiRegion, 'auto');
+  const previous = { ...saved, minimaxApiKey: 'test-key', limitProviders: 'minimax' };
+  const next = { ...previous, ...finalAccountSettings({ minimaxApiRegion: 'cn' }, previous) };
+  assert.equal(next.minimaxApiKey, 'test-key');
+  const change = classifySettingsChange(previous, next);
+  assert.deepEqual(change.limitScopes, [{ provider: 'minimax' }]);
+  assert.equal(change.usageStructural, false);
+  const { settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
+  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax' }, reason: 'settings-change', options: { clear: true } }]);
 });

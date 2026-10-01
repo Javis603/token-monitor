@@ -163,9 +163,14 @@ function minimaxRegion(options = {}, env = {}) {
     || env.MINIMAX_API_HOST
     || ''
   ).trim().toLowerCase();
-  if (raw === 'cn' || raw.includes('minimaxi.com')) return 'cn';
-  if (raw === 'intl' || raw === 'en' || raw === 'global' || raw === 'international' || raw.includes('minimax.io')) return 'intl';
+  if (['cn', 'minimaxi.com', 'api.minimaxi.com'].includes(raw)) return 'cn';
+  if (['intl', 'en', 'global', 'international', 'minimax.io', 'api.minimax.io'].includes(raw)) return 'intl';
   return 'auto';
+}
+
+// Empty means no user selection, so the runtime can still consult env.
+function normalizeMinimaxRegionSetting(value) {
+  return String(value || '').trim() ? minimaxRegion({ minimaxApiRegion: value }) : '';
 }
 
 function minimaxRegionOrder(options = {}, env = {}) {
@@ -347,6 +352,7 @@ module.exports = {
   minimaxAttemptOrder,
   minimaxBaseUrl,
   minimaxRegion,
+  normalizeMinimaxRegionSetting,
   minimaxRegionForUrl,
   parseMinimaxTiers,
   fetchMinimaxLimits

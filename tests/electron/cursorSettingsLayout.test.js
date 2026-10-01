@@ -775,12 +775,17 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   }
   assert.deepEqual(forms.find(({ id }) => id === 'deepseek').openUrl, { url: 'https://platform.deepseek.com/api_keys' });
 
-  // MiniMax keeps landing on the region its last successful poll resolved to;
+  // MiniMax follows the selection, with successful-probe status for Auto;
   // the form declares that, so the renderer has no MiniMax branch of its own.
   const app = readRendererFile('app.js');
   assert.deepEqual(forms.find(({ id }) => id === 'minimax').openUrl, {
+    byField: 'minimaxApiRegion',
+    urls: {
+      cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
+      intl: 'https://platform.minimax.io/user-center/payment/token-plan'
+    },
     byStatus: 'region',
-    urls: { en: 'https://platform.minimax.io/user-center/payment/token-plan' },
+    statusUrls: { en: 'https://platform.minimax.io/user-center/payment/token-plan' },
     default: 'https://platform.minimaxi.com/user-center/payment/token-plan'
   });
 
@@ -797,12 +802,12 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   assert.deepEqual(minimax.top, [{ field: 'minimaxApiRegion' }]);
 
   // The region never becomes a credential: no store path, so it stays in
-  // settings.json and a fresh install seeds it from the env lane.
+  // settings.json only after a selection; an implicit default stays empty.
   const { initialAccountSettings } = require('../../src/electron/limits/accountSettings');
-  assert.equal(initialAccountSettings({}).minimaxApiRegion, 'auto');
-  assert.equal(initialAccountSettings({ MINIMAX_API_REGION: 'cn' }).minimaxApiRegion, 'cn');
-  assert.equal(initialAccountSettings({ TOKEN_MONITOR_MINIMAX_API_REGION: 'intl' }).minimaxApiRegion, 'intl');
-  assert.equal(initialAccountSettings({ MINIMAX_API_HOST: 'api.minimax.io' }).minimaxApiRegion, 'intl');
+  assert.equal(initialAccountSettings({}).minimaxApiRegion, '');
+  assert.equal(initialAccountSettings({ MINIMAX_API_REGION: 'cn' }).minimaxApiRegion, '');
+  assert.equal(initialAccountSettings({ TOKEN_MONITOR_MINIMAX_API_REGION: 'intl' }).minimaxApiRegion, '');
+  assert.equal(initialAccountSettings({ MINIMAX_API_HOST: 'api.minimax.io' }).minimaxApiRegion, '');
   assert.match(app, /limitAccountPanelsApi\.resolveOpenUrl\(form, \{\s*document,\s*provider: externalProviderForAccount\(form\.id\)/);
   assert.doesNotMatch(app, /minimaxPlatformUrl|form\.id === 'minimax'/);
   const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');

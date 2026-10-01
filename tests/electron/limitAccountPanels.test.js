@@ -126,9 +126,9 @@ for (const form of limitAccountFormsForRenderer()) {
       input.value = `${field.key}-draft`;
     }
 
-    // Every field reaches the caller: whether the draft is complete, rejected
+    // Credential draft fields reach the caller: whether it is complete, rejected
     // or saved is the save path's call, and so is the message line.
-    const expected = Object.fromEntries(form.fields.map((field) => [
+    const expected = Object.fromEntries(form.fields.filter((field) => field.submitWithCredential !== false).map((field) => [
       field.key,
       field.input === 'select' ? field.options[0].value : `${field.key}-draft`
     ]));
@@ -145,7 +145,7 @@ for (const form of limitAccountFormsForRenderer()) {
     await submit.click();
     // Clearing the draft empties secrets and leaves settings beside them.
     for (const field of form.fields) {
-      assert.equal(group.byId(`${field.key}Input`).value, field.secret ? '' : expected[field.key], field.key);
+      assert.equal(group.byId(`${field.key}Input`).value, field.secret ? '' : field.options[0].value, field.key);
     }
   });
 }
@@ -206,9 +206,9 @@ test('selects drive their dependent hints, notes and landing page before they ar
   assert.equal([...zai.group.byId('zaiManualPanel').walk()].some((node) => node.id === 'zaiApiRegionInput'), false,
     'the region stays reachable once the paste panel hides');
 
-  // MiniMax follows the region of its last successful poll.
-  assert.equal(resolveOpenUrl(forms.minimax, { provider: { region: 'en' } }), 'https://platform.minimax.io/user-center/payment/token-plan');
-  assert.equal(resolveOpenUrl(forms.minimax, { provider: null }), 'https://platform.minimaxi.com/user-center/payment/token-plan');
+  // MiniMax Auto follows the region of its last successful poll.
+  assert.equal(resolveOpenUrl(forms.minimax, { document: { getElementById: () => ({ value: 'auto' }) }, provider: { region: 'en' } }), 'https://platform.minimax.io/user-center/payment/token-plan');
+  assert.equal(resolveOpenUrl(forms.minimax, { document: { getElementById: () => ({ value: 'auto' }) }, provider: null }), 'https://platform.minimaxi.com/user-center/payment/token-plan');
 
   const minimax = renderPanel(forms.minimax);
   const region = minimax.group.byId('minimaxApiRegionInput');
@@ -350,4 +350,49 @@ test('every shared account message exists in each locale with its placeholders',
       for (const param of params) assert.match(messages[key], new RegExp(`\\{${param}\\}`), `${key} ${locale}`);
     }
   }
+});
+
+test('MiniMax explicit regions drive Open before a probe and override stale status', async () => {
+  const { resolveOpenUrl, syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
+  const opened = [];
+  let provider = null;
+  const panel = renderPanel(form, { onOpen: () => opened.push(resolveOpenUrl(form, { document: panel.document, provider })) });
+  syncCredentialFields(form, { document: panel.document, settings: { minimaxApiRegion: 'auto' } });
+  const region = panel.group.byId('minimaxApiRegionInput');
+  await region.change('intl');
+  panel.group.byId('minimaxOpenBrowser').click();
+  assert.equal(opened.pop(), 'https://platform.minimax.io/user-center/payment/token-plan');
+  provider = { region: 'en' };
+  await region.change('cn');
+  panel.group.byId('minimaxOpenBrowser').click();
+  assert.equal(opened.pop(), 'https://platform.minimaxi.com/user-center/payment/token-plan');
+  await region.change('auto');
+  panel.group.byId('minimaxOpenBrowser').click();
+  assert.equal(opened.pop(), 'https://platform.minimax.io/user-center/payment/token-plan');
+  provider = null;
+  panel.group.byId('minimaxOpenBrowser').click();
+  assert.equal(opened.pop(), 'https://platform.minimaxi.com/user-center/payment/token-plan');
+});
+
+test('MiniMax key submission waits for a region save without submitting an implicit region', async () => {
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
+  const drafts = [];
+  let finish;
+  const { group } = renderPanel(form, {
+    onFieldChange: () => new Promise((resolve) => { finish = resolve; }),
+    onSave: (_, values) => drafts.push(values)
+  });
+  group.byId('minimaxApiKeyInput').value = 'sk-cp-test';
+  const submit = group.byId('minimaxCredentialSubmit');
+  await submit.click();
+  assert.deepEqual(drafts, [{ minimaxApiKey: 'sk-cp-test' }]);
+  group.byId('minimaxApiRegionInput').change('cn');
+  const pending = submit.click();
+  assert.equal(submit.disabled, true);
+  await Promise.resolve();
+  assert.equal(drafts.length, 1);
+  finish();
+  await pending;
+  assert.deepEqual(drafts[1], { minimaxApiKey: 'sk-cp-test' });
 });

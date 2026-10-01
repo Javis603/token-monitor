@@ -27,11 +27,16 @@ function byFieldValue(document, spec) {
 
 // The page Open lands on. `byField` follows a select before its change is
 // saved; `byStatus` follows the provider's last successful poll (MiniMax's
-// region), with `default` until there is one.
+// region), with `default` until there is one. A form with both uses statusUrls
+// only when the select has no explicit URL (for example Auto).
 function resolveOpenUrl(form, { document, provider }) {
   const { openUrl } = form;
   if (openUrl.url) return openUrl.url;
-  if (openUrl.byField) return openUrl.urls[fieldValue(document, openUrl.byField)] || openUrl.default;
+  if (openUrl.byField) {
+    const selected = openUrl.urls[fieldValue(document, openUrl.byField)];
+    if (selected) return selected;
+    return openUrl.statusUrls?.[provider?.[openUrl.byStatus]] || openUrl.default;
+  }
   return openUrl.urls[provider?.[openUrl.byStatus]] || openUrl.default;
 }
 
@@ -110,6 +115,7 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
     return code;
   };
   const inputs = new Map();
+  const independentSettingSaves = new Map();
   const control = (field) => {
     const input = document.createElement(field.input === 'select' || field.input === 'textarea' ? field.input : 'input');
     inputs.set(field, input);
@@ -124,7 +130,12 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
       }
       input.addEventListener('change', () => {
         refreshFieldDependents(form, { document });
-        onFieldChange?.(form, field, input.value);
+        const result = onFieldChange?.(form, field, input.value);
+        if (field.submitWithCredential === false) {
+          const pending = Promise.resolve(result);
+          independentSettingSaves.set(field.key, pending);
+          pending.catch(() => {});
+        }
       });
       return input;
     }
@@ -197,7 +208,12 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
     submit.disabled = true;
     submit.textContent = translate('settings.common.checking');
     try {
-      const values = Object.fromEntries([...inputs].map(([field, input]) => [field.key, input.value]));
+      // These settings save independently; wait for their writes so the key
+      // probe sees the selected region without persisting an implicit default.
+      await Promise.all(independentSettingSaves.values());
+      const values = Object.fromEntries([...inputs]
+        .filter(([field]) => field.submitWithCredential !== false)
+        .map(([field, input]) => [field.key, input.value]));
       await onSave(form, values, () => {
         for (const [field, input] of inputs) if (field.secret) input.value = '';
       });

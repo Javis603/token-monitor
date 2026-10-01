@@ -666,3 +666,28 @@ test('fetchMinimaxLimits aborts when the body stalls after the headers', { timeo
   assert.equal(r.status, 'unavailable');
   assert.deepEqual(r.windows, []);
 });
+
+test('MiniMax accepts exact region aliases and hosts, never hostname substrings', () => {
+  for (const host of ['minimaxi.com', 'api.minimaxi.com']) assert.equal(minimaxRegion({ minimaxApiRegion: host }), 'cn');
+  for (const host of ['minimax.io', 'api.minimax.io']) assert.equal(minimaxRegion({ minimaxApiRegion: host }), 'intl');
+  for (const raw of ['evil-minimax.io.example', 'api.minimaxi.com.evil.test', 'https://evil.test/minimax.io', 'api.minimax.io@evil.test']) {
+    assert.equal(minimaxRegion({ minimaxApiRegion: raw }), 'auto', raw);
+  }
+});
+
+test('MiniMax pinned regions retain the legacy endpoint fallback', async () => {
+  for (const [region, urls] of [
+    ['cn', [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]],
+    ['intl', [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN]]
+  ]) {
+    const calls = [];
+    const result = await fetchMinimaxLimits({ minimaxApiRegion: region, minimaxApiKey: 'sk-cp-test' }, {
+      env: {}, fetch: async (url) => {
+        calls.push(url);
+        return calls.length === 1 ? { ok: false, status: 404 } : okResponse({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 60 }] } });
+      }
+    });
+    assert.equal(result.status, 'ok');
+    assert.deepEqual(calls, urls);
+  }
+});
