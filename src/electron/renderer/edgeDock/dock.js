@@ -1318,7 +1318,7 @@ function appendLiveRate(card, head, cell) {
 
 function appendLiveRateDetails(card, cell) {
   const entries = window.TokenMonitorTokenRate.liveTokenRateTooltipEntries(
-    { devices: cell.rateDevices }, cell.rateMode, formatRate
+    { devices: cell.rateDevices, deviceCount: cell.deviceCount }, cell.rateMode, formatRate
   );
   if (!entries.length) return;
   const list = el('div', 'edge-dock-accounts edge-dock-clients edge-dock-rate-details');

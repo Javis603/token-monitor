@@ -1113,8 +1113,11 @@ function renderLiveTokenRate() {
     const icon = document.createElement('span');
     icon.className = `row-icon row-icon-${modelVendorFor(model) || 'token-monitor'}`;
     icon.setAttribute('aria-hidden', 'true');
+    const name = document.createElement('span');
+    name.className = 'live-token-rate-model-label';
+    name.textContent = model;
     cell.classList.add('live-token-rate-model-name');
-    cell.replaceChildren(icon, document.createTextNode(model));
+    cell.replaceChildren(icon, name);
   }
   if (!detailEntries.length) els.liveTokenRate.title = label;
   els.liveTokenRate.setAttribute('aria-label', [label, ...detailEntries.map((entry) =>

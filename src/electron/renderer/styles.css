@@ -5299,11 +5299,19 @@ html.is-windows .limit-live-badge {
 .live-token-rate .limit-detail-tooltip-row span:first-child {
   text-align: left;
 }
-.live-token-rate .limit-detail-tooltip-full.is-caption {
-  max-width: 240px;
-  margin-bottom: 2px;
-  font-size: 10px;
+.live-token-rate .live-token-rate-model-name { display: flex; align-items: center; gap: 7px; }
+.live-token-rate .live-token-rate-model-name .row-icon { width: 12px; height: 12px; flex: 0 0 12px; }
+.live-token-rate .live-token-rate-model-name .live-token-rate-model-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: inherit;
+  opacity: 1;
+  text-align: left;
 }
+
 .live-token-rate:hover {
   background: rgba(var(--overlay-rgb), 0.055);
   color: var(--text);
@@ -7525,6 +7533,3 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 [hidden] {
   display: none !important;
 }
-
-.live-token-rate-model-name { display: flex; align-items: center; gap: 7px; }
-.live-token-rate-model-name .row-icon { width: 12px; height: 12px; flex: 0 0 12px; }

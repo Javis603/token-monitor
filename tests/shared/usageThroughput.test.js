@@ -559,3 +559,72 @@ test('model throughput survives extraction, normalization, merge, sync and exact
   assert.deepEqual(synced.periods.today.modelThroughput, fresh.modelThroughput);
   assert.equal(normalizePeriod({ totalTokens: 1 }).modelThroughput, undefined, 'legacy absence must not imply a zero baseline');
 });
+
+test('unknown model attribution survives partition merges, aggregation and anchored deltas', () => {
+  const aware = extractUsageFromTokscale({ entries: [tokscaleEntry()] });
+  const legacy = { ...aware };
+  delete legacy.modelThroughput;
+  assert.equal(normalizePeriod().modelThroughput, undefined);
+  for (const inputs of [[legacy], [legacy, aware], [aware, legacy]]) {
+    assert.equal(mergePeriods(...inputs).modelThroughput, undefined);
+    const aggregate = aggregateDevices(inputs.map((today, i) => ({ deviceId: String(i), today })));
+    assert.equal(aggregate.periods.today.modelThroughput, undefined);
+  }
+  assert.deepEqual(mergePeriods(emptyPeriod(), aware).modelThroughput, aware.modelThroughput);
+  for (const inputs of [[legacy, aware, aware], [aware, legacy, aware], [aware, aware, legacy]]) {
+    assert.equal(applyPeriodDelta(...inputs).modelThroughput, undefined);
+  }
+});
+
+test('model timed output follows session normalization and leaves other models usable', () => {
+  const valid = { timedTokens: 100, timedOutputTokens: 6, timedDurationMs: 1000 };
+  const source = {
+    outputTokens: 30, timedTokens: 200, timedOutputTokens: 30, timedDurationMs: 2000,
+    modelOutputs: { alpha: 10, beta: 20 }, models: { alpha: 10, beta: 20 }
+  };
+  for (const fields of [
+    { timedOutputTokens: 1_000_000, timedDurationMs: 1000 },
+    { timedOutputTokens: -10, timedDurationMs: 1000 },
+    { timedOutputTokens: NaN, timedDurationMs: 1000 },
+    { timedOutputTokens: '8', timedDurationMs: '1000' },
+    { timedOutputTokens: 6, timedDurationMs: 0 },
+    { timedOutputTokens: 6, timedDurationMs: -1 }
+  ]) {
+    const result = normalizePeriod({ ...source, modelThroughput: { alpha: { ...valid, ...fields }, beta: valid },
+      sessions: { 'claude:s1': { client: 'claude', sessionId: 's1', outputTokens: 10, ...fields } } });
+    assert.equal(result.modelThroughput.alpha.timedOutputTokens, result.sessions['claude:s1'].timedOutputTokens);
+    assert.deepEqual(result.modelThroughput.beta, valid);
+    assert.deepEqual(normalizePeriod(result).modelThroughput, result.modelThroughput);
+  }
+});
+
+test('model counters keep physical bounds through duplicate normalized keys and preserve valid entries', () => {
+  const source = { outputTokens: 40, timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000,
+    modelOutputs: { alpha: 10 }, models: { alpha: 10 } };
+  const result = normalizePeriod({ ...source, modelThroughput: {
+    alpha: { timedTokens: 1_000_000, timedOutputTokens: 1_000_000, timedDurationMs: 1_000_000 },
+    ' alpha ': { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 1000 },
+    beta: { timedTokens: 10, timedOutputTokens: 1_000_000, timedDurationMs: 1000 }, bad: null
+  } });
+  assert.deepEqual(result.modelThroughput.alpha, { timedTokens: 100, timedOutputTokens: 10, timedDurationMs: 1000 });
+  assert.equal(result.modelThroughput.beta.timedOutputTokens, 40, 'the period bound applies when model outputs are unavailable');
+  assert.equal(Object.hasOwn(result.modelThroughput, 'bad'), false);
+  assert.deepEqual(normalizePeriod(result).modelThroughput, result.modelThroughput);
+});
+
+test('missing or malformed maps are unavailable while an empty map is an exact baseline', () => {
+  for (const modelThroughput of [undefined, null, true, 1, 'x', [], [{ timedTokens: 1 }], { bad: null }, { bad: [] }, { bad: {} }]) {
+    const normalized = normalizePeriod({ modelThroughput });
+    assert.equal(Object.hasOwn(normalized, 'modelThroughput'), false);
+    assert.equal(normalizePeriod(normalized).modelThroughput, undefined);
+  }
+  assert.deepEqual(Object.keys(normalizePeriod({ modelThroughput: {} }).modelThroughput), []);
+});
+
+test('model output bounds ignore inherited object properties', () => {
+  const modelThroughput = Object.fromEntries(['constructor', '__proto__'].map((model) =>
+    [model, { timedTokens: 10, timedOutputTokens: 2, timedDurationMs: 1000 }]));
+  const result = normalizePeriod({ outputTokens: 4, timedTokens: 20, timedOutputTokens: 4, timedDurationMs: 2000, modelThroughput });
+  for (const model of Object.keys(modelThroughput)) assert.deepEqual(result.modelThroughput[model], modelThroughput[model]);
+  assert.deepEqual(normalizePeriod(result).modelThroughput, result.modelThroughput);
+});

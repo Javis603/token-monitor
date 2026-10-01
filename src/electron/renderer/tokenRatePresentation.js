@@ -132,11 +132,14 @@
         sampledAt: Number(now()) || 0,
         revision,
         models: Object.entries(models || {}).flatMap(([model, counters]) => {
-          // No model map on an older producer means unavailable attribution, not zero.
+          // Missing attribution is unknown, not an exact zero baseline.
           if (!previousModels) return [];
           const previous = previousModels[model] || { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
           const change = Object.fromEntries(Object.keys(counters).map((field) => [field, counters[field] - previous[field]]));
-          if (Object.values(change).some((value) => value < 0) || !(change.timedDurationMs > 0)) return [];
+          // A renamed/retroactively attributed model may appear with historical
+          // counters. It cannot have added more than this snapshot's entire delta.
+          if (Object.keys(change).some((field) => change[field] < 0 || change[field] > delta[field])
+            || !(change.timedDurationMs > 0)) return [];
           return [{ model, speed: tokenRatePerSecond(change), burn: tokenBurnPerMinute(change) }];
         }),
         ...delta
@@ -167,7 +170,6 @@
     const clearAfter = positiveNumber(clearMs);
     if (!clearAfter || clearAfter <= lifetime) throw new TypeError('clearMs must be greater than activeMs');
     const trackers = new Map();
-    const deviceNames = new Map();
     let revision = 0;
     let lastDisplaySample = null;
 
@@ -185,13 +187,11 @@
 
     function reset(entries = []) {
       trackers.clear();
-      deviceNames.clear();
       lastDisplaySample = null;
       for (const entry of normalizedEntries(entries)) {
         const tracker = createLiveTokenRateTracker({ now });
         tracker.reset(entry.period);
-        deviceNames.set(entry.id, entry.name);
-        trackers.set(entry.id, tracker);
+        trackers.set(entry.id, { tracker, name: entry.name });
       }
     }
 
@@ -202,24 +202,24 @@
       let fresh = false;
       let invalidated = false;
 
-      for (const [id, tracker] of trackers) {
+      for (const [id, { tracker }] of trackers) {
         if (present.has(id)) continue;
         if (tracker.getSample()) {
           changed = true;
         }
         trackers.delete(id);
-        deviceNames.delete(id);
       }
 
       for (const entry of nextEntries) {
-        deviceNames.set(entry.id, entry.name);
-        let tracker = trackers.get(entry.id);
-        if (!tracker) {
-          tracker = createLiveTokenRateTracker({ now });
+        const device = trackers.get(entry.id);
+        if (!device) {
+          const tracker = createLiveTokenRateTracker({ now });
           tracker.reset(entry.period);
-          trackers.set(entry.id, tracker);
+          trackers.set(entry.id, { tracker, name: entry.name });
           continue;
         }
+        device.name = entry.name;
+        const { tracker } = device;
         const previous = tracker.getSample();
         const sample = tracker.observe(entry.period);
         if (sample === previous) continue;
@@ -236,9 +236,9 @@
     function activeSamples() {
       const timestamp = Number(now()) || 0;
       return [...trackers.entries()]
-        .map(([id, tracker]) => {
+        .map(([id, { tracker, name }]) => {
           const sample = tracker.getSample();
-          return sample ? { ...sample, id, name: deviceNames.get(id) || id } : null;
+          return sample ? { ...sample, id, name } : null;
         })
         .filter((sample) => sample && timestamp < sample.sampledAt + lifetime);
     }
@@ -250,19 +250,8 @@
           speed: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.speed, 0)),
           burn: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.burn, 0)),
           sampledAt: Math.max(...samples.map((sample) => sample.sampledAt)),
-          models: [...samples.reduce((models, sample) => {
-            for (const entry of sample.models || []) {
-              const previous = models.get(entry.model) || { model: entry.model, speed: 0, burn: 0 };
-              previous.speed = cappedTokenRate(previous.speed + entry.speed);
-              previous.burn = cappedTokenRate(previous.burn + entry.burn);
-              models.set(entry.model, previous);
-            }
-            return models;
-          }, new Map()).values()],
-          ...(samples.some((sample) => sample.models?.length) ? {
-            devices: samples.filter((sample) => sample.models?.length)
-              .map(({ id, name, models }) => ({ id, name, models }))
-          } : {}),
+          devices: samples.filter((sample) => sample.models?.length)
+            .map(({ id, name, models }) => ({ id, name, models })),
           deviceCount: samples.length,
           revision
         };
@@ -328,15 +317,16 @@
     const burn = mode === 'burn';
     const unit = burn ? 'TPM' : 'tok/s';
     const devices = sample?.devices || [];
-    const grouped = devices.length > 1;
+    const grouped = (sample?.deviceCount || devices.length) > 1;
     const entries = [];
-    for (const [index, device] of devices.entries()) {
-      if (grouped) entries.push({ full: device.name, separated: index > 0 });
+    for (const device of devices) {
+      if (!device.models?.length) continue;
+      if (grouped) entries.push({ full: device.name, separated: entries.length > 0 });
       const models = device.models.slice().sort((a, b) =>
         (burn ? b.burn - a.burn : b.speed - a.speed) || a.model.localeCompare(b.model));
       entries.push(...models.map((entry) => [entry.model, `${formatRate(burn ? entry.burn : entry.speed)} ${unit}`]));
     }
-    return devices.length ? entries : [];
+    return entries;
   }
 
   function defaultNow() {

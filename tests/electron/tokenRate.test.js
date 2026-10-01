@@ -213,7 +213,7 @@ test('live rate sums active device samples, then retains the last value dimmed f
     burn: 6000,
     sampledAt: 100,
     expiresAt: 8100,
-    models: [],
+    devices: [],
     deviceCount: 1,
     revision: 1,
     idle: false
@@ -230,7 +230,7 @@ test('live rate sums active device samples, then retains the last value dimmed f
     burn: 13200,
     sampledAt: 200,
     expiresAt: 8100,
-    models: [],
+    devices: [],
     deviceCount: 2,
     revision: 2,
     idle: false
@@ -243,7 +243,7 @@ test('live rate sums active device samples, then retains the last value dimmed f
     burn: 7200,
     sampledAt: 200,
     expiresAt: 8200,
-    models: [],
+    devices: [],
     deviceCount: 1,
     revision: 2,
     idle: false
@@ -254,7 +254,7 @@ test('live rate sums active device samples, then retains the last value dimmed f
     burn: 7200,
     sampledAt: 200,
     expiresAt: 180200,
-    models: [],
+    devices: [],
     deviceCount: 1,
     revision: 2,
     idle: true
@@ -307,7 +307,7 @@ test('live rate retains the last aggregate when its only device becomes stale', 
       burn: 6000,
       sampledAt: 100,
       expiresAt: 180100,
-      models: [],
+      devices: [],
       deviceCount: 1,
       revision: 1,
       idle: true
@@ -818,17 +818,20 @@ test('live model rates use matched model deltas and follow device expiry', () =>
   tracker.reset([{ id: 'a', period: base }, { id: 'b', period: base }]);
   now = 100;
   tracker.observe([{ id: 'a', period: a }, { id: 'b', period: base }]);
-  assert.deepEqual(tracker.getSample().models, [{ model: 'alpha', speed: 40, burn: 6000 }, { model: 'beta', speed: 10, burn: 6000 }]);
+  assert.deepEqual(tracker.getSample().devices[0].models, [{ model: 'alpha', speed: 40, burn: 6000 }, { model: 'beta', speed: 10, burn: 6000 }]);
   assert.equal(tracker.getSample().speed, 20, 'headline remains the matched overall ratio');
   now = 200;
   tracker.observe([{ id: 'a', period: a }, { id: 'b', period: b }]);
-  assert.deepEqual(tracker.getSample().models, [{ model: 'alpha', speed: 70, burn: 9000 }, { model: 'beta', speed: 10, burn: 6000 }]);
-  tracker.observe([{ id: 'a', period: a }, { id: 'b', period: b }]);
+  assert.deepEqual(tracker.getSample().devices.map((device) => device.models), [[{ model: 'alpha', speed: 40, burn: 6000 }, { model: 'beta', speed: 10, burn: 6000 }], [{ model: 'alpha', speed: 30, burn: 3000 }]]);
+  const beforeDuplicate = tracker.getSample();
+  const duplicate = tracker.observe([{ id: 'a', period: a }, { id: 'b', period: b }]);
+  assert.equal(duplicate.changed, false);
+  assert.deepEqual(duplicate.sample, beforeDuplicate);
   now = 8100;
-  assert.deepEqual(tracker.getSample().models, [{ model: 'alpha', speed: 30, burn: 3000 }]);
+  assert.deepEqual(tracker.getSample().devices[0].models, [{ model: 'alpha', speed: 30, burn: 3000 }]);
   now = 8200;
   assert.equal(tracker.getSample().idle, true);
-  assert.deepEqual(tracker.getSample().models, [{ model: 'alpha', speed: 30, burn: 3000 }]);
+  assert.deepEqual(tracker.getSample().devices[0].models, [{ model: 'alpha', speed: 30, burn: 3000 }]);
   now = 180200;
   assert.equal(tracker.getSample(), null);
 });
@@ -873,4 +876,57 @@ test('live rate selection carries device hostnames for hover groups', () => {
   const stats = { devices: [{ deviceId: 'a', hostname: 'MacBook', periods: { today: period } }] };
   assert.equal(tokenRateApi.selectLiveTokenRatePeriods(stats, 'a', 'host', 'all').entries[0].name, 'MacBook');
   assert.equal(tokenRateApi.selectLiveTokenRatePeriods(stats, 'a', 'local', 'device').entries[0].name, 'MacBook');
+});
+
+test('live device names update with the existing tracker and reset with its identity', () => {
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker();
+  const base = modelRatePeriod({});
+  const fresh = modelRatePeriod({ alpha: { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000 } });
+  tracker.reset([{ id: 'a', name: 'Old name', period: base }]);
+  tracker.observe([{ id: 'a', name: 'Old name', period: fresh }]);
+  const revision = tracker.getSample().revision;
+  tracker.observe([{ id: 'a', name: 'New name', period: fresh }]);
+  assert.equal(tracker.getSample().devices[0].name, 'New name');
+  assert.equal(tracker.getSample().revision, revision);
+  tracker.reset([{ id: 'b', name: 'Replacement', period: base }]);
+  tracker.observe([{ id: 'b', name: 'Replacement', period: fresh }]);
+  assert.deepEqual(tracker.getSample().devices.map(({ id, name }) => ({ id, name })), [{ id: 'b', name: 'Replacement' }]);
+});
+
+test('a merged legacy snapshot establishes the first model-aware baseline without an all-day rate', () => {
+  const { mergePeriods } = require('../../src/shared/usage');
+  const tracker = tokenRateApi.createLiveTokenRateTracker();
+  const legacy = { timedTokens: 10000, timedOutputTokens: 4000, timedDurationMs: 100000, outputTokens: 4000 };
+  tracker.reset(mergePeriods(legacy));
+  const fresh = { ...modelRatePeriod({ alpha: { timedTokens: 10100, timedOutputTokens: 4020, timedDurationMs: 101000 } }), outputTokens: 4020 };
+  const first = tracker.observe(mergePeriods(fresh));
+  assert.equal(first.speed, 20);
+  assert.deepEqual(first.models, []);
+  const next = { ...modelRatePeriod({ alpha: { timedTokens: 10200, timedOutputTokens: 4060, timedDurationMs: 102000 } }), outputTokens: 4060 };
+  assert.deepEqual(tracker.observe(mergePeriods(next)).models, [{ model: 'alpha', speed: 40, burn: 6000 }]);
+});
+
+test('mixed legacy devices retain the reporting device heading without inventing missing model rows', () => {
+  const tracker = tokenRateApi.createLiveTokenRateGroupTracker();
+  tracker.reset([{ id: 'a', name: 'MacBook', period: modelRatePeriod({}) },
+    { id: 'b', name: 'Desktop', period: { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 } }]);
+  tracker.observe([{ id: 'a', name: 'MacBook', period: modelRatePeriod({ alpha: { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000 } }) },
+    { id: 'b', name: 'Desktop', period: { timedTokens: 100, timedOutputTokens: 30, timedDurationMs: 1000 } }]);
+  const sample = tracker.getSample();
+  assert.equal(sample.deviceCount, 2);
+  assert.equal(sample.devices.length, 1);
+  assert.equal(sample.devices[0].name, 'MacBook');
+  assert.deepEqual(tokenRateApi.liveTokenRateTooltipEntries(sample, 'speed', String), [{ full: 'MacBook', separated: false }, ['alpha', '40 tok/s']]);
+});
+
+test('changing a model alias cannot turn historical counters into a live model delta', () => {
+  const { projectModelAliasStats } = require('../../src/electron/modelAliasPresentation');
+  const tracker = tokenRateApi.createLiveTokenRateTracker();
+  const raw = (tokens, output, duration) => modelRatePeriod({ alpha: { timedTokens: tokens, timedOutputTokens: output, timedDurationMs: duration } });
+  tracker.reset(raw(10000, 4000, 100000));
+  const aliased = (period) => projectModelAliasStats({ periods: { today: period } }, { alpha: 'GPT' }).periods.today;
+  const first = tracker.observe(aliased(raw(10100, 4020, 101000)));
+  assert.equal(first.speed, 20);
+  assert.deepEqual(first.models, []);
+  assert.deepEqual(tracker.observe(aliased(raw(10200, 4060, 102000))).models, [{ model: 'GPT', speed: 40, burn: 6000 }]);
 });
