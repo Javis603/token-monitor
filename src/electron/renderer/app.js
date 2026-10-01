@@ -2037,7 +2037,10 @@ document.addEventListener('pointerdown', (event) => {
 
 const overflowText = window.TokenMonitorOverflowText.create({
   document, window, prefersReducedMotion,
-  enabled: element => Boolean(element.closest('.session-mode, .home-session-row'))
+  enabled: element => Boolean(element.closest('.session-mode, .home-session-row')),
+  onLeave: () => requestAnimationFrame(() => {
+    if (state.breakdown === 'home' && visibleStatsSurface() === 'main' && state.stats) renderHome();
+  })
 });
 
 function bindHoverMarquee(element) { overflowText.bind(element); }
@@ -3968,7 +3971,7 @@ function limitDetailTooltipShouldHoldRender() {
 }
 
 function sessionTooltipShouldHoldRender() {
-  return Boolean(document.querySelector('.home-session-row .is-hover-scrolling, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within'));
+  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within'));
 }
 
 function flushPendingLimitDetailTooltipRender() {

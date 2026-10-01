@@ -5803,7 +5803,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .detail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
 .detail-back { flex-shrink: 0; background: transparent; border: 0; color: var(--muted, #8a8a90); font: inherit; cursor: pointer; padding: 0; }
 .detail-heading { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.fade-overflow { text-overflow: clip; scrollbar-width: none; }
+.fade-overflow.is-overflow-enabled { text-overflow: clip; scrollbar-width: none; }
+.is-overflow-enabled > .overflow-text-content { display: inline-block; width: max-content; }
+.is-hover-scrolling > .overflow-text-content { will-change: transform; }
 .fade-overflow::-webkit-scrollbar { display: none; }
 .fade-overflow.has-overflow-fade {
   -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);

@@ -28,6 +28,10 @@ test('session detail renders its heading before loading, errors and empty result
     const classes = new Set();
     return {
       children: [], isConnected: true, scrollLeft: 0, scrollWidth: 600, clientWidth: 200,
+      style: {}, getBoundingClientRect: () => ({ width: 600 }),
+      get childNodes() { return this.children.length ? this.children : [{ textContent: this._text || '' }]; },
+      get textContent() { return this.children.length ? this.children.map(node => node.textContent).join('') : this._text || ''; },
+      set textContent(value) { this.children = []; this._text = value; },
       closest: () => ({}),
       classList: { add: value => classes.add(value), remove: value => classes.delete(value), contains: value => classes.has(value), toggle: (value, enabled) => enabled ? classes.add(value) : classes.delete(value) },
       append(...nodes) { this.children.push(...nodes); },
@@ -84,7 +88,7 @@ test('session detail renders its heading before loading, errors and empty result
     heading.mouseenter();
     timers.pop()();
     frames.pop()(8000);
-    assert.ok(heading.scrollLeft > 0, 'hover reveals the clipped title');
+    assert.equal(heading.children[0].style.transform, 'translate3d(-400px, 0, 0)', 'hover reveals the clipped title');
     assert.equal(heading.classList.contains('has-overflow-fade'), false, 'the end stays readable after scrolling');
     assert.equal(heading.classList.contains('is-hover-scrolling'), true);
     heading.mouseleave();
@@ -96,7 +100,7 @@ test('session detail renders its heading before loading, errors and empty result
     assert.equal(heading.scrollLeft, 0);
     assert.equal(heading.title, title, 'full title remains available without motion');
     reducedMotion = false;
-    heading.scrollWidth = heading.clientWidth;
+    heading.children[0].getBoundingClientRect = () => ({ width: heading.clientWidth });
     overflowText.update(heading);
     assert.equal(heading.classList.contains('has-overflow-fade'), false, 'fitting text stays opaque');
   }
