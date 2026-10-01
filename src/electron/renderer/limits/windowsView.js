@@ -520,15 +520,20 @@
 
   // A gauge or plan label can be the trigger itself; no extra info icon needed.
   function setDetailTooltip(wrap, entries) {
-    wrap.removeAttribute('title');
     let tooltip = wrap.querySelector('.limit-detail-tooltip');
     if (!entries?.length) {
       tooltip?.hidePopover?.();
       tooltip?.replaceChildren();
       wrap.classList.remove('limit-detail-tooltip-wrap');
       wrap.removeAttribute('tabindex');
+      wrap.removeAttribute('aria-label');
+      wrap.style.removeProperty('-webkit-app-region');
       return;
     }
+    // The popover replaces whatever native tooltip the element had; do this on
+    // attach only — on detach the caller may have already restored `title` for
+    // its own fallback (the marquee's reduced-motion tooltip, say).
+    wrap.removeAttribute('title');
     wrap.classList.add('limit-detail-tooltip-wrap');
     wrap.style.setProperty('-webkit-app-region', 'no-drag');
     wrap.setAttribute('aria-label', entries.map((entry) => Array.isArray(entry) ? entry.join(': ') : entry.full).join(', '));
@@ -541,7 +546,9 @@
     );
     const next = detailTooltipNode(entries, columns);
     if (tooltip) {
-      tooltip.className = next.className;
+      // Sync only the layout class: is-below is positional state the tooltip
+      // manages itself, and overwriting it mid-hover flips an open popover.
+      tooltip.classList.toggle('limit-detail-tooltip-triple', next.classList.contains('limit-detail-tooltip-triple'));
       tooltip.replaceChildren(...next.children);
     } else {
       tooltip = next;

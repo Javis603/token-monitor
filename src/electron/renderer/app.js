@@ -3998,7 +3998,7 @@ function limitDetailTooltipShouldHoldRender() {
 }
 
 function sessionTooltipShouldHoldRender() {
-  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within'));
+  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
 }
 
 function flushPendingLimitDetailTooltipRender() {
@@ -6560,7 +6560,10 @@ function render() {
     if (state.openSession.kind === 'background-review-group') {
       const latest = sessionRowsForPeriod(period).find((row) => row.reviewGroup === true);
       if (latest) state.openSession.summary = latest;
-      renderBackgroundReviewDetail(state.openSession);
+      // The rebuild replaces every run node, so a hovered run tooltip would die
+      // mid-read (and a keyboard focus with it); hold until it closes, as the
+      // session and home lists already do.
+      if (!sessionTooltipShouldHoldRender()) renderBackgroundReviewDetail(state.openSession);
     }
     if (state.openSession.renderOptions) {
       const options = state.openSession.renderOptions;

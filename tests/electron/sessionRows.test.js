@@ -142,7 +142,7 @@ test('multi-model sessions expose every model with its tokens and share of the s
 test('model tooltip shares read the session total and floor at a real sliver', () => {
   // Models can out-sum the recorded total (overlapping reads); the share is
   // then of the attributed tokens rather than over 100% each.
-  assert.deepEqual(sessionModelTooltipEntries({ totalTokens: 40, models: { a: 30, b: 10 } }), [
+  assert.deepEqual(sessionModelTooltipEntries({ totalTokens: 30, models: { a: 30, b: 10 } }), [
     ['a', '30', '75%'],
     ['b', '10', '25%']
   ]);
@@ -179,6 +179,59 @@ test('session rows carry the model tooltip entries behind the "N models" label',
     ['gpt-5.6-sol', '60', '60%'],
     ['gpt-5.6', '40', '40%']
   ]);
+});
+
+test('a hovered background-review run tooltip holds the session repaint', () => {
+  // The periodic rebuild of an open review detail replaces every run node;
+  // sessionTooltipShouldHoldRender is what keeps a tooltip open through it.
+  // The guard's selector must cover the run title, which carries the wrap
+  // class itself — matching only the Sessions list's containers would leave
+  // this surface unprotected.
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const body = source.slice(
+    source.indexOf('function sessionTooltipShouldHoldRender('),
+    source.indexOf('function flushPendingLimitDetailTooltipRender(')
+  );
+  const matchesPart = (part, el) => {
+    const compounds = part.trim().split(/\s+/);
+    const [cls, ...pseudos] = compounds.at(-1).split(':');
+    if (!cls.split('.').filter(Boolean).every((c) => el.classes.includes(c))) return false;
+    if (pseudos.includes('hover') && !el.hovered) return false;
+    if (pseudos.includes('focus-within') && !el.focusWithin) return false;
+    let anc = el.parent;
+    for (let i = compounds.length - 2; i >= 0; i -= 1) {
+      const required = compounds[i].split('.').filter(Boolean);
+      while (anc && !required.every((c) => anc.classes.includes(c))) anc = anc.parent;
+      if (!anc) return false;
+      anc = anc.parent;
+    }
+    return true;
+  };
+  const document = {
+    element: null,
+    querySelector(selector) {
+      return this.element && selector.split(',').some((part) => matchesPart(part, this.element))
+        ? this.element
+        : null;
+    }
+  };
+  const shouldHold = Function('document', `${body}\nreturn sessionTooltipShouldHoldRender;`)(document);
+
+  for (const flag of ['hovered', 'focusWithin']) {
+    document.element = { classes: ['detail-ex-title', 'limit-detail-tooltip-wrap'], [flag]: true, parent: null };
+    assert.equal(shouldHold(), true);
+  }
+  document.element = { classes: ['detail-ex-title', 'limit-detail-tooltip-wrap'], parent: null };
+  assert.equal(shouldHold(), false);
+});
+
+test('the periodic review-detail rebuild defers to the tooltip hold', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const branch = source.slice(
+    source.indexOf("state.openSession.kind === 'background-review-group'"),
+    source.indexOf('state.openSession.renderOptions')
+  );
+  assert.match(branch, /!sessionTooltipShouldHoldRender\(\)/);
 });
 
 test('Codex merged rollout labels contain UUIDs only', () => {
