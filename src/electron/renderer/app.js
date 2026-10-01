@@ -4645,7 +4645,9 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   back.type = 'button';
   back.className = title ? 'detail-back detail-back-titled' : 'detail-back';
   if (!title) back.textContent = `‹ ${backLabel}`;
-  back.setAttribute('aria-label', backLabel);
+  back.setAttribute('aria-label', title
+    ? t('sessions.backToWithTitle', { title, destination: backLabel })
+    : t('sessions.backTo', { destination: backLabel }));
   back.title = title || backLabel;
   back.addEventListener('click', sessionDetailBack);
   head.append(back);
@@ -4729,7 +4731,9 @@ function renderBackgroundReviewDetail(request) {
   const back = document.createElement('button');
   back.type = 'button';
   back.className = 'detail-back detail-back-titled';
-  back.setAttribute('aria-label', t('sessions') || 'Sessions');
+  back.setAttribute('aria-label', t('sessions.backToWithTitle', {
+    title: t('sessions.backgroundReviews'), destination: t('sessions') || 'Sessions'
+  }));
   back.title = t('sessions') || 'Sessions';
   back.addEventListener('click', closeSessionDetail);
   const arrow = document.createElement('span');

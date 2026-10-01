@@ -7,6 +7,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const { exchangeRows, formatToolList } = require('../../src/electron/renderer/sessionDetail');
+const { translate } = require('../../src/electron/renderer/i18n');
 
 const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
 
@@ -55,7 +56,7 @@ test('session detail renders its heading before loading, errors and empty result
   const end = rendererSource.indexOf('function backgroundReviewRunNode(', start);
   let render;
   const context = {
-    els, state, document: { createElement: element, querySelectorAll: () => [els.sessionDetailHead.querySelector('.detail-heading')].filter(Boolean) }, window: { addEventListener() {} }, t: key => key,
+    els, state, document: { createElement: element, querySelectorAll: () => [els.sessionDetailHead.querySelector('.detail-heading')].filter(Boolean) }, window: { addEventListener() {} }, t: (key, params) => translate('en', key, params),
     sessionDetailBack() { state.backClicked = true; },
     detailNote: text => ({ textContent: text }),
     sessionDetailApi: { exchangeRows: detail => detail?.exchanges || [] },
@@ -94,7 +95,7 @@ test('session detail renders its heading before loading, errors and empty result
       assert.equal(back.querySelector('.detail-back-arrow').textContent, '‹');
       assert.equal(back.querySelector('.detail-back-arrow').attributes['aria-hidden'], 'true');
       assert.equal(heading.parentElement, back);
-      assert.equal(back.attributes['aria-label'], 'sessions');
+      assert.equal(back.attributes['aria-label'], `${title} — Back to sessions`);
       heading.click();
       assert.equal(state.backClicked, true);
       state.backClicked = false;
@@ -127,23 +128,44 @@ test('session detail renders its heading before loading, errors and empty result
   render({ loading: true });
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
   assert.equal(els.sessionDetailHead.children[0].textContent, '‹ sessions');
+  assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], 'Back to sessions');
   state.openSession = { title: 'gpt-5.6-sol · 12:34', returnTo: { kind: 'background-review-group' } };
   render({ loading: true });
-  assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], 'sessions.backgroundReviews');
+  assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], 'gpt-5.6-sol · 12:34 — Back to Codex Auto Review');
   context.closeSessionDetail = () => { state.backClicked = true; };
   const groupStart = rendererSource.indexOf('function renderBackgroundReviewDetail(');
   const groupEnd = rendererSource.indexOf('function detailNote(', groupStart);
   vm.runInNewContext(`${rendererSource.slice(groupStart, groupEnd)}\nglobalThis.renderGroup = renderBackgroundReviewDetail;`, context);
   context.renderGroup({ summary: { backgroundReviewRows: [] } });
   const groupBack = els.sessionDetailHead.children[0];
-  assert.equal(groupBack.textContent, '‹sessions.backgroundReviews');
-  assert.equal(groupBack.attributes['aria-label'], 'sessions');
+  assert.equal(groupBack.textContent, '‹Codex Auto Review');
+  assert.equal(groupBack.attributes['aria-label'], 'Codex Auto Review — Back to sessions');
   const groupHeading = els.sessionDetailHead.querySelector('.detail-heading');
-  assert.equal(groupHeading.textContent, 'sessions.backgroundReviews');
+  assert.equal(groupHeading.textContent, 'Codex Auto Review');
   assert.equal(groupHeading.title, groupHeading.textContent);
   assert.equal(groupHeading.parentElement, groupBack);
   groupHeading.click();
   assert.equal(state.backClicked, true);
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+    context.t = (key, params) => translate(locale, key, params);
+    for (const returnTo of [null, { kind: 'background-review-group' }]) {
+      const title = 'Review PR 906';
+      state.openSession = { title, returnTo };
+      render({ loading: true });
+      const destination = context.t(returnTo ? 'sessions.backgroundReviews' : 'sessions');
+      const label = els.sessionDetailHead.children[0].attributes['aria-label'];
+      assert.ok(label.startsWith(title), `${locale}: accessible name starts with the visible title`);
+      assert.ok(label.includes(destination), `${locale}: accessible name includes the return destination`);
+      assert.ok(!label.includes('{'), `${locale}: translation parameters are resolved`);
+    }
+    context.renderGroup({ summary: { backgroundReviewRows: [] } });
+    const label = els.sessionDetailHead.children[0].attributes['aria-label'];
+    assert.ok(label.startsWith(context.t('sessions.backgroundReviews')));
+    assert.ok(label.includes(context.t('sessions')));
+    state.openSession = {};
+    render({ loading: true });
+    assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], context.t('sessions.backTo', { destination: context.t('sessions') }));
+  }
 });
 
 test('the compact detail back control returns to the review group or the session list', () => {
