@@ -51,8 +51,24 @@ function actionWindowForEvent(BrowserWindow, event, fallbackWindow) {
   return target && !target.isDestroyed() ? target : null;
 }
 
+// macOS 'activate' (Dock click, Finder/`open` reopen) arrives whatever the
+// window state: a live main window that is hidden or minimized is refocused;
+// another live window still blocks creation; only an empty or edge-dock-only
+// set spawns a new main window.
+function activateWindowAction(state = {}) {
+  const mainWindow = state.mainWindow;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const minimized = typeof mainWindow.isMinimized === 'function' && mainWindow.isMinimized();
+    return (!mainWindow.isVisible() || minimized) ? 'focusWindow' : 'none';
+  }
+  const windows = Array.isArray(state.windows) ? state.windows : [];
+  const isDockOwned = typeof state.isDockOwned === 'function' ? state.isDockOwned : () => false;
+  return windows.every((win) => isDockOwned(win)) ? 'createWindow' : 'none';
+}
+
 module.exports = {
   actionWindowForEvent,
+  activateWindowAction,
   handoffWindow,
   showWindow
 };

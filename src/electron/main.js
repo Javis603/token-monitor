@@ -89,7 +89,7 @@ const {
 } = require('../shared/providers/antigravity/selfSync');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
-const { actionWindowForEvent, handoffWindow, showWindow } = require('./windowLifecycle');
+const { actionWindowForEvent, activateWindowAction, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
 const { applyCodexAdditionalLimitsMigration } = require('./codexAdditionalLimitsMigration');
 const { createDeviceRuntime } = require('../shared/usage/deviceRuntime');
@@ -8763,14 +8763,21 @@ app.whenReady().then(() => {
   });
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
-  // The window this builds is about to be on screen, so the policy is resolved
-  // for a visible window exactly as focusExistingWindow() does. Without it this
-  // was the one path reaching applyMacSpaceBehavior() with a process type
-  // nothing had decided, which skipTransformProcessType now preserves.
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().some((win) => !edgeDockController?.owns(win))) return;
-    applyMacActivationPolicy({ mainWindowVisible: true });
-    createWindow();
+    const action = activateWindowAction({
+      mainWindow,
+      windows: BrowserWindow.getAllWindows(),
+      isDockOwned: (win) => Boolean(edgeDockController?.owns(win))
+    });
+    if (action === 'focusWindow') focusExistingWindow();
+    else if (action === 'createWindow') {
+      // The window this builds is about to be on screen, so the policy is resolved
+      // for a visible window exactly as focusExistingWindow() does. Without it this
+      // was the one path reaching applyMacSpaceBehavior() with a process type
+      // nothing had decided, which skipTransformProcessType now preserves.
+      applyMacActivationPolicy({ mainWindowVisible: true });
+      createWindow();
+    }
   });
   maybeRunBackgroundUpdateCheck();
   startAppUpdateBackgroundChecks();
