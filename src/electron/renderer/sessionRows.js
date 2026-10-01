@@ -110,6 +110,7 @@
     const total = finiteNumber(session?.totalTokens);
     const attributed = entries.reduce((sum, entry) => sum + entry.tokens, 0);
     const denominator = Math.max(total, attributed);
+    const formatTokens = typeof options.formatTokens === 'function' ? options.formatTokens : formatNumber;
     // The same share label the tool-detail accordion prints for model rows: a
     // real sliver reads "<1%" rather than rounding to a misleading 0.
     const percentLabel = (percent) => (
@@ -118,7 +119,7 @@
     const named = entries.filter((entry) => entry.model);
     const rows = named.map((entry) => [
       entry.model,
-      formatNumber(entry.tokens),
+      formatTokens(entry.tokens),
       percentLabel(denominator > 0 ? entry.tokens / denominator * 100 : 0)
     ]);
     const unlabeled = attributed - named.reduce((sum, entry) => sum + entry.tokens, 0);
@@ -126,7 +127,7 @@
     if (unattributed > 0) {
       rows.push([
         textValue(options.unattributedLabel) || 'Unclassified',
-        formatNumber(unattributed),
+        formatTokens(unattributed),
         percentLabel(unattributed / denominator * 100)
       ]);
     }

@@ -1203,7 +1203,8 @@ function sessionsContainer(sessions, options = {}) {
     const modelLabel = sessionRowsApi.sessionModelLabel(session);
     const age = relativeAgo(session.lastUsedAt || session.startedAt);
     const modelEntries = sessionRowsApi.sessionModelTooltipEntries(session, {
-      unattributedLabel: t('dashboard.tooltip.unclassified')
+      unattributedLabel: t('dashboard.tooltip.unclassified'),
+      formatTokens: formatBreakdownTokens
     });
     if (modelLabel && modelEntries.length > 1) {
       const models = el('span', 'session-models', modelLabel);

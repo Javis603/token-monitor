@@ -5887,7 +5887,8 @@ function renderHomeSessionModule() {
     // row's own text, and the tooltip lists the models behind the count.
     const modelLabel = sessionRowsApi.sessionModelLabel(row);
     const modelEntries = sessionRowsApi.sessionModelTooltipEntries(row, {
-      unattributedLabel: t('dashboard.tooltip.unclassified')
+      unattributedLabel: t('dashboard.tooltip.unclassified'),
+      formatTokens: formatCompact
     });
     if (modelLabel && modelEntries.length > 1) {
       const models = document.createElement('span');
