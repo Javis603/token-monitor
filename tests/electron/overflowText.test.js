@@ -28,8 +28,8 @@ function harness(distance = 7, options = {}) {
         toggle: (value, enabled) => enabled ? classes.add(value) : classes.delete(value)
       },
       addEventListener(type, handler) { this[type] = handler; },
-      hasAttribute: () => false,
-      removeAttribute() {}
+      hasAttribute(name) { return Object.hasOwn(this, name); },
+      removeAttribute(name) { delete this[name]; }
     };
   }
   const element = node();
@@ -103,7 +103,7 @@ test('unchanged text preserves pending, active and completed hover motion', () =
   h.api.setText(h.element, 'A renamed session');
   assert.equal(content.style.transform, 'translate3d(0px, 0, 0)');
   assert.equal(h.element.textContent, 'A renamed session');
-  assert.equal(h.element.title, 'A renamed session');
+  assert.equal(h.element.hasAttribute('title'), false);
   assert.equal(h.element.classList.contains('is-hover-reading'), false);
 });
 
@@ -217,7 +217,7 @@ for (const phase of ['pending', 'active', 'completed']) {
 }
 
 test('reading handoff ignores renamed, different and moved session titles', () => {
-  for (const change of ['title', 'key', 'position']) {
+  for (const change of ['title', 'key', 'position', 'missing']) {
     const h = harness(100);
     h.element.dataset.overflowKey = 'codex:session-1';
     if (change === 'position') h.hover({ clientX: 50, clientY: 10 });
@@ -228,13 +228,85 @@ test('reading handoff ignores renamed, different and moved session titles', () =
     replacement.dataset.overflowKey = change === 'key' ? 'codex:session-2' : h.element.dataset.overflowKey;
     h.api.bind(replacement);
     replacement.getBoundingClientRect = () => ({ left: 0, right: 200, top: 40, bottom: 60, width: 200 });
-    h.api.preserveReading({ querySelectorAll: () => [h.element] }, { querySelectorAll: () => [replacement] });
+    h.api.preserveReading({ querySelectorAll: () => [h.element] }, {
+      querySelectorAll: () => change === 'missing' ? [] : [replacement]
+    });
     assert.equal(replacement.classList.contains('is-hover-reading'), false);
-    assert.equal(replacement.children[0].style.transform, undefined);
+    assert.equal(replacement.children[0].style.transform, 'translate3d(0px, 0, 0)');
+    assert.equal(h.element.classList.contains('is-hover-reading'), false, 'failed handoff stops the old motion immediately');
     h.element.isConnected = false;
     h.frame(1000);
     assert.equal(h.element.classList.contains('is-hover-reading'), false);
   }
+});
+
+for (const phase of ['pending', 'active', 'completed']) {
+  for (const width of [180, 240, 320]) {
+    test(`${phase} reading reaches the new endpoint after replacement width changes to ${width}px`, () => {
+      const h = harness(100);
+      const pointer = { clientX: 50, clientY: 10 };
+      h.element.dataset.overflowKey = 'codex:session-1';
+      if (phase === 'pending') h.element.mouseenter(pointer);
+      else {
+        h.hover(pointer);
+        h.frame(phase === 'active' ? 500 : 2200);
+      }
+      const before = h.element.children[0].style.transform;
+      const replacement = h.node();
+      replacement.clientWidth = width;
+      replacement.dataset.overflowKey = h.element.dataset.overflowKey;
+      replacement.textContent = h.element.textContent;
+      h.api.bind(replacement);
+      h.api.preserveReading({ querySelectorAll: () => [h.element] }, { querySelectorAll: () => [replacement] });
+      h.element.isConnected = false;
+      h.document.querySelectorAll = () => [replacement];
+      if (width === 180) assert.equal(replacement.children[0].style.transform, before, 'narrowing continues from the existing offset');
+      if (phase === 'pending') {
+        const [id, timer] = [...h.timers][0];
+        h.timers.delete(id);
+        timer.callback();
+      }
+      h.frame(10_000);
+      assert.equal(replacement.children[0].style.transform, `translate3d(${-Math.max(0, 300 - width)}px, 0, 0)`);
+      assert.equal(replacement.classList.contains('has-overflow-fade'), false, 'the complete tail is visible at the new endpoint');
+      assert.equal(h.frames.size, 0, 'the animation finishes without a perpetual repaint');
+    });
+  }
+}
+
+test('native text tooltips follow reduced motion for binding, updates and preference changes', () => {
+  let reduced = false;
+  const h = harness(100, { prefersReducedMotion: () => reduced });
+  assert.equal(h.element.hasAttribute('title'), false);
+  h.api.setText(h.element, 'Renamed title');
+  assert.equal(h.element.hasAttribute('title'), false);
+  reduced = true;
+  h.api.refresh();
+  h.frame(0);
+  assert.equal(h.element.title, 'Renamed title');
+  h.api.setText(h.element, 'Another title');
+  assert.equal(h.element.title, 'Another title');
+  const reducedTitle = h.node();
+  reducedTitle.textContent = 'Bound with reduced motion';
+  h.api.bind(reducedTitle);
+  assert.equal(reducedTitle.title, reducedTitle.textContent);
+  reduced = false;
+  h.api.setText(h.element, h.element.textContent);
+  h.frame(0);
+  assert.equal(h.element.hasAttribute('title'), false, 'unchanged text also observes the latest preference');
+  const fitting = harness(0);
+  assert.equal(fitting.element.hasAttribute('title'), false, 'fitting text has no tooltip in normal mode');
+});
+
+test('failed handoff cancels a pending delay immediately', () => {
+  const h = harness(100);
+  h.element.dataset.overflowKey = 'codex:session-1';
+  h.element.mouseenter();
+  assert.equal(h.timers.size, 1);
+  h.api.preserveReading({ querySelectorAll: () => [h.element] }, { querySelectorAll: () => [] });
+  assert.equal(h.timers.size, 0);
+  assert.equal(h.frames.size, 0);
+  assert.equal(h.element.classList.contains('is-hover-reading'), false);
 });
 
 test('resizing clamps the offset and detaching a hovered title stops its animation', () => {

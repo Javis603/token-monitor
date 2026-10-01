@@ -38,6 +38,7 @@ test('session detail renders its heading before loading, errors and empty result
       append(...nodes) { this.children.push(...nodes); nodes.forEach(node => { node.parentElement = this; }); },
       replaceChildren(...nodes) { this.children = nodes; },
       setAttribute(name, value) { (this.attributes ||= {})[name] = value; },
+      removeAttribute(name) { delete this[name]; },
       addEventListener(type, handler) { if (type === 'click') this.clickHandler = handler; else this[type] = handler; },
       click() { this.clickHandler?.(); this.parentElement?.click(); },
       querySelector(selector) {
@@ -87,10 +88,11 @@ test('session detail renders its heading before loading, errors and empty result
       render(options);
       const heading = els.sessionDetailHead.querySelector('.detail-heading');
       assert.equal(heading.textContent, title);
-      assert.equal(heading.title, title);
+      assert.equal(heading.title, undefined);
       const back = els.sessionDetailHead.children[0];
       assert.equal(back.className, 'detail-back detail-back-titled');
       assert.equal(back.type, 'button');
+      assert.equal(back.title, undefined, 'the parent button does not reintroduce a native tooltip');
       assert.equal(back.textContent, `‹${title}`);
       assert.equal(back.querySelector('.detail-back-arrow').textContent, '‹');
       assert.equal(back.querySelector('.detail-back-arrow').attributes['aria-hidden'], 'true');
@@ -142,7 +144,8 @@ test('session detail renders its heading before loading, errors and empty result
   assert.equal(groupBack.attributes['aria-label'], 'Codex Auto Review — Back to sessions');
   const groupHeading = els.sessionDetailHead.querySelector('.detail-heading');
   assert.equal(groupHeading.textContent, 'Codex Auto Review');
-  assert.equal(groupHeading.title, groupHeading.textContent);
+  assert.equal(groupHeading.title, undefined);
+  assert.equal(groupBack.title, undefined);
   assert.equal(groupHeading.parentElement, groupBack);
   groupHeading.click();
   assert.equal(state.backClicked, true);

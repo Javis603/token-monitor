@@ -4650,7 +4650,7 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   back.setAttribute('aria-label', title
     ? t('sessions.backToWithTitle', { title, destination: backLabel })
     : t('sessions.backTo', { destination: backLabel }));
-  back.title = title || backLabel;
+  if (!title) back.title = backLabel;
   back.addEventListener('click', sessionDetailBack);
   head.append(back);
 
@@ -4736,7 +4736,6 @@ function renderBackgroundReviewDetail(request) {
   back.setAttribute('aria-label', t('sessions.backToWithTitle', {
     title: t('sessions.backgroundReviews'), destination: t('sessions') || 'Sessions'
   }));
-  back.title = t('sessions') || 'Sessions';
   back.addEventListener('click', closeSessionDetail);
   const arrow = document.createElement('span');
   arrow.className = 'detail-back-arrow';
@@ -4745,7 +4744,6 @@ function renderBackgroundReviewDetail(request) {
   const heading = document.createElement('span');
   heading.className = 'detail-heading';
   heading.textContent = t('sessions.backgroundReviews');
-  back.title = heading.textContent;
   bindHoverMarquee(heading);
   back.append(arrow, heading);
   head.append(back);

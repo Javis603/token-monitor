@@ -19,13 +19,24 @@
       const content = contents.get(element);
       if (content) content.style.transform = `translate3d(${-offset}px, 0, 0)`;
     }
+    function animate(motion, distance) {
+      motion.from = offsets.get(motion.element) || 0;
+      motion.distance = distance;
+      motion.startedAt = window.performance.now();
+      motion.duration = Math.max(240, Math.min(8000, Math.abs(distance - motion.from) * 22));
+      if (!motion.frameId) motion.frameId = window.requestAnimationFrame(motion.step);
+    }
     function update(element) {
       element.classList.toggle('is-overflow-enabled', enabled(element));
+      if (prefersReducedMotion()) element.title = element.textContent || '';
+      else element.removeAttribute('title');
       const distance = distanceFor(element);
       const offset = Math.min(offsets.get(element) || 0, distance);
       move(element, offset);
       element.classList.toggle('has-overflow-fade', enabled(element)
         && distance - offset > 1);
+      const motion = motions.get(element);
+      if (motion && motion.startedAt !== null && motion.distance !== distance) animate(motion, distance);
     }
     function refresh() {
       if (refreshFrame) return;
@@ -54,24 +65,28 @@
       if (distance <= 1) return;
       element.classList.add('is-hover-reading');
       const motion = {
-        element, delayId: 0, frameId: 0,
+        element, delayId: 0, frameId: 0, startedAt: null,
         point: event ? { x: event.clientX, y: event.clientY } : null
+      };
+      motion.step = now => {
+        motion.frameId = 0;
+        const current = motion.element;
+        if (!current.isConnected || !enabled(current) || prefersReducedMotion()) { stop(current); return; }
+        update(current);
+        const progress = Math.max(0, Math.min(1, (now - motion.startedAt) / motion.duration));
+        move(current, motion.from + (motion.distance - motion.from) * progress);
+        update(current);
+        if (progress < 1 && !motion.frameId) motion.frameId = window.requestAnimationFrame(motion.step);
       };
       motions.set(element, motion);
       motion.delayId = window.setTimeout(() => {
         motion.delayId = 0;
-        const startedAt = window.performance.now();
-        const duration = Math.max(240, Math.min(8000, distance * 22));
+        if (!motion.element.isConnected || !enabled(motion.element) || prefersReducedMotion()) {
+          stop(motion.element);
+          return;
+        }
         motion.element.classList.add('is-hover-scrolling');
-        const step = now => {
-          const current = motion.element;
-          if (!current.isConnected || !enabled(current) || prefersReducedMotion()) { stop(current); return; }
-          const progress = Math.min(1, (now - startedAt) / duration);
-          move(current, distance * progress);
-          update(current);
-          motion.frameId = progress < 1 ? window.requestAnimationFrame(step) : 0;
-        };
-        motion.frameId = window.requestAnimationFrame(step);
+        animate(motion, distanceFor(motion.element));
       }, 240);
     }
     function bind(element) {
@@ -82,7 +97,7 @@
       element.append(content);
       contents.set(element, content);
       element.classList.add('fade-overflow');
-      element.title = element.textContent || '';
+      update(element);
       element.addEventListener('mouseenter', event => start(element, event));
       element.addEventListener('mousemove', event => {
         const motion = motions.get(element);
@@ -103,7 +118,7 @@
       }
       stop(element);
       (contents.get(element) || element).textContent = text;
-      element.title = element.textContent;
+      update(element);
       refresh();
     }
     function preserveReading(previous, next) {
@@ -114,11 +129,17 @@
         const replacement = replacements.get(element.dataset.overflowKey);
         const motion = motions.get(element);
         if (!motion || !replacement || !contents.has(replacement)
-          || replacement.textContent !== element.textContent) continue;
+          || replacement.textContent !== element.textContent) {
+          stop(element);
+          continue;
+        }
         // A reordered or resized row may no longer contain the stationary pointer.
         const rect = replacement.getBoundingClientRect();
         if (motion.point && (motion.point.x < rect.left || motion.point.x >= rect.right
-          || motion.point.y < rect.top || motion.point.y >= rect.bottom)) continue;
+          || motion.point.y < rect.top || motion.point.y >= rect.bottom)) {
+          stop(element);
+          continue;
+        }
         stop(replacement);
         motions.delete(element);
         motions.set(replacement, motion);
