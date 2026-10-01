@@ -3963,11 +3963,33 @@ html.is-windows .settings-panel select option {
 .shell.session-mode .row-cost {
   line-height: 1.1;
 }
-.shell.session-mode .session-row .row-metrics::after,
-.shell.session-mode .summary-row[data-review-group="true"] .row-metrics::after {
+/* Rows that open Session Details say so with a hover wash instead of a `›`:
+   a third right-hand line (context / cache) leaves no corner for a chevron.
+   `role="button"` is set only on rows that actually open something (see
+   applyBreakdownRowSemantics), so a row with no detail stays inert. The list
+   gets a little inline room so the wash can reach past the text it frames. */
+.shell.session-mode .breakdown {
+  margin-inline: -6px;
+  padding-inline: 6px 8px;
+}
+.shell.session-mode .row[role="button"] {
+  position: relative;
+  isolation: isolate;
+}
+.shell.session-mode .row[role="button"]::before {
   position: absolute;
-  right: 0;
-  bottom: 0;
+  z-index: -1;
+  inset: -5px -6px 3px;
+  border-radius: 8px;
+  background: rgba(var(--overlay-rgb), 0.06);
+  content: '';
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.shell.session-mode .row[role="button"]:hover::before,
+.shell.session-mode .row[role="button"]:focus-visible::before {
+  opacity: 1;
 }
 .shell.session-mode .bar {
   height: 5px;
@@ -5855,12 +5877,11 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .background-review-totals { white-space: nowrap; color: var(--text); }
 .background-review-run:focus-visible,
 .row[role="button"]:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.35); outline-offset: 2px; }
-.row.session-row[data-client="claude"], .row.session-row[data-client="codex"], .row.session-row[data-client="opencode"], .row.session-row[data-client="reasonix"], .row.session-row[data-client="dsh"] { cursor: pointer; }
-.row.session-row[data-client="claude"] .row-metrics::after, .row.session-row[data-client="codex"] .row-metrics::after, .row.session-row[data-client="opencode"] .row-metrics::after, .row.session-row[data-client="reasonix"] .row-metrics::after, .row.session-row[data-client="dsh"] .row-metrics::after { content: '›'; color: var(--muted); font-size: 14px; line-height: 1; }
-.row.summary-row[data-review-group="true"] { cursor: pointer; }
-.row.summary-row[data-review-group="true"] .row-metrics::after { content: '›'; color: var(--muted); font-size: 14px; line-height: 1; }
-.row.session-row[data-client="reasonix"][data-detail-unavailable="true"] { cursor: default; }
-.row.session-row[data-client="reasonix"][data-detail-unavailable="true"] .row-metrics::after { content: none; }
+.row[role="button"] { cursor: pointer; }
+.detail-session-id { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted, #8a8a90); font-size: 10px; }
+.detail-session-id-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
+.detail-session-id-copy { flex-shrink: 0; padding: 0 2px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; opacity: 0.72; }
+.detail-session-id-copy:hover, .detail-session-id-copy:focus-visible { color: var(--text); opacity: 1; }
 .view-preference-row.has-subgroup {
   grid-template-columns: minmax(0, 1fr) repeat(3, 22px);
 }

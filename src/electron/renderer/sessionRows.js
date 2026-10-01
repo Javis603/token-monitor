@@ -207,6 +207,25 @@
     return `${formatNumber(count)} ${count === 1 ? 'call' : 'calls'}`;
   }
 
+  // Share of the session's input the provider served from cache - the same
+  // split the Tool detail prints as "Input (Cache Hit)". A session with no
+  // cache traffic either way says nothing about caching (several clients never
+  // report it), so it gets no reading rather than a 0% that reads as a miss.
+  function sessionCacheHitPercent(session) {
+    const cacheRead = Math.max(0, finiteNumber(session?.cacheReadTokens));
+    const cacheWrite = Math.max(0, finiteNumber(session?.cacheWriteTokens));
+    if (cacheRead <= 0 && cacheWrite <= 0) return null;
+    const input = Math.max(0, finiteNumber(session?.inputTokens)) + cacheRead + cacheWrite;
+    return cacheRead / input * 100;
+  }
+
+  function cacheHitLabel(session, options) {
+    const percent = sessionCacheHitPercent(session);
+    if (percent === null) return '';
+    const text = percent > 0 && percent < 1 ? '<1%' : `${Math.round(Math.min(100, percent))}%`;
+    return typeof options.cacheHitLabel === 'function' ? options.cacheHitLabel(text) : `${text} cached`;
+  }
+
   function isBackgroundReviewSession(session) {
     return textValue(session?.sessionKind) === 'background-review';
   }
@@ -233,7 +252,8 @@
     );
     const subtitleParts = [
       sessionActivityLabel(session, now),
-      messageLabel(session)
+      messageLabel(session),
+      cacheHitLabel(session, options)
     ].filter(Boolean);
     // One derivation, not two: the boolean is a projection of the three-state
     // value, so a row can never be marked running by one reading and idle by the
@@ -299,7 +319,8 @@
         const activityParts = [
           archived ? archivedLabel : '',
           sessionActivityLabel(session, now),
-          messageLabel(session)
+          messageLabel(session),
+          cacheHitLabel(session, options)
         ].filter(Boolean);
         return {
           key: `session:${key}`,
@@ -405,6 +426,7 @@
     groupBackgroundReviewRows,
     handleBreakdownRowKeydown,
     sessionBreakdownIncomplete,
+    sessionCacheHitPercent,
     sessionIdLabel,
     // Exported for the edge dock's session rows: a card that shows the top
     // model reads a different name than the list's "N models" for the same

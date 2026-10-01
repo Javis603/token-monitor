@@ -117,6 +117,39 @@ test('session rows group client and model apart from activity metadata', () => {
   assert.equal(row.detail, 'titled');
 });
 
+test('session activity ends with the share of input served from cache', () => {
+  const now = new Date(2026, 4, 30, 12, 30);
+  const session = (id, fields) => ({
+    client: 'codex',
+    sessionId: id,
+    title: id,
+    totalTokens: 1_000,
+    models: { 'gpt-5.6-sol': 1_000 },
+    messageCount: 4,
+    lastUsedAt: localIso(2026, 5, 30, 12, 7),
+    ...fields
+  });
+  const rows = sessionRowsForPeriod({ sessions: {
+    'codex:warm': session('warm', { inputTokens: 40, cacheReadTokens: 940, cacheWriteTokens: 20, outputTokens: 50 }),
+    'codex:sliver': session('sliver', { inputTokens: 995, cacheReadTokens: 5, outputTokens: 50 }),
+    // Writes with no reads is a real cold start, so it reads 0%.
+    'codex:cold': session('cold', { inputTokens: 500, cacheWriteTokens: 500, outputTokens: 50 }),
+    // No cache traffic at all says nothing about caching: no reading.
+    'codex:unreported': session('unreported', { inputTokens: 950, outputTokens: 50 })
+  } }, {
+    clientLabels,
+    clientColors,
+    now,
+    cacheHitLabel: (percent) => `快取命中 ${percent}`
+  });
+  const activity = Object.fromEntries(rows.map((row) => [row.name, row.activity]));
+
+  assert.equal(activity.warm, '12:07 · 4 calls · 快取命中 94%');
+  assert.equal(activity.sliver, '12:07 · 4 calls · 快取命中 <1%');
+  assert.equal(activity.cold, '12:07 · 4 calls · 快取命中 0%');
+  assert.equal(activity.unreported, '12:07 · 4 calls');
+});
+
 test('multi-model sessions expose every model with its tokens and share of the session', () => {
   const session = {
     totalTokens: 100,
@@ -622,7 +655,10 @@ test('session layout keeps page chrome consistent and scrolls long labels on one
   assert.match(styles, /\.shell\.session-mode \.row-detail\s*\{[^}]*white-space:\s*nowrap;/s);
   assert.match(styles, /\.shell\.session-mode \.row-title\.is-hover-scrolling,/);
   assert.match(styles, /\.shell\.session-mode \.row-detail\.is-hover-scrolling\s*\{[^}]*text-overflow:\s*clip;/s);
-  assert.match(styles, /\.shell\.session-mode \.session-row \.row-metrics::after,[^{]+\{[^}]*position:\s*absolute;[^}]*bottom:\s*0;/s);
+  // A clickable row is marked by a hover wash keyed off its button role, not by
+  // a `›` that would collide with the third right-hand line.
+  assert.doesNotMatch(styles, /\.row-metrics::after/);
+  assert.match(styles, /\.shell\.session-mode \.row\[role="button"\]:hover::before,\s*\.shell\.session-mode \.row\[role="button"\]:focus-visible::before\s*\{[^}]*opacity:\s*1;/s);
   assert.match(renderer, /class="row-activity"/);
   assert.match(renderer, /function setHoverMarqueeText\([^]*?overflowText\.setText\(element, value\)/);
 });

@@ -2427,9 +2427,13 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   const activityEl = row.querySelector('.row-activity');
   activityEl.textContent = activity || '';
   activityEl.classList.toggle('hidden', !activity);
+  // A session's id is an identity, not a reading: it lives in Session Details,
+  // which leaves the list row its three lines of usage. Other rows (the review
+  // group's count, say) still print their detail here.
+  const shownDetail = kind === 'session' ? '' : detail;
   const detailEl = row.querySelector('.row-detail');
-  setHoverMarqueeText(detailEl, detail);
-  detailEl.classList.toggle('hidden', !detail);
+  setHoverMarqueeText(detailEl, shownDetail);
+  detailEl.classList.toggle('hidden', !shownDetail);
   const valueEl = row.querySelector('.row-value');
   if (tokenDataUnavailable === true) {
     row.dataset.tokenDataUnavailable = 'true';
@@ -2837,6 +2841,7 @@ function rawSessionRowsForPeriod(period) {
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
+    cacheHitLabel: (percent) => t('session.cacheHit', { percent }),
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
 }
@@ -4692,6 +4697,9 @@ function renderSessionDetail({ detail, loading, error } = {}) {
     back.append(arrow, heading);
   }
 
+  const idLabel = sessionRowsApi.sessionIdLabel(state.openSession?.sessionId);
+  if (idLabel) container.append(sessionIdLine(idLabel));
+
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
   if (error || (detail && detail.found === false)) { container.append(detailNote(t('detailNotFound') || 'Transcript not found on this machine.')); return; }
 
@@ -4709,6 +4717,26 @@ function renderSessionDetail({ detail, loading, error } = {}) {
 
   const max = Math.max(1, ...rows.map((row) => row.value));
   for (const row of rows) container.append(exchangeNode(row, max));
+}
+
+// The id the Sessions list no longer prints: selectable, with a copy button
+// for pasting into a client's resume command or an issue.
+function sessionIdLine(idLabel) {
+  const line = document.createElement('div');
+  line.className = 'detail-session-id';
+  const text = document.createElement('span');
+  text.className = 'detail-session-id-text';
+  text.textContent = idLabel;
+  text.title = idLabel;
+  const copy = document.createElement('button');
+  copy.type = 'button';
+  copy.className = 'detail-session-id-copy';
+  copy.textContent = '⧉';
+  copy.title = t('session.copyId');
+  copy.setAttribute('aria-label', t('session.copyId'));
+  copy.addEventListener('click', () => copyToClipboard(idLabel, copy));
+  line.append(text, copy);
+  return line;
 }
 
 function backgroundReviewRunNode(row, max, parent) {

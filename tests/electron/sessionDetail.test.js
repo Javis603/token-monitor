@@ -61,6 +61,8 @@ test('session detail renders its heading before loading, errors and empty result
     sessionDetailBack() { state.backClicked = true; },
     detailNote: text => ({ textContent: text }),
     sessionDetailApi: { exchangeRows: detail => detail?.exchanges || [] },
+    sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
+    copyToClipboard: (text) => { state.copied = text; },
     exchangeNode: row => ({ textContent: row.title }),
     prefersReducedMotion: () => reducedMotion,
     setTimeout: callback => { timers.push(callback); return timers.length; },
@@ -126,8 +128,20 @@ test('session detail renders its heading before loading, errors and empty result
     overflowText.update(heading);
     assert.equal(heading.classList.contains('has-overflow-fade'), false, 'fitting text stays opaque');
   }
+  // The id the Sessions list no longer prints opens the detail body, copyable,
+  // in every state the body can be in.
+  for (const options of [{ loading: true }, { error: true }, { detail: { exchanges: [{ title: 'Reply', value: 10 }] } }]) {
+    state.openSession = { title: 'Review PR 906', sessionId: 'rollout-2026-09-18T11-44-50-019e76fc-dddd-eeee-ffff-222222222222' };
+    render(options);
+    const idLine = els.sessionDetail.children[0];
+    assert.equal(idLine.className, 'detail-session-id');
+    assert.equal(idLine.querySelector('.detail-session-id-text').textContent, '019e76fc-dddd-eeee-ffff-222222222222');
+    idLine.querySelector('.detail-session-id-copy').click();
+    assert.equal(state.copied, '019e76fc-dddd-eeee-ffff-222222222222');
+  }
   state.openSession = {};
   render({ loading: true });
+  assert.equal(els.sessionDetail.children[0].className, undefined, 'no id, no line');
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
   assert.equal(els.sessionDetailHead.children[0].textContent, '‹ sessions');
   assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], 'Back to sessions');
