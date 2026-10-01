@@ -263,6 +263,7 @@
           key: `session:${key}`,
           kind: 'session',
           name: sessionTitle || titleParts.join(' · '),
+          modelLabel,
           subtitle: (sessionTitle ? titleParts : activityParts).join(' · '),
           activity: sessionTitle ? activityParts.join(' · ') : undefined,
           detail: sessionIdLabel(sessionId),

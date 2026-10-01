@@ -164,8 +164,56 @@ test('background review sessions collapse into one interactive aggregate row wit
     'session:codex:review-a',
     'session:codex:review-b'
   ]);
+  assert.deepEqual(collapsed[1].backgroundReviewRows.map((row) => row.modelLabel), [
+    'codex-auto-review',
+    'gpt-5.6-sol'
+  ]);
   assert.equal(Object.hasOwn(collapsed[1], 'sessionGroupExpanded'), false);
   assert.equal(Object.hasOwn(collapsed[1], 'sessionDetailAvailable'), false);
+});
+
+test('background review run headings show the model independently of session titles and keep the time', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const body = source.slice(source.indexOf('function backgroundReviewRunNode('), source.indexOf('function renderBackgroundReviewDetail('));
+  const sessionRowsApi = require('../../src/electron/renderer/sessionRows');
+  let opened;
+  const createNode = () => {
+    const children = new Map();
+    return {
+      events: {},
+      setAttribute() {},
+      querySelector(selector) {
+        if (!children.has(selector)) children.set(selector, {});
+        return children.get(selector);
+      },
+      addEventListener(type, handler) { this.events[type] = handler; }
+    };
+  };
+  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth', 'openSessionDetail', `${body}\nreturn backgroundReviewRunNode;`)(
+    { createElement: createNode }, sessionRowsApi, () => 'Codex Auto Review', String, String, () => {}, () => 100,
+    (request) => { opened = request; }
+  );
+  for (const [models, expectedModel] of [
+    [{ 'gpt-5.6-sol': 30 }, 'gpt-5.6-sol'],
+    [{ 'gpt-5.6-sol': 20, 'gpt-5.6': 10 }, '2 models'],
+    [{}, '']
+  ]) {
+    const [row] = sessionRowsForPeriod({ sessions: { 'codex:review': {
+      client: 'codex', sessionId: 'review', title: 'Automatic review', sessionKind: 'background-review',
+      totalTokens: 30, models, lastUsedAt: new Date().toISOString()
+    } } });
+    const parent = { kind: 'background-review-group' };
+    const node = render(row, 30, parent);
+    const time = sessionRowsApi.compactSessionTime(row.sortTime);
+    const expectedTitle = [expectedModel, time].filter(Boolean).join(' · ');
+    assert.equal(node.querySelector('.detail-ex-title').textContent, expectedTitle);
+    assert.equal(node.querySelector('.detail-ex-title').title, expectedTitle);
+    assert.equal(node.querySelector('.detail-ex-sub').textContent, 'review');
+    node.events.click();
+    assert.equal(opened.title, `Codex Auto Review · ${expectedTitle}`);
+    assert.equal(opened.sessionId, 'review');
+    assert.equal(opened.returnTo, parent);
+  }
 });
 
 test('model name alone does not hide an ordinary Codex session in background reviews', () => {

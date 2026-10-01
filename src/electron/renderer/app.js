@@ -4708,7 +4708,10 @@ function backgroundReviewRunNode(row, max, parent) {
     + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
     + '<div class="bar"><div class="bar-fill"></div></div>';
   const time = sessionRowsApi.compactSessionTime(row.sortTime, new Date());
-  wrap.querySelector('.detail-ex-title').textContent = time || t('sessions.backgroundReviews');
+  const title = [row.modelLabel, time].filter(Boolean).join(' · ') || t('sessions.backgroundReviews');
+  const titleEl = wrap.querySelector('.detail-ex-title');
+  titleEl.textContent = title;
+  titleEl.title = title;
   wrap.querySelector('.detail-ex-sub').textContent = row.detail || '';
   wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
   wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0);
@@ -4717,7 +4720,7 @@ function backgroundReviewRunNode(row, max, parent) {
     client: row.client,
     sessionId: String(row.key || '').replace(/^session:[^:]+:/, ''),
     sessionCost: Number(row.cost || 0),
-    title: `${t('sessions.backgroundReviews')} · ${time}`,
+    title: `${t('sessions.backgroundReviews')} · ${title}`,
     returnTo: parent
   });
   wrap.addEventListener('click', open);
