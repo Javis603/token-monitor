@@ -158,6 +158,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   },
   limits: {
     saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
+    listOrganizationChoices: (providerId) => ipcRenderer.invoke('limits:listOrganizationChoices', providerId),
     clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId)
   },
   opencode: {

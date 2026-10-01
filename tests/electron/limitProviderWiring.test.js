@@ -99,6 +99,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     copilotApiToken: ['providers', 'copilot', 'apiToken'],
     zedCookie: ['providers', 'zed', 'cookie'],
     typesafeCookie: ['providers', 'typesafe', 'cookie'],
+    stepfunToken: ['providers', 'stepfun', 'token'],
     commandcodeCookie: ['providers', 'commandcode', 'cookie'],
     zaiApiKey: ['providers', 'zai', 'apiKey'],
     zaiTeamApiKey: ['providers', 'zaiTeam', 'apiKey'],
@@ -142,7 +143,7 @@ test('the renderer receives no credential values except the two hub secrets', ()
 
 test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refresh scopes)', () => {
   assert.deepEqual(LIMIT_PROVIDER_SETTING_KEYS, {
-    claude: ['claudeWebCookie'],
+    claude: ['claudeWebCookie', 'claudeWebOrganizationId'],
     codex: ['codexManagedAccounts'],
     opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
     cursor: ['cursorDisabledAccountIds'],
@@ -160,6 +161,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     deepseek: ['deepseekApiKey'],
     devin: ['devinBearerToken', 'devinOrganization'],
     typesafe: ['typesafeCookie'],
+    stepfun: ['stepfunToken'],
     openrouter: ['openrouterProfiles'],
     minimax: ['minimaxApiKey'],
     volcengine: [
@@ -256,13 +258,13 @@ test('settings:update normalizes provider fields and strips separately managed a
   const fields = LIMIT_PROVIDER_REGISTRY.flatMap(({ fields }) => fields);
   const normalizedKeys = fields.filter(({ normalize, persist }) => normalize && persist !== 'never').map(({ key }) => key);
   assert.deepEqual(normalizedKeys.sort(), [
-    'claudeWebCookie', 'deepseekApiKey', 'minimaxApiKey', 'copilotApiToken', 'copilotEnterpriseHost',
+    'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'minimaxApiKey', 'copilotApiToken', 'copilotEnterpriseHost',
     'factoryApiKey', 'clineApiKey', 'zaiApiKey', 'zaiApiRegion', 'zaiTeamApiKey',
     'zaiTeamOrganizationId', 'zaiTeamProjectId', 'volcengineAccessKeyId',
     'volcengineSecretAccessKey', 'volcengineRegion', 'volcengineAgentAccessKeyId',
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
-    'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie',
+    'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
     'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie'
   ].sort());
   for (const key of normalizedKeys) {
@@ -337,6 +339,7 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://commandcode.ai/',
     'https://dashboard.zed.dev/',
     'https://console.typesafe.ai/settings/billing',
+    'https://platform.stepfun.com/plan-usage',
     'https://ollama.com/settings',
     'https://www.ollama.com/signin',
     'https://kimi.com/code',

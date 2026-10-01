@@ -27,6 +27,9 @@ const accountIdentityApi = require('../../src/electron/renderer/accountIdentity'
 const i18n = require('../../src/electron/renderer/i18n');
 const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
 const { buildEdgeDockCells } = require('../../src/electron/renderer/edgeDock/presentation');
+const { parseStepfunUsage } = require('../../src/shared/providers/stepfun/limits');
+const { parseFactoryLegacyUsage, parseFactoryTokenRateLimits } = require('../../src/shared/providers/factory/limits');
+const { normalizeLimitProvider } = require('../../src/shared/limits/core');
 
 const root = path.join(__dirname, '../..');
 
@@ -41,6 +44,7 @@ class FakeElement {
     this.classNames = new Set();
     this.classList = {
       add: (...names) => names.forEach((name) => this.classNames.add(name)),
+      contains: (name) => this.classNames.has(name),
       toggle: (name, enabled) => {
         if (enabled) this.classNames.add(name);
         else this.classNames.delete(name);
@@ -50,9 +54,21 @@ class FakeElement {
 
   get className() { return [...this.classNames].join(' '); }
   set className(value) { this.classNames = new Set(String(value).split(' ').filter(Boolean)); }
-  append(...children) { this.children.push(...children.filter(Boolean)); }
+  append(...children) {
+    for (const child of children.filter(Boolean)) {
+      if (child instanceof FakeElement) child.parent = this;
+      this.children.push(child);
+    }
+  }
+  remove() {
+    if (!this.parent) return;
+    this.parent.children = this.parent.children.filter((child) => child !== this);
+    this.parent = null;
+  }
   addEventListener() {}
   setAttribute(name, value) { this.attributes[name] = value; }
+  removeAttribute(name) { delete this.attributes[name]; }
+  replaceChildren(...children) { this.children = [...children]; }
   querySelector(selector) { return this.find(selector.replace('.', '')); }
 
   // Depth-first walk, so an assertion can ask what the card actually drew
@@ -210,6 +226,23 @@ test('the page hands the shared view every dependency it destructures', () => {
   }
 });
 
+test('session gauges reuse the detail tooltip builder without an info icon', () => {
+  const view = dockView();
+  const gauge = new FakeElement('span');
+  gauge.className = 'edge-dock-session-cache';
+  const { setSessionTooltip } = require('../../src/electron/renderer/sessionRows');
+  setSessionTooltip(gauge, { contextTokens: 123000, contextWindow: 200000 }, { minutes: 28 }, (key, params) => i18n.translate('en', key, params), view);
+  const tooltip = gauge.find('limit-detail-tooltip');
+  assert.ok(tooltip);
+  assert.equal(tooltip.text, '123K / 200K Cache ~28m left');
+  assert.equal(gauge.find('limit-detail-tooltip-trigger'), null);
+  const eventCount = gauge.children.length;
+  setSessionTooltip(gauge, null, { minutes: 27 }, (key, params) => i18n.translate('en', key, params), view);
+  assert.equal(gauge.children.length, eventCount);
+  assert.equal(gauge.find('limit-detail-tooltip'), tooltip);
+  assert.equal(tooltip.text, 'Cache ~27m left');
+});
+
 // The dependency list above is only half the wiring: the view also reads
 // preferences off its settings accessor, and the dock's accessor is the
 // appearance projection the main process pushes. A preference the projection
@@ -270,6 +303,25 @@ test('a TypeSafe card shows the next credit expiry without calling it a reset', 
   assert.match(card.text, /\$2\.00/);
   assert.doesNotMatch(card.text, /Reset/);
   assert.equal(card.find('limit-window').classNames.has('limit-window-no-reset'), false);
+});
+
+test('StepFun draws rolling windows and Token Plan credit as actual meters', () => {
+  const reset = String(Math.floor(Date.now() / 1000) + 86400);
+  const coding = dockView().renderProviderWindows({ provider: 'stepfun', windows: parseStepfunUsage({
+    status: 1, five_hour_usage_left_rate: 0.8, weekly_usage_left_rate: 0.6,
+    five_hour_usage_reset_time: reset, weekly_usage_reset_time: reset
+  }) }, '#000000');
+  assert.deepEqual([...coding.walk()].filter((node) => node.classNames.has('limit-window-text')).map((node) => node.children[0].textContent), ['5-hour', 'Weekly']);
+  assert.equal(coding.textOf('limit-meter').length, 2);
+
+  const credit = dockView().renderProviderWindows({ provider: 'stepfun', windows: parseStepfunUsage({
+    status: 1, plan_family: 2, five_hour_usage_reset_time: '0', weekly_usage_reset_time: '0',
+    plan_credit_rate_limit: { subscription_credit_left_rate: 0.73, subscription_credit_reset_time: reset }
+  }) }, '#000000');
+  assert.deepEqual([...credit.walk()].filter((node) => node.classNames.has('limit-window-text')).map((node) => node.children[0].textContent), ['Credit']);
+  assert.equal(credit.textOf('limit-meter').length, 1);
+  assert.ok(credit.find('limit-window').classNames.has('limit-window-wide'));
+  assert.match(credit.text, /73% left/);
 });
 
 test('a TypeSafe card does not repeat the full balance beside its expiry', () => {
@@ -530,6 +582,63 @@ test('a Devin card keeps Daily, Weekly, and the extra usage balance', () => {
   assert.match(windows[2].text, /\$10\.00/);
   assert.equal(windows[2].classNames.has('limit-window-wide'), true);
   assert.equal(windows[2].classNames.has('limit-window-no-reset'), true);
+});
+
+test('a Factory card draws both pools and the extra usage balance', () => {
+  // The collector's real output: normalizeLimitProvider() sorts windows by
+  // kind, interleaving the Standard and Core pools, and turns the balance
+  // into a credits window.
+  const now = Date.parse('2026-09-10T12:00:00Z');
+  const parsed = parseFactoryTokenRateLimits({
+    usesTokenRateLimitsBilling: true,
+    limits: {
+      standard: {
+        fiveHour: { usedPercent: 12.5, secondsRemaining: 1800 },
+        weekly: { usedPercent: 25, windowEnd: '2026-09-14T12:00:00Z' },
+        monthly: { usedPercent: 40, windowEnd: 1788192000000 }
+      },
+      core: {
+        fiveHour: { usedPercent: 5, secondsRemaining: 900 },
+        weekly: { usedPercent: 10 },
+        monthly: { usedPercent: 0, secondsRemaining: 86400 }
+      }
+    },
+    extraUsageBalanceCents: 1234
+  }, now);
+  const card = dockView().renderProviderWindows(
+    normalizeLimitProvider({ provider: 'factory', status: 'ok', ...parsed }),
+    '#FF6F00'
+  );
+
+  const windows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.deepEqual(
+    windows.map((node) => node.children[0].children[0].textContent),
+    ['5-hour', 'Weekly', 'Monthly', 'Core 5-hour', 'Core Weekly', 'Core Monthly', 'Balance']
+  );
+  assert.deepEqual(
+    windows.map((node) => node.classNames.has('limit-window-wide')),
+    [false, false, true, false, false, true, true]
+  );
+  assert.match(windows[6].text, /\$12\.34/);
+  assert.equal(windows[6].classNames.has('limit-window-no-reset'), true);
+});
+
+test('a legacy Factory card draws its Standard and Premium billing windows', () => {
+  const card = dockView().renderProviderWindows(normalizeLimitProvider({
+    provider: 'factory',
+    status: 'ok',
+    ...parseFactoryLegacyUsage({
+      usage: {
+        endDate: '2026-10-01T00:00:00Z',
+        standard: { userTokens: 250, totalAllowance: 1000 },
+        premium: { userTokens: 50, totalAllowance: 100 }
+      }
+    })
+  }), '#FF6F00');
+
+  const windows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.deepEqual(windows.map((node) => node.children[0].children[0].textContent), ['Standard', 'Premium']);
+  assert.ok(windows.every((node) => node.classNames.has('limit-window-wide')));
 });
 
 test('a Cline card folds month spend into the credit detail tooltip', () => {
@@ -1291,4 +1400,210 @@ test('a stale row is dimmed by the page rule, not recoloured', () => {
   assert.equal(row.classNames.has('stale'), true);
   const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
   assert.doesNotMatch(dock, /freshness\.tone === 'stale'/, 'the card no longer paints staleness orange on its own');
+});
+
+// ---- Visible usage items ----------------------------------------------------
+// The checklist is read off the card itself, so these check both halves: what
+// the card tags, and what an unchecked tag removes.
+
+const usageItems = require('../../src/shared/limits/usageItems');
+
+const codexRecord = () => ({
+  provider: 'codex',
+  windows: [
+    { kind: 'session', label: 'Session', remainingPercent: 70 },
+    { kind: 'weekly', label: '', remainingPercent: 55 },
+    { kind: 'billing', label: 'Monthly', remainingPercent: 40 },
+    { kind: 'session', label: 'Spark', remainingPercent: 90, additional: true }
+  ],
+  resetCredits: { availableCount: 2, expirations: [new Date(Date.now() + 86_400_000).toISOString()] }
+});
+
+const windowTitles = (card) => [...card.walk()]
+  .filter((node) => node.classNames.has('limit-window'))
+  .map((node) => node.children[0].children[0].textContent);
+
+test('the checklist lists what the card draws, in card order, without Codex additional pools', () => {
+  const items = dockView().limitProviderUsageItems([codexRecord()]);
+  assert.deepEqual(items.map((item) => item.id), [
+    usageItems.limitWindowKey({ kind: 'session', label: 'Session' }),
+    usageItems.limitWindowKey({ kind: 'weekly', label: '' }),
+    usageItems.limitWindowKey({ kind: 'billing', label: 'Monthly' }),
+    'resets'
+  ]);
+  assert.deepEqual(items.map((item) => item.label), ['Session', 'Weekly', 'Monthly', 'Resets']);
+});
+
+test('the checklist names each row once across accounts', () => {
+  const items = dockView().limitProviderUsageItems([codexRecord(), codexRecord()]);
+  assert.equal(items.length, 4);
+});
+
+test('an unchecked row leaves the card and its partner takes the full width', () => {
+  const card = dockView({
+    limitProviderHiddenItems: { codex: [usageItems.limitWindowKey({ kind: 'weekly', label: '' }), 'resets'] }
+  }).renderProviderWindows(codexRecord(), '#10A37F');
+
+  assert.deepEqual(windowTitles(card), ['Session', 'Monthly', 'Spark']);
+  assert.equal(card.find('limit-reset-credits'), null);
+  const [session] = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+  assert.equal(session.classNames.has('limit-window-wide'), true, 'a row left alone spans its grid row');
+});
+
+test('the Codex additional pools answer to their own switch, not the checklist', () => {
+  const spark = { kind: 'session', label: 'Spark', additional: true };
+  const card = dockView({
+    limitProviderHiddenItems: { codex: [usageItems.limitWindowKey(spark)] }
+  }).renderProviderWindows(codexRecord(), '#10A37F');
+  assert.ok(windowTitles(card).includes('Spark'));
+});
+
+test('another provider\'s hidden items leave this card alone', () => {
+  const card = dockView({ limitProviderHiddenItems: { claude: ['resets'] } })
+    .renderProviderWindows(codexRecord(), '#10A37F');
+  assert.ok(card.find('limit-reset-credits'));
+});
+
+test('Cline\'s credits and month spend are one item, since they are one row', () => {
+  const record = {
+    provider: 'cline',
+    windows: [
+      { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 0.5, currency: 'CREDITS', showMeter: false },
+      { kind: 'billing', metric: 'spend', label: 'Usage credits', used: 0.13, limit: null, currency: 'USD', showMeter: false }
+    ]
+  };
+  assert.deepEqual(dockView().limitProviderUsageItems([record]), [{ id: 'credits', label: 'Credits' }]);
+  const card = dockView({ limitProviderHiddenItems: { cline: ['credits'] } }).renderProviderWindows(record, '#9D4EDD');
+  assert.equal([...card.walk()].filter((node) => node.classNames.has('limit-window')).length, 0);
+});
+
+test('an Antigravity group whose rows are all unchecked goes with them', () => {
+  const record = {
+    provider: 'antigravity',
+    windows: [
+      { kind: 'session', label: 'Gemini Pro 5-hour', remainingPercent: 80 },
+      { kind: 'weekly', label: 'Gemini Pro weekly', remainingPercent: 60 },
+      { kind: 'session', label: 'Claude 5-hour', remainingPercent: 90 },
+      { kind: 'weekly', label: 'Claude weekly', remainingPercent: 70 }
+    ]
+  };
+  const items = dockView().limitProviderUsageItems([record]);
+  assert.equal(items.length, 4);
+  assert.match(items[0].label, /Gemini Pro/);
+  const hidden = items.filter((item) => /Claude/.test(item.label)).map((item) => item.id);
+  const card = dockView({ limitProviderHiddenItems: { antigravity: hidden } }).renderProviderWindows(record, '#4285F4');
+  const groups = [...card.walk()].filter((node) => node.classNames.has('limit-window-group'));
+  assert.equal(groups.length, 1);
+  assert.doesNotMatch(card.text, /Claude/);
+});
+
+test('a MiMo plan drawn from the balance is the same item as the plan window', () => {
+  const planKey = usageItems.limitWindowKey({ kind: 'billing', label: 'Token Plan' });
+  const record = {
+    provider: 'mimo',
+    balance: { amount: 3, currency: 'USD', planUsed: 20, planLimit: 100 },
+    windows: []
+  };
+  const ids = dockView().limitProviderUsageItems([record]).map((item) => item.id);
+  assert.ok(ids.includes(planKey), `expected ${planKey} in ${ids.join(', ')}`);
+});
+
+// Every provider branch must tag the rows it draws, or a row can be neither
+// listed nor hidden. One payload carrying every window shape the card knows —
+// and one with the metric-less shapes older hubs send — goes through each
+// branch.
+const everyShapeRecord = (provider) => ({
+  provider,
+  windows: [
+    { kind: 'session', label: 'Session', remainingPercent: 70 },
+    { kind: 'daily', label: 'Daily', remainingPercent: 65 },
+    { kind: 'weekly', label: 'Weekly', remainingPercent: 55 },
+    { kind: 'billing', label: 'Monthly', remainingPercent: 40 },
+    { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 8, limit: 20, currency: 'USD' },
+    { kind: 'billing', metric: 'spend', label: 'Usage credits', used: 3, limit: 10, currency: 'USD' },
+    { kind: 'session', label: 'Spark', remainingPercent: 90, additional: true }
+  ],
+  balance: { amount: 12, currency: 'USD', todaySpend: 1, monthSpend: 4, giftBalance: 2, cashBalance: 10 },
+  balanceUsd: 12,
+  resetCredits: { availableCount: 2, expirations: [new Date(Date.now() + 86_400_000).toISOString()] },
+  usageSummary: { period: 'month', totalTokens: 1200, todayTokens: 100, weekTokens: 500, inputTokens: 700, outputTokens: 500, requests: 12, standardCost: 0.01 }
+});
+const legacyShapeRecord = (provider) => ({
+  provider,
+  windows: [
+    { kind: 'billing', label: 'Credits', remaining: 8, currency: 'USD' },
+    { kind: 'billing', label: 'Usage credits', used: 3, limit: 10, currency: 'USD' }
+  ],
+  balance: { amount: 12, currency: 'USD' }
+});
+// Shapes that only some branches draw, each from a window the card renames or
+// a row it builds with no window at all: Antigravity's grouped pools, a
+// label-less credits pool and an unlimited quota with no balance; then an
+// expired plan with no window at all.
+const sparseShapeRecord = (provider) => ({
+  provider,
+  windows: [
+    { kind: 'session', label: 'Gemini Pro 5-hour', remainingPercent: 60 },
+    { kind: 'weekly', label: 'Gemini Pro weekly', remainingPercent: 50 },
+    { kind: 'billing', remaining: 5, limit: 10 },
+    { kind: 'billing', metric: 'credits', label: 'Quota', showMeter: false, detail: 'unlimited' }
+  ]
+});
+const windowlessRecord = (provider) => ({ provider, windows: [], balance: { currency: 'USD', planStatus: 'expired' } });
+const shapeRecords = (provider) => [
+  everyShapeRecord(provider), legacyShapeRecord(provider), sparseShapeRecord(provider), windowlessRecord(provider)
+];
+// Rows deliberately off the checklist: Codex's additional pools answer to
+// showCodexAdditionalLimits, and Antigravity's `--` Weekly stands in for a
+// payload with no weekly window at all.
+const offChecklist = { codex: ['Spark'], antigravity: ['Weekly'] };
+// The whole drawn tree, so a window that only moves a meter still counts as
+// drawn. Tooltip anchor names count up on every render, so they are masked.
+const cardSnapshot = (node) => (node instanceof FakeElement
+  ? JSON.stringify([node.className, node.textContent, node.style, node.attributes, node.children.map(cardSnapshot)])
+    .replace(/--limit-detail-anchor-\d+/g, '--limit-detail-anchor')
+  : String(node?.textContent ?? ''));
+const cardRows = (card) => [...card.walk()].filter((node) => node.classNames.has('limit-window'));
+const rowTitle = (row) => row.children[0]?.children[0]?.textContent || row.text;
+
+test('every row any provider draws is a usage item the card can hide', () => {
+  const problems = [];
+  const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
+  for (const provider of LIMIT_PROVIDER_IDS) {
+    for (const record of shapeRecords(provider)) {
+      for (const row of cardRows(dockView().renderProviderWindows(record, '#888888'))) {
+        if ((offChecklist[provider] || []).includes(rowTitle(row))) continue;
+        if (!row.dataset.usageItem) problems.push(`${provider}: row "${rowTitle(row)}" is not a usage item`);
+      }
+      const hidden = { [provider]: dockView().limitProviderUsageItems([record]).map((item) => item.id) };
+      const left = cardRows(dockView({ limitProviderHiddenItems: hidden }).renderProviderWindows(record, '#888888'))
+        .filter((row) => row.dataset.usageItem);
+      for (const row of left) problems.push(`${provider}: unchecked row "${rowTitle(row)}" is still drawn`);
+    }
+  }
+  assert.deepEqual(problems, []);
+});
+
+// Home and the dock picker filter raw windows rather than card rows, so every
+// window the card draws from has to land on an item the card lists — or a row
+// gone from the card would stay on Home.
+test('with every item unchecked, Home and the picker keep no window the card drew from', () => {
+  const problems = [];
+  const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
+  const view = dockView();
+  for (const provider of LIMIT_PROVIDER_IDS) {
+    for (const record of shapeRecords(provider)) {
+      const full = cardSnapshot(view.renderProviderWindows(record, '#888888'));
+      const hidden = { [provider]: view.limitProviderUsageItems([record]).map((item) => item.id) };
+      for (const [index, window] of record.windows.entries()) {
+        if (provider === 'codex' && window.additional) continue;
+        if (usageItems.isLimitWindowHidden(hidden, provider, window)) continue;
+        const without = { ...record, windows: record.windows.filter((_, other) => other !== index) };
+        if (cardSnapshot(view.renderProviderWindows(without, '#888888')) !== full) {
+          problems.push(`${provider}: the card draws "${window.label}" but Home would keep it`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(problems, []);
 });

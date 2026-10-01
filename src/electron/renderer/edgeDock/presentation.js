@@ -13,11 +13,12 @@
     node ? require('./items') : root?.TokenMonitorEdgeDockItems,
     node ? require('../accountIdentity') : root?.TokenMonitorAccountIdentity,
     node ? require('../../../shared/sessionLive') : root?.TokenMonitorSessionLive,
-    node ? require('../usageAttributionRows') : root?.TokenMonitorUsageAttributionRows
+    node ? require('../usageAttributionRows') : root?.TokenMonitorUsageAttributionRows,
+    node ? require('../limits/resetMotion') : root?.TokenMonitorLimitResetMotion
   );
   if (node) module.exports = api;
   if (root) root.TokenMonitorEdgeDockPresentation = api;
-})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive, usageAttributionRows) {
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockPresentation(trayText, balanceDisplay, limitProviders, dockItems, accountIdentity, sessionLive, usageAttributionRows, limitResetMotion) {
   // Every account is listed; the card scrolls when they outgrow the screen.
   const MAX_BUBBLE_ACCOUNTS = 50;
 
@@ -76,9 +77,16 @@
       : null;
   }
 
-  function accountSummary(provider) {
+  function accountSummary(provider, options = {}) {
+    const windowKey = options.windowKey || '';
     const selection = trayText.compactLimitSelection(provider);
-    const headline = headlinePick(selection);
+    const chosenWindow = windowKey && provider?.status === 'ok' && !provider?.stale
+      ? dockItems.selectedLimitWindow(provider, windowKey, options)
+      : null;
+    const headline = windowKey
+      ? (chosenWindow && trayText.remainingPercent(chosenWindow, provider) !== null
+        ? { window: chosenWindow, remaining: trayText.remainingPercent(chosenWindow, provider) } : null)
+      : headlinePick(selection);
     return {
       status: provider?.status === 'ok' && !provider?.stale ? 'ok' : (provider?.stale ? 'stale' : 'error'),
       planLabel: String(provider?.planLabel || provider?.accountLabel || ''),
@@ -89,10 +97,9 @@
       stale: provider?.stale === true,
       headlineRemaining: headline ? headline.remaining : null,
       headlineWindow: headline ? headline.window : null,
-      // Severity is the tightest metered pool, not the headline: with the
-      // warn-colours toggle on, an account whose weekly runs out while its
-      // session still reads 100% flags before the number flips to 0%.
-      severityPercent: selection ? selection.tightestPercent : null,
+      // Automatic mode warns for the tightest metered pool. A pinned window
+      // keeps both the number and its colour tied to that chosen pool.
+      severityPercent: windowKey ? (headline?.remaining ?? null) : (selection ? selection.tightestPercent : null),
       // The card renders its quota rows from the shared Limits view, which
       // reads the collector record itself. Projecting the windows here is what
       // made the card a second, less-informed implementation of the same rows:
@@ -187,6 +194,9 @@
         // "N models" for a multi-model session — a reading this projection
         // could not reproduce from a flattened winner.
         models: session.models || {},
+        promptCache: session.promptCache || null,
+        contextTokens: finite(session.contextTokens),
+        contextWindow: finite(session.contextWindow),
         totalTokens: finite(session.totalTokens) || 0,
         costUsd: finite(session.costUsd) || 0,
         lastUsedAt: session.lastUsedAt || null,
@@ -326,7 +336,7 @@
     const hidden = new Set(options.hiddenAccounts || []);
     const accounts = records
       .filter((record) => !record?.accountKey || !hidden.has(record.accountKey))
-      .map((record) => ({ record, summary: accountSummary(record) }));
+      .map((record) => ({ record, summary: accountSummary(record, options) }));
     // Accounts keep the collector's order, as the Limits view lists them. The
     // live Codex account is taken from this device's records alone, so a synced
     // device's login is never marked as the one in use here.
@@ -403,6 +413,15 @@
       remainingPercent: headline ? headline.summary.headlineRemaining : null,
       severityPercent: headline ? headline.summary.severityPercent : null,
       windowKind: headlineWindow ? String(headlineWindow.kind || '') : '',
+      // The headline window's cycle boundary plus the identities the Limits
+      // view keys its rows on. The rail's refill motion needs them to tell a
+      // real reset apart from a headline that moved to another account or
+      // window — a swap animates nothing, a reset animates the ring.
+      resetsAt: headlineWindow?.resetsAt || null,
+      headlineAccount: headline ? limitResetMotion.providerKey(headline.record) : '',
+      headlineWindowKey: headlineWindow
+        ? limitResetMotion.windowKey(headlineWindow.label || '', headlineWindow)
+        : '',
       credits: headlineCredits,
       accountCount: accounts.length,
       accounts: projected.slice(0, MAX_BUBBLE_ACCOUNTS).map((account) => account.summary),
@@ -605,6 +624,7 @@
         // every time an account refreshes or signs out.
         cells.push(providerCell(item.provider, byId.get(item.provider) || [], {
           ...item,
+          showCodexAdditionalLimits: options.showCodexAdditionalLimits,
           subscriptionAccounts: allById.get(item.provider) || [],
           stats,
           localDeviceId: options.localDeviceId,

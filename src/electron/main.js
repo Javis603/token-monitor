@@ -127,6 +127,7 @@ const {
 } = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 const { limitProviderUrlAllowed } = require('../shared/limits/accounts');
+const { normalizeLimitProviderHiddenItems } = require('../shared/limits/usageItems');
 const {
   accountFieldProjection,
   accountStatusProjection,
@@ -405,8 +406,10 @@ const {
 } = require('./floatingBubble');
 const { applyWindowsChrome } = require('./windowsChrome');
 const { canUseEdgeDock, createEdgeDockController, edgeDockSupported } = require('./edgeDock/controller');
+const { createFullScreenProbe } = require('./edgeDock/fullScreenProbe');
 const {
   normalizeEdgeDockDisplayId,
+  normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide
 } = require('./edgeDock/geometry');
@@ -638,6 +641,9 @@ function defaultSettings() {
     limitProviderOrder: defaultLimitProviderOrder(),
     homeLimitProviderOrder: '',
     hiddenHomeLimitProviders: '',
+    // Rows of a provider's limits card the user has hidden, as
+    // `{ providerId: [itemId, ...] }` (see shared/limits/usageItems).
+    limitProviderHiddenItems: {},
     homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
     limitsRefreshMode: normalizeLimitsRefreshMode(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE),
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
@@ -2523,6 +2529,7 @@ function readSettings() {
     if (saved.hiddenHomeLimitProviders !== undefined) {
       merged.hiddenHomeLimitProviders = normalizeHiddenLimitProviders(saved.hiddenHomeLimitProviders);
     }
+    merged.limitProviderHiddenItems = normalizeLimitProviderHiddenItems(merged.limitProviderHiddenItems);
     merged.homeLimitAccountCount = normalizeHomeLimitAccountCount(merged.homeLimitAccountCount);
     merged.periodMonthMode = normalizePeriodMonthMode(merged.periodMonthMode);
     if (saved.historyEnabled !== undefined) {
@@ -2594,7 +2601,7 @@ function readSettings() {
     merged.edgeDockSide = normalizeEdgeDockSide(merged.edgeDockSide);
     merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
     merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
-    merged.edgeDockMode = merged.edgeDockMode === 'always' ? 'always' : 'autoHide';
+    merged.edgeDockMode = normalizeEdgeDockMode(merged.edgeDockMode);
     merged.edgeDockHaptic = parseBoolean(merged.edgeDockHaptic, true);
     merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
     merged.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode(merged.edgeDockMacBackdrop);
@@ -5215,6 +5222,7 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     // every preference that view reads has to reach this renderer as well —
     // otherwise the card silently renders a different page's answer.
     showCodexAdditionalLimits: source.showCodexAdditionalLimits,
+    limitProviderHiddenItems: source.limitProviderHiddenItems,
     showLimitSource: source.showLimitSource,
     codexResetForecastEnabled: source.codexResetForecastEnabled,
     claudePrepaidBalanceEnabled: source.claudePrepaidBalanceEnabled,
@@ -5396,6 +5404,7 @@ function edgeDockCellsFor(visibleStats) {
     // dock window is handed cells and nothing else, so both ride the cell.
     syncActive: syncProvenanceActive(),
     items: settings?.edgeDockItems,
+    showCodexAdditionalLimits: settings?.showCodexAdditionalLimits,
     codexManagedAccounts: codexAccountsForRenderer(),
     activeCodexAccountId: codexPresentationPendingAccountId || codexPresentationActiveAccountId,
     limitsEnabled: settings?.limitsEnabled !== false,
@@ -5503,6 +5512,7 @@ function ensureEdgeDockController() {
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
+    isFullScreen: createFullScreenProbe({ platform: process.platform, screen, logger: (message) => console.log(message) }),
     // The dock card's Switch button runs the same swap the Limits view does,
     // then repaints from the refreshed records. It is the dock's only write.
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
@@ -5651,7 +5661,7 @@ function setTrayContentFromMenu(value) {
 
 function setEdgeDockFromMenu(patch = {}) {
   if (patch.edgeDockEnabled !== undefined) settings.edgeDockEnabled = parseBoolean(patch.edgeDockEnabled, false);
-  if (patch.edgeDockMode !== undefined) settings.edgeDockMode = patch.edgeDockMode === 'always' ? 'always' : 'autoHide';
+  if (patch.edgeDockMode !== undefined) settings.edgeDockMode = normalizeEdgeDockMode(patch.edgeDockMode);
   if (patch.edgeDockSide !== undefined) settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
   saveSettings();
   // Also re-syncs the dock itself (pushSettingsToRenderer → syncEdgeDock).
@@ -7349,7 +7359,7 @@ app.whenReady().then(() => {
       edgeDockSide: normalizeEdgeDockSide(patch.edgeDockSide ?? settings.edgeDockSide),
       edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
       edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),
-      edgeDockMode: (patch.edgeDockMode ?? settings.edgeDockMode) === 'always' ? 'always' : 'autoHide',
+      edgeDockMode: normalizeEdgeDockMode(patch.edgeDockMode ?? settings.edgeDockMode),
       edgeDockHaptic: parseBoolean(patch.edgeDockHaptic ?? settings.edgeDockHaptic, true),
       edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
       edgeDockMacBackdrop: normalizeEdgeDockBackdropMode(patch.edgeDockMacBackdrop ?? settings.edgeDockMacBackdrop),
@@ -7388,6 +7398,7 @@ app.whenReady().then(() => {
       showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
+      limitProviderHiddenItems: normalizeLimitProviderHiddenItems(patch.limitProviderHiddenItems ?? settings.limitProviderHiddenItems),
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
@@ -7890,6 +7901,7 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
+  ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
     const cookie = opencodeWeb.sanitizeCookieHeader(raw);

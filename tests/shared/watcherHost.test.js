@@ -294,6 +294,87 @@ test('a terminate that never confirms falls back instead of assuming release', a
   }
 });
 
+test('polling forced by an unconfirmed terminate still respects the entry limit', async () => {
+  FakeWorker.reset();
+  const stub = stubChokidar();
+  const root = tmpTree();
+  for (let index = 0; index < 5; index += 1) fs.writeFileSync(path.join(root, `s${index}.jsonl`), '');
+  const fallbacks = [];
+  const errors = [];
+  const handlers = {
+    onHostFallback: (error, fallback) => fallbacks.push(fallback),
+    onError: (error) => errors.push(error)
+  };
+  try {
+    const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+    const first = coordinator.acquire({ dirs: [root], clients: 'claude', usePolling: false, pollingEntryLimit: 3 }, handlers);
+    const wedged = FakeWorker.last();
+    wedged.deferTerminate = true;
+    first.close();
+    coordinator.acquire({ dirs: [root], clients: 'claude', usePolling: false, pollingEntryLimit: 3 }, handlers);
+
+    wedged.failTerminate(new Error('terminate failed'));
+    await until(() => errors.length === 1);
+    // The owner asked for native events; the host chose polling on its own and
+    // has to tell it so, and has to refuse a tree over the limit all the same.
+    assert.deepEqual(fallbacks, [{ usePolling: true }]);
+    assert.equal(stub.built.length, 0, 'no polling watcher over an oversized tree');
+    assert.equal(errors[0].code, 'watch-polling-limit');
+  } finally {
+    stub.restore();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Either variable forbids polling, and either must stop the must-poll path too.
+for (const pollingEnv of ['TOKEN_MONITOR_WATCH_POLLING', 'CHOKIDAR_USEPOLLING']) test(`an unconfirmed terminate gives up watching when ${pollingEnv}=0`, async () => {
+  FakeWorker.reset();
+  const stub = stubChokidar();
+  const original = process.env[pollingEnv];
+  process.env[pollingEnv] = '0';
+  const errors = [];
+  const handlers = { onError: (error) => errors.push(error) };
+  try {
+    const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+    const first = coordinator.acquire({ dirs: ['/a'], clients: 'claude', usePolling: false }, handlers);
+    const wedged = FakeWorker.last();
+    wedged.deferTerminate = true;
+    first.close();
+    coordinator.acquire({ dirs: ['/b'], clients: 'claude', usePolling: false }, handlers);
+
+    wedged.failTerminate(new Error('terminate failed'));
+    await until(() => errors.length === 1);
+    // The old native descriptors may still be held and polling cannot run, so
+    // any watcher here would be a second native set in flight.
+    assert.equal(stub.built.length, 0);
+    assert.equal(errors[0].code, 'watch-polling-unavailable');
+  } finally {
+    if (original === undefined) delete process.env[pollingEnv];
+    else process.env[pollingEnv] = original;
+    stub.restore();
+  }
+});
+
+test('a refused host that is already closed does not report into its successor', async () => {
+  const stub = stubChokidar();
+  const root = tmpTree();
+  for (let index = 0; index < 5; index += 1) fs.writeFileSync(path.join(root, `s${index}.jsonl`), '');
+  const errors = [];
+  try {
+    const host = createInProcessWatcherHost(
+      { dirs: [root], clients: 'claude', usePolling: true, pollingEntryLimit: 3 },
+      { onError: (error) => errors.push(error) }
+    );
+    host.close();
+    await wait(20);
+    assert.deepEqual(errors, []);
+    assert.equal(stub.built.length, 0);
+  } finally {
+    stub.restore();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('the quit path terminates instead of waiting for the slow teardown', () => {
   FakeWorker.reset();
   const coordinator = createWatcherCoordinator({ Worker: FakeWorker });

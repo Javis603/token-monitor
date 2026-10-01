@@ -220,6 +220,29 @@ test('findings mark a collector stale after the effective interval threshold', (
   assert.deepEqual(findings, [{ code: 'collector-stale' }]);
 });
 
+test('a watcher dropped for interval collection is a finding, not a polling one', () => {
+  const now = Date.parse('2026-08-05T10:00:00.000Z');
+  const snapshot = (watchFallbackCode) => ({
+    collector: {
+      detailsAvailable: true,
+      intervalMs: 5 * 60 * 1000,
+      lastTickSuccessAt: new Date(now - 60 * 1000).toISOString(),
+      watchMode: 'interval',
+      watchFallbackCode
+    },
+    usage: {},
+    topology: {},
+    limits: {}
+  });
+  assert.deepEqual(deriveDiagnosticFindings(snapshot('EMFILE'), now), [
+    { code: 'watcher-interval-fallback', detailCode: 'emfile' }
+  ]);
+  // Forced polling reaches the same state without a descriptor error.
+  assert.deepEqual(deriveDiagnosticFindings(snapshot(null), now), [
+    { code: 'watcher-interval-fallback' }
+  ]);
+});
+
 test('client sync failures become findings for Cursor and Antigravity', () => {
   const now = Date.parse('2026-08-05T10:00:00.000Z');
   const findings = deriveDiagnosticFindings(baseSnapshot({

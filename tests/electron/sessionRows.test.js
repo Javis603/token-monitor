@@ -578,3 +578,55 @@ test('an archived session is never running and a half-read context is not shown'
   assert.equal(windowless.running, true);
   assert.equal(windowless.context, undefined);
 });
+
+test('session rows keep a completed session cache when the recent context expires in every period', () => {
+  const at = Date.parse('2026-09-30T09:00:00Z');
+  const session = { client: 'codex', sessionId: 'cache-session', totalTokens: 100, lastUsedAt: new Date(at).toISOString(), turnEnded: true,
+    contextTokens: 60, contextWindow: 100, promptCache: { observedAt: new Date(at).toISOString(), ttlSeconds: 1800 } };
+  for (const period of ['today', 'month', 'allTime']) {
+    const before = sessionRowsForPeriod({ sessions: { cache: session } }, { now: new Date(at + 600_000) })[0];
+    assert.equal(before.context.percentUsed, 60, period);
+    const after = sessionRowsForPeriod({ sessions: { cache: session } }, { now: new Date(at + 600_001) })[0];
+    assert.equal(after.context, undefined, period);
+    assert.equal(after.promptCache.minutes, 20, period);
+    assert.equal(after.contextSnapshot.contextTokens, 60, period);
+    assert.equal(after.contextSnapshot.contextWindow, 100, period);
+    assert.equal(sessionRowsForPeriod({ sessions: { cache: session } }, { now: new Date(at + 1800_000) })[0].promptCache, null, period);
+  }
+});
+
+test('the shared metrics slot restores its meter and tone after cache or empty states', () => {
+  const fs = require('node:fs');
+  const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
+  const body = source.slice(source.indexOf('function updateRowContext('), source.indexOf('// Flare the row', source.indexOf('function updateRowContext(')));
+  const element = () => {
+    const classes = new Set();
+    return { dataset: {}, textContent: '', classList: { add: x => classes.add(x), remove: x => classes.delete(x), toggle: (x, on) => on ? classes.add(x) : classes.delete(x), contains: x => classes.has(x) }, removeAttribute(name) { delete this[name]; } };
+  };
+  const gauge = element(), meter = element(), value = element(), fill = { style: { setProperty() {} } };
+  gauge.querySelector = selector => ({ '.row-context-meter': meter, '.row-context-value': value, '.row-context-fill': fill })[selector];
+  const row = { querySelector: () => gauge };
+  const update = Function('state', 't', 'sessionRowsApi', 'limitWindowsView', body + '\nreturn updateRowContext;')({ settings: {} }, (key, params) => `${key}:${JSON.stringify(params)}`, require('../../src/electron/renderer/sessionRows'), { setDetailTooltip(node, entries) { node.entries = entries; } });
+  update(row, { percentLeft: 5, percentUsed: 95, tone: 'low' });
+  assert.equal(gauge.dataset.tone, 'low');
+  update(row, null, { minutes: 20, ttlSeconds: 1800 }, { contextTokens: 123000, contextWindow: 200000 });
+  assert.equal(gauge.classList.contains('hidden'), false);
+  assert.equal(meter.classList.contains('hidden'), true);
+  assert.equal(gauge.dataset.tone, '');
+  assert.match(value.textContent, /20/);
+  assert.equal(gauge.entries[0].full, '123K / 200K');
+  assert.match(gauge.entries[1].full, /20/);
+  update(row, { percentLeft: 40, percentUsed: 60, tone: '' });
+  assert.equal(meter.classList.contains('hidden'), false);
+  assert.equal(value.textContent, '60%');
+  update(row, { percentLeft: 40, percentUsed: 60, tone: '', contextTokens: 123000, contextWindow: 200000 }, { minutes: 29, ttlSeconds: 1800 });
+  assert.equal(value.textContent, '60%');
+  assert.match(gauge.entries.at(-1).full, /29/);
+  assert.equal(gauge.entries[0].full, '123K / 200K');
+  update(row, { percentLeft: 40, percentUsed: 60, tone: '' }, null, 'codex');
+  assert.equal(gauge.entries.length, 0);
+  update(row, null, null);
+  assert.equal(gauge.classList.contains('hidden'), true);
+  assert.equal(gauge.title, undefined);
+  assert.deepEqual(gauge.entries, []);
+});

@@ -20,17 +20,20 @@
       save,
       providerLabel,
       providerColor,
+      windowLabel,
       hasProviderMark,
       maskEmail,
       mimoProductLabel,
       createRowDrag,
-      enabledLimitProviders
+      enabledLimitProviders,
+      isWindowHidden = () => false
     } = deps;
 
     // Selection and the open add menu live here rather than in the DOM, because
     // every settings save repaints the whole form.
     const ui = { selected: '', menuOpen: false };
     let drag = null;
+    let renderedSignature = '';
 
     function el(tag, className, text) {
       const node = document.createElement(tag);
@@ -161,7 +164,7 @@
       section('settings.edgeDock.addLimits', addableLimitProviders(
         enabledLimitProviders?.() || connectedProviders(),
         items.filter((item) => item.type === 'limit').map((item) => item.provider)
-      ).map((provider) => ({ type: 'limit', provider, hiddenAccounts: [], showUsage: true })));
+      ).map((provider) => ({ type: 'limit', provider, hiddenAccounts: [], showUsage: true, windowKey: '' })));
       section('settings.edgeDock.addUsage', itemsApi.STAT_METRICS
         .filter((metric) => metric !== itemsApi.SESSIONS_METRIC)
         .map((metric) => ({ type: 'stat', metric }))
@@ -207,6 +210,63 @@
         options.append(label);
       }
       row.append(text, options);
+      return row;
+    }
+
+    function windowChoices(item) {
+      const hidden = new Set(item.hiddenAccounts || []);
+      const choices = new Map();
+      for (const record of getStats()?.limits?.providers || []) {
+        if (String(record?.provider || '').toLowerCase() !== item.provider
+          || (record.accountKey && hidden.has(record.accountKey))) continue;
+        for (const window of itemsApi.selectableLimitWindows(record, getSettings())) {
+          const key = itemsApi.limitWindowKey(window);
+          if (!key || choices.has(key)) continue;
+          // A row hidden from the provider's card is not offered as a new pin;
+          // a pin made before it was hidden keeps its name rather than turning
+          // into "unavailable".
+          const keys = itemsApi.limitWindowKeys(window);
+          if (isWindowHidden(item.provider, window) && !keys.includes(item.windowKey)) continue;
+          choices.set(key, {
+            value: key,
+            keys,
+            label: windowLabel(record, window)
+          });
+        }
+      }
+      return [...choices.values()];
+    }
+
+    function refreshWindowPicker(select, item) {
+      const choices = [{ value: '', label: t('settings.edgeDock.window.auto') }, ...windowChoices(item)];
+      const matchingChoices = item.windowKey ? choices.filter((choice) => choice.keys?.includes(item.windowKey)) : [];
+      const selectedValue = matchingChoices.length === 1 ? matchingChoices[0].value : item.windowKey || '';
+      if (item.windowKey && matchingChoices.length !== 1) {
+        choices.push({ value: item.windowKey, label: t('settings.edgeDock.window.unavailable') });
+      }
+      const options = choices.map((choice) => {
+        const option = document.createElement('option');
+        option.value = choice.value;
+        option.textContent = choice.label;
+        return option;
+      });
+      select.replaceChildren(...options);
+      select.value = selectedValue;
+    }
+
+    function windowRow(item, id) {
+      const row = el('label', 'settings-item edge-dock-composer-window');
+      row.append(el('span', 'settings-item-title', t('settings.edgeDock.window')));
+      const select = document.createElement('select');
+      refreshWindowPicker(select, item);
+      select.addEventListener('change', () => { void updateItem(id, { windowKey: select.value }); });
+      select.addEventListener('blur', () => {
+        // Blur precedes the click on the next control. Refresh only the options
+        // so that control stays attached and receives its click and focus.
+        const currentItem = effectiveItems().find((entry) => itemsApi.itemId(entry) === id);
+        if (currentItem && root.contains(select)) refreshWindowPicker(select, currentItem);
+      });
+      row.append(select);
       return row;
     }
 
@@ -272,6 +332,7 @@
       pane.append(switchRow('settings.edgeDock.showSessions', item.showSessions !== false, (checked) => {
         void updateItem(id, { showSessions: checked });
       }));
+      pane.append(windowRow(item, id));
       if (item.provider === 'codex') {
         pane.append(choiceRow('settings.edgeDock.limitValue', item.accountMode === 'lowest' ? 'lowest' : 'active', [
           { value: 'active', labelKey: 'trayComposer.account.active' },
@@ -318,6 +379,25 @@
       if (drag?.deferRender()) return;
       const items = effectiveItems();
       if (ui.selected && !items.some((item) => itemsApi.itemId(item) === ui.selected)) ui.selected = '';
+      const selectedItem = items.find((item) => itemsApi.itemId(item) === ui.selected);
+      // A stats tick can change token totals without changing any control here.
+      // Replacing the native select on every tick closes its open menu.
+      const signature = JSON.stringify({
+        items,
+        labels: items.map(itemLabel),
+        selected: ui.selected,
+        menuOpen: ui.menuOpen,
+        automatic: isAutomatic(),
+        connected: isAutomatic() ? connectedProviders() : null,
+        addable: ui.menuOpen ? enabledLimitProviders?.() : null,
+        windows: selectedItem?.type === 'limit' ? windowChoices(selectedItem) : null,
+        accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account) => [
+          account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel
+        ]) : null,
+        wording: [t('settings.edgeDock.window'), t('settings.edgeDock.window.auto'), t('settings.edgeDock.window.unavailable')]
+      });
+      if (signature === renderedSignature && root.firstChild) return;
+      if (root.contains(document.activeElement) && document.activeElement?.tagName === 'SELECT') return;
 
       const heading = el('div', 'edge-dock-composer-heading');
       heading.append(el('span', '', t('settings.edgeDock.items')));
@@ -352,6 +432,7 @@
       rail.append(add);
       body.append(rail, detail(items));
       root.replaceChildren(heading, body);
+      renderedSignature = signature;
     }
 
     drag = createRowDrag({

@@ -29,6 +29,7 @@ const FINDING_CODES = new Set([
   'limits-provider-failed',
   'storage-archive-write-failed',
   'stream-disconnected',
+  'watcher-interval-fallback',
   'watcher-polling-fallback',
   'watcher-rebuild-failed'
 ]);
@@ -397,7 +398,7 @@ function sanitizeCollector(collector = {}, platform) {
     intervalMs: boundedNumber(collector.intervalMs),
     watchDebounceMs: boundedNumber(collector.watchDebounceMs),
     watchEnabled: collector.watchEnabled === true,
-    watchMode: safeChoice(collector.watchMode, new Set(['native', 'polling', 'disabled'])),
+    watchMode: safeChoice(collector.watchMode, new Set(['native', 'polling', 'interval', 'disabled'])),
     watchFallbackCode: collector.watchFallbackCode ? identifier(collector.watchFallbackCode) : 'none',
     lastWatchFailureCode: collector.lastWatchFailureCode ? identifier(collector.lastWatchFailureCode) : 'none',
     tickInFlight: collector.tickInFlight === true,
@@ -650,6 +651,12 @@ function deriveDiagnosticFindings(snapshot, nowMs = Date.now()) {
     }
     if (collector.watchMode === 'polling' && collector.watchFallbackCode && !isNoFailureCode(collector.watchFallbackCode)) {
       add({ code: 'watcher-polling-fallback', detailCode: collector.watchFallbackCode });
+    }
+    if (collector.watchMode === 'interval') {
+      add({
+        code: 'watcher-interval-fallback',
+        ...(isNoFailureCode(collector.watchFallbackCode) ? {} : { detailCode: collector.watchFallbackCode })
+      });
     }
     if (collector.lastWatchFailureCode && !isNoFailureCode(collector.lastWatchFailureCode)) add({ code: 'watcher-rebuild-failed' });
   }

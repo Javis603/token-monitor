@@ -1008,6 +1008,35 @@ test('Muse rows fold Tokscale disjoint reasoning into output and totals', () => 
   assert.equal(session.reasoningTokens, 278);
 });
 
+test('fx scan rows and the display name share the tracked client id', () => {
+  assert.equal(normalizeClientName('fx'), 'fx');
+  assert.equal(normalizeClientName('Fx'), 'fx');
+  const period = extractUsageFromTokscale([{ client: 'fx', model: 'glm-5.2', totalTokens: 12 }]);
+  assert.equal(period.clients.fx, 12);
+});
+
+test('fx rows keep Tokscale reasoning inside the output bucket', () => {
+  // fx's snapshot already counts reasoning inside output_tokens (the wire
+  // schema rejects reasoning > output) and the parser emits both buckets
+  // verbatim — so unlike muse/dsh nothing is added back here.
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [{
+      client: 'fx', sessionId: 'fx-session', model: 'glm-5.2',
+      input: 1200, output: 340, cacheRead: 500, cacheWrite: 80,
+      reasoning: 60, messageCount: 4, cost: 0.0314,
+      timestamp: '2026-09-29T00:00:00.000Z'
+    }]
+  });
+  assert.equal(period.totalTokens, 2120);
+  assert.equal(period.clients.fx, 2120);
+  assert.equal(period.clientOutputs.fx, 340);
+  const session = period.sessions['fx:fx-session'];
+  assert.equal(session.totalTokens, 2120);
+  assert.equal(session.outputTokens, 340);
+  assert.equal(session.reasoningTokens, 60);
+});
+
 test('extractUsageFromTokscale keeps model usage grouped by client', () => {
   const period = extractUsageFromTokscale([
     { client: 'Hermes', model: 'claude-3-5-sonnet', totalTokens: 100, costUsd: 1.25 },

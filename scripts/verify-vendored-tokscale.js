@@ -46,6 +46,7 @@ const FIXTURE_LINES = [
 const EXPECTED = { client: FIXTURE_CLIENT, model: 'deepseek-reasoner', input: 2885, output: 2, reasoning: 23, cacheRead: 0 };
 const MUSE_SESSION_ID = 'b1111111-2222-4333-8444-555555555555';
 const MUSE_MODEL = 'muse-spark-1.3-contributor';
+const FX_SESSION_ID = 'fxsess-0001-aaaa-bbbb-ccccdddddddd';
 // Every Tokscale-parsed client added after the legacy baseline in
 // tests/shared/tokscaleTokenContracts.test.js needs a case here. That test
 // makes a new catalog id fail locally until its real binary output and Token
@@ -88,6 +89,59 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
           }
         }
       })}\n`);
+    }
+  },
+  {
+    client: 'fx',
+    // fx writes one aggregate snapshot per session at
+    // `~/.fx/sessions/<id>/usage-v2.json`; the sibling `session.json` carries
+    // the workspace root and `sessions/index.json` the title. Unlike DSH/Muse
+    // its `output` stays reasoning-inclusive (the wire schema validates
+    // reasoning <= output and the parser emits both verbatim), so `fx` is
+    // deliberately NOT in TOKSCALE_DISJOINT_REASONING_CLIENTS — the separate
+    // `reasoning` bucket is informational, not additive.
+    expectedRow: { model: 'glm-5.2', input: 1200, output: 340, cacheRead: 500, cacheWrite: 80, reasoning: 60 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 2120, clientTokens: 2120, clientOutputTokens: 340 },
+    expectedSession: { id: FX_SESSION_ID, totalTokens: 2120, outputTokens: 340, reasoningTokens: 60 },
+    writeFixture(home) {
+      const sessionDir = path.join(home, '.fx', 'sessions', FX_SESSION_ID);
+      fs.mkdirSync(sessionDir, { recursive: true });
+      fs.writeFileSync(path.join(sessionDir, 'usage-v2.json'), JSON.stringify({
+        schema_version: 2,
+        session_id: FX_SESSION_ID,
+        snapshot: {
+          schema_version: 1,
+          total_cost: 0.0314,
+          input_tokens: 1200,
+          output_tokens: 340,
+          cache_read_tokens: 500,
+          cache_write_tokens: 80,
+          reasoning_tokens: 60,
+          request_count: 4,
+          models: [
+            {
+              model: 'zai/glm-5.2',
+              total_cost: 0.0314,
+              input_tokens: 1200,
+              output_tokens: 340,
+              cache_read_tokens: 500,
+              cache_write_tokens: 80,
+              reasoning_tokens: 60,
+              request_count: 4
+            }
+          ]
+        }
+      }));
+      fs.writeFileSync(path.join(sessionDir, 'session.json'), JSON.stringify({
+        id: FX_SESSION_ID,
+        workspace_root: '/tmp/fx-workspace',
+        created_at_ms: 1787196900000,
+        updated_at_ms: 1787196905040
+      }));
+      fs.writeFileSync(path.join(home, '.fx', 'sessions', 'index.json'), JSON.stringify({
+        sessions: [{ id: FX_SESSION_ID, title: 'Refactor the zig lexer' }]
+      }));
     }
   }
 ]);

@@ -13,6 +13,7 @@ const {
   edgeDockRailBounds,
   edgeDockTriggerBounds,
   normalizeEdgeDockDisplayId,
+  normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
   rectContains
@@ -24,6 +25,10 @@ const SURFACES = Object.freeze(['peek', 'rail', 'bubble']);
 const POLL_IDLE_MS = 90;
 const POLL_ACTIVE_MS = 40;
 const POLL_DRAG_MS = 16;
+// How often `alwaysExceptFullScreen` re-checks for a full-screen app. The macOS
+// Space transition itself takes longer than this, so a faster poll would only
+// spend window-list reads without making the dock react sooner.
+const FULL_SCREEN_POLL_MS = 500;
 const FADE_IN_MS = 150;
 const FADE_OUT_MS = 120;
 const FADE_STEP_MS = 16;
@@ -68,6 +73,8 @@ function createEdgeDockController(deps) {
     onSwitchCodexAccount,
     onOpenResetForecastSource,
     performHaptic = () => false,
+    // (display) => whether another app is full screen on that display.
+    isFullScreen = () => false,
     logger = () => {}
   } = deps;
 
@@ -100,6 +107,8 @@ function createEdgeDockController(deps) {
   let peeking = false;
   let drag = null;
   let placementOverride = null;
+  let fullScreen = false;
+  let fullScreenCheckedAt = -Infinity;
   let ipcRegistered = false;
   let displayListenersAttached = false;
   const shapes = { peek: null, rail: null, bubble: null };
@@ -112,7 +121,35 @@ function createEdgeDockController(deps) {
   }
 
   function alwaysVisible() {
-    return settings().edgeDockMode === 'always';
+    const mode = normalizeEdgeDockMode(settings().edgeDockMode);
+    return mode === 'always' || (mode === 'alwaysExceptFullScreen' && !fullScreen);
+  }
+
+  // Re-reads the full-screen state when the mode depends on it and the last
+  // read is stale; returns whether it changed.
+  function refreshFullScreen(now, force = false) {
+    const previous = fullScreen;
+    if (normalizeEdgeDockMode(settings().edgeDockMode) !== 'alwaysExceptFullScreen') {
+      fullScreen = false;
+      fullScreenCheckedAt = -Infinity;
+    } else if (force || now - fullScreenCheckedAt >= FULL_SCREEN_POLL_MS) {
+      fullScreenCheckedAt = now;
+      try {
+        fullScreen = isFullScreen(display()) === true;
+      } catch (error) {
+        logger(`[edge-dock] full-screen check failed: ${error.message}`);
+        fullScreen = false;
+      }
+    }
+    return fullScreen !== previous;
+  }
+
+  function syncAlwaysVisible() {
+    const always = alwaysVisible();
+    if (always === intent.snapshot().always) return;
+    applyEffects(intent.setAlways(always));
+    // Leaving always-visible behaves like a pointer that just left.
+    if (!always && !intent.snapshot().pinned) applyEffects(intent.retract());
   }
 
   function hapticsEnabled() {
@@ -622,6 +659,11 @@ function createEdgeDockController(deps) {
       } else if (current && drag) {
         followDrag(point, current);
       } else if (current) {
+        if (refreshFullScreen(Date.now())) {
+          syncAlwaysVisible();
+          showPeek();
+          render('rail');
+        }
         const revealed = intent.snapshot().revealed;
         const bubbleRect = bubbleVisible ? current.bubble : null;
         const input = {
@@ -786,6 +828,12 @@ function createEdgeDockController(deps) {
     if (bubbleCell !== null) invalidateBubblePlacement();
     positionRail();
     if (bubbleCell !== null) render('bubble');
+    // The dock may now sit on another display (a removed one falls back to the
+    // primary), so the cached full-screen state can describe the wrong screen.
+    if (refreshFullScreen(Date.now(), true)) {
+      syncAlwaysVisible();
+      render('rail');
+    }
     if (!railVisible) showPeek();
   }
 
@@ -816,6 +864,8 @@ function createEdgeDockController(deps) {
     drag = null;
     placementOverride = null;
     intent.retract();
+    fullScreen = false;
+    fullScreenCheckedAt = -Infinity;
     destroyWindows();
   }
 
@@ -827,12 +877,8 @@ function createEdgeDockController(deps) {
         return;
       }
       start();
-      const always = alwaysVisible();
-      if (always !== intent.snapshot().always) {
-        applyEffects(intent.setAlways(always));
-        // Leaving always-visible mode behaves like a pointer that just left.
-        if (!always && !intent.snapshot().pinned) applyEffects(intent.retract());
-      }
+      refreshFullScreen(Date.now(), true);
+      syncAlwaysVisible();
       if (!drag) {
         positionRail();
         showPeek();

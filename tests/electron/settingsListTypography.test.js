@@ -36,6 +36,6 @@ test('the limit provider disclosure button does not re-declare the type size', (
   const css = readRendererFile('styles.css');
   assert.doesNotMatch(cssRule(css, '.limit-provider-main'), /font-size/);
   const app = readRendererFile('app.js');
-  assert.match(app, /const hasOptions = Boolean\(accountGroup \|\| settings \|\| connectionDetailKey\);/);
+  assert.match(app, /const hasOptions = Boolean\(accountGroup \|\| settings \|\| connectionDetailKey \|\| usageItems\.length\);/);
   assert.match(app, /\} else \{\n\s*row\.append\(wrap, copy, actions\);/);
 });

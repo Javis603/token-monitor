@@ -83,11 +83,15 @@
     return windows;
   }
 
-  function homeLimitAccounts(accounts, limit = 3, { sort = 'remaining' } = {}) {
+  // `isWindowHidden(providerId, window)` drops the rows the user unchecked on
+  // the provider's usage-item list. It runs after the MiMo plan is synthesized,
+  // so hiding the plan hides the placeholder built from the balance as well.
+  function homeLimitAccounts(accounts, limit = 3, { sort = 'remaining', isWindowHidden = null } = {}) {
     return (accounts || [])
       .map((account, index) => {
         const providerId = String(account?.providerId || '').trim().toLowerCase();
         const windows = accountWindows(account)
+          .filter((window) => typeof isWindowHidden !== 'function' || !isWindowHidden(providerId, window))
           .map((window, windowIndex) => {
             const credits = balanceDisplay.isCreditsWindow(window);
             return {
@@ -229,7 +233,8 @@
     sort = 'remaining',
     accountName,
     accountColor,
-    accountIcon
+    accountIcon,
+    isWindowHidden = null
   } = {}) {
     const enabled = new Set((enabledProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
     const hidden = new Set((hiddenProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
@@ -253,7 +258,29 @@
         });
       });
     }
-    return homeLimitAccounts(accounts, limit, { sort });
+    return homeLimitAccounts(accounts, limit, { sort, isWindowHidden });
+  }
+
+  // True when at least one enabled, unhidden limit provider has no entry yet in
+  // `providers` (the composed device record's `limits.providers`). Distinguishes
+  // "nothing is configured" from "configured, but the first probe/usage baseline
+  // has not landed yet" (DeviceState buffers both usage previews and limits until
+  // a complete usage baseline exists, so a provider can stay absent for minutes
+  // after cold start even though it is enabled and will report shortly).
+  function homeLimitsAwaitingFirstData({
+    providers = [],
+    providerOptions = [],
+    enabledProviderIds = [],
+    hiddenProviderIds = []
+  } = {}) {
+    const enabled = new Set((enabledProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
+    const hidden = new Set((hiddenProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
+    const byId = providerEntriesById(providers);
+    return (providerOptions || []).some(({ id: rawId }) => {
+      const id = String(rawId || '').trim().toLowerCase();
+      if (!id || hidden.has(id) || !enabled.has(id)) return false;
+      return !byId.has(id);
+    });
   }
 
   function homeTrendSummary(points) {
@@ -456,6 +483,7 @@
   return {
     homeLimitAccounts,
     homeLimitAccountsForProviders,
+    homeLimitsAwaitingFirstData,
     homeModelRows,
     longRangePeakDayTokens,
     homeToolRows,

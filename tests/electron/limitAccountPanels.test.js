@@ -75,6 +75,25 @@ function renderPanel(form, callbacks = {}) {
 
 const translated = (key, params) => i18n.translate('en', key, params);
 
+test('Claude organization choice starts hidden before a cookie is checked', () => {
+  const form = limitAccountFormsForRenderer().find((entry) => entry.id === 'claude');
+  const { group } = renderPanel(form);
+  assert.equal(group.byId('claudeWebOrganizationRow').classList.contains('hidden'), true);
+});
+
+test('StepFun setup copy points to its button, request header and save action', () => {
+  const form = limitAccountFormsForRenderer().find((entry) => entry.id === 'stepfun');
+  const { group } = renderPanel(form);
+  const steps = form.manual[0].steps;
+  assert.equal(steps.length, 4);
+  assert.match(i18n.translate('zh-TW', steps[0]), /使用上方按鈕/);
+  assert.match(i18n.translate('en', steps[0]), /button above/);
+  assert.match(i18n.translate('en', steps[1][0]), /DevTools \(F12 or Cmd\+Opt\+I\) -> Network/);
+  assert.match(group.text, /QueryStepPlanRateLimit/);
+  assert.match(i18n.translate('en', steps[2]), /Headers -> Request Headers.*Oasis-Token/);
+  assert.match(i18n.translate('zh-TW', steps[3]), /儲存 token/);
+});
+
 for (const form of limitAccountFormsForRenderer()) {
   test(`${form.id} renders a localized account panel and hands the draft to the caller`, async () => {
     const calls = [];

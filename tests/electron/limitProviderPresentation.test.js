@@ -307,7 +307,8 @@ function runProviderSpendNode(source, balance, provider = null) {
       'settings.thirdparty.outputTokens': 'Output tokens',
       'settings.thirdparty.requests': 'Requests'
     })[key] || key,
-    limitNoteRowNode: (options) => options
+    limitNoteRowNode: (options) => options,
+    tagUsageItem: (node) => node
   };
   vm.runInNewContext(
     `${optionalNumber}\n${spendEntries}\n${spendNode}\n`
@@ -1245,6 +1246,10 @@ test('Z.ai and Team keep all billing windows and render MCP full width after pai
       limitWindowNode: (label, window, _color, _tone, _value, detail) => Object.assign(makeNode(), { label, window, detail }),
       providerWindowLabel: (p, window, fallback = '') => limitWindowLabel(p?.provider, window, fallback),
       providerWindowText: (p, window) => limitWindowText(p, window, { showLimitUsed: false }),
+      tagUsageItem: (node) => node,
+      hideUsageItems() {},
+      usageItems: { hiddenUsageItemSet: () => new Set() },
+      settings: () => ({}),
       provider: { provider, windows: [
         { kind: 'weekly', label: 'Weekly' },
         { kind: 'billing', label: 'MCP' },
@@ -1293,7 +1298,11 @@ test('OpenCode reads the Zen balance from its credits window without metering it
     optionalFiniteNumber: (value) => (Number.isFinite(Number(value)) && value !== null && value !== '' ? Number(value) : null),
     formatLimitAmount: (value) => `$${Number(value).toFixed(2)}`,
     providerWindowLabel: (p, window, fallback = '') => limitWindowLabel(p?.provider, window, fallback),
-    limitWindowNode: (label, window, _color, _tone, value) => Object.assign(makeNode(), { label, window, value })
+    limitWindowNode: (label, window, _color, _tone, value) => Object.assign(makeNode(), { label, window, value }),
+    tagUsageItem: (node) => node,
+    hideUsageItems() {},
+    usageItems: { hiddenUsageItemSet: () => new Set() },
+    settings: () => ({})
   };
   const balanceWindow = { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 8.5, currency: 'USD', showMeter: false };
 
@@ -1636,7 +1645,7 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
 
   assert.match(homeLabel, /if \(window\?\.kind === 'billing'\) \{/);
   assert.match(homeLabel, /limitProviderCompactWindowLabel\(providerId, window, visibleWindows\)/);
-  assert.match(homeRows, /limitProviderCompactWindows\(provider, provider\.windows\)/);
+  assert.match(homeRows, /limitProviderCompactWindows\(\s*provider,\s*\(provider\.windows \|\| \[\]\)\.filter\(/);
   assert.match(homeLabel, /const label = String\(window\?\.label \|\| ''\)\.trim\(\);/);
   assert.match(homeLabel, /if \(label\) return label;/);
   assert.match(homeLabel, /billing: 'home\.limit\.billing'/);
@@ -1779,14 +1788,16 @@ test('Balance and token quota values omit the redundant left suffix', () => {
 });
 
 test('MiMo Limits draws a credits balance when the provider balance object is absent', () => {
-  const render = viewBody('renderProviderWindows');
+  const render = [viewBody('tagUsageItem'), viewBody('hideUsageItems'), viewBody('renderProviderWindows')].join('\n');
   const makeNode = () => {
-    const node = { children: [], classes: new Set(), append(...children) { this.children.push(...children); } };
+    const node = { children: [], dataset: {}, classes: new Set(), append(...children) { this.children.push(...children); } };
     node.classList = { add(...classes) { classes.forEach((name) => node.classes.add(name)); } };
     return node;
   };
   const context = {
     document: { createElement: makeNode },
+    settings: () => ({}),
+    usageItems: require('../../src/shared/limits/usageItems'),
     windowForKind: (provider, kind) => provider.windows.find((window) => window.kind === kind) || null,
     windowsForKind: (provider, kind) => provider.windows.filter((window) => window.kind === kind),
     isCreditsWindow,
