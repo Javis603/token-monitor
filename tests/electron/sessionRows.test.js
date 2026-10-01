@@ -210,7 +210,7 @@ test('background review run headings show the model independently of session tit
     assert.equal(node.querySelector('.detail-ex-title').title, expectedTitle);
     assert.equal(node.querySelector('.detail-ex-sub').textContent, 'review');
     node.events.click();
-    assert.equal(opened.title, `Codex Auto Review · ${expectedTitle}`);
+    assert.equal(opened.title, expectedTitle);
     assert.equal(opened.sessionId, 'review');
     assert.equal(opened.returnTo, parent);
   }

@@ -21,9 +21,15 @@ function deferred() {
 }
 
 test('session detail renders its heading before loading, errors and empty results, and keeps it when sorting', () => {
+  const timers = [];
+  const frames = [];
+  let reducedMotion = false;
   function element() {
+    const classes = new Set();
     return {
-      children: [], classList: { add() {}, remove() {} },
+      children: [], scrollLeft: 0, scrollWidth: 600, clientWidth: 200,
+      closest: () => ({}),
+      classList: { add: value => classes.add(value), remove: value => classes.delete(value), contains: value => classes.has(value) },
       append(...nodes) { this.children.push(...nodes); },
       replaceChildren(...nodes) { this.children = nodes; },
       addEventListener(type, handler) { this[type] = handler; },
@@ -41,14 +47,23 @@ test('session detail renders its heading before loading, errors and empty result
     detailNote: text => ({ textContent: text }),
     sessionDetailApi: { exchangeRows: detail => detail?.exchanges || [] },
     exchangeNode: row => ({ textContent: row.title }),
+    prefersReducedMotion: () => reducedMotion,
+    setTimeout: callback => { timers.push(callback); return timers.length; },
+    clearTimeout() {},
+    requestAnimationFrame: callback => { frames.push(callback); return frames.length; },
+    cancelAnimationFrame() {},
+    performance: { now: () => 0 },
     toggleDetailSort() {
       state.detailSort = 'time';
       render({ detail: state.openSession.detail });
     }
   };
+  const marqueeStart = rendererSource.indexOf('const hoverMarqueeStates =');
+  const marqueeEnd = rendererSource.indexOf('function setHoverMarqueeText(', marqueeStart);
+  vm.runInNewContext(rendererSource.slice(marqueeStart, marqueeEnd), context);
   vm.runInNewContext(`${rendererSource.slice(start, end)}\nglobalThis.render = renderSessionDetail;`, context);
   render = context.render;
-  for (const title of ['Background Reviews · gpt-5.6-sol · 12:34', 'Ordinary session title']) {
+  for (const title of ['gpt-5.6-sol · 12:34', 'A long ordinary session title that exceeds the available header width']) {
     state.openSession = { title, detail: { exchanges: [{ title: 'Reply', value: 10 }] } };
     for (const options of [{ loading: true }, { error: true }, { detail: { found: false } },
       { detail: { exchanges: [] } }, { detail: state.openSession.detail }]) {
@@ -59,7 +74,21 @@ test('session detail renders its heading before loading, errors and empty result
       assert.equal(els.sessionDetailHead.children[0].className, 'detail-back');
     }
     els.sessionDetailHead.querySelector('.detail-sort').click();
-    assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, title);
+    const heading = els.sessionDetailHead.querySelector('.detail-heading');
+    assert.equal(heading.textContent, title);
+    heading.mouseenter();
+    timers.pop()();
+    frames.pop()(8000);
+    assert.ok(heading.scrollLeft > 0, 'hover reveals the clipped title');
+    assert.equal(heading.classList.contains('is-hover-scrolling'), true);
+    heading.mouseleave();
+    assert.equal(heading.scrollLeft, 0);
+    assert.equal(heading.classList.contains('is-hover-scrolling'), false);
+    reducedMotion = true;
+    heading.mouseenter();
+    assert.equal(heading.scrollLeft, 0);
+    assert.equal(heading.title, title, 'full title remains available without motion');
+    reducedMotion = false;
   }
   state.openSession = {};
   render({ loading: true });

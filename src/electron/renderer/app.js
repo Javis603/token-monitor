@@ -4684,6 +4684,7 @@ function renderSessionDetail({ detail, loading, error } = {}) {
     heading.className = 'detail-heading';
     heading.textContent = state.openSession.title;
     heading.title = state.openSession.title;
+    bindHoverMarquee(heading);
     head.append(heading);
   }
 
@@ -4728,7 +4729,7 @@ function backgroundReviewRunNode(row, max, parent) {
     client: row.client,
     sessionId: String(row.key || '').replace(/^session:[^:]+:/, ''),
     sessionCost: Number(row.cost || 0),
-    title: `${t('sessions.backgroundReviews')} · ${title}`,
+    title,
     returnTo: parent
   });
   wrap.addEventListener('click', open);
