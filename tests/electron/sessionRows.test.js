@@ -12,6 +12,7 @@ const {
   handleBreakdownRowKeydown,
   sessionBreakdownIncomplete,
   sessionIdLabel,
+  sessionModelTooltipEntries,
   sessionRowsForPeriod
 } = require('../../src/electron/renderer/sessionRows');
 
@@ -116,6 +117,70 @@ test('session rows group client and model apart from activity metadata', () => {
   assert.equal(row.detail, 'titled');
 });
 
+test('multi-model sessions expose every model with its tokens and share of the session', () => {
+  const session = {
+    totalTokens: 100,
+    models: { 'gpt-5.6-sol': 70, 'claude-opus-5': 20 }
+  };
+  assert.deepEqual(sessionModelTooltipEntries(session), [
+    ['gpt-5.6-sol', '70', '70%'],
+    ['claude-opus-5', '20', '20%'],
+    ['Unclassified', '10', '10%']
+  ]);
+  assert.deepEqual(sessionModelTooltipEntries(session, { unattributedLabel: '未分類' }).at(-1), [
+    '未分類', '10', '10%'
+  ]);
+  // The rows follow the heaviest model first, not the models map's order,
+  // with the tokens no model claimed trailing them.
+  assert.deepEqual(
+    sessionModelTooltipEntries({ totalTokens: 100, models: { 'claude-opus-5': 20, 'gpt-5.6-sol': 70 } })
+      .map(([model]) => model),
+    ['gpt-5.6-sol', 'claude-opus-5', 'Unclassified']
+  );
+});
+
+test('model tooltip shares read the session total and floor at a real sliver', () => {
+  // Models can out-sum the recorded total (overlapping reads); the share is
+  // then of the attributed tokens rather than over 100% each.
+  assert.deepEqual(sessionModelTooltipEntries({ totalTokens: 40, models: { a: 30, b: 10 } }), [
+    ['a', '30', '75%'],
+    ['b', '10', '25%']
+  ]);
+  assert.deepEqual(sessionModelTooltipEntries({ totalTokens: 1000, models: { a: 999, b: 1 } }), [
+    ['a', '999', '100%'],
+    ['b', '1', '<1%']
+  ]);
+  // Fewer than two models never abbreviates to "N models", so there is no
+  // tooltip behind a label that names the model already.
+  assert.deepEqual(sessionModelTooltipEntries({ totalTokens: 10, models: { a: 10 } }), []);
+  assert.deepEqual(sessionModelTooltipEntries({ totalTokens: 10, models: { a: 10, b: 0 } }), []);
+  assert.deepEqual(sessionModelTooltipEntries(null), []);
+});
+
+test('session rows carry the model tooltip entries behind the "N models" label', () => {
+  const [row] = sessionRowsForPeriod({ sessions: {
+    'codex:mixed': {
+      client: 'codex',
+      sessionId: 'mixed',
+      title: 'Mixed run',
+      totalTokens: 100,
+      models: { 'gpt-5.6-sol': 60, 'gpt-5.6': 40 },
+      lastUsedAt: localIso(2026, 5, 30, 12, 7)
+    }
+  } }, {
+    clientLabels,
+    clientColors,
+    now: new Date(2026, 4, 30, 12, 30),
+    unattributedLabel: 'Unclassified'
+  });
+  assert.equal(row.modelLabel, '2 models');
+  assert.equal(row.subtitle, 'Codex · 2 models');
+  assert.deepEqual(row.modelTooltipEntries, [
+    ['gpt-5.6-sol', '60', '60%'],
+    ['gpt-5.6', '40', '40%']
+  ]);
+});
+
 test('Codex merged rollout labels contain UUIDs only', () => {
   const first = '01a084ff-20ff-7563-beb4-045b31e5a47a';
   const second = '01a0876b-d178-7be2-a485-529a745ea1b0';
@@ -189,9 +254,9 @@ test('background review run headings show the model independently of session tit
       addEventListener(type, handler) { this.events[type] = handler; }
     };
   };
-  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth', 'openSessionDetail', 'bindHoverMarquee', `${body}\nreturn backgroundReviewRunNode;`)(
+  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth', 'openSessionDetail', 'bindHoverMarquee', 'limitWindowsView', `${body}\nreturn backgroundReviewRunNode;`)(
     { createElement: createNode }, sessionRowsApi, () => 'Codex Auto Review', String, String, () => {}, () => 100,
-    (request) => { opened = request; }, () => {}
+    (request) => { opened = request; }, () => {}, { setDetailTooltip() {} }
   );
   for (const [models, expectedModel] of [
     [{ 'gpt-5.6-sol': 30 }, 'gpt-5.6-sol'],

@@ -2357,7 +2357,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2396,9 +2396,33 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
     mark.className = 'row-mark dot';
     mark.style.background = color;
   }
-  setHoverMarqueeText(row.querySelector('.row-title'), name);
+  const titleEl = row.querySelector('.row-title');
+  setHoverMarqueeText(titleEl, name);
   const subtitleEl = row.querySelector('.row-subtitle');
-  subtitleEl.textContent = subtitle || '';
+  // A multi-model session abbreviates to "N models"; that label opens the same
+  // tooltip the context gauge carries, one row per model with its tokens and
+  // share of the session. A titled row prints the label inside the
+  // client · model line, so the trigger is just the "N models" span; an
+  // untitled row folds it into the title instead, whose whole text then opens
+  // the tooltip. The trigger mirrors the row's own wording rather than adding
+  // chrome, so there is nothing extra on a single-model row.
+  const modelEntries = Array.isArray(modelTooltipEntries) && modelTooltipEntries.length > 1
+    ? modelTooltipEntries : null;
+  const subtitleShowsModel = Boolean(modelEntries && modelLabel && String(subtitle || '').endsWith(modelLabel));
+  if (subtitleShowsModel) {
+    const models = document.createElement('span');
+    models.className = 'session-models';
+    models.textContent = modelLabel;
+    subtitleEl.replaceChildren(document.createTextNode(subtitle.slice(0, -modelLabel.length)), models);
+    limitWindowsView.setDetailTooltip(models, modelEntries);
+  } else {
+    subtitleEl.textContent = subtitle || '';
+  }
+  if (!subtitleShowsModel && modelEntries && modelLabel && String(name || '').endsWith(modelLabel)) {
+    limitWindowsView.setDetailTooltip(titleEl, modelEntries);
+  } else if (titleEl.classList.contains('limit-detail-tooltip-wrap')) {
+    limitWindowsView.setDetailTooltip(titleEl, null);
+  }
   subtitleEl.classList.toggle('hidden', !subtitle);
   const activityEl = row.querySelector('.row-activity');
   activityEl.textContent = activity || '';
@@ -2812,6 +2836,7 @@ function rawSessionRowsForPeriod(period) {
     stableColor,
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived'),
+    unattributedLabel: t('dashboard.tooltip.unclassified'),
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
 }
@@ -3973,7 +3998,7 @@ function limitDetailTooltipShouldHoldRender() {
 }
 
 function sessionTooltipShouldHoldRender() {
-  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within'));
+  return Boolean(document.querySelector('.home-session-row .is-hover-reading, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within'));
 }
 
 function flushPendingLimitDetailTooltipRender() {
@@ -4701,6 +4726,11 @@ function backgroundReviewRunNode(row, max, parent) {
   titleEl.textContent = title;
   titleEl.title = title;
   bindHoverMarquee(titleEl);
+  // A multi-model run reads "N models · time" here — the same label the
+  // Sessions list opens for its per-model shares, so the title opens it too.
+  if (row.modelTooltipEntries?.length > 1) {
+    limitWindowsView.setDetailTooltip(titleEl, row.modelTooltipEntries);
+  }
   wrap.querySelector('.detail-ex-sub').textContent = row.detail || '';
   wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
   wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0);
@@ -5853,7 +5883,22 @@ function renderHomeSessionModule() {
     const age = homeSessionAgo(Date.parse(row.lastUsedAt || row.startedAt || ''));
     const description = document.createElement('span');
     description.className = 'home-list-sub';
-    description.textContent = [sessionRowsApi.sessionModelLabel(row), age].filter(Boolean).join(' · ');
+    // The same "N models" hover the Sessions list draws: the label stays the
+    // row's own text, and the tooltip lists the models behind the count.
+    const modelLabel = sessionRowsApi.sessionModelLabel(row);
+    const modelEntries = sessionRowsApi.sessionModelTooltipEntries(row, {
+      unattributedLabel: t('dashboard.tooltip.unclassified')
+    });
+    if (modelLabel && modelEntries.length > 1) {
+      const models = document.createElement('span');
+      models.className = 'session-models';
+      models.textContent = modelLabel;
+      limitWindowsView.setDetailTooltip(models, modelEntries);
+      description.append(models);
+      if (age) description.append(document.createTextNode(` · ${age}`));
+    } else {
+      description.textContent = [modelLabel, age].filter(Boolean).join(' · ');
+    }
     meta.append(description);
     const context = window.TokenMonitorSessionLive.sessionActivityState(row) !== 'idle' ? row.context : null;
     const cache = window.TokenMonitorSessionLive.sessionPromptCacheForRow(row);

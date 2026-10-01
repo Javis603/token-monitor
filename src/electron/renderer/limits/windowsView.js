@@ -533,8 +533,15 @@
     wrap.style.setProperty('-webkit-app-region', 'no-drag');
     wrap.setAttribute('aria-label', entries.map((entry) => Array.isArray(entry) ? entry.join(': ') : entry.full).join(', '));
     wrap.tabIndex = 0;
-    const next = detailTooltipNode(entries);
+    // Widen to the triple-column layout when an entry carries a middle cell
+    // (e.g. model name · tokens · share) the same way limitDetailInfoNode does.
+    const columns = entries.reduce(
+      (widest, entry) => Math.max(widest, Array.isArray(entry) ? entry.length : 0),
+      0
+    );
+    const next = detailTooltipNode(entries, columns);
     if (tooltip) {
+      tooltip.className = next.className;
       tooltip.replaceChildren(...next.children);
     } else {
       tooltip = next;

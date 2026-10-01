@@ -718,7 +718,8 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
 /* The tooltip is `width: max-content` and grows leftward from its trigger. On
    the page that has the whole window to grow into; here the window is the card,
    so a wide one would run off the edge instead of wrapping. */
-.edge-dock-accounts .limit-detail-tooltip {
+.edge-dock-accounts .limit-detail-tooltip,
+.edge-dock-sessions .limit-detail-tooltip {
   max-width: 248px;
 }
 

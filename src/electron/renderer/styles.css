@@ -4622,7 +4622,10 @@ html.is-windows .limit-live-badge {
 .home-session-context.limit-detail-tooltip-wrap,
 .home-session-cache.limit-detail-tooltip-wrap,
 .edge-dock-session-context.limit-detail-tooltip-wrap,
-.edge-dock-session-cache.limit-detail-tooltip-wrap {
+.edge-dock-session-cache.limit-detail-tooltip-wrap,
+.session-models.limit-detail-tooltip-wrap,
+.row-title.limit-detail-tooltip-wrap,
+.detail-ex-title.limit-detail-tooltip-wrap {
   display: inline-flex;
   width: auto;
   height: auto;
@@ -4721,6 +4724,21 @@ html.is-windows .limit-live-badge {
   border-right: none;
   border-bottom: none;
   border-left: 1px solid rgba(var(--line-rgb), 0.22);
+}
+/* A "N models" label sits at a row's left edge, so the tooltip opens to the
+   right of the trigger instead of extending left from its right edge — the
+   default alignment would clip off the side of the window. */
+.session-models.limit-detail-tooltip-wrap .limit-detail-tooltip,
+.row-title.limit-detail-tooltip-wrap .limit-detail-tooltip,
+.detail-ex-title.limit-detail-tooltip-wrap .limit-detail-tooltip {
+  right: auto;
+  left: calc(anchor(left) - 1px);
+}
+.session-models.limit-detail-tooltip-wrap .limit-detail-tooltip::after,
+.row-title.limit-detail-tooltip-wrap .limit-detail-tooltip::after,
+.detail-ex-title.limit-detail-tooltip-wrap .limit-detail-tooltip::after {
+  right: auto;
+  left: 6px;
 }
 .limit-detail-tooltip-triple {
   grid-template-columns: max-content max-content max-content;

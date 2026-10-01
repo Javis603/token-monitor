@@ -96,6 +96,43 @@
     return `${models.length} models`;
   }
 
+  // The rows a "N models" label opens on hover: every model behind the count,
+  // heaviest first, with its tokens and share of the session. A session can
+  // hold tokens no model claimed (a log written before the model field
+  // existed, say), so the remainder is reported as one last row rather than
+  // letting the shares sum under the label's promise.
+  function sessionModelTooltipEntries(session, options = {}) {
+    const entries = Object.entries(session?.models || {})
+      .map(([model, tokens]) => ({ model: String(model || ''), tokens: finiteNumber(tokens) }))
+      .filter((entry) => entry.tokens > 0);
+    if (entries.length < 2) return [];
+    entries.sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model));
+    const total = finiteNumber(session?.totalTokens);
+    const attributed = entries.reduce((sum, entry) => sum + entry.tokens, 0);
+    const denominator = Math.max(total, attributed);
+    // The same share label the tool-detail accordion prints for model rows: a
+    // real sliver reads "<1%" rather than rounding to a misleading 0.
+    const percentLabel = (percent) => (
+      percent > 0 && percent < 1 ? '<1%' : `${Math.round(Math.min(100, percent))}%`
+    );
+    const named = entries.filter((entry) => entry.model);
+    const rows = named.map((entry) => [
+      entry.model,
+      formatNumber(entry.tokens),
+      percentLabel(denominator > 0 ? entry.tokens / denominator * 100 : 0)
+    ]);
+    const unlabeled = attributed - named.reduce((sum, entry) => sum + entry.tokens, 0);
+    const unattributed = unlabeled + Math.max(0, total - attributed);
+    if (unattributed > 0) {
+      rows.push([
+        textValue(options.unattributedLabel) || 'Unclassified',
+        formatNumber(unattributed),
+        percentLabel(unattributed / denominator * 100)
+      ]);
+    }
+    return rows;
+  }
+
   function sessionTimestampValue(session) {
     const date = validDate(session?.lastUsedAt || session?.startedAt);
     return date ? date.getTime() : 0;
@@ -187,7 +224,7 @@
     const stable = typeof options.stableColor === 'function' ? options.stableColor : stableColor;
     const palette = options.fallbackColors || fallbackColors;
     const client = textValue(session?.client) || 'reasonix';
-    const { clientLabel, titleParts } = sessionTitleParts(
+    const { clientLabel, titleParts, modelLabel } = sessionTitleParts(
       { ...session, client },
       labels,
       'Reasonix',
@@ -207,6 +244,10 @@
       key: `session:${key}`,
       kind: 'session',
       name: titleParts.join(' · '),
+      modelLabel,
+      modelTooltipEntries: sessionModelTooltipEntries(session, {
+        unattributedLabel: options.unattributedLabel
+      }),
       subtitle: subtitleParts.join(' · '),
       running: running || undefined,
       activityState,
@@ -264,6 +305,9 @@
           kind: 'session',
           name: sessionTitle || titleParts.join(' · '),
           modelLabel,
+          modelTooltipEntries: sessionModelTooltipEntries(session, {
+            unattributedLabel: options.unattributedLabel
+          }),
           subtitle: (sessionTitle ? titleParts : activityParts).join(' · '),
           activity: sessionTitle ? activityParts.join(' · ') : undefined,
           detail: sessionIdLabel(sessionId),
@@ -365,6 +409,7 @@
     // model reads a different name than the list's "N models" for the same
     // session, so both surfaces compose the label from this one helper.
     sessionModelLabel,
+    sessionModelTooltipEntries,
     sessionRowsForPeriod
   };
 });

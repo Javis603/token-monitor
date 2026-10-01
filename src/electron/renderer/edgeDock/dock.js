@@ -1198,8 +1198,21 @@ function sessionsContainer(sessions, options = {}) {
     // The model label is composed by the Sessions list's own helper, so a
     // multi-model session reads "N models" here exactly as it does there —
     // projecting only the top model showed a different name than the list's
-    // for the same session.
-    meta.append(document.createTextNode([sessionRowsApi.sessionModelLabel(session), relativeAgo(session.lastUsedAt || session.startedAt)].filter(Boolean).join(' · ')));
+    // for the same session. The label is the tooltip trigger there too: one
+    // row per model with its tokens and share.
+    const modelLabel = sessionRowsApi.sessionModelLabel(session);
+    const age = relativeAgo(session.lastUsedAt || session.startedAt);
+    const modelEntries = sessionRowsApi.sessionModelTooltipEntries(session, {
+      unattributedLabel: t('dashboard.tooltip.unclassified')
+    });
+    if (modelLabel && modelEntries.length > 1) {
+      const models = el('span', 'session-models', modelLabel);
+      limitWindowsView.setDetailTooltip(models, modelEntries);
+      meta.append(models);
+      if (age) meta.append(document.createTextNode(` · ${age}`));
+    } else {
+      meta.append(document.createTextNode([modelLabel, age].filter(Boolean).join(' · ')));
+    }
     const context = contextNode(session);
     const cache = context ? null : sessionLive.sessionPromptCacheForRow(session);
     if (cache) {
