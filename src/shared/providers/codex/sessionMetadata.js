@@ -336,7 +336,12 @@ function resolveSessionMetadata(sessionIds, context) {
       homeDir: home,
       env: deps.env
     }));
-  for (const [sessionId, meta] of readT3Metadata(sessionIds)) {
+  // T3 queries expand and batch the ids against JSON runtime cursors. Exclude
+  // titles that cannot be replaced before paying for those fallback queries.
+  const t3SessionIds = new Set([...sessionIds].filter(
+    (id) => !(result.get(id)?.title && generatedTitleById.get(id))
+  ));
+  for (const [sessionId, meta] of readT3Metadata(t3SessionIds)) {
     const resolved = result.get(sessionId) || {};
     // Never overwrite a title the Codex store itself generated; do replace the
     // prompt-derived fallback, which is exactly the case T3 improves on.
