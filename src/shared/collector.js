@@ -58,6 +58,11 @@ const {
   resolveQoderCnPricing
 } = require('./providers/qodercn/usage');
 const {
+  buildMcodeDesktopHistoryGraph,
+  buildMcodeDesktopPeriods,
+  collectMcodeDesktopRows
+} = require('./mcodeDesktopUsage');
+const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
   isReasonixNativeSessionSidecar,
@@ -1050,6 +1055,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
   }
+  if (options.mcodeDesktopGraph) {
+    rawGraphs.push(options.mcodeDesktopGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.mcodeDesktopGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -1158,6 +1167,7 @@ async function collectUsageOnce(options) {
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
+  const includesMcodeDesktop = normalizedClients.split(',').includes('mcode');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -1188,11 +1198,16 @@ async function collectUsageOnce(options) {
   let qoderCnRows = null;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
+  let mcodeDesktopPeriods = null;
+  let mcodeDesktopRows = null;
+  let mcodeDesktopPricing = null;
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     const progress = { ...periods };
     if (qoderCnPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, qoderCnPeriods.today);
     if (qoderCnPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, qoderCnPeriods.month);
+    if (mcodeDesktopPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, mcodeDesktopPeriods.today);
+    if (mcodeDesktopPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, mcodeDesktopPeriods.month);
     try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
   };
   if (normalizedClients) {
@@ -1266,6 +1281,28 @@ async function collectUsageOnce(options) {
         qoderCnPeriods = options.qoderCnFallbackPeriods || null;
       }
     }
+    if (includesMcodeDesktop && (!targetRequested || targetClients.includes('mcode'))) {
+      try {
+        // Anchored (watch/interval) ticks collect rows only since local midnight
+        // for the period delta, matching the tokscale --today scan scope.
+        const mcodeSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
+        mcodeDesktopRows = collectMcodeDesktopRows({ homeDir: options.homeDir, sinceMs: mcodeSinceMs });
+        mcodeDesktopPricing = await resolveModelPricing(mcodeDesktopRows, {
+          lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs,
+          pricingRevision: options.pricingRevision
+        });
+        const mcodeJson = buildMcodeDesktopPeriods({ now: collectedAt, allTimeSince, rows: mcodeDesktopRows, pricingByModel: mcodeDesktopPricing });
+        mcodeDesktopPeriods = {
+          today: extractUsageFromTokscale(mcodeJson.today),
+          month: extractUsageFromTokscale(mcodeJson.month),
+          allTime: extractUsageFromTokscale(mcodeJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`mcode desktop parse failed: ${err.message}`);
+        mcodeDesktopPeriods = null;
+      }
+    }
     throwIfAborted(options.signal);
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
@@ -1316,6 +1353,13 @@ async function collectUsageOnce(options) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
         freshPartitions.qodercn = anchor.todayPartitions.qodercn;
+      }
+      // The MiniMax Code Desktop adapter is a local source, but mcode itself is
+      // also a tokscale client (headless capture), so the mcode partition must
+      // MERGE both rather than replace — a watch tick targeting mcode would
+      // otherwise drop the headless-capture rows for the desktop rows.
+      if (mcodeDesktopPeriods) {
+        freshPartitions.mcode = mergePeriods(freshPartitions.mcode || emptyPeriod(), mcodeDesktopPeriods.today);
       }
       if (!useTargetedPartitions) {
         // The fallback rebuilds every Tokscale partition, but parse-local
@@ -1383,6 +1427,15 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, qoderCnPeriods.month);
       allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), qodercn: qoderCnPeriods.today };
+    }
+    if (mcodeDesktopPeriods && !anchorUsed) {
+      today = mergePeriods(today, mcodeDesktopPeriods.today);
+      month = mergePeriods(month, mcodeDesktopPeriods.month);
+      allTime = mergePeriods(allTime, mcodeDesktopPeriods.allTime);
+      todayPartitions = {
+        ...(todayPartitions || {}),
+        mcode: mergePeriods(todayPartitions?.mcode || emptyPeriod(), mcodeDesktopPeriods.today)
+      };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1602,11 +1655,29 @@ async function collectUsageOnce(options) {
     const historyQoderCnGraph = qoderCnHistoryReadFailed
       ? options.qoderCnHistoryFallbackGraph
       : qoderCnGraph;
+    // MiniMax Code Desktop history graph: like Qoder CN, the graph needs the
+    // full row set (anchored ticks read only since local midnight), so read the
+    // transcripts fresh here when the scan's rows are the midnight-truncated set.
+    let mcodeDesktopGraph = null;
+    if (includesMcodeDesktop) {
+      try {
+        const rows = (!anchorUsed && mcodeDesktopRows) ? mcodeDesktopRows : collectMcodeDesktopRows({ homeDir: options.homeDir });
+        const pricing = (!anchorUsed && mcodeDesktopPricing) ? mcodeDesktopPricing : await resolveModelPricing(rows, {
+          lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs,
+          pricingRevision: options.pricingRevision
+        });
+        mcodeDesktopGraph = buildMcodeDesktopHistoryGraph({ rows, pricingByModel: pricing });
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`mcode desktop history parse failed: ${err.message}`);
+      }
+    }
     throwIfAborted(options.signal);
     const history = await collectHistoryOnce({
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
       qoderCnGraph: historyQoderCnGraph || null,
+      mcodeDesktopGraph: mcodeDesktopGraph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1643,13 +1714,29 @@ async function collectUsageOnce(options) {
   return summary;
 }
 
-// Sources that remain part of collection, health, and diagnostics but are too
-// broad for a persistent recursive watcher. Kiro globalStorage accepts every
-// `.chat`, `.json`, and extensionless file at any depth in tokscale, so a real
-// tree can require thousands of native directory watches; after descriptor
-// exhaustion the same tree becomes an even more expensive 2-second polling
-// watch. Regular interval ticks (five minutes by default), manual refreshes, and
-// hourly full reconciliation still scan it through the unchanged Kiro client.
+// Where tokscale looks for captured `codex exec --json` output. Both defaults
+// are scanned on every platform — upstream pushes them with no cfg gate, so the
+// Application Support one is not a macOS variant of the .config one — and
+// TOKSCALE_HEADLESS_DIR replaces the pair rather than adding to it
+// (scanner.rs `headless_roots_with_env_strategy`). Neither default follows
+// XDG_CONFIG_HOME: upstream spells the .config path as a literal.
+//
+// `optional` marks a root whose absence carries no information. Nobody has
+// these unless they opted into a capture workflow, so the diagnostics panel
+// hides them when they are missing rather than showing them struck through
+// beside a real "Codex wrote nothing here". A configured root is the opposite:
+// the user named that path, so its absence is exactly what they want to see.
+// Per-client data-dir candidates, keyed by client. Drives the detection-status
+// derivation and, after the interval-only/self-synced projections below, the
+// chokidar watch list; Antigravity's read-only source roots are added back
+// explicitly below.
+// The watched roots, each tagged with a stable id for its *kind*. One id may
+// cover several paths: Copilot's workspaceStorage has a variant per platform and
+// Kiro's IDE globalStorage has four, but "the VS Code workspace storage is
+// missing" is the useful statement, not which spelling was probed. Absolute
+// paths contain the user's home directory and never leave this process, so a
+// health record carries the id instead — CLIENT_SOURCE_CHECK_IDS in
+// clientHealth.js is the allowlist every id here must appear in.
 const INTERVAL_ONLY_SOURCE_CHECK_IDS = new Set(['kiro-ide-globalstorage']);
 
 // The watcher only ever wants paths, so it keeps its original shape rather than

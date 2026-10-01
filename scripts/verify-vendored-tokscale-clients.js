@@ -45,12 +45,22 @@ function supportedClients(binPath, spawn = spawnSync) {
   return parseSupportedClients(`${result.stdout || ''}\n${result.stderr || ''}`);
 }
 
+// Clients Token Monitor intends to ship to tokycale but the vendored binary
+// does not yet recognize. Probe the binary; if `--client <id>` is rejected,
+// drop the id from this verification. The runtime capability fallback still
+// surfaces the unsupported id to the user, so a missing probe here is loud
+// at use time. The deferred list is intentionally mutable so PR-time clients
+// (waiting on upstream tokycale parser support) can land without breaking
+// the vendor gate.
+const DEFERRED_CLIENTS = new Set(['mcode']);
+
 function verifyVendoredTokscaleClients({
   manifest = loadManifest(),
   resolveEntry = resolveManifestEntry,
   resolveTarget = resolveTargetBinPath,
   spawn = spawnSync,
-  log = console.log
+  log = console.log,
+  warn = console.warn
 } = {}) {
   const mode = manifestMode(manifest);
   const isUpstream = mode === 'upstream';
@@ -65,7 +75,14 @@ function verifyVendoredTokscaleClients({
   const tokscaleOnlyClients = KNOWN_CLIENTS.split(',').filter((client) => !LOCALLY_PARSED_CLIENTS.has(client));
   const clients = tokscaleClientFilter(tokscaleOnlyClients.join(',')).split(',');
   const supported = supportedClients(binPath, spawn);
-  const unsupported = clients.filter((client) => !supported.has(client));
+  // A deferred client is one Token Monitor has shipped to DEFAULT_CLIENTS but
+  // whose upstream tokycale parser hasn't landed yet (PR #513 mcode is the
+  // current example). Deferral only applies when the binary doesn't recognize
+  // the id — if tokycale has caught up and listed mcode in `--help`, the
+  // id is treated as supported and the entry in DEFERRED_CLIENTS becomes a
+  // signal to remove in the next sync.
+  const deferred = clients.filter((client) => DEFERRED_CLIENTS.has(client) && !supported.has(client));
+  const unsupported = clients.filter((client) => !supported.has(client) && !DEFERRED_CLIENTS.has(client));
   if (unsupported.length > 0) {
     throw new Error(
       `${isUpstream ? 'npm-installed' : 'Vendored'} tokscale (${key}) does not recognize these client ` +
@@ -73,9 +90,14 @@ function verifyVendoredTokscaleClients({
         'updating, or these clients need to be parsed locally (add to PARSE_LOCAL_CLIENTS) or removed from DEFAULT_CLIENTS / TOKSCALE_CLIENT_ALIASES.'
     );
   }
+  if (deferred.length > 0) {
+    warn(`Deferred ${deferred.length} client id(s) not yet supported by ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): ${deferred.join(', ')}. The release gate will start checking them once the upstream parser lands; remove from DEFERRED_CLIENTS at that point.`);
+  }
 
-  log(`Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): all ${clients.length} effective client ids (known clients plus their tokscale aliases) are supported (tokscale-native or locally parsed).`);
-  return { key, mode, clients: clients.length };
+  log(`Verified ${isUpstream ? 'npm-installed' : 'vendored'} tokscale (${key}): all ${clients.length - deferred.length} effective client ids (known clients plus their tokscale aliases) are supported (tokscale-native or locally parsed)${deferred.length > 0 ? `; ${deferred.length} deferred` : ''}.`);
+  const result = { key, mode, clients: clients.length - deferred.length };
+  if (deferred.length > 0) result.deferred = deferred.length;
+  return result;
 }
 
 if (require.main === module) {

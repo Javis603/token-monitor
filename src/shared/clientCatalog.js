@@ -71,6 +71,7 @@
     { id: 'commandcode', label: 'Command Code' },
     { id: 'mimo', label: 'Xiaomi MiMo' },
     { id: 'muse', label: 'Muse Code' },
+    { id: 'mcode', label: 'MiniMax Code' },
     { id: 'zcode', label: 'ZCode' },
     { id: 'kiro', label: 'Kiro' },
     { id: 'codebuddy', label: 'CodeBuddy' },

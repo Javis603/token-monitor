@@ -870,7 +870,7 @@ test('extractUsageFromTokscale normalizes Pi, Zed, and Kilo, keeping Copilot dis
   assert.equal(period.clients.kilo, 19);
 });
 
-test('extractUsageFromTokscale normalizes MiMo and ZCode client ids', () => {
+test('extractUsageFromTokscale normalizes MiMo, MiniMax Code and ZCode client ids', () => {
   // `micode` is tokscale's id for MiMo — a fossil of the path typo upstream
   // fixed in its PR #784, which left the id behind. Token Monitor's id is
   // `mimo`, shared with the limits provider for the same product, so both
@@ -878,11 +878,13 @@ test('extractUsageFromTokscale normalizes MiMo and ZCode client ids', () => {
   const period = extractUsageFromTokscale([
     { client: 'micode', model: 'mimo-v2.5-pro', totalTokens: 23 },
     { client: 'micode-desktop', model: 'mimo-v2.5-pro', totalTokens: 5 },
+    { client: 'mcode', model: 'MiniMax-M2.5', totalTokens: 31 },
     { client: 'ZCode', model: 'glm-4.7', totalTokens: 29 }
   ]);
 
   assert.equal(period.clients.mimo, 28);
   assert.equal(period.clients.micode, undefined);
+  assert.equal(period.clients.mcode, 31);
   assert.equal(period.clients.zcode, 29);
 });
 
@@ -1035,6 +1037,14 @@ test('fx rows keep Tokscale reasoning inside the output bucket', () => {
   assert.equal(session.totalTokens, 2120);
   assert.equal(session.outputTokens, 340);
   assert.equal(session.reasoningTokens, 60);
+});
+
+test('normalizeClientName maps MiniMax Code and its product label to mcode', () => {
+  assert.equal(normalizeClientName('mcode'), 'mcode');
+  assert.equal(normalizeClientName('MiniMax Code'), 'mcode');
+  assert.equal(normalizeClientName('minimax-code'), 'mcode');
+  // A MiniMax *model* label is not the client: it must not collapse into mcode.
+  assert.equal(normalizeClientName('MiniMax-M3'), 'minimax-m3');
 });
 
 test('extractUsageFromTokscale keeps model usage grouped by client', () => {

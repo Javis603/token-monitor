@@ -9,6 +9,7 @@ const { tokscaleConfigDir, tokscaleHomeDir } = require('./tokscaleConfig');
 const { claudeSessionRoots } = require('./providers/claude/paths');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
+const { mcodeDesktopSessionsRoot } = require('./mcodeDesktopUsage');
 const { qoderCnDataPaths } = require('./providers/qodercn/usage');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
@@ -169,6 +170,18 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['codex-sessions', path.join(codexHome, 'sessions')],
     ['codex-sessions', path.join(codexHome, 'archived_sessions')],
     ...tokscaleHeadlessRoots(home).map(({ dir, optional }) => ['codex-sessions', path.join(dir, 'codex'), null, optional])
+  );
+  // MiniMax Code: tokscale captures `mcode exec --output-format stream-json`
+  // streams under its own headless roots (TOKSCALE_HEADLESS_DIR or the
+  // `<home>/.config/tokscale/headless` + Application Support pair, mirroring
+  // codex), and never scans MiniMax Code's shared Desktop/Runtime session
+  // store. The roots are `optional` because nobody has them unless they
+  // opted into a capture workflow, so the diagnostics panel hides them while
+  // absent.
+  add(
+    'mcode',
+    ...tokscaleHeadlessRoots(home).map(({ dir, optional }) => ['mcode-headless', path.join(dir, 'mcode'), null, optional]),
+    ['mcode-desktop-sessions', mcodeDesktopSessionsRoot({ homeDir: home })]
   );
   const hermesHome = resolveHermesHome({ env: process.env, homeDir: home });
   add('hermes', ['hermes-home', hermesHome], ...hermesProfileWatchDirs(hermesHome).map((dir) => ['hermes-profile', dir]));
@@ -488,5 +501,7 @@ module.exports = {
   canonicalWatchPath,
   cherryStudioTranscriptRoots,
   clientSourceRoots,
-  copilotExporterWatch
+  copilotExporterWatch,
+  tokscaleHeadlessRoots,
+  xdgDataHome
 };

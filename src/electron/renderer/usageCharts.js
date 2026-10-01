@@ -420,7 +420,7 @@
     return result;
   }
 
-  // Brand colours come from the vendor presentation table. One shared, mutable
+// Brand colours come from the vendor presentation table. One shared, mutable
   // object: the renderers apply the user's vendor-colour overrides onto it.
   const clientColors = vendorPresentation.vendorColors();
   // Kept distinct from every named vendor colour in the table — sharing a hex with a real

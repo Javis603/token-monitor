@@ -51,8 +51,8 @@ test('app.js takes client identity from the catalog and keeps no copy of it', ()
 });
 
 test('renderer known clients include current tokscale-supported tools', () => {
-  const clients = knownClientIds();
-  for (const client of ['cline', 'amp', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'mimo', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh']) {
+const clients = knownClientIds();
+  for (const client of ['cline', 'amp', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'mimo', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh', 'mcode']) {
     assert.ok(clients.includes(client), `${client} should be a known renderer client`);
   }
 });
@@ -68,6 +68,7 @@ test('renderer distinguishes Grok model and Grok Build tool icons', () => {
 test('renderer reuses vendor icons for MiMo and ZCode tool rows', () => {
   const styles = rendererStyles();
   assert.match(styles, /\.row-icon-mimo\s*\{[^}]*assets\/icons\/xiaomi\.svg/s);
+  assert.match(styles, /\.row-icon-mcode\s*\{[^}]*assets\/icons\/minimax\.svg/s);
   assert.match(styles, /\.row-icon-zcode\s*\{[^}]*assets\/icons\/zai\.svg/s);
 });
 

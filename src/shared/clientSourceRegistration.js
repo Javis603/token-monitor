@@ -38,6 +38,7 @@ const SOURCE_MARKERS = [
   { marker: '.factory/sessions', client: 'droid', hostCheckId: 'droid-sessions' },
   { marker: '.local/share/mimocode/mimocode.db', client: 'mimo' },
   { marker: '.local/share/muse/sessions', client: 'muse' },
+  { marker: '.config/tokscale/headless/mcode', client: 'mcode' },
   { marker: '.zcode/projects', client: 'zcode' },
   { marker: '.zcode/cli/db', client: 'zcode' },
   { marker: '.kiro/sessions', client: 'kiro' },

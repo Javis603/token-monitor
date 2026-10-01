@@ -58,7 +58,7 @@
   const LIGHT_SUCCESS = '#18794e';
   const LIGHT_SUCCESS_RGB = '24, 121, 78';
 
-  // Vendors shown in the vendor-colour list and their labels, from the vendor
+// Vendors shown in the vendor-colour list and their labels, from the vendor
   // presentation table (tracked clients first). Vendors not listed here but
   // present in clientColors are appended after these, then the synthetic
   // "default" fallback is shown last.
