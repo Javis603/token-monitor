@@ -74,6 +74,8 @@ test('a window drawn under another item is hidden with that item', () => {
   const legacyClaudeSpend = { kind: 'billing', label: 'Usage credits' };
   assert.equal(isLimitWindowHidden({ claude: ['spend'] }, 'claude', legacyClaudeSpend), true);
   assert.equal(limitUsageItemId(legacyClaudeSpend), limitWindowKey(legacyClaudeSpend));
+  const legacyOpenRouterBalance = { kind: 'billing', label: 'Credits', remaining: 4 };
+  assert.equal(isLimitWindowHidden({ openrouter: ['credits'] }, 'openrouter', legacyOpenRouterBalance), true);
 });
 
 test('a hidden window the payload no longer draws is still named', () => {

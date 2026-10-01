@@ -97,7 +97,8 @@
 
   // The item a window's row belongs to. `providerId` covers the rows the card
   // draws from a window under another item: Cline folds its spend into the
-  // credits row, and older hubs send Claude's spend window without a metric.
+  // credits row, and older hubs send Claude's spend window and OpenRouter's
+  // balance window without a metric.
   function limitUsageItemId(window, providerId = '') {
     const provider = normalizedId(providerId);
     const metric = normalizedId(window?.metric);
@@ -105,6 +106,7 @@
     if (provider === 'claude' && !metric && window?.kind === 'billing' && window?.label === 'Usage credits') {
       return 'spend';
     }
+    if (provider === 'openrouter' && !metric && window?.label === 'Credits') return 'credits';
     if (metric === 'credits' || metric === 'spend') return metric;
     return limitWindowKey(window);
   }
