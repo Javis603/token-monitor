@@ -19,6 +19,10 @@ function codexAdditionalLimitsMigrationPatch(settings, stats) {
   if (ids.length === 0) return null;
   let hiddenItems = settings.limitProviderHiddenItems;
   for (const id of ids) hiddenItems = usageItems.setUsageItemHidden(hiddenItems, 'codex', id, true);
+  // A full hidden list drops ids past its cap; keep honouring the switch rather
+  // than reveal a pool it was hiding.
+  const kept = new Set(hiddenItems?.codex || []);
+  if (!ids.every((id) => kept.has(id))) return null;
   return { limitProviderHiddenItems: hiddenItems, showCodexAdditionalLimits: true };
 }
 

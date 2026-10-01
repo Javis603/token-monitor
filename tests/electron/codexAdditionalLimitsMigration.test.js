@@ -42,11 +42,16 @@ test('a stored false hides every pool it can see and turns the switch back on', 
   assert.equal(isLimitWindowHidden(patch.limitProviderHiddenItems, 'codex', { kind: 'session', label: 'Session' }), false);
 });
 
-test('nothing moves until a pool is reported, or when the switch was on', () => {
+test('nothing moves until a pool is reported and fits, or when the switch was on', () => {
   assert.equal(codexAdditionalLimitsMigrationPatch({ showCodexAdditionalLimits: false }, statsWith(codex())), null);
   assert.equal(codexAdditionalLimitsMigrationPatch({ showCodexAdditionalLimits: false }, null), null);
   assert.equal(codexAdditionalLimitsMigrationPatch({ showCodexAdditionalLimits: true }, statsWith(codex(sparkSession))), null);
   assert.equal(codexAdditionalLimitsMigrationPatch({}, statsWith(codex(sparkSession))), null);
+  const full = Array.from({ length: 64 }, (_, index) => limitWindowKey({ kind: 'session', label: `Pool ${index}` }));
+  assert.equal(codexAdditionalLimitsMigrationPatch(
+    { showCodexAdditionalLimits: false, limitProviderHiddenItems: { codex: full } },
+    statsWith(codex(sparkSession))
+  ), null, 'a pool id the full hidden list would drop keeps the switch off');
 });
 
 test('the carried-over selection persists and pushes once, and a failed save leaves settings untouched', () => {
