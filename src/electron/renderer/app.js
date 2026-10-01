@@ -4679,6 +4679,14 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   back.addEventListener('click', sessionDetailBack);
   head.append(back);
 
+  if (state.openSession?.title) {
+    const heading = document.createElement('strong');
+    heading.className = 'detail-heading';
+    heading.textContent = state.openSession.title;
+    heading.title = state.openSession.title;
+    head.append(heading);
+  }
+
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
   if (error || (detail && detail.found === false)) { container.append(detailNote(t('detailNotFound') || 'Transcript not found on this machine.')); return; }
 

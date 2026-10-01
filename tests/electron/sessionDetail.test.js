@@ -20,6 +20,52 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+test('session detail renders its heading before loading, errors and empty results, and keeps it when sorting', () => {
+  function element() {
+    return {
+      children: [], classList: { add() {}, remove() {} },
+      append(...nodes) { this.children.push(...nodes); },
+      replaceChildren(...nodes) { this.children = nodes; },
+      addEventListener(type, handler) { this[type] = handler; },
+      querySelector(selector) { return this.children.find(node => `.${node.className}` === selector) || null; }
+    };
+  }
+  const els = { breakdown: element(), sessionDetail: element(), sessionDetailHead: element() };
+  const state = { detailSort: 'tokens', openSession: null };
+  const start = rendererSource.indexOf('function renderSessionDetail(');
+  const end = rendererSource.indexOf('function backgroundReviewRunNode(', start);
+  let render;
+  const context = {
+    els, state, document: { createElement: element }, t: key => key,
+    sessionDetailBack() {},
+    detailNote: text => ({ textContent: text }),
+    sessionDetailApi: { exchangeRows: detail => detail?.exchanges || [] },
+    exchangeNode: row => ({ textContent: row.title }),
+    toggleDetailSort() {
+      state.detailSort = 'time';
+      render({ detail: state.openSession.detail });
+    }
+  };
+  vm.runInNewContext(`${rendererSource.slice(start, end)}\nglobalThis.render = renderSessionDetail;`, context);
+  render = context.render;
+  for (const title of ['Background Reviews · gpt-5.6-sol · 12:34', 'Ordinary session title']) {
+    state.openSession = { title, detail: { exchanges: [{ title: 'Reply', value: 10 }] } };
+    for (const options of [{ loading: true }, { error: true }, { detail: { found: false } },
+      { detail: { exchanges: [] } }, { detail: state.openSession.detail }]) {
+      render(options);
+      const heading = els.sessionDetailHead.querySelector('.detail-heading');
+      assert.equal(heading.textContent, title);
+      assert.equal(heading.title, title);
+      assert.equal(els.sessionDetailHead.children[0].className, 'detail-back');
+    }
+    els.sessionDetailHead.querySelector('.detail-sort').click();
+    assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, title);
+  }
+  state.openSession = {};
+  render({ loading: true });
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
+});
+
 function sessionDetailHarness(getSessionDetail) {
   const start = rendererSource.indexOf('function applySessionDetailResult(');
   const end = rendererSource.indexOf('\nfunction toggleDetailSort', start);
