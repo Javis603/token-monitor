@@ -139,18 +139,17 @@ test('session activity ends with the share of input served from cache', () => {
   } }, {
     clientLabels,
     clientColors,
-    now,
-    cacheHitLabel: (percent) => `快取命中 ${percent}`
+    now
   });
-  const activity = Object.fromEntries(rows.map((row) => [row.name, row.activity]));
+  const byName = Object.fromEntries(rows.map((row) => [row.name, row]));
 
-  assert.equal(activity.warm, '12:07 · 4 calls · 快取命中 94%');
-  assert.equal(activity.sliver, '12:07 · 4 calls · 快取命中 <1%');
-  assert.equal(activity.cold, '12:07 · 4 calls · 快取命中 0%');
-  assert.equal(activity.unreported, '12:07 · 4 calls');
+  assert.equal(byName.warm.activity, '12:07 · 4 calls · 94%');
+  assert.equal(byName.sliver.activity, '12:07 · 4 calls · <1%');
+  assert.equal(byName.cold.activity, '12:07 · 4 calls · 0%');
+  assert.equal(byName.unreported.activity, '12:07 · 4 calls');
 });
 
-test('session activity reads the session own generation speed between calls and cache', () => {
+test('session activity ends with the session own generation speed after its cache hit', () => {
   const now = new Date(2026, 4, 30, 12, 30);
   const base = {
     client: 'codex',
@@ -172,9 +171,11 @@ test('session activity reads the session own generation speed between calls and 
   } }, { clientLabels, clientColors, now });
   const byId = Object.fromEntries(rows.map((row) => [row.detail, row]));
 
-  assert.equal(byId.timed.activity, '12:07 · 4 calls · 93 tok/s · 94% cached');
-  assert.equal(byId.untimed.activity, '12:07 · 4 calls · 94% cached');
-  assert.equal(byId.untitled.subtitle, '12:07 · 4 calls · 1,200 tok/s · 94% cached');
+  // Cache before speed: in a window too narrow for the line, the fade eats the
+  // `tok/s` unit rather than the percentage's digits.
+  assert.equal(byId.timed.activity, '12:07 · 4 calls · 94% · 93 tok/s');
+  assert.equal(byId.untimed.activity, '12:07 · 4 calls · 94%');
+  assert.equal(byId.untitled.subtitle, '12:07 · 4 calls · 94% · 1,200 tok/s');
 });
 
 test('multi-model sessions expose every model with its tokens and share of the session', () => {

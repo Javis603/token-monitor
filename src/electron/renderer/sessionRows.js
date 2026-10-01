@@ -234,11 +234,13 @@
     return cacheRead / input * 100;
   }
 
-  function cacheHitLabel(session, options) {
+  // A bare percentage: the line has no room for a label in a narrow window, and
+  // an icon would either look like a clock beside the time or borrow the
+  // footer's ⚡, which already means speed.
+  function cacheHitLabel(session) {
     const percent = sessionCacheHitPercent(session);
     if (percent === null) return '';
-    const text = percent > 0 && percent < 1 ? '<1%' : `${Math.round(Math.min(100, percent))}%`;
-    return typeof options.cacheHitLabel === 'function' ? options.cacheHitLabel(text) : `${text} cached`;
+    return percent > 0 && percent < 1 ? '<1%' : `${Math.round(Math.min(100, percent))}%`;
   }
 
   function isBackgroundReviewSession(session) {
@@ -268,8 +270,8 @@
     const subtitleParts = [
       sessionActivityLabel(session, now),
       messageLabel(session),
-      tokenRateLabel(session),
-      cacheHitLabel(session, options)
+      cacheHitLabel(session),
+      tokenRateLabel(session)
     ].filter(Boolean);
     // One derivation, not two: the boolean is a projection of the three-state
     // value, so a row can never be marked running by one reading and idle by the
@@ -336,8 +338,8 @@
           archived ? archivedLabel : '',
           sessionActivityLabel(session, now),
           messageLabel(session),
-          tokenRateLabel(session),
-          cacheHitLabel(session, options)
+          cacheHitLabel(session),
+          tokenRateLabel(session)
         ].filter(Boolean);
         return {
           key: `session:${key}`,

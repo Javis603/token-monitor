@@ -2429,7 +2429,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
     limitWindowsView.setDetailTooltip(titleEl, null);
   }
   subtitleEl.classList.toggle('hidden', !subtitle);
-  // The activity line carries time, calls, tok/s and cache hit; a narrow window
+  // The activity line carries time, calls, cache hit and tok/s; a narrow window
   // fades and scrolls it on hover the way the title does rather than wrapping.
   const activityEl = row.querySelector('.row-activity');
   setHoverMarqueeText(activityEl, activity);
@@ -2848,7 +2848,6 @@ function rawSessionRowsForPeriod(period) {
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
-    cacheHitLabel: (percent) => t('session.cacheHit', { percent }),
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
   });
 }
