@@ -983,6 +983,26 @@ test('the Codex reset forecast rides the card with its own tooltip', () => {
   assert.equal(off.find('codex-reset-forecast'), null);
 });
 
+test('MiMo account headings do not duplicate the provider subscription card or add empty focus stops', () => {
+  const rows = ['a', 'b'].map((accountKey, index) => ({
+    provider: 'mimo', status: 'ok', accountKey, accountName: `MiMo abcdef${index + 1}`,
+    accountLabel: 'Console', planLabel: 'Pay-as-you-go', windows: []
+  }));
+  const subscription = {
+    id: 'mimo-sub', provider: 'mimo', kind: 'subscription', planName: 'Pro', amountMinor: 1000,
+    currency: 'USD', intervalCount: 1, interval: 'month', startDate: '2026-08-01', autoRenew: true,
+    topUps: [], binding: { accountKey: 'a' }
+  };
+  const view = dockView({ subscriptions: [subscription], accounts: rows });
+  const built = view.renderLimitProviderGroup('mimo', 'Xiaomi MiMo', rows, '#000000');
+  const wraps = [...built.walk()].filter((node) => node.classNames.has('subscription-plan-wrap'));
+  assert.deepEqual(wraps.map((node) => node.find('subscription-plan-trigger').textContent), ['2 accounts', 'Pay-as-you-go']);
+  assert.equal(wraps.every((node) => node.tabIndex === 0), true, 'the visible triggers remain keyboard accessible');
+  assert.equal(view.renderLimitProviderHead('mimo', 'Account A', rows[0], '#000000', {
+    accountRow: true, planText: ''
+  }).find('subscription-plan-wrap'), null, 'an empty plan has no hover or keyboard trigger');
+});
+
 // The plan cell used to be the one row that differed: the page hung a hover card
 // off it and the card showed the plan as dead text, because the decoration was
 // the widget's own and arrived through a `decoratePlan` hook the dock had

@@ -24,10 +24,10 @@ const MIMO_MEMBERSHIP_LABEL = MIMO_DESKTOP_MEMBERSHIP_PRODUCT;
 // subscription, which is an answer rather than a failure, and `percent` is a
 // *remaining* share — the opposite of the console lane's used ratio.
 function readMimoMembershipPlan(body) {
-  const data = body && typeof body === 'object' && body.data && typeof body.data === 'object'
+  const data = body && typeof body === 'object' && (Object.hasOwn(body, 'data') || Object.hasOwn(body, 'code'))
     ? body.data
     : body;
-  if (!data || typeof data !== 'object') return { ok: false };
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return { ok: false };
   const current = data.current;
   // Desktop treats both an omitted current and null as no subscription.
   if (current == null) return { ok: true, plan: null };

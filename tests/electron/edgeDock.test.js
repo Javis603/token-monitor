@@ -59,7 +59,7 @@ test('dock account choices distinguish MiMo products without changing sibling pr
       { provider: 'mimo', accountKey: 'membership', accountLabel: 'Desktop Membership', planLabel: 'Pro' }
     ]), ['Console', 'Desktop Membership']);
     assert.deepEqual(labels('codex', [
-      { provider: 'codex', accountKey: 'a', accountName: 'Account A' },
+      { provider: 'codex', accountKey: 'a', accountName: 'Account A', accountLabel: 'Console' },
       { provider: 'codex', accountKey: 'b', accountName: 'Account B' }
     ]), ['Account A', 'Account B']);
     assert.deepEqual(labels('volcengine', [

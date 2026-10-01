@@ -34,6 +34,33 @@ class Element {
   contains(node) { return this === node || this.children.some((child) => child.contains(node)); }
 }
 
+test('a MiMo product label change repaints its account choices', () => {
+  const previousDocument = global.document;
+  global.document = { createElement: (tag) => new Element(tag), activeElement: null };
+  try {
+    const root = new Element('div');
+    const rows = ['a', 'b'].map((accountKey) => ({ provider: 'mimo', accountKey, accountName: 'MiMo abcdef1', planLabel: 'Pro' }));
+    const composer = createEdgeDockComposer({
+      root, itemsApi, t: (key) => key, presentationApi: {},
+      getSettings: () => ({ edgeDockItems: [{ type: 'limit', provider: 'mimo' }] }),
+      getStats: () => ({ limits: { providers: rows } }), save: () => {},
+      providerLabel: (id) => id, providerColor: () => '#000000', hasProviderMark: () => false,
+      maskEmail: (email) => email, mimoProductLabel: require('../../src/shared/limits/windowLabels').mimoProductLabel,
+      createRowDrag: () => ({ deferRender: () => false })
+    });
+    const all = (node) => [node, ...node.children.flatMap(all)];
+    const names = () => all(root).filter((node) => node.className === 'edge-dock-composer-account-name').map((node) => node.textContent);
+    composer.render();
+    all(root).find((node) => node.className === 'edge-dock-composer-item').listeners.click();
+    assert.deepEqual(names(), ['MiMo abcdef1', 'MiMo abcdef1']);
+    rows[1].accountLabel = 'Desktop Membership';
+    composer.render();
+    assert.deepEqual(names(), ['MiMo abcdef1', 'MiMo abcdef1 · Desktop Membership']);
+  } finally {
+    global.document = previousDocument;
+  }
+});
+
 test('a stats-only repaint keeps an open window picker and its labels match the Limits view', () => {
   const previousDocument = global.document;
   const document = { createElement: (tag) => new Element(tag), activeElement: null };

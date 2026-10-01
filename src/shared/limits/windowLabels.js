@@ -75,7 +75,7 @@
     const groups = new Map();
     (providers || []).forEach((provider, index) => {
       const name = String(provider.accountName || '').trim();
-      const suffix = name.match(/(?:^| · )(MiMo [a-f0-9]{7})$/i)?.[1];
+      const suffix = name.match(/(?:^|\s(?:·\s)?)(MiMo [a-f0-9]{7})$/i)?.[1];
       const email = String(provider.accountEmail || '').trim().toLowerCase();
       const key = suffix ? `suffix:${suffix.toLowerCase()}`
         : email ? `email:${email}`

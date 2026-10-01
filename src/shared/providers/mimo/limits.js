@@ -650,7 +650,9 @@ function mimoEntryIdentity(entry, consoleRow, deps = {}) {
   const email = cleanText(consoleRow?.accountEmail || entry.console?.account?.accountEmail);
   const rawName = cleanText(consoleRow?.accountName || entry.console?.account?.accountName);
   const suffix = mimoAccountSuffix(entry.accountKey);
-  const name = rawName ? [rawName, suffix].filter(Boolean).join(' · ') : suffix;
+  // Reserve the suffix within the shared 64-character account-name limit.
+  const profileName = [...rawName].slice(0, 64 - suffix.length - (suffix ? 3 : 0)).join('');
+  const name = profileName ? [profileName, suffix].filter(Boolean).join(' · ') : suffix;
   const cache = mimoAccountMetadata(deps);
   const remembered = cache?.get(entry.accountKey);
   const identity = {

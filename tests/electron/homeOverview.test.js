@@ -1019,6 +1019,10 @@ test('Home bars a MiMo lane by lane, so all readings stay on their own bar', () 
     [['weekly', '']],
     [['Token Plan', ''], ['Balance', 'credits']]
   ]);
+  assert.deepEqual(rows.map((row) => [row.key, row.windows.map((window) => window.remainingPercent)]), [
+    ['mimo:membership', [78]], ['mimo:console', [80, 100]]
+  ]);
+  assert.equal(rows[1].windows[1].remaining, 9.95);
 });
 
 test('Home shows a MiMo token plan and balance side by side', () => {

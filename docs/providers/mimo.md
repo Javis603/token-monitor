@@ -49,7 +49,7 @@ GET {base}/user/xiaomi/me
   -> 200 {"code":0, "data":{"userId": …}}
 ```
 
-The hop through `/api/sts` is what **mints the service session**, and the cookie jar gains `serviceToken`, `mimopc_ph`, `mimopc_slh` and `userId` — the last under `.xiaomimimo.com`, so it covers the service host, and `mimopc_slh` arriving twice for the reason the console lane's `api-platform_slh` does. `passInfo`, `pass_ua`, `deviceId` and `ptn_count` belong to the SSO hop above it rather than to this one, and stay on the account hosts. Measured on a live exchange, the membership host receives `serviceToken`, `userId`, `mimopc_ph` and `mimopc_slh`. The service id is `mimopc`, and the login is driven by visiting the API — the app carries no URL that constructs it.
+The hop through `/api/sts` is what **mints the service session**, and the cookie jar gains `serviceToken`, `mimopc_ph`, `mimopc_slh` and `userId` — the last under `.xiaomimimo.com`, so it covers the service host, and `mimopc_slh` arriving twice for the same reason the console lane's `api-platform_slh` does. `passInfo`, `pass_ua`, `deviceId` and `ptn_count` belong to the SSO hop above it rather than to this one, and stay on the account hosts. Measured on a live exchange, the membership host receives `serviceToken`, `userId`, `mimopc_ph` and `mimopc_slh`. The service id is `mimopc`, and the login is driven by visiting the API — the app carries no URL that constructs it.
 
 - **Exchange-minted service cookies stay in memory.** They are this exchange's output, and the membership lane's only credential is the account cookie it was minted from: the account cookie is read again on every refresh, and nothing minted here is stored.
 - **A service cookie is not a substitute for the identity hop.** Measured: a freshly minted `serviceToken` set answers `/user/xiaomi/subscription/self` and `/user/usage` with `code: 0`, and is answered by `/user/xiaomi/me` with a **302 back to the SSO**, so it carries no identity and no region reading. What makes that hop answer 200 is where `/sts` sends the client — `/api/user/xiaomi/me?userId=…`, a query the redirect carries — rather than the cookies: the minted set replayed against the bare path answers 302 whether it is sent whole or as `serviceToken` alone. Nothing else needs that distinction today — the lane has no paste — but the console lane's service cookie is a different service's and would not work here either.
@@ -110,6 +110,8 @@ Both hosts in that chain set cookies, and only the second hop's are in scope for
 
 `/usage` is the only console summary that reports spend. `costUsage.totalCost` is all-time money spent and `currentMonthCost` is the month figure shown by the row. The endpoint has no daily or weekly rollup, so the row's `todaySpend` and `weekSpend` are tracked locally as positive deltas of that cumulative total — the derivation z.ai's report also uses, and the one `docs/API.md` documents — while `monthSpend` and `allTimeSpend` stay the console's own figures. The paginated call ledger and monthly bill endpoint are intentionally not queried.
 
+Local spend tracking requires the console's currency. An observation without it does not change the ledger. Writes are best-effort, as in Z.ai: after a failed write, the next observation compares with the persisted baseline, so missed spend is attributed to that later observation's day.
+
 The wallet itself reports money only: `{balance, frozenBalance, currency, overdraftLimit, remainingOverdraftLimit, giftBalance, cashBalance}` — no cap and no percentage of its own. The meter the row draws beside it is therefore **derived at display time** (`amount / (amount + monthSpend)`, `creditsMeterPercent` in `src/shared/limits/balanceDisplay.js`), never a wire value. That derivation is the fallback for a money window carrying no percentage of its own, which is what deepseek's balance window is; openrouter's credits window reports a real `usedPercent`, so `creditsMeterPercent` returns that instead and never reaches the rule.
 
 Both lanes therefore resolve the same way: an account cookie already on the machine, exchanged per refresh for a session that is never stored. The console lane keeps the manual paste as its fallback where no MiMo Desktop is signed in; the membership has none, because it is not sold on the developer platform.
@@ -128,6 +130,7 @@ The tested `sk-` credential did not authorize the billing routes checked: those 
 
 - The percentage is therefore a **remaining** share on a 0–100 scale, not the platform console's used-ratio. Do not reuse the console lane's normalisation.
 - **Judge plan state by `current` being absent, never by `percent`.** The app's own test is the loose one (`t == null`), so a payload that omits `current` is the same answer as one that states it as null.
+- An invalid `data` envelope is unavailable, not a successful no-subscription answer; it must not remove the last good membership.
 - **Match Desktop's weekly display.** Publish `kind: 'weekly'` and let the shared window label name it. `resetsAt` comes from `current.nextResetTime`; do not invent `windowMinutes` or calculate a reset from `renewalMode`.
 - **There is one quota window in the parsed subscription.** Do not add a second window from `/user/usage`.
 
@@ -255,6 +258,8 @@ At-rest encryption is a property of the store, never evidence that the user sign
 The walk therefore takes `deps.mimoExchangeFetch` when a runtime supplies one. In the widget, an explicit `HTTP(S)_PROXY`/`ALL_PROXY` environment keeps the same precedence and `NO_PROXY` behavior as every other limits request; otherwise the adapter asks Chromium what the OS/PAC configuration resolved for each host (`session.resolveProxy`, e.g. `PROXY 127.0.0.1:7890; DIRECT`) and routes undici through those routes in order. The adapter is `src/electron/providers/mimo/exchangeFetch.js`, injected beside `claudeWebFetch` into both the collector's deps and the settings probes'. A proxy type undici cannot speak is refused unless Chromium supplied a later usable fallback; every hop is cancellable, so a probe deadline stops the walk instead of waiting for it.
 
 The cookie jar stays this module's either way. A Chromium *session* is not an alternative: it owns the cookie policy, and that policy withholds every cookie on the https→http hop this chain's callback makes.
+
+The exchange jar handles host, Domain and Secure, with Domain parsing supplied by undici. It does not implement Path or cookie expiry; those remain limitations of this per-exchange jar, not observed failures in the measured login chain.
 
 ### Manual console credential
 

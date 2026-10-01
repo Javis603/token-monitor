@@ -2290,7 +2290,7 @@
     const representatives = groups.map((group) => group.find((row) => row.accountEmail) || group[0]);
     const accountTitle = (index) => limitAccountDefaultTitle(representatives[index], index, representatives);
     const oneAccount = groups.length === 1;
-    const { row, list, groupProvider } = renderLimitProviderGroupFrame(
+    const { row, list } = renderLimitProviderGroupFrame(
       'mimo', label, providers, color, { count: oneAccount ? 0 : groups.length }
     );
     if (oneAccount) {
@@ -2302,7 +2302,7 @@
         const products = document.createElement('div');
         products.className = 'limit-account-list';
         appendMimoAccountProducts(products, group, color);
-        account.append(renderLimitProviderHead('mimo', accountTitle(index), groupProvider, color, {
+        account.append(renderLimitProviderHead('mimo', accountTitle(index), representatives[index], color, {
           showIcon: false,
           accountRow: true,
           planText: '',
@@ -2668,7 +2668,7 @@
     return subscriptionCardNode(subscriptionTooltipRows(subscription, provider, includeRollup));
   }
 
-  // Wraps the plan label so hovering it reveals the subscription card. Reuses the
+  // Wraps a visible plan label so hovering it reveals the subscription card. Reuses the
   // limit-detail tooltip plumbing, which already holds off the list re-render
   // while the pointer is inside.
   //
@@ -2676,6 +2676,7 @@
   // nothing, so having recorded one IS the switch. A separate toggle only made it
   // possible to enter the data and see nothing happen.
   function decoratePlanWithSubscription(plan, provider, includeRollup) {
+    if (!plan.textContent) return plan;
     const card = subscriptionCardForRow(provider, includeRollup);
     if (!card) return plan;
 

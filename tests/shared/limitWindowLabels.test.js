@@ -86,7 +86,7 @@ test('every surface that paints a window label routes through the helper', () =>
     'src/shared/providers/mimo/limits.js',
     'src/shared/providers/mimo/membership.js'
   ]) {
-    assert.doesNotMatch(read(file), /'(?:Desktop )?Membership'/, `${file} should take the word from the helper`);
+    assert.doesNotMatch(read(file), /(['"`])(?:Desktop )?Membership\1/, `${file} should take the word from the helper`);
   }
   assert.match(read('src/shared/providers/mimo/membership.js'), /MIMO_MEMBERSHIP_LABEL = MIMO_DESKTOP_MEMBERSHIP_PRODUCT;/);
 });
@@ -105,6 +105,11 @@ test('MiMo rows group into logical accounts by suffix, then address', () => {
     { accountKey: 'membership', accountEmail: 'b@example.com', accountName: 'Renamed · MiMo abcdef1' }
   ]);
   assert.equal(sameSuffix.length, 1, 'the suffix ties two devices\' rows together');
+  const { normalizeLimitProvider } = require('../../src/shared/limits/core');
+  assert.equal(mimoAccountGroups([
+    { provider: 'mimo', accountKey: 'console', accountEmail: 'a@example.com', accountName: 'Alice · MiMo abcdef1' },
+    { provider: 'mimo', accountKey: 'membership', accountEmail: 'b@example.com', accountName: 'Renamed · MiMo abcdef1' }
+  ].map(normalizeLimitProvider)).length, 1, 'the identity survives shared name normalization');
   assert.equal(mimoAccountGroups([
     { accountKey: 'one', accountEmail: 'a@example.com', accountName: 'Alice' },
     { accountKey: 'two', accountEmail: 'a@example.com', accountName: '' }

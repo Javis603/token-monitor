@@ -321,6 +321,20 @@ test('a discovered session mints two rows: the console product and the membershi
   assert.deepEqual(world.mints(), { console: 1, membership: 1 }, 'each lane mints its own service session once');
 });
 
+test('a long profile name keeps its stable account suffix after normalization', async () => {
+  for (const letter of ['A', '𠮷']) {
+    const world = mimoWorld();
+    const rows = await fetchMimoLimits({}, {
+      ...world.deps,
+      fetch: (url, init) => String(url).includes('/userProfile')
+        ? reply(200, { code: 0, data: { userId: '42', nickName: letter.repeat(55) } })
+        : world.fetch(url, init)
+    });
+    const names = normalizeLimitsSummary({ providers: rows }).providers.map((row) => row.accountName);
+    assert.deepEqual(names, [letter.repeat(49) + ' MiMo 9c59f5a', letter.repeat(49) + ' MiMo 9c59f5a']);
+  }
+});
+
 test('a pasted console cookie and the machine’s session share the account, not the row', async () => {
   const world = mimoWorld();
   const rows = await fetchMimoLimits({
@@ -694,11 +708,14 @@ test('a console lane that fails leaves the membership standing', async () => {
 });
 
 test('a membership payload the reader cannot use is an outage, not a refusal', async () => {
-  const world = mimoWorld({ subscriptionBody: { code: 5, message: 'try later' } });
-  const rows = await fetchMimoLimits({}, world.deps);
-  assert.equal(rows[0].status, 'ok', 'the wallet answers for itself');
-  assert.equal(rows[1].status, 'unavailable', 'a body this lane cannot read is not evidence the sign-in ended');
-  assert.equal(rows[1].windows.length, 0);
+  const active = await fetchMimoLimits({}, mimoWorld().deps);
+  for (const body of [{ code: 5 }, { code: 0 }, ...[null, [], 'bad'].map((data) => ({ code: 0, data }))]) {
+    const rows = await fetchMimoLimits({ previousLimits: { providers: active } }, mimoWorld({ subscriptionBody: body }).deps);
+    assert.equal(rows[0].status, 'ok', 'the wallet answers for itself');
+    assert.equal(rows[1].status, 'unavailable', 'a malformed response is not a missing subscription');
+    assert.equal(rows[1].windows.length, 0);
+    assert.equal(rows.some((row) => row.removed), false, 'the last good membership remains eligible for retention');
+  }
 });
 
 test('a stalled membership read times out without discarding the Console result', async () => {
@@ -1297,6 +1314,14 @@ test('today and week are the console total’s own deltas, and a drop only rebas
   assert.equal(back.todaySpend, 1.1, 'today counts only its own bucket');
   assert.equal(back.weekSpend, 1.1, 'the week is the last seven days, not everything the store keeps');
   assert.equal(back.trackingSince, first.trackingSince, 'the ledger states when observation began once, and that does not move');
+
+  const beforeUnknown = JSON.stringify(store);
+  for (const currency of ['', '  ', undefined]) {
+    assert.equal(recordMimoCumulativeSpend({
+      accountKey: 'sha256:a', currency, totalCost: 99, now: at(27, 11), storePath: '/x/mimo-spend.json', ...io
+    }), null, 'an observation without a currency cannot change a money ledger');
+    assert.equal(JSON.stringify(store), beforeUnknown);
+  }
 
   // A ledger only compares like with like: switching the console's currency
   // rebases it rather than subtracting one currency's total from another's.

@@ -392,7 +392,7 @@
         addable: ui.menuOpen ? enabledLimitProviders?.() : null,
         windows: selectedItem?.type === 'limit' ? windowChoices(selectedItem) : null,
         accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account) => [
-          account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel
+          account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel
         ]) : null,
         wording: [t('settings.edgeDock.window'), t('settings.edgeDock.window.auto'), t('settings.edgeDock.window.unavailable')]
       });

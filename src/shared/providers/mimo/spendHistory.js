@@ -19,8 +19,9 @@ function localDayKey(ms) {
 // positive delta between observations. A drop (refund, plan reset) moves the
 // baseline without recording negative spend — the same rule Z.ai documents.
 function recordMimoCumulativeSpend({ accountKey, currency, totalCost, now, storePath, readJson: readOverride, writeJsonAtomic: writeOverride }) {
+  const wanted = String(currency || '').trim();
   // An omitted total must not rebase the ledger to zero.
-  if (!accountKey || totalCost === null || !Number.isFinite(totalCost) || !storePath) return null;
+  if (!accountKey || !wanted || totalCost === null || !Number.isFinite(totalCost) || !storePath) return null;
   const nowMs = Number(now);
   const total = Math.max(0, totalCost);
   const read = readOverride || readJson;
@@ -36,13 +37,12 @@ function recordMimoCumulativeSpend({ accountKey, currency, totalCost, now, store
     || !store.accounts || typeof store.accounts !== 'object' || Array.isArray(store.accounts)) {
     store = { version: MIMO_SPEND_STORE_VERSION, accounts: {} };
   }
-  const wanted = String(currency || '').trim();
   let entry = store.accounts[accountKey];
   let changed = false;
   // A ledger only compares like with like: the console states its spend in the
   // account's own currency, so a change of currency rebases the ledger instead
   // of subtracting one currency's total from another's — DeepSeek's rule.
-  if (entry && wanted && String(entry.currency || '') !== wanted) {
+  if (entry && String(entry.currency || '') !== wanted) {
     entry = null;
     changed = true;
   }
@@ -78,8 +78,8 @@ function recordMimoCumulativeSpend({ accountKey, currency, totalCost, now, store
   }
   store.accounts[accountKey] = entry;
   // Best effort: a failed write (read-only dir, full disk) must not reject a
-  // lane whose balance and quota did answer. The next round re-reads the older
-  // baseline and its delta still lands.
+  // lane whose balance and quota did answer. The next round uses the persisted
+  // baseline, attributing any missed delta to that observation's day.
   if (changed) {
     try {
       write(storePath, store);
