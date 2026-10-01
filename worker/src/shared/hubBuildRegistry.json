@@ -264,10 +264,6 @@
       },
       {
         "revision": 66,
-        "buildId": "sha256:7ecb401414e003fd8efc5cdb7a7b1df36f62fac6567717009ac8c92f859871b0"
-      },
-      {
-        "revision": 67,
         "buildId": "sha256:76b26396d9b1c3e1534b4832548085e56dd2f144f5e87ac1aa334ecdc1b43624"
       }
     ],

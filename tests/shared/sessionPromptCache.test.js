@@ -80,7 +80,7 @@ test('newer cold observations clear a warm reading across period merges', () => 
   const cold = { ...warm, lastUsedAt: later, promptCache: null };
   const make = (id, session) => ({ deviceId: id, updatedAt: later, periods: { today: { sessions: { a: session } } } });
   for (const devices of [[make('one', warm), make('two', cold)], [make('two', cold), make('one', warm)]]) {
-    const stats = aggregateDevices(devices);
+    const stats = aggregateDevices(devices, 10 * 60_000, Date.parse(later));
     assert.equal(stats.periods.today.sessions['claude:a'].promptCache, null);
   }
 });
