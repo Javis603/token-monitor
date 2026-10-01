@@ -40,6 +40,14 @@ const { CLIENT_LABELS } = window.TokenMonitorClientCatalog;
 // at paint time rather than frozen at push time.
 const sessionLive = window.TokenMonitorSessionLive;
 const sessionRowsApi = window.TokenMonitorSessionRows;
+const overflowText = window.TokenMonitorOverflowText.create({
+  document, window, prefersReducedMotion,
+  onLeave: () => requestAnimationFrame(() => {
+    if (!limitTooltip.pending || limitTooltipShouldHoldRender()) return;
+    limitTooltip.pending = false;
+    if (state.payload?.cell) renderBubble(state.payload);
+  })
+});
 const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
   spin: 'edge-dock-session-spin',
   check: 'edge-dock-session-check',
@@ -333,6 +341,7 @@ const limitTooltip = {
 };
 
 function limitTooltipShouldHoldRender() {
+  if (contentLayer.querySelector('.fade-overflow:hover')) return true;
   if (!limitTooltip.active) return false;
   return Boolean(contentLayer.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
 }
@@ -1177,7 +1186,9 @@ function sessionsContainer(sessions, options = {}) {
     // made the row read as a different kind of row, and the colour carried no
     // more information than the dot does.
     nameNode.append(stateMark(session, key, state));
-    nameNode.append(document.createTextNode(name));
+    const title = el('span', 'edge-dock-session-title', name);
+    overflowText.bind(title);
+    nameNode.append(title);
     // The glyph is decorative and its `title` only reaches pointer users, so the
     // translated state is rendered as real text for assistive technology. It
     // cannot go on the row itself: a plain `div` has the generic role and
@@ -1480,6 +1491,7 @@ function commitCard(card, cellId) {
   const scrollTop = sameCard ? previous.querySelector(CARD_SCROLL_SELECTOR)?.scrollTop || 0 : 0;
   const resetSnapshot = cardResetAnimator.capture(contentLayer);
   contentLayer.replaceChildren(card);
+  overflowText.refresh();
   const list = card.querySelector(CARD_SCROLL_SELECTOR);
   if (list) list.scrollTop = scrollTop;
   cardResetAnimator.animate(card, resetSnapshot);

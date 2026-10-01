@@ -27,9 +27,9 @@ test('session detail renders its heading before loading, errors and empty result
   function element() {
     const classes = new Set();
     return {
-      children: [], scrollLeft: 0, scrollWidth: 600, clientWidth: 200,
+      children: [], isConnected: true, scrollLeft: 0, scrollWidth: 600, clientWidth: 200,
       closest: () => ({}),
-      classList: { add: value => classes.add(value), remove: value => classes.delete(value), contains: value => classes.has(value) },
+      classList: { add: value => classes.add(value), remove: value => classes.delete(value), contains: value => classes.has(value), toggle: (value, enabled) => enabled ? classes.add(value) : classes.delete(value) },
       append(...nodes) { this.children.push(...nodes); },
       replaceChildren(...nodes) { this.children = nodes; },
       addEventListener(type, handler) { this[type] = handler; },
@@ -42,7 +42,7 @@ test('session detail renders its heading before loading, errors and empty result
   const end = rendererSource.indexOf('function backgroundReviewRunNode(', start);
   let render;
   const context = {
-    els, state, document: { createElement: element }, t: key => key,
+    els, state, document: { createElement: element, querySelectorAll: () => els.sessionDetailHead.children.filter(node => node.className === 'detail-heading') }, window: { addEventListener() {} }, t: key => key,
     sessionDetailBack() {},
     detailNote: text => ({ textContent: text }),
     sessionDetailApi: { exchangeRows: detail => detail?.exchanges || [] },
@@ -58,9 +58,12 @@ test('session detail renders its heading before loading, errors and empty result
       render({ detail: state.openSession.detail });
     }
   };
-  const marqueeStart = rendererSource.indexOf('const hoverMarqueeStates =');
-  const marqueeEnd = rendererSource.indexOf('function setHoverMarqueeText(', marqueeStart);
-  vm.runInNewContext(rendererSource.slice(marqueeStart, marqueeEnd), context);
+  const overflowText = require('../../src/electron/renderer/overflowText').create({
+    document: context.document,
+    window: { ...context, addEventListener() {} },
+    prefersReducedMotion: context.prefersReducedMotion
+  });
+  context.bindHoverMarquee = overflowText.bind;
   vm.runInNewContext(`${rendererSource.slice(start, end)}\nglobalThis.render = renderSessionDetail;`, context);
   render = context.render;
   for (const title of ['gpt-5.6-sol · 12:34', 'A long ordinary session title that exceeds the available header width']) {
@@ -76,19 +79,26 @@ test('session detail renders its heading before loading, errors and empty result
     els.sessionDetailHead.querySelector('.detail-sort').click();
     const heading = els.sessionDetailHead.querySelector('.detail-heading');
     assert.equal(heading.textContent, title);
+    while (frames.length) frames.shift()(0);
+    assert.equal(heading.classList.contains('has-overflow-fade'), true);
     heading.mouseenter();
     timers.pop()();
     frames.pop()(8000);
     assert.ok(heading.scrollLeft > 0, 'hover reveals the clipped title');
+    assert.equal(heading.classList.contains('has-overflow-fade'), false, 'the end stays readable after scrolling');
     assert.equal(heading.classList.contains('is-hover-scrolling'), true);
     heading.mouseleave();
     assert.equal(heading.scrollLeft, 0);
+    assert.equal(heading.classList.contains('has-overflow-fade'), true);
     assert.equal(heading.classList.contains('is-hover-scrolling'), false);
     reducedMotion = true;
     heading.mouseenter();
     assert.equal(heading.scrollLeft, 0);
     assert.equal(heading.title, title, 'full title remains available without motion');
     reducedMotion = false;
+    heading.scrollWidth = heading.clientWidth;
+    overflowText.update(heading);
+    assert.equal(heading.classList.contains('has-overflow-fade'), false, 'fitting text stays opaque');
   }
   state.openSession = {};
   render({ loading: true });

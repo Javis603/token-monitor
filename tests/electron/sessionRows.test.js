@@ -189,9 +189,9 @@ test('background review run headings show the model independently of session tit
       addEventListener(type, handler) { this.events[type] = handler; }
     };
   };
-  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth', 'openSessionDetail', `${body}\nreturn backgroundReviewRunNode;`)(
+  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth', 'openSessionDetail', 'bindHoverMarquee', `${body}\nreturn backgroundReviewRunNode;`)(
     { createElement: createNode }, sessionRowsApi, () => 'Codex Auto Review', String, String, () => {}, () => 100,
-    (request) => { opened = request; }
+    (request) => { opened = request; }, () => {}
   );
   for (const [models, expectedModel] of [
     [{ 'gpt-5.6-sol': 30 }, 'gpt-5.6-sol'],
@@ -506,8 +506,7 @@ test('session layout keeps page chrome consistent and scrolls long labels on one
   assert.match(styles, /\.shell\.session-mode \.row-detail\.is-hover-scrolling\s*\{[^}]*text-overflow:\s*clip;/s);
   assert.match(styles, /\.shell\.session-mode \.session-row \.row-metrics::after,[^{]+\{[^}]*position:\s*absolute;[^}]*bottom:\s*0;/s);
   assert.match(renderer, /class="row-activity"/);
-  assert.match(renderer, /function setHoverMarqueeText\([^]*?element\.removeAttribute\('title'\);\n}/);
-  assert.doesNotMatch(renderer, /function setHoverMarqueeText\([^]*?element\.title\s*=/);
+  assert.match(renderer, /function setHoverMarqueeText\([^]*?overflowText\.setText\(element, value\)/);
 });
 
 test('a session still being written to is marked running and shows its context headroom', () => {

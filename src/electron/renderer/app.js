@@ -2035,51 +2035,13 @@ document.addEventListener('pointerdown', (event) => {
   }
 });
 
-const hoverMarqueeStates = new WeakMap();
+const overflowText = window.TokenMonitorOverflowText.create({
+  document, window, prefersReducedMotion,
+  enabled: element => Boolean(element.closest('.session-mode, .home-session-row'))
+});
 
-function stopHoverMarquee(element, { reset = true } = {}) {
-  const motion = hoverMarqueeStates.get(element);
-  if (motion?.delayId) clearTimeout(motion.delayId);
-  if (motion?.frameId) cancelAnimationFrame(motion.frameId);
-  hoverMarqueeStates.delete(element);
-  element.classList.remove('is-hover-scrolling');
-  if (reset) element.scrollLeft = 0;
-}
-
-function startHoverMarquee(element) {
-  stopHoverMarquee(element);
-  if (prefersReducedMotion() || !element.closest('.session-mode')) return;
-  const distance = Math.ceil(element.scrollWidth - element.clientWidth);
-  if (distance <= 1) return;
-
-  const motion = { delayId: 0, frameId: 0 };
-  hoverMarqueeStates.set(element, motion);
-  motion.delayId = setTimeout(() => {
-    motion.delayId = 0;
-    element.classList.add('is-hover-scrolling');
-    const startedAt = performance.now();
-    const duration = Math.max(1800, Math.min(8000, distance * 22));
-    const step = (now) => {
-      const progress = Math.min(1, (now - startedAt) / duration);
-      element.scrollLeft = distance * progress;
-      if (progress < 1) motion.frameId = requestAnimationFrame(step);
-      else motion.frameId = 0;
-    };
-    motion.frameId = requestAnimationFrame(step);
-  }, 240);
-}
-
-function bindHoverMarquee(element) {
-  element.addEventListener('mouseenter', () => startHoverMarquee(element));
-  element.addEventListener('mouseleave', () => stopHoverMarquee(element));
-}
-
-function setHoverMarqueeText(element, value) {
-  stopHoverMarquee(element);
-  const text = value || '';
-  element.textContent = text;
-  element.removeAttribute('title');
-}
+function bindHoverMarquee(element) { overflowText.bind(element); }
+function setHoverMarqueeText(element, value) { overflowText.setText(element, value); }
 
 function renderDeviceAccordion(accordionInner, deviceDetail) {
   const signature = JSON.stringify([
@@ -4006,7 +3968,7 @@ function limitDetailTooltipShouldHoldRender() {
 }
 
 function sessionTooltipShouldHoldRender() {
-  return Boolean(document.querySelector('.home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within'));
+  return Boolean(document.querySelector('.home-session-row .is-hover-scrolling, .home-session-meta .limit-detail-tooltip-wrap:hover, .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within'));
 }
 
 function flushPendingLimitDetailTooltipRender() {
@@ -4721,6 +4683,7 @@ function backgroundReviewRunNode(row, max, parent) {
   const titleEl = wrap.querySelector('.detail-ex-title');
   titleEl.textContent = title;
   titleEl.title = title;
+  bindHoverMarquee(titleEl);
   wrap.querySelector('.detail-ex-sub').textContent = row.detail || '';
   wrap.querySelector('.detail-ex-value').textContent = formatNumber(row.value);
   wrap.querySelector('.detail-ex-cost').textContent = formatCost(row.cost || 0);
@@ -4801,6 +4764,7 @@ function exchangeNode(row, max) {
     exTitle.append(role, sep);
   }
   exTitle.append(document.createTextNode(row.title));
+  bindHoverMarquee(exTitle);
   wrap.querySelector('.detail-ex-sub').textContent = row.subtitle;
   const tokensAvailable = row.tokensAvailable !== false;
   wrap.querySelector('.detail-ex-value').textContent = tokensAvailable
@@ -5851,6 +5815,7 @@ function renderHomeSessionModule() {
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.title || row.projectLabel || String(row.sessionId || '').slice(0, 12) || '—';
+    bindHoverMarquee(name);
     const value = document.createElement('span');
     value.className = 'home-list-value';
     value.textContent = formatCompact(row.totalTokens);

@@ -274,7 +274,8 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   assert.match(sessions, /if \(context\) meta\.append\(context\)/);
   // Running is a dot beside the name, not a recoloured title.
   assert.match(sessions, /nameNode\.append\(stateMark\(session, key, state\)\)/);
-  assert.match(sessions, /nameNode\.append\(document\.createTextNode\(name\)\)/);
+  assert.match(sessions, /el\('span', 'edge-dock-session-title', name\)/);
+  assert.match(sessions, /overflowText\.bind\(title\)/);
   assert.doesNotMatch(css, /\.edge-dock-session\.is-running \.edge-dock-session-name\s*\{[^}]*color/);
   // Three states: a spinner while working, a check once the transcript said the
   // turn finished, and a faint dot for a session that has gone quiet. The
