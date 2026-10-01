@@ -204,6 +204,17 @@ test('ingest never persists conversation text from an untrusted sender', () => {
   }
 });
 
+test('Node Hub preserves titles only when explicitly enabled', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', dataFile, syncSessionTitles: true, logger: { error() {} } });
+  try {
+    hub.ingest({ deviceId: 'dev-titles', today: { sessions: { one: { title: 'Useful title' } } } });
+    assert.equal(hub.getDevices()[0].periods.today.sessions.one.title, 'Useful title');
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
 test('getStats exposes the effective staleness threshold', () => {
   const dataFile = tempDataFile();
   const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', staleAfterMs: 123456, dataFile, logger: { error() {} } });

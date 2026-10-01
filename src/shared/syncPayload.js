@@ -191,7 +191,8 @@ function sessionsWithoutReasonix(sessions) {
 
 function buildSyncPayload(summary, {
   omitAllTimeProjects = false,
-  omitHistoryTokenComponents = false
+  omitHistoryTokenComponents = false,
+  syncSessionTitles = false
 } = {}) {
   if (!summary || typeof summary !== 'object') return summary;
   const payload = { ...summary, limits: syncLimits(summary.limits) };
@@ -220,10 +221,8 @@ function buildSyncPayload(summary, {
     delete payload[periodName].projects;
     if (hasOwn(payload[periodName], 'sessions')) {
       payload[periodName].sessions = sessionsWithoutReasonix(payload[periodName].sessions);
-      // Titles come from local client metadata rather than Tokscale. Keep them
-      // as a widget-only overlay: composeLocalSyncStats() restores this device's
-      // local record for presentation, while the sync payload never carries text.
-      payload[periodName].sessions = sessionsWithoutLocalTitles(payload[periodName].sessions);
+      // Titles are local metadata and stay off the wire unless the operator opts in.
+      if (!syncSessionTitles) payload[periodName].sessions = sessionsWithoutLocalTitles(payload[periodName].sessions);
       if (!projectsEnabled) payload[periodName].sessions = sessionsWithoutProjectMetadata(payload[periodName].sessions);
     }
   }
@@ -285,8 +284,8 @@ function syncPayload(summary, options = {}) {
   return serializeSyncPayload(summary, options).payload;
 }
 
-async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } = {}) {
-  let serialized = serializeSyncPayload(summary);
+async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, syncSessionTitles = false } = {}) {
+  let serialized = serializeSyncPayload(summary, { syncSessionTitles });
   if (serialized.payload?.allTimeProjectsOmitted === true && typeof logger === 'function') {
     logger(`all-time project breakdown omitted; payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
   }
@@ -306,7 +305,8 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
   const retrySerialized = response.status === 413
     ? serializeSyncPayload(summary, {
         omitHistoryTokenComponents: true,
-        omitAllTimeProjects: true
+        omitAllTimeProjects: true,
+        syncSessionTitles
       })
     : null;
   const canRetryReduced = response.status === 413

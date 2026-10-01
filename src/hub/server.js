@@ -43,6 +43,7 @@ function createHub({
   port = 17321,
   host = '0.0.0.0',
   secret = '',
+  syncSessionTitles = false,
   staleAfterMs = DEFAULT_STALE_AFTER_MS,
   broadcastDelayMs = 100,
   dataFile = path.join(projectRoot(), 'data', 'devices.json'),
@@ -159,8 +160,8 @@ function createHub({
       throw new Error('deviceId_required');
     }
     const deviceId = String(payload.deviceId || payload.id);
-    const existing = stripSessionTextFromDeviceRecord(store.devices[deviceId]);
-    const incoming = stripSessionTextFromDeviceRecord(payload);
+    const existing = syncSessionTitles ? store.devices[deviceId] : stripSessionTextFromDeviceRecord(store.devices[deviceId]);
+    const incoming = syncSessionTitles ? payload : stripSessionTextFromDeviceRecord(payload);
     const record = mergeDeviceRecord(existing, { ...incoming, receivedAt: new Date().toISOString() });
     store.devices[record.deviceId] = record;
     persist();
@@ -379,7 +380,10 @@ if (require.main === module) {
   const staleAfterMs = Number(args.staleAfterMs || process.env.TOKEN_MONITOR_STALE_AFTER_MS || DEFAULT_STALE_AFTER_MS);
   const dataFile = String(args.dataFile || process.env.TOKEN_MONITOR_DATA_FILE || path.join(projectRoot(), 'data', 'devices.json'));
 
-  const hub = createHub({ port, host, secret, staleAfterMs, dataFile });
+  const hub = createHub({
+    port, host, secret, staleAfterMs, dataFile,
+    syncSessionTitles: process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES === '1'
+  });
   hub.start().then(() => {
     console.log(`Token Monitor hub listening on http://${hub.bindHost}:${port}`);
     console.log(`Data file: ${dataFile}`);

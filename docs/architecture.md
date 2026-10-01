@@ -114,6 +114,8 @@ Every publish recomposes and ships the whole stats tree, so its cost is paid per
 
 The Hub stores normalized device records (`normalizeDeviceRecord`) and aggregates on read (`aggregateDevices`). `DeviceState` composes the wire record from usage, the runtime envelope and limits: limits-only updates keep the usage `updatedAt`, and cold-start previews wait for a complete usage baseline. `collectUsageOnce()` owns the usage portion; `docs/API.md` documents the full contract, which the Worker shares exactly. Neither Hub needs provider credentials.
 
+Session titles are removed by agent payload construction and again at Node Hub ingest by default. `TOKEN_MONITOR_SYNC_SESSION_TITLES=1` opts both the sender and self-hosted Node Hub into syncing normalized titles (maximum 160 characters); the Cloudflare Worker always strips them. Keep the two opt-ins independent so Hub ingress remains a trust boundary.
+
 Settings keys, env vars, CLI flags, Hub endpoints and this wire shape have external users: treat changes as breaking and plan the migration.
 
 A device older than `staleAfterMs` (default 10 min) stays in `/api/stats` with `stale: true` and is greyed out — intentional, not a bug.

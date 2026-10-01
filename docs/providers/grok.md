@@ -26,7 +26,7 @@ Grok writes nanosecond ISO strings (`2026-08-19T07:53:22.948065400Z`). V8 trunca
 
 `generated_title`, whitespace-collapsed and capped at 96 code points — the same cap claude, codex and kimi each carry locally (there is no shared cleaner). Grok titles are the writer's own prompt text and run to ~173 code points, so the cap is load-bearing. A blank title yields no `title` field at all rather than an empty one, and the row still resolves on its timestamps.
 
-`title` stays on the device: `buildSyncPayload()` removes local session titles before upload, and the Hub strips text again on ingress.
+`title` stays on the device by default: `buildSyncPayload()` removes local session titles before upload, and the Hub strips text again on ingress. Opt-in title sync is available for self-hosted Node hubs with `TOKEN_MONITOR_SYNC_SESSION_TITLES=1` on both sender and Hub.
 
 ## Scope
 

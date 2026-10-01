@@ -70,6 +70,19 @@ test('syncPayload keeps locally resolved conversation titles off the hub wire', 
   assert.equal(summary.today.sessions['codex:thread-a'].title, 'Private local title');
 });
 
+test('syncPayload includes session titles only when explicitly enabled', () => {
+  const summary = {
+    today: { sessions: { one: { title: 'Session title' } } },
+    month: { sessions: { one: { title: 'Session title' } } },
+    limits: { providers: [] }
+  };
+
+  const payload = syncPayload(summary, { syncSessionTitles: true });
+
+  assert.equal(payload.today.sessions.one.title, 'Session title');
+  assert.equal(payload.month.sessions.one.title, 'Session title');
+});
+
 test('syncPayload bounds uploads by omitting all-time sessions', () => {
   const summary = {
     deviceId: 'dev-a',
