@@ -14094,8 +14094,7 @@ function renderMimoStatus() {
 
       right.append(info);
       if (remove) right.append(remove);
-      if (input) row.append(input);
-      row.append(main, right);
+      row.append(input || document.createElement('span'), main, right);
       listEl.append(row);
     }
   }

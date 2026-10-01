@@ -1090,9 +1090,10 @@
         if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, currency)}`);
         const balanceText = formatMoney(amount, currency) || '—';
         // Reuse the shared display-only balance meter; do not put it on the wire.
+        const meterPercent = creditsMeterPercent(provider, creditsWindow);
         const balanceNode = limitWindowNode(
           'Balance',
-          { remainingPercent: creditsMeterPercent(provider, creditsWindow) },
+          meterPercent === null ? { showMeter: false } : { remainingPercent: meterPercent },
           color,
           0.68,
           balanceText,

@@ -1323,7 +1323,7 @@ test('the console row states the console’s own month and all time beside a loc
   const probeAt = (totalCost, hour) => ({
     fetch: mimoWorld({ totalCost }).fetch,
     readMimoDesktopAccount: absentDesktop,
-    now: () => Date.UTC(2026, 8, 27, hour),
+    now: () => new Date(2026, 8, 27, hour).getTime(),
     mimoStorePath: '/x/mimo-spend.json',
     ...io
   });

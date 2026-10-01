@@ -452,6 +452,23 @@ test('a MiMo wallet meters against its month spend and carries the spend line', 
   );
   assert.equal(bare.find('limit-meter-fill').style['--bar-scale'], '1');
   assert.equal(bare.find('limit-spend'), null);
+
+  for (const partial of [{ giftBalance: 5 }, { cashBalance: 5 }]) {
+    const unknown = dockView().renderProviderWindows({
+      ...row, windows: [], balance: { amount: null, currency: 'CNY', ...partial }
+    }, '#000000');
+    assert.match(unknown.text, /Balance —/);
+    assert.equal(unknown.find('limit-meter-fill'), null, 'unknown funds must not look exhausted');
+  }
+  const empty = dockView().renderProviderWindows({
+    ...row, windows: [], balance: { amount: 0, currency: 'CNY' }
+  }, '#000000');
+  assert.equal(empty.find('limit-meter-fill').style['--bar-scale'], '0');
+  const reported = dockView().renderProviderWindows({
+    ...row, windows: [{ kind: 'billing', metric: 'credits', usedPercent: 25 }],
+    balance: { amount: null, currency: 'CNY', giftBalance: 5 }
+  }, '#000000');
+  assert.equal(reported.find('limit-meter-fill').style['--bar-scale'], '0.75');
 });
 
 test('a MiMo Console card renders Token Plan states from normalized and persisted rows', () => {

@@ -3217,7 +3217,6 @@ test('MiMo lists the detected Desktop session without controls the user does not
   assert.match(render, /const detected = account\.removable === false;/);
   assert.match(render, /const input = detected \? null : document\.createElement\('input'\)/);
   assert.match(render, /const remove = detected \? null : document\.createElement\('button'\)/);
-  assert.match(render, /if \(input\) row\.append\(input\)/);
   assert.match(render, /if \(remove\) right\.append\(remove\)/);
   assert.match(app, /if \(account\?\.removable === false\) return t\('settings\.mimo\.desktopAccount'\)/);
 });
@@ -3295,6 +3294,9 @@ test('MiMo settings reuses the shared sign-in status for rejected accounts', () 
   };
   const render = vm.runInNewContext(`${source}\nrenderMimoStatus`, context);
   render();
+  assert.ok(list.children.every((row) => row.children.length === 3), 'read-only rows retain the shared checkbox column');
+  assert.equal(list.children[2].children[0].type, undefined);
+  assert.equal(list.children[2].children[2].children.length, 1, 'the detected account has no remove control');
   const info = list.children.map((row) => [...row.walk()].find((node) => node.className === 'managed-account-info'));
   assert.deepEqual(info.map((node) => node.textContent), ['Sign in again', 'Console', 'Sign in again']);
   assert.equal(info[0].title, 'Sign in again');
