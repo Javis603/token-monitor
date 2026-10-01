@@ -5802,7 +5802,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .session-detail::-webkit-scrollbar { width: 0; height: 0; }
 .detail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
 .detail-back { flex-shrink: 0; background: transparent; border: 0; color: var(--muted, #8a8a90); font: inherit; cursor: pointer; padding: 0; }
-.detail-heading { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+/* The whole title is a back target; retain the original `‹ Sessions` spacing. */
+.detail-back-titled { display: flex; align-items: baseline; gap: 1ch; flex: 1; min-width: 0; text-align: start; }
+.detail-back-arrow { flex: 0 0 auto; font: inherit; }
+.detail-heading { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; color: var(--muted, #8a8a90); }
 .fade-overflow.is-overflow-enabled { text-overflow: clip; scrollbar-width: none; }
 .is-overflow-enabled > .overflow-text-content { display: inline-block; width: max-content; }
 .is-hover-scrolling > .overflow-text-content { will-change: transform; }

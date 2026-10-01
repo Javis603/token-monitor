@@ -7,7 +7,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 const { create } = require('../../src/electron/renderer/overflowText');
 
-function harness(distance = 7) {
+function harness(distance = 7, options = {}) {
   let now = 0;
   let nextId = 0;
   const timers = new Map();
@@ -42,7 +42,7 @@ function harness(distance = 7) {
     cancelAnimationFrame: id => frames.delete(id)
   };
   const document = { createElement: node, querySelectorAll: () => [element] };
-  const api = create({ document, window, prefersReducedMotion: () => false });
+  const api = create({ document, window, prefersReducedMotion: () => false, ...options });
   function frame(at) {
     now = at;
     const pending = [...frames.values()];
@@ -58,7 +58,7 @@ function harness(distance = 7) {
   }
   api.bind(element);
   frame(0);
-  return { api, element, node, document, window, frame, hover, frames };
+  return { api, element, node, document, window, frame, hover, frames, timers };
 }
 
 test('small overflow moves smoothly in fractional pixels and finishes promptly', () => {
@@ -80,6 +80,11 @@ test('small overflow moves smoothly in fractional pixels and finishes promptly',
 test('unchanged text preserves pending, active and completed hover motion', () => {
   const h = harness(100);
   const content = h.element.children[0];
+  h.element.mouseenter();
+  const delayId = [...h.timers.keys()][0];
+  h.api.setText(h.element, h.element.textContent);
+  assert.equal([...h.timers.keys()][0], delayId, 'an update during the hover delay keeps the original timer');
+  h.element.mouseleave();
   h.hover();
   h.frame(500);
   const before = content.style.transform;
@@ -95,6 +100,41 @@ test('unchanged text preserves pending, active and completed hover motion', () =
   h.api.setText(h.element, 'A renamed session');
   assert.equal(content.style.transform, 'translate3d(0px, 0, 0)');
   assert.equal(h.element.textContent, 'A renamed session');
+  assert.equal(h.element.title, 'A renamed session');
+  assert.equal(h.element.classList.contains('is-hover-reading'), false);
+});
+
+test('leaving before the delay cancels motion, and reduced motion keeps the full tooltip', () => {
+  let reduced = false;
+  let releases = 0;
+  const h = harness(100, { prefersReducedMotion: () => reduced, onLeave: () => { releases++; } });
+  h.element.mouseenter();
+  h.element.mouseleave();
+  assert.equal(h.timers.size, 0);
+  h.frame(1000);
+  assert.equal(h.element.children[0].style.transform, 'translate3d(0px, 0, 0)');
+  assert.equal(releases, 1);
+  reduced = true;
+  h.element.mouseenter();
+  assert.equal(h.timers.size, 0);
+  assert.equal(h.element.classList.contains('is-hover-reading'), false);
+  assert.equal(h.element.title, h.element.textContent);
+});
+
+test('resizing clamps the offset and detaching a hovered title stops its animation', () => {
+  const h = harness(100);
+  h.hover();
+  h.frame(1000);
+  h.element.clientWidth = 280;
+  h.api.update(h.element);
+  assert.equal(h.element.children[0].style.transform, 'translate3d(-20px, 0, 0)');
+  h.element.clientWidth = 320;
+  h.api.update(h.element);
+  assert.equal(h.element.children[0].style.transform, 'translate3d(0px, 0, 0)');
+  assert.equal(h.element.classList.contains('has-overflow-fade'), false);
+  h.element.isConnected = false;
+  h.frame(1100);
+  assert.equal(h.frames.size, 0);
   assert.equal(h.element.classList.contains('is-hover-reading'), false);
 });
 

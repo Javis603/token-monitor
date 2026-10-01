@@ -34,10 +34,19 @@ test('session detail renders its heading before loading, errors and empty result
       set textContent(value) { this.children = []; this._text = value; },
       closest: () => ({}),
       classList: { add: value => classes.add(value), remove: value => classes.delete(value), contains: value => classes.has(value), toggle: (value, enabled) => enabled ? classes.add(value) : classes.delete(value) },
-      append(...nodes) { this.children.push(...nodes); },
+      append(...nodes) { this.children.push(...nodes); nodes.forEach(node => { node.parentElement = this; }); },
       replaceChildren(...nodes) { this.children = nodes; },
-      addEventListener(type, handler) { this[type] = handler; },
-      querySelector(selector) { return this.children.find(node => `.${node.className}` === selector) || null; }
+      setAttribute(name, value) { (this.attributes ||= {})[name] = value; },
+      addEventListener(type, handler) { if (type === 'click') this.clickHandler = handler; else this[type] = handler; },
+      click() { this.clickHandler?.(); this.parentElement?.click(); },
+      querySelector(selector) {
+        for (const child of this.children) {
+          if (`.${child.className}` === selector) return child;
+          const found = child.querySelector?.(selector);
+          if (found) return found;
+        }
+        return null;
+      }
     };
   }
   const els = { breakdown: element(), sessionDetail: element(), sessionDetailHead: element() };
@@ -46,8 +55,8 @@ test('session detail renders its heading before loading, errors and empty result
   const end = rendererSource.indexOf('function backgroundReviewRunNode(', start);
   let render;
   const context = {
-    els, state, document: { createElement: element, querySelectorAll: () => els.sessionDetailHead.children.filter(node => node.className === 'detail-heading') }, window: { addEventListener() {} }, t: key => key,
-    sessionDetailBack() {},
+    els, state, document: { createElement: element, querySelectorAll: () => [els.sessionDetailHead.querySelector('.detail-heading')].filter(Boolean) }, window: { addEventListener() {} }, t: key => key,
+    sessionDetailBack() { state.backClicked = true; },
     detailNote: text => ({ textContent: text }),
     sessionDetailApi: { exchangeRows: detail => detail?.exchanges || [] },
     exchangeNode: row => ({ textContent: row.title }),
@@ -78,7 +87,17 @@ test('session detail renders its heading before loading, errors and empty result
       const heading = els.sessionDetailHead.querySelector('.detail-heading');
       assert.equal(heading.textContent, title);
       assert.equal(heading.title, title);
-      assert.equal(els.sessionDetailHead.children[0].className, 'detail-back');
+      const back = els.sessionDetailHead.children[0];
+      assert.equal(back.className, 'detail-back detail-back-titled');
+      assert.equal(back.type, 'button');
+      assert.equal(back.textContent, `‹${title}`);
+      assert.equal(back.querySelector('.detail-back-arrow').textContent, '‹');
+      assert.equal(back.querySelector('.detail-back-arrow').attributes['aria-hidden'], 'true');
+      assert.equal(heading.parentElement, back);
+      assert.equal(back.attributes['aria-label'], 'sessions');
+      heading.click();
+      assert.equal(state.backClicked, true);
+      state.backClicked = false;
     }
     els.sessionDetailHead.querySelector('.detail-sort').click();
     const heading = els.sessionDetailHead.querySelector('.detail-heading');
@@ -107,6 +126,44 @@ test('session detail renders its heading before loading, errors and empty result
   state.openSession = {};
   render({ loading: true });
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
+  assert.equal(els.sessionDetailHead.children[0].textContent, '‹ sessions');
+  state.openSession = { title: 'gpt-5.6-sol · 12:34', returnTo: { kind: 'background-review-group' } };
+  render({ loading: true });
+  assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], 'sessions.backgroundReviews');
+  context.closeSessionDetail = () => { state.backClicked = true; };
+  const groupStart = rendererSource.indexOf('function renderBackgroundReviewDetail(');
+  const groupEnd = rendererSource.indexOf('function detailNote(', groupStart);
+  vm.runInNewContext(`${rendererSource.slice(groupStart, groupEnd)}\nglobalThis.renderGroup = renderBackgroundReviewDetail;`, context);
+  context.renderGroup({ summary: { backgroundReviewRows: [] } });
+  const groupBack = els.sessionDetailHead.children[0];
+  assert.equal(groupBack.textContent, '‹sessions.backgroundReviews');
+  assert.equal(groupBack.attributes['aria-label'], 'sessions');
+  const groupHeading = els.sessionDetailHead.querySelector('.detail-heading');
+  assert.equal(groupHeading.textContent, 'sessions.backgroundReviews');
+  assert.equal(groupHeading.title, groupHeading.textContent);
+  assert.equal(groupHeading.parentElement, groupBack);
+  groupHeading.click();
+  assert.equal(state.backClicked, true);
+});
+
+test('the compact detail back control returns to the review group or the session list', () => {
+  const start = rendererSource.indexOf('function sessionDetailBack(');
+  const end = rendererSource.indexOf('function renderSessionDetail(', start);
+  const group = { kind: 'background-review-group', summary: {} };
+  const state = { openSession: { returnTo: group } };
+  let renderedGroup;
+  let closed = false;
+  const back = Function('state', 'renderBackgroundReviewDetail', 'closeSessionDetail',
+    `${rendererSource.slice(start, end)}\nreturn sessionDetailBack;`
+  )(state, request => { renderedGroup = request; }, () => { closed = true; state.openSession = null; });
+  back();
+  assert.equal(state.openSession, group);
+  assert.equal(renderedGroup, group);
+  assert.equal(closed, false);
+  state.openSession = { title: 'Ordinary session' };
+  back();
+  assert.equal(closed, true);
+  assert.equal(state.openSession, null);
 });
 
 function sessionDetailHarness(getSessionDetail) {

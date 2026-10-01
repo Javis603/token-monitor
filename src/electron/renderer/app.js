@@ -4639,18 +4639,28 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   container.replaceChildren();
 
   const back = document.createElement('button');
-  back.className = 'detail-back';
-  back.textContent = `‹ ${t('sessions') || 'Sessions'}`;
+  const title = state.openSession?.title;
+  const backLabel = state.openSession?.returnTo?.kind === 'background-review-group'
+    ? t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
+  back.type = 'button';
+  back.className = title ? 'detail-back detail-back-titled' : 'detail-back';
+  if (!title) back.textContent = `‹ ${backLabel}`;
+  back.setAttribute('aria-label', backLabel);
+  back.title = title || backLabel;
   back.addEventListener('click', sessionDetailBack);
   head.append(back);
 
-  if (state.openSession?.title) {
-    const heading = document.createElement('strong');
+  if (title) {
+    const arrow = document.createElement('span');
+    arrow.className = 'detail-back-arrow';
+    arrow.textContent = '‹';
+    arrow.setAttribute('aria-hidden', 'true');
+    const heading = document.createElement('span');
     heading.className = 'detail-heading';
-    heading.textContent = state.openSession.title;
-    heading.title = state.openSession.title;
+    heading.textContent = title;
+    heading.title = title;
     bindHoverMarquee(heading);
-    head.append(heading);
+    back.append(arrow, heading);
   }
 
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
@@ -4717,13 +4727,22 @@ function renderBackgroundReviewDetail(request) {
   container.replaceChildren();
 
   const back = document.createElement('button');
-  back.className = 'detail-back';
-  back.textContent = `‹ ${t('sessions') || 'Sessions'}`;
+  back.type = 'button';
+  back.className = 'detail-back detail-back-titled';
+  back.setAttribute('aria-label', t('sessions') || 'Sessions');
+  back.title = t('sessions') || 'Sessions';
   back.addEventListener('click', closeSessionDetail);
-  const heading = document.createElement('strong');
+  const arrow = document.createElement('span');
+  arrow.className = 'detail-back-arrow';
+  arrow.textContent = '‹';
+  arrow.setAttribute('aria-hidden', 'true');
+  const heading = document.createElement('span');
   heading.className = 'detail-heading';
   heading.textContent = t('sessions.backgroundReviews');
-  head.append(back, heading);
+  back.title = heading.textContent;
+  bindHoverMarquee(heading);
+  back.append(arrow, heading);
+  head.append(back);
 
   const rows = request?.summary?.backgroundReviewRows || [];
   if (rows.length === 0) {
