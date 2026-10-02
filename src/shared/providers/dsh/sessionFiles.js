@@ -294,8 +294,8 @@ function positiveTokenCount(value) {
 // that switches model mid-conversation gets a different window and the newest
 // usage chunk is the current occupancy. A zero-token usage chunk is a provider
 // reporting nothing, not an emptied context, so it never replaces a reading.
-function foldDshSessionState(text, previous = {}) {
-  let title = persistedDshSessionTitle(previous.title);
+function foldDshSessionState(text, previous = {}, { resolveTitles = true } = {}) {
+  let title = resolveTitles ? persistedDshSessionTitle(previous.title) : '';
   let contextWindow = positiveTokenCount(previous.contextWindow);
   let contextTokens = positiveTokenCount(previous.contextTokens);
   // Whether the newest turn boundary in the log is a completion. DSH brackets
@@ -313,7 +313,7 @@ function foldDshSessionState(text, previous = {}) {
     try { event = JSON.parse(line); } catch (_) { continue; }
     const data = event?.data;
     if (event?.type === 'session/title') {
-      const nextTitle = persistedDshSessionTitle(data?.title);
+      const nextTitle = resolveTitles ? persistedDshSessionTitle(data?.title) : '';
       if (nextTitle) title = nextTitle;
       continue;
     }
@@ -400,7 +400,8 @@ function decodeSessionAppend(filePath, buffer) {
 // new bytes when the previous file identity and bounded head/tail fingerprint
 // still match. Any replacement or rewrite resets the fold, while a torn final
 // record/frame remains eligible for retry.
-function readDshSessionState(filePath, previous = {}) {
+function readDshSessionState(filePath, previous = {}, { resolveTitles = true } = {}) {
+  if ((previous.resolveTitles !== false) !== resolveTitles) previous = {};
   let stat;
   try {
     stat = fs.statSync(filePath);
@@ -440,7 +441,7 @@ function readDshSessionState(filePath, previous = {}) {
       && Number.isSafeInteger(previousOffset) && previousOffset >= 0 && previousOffset <= previousSize
       && dshSessionContinuityMatches(fd, previous, previousSize);
     const start = appendOnly ? previousOffset : 0;
-    let state = foldDshSessionState('', appendOnly ? previous : {});
+    let state = foldDshSessionState('', appendOnly ? previous : {}, { resolveTitles });
     const isZstd = filePath.endsWith('.jsonl.zstd');
     let position = start;
     let consumed = 0;
@@ -457,7 +458,7 @@ function readDshSessionState(filePath, previous = {}) {
 
       if (isZstd) {
         const decoded = decodeZstdBuffer(pending, scanZstdFrames(pending));
-        state = foldDshSessionState(decoded.text, state);
+        state = foldDshSessionState(decoded.text, state, { resolveTitles });
         consumed += decoded.decodedEnd;
         pending = pending.subarray(decoded.decodedEnd);
         stoppedOnError = decoded.stoppedOnError;
@@ -465,7 +466,7 @@ function readDshSessionState(filePath, previous = {}) {
         const lastNewline = pending.lastIndexOf(0x0a);
         if (lastNewline >= 0) {
           const complete = lastNewline + 1;
-          state = foldDshSessionState(pending.subarray(0, complete).toString('utf8'), state);
+          state = foldDshSessionState(pending.subarray(0, complete).toString('utf8'), state, { resolveTitles });
           consumed += complete;
           pending = pending.subarray(complete);
         }
@@ -474,10 +475,11 @@ function readDshSessionState(filePath, previous = {}) {
     if (filePath.endsWith('.jsonl.zstd') && !stoppedOnError && pending.length > 0) {
       // A live final frame may be torn but still contain complete JSONL rows.
       // Fold those rows now, while retaining the frame boundary for replay.
-      state = foldDshSessionState(decodeSessionAppend(filePath, pending).text, state);
+      state = foldDshSessionState(decodeSessionAppend(filePath, pending).text, state, { resolveTitles });
     }
     return {
       ...state,
+      resolveTitles,
       offset: start + consumed,
       size,
       mtimeMs,

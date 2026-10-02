@@ -193,3 +193,28 @@ test('the renderer attaches the pulled list to every stats it adopts and pulls f
   assert.match(app, /function render\(\) \{[\s\S]*?if \(!state\.stats\) return;\s*allTimeSessions\.ensure\(\);/);
   assert.match(app, /allTimeSessions\.ensure\(\);\s*renderSessionUsageArchiveStatus\(\);/, 'Settings pulls for the archived count');
 });
+
+test('a title-bearing pull that lands after privacy is enabled is projected using the current policy', async () => {
+  const { withoutSessionTitleStats } = require('../../src/shared/sessionTitlePrivacy');
+  let hidden = false;
+  let resolvePull;
+  const input = stats();
+  let adopted;
+  const loader = createAllTimeSessionsLoader({
+    fetchSessions: () => new Promise((resolve) => { resolvePull = resolve; }),
+    currentSnapshot: () => input.snapshot,
+    needed: () => true,
+    projectStats: (value) => hidden ? withoutSessionTitleStats(value) : value,
+    onLoaded: () => { adopted = loader.attach(input); }
+  });
+  loader.ensure();
+  await settle();
+  hidden = true;
+  resolvePull({ 'codex:s': { title: 'Private title', totalTokens: 9 } });
+  await settle();
+  assert.equal(adopted.periods.allTime.sessions['codex:s'].title, undefined);
+  assert.equal(adopted.periods.allTime.sessions['codex:s'].totalTokens, 9);
+  assert.equal(Object.hasOwn(input.periods.allTime, 'sessions'), false);
+  hidden = false;
+  assert.equal(loader.attach(input).periods.allTime.sessions['codex:s'].title, 'Private title');
+});

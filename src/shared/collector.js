@@ -48,6 +48,7 @@ const {
   projectPathFromJsonl,
   sessionMetadataMap
 } = require('./sessionMetadata');
+const { withoutSessionTitleStats } = require('./sessionTitlePrivacy');
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { buildPromaHistoryGraph, buildPromaPeriods, collectPromaRows } = require('./providers/proma/usage');
 const {
@@ -1103,6 +1104,7 @@ async function collectUsageOnce(options) {
     }
   };
   const projectsEnabled = options.projectsEnabled !== false;
+  const resolveTitles = options.sessionTitlesEnabled !== false;
   const runTokscaleScan = options.runTokscale || ((input) => runTokscale({
     ...input,
     workspaces: projectsEnabled,
@@ -1113,7 +1115,7 @@ async function collectUsageOnce(options) {
   }));
   const runTokscaleFn = async (input) => {
     const json = await runTokscaleScan(input);
-    applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
+    applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled, resolveTitles });
     return json;
   };
   const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
@@ -1150,7 +1152,7 @@ async function collectUsageOnce(options) {
     // Still unconditional: only the clients whose parser records a workspace come
     // back from the scan attributed, so the resolvers stay the answer for the rest.
     // applySessionMetadata skips the expensive path read per session, not per tick.
-    { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled }
+    { ...localSessionMetadataDeps, retryMisses, resolveProjects: projectsEnabled, resolveTitles }
   );
   // Proma and Qoder CN remain local compatibility adapters. Reasonix aggregate
   // usage is supplied by the same Tokscale path as every other tracked client.
@@ -1193,7 +1195,7 @@ async function collectUsageOnce(options) {
     const progress = { ...periods };
     if (qoderCnPeriods?.today && progress.today) progress.today = mergePeriods(progress.today, qoderCnPeriods.today);
     if (qoderCnPeriods?.month && progress.month) progress.month = mergePeriods(progress.month, qoderCnPeriods.month);
-    try { options.onProgress({ ...progress, updatedAt: new Date().toISOString() }); } catch (_) {}
+    try { options.onProgress({ ...(resolveTitles ? progress : withoutSessionTitleStats(progress)), updatedAt: new Date().toISOString() }); } catch (_) {}
   };
   if (normalizedClients) {
     const syncClients = targetRequested ? targetTokscaleClients : tokscaleClients;
@@ -1420,7 +1422,7 @@ async function collectUsageOnce(options) {
           pricingRevision: options.pricingRevision
         }),
         logger: options.logger,
-        decoratePeriods: (periods, home) => applySessionMetadata(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
+        decoratePeriods: (periods, home) => applySessionMetadata(periods, home, { scopedHome: true, resolveProjects: projectsEnabled, resolveTitles })
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
@@ -1441,7 +1443,7 @@ async function collectUsageOnce(options) {
           pricingRevision: options.pricingRevision
         }),
         logger: options.logger,
-        decoratePeriods: (periods, home) => applySessionMetadata(periods, home, { scopedHome: true, resolveProjects: projectsEnabled })
+        decoratePeriods: (periods, home) => applySessionMetadata(periods, home, { scopedHome: true, resolveProjects: projectsEnabled, resolveTitles })
       });
       wslBundle = wslResult.bundle;
       wslDetected = wslResult.detected;
@@ -1539,7 +1541,8 @@ async function collectUsageOnce(options) {
         homeDir: options.homeDir || os.homedir(),
         platform: platformValue,
         cwdDir: options.cwdDir || process.cwd(),
-        projectIdentity
+        projectIdentity,
+        resolveTitles
       });
       const nativeView = nativeCache.getView({ now: collectedAt, projectsEnabled, allTimeSince });
       summary.nativeSessions = nativeView.sessions;
@@ -1640,7 +1643,7 @@ async function collectUsageOnce(options) {
     )
   });
   if (clientHealth) summary.clientHealth = clientHealth;
-  return summary;
+  return resolveTitles ? summary : withoutSessionTitleStats(summary);
 }
 
 // Sources that remain part of collection, health, and diagnostics but are too
@@ -2648,6 +2651,7 @@ function startCollector(options) {
   const reasonixNativeSessionsEnabled = options.reasonixNativeSessionsEnabled === true;
   const reasonixNativeSessionCache = reasonixNativeSessionsEnabled && trackedClients.has('reasonix')
     ? options.reasonixNativeSessionCache || createReasonixNativeSessionCache({
+      resolveTitles: options.sessionTitlesEnabled !== false,
       env: options.env || process.env,
       homeDir: options.homeDir || os.homedir(),
       platform: options.platform || process.platform,

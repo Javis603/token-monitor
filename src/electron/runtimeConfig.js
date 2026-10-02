@@ -35,6 +35,7 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'historyIntervalMs',
   'sessionUsageArchiveEnabled',
   'projectsEnabled',
+  'sessionTitlesEnabled',
   'wslScanEnabled'
 ]);
 // Functions and identity fields deliberately stay out: this key answers only
@@ -48,6 +49,7 @@ const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
   'historyEnabled',
   'dailyHistoryArchiveEnabled',
   'projectsEnabled',
+  'sessionTitlesEnabled',
   'historyIntervalMs',
   'watchEnabled',
   'watchUsePolling',
@@ -105,6 +107,7 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
     dailyHistoryArchiveWriteEnabled: context.dailyHistoryArchiveWriteEnabled,
     projectsEnabled: settings.projectsEnabled !== false,
+    sessionTitlesEnabled: settings.sessionTitlesEnabled !== false,
     reasonixNativeSessionsEnabled: context.reasonixNativeSessionsEnabled === true,
     historyIntervalMs: context.historyIntervalMs ?? settings.historyIntervalMs,
     watchEnabled: context.watchEnabled,

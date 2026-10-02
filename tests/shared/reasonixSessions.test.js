@@ -1004,3 +1004,22 @@ test('readReasonixNativeSession projects usage without reading oversized officia
   assert.equal(session.totalTokens, 987654);
   assert.equal(session.requestCount, 7);
 });
+
+test('native private sessions skip title and preview extraction while retaining usage and timestamps', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'reasonix-private-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const now = new Date();
+  const directory = path.join(root, 'sessions');
+  sidecars(directory, 'private-id', {
+    id: 'private-id', schema_version: 1, created_at: now.toISOString(), updated_at: now.toISOString(),
+    custom_title: 'Private custom', topic_title: 'Private topic', preview: 'Private preview'
+  }, nativeTelemetry());
+  const cache = createReasonixNativeSessionCache({
+    env: { REASONIX_STATE_HOME: root }, homeDir: root, resolveTitles: false
+  });
+  const row = cache.getView({ now }).sessions.today['reasonix:private-id'];
+  assert.ok(row);
+  for (const field of ['title', 'customTitle', 'topicTitle', 'preview']) assert.equal(row[field], undefined, field);
+  assert.equal(row.totalTokens, 140);
+  assert.equal(row.startedAt, now.toISOString());
+});

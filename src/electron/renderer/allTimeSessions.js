@@ -28,7 +28,7 @@
   // neither attached to stats from another Hub or mode, nor kept when it lands
   // after a switch. A failed pull waits for the next stats instead of retrying
   // in a loop.
-  function createAllTimeSessionsLoader({ fetchSessions, currentSnapshot, needed, onLoaded, onError }) {
+  function createAllTimeSessionsLoader({ fetchSessions, currentSnapshot, needed, onLoaded, onError, projectStats = (stats) => stats }) {
     if (typeof fetchSessions !== 'function') throw new TypeError('fetchSessions must be a function');
     if (typeof currentSnapshot !== 'function') throw new TypeError('currentSnapshot must be a function');
     if (typeof needed !== 'function') throw new TypeError('needed must be a function');
@@ -38,8 +38,11 @@
     let pending = false;
 
     function attach(stats) {
-      if (!pulled || !sameSource(pulled.snapshot, stats?.snapshot)) return stats;
-      return withAllTimeSessions(stats, pulled.sessions);
+      const attached = pulled && sameSource(pulled.snapshot, stats?.snapshot)
+        ? withAllTimeSessions(stats, pulled.sessions) : stats;
+      // Apply the current privacy policy after attaching, including an older
+      // pull that completes after the user disabled titles.
+      return projectStats(attached);
     }
 
     function invalidate() {

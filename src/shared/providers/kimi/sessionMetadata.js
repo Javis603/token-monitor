@@ -152,7 +152,7 @@ function cleanTitle(value) {
 // spawns. Taking the field regardless of kind would put those on session rows,
 // so only `generated` (the runtime's `chat_title` summary) and `custom` (a user
 // rename) are read, and the runtime never overwrites a custom title.
-function readKimiStateMetadata(statePath) {
+function readKimiStateMetadata(statePath, { resolveTitles = true } = {}) {
   let state;
   try { state = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch (_) { return {}; }
   if (!state || typeof state !== 'object') return {};
@@ -166,7 +166,7 @@ function readKimiStateMetadata(statePath) {
   // v2 carries `titleKind`; the legacy documents predate it and mark the same
   // distinction with `isCustomTitle`, which the runtime normalizes to `custom`
   // when it migrates them on read.
-  const titleKind = stringValue(state.titleKind) || (state.isCustomTitle === true ? 'custom' : '');
+  const titleKind = resolveTitles ? stringValue(state.titleKind) || (state.isCustomTitle === true ? 'custom' : '') : '';
   const title = titleKind === 'generated' || titleKind === 'custom' ? cleanTitle(state.title) : '';
   return {
     ...(projectPath ? { projectPath } : {}),
@@ -189,7 +189,7 @@ function resolveSessionMetadata(sessionIds, context) {
   ];
   const result = new Map();
   for (const [sessionId, statePath] of readKimiSessionStateFiles(roots, sessionIds)) {
-    const raw = readKimiStateMetadata(statePath);
+    const raw = readKimiStateMetadata(statePath, { resolveTitles: context.resolveTitles });
     const identity = resolveProjects ? projectIdentity(raw.projectPath) : {};
     const meta = {
       ...(raw.title ? { title: raw.title } : {}),

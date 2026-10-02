@@ -139,8 +139,9 @@ function readTitles(dbPath, sqlite, wantedIds, cache) {
   }
 }
 
-function resolveSessionMetadata(sessionIds, { deps = {}, home } = {}) {
+function resolveSessionMetadata(sessionIds, { deps = {}, home, resolveTitles = true } = {}) {
   const result = new Map();
+  if (!resolveTitles) return result;
   const sqlite = resolveSqlite(deps);
   if (typeof sqlite?.DatabaseSync !== 'function') return result;
   const candidates = cursorDesktopStateCandidates({

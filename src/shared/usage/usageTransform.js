@@ -1,5 +1,6 @@
 'use strict';
 
+const { withoutSessionTitleStats } = require('../sessionTitlePrivacy');
 const { applyArchivedClientUsage } = require('./clientUsageArchive');
 const {
   applySessionUsageArchive,
@@ -15,7 +16,8 @@ const USAGE_TRANSFORM_SETTING_KEYS = Object.freeze([
   'archivedClientUsage',
   'clients',
   'projectsEnabled',
-  'sessionUsageArchiveEnabled'
+  'sessionUsageArchiveEnabled',
+  'sessionTitlesEnabled'
 ]);
 
 function usageTransformSettings(settings = {}) {
@@ -100,10 +102,12 @@ function createUsageTransform(options = {}) {
           canonicalSummary: true,
           mutate: true
         });
-    return settings.projectsEnabled === false ? visibleSummary : applyProjectRollups(visibleSummary);
+    const privateSummary = settings.sessionTitlesEnabled === false ? withoutSessionTitleStats(visibleSummary) : visibleSummary;
+    return settings.projectsEnabled === false ? privateSummary : applyProjectRollups(privateSummary);
   }
 
   function transform(summary) {
+    if (getSettings()?.sessionTitlesEnabled === false) summary = withoutSessionTitleStats(summary);
     const now = sessionUsageArchiveDate(summary);
     if (getSettings()?.sessionUsageArchiveEnabled === false) return project(summary, null, now);
     if (isExternalAgentActive()) {

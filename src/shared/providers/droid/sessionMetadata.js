@@ -38,13 +38,13 @@ function isoFromEpoch(value) {
   return Number.isNaN(date.getTime()) ? '' : date.toISOString();
 }
 
-function droidSessionMetadataFromEntry(entry, { projectIdentity, resolveProjects }) {
+function droidSessionMetadataFromEntry(entry, { projectIdentity, resolveProjects, resolveTitles = true }) {
   const stringValue = (value) => typeof value === 'string' ? value.trim() : '';
   const startedAt = isoFromEpoch(entry.createdTimeMs);
   const lastUsedAt = isoFromEpoch(entry.modifiedTimeMs ?? entry.mtime) || startedAt;
   const projectPath = stringValue(entry.cwd);
   const identity = resolveProjects && projectPath ? projectIdentity(projectPath) : {};
-  const title = stringValue(entry.title);
+  const title = resolveTitles ? stringValue(entry.title) : '';
   return {
     ...(title ? { title } : {}),
     ...(identity.projectId ? identity : {}),
@@ -64,7 +64,7 @@ function resolveSessionMetadata(sessionIds, context) {
       const legacyId = typeof entry?.sessionId === 'string' ? entry.sessionId.trim() : '';
       const sessionId = currentId || legacyId;
       if (!sessionId || !wanted.has(sessionId)) continue;
-      const meta = droidSessionMetadataFromEntry(entry, { projectIdentity, resolveProjects });
+      const meta = droidSessionMetadataFromEntry(entry, { projectIdentity, resolveProjects, resolveTitles: context.resolveTitles });
       const existing = result.get(sessionId) || {};
       const merged = { ...meta, ...existing };
       if (merged.title || merged.projectId || merged.startedAt || merged.lastUsedAt) result.set(sessionId, merged);

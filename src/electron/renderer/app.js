@@ -4695,32 +4695,7 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   head.replaceChildren();
   container.replaceChildren();
 
-  const back = document.createElement('button');
-  const title = state.openSession?.title;
-  const backLabel = state.openSession?.returnTo?.kind === 'background-review-group'
-    ? t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
-  back.type = 'button';
-  back.className = title ? 'detail-back detail-back-titled' : 'detail-back';
-  if (!title) back.textContent = `‹ ${backLabel}`;
-  back.setAttribute('aria-label', title
-    ? t('sessions.backToWithTitle', { title, destination: backLabel })
-    : t('sessions.backTo', { destination: backLabel }));
-  if (!title) back.title = backLabel;
-  back.addEventListener('click', sessionDetailBack);
-  head.append(back);
-
-  if (title) {
-    const arrow = document.createElement('span');
-    arrow.className = 'detail-back-arrow';
-    arrow.textContent = '‹';
-    arrow.setAttribute('aria-hidden', 'true');
-    const heading = document.createElement('span');
-    heading.className = 'detail-heading';
-    heading.textContent = title;
-    heading.title = title;
-    bindHoverMarquee(heading);
-    back.append(arrow, heading);
-  }
+  head.append(sessionDetailBackButton());
 
   const idLabel = sessionRowsApi.sessionDetailIdLabel(state.openSession?.client, state.openSession?.sessionId, detail);
   if (idLabel) container.append(sessionIdLine(idLabel));
@@ -4742,6 +4717,36 @@ function renderSessionDetail({ detail, loading, error } = {}) {
 
   const max = Math.max(1, ...rows.map((row) => row.value));
   for (const row of rows) container.append(exchangeNode(row, max));
+}
+
+function sessionDetailBackButton() {
+  const back = document.createElement('button');
+  const title = state.settings?.sessionTitlesEnabled === false ? '' : state.openSession?.title;
+  const backLabel = state.openSession?.returnTo?.kind === 'background-review-group'
+    ? t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
+  back.type = 'button';
+  back.className = title ? 'detail-back detail-back-titled' : 'detail-back';
+  if (!title) back.textContent = `‹ ${backLabel}`;
+  back.setAttribute('aria-label', title
+    ? t('sessions.backToWithTitle', { title, destination: backLabel })
+    : t('sessions.backTo', { destination: backLabel }));
+  if (!title) back.title = backLabel;
+  back.addEventListener('click', sessionDetailBack);
+
+  if (title) {
+    const arrow = document.createElement('span');
+    arrow.className = 'detail-back-arrow';
+    arrow.textContent = '‹';
+    arrow.setAttribute('aria-hidden', 'true');
+    const heading = document.createElement('span');
+    heading.className = 'detail-heading';
+    heading.textContent = title;
+    heading.title = title;
+    bindHoverMarquee(heading);
+    back.append(arrow, heading);
+  }
+
+  return back;
 }
 
 // Copy the conversation identity, not a multi-UUID rollout filename.
@@ -6482,6 +6487,23 @@ function renderHome() {
     requestAnimationFrame(() => activityScroller.classList.remove('is-restoring-hover'));
   }
   // ResizeObserver repeats the scroll + hover restoration once layout fully settles.
+}
+
+function sessionStatsForDisplay(stats) {
+  return state.settings?.sessionTitlesEnabled === false
+    ? window.TokenMonitorSessionTitlePrivacy.withoutSessionTitleStats(stats) : stats;
+}
+
+function setRendererSettings(next) {
+  const titlesChanged = (state.settings?.sessionTitlesEnabled !== false) !== (next.sessionTitlesEnabled !== false);
+  state.settings = next;
+  state.stats = sessionStatsForDisplay(state.stats);
+  if (titlesChanged && state.openSession?.kind === 'session') {
+    // Update only the heading; keep the loaded body, error/loading state and
+    // sort control intact, even when a detail request is still in flight.
+    const head = els.sessionDetailHead;
+    head.replaceChildren(sessionDetailBackButton(), ...Array.from(head.children).slice(1));
+  }
 }
 
 function render() {
@@ -9262,6 +9284,25 @@ function renderSessionSettingsList() {
   const wrap = document.createElement('div');
   wrap.id = 'sessionSettingsList';
   wrap.className = 'settings-nested-list trend-settings-list';
+  const titleLabel = document.createElement('label');
+  titleLabel.className = 'checkbox-label trend-settings-row';
+  const titleInput = document.createElement('input');
+  titleInput.type = 'checkbox';
+  titleInput.name = 'sessionTitlesEnabled';
+  titleInput.checked = state.settings?.sessionTitlesEnabled !== false;
+  titleInput.setAttribute('aria-describedby', 'sessionTitlesNote');
+  const titleText = document.createElement('span');
+  titleText.textContent = t('settings.session.showTitles');
+  titleLabel.append(titleInput, titleText);
+  const titleNote = document.createElement('p');
+  titleNote.id = 'sessionTitlesNote';
+  titleNote.className = 'settings-note';
+  titleNote.textContent = t('settings.session.showTitlesNote');
+  titleInput.addEventListener('change', async () => {
+    await saveSettings({ sessionTitlesEnabled: titleInput.checked });
+    await refreshStats({ force: true });
+  });
+  wrap.append(titleLabel, titleNote);
   // A plain `.settings-item` row, matching the Model ranking control in Main —
   // the same title-left/control-right shape. It deliberately does NOT reuse
   // `.home-activity-settings`: that carries its own indent rule for the Home
@@ -11318,7 +11359,7 @@ async function saveSettings(patch) {
 // The resolved settings of a write that went through settings:update in main,
 // whether the renderer sent it as a patch or as an account credential command.
 function applyPersistedSettings(next, settingsPushRevision) {
-  state.settings = next;
+  setRendererSettings(next);
   applyEffectiveCurrencyRates();
   // settings:update broadcasts the normalized settings before resolving the
   // IPC request. The push already ran the full sync; repeating it when the
@@ -12333,7 +12374,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   for (const key of Object.keys(appearancePreview)) {
     if (JSON.stringify(next[key]) !== JSON.stringify(state.settings?.[key])) delete appearancePreview[key];
   }
-  state.settings = next;
+  setRendererSettings(next);
   applyEffectiveCurrencyRates();
   observeDisplayLiveTokenRates(state.stats);
   preserveSettingsPanelScroll(syncSettingsForm);
@@ -12433,6 +12474,7 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   fetchSessions: (snapshotId) => window.tokenMonitor.getAllTimeSessions(snapshotId),
   currentSnapshot: () => state.stats?.snapshot,
   needed: allTimeSessionsNeeded,
+  projectStats: sessionStatsForDisplay,
   onLoaded: () => {
     if (state.stats) state.stats = allTimeSessions.attach(state.stats);
     statsRenderScheduler.request();

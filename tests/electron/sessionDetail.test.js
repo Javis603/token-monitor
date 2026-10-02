@@ -128,6 +128,31 @@ test('session detail renders its heading before loading, errors and empty result
     overflowText.update(heading);
     assert.equal(heading.classList.contains('has-overflow-fade'), false, 'fitting text stays opaque');
   }
+  // Privacy changes replace only the back/heading node. The loaded body and
+  // sort control survive, and a later detail response respects the new policy.
+  context.window.TokenMonitorSessionTitlePrivacy = require('../../src/shared/sessionTitlePrivacy');
+  const settingsStart = rendererSource.indexOf('function sessionStatsForDisplay(');
+  const settingsEnd = rendererSource.indexOf('\nfunction render()', settingsStart);
+  vm.runInNewContext(`${rendererSource.slice(settingsStart, settingsEnd)}\nglobalThis.setSettings = setRendererSettings;`, context);
+  state.openSession = { kind: 'session', title: 'PRIVATE TITLE', detail: { exchanges: [{ title: 'Reply', value: 10 }] } };
+  state.stats = { periods: { today: { sessions: { s: { title: 'PRIVATE TITLE', totalTokens: 10 } } } } };
+  render({ detail: state.openSession.detail });
+  const body = els.sessionDetail.children[0];
+  const sort = els.sessionDetailHead.querySelector('.detail-sort');
+  context.setSettings({ sessionTitlesEnabled: false });
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
+  assert.equal(els.sessionDetailHead.children[0].attributes['aria-label'], 'Back to sessions');
+  assert.strictEqual(els.sessionDetail.children[0], body);
+  assert.strictEqual(els.sessionDetailHead.querySelector('.detail-sort'), sort);
+  assert.equal(state.stats.periods.today.sessions.s.title, undefined);
+  for (const options of [{ loading: true }, { error: true }, { detail: state.openSession.detail }]) {
+    render(options);
+    assert.doesNotMatch(els.sessionDetailHead.textContent, /PRIVATE/);
+    assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
+  }
+  context.setSettings({ sessionTitlesEnabled: true });
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'PRIVATE TITLE');
+
   // The id the Sessions list no longer prints opens the detail body, copyable,
   // in every state the body can be in.
   for (const options of [{ loading: true }, { error: true }, { detail: { exchanges: [{ title: 'Reply', value: 10 }] } }]) {

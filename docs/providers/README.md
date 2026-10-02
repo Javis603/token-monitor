@@ -67,6 +67,16 @@ Tracked-client identity lives in `CLIENT_CATALOG`, but a new client touches seve
 
 Self-synced clients (cursor/antigravity) additionally go in `SELF_SYNCED_CLIENTS`; parse-local clients must NOT. Explain source roots versus generated cache roots in the provider note so watch behaviour stays loop-free.
 
+### Session metadata contract
+
+A local resolver accepts `(Set<sessionId>, context)` and returns a synchronous `Map` keyed by bare session id. Normalize a source's display name to the optional `title` field before returning metadata; do not pass vendor title aliases or prompt previews to ordinary session rows, or add a provider-specific title path in the renderer. The shared metadata application and presentation projection already handle `title` for every registered client, so a new title source needs no per-view privacy switch. Tokscale-supplied names enter through `applyTokscaleSessionMetadata()` instead.
+
+`context.resolveTitles` is enabled unless it is explicitly `false`. Every title reader must honor it at the source: skip a title-only database/file lookup entirely, omit title columns from combined SQLite queries, and skip title extraction when a shared transcript/state file is still needed for other facts. Keep timestamps, project attribution, context, turn state and prompt-cache readings independent of this flag. Omit `title` or return an empty string when disabled. A cache that outlives collection must include the title mode in its key or invalidate its title state on a mode change; disabling and re-enabling with unchanged files must work. Returning no title after performing the same lookup does not satisfy the read contract.
+
+Use `assertSessionTitleContract()` from `tests/helpers/sessionTitleContract.js` in the provider's focused tests. Supply a `read(options)` closure that exercises the real reader with the same fixture and cache across default → disabled → enabled, the expected title and non-title metadata, and an `assertPrivateRead` callback that checks query/I/O observations or parser/cache state. Instrument title access where practical (for example, a throwing getter or a SQL-column assertion) so a test cannot pass solely because a returned title was discarded. Existing examples are in `tests/shared/sessionTitlePrivacy.test.js`; provider-specific discovery and source-precedence tests remain alongside the provider's own tests.
+
+For a title-only resolver, test zero source queries while disabled. For a combined reader, test that non-title facts survive and title work is skipped. Native adapters that bypass the ordinary resolver registry must additionally carry the preference into their cache and publish through the shared title projection. The runtime limits, retained-cache behavior and Tokscale parsing limitation are documented in [architecture.md](../architecture.md#session-title-privacy).
+
 ### Partition invariants
 
 Targeted watch ticks make the client id a correctness surface, because the scan is keyed on it from two independent directions: `clientWatchCandidates()` decides which id a changed path maps to, and `normalizeClientName()` decides which id tokscale's rows land under. Three invariants keep them aligned:

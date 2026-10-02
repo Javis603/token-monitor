@@ -119,7 +119,7 @@ function resolveSessionMetadata(sessionIds, context) {
       fileCache.set(key, entry);
     }
     const readState = deps.readDshSessionState || readDshSessionState;
-    const sessionState = readState(entry.filePath, entry.sessionState);
+    const sessionState = readState(entry.filePath, entry.sessionState, { resolveTitles: context.resolveTitles });
     if (sessionState !== entry.sessionState) {
       entry = { ...entry, sessionState };
       fileCache.set(key, entry);

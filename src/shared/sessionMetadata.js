@@ -68,7 +68,7 @@ function timestampFromJsonLine(line) {
 // aliases it already understands, so nothing downstream needs to know the scan
 // supplied them. A binary that does not emit the arrays leaves every row
 // untouched and the file-reading resolvers below still answer.
-function applyTokscaleSessionMetadata(json, { resolveProjects = true } = {}) {
+function applyTokscaleSessionMetadata(json, { resolveProjects = true, resolveTitles = true } = {}) {
   const rows = Array.isArray(json?.entries) ? json.entries : [];
   const result = { sessions: 0, projects: 0 };
   if (rows.length === 0) return result;
@@ -98,10 +98,14 @@ function applyTokscaleSessionMetadata(json, { resolveProjects = true } = {}) {
       ? { projectId: identity.projectId, projectLabel: identity.projectLabel || String(entry?.label || '').trim() }
       : null);
   }
-  if (sessionMeta.size === 0 && identities.size === 0) return result;
+  if (resolveTitles && sessionMeta.size === 0 && identities.size === 0) return result;
 
   for (const row of rows) {
     if (!row || typeof row !== 'object') continue;
+    if (!resolveTitles) {
+      delete row.sessionTitle;
+      delete row.session_title;
+    }
     const client = String(row.client || '').trim();
     const sessionId = String(row.sessionId ?? row.session_id ?? '').trim();
     const meta = client && sessionId ? sessionMeta.get(`${client}:${sessionId}`) : null;
@@ -111,7 +115,7 @@ function applyTokscaleSessionMetadata(json, { resolveProjects = true } = {}) {
       const lastUsedAt = isoFromMs(meta.lastActiveMs ?? meta.last_active_ms);
       if (startedAt && !row.startedAt) row.startedAt = startedAt;
       if (lastUsedAt && !row.lastUsedAt) row.lastUsedAt = lastUsedAt;
-      const title = String(meta.title || '').trim();
+      const title = resolveTitles ? String(meta.title || '').trim() : '';
       if (title && !row.sessionTitle) row.sessionTitle = title;
       result.sessions += 1;
     }
@@ -219,6 +223,11 @@ function fileSessionMetadata(sessionId, filePath, context, existing = {}) {
 // Every provider adapter accepts (Set<sessionId>, context) and returns a Map
 // keyed by bare session id. Storage-specific cache and refresh policy stays in
 // the adapter; the registry only owns selection and the common row contract.
+// Display names leave the adapter only as `meta.title`. `context.resolveTitles`
+// defaults to true; false skips title-only I/O and title extraction, not the
+// timestamp/project/context/turn reads. Cache entries must respect mode changes.
+// See docs/providers/README.md (Session metadata contract) and the reusable
+// assertion in tests/helpers/sessionTitleContract.js before adding a resolver.
 // retryAfterTimestampFallback preserves the providers whose metadata can arrive
 // after tokscale first exposes a session id. Kimi and unknown clients retain the
 // existing one-shot id-timestamp fallback.
@@ -296,6 +305,7 @@ function sessionMetadataMap(periods, home = os.homedir(), deps = {}) {
     metadata,
     now,
     resolveProjects,
+    resolveTitles: deps.resolveTitles !== false,
     projectIdentity,
     isoFromDate,
     // Reading a transcript in full to recover its project path is the expensive
@@ -338,13 +348,14 @@ function applySessionMetadata(periods, home, deps = {}) {
   const metadata = sessionMetadataMap(periods, home, deps);
   for (const period of Object.values(periods || {})) {
     for (const [key, session] of Object.entries(period?.sessions || {})) {
+      if (deps.resolveTitles === false) delete session.title;
       const meta = metadata.get(key);
       if (!meta) continue;
       if (meta.startedAt && (!session.startedAt || Date.parse(meta.startedAt) < Date.parse(session.startedAt))) session.startedAt = meta.startedAt;
       if (meta.lastUsedAt && (!session.lastUsedAt || Date.parse(meta.lastUsedAt) > Date.parse(session.lastUsedAt))) session.lastUsedAt = meta.lastUsedAt;
       if (meta.projectId) session.projectId = meta.projectId;
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
-      if (meta.title) session.title = meta.title;
+      if (deps.resolveTitles !== false && meta.title) session.title = meta.title;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
       if (Object.prototype.hasOwnProperty.call(meta, 'promptCache')) session.promptCache = meta.promptCache;
       // The three states mean different things and are copied as they are:

@@ -178,7 +178,7 @@ function resolveSessionMetadata(sessionIds, context) {
     if (startedAt) meta.startedAt = startedAt;
     const used = lastUsedAt(summary, isoFromDate);
     if (used) meta.lastUsedAt = used;
-    const title = cleanTitle(summary.generated_title);
+    const title = context.resolveTitles === false ? '' : cleanTitle(summary.generated_title);
     if (title) meta.title = title;
     if (resolveProjects && projectFor) {
       const source = typeof summary.source_workspace_dir === 'string' ? summary.source_workspace_dir.trim() : '';

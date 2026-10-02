@@ -131,7 +131,8 @@ function pathOptions(options = {}) {
     platform,
     cwdDir: options.cwdDir || process.cwd(),
     pathModule: options.pathModule || path,
-    allTimeSince: options.allTimeSince
+    allTimeSince: options.allTimeSince,
+    resolveTitles: options.resolveTitles !== false
   };
 }
 
@@ -345,9 +346,9 @@ function readReasonixNativeSession(metaPath, telemetryPath, options = {}) {
   const createdAt = firstTimestamp(meta, ['created_at', 'createdAt']);
   const updatedAt = firstTimestamp(meta, ['updated_at', 'updatedAt']);
   const topicId = textValue(firstValue(meta, ['topic_id', 'topicId']), 256);
-  const topicTitle = firstText(meta, ['topic_title', 'topicTitle']);
-  const customTitle = firstText(meta, ['custom_title', 'customTitle', 'name']);
-  const preview = countsTrusted
+  const topicTitle = options.resolveTitles === false ? '' : firstText(meta, ['topic_title', 'topicTitle']);
+  const customTitle = options.resolveTitles === false ? '' : firstText(meta, ['custom_title', 'customTitle', 'name']);
+  const preview = options.resolveTitles !== false && countsTrusted
     ? firstText(meta, ['preview'], 256) || firstText(meta?.preview, ['text', 'content', 'value'], 256)
     : '';
 
@@ -355,7 +356,7 @@ function readReasonixNativeSession(metaPath, telemetryPath, options = {}) {
     native: true,
     client: REASONIX_CLIENT,
     sessionId: `${NATIVE_SESSION_PREFIX}${id}`,
-    title: sessionTitle(meta, { trustedPreview: preview }),
+    ...(options.resolveTitles === false ? {} : { title: sessionTitle(meta, { trustedPreview: preview }) }),
     scope,
     ...(model ? { model, models: usage ? { [model]: totalTokens } : {} } : { models: {} }),
     ...(project.projectId ? { projectId: project.projectId } : {}),

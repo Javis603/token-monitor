@@ -223,10 +223,10 @@ function applyMetadataLine(state, line) {
   try {
     const entry = JSON.parse(line.toString('utf8'));
     applyPromptCacheEntry(state.promptCacheState, entry, 'claude');
-    if (entry?.type === 'custom-title') {
+    if (entry?.type === 'custom-title' && state.resolveTitles !== false) {
       const candidate = cleanTitle(entry.customTitle);
       if (candidate) state.customTitle = candidate;
-    } else if (entry?.type === 'ai-title') {
+    } else if (entry?.type === 'ai-title' && state.resolveTitles !== false) {
       const candidate = cleanTitle(entry.aiTitle);
       if (candidate) state.aiTitle = candidate;
     } else if (entry?.type === 'assistant') {
@@ -473,7 +473,9 @@ function readSessionTitle(filePath, deps = {}) {
   if (!file) return '';
   const cache = deps.cache || titleCache;
   const fsApi = deps.fs || fs;
-  const cached = cache.get(file);
+  const resolveTitles = deps.resolveTitles !== false;
+  const previous = cache.get(file);
+  const cached = previous?.resolveTitles === resolveTitles ? previous : undefined;
   let fd;
   try {
     const stat = fsApi.statSync(file);
@@ -507,6 +509,7 @@ function readSessionTitle(filePath, deps = {}) {
         contextWindow: tokenCount(cached.contextWindow)
       }
       : emptyIndex();
+    index.resolveTitles = resolveTitles;
     const start = appendOnly ? cached.size : 0;
 
     fd = fsApi.openSync(file, 'r');
@@ -583,7 +586,7 @@ function resolveSessionMetadata(sessionIds, context) {
       filePath,
       metadata.get(`claude:${sessionId}`)
     );
-    const title = readSessionTitle(filePath, deps.claudeMetadataDeps);
+    const title = readSessionTitle(filePath, { ...deps.claudeMetadataDeps, resolveTitles: context.resolveTitles });
     // The turn boundary rides the same scan and its cache, so asking for it
     // costs no second pass. Reported for every session rather than only a recent
     // one: it is what stops a session reading as running, and gating it on the

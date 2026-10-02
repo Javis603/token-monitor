@@ -137,7 +137,7 @@ function readSessionMeta(sessionIds, deps = {}) {
           }
         }
       }
-      const sql = `SELECT id, COALESCE(title,'') AS title, ${directory} AS directory, time_created AS created
+      const sql = `SELECT id, ${deps.resolveTitles === false ? "''" : "COALESCE(title,'')"} AS title, ${directory} AS directory, time_created AS created
                    FROM session WHERE id IN (${placeholders})`;
       for (const r of db.prepare(sql).all(...ids)) {
         const id = String(r.id);
@@ -179,14 +179,14 @@ function readSessionMetaForHome(sessionIds, home, deps = {}) {
 function resolveSessionMetadata(sessionIds, context) {
   const { deps, home, projectIdentity, resolveProjects } = context;
   const readMetadata = deps.readOpencodeMeta || (deps.scopedHome
-    ? (ids) => readSessionMetaForHome(ids, home, deps.opencodeDeps)
-    : (ids) => readSessionMeta(ids, deps.opencodeDeps));
+    ? (ids) => readSessionMetaForHome(ids, home, { ...deps.opencodeDeps, resolveTitles: context.resolveTitles })
+    : (ids) => readSessionMeta(ids, { ...deps.opencodeDeps, resolveTitles: context.resolveTitles }));
   const result = new Map();
   for (const [sessionId, meta] of readMetadata(sessionIds)) {
     const startedAt = meta.startedAt || '';
     const lastUsedAt = meta.lastUsedAt || startedAt;
     const identity = resolveProjects ? projectIdentity(meta.projectPath) : {};
-    const title = String(meta.title || '').trim();
+    const title = context.resolveTitles === false ? '' : String(meta.title || '').trim();
     if (startedAt || lastUsedAt || identity.projectId || title) {
       result.set(sessionId, {
         startedAt,

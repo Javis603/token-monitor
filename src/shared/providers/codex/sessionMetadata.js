@@ -198,7 +198,7 @@ function readSessionMeta(sessionIds, deps = {}) {
       db = openDb(dbPath, sqliteMod);
       const columns = new Set(db.prepare('PRAGMA table_info(threads)').all().map((column) => String(column.name)));
       if (!columns.has('id')) continue;
-      const fields = ['name', 'title', 'thread_source', 'source'];
+      const fields = deps.resolveTitles === false ? ['thread_source', 'source'] : ['name', 'title', 'thread_source', 'source'];
       for (let offset = 0; offset < candidateIds.length; offset += QUERY_CHUNK_SIZE) {
         const chunk = candidateIds.slice(offset, offset + QUERY_CHUNK_SIZE).filter((id) => !metaByThreadId.has(id));
         if (chunk.length === 0) continue;
@@ -212,7 +212,7 @@ function readSessionMeta(sessionIds, deps = {}) {
             metaByThreadId.set(id, { sessionKind: 'background-review' });
             continue;
           }
-          const title = titleForRow(row);
+          const title = deps.resolveTitles === false ? '' : titleForRow(row);
           if (!title) continue;
           metaByThreadId.set(id, { title });
           if (isGeneratedTitle(row)) generatedTitleIds.add(id);
@@ -318,14 +318,15 @@ function resolveSessionMetadata(sessionIds, context) {
   // but a real Codex title still wins over T3's.
   const generatedTitleById = new Map();
   const readMetadata = deps.readCodexMeta || (deps.scopedHome
-    ? (ids) => readSessionMetaForHome(ids, home, { ...(deps.codexDeps || {}), titleSourceById: generatedTitleById })
+    ? (ids) => readSessionMetaForHome(ids, home, { ...(deps.codexDeps || {}), resolveTitles: context.resolveTitles, titleSourceById: generatedTitleById })
     : (ids) => readSessionMeta(ids, {
       ...(deps.codexDeps || {}),
       titleSourceById: generatedTitleById,
+      resolveTitles: context.resolveTitles,
       homeDir: home,
       env: deps.env
     }));
-  for (const [sessionId, meta] of readMetadata(sessionIds)) {
+  for (const [sessionId, meta] of readMetadata(sessionIds, { resolveTitles: context.resolveTitles })) {
     result.set(sessionId, { ...(metadata.get(`codex:${sessionId}`) || {}), ...meta });
   }
 
@@ -341,7 +342,7 @@ function resolveSessionMetadata(sessionIds, context) {
   const t3SessionIds = [...sessionIds].filter(
     (id) => !(result.get(id)?.title && generatedTitleById.get(id))
   );
-  for (const [sessionId, meta] of readT3Metadata(t3SessionIds)) {
+  for (const [sessionId, meta] of context.resolveTitles === false ? [] : readT3Metadata(t3SessionIds)) {
     const resolved = result.get(sessionId) || {};
     // Never overwrite a title the Codex store itself generated; do replace the
     // prompt-derived fallback, which is exactly the case T3 improves on.

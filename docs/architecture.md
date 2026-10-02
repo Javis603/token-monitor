@@ -61,6 +61,12 @@ On Windows, `src/shared/wslUsage.js` also scans **running** WSL distros. It gate
 
 A failed usage reconfiguration rolls back to the last-known-good runtime and retries the latest desired settings on a bounded backoff, emitting `usage-reconfigure-exhausted` when the budget runs out. A newer setting starts a fresh budget.
 
+### Session title privacy
+
+The widget's `sessionTitlesEnabled` preference defaults to `true`. Turning it off restarts usage collection with `resolveTitles: false`: title-only readers (Cursor and T3) are skipped, SQLite metadata queries exclude title columns, and transcript/state readers skip title extraction while retaining timestamps, project attribution, turn state, context and prompt-cache readings. Shared files still have to be read for those other facts and token accounting; this is not a transcript-access toggle. Tokscale's current CLI exposes no title-parsing opt-out, so this preference gates Token Monitor's own metadata readers and discards scan-supplied titles, but does not change Tokscale's internal usage parsing.
+
+The usage transform strips title/preview aliases before archive capture and after archive projection. Main also strips them from cached presentation snapshots and on-demand all-time sessions, including native views, so disabling does not wait for a full scan and does not mutate an existing snapshot. Previously saved archive and collector-anchor files are not erased; their titles are hidden while disabled. Titles remain local and are omitted from sync regardless of this preference. A separate headless agent has its own collection policy and does not inherit widget preferences.
+
 ### Usage worker
 
 The widget runs the collector, the usage transform (`src/shared/usage/usageTransform.js`) and the session archive writer on a worker thread through `src/shared/usage/usageHost.js`, so a tick's post-scan work and a full scan's transcript reads do not stall the main process. Summaries arrive already transformed (`onUpdate(summary, reason, { transformed: true })`) and `DeviceRuntime` skips its own transform for them.

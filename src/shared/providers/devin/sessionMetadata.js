@@ -42,7 +42,7 @@ function isMissingColumnError(error) {
 // null = could not read (locked db, transient IO); only a successful read —
 // including an empty one — may be cached, or one failed open would serve as
 // the answer for the whole fingerprint lifetime.
-function readRows(dbPath, sqliteMod) {
+function readRows(dbPath, sqliteMod, resolveTitles) {
   let db;
   try {
     db = new sqliteMod.DatabaseSync(dbPath, { readOnly: true });
@@ -56,7 +56,7 @@ function readRows(dbPath, sqliteMod) {
     let rows;
     try {
       rows = db.prepare(
-        'SELECT id, title, working_directory, created_at, last_activity_at FROM sessions'
+        `SELECT id, ${resolveTitles ? 'title, ' : ''}working_directory, created_at, last_activity_at FROM sessions`
       ).all();
     } catch (error) {
       // Older databases predate the title / working_directory columns; fall
@@ -77,12 +77,13 @@ function readRows(dbPath, sqliteMod) {
   }
 }
 
-function rowsForDb(dbPath, sqliteMod, cache) {
-  const fingerprint = dbFingerprint(dbPath);
+function rowsForDb(dbPath, sqliteMod, cache, resolveTitles) {
+  const stamp = dbFingerprint(dbPath);
+  const fingerprint = stamp ? `${stamp}|titles:${resolveTitles}` : '';
   if (!fingerprint) return new Map();
   const cached = cache.get(dbPath);
   if (cached && cached.fingerprint === fingerprint) return cached.rows;
-  const rows = readRows(dbPath, sqliteMod);
+  const rows = readRows(dbPath, sqliteMod, resolveTitles);
   if (rows === null) return new Map();
   cache.set(dbPath, { fingerprint, rows });
   return rows;
@@ -103,7 +104,7 @@ function resolveSessionMetadata(sessionIds, context) {
   const cache = deps.devinDbRowsCache || dbRowsCache;
   const wanted = new Set(sessionIds);
   for (const dbPath of devinCliDbPaths({ homeDir: home, platform, env })) {
-    const rows = rowsForDb(dbPath, sqliteMod, cache);
+    const rows = rowsForDb(dbPath, sqliteMod, cache, context.resolveTitles !== false);
     if (rows.size === 0) continue;
     for (const sessionId of wanted) {
       if (result.has(sessionId)) continue;
@@ -114,7 +115,7 @@ function resolveSessionMetadata(sessionIds, context) {
       const lastUsedAt = isoFromDate(Number(row.last_activity_at) * 1000);
       if (startedAt) meta.startedAt = startedAt;
       if (lastUsedAt) meta.lastUsedAt = lastUsedAt;
-      const title = String(row.title || '').trim();
+      const title = context.resolveTitles === false ? '' : String(row.title || '').trim();
       if (title) meta.title = title;
       if (context.resolveProjects !== false && typeof projectIdentity === 'function') {
         const identity = projectIdentity(row.working_directory);
