@@ -9,7 +9,19 @@ read_when:
 
 # Codex
 
-Codex combines a tokscale-backed usage client, local rollout enrichment and a multi-account limits provider. Keep those data planes separate even though they share the `codex` id.
+Codex combines a tokscale-backed usage client, local rollout enrichment, supplementary local-executor observations and a multi-account limits provider. Keep usage and limits separate even though they share the `codex` id.
+
+## Dots local execution
+
+Dots-created local Work/Codex tasks currently expose live App Server counters without writing a local rollout. `localUsageSource.js` observes those counters through the hosted desktop App Server, using the live `CODEX_HOME/auth.json` login. A task qualifies only when its single execution environment matches a running **local** `codex exec-server --environment-id` process and its source is `codex_work_cca` / `aeon_child`; cwd alone never proves device ownership. Cloud coordinators, another computer's executors, ambiguous environments and tasks with native rollout paths are excluded. Normal rollout collection continues unchanged.
+
+The widget and resident agent observe while running; one-shot collection only reads the durable ledger. Discovery checks every five seconds and live changes use the collector's existing bounded debounce. `TOKEN_MONITOR_CODEX_LOCAL_USAGE=0` stops observation without erasing already collected usage. The source uses the existing undici dependency with standard proxy environment variables and `NO_PROXY`; unlike Electron limits fetches, this worker-owned WebSocket does **not** inherit the OS proxy. It never starts turns, changes thread configuration, answers approvals or requests quotas.
+
+`codex-local-usage.sqlite` in the shared data directory stores only counters, request identities and session/project metadata. Transactions and cumulative checkpoints deduplicate notifications across reconnects and the widget/agent. Only observed requests receive a day/model/project attribution; a pre-observation cumulative prefix and gaps while offline are not backfilled. RPC input includes cached input and RPC output includes reasoning; convert to canonical exclusive input and inclusive output, then to the disjoint Codex buckets expected by the shared Tokscale decoder. Pricing uses the same catalog lookup as other locally parsed usage; unavailable prices stay zero, without implying subscription billing.
+
+These requests appear under the existing `codex` client and use the actual thread id (not an inherited fork `sessionId`), the stored task name and `projectIdentity(cwd)`. Today/month/allTime and history consume the same ledger. Native rollout sessions take precedence on identity overlap. The request ledger already provides retention, so `codexLocalSessionKeys` prevents a second copy in the generic session archive and is removed from sync payloads. Session details show observed token entries; conversation text and tool content are not collected. Titles stay local under the existing sync privacy rules. Hosted environment metadata is a desktop extension; connection/discovery failures retry with bounded backoff and leave native collection available.
+
+Manual acceptance: run the updated widget with Codex tracking enabled and the desktop local executor connected, ask Dots to create or continue a local project task, then verify its title/tokens in Sessions and its directory label in Projects. Restart Token Monitor and verify the same totals remain; continue the task and verify only the new consumption is added. Usage before observation began is deliberately outside this acceptance scope.
 
 ## Session metadata and context
 

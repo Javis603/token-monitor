@@ -37,6 +37,8 @@ Only the app, agent and packaging scripts run `ensure:tokscale`, which installs 
 - **Defensive extraction.** `src/shared/usage.js` deep-walks tokscale's JSON and never assumes a fixed layout.
 - **Targeted watch scans.** Changed paths map back to clients, and those partitions are scanned in one unioned `--today` scan. That makes the client id a partition key — see the partition invariants in `docs/providers/README.md`.
 
+Codex's local Dots executor also has a live App Server usage source (`docs/providers/codex.md`). Its persistent request ledger merges after the native/WSL periods and remains outside the native delta anchor and per-client scan partitions. Source events feed the same bounded watch debounce; Smart mode records activity and interval mode retains its cadence. Collector stop closes the source connection and fences late callbacks. Its ledger supplies retention, so generic session-archive capture skips its local-only `codexLocalSessionKeys` and sync removes that marker.
+
 Claude and Codex derive prompt-cache observations in their existing provider-owned session metadata pass, alongside context and turn state. Do not add an independent transcript reader for each metric. Append scans retain cache-accounting identity so duplicate records cannot restart an estimate when the original record leaves the initial tail. In anchored watch propagation, an omitted `promptCache` leaves the prior observation alone; explicit `null` clears it.
 
 ### Watching

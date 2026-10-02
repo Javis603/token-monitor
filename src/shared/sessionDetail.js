@@ -12,6 +12,7 @@ const {
 const codebuddyExtension = require('./providers/codebuddy/extension');
 const opencodeSession = require('./providers/opencode/session');
 const { readReasonixSessionEvents } = require('./providers/reasonix/sessionDetail');
+const { createLocalUsageStore } = require('./providers/codex/localUsageStore');
 
 function* readTranscriptLines(filePath) {
   const fd = fs.openSync(filePath, 'r');
@@ -591,6 +592,23 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
   const filePath = resolveSessionFile(client, sessionId, home, { env, useEnvRoots });
   if (!filePath && client === 'codebuddy') {
     return readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, home, env, deps });
+  }
+  if (!filePath && client === 'codex') {
+    const store = createLocalUsageStore({ homeDir: home, env, ...(deps.codexLocalUsageOptions || {}) });
+    try {
+      const rows = store.rows().filter((row) => row.threadId === sessionId && !row.nativeBacked);
+      if (rows.length) {
+        const events = rows.map((row) => ({
+          kind: 'turn', type: 'assistant-attempt', timestamp: row.observedAt,
+          tokens: makeTokens(row.usage), tools: []
+        }));
+        const grouped = filterExchangesByPeriod(groupEvents(events), period, new Date((deps.now || Date.now)()));
+        distributeCost(grouped, sessionCost);
+        return { found: true, client, sessionId, canonicalSessionId: sessionId, period,
+          exchanges: grouped, totals: totalsOf(grouped, sessionCost) };
+      }
+    } catch (_) { /* A damaged supplemental ledger must not break native details. */ }
+    finally { store.close(); }
   }
   if (!filePath) return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
   let parsed;

@@ -51,6 +51,8 @@ const {
 } = require('./sessionMetadata');
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
+const { readLocalUsageView } = require('./providers/codex/localUsage');
+const { createLocalUsageSource } = require('./providers/codex/localUsageSource');
 const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
@@ -764,6 +766,10 @@ async function collectHistoryOnce(options) {
       if (typeof options.logger === 'function') options.logger(`tokscale graph failed: ${error.message}`);
     }
   }
+  if (options.codexLocalGraph) {
+    rawGraphs.push(options.codexLocalGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.codexLocalGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -1099,6 +1105,32 @@ async function collectUsageOnce(options) {
     }
   }
 
+  // This contribution is durable but has no rollout file. Keep it outside
+  // windowsPeriods/todayPartitions so exact native watch deltas stay native.
+  let codexLocalView = null;
+  if (trackedClientSet.has('codex') && options.codexLocalUsageEnabled !== false) {
+    try {
+      codexLocalView = await readLocalUsageView({
+        ...options, store: options.codexLocalUsageStore, now: collectedAt,
+        nativePeriod: allTime, projectIdentity,
+        resolvePricing: (rows) => resolveModelPricing(rows, {
+          ...options, lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs
+        })
+      });
+      throwIfAborted(options.signal);
+      if (codexLocalView.sessionKeys.length) {
+        today = mergePeriods(today, codexLocalView.today);
+        month = mergePeriods(month, codexLocalView.month);
+        allTime = mergePeriods(allTime, codexLocalView.allTime);
+      }
+      options.onCodexLocalUsageComputed?.(codexLocalView);
+    } catch (_error) {
+      if (options.signal?.aborted) throw abortReason(options.signal);
+      options.onDiagnosticEvent?.({ subsystem: 'collector', code: 'codex-local-usage-read-failed' });
+    }
+  }
+
   // One filesystem probe per tick, shared by the legacy status and the health
   // record below. Probing twice cost a second pass over every client's roots —
   // including the per-workspace walk Copilot needs — and let one snapshot report
@@ -1130,6 +1162,9 @@ async function collectUsageOnce(options) {
     month,
     allTime
   };
+  // The request ledger is this source's archive. A second per-session archive
+  // would resurrect its contribution after a native rollout takes precedence.
+  if (codexLocalView) summary.codexLocalSessionKeys = codexLocalView.sessionKeys;
   if (options.reasonixNativeSessionsEnabled === true && trackedClientSet.has('reasonix')) {
     try {
       const nativeCache = options.reasonixNativeSessionCache || createReasonixNativeSessionCache({
@@ -1165,6 +1200,7 @@ async function collectUsageOnce(options) {
     throwIfAborted(options.signal);
     const history = await collectHistoryOnce({
       clients: normalizedClients,
+      codexLocalGraph: codexLocalView?.graph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -2290,6 +2326,9 @@ function startCollector(options) {
   // rather than kept as a second copy, so the two cannot drift; a restart simply
   // relearns them from the first tick, which always includes history.
   let activityDaysAnchor = {};
+  let codexLocalView = null;
+  let codexLocalViewDay = null;
+  let codexLocalSource = null;
   // Keep the highest complete live day in this collector even when another
   // process owns the shared archive. A watch tick can then hand its value to a
   // later full/history tick instead of losing it at the tick boundary.
@@ -2536,6 +2575,8 @@ function startCollector(options) {
         sourceSelfSync: tickOptions.sourceSelfSync ?? null,
         reasonixNativeSessionsEnabled,
         reasonixNativeSessionCache,
+        codexLocalUsageStore: codexLocalSource?.store || options.codexLocalUsageStore,
+        onCodexLocalUsageComputed: (view) => { codexLocalView = view; codexLocalViewDay = todayKey; },
         // Both selections name clients whose pending source event this tick has
         // already consumed — the queue's drain for one, its acknowledgement for
         // the other — so either is a legitimate restore.
@@ -2591,6 +2632,12 @@ function startCollector(options) {
               // scans carry the previous status forward in main.js.
               if (partial.allTime) {
                 preview.clientStatus = deriveClientStatus(clients, partial.allTime);
+              }
+              if (codexLocalView && codexLocalViewDay === todayKey) {
+                for (const name of ['today', 'month', 'allTime']) {
+                  if (preview[name]) preview[name] = mergePeriods(preview[name], codexLocalView[name]);
+                }
+                preview.codexLocalSessionKeys = codexLocalView.sessionKeys;
               }
               onPreview(preview);
             }
@@ -3120,6 +3167,7 @@ function startCollector(options) {
     if (stopped) return;
     stopped = true;
     runtimeAbortController.abort(new Error('collector stopped'));
+    codexLocalSource?.stop();
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
     clearRolloverHistoryRetry();
@@ -3134,8 +3182,8 @@ function startCollector(options) {
     // It clears startBarrier before this continuation asks again; the regression
     // test pins that startup ordering because reversing it would microtask-spin.
     if (startBarrier) return Promise.resolve(startBarrier).then(() => whenIdle());
-    if (!tickInFlight) return Promise.resolve();
-    return new Promise((resolve) => idleWaiters.push(resolve));
+    const usageIdle = !tickInFlight ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(resolve));
+    return usageIdle.then(() => stopped ? codexLocalSource?.whenIdle() : undefined);
   }
 
   function getDiagnostics() {
@@ -3174,12 +3222,27 @@ function startCollector(options) {
       lastHistoryFailureCode,
       lastHistoryScanDurationMs,
       lastFailureCode: lastTickFailureCode,
+      ...(codexLocalSource ? { codexLocalUsage: codexLocalSource.getDiagnostics() } : {}),
       wslStatus: cloneDiagnosticValue(wslStatusAnchor)
     };
   }
 
   setupWatchers();
   loop();
+  if (trackedClients.has('codex') && options.codexLocalUsageEnabled !== false
+    && (options.env || process.env).TOKEN_MONITOR_CODEX_LOCAL_USAGE !== '0') {
+    codexLocalSource = createLocalUsageSource({
+      ...sourceOptions,
+      store: options.codexLocalUsageStore,
+      onChange() {
+        if (stopped) return;
+        activityRevision += 1;
+        if (watchTriggersCollection) scheduleTick('watch:codex-local-usage', ['codex']);
+        else recordWatchClients(['codex']);
+      }
+    });
+    codexLocalSource.start();
+  }
 
   // A rescan of one tool. Was cursor-only because a Cursor sign-in was the only
   // caller; the machinery underneath was always per-client, so the guard was a
