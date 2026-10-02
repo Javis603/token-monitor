@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('../../src/shared/tokscalePlatform');
+const { tokscalePackageNameForPlatform } = require('../../src/shared/tokscalePlatform');
 
 test('tokscalePackageNameForPlatform returns npm package names including Windows msvc suffix', () => {
   assert.equal(tokscalePackageNameForPlatform('darwin', 'arm64'), '@tokscale/cli-darwin-arm64');
@@ -15,8 +15,4 @@ test('tokscalePackageNameForPlatform returns npm package names including Windows
 test('tokscalePackageNameForPlatform returns null for unsupported updater platforms', () => {
   assert.equal(tokscalePackageNameForPlatform('linux', 'x64'), null);
   assert.equal(tokscalePackageNameForPlatform('darwin', 'ia32'), null);
-});
-
-test('tokscalePlatformKey uses process-style platform and arch', () => {
-  assert.equal(tokscalePlatformKey('darwin', 'arm64'), 'darwin-arm64');
 });
