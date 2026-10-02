@@ -785,7 +785,10 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
       intl: 'https://platform.minimax.io/user-center/payment/token-plan'
     },
     byStatus: 'region',
-    statusUrls: { en: 'https://platform.minimax.io/user-center/payment/token-plan' },
+    statusUrls: {
+      cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
+      en: 'https://platform.minimax.io/user-center/payment/token-plan'
+    },
     default: 'https://platform.minimaxi.com/user-center/payment/token-plan'
   });
 

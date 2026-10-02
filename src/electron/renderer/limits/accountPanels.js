@@ -67,7 +67,7 @@ function refreshFieldDependents(form, { document }) {
   }
 }
 
-function createCredentialPanel(form, { document, translate, onToggle, onOpen, onClear, onRefresh, onSave, onFieldChange }) {
+function createCredentialPanel(form, { document, translate, onToggle, onOpen, onClear, onRefresh, onSave, onFieldChange, onFieldError }) {
   const { id } = form;
   const element = (tag, elementId, className = '') => {
     const node = document.createElement(tag);
@@ -130,12 +130,19 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
       }
       input.addEventListener('change', () => {
         refreshFieldDependents(form, { document });
-        const result = onFieldChange?.(form, field, input.value);
         if (field.submitWithCredential === false) {
-          const pending = Promise.resolve(result);
+          const value = input.value;
+          const previous = independentSettingSaves.get(field.key);
+          const pending = (previous || Promise.resolve()).catch(() => {}).then(() => onFieldChange?.(form, field, value));
           independentSettingSaves.set(field.key, pending);
-          pending.catch(() => {});
-        }
+          const settled = () => {
+            if (independentSettingSaves.get(field.key) === pending) independentSettingSaves.delete(field.key);
+          };
+          pending.then(settled, (error) => {
+            settled();
+            onFieldError?.(form, error);
+          });
+        } else onFieldChange?.(form, field, input.value);
       });
       return input;
     }
@@ -210,7 +217,13 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
     try {
       // These settings save independently; wait for their writes so the key
       // probe sees the selected region without persisting an implicit default.
-      await Promise.all(independentSettingSaves.values());
+      try {
+        // A change queued while submission waits must finish too. Settled
+        // failures leave the queue so a later submission can retry normally.
+        while (independentSettingSaves.size) await Promise.all(independentSettingSaves.values());
+      } catch (_) {
+        return;
+      }
       const values = Object.fromEntries([...inputs]
         .filter(([field]) => field.submitWithCredential !== false)
         .map(([field, input]) => [field.key, input.value]));

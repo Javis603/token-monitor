@@ -10783,7 +10783,11 @@ function setupLimitAccountPanels() {
       },
       onClear: ({ id }) => clearAccountCredential(id),
       onSave: ({ id, messages, failedKey }, values, clearInput) => saveAccountCredential(id, values, { messages, failedKey, clearInput }),
-      onFieldChange: (form, field, value) => saveAccountFormSetting(form, field, value)
+      onFieldChange: (form, field, value) => saveAccountFormSetting(form, field, value),
+      onFieldError: ({ id, failedKey }, error) => {
+        setAccountPanelMessage(id, { key: failedKey, params: { message: error.message } });
+        renderExternalProviderStatus(id);
+      }
     });
     const catalogIndex = LIMIT_PROVIDERS.findIndex((provider) => provider.id === form.id);
     const nextGroup = LIMIT_PROVIDERS.slice(catalogIndex + 1)

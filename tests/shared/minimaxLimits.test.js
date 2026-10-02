@@ -1,7 +1,10 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
+const dotenv = require('dotenv');
 
 const {
   minimaxToken,
@@ -16,6 +19,12 @@ const {
   MINIMAX_REMAINS_URL_EN
 } = require('../../src/shared/providers/minimax/limits');
 const { parseLimitProviders } = require('../../src/shared/limits/collector');
+
+test('the copied environment example leaves the legacy MiniMax host pin effective', () => {
+  const example = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
+  const env = dotenv.parse(`${example}\nMINIMAX_API_HOST=api.minimaxi.com\n`);
+  assert.equal(minimaxRegion({}, env), 'cn');
+});
 
 function okResponse(body) {
   return { ok: true, status: 200, json: async () => body };

@@ -15,7 +15,7 @@ The API key stays in the main-process credential store. Region changes retain th
 
 ## Invariants and known gaps
 
-An unchosen region stays empty in stored settings. Renderer projection and runtime config resolve the environment at use time; displaying Auto or saving a key must not freeze an implicit default. An explicit Auto selection is stored as `auto` and overrides the environment. The form's region saves independently (`submitWithCredential: false`); key submission waits for that write and omits the region from its credential draft.
+An unchosen region stays empty in stored settings. Renderer projection and runtime config resolve the environment at use time; displaying Auto or saving a key must not freeze an implicit default. An explicit Auto selection is stored as `auto` and overrides the environment. The form's region saves independently (`submitWithCredential: false`); writes are serialized per field, and key submission waits for queued writes and omits the region from its credential draft. Failed writes show a panel message and leave the queue so later submissions can retry after settings resync.
 
 Open Browser follows the current China/International selection, including before the first successful probe. Auto follows the last successful probe's `en`/`cn` region, with the historical China landing page until a successful result exists. The wire region keeps `en`/`cn`; the setting's `intl`/`auto` vocabulary never replaces it.
 
