@@ -95,7 +95,7 @@ test('Codex private mode excludes title columns but preserves background review 
   }
   const result = codex.readSessionMeta(['s', 'ordinary'], { sqlite: { DatabaseSync }, dbPaths: ['fake'], resolveTitles: false });
   assert.equal(result.get('s').sessionKind, 'background-review');
-  assert.equal(result.has('ordinary'), false);
+  assert.deepEqual(result.get('ordinary'), {});
   assert.doesNotMatch(queries.find((sql) => sql.startsWith('SELECT')), /\btitle\b|\bname\b/);
   const resolved = codex.resolveSessionMetadata(new Set(['s']), {
     home: path.join(os.tmpdir(), 'missing-title-home'), metadata: new Map([['codex:s', { title: 'CACHED TITLE', lastUsedAt: AT }]]), resolveTitles: false,

@@ -212,7 +212,13 @@ function readSessionMeta(sessionIds, deps = {}) {
             metaByThreadId.set(id, { sessionKind: 'background-review' });
             continue;
           }
-          const title = deps.resolveTitles === false ? '' : titleForRow(row);
+          // Keep ordinary rows eligible for cached metadata merging even when
+          // title lookup is disabled; timestamps/projects are independent.
+          if (deps.resolveTitles === false) {
+            metaByThreadId.set(id, {});
+            continue;
+          }
+          const title = titleForRow(row);
           if (!title) continue;
           metaByThreadId.set(id, { title });
           if (isGeneratedTitle(row)) generatedTitleIds.add(id);

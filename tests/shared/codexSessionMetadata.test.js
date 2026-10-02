@@ -364,3 +364,33 @@ maybe('an already named Codex history does not open the T3 database', () => {
   assert.equal(t3Opens, 0);
   assert.deepEqual(result, new Map(rows.map((row) => [row.id, { title: row.name }])));
 });
+
+
+maybe('private Codex metadata preserves ordinary cached facts without a transcript and re-enables titles', () => {
+  const ordinary = '019e76fc-dddd-eeee-ffff-222222222222';
+  const file = makeDb([
+    { id: ordinary, name: 'Current title', threadSource: 'user' },
+    { id: 'untitled', threadSource: 'user' },
+    { id: 'review', threadSource: 'guardian_review' }
+  ]);
+  const facts = { startedAt: '2026-10-02T08:00:00Z', lastUsedAt: '2026-10-02T09:00:00Z',
+    projectId: 'project', projectLabel: 'Project', contextTokens: 30, contextWindow: 100, turnEnded: true };
+  const cached = Object.freeze({ ...facts, title: 'Cached title' });
+  const ids = new Set([ordinary, 'untitled', 'review']);
+  const privateRows = metadata.readSessionMeta(ids, { dbPaths: [file], sqlite, resolveTitles: false });
+  assert.deepEqual(privateRows.get(ordinary), {}, 'ordinary rows stay eligible for merging');
+  assert.deepEqual(privateRows.get('untitled'), {});
+  assert.equal(privateRows.get('review').sessionKind, 'background-review');
+  const resolved = metadata.resolveSessionMetadata(ids, {
+    home: path.dirname(file), metadata: new Map([[`codex:${ordinary}`, cached]]), resolveTitles: false,
+    deps: { codexDeps: { dbPaths: [file], sqlite }, env: {},
+      readT3Meta() { throw new Error('private mode must not read T3 titles'); } },
+    fileSessionMetadata() { throw new Error('fixture has no transcript'); }
+  });
+  assert.deepEqual(resolved.get(ordinary), facts);
+  assert.equal(resolved.get('review').sessionKind, 'background-review');
+  assert.equal(cached.title, 'Cached title', 'published cache is not mutated');
+  const enabled = metadata.readSessionMeta(ids, { dbPaths: [file], sqlite, resolveTitles: true });
+  assert.equal(enabled.get(ordinary).title, 'Current title');
+  assert.equal(enabled.has('untitled'), false, 'enabled lookup behavior is preserved');
+});
