@@ -21,7 +21,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-test('session detail renders its heading before loading, errors and empty results, and keeps it when sorting', () => {
+test('session detail renders its heading before loading, errors and empty results, and keeps it when sorting', async () => {
   const timers = [];
   const frames = [];
   let reducedMotion = false;
@@ -136,6 +136,7 @@ test('session detail renders its heading before loading, errors and empty result
   context.allTimeSessions = { invalidate: () => { invalidations += 1; }, ensure: () => { pulls += 1; } };
   const settingsStart = rendererSource.indexOf('function sessionStatsForDisplay(');
   const settingsEnd = rendererSource.indexOf('\nfunction render()', settingsStart);
+  assert.ok(settingsStart >= 0 && settingsEnd > settingsStart, 'renderer title settings helpers should be present');
   vm.runInNewContext(`${rendererSource.slice(settingsStart, settingsEnd)}\nglobalThis.setSettings = setRendererSettings;`, context);
   state.openSession = { kind: 'session', title: 'PRIVATE TITLE', detail: { exchanges: [{ title: 'Reply', value: 10 }] } };
   state.stats = { periods: { today: { sessions: { s: { title: 'PRIVATE TITLE', totalTokens: 10 } } } } };
@@ -161,6 +162,60 @@ test('session detail renders its heading before loading, errors and empty result
   assert.strictEqual(state.stats, adoptedStats, 'unrelated settings do not re-project stats');
   assert.equal(pulls, 2);
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'PRIVATE TITLE');
+
+  // Open real Details while hidden, rather than pre-seeding a cached title.
+  const openStart = rendererSource.indexOf('function applySessionDetailResult(');
+  const openEnd = rendererSource.indexOf('\nfunction toggleDetailSort', openStart);
+  assert.ok(openStart >= 0 && openEnd > openStart, 'detail navigation should be present');
+  context.visibleStatsSurface = () => 'main';
+  context.renderSessionDetail = render;
+  const detailRequest = deferred();
+  context.window.tokenMonitor = { getSessionDetail: () => detailRequest.promise };
+  vm.runInNewContext(`${rendererSource.slice(openStart, openEnd)}\nglobalThis.open = openSessionDetail;`, context);
+  state.period = 'today';
+  context.setSettings({ sessionTitlesEnabled: false });
+  state.stats = { periods: { today: { sessions: { 'codex:s': { client: 'codex', totalTokens: 10 } } } } };
+  const opening = context.open({ client: 'codex', sessionId: 's', title: 'Codex · gpt-5' });
+  assert.equal(state.openSession.title, '', 'hidden row text is not stored as a session title');
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
+  context.setSettings({ sessionTitlesEnabled: true });
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null, 'wait for title-bearing presentation stats');
+  state.stats = { periods: { today: { sessions: {
+    'claude:s': { title: 'Wrong client' },
+    'codex:s': { title: 'Review PR 920', totalTokens: 10 }
+  } } } };
+  context.refreshSessionDetailHeading();
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'Review PR 920');
+  const loadingBody = els.sessionDetail.children[0];
+  const restoredHeading = els.sessionDetailHead.children[0];
+  context.refreshSessionDetailHeading();
+  assert.strictEqual(els.sessionDetailHead.children[0], restoredHeading, 'unchanged stats preserve heading motion');
+  assert.strictEqual(els.sessionDetail.children[0], loadingBody, 'title arrival keeps the loading body');
+  detailRequest.resolve({ exchanges: [{ title: 'Reply', value: 10 }] });
+  await opening;
+  const loadedBody = els.sessionDetail.children[0];
+  const restoredSort = els.sessionDetailHead.querySelector('.detail-sort');
+  state.stats.periods.today.sessions['codex:s'].title = 'Renamed session';
+  context.refreshSessionDetailHeading();
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'Renamed session');
+  assert.strictEqual(els.sessionDetail.children[0], loadedBody);
+  assert.strictEqual(els.sessionDetailHead.querySelector('.detail-sort'), restoredSort);
+  assert.match(rendererSource, /refreshSessionDetailHeading\(\);\s*if \(state\.openSession\.renderOptions\)/,
+    'ordinary Details refresh the heading in the normal render path');
+
+  state.openSession = { kind: 'session', client: 'reasonix', sessionId: 'reasonix:n', period: 'month', title: '' };
+  state.stats = { nativeSessions: { today: { 'reasonix:n': { title: 'Wrong period' } },
+    month: { 'reasonix:n': { title: 'Native session' } } } };
+  context.refreshSessionDetailHeading();
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'Native session');
+  context.setSettings({ sessionTitlesEnabled: false });
+  const groupOpening = context.open({ client: 'codex', sessionId: 's', title: 'gpt-5 · 12:00',
+    returnTo: { kind: 'background-review-group' } });
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
+  context.setSettings({ sessionTitlesEnabled: true });
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'gpt-5 · 12:00',
+    'background review runs retain their model/time heading');
+  await groupOpening;
 
   // The id the Sessions list no longer prints opens the detail body, copyable,
   // in every state the body can be in.

@@ -4649,7 +4649,9 @@ function applySessionDetailResult(request, options) {
 }
 
 async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null }) {
-  const request = { kind: 'session', client, sessionId, sessionCost, title, period: state.period, detail: null, returnTo };
+  const request = { kind: 'session', client, sessionId, sessionCost,
+    title: state.settings?.sessionTitlesEnabled === false && returnTo?.kind !== 'background-review-group' ? '' : title,
+    period: state.period, detail: null, returnTo };
   state.openSession = request;
   renderSessionDetail({ loading: true });
   try {
@@ -4720,9 +4722,31 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   for (const row of rows) container.append(exchangeNode(row, max));
 }
 
+function sessionDetailTitle() {
+  if (state.settings?.sessionTitlesEnabled === false) return '';
+  const request = state.openSession;
+  // Review runs use their model/time heading; ordinary Details follow the
+  // current session metadata, including titles received after opening hidden.
+  if (request?.returnTo?.kind === 'background-review-group') return request.title;
+  const period = request?.period || state.period;
+  const session = request?.client === 'reasonix'
+    ? state.stats?.nativeSessions?.[period]?.[request.sessionId]
+    : state.stats?.periods?.[period]?.sessions?.[`${request?.client}:${request?.sessionId}`];
+  return session?.title || request?.title || '';
+}
+
+function refreshSessionDetailHeading() {
+  if (state.openSession?.kind !== 'session') return;
+  const head = els.sessionDetailHead;
+  if ((head.querySelector('.detail-heading')?.textContent || '') === sessionDetailTitle()) return;
+  // Retain the body, loading/error state and sort control. Unchanged headings
+  // also retain their hover-reading motion through periodic stats updates.
+  head.replaceChildren(sessionDetailBackButton(), ...Array.from(head.children).slice(1));
+}
+
 function sessionDetailBackButton() {
   const back = document.createElement('button');
-  const title = state.settings?.sessionTitlesEnabled === false ? '' : state.openSession?.title;
+  const title = sessionDetailTitle();
   const backLabel = state.openSession?.returnTo?.kind === 'background-review-group'
     ? t('sessions.backgroundReviews') : (t('sessions') || 'Sessions');
   back.type = 'button';
@@ -6505,12 +6529,7 @@ function setRendererSettings(next) {
     allTimeSessions.invalidate();
     allTimeSessions.ensure();
   }
-  if (titlesChanged && state.openSession?.kind === 'session') {
-    // Update only the heading; keep the loaded body, error/loading state and
-    // sort control intact, even when a detail request is still in flight.
-    const head = els.sessionDetailHead;
-    head.replaceChildren(sessionDetailBackButton(), ...Array.from(head.children).slice(1));
-  }
+  if (titlesChanged) refreshSessionDetailHeading();
 }
 
 function render() {
@@ -6647,6 +6666,7 @@ function render() {
       // session and home lists already do.
       if (!sessionTooltipShouldHoldRender()) renderBackgroundReviewDetail(state.openSession);
     }
+    refreshSessionDetailHeading();
     if (state.openSession.renderOptions) {
       const options = state.openSession.renderOptions;
       state.openSession.renderOptions = null;

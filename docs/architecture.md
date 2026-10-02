@@ -90,7 +90,7 @@ The widget runs the collector, the usage transform (`src/shared/usage/usageTrans
 
 ## Session title display
 
-`sessionTitlesEnabled` defaults to `true` and controls Electron presentation only. Hide titles through the shared display projection, including cached snapshots, all-time pulls and detail headings; keep collection, metadata caches and local archives unchanged. Titles continue to be collected and saved locally while hidden, and remain excluded from sync independently of this preference.
+`sessionTitlesEnabled` defaults to `true` and controls Electron presentation only. Hide titles from cached snapshots and all-time pulls through `src/electron/sessionTitleDisplay.js`; ordinary detail headings derive their title from current presentation stats and honor the same preference. Keep collection, metadata caches and local archives unchanged. Titles continue to be collected and saved locally while hidden, and remain excluded from sync independently of this preference.
 
 ## Widget mode switching
 

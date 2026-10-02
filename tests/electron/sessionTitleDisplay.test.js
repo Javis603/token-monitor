@@ -62,6 +62,46 @@ test('main presentation caches restore titles from the same snapshot when re-ena
   }
 });
 
+test('saving the title preference immediately republishes Today and Home data from main', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const projectionStart = source.indexOf('function electronPresentationStats(');
+  const projectionEnd = source.indexOf('\nconst allTimeSessionsCache', projectionStart);
+  const refreshStart = source.indexOf('function refreshLimitStatsPresentation(');
+  const refreshEnd = source.indexOf('\nfunction sendMimoAccountsPush(', refreshStart);
+  const updateStart = source.indexOf('    pushSettingsToRenderer();\n    if (settings.sessionTitlesEnabled');
+  const updateEnd = source.indexOf('    return settingsForRenderer();', updateStart);
+  assert.ok(projectionStart >= 0 && projectionEnd > projectionStart);
+  assert.ok(refreshStart >= 0 && refreshEnd > refreshStart);
+  assert.ok(updateStart >= 0 && updateEnd > updateStart);
+  const events = [];
+  const noop = () => {};
+  let adopted;
+  const original = { periods: { today: { sessions: { 'codex:s': session() } }, month: { sessions: {} } } };
+  const context = {
+    settings: { sessionTitlesEnabled: false }, previousSettingsState: { sessionTitlesEnabled: true },
+    latestStats: original, mode: 'local', ...modelAliases, withoutSessionTitleStats,
+    presentationCache: createStatsPresentationCache(), syncProvenanceActive: () => false,
+    projectLimitStatsForDisplay: value => value,
+    migrateCodexAdditionalLimits: noop, scheduleMacWidgetSnapshot: noop, captureMacWidgetProducerOwner: noop,
+    updateEdgeDockCells: noop, updateTrayDisplay: noop,
+    rendererSnapshots: { stamp: (_raw, value) => value }, rendererStats: value => value,
+    pushSettingsToRenderer() { events.push('settings'); },
+    mainWindow: { isDestroyed: () => false, webContents: { send(_channel, payload) {
+      events.push('stats'); adopted = payload.data.stats;
+    } } }
+  };
+  vm.runInNewContext(`${source.slice(projectionStart, projectionEnd)}\n${source.slice(refreshStart, refreshEnd)}\nfunction saveDisplayPreference() {${source.slice(updateStart, updateEnd)}}`, context);
+  for (const enabled of [false, true]) {
+    context.previousSettingsState = { sessionTitlesEnabled: !enabled };
+    context.settings = { sessionTitlesEnabled: enabled };
+    context.saveDisplayPreference();
+    assert.equal(adopted.periods.today.sessions['codex:s'].title, enabled ? 'Private title' : undefined,
+      'Today and Home receive the restored title without another collection tick');
+    assert.deepEqual(events.splice(0), ['settings', 'stats']);
+    assert.equal(original.periods.today.sessions['codex:s'].title, 'Private title');
+  }
+});
+
 test('changing title display does not reconfigure usage collection', () => {
   const enabled = { clients: 'codex', sessionTitlesEnabled: true };
   const hidden = { ...enabled, sessionTitlesEnabled: false };
