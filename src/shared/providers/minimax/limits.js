@@ -190,10 +190,43 @@ function parseMinimaxTiers(body) {
   return windows;
 }
 
-function minimaxRegionOrder(options = {}) {
-  const pinned = options.minimaxApiHost;
-  if (pinned === 'cn') return ['cn'];
-  if (pinned === 'en' || pinned === 'minimax.io') return ['en'];
+// Which host the quota probe talks to. 'auto' keeps the historical behaviour —
+// probe the global endpoint first and fall back to CN only when the token is
+// rejected — so an account that works today keeps working. 'cn' / 'intl' pin the
+// probe to one host, which is what a user on a network that cannot reach the
+// other region needs. The token-plan -> legacy fallback still applies inside a
+// pinned region; only the cross-region hop is removed.
+//
+// `env` defaults to {} rather than process.env on purpose: the registry calls
+// this as the write-time normalizer with an empty env, and a stored setting must
+// never be derived from the machine running the widget. The env lane is
+// consulted by the probe itself, where deps.env carries the real environment.
+//
+// minimaxApiHost is the pre-setting option name. It stays honoured so existing
+// callers and the host spellings it accepted keep working.
+function minimaxRegion(options = {}, env = {}) {
+  const raw = String(
+    options.minimaxApiRegion
+    || options.minimaxApiHost
+    || env.TOKEN_MONITOR_MINIMAX_API_REGION
+    || env.MINIMAX_API_REGION
+    || env.MINIMAX_API_HOST
+    || ''
+  ).trim().toLowerCase();
+  if (['cn', 'minimaxi.com', 'api.minimaxi.com'].includes(raw)) return 'cn';
+  if (['intl', 'en', 'global', 'international', 'minimax.io', 'api.minimax.io'].includes(raw)) return 'intl';
+  return 'auto';
+}
+
+// Empty means no user selection, so the runtime can still consult env.
+function normalizeMinimaxRegionSetting(value) {
+  return String(value || '').trim() ? minimaxRegion({ minimaxApiRegion: value }) : '';
+}
+
+function minimaxRegionOrder(options = {}, env = {}) {
+  const region = minimaxRegion(options, env);
+  if (region === 'cn') return ['cn'];
+  if (region === 'intl') return ['en'];
   const remembered = MINIMAX_REGIONS.includes(options.minimaxRememberedRegion)
     ? options.minimaxRememberedRegion
     : '';
@@ -216,15 +249,15 @@ function minimaxUrlsForRegion(region) {
     ];
 }
 
-function minimaxAttemptSpecs(options = {}) {
-  return minimaxRegionOrder(options).flatMap(minimaxUrlsForRegion);
+function minimaxAttemptSpecs(options = {}, env = {}) {
+  return minimaxRegionOrder(options, env).flatMap(minimaxUrlsForRegion);
 }
 
 // Returns the list of request URLs to try, in order. CodexBar currently probes
 // /v1/token_plan/remains first, then falls back to the legacy coding_plan
 // endpoint for the same region before trying the other region on auth errors.
-function minimaxAttemptOrder(options = {}) {
-  return minimaxAttemptSpecs(options).map((attempt) => attempt.url);
+function minimaxAttemptOrder(options = {}, env = {}) {
+  return minimaxAttemptSpecs(options, env).map((attempt) => attempt.url);
 }
 
 function minimaxRegionForUrl(url) {
@@ -234,12 +267,9 @@ function minimaxRegionForUrl(url) {
 }
 
 // Pick a single URL for callers that want a forced region without retry
-// behavior (legacy `minimaxBaseUrl` shape). Default is the global endpoint;
-// pass minimaxApiHost: 'cn' to pin to the CN endpoint.
-function minimaxBaseUrl(options = {}) {
-  const pinned = options.minimaxApiHost;
-  if (pinned === 'cn') return MINIMAX_REMAINS_URL_CN;
-  return MINIMAX_REMAINS_URL_EN;
+// behavior (legacy `minimaxBaseUrl` shape). Default is the global endpoint.
+function minimaxBaseUrl(options = {}, env = {}) {
+  return minimaxRegion(options, env) === 'cn' ? MINIMAX_REMAINS_URL_CN : MINIMAX_REMAINS_URL_EN;
 }
 
 function shouldTryLegacyMinimaxEndpoint(error) {
@@ -299,7 +329,7 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
   const rememberedRegion = MINIMAX_REGIONS.includes(options.minimaxRememberedRegion)
     ? options.minimaxRememberedRegion
     : rememberedMinimaxRegion(deps);
-  const attempts = minimaxAttemptSpecs({ ...options, minimaxRememberedRegion: rememberedRegion });
+  const attempts = minimaxAttemptSpecs({ ...options, minimaxRememberedRegion: rememberedRegion }, env);
   let lastError = null;
   let sawTransportFailure = false;
   for (let index = 0; index < attempts.length; index += 1) {
@@ -413,6 +443,8 @@ module.exports = {
   minimaxToken,
   minimaxAttemptOrder,
   minimaxBaseUrl,
+  minimaxRegion,
+  normalizeMinimaxRegionSetting,
   minimaxRegionForUrl,
   parseMinimaxTiers,
   fetchMinimaxLimits

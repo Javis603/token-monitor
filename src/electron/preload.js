@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     return () => ipcRenderer.removeListener('appearance:nativeMaterial', listener);
   },
   getStats: (options) => ipcRenderer.invoke('stats:get', options),
+  deleteDevice: (deviceId) => ipcRenderer.invoke('devices:delete', deviceId),
   getAllTimeSessions: (snapshotId) => ipcRenderer.invoke('stats:allTimeSessions', snapshotId),
   getSessionDetail: (args) => ipcRenderer.invoke('session:getDetail', args),
   getStreamStatus: () => ipcRenderer.invoke('stream:status'),
@@ -157,6 +158,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   },
   limits: {
     saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
+    listOrganizationChoices: (providerId) => ipcRenderer.invoke('limits:listOrganizationChoices', providerId),
     clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId)
   },
   opencode: {

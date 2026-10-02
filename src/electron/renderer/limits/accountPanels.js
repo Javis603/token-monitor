@@ -27,11 +27,16 @@ function byFieldValue(document, spec) {
 
 // The page Open lands on. `byField` follows a select before its change is
 // saved; `byStatus` follows the provider's last successful poll (MiniMax's
-// region), with `default` until there is one.
+// region), with `default` until there is one. A form with both uses statusUrls
+// only when the select has no explicit URL (for example Auto).
 function resolveOpenUrl(form, { document, provider }) {
   const { openUrl } = form;
   if (openUrl.url) return openUrl.url;
-  if (openUrl.byField) return openUrl.urls[fieldValue(document, openUrl.byField)] || openUrl.default;
+  if (openUrl.byField) {
+    const selected = openUrl.urls[fieldValue(document, openUrl.byField)];
+    if (selected) return selected;
+    return openUrl.statusUrls?.[provider?.[openUrl.byStatus]] || openUrl.default;
+  }
   return openUrl.urls[provider?.[openUrl.byStatus]] || openUrl.default;
 }
 
@@ -43,7 +48,7 @@ function syncCredentialFields(form, { document, settings }) {
     if (!control) continue;
     if (field.input === 'select') {
       const stored = settings?.[field.key];
-      control.value = field.options.some((option) => option.value === stored) ? stored : field.options[0].value;
+      control.value = [...(control.options || field.options)].some((option) => option.value === stored) ? stored : field.options[0].value;
     } else if (field.prefill && !control.value && document.activeElement !== control) {
       control.value = settings?.[field.key] || '';
     }
@@ -62,7 +67,7 @@ function refreshFieldDependents(form, { document }) {
   }
 }
 
-function createCredentialPanel(form, { document, translate, onToggle, onOpen, onClear, onRefresh, onSave, onFieldChange }) {
+function createCredentialPanel(form, { document, translate, onToggle, onOpen, onClear, onRefresh, onSave, onFieldChange, onFieldError }) {
   const { id } = form;
   const element = (tag, elementId, className = '') => {
     const node = document.createElement(tag);
@@ -110,12 +115,14 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
     return code;
   };
   const inputs = new Map();
+  const independentSettingSaves = new Map();
   const control = (field) => {
     const input = document.createElement(field.input === 'select' || field.input === 'textarea' ? field.input : 'input');
     inputs.set(field, input);
     input.id = controlId(field);
     input.className = 'credential-input';
     if (field.input === 'select') {
+      if (field.key === 'claudeWebOrganizationId') input.disabled = true;
       for (const option of field.options) {
         const node = localized(document.createElement('option'), option.labelKey);
         node.value = option.value;
@@ -123,7 +130,19 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
       }
       input.addEventListener('change', () => {
         refreshFieldDependents(form, { document });
-        onFieldChange?.(form, field, input.value);
+        if (field.submitWithCredential === false) {
+          const value = input.value;
+          const previous = independentSettingSaves.get(field.key);
+          const pending = (previous || Promise.resolve()).catch(() => {}).then(() => onFieldChange?.(form, field, value));
+          independentSettingSaves.set(field.key, pending);
+          const settled = () => {
+            if (independentSettingSaves.get(field.key) === pending) independentSettingSaves.delete(field.key);
+          };
+          pending.then(settled, (error) => {
+            settled();
+            onFieldError?.(form, error);
+          });
+        } else onFieldChange?.(form, field, input.value);
       });
       return input;
     }
@@ -164,6 +183,10 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
     const input = control(field);
     if (!field.labelKey) return input;
     const row = element('div', '', 'settings-row');
+    if (field.key === 'claudeWebOrganizationId') {
+      row.id = 'claudeWebOrganizationRow';
+      row.classList.add('hidden');
+    }
     const label = localized(document.createElement('label'), field.labelKey);
     label.setAttribute('for', input.id);
     row.append(label, input);
@@ -192,7 +215,18 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
     submit.disabled = true;
     submit.textContent = translate('settings.common.checking');
     try {
-      const values = Object.fromEntries([...inputs].map(([field, input]) => [field.key, input.value]));
+      // These settings save independently; wait for their writes so the key
+      // probe sees the selected region without persisting an implicit default.
+      try {
+        // A change queued while submission waits must finish too. Settled
+        // failures leave the queue so a later submission can retry normally.
+        while (independentSettingSaves.size) await Promise.all(independentSettingSaves.values());
+      } catch (_) {
+        return;
+      }
+      const values = Object.fromEntries([...inputs]
+        .filter(([field]) => field.submitWithCredential !== false)
+        .map(([field, input]) => [field.key, input.value]));
       await onSave(form, values, () => {
         for (const [field, input] of inputs) if (field.secret) input.value = '';
       });

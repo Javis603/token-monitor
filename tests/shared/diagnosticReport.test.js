@@ -9,7 +9,8 @@ const {
   MAX_REPORT_BYTES,
   projectClientHealth,
   projectHubDevices,
-  projectLimitsDiagnostics
+  projectLimitsDiagnostics,
+  sanitizeDiagnosticSnapshot
 } = require('../../src/shared/diagnosticReport');
 const { createDiagnosticReportGenerator, processMetricsSnapshot, statArchiveFile } = require('../../src/electron/diagnostics');
 
@@ -102,6 +103,37 @@ test('archive stat projection distinguishes absent, disabled, and unreadable arc
   });
 });
 
+test('iCloud diagnostics are allowlisted and redact absolute roots', () => {
+  const snapshot = sanitizeDiagnosticSnapshot(baseSnapshot({
+    topology: { icloudWidgetProducerActive: true },
+    icloud: {
+      state: 'error',
+      availability: 'available',
+      supported: true,
+      root: '/Users/alice/Library/Mobile Documents/com~apple~CloudDocs/Token Monitor/sync-v1',
+      deviceCount: 3,
+      lastSuccessfulReconciliation: '2026-08-05T09:59:00.000Z',
+      lastWriteAt: '2026-08-05T09:59:30.000Z',
+      lastErrorCategory: 'device-write-failed',
+      lastSubscriptionReconcileErrorCategory: 'invalid-subscription-document',
+      watcher: 'unavailable',
+      reconciliation: 'idle',
+      subscriptionRevision: '7:alice-device'
+    }
+  }));
+  assert.equal(snapshot.icloud.root, '[redacted]/Token Monitor/sync-v1');
+  assert.equal(snapshot.icloud.deviceCount, 3);
+  assert.equal(snapshot.icloud.lastSubscriptionReconcileErrorCategory, 'invalid-subscription-document');
+  assert.equal(snapshot.icloud.subscriptionRevision, '7:[redacted]');
+  assert.equal(snapshot.topology.icloudWidgetProducerActive, true);
+  const report = formatDiagnosticReport(baseSnapshot({
+    topology: { icloudWidgetProducerActive: true },
+    icloud: snapshot.icloud
+  }));
+  assert.match(report.text, /\[iCloud Sync\]/);
+  assert.match(report.text, /icloudWidgetProducerActive: true/);
+});
+
 test('hub device projection removes identifiers and groups full OS compatibility data', () => {
   const now = Date.parse('2026-08-05T10:00:00.000Z');
   const projected = projectHubDevices({
@@ -186,6 +218,29 @@ test('findings mark a collector stale after the effective interval threshold', (
     limits: {}
   }, now);
   assert.deepEqual(findings, [{ code: 'collector-stale' }]);
+});
+
+test('a watcher dropped for interval collection is a finding, not a polling one', () => {
+  const now = Date.parse('2026-08-05T10:00:00.000Z');
+  const snapshot = (watchFallbackCode) => ({
+    collector: {
+      detailsAvailable: true,
+      intervalMs: 5 * 60 * 1000,
+      lastTickSuccessAt: new Date(now - 60 * 1000).toISOString(),
+      watchMode: 'interval',
+      watchFallbackCode
+    },
+    usage: {},
+    topology: {},
+    limits: {}
+  });
+  assert.deepEqual(deriveDiagnosticFindings(snapshot('EMFILE'), now), [
+    { code: 'watcher-interval-fallback', detailCode: 'emfile' }
+  ]);
+  // Forced polling reaches the same state without a descriptor error.
+  assert.deepEqual(deriveDiagnosticFindings(snapshot(null), now), [
+    { code: 'watcher-interval-fallback' }
+  ]);
 });
 
 test('client sync failures become findings for Cursor and Antigravity', () => {

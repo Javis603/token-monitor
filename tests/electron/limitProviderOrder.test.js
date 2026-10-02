@@ -56,6 +56,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'ollama',
     'trae',
     'alibaba',
+    'stepfun',
     'thirdparty'
   ]);
 });

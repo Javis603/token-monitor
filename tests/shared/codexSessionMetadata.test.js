@@ -280,3 +280,87 @@ maybe('the T3 title outranks a prompt-derived Codex label but never a generated 
   assert.equal(result.get(promptTitled).title, '修正 Droid 標籤與 Provider 排序');
   assert.equal(result.get(appTitled).title, 'T3 Code Thread Title Display');
 });
+
+maybe('T3 lookup only receives sessions whose title it can still improve', () => {
+  const named = '01a0a091-18da-7123-b874-e75d66eaae9c';
+  const other = '01a0a0d2-3da6-7151-9e15-7673a4b40d1f';
+  const rollout = `rollout-2026-09-14T23-37-38-${named}`;
+  const merged = `${rollout}_rollout-2026-09-14T23-38-00-${other}`;
+  const codexFile = makeDb([
+    { id: named, name: 'Codex generated', title: 'First prompt' },
+    { id: other, title: 'Another prompt' },
+    { id: 'prompt', title: 'First prompt' },
+    { id: 'stripped', name: '[@image.png](file:///private/a.png)', title: 'First prompt' },
+    { id: 'blank', name: '   ' },
+    { id: 'review', name: 'Private review', threadSource: 'guardian_review' }
+  ]);
+  const fallbackIds = ['prompt', 'stripped', 'blank', 'missing', 'review'];
+  const t3File = makeT3Db([named, other, ...fallbackIds].map((id) => ({
+    t3ThreadId: `t3-${id}`, codexThreadId: id, title: `T3 ${id}`
+  })));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-t3-filter-'));
+  tmpDirs.push(home);
+  const requested = [];
+  const resolve = () => metadata.resolveSessionMetadata(new Set([rollout, merged, ...fallbackIds]), {
+    deps: {
+      scopedHome: true,
+      codexDeps: { dbPaths: [codexFile], sqlite },
+      readT3Meta(ids) {
+        requested.push([...ids]);
+        return metadata.readT3SessionMeta(ids, { t3DbPaths: [t3File], sqlite });
+      }
+    },
+    home,
+    metadata: new Map(),
+    resolveProjects: false,
+    fileSessionMetadata: (_sessionId, _filePath, existing) => existing || {}
+  });
+
+  const result = resolve();
+  assert.deepEqual(requested, [fallbackIds]);
+  assert.equal(result.get(rollout).title, 'Codex generated');
+  assert.equal(result.get(merged).title, 'Codex generated');
+  for (const id of fallbackIds) assert.equal(result.get(id).title, `T3 ${id}`);
+  assert.equal(result.get('review').sessionKind, 'background-review');
+
+  // Eligibility comes from this pass's Codex rows, not a persistent title cache.
+  // Removing a generated name must restore T3 fallback on the very next pass;
+  // assigning one must immediately stop that session's fallback query.
+  const db = new sqlite.DatabaseSync(codexFile);
+  db.prepare('UPDATE threads SET name = ? WHERE id = ?').run('', named);
+  db.prepare('UPDATE threads SET name = ? WHERE id = ?').run('New Codex name', 'prompt');
+  db.close();
+  const renamed = resolve();
+  assert.deepEqual(requested[1], [rollout, merged, 'stripped', 'blank', 'missing', 'review']);
+  assert.equal(renamed.get(rollout).title, `T3 ${named}`);
+  assert.equal(renamed.get(merged).title, `T3 ${named}`);
+  assert.equal(renamed.get('prompt').title, 'New Codex name');
+});
+
+maybe('an already named Codex history does not open the T3 database', () => {
+  const rows = Array.from({ length: 401 }, (_, index) => ({ id: `named-${index}`, name: `Codex ${index}` }));
+  const codexFile = makeDb(rows);
+  const t3File = makeT3Db([
+    { t3ThreadId: 't3-0', codexThreadId: rows[0].id, title: 'Unused T3 title' }
+  ]);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-t3-named-'));
+  tmpDirs.push(home);
+  let t3Opens = 0;
+  const observedSqlite = {
+    DatabaseSync: function(file, options) {
+      if (file === t3File) t3Opens += 1;
+      return new sqlite.DatabaseSync(file, options);
+    }
+  };
+  const result = metadata.resolveSessionMetadata(new Set(rows.map((row) => row.id)), {
+    deps: { scopedHome: true, codexDeps: { dbPaths: [codexFile], t3DbPaths: [t3File], sqlite: observedSqlite } },
+    home,
+    metadata: new Map(),
+    resolveProjects: false,
+    fileSessionMetadata: (_sessionId, _filePath, existing) => existing || {}
+  });
+
+  // Count work rather than elapsed time: this remains deterministic on slow CI.
+  assert.equal(t3Opens, 0);
+  assert.deepEqual(result, new Map(rows.map((row) => [row.id, { title: row.name }])));
+});

@@ -12,6 +12,7 @@ const opencodeSession = require('./providers/opencode/session');
 const kimiSessionMetadata = require('./providers/kimi/sessionMetadata');
 const dshSessionMetadata = require('./providers/dsh/sessionMetadata');
 const devinSessionMetadata = require('./providers/devin/sessionMetadata');
+const grokSessionMetadata = require('./providers/grok/sessionMetadata');
 
 function isoFromDate(value) {
   const date = value instanceof Date ? value : new Date(value || '');
@@ -229,7 +230,12 @@ const SESSION_METADATA_RESOLVERS = new Map([
   ['droid', { resolve: droidSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['kimi', { resolve: kimiSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: false }],
   ['dsh', { resolve: dshSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
-  ['devin', { resolve: devinSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }]
+  ['devin', { resolve: devinSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
+  // Grok session ids are bare uuids, so the id-timestamp fallback above gives
+  // them nothing and this flag only decides whether an unresolved id is retried
+  // within the tick. grok writes `summary.json` after tokscale first exposes
+  // the id, so it needs the retry.
+  ['grok', { resolve: grokSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }]
 ]);
 
 function resolverDefinition(entry) {
@@ -340,6 +346,7 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
       if (meta.title) session.title = meta.title;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
+      if (Object.prototype.hasOwnProperty.call(meta, 'promptCache')) session.promptCache = meta.promptCache;
       // The three states mean different things and are copied as they are:
       // `true` is a finished turn, `false` is one that is open, and absent is a
       // client that reports no boundary at all. Only the last may leave an

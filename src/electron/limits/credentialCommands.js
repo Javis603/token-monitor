@@ -40,11 +40,12 @@ function invalid(status, errorCode = '') {
 
 // The draft as it would be stored. Only fields the caller sent are part of it,
 // so one of Kimi's two credential lanes can be saved without blanking the
-// other; a select always travels with its form, so it is always sent.
+// other. Independently saved settings are excluded so a rendered default
+// cannot become a stored override just because a credential is submitted.
 function draftFor(entry, values) {
   const candidate = {};
   for (const field of formFields(entry)) {
-    if (!Object.hasOwn(values, field.key)) continue;
+    if (field.submitWithCredential === false || !Object.hasOwn(values, field.key)) continue;
     const raw = String(values[field.key] ?? '');
     try {
       candidate[field.key] = normalizeAccountField(field.key, raw);
@@ -72,6 +73,9 @@ function providerSelectionIncluding(selection, providerId) {
 
 function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, env = process.env }) {
   const revisions = new Map();
+  // Discovery can rotate a session before the user chooses an organization.
+  // Keep that credential in main so the renderer never receives the secret.
+  const pendingRenewals = new Map();
   const nextRevision = (providerId) => {
     const revision = (revisions.get(providerId) || 0) + 1;
     revisions.set(providerId, revision);
@@ -90,6 +94,7 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
     for (const entry of LIMIT_PROVIDER_REGISTRY) {
       if (entry.form && formFieldKeys(entry).some((key) => patch?.[key] !== undefined)) {
         nextRevision(entry.id);
+        pendingRenewals.delete(entry.id);
       }
     }
   }
@@ -100,6 +105,13 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
     const revision = nextRevision(entry.id);
     const { candidate, rejected } = draftFor(entry, values);
     if (rejected) return rejected;
+    const discover = accountForm(entry).discover;
+    const submittedCredential = discover && candidate[discover.credential];
+    const pendingRenewal = pendingRenewals.get(entry.id);
+    if (pendingRenewal) {
+      if (pendingRenewal.submitted === submittedCredential) candidate[discover.credential] = pendingRenewal.renewed;
+      else pendingRenewals.delete(entry.id);
+    }
 
     // The probe sees the draft and nothing it would not store: a credential of
     // this form that is not part of the draft is blanked, so a stored sibling
@@ -111,6 +123,45 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
     }
     const renewed = {};
     const deps = { ...probeDeps(renewed), env: {} };
+    let discoveredChoices;
+    const selectionRequired = (choices) => {
+      if (discover && renewed[discover.credential]) {
+        pendingRenewals.set(entry.id, {
+          submitted: submittedCredential,
+          renewed: normalizeAccountField(discover.credential, renewed[discover.credential])
+        });
+      }
+      return { saved: false, verdict: 'selectionRequired', status: 'selectionRequired', choices };
+    };
+    if (discover) {
+      let choices;
+      try {
+        choices = await entry.limits[discover.fn](candidate[discover.credential], deps);
+      } catch (error) {
+        if (revisions.get(entry.id) !== revision) {
+          return { saved: false, verdict: 'superseded', status: 'superseded', errorCode: '' };
+        }
+        if (credentialVerdict(error?.status) === 'invalid') {
+          pendingRenewals.delete(entry.id);
+          return invalid(error.status, error?.code || '');
+        }
+      }
+      if (revisions.get(entry.id) !== revision) {
+        return { saved: false, verdict: 'superseded', status: 'superseded', errorCode: '' };
+      }
+      if (choices?.length) {
+        discoveredChoices = choices;
+        if (choices.length === 1 && !candidate[discover.selection]) {
+          candidate[discover.selection] = choices[0].id;
+        } else if (choices.length > 1 && !candidate[discover.selection]) {
+          return selectionRequired(choices);
+        }
+        if (!choices.some((choice) => choice.id === candidate[discover.selection])) {
+          return selectionRequired(choices);
+        }
+      }
+      if (renewed[discover.credential]) candidate[discover.credential] = normalizeAccountField(discover.credential, renewed[discover.credential]);
+    }
     let provider = null;
     let status;
     let errorCode = '';
@@ -120,6 +171,7 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
     } catch (error) {
       status = error?.status || 'unavailable';
       errorCode = error?.code || '';
+      if (errorCode === 'CLAUDE_WEB_ORGANIZATION_SELECTION_REQUIRED') discoveredChoices = error.organizationChoices;
     }
     // Any later write for this form retires the whole probe — a stale
     // rejection must not land over a newer credential either.
@@ -127,7 +179,13 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
       return { saved: false, verdict: 'superseded', status: 'superseded', errorCode: '' };
     }
     const verdict = credentialVerdict(status);
-    if (verdict === 'invalid') return invalid(status, errorCode);
+    if (discoveredChoices && errorCode === 'CLAUDE_WEB_ORGANIZATION_SELECTION_REQUIRED') {
+      return selectionRequired(discoveredChoices);
+    }
+    if (verdict === 'invalid') {
+      pendingRenewals.delete(entry.id);
+      return invalid(status, errorCode);
+    }
     // A probe may rotate the credential it was given (Claude's session key);
     // what gets stored is the value the provider will accept next.
     for (const [key, value] of Object.entries(renewed)) {
@@ -140,19 +198,39 @@ function createCredentialCommands({ getSettings, applySettingsPatch, probeDeps, 
       limitProviders: providerSelectionIncluding(getSettings().limitProviders, entry.id),
       limitsEnabled: true
     });
-    return { saved: true, verdict, status, errorCode, settings };
+    pendingRenewals.delete(entry.id);
+    return { saved: true, verdict, status, errorCode, settings, ...(discoveredChoices ? { choices: discoveredChoices } : {}) };
   }
 
   function clearCredential(providerId) {
     const entry = formEntry(providerId);
     if (!entry) return { cleared: false };
+    pendingRenewals.delete(entry.id);
     const settings = applySettingsPatch(Object.fromEntries(
-      formFields(entry).filter((field) => field.secret).map(({ key }) => [key, ''])
+      formFields(entry).filter((field) => field.secret || entry.fields.find((item) => item.key === field.key)?.clearWithCredential).map(({ key }) => [key, ''])
     ));
     return { cleared: true, settings };
   }
 
-  return { saveCredential, clearCredential, noteSettingsPatch };
+  async function listOrganizationChoices(providerId) {
+    const entry = formEntry(providerId);
+    const form = entry && accountForm(entry);
+    if (!form?.discover) return { status: 'notConfigured', choices: [] };
+    const cookie = limitsAccountConfig(getSettings(), { env })[form.discover.credential];
+    if (!cookie) return { status: 'notConfigured', choices: [] };
+    const renewed = {};
+    try {
+      const choices = await entry.limits[form.discover.fn](cookie, { ...probeDeps(renewed), env: {} });
+      if (renewed[form.discover.credential] && getSettings()[form.discover.credential] === cookie) {
+        applySettingsPatch({ [form.discover.credential]: renewed[form.discover.credential] });
+      }
+      return { status: 'ok', choices };
+    } catch (error) {
+      return { status: error?.status || 'unavailable', choices: [] };
+    }
+  }
+
+  return { saveCredential, clearCredential, listOrganizationChoices, noteSettingsPatch };
 }
 
 module.exports = {

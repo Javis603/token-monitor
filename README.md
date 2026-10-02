@@ -26,7 +26,7 @@
 
 ## What is Token Monitor?
 
-A desktop widget that shows live token usage and AI Tool Limits across 41+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
+A desktop widget that shows live token usage and AI Tool Limits across 43+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project.
 
 ## Supported Tools
 
@@ -39,7 +39,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/` (`opencode*.db`, `storage/message/`) | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `~/.hermes/state.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor IDE / Cursor CLI | `~/.config/tokscale/cursor-cache/` (account-level usage export) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor IDE / Cursor CLI / Grok Bot | `~/.config/tokscale/cursor-cache/` (account-level usage export) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.gemini/` (`antigravity/`, `antigravity-ide/`, `antigravity-backup/`, `antigravity-cli/conversations/`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks (`.../saoudrizwan.claude-dev/tasks/`), `~/.cline/data/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/amp.png" width="28" alt="Amp" /> | Amp | `~/.local/share/amp/threads/` | ✅ | — | — |
@@ -67,6 +67,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/lmstudio.png" width="28" alt="LM Studio" /> | LM Studio | `~/.lmstudio/server-logs/**/*.log` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/unsloth.png" width="28" alt="Unsloth" /> | Unsloth Studio | `~/.unsloth/studio/studio.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/devin.png" width="28" alt="Devin" /> | Devin CLI / Devin Desktop | `~/.local/share/devin/cli/sessions.db`, `<platform-app-data>/Devin/User/acp-events/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/fx.png" width="28" alt="fx" /> | fx | `~/.fx/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console Cookie (billing balance and estimated token spend via usage data) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API key (usage/key limit; balance when credits access is authorized, documented for Management keys) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" /> | Minimax | Minimax API key (Token Plan quota via Minimax API) | — | ✅ | — |
@@ -74,6 +75,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/ollama.png" width="28" alt="Ollama" /> | Ollama | Ollama Cloud cookie (session/weekly usage via ollama.com/settings) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Trae CN access token (Trae CN / SOLO credits via trae.cn) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | Alibaba Cloud console cookie (Bailian / Model Studio Token Plan quota, Team & Personal) | — | ✅ | — |
+| <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token (Coding Plan / Token Plan quota) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="Third-party APIs" /> | Third-party APIs | New API / Sub2API-compatible account presets (including compatible One API forks), a New API API-key preset, and a Custom balance endpoint | — | ✅ | — |
 
 <details>
@@ -87,7 +89,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 - Devin tracks Devin CLI sessions from the local `sessions.db` and Devin Desktop agent sessions from `acp-events` ACP logs; where both cover the same session the CLI database is authoritative. Desktop coverage depends on the connected ACP agent: only agents that write `usage_update` events locally are counted, and Devin Desktop's default `devin-cloud` agent meters its usage server-side, so a default Desktop setup reports no Desktop tokens. Session titles and project attribution come from the CLI database. See [Devin source notes](docs/providers/devin.md).
 
 - Command Code transcripts do not contain actual token counts or per-message model metadata. Token usage is estimated from transcript text, while model attribution and derived cost may reflect the currently configured model rather than the model historically used for each request.
-- The Cursor cache comes from Cursor's account-level usage export, so it covers Cursor IDE and Cursor CLI alike. Token Monitor automatically detects accounts signed in through the Cursor desktop app and also supports adding accounts manually in Settings. The cache re-syncs automatically when stale, but newly finished sessions can take a few minutes to reach Cursor's dashboard, so usage updates on sync rather than instantly.
+- The Cursor cache comes from Cursor's account-level usage export, so it covers usage from Cursor IDE, Cursor CLI, and Grok Bot. Token Monitor automatically detects accounts signed in through the Cursor desktop app and also supports adding accounts manually in Settings. The cache re-syncs automatically when stale, but newly finished sessions can take a few minutes to reach Cursor's dashboard, so usage updates on sync rather than instantly.
 
 - Custom maps numeric JSON fields from one GET balance endpoint; OpenAI or Anthropic compatibility alone is not enough.
 
@@ -128,7 +130,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Tracking usage
 
-- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 33+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
+- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 34+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
 - **Live token rate** — an optional live readout of generation speed in `tok/s` or total burn in `tok/min`
 - **Per-session detail** — open a session to see tokens per prompt, expandable to each reply's exact token split and tools used (read on-demand from local transcripts or databases, never synced)
 - **Cache hit statistics** — click any tool or model to expand a detailed breakdown of input tokens (cache hit vs miss), output tokens, and hit-rate percentages
@@ -138,7 +140,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Limits, trends & export
 
-- **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 27+ providers, including multiple OpenRouter/third-party profiles and balance-style accounts (Claude credits, DeepSeek prepaid balance and spend history, third-party balances)
+- **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 28+ providers, including multiple OpenRouter/third-party profiles and balance-style accounts (Claude credits, DeepSeek prepaid balance and spend history, third-party balances)
 - **Multiple accounts & Codex switching** — track several accounts per provider, each with its own limits; a tracked Codex account can be switched as the active local account in one click, without re-authenticating
 - **Codex reset forecast** — an optional third-party forecast below Codex limits, showing the expected reset time, the reset type (Regular or Banked), and when the window last reset
 - **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
@@ -150,7 +152,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 
 ### Multi-device & deployment
 
-- **Real-time multi-device sync** — Server-Sent Events push an update on one device to the others within seconds
+- **Real-time multi-device sync** — hub-backed sync uses Server-Sent Events to push updates to other devices within seconds; iCloud Drive sync is eventually consistent
 - **Local-first** — no servers needed for single-device use
 - **Self-hosted sync backend** — in-widget hub, Node CLI hub, or Cloudflare Worker
 - **iOS widget support** — Widgy and Scriptable through the Worker hub
@@ -161,7 +163,7 @@ Most usage monitors are useful on the machine they run on. Token Monitor is buil
 - **Breakdown views** — grouped by tool, device, model, session, project, or account limits
 - **Menu bar (macOS) and system tray (Windows) popover** — live cost, tokens, or the closest-to-empty provider limit % next to the icon
 - **Floating Bubble mode** — collapses the widget into a draggable mini-window with click or hover preview and tray-style content
-- **Edge Dock (macOS & Windows)** — keeps quotas and usage at the screen edge, with auto-hide or always-visible modes and hover cards for account limits, recent sessions, and token usage. Choose, reorder, and configure items in Settings, and toggle it from the menu bar or system tray
+- **Edge Dock (macOS & Windows)** — keeps quotas and usage at the screen edge, with auto-hide, always-visible, or fullscreen auto-hide modes. Hover cards show account limits, recent sessions, and token usage. Choose, reorder, and configure items in Settings, and toggle it from the menu bar or system tray
 - **Menu bar layout composer** — the menu bar and the floating bubble can use a built-in preset or a layout you build yourself: pick "Custom…" to add AI tool icons, quota bars, percentages, reset times, cost, the live token rate, or custom text, drag to reorder against a live preview, and give each item its own AI tool, account, quota window, and typeface
 - **Appearance controls** — interface theme switching (incl. a light mode), per-tool vendor colours, glass opacity, blur, transparent window mode, and custom fonts
 - **Native macOS Widgets** — View token usage and cost, trends, AI tool quota remaining and reset times, activity heatmaps, and breakdowns by tool or model in Small, Medium, and Large layouts on macOS 14+
@@ -192,7 +194,7 @@ Local mode is the default: launch the app and it starts tracking this device. No
 
 ## Multi-device sync
 
-Pick ONE hub backend that all your devices (and any headless agents) connect to. On each device, open the widget and pick a mode under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget.
+Pick ONE multi-device sync backend for your devices (and any headless agents). On each device, open the widget and pick a mode under Settings → Multi-device Sync. The widget contributes this device's usage automatically; run `npm run agent` only on machines without a widget. iCloud Drive is a macOS-widget-only option and does not support headless agents.
 
 #### Option A — Host the hub from the widget (easiest, no CLI)
 
@@ -224,6 +226,10 @@ npx wrangler deploy
 ```
 
 Paste the deployed URL into each device's widget at Settings → Multi-device Sync. See [worker/README.md](worker/README.md) for the iOS widget recipe and endpoint reference, or [docs/API.md](docs/API.md) for the hub HTTP API.
+
+#### Option D — iCloud Drive (macOS, no Hub server)
+
+On each Mac signed into the same Apple ID, choose **iCloud Drive** in Settings → Multi-device Sync. This is an opt-in macOS-only path: Token Monitor writes one atomic snapshot per device and one subscription snapshot per writer under `iCloud Drive/Token Monitor/sync-v1/`, then each Mac aggregates the valid files locally. It uses no Token Monitor server, CloudKit, or credentials; provider API keys, cookies, and tokens stay local. iCloud Drive is eventually consistent, so another Mac may take a moment to appear or update, and a missing or malformed file never clears the last-good aggregate.
 
 ## App data
 
@@ -264,7 +270,7 @@ Mode B — Sync (opt-in, multi-device)
     device C agent ──▶
 ```
 
-The widget chooses local vs sync mode based on Settings → Multi-device Sync. The hub itself can run as a separate `npm run hub` process, a Cloudflare Worker, or directly inside one of the widgets (Host mode). In sync mode the hub pushes aggregated stats to every connected widget over Server-Sent Events, so updates on one device appear on the others within a few seconds.
+The widget chooses local vs sync mode based on Settings → Multi-device Sync. The hub itself can run as a separate `npm run hub` process, a Cloudflare Worker, or directly inside one of the widgets (Host mode). In Hub Client and Host modes, the hub pushes aggregated stats to every connected widget over Server-Sent Events, so updates on one device usually appear on the others within a few seconds. iCloud Drive mode syncs files directly; propagation is eventually consistent and may take longer.
 
 ## Session data retention
 

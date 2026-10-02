@@ -25,6 +25,27 @@ const period = {
   projects: { p1: { projectId: 'p1', models: { 'anthropic/claude-opus-5': 40, 'claude-opus-5': 30 } } }
 };
 
+test('model throughput aliases sum matched raw counters for each device and preserve no-op identity', () => {
+  const modelThroughput = { 'anthropic/claude-opus-5': { timedTokens: 100, timedOutputTokens: 40, timedDurationMs: 1000 },
+    'claude-opus-5': { timedTokens: 200, timedOutputTokens: 20, timedDurationMs: 2000 } };
+  const today = { modelThroughput };
+  const stats = { periods: { today }, devices: [{ deviceId: 'a', periods: { today } }] };
+  const before = structuredClone(stats);
+  for (const [settings, options] of [[aliases, {}], [{}, { grouping: 'duplicates' }]]) {
+    const projected = projectModelAliasStats(stats, settings, options);
+    for (const value of [projected.periods.today, projected.devices[0].periods.today]) {
+      assert.deepEqual(value.modelThroughput, { 'claude-opus-5': { timedTokens: 300, timedOutputTokens: 60, timedDurationMs: 3000 } });
+      const { tokenRatePerSecond } = require('../../src/electron/renderer/tokenRatePresentation');
+      assert.equal(tokenRatePerSecond(value.modelThroughput['claude-opus-5']), 20, 'sum counters before dividing');
+    }
+  }
+  assert.deepEqual(stats, before);
+  assert.strictEqual(projectModelAliasStats(stats, {}).periods.today, today);
+  const noMatch = projectModelAliasStats(stats, { absent: 'other' });
+  assert.strictEqual(noMatch.periods.today.modelThroughput, modelThroughput);
+  assert.strictEqual(noMatch.devices, stats.devices);
+});
+
 test('empty or malformed alias settings are a no-op until automatic grouping is on', () => {
   const stats = { periods: { today: period } };
   for (const input of [undefined, null, [], 'x', {}, { x: 3, ' ': 'x', y: '' }]) {

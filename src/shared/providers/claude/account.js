@@ -14,6 +14,13 @@ module.exports = {
       normalize: { fn: 'normalizeClaudeWebCookieInput', style: 'value' },
       envFallback: ['CLAUDE_WEB_COOKIE'],
       project: 'set'
+    },
+    {
+      key: 'claudeWebOrganizationId',
+      kind: 'setting',
+      normalize: { fn: 'normalizeClaudeWebOrganizationId', style: 'value' },
+      project: 'value',
+      clearWithCredential: true
     }
   ],
   status: {
@@ -23,6 +30,7 @@ module.exports = {
     pendingKey: 'claudePendingCheckSince'
   },
   form: {
+    discover: { fn: 'listClaudeWebOrganizations', credential: 'claudeWebCookie', selection: 'claudeWebOrganizationId' },
     titleKey: 'settings.claude.title',
     openKey: 'settings.claude.openBrowser',
     clearKey: 'settings.claude.clearCookie',
@@ -30,8 +38,12 @@ module.exports = {
     emptyKey: 'settings.claude.statusNotSet',
     failedKey: 'settings.claude.saveFailed',
     fields: [
-      { key: 'claudeWebCookie', input: 'textarea', placeholderKey: 'settings.claude.cookiePlaceholder', required: true }
+      { key: 'claudeWebCookie', input: 'textarea', placeholderKey: 'settings.claude.cookiePlaceholder', required: true },
+      { key: 'claudeWebOrganizationId', input: 'select', labelKey: 'settings.claude.organization', options: [
+        { value: '', labelKey: 'settings.claude.organizationChoose' }
+      ] }
     ],
+    top: [{ field: 'claudeWebOrganizationId' }],
     manual: [
       { note: 'settings.claude.note' },
       { steps: ['settings.claude.step1', 'settings.claude.step2', 'settings.claude.step3', 'settings.claude.step4'] },

@@ -70,6 +70,7 @@ function collectUsageModelIds(value, modelIds = new Set()) {
   if (!value || typeof value !== 'object') return modelIds;
   addModelId(modelIds, value.model);
   for (const field of MODEL_MAP_FIELDS) addModelMapIds(modelIds, value[field]);
+  addModelMapIds(modelIds, value.modelThroughput);
   for (const field of ['clientModels', 'clientModelCosts']) addClientModelIds(modelIds, value[field]);
   for (const field of ['sessions', 'projects']) {
     for (const row of Object.values(value[field] || {})) collectUsageModelIds(row, modelIds);
@@ -131,6 +132,20 @@ function foldClientModelMaps(map, resolve) {
   return mapValues(map, (row) => foldModelMap(row, resolve));
 }
 
+function foldModelThroughput(value, resolve) {
+  if (!value || typeof value !== 'object') return value;
+  const keys = Object.keys(value);
+  if (!keys.some((model) => resolve(model) !== model)) return value;
+  const result = new Map();
+  for (const model of keys) {
+    const key = resolve(model);
+    const target = result.get(key) || { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+    for (const field of Object.keys(target)) target[field] += num(value[model]?.[field]);
+    result.set(key, target);
+  }
+  return Object.fromEntries(result);
+}
+
 function projectNestedUsage(map, resolve) {
   return mapValues(map, (row) => projectUsage(row, resolve));
 }
@@ -140,6 +155,7 @@ function projectNestedUsage(map, resolve) {
 // project of every period of every device.
 const USAGE_PROJECTIONS = [
   ...MODEL_MAP_FIELDS.map((field) => [field, foldModelMap]),
+  ['modelThroughput', foldModelThroughput],
   ['clientModels', foldClientModelMaps],
   ['clientModelCosts', foldClientModelMaps],
   ['sessions', projectNestedUsage],

@@ -1,13 +1,17 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
+const dotenv = require('dotenv');
 
 const {
   minimaxToken,
   parseMinimaxTiers,
   fetchMinimaxLimits,
   minimaxAttemptOrder,
+  minimaxRegion,
   minimaxRegionForUrl,
   isMinimaxTransportError,
   MINIMAX_REGION_MEMORY_STATE_KEY,
@@ -19,6 +23,12 @@ const {
 const { parseLimitProviders } = require('../../src/shared/limits/collector');
 
 const CN_REMAINS_URLS = new Set([MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
+
+test('the copied environment example leaves the legacy MiniMax host pin effective', () => {
+  const example = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
+  const env = dotenv.parse(`${example}\nMINIMAX_API_HOST=api.minimaxi.com\n`);
+  assert.equal(minimaxRegion({}, env), 'cn');
+});
 
 function okResponse(body) {
   return { ok: true, status: 200, json: async () => body };
@@ -83,6 +93,33 @@ test('minimaxAttemptOrder puts a remembered region first and keeps the other as 
     MINIMAX_TOKEN_PLAN_REMAINS_URL_CN,
     MINIMAX_REMAINS_URL_CN
   ]);
+});
+
+test('minimaxRegion normalizes the explicit region setting and keeps auto as the default', () => {
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'auto' }), 'auto');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'cn' }), 'cn');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'intl' }), 'intl');
+  assert.equal(minimaxRegion({ minimaxApiRegion: ' INTL ' }), 'intl');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'en' }), 'intl');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'global' }), 'intl');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'api.minimaxi.com' }), 'cn');
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'api.minimax.io' }), 'intl');
+  // Anything unrecognized degrades to the historical probe order rather than
+  // pinning a region the user never asked for.
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'nonsense' }), 'auto');
+  assert.equal(minimaxRegion({}), 'auto');
+  assert.equal(minimaxRegion(), 'auto');
+});
+
+test('minimaxRegion prefers the new option, then the legacy host pin, then the env lane', () => {
+  assert.equal(minimaxRegion({ minimaxApiRegion: 'cn', minimaxApiHost: 'en' }), 'cn');
+  assert.equal(minimaxRegion({}, { TOKEN_MONITOR_MINIMAX_API_REGION: 'cn' }), 'cn');
+  assert.equal(minimaxRegion({}, { MINIMAX_API_REGION: 'intl' }), 'intl');
+  assert.equal(minimaxRegion({}, { MINIMAX_API_HOST: 'api.minimaxi.com' }), 'cn');
+  assert.equal(
+    minimaxRegion({ minimaxApiRegion: 'intl' }, { TOKEN_MONITOR_MINIMAX_API_REGION: 'cn' }),
+    'intl'
+  );
 });
 
 test('minimaxRegionForUrl maps endpoints to en/cn labels for the renderer', () => {
@@ -612,6 +649,63 @@ test('fetchMinimaxLimits reports cn region when pinned to the CN endpoint', asyn
   assert.equal(r.region, 'cn');
 });
 
+test('fetchMinimaxLimits probes only the pinned region and reports the resolved wire region', async () => {
+  const body = {
+    data: {
+      model_remains: [
+        { model_name: 'general', current_interval_remaining_percent: 60, current_weekly_remaining_percent: 55 }
+      ]
+    }
+  };
+  const intlCalls = [];
+  const intl = await fetchMinimaxLimits({ minimaxApiRegion: 'intl', minimaxApiKey: 'sk-cp-test' }, {
+    env: {},
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      intlCalls.push(url);
+      return okResponse(body);
+    }
+  });
+  assert.deepEqual(intlCalls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
+  assert.equal(intl.status, 'ok');
+  // The wire region keeps its historical en/cn vocabulary; the setting's 'auto'
+  // and 'intl' never leak into it.
+  assert.equal(intl.region, 'en');
+});
+
+test('fetchMinimaxLimits does not cross regions when the region is pinned', async () => {
+  // The cross-region hop is the whole point of pinning: a CN key on a network
+  // that cannot reach api.minimax.io would otherwise burn every probe on a
+  // doomed global request. A 401 here is final, not a signal to try CN.
+  const calls = [];
+  const r = await fetchMinimaxLimits({ minimaxApiRegion: 'cn', minimaxApiKey: 'sk-cp-test' }, {
+    env: {},
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      return unauthorized();
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
+  assert.equal(r.status, 'unauthorized');
+  assert.deepEqual(r.windows, []);
+});
+
+test('fetchMinimaxLimits pins the region from the env lane for headless use', async () => {
+  const calls = [];
+  const r = await fetchMinimaxLimits({}, {
+    env: { MINIMAX_CODING_API_KEY: 'sk-cp-test', MINIMAX_API_REGION: 'cn' },
+    now: () => 1_716_350_000_000,
+    fetch: async (url) => {
+      calls.push(url);
+      return okResponse({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 40 }] } });
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+  assert.equal(r.status, 'ok');
+  assert.equal(r.region, 'cn');
+});
+
 // The abort timer must outlive the body read, not just the headers. Undici resolves the
 // fetch as soon as the head arrives, so a body that never arrives is only bounded if the
 // timer is still armed while `.json()` is pending.
@@ -791,4 +885,29 @@ test('fetchMinimaxLimits follows a key swapped to the other region and updates t
   assert.equal(r.status, 'ok');
   assert.equal(r.region, 'en');
   assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'en');
+});
+
+test('MiniMax accepts exact region aliases and hosts, never hostname substrings', () => {
+  for (const host of ['minimaxi.com', 'api.minimaxi.com']) assert.equal(minimaxRegion({ minimaxApiRegion: host }), 'cn');
+  for (const host of ['minimax.io', 'api.minimax.io']) assert.equal(minimaxRegion({ minimaxApiRegion: host }), 'intl');
+  for (const raw of ['evil-minimax.io.example', 'api.minimaxi.com.evil.test', 'https://evil.test/minimax.io', 'api.minimax.io@evil.test']) {
+    assert.equal(minimaxRegion({ minimaxApiRegion: raw }), 'auto', raw);
+  }
+});
+
+test('MiniMax pinned regions retain the legacy endpoint fallback', async () => {
+  for (const [region, urls] of [
+    ['cn', [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]],
+    ['intl', [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN]]
+  ]) {
+    const calls = [];
+    const result = await fetchMinimaxLimits({ minimaxApiRegion: region, minimaxApiKey: 'sk-cp-test' }, {
+      env: {}, fetch: async (url) => {
+        calls.push(url);
+        return calls.length === 1 ? { ok: false, status: 404 } : okResponse({ data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 60 }] } });
+      }
+    });
+    assert.equal(result.status, 'ok');
+    assert.deepEqual(calls, urls);
+  }
 });

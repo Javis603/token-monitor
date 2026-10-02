@@ -18,7 +18,7 @@ function response(status, body = {}) {
 
 // The real DeepSeek fetcher behind a fake transport, so each verdict is taken
 // from the provider's own classification of an HTTP answer.
-function commands({ answer = () => response(200, BALANCE), settings = {} } = {}) {
+function commands({ answer = () => response(200, BALANCE), settings = {}, env = {} } = {}) {
   const patches = [];
   const writes = [];
   let current = { ...settings };
@@ -36,7 +36,7 @@ function commands({ answer = () => response(200, BALANCE), settings = {} } = {})
       readJson: () => ({}),
       writeJsonAtomic: (file) => writes.push(file)
     }),
-    env: {}
+    env
   });
   return { api, patches, writes };
 }
@@ -193,6 +193,81 @@ test('a session key renewed during the probe is the one stored', async () => {
   assert.equal(result.verdict, 'valid');
   assert.equal(patches.length, 1);
   assert.equal(patches[0].claudeWebCookie, 'sessionKey=sk-ant-sid01-rotated');
+  assert.equal(patches[0].claudeWebOrganizationId, 'organization-web');
+});
+
+test('Claude save asks for an organization before storing a multi-organization session', async () => {
+  const organizations = [
+    { uuid: 'free', name: 'Personal', capabilities: ['chat'] },
+    { uuid: 'team', name: 'Workspace', capabilities: ['chat', 'raven'], raven_type: 'team' }
+  ];
+  const { api, patches } = commands({ answer: (url) => {
+    if (url.endsWith('/api/organizations')) return response(200, organizations);
+    if (url.endsWith('/api/account')) return response(200, { uuid: 'same-account', memberships: [
+      { organization: organizations[0] }, { organization: organizations[1], seat_tier: 'team_standard' }
+    ] });
+    if (url.endsWith('/prepaid/credits')) return response(200, { amount: 0 });
+    assert.match(url, /\/organizations\/team\/usage/);
+    return response(200, { five_hour: { utilization: 23 } });
+  } });
+  const draft = { claudeWebCookie: 'sessionKey=sk-ant-multi' };
+  const pending = await api.saveCredential('claude', draft);
+  assert.equal(pending.verdict, 'selectionRequired');
+  assert.deepEqual(pending.choices.map(({ id }) => id), ['free', 'team']);
+  assert.deepEqual(patches, []);
+  const saved = await api.saveCredential('claude', { ...draft, claudeWebOrganizationId: 'team' });
+  assert.equal(saved.saved, true);
+  assert.equal(patches[0].claudeWebOrganizationId, 'team');
+  assert.deepEqual((await api.listOrganizationChoices('claude')).choices.map(({ id }) => id), ['free', 'team']);
+  api.clearCredential('claude');
+  assert.equal(patches.at(-1).claudeWebOrganizationId, '');
+});
+
+test('Claude multi-organization save carries a rotated session through the choice', async () => {
+  const oldCookie = 'sessionKey=sk-ant-old-session';
+  const newCookie = 'sessionKey=sk-ant-new-session';
+  const organizations = [
+    { uuid: 'free', name: 'Personal', capabilities: ['chat'] },
+    { uuid: 'team', name: 'Workspace', capabilities: ['chat', 'raven'], raven_type: 'team' }
+  ];
+  const patches = [];
+  const sentCookies = [];
+  const api = createCredentialCommands({
+    getSettings: () => ({}),
+    applySettingsPatch: (patch) => { patches.push(patch); return {}; },
+    probeDeps: (renewed) => ({
+      probe: true,
+      providerRuntimeState: new Map(),
+      onClaudeWebCookieRenewed: ({ cookie }) => { renewed.claudeWebCookie = cookie; return true; },
+      fetch: async (url, init) => {
+        const cookie = init?.headers?.cookie;
+        sentCookies.push(cookie);
+        if (url.endsWith('/api/organizations') && sentCookies.length === 1) {
+          assert.equal(cookie, oldCookie);
+          return {
+            ok: true,
+            headers: { getSetCookie: () => [`${newCookie}; Path=/; Secure; HttpOnly`] },
+            json: async () => organizations
+          };
+        }
+        assert.equal(cookie, newCookie, 'Claude retired the original session after discovery');
+        if (url.endsWith('/api/organizations')) return response(200, organizations);
+        if (url.endsWith('/api/account')) return response(200, { uuid: 'account-web', email_address: 'owner@example.com' });
+        if (url.endsWith('/prepaid/credits')) return response(200, { amount: 0 });
+        return response(200, { five_hour: { utilization: 23 } });
+      }
+    }),
+    env: {}
+  });
+  const first = await api.saveCredential('claude', { claudeWebCookie: oldCookie });
+  assert.equal(first.verdict, 'selectionRequired');
+  assert.deepEqual(patches, [], 'the session is held in main until the user selects a choice');
+  assert.equal(JSON.stringify(first).includes('sk-ant-new-session'), false, 'the renewed secret must not reach the renderer');
+  const second = await api.saveCredential('claude', { claudeWebCookie: oldCookie, claudeWebOrganizationId: 'team' });
+  assert.equal(second.saved, true);
+  assert.equal(patches[0].claudeWebCookie, newCookie);
+  assert.equal(patches[0].claudeWebOrganizationId, 'team');
+  assert.ok(sentCookies.slice(1).every((cookie) => cookie === newCookie));
 });
 
 test('a lane saved on its own is probed without the stored sibling vouching for it', async () => {
@@ -305,4 +380,20 @@ test('a confirmed Ollama cookie answers the next poll from the probe', async () 
   });
   assert.equal(polled.status, 'unavailable');
   assert.equal(requests, 1);
+});
+
+test('MiniMax credential save keeps an implicit region and probes the effective env region', async () => {
+  const urls = [];
+  const { api, patches } = commands({
+    settings: { minimaxApiRegion: '', limitProviders: 'minimax' },
+    env: { MINIMAX_API_REGION: 'cn' },
+    answer: (url) => {
+      urls.push(url);
+      return response(200, { data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 60 }] } });
+    }
+  });
+  const result = await api.saveCredential('minimax', { minimaxApiKey: 'sk-cp-test', minimaxApiRegion: 'auto' });
+  assert.equal(result.saved, true);
+  assert.deepEqual(urls, ['https://api.minimaxi.com/v1/token_plan/remains']);
+  assert.equal(Object.hasOwn(patches[0], 'minimaxApiRegion'), false);
 });
