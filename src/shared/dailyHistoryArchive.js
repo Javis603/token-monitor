@@ -8,12 +8,17 @@ const {
   normalizeTokscaleClientName, normalizeTokscaleModelNameForClient,
   normalizeTokscaleModelComponentSummary, num, sumOutputTokens, sumTokens
 } = require('./history');
+const { normalizeClientName, normalizeModelNameForClient } = require('./usage');
 const {
   CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry
 } = require('./clientIdentitySplits');
 
 const ARCHIVE_VERSION = 1;
 const DAY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+// Client ids and model names are folded into ordinary period maps downstream, so
+// reject the property names that either mutate a prototype or are silently
+// dropped by a `__proto__` assignment.
+const UNSAFE_MAP_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 function observationKey(value) {
   return JSON.stringify([
@@ -616,6 +621,54 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
   return { contributions, ...(timeMetrics ? { timeMetrics } : {}) };
 }
 
+// The (client, model) usage the retained days still hold, folded onto the same
+// partition keys a live period uses so the totals can be compared directly: the
+// tokscale client name collapses to its tracked client id, and the model id to
+// the period's model key. The daily history archive outlives the source files it
+// was built from, so this cumulative is the floor allTime must not fall below
+// once a source is rotated away (issue #808). It is collapsed across days into a
+// per-(client, model) total — which specific days rotated is unknown and does
+// not matter to a floor, but which model rotated does, so the model grain is
+// kept.
+function periodModelKeyFor(client, model) {
+  let name = String(model || '');
+  // Mirror the live period (usage.js reconcileCursorAutoGlobalModels): Cursor's
+  // Auto-mode requests arrive as `auto` or `default` and both fold to one row.
+  if (client === 'cursor' && (name === 'auto' || name === 'default')) name = 'cursor-auto';
+  return normalizeModelNameForClient(name, client) || name || 'unknown';
+}
+
+function allTimeCumulativeFromArchive(archive) {
+  const normalized = normalizeDailyHistoryArchive(archive);
+  // The keys are client ids and model names read from the archive on disk, and a
+  // normalized client id can be a string like `__proto__`. A bare-object
+  // accumulator keeps the reduction itself from mutating Object.prototype, and
+  // dropping the reserved names entirely keeps them from leaking downstream,
+  // where addClientUsage writes to ordinary period maps whose `__proto__`
+  // assignment is silently dropped while the token still lands in the total.
+  const cumulative = Object.create(null);
+  for (const day of Object.values(normalized.days)) {
+    for (const observation of Object.values(day.observations)) {
+      const client = normalizeClientName(observation.client);
+      if (!client || UNSAFE_MAP_KEYS.has(client)) continue;
+      const tokens = Math.max(0, Math.round(num(observation.tokens)));
+      const cost = Math.max(0, num(observation.cost));
+      if (tokens === 0 && cost === 0) continue;
+      const model = periodModelKeyFor(client, observation.modelId);
+      if (UNSAFE_MAP_KEYS.has(model)) continue;
+      const entry = cumulative[client]
+        || (cumulative[client] = {
+          totalTokens: 0, costUsd: 0, models: Object.create(null), modelCosts: Object.create(null)
+        });
+      entry.totalTokens += tokens;
+      entry.costUsd += cost;
+      if (tokens > 0) entry.models[model] = num(entry.models[model]) + tokens;
+      if (cost > 0) entry.modelCosts[model] = num(entry.modelCosts[model]) + cost;
+    }
+  }
+  return cumulative;
+}
+
 function dailyHistoryArchivePath(options = {}) {
   return options.path || path.join(sharedDataDir(options), 'daily-history-archive.json');
 }
@@ -738,6 +791,7 @@ function retainLiveDailyHistory(period, options = {}) {
 }
 
 module.exports = {
+  allTimeCumulativeFromArchive,
   captureDailyHistoryArchive,
   clearDailyHistoryArchive,
   dailyHistoryArchivePath,

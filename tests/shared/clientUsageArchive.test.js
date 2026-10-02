@@ -10,6 +10,7 @@ try {
 
 const {
   applyArchivedClientUsage,
+  applyDailyHistoryAllTimeFloor,
   captureArchivedClientUsage,
   normalizeArchivedClientUsage,
   pruneArchivedClientUsage
@@ -680,4 +681,136 @@ test('recapturing Pi carries the merged snapshot residue forward', () => {
   // End to end: with nothing tracked, the recaptured archive still totals 100.
   const applied = applyArchivedClientUsage(liveSummary(now, {}), recaptured, { activeClients: '', now });
   assert.equal(applied.periods.allTime.totalTokens, 100);
+});
+
+// --- applyDailyHistoryAllTimeFloor (issue #808: rotated sources) ---
+
+function allTimeOnly(fields) {
+  return { allTime: { totalTokens: 0, costUsd: 0, clients: {}, clientCosts: {}, models: {}, clientModels: {}, ...fields } };
+}
+
+test('the floor lifts allTime back to the archive cumulative when a source rotated away', () => {
+  const cumulative = {
+    claude: {
+      totalTokens: 234000000,
+      costUsd: 32.5,
+      models: { 'claude-opus-4-8': 234000000 },
+      modelCosts: { 'claude-opus-4-8': 32.5 }
+    }
+  };
+  const summary = allTimeOnly({
+    totalTokens: 10000000,
+    costUsd: 1,
+    clients: { claude: 10000000 },
+    clientCosts: { claude: 1 },
+    models: { 'claude-opus-4-8': 10000000 },
+    clientModels: { claude: { 'claude-opus-4-8': 10000000 } },
+    clientModelCosts: { claude: { 'claude-opus-4-8': 1 } }
+  });
+
+  const floored = applyDailyHistoryAllTimeFloor(summary, cumulative);
+
+  assert.equal(floored.allTime.totalTokens, 234000000);
+  assert.equal(floored.allTime.clients.claude, 234000000);
+  assert.equal(floored.allTime.models['claude-opus-4-8'], 234000000);
+  assert.equal(Math.round(floored.allTime.costUsd * 100) / 100, 32.5);
+  assert.equal(floored.allTime.capabilities.tokenComponents, false);
+});
+
+test('the floor never lowers or double counts a source still fully present', () => {
+  const cumulative = { claude: { totalTokens: 100, costUsd: 1, models: { m: 100 }, modelCosts: { m: 1 } } };
+  const present = allTimeOnly({
+    totalTokens: 300,
+    costUsd: 5,
+    clients: { claude: 300 },
+    clientCosts: { claude: 5 },
+    models: { m: 300 },
+    clientModels: { claude: { m: 300 } }
+  });
+
+  const once = applyDailyHistoryAllTimeFloor(present, cumulative);
+  assert.equal(once.allTime.totalTokens, 300, 'live already exceeds the floor');
+  const twice = applyDailyHistoryAllTimeFloor(once, cumulative);
+  assert.equal(twice.allTime.totalTokens, 300, 're-applying adds nothing');
+});
+
+test('the floor is idempotent: applying to its own output adds nothing more', () => {
+  const cumulative = { claude: { totalTokens: 500, costUsd: 4, models: { m: 500 }, modelCosts: { m: 4 } } };
+  const summary = allTimeOnly({ totalTokens: 100, clients: { claude: 100 }, models: { m: 100 }, clientModels: { claude: { m: 100 } } });
+  const first = applyDailyHistoryAllTimeFloor(summary, cumulative);
+  const second = applyDailyHistoryAllTimeFloor(first, cumulative);
+  assert.equal(first.allTime.totalTokens, 500);
+  assert.equal(second.allTime.totalTokens, 500);
+});
+
+test('the floor only touches allTime, leaving today and month alone', () => {
+  const cumulative = { claude: { totalTokens: 500, costUsd: 0, models: { m: 500 }, modelCosts: {} } };
+  const summary = {
+    today: { totalTokens: 5, clients: { claude: 5 } },
+    month: { totalTokens: 20, clients: { claude: 20 } },
+    allTime: { totalTokens: 100, costUsd: 0, clients: { claude: 100 }, clientCosts: {}, models: { m: 100 }, clientModels: { claude: { m: 100 } } }
+  };
+  const floored = applyDailyHistoryAllTimeFloor(summary, cumulative);
+  assert.equal(floored.today.totalTokens, 5);
+  assert.equal(floored.month.totalTokens, 20);
+  assert.equal(floored.allTime.totalTokens, 500);
+});
+
+test('the floor is a no-op without an allTime period or without archive data', () => {
+  const cumulative = { claude: { totalTokens: 500, costUsd: 0, models: { m: 500 }, modelCosts: {} } };
+  const noAllTime = { today: { totalTokens: 5, clients: { claude: 5 } } };
+  assert.deepEqual(applyDailyHistoryAllTimeFloor(noAllTime, cumulative), noAllTime);
+  const summary = allTimeOnly({ totalTokens: 100, clients: { claude: 100 } });
+  assert.equal(applyDailyHistoryAllTimeFloor(summary, {}).allTime.totalTokens, 100);
+  assert.equal(applyDailyHistoryAllTimeFloor(summary, null).allTime.totalTokens, 100);
+});
+
+test('the floor restores a rotated model even when another model grew past the client total', () => {
+  // opus (100) rotated away; sonnet grew from 50 to 300. The client-total live
+  // (300) already exceeds the client-total floor (150), so a client-total floor
+  // would restore nothing — but opus's 100 must come back. This is issue #808.
+  const cumulative = {
+    claude: {
+      totalTokens: 150,
+      costUsd: 3,
+      models: { opus: 100, sonnet: 50 },
+      modelCosts: { opus: 2, sonnet: 1 }
+    }
+  };
+  const summary = allTimeOnly({
+    totalTokens: 300,
+    costUsd: 6,
+    clients: { claude: 300 },
+    clientCosts: { claude: 6 },
+    models: { sonnet: 300 },
+    clientModels: { claude: { sonnet: 300 } },
+    clientModelCosts: { claude: { sonnet: 6 } }
+  });
+
+  const floored = applyDailyHistoryAllTimeFloor(summary, cumulative);
+
+  assert.equal(floored.allTime.models.opus, 100, 'rotated opus restored');
+  assert.equal(floored.allTime.models.sonnet, 300, 'live sonnet untouched');
+  assert.equal(floored.allTime.clients.claude, 400, 'client total = 300 live + 100 restored');
+  assert.equal(floored.allTime.totalTokens, 400);
+  // sonnet's cost floor (1) is under live (6) so only opus's cost (2) returns.
+  assert.equal(Math.round(floored.allTime.costUsd * 100) / 100, 8);
+});
+
+test('the floor restores a model that carried cost but no tokens', () => {
+  const cumulative = { claude: { totalTokens: 0, costUsd: 5, models: {}, modelCosts: { m: 5 } } };
+  const summary = allTimeOnly({
+    totalTokens: 100,
+    costUsd: 0,
+    clients: { claude: 100 },
+    clientCosts: {},
+    models: {},
+    clientModels: { claude: {} },
+    clientModelCosts: { claude: {} }
+  });
+
+  const floored = applyDailyHistoryAllTimeFloor(summary, cumulative);
+
+  assert.equal(Math.round(floored.allTime.costUsd * 100) / 100, 5, 'cost-only shortfall restored');
+  assert.equal(floored.allTime.totalTokens, 100, 'tokens unchanged');
 });

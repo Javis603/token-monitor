@@ -506,8 +506,92 @@ function pruneArchivedClientUsage(archive, activeClients) {
   return normalizedArchive;
 }
 
+// allTime accrues from live scans plus the client and session archives, so it
+// only ever counts sources still on disk. When a source file is rotated away —
+// cleaned up by hand, or by the upstream tool — its history drops out of the
+// total even though the daily history archive still holds every observed day
+// (issue #808). Neither existing archive covers that: the session archive only
+// knows sessions seen since first run, and archivedClientUsage only snapshots
+// what was on the device the moment a client was untracked. The daily history
+// archive is the record that outlives the source, so its retained (client,
+// model) cumulative is the floor allTime must not fall below.
+//
+// The floor is applied per (client, model), not per client total. A client
+// whose live total has already grown past its archived total on one model must
+// still get back a *different* model whose source has since rotated away — a
+// client-total floor would see the grown model cover the gap and restore
+// nothing. Each archived model is compared against its own live usage and only
+// the positive shortfall is added, so a model still wholly present contributes
+// nothing and no tokens are ever counted twice. `cumulative` is
+// allTimeCumulativeFromArchive()'s output, already folded onto the period's
+// client and model keys, so the two sides compare on the same key.
+function applyDailyHistoryAllTimeFloor(summary, cumulative) {
+  if (!cumulative || typeof cumulative !== 'object') return summary;
+  const clients = Object.keys(cumulative);
+  if (clients.length === 0 || !hasSummaryPeriod(summary, 'allTime')) return summary;
+
+  // Decide what needs topping up against a read-only view first, so the common
+  // steady state — every source present, nothing rotated — returns the summary
+  // untouched instead of paying for a deep clone on every tick.
+  const live = periodFor(summary, 'allTime');
+  const shortfalls = [];
+  for (const client of clients) {
+    const floor = cumulative[client];
+    const liveModels = live.clientModels?.[client] || {};
+    const liveModelCosts = live.clientModelCosts?.[client] || {};
+    // The union of token- and cost-bearing models: a retained observation with
+    // cost but zero tokens still has a shortfall to restore.
+    const modelKeys = new Set([
+      ...Object.keys(floor.models || {}),
+      ...Object.keys(floor.modelCosts || {})
+    ]);
+    const models = {};
+    const modelCosts = {};
+    let missingTokens = 0;
+    let missingCost = 0;
+    for (const model of modelKeys) {
+      const gapTokens = Math.max(0, Math.round(numberValue(floor.models?.[model])))
+        - Math.max(0, Math.round(numberValue(liveModels[model])));
+      if (gapTokens > 0) {
+        models[model] = gapTokens;
+        missingTokens += gapTokens;
+      }
+      const gapCost = Math.max(0, numberValue(floor.modelCosts?.[model]))
+        - Math.max(0, numberValue(liveModelCosts[model]));
+      if (gapCost > 0) {
+        modelCosts[model] = gapCost;
+        missingCost += gapCost;
+      }
+    }
+    if (missingTokens > 0 || missingCost > 0) {
+      shortfalls.push({ client, models, modelCosts, missingTokens, missingCost });
+    }
+  }
+  if (shortfalls.length === 0) return summary;
+
+  const next = cloneJson(summary);
+  const period = targetPeriod(next, 'allTime');
+  for (const { client, models, modelCosts, missingTokens, missingCost } of shortfalls) {
+    // Exact per-model shortfalls, so the client and global totals move by exactly
+    // the sum of what each model got back — no proportional rounding drift, and a
+    // model still fully present adds nothing. addClientUsage keys the
+    // client/period totals off totalTokens/costUsd; the restored slice carries no
+    // session detail, so it lands as unclassified rather than claiming a
+    // cache/output breakdown it never had.
+    addClientUsage(period, client, {
+      totalTokens: missingTokens,
+      costUsd: missingCost,
+      models,
+      modelCosts,
+      sessions: {}
+    });
+  }
+  return next;
+}
+
 module.exports = {
   applyArchivedClientUsage,
+  applyDailyHistoryAllTimeFloor,
   captureArchivedClientUsage,
   normalizeArchivedClientUsage,
   pruneArchivedClientUsage
