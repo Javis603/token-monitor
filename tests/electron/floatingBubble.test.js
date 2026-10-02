@@ -93,45 +93,45 @@ test('normalizeInitialRendererViewState restores a persisted last-used view', ()
     normalizeInitialRendererViewState({ period: 'bad', breakdown: 'bad' }, { period: 'allTime', breakdown: 'session' }),
     { period: 'allTime', breakdown: 'session' }
   );
-  // Empty snapshot (fresh install) falls back to the today/tool defaults.
+  // Empty snapshot (fresh install) falls back to the today/home defaults.
   assert.deepEqual(
     normalizeInitialRendererViewState(undefined),
-    { period: 'today', breakdown: 'tool' }
+    { period: 'today', breakdown: 'home' }
   );
 });
 
 test('floatingBubbleInitialRendererQuery primes the first collapsed mini-window paint', () => {
-  // The view state always rides along (default today/tool when none is given)
-  // so a persisted last view of tool/today is never mistaken for "no view".
+  // The view state always rides along (default today/home when none is given)
+  // so a persisted last view of home/today is never mistaken for "no view".
   assert.deepEqual(
     floatingBubbleInitialRendererQuery({ collapsed: true, side: 'right' }, true),
-    { period: 'today', breakdown: 'tool', floatingBubbleSide: 'right' }
+    { period: 'today', breakdown: 'home', floatingBubbleSide: 'right' }
   );
   assert.deepEqual(
     floatingBubbleInitialRendererQuery({ collapsed: true, side: 'top' }, true),
-    { period: 'today', breakdown: 'tool' }
+    { period: 'today', breakdown: 'home' }
   );
   assert.deepEqual(
     floatingBubbleInitialRendererQuery({ collapsed: false, side: 'right' }, true),
-    { period: 'today', breakdown: 'tool' }
+    { period: 'today', breakdown: 'home' }
   );
   assert.deepEqual(
     floatingBubbleInitialRendererQuery({ collapsed: true, side: 'right' }, false),
-    { period: 'today', breakdown: 'tool' }
+    { period: 'today', breakdown: 'home' }
   );
   assert.deepEqual(
     floatingBubbleInitialRendererQuery(
       { collapsed: false, side: null },
       { suppressInitialNumberAnimation: true }
     ),
-    { period: 'today', breakdown: 'tool', suppressInitialNumberAnimation: '1' }
+    { period: 'today', breakdown: 'home', suppressInitialNumberAnimation: '1' }
   );
   assert.deepEqual(
     floatingBubbleInitialRendererQuery(
       { collapsed: true, side: 'left' },
       { collapsedWindow: true, suppressInitialNumberAnimation: true }
     ),
-    { period: 'today', breakdown: 'tool', floatingBubbleSide: 'left', suppressInitialNumberAnimation: '1' }
+    { period: 'today', breakdown: 'home', floatingBubbleSide: 'left', suppressInitialNumberAnimation: '1' }
   );
 });
 
@@ -154,7 +154,7 @@ test('floatingBubbleInitialRendererQuery preserves renderer view state across wi
     ),
     { period: 'allTime', breakdown: 'trends' }
   );
-  // A default last view of today/tool is carried explicitly, not omitted.
+  // A default last view of today/home is carried explicitly, not omitted.
   assert.deepEqual(
     floatingBubbleInitialRendererQuery(
       { collapsed: false, side: null },
@@ -164,7 +164,7 @@ test('floatingBubbleInitialRendererQuery preserves renderer view state across wi
     ),
     { period: 'today', breakdown: 'status' }
   );
-  // A corrupt snapshot collapses to today/tool, still carried explicitly.
+  // A corrupt snapshot collapses to today/home, still carried explicitly.
   assert.deepEqual(
     floatingBubbleInitialRendererQuery(
       { collapsed: true, side: 'left' },
@@ -173,7 +173,7 @@ test('floatingBubbleInitialRendererQuery preserves renderer view state across wi
         viewState: { period: 'bad', breakdown: 'bad' }
       }
     ),
-    { period: 'today', breakdown: 'tool', floatingBubbleSide: 'left' }
+    { period: 'today', breakdown: 'home', floatingBubbleSide: 'left' }
   );
 });
 
