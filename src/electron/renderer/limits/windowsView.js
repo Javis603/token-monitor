@@ -1854,7 +1854,7 @@
       const expiresIn = codexResetForecastTimeUntil(forecast.expiresAt);
       if (expiresAt) {
         entries.push({
-          full: `${t('limits.codexResetForecast.expiresLabel')} · ${[expiresAt, expiresIn].filter(Boolean).join(' · ')}`
+          full: `${t('limits.codexResetForecast.expiresLabel')} ${[expiresAt, expiresIn].filter(Boolean).join(' · ')}`
         });
       }
     }

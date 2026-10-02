@@ -4266,7 +4266,6 @@ html.is-windows .settings-panel select option {
   white-space: nowrap;
   pointer-events: none;
 }
-.codex-reset-forecast:hover :is(.codex-reset-forecast-label, .codex-reset-forecast-value),
 .codex-reset-forecast:has(.codex-reset-forecast-open:focus-visible) :is(.codex-reset-forecast-label, .codex-reset-forecast-value) {
   color: var(--accent);
 }

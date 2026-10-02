@@ -259,7 +259,7 @@ test('forecast tooltip keeps scheduled and historical reset types distinct', () 
   tooltip({ ...forecast, status: 'active', scheduledFor: '', expiresAt: '2026-10-03T16:00:00Z' });
   assert.deepEqual(entries, [
     { full: '偵測到訊號', heading: true },
-    { full: '有效至 · 2026-10-03T16:00:00Z' },
+    { full: '有效至 2026-10-03T16:00:00Z' },
     { full: '@thsottiaux', caption: true },
     { full: '上次重置', heading: true, separated: true },
     { full: `備用重置額度 · ${forecast.latestResetAt}` }
@@ -328,7 +328,7 @@ test('forecast tooltip gates retained metadata by the current signal state', () 
   tooltip({ ...forecast, status: 'active', expiresAt: '2026-10-03T04:00:00Z' });
   assert.deepEqual(entries.slice(0, 3), [
     { full: '偵測到訊號', heading: true },
-    { full: '有效至 · 2026-10-03T04:00:00Z' },
+    { full: '有效至 2026-10-03T04:00:00Z' },
     { full: '@thsottiaux', caption: true }
   ], 'active forecasts must not carry an old scheduled time');
   assert.equal(entries.length, 5);
