@@ -72,6 +72,38 @@ test('ensure skips download when the installed binary already matches', async ()
   }
 });
 
+test('ensure still succeeds when the build marker cannot be written', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-ensure-'));
+  const target = path.join(dir, 'tokscale');
+  const payload = Buffer.from('vendored binary');
+  fs.writeFileSync(target, payload);
+  const logs = [];
+  const readOnlyFs = {
+    ...fs,
+    writeFileSync: (filePath, ...rest) => {
+      if (String(filePath).endsWith('.build.json')) {
+        throw Object.assign(new Error('EROFS: read-only file system'), { code: 'EROFS' });
+      }
+      return fs.writeFileSync(filePath, ...rest);
+    }
+  };
+
+  try {
+    const result = await ensureVendoredTokscale({
+      manifest: manifestFor(payload),
+      requestedKey: 'darwin-arm64',
+      fsImpl: readOnlyFs,
+      ...dependencies(target),
+      log: (message) => logs.push(message)
+    });
+    assert.equal(result.status, 'matched');
+    assert.equal(fs.existsSync(`${target}.build.json`), false);
+    assert.ok(logs.some((line) => line.includes('build marker')));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('ensure downloads, smoke-tests, and atomically replaces a mismatched binary', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-ensure-'));
   const target = path.join(dir, 'tokscale');

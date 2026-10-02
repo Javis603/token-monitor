@@ -1547,12 +1547,15 @@ function renderTokscaleStatus() {
     : t(status ? 'settings.common.notFound' : 'settings.common.checking');
 }
 
-async function refreshTokscaleStatus() {
+async function refreshTokscaleStatus({ retried = false } = {}) {
   if (!window.tokenMonitor.getTokscaleStatus) return;
   try {
     state.tokscaleStatus = await window.tokenMonitor.getTokscaleStatus();
   } catch (_) {
-    state.tokscaleStatus = { supported: true, current: null };
+    // An unreadable status is not evidence the binary is missing; keep showing
+    // "Checking..." and ask again rather than claiming "Not found".
+    state.tokscaleStatus = null;
+    if (!retried) setTimeout(() => { void refreshTokscaleStatus({ retried: true }); }, 5000);
   }
   renderTokscaleStatus();
 }

@@ -1,6 +1,7 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -121,20 +122,34 @@ function resolvePlatformBinary() {
 
 // The fork build reports the same `--version` as the upstream release it is
 // based on, so only the marker beside the binary identifies it. A marker whose
-// recorded size no longer matches belongs to a binary npm has since replaced.
+// hash no longer matches belongs to a binary npm has since replaced. The size
+// check only skips hashing an obviously different file; the verdict is cached
+// per file identity because hashing the binary takes tens of milliseconds.
+let tokscaleBuildCache = { key: '', matches: false };
+
 function readTokscaleBuild(binPath) {
   const marker = readJson(tokscaleBuildMarkerPath(binPath), null);
-  if (!marker || typeof marker.releaseTag !== 'string' || typeof marker.commit !== 'string') return null;
+  if (!marker || typeof marker.releaseTag !== 'string' || typeof marker.commit !== 'string' || typeof marker.sha256 !== 'string') return null;
+  let stat;
   try {
-    if (fs.statSync(binPath).size !== marker.size) return null;
+    stat = fs.statSync(binPath);
   } catch (_) {
     return null;
   }
-  return { releaseTag: marker.releaseTag, commit: marker.commit };
+  if (stat.size !== marker.size) return null;
+  const key = `${binPath}\0${stat.size}\0${stat.mtimeMs}\0${marker.sha256}`;
+  if (tokscaleBuildCache.key !== key) {
+    let actual = '';
+    try {
+      actual = crypto.createHash('sha256').update(fs.readFileSync(binPath)).digest('hex');
+    } catch (_) {}
+    tokscaleBuildCache = { key, matches: actual === marker.sha256.toLowerCase() };
+  }
+  return tokscaleBuildCache.matches ? { releaseTag: marker.releaseTag, commit: marker.commit } : null;
 }
 
 function getTokscaleStatus() {
-  if (!tokscalePackageNameForPlatform()) return { supported: false };
+  if (bundledPackageCandidates().length === 0) return { supported: false };
   const bundled = locateBundledBinary();
   return {
     supported: true,

@@ -60,16 +60,22 @@ function smokeTest(binPath, spawn = spawnSync) {
   return result.stdout.trim();
 }
 
-// The marker records the size of the binary it describes, so a later npm
+// The marker records the hash of the binary it describes, so a later npm
 // reinstall that puts the upstream binary back cannot inherit the fork label.
-function writeBuildMarker(manifest, entry, targetBinPath, fsImpl) {
-  const marker = {
-    releaseTag: manifest.releaseTag,
-    commit: manifest.commit,
-    sha256: entry.sha256,
-    size: fsImpl.statSync(targetBinPath).size
-  };
-  fsImpl.writeFileSync(tokscaleBuildMarkerPath(targetBinPath), `${JSON.stringify(marker, null, 2)}\n`);
+// It is display metadata only: failing to write it (read-only node_modules)
+// must not stop the app or agent from starting on a binary that is correct.
+function writeBuildMarker(manifest, entry, targetBinPath, fsImpl, log) {
+  try {
+    const marker = {
+      releaseTag: manifest.releaseTag,
+      commit: manifest.commit,
+      sha256: entry.sha256,
+      size: fsImpl.statSync(targetBinPath).size
+    };
+    fsImpl.writeFileSync(tokscaleBuildMarkerPath(targetBinPath), `${JSON.stringify(marker, null, 2)}\n`);
+  } catch (error) {
+    log(`Could not write the tokscale build marker (${error.message}); Settings will show the version without the fork label.`);
+  }
 }
 
 function targetPlatformForKey(key) {
@@ -158,7 +164,7 @@ async function ensureVendoredTokscale({
 
   if (sha256File(targetBinPath, fsImpl) === entry.sha256) {
     log(`Vendored tokscale already matches ${entry.sha256.slice(0, 12)} at ${targetBinPath}; no download needed.`);
-    writeBuildMarker(manifest, entry, targetBinPath, fsImpl);
+    writeBuildMarker(manifest, entry, targetBinPath, fsImpl, log);
     return { status: 'matched', key, targetBinPath };
   }
 
@@ -177,7 +183,7 @@ async function ensureVendoredTokscale({
     if (process.platform !== 'win32') fsImpl.chmodSync(tempPath, 0o755);
     const version = smoke(tempPath);
     fsImpl.renameSync(tempPath, targetBinPath);
-    writeBuildMarker(manifest, entry, targetBinPath, fsImpl);
+    writeBuildMarker(manifest, entry, targetBinPath, fsImpl, log);
     log(`Vendored tokscale ensured at ${targetBinPath} (${version})`);
     return { status: 'installed', key, targetBinPath, version };
   } finally {
