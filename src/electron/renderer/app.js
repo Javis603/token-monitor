@@ -4723,11 +4723,11 @@ function renderSessionDetail({ detail, loading, error } = {}) {
 }
 
 function sessionDetailTitle() {
-  if (state.settings?.sessionTitlesEnabled === false) return '';
   const request = state.openSession;
-  // Review runs use their model/time heading; ordinary Details follow the
-  // current session metadata, including titles received after opening hidden.
+  // Review runs use a model/time heading, which is independent of session
+  // title visibility. Ordinary Details follow the current session metadata.
   if (request?.returnTo?.kind === 'background-review-group') return request.title;
+  if (state.settings?.sessionTitlesEnabled === false) return '';
   const period = request?.period || state.period;
   const session = request?.client === 'reasonix'
     ? state.stats?.nativeSessions?.[period]?.[request.sessionId]

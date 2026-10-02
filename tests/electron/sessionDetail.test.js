@@ -211,11 +211,16 @@ test('session detail renders its heading before loading, errors and empty result
   context.setSettings({ sessionTitlesEnabled: false });
   const groupOpening = context.open({ client: 'codex', sessionId: 's', title: 'gpt-5 · 12:00',
     returnTo: { kind: 'background-review-group' } });
-  assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
-  context.setSettings({ sessionTitlesEnabled: true });
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'gpt-5 · 12:00',
-    'background review runs retain their model/time heading');
+    'model/time is not a session title and remains visible while titles are hidden');
+  const reviewHeading = els.sessionDetailHead.children[0];
+  context.setSettings({ sessionTitlesEnabled: true });
+  assert.strictEqual(els.sessionDetailHead.children[0], reviewHeading);
+  context.setSettings({ sessionTitlesEnabled: false });
+  assert.strictEqual(els.sessionDetailHead.children[0], reviewHeading, 'title toggles preserve the review heading');
   await groupOpening;
+  assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'gpt-5 · 12:00');
+  context.setSettings({ sessionTitlesEnabled: true });
 
   // The id the Sessions list no longer prints opens the detail body, copyable,
   // in every state the body can be in.
