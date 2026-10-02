@@ -7,6 +7,8 @@ const { simpleHostSourceRoots } = require('./clientSourceRegistration');
 const { normalizeCustomScanPaths } = require('./customScanPaths');
 const { tokscaleConfigDir, tokscaleHomeDir } = require('./tokscaleConfig');
 const { claudeSessionRoots } = require('./providers/claude/paths');
+const { cursorDeviceDir } = require('./providers/cursor/deviceHook');
+const { isCursorDeviceUsage } = require('./providers/cursor/deviceUsage');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { qoderCnDataPaths } = require('./providers/qodercn/usage');
@@ -217,7 +219,11 @@ function clientSourceRoots(clientsCsv, options = {}) {
   //                    routed that way on purpose so an isolated profile covers
   //                    the sync cache too.
   const tokscaleConfigRoot = tokscaleConfigDir({ env, platform, homeDir: home });
-  add('cursor', ['tokscale-cursor-cache', path.join(tokscaleHome, '.config', 'tokscale', 'cursor-cache')]);
+  if (isCursorDeviceUsage(options.cursorUsageSource)) {
+    add('cursor', ['cursor-device-log', cursorDeviceDir({ env, home })]);
+  } else {
+    add('cursor', ['tokscale-cursor-cache', path.join(tokscaleHome, '.config', 'tokscale', 'cursor-cache')]);
+  }
   add('antigravity',
     ['tokscale-antigravity-cache', path.join(tokscaleConfigRoot, 'antigravity-cache')],
     ['antigravity-extension-data', path.join(home, '.gemini', 'antigravity', 'conversations')]);

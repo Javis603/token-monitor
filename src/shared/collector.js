@@ -41,6 +41,14 @@ const {
 const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
+const { installCursorDeviceHook, uninstallCursorDeviceHook } = require('./providers/cursor/deviceHook');
+const {
+  buildCursorDeviceHistoryGraph,
+  buildCursorDevicePeriods,
+  collectCursorDeviceRows,
+  isCursorDeviceUsage,
+  normalizeCursorUsageSource
+} = require('./providers/cursor/deviceUsage');
 const {
   applySessionMetadata,
   applyTokscaleSessionMetadata,
@@ -1050,6 +1058,10 @@ async function collectHistoryOnce(options) {
     rawGraphs.push(options.qoderCnGraph);
     histories.push(normalizeHistory(parseGraphResult(options.qoderCnGraph), { capDays, todayKey }));
   }
+  if (options.cursorDeviceGraph) {
+    rawGraphs.push(options.cursorDeviceGraph);
+    histories.push(normalizeHistory(parseGraphResult(options.cursorDeviceGraph), { capDays, todayKey }));
+  }
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -1154,7 +1166,12 @@ async function collectUsageOnce(options) {
   );
   // Proma and Qoder CN remain local compatibility adapters. Reasonix aggregate
   // usage is supplied by the same Tokscale path as every other tracked client.
+  // Cursor device mode is the same kind of adapter at runtime only — the catalog
+  // stays account-level, so PARSE_LOCAL_CLIENTS must not grow a `cursor` entry.
+  const cursorDeviceMode = isCursorDeviceUsage(options.cursorUsageSource)
+    && normalizedClients.split(',').includes('cursor');
   const localClients = new Set(PARSE_LOCAL_CLIENTS);
+  if (cursorDeviceMode) localClients.add('cursor');
   const tokscaleClients = normalizedClients ? normalizedClients.split(',').filter((c) => !localClients.has(c)).join(',') : normalizedClients;
   const includesProma = normalizedClients.split(',').includes('proma');
   const includesQoderCn = normalizedClients.split(',').includes('qodercn');
@@ -1188,6 +1205,9 @@ async function collectUsageOnce(options) {
   let qoderCnRows = null;
   let qoderCnPricing = null;
   let qoderCnPeriodReadFailed = false;
+  let cursorDevicePeriods = null;
+  let cursorDeviceRows = null;
+  let cursorDevicePricing = null;
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     const progress = { ...periods };
@@ -1266,6 +1286,33 @@ async function collectUsageOnce(options) {
         qoderCnPeriods = options.qoderCnFallbackPeriods || null;
       }
     }
+    if (cursorDeviceMode && (!targetRequested || targetClients.includes('cursor'))) {
+      try {
+        cursorDeviceRows = collectCursorDeviceRows({
+          env: options.env || process.env,
+          home: options.homeDir || os.homedir(),
+          logPath: options.cursorDeviceLogPath
+        });
+        cursorDevicePricing = await resolveModelPricing(cursorDeviceRows, {
+          lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
+          commandTimeoutMs: options.pricingTimeoutMs ?? Math.min(commandTimeoutMs || PROMA_PRICING_LOOKUP_TIMEOUT_MS, PROMA_PRICING_LOOKUP_TIMEOUT_MS),
+          pricingRevision: options.pricingRevision
+        });
+        const cursorJson = buildCursorDevicePeriods({
+          now: collectedAt,
+          allTimeSince,
+          rows: cursorDeviceRows,
+          pricingByModel: cursorDevicePricing
+        });
+        cursorDevicePeriods = {
+          today: extractUsageFromTokscale(cursorJson.today),
+          month: extractUsageFromTokscale(cursorJson.month),
+          allTime: extractUsageFromTokscale(cursorJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`cursor device parse failed: ${err.message}`);
+      }
+    }
     throwIfAborted(options.signal);
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
@@ -1312,6 +1359,7 @@ async function collectUsageOnce(options) {
       }
       if (promaPeriods) freshPartitions.proma = promaPeriods.today;
       if (qoderCnPeriods) freshPartitions.qodercn = qoderCnPeriods.today;
+      if (cursorDevicePeriods) freshPartitions.cursor = cursorDevicePeriods.today;
       if (qoderCnPeriodReadFailed && anchor.todayPartitions?.qodercn) {
         // A transient local.db read failure must not turn the existing Qoder CN
         // partition into an empty one or subtract it from month/allTime.
@@ -1383,6 +1431,12 @@ async function collectUsageOnce(options) {
       month = mergePeriods(month, qoderCnPeriods.month);
       allTime = mergePeriods(allTime, qoderCnPeriods.allTime);
       todayPartitions = { ...(todayPartitions || {}), qodercn: qoderCnPeriods.today };
+    }
+    if (cursorDevicePeriods && !anchorUsed) {
+      today = mergePeriods(today, cursorDevicePeriods.today);
+      month = mergePeriods(month, cursorDevicePeriods.month);
+      allTime = mergePeriods(allTime, cursorDevicePeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), cursor: cursorDevicePeriods.today };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1510,7 +1564,8 @@ async function collectUsageOnce(options) {
     env: options.env,
     homeDir: options.homeDir,
     platform: platformValue,
-    wslDetected: wslStatus?.detected
+    wslDetected: wslStatus?.detected,
+    cursorUsageSource: options.cursorUsageSource
   });
 
   const summary = {
@@ -1607,6 +1662,16 @@ async function collectUsageOnce(options) {
       clients: tokscaleClients,
       promaGraph: includesProma ? buildPromaHistoryGraph({ rows: promaRows || collectPromaRows(), pricingByModel: promaPricing || {} }) : null,
       qoderCnGraph: historyQoderCnGraph || null,
+      cursorDeviceGraph: cursorDeviceMode
+        ? buildCursorDeviceHistoryGraph({
+          rows: cursorDeviceRows || collectCursorDeviceRows({
+            env: options.env || process.env,
+            home: options.homeDir || os.homedir(),
+            logPath: options.cursorDeviceLogPath
+          }),
+          pricingByModel: cursorDevicePricing || {}
+        })
+        : null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
@@ -1632,6 +1697,7 @@ async function collectUsageOnce(options) {
     sourceChecks,
     wslStatus,
     observedAt: collectedAt,
+    cursorUsageSource: options.cursorUsageSource,
     lastActivityDays: mergeClientActivityDays(
       options.lastActivityDays,
       summary.history,
@@ -1675,6 +1741,14 @@ function clientWatchCandidates(clientsCsv, options = {}) {
 // Watching them turns every tick into the trigger for the next one (issue #15).
 const SELF_SYNCED_CLIENTS = new Set(SELF_SYNC_KINDS);
 
+function isSelfSyncedClient(client, options = {}) {
+  if (!SELF_SYNCED_CLIENTS.has(client)) return false;
+  // Device-mode Cursor reads a jsonl our Agent hook writes. Treating it as
+  // self-synced would drop that directory from the watcher the same way the
+  // tokscale cache is dropped, and usage would only move on the interval tick.
+  return client !== 'cursor' || !isCursorDeviceUsage(options.cursorUsageSource);
+}
+
 // Watch roots that feed a self-sync, keyed by client. Antigravity's IDE cache is
 // written by our sync and must stay watch-excluded, but the native session roots
 // are read-only inputs to that sync (tokscale only ever readdir/stats them —
@@ -1704,7 +1778,7 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
   for (const [client, dirs] of Object.entries(clientWatchCandidates(clientsCsv, options))) {
     // Cursor and Antigravity's built-in roots are caches written by our own
     // self-sync. A custom root is external input, so it must remain watchable.
-    const candidates = SELF_SYNCED_CLIENTS.has(client)
+    const candidates = isSelfSyncedClient(client, options)
       ? dirs.filter((dir) => customScanPaths[client]?.includes(dir))
       : dirs;
     const existing = [...new Set(candidates.filter(dirExists))];
@@ -2089,7 +2163,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
       .flatMap(([client, dirs]) => dirs
         .filter((dir) => (
           (client !== 'copilot' || customRoots.get(client)?.has(canonicalRoot(dir)))
-          && (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir))
+          && (!isSelfSyncedClient(client, options) || customScanPaths[client]?.includes(dir))
           && !(claimed.get(client) || EMPTY_SET).has(dir)
         ))
         .map((dir) => ({ root: canonicalRoot(dir), custom: isCustomOnly(client, canonicalRoot(dir)) }))),
@@ -2239,7 +2313,7 @@ function deriveClientHealth(clientsCsv, allTimePeriod, options = {}) {
     const checks = checksByClient[client] || [];
     const detected = checks.filter((check) => check.exists);
     const liveTokens = Number(usageClients[client] || 0);
-    const sync = SELF_SYNCED_CLIENTS.has(client) ? throttle.syncStatus(client) : null;
+    const sync = isSelfSyncedClient(client, options) ? throttle.syncStatus(client) : null;
     const entry = {
       source: {
         state: checks.length === 0 ? 'unknown' : (detected.length > 0 ? 'detected' : 'missing'),
@@ -2345,7 +2419,7 @@ function canTargetTodayPartitions(anchor, targetClients) {
   );
 }
 
-function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null) {
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, cursorUsageSource = 'account') {
   // Deterministic string that captures the config inputs anchor correctness
   // depends on. When this changes, the persisted anchor is invalidated.
   const qoderCn = String(qoderCnDbPath || '').trim();
@@ -2358,7 +2432,8 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qod
   // common case.
   const scanKey = customScanPathsFingerprint(customScanPaths);
   const scanPart = scanKey ? `|scan:${scanKey}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}`;
+  const cursorPart = isCursorDeviceUsage(cursorUsageSource) ? '|cursorUsage:device' : '';
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}${cursorPart}`;
 }
 
 function qoderCnSourcesForClients(clientsCsv, options = {}) {
@@ -2389,13 +2464,13 @@ function qoderCnProjectsDirForClients(clientsCsv, options = {}) {
 // collector still reuses the periods then and simply forces a full scan, while
 // a seed has nothing to stand on and declines.
 function collectorAnchorTrust(saved, options = {}) {
-  const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, now = new Date() } = options;
+  const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, cursorUsageSource = 'account', now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
   // Old Cursor anchors preserve `default` in their broad-period model maps;
   // applying a new `cursor-auto` Today delta to them would split one mode.
   if (normalizeClientsCsv(clients).split(',').includes('cursor') && saved.cursorAutoModelVersion !== 1) return null;
-  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths)) return null;
+  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, cursorUsageSource)) return null;
   const parsed = Date.parse(saved.fullScanAt || '');
   const capturedAtMs = Number.isFinite(parsed) && parsed <= now.getTime() ? parsed : null;
   return { capturedAtMs };
@@ -2659,12 +2734,31 @@ function startCollector(options) {
     ? hostOsInfo()
     : normalizeOsInfo(options.osInfo);
   const log = logger || (() => {});
+  const cursorUsageSource = normalizeCursorUsageSource(options.cursorUsageSource);
+  if (options.manageCursorDeviceHook === true) {
+    try {
+      const hookOptions = {
+        env: options.env || process.env,
+        home: options.homeDir,
+        execPath: options.execPath,
+        isElectron: options.isElectron
+      };
+      if (cursorUsageSource === 'device' && trackedClients.has('cursor')) {
+        installCursorDeviceHook(hookOptions);
+      } else {
+        uninstallCursorDeviceHook(hookOptions);
+      }
+    } catch (error) {
+      log(`cursor device hook update failed: ${error.message}`);
+    }
+  }
   const normalizedClients = normalizeClientsCsv(clients);
   const sourceOptions = {
     customScanPaths: options.customScanPaths,
     env: options.env,
     homeDir: options.homeDir,
-    platform: options.platform
+    platform: options.platform,
+    cursorUsageSource: options.cursorUsageSource
   };
   const qoderCnSources = qoderCnSourcesForClients(normalizedClients, {
     homeDir: options.homeDir,
@@ -2753,7 +2847,7 @@ function startCollector(options) {
       sourceSelfSync
     })
   });
-  const selfSyncedClients = normalizeClientsCsv(clients).split(',').filter((client) => SELF_SYNCED_CLIENTS.has(client));
+  const selfSyncedClients = normalizeClientsCsv(clients).split(',').filter((client) => isSelfSyncedClient(client, options));
   let activityRevision = 0;
   let collectedActivityRevision = 0;
   let initialCollectionComplete = false;
@@ -2822,7 +2916,8 @@ function startCollector(options) {
         projectsEnabled: options.projectsEnabled,
         qoderCnDbPath,
         qoderCnProjectsDir,
-        customScanPaths: options.customScanPaths
+        customScanPaths: options.customScanPaths,
+        cursorUsageSource: options.cursorUsageSource
       });
       if (trust) {
         anchor = {
@@ -3051,7 +3146,7 @@ function startCollector(options) {
               wslStatus: wslStatusAnchor,
               ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
               ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
-              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths),
+              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, options.cursorUsageSource),
               fullScanAt: new Date(lastFullScanAt).toISOString()
             }));
           } catch (_) {}
@@ -3594,7 +3689,7 @@ function startCollector(options) {
       targetClients: [normalized],
       // Only the self-synced clients have a sync to force; naming any other here
       // would be read by nothing.
-      forceSelfSync: refreshOptions.forceSync === true && SELF_SYNCED_CLIENTS.has(normalized) ? [normalized] : null
+      forceSelfSync: refreshOptions.forceSync === true && isSelfSyncedClient(normalized, options) ? [normalized] : null
     });
   }
 

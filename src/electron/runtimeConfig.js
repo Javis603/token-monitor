@@ -2,6 +2,7 @@
 
 const { clientsCsvForSetting } = require('../shared/clientTracking');
 const { normalizeHistoryIntervalMs } = require('../shared/collector');
+const { normalizeCursorUsageSource } = require('../shared/providers/cursor/deviceUsage');
 const {
   normalizeLimitsRefreshMode,
   normalizeLimitsRefreshMs,
@@ -35,7 +36,8 @@ const USAGE_STRUCTURAL_KEYS = Object.freeze([
   'historyIntervalMs',
   'sessionUsageArchiveEnabled',
   'projectsEnabled',
-  'wslScanEnabled'
+  'wslScanEnabled',
+  'cursorUsageSource'
 ]);
 // Functions and identity fields deliberately stay out: this key answers only
 // whether replacing the active usage runtime would change its collection work.
@@ -54,7 +56,8 @@ const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
   'watchTriggersCollection',
   'intervalRequiresActivity',
   'watchDebounceMs',
-  'wslScanEnabled'
+  'wslScanEnabled',
+  'cursorUsageSource'
 ]);
 const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsEnabled',
@@ -116,6 +119,7 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     intervalRequiresActivity: Boolean(context.intervalRequiresActivity),
     watchDebounceMs: Number(context.watchDebounceMs || 1500),
     wslScanEnabled: settings.wslScanEnabled !== false,
+    cursorUsageSource: normalizeCursorUsageSource(settings.cursorUsageSource),
     onError: context.onError,
     logger: context.logger
   };
