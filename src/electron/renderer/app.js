@@ -296,7 +296,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, tokscaleCheck: null, tokscaleBusy: false, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, minimaxPendingCheckSince: 0, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
@@ -430,16 +430,8 @@ Object.assign(els, {
   advancedSettingsGroup: document.getElementById('advancedSettingsGroup'),
   advancedSettingsToggle: document.getElementById('advancedSettingsToggle'),
   advancedSettingsDetails: document.getElementById('advancedSettingsDetails'),
-  advancedSettingsSummary: document.getElementById('advancedSettingsSummary'),
   tokscaleGroup: document.getElementById('tokscaleGroup'),
   tokscaleInstalled: document.getElementById('tokscaleInstalled'),
-  tokscaleBundledLine: document.getElementById('tokscaleBundledLine'),
-  tokscaleBundled: document.getElementById('tokscaleBundled'),
-  tokscaleNpm: document.getElementById('tokscaleNpm'),
-  tokscaleMessage: document.getElementById('tokscaleMessage'),
-  checkTokscaleButton: document.getElementById('checkTokscaleButton'),
-  downloadTokscaleButton: document.getElementById('downloadTokscaleButton'),
-  resetTokscaleButton: document.getElementById('resetTokscaleButton'),
   openTokscaleLinkButton: document.getElementById('openTokscaleLinkButton'),
   aboutVersion: document.getElementById('aboutVersion'),
   openRepositoryButton: document.getElementById('openRepositoryButton'),
@@ -1538,135 +1530,31 @@ function colorWithAlpha(hex, alpha) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-function setTokscaleMessage(text = '', tone = '') {
-  if (!els.tokscaleMessage) return;
-  els.tokscaleMessage.textContent = text;
-  els.tokscaleMessage.classList.toggle('error', tone === 'error');
-  els.tokscaleMessage.classList.toggle('success', tone === 'success');
-}
-
-function mergeTokscalePayload(payload) {
-  if (!payload || typeof payload !== 'object') return;
-  if (payload.status) state.tokscaleStatus = payload.status;
-  else if (payload.supported === false) state.tokscaleStatus = { supported: false };
-  else if (payload.current || payload.bundled || payload.downloaded) {
-    state.tokscaleStatus = {
-      ...(state.tokscaleStatus || { supported: true }),
-      supported: payload.supported !== false,
-      current: payload.current ?? state.tokscaleStatus?.current ?? null,
-      bundled: payload.bundled ?? state.tokscaleStatus?.bundled ?? null,
-      downloaded: payload.downloaded ?? state.tokscaleStatus?.downloaded ?? null
-    };
-  }
-  if (payload.npm || payload.checkedAt) {
-    state.tokscaleCheck = {
-      newer: Boolean(payload.newer),
-      npm: payload.npm || state.tokscaleCheck?.npm || null,
-      checkedAt: payload.checkedAt || state.tokscaleCheck?.checkedAt || null
-    };
-  }
-  if (payload.downloaded === true && state.tokscaleCheck?.npm?.version === payload.version) {
-    state.tokscaleCheck = { ...state.tokscaleCheck, newer: false };
-  }
-}
-
 function renderTokscaleStatus() {
   if (!els.tokscaleGroup) return;
   const status = state.tokscaleStatus;
-  const advancedSummaryKey = state.tokscaleCheck?.newer
-    ? 'settings.advanced.tokscaleUpdate'
-    : 'settings.advanced.summary';
-  if (els.advancedSettingsSummary) {
-    els.advancedSettingsSummary.dataset.i18n = advancedSummaryKey;
-    els.advancedSettingsSummary.textContent = t(advancedSummaryKey);
-  }
   if (status?.supported === false) {
     els.tokscaleGroup.classList.add('hidden');
     return;
   }
   els.tokscaleGroup.classList.remove('hidden');
   const current = status?.current;
-  const source = current?.source === 'downloaded'
-    ? (current.installedAt
-      ? t('settings.tokscale.downloadedSourceWithAge', { age: compactAge(current.installedAt) })
-      : t('settings.tokscale.downloadedSource'))
-    : t('settings.tokscale.bundledSource');
-  els.tokscaleInstalled.textContent = current ? `${versionText(current.version)} (${source})` : t('settings.common.notFound');
-  els.tokscaleBundledLine.classList.toggle('hidden', !status?.downloaded || !status?.bundled);
-  els.tokscaleBundled.textContent = status?.bundled ? versionText(status.bundled.version) : '—';
-  if (state.tokscaleCheck?.npm?.version) {
-    els.tokscaleNpm.textContent = state.tokscaleCheck.newer
-      ? versionText(state.tokscaleCheck.npm.version)
-      : t('settings.appUpdate.latestWithStatus', { version: state.tokscaleCheck.npm.version, status: t('settings.tokscale.currentSuffix') });
-  } else {
-    els.tokscaleNpm.textContent = t('settings.common.notChecked');
-  }
-  els.checkTokscaleButton.disabled = state.tokscaleBusy;
-  els.downloadTokscaleButton.disabled = state.tokscaleBusy;
-  els.resetTokscaleButton.disabled = state.tokscaleBusy;
-  els.downloadTokscaleButton.classList.toggle('hidden', !state.tokscaleCheck?.newer);
-  els.resetTokscaleButton.classList.toggle('hidden', !status?.downloaded);
+  const build = current?.build?.commit
+    ? t('settings.tokscale.forkBuild', { commit: current.build.commit.slice(0, 8) })
+    : '';
+  els.tokscaleInstalled.textContent = current
+    ? `${versionText(current.version)}${build}`
+    : t(status ? 'settings.common.notFound' : 'settings.common.checking');
 }
 
 async function refreshTokscaleStatus() {
   if (!window.tokenMonitor.getTokscaleStatus) return;
   try {
     state.tokscaleStatus = await window.tokenMonitor.getTokscaleStatus();
-    renderTokscaleStatus();
-  } catch (error) {
-    setTokscaleMessage(error.message, 'error');
+  } catch (_) {
+    state.tokscaleStatus = { supported: true, current: null };
   }
-}
-
-async function checkTokscaleNpm() {
-  state.tokscaleBusy = true;
-  setTokscaleMessage(t('settings.tokscale.checkingNpm'));
   renderTokscaleStatus();
-  try {
-    const result = await window.tokenMonitor.checkTokscaleNpm();
-    if (result?.error) throw new Error(result.error);
-    mergeTokscalePayload(result);
-    if (state.tokscaleStatus?.supported === false) return;
-    setTokscaleMessage(state.tokscaleCheck?.newer ? t('settings.tokscale.newerOnNpm') : t('settings.tokscale.bundledCurrent'));
-  } catch (error) {
-    setTokscaleMessage(error.message, 'error');
-  } finally {
-    state.tokscaleBusy = false;
-    renderTokscaleStatus();
-  }
-}
-
-async function downloadTokscaleFromNpm() {
-  state.tokscaleBusy = true;
-  setTokscaleMessage(t('settings.tokscale.downloading'));
-  renderTokscaleStatus();
-  try {
-    const result = await window.tokenMonitor.downloadTokscaleFromNpm();
-    if (result?.error) throw new Error(result.error);
-    mergeTokscalePayload(result);
-    setTokscaleMessage(t('settings.tokscale.downloaded', { version: versionText(result.version) }), 'success');
-  } catch (error) {
-    setTokscaleMessage(error.message, 'error');
-  } finally {
-    state.tokscaleBusy = false;
-    renderTokscaleStatus();
-  }
-}
-
-async function resetTokscaleToBundled() {
-  state.tokscaleBusy = true;
-  setTokscaleMessage(t('settings.tokscale.resetting'));
-  renderTokscaleStatus();
-  try {
-    state.tokscaleStatus = await window.tokenMonitor.resetTokscaleToBundled();
-    state.tokscaleCheck = null;
-    setTokscaleMessage(t('settings.tokscale.usingBundled'), 'success');
-  } catch (error) {
-    setTokscaleMessage(error.message, 'error');
-  } finally {
-    state.tokscaleBusy = false;
-    renderTokscaleStatus();
-  }
 }
 function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
 
@@ -12258,9 +12146,6 @@ els.resetZoomButton.addEventListener('click', async () => {
   await saveSettings({ zoomFactor: defaultAppearance.zoomFactor });
 });
 els.openConfigButton.addEventListener('click', () => window.tokenMonitor.openUserData());
-els.checkTokscaleButton?.addEventListener('click', checkTokscaleNpm);
-els.downloadTokscaleButton?.addEventListener('click', downloadTokscaleFromNpm);
-els.resetTokscaleButton?.addEventListener('click', resetTokscaleToBundled);
 els.openTokscaleLinkButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.('https://github.com/junhoyeo/tokscale'));
 els.openRepositoryButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_REPOSITORY_URL));
 els.openWebsiteButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_WEBSITE_URL));
@@ -12445,11 +12330,6 @@ window.tokenMonitor.onHubPush?.((payload) => {
     }
   }
   if (settingsVisible) renderHubStatus();
-});
-
-window.tokenMonitor.onTokscalePush?.((payload) => {
-  mergeTokscalePayload(payload);
-  if (isSettingsSurfaceVisible()) renderTokscaleStatus();
 });
 
 function renderConnectionStatus(surface = visibleStatsSurface()) {

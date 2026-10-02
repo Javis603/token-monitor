@@ -1,30 +1,30 @@
 ﻿'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { decideResolver, kimiWorkSessionsRoots } = require('../../src/shared/collector');
+const { kimiWorkSessionsRoots, readTokscaleBuild } = require('../../src/shared/collector');
 
-test('decideResolver prefers downloaded binary only when it is newer than bundled', () => {
-  const bundled = { source: 'bundled', version: '2.1.3', path: '/bundled/tokscale' };
-  const downloaded = { source: 'downloaded', version: '2.3.0', path: '/downloaded/tokscale' };
+test('readTokscaleBuild trusts the fork marker only while it still describes the binary', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-build-marker-'));
+  const binPath = path.join(dir, 'tokscale');
+  try {
+    fs.writeFileSync(binPath, 'fork binary');
+    assert.equal(readTokscaleBuild(binPath), null);
 
-  assert.equal(decideResolver({ downloaded, bundled }), downloaded);
-});
+    const marker = { releaseTag: 'token-monitor-ab1067f3', commit: 'ab1067f38edda3faa822c67b6df016c5c38ded9b', size: 'fork binary'.length };
+    fs.writeFileSync(`${binPath}.build.json`, JSON.stringify(marker));
+    assert.deepEqual(readTokscaleBuild(binPath), { releaseTag: marker.releaseTag, commit: marker.commit });
 
-test('decideResolver keeps bundled as floor when bundled is same or newer', () => {
-  const bundled = { source: 'bundled', version: '2.5.0', path: '/bundled/tokscale' };
-  const downloaded = { source: 'downloaded', version: '2.3.0', path: '/downloaded/tokscale' };
-
-  assert.equal(decideResolver({ downloaded, bundled }), bundled);
-  assert.equal(decideResolver({ downloaded: { ...downloaded, version: '2.5.0' }, bundled }), bundled);
-});
-
-test('decideResolver falls back to JS shim when no bundled binary exists', () => {
-  const shim = { source: 'shim', version: '2.1.3', path: '/shim/bin.js' };
-
-  assert.equal(decideResolver({ downloaded: null, bundled: null, shim }), shim);
+    // npm put an upstream binary back without clearing the marker.
+    fs.writeFileSync(binPath, 'upstream release binary');
+    assert.equal(readTokscaleBuild(binPath), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('kimiWorkSessionsRoots mirrors platform paths and relocated Windows shares', () => {

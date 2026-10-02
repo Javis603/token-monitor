@@ -79,6 +79,7 @@ const {
 const { seedSplitClients } = require('../shared/clientIdentitySplits');
 const {
   clientDiagnosticRoots,
+  getTokscaleStatus,
   lookupModelPricing,
   normalizeHistoryIntervalMs,
   visibleDiagnosticRoots
@@ -167,13 +168,6 @@ const {
   normalizeHiddenHomeModules,
   normalizeHomeModuleOrder
 } = require('./renderer/homeModulePreferences');
-const {
-  checkNpmForNewer,
-  cleanupStaleStaging,
-  downloadFromNpm,
-  getTokscaleStatus,
-  resetToBundled
-} = require('../shared/tokscaleUpdater');
 const {
   appUpdateInstallSupport,
   classifyAppUpdateError,
@@ -2953,8 +2947,6 @@ const providerTrayIcons = {};
 let registeredWindowToggleShortcut = '';
 let windowToggleShortcutRegistered = false;
 let defaultTrayIcon = null;
-let tokScaleNpmMetadata = null;
-let tokScaleUpdaterBusy = false;
 function getDefaultTrayIcon() {
   if (!defaultTrayIcon) defaultTrayIcon = buildTrayIcon();
   return defaultTrayIcon;
@@ -6205,53 +6197,6 @@ async function refreshAfterPricingChange() {
   }
 }
 
-function stripTokscaleMetadata(result) {
-  if (!result || typeof result !== 'object') return result;
-  const { metadata: _metadata, ...publicResult } = result;
-  return publicResult;
-}
-
-function sendTokscalePush(payload) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send('tokscale:push', payload); } catch (_) {}
-}
-
-async function checkTokscaleNpm({ silent = false } = {}) {
-  try {
-    const result = await checkNpmForNewer(app.getVersion());
-    if (result.metadata) tokScaleNpmMetadata = result.metadata;
-    const publicResult = stripTokscaleMetadata(result);
-    sendTokscalePush({ type: 'check', ...publicResult });
-    return publicResult;
-  } catch (error) {
-    if (silent) {
-      console.log(`[tokscale] npm check failed: ${error.message}`);
-      return { supported: true, error: null, silent: true };
-    }
-    return { supported: true, error: error.message };
-  }
-}
-
-async function downloadTokscaleFromNpm() {
-  if (tokScaleUpdaterBusy) return { supported: true, busy: true };
-  tokScaleUpdaterBusy = true;
-  try {
-    if (!tokScaleNpmMetadata) {
-      const checked = await checkNpmForNewer(app.getVersion());
-      if (!checked.supported) return { supported: false };
-      tokScaleNpmMetadata = checked.metadata;
-    }
-    const result = await downloadFromNpm(tokScaleNpmMetadata);
-    const publicResult = stripTokscaleMetadata(result);
-    sendTokscalePush({ type: 'download', ...publicResult });
-    return publicResult;
-  } catch (error) {
-    return { supported: true, error: error.message };
-  } finally {
-    tokScaleUpdaterBusy = false;
-  }
-}
-
 let appUpdateCheckInFlight = false;
 let appUpdateCheckPromise = null;
 let appUpdateLastError = null;
@@ -7110,7 +7055,10 @@ app.whenReady().then(() => {
   createWindow();
   syncLoginItemSettingFromOs();
   configureWindowToggleShortcut();
-  cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
+  // The retired in-app npm updater kept upstream tokscale builds here; the
+  // collector no longer reads them, so drop the leftovers.
+  fs.promises.rm(path.join(sharedDataDir(), 'tokscale'), { recursive: true, force: true })
+    .catch((error) => console.log(`[tokscale] removing retired npm downloads failed: ${error.message}`));
   ensureTray();
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
@@ -7130,7 +7078,6 @@ app.whenReady().then(() => {
   refreshExchangeRates();                // non-blocking: only fetches when stale
   rateRefreshTimer = setInterval(() => { refreshExchangeRates(); }, 6 * 60 * 60 * 1000);
   syncEdgeDock();
-  setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
   ipcMain.handle('appearance:getBackgroundImage', () => getBackgroundImage(app.getPath('userData')));
   ipcMain.handle('appearance:chooseBackgroundImage', async () => {
@@ -7825,14 +7772,6 @@ app.whenReady().then(() => {
   ipcMain.handle('mimo:setAccountEnabled', (_event, id, enabled) => setMimoManagedAccountEnabled(id, enabled));
   ipcMain.handle('mimo:removeAccount', async (_event, id) => removeMimoManagedAccount(id));
   ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
-  ipcMain.handle('tokscale:checkNpm', () => checkTokscaleNpm());
-  ipcMain.handle('tokscale:downloadFromNpm', () => downloadTokscaleFromNpm());
-  ipcMain.handle('tokscale:resetToBundled', async () => {
-    tokScaleNpmMetadata = null;
-    const status = await resetToBundled();
-    sendTokscalePush({ type: 'reset', status });
-    return status;
-  });
   ipcMain.handle('appUpdate:getState', () => deriveAppUpdateState());
   ipcMain.handle('appUpdate:checkNow', () => runAppUpdateCheck({ force: true }));
   ipcMain.handle('appUpdate:download', () => downloadAndPrepareAppUpdate());

@@ -100,10 +100,11 @@ function diagnosticTokscaleInfo(getTokscaleStatus) {
     const status = getTokscaleStatus?.() || {};
     return {
       version: status.current?.version || status.bundled?.version || 'unknown',
-      source: status.current?.source || (status.bundled ? 'bundled' : 'unknown')
+      source: status.current?.source || (status.bundled ? 'bundled' : 'unknown'),
+      build: status.current?.build?.releaseTag || null
     };
   } catch (_) {
-    return { version: 'unknown', source: 'unknown' };
+    return { version: 'unknown', source: 'unknown', build: null };
   }
 }
 
@@ -323,6 +324,7 @@ function createDiagnosticSnapshotBuilder(options = {}) {
         chromiumVersion: versions.chrome,
         tokscaleVersion: tokScale.version,
         tokscaleSource: tokScale.source,
+        tokscaleBuild: tokScale.build,
         packaged: appState.packaged === true,
         platform,
         osName: osInfo.name,

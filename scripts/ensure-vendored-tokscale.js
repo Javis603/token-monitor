@@ -16,6 +16,7 @@ const {
   resolveTargetBinPath,
   resolveInstalledPackageVersion
 } = require('./vendoredTokscale');
+const { tokscaleBuildMarkerPath } = require('../src/shared/tokscalePlatform');
 
 const MAX_BYTES = 50 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 60 * 1000;
@@ -57,6 +58,18 @@ function smokeTest(binPath, spawn = spawnSync) {
   if (result.error) throw new Error(`Binary failed to execute: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`Binary exited ${result.status}: ${result.stderr || result.stdout}`);
   return result.stdout.trim();
+}
+
+// The marker records the size of the binary it describes, so a later npm
+// reinstall that puts the upstream binary back cannot inherit the fork label.
+function writeBuildMarker(manifest, entry, targetBinPath, fsImpl) {
+  const marker = {
+    releaseTag: manifest.releaseTag,
+    commit: manifest.commit,
+    sha256: entry.sha256,
+    size: fsImpl.statSync(targetBinPath).size
+  };
+  fsImpl.writeFileSync(tokscaleBuildMarkerPath(targetBinPath), `${JSON.stringify(marker, null, 2)}\n`);
 }
 
 function targetPlatformForKey(key) {
@@ -145,6 +158,7 @@ async function ensureVendoredTokscale({
 
   if (sha256File(targetBinPath, fsImpl) === entry.sha256) {
     log(`Vendored tokscale already matches ${entry.sha256.slice(0, 12)} at ${targetBinPath}; no download needed.`);
+    writeBuildMarker(manifest, entry, targetBinPath, fsImpl);
     return { status: 'matched', key, targetBinPath };
   }
 
@@ -163,6 +177,7 @@ async function ensureVendoredTokscale({
     if (process.platform !== 'win32') fsImpl.chmodSync(tempPath, 0o755);
     const version = smoke(tempPath);
     fsImpl.renameSync(tempPath, targetBinPath);
+    writeBuildMarker(manifest, entry, targetBinPath, fsImpl);
     log(`Vendored tokscale ensured at ${targetBinPath} (${version})`);
     return { status: 'installed', key, targetBinPath, version };
   } finally {

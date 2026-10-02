@@ -4,7 +4,6 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const semver = require('semver');
 const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
@@ -16,7 +15,7 @@ const {
   MAX_DIAGNOSTICS_PER_CLIENT,
   deriveClientOverall
 } = require('./clientHealth');
-const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
+const { tokscaleBuildMarkerPath, tokscalePackageNameForPlatform } = require('./tokscalePlatform');
 const { createTokscaleCapabilityResolver, filterSupportedClients, parseSupportedClients } = require('./tokscaleCapabilities');
 const { customPricingPath, tokscaleCacheDirs } = require('./tokscaleConfig');
 const { normalizeCustomScanPaths, customScanPathsFingerprint, tokscaleExtraDirsEnv } = require('./customScanPaths');
@@ -112,42 +111,40 @@ function locateBundledBinary() {
   return null;
 }
 
-function readDownloadedPointer() {
-  const currentPath = path.join(sharedDataDir(), 'tokscale', 'current.json');
-  const current = readJson(currentPath, null);
-  if (!current || typeof current !== 'object') return null;
-  if (current.platform && current.platform !== tokscalePlatformKey()) return null;
-  if (!semver.valid(current.version)) return null;
-  if (typeof current.path !== 'string' || !path.isAbsolute(current.path)) return null;
+// The bundled binary is the only native candidate: packaging swaps the pinned
+// fork build into @tokscale/cli-<platform>, and an upstream npm build would
+// silently drop the downstream session/workspace report grouping. A
+// `current.json` pointer left behind by the retired npm updater is ignored.
+function resolvePlatformBinary() {
+  return locateBundledBinary() || { source: 'shim', path: TOKSCALE_BIN_JS, version: null };
+}
+
+// The fork build reports the same `--version` as the upstream release it is
+// based on, so only the marker beside the binary identifies it. A marker whose
+// recorded size no longer matches belongs to a binary npm has since replaced.
+function readTokscaleBuild(binPath) {
+  const marker = readJson(tokscaleBuildMarkerPath(binPath), null);
+  if (!marker || typeof marker.releaseTag !== 'string' || typeof marker.commit !== 'string') return null;
   try {
-    const stat = fs.statSync(current.path);
-    if (!stat.isFile()) return null;
-    if (process.platform !== 'win32' && (stat.mode & 0o111) === 0) return null;
+    if (fs.statSync(binPath).size !== marker.size) return null;
   } catch (_) {
     return null;
   }
-  return {
-    source: 'downloaded',
-    path: current.path,
-    version: current.version,
-    installedAt: current.installedAt || '',
-    integrity: current.integrity || ''
-  };
+  return { releaseTag: marker.releaseTag, commit: marker.commit };
 }
 
-function decideResolver({ downloaded, bundled, shim }) {
-  if (downloaded && !bundled) return downloaded;
-  if (downloaded && bundled && semver.valid(downloaded.version) && semver.valid(bundled.version) && semver.gt(downloaded.version, bundled.version)) {
-    return downloaded;
-  }
-  return bundled || shim || null;
-}
-
-function resolvePlatformBinary() {
+function getTokscaleStatus() {
+  if (!tokscalePackageNameForPlatform()) return { supported: false };
   const bundled = locateBundledBinary();
-  const downloaded = readDownloadedPointer();
-  const shim = { source: 'shim', path: TOKSCALE_BIN_JS, version: null };
-  return decideResolver({ downloaded, bundled, shim });
+  return {
+    supported: true,
+    current: bundled ? {
+      source: bundled.source,
+      version: bundled.version,
+      path: bundled.path,
+      build: readTokscaleBuild(bundled.path)
+    } : null
+  };
 }
 
 // Tokscale reads a few XDG environment variables with a bare
@@ -3633,7 +3630,6 @@ module.exports = {
   mergeClientActivityDays,
   wslPeriodsForPreview,
   statusFromSignals,
-  decideResolver,
   DEFAULT_HISTORY_INTERVAL_MS,
   HISTORY_INTERVAL_VALUES,
   LIMITS_RESET_BOUNDARY_MAX_TIMER_MS,
@@ -3645,7 +3641,8 @@ module.exports = {
   lookupModelPricing,
   normalizePromaPricing,
   pruneAttemptedResetBoundaries,
-  readDownloadedPointer,
+  getTokscaleStatus,
+  readTokscaleBuild,
   resolvePlatformBinary,
   resolvePromaPricing,
   resetPromaPricingCache,

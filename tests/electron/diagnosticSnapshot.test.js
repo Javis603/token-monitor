@@ -86,7 +86,7 @@ function createBuilder(overrides = {}) {
     getHubModeGeneration: () => 7,
     getCurrentHubStatsIdentity: () => 'host|http://127.0.0.1:17321',
     getLocalRecord: () => localRecord,
-    getTokscaleStatus: () => ({ current: { version: '4.10.0', source: 'bundled' } }),
+    getTokscaleStatus: () => ({ current: { version: '4.10.0', source: 'bundled', build: { releaseTag: 'token-monitor-ab1067f3', commit: 'ab1067f3' } } }),
     getConfiguration: () => ({ configurationSource: 'effective-normalized', allTimeSince: '2024-01-01' }),
     getJournalSnapshot: () => ({ startedAt: '2026-08-06T09:00:00.000Z', events: [] }),
     getArchiveState: () => ({ enabled: true, loaded: false, countSource: 'not-loaded' }),
@@ -115,6 +115,7 @@ test('host snapshots use the cached Hub stats without rebuilding aggregates', ()
   assert.equal(snapshot.hub.devices.deviceCount, 2);
   assert.equal(snapshot.hub.devices.remoteGroups[0].osVersion, '11.0.26100');
   assert.equal(snapshot.environment.resolvedLocale, 'zh-TW');
+  assert.equal(snapshot.environment.tokscaleBuild, 'token-monitor-ab1067f3');
   assert.equal(snapshot.configuration.allTimeSince, '2024-01-01');
   assert.equal(snapshot.usage.usageOwner, 'electron-widget');
 });
