@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { isDeepStrictEqual } = require('node:util');
-const { PERIODS, normalizePeriod } = require('./usage');
+const { PERIODS, normalizePeriod } = require('../usage');
 const {
   cloneJson,
   hasSummaryPeriod,
@@ -13,15 +13,15 @@ const {
   periodFor,
   targetPeriod,
   toDate
-} = require('./archiveHelpers');
-const { readJson, sharedDataDir, writeJsonAtomic } = require('./config');
-const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
-const { splitClientIdFor } = require('./clientIdentitySplits');
+} = require('../archiveHelpers');
+const { readJson, sharedDataDir, writeJsonAtomic } = require('../config');
+const { filterReasonixSyntheticSessions, isReasonixSyntheticSession } = require('../providers/reasonix/sessionGuard');
+const { splitClientIdFor } = require('../clientIdentitySplits');
 const {
   isLegacyCursorEntry,
   legacyCursorLookup,
   supersedingCursorSessionId
-} = require('./providers/cursor/sessionGuard');
+} = require('../providers/cursor/sessionGuard');
 
 function sessionUsageArchiveDate(deviceRecord, fallback = new Date()) {
   const collectedAt = new Date(deviceRecord?.updatedAt || '');

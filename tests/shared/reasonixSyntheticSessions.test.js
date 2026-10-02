@@ -7,13 +7,13 @@ const {
   filterReasonixSyntheticSessions,
   isReasonixSyntheticSession
 } = require('../../src/shared/providers/reasonix/sessionGuard');
-const { createDeviceState } = require('../../src/shared/deviceState');
+const { createDeviceState } = require('../../src/shared/usage/deviceState');
 const {
   applySessionUsageArchive,
   captureSessionUsageArchive,
   normalizeSessionUsageArchive,
   readSessionUsageArchive
-} = require('../../src/shared/sessionUsageArchive');
+} = require('../../src/shared/usage/sessionUsageArchive');
 const { composeLocalSyncStats } = require('../../src/electron/syncDisplayStats');
 const { mergedLocalAllTimeSessions } = require('../../src/shared/localSessions');
 const { syncPayload } = require('../../src/shared/syncPayload');

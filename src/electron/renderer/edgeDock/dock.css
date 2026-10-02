@@ -218,6 +218,20 @@ html.edge-dock-liquid-glass .edge-dock-shape-line { stroke: transparent; }
   50%      { opacity: 0.66; transform: scale(1.06); }
 }
 
+/* The flare a quota refill lands with — the ring's counterpart to the meter's
+   `.limit-meter-completion` (its keyframes and timing are driven by the same
+   WAAPI pass, see animateRingCompletion). A disc clipped to the ring's own
+   bounds rather than the meter's bar end. */
+.edge-dock-ring-complete {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(closest-side, var(--ring-color, var(--accent)), transparent 72%);
+}
+
 .edge-dock-mark {
   width: 17px;
   height: 17px;
@@ -535,6 +549,7 @@ html.edge-dock-liquid-glass .edge-dock-shape-line { stroke: transparent; }
   column-gap: 10px;
 }
 .edge-dock-session-name {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -542,6 +557,12 @@ html.edge-dock-liquid-glass .edge-dock-shape-line { stroke: transparent; }
   color: var(--text);
   font-size: 11.5px;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.edge-dock-session-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
 }
 /* The state mark, reserved on every row so all titles start at the same x.
@@ -640,6 +661,7 @@ html.edge-dock-liquid-glass .edge-dock-shape-line { stroke: transparent; }
    same count one line above it. */
 .edge-dock-session-groups { gap: 12px; }
 .edge-dock-session-group { display: grid; gap: 6px; }
+.edge-dock-session-cache { margin-left: auto; flex: 0 0 auto; white-space: nowrap; }
 .edge-dock-session-meta {
   grid-column: 1 / -1;
   display: flex;
@@ -696,7 +718,8 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
 /* The tooltip is `width: max-content` and grows leftward from its trigger. On
    the page that has the whole window to grow into; here the window is the card,
    so a wide one would run off the edge instead of wrapping. */
-.edge-dock-accounts .limit-detail-tooltip {
+.edge-dock-accounts .limit-detail-tooltip,
+.edge-dock-sessions .limit-detail-tooltip {
   max-width: 248px;
 }
 
@@ -940,3 +963,23 @@ html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge
   white-space: nowrap;
   border: 0;
 }
+
+.edge-dock-rate-details {
+  margin-top: 8px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.16);
+  gap: 8px;
+}
+.edge-dock-rate-model {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) max-content;
+  align-items: center;
+  column-gap: 7px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.edge-dock-rate-model .edge-dock-mark { width: 12px; height: 12px; }
+.edge-dock-rate-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.edge-dock-rate-model-value { color: var(--muted); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.edge-dock-rate-device { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.edge-dock-rate-device.is-separated { margin-top: 2px; padding-top: 8px; border-top: 1px solid rgba(var(--line-rgb), 0.16); }

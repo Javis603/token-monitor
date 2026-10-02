@@ -256,6 +256,7 @@ test('full anchors persist local-only Reasonix native views alongside aggregate 
 
     await waitForCondition(() => updates.length === 1);
     const saved = JSON.parse(fs.readFileSync(path.join(tmpShared, 'collector-anchor.json'), 'utf8'));
+    assert.equal(saved.cursorAutoModelVersion, 1);
     assert.deepEqual(saved.nativeSessions, nativeView.sessions);
     assert.deepEqual(saved.nativeProjects, nativeView.projects);
   } finally {
@@ -675,4 +676,17 @@ test('anchor trust separates "cannot be reused" from "cannot be dated"', () => {
   assert.equal(collectorAnchorTrust(anchor({ fullScanAt: 'nope' }), options).capturedAtMs, null);
   const future = new Date(now.getTime() + 60_000).toISOString();
   assert.equal(collectorAnchorTrust(anchor({ fullScanAt: future }), options).capturedAtMs, null);
+});
+
+test('Cursor anchors from before the Auto model rename require a full scan', () => {
+  const { collectorAnchorTrust, configFingerprint } = freshCollector();
+  const now = new Date(2026, 7, 8, 10, 0, 0);
+  const options = { clients: 'cursor', allTimeSince: '2024-01-01', now };
+  const anchor = {
+    dateKey: '2026-08-08', today: {}, month: {}, allTime: {},
+    configFingerprint: configFingerprint('cursor', '2024-01-01'),
+    fullScanAt: new Date(now.getTime() - 60_000).toISOString()
+  };
+  assert.equal(collectorAnchorTrust(anchor, options), null);
+  assert.equal(collectorAnchorTrust({ ...anchor, cursorAutoModelVersion: 1 }, options).capturedAtMs, now.getTime() - 60_000);
 });

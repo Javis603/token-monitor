@@ -37,7 +37,7 @@ const {
 } = require('../../src/shared/collector');
 const { KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
 const { createSelfSyncThrottle } = require('../../src/shared/selfSyncThrottle');
-const { applySessionUsageArchive } = require('../../src/shared/sessionUsageArchive');
+const { applySessionUsageArchive } = require('../../src/shared/usage/sessionUsageArchive');
 const { aggregateDevices, mergeDeviceRecord, normalizeDeviceRecord } = require('../../src/shared/usage');
 
 installSourceEnvGuard(test);
@@ -465,6 +465,25 @@ test('source resolution feeds watcher paths and exact-file diagnostics without c
   assert.deepEqual(clientWatchCandidates('zcode,codex,amp', options).zcode, roots.zcode.map((root) => root.dir));
   assert.deepEqual(clientSourceChecks('zcode', options).zcode.map((check) => check.id), ['zcode-projects', 'zcode-cli-db']);
   assert.equal(clientDiagnosticRoots('zcode', options).zcode.find((root) => root.id === 'zcode-cli-db').dir, zcodeDb.sourcePath);
+});
+
+test('Muse watches the same XDG sessions root used for source detection', () => {
+  const homeDir = path.join(os.tmpdir(), 'muse-source-home');
+  const env = { XDG_DATA_HOME: path.join(homeDir, 'xdg') };
+  const options = { homeDir, env };
+  const dir = path.join(env.XDG_DATA_HOME, 'muse', 'sessions');
+  assert.deepEqual(clientSourceRoots('muse', options).muse, [{ id: 'muse-sessions', dir }]);
+  assert.deepEqual(clientWatchCandidates('muse', options).muse, [dir]);
+  assert.deepEqual(clientSourceChecks('muse', options).muse.map((check) => check.id), ['muse-sessions']);
+});
+
+test('fx watches the home-relative sessions root used for source detection', () => {
+  const homeDir = path.join(os.tmpdir(), 'fx-source-home');
+  const options = { homeDir };
+  const dir = path.join(homeDir, '.fx', 'sessions');
+  assert.deepEqual(clientSourceRoots('fx', options).fx, [{ id: 'fx-sessions', dir }]);
+  assert.deepEqual(clientWatchCandidates('fx', options).fx, [dir]);
+  assert.deepEqual(clientSourceChecks('fx', options).fx.map((check) => check.id), ['fx-sessions']);
 });
 
 test('source observations keep exact files, optional roots and WSL health in sync with diagnostics', () => {

@@ -12,11 +12,11 @@
 
 const { parentPort, workerData } = require('node:worker_threads');
 
-const { startCollector } = require('./collector');
+const { startCollector } = require('../collector');
 const { externalAgentActive } = require('./agentPid');
-const { createCursorUsageEventIndex } = require('./providers/cursor/usageEvents');
+const { createCursorUsageEventIndex } = require('../providers/cursor/usageEvents');
 const { createSessionUsageArchiveStore } = require('./sessionUsageArchiveStore');
-const { trackLiveSubprocesses } = require('./subprocessTermination');
+const { trackLiveSubprocesses } = require('../subprocessTermination');
 const { createUsageTransform } = require('./usageTransform');
 
 const config = workerData || {};

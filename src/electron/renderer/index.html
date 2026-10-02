@@ -118,19 +118,12 @@
               <div id="advancedSettingsDetails" class="advanced-settings-details hidden" inert>
                 <div class="advanced-settings-body">
                   <div id="tokscaleGroup" class="settings-group advanced-settings-block maintenance-panel">
-                    <div class="settings-group-header maintenance-header"><span>Tokscale</span><span data-i18n="settings.tokscale.source">Data engine from npm</span></div>
+                    <div class="settings-group-header maintenance-header"><span>Tokscale</span><span data-i18n="settings.tokscale.source">Bundled CLI dependency</span></div>
                     <div class="maintenance-version-grid tokscale-version-grid">
                       <div class="maintenance-version-item"><span data-i18n="settings.tokscale.installed">Installed</span><strong id="tokscaleInstalled" data-i18n="settings.common.checking">Checking...</strong></div>
-                      <div class="maintenance-version-item"><span><span data-i18n="settings.tokscale.npm">On npm</span> <small data-i18n="settings.tokscale.latestTag">(latest tag)</small></span><strong id="tokscaleNpm" data-i18n="settings.common.notChecked">Not checked</strong></div>
-                      <div id="tokscaleBundledLine" class="maintenance-version-item"><span data-i18n="settings.tokscale.bundled">Bundled</span><strong id="tokscaleBundled">—</strong></div>
+                      <div id="tokscaleBundledBuildRow" class="maintenance-version-item hidden"><span data-i18n="settings.tokscale.bundledBuild">Bundled build</span><strong id="tokscaleBundledBuild"></strong></div>
                     </div>
                     <p class="settings-note"><span data-i18n="settings.tokscale.noteBefore">Token Monitor uses tokscale (MIT, open-source) to read token data.</span> <button id="openTokscaleLinkButton" type="button" class="inline-link" data-i18n="settings.tokscale.learnMore">Learn more</button></p>
-                    <div id="tokscaleMessage" class="tokscale-message"></div>
-                    <div class="settings-actions maintenance-actions">
-                      <button id="checkTokscaleButton" type="button" data-i18n="settings.tokscale.checkNpm">Check npm</button>
-                      <button id="downloadTokscaleButton" type="button" class="hidden" data-i18n="settings.tokscale.downloadNpm">Download from npm</button>
-                      <button id="resetTokscaleButton" type="button" class="hidden" data-i18n="settings.tokscale.resetBundled">Reset to bundled</button>
-                    </div>
                   </div>
                   <div class="settings-group advanced-settings-block advanced-config-row">
                     <p class="settings-note"><span data-i18n="settings.advanced.note">Additional options are available in</span> <code>settings.json</code>.</p>
@@ -279,6 +272,7 @@
                     <div class="inline-options" role="radiogroup" aria-labelledby="edgeDockModeLabel">
                       <label class="inline-option"><input type="radio" name="edgeDockMode" value="autoHide" /><span data-i18n="settings.edgeDock.mode.autoHide">Auto-hide</span></label>
                       <label class="inline-option"><input type="radio" name="edgeDockMode" value="always" /><span data-i18n="settings.edgeDock.mode.always">Always visible</span></label>
+                      <label class="inline-option"><input type="radio" name="edgeDockMode" value="alwaysExceptFullScreen" /><span data-i18n="settings.edgeDock.mode.alwaysExceptFullScreen">Fullscreen auto-hide</span></label>
                     </div>
                   </div>
                   <div class="settings-item">
@@ -1374,6 +1368,10 @@
                 <input type="radio" name="hubMode" value="host" />
                 <div class="hub-mode-text"><strong data-i18n="settings.sync.hostHub">Host hub on this device</strong><span data-i18n="settings.sync.hostHubDesc">Open a hub here so other devices can connect.</span></div>
               </label>
+              <label class="hub-mode-option">
+                <input type="radio" name="hubMode" value="icloud" />
+                <div class="hub-mode-text"><strong data-i18n="settings.sync.icloud">iCloud Drive</strong><span data-i18n="settings.sync.icloudDesc">Sync this Mac with other Macs using iCloud Drive.</span></div>
+              </label>
             </div>
             <div id="hubClientFields" class="hub-mode-fields hidden">
               <label><span data-i18n="settings.sync.hubUrl">Hub URL</span><input id="hubUrlInput" type="text" spellcheck="false" placeholder="http://hub-host:17321" /></label>
@@ -1408,6 +1406,11 @@
               <div id="hubAddressList" class="hub-address-list"></div>
               <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. macOS / Windows may prompt to allow incoming connections the first time. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
               <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
+            </div>
+            <div id="icloudFields" class="hub-mode-fields hidden">
+              <div id="icloudStatus" class="hub-status" role="status" aria-live="polite"></div>
+              <div id="icloudRootStatus" class="icloud-root-status"></div>
+              <p class="settings-note" data-i18n="settings.sync.icloudNote">Sync usage, limits, history, devices and subscriptions across Macs signed into the same Apple ID. No Token Monitor server is used; updates may take a moment to appear.</p>
             </div>
             <label><span data-i18n="settings.sync.deviceId">Device ID</span><input id="deviceIdInput" type="text" spellcheck="false" placeholder="auto (hostname)" data-i18n-placeholder="settings.sync.deviceIdPlaceholder" /></label>
             <div class="settings-actions">
@@ -1490,6 +1493,7 @@
     <script src="../../shared/compactTokens.js"></script>
     <script src="../../shared/limits/balanceDisplay.js"></script>
     <script src="../../shared/limits/windowLabels.js"></script>
+    <script src="../../shared/limits/usageItems.js"></script>
     <script src="../../shared/limits/windowText.js"></script>
     <script src="limits/windowsView.js"></script>
     <script src="trayBars.js"></script>
@@ -1506,6 +1510,7 @@
     <script src="../providers/codex/accountControl.js"></script>
     <script src="limits/displayMode.js"></script>
     <script src="limits/resetMotion.js"></script>
+    <script src="limits/resetAnimator.js"></script>
     <script src="clientStatusPresentation.js"></script>
     <script src="clientHealthPresentation.js"></script>
     <script src="clientSourceCache.js"></script>
@@ -1523,7 +1528,9 @@
     <script src="i18n.js"></script>
     <script src="../../shared/providers/reasonix/sessionGuard.js"></script>
     <script src="../../shared/sessionLive.js"></script>
+    <script src="../sessionTitleDisplay.js"></script>
     <script src="sessionRows.js"></script>
+    <script src="overflowText.js"></script>
     <script src="breakdownRenderPolicy.js"></script>
     <script src="statsRenderScheduler.js"></script>
     <script src="allTimeSessions.js"></script>

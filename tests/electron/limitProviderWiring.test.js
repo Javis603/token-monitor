@@ -13,7 +13,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 const { CREDENTIAL_SETTING_PATHS, credentialSettingsForRenderer } = require('../../src/shared/credentialStore');
-const { LIMIT_PROVIDER_SETTING_KEYS, limitsConfigFromSettings } = require('../../src/electron/runtimeConfig');
+const { LIMIT_PROVIDER_SETTING_KEYS, limitsConfigFromSettings, classifySettingsChange } = require('../../src/electron/runtimeConfig');
 const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
 const { isAllowedVerificationUrl } = require('../../src/shared/providers/copilot/deviceFlow');
 const { isAllowedCodexLoginUrl } = require('../../src/shared/providers/codex/login');
@@ -99,6 +99,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     copilotApiToken: ['providers', 'copilot', 'apiToken'],
     zedCookie: ['providers', 'zed', 'cookie'],
     typesafeCookie: ['providers', 'typesafe', 'cookie'],
+    stepfunToken: ['providers', 'stepfun', 'token'],
     commandcodeCookie: ['providers', 'commandcode', 'cookie'],
     zaiApiKey: ['providers', 'zai', 'apiKey'],
     zaiTeamApiKey: ['providers', 'zaiTeam', 'apiKey'],
@@ -142,7 +143,7 @@ test('the renderer receives no credential values except the two hub secrets', ()
 
 test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refresh scopes)', () => {
   assert.deepEqual(LIMIT_PROVIDER_SETTING_KEYS, {
-    claude: ['claudeWebCookie'],
+    claude: ['claudeWebCookie', 'claudeWebOrganizationId'],
     codex: ['codexManagedAccounts'],
     opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
     cursor: ['cursorDisabledAccountIds'],
@@ -160,8 +161,9 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     deepseek: ['deepseekApiKey'],
     devin: ['devinBearerToken', 'devinOrganization'],
     typesafe: ['typesafeCookie'],
+    stepfun: ['stepfunToken'],
     openrouter: ['openrouterProfiles'],
-    minimax: ['minimaxApiKey'],
+    minimax: ['minimaxApiKey', 'minimaxApiRegion'],
     volcengine: [
       'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
       'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'
@@ -206,6 +208,15 @@ test('limitsConfigFromSettings env fallbacks and precedence', () => {
   assert.equal(legacyOnly.zedCookie, 'legacy-zed');
   assert.equal(legacyOnly.typesafeCookie, 'legacy-typesafe');
   assert.equal(legacyOnly.workbuddyAccessToken, 'legacy-wb');
+  // The Minimax region reaches the probe through the config layer, so the env
+  // names must be declared on the field — minimaxRegion's own env lane is
+  // shadowed by the configDefault this resolves to.
+  assert.equal(limitsConfigFromSettings({}, { env: {} }).minimaxApiRegion, 'auto');
+  assert.equal(limitsConfigFromSettings({}, { env: { MINIMAX_API_REGION: 'cn' } }).minimaxApiRegion, 'cn');
+  assert.equal(
+    limitsConfigFromSettings({}, { env: { TOKEN_MONITOR_MINIMAX_API_REGION: 'intl' } }).minimaxApiRegion,
+    'intl'
+  );
   // Settings win over env.
   const settingsWin = limitsConfigFromSettings(
     { claudeWebCookie: 'settings-claude', zedCookie: 'settings-zed' },
@@ -256,13 +267,13 @@ test('settings:update normalizes provider fields and strips separately managed a
   const fields = LIMIT_PROVIDER_REGISTRY.flatMap(({ fields }) => fields);
   const normalizedKeys = fields.filter(({ normalize, persist }) => normalize && persist !== 'never').map(({ key }) => key);
   assert.deepEqual(normalizedKeys.sort(), [
-    'claudeWebCookie', 'deepseekApiKey', 'minimaxApiKey', 'copilotApiToken', 'copilotEnterpriseHost',
+    'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'minimaxApiKey', 'minimaxApiRegion', 'copilotApiToken', 'copilotEnterpriseHost',
     'factoryApiKey', 'clineApiKey', 'zaiApiKey', 'zaiApiRegion', 'zaiTeamApiKey',
     'zaiTeamOrganizationId', 'zaiTeamProjectId', 'volcengineAccessKeyId',
     'volcengineSecretAccessKey', 'volcengineRegion', 'volcengineAgentAccessKeyId',
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
-    'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie',
+    'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
     'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaCookie'
   ].sort());
   for (const key of normalizedKeys) {
@@ -277,6 +288,10 @@ test('settings:update normalizes provider fields and strips separately managed a
   }
   assert.equal(finalAccountSettings({}, {}).zaiApiRegion, 'global');
   assert.equal(finalAccountSettings({}, {}).qoderSite, 'global');
+  assert.equal(finalAccountSettings({}, {}).minimaxApiRegion, '');
+  // A stored value the normalizer no longer accepts is re-canonicalized against
+  // persistFallback rather than kept verbatim.
+  assert.equal(finalAccountSettings({}, { minimaxApiRegion: '  CN  ' }).minimaxApiRegion, 'cn');
   // Kimi's keys are normalized in the patch but have no final literal entry.
   assert.equal(Object.hasOwn(finalAccountSettings({ kimiApiKey: 'x' }, {}), 'kimiApiKey'), false);
 
@@ -337,6 +352,7 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://commandcode.ai/',
     'https://dashboard.zed.dev/',
     'https://console.typesafe.ai/settings/billing',
+    'https://platform.stepfun.com/plan-usage',
     'https://ollama.com/settings',
     'https://www.ollama.com/signin',
     'https://kimi.com/code',
@@ -505,4 +521,26 @@ test('every provider with an account panel has its group and status markup in in
   for (const [provider, { status }] of Object.entries(nodes)) {
     assert.match(indexHtml, new RegExp(`id="${status}"`), `${provider} status pill exists in index.html`);
   }
+});
+
+test('MiniMax implicit region remains env-driven after unrelated saves and reloads', () => {
+  const { initialAccountSettings } = require('../../src/electron/limits/accountSettings');
+  const first = initialAccountSettings({ MINIMAX_API_REGION: 'cn' });
+  const saved = JSON.parse(JSON.stringify({ ...first, ...finalAccountSettings({ language: 'en' }, first) }));
+  assert.equal(saved.minimaxApiRegion, '');
+  const env = { MINIMAX_API_REGION: 'intl' };
+  assert.equal(limitsConfigFromSettings(saved, { env }).minimaxApiRegion, 'intl');
+  assert.equal(accountFieldProjection(saved, env).minimaxApiRegion, 'intl');
+  const explicit = { ...saved, ...finalAccountSettings({ minimaxApiRegion: 'auto' }, saved) };
+  const reloaded = JSON.parse(JSON.stringify(explicit));
+  assert.equal(limitsConfigFromSettings(reloaded, { env }).minimaxApiRegion, 'auto');
+  assert.equal(accountFieldProjection(reloaded, env).minimaxApiRegion, 'auto');
+  const previous = { ...saved, minimaxApiKey: 'test-key', limitProviders: 'minimax' };
+  const next = { ...previous, ...finalAccountSettings({ minimaxApiRegion: 'cn' }, previous) };
+  assert.equal(next.minimaxApiKey, 'test-key');
+  const change = classifySettingsChange(previous, next);
+  assert.deepEqual(change.limitScopes, [{ provider: 'minimax' }]);
+  assert.equal(change.usageStructural, false);
+  const { settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
+  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax' }, reason: 'settings-change', options: { clear: true } }]);
 });

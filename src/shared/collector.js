@@ -4,7 +4,6 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const semver = require('semver');
 const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
@@ -16,7 +15,7 @@ const {
   MAX_DIAGNOSTICS_PER_CLIENT,
   deriveClientOverall
 } = require('./clientHealth');
-const { tokscalePackageNameForPlatform, tokscalePlatformKey } = require('./tokscalePlatform');
+const { tokscalePackageNameForPlatform } = require('./tokscalePlatform');
 const { createTokscaleCapabilityResolver, filterSupportedClients, parseSupportedClients } = require('./tokscaleCapabilities');
 const { customPricingPath, tokscaleCacheDirs } = require('./tokscaleConfig');
 const { normalizeCustomScanPaths, customScanPathsFingerprint, tokscaleExtraDirsEnv } = require('./customScanPaths');
@@ -112,42 +111,30 @@ function locateBundledBinary() {
   return null;
 }
 
-function readDownloadedPointer() {
-  const currentPath = path.join(sharedDataDir(), 'tokscale', 'current.json');
-  const current = readJson(currentPath, null);
-  if (!current || typeof current !== 'object') return null;
-  if (current.platform && current.platform !== tokscalePlatformKey()) return null;
-  if (!semver.valid(current.version)) return null;
-  if (typeof current.path !== 'string' || !path.isAbsolute(current.path)) return null;
-  try {
-    const stat = fs.statSync(current.path);
-    if (!stat.isFile()) return null;
-    if (process.platform !== 'win32' && (stat.mode & 0o111) === 0) return null;
-  } catch (_) {
-    return null;
-  }
-  return {
-    source: 'downloaded',
-    path: current.path,
-    version: current.version,
-    installedAt: current.installedAt || '',
-    integrity: current.integrity || ''
-  };
-}
-
-function decideResolver({ downloaded, bundled, shim }) {
-  if (downloaded && !bundled) return downloaded;
-  if (downloaded && bundled && semver.valid(downloaded.version) && semver.valid(bundled.version) && semver.gt(downloaded.version, bundled.version)) {
-    return downloaded;
-  }
-  return bundled || shim || null;
-}
-
+// The bundled binary is the only native candidate: packaging swaps the pinned
+// fork build into @tokscale/cli-<platform>, and an upstream npm build would
+// silently drop the downstream session/workspace report grouping. A
+// `current.json` pointer left behind by the retired npm updater is ignored.
 function resolvePlatformBinary() {
-  const bundled = locateBundledBinary();
-  const downloaded = readDownloadedPointer();
-  const shim = { source: 'shim', path: TOKSCALE_BIN_JS, version: null };
-  return decideResolver({ downloaded, bundled, shim });
+  return locateBundledBinary() || { source: 'shim', path: TOKSCALE_BIN_JS, version: null };
+}
+
+// Declared app build metadata, not verification of the executable's bytes.
+function readTokscaleBundledBuild(manifest = readJson(path.join(__dirname, '../../scripts/vendor/tokscale.json'), null)) {
+  if (!manifest || ![undefined, null, 'override'].includes(manifest.mode)) return null;
+  if (typeof manifest.commit !== 'string' || !/^[0-9a-f]{40}$/i.test(manifest.commit)) return null;
+  if (typeof manifest.releaseTag !== 'string' || !manifest.releaseTag) return null;
+  return { releaseTag: manifest.releaseTag, commit: manifest.commit };
+}
+
+function getTokscaleStatus() {
+  if (bundledPackageCandidates().length === 0) return { supported: false };
+  const current = resolvePlatformBinary();
+  return {
+    supported: true,
+    current: { source: current.source, version: current.version, path: current.path },
+    bundledBuild: readTokscaleBundledBuild()
+  };
 }
 
 // Tokscale reads a few XDG environment variables with a bare
@@ -950,6 +937,12 @@ function propagateTodayProjects(today, periods) {
       // dock card reads month first, so it was the surface that displayed it.
       target.contextWindow = Number(session.contextWindow) || 0;
       target.contextTokens = Number(session.contextTokens) || 0;
+      // Home and Dock prefer month rows; carry the fresh observation (including
+      // an explicit cold reading) through anchored watch updates as well.
+      // An omitted observation is a metadata miss, not evidence of a cold cache.
+      if (Object.prototype.hasOwnProperty.call(session, 'promptCache')) {
+        target.promptCache = session.promptCache;
+      }
       // The turn boundary is copied in all three states, matching what the
       // fresh scan said: `true` finished, `false` open, absent unknown. Copying
       // only `true` left a stale `true` in a derived period after its session
@@ -1129,6 +1122,7 @@ async function collectUsageOnce(options) {
   const normalizedClients = normalizeClientsCsv(clients);
   const localSessionMetadataDeps = {
     ...(options.sessionMetadataDeps || {}),
+    customScanPaths: options.customScanPaths,
     metadataCache: new Map(),
     resolvedSessionKeys: new Set(),
     attemptedSessionKeys: new Set()
@@ -1874,6 +1868,18 @@ const ANTIGRAVITY_SHALLOW_SOURCE_DIRS = new Set(['brain']);
 const KEEP_EVERYTHING = () => false;
 const EMPTY_SET = new Set();
 
+// A custom root is whatever directory the user picked, and in practice that can
+// be a whole projects folder (#857: ~1.1M files, mostly dependency and VCS
+// trees). No agent writes a transcript into these, but every one of their
+// directories costs a watch descriptor, and every file a stat once polling
+// takes over. Tokscale still walks them, so a full scan misses nothing; only
+// the live trigger is pruned. Built-in recursive roots keep their contract
+// untouched, since their shape is the client's own.
+const CUSTOM_ROOT_PRUNED_DIRS = new Set([
+  '.git', '.hg', '.svn', 'node_modules', '.venv', 'venv', '__pycache__', '.tox'
+]);
+const pruneDependencyTrees = (parts) => parts.some((part) => CUSTOM_ROOT_PRUNED_DIRS.has(part));
+
 // Tokscale opens one exact database directly under this root instead of walking
 // it. Keep the direct children it names — including the WAL/SHM sidecars, which
 // are the live-write signal even though tokscale never parses them as databases
@@ -2056,17 +2062,39 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // contract. The self-synced cache roots are never handed to chokidar in the
   // first place. The parse-local Antigravity CLI dir is added back explicitly —
   // it shares the umbrella client id but is written by `agy`, not by our sync.
+  // Candidates are bare paths, so a client that names its own built-in root as
+  // a custom path too would read as custom twice over. Whether a root is
+  // built-in comes from the source list instead, which still says so.
+  const builtInBySource = new Map(Object.entries(clientSourceRoots(clientsCsv, options)).map(([client, roots]) => [
+    client,
+    new Set(roots.filter((root) => !root.custom).map((root) => canonicalRoot(root.dir)))
+  ]));
+  const isCustomOnly = (client, root) => Boolean(customRoots.get(client)?.has(root))
+    && !builtInBySource.get(client)?.has(root);
   const recursive = [
     ...Object.entries(candidates)
-      .flatMap(([client, dirs]) => dirs.filter((dir) => (
-        (client !== 'copilot' || customRoots.get(client)?.has(canonicalRoot(dir)))
-        && (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir))
-        && !(claimed.get(client) || EMPTY_SET).has(dir)
-      ))),
-    ...(antigravityEnabled && dirExists(antigravityCliDataDir()) ? [antigravityCliDataDir()] : [])
+      .flatMap(([client, dirs]) => dirs
+        .filter((dir) => (
+          (client !== 'copilot' || customRoots.get(client)?.has(canonicalRoot(dir)))
+          && (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir))
+          && !(claimed.get(client) || EMPTY_SET).has(dir)
+        ))
+        .map((dir) => ({ root: canonicalRoot(dir), custom: isCustomOnly(client, canonicalRoot(dir)) }))),
+    ...(antigravityEnabled && dirExists(antigravityCliDataDir())
+      ? [{ root: canonicalRoot(antigravityCliDataDir()), custom: false }]
+      : [])
   ];
-  for (const root of new Set(recursive.map(canonicalRoot))) {
+  // A directory that is a built-in root for any client keeps everything, even
+  // where it is also named as a custom root, by that client or another: the
+  // built-in contract is the one that must hold.
+  const builtInRoots = new Set(recursive.filter((entry) => !entry.custom).map((entry) => entry.root));
+  for (const root of builtInRoots) {
     entries.push({ root, prefix: root + path.sep, policy: KEEP_EVERYTHING });
+  }
+  for (const root of new Set(recursive.filter((entry) => entry.custom).map((entry) => entry.root))) {
+    if (builtInRoots.has(root)) continue;
+    entries.push({ root, prefix: root + path.sep, policy: pruneDependencyTrees });
+    boundedCount += 1;
   }
   return { entries, boundedCount };
 }
@@ -2351,6 +2379,9 @@ function collectorAnchorTrust(saved, options = {}) {
   const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
+  // Old Cursor anchors preserve `default` in their broad-period model maps;
+  // applying a new `cursor-auto` Today delta to them would split one mode.
+  if (normalizeClientsCsv(clients).split(',').includes('cursor') && saved.cursorAutoModelVersion !== 1) return null;
   if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths)) return null;
   const parsed = Date.parse(saved.fullScanAt || '');
   const capturedAtMs = Number.isFinite(parsed) && parsed <= now.getTime() ? parsed : null;
@@ -2361,6 +2392,16 @@ function collectorAnchorTrust(saved, options = {}) {
 // valid, so a long-running session periodically rescans month/allTime
 // and picks up any changes that the delta-derivation might miss.
 const FULL_SCAN_INTERVAL_MS = 60 * 60 * 1000;
+
+// Ceiling on how long an unbroken run of watch events may keep deferring the
+// tick. Every event clears the pending debounce timer and re-arms a fresh one,
+// so a source that changes more often than once per `watchDebounceMs` would
+// hold the live refresh back until the interval fallback. Concurrent agents
+// streaming to their transcripts do exactly that. The re-arm itself stays — it
+// is what keeps a mid-tick event from coalescing — and 5s is the far end of
+// the promised 3-5s refresh, so the ceiling only ever fires where the promise
+// was already broken.
+const WATCH_MAX_WAIT_MS = 5000;
 
 // Escape hatch for filesystems that never deliver native events — network
 // mounts, some FUSE drivers, container bind mounts. chokidar has its own
@@ -2382,7 +2423,19 @@ function watchPollingEnvOverride(env = process.env) {
   return !['0', 'false', 'no', 'off'].includes(raw);
 }
 
+// Whether the environment rules polling out, resolved in the same order as
+// resolveWatchUsePolling so the two can never disagree about who decides.
+function watchPollingForbidden(env = process.env) {
+  const chokidarOverride = chokidarPollingEnv(env);
+  if (chokidarOverride !== undefined) return chokidarOverride === false;
+  return watchPollingEnvOverride(env) === false;
+}
+
 function resolveWatchUsePolling(preferred, env = process.env) {
+  // chokidar's own variable overrides whatever we pass it, so it has to win
+  // here too or diagnostics would report native events while chokidar polls.
+  const chokidarOverride = chokidarPollingEnv(env);
+  if (chokidarOverride !== undefined) return chokidarOverride;
   const override = watchPollingEnvOverride(env);
   if (override !== undefined) return override;
   if (typeof preferred === 'boolean') return preferred;
@@ -2401,6 +2454,108 @@ function resolveWatchUsePolling(preferred, env = process.env) {
 // everywhere, suppressing this fallback is the only thing that direction of the
 // override still does.
 const WATCH_DESCRIPTOR_ERROR_CODES = new Set(['ENOSPC', 'EMFILE', 'ENFILE']);
+
+// Polling needs no descriptors, but it holds a stat watcher per path and stats
+// every one of them each interval, so its cost grows with the tree rather than
+// with activity. Over a tree large enough to have exhausted the descriptors in
+// the first place, that took the app down (#857: the main process grew by
+// ~1.7 GB/min polling ~1.1M paths). Past this many entries the watcher is
+// dropped instead and the interval loop collects on its own. A heavy user's
+// default roots measured about 5.6k entries, so the limit leaves real headroom.
+const WATCH_POLLING_ENTRY_LIMIT = 20000;
+
+// Counts what chokidar would watch — the same roots through the same ignore
+// matcher — and stops as soon as the count passes `limit`, so a million-entry
+// tree costs no more than a small one. opendir rather than readdir, because a
+// single flat directory can itself hold the whole tree.
+//
+// Symlinked directories are followed, as chokidar follows them by default, and
+// every link is walked on its own: chokidar dedupes by the link's own path, not
+// its target, so two links into one tree are two trees to poll. Nothing here
+// dedupes cycles either. A link back into its own ancestry stops resolving at
+// the kernel's symlink limit (ELOOP), which is where chokidar stops too, and
+// failing that the counter itself ends the walk — refusing to poll, which is
+// the safe answer for a tree chokidar could not finish either.
+function watchEntriesExceed(dirs, ignored, limit) {
+  let count = 0;
+  const pending = [...dirs];
+  while (pending.length > 0) {
+    const dir = pending.pop();
+    let handle;
+    try { handle = fs.opendirSync(dir); } catch (_) { continue; }
+    try {
+      let entry;
+      while ((entry = handle.readSync()) !== null) {
+        const entryPath = path.join(dir, entry.name);
+        if (ignored?.(entryPath)) continue;
+        count += 1;
+        if (count > limit) return true;
+        if (entry.isDirectory()) {
+          pending.push(entryPath);
+        } else if (entry.isSymbolicLink()) {
+          try {
+            if (fs.statSync(entryPath).isDirectory()) pending.push(entryPath);
+          } catch (_) {
+            // A dangling or looping link is one entry and nothing below it.
+          }
+        }
+      }
+    } catch (_) {
+      // A directory removed or made unreadable mid-walk is simply not counted.
+    } finally {
+      handle.closeSync();
+    }
+  }
+  return false;
+}
+
+// chokidar reads CHOKIDAR_USEPOLLING after the options it is handed and lets it
+// win, so the polling mode it actually runs can differ from the one we asked
+// for. Parsed exactly as chokidar 4 parses it; undefined when unset.
+function chokidarPollingEnv(env = process.env) {
+  const raw = env.CHOKIDAR_USEPOLLING;
+  if (raw === undefined) return undefined;
+  const lower = String(raw).toLowerCase();
+  if (lower === 'false' || lower === '0') return false;
+  if (lower === 'true' || lower === '1') return true;
+  return Boolean(lower);
+}
+
+// Reported in place of a watcher when polling would cover more than the limit,
+// or when the owner required polling and the environment forbids it. The
+// collector answers either by dropping to interval collection.
+const WATCH_POLLING_LIMIT_CODE = 'watch-polling-limit';
+const WATCH_POLLING_UNAVAILABLE_CODE = 'watch-polling-unavailable';
+const WATCH_REFUSAL_CODES = new Set([WATCH_POLLING_LIMIT_CODE, WATCH_POLLING_UNAVAILABLE_CODE]);
+
+// The one place a chokidar instance is created, in the watch process and in the
+// in-process fallback alike. The bound lives here rather than in the collector
+// because the host can switch to polling on its own (a watch process that never
+// confirmed its exit), and a check the host can route around bounds nothing.
+function openWatch(chokidar, config = {}) {
+  const ignored = watchIgnoreMatcher(config.clients, { customScanPaths: config.customScanPaths });
+  const limit = Number.isInteger(config.pollingEntryLimit) && config.pollingEntryLimit >= 0
+    ? config.pollingEntryLimit
+    : WATCH_POLLING_ENTRY_LIMIT;
+  // Bounded on the mode that will really run, through the same resolver every
+  // other watch decision uses: CHOKIDAR_USEPOLLING, then our own override, then
+  // what was asked for.
+  const usePolling = resolveWatchUsePolling(config.usePolling === true);
+  // `requirePolling` is not a preference: the host sets it when native
+  // descriptors from a previous watcher may still be held, so falling through
+  // to native here would put two sets in flight. Not watching is the safe answer.
+  if (config.requirePolling === true && !usePolling) {
+    const error = new Error('polling required but forbidden by the environment');
+    error.code = WATCH_POLLING_UNAVAILABLE_CODE;
+    throw error;
+  }
+  if (usePolling && watchEntriesExceed(config.dirs || [], ignored, limit)) {
+    const error = new Error(`over ${limit} paths to poll`);
+    error.code = WATCH_POLLING_LIMIT_CODE;
+    throw error;
+  }
+  return chokidar.watch(config.dirs, watcherOptions(usePolling, ignored));
+}
 
 function watcherOptions(usePolling, ignored) {
   return {
@@ -2462,10 +2617,17 @@ function startCollector(options) {
   // the interval loop into spins. Clamping here means no timer below can
   // reintroduce that by forgetting.
   const watchDebounceMs = clampTimerDelayMs(options.watchDebounceMs, 1500);
+  // Floored at the debounce: a ceiling shorter than one debounce window would
+  // pull every lone event forward and make the debounce itself unobservable.
+  const watchMaxWaitMs = Math.max(watchDebounceMs, clampTimerDelayMs(options.watchMaxWaitMs, WATCH_MAX_WAIT_MS));
   const intervalMs = clampTimerDelayMs(options.intervalMs, 5 * 60 * 1000);
   const historyRetryMs = clampTimerDelayMs(options.historyRetryMs, 60 * 1000);
   const watchUsePolling = resolveWatchUsePolling(options.watchUsePolling);
-  const watchNativeForced = watchPollingEnvOverride() === false;
+  // Overridable so tests need not build a 20k-entry tree to cross it.
+  const watchPollingEntryLimit = Number.isInteger(options.watchPollingEntryLimit) && options.watchPollingEntryLimit >= 0
+    ? options.watchPollingEntryLimit
+    : WATCH_POLLING_ENTRY_LIMIT;
+  const watchNativeForced = watchPollingForbidden();
   const runtimeAbortController = new AbortController();
   const runtimeSignal = runtimeAbortController.signal;
   let startBarrier = options.startBarrier ? Promise.resolve(options.startBarrier) : null;
@@ -2542,6 +2704,11 @@ function startCollector(options) {
   let lastFullScanAt = 0;
   let pendingWaiters = [];
   let debounceTimer = null;
+  // Monotonic ms (performance.now()) by which the current run of watch events
+  // must have ticked, or 0 when no run is pending. Not Date.now(): a wall-clock
+  // step backwards mid-storm would push the deadline out by the same amount. Set by the first scheduleTick of a run, cleared when
+  // a tick actually starts so the next quiet period begins its own run.
+  let watchDeadlineAt = 0;
   let intervalTimer = null;
   let stopped = false;
   let lastTickAttemptAt = 0;
@@ -2584,6 +2751,12 @@ function startCollector(options) {
   // the rest of the process. Retrying native events on each rebuild would just
   // rediscover the same exhausted budget.
   let watchDescriptorFallback = false;
+  // Also sticky: set when polling would have to cover more than
+  // WATCH_POLLING_ENTRY_LIMIT paths. No watcher runs from then on, and the
+  // interval loop stops waiting for watch activity, since none can arrive.
+  let watchIntervalFallback = false;
+  // Sticky as well: the watch host switched to polling on its own.
+  let watchHostPolling = false;
 
   function emitDiagnosticEvent(event) {
     try {
@@ -2856,6 +3029,7 @@ function startCollector(options) {
             fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
             fs.writeFileSync(anchorPath, JSON.stringify({
               dateKey: anchor.dateKey,
+              cursorAutoModelVersion: 1,
               today: anchor.today,
               month: anchor.month,
               allTime: anchor.allTime,
@@ -3080,6 +3254,21 @@ function startCollector(options) {
   function scheduleTick(reason, eventClients) {
     if (stopped) return;
     recordWatchClients(eventClients);
+    // The first event of a run pins the deadline; every re-arm after it waits
+    // out whichever of the debounce and the remaining ceiling comes first, so a
+    // storm faster than the debounce still ticks instead of deferring forever.
+    // Time behind an in-flight tick does not count toward the ceiling: the timer
+    // can only re-arm there, and a slow tick under a steady write stream would
+    // otherwise chain scans back-to-back once it finished. Floored at 1ms
+    // because clampTimerDelayMs' reason applies here too: a zero or negative
+    // delay is rewritten to 1ms by setTimeout, and an expired deadline must arm
+    // a real timer rather than spin.
+    const nowMs = performance.now();
+    if (tickInFlight) watchDeadlineAt = 0;
+    else if (watchDeadlineAt === 0) watchDeadlineAt = nowMs + watchMaxWaitMs;
+    const delayMs = watchDeadlineAt === 0
+      ? watchDebounceMs
+      : Math.max(1, Math.min(watchDebounceMs, watchDeadlineAt - nowMs));
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       debounceTimer = null;
@@ -3088,6 +3277,7 @@ function startCollector(options) {
       // There is deliberately no cooldown on top of the debounce: the product
       // promises 3–5 s updates, and a cooldown would break that promise.
       if (tickInFlight) { scheduleTick(reason); return; }
+      watchDeadlineAt = 0;
       // A raw source event means that client's synced cache may now be stale, so
       // its sync drops to the short floor instead of waiting out the idle
       // cadence. Its cache is deliberately outside the watcher, so a sync here
@@ -3097,14 +3287,14 @@ function startCollector(options) {
         targetClients: takeWatchClients(),
         sourceSelfSync: sourceSyncQueue.takeDue()
       });
-    }, watchDebounceMs);
+    }, delayMs);
   }
 
   // chokidar's close() walks every watched entry and closes every fs.watch
   // handle inline, and its cost grows superlinearly with that count, so on a
   // tree the size of ~/.claude/projects it runs for about a second. That cost
-  // has not gone away — watcherHost.js just decides which thread pays it, and
-  // by default that is a worker rather than the one driving the UI. `skipClose`
+  // has not gone away — watcherHost.js just decides who pays it, and by
+  // default that is a child process rather than the thread driving the UI. `skipClose`
   // is the quit path: descriptors go with the process, so there is nothing to
   // wait for.
   function closeWatchers({ skipClose = false } = {}) {
@@ -3114,9 +3304,29 @@ function startCollector(options) {
     watchers.length = 0;
   }
 
+  function enterIntervalFallback(error) {
+    if (watchIntervalFallback) return;
+    watchIntervalFallback = true;
+    emitDiagnosticEvent({
+      subsystem: 'watcher',
+      code: 'watcher-interval-fallback',
+      ...(watchFallbackCode ? { detailCode: watchFallbackCode } : {})
+    });
+    log(`Cannot watch safely (${error.message}); collecting every ${Math.round(intervalMs / 1000)}s instead.`);
+    // Reported from inside the host's own dispatch, so the teardown waits a turn.
+    setImmediate(() => {
+      if (!stopped) closeWatchers();
+    });
+  }
+
   function handleWatchError(error) {
     log(`chokidar error: ${error.message}`);
-    if (stopped || watchUsePolling || watchNativeForced || watchDescriptorFallback) return;
+    if (stopped) return;
+    if (WATCH_REFUSAL_CODES.has(error?.code)) {
+      enterIntervalFallback(error);
+      return;
+    }
+    if (stopped || watchUsePolling || watchNativeForced || watchDescriptorFallback || watchIntervalFallback) return;
     if (!WATCH_DESCRIPTOR_ERROR_CODES.has(error?.code)) return;
     watchDescriptorFallback = true;
     watchFallbackCode = error.code;
@@ -3136,7 +3346,7 @@ function startCollector(options) {
   }
 
   function setupWatchers() {
-    if (!watchEnabled) return;
+    if (!watchEnabled || watchIntervalFallback) return;
     // Canonicalise before anything derives from these roots, so the paths handed
     // to chokidar and the paths clientsForWatchPath matches against are the same
     // strings. Resolving only one of the two would silently break attribution.
@@ -3213,9 +3423,18 @@ function startCollector(options) {
     const usePolling = watchUsePolling || watchDescriptorFallback;
     try {
       const host = createWatcherHost(
-        { dirs, clients, customScanPaths: sourceOptions.customScanPaths, usePolling },
         {
-          onHostFallback: (error) => {
+          dirs,
+          clients,
+          customScanPaths: sourceOptions.customScanPaths,
+          usePolling,
+          pollingEntryLimit: watchPollingEntryLimit
+        },
+        {
+          onHostFallback: (error, fallback = {}) => {
+            // The host moves to polling by itself when a watch process never
+            // confirmed its exit; diagnostics have to say so.
+            if (fallback.usePolling === true) watchHostPolling = true;
             emitDiagnosticEvent({ subsystem: 'watcher', code: 'watcher-host-fallback' });
             log(`Watch worker unavailable (${error.message}); watching on this thread.`);
           },
@@ -3242,8 +3461,12 @@ function startCollector(options) {
     // retain the hourly reconciliation path for missed events, newly created
     // client directories, WSL-only activity, and cross-day metadata refreshes.
     const fullScanDue = lastFullScanAt === 0 || Date.now() - lastFullScanAt >= FULL_SCAN_INTERVAL_MS;
+    // Smart mode trusts the watcher to say which clients moved. Without one it
+    // is plain interval collection, or it would scan nothing but the hourly
+    // reconciliation.
+    const activityGated = intervalRequiresActivity && !watchIntervalFallback;
     if (
-      intervalRequiresActivity &&
+      activityGated &&
       initialCollectionComplete &&
       !fullScanDue &&
       activityRevisionAtStart <= collectedActivityRevision
@@ -3256,7 +3479,7 @@ function startCollector(options) {
     // lastFullScanAt === 0 means no valid timestamp exists (cold start,
     // unparseable, or future timestamp) — force a full scan immediately.
     const anchorToday = Boolean(!fullScanDue && anchor && anchor.dateKey === localTodayKey());
-    const sourceSelfSync = intervalRequiresActivity ? sourceSyncQueue.takeDue() : null;
+    const sourceSelfSync = activityGated ? sourceSyncQueue.takeDue() : null;
     // Smart mode carries the clients its watch events named since the last tick
     // and unions the self-synced ones on top regardless. Their tokscale cache
     // dirs are deliberately unwatched to avoid a self-triggering loop, so a sync
@@ -3264,7 +3487,7 @@ function startCollector(options) {
     // belongs to. Antigravity's source roots are watched and do name it, but that
     // tracks the IDE writing rather than the sync landing, so targeting alone
     // would still miss the sync output.
-    const targetClients = intervalRequiresActivity ? takeWatchClients(selfSyncedClients) : [];
+    const targetClients = activityGated ? takeWatchClients(selfSyncedClients) : [];
     runTick('interval', {
       ...(anchorToday ? { todayOnly: true, refreshWsl: true, targetClients } : {}),
       ...(sourceSelfSync ? { sourceSelfSync } : {}),
@@ -3304,7 +3527,9 @@ function startCollector(options) {
   function getDiagnostics() {
     const watchMode = !watchEnabled
       ? 'disabled'
-      : (watchUsePolling || watchDescriptorFallback ? 'polling' : 'native');
+      : watchIntervalFallback
+        ? 'interval'
+        : (watchUsePolling || watchDescriptorFallback || watchHostPolling ? 'polling' : 'native');
     const state = stopped
       ? 'stopped'
       : tickInFlight
@@ -3395,7 +3620,6 @@ module.exports = {
   mergeClientActivityDays,
   wslPeriodsForPreview,
   statusFromSignals,
-  decideResolver,
   DEFAULT_HISTORY_INTERVAL_MS,
   HISTORY_INTERVAL_VALUES,
   LIMITS_RESET_BOUNDARY_MAX_TIMER_MS,
@@ -3407,7 +3631,8 @@ module.exports = {
   lookupModelPricing,
   normalizePromaPricing,
   pruneAttemptedResetBoundaries,
-  readDownloadedPointer,
+  getTokscaleStatus,
+  readTokscaleBundledBuild,
   resolvePlatformBinary,
   resolvePromaPricing,
   resetPromaPricingCache,
@@ -3433,5 +3658,9 @@ module.exports = {
   watchAttributionRootsForClients,
   watcherOptions,
   watchIgnoreMatcher,
+  openWatch,
+  WATCH_POLLING_LIMIT_CODE,
+  WATCH_POLLING_UNAVAILABLE_CODE,
+  WATCH_REFUSAL_CODES,
   watchPathsForClients
 };

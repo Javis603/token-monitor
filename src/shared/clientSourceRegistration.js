@@ -37,6 +37,7 @@ const SOURCE_MARKERS = [
   { marker: '.dsh/sessions', client: 'dsh' },
   { marker: '.factory/sessions', client: 'droid', hostCheckId: 'droid-sessions' },
   { marker: '.local/share/mimocode/mimocode.db', client: 'mimo' },
+  { marker: '.local/share/muse/sessions', client: 'muse' },
   { marker: '.zcode/projects', client: 'zcode' },
   { marker: '.zcode/cli/db', client: 'zcode' },
   { marker: '.kiro/sessions', client: 'kiro' },
@@ -54,7 +55,8 @@ const SOURCE_MARKERS = [
   { marker: '.config/Devin/User/acp-events', client: 'devin' },
   { marker: '.config/devin/User/acp-events', client: 'devin' },
   { marker: 'AppData/Roaming/Devin/User/acp-events', client: 'devin' },
-  { marker: 'Library/Application Support/Devin/User/acp-events', client: 'devin' }
+  { marker: 'Library/Application Support/Devin/User/acp-events', client: 'devin' },
+  { marker: '.fx/sessions', client: 'fx', hostCheckId: 'fx-sessions' }
 ];
 
 const WSL_DATA_MARKERS = SOURCE_MARKERS.map(({ marker }) => marker);

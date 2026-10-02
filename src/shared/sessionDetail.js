@@ -150,8 +150,10 @@ function codexToolName(payload) {
   return payload.name || payload.tool_name || payload.tool || '';
 }
 
-function parseCodexTranscript(text) {
+function parseCodexTranscriptData(text) {
   const events = [];
+  let canonicalSessionId = '';
+  let sawSessionMeta = false;
   let pendingTools = [];
   let adjacentPrompt = null;
   for (const line of String(text || '').split(/\r?\n/)) {
@@ -164,6 +166,11 @@ function parseCodexTranscript(text) {
     let obj;
     try { obj = JSON.parse(trimmed); } catch (_) { continue; }
     const payload = obj.payload || {};
+    if (obj.type === 'session_meta' && !sawSessionMeta) {
+      sawSessionMeta = true;
+      const id = typeof payload.id === 'string' ? payload.id.trim() : '';
+      if (/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id)) canonicalSessionId = id;
+    }
     if (obj.type === 'response_item' && (payload.type === 'function_call' || payload.type === 'custom_tool_call' || payload.type === 'tool_search_call')) {
       const name = codexToolName(payload);
       if (name) pendingTools.push(name);
@@ -221,7 +228,11 @@ function parseCodexTranscript(text) {
       pendingTools = [];
     }
   }
-  return events;
+  return { events, canonicalSessionId };
+}
+
+function parseCodexTranscript(text) {
+  return parseCodexTranscriptData(text).events;
 }
 
 function emptyTokens() {
@@ -399,11 +410,17 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
   try { text = fs.readFileSync(filePath, 'utf8'); } catch (_) {
     return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
   }
-  const events = parseByClient(client, text);
+  // Reuse the on-demand transcript parse; the filename is a lookup key, not
+  // necessarily Codex's conversation identity.
+  const parsed = client === 'codex' ? parseCodexTranscriptData(text) : null;
+  const events = parsed ? parsed.events : parseByClient(client, text);
   const now = new Date((deps.now || Date.now)());
   const grouped = filterExchangesByPeriod(groupEvents(events), period, now);
   distributeCost(grouped, sessionCost);
-  return { found: true, client, sessionId, period, exchanges: grouped, totals: totalsOf(grouped, sessionCost) };
+  return {
+    found: true, client, sessionId, period, exchanges: grouped, totals: totalsOf(grouped, sessionCost),
+    ...(parsed ? { canonicalSessionId: parsed.canonicalSessionId } : {})
+  };
 }
 
 module.exports = {

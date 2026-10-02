@@ -19,8 +19,8 @@
 //
 // One worker at a time per coordinator. A replacement starts only after the
 // previous worker has exited, so two collectors never overlap: not their scans,
-// not their watcher descriptor sets (the watcher is a worker nested in this
-// one), and not their archive writes.
+// not their watcher descriptor sets (the watcher is a child process this one
+// owns, killed by its collector's stop), and not their archive writes.
 //
 // The in-process collector is a real fallback, as in watcherHost.js. A Worker
 // constructor does not throw on a broken module; it emits 'error' and exits, and
@@ -30,8 +30,8 @@
 //
 // On by default. TOKEN_MONITOR_USAGE_WORKER=0 pins the in-process collector.
 
-const { startCollector } = require('./collector');
-const { createLiveSubprocessTable, signalLiveSubprocesses } = require('./subprocessTermination');
+const { startCollector } = require('../collector');
+const { createLiveSubprocessTable, signalLiveSubprocesses } = require('../subprocessTermination');
 
 const WORKER_PATH = require.resolve('./usageWorker');
 // How long a stopping worker gets to stop its collector (which terminates its

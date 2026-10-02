@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 
@@ -39,14 +40,42 @@ test('General settings keeps Tokscale inside a collapsed Advanced disclosure', (
   assert.ok(end < general.indexOf('settings.about.title'));
 });
 
-test('General settings explains Discord presence and identifies Tokscale as an npm CLI dependency', () => {
+test('General settings explains Discord presence and identifies Tokscale as a bundled CLI dependency', () => {
   const html = read('index.html');
   const i18n = read('i18n.js');
 
   assert.match(html, /id="discordRpcInput"[^>]*aria-describedby="discordRpcDescription"[\s\S]*id="discordRpcDescription" class="settings-item-desc"[^>]*settings\.integrations\.discordDescription/);
   assert.equal((i18n.match(/'settings\.integrations\.discordDescription':/g) || []).length, 5);
-  assert.match(i18n, /'settings\.tokscale\.source': '來自 npm 的 CLI 依賴'/);
+  assert.match(i18n, /'settings\.tokscale\.source': '內建的 CLI 依賴'/);
   assert.doesNotMatch(i18n, /'settings\.tokscale\.source': '[^']*(?:Data engine|資料引擎|数据引擎|데이터 엔진|データエンジン)/);
+});
+
+test('Tokscale separates installed version from declared bundled build', () => {
+  const source = read('app.js');
+  const body = source.slice(source.indexOf('function renderTokscaleStatus()'), source.indexOf('async function refreshTokscaleStatus('));
+  let buildHidden;
+  const els = {
+    tokscaleGroup: { classList: { add() {}, remove() {} } },
+    tokscaleInstalled: { textContent: '' },
+    tokscaleBundledBuild: { textContent: '' },
+    tokscaleBundledBuildRow: { classList: { toggle: (_, hidden) => { buildHidden = hidden; } } }
+  };
+  const state = { tokscaleStatus: { supported: true, current: { source: 'bundled', version: '4.17.0' }, bundledBuild: { commit: 'a'.repeat(40) } } };
+  const context = { els, state, t: (key) => key, versionText: (version) => `v${version}` };
+  vm.runInNewContext(`${body}\nrenderTokscaleStatus()`, context);
+  assert.equal(els.tokscaleInstalled.textContent, 'v4.17.0');
+  assert.equal(els.tokscaleBundledBuild.textContent, 'fork aaaaaaaa');
+  assert.equal(buildHidden, false);
+  state.tokscaleStatus = { supported: true, current: { source: 'shim', version: null }, bundledBuild: null };
+  vm.runInNewContext(`${body}\nrenderTokscaleStatus()`, context);
+  assert.equal(els.tokscaleInstalled.textContent, 'settings.tokscale.versionUnknown');
+  assert.equal(buildHidden, true);
+  state.tokscaleStatus = {};
+  vm.runInNewContext(`${body}\nrenderTokscaleStatus()`, context);
+  assert.equal(els.tokscaleInstalled.textContent, 'settings.tokscale.versionUnknown');
+  assert.equal((read('i18n.js').match(/'settings\.tokscale\.bundledBuild':/g) || []).length, 5);
+  const pkg = JSON.parse(fs.readFileSync(path.join(rendererDir, '../../../package.json'), 'utf8'));
+  assert.ok(pkg.build.files.includes('scripts/vendor/tokscale.json'));
 });
 
 test('General settings places integrations after the complete App Updates group', () => {
@@ -79,14 +108,6 @@ test('maintenance versions stay as compact flat rows instead of nested cards', (
   assert.match(grid, /gap: 6px/);
   assert.doesNotMatch(grid, /background|border-radius|grid-template-columns/);
   assert.match(css, /\.maintenance-version-item \{[\s\S]*display: flex;[\s\S]*justify-content: space-between/);
-});
-
-test('Tokscale updates surface a localized status in the collapsed Advanced row', () => {
-  const app = read('app.js');
-
-  assert.match(app, /advancedSettingsSummary: document\.getElementById\('advancedSettingsSummary'\)/);
-  assert.match(app, /state\.tokscaleCheck\?\.newer[\s\S]*'settings\.advanced\.tokscaleUpdate'[\s\S]*'settings\.advanced\.summary'/);
-  assert.match(app, /advancedSettingsSummary\.dataset\.i18n = advancedSummaryKey/);
 });
 
 test('About uses runtime version and allowlisted Token Monitor links', () => {

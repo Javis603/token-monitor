@@ -75,7 +75,7 @@ test('fetchOpenRouterLimits exposes true key and credits denominators plus spend
         usage_weekly: 4.5,
         usage_monthly: 9.75,
         limit: 30,
-        limit_remaining: 18,
+        limit_remaining: 20.25,
         limit_reset: 'monthly',
         is_management_key: true,
         is_free_tier: false
@@ -96,7 +96,7 @@ test('fetchOpenRouterLimits exposes true key and credits denominators plus spend
     window.showMeter,
     window.detail
   ]), [
-    ['Monthly limit', 12, 30, 18, true, ''],
+    ['Monthly limit', 9.75, 30, 20.25, true, ''],
     ['Credits', 40, 100, 60, true, '']
   ]);
   assert.equal(provider.planLabel, 'Management');
@@ -233,14 +233,93 @@ test('blank and absent API numbers stay unknown instead of becoming zero-value m
 });
 
 test('a key limit can derive usage from a real remaining value', () => {
-  assert.deepEqual(keyLimitWindow({ limit: 30, limit_remaining: 18 }), {
+  const expected = {
     kind: 'billing',
     label: 'API key limit',
     used: 12,
     limit: 30,
     remaining: 18,
     showMeter: true
+  };
+  assert.deepEqual(keyLimitWindow({ limit: 30, limit_remaining: 18 }), expected);
+  assert.deepEqual(keyLimitWindow({ limit: 30, usage: 5, limit_remaining: 18 }), expected);
+});
+
+test('a resetting key limit is measured against the current period, not lifetime usage', () => {
+  // `usage` is the key's all-time spend; a daily cap only counts today's.
+  const key = {
+    usage: 150,
+    usage_daily: 1,
+    usage_weekly: 20,
+    usage_monthly: 60,
+    limit: 5,
+    limit_remaining: 4,
+    limit_reset: 'daily'
+  };
+  assert.deepEqual(keyLimitWindow(key), {
+    kind: 'session',
+    label: 'Daily limit',
+    used: 1,
+    limit: 5,
+    remaining: 4,
+    showMeter: true
   });
+
+  // Without a remaining value, the matching period's usage stands in.
+  const { limit_remaining: _remaining, ...withoutRemaining } = key;
+  assert.deepEqual(
+    [
+      keyLimitWindow(withoutRemaining),
+      keyLimitWindow({ ...withoutRemaining, limit: 50, limit_reset: 'weekly' }),
+      keyLimitWindow({ ...withoutRemaining, limit: 100, limit_reset: 'monthly' })
+    ].map(({ label, used, remaining }) => [label, used, remaining]),
+    [
+      ['Daily limit', 1, 4],
+      ['Weekly limit', 20, 30],
+      ['Monthly limit', 60, 40]
+    ]
+  );
+
+  // A limit that never resets is still measured against lifetime usage.
+  const lifetime = keyLimitWindow({ ...withoutRemaining, limit: 200, limit_reset: null });
+  assert.deepEqual([lifetime.label, lifetime.used, lifetime.remaining], ['API key limit', 150, 50]);
+});
+
+test('key limit fallback includes BYOK usage only when it counts toward the cap', () => {
+  const key = {
+    limit: 100,
+    include_byok_in_limit: true,
+    usage: 80,
+    usage_daily: 1,
+    usage_weekly: 5,
+    usage_monthly: 20,
+    byok_usage: 70,
+    byok_usage_daily: 2,
+    byok_usage_weekly: 10,
+    byok_usage_monthly: 30
+  };
+  assert.deepEqual(
+    [
+      keyLimitWindow({ ...key, limit_reset: 'daily' }),
+      keyLimitWindow({ ...key, limit_reset: 'weekly' }),
+      keyLimitWindow({ ...key, limit_reset: 'monthly' }),
+      keyLimitWindow({ ...key, limit: 200 })
+    ].map(({ label, used, remaining }) => [label, used, remaining]),
+    [
+      ['Daily limit', 3, 97],
+      ['Weekly limit', 15, 85],
+      ['Monthly limit', 50, 50],
+      ['API key limit', 150, 50]
+    ]
+  );
+
+  const monthly = { ...key, limit_reset: 'monthly' };
+  const excluded = keyLimitWindow({ ...monthly, include_byok_in_limit: false });
+  assert.deepEqual([excluded.used, excluded.remaining], [20, 80]);
+  assert.equal(keyLimitWindow({ ...monthly, usage_monthly: null }), null);
+  assert.equal(keyLimitWindow({ ...monthly, byok_usage_monthly: null }), null);
+  const authoritative = keyLimitWindow({ ...monthly, usage_monthly: null, byok_usage_monthly: null, limit_remaining: 40 });
+  assert.deepEqual([authoritative.used, authoritative.remaining], [60, 40]);
 });
 
 test('scoped refresh fetches only the selected OpenRouter profile', async () => {

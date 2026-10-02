@@ -208,7 +208,8 @@ function sessionsWithoutReasonix(sessions) {
 function buildSyncPayload(summary, {
   omitAllTimeProjects = false,
   omitHistoryTokenComponents = false,
-  omitHistoryCostAttribution = false
+  omitHistoryCostAttribution = false,
+  omitModelThroughput = false
 } = {}) {
   if (!summary || typeof summary !== 'object') return summary;
   const payload = { ...summary, limits: syncLimits(summary.limits) };
@@ -257,6 +258,11 @@ function buildSyncPayload(summary, {
       payload.allTimeProjectsOmitted = true;
     }
   }
+  if (omitModelThroughput) {
+    for (const period of ['today', 'month', 'allTime']) {
+      if (payload[period]) delete payload[period].modelThroughput;
+    }
+  }
   return payload;
 }
 
@@ -274,6 +280,14 @@ function serializeSyncPayload(summary, options = {}) {
     return { payload, body, bytes: body ? Buffer.byteLength(body, 'utf8') : 0 };
   }
   let body = JSON.stringify(payload);
+  if (Buffer.byteLength(body, 'utf8') > maxBytes
+    && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput)) {
+    // Optional live attribution must never evict aggregate usage or session detail.
+    // Omit the whole map so readers re-baseline rather than infer missing keys as zero.
+    buildOptions.omitModelThroughput = true;
+    payload = buildSyncPayload(summary, buildOptions);
+    body = JSON.stringify(payload);
+  }
   if (Buffer.byteLength(body, 'utf8') > maxBytes && payload.history && typeof payload.history === 'object') {
     // This optional matrix can be much larger than the independent tool/model
     // totals. Shed it before existing component/session/project detail, in all
@@ -337,7 +351,8 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
     ? serializeSyncPayload(summary, {
         omitHistoryTokenComponents: true,
         omitHistoryCostAttribution: true,
-        omitAllTimeProjects: true
+        omitAllTimeProjects: true,
+        omitModelThroughput: true
       })
     : null;
   const canRetryReduced = response.status === 413
@@ -346,7 +361,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger } =
     try { await response.arrayBuffer(); } catch (_) { /* best-effort drain before retry */ }
     serialized = retrySerialized;
     if (typeof logger === 'function') {
-      logger('hub rejected the payload; retrying once without additive History detail or all-time projects');
+      logger('hub rejected the payload; retrying once without model timing detail, additive History detail or all-time projects');
     }
     response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   }

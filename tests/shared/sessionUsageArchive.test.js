@@ -7,7 +7,7 @@ const test = require('node:test');
 
 let archiveApi = {};
 try {
-  archiveApi = require('../../src/shared/sessionUsageArchive');
+  archiveApi = require('../../src/shared/usage/sessionUsageArchive');
 } catch (_) {}
 
 const {
@@ -333,6 +333,25 @@ test('normalizes legacy and malformed archive entries without losing usable sess
   assert.deepEqual(Object.keys(normalized.sessions), ['opencode:o1']);
   assert.equal(normalized.sessions['opencode:o1'].periods.allTime.totalTokens, 12);
   assert.equal(normalized.sessions['opencode:o1'].periods.today, undefined);
+});
+
+test('replayed Cursor default sessions use cursor-auto while other clients keep default', () => {
+  const archive = normalizeSessionUsageArchive({ sessions: {
+    'cursor:old': {
+      capturedAt: '2026-09-20T12:00:00.000Z',
+      periods: { allTime: { client: 'cursor', sessionId: 'old', totalTokens: 5, models: { default: 5 } } }
+    },
+    'claude:old': {
+      capturedAt: '2026-09-20T12:00:00.000Z',
+      periods: { allTime: { client: 'claude', sessionId: 'old', totalTokens: 11, models: { default: 11 } } }
+    }
+  } });
+  const visible = applySessionUsageArchive({ allTime: { sessions: {} } }, archive);
+
+  assert.equal(visible.allTime.clientModels.cursor['cursor-auto'], 5);
+  assert.equal(visible.allTime.clientModels.claude.default, 11);
+  assert.equal(visible.allTime.models['cursor-auto'], 5);
+  assert.equal(visible.allTime.models.default, 11);
 });
 
 test('capture does not churn timestamps when session data is unchanged', () => {

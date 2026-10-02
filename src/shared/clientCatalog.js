@@ -70,6 +70,7 @@
     { id: 'kilo', label: 'Kilo' },
     { id: 'commandcode', label: 'Command Code' },
     { id: 'mimo', label: 'Xiaomi MiMo' },
+    { id: 'muse', label: 'Muse Code' },
     { id: 'zcode', label: 'ZCode' },
     { id: 'kiro', label: 'Kiro' },
     { id: 'codebuddy', label: 'CodeBuddy' },
@@ -81,7 +82,8 @@
     { id: 'cherrystudio', label: 'Cherry Studio' },
     { id: 'lmstudio', label: 'LM Studio' },
     { id: 'unsloth', label: 'Unsloth' },
-    { id: 'devin', label: 'Devin' }
+    { id: 'devin', label: 'Devin' },
+    { id: 'fx', label: 'fx' }
   ].map((client) => Object.freeze({
     defaultTracked: true,
     locallyParsed: false,

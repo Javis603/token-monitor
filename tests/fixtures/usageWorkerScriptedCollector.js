@@ -85,4 +85,4 @@ collector.startCollector = (options) => {
   };
 };
 
-require('../../src/shared/usageWorker');
+require('../../src/shared/usage/usageWorker');

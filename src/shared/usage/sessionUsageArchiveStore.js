@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
-const { sharedDataDir } = require('./config');
+const { sharedDataDir } = require('../config');
 const {
   normalizeSessionUsageArchive,
   readSessionUsageArchive,

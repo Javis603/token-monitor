@@ -2,9 +2,8 @@
 
 // Consistency checks over the per-client wiring that is still maintained
 // independently of the tracked-client catalog. Client identity itself now comes
-// from CLIENT_CATALOG (src/shared/clientCatalog.js), but Discord's asset/label
-// maps and the WSL marker tables are separate sources that must still agree with
-// it by hand — those are what this file guards.
+// from CLIENT_CATALOG (src/shared/clientCatalog.js), but the WSL marker tables
+// remain a separate source that must still agree with it by hand.
 //
 // Each check tests an *invariant* between two independently-maintained lists
 // rather than a pinned snapshot of either one's contents, so it keeps protecting
@@ -17,49 +16,13 @@
 // None of those are duplicated here.
 
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
-const vm = require('node:vm');
 
 const { KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
 const { SOURCE_MARKERS } = require('../../src/shared/clientSourceRegistration');
 const { WSL_DATA_MARKERS, MARKER_CLIENTS } = require('../../src/shared/wslUsage');
 
-const rootDir = path.join(__dirname, '..', '..');
-const knownClientOrder = KNOWN_CLIENTS.split(',');
-const knownClientIds = new Set(knownClientOrder);
-
-// discordRpc.js requires '@xhayper/discord-rpc', which isn't needed to read
-// its two plain data structures. Load it the same way
-// tests/electron/discordRpc.test.js already does (sandboxed, mocked require)
-// rather than adding a new dependency or a new exported surface.
-function loadDiscordRpcClientMaps() {
-  const filePath = path.join(rootDir, 'src', 'electron', 'discordRpc.js');
-  const source = fs.readFileSync(filePath, 'utf8');
-  const sandbox = {
-    console,
-    module: { exports: {} },
-    require(name) {
-      if (name === '@xhayper/discord-rpc') return { Client: class {} };
-      if (name === '../shared/currency') return require('../../src/shared/currency');
-      if (name === '../shared/compactTokens') return require('../../src/shared/compactTokens');
-      return require(name);
-    },
-    setTimeout,
-    clearTimeout,
-    Date
-  };
-  vm.runInNewContext(
-    `${source}\nmodule.exports.__KNOWN_CLIENT_ASSETS = KNOWN_CLIENT_ASSETS;\nmodule.exports.__CLIENT_LABELS = CLIENT_LABELS;`,
-    sandbox,
-    { filename: filePath }
-  );
-  return {
-    knownClientAssets: sandbox.module.exports.__KNOWN_CLIENT_ASSETS,
-    clientLabels: sandbox.module.exports.__CLIENT_LABELS
-  };
-}
+const knownClientIds = new Set(KNOWN_CLIENTS.split(','));
 
 // --- WSL markers <-> the client each marker is attributed to -----------------
 
@@ -97,7 +60,7 @@ test('source markers declare each WSL path once and preserve discovery order', (
   assert.deepEqual(WSL_DATA_MARKERS, SOURCE_MARKERS.map(({ marker }) => marker));
   assert.deepEqual(Object.entries(MARKER_CLIENTS), SOURCE_MARKERS.map(({ marker, client }) => [marker, client]));
   assert.deepEqual(SOURCE_MARKERS.filter(({ hostCheckId }) => hostCheckId).map(({ client }) => client), [
-    'qwen', 'pi', 'omp', 'commandcode', 'droid'
+    'qwen', 'pi', 'omp', 'commandcode', 'droid', 'fx'
   ]);
   assert.deepEqual(WSL_DATA_MARKERS, [
     '.claude/projects', '.claude/transcripts', '.codex/sessions', '.local/share/opencode',
@@ -112,7 +75,7 @@ test('source markers declare each WSL path once and preserve discovery order', (
     '.config/Code/User/globalStorage/kilocode.kilo-code/tasks',
     '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks',
     '.commandcode/projects', '.dsh/sessions', '.factory/sessions',
-    '.local/share/mimocode/mimocode.db', '.zcode/projects', '.zcode/cli/db',
+    '.local/share/mimocode/mimocode.db', '.local/share/muse/sessions', '.zcode/projects', '.zcode/cli/db',
     '.kiro/sessions', '.local/share/kiro-cli/data.sqlite3',
     '.config/Kiro/User/globalStorage/kiro.kiroagent',
     '.config/kiro/User/globalStorage/kiro.kiroagent', '.codebuddy/projects',
@@ -120,51 +83,7 @@ test('source markers declare each WSL path once and preserve discovery order', (
     '.lmstudio/server-logs', '.unsloth/studio/studio.db',
     '.local/share/devin/cli/sessions.db', 'AppData/Roaming/devin/cli/sessions.db',
     '.config/Devin/User/acp-events', '.config/devin/User/acp-events',
-    'AppData/Roaming/Devin/User/acp-events', 'Library/Application Support/Devin/User/acp-events'
+    'AppData/Roaming/Devin/User/acp-events', 'Library/Application Support/Devin/User/acp-events',
+    '.fx/sessions'
   ]);
-});
-
-// --- Discord Rich Presence client maps <-> the canonical client list ---------
-
-test('discordRpc KNOWN_CLIENT_ASSETS and CLIENT_LABELS stay in sync with KNOWN_CLIENTS', () => {
-  const { knownClientAssets, clientLabels } = loadDiscordRpcClientMaps();
-
-  assert.deepEqual(
-    [...knownClientAssets].filter((id) => knownClientIds.has(id)),
-    knownClientOrder,
-    'tracked Discord assets should follow CLIENT_CATALOG display order'
-  );
-  assert.deepEqual(
-    Object.keys(clientLabels).filter((id) => knownClientIds.has(id)),
-    knownClientOrder,
-    'tracked Discord labels should follow CLIENT_CATALOG display order'
-  );
-
-  const missingFromAssets = [];
-  const missingFromLabels = [];
-  for (const id of knownClientIds) {
-    if (!knownClientAssets.has(id)) missingFromAssets.push(id);
-    if (!Object.prototype.hasOwnProperty.call(clientLabels, id)) missingFromLabels.push(id);
-  }
-
-  // Ids present in the Discord maps but no longer (or never) a tracked client.
-  // Not necessarily a bug — an asset can be uploaded ahead of a client landing
-  // — but it should be an intentional, reviewed state, not silent drift.
-  const orphanedInAssets = [...knownClientAssets].filter((id) => !knownClientIds.has(id));
-  const orphanedInLabels = Object.keys(clientLabels).filter((id) => !knownClientIds.has(id));
-
-  assert.deepEqual(
-    missingFromAssets, [],
-    'KNOWN_CLIENTS ids missing from discordRpc.js KNOWN_CLIENT_ASSETS — Rich ' +
-    'Presence will show no icon for these clients when they are the top client today'
-  );
-  assert.deepEqual(
-    missingFromLabels, [],
-    'KNOWN_CLIENTS ids missing from discordRpc.js CLIENT_LABELS — Rich ' +
-    'Presence falls back to the raw client id as the display label for these'
-  );
-  // Left as documentation rather than an assertion failure: orphan entries are
-  // flagged for maintainer review (see PR description), not treated as wrong.
-  void orphanedInAssets;
-  void orphanedInLabels;
 });

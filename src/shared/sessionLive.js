@@ -131,6 +131,44 @@
     return sessionContextRow(session);
   }
 
+  function sessionPromptCacheForRow(session, now = Date.now()) {
+    if (isArchivedSession(session) || !['claude', 'codex'].includes(session?.client)) return null;
+    const observedAt = timestampMs(session?.promptCache?.observedAt);
+    const ttlSeconds = session?.promptCache?.ttlSeconds;
+    if (!observedAt || ![300, 1800, 3600].includes(ttlSeconds)) return null;
+    const clock = nowMs(now);
+    if (observedAt > clock) return null;
+    const expiresAt = observedAt + ttlSeconds * 1000;
+    if (expiresAt <= clock) return null;
+    return { expiresAt, ttlSeconds, minutes: Math.ceil((expiresAt - clock) / 60_000) };
+  }
+
+  function nextPromptCacheChangeAt(sessions, now = Date.now()) {
+    const clock = nowMs(now);
+    let next = 0;
+    for (const session of sessions || []) {
+      const reading = sessionPromptCacheForRow(session, clock);
+      if (!reading) continue;
+      const boundary = reading.expiresAt - (reading.minutes - 1) * 60_000;
+      if (!next || boundary < next) next = boundary;
+    }
+    return next;
+  }
+
+  // Context survives a finished turn until inactivity, then the same slot can
+  // show cache time. Include ended sessions: running expiry alone misses them.
+  function nextSessionStatusChangeAt(sessions, now = Date.now()) {
+    const clock = nowMs(now);
+    let next = nextPromptCacheChangeAt(sessions, clock);
+    for (const session of sessions || []) {
+      if (isArchivedSession(session)) continue;
+      const last = timestampMs(session?.lastUsedAt);
+      const expiry = last + RUNNING_WINDOW_MS + 1;
+      if (last && expiry > clock && (!next || expiry < next)) next = expiry;
+    }
+    return next;
+  }
+
   // The three state glyphs, as markup, so both renderers draw the same shapes
   // and only name their CSS classes differently. Six spokes with one leading at
   // full opacity read as rotation even in a still frame, which is why the
@@ -165,6 +203,9 @@
     isRunningSession,
     sessionActivityState,
     sessionContextForRow,
+    sessionPromptCacheForRow,
+    nextPromptCacheChangeAt,
+    nextSessionStatusChangeAt,
     sessionContextRow,
     sessionContextWindow,
     sessionStateMarkup

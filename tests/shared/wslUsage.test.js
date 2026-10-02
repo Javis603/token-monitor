@@ -56,6 +56,18 @@ test('homeHasData maps an alternate-root marker to its client id', () => {
   assert.deepEqual([...ids], ['kimi']);
 });
 
+test('homeHasData detects Muse sessions in a WSL home', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const marker = `${home}\\.local\\share\\muse\\sessions`;
+  assert.deepEqual(homeHasData(home, (path) => path === marker), ['muse']);
+});
+
+test('homeHasData detects fx sessions in a WSL home', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const marker = `${home}\\.fx\\sessions`;
+  assert.deepEqual(homeHasData(home, (path) => path === marker), ['fx']);
+});
+
 test('homeHasData attributes Kilo CLI and extension markers to one client', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   for (const marker of [

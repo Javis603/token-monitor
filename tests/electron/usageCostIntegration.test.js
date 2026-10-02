@@ -7,13 +7,14 @@ const vm = require('node:vm');
 const test = require('node:test');
 const policy = require('../../src/electron/usageCostPolicy');
 const presentation = require('../../src/electron/modelAliasPresentation');
+const titles = require('../../src/electron/sessionTitleDisplay');
 const { createStatsPresentationCache } = require('../../src/electron/statsPublisher');
 const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 const rules = [{ client: 'codex', modelPrefix: 'chatgpt-web/', included: false }];
 function mainFunction(name, dependencies) {
   const body = source.match(new RegExp(`(?:async )?function ${name}\\([^]*?\\n\\}`))?.[0];
   assert.ok(body);
-  return vm.runInNewContext(`(${body})`, { ...policy, ...presentation, ...dependencies });
+  return vm.runInNewContext(`(${body})`, { ...policy, ...presentation, ...titles, ...dependencies });
 }
 
 test('tool preference rendering reacts independently to cost rules and custom scan paths', () => {
@@ -56,6 +57,7 @@ test('normalized cost rules remain available to the renderer settings UI', () =>
     subscriptionsAreShared: () => false,
     currentHubIdentity: () => '',
     subscriptionsDocumentFor: () => null,
+    subscriptionDocumentVersion: () => null,
     pendingOrphanedSubscriptions: () => [],
     accountFieldProjection: () => ({}),
     codexAccountsForRenderer: () => [],
@@ -154,4 +156,35 @@ test('dashboard history and per-device fixed periods use policy; export bypass s
   assert.equal(result.deviceHistories[0].periods.today.costUsd, 0);
   assert.equal((await getHistory({ raw: true })).daily[0].cost, 9);
   assert.equal(raw.history.summary.totalCost, 9);
+});
+
+test('cost and title preferences independently reproject one cached snapshot and its all-time sessions', () => {
+  const session = { client: 'codex', title: 'Private title', preview: 'Private preview',
+    costUsd: 9, models: { 'chatgpt-web/pro': 100 }, modelCosts: { 'chatgpt-web/pro': 9 } };
+  const period = { totalTokens: 100, costUsd: 9, clientCosts: { codex: 9 },
+    modelCosts: { 'chatgpt-web/pro': 9 }, clientModelCosts: { codex: { 'chatgpt-web/pro': 9 } },
+    sessions: { one: session } };
+  const raw = { periods: { today: period, allTime: period } };
+  const before = structuredClone(raw);
+  const settings = { usageCostRules: rules, sessionTitlesEnabled: false,
+    modelAliases: { 'chatgpt-web/pro': 'web-pro' }, modelAliasGrouping: 'off' };
+  const dependencies = { settings, syncProvenanceActive: () => false,
+    projectLimitStatsForDisplay: (stats) => stats, presentationCache: createStatsPresentationCache(),
+    allTimeSessionsCache: createStatsPresentationCache(), completeLocalSyncStats: (stats) => stats,
+    snapshotLocalDevices: new WeakMap() };
+  const project = mainFunction('electronPresentationStats', dependencies);
+  const pull = mainFunction('rendererAllTimeSessions', dependencies);
+  for (const [included, visible] of [[false, false], [true, false], [true, true], [false, true]]) {
+    settings.usageCostRules = included ? [] : rules;
+    settings.sessionTitlesEnabled = visible;
+    const shown = project(raw);
+    const sessions = pull(raw);
+    assert.equal(shown.periods.today.costUsd, included ? 9 : 0);
+    assert.equal(sessions.one.costUsd, included ? 9 : 0);
+    assert.equal(shown.periods.today.sessions.one.title, visible ? 'Private title' : undefined);
+    assert.equal(sessions.one.preview, visible ? 'Private preview' : undefined);
+    assert.deepEqual(sessions.one.models, { 'web-pro': 100 });
+    assert.strictEqual(project(raw), shown);
+  }
+  assert.deepEqual(raw, before);
 });

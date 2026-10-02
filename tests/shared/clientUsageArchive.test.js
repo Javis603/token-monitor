@@ -5,7 +5,7 @@ const test = require('node:test');
 
 let archiveApi = {};
 try {
-  archiveApi = require('../../src/shared/clientUsageArchive');
+  archiveApi = require('../../src/shared/usage/clientUsageArchive');
 } catch (_) {}
 
 const {
@@ -292,6 +292,26 @@ test('archived Kilo Code usage migrates to the canonical Kilo client id', () => 
   assert.equal(summary.allTime.clients.kilocode, undefined);
 
   assert.deepEqual(pruneArchivedClientUsage(archive, 'codex,kilo').clients, {});
+});
+
+test('untracked Cursor default archive replays as cursor-auto without changing other clients', () => {
+  const capturedAt = '2026-09-20T12:00:00.000Z';
+  const archive = normalizeArchivedClientUsage({ clients: {
+    cursor: { client: 'cursor', capturedAt, periods: { allTime: {
+      totalTokens: 5, costUsd: 0.5, models: { default: 5 }, modelCosts: { default: 0.5 }
+    } } },
+    claude: { client: 'claude', capturedAt, periods: { allTime: {
+      totalTokens: 11, costUsd: 1.1, models: { default: 11 }, modelCosts: { default: 1.1 }
+    } } }
+  } });
+  const visible = applyArchivedClientUsage({ allTime: { sessions: {} } }, archive, {
+    activeClients: '', now: new Date('2026-09-28T12:00:00.000Z')
+  });
+
+  assert.equal(visible.allTime.models['cursor-auto'], 5);
+  assert.equal(visible.allTime.models.default, 11);
+  assert.equal(visible.allTime.clientModels.cursor['cursor-auto'], 5);
+  assert.equal(visible.allTime.clientModels.claude.default, 11);
 });
 
 // A progressive preview carries only the periods it has finished scanning, and

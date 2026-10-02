@@ -41,12 +41,14 @@ async function claudeProviderForCredentials(oauth) {
   });
 }
 
-test('Codex plan labels map pro and prolite to multiplier display names', () => {
-  assert.equal(codexProviderForPlan('pro').accountLabel, 'Pro 20x');
-  assert.equal(codexProviderForPlan('Codex Pro').accountLabel, 'Pro 20x');
-  assert.equal(codexProviderForPlan('OpenAI Codex Pro').accountLabel, 'Pro 20x');
-  assert.equal(codexProviderForPlan('prolite').accountLabel, 'Pro 5x');
-  assert.equal(codexProviderForPlan('Codex Pro Lite').accountLabel, 'Pro 5x');
+test('Codex plan labels show the updated Pro tiers', () => {
+  assert.equal(codexProviderForPlan('pro').accountLabel, 'Pro More');
+  assert.equal(codexProviderForPlan('Codex Pro').accountLabel, 'Pro More');
+  assert.equal(codexProviderForPlan('OpenAI Codex Pro').accountLabel, 'Pro More');
+  assert.equal(codexProviderForPlan('prolite').accountLabel, 'Pro');
+  assert.equal(codexProviderForPlan('Codex Pro Lite').accountLabel, 'Pro');
+  assert.equal(codexProviderForPlan('promax').accountLabel, 'Pro Max');
+  assert.equal(codexProviderForPlan('Codex Pro Max').accountLabel, 'Pro Max');
 });
 
 test('Codex plan labels compact common enterprise identifiers and humanize fallback identifiers', () => {

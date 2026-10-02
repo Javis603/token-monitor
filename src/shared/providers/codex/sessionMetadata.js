@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { findSessionFiles, codexSessionFile } = require('../../sessionFiles');
 const { shouldReadSessionContext } = require('../../sessionContext');
-const { readCodexSessionContext, readCodexTurnEnded } = require('./sessionContext');
+const { readCodexSessionState, readCodexSessionContext, readCodexTurnEnded } = require('./sessionContext');
 
 let sqlite = null;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
@@ -336,7 +336,12 @@ function resolveSessionMetadata(sessionIds, context) {
       homeDir: home,
       env: deps.env
     }));
-  for (const [sessionId, meta] of readT3Metadata(sessionIds)) {
+  // T3 queries expand and batch the ids against JSON runtime cursors. Exclude
+  // titles that cannot be replaced before paying for those fallback queries.
+  const t3SessionIds = [...sessionIds].filter(
+    (id) => !(result.get(id)?.title && generatedTitleById.get(id))
+  );
+  for (const [sessionId, meta] of readT3Metadata(t3SessionIds)) {
     const resolved = result.get(sessionId) || {};
     // Never overwrite a title the Codex store itself generated; do replace the
     // prompt-derived fallback, which is exactly the case T3 improves on.
@@ -359,10 +364,12 @@ function resolveSessionMetadata(sessionIds, context) {
   const decorate = (sessionId, filePath) => {
     const meta = context.fileSessionMetadata(sessionId, filePath, result.get(sessionId));
     if (!shouldReadSessionContext(meta.lastUsedAt, context.now)) return meta;
-    const sessionContext = readContext(filePath);
+    const state = readCodexSessionState(filePath, deps.codexDeps);
+    if (state.promptCacheState?.observation !== undefined) meta.promptCache = state.promptCacheState.observation;
+    const sessionContext = deps.readCodexSessionContext ? readContext(filePath) : state.context;
     // The turn boundary rides the same tail and answers the other half of the
     // question the window cannot: whether the agent is still generating.
-    const turnEnded = readTurnEnded(filePath);
+    const turnEnded = deps.readCodexTurnEnded ? readTurnEnded(filePath) : state.turnEnded;
     const decorated = sessionContext ? { ...meta, ...sessionContext } : meta;
     // Forwarded in all three states, so a \' + BT + 'false\' + BT + ' can clear a \' + BT + 'true\' + BT + ' from an
     // earlier tick and an unknown transcript leaves the reading alone.

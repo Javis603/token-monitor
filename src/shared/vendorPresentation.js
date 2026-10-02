@@ -54,6 +54,7 @@
     { id: 'kilo', color: '#F8F676' },
     { id: 'commandcode', color: '#8C4EDD', widgetColor: '#9D66E7' },
     { id: 'mimo', color: '#000000', icon: 'xiaomi', widgetInk: true },
+    { id: 'muse', color: '#0866FF', icon: 'meta' },
     { id: 'zcode', color: '#000000', icon: 'zai', widgetInk: true },
     { id: 'kiro', color: '#9046FF', widgetColor: '#A66AFF' },
     { id: 'codebuddy', color: '#6C4DFF', widgetColor: '#8064FF' },
@@ -66,6 +67,7 @@
     { id: 'lmstudio', color: '#6C5CE7', widgetColor: '#8074E8' },
     { id: 'unsloth', color: '#40B85A' },
     { id: 'devin', color: '#000000', widgetInk: true },
+    { id: 'fx', color: '#000000', widgetInk: true },
     // Not tracked clients: model vendors and limits providers. A vendor shares
     // the colour of the client it names (moonshot/kimi, zai/zaiteam, xai/grok).
     { id: 'openrouter', label: 'OpenRouter', color: '#6566F1' },
@@ -87,8 +89,8 @@
     { id: 'ollama', label: 'Ollama', color: '#888888', widgetInk: true },
     { id: 'trae', label: 'Trae CN', color: '#32F08C' },
     { id: 'alibaba', label: 'Alibaba Cloud', color: '#615CED', widgetColor: '#7771F4' },
-    { id: 'nvidia', label: 'NVIDIA', color: '#74B71B' },
     { id: 'stepfun', label: 'StepFun', color: '#000000', widgetInk: true },
+    { id: 'nvidia', label: 'NVIDIA', color: '#74B71B' },
     { id: 'typesafe', label: 'TypeSafe', color: '#000000', widgetInk: true },
     { id: 'thirdparty', label: 'Third-party APIs', color: '#8090A6' },
     // Marks without a colour of their own. Factory is the limits provider for

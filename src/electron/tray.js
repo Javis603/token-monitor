@@ -10,6 +10,7 @@ const {
   trayShowsTitle
 } = require('../shared/trayText');
 const { codexAccountDisplayLabel } = require('./renderer/accountIdentity');
+const { EDGE_DOCK_MODES, normalizeEdgeDockMode } = require('./edgeDock/geometry');
 const { translate: translateMessage } = require('./renderer/i18n');
 
 const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
@@ -324,7 +325,7 @@ function buildTrayMenuTemplate(options = {}) {
   // user wants when switched on.
   const edgeDockItem = state.edgeDockSupported ? (() => {
     const setDock = callback('onSetEdgeDock');
-    const mode = state.edgeDockMode === 'always' ? 'always' : 'autoHide';
+    const mode = normalizeEdgeDockMode(state.edgeDockMode);
     const side = state.edgeDockSide === 'left' ? 'left' : 'right';
     return {
       label: t('trayMenu.edgeDock'),
@@ -336,7 +337,7 @@ function buildTrayMenuTemplate(options = {}) {
           click: () => setDock({ edgeDockEnabled: state.edgeDockEnabled !== true })
         },
         { type: 'separator' },
-        ...[['autoHide', 'settings.edgeDock.mode.autoHide'], ['always', 'settings.edgeDock.mode.always']].map(([value, labelKey]) => ({
+        ...EDGE_DOCK_MODES.map((value) => [value, `settings.edgeDock.mode.${value}`]).map(([value, labelKey]) => ({
           label: t(labelKey),
           type: 'radio',
           checked: mode === value,

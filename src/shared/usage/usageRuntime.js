@@ -1,6 +1,6 @@
 'use strict';
 
-const { startCollector } = require('./collector');
+const { startCollector } = require('../collector');
 
 function createUsageRuntime(options = {}, deps = {}) {
   const start = typeof deps.startCollector === 'function' ? deps.startCollector : startCollector;
