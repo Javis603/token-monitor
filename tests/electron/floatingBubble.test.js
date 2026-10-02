@@ -159,10 +159,10 @@ test('floatingBubbleInitialRendererQuery preserves renderer view state across wi
     floatingBubbleInitialRendererQuery(
       { collapsed: false, side: null },
       {
-        viewState: { period: 'today', breakdown: 'status' }
+        viewState: { period: 'today', breakdown: 'home' }
       }
     ),
-    { period: 'today', breakdown: 'status' }
+    { period: 'today', breakdown: 'home' }
   );
   // A corrupt snapshot collapses to today/home, still carried explicitly.
   assert.deepEqual(
