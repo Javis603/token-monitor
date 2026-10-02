@@ -641,7 +641,7 @@ test('fetchCodexLimits surfaces a named additional OAuth bucket without promotin
 
   assert.equal(provider.status, 'ok');
   assert.equal(provider.source, 'oauth');
-  assert.equal(provider.accountLabel, 'Pro 20x');
+  assert.equal(provider.accountLabel, 'Pro More');
   assert.equal(provider.windows.length, 1);
   assert.equal(provider.windows[0].kind, 'weekly');
   assert.equal(provider.windows[0].label, 'Codex Other');

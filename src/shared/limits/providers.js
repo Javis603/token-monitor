@@ -60,6 +60,7 @@
     { id: 'ollama', label: 'Ollama' },
     { id: 'trae', label: 'Trae CN' },
     { id: 'alibaba', label: 'Alibaba Cloud' },
+    { id: 'stepfun', label: 'StepFun' },
     { id: 'thirdparty', label: 'Third-party APIs' }
   ].map((provider) => Object.freeze({ ...provider })));
 

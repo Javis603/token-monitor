@@ -36,6 +36,8 @@ Only the app, agent and packaging scripts run `ensure:tokscale`, which installs 
 - **Defensive extraction.** `src/shared/usage.js` deep-walks tokscale's JSON and never assumes a fixed layout.
 - **Targeted watch scans.** Changed paths map back to clients, and those partitions are scanned in one unioned `--today` scan. That makes the client id a partition key — see the partition invariants in `docs/providers/README.md`.
 
+Claude and Codex derive prompt-cache observations in their existing provider-owned session metadata pass, alongside context and turn state. Do not add an independent transcript reader for each metric. Append scans retain cache-accounting identity so duplicate records cannot restart an estimate when the original record leaves the initial tail. In anchored watch propagation, an omitted `promptCache` leaves the prior observation alone; explicit `null` clears it.
+
 ### Watching
 
 - There is no cooldown on top of the debounce, because the product promises 3–5 s updates. The debounce is instead capped by `watchMaxWaitMs` (5 s, floored at the debounce), because a trailing debounce never fires while agents keep writing faster than it. Time behind an in-flight tick does not count toward the cap, so a slow tick cannot chain scans back-to-back.
@@ -85,6 +87,10 @@ The widget runs the collector, the usage transform (`src/shared/usage/usageTrans
 ### Balance quotas
 
 `windows[].metric === 'credits'` marks a money quota (`remaining` + `currency`). `src/shared/limits/balanceDisplay.js` is the single display entry point for Home, the tray and the limits page: key off the marker, never a provider whitelist. The top-up meter percentage is a display derivation and stays out of the wire shape.
+
+## Session title display
+
+`sessionTitlesEnabled` defaults to `true` and controls Electron presentation only. Hide titles from cached snapshots and all-time pulls through `src/electron/sessionTitleDisplay.js`; ordinary detail headings derive their title from current presentation stats and honor the same preference. Keep collection, metadata caches and local archives unchanged. Titles continue to be collected and saved locally while hidden, and remain excluded from sync independently of this preference.
 
 ## Widget mode switching
 

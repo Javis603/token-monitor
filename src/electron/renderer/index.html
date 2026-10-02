@@ -279,6 +279,7 @@
                     <div class="inline-options" role="radiogroup" aria-labelledby="edgeDockModeLabel">
                       <label class="inline-option"><input type="radio" name="edgeDockMode" value="autoHide" /><span data-i18n="settings.edgeDock.mode.autoHide">Auto-hide</span></label>
                       <label class="inline-option"><input type="radio" name="edgeDockMode" value="always" /><span data-i18n="settings.edgeDock.mode.always">Always visible</span></label>
+                      <label class="inline-option"><input type="radio" name="edgeDockMode" value="alwaysExceptFullScreen" /><span data-i18n="settings.edgeDock.mode.alwaysExceptFullScreen">Fullscreen auto-hide</span></label>
                     </div>
                   </div>
                   <div class="settings-item">
@@ -1498,6 +1499,7 @@
     <script src="../../shared/compactTokens.js"></script>
     <script src="../../shared/limits/balanceDisplay.js"></script>
     <script src="../../shared/limits/windowLabels.js"></script>
+    <script src="../../shared/limits/usageItems.js"></script>
     <script src="../../shared/limits/windowText.js"></script>
     <script src="limits/windowsView.js"></script>
     <script src="trayBars.js"></script>
@@ -1514,6 +1516,7 @@
     <script src="../providers/codex/accountControl.js"></script>
     <script src="limits/displayMode.js"></script>
     <script src="limits/resetMotion.js"></script>
+    <script src="limits/resetAnimator.js"></script>
     <script src="clientStatusPresentation.js"></script>
     <script src="clientHealthPresentation.js"></script>
     <script src="clientSourceCache.js"></script>
@@ -1531,7 +1534,9 @@
     <script src="i18n.js"></script>
     <script src="../../shared/providers/reasonix/sessionGuard.js"></script>
     <script src="../../shared/sessionLive.js"></script>
+    <script src="../sessionTitleDisplay.js"></script>
     <script src="sessionRows.js"></script>
+    <script src="overflowText.js"></script>
     <script src="breakdownRenderPolicy.js"></script>
     <script src="statsRenderScheduler.js"></script>
     <script src="allTimeSessions.js"></script>

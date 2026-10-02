@@ -463,6 +463,10 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ...devinRoots.cli.map((dir) => [DEVIN_CLI_SOURCE_CHECK_ID, dir, path.join(dir, 'sessions.db')]),
     ...devinRoots.desktop.map((dir) => [DEVIN_DESKTOP_SOURCE_CHECK_ID, dir])
   );
+  // fx (vercel-labs): one home-relative `~/.fx/sessions` tree on every
+  // platform (clients.rs PathRoot::Home), holding per-session
+  // `usage-v2.json` snapshots plus the shared `index.json` titles file.
+  add('fx', ...simpleHostSourceRoots('fx', home));
   const customScanPaths = normalizeCustomScanPaths(options.customScanPaths, { platform });
   for (const [client, dirs] of Object.entries(customScanPaths)) {
     if (!enabled.has(client)) continue;

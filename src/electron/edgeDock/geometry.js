@@ -53,6 +53,14 @@ const EDGE_DOCK_TIMING = Object.freeze({
   bubbleDelayMs: 70
 });
 
+// `alwaysExceptFullScreen` behaves as `always` on the desktop and as
+// `autoHide` while a full-screen app covers the dock's display.
+const EDGE_DOCK_MODES = Object.freeze(['autoHide', 'always', 'alwaysExceptFullScreen']);
+
+function normalizeEdgeDockMode(value) {
+  return EDGE_DOCK_MODES.includes(value) ? value : 'autoHide';
+}
+
 function normalizeEdgeDockSide(value) {
   return EDGE_DOCK_SIDES.includes(value) ? value : 'right';
 }
@@ -416,6 +424,7 @@ function createEdgeDockIntent(timing = EDGE_DOCK_TIMING) {
 module.exports = {
   EDGE_DOCK_DEFAULT_OFFSET,
   EDGE_DOCK_METRICS,
+  EDGE_DOCK_MODES,
   EDGE_DOCK_SIDES,
   EDGE_DOCK_TIMING,
   createEdgeDockIntent,
@@ -428,6 +437,7 @@ module.exports = {
   edgeDockRailBounds,
   edgeDockTriggerBounds,
   normalizeEdgeDockDisplayId,
+  normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
   railLength,

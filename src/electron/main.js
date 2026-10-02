@@ -89,8 +89,9 @@ const {
 } = require('../shared/providers/antigravity/selfSync');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
-const { actionWindowForEvent, handoffWindow, showWindow } = require('./windowLifecycle');
+const { actionWindowForEvent, activateWindowAction, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
+const { applyCodexAdditionalLimitsMigration } = require('./codexAdditionalLimitsMigration');
 const { createDeviceRuntime } = require('../shared/usage/deviceRuntime');
 const { externalAgentActive } = require('../shared/usage/agentPid');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
@@ -116,6 +117,7 @@ const {
 } = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
 const { limitProviderUrlAllowed } = require('../shared/limits/accounts');
+const { normalizeLimitProviderHiddenItems } = require('../shared/limits/usageItems');
 const {
   accountFieldProjection,
   accountStatusProjection,
@@ -330,6 +332,7 @@ const {
   createStatsPublicationBatcher,
   rendererStats
 } = require('./statsPublisher');
+const { withoutSessionTitleStats, withoutSessionTitles } = require('./sessionTitleDisplay');
 const { createSseBlockReader, parseSseBlock } = require('./sseEventReader');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
@@ -391,8 +394,10 @@ const {
 } = require('./floatingBubble');
 const { applyWindowsChrome } = require('./windowsChrome');
 const { canUseEdgeDock, createEdgeDockController, edgeDockSupported } = require('./edgeDock/controller');
+const { createFullScreenProbe } = require('./edgeDock/fullScreenProbe');
 const {
   normalizeEdgeDockDisplayId,
+  normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide
 } = require('./edgeDock/geometry');
@@ -564,6 +569,7 @@ function defaultSettings() {
     // `used` is what the Sessions view and this app's own readouts show, while
     // the clients' default footers tend to lead with what is left.
     sessionContextMetric: 'used',
+    sessionTitlesEnabled: true,
     periodMonthMode: 'month',
     themeColors: {},
     vendorColors: {},
@@ -583,7 +589,7 @@ function defaultSettings() {
     edgeDockOffset: null,
     edgeDockDisplayId: null,
     edgeDockItems: null,
-    lastViewState: { period: 'today', breakdown: 'tool' },
+    lastViewState: { period: 'today', breakdown: 'home' },
     discordRpcEnabled: false,
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
     icloudWriterId: '',
@@ -624,6 +630,9 @@ function defaultSettings() {
     limitProviderOrder: defaultLimitProviderOrder(),
     homeLimitProviderOrder: '',
     hiddenHomeLimitProviders: '',
+    // Rows of a provider's limits card the user has hidden, as
+    // `{ providerId: [itemId, ...] }` (see shared/limits/usageItems).
+    limitProviderHiddenItems: {},
     homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
     limitsRefreshMode: normalizeLimitsRefreshMode(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE),
     limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
@@ -2471,6 +2480,7 @@ function readSettings() {
     if (saved.hiddenHomeLimitProviders !== undefined) {
       merged.hiddenHomeLimitProviders = normalizeHiddenLimitProviders(saved.hiddenHomeLimitProviders);
     }
+    merged.limitProviderHiddenItems = normalizeLimitProviderHiddenItems(merged.limitProviderHiddenItems);
     merged.homeLimitAccountCount = normalizeHomeLimitAccountCount(merged.homeLimitAccountCount);
     merged.periodMonthMode = normalizePeriodMonthMode(merged.periodMonthMode);
     if (saved.historyEnabled !== undefined) {
@@ -2491,6 +2501,7 @@ function readSettings() {
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
+    merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
     merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
@@ -2542,7 +2553,7 @@ function readSettings() {
     merged.edgeDockSide = normalizeEdgeDockSide(merged.edgeDockSide);
     merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
     merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
-    merged.edgeDockMode = merged.edgeDockMode === 'always' ? 'always' : 'autoHide';
+    merged.edgeDockMode = normalizeEdgeDockMode(merged.edgeDockMode);
     merged.edgeDockHaptic = parseBoolean(merged.edgeDockHaptic, true);
     merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
     merged.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode(merged.edgeDockMacBackdrop);
@@ -2599,6 +2610,16 @@ function seedInitialLimitProviders(summary) {
       deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
       pushSettingsToRenderer();
     }
+  });
+}
+
+// Runs on the presented stats rather than this device's record, so a Codex
+// account another device reports carries the switch over too.
+function migrateCodexAdditionalLimits(visibleStats) {
+  return applyCodexAdditionalLimitsMigration(visibleStats, {
+    settings,
+    saveSettings,
+    onPersisted: pushSettingsToRenderer
   });
 }
 
@@ -2882,9 +2903,9 @@ function electronPresentationStats(stats) {
   };
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
-  const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null]);
+  const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
   return presentationCache.get(stats, key, () => projectModelAliasStats(
-    projectLimitStatsForDisplay(stats, limitOptions),
+    projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(stats) : stats, limitOptions),
     aliases,
     { grouping }
   ));
@@ -2905,14 +2926,14 @@ function rendererAllTimeSessions(stats) {
   if (!stats) return null;
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
-  const key = JSON.stringify([aliases ?? null, grouping ?? null]);
+  const key = JSON.stringify([aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
   return allTimeSessionsCache.get(stats, key, () => {
     const complete = completeLocalSyncStats(stats);
     const hubSnapshot = snapshotLocalDevices.get(stats);
     const sessions = hubSnapshot
       ? mergedLocalAllTimeSessions(complete.periods, hubSnapshot.localDevice)
       : complete.periods?.allTime?.sessions || {};
-    return projectModelAliasSessions(stats, sessions, aliases, { grouping });
+    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, aliases, { grouping });
   });
 }
 
@@ -4538,6 +4559,7 @@ function sendPush(payload, options = {}) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
     const visibleStats = electronPresentationStats(latestStats);
+    migrateCodexAdditionalLimits(visibleStats);
     rendererPayload = {
       ...payload,
       data: { ...payload.data, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
@@ -5163,6 +5185,7 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
     // every preference that view reads has to reach this renderer as well —
     // otherwise the card silently renders a different page's answer.
     showCodexAdditionalLimits: source.showCodexAdditionalLimits,
+    limitProviderHiddenItems: source.limitProviderHiddenItems,
     showLimitSource: source.showLimitSource,
     codexResetForecastEnabled: source.codexResetForecastEnabled,
     claudePrepaidBalanceEnabled: source.claudePrepaidBalanceEnabled,
@@ -5344,6 +5367,7 @@ function edgeDockCellsFor(visibleStats) {
     // dock window is handed cells and nothing else, so both ride the cell.
     syncActive: syncProvenanceActive(),
     items: settings?.edgeDockItems,
+    showCodexAdditionalLimits: settings?.showCodexAdditionalLimits,
     codexManagedAccounts: codexAccountsForRenderer(),
     activeCodexAccountId: codexPresentationPendingAccountId || codexPresentationActiveAccountId,
     limitsEnabled: settings?.limitsEnabled !== false,
@@ -5451,6 +5475,7 @@ function ensureEdgeDockController() {
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
+    isFullScreen: createFullScreenProbe({ platform: process.platform, screen, logger: (message) => console.log(message) }),
     // The dock card's Switch button runs the same swap the Limits view does,
     // then repaints from the refreshed records. It is the dock's only write.
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
@@ -5500,6 +5525,7 @@ function syncEdgeDock(rendererSettings) {
 function refreshLimitStatsPresentation() {
   if (!latestStats) return;
   const visibleStats = electronPresentationStats(latestStats);
+  migrateCodexAdditionalLimits(visibleStats);
   scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
   updateEdgeDockCells(visibleStats);
   updateTrayDisplay();
@@ -5599,7 +5625,7 @@ function setTrayContentFromMenu(value) {
 
 function setEdgeDockFromMenu(patch = {}) {
   if (patch.edgeDockEnabled !== undefined) settings.edgeDockEnabled = parseBoolean(patch.edgeDockEnabled, false);
-  if (patch.edgeDockMode !== undefined) settings.edgeDockMode = patch.edgeDockMode === 'always' ? 'always' : 'autoHide';
+  if (patch.edgeDockMode !== undefined) settings.edgeDockMode = normalizeEdgeDockMode(patch.edgeDockMode);
   if (patch.edgeDockSide !== undefined) settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
   saveSettings();
   // Also re-syncs the dock itself (pushSettingsToRenderer → syncEdgeDock).
@@ -7297,7 +7323,7 @@ app.whenReady().then(() => {
       edgeDockSide: normalizeEdgeDockSide(patch.edgeDockSide ?? settings.edgeDockSide),
       edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
       edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),
-      edgeDockMode: (patch.edgeDockMode ?? settings.edgeDockMode) === 'always' ? 'always' : 'autoHide',
+      edgeDockMode: normalizeEdgeDockMode(patch.edgeDockMode ?? settings.edgeDockMode),
       edgeDockHaptic: parseBoolean(patch.edgeDockHaptic ?? settings.edgeDockHaptic, true),
       edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
       edgeDockMacBackdrop: normalizeEdgeDockBackdropMode(patch.edgeDockMacBackdrop ?? settings.edgeDockMacBackdrop),
@@ -7336,9 +7362,11 @@ app.whenReady().then(() => {
       showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
+      limitProviderHiddenItems: normalizeLimitProviderHiddenItems(patch.limitProviderHiddenItems ?? settings.limitProviderHiddenItems),
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
+      sessionTitlesEnabled: parseBoolean(patch.sessionTitlesEnabled ?? settings.sessionTitlesEnabled, true),
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
@@ -7509,6 +7537,9 @@ app.whenReady().then(() => {
       }
     }
     pushSettingsToRenderer();
+    if (settings.sessionTitlesEnabled !== previousSettingsState.sessionTitlesEnabled) {
+      refreshLimitStatsPresentation();
+    }
     return settingsForRenderer();
   }
   ipcMain.handle('appearance:preview', (event, patch) => {
@@ -8739,14 +8770,21 @@ app.whenReady().then(() => {
   });
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
-  // The window this builds is about to be on screen, so the policy is resolved
-  // for a visible window exactly as focusExistingWindow() does. Without it this
-  // was the one path reaching applyMacSpaceBehavior() with a process type
-  // nothing had decided, which skipTransformProcessType now preserves.
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().some((win) => !edgeDockController?.owns(win))) return;
-    applyMacActivationPolicy({ mainWindowVisible: true });
-    createWindow();
+    const action = activateWindowAction({
+      mainWindow,
+      windows: BrowserWindow.getAllWindows(),
+      isDockOwned: (win) => Boolean(edgeDockController?.owns(win))
+    });
+    if (action === 'focusWindow') focusExistingWindow();
+    else if (action === 'createWindow') {
+      // The window this builds is about to be on screen, so the policy is resolved
+      // for a visible window exactly as focusExistingWindow() does. Without it this
+      // was the one path reaching applyMacSpaceBehavior() with a process type
+      // nothing had decided, which skipTransformProcessType now preserves.
+      applyMacActivationPolicy({ mainWindowVisible: true });
+      createWindow();
+    }
   });
   maybeRunBackgroundUpdateCheck();
   startAppUpdateBackgroundChecks();

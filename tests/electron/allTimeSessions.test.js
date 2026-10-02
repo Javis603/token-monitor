@@ -188,8 +188,58 @@ test('the renderer attaches the pulled list to every stats it adopts and pulls f
   assert.ok(html.indexOf('<script src="allTimeSessions.js">') < html.indexOf('<script src="app.js">'));
   assert.match(preload, /getAllTimeSessions: \(snapshotId\) => ipcRenderer\.invoke\('stats:allTimeSessions', snapshotId\)/);
   assert.match(app, /fetchSessions: \(snapshotId\) => window\.tokenMonitor\.getAllTimeSessions\(snapshotId\),\s*currentSnapshot: \(\) => state\.stats\?\.snapshot,/);
-  assert.equal((app.match(/allTimeSessions\.invalidate\(\);\s*state\.stats = allTimeSessions\.attach\(/g) || []).length, 2, 'push and refresh');
+  assert.equal((app.match(/allTimeSessions\.invalidate\(\);\s*state\.stats = sessionStatsForDisplay\(allTimeSessions\.attach\(/g) || []).length, 2, 'push and refresh');
   assert.doesNotMatch(app, /state\.stats = (payload\.data\.stats|nextStats);/);
   assert.match(app, /function render\(\) \{[\s\S]*?if \(!state\.stats\) return;\s*allTimeSessions\.ensure\(\);/);
   assert.match(app, /allTimeSessions\.ensure\(\);\s*renderSessionUsageArchiveStatus\(\);/, 'Settings pulls for the archived count');
+});
+
+test('a title-bearing pull that lands after titles are hidden is projected using the current policy', async () => {
+  const { withoutSessionTitles } = require('../../src/electron/sessionTitleDisplay');
+  let hidden = false;
+  let resolvePull;
+  const input = stats();
+  let adopted;
+  let projections = 0;
+  const loader = createAllTimeSessionsLoader({
+    fetchSessions: () => new Promise((resolve) => { resolvePull = resolve; }),
+    currentSnapshot: () => input.snapshot,
+    needed: () => true,
+    projectSessions: (value) => { projections += 1; return hidden ? withoutSessionTitles(value) : value; },
+    projectionKey: () => hidden,
+    onLoaded: () => { adopted = loader.attach(input); }
+  });
+  loader.ensure();
+  await settle();
+  hidden = true;
+  resolvePull({ 'codex:s': { title: 'Private title', totalTokens: 9 } });
+  await settle();
+  assert.equal(adopted.periods.allTime.sessions['codex:s'].title, undefined);
+  assert.equal(adopted.periods.allTime.sessions['codex:s'].totalTokens, 9);
+  assert.equal(Object.hasOwn(input.periods.allTime, 'sessions'), false);
+  const projectedSessions = adopted.periods.allTime.sessions;
+  for (let tick = 0; tick < 5; tick += 1) {
+    assert.strictEqual(loader.attach(stats({ id: tick + 2, source: 0 })).periods.allTime.sessions, projectedSessions);
+  }
+  assert.equal(projections, 1, 'successive pushes reuse the projected map');
+  hidden = false;
+  assert.equal(loader.attach(input).periods.allTime.sessions['codex:s'].title, 'Private title');
+  assert.equal(projections, 2);
+});
+
+
+test('re-enabling re-pulls a titleless list for the same snapshot', async () => {
+  const { loader, calls, loaded } = harness();
+  loader.ensure();
+  await settle();
+  calls[0].resolve({ 'codex:s': { totalTokens: 9 } });
+  await settle();
+  assert.equal(loaded[0].periods.allTime.sessions['codex:s'].title, undefined);
+  loader.invalidate();
+  loader.ensure();
+  await settle();
+  assert.equal(calls[1].id, calls[0].id);
+  calls[1].resolve({ 'codex:s': { title: 'Recovered title', totalTokens: 9 } });
+  await settle();
+  assert.equal(loaded[1].periods.allTime.sessions['codex:s'].title, 'Recovered title');
 });

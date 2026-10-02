@@ -477,6 +477,15 @@ test('Muse watches the same XDG sessions root used for source detection', () => 
   assert.deepEqual(clientSourceChecks('muse', options).muse.map((check) => check.id), ['muse-sessions']);
 });
 
+test('fx watches the home-relative sessions root used for source detection', () => {
+  const homeDir = path.join(os.tmpdir(), 'fx-source-home');
+  const options = { homeDir };
+  const dir = path.join(homeDir, '.fx', 'sessions');
+  assert.deepEqual(clientSourceRoots('fx', options).fx, [{ id: 'fx-sessions', dir }]);
+  assert.deepEqual(clientWatchCandidates('fx', options).fx, [dir]);
+  assert.deepEqual(clientSourceChecks('fx', options).fx.map((check) => check.id), ['fx-sessions']);
+});
+
 test('source observations keep exact files, optional roots and WSL health in sync with diagnostics', () => {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-source-observations-'));
   const previousHome = os.homedir;

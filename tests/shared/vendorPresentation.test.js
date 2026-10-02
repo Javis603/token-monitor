@@ -77,5 +77,32 @@ test('the widget palette omits entries that restate the defaults', () => {
 test('one mask rule is installed per mark id', () => {
   const rules = rowIconMaskRules('../../../assets/icons/').split('\n');
   assert.equal(rules.length, MARK_IDS.length);
-  assert.ok(rules.includes('.row-icon-grok { -webkit-mask-image: url(../../../assets/icons/xai.svg); mask-image: url(../../../assets/icons/xai.svg); }'));
+  assert.ok(rules.includes('.row-icon-grok { -webkit-mask-image: url("../../../assets/icons/xai.svg"); mask-image: url("../../../assets/icons/xai.svg"); }'));
+});
+
+test('a mask url survives an install path with parentheses', () => {
+  // A Windows install under `C:\Program Files (x86)` makes the base URL contain
+  // a literal `(`: `new URL()` does not percent-encode parentheses. The url()
+  // token has to be quoted, or the token ends at that `)`, the declaration is
+  // invalid CSS and every vendor mark degrades to a solid currentColor square.
+  const base = 'file:///C:/Program%20Files%20(x86)/Token%20Monitor/resources/app.asar/assets/icons/';
+  const rules = rowIconMaskRules(base).split('\n');
+  assert.equal(rules.length, MARK_IDS.length);
+  assert.ok(
+    rules.includes(`.row-icon-grok { -webkit-mask-image: url("${base}xai.svg"); mask-image: url("${base}xai.svg"); }`)
+  );
+  for (const rule of rules) {
+    // Exactly the two quoted url() tokens, each containing no bare `)`.
+    assert.match(rule, /^\.row-icon-[a-z0-9-]+ \{ -webkit-mask-image: url\("([^"\\]|\\.)*"\); mask-image: url\("([^"\\]|\\.)*"\); \}$/);
+  }
+});
+
+test('a mask url escapes quotes and backslashes in the base', () => {
+  // A POSIX install path can contain `"` or `\`; either would end the quoted
+  // url() token early (and `\` escapes whatever follows it).
+  const quoted = rowIconMaskRules('file:///tmp/a"b/assets/icons/').split('\n')[0];
+  assert.equal((quoted.match(/[^\\]"/g) || []).length, 4, quoted);
+  assert.ok(quoted.includes(String.raw`a\"b`), quoted);
+  const slashed = rowIconMaskRules(String.raw`file:///tmp/a\b/assets/icons/`).split('\n')[0];
+  assert.ok(slashed.includes(String.raw`a\\b`), slashed);
 });

@@ -73,6 +73,12 @@
     return Object.values(counters).every((value) => value !== null) ? counters : null;
   }
 
+  function modelCounters(period) {
+    return Object.fromEntries(Object.entries(period.modelThroughput || {})
+      .map(([model, counters]) => [model, usageCounters(counters)])
+      .filter(([, counters]) => counters));
+  }
+
   // A period is cumulative, so its ratio is necessarily an average. Live rate is the ratio
   // of the counters added by one successful snapshot: the duration comes from the same
   // tokscale performance entries as both token numerators, never from watcher or wall time.
@@ -81,16 +87,21 @@
   function createLiveTokenRateTracker({ now = defaultNow } = {}) {
     if (typeof now !== 'function') throw new TypeError('now must be a function');
     let baseline = null;
+    let modelBaseline = null;
     let sample = null;
     let revision = 0;
 
     function reset(period) {
       baseline = period ? usageCounters(period) : null;
+      modelBaseline = period?.modelThroughput ? modelCounters(period) : null;
       sample = null;
     }
 
     function observe(period) {
       const current = usageCounters(period);
+      const models = period?.modelThroughput ? modelCounters(period) : null;
+      const previousModels = modelBaseline;
+      modelBaseline = models;
       if (!current) {
         baseline = null;
         sample = null;
@@ -120,6 +131,17 @@
         burn: tokenBurnPerMinute(delta),
         sampledAt: Number(now()) || 0,
         revision,
+        models: Object.entries(models || {}).flatMap(([model, counters]) => {
+          // Missing attribution is unknown, not an exact zero baseline.
+          if (!previousModels) return [];
+          const previous = previousModels[model] || { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+          const change = Object.fromEntries(Object.keys(counters).map((field) => [field, counters[field] - previous[field]]));
+          // A renamed/retroactively attributed model may appear with historical
+          // counters. It cannot have added more than this snapshot's entire delta.
+          if (Object.keys(change).some((field) => change[field] < 0 || change[field] > delta[field])
+            || !(change.timedDurationMs > 0)) return [];
+          return [{ model, speed: tokenRatePerSecond(change), burn: tokenBurnPerMinute(change) }];
+        }),
         ...delta
       };
       return sample;
@@ -158,7 +180,7 @@
         const id = String(entry?.id || '').trim();
         if (!id || seen.has(id)) continue;
         seen.add(id);
-        result.push({ id, period: entry?.period });
+        result.push({ id, name: String(entry?.name || id), period: entry?.period });
       }
       return result;
     }
@@ -169,7 +191,7 @@
       for (const entry of normalizedEntries(entries)) {
         const tracker = createLiveTokenRateTracker({ now });
         tracker.reset(entry.period);
-        trackers.set(entry.id, tracker);
+        trackers.set(entry.id, { tracker, name: entry.name });
       }
     }
 
@@ -180,7 +202,7 @@
       let fresh = false;
       let invalidated = false;
 
-      for (const [id, tracker] of trackers) {
+      for (const [id, { tracker }] of trackers) {
         if (present.has(id)) continue;
         if (tracker.getSample()) {
           changed = true;
@@ -189,13 +211,15 @@
       }
 
       for (const entry of nextEntries) {
-        let tracker = trackers.get(entry.id);
-        if (!tracker) {
-          tracker = createLiveTokenRateTracker({ now });
+        const device = trackers.get(entry.id);
+        if (!device) {
+          const tracker = createLiveTokenRateTracker({ now });
           tracker.reset(entry.period);
-          trackers.set(entry.id, tracker);
+          trackers.set(entry.id, { tracker, name: entry.name });
           continue;
         }
+        device.name = entry.name;
+        const { tracker } = device;
         const previous = tracker.getSample();
         const sample = tracker.observe(entry.period);
         if (sample === previous) continue;
@@ -211,8 +235,11 @@
 
     function activeSamples() {
       const timestamp = Number(now()) || 0;
-      return [...trackers.values()]
-        .map((tracker) => tracker.getSample())
+      return [...trackers.entries()]
+        .map(([id, { tracker, name }]) => {
+          const sample = tracker.getSample();
+          return sample ? { ...sample, id, name } : null;
+        })
         .filter((sample) => sample && timestamp < sample.sampledAt + lifetime);
     }
 
@@ -223,6 +250,8 @@
           speed: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.speed, 0)),
           burn: cappedTokenRate(samples.reduce((sum, sample) => sum + sample.burn, 0)),
           sampledAt: Math.max(...samples.map((sample) => sample.sampledAt)),
+          devices: samples.filter((sample) => sample.models?.length)
+            .map(({ id, name, models }) => ({ id, name, models })),
           deviceCount: samples.length,
           revision
         };
@@ -262,7 +291,7 @@
       return {
         entries: devices
           .filter((device) => device?.stale !== true && device?.periods?.today && typeof device.periods.today === 'object')
-          .map((device) => ({ id: `device:${String(device.deviceId || 'unknown')}`, period: device.periods.today })),
+          .map((device) => ({ id: `device:${String(device.deviceId || 'unknown')}`, ...(device.hostname ? { name: device.hostname } : {}), period: device.periods.today })),
         source: 'devices:all'
       };
     }
@@ -277,11 +306,27 @@
       || (!syncMode ? stats?.periods?.today : null);
     if (localPeriod && typeof localPeriod === 'object') {
       return {
-        entries: [{ id: `device:${normalizedDeviceId}`, period: localPeriod }],
+        entries: [{ id: `device:${normalizedDeviceId}`, ...(localDevice?.hostname ? { name: localDevice.hostname } : {}), period: localPeriod }],
         source: `device:${normalizedDeviceId}`
       };
     }
     return { entries: [], source: `device:${normalizedDeviceId || 'unavailable'}` };
+  }
+
+  function liveTokenRateTooltipEntries(sample, mode, formatRate) {
+    const burn = mode === 'burn';
+    const unit = burn ? 'TPM' : 'tok/s';
+    const devices = sample?.devices || [];
+    const grouped = (sample?.deviceCount || devices.length) > 1;
+    const entries = [];
+    for (const device of devices) {
+      if (!device.models?.length) continue;
+      if (grouped) entries.push({ full: device.name, separated: entries.length > 0 });
+      const models = device.models.slice().sort((a, b) =>
+        (burn ? b.burn - a.burn : b.speed - a.speed) || a.model.localeCompare(b.model));
+      entries.push(...models.map((entry) => [entry.model, `${formatRate(burn ? entry.burn : entry.speed)} ${unit}`]));
+    }
+    return entries;
   }
 
   function defaultNow() {
@@ -501,6 +546,7 @@
     createLiveTokenRateTracker,
     createTokenRateBoostController,
     isSharedSyncMode,
+    liveTokenRateTooltipEntries,
     positiveNumber,
     selectLiveTokenRatePeriods,
     tokenBurnPerMinute,

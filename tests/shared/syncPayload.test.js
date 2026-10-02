@@ -10,6 +10,41 @@ test('syncPayload preserves nullish inputs', () => {
   assert.equal(syncPayload(undefined), undefined);
 });
 
+test('oversized model timing detail is omitted before session detail without mutating the source', () => {
+  const modelThroughput = Object.fromEntries(Array.from({ length: 13000 }, (_, i) => [
+    `model-${i}-${'x'.repeat(20)}`, { timedTokens: 1, timedOutputTokens: 1, timedDurationMs: 1 }
+  ]));
+  const today = { totalTokens: 13000, outputTokens: 13000, timedTokens: 13000, timedOutputTokens: 13000, timedDurationMs: 13000,
+    modelThroughput, sessions: { 'codex:s1': { client: 'codex', sessionId: 's1', totalTokens: 13000 } } };
+  const summary = { deviceId: 'a', today, month: today, allTime: today };
+  const serialized = serializeSyncPayload(summary);
+  assert.ok(serialized.bytes <= SYNC_PAYLOAD_BUDGET_BYTES);
+  for (const name of ['today', 'month', 'allTime']) {
+    assert.equal(Object.hasOwn(serialized.payload[name], 'modelThroughput'), false);
+    assert.equal(serialized.payload[name].totalTokens, 13000);
+    assert.strictEqual(summary[name].modelThroughput, modelThroughput);
+  }
+  assert.deepEqual(serialized.payload.today.sessions, today.sessions);
+  assert.equal(serialized.payload.sessionDetailsOmitted, undefined);
+  const { normalizePeriod } = require('../../src/shared/usage');
+  assert.equal(normalizePeriod(serialized.payload.today).modelThroughput, undefined);
+});
+
+test('413 recovery can omit model detail even when the original body fits the default budget', async () => {
+  const today = { totalTokens: 10, modelThroughput: { alpha: { timedTokens: 10, timedOutputTokens: 2, timedDurationMs: 1000 } } };
+  const requests = [];
+  const result = await postSyncPayload(async (_url, request) => {
+    requests.push(JSON.parse(request.body));
+    return { status: requests.length === 1 ? 413 : 200, arrayBuffer: async () => new ArrayBuffer(0) };
+  }, 'https://hub.invalid/api/ingest', { summary: { deviceId: 'a', today } });
+  assert.equal(result.retried, true);
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0].today.modelThroughput, today.modelThroughput);
+  assert.equal(Object.hasOwn(requests[1].today, 'modelThroughput'), false);
+  assert.equal(requests[1].today.totalTokens, 10);
+  assert.ok(today.modelThroughput);
+});
+
 test('syncPayload preserves the upload interval used by hub staleness checks', () => {
   const payload = syncPayload({
     deviceId: 'dev-a',

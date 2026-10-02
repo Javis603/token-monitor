@@ -98,6 +98,7 @@ function createHarness() {
   const context = {
     document,
     state: { settings: { showToolIcons: false } },
+    prefersReducedMotion: () => false,
     toolIconsEnabled: () => false,
     clientsWithIcon: new Set(),
     formatNumber: (value) => String(value),
@@ -113,6 +114,7 @@ function createHarness() {
     },
     clearTimeout(id) { timers.delete(id); },
     window: {
+      TokenMonitorOverflowText: { create: () => ({}) },
       tokenMonitor: {
         deleteDevice: async (...args) => {
           deleteCalls += 1;
