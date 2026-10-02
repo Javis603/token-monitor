@@ -1769,5 +1769,6 @@ module.exports = {
   normalizeDeviceRecord,
   normalizePeriod,
   projectRollupFromSessions,
-  stripSessionTextFromDeviceRecord
+  stripSessionTextFromDeviceRecord,
+  stripSessionTextFromPeriod
 };
