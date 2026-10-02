@@ -392,6 +392,8 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
       // regions are probed at all, and it is what keeps a CN key off
       // 'unavailable' while the global host is unreachable from CN networks.
       if (isMinimaxTransportError(error)) {
+        // A canceled runtime must not issue another request with stale config.
+        if (deps.signal?.aborted) break;
         sawTransportFailure = true;
         const nextRegionIndex = attempts.findIndex(
           (candidate, candidateIndex) => candidateIndex > index && candidate.region !== attempt.region

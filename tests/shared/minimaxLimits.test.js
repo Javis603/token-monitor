@@ -998,6 +998,45 @@ test('Auto advances to the other region after the per-request timeout aborts', {
   assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
 });
 
+test('MiniMax stops the superseded probe before retrying another region with the old key', { timeout: 5000 }, async () => {
+  const calls = [];
+  let firstStarted;
+  const started = new Promise((resolve) => { firstStarted = resolve; });
+  const runtime = createLimitsRuntime({
+    limitProviders: ['minimax'], minimaxApiKey: 'sk-cp-old', minimaxApiRegion: 'auto'
+  }, {
+    autoStart: false, autoRetry: false, env: {},
+    fetch: async (url, init) => {
+      calls.push({ url, authorization: init.headers.Authorization });
+      if (init.signal.aborted) throw init.signal.reason;
+      if (init.headers.Authorization === 'Bearer sk-cp-old') {
+        firstStarted();
+        return new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+        });
+      }
+      return okResponse(windowsBody);
+    }
+  });
+  try {
+    const first = runtime.refresh({ provider: 'minimax' }, 'manual');
+    await started;
+    runtime.reconfigure({ minimaxApiKey: 'sk-cp-new', minimaxApiRegion: 'cn' });
+    runtime.clear({ provider: 'minimax' }, 'settings-change');
+    await runtime.refresh({ provider: 'minimax' }, 'settings-change');
+    await first;
+    assert.deepEqual(calls, [
+      { url: MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, authorization: 'Bearer sk-cp-old' },
+      { url: MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, authorization: 'Bearer sk-cp-new' }
+    ]);
+    const row = runtime.getSnapshot().providers[0];
+    assert.equal(row.status, 'ok');
+    assert.equal(row.region, 'cn');
+  } finally {
+    runtime.stop();
+  }
+});
+
 test('Auto retries the other region when a response body disconnects during reading', async () => {
   const calls = [];
   const result = await fetchMinimaxLimits({ minimaxApiKey: 'sk-cp-test' }, {

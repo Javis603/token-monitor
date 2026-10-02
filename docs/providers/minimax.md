@@ -9,7 +9,7 @@ read_when:
 
 An explicit `minimaxApiRegion` choice wins over the legacy probe option `minimaxApiHost`, then `TOKEN_MONITOR_MINIMAX_API_REGION`, `MINIMAX_API_REGION`, and `MINIMAX_API_HOST`. Region and hostname aliases are exact matches. The default is `auto`: probe the last region that returned parseable quota first, or international first when no success is remembered. The other region remains a fallback for authentication rejection or transport failure. A China/International selection from settings or env always pins that region ahead of memory and prevents cross-region requests.
 
-Within each region, the Token Plan endpoint falls back to the legacy Coding Plan endpoint on the existing migration/error signals. A transport failure skips the remaining endpoint on the unreachable host. HTTP failures such as 5xx or 429 and JSON parse failures do not trigger a cross-region retry.
+Within each region, the Token Plan endpoint falls back to the legacy Coding Plan endpoint on the existing migration/error signals. A transport failure skips the remaining endpoint on the unreachable host. Runtime cancellation stops the probe without retrying another region; a per-request timeout remains eligible for fallback. HTTP failures such as 5xx or 429 and JSON parse failures do not trigger a cross-region retry.
 
 ## Credentials and transport
 
