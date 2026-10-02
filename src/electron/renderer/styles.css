@@ -594,6 +594,13 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   pointer-events: none;
   transform: translateY(-4px);
 }
+/* The panel shares the shell's column with the dashboard surfaces rather than
+   covering them, and only the scrolling surfaces can shrink to make room. The
+   rows that keep their height (the total, the back row, the session head and
+   pager) would otherwise squeeze the panel to a sliver in a short window, so
+   they step aside while settings is open. None of them scrolls or is measured,
+   so hiding them loses no state. */
+.shell.settings-open > :is(.total-panel, .view-back-row, .detail-head, .session-pager-host) { display: none; }
 .settings-panel label, .settings-field { display: grid; min-width: 0; gap: 4px; color: var(--muted); font-size: 11px; }
 .settings-field-label { min-width: 0; }
 /* Keep checkbox labels semantic for assistive technology, but make the visual
