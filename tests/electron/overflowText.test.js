@@ -326,7 +326,7 @@ test('resizing clamps the offset and detaching a hovered title stops its animati
   assert.equal(h.element.classList.contains('is-hover-reading'), false);
 });
 
-test('updateRow moves ids into Details only for sessions that can open them', () => {
+test('updateRow keeps IDs for untitled sessions and moves them into Details for titled sessions', () => {
   const h = harness();
   const row = h.node();
   const selectors = new Map();
@@ -353,11 +353,37 @@ test('updateRow moves ids into Details only for sessions that can open them', ()
     ['cursor', undefined, false], ['copilot', undefined, false], ['zed', undefined, false],
     ['reasonix', false, false], ['reasonix', true, true], ['reasonix', false, false]
   ]) {
-    context.update(row, { name: 'Session', detail: 'session-id', kind: 'session', client, sessionDetailAvailable, value: 100 });
-    const detail = row.querySelector('.row-detail');
-    assert.equal(interactive, expectedInteractive, client);
-    assert.equal(detail.textContent, expectedInteractive ? '' : 'session-id', client);
-    assert.equal(detail.classList.contains('hidden'), expectedInteractive, client);
+    for (const titled of [true, false, true]) {
+      context.update(row, { name: titled ? 'Named session' : 'Tool · Model',
+        subtitle: titled ? 'Tool · Model' : '12:00 · 2 calls',
+        activity: titled ? '12:00 · 2 calls' : undefined,
+        detail: 'session-id', kind: 'session', client, sessionDetailAvailable, value: 100 });
+      const detail = row.querySelector('.row-detail');
+      assert.equal(interactive, expectedInteractive, client);
+      const hidden = expectedInteractive && titled;
+      assert.equal(detail.textContent, hidden ? '' : 'session-id', client);
+      assert.equal(detail.classList.contains('hidden'), hidden, client);
+    }
+  }
+  const { sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
+  const { withoutSessionTitles } = require('../../src/shared/sessionTitlePrivacy');
+  const sessionId = '019e76fc-dddd-eeee-ffff-222222222222';
+  const original = { client: 'codex', sessionId, title: 'Named session', totalTokens: 42,
+    models: { 'gpt-5': 42 }, messageCount: 2, lastUsedAt: new Date(2026, 9, 2, 12, 0).toISOString() };
+  const visibleLines = () => ['row-title', 'row-subtitle', 'row-activity', 'row-detail']
+    .map((name) => row.querySelector(`.${name}`))
+    .filter((element) => !element.classList.contains('hidden') && element.textContent)
+    .map((element) => element.textContent);
+  for (const enabled of [true, false, true]) {
+    const sessions = enabled ? { s: original } : withoutSessionTitles({ s: original });
+    const [data] = sessionRowsForPeriod({ sessions }, {
+      clientLabels: { codex: 'Codex' }, now: new Date(2026, 9, 2, 12, 1)
+    });
+    context.update(row, data);
+    assert.deepEqual(visibleLines(), enabled
+      ? ['Named session', 'Codex · gpt-5', '12:00 · 2 calls']
+      : ['Codex · gpt-5', '12:00 · 2 calls', sessionId]);
+    assert.equal(interactive, true, 'title mode changes preserve detail navigation');
   }
   context.update(row, { name: 'Reviews', detail: '3 runs', kind: 'summary', reviewGroup: true, value: 100 });
   assert.equal(interactive, true);

@@ -2454,9 +2454,10 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   const activityEl = row.querySelector('.row-activity');
   setHoverMarqueeText(activityEl, activity);
   activityEl.classList.toggle('hidden', !activity);
-  // Move the id into Session Details only when the row can open them; clients
-  // without a detail reader still need their id here to distinguish sessions.
-  const shownDetail = kind === 'session' && interactive ? '' : detail;
+  // A titled session already has name, client/model and activity lines. Move
+  // its ID into Details, but keep the ID when only two lines remain so untitled
+  // sessions can still be distinguished (including when titles are disabled).
+  const shownDetail = kind === 'session' && interactive && activity ? '' : detail;
   const detailEl = row.querySelector('.row-detail');
   setHoverMarqueeText(detailEl, shownDetail);
   detailEl.classList.toggle('hidden', !shownDetail);
