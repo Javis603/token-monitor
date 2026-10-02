@@ -88,6 +88,10 @@ The widget runs the collector, the usage transform (`src/shared/usage/usageTrans
 
 `windows[].metric === 'credits'` marks a money quota (`remaining` + `currency`). `src/shared/limits/balanceDisplay.js` is the single display entry point for Home, the tray and the limits page: key off the marker, never a provider whitelist. The top-up meter percentage is a display derivation and stays out of the wire shape.
 
+## Session title display
+
+`sessionTitlesEnabled` defaults to `true` and controls Electron presentation only. Hide titles through the shared display projection, including cached snapshots, all-time pulls and detail headings; keep collection, metadata caches and local archives unchanged. Titles continue to be collected and saved locally while hidden, and remain excluded from sync independently of this preference.
+
 ## Widget mode switching
 
 `settings.hubMode` selects the data path. `local` runs the local collector over IPC. `client` stops it, opens the Hub SSE stream and runs a sync collector for this device. `host` adds an embedded Hub (`startEmbeddedHub()`). `icloud` runs the macOS widget collector and writes this device's record to iCloud Drive; its file reconciliation supplies the shared aggregate without Hub SSE. A Hub sync collector skips posting while the PID in `data/agent.pid` is alive. In iCloud mode the widget remains the sole producer of its iCloud DeviceRecord even while an external headless agent is active, because the agent has no iCloud sink. The agent owns the local daily-history archive while active; the widget reads it and continues producing its iCloud record without writing the archive.

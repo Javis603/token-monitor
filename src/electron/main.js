@@ -332,6 +332,7 @@ const {
   createStatsPublicationBatcher,
   rendererStats
 } = require('./statsPublisher');
+const { withoutSessionTitleStats, withoutSessionTitles } = require('./sessionTitleDisplay');
 const { createSseBlockReader, parseSseBlock } = require('./sseEventReader');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
@@ -568,6 +569,7 @@ function defaultSettings() {
     // `used` is what the Sessions view and this app's own readouts show, while
     // the clients' default footers tend to lead with what is left.
     sessionContextMetric: 'used',
+    sessionTitlesEnabled: true,
     periodMonthMode: 'month',
     themeColors: {},
     vendorColors: {},
@@ -2499,6 +2501,7 @@ function readSettings() {
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
+    merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
     merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
@@ -2900,9 +2903,9 @@ function electronPresentationStats(stats) {
   };
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
-  const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null]);
+  const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
   return presentationCache.get(stats, key, () => projectModelAliasStats(
-    projectLimitStatsForDisplay(stats, limitOptions),
+    projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(stats) : stats, limitOptions),
     aliases,
     { grouping }
   ));
@@ -2923,14 +2926,14 @@ function rendererAllTimeSessions(stats) {
   if (!stats) return null;
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
-  const key = JSON.stringify([aliases ?? null, grouping ?? null]);
+  const key = JSON.stringify([aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
   return allTimeSessionsCache.get(stats, key, () => {
     const complete = completeLocalSyncStats(stats);
     const hubSnapshot = snapshotLocalDevices.get(stats);
     const sessions = hubSnapshot
       ? mergedLocalAllTimeSessions(complete.periods, hubSnapshot.localDevice)
       : complete.periods?.allTime?.sessions || {};
-    return projectModelAliasSessions(stats, sessions, aliases, { grouping });
+    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, aliases, { grouping });
   });
 }
 
@@ -7363,6 +7366,7 @@ app.whenReady().then(() => {
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
+      sessionTitlesEnabled: parseBoolean(patch.sessionTitlesEnabled ?? settings.sessionTitlesEnabled, true),
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
@@ -7533,6 +7537,9 @@ app.whenReady().then(() => {
       }
     }
     pushSettingsToRenderer();
+    if (settings.sessionTitlesEnabled !== previousSettingsState.sessionTitlesEnabled) {
+      refreshLimitStatsPresentation();
+    }
     return settingsForRenderer();
   }
   ipcMain.handle('appearance:preview', (event, patch) => {
