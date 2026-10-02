@@ -11,7 +11,7 @@ const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron',
 
 function functionSource(source, name, nextName) {
   const start = source.indexOf(`function ${name}(`);
-  const next = source.indexOf(`${nextName}(`, start + 1);
+  const next = source.indexOf(`function ${nextName}(`, start + 1);
   const end = next < 0 ? -1 : source.lastIndexOf('\n', next) + 1;
   assert.ok(start >= 0 && end > start, `${name} source should be present`);
   return source.slice(start, end);
@@ -28,8 +28,20 @@ class FakeNode {
     this._textContent = '';
   }
 
-  set textContent(value) { this._textContent = String(value ?? ''); }
-  get textContent() { return this._textContent; }
+  set textContent(value) { this._textContent = String(value ?? ''); this.children = []; }
+  get textContent() { return this._textContent + this.children.map(child => child.textContent).join(''); }
+  get parentElement() { return this.parentNode; }
+  remove() {
+    if (!this.parentNode) return;
+    this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1);
+    this.parentNode = null;
+  }
+  insertBefore(child, before) {
+    child.remove();
+    child.parentNode = this;
+    this.children.splice(before ? this.children.indexOf(before) : this.children.length, 0, child);
+  }
+  moveBefore(child, before) { this.insertBefore(child, before); }
 
   append(...children) {
     for (const child of children) {
@@ -69,9 +81,8 @@ class FakeNode {
   }
 
   querySelector(selector) {
-    if (selector !== '.device-delete-button') return null;
     for (const child of this.children) {
-      if (child.className === 'device-delete-button') return child;
+      if (child.className?.split(' ').includes(selector.slice(1))) return child;
       const nested = child.querySelector?.(selector);
       if (nested) return nested;
     }
@@ -121,7 +132,7 @@ function createHarness() {
     formatCompact: (value) => String(value),
     t: (key) => ({
       'devices.remove': 'Delete',
-      'devices.removeConfirm': 'Click again'
+      'devices.removeConfirm': 'Confirm removal'
     }[key] || key),
     setTimeout(callback) {
       const id = nextTimer++;
@@ -130,7 +141,7 @@ function createHarness() {
     },
     clearTimeout(id) { timers.delete(id); },
     window: {
-      TokenMonitorOverflowText: { create: () => ({}) },
+      TokenMonitorOverflowText: { create: () => ({ bind() {} }) },
       tokenMonitor: {
         deleteDevice: async (...args) => {
           deleteCalls += 1;
@@ -144,7 +155,7 @@ function createHarness() {
   const end = app.indexOf('\nfunction appendAccordionMetricRow', start);
   assert.ok(start >= 0 && end > start, 'delete confirmation implementation should be present');
   vm.runInNewContext(
-    `${app.slice(start, end)}\nlet syncPanelListSignature = '';\n${functionSource(app, 'renderSyncPanelDevices', 'syncDeviceRow')}\n${functionSource(app, 'syncDeviceRow', 'renderHubBuildStatus')}\nglobalThis.renderDeviceAccordionForTest = renderDeviceAccordion;`,
+    `${app.slice(start, end)}\nlet syncPanelListScope = '';\n${functionSource(app, 'renderSyncPanelDevices', 'syncDeviceRow')}\n${functionSource(app, 'syncDeviceRow', 'renderHubBuildStatus')}\nglobalThis.renderDeviceAccordionForTest = renderDeviceAccordion;`,
     context
   );
   return {
@@ -196,7 +207,7 @@ test('device deletion confirmation cancels on blur, outside interaction, timeout
 
   await remove.dispatch('click');
   assert.equal(remove.dataset.confirm, 'true');
-  assert.equal(remove.textContent, 'Click again');
+  assert.equal(remove.textContent, 'Confirm removal');
   remove.dispatch('blur');
   assert.equal(remove.dataset.confirm, '');
   assert.equal(remove.textContent, 'Delete');
@@ -213,7 +224,7 @@ test('device deletion confirmation cancels on blur, outside interaction, timeout
   await remove.dispatch('click');
   harness.render(accordion, deviceDetail());
   assert.equal(remove.dataset.confirm, 'true');
-  assert.equal(remove.textContent, 'Click again');
+  assert.equal(remove.textContent, 'Confirm removal');
   assert.equal(harness.timers.size, 1);
 
   harness.render(accordion, deviceDetail('remote-b', [{
@@ -221,6 +232,79 @@ test('device deletion confirmation cancels on blur, outside interaction, timeout
   }]));
   assert.equal(remove.dataset.confirm, '');
   assert.equal(harness.timers.size, 0);
+});
+
+test('device controls retain confirmation and its original deadline across updates, insertion and sorting', async () => {
+  const harness = createHarness();
+  const list = harness.createNode('div');
+  harness.context.els.syncDeviceList = list;
+  const row = key => ({ key, name: key, stale: true, canRemove: true });
+  const render = rows => harness.context.renderSyncPanelDevices(rows);
+  render([row('a'), row('b')]);
+  const original = list.children[1];
+  const remove = original.querySelector('.device-delete-button');
+  await remove.dispatch('click');
+  const [timerId, deadline] = harness.timers.entries().next().value;
+  render([row('new'), { ...row('b'), name: 'renamed', agentVersion: '0.65.1' }, row('a')]);
+  assert.equal(list.children[1], original);
+  assert.equal(original.querySelector('.device-delete-button'), remove);
+  assert.equal(remove.dataset.confirm, 'true');
+  assert.equal(remove.textContent, 'Confirm removal');
+  assert.equal(original.querySelector('.sync-device-name').textContent, 'renamed');
+  assert.equal(harness.timers.size, 1);
+  assert.equal(harness.timers.get(timerId), deadline, 'a push must not extend the confirmation deadline');
+  render([row('b'), row('a')]);
+  assert.equal(list.children[0], original);
+  assert.equal(remove.dataset.confirm, 'true');
+  deadline();
+  assert.equal(remove.dataset.confirm, '');
+  assert.equal(harness.timers.size, 0);
+});
+
+test('confirmation cancels when the target disappears, becomes ineligible or the connection changes', async () => {
+  for (const change of ['removed', 'online', 'local', 'backend', 'secret', 'mode']) {
+    const harness = createHarness();
+    const list = harness.createNode('div');
+    harness.context.els.syncDeviceList = list;
+    const row = { key: 'remote', name: 'remote', stale: true, canRemove: true };
+    harness.context.renderSyncPanelDevices([row]);
+    const remove = list.querySelector('.device-delete-button');
+    await remove.dispatch('click');
+    if (change === 'backend') harness.context.state.settings.hubUrl = 'https://new.example';
+    if (change === 'secret') harness.context.state.settings.secret = 'new-secret';
+    if (change === 'mode') harness.context.state.settings.hubMode = 'icloud';
+    const next = change === 'removed' ? [] : [{
+      ...row,
+      stale: change !== 'online',
+      isLocal: change === 'local',
+      canRemove: change !== 'online' && change !== 'local'
+    }];
+    harness.context.renderSyncPanelDevices(next);
+    assert.equal(remove.dataset.confirm, '', change);
+    assert.equal(harness.timers.size, 0, change);
+    if (['online', 'local', 'removed'].includes(change)) {
+      assert.equal(list.querySelector('.device-delete-button'), null, change);
+    } else {
+      const nextRemove = list.querySelector('.device-delete-button');
+      assert.notEqual(nextRemove, remove, change);
+      assert.notEqual(nextRemove.dataset.confirm, 'true', change);
+    }
+  }
+});
+
+test('language updates keep confirmation and use current labels when its deadline expires', async () => {
+  const harness = createHarness();
+  const list = harness.createNode('div');
+  harness.render(list, deviceDetail());
+  const remove = list.querySelector('.device-delete-button');
+  await remove.dispatch('click');
+  harness.context.currentLocale = () => 'zh-TW';
+  harness.context.t = key => ({ 'devices.remove': '移除', 'devices.removeConfirm': '確認移除' }[key] || key);
+  harness.render(list, deviceDetail());
+  assert.equal(list.querySelector('.device-delete-button'), remove);
+  assert.equal(remove.textContent, '確認移除');
+  harness.timers.values().next().value();
+  assert.equal(remove.textContent, '移除');
 });
 
 test('device deletion requires the second click and resets after failure', async () => {
@@ -357,7 +441,7 @@ test('pending deletion survives a stats redraw and releases the replacement butt
     assert.equal(original.disabled, true);
     harness.render(accordion, { ...detail, metaParts: ['new timestamp'] });
     const replacement = accordion.querySelector('.device-delete-button');
-    assert.notEqual(replacement, original);
+    assert.equal(replacement, original, 'metadata updates retain the live button');
     assert.equal(replacement.disabled, true);
     await replacement.dispatch('click');
     await replacement.dispatch('click');

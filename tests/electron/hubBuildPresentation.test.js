@@ -82,6 +82,12 @@ test('unconfirmed runtimes and unavailable probes do not guess a backend label',
     assert.equal(els.syncPanelBuild.hidden, true);
     assert.equal(els.syncPanelBuild.textContent, '');
   }
+  const switched = renderer();
+  switched.state.settings.hubUrl = 'https://next.example';
+  switched.state.hubBuildStatus.hubUrl = 'https://previous.example';
+  switched.renderHubBuildStatus();
+  assert.equal(switched.els.syncPanelBuild.hidden, true);
+  assert.equal(switched.els.hubBuildStatus.hidden, true);
   for (const hubMode of ['host', 'local', 'icloud']) {
     const { els } = renderer({ hubMode });
     assert.equal(els.syncPanelBuild.hidden, true);

@@ -97,6 +97,8 @@
     let rows = [];
     let selectedIcon = null;
     let active = -1;
+    let hovered = -1;
+    let keyboardHighlight = false;
     let opened = false;
     let destroyed = false;
     let frame = null;
@@ -163,7 +165,15 @@
       text.append(title, description);
       row.append(icon, text);
       listen(row, 'pointermove', (event) => {
-        if (event.pointerType !== 'touch' && !option.disabled) highlight(index, false);
+        if (event.pointerType === 'touch' || option.disabled) return;
+        hovered = index;
+        keyboardHighlight = false;
+        updateRows();
+      }, false, rowListeners);
+      listen(row, 'pointerleave', () => {
+        if (hovered !== index) return;
+        hovered = -1;
+        updateRows();
       }, false, rowListeners);
       listen(row, 'click', () => {
         if (option.disabled) return;
@@ -190,6 +200,7 @@
         Object.keys(option).some(key => option[key] !== options[index]?.[key]));
       options = next;
       if (changed) {
+        hovered = -1;
         rowListeners.splice(0).forEach(remove => remove());
         rows = options.map(createRow);
         listbox.replaceChildren(...rows);
@@ -221,7 +232,7 @@
     function updateRows() {
       rows.forEach((row, index) => {
         row.dataset.selected = String(options[index].value === select.value);
-        row.dataset.highlighted = String(opened && index === active);
+        row.dataset.highlighted = String(opened && (index === hovered || (hovered < 0 && keyboardHighlight && index === active)));
         row.setAttribute('aria-selected', String(options[index].value === select.value));
       });
       if (opened && rows[active]) trigger.setAttribute('aria-activedescendant', rows[active].id);
@@ -229,6 +240,8 @@
     }
 
     function highlight(index, scroll = true) {
+      hovered = -1;
+      keyboardHighlight = true;
       active = index;
       updateRows();
       if (scroll) rows[active]?.scrollIntoView({ block: 'nearest' });
@@ -273,6 +286,8 @@
       if (!opened) return;
       const choice = commit && !select.disabled && anchorVisible() ? options[active] : null;
       opened = false;
+      hovered = -1;
+      keyboardHighlight = false;
       activeControls.delete(document);
       openListeners.splice(0).forEach(remove => remove());
       ancestorObserver?.disconnect();
@@ -294,7 +309,7 @@
       }
     }
 
-    function open() {
+    function open({ keyboard = false } = {}) {
       if (opened || destroyed) return;
       sync();
       if (trigger.disabled || !anchorVisible()) return;
@@ -307,8 +322,10 @@
       trigger.setAttribute('aria-expanded', 'true');
       position();
       highlight(active);
+      keyboardHighlight = keyboard;
+      updateRows();
       listen(document, 'pointerdown', (event) => {
-        if (!trigger.contains(event.target) && !listbox.contains(event.target)) close({ commit: true });
+        if (!trigger.contains(event.target) && !listbox.contains(event.target)) close();
       }, true, openListeners);
       listen(document, 'scroll', schedulePosition, true, openListeners);
       listen(window, 'resize', schedulePosition, false, openListeners);
@@ -336,11 +353,11 @@
         if (opened) { event.preventDefault(); event.stopPropagation(); close(); }
         return;
       }
-      if (key === 'Tab') { close({ commit: true }); return; }
+      if (key === 'Tab') { close({ commit: keyboardHighlight }); return; }
       if (key === 'Enter' || key === ' ') {
         event.preventDefault();
         if (opened) close({ commit: true });
-        else open();
+        else open({ keyboard: true });
         return;
       }
       if (key === 'ArrowUp' && event.altKey && opened) {
@@ -350,14 +367,14 @@
       }
       if (key === 'ArrowDown' && event.altKey) {
         event.preventDefault();
-        open();
+        open({ keyboard: true });
         return;
       }
       const directions = { ArrowDown: 1, ArrowUp: -1, Home: 'first', End: 'last', PageDown: 10, PageUp: -10 };
       if (key in directions) {
         event.preventDefault();
         const wasOpen = opened;
-        open();
+        open({ keyboard: true });
         if (opened && (wasOpen || key !== 'ArrowDown')) {
           highlight(navigate(options, active, !wasOpen && key === 'ArrowUp' ? 'first' : directions[key]));
         }
@@ -365,7 +382,7 @@
       }
       if (!event.altKey && key.length === 1) {
         event.preventDefault();
-        open();
+        open({ keyboard: true });
         if (!opened) return;
         const now = Date.now();
         search = now - searchAt > 700 ? key : search + key;
@@ -382,7 +399,7 @@
     select.setAttribute('aria-hidden', 'true');
     listen(trigger, 'click', () => { if (opened) close(); else open(); });
     listen(trigger, 'keydown', handleKey);
-    listen(trigger, 'blur', (event) => close({ commit: Boolean(event.relatedTarget) }));
+    listen(trigger, 'blur', () => close());
     listen(listbox, 'pointerdown', event => event.preventDefault());
     listen(select, 'change', sync);
     const observer = window.MutationObserver ? new window.MutationObserver(sync) : null;

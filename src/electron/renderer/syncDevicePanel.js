@@ -69,5 +69,14 @@
     return failureReason ? 'disconnected' : 'connecting';
   }
 
-  return { clientConnectionState, deviceCounts, deviceRows };
+  function connectionEndpoint(value) {
+    try {
+      const url = new URL(String(value || '').trim());
+      return ['http:', 'https:'].includes(url.protocol) ? url.host : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  return { clientConnectionState, connectionEndpoint, deviceCounts, deviceRows };
 });

@@ -67,12 +67,15 @@ test('offline, hidden and reduced-motion states do not start data cues', () => {
 
 test('sync status has distinct static connection icons and only a visible waiting state spins', () => {
   const start = html.indexOf('id="syncPanelSignal"');
-  const end = html.indexOf('<div class="sync-panel-state">', start);
+  const end = html.indexOf('</span>', start);
   const signal = html.slice(start, end);
   assert.match(signal, /aria-hidden="true"/);
   for (const kind of ['linked', 'unlinked', 'pending']) {
     assert.match(signal, new RegExp(`class="sync-panel-signal-${kind}"`));
   }
+  assert.match(signal, /<path d="m8 12 3 3 5-6"/);
+  assert.match(signal, /<path d="m6 6 12 12"/);
+  assert.doesNotMatch(signal, /M10 13a5|M9 15l/);
   assert.doesNotMatch(css, /sync-signal-ripple|\.sync-panel-signal::after/);
   const animatedRule = css.match(/([^{}]+)\{\s*animation: sync-signal-spin[^}]+\}/);
   assert.ok(animatedRule);
@@ -115,8 +118,8 @@ test('connection state and window visibility drive the icon without replacing it
   const end = app.indexOf('function updateSyncPanelAges(', start);
   const signal = { dataset: {} };
   const context = vm.createContext({
-    els: { syncPanelSignal: signal, syncPanelConnection: { dataset: {} }, syncPanelState: {}, syncPanelDetail: { dataset: {} } },
-    state: { mode: 'sync', streamConnected: true },
+    els: { syncPanelSignal: signal, syncPanelConnection: { dataset: {} }, syncPanelState: {}, syncPanelDetail: {}, syncPanelUpload: {} },
+    state: { mode: 'sync', streamConnected: true, settings: { hubUrl: 'https://hub.example' } },
     isRendererWindowHidden: () => false,
     streamFailureText: () => '',
     syncDevicePanelApi: require('../../src/electron/renderer/syncDevicePanel'),
@@ -133,6 +136,13 @@ test('connection state and window visibility drive the icon without replacing it
   context.isRendererWindowHidden = () => true;
   context.renderSyncPanelConnection('client');
   assert.equal(context.els.syncPanelConnection.dataset.state, 'disconnected');
+  assert.equal(context.els.syncPanelDetail.textContent, 'Network unavailable');
+  assert.equal(context.els.syncPanelUpload.hidden, false);
+  context.els.syncDeviceList = { querySelectorAll: () => [] };
+  context.syncPanelUploadText = () => 'Last upload 5 minutes ago';
+  vm.runInContext(`const syncPanelRows = [];\n${app.slice(app.indexOf('function updateSyncPanelAges('), app.indexOf('function tickSyncPanelAges('))}`, context);
+  context.updateSyncPanelAges();
+  assert.equal(context.els.syncPanelUpload.textContent, 'Last upload 5 minutes ago');
   assert.equal(context.els.syncPanelDetail.textContent, 'Network unavailable');
   assert.equal(signal.dataset.windowHidden, 'true');
   const visibilityStart = app.indexOf('function handleWindowVisibilityChange()');

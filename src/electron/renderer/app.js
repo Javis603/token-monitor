@@ -408,6 +408,14 @@ Object.assign(els, {
   icloudRootStatus: document.getElementById('icloudRootStatus'),
   hubBuildStatus: document.getElementById('hubBuildStatus'),
   hubClientFields: document.getElementById('hubClientFields'),
+  syncConnectionEditor: document.getElementById('syncConnectionEditor'),
+  syncConnectionIdentity: document.getElementById('syncConnectionIdentity'),
+  syncConnectionEndpoint: document.getElementById('syncConnectionEndpoint'),
+  syncConnectionEdit: document.getElementById('syncConnectionEdit'),
+  syncConnectionCancel: document.getElementById('syncConnectionCancel'),
+  syncConnectionSaveError: document.getElementById('syncConnectionSaveError'),
+  syncDeviceSettings: document.getElementById('syncDeviceSettings'),
+  syncUploadIntervalRow: document.getElementById('syncUploadIntervalRow'),
   hubHostFields: document.getElementById('hubHostFields'),
   hubPortInput: document.getElementById('hubPortInput'),
   hubSecretInput: document.getElementById('hubSecretInput'),
@@ -420,6 +428,7 @@ Object.assign(els, {
   syncPanelSignal: document.getElementById('syncPanelSignal'),
   syncPanelState: document.getElementById('syncPanelState'),
   syncPanelDetail: document.getElementById('syncPanelDetail'),
+  syncPanelUpload: document.getElementById('syncPanelUpload'),
   syncPanelBuild: document.getElementById('syncPanelBuild'),
   syncPanelCount: document.getElementById('syncPanelCount'),
   syncDeviceList: document.getElementById('syncDeviceList'),
@@ -2082,15 +2091,15 @@ function resetDeviceDeleteConfirmation(remove, defaultText = remove.dataset.idle
   clearDeviceDeleteConfirmationTimer(remove);
   armedDeviceDeleteButtons.delete(remove);
   remove.dataset.confirm = '';
-  remove.textContent = defaultText;
+  remove.querySelector('.device-delete-label').textContent = defaultText;
 }
 
-function armDeviceDeleteConfirmation(remove, defaultText, confirmationText) {
+function armDeviceDeleteConfirmation(remove) {
   clearDeviceDeleteConfirmationTimer(remove);
   armedDeviceDeleteButtons.add(remove);
   remove.dataset.confirm = 'true';
-  remove.textContent = confirmationText;
-  const timer = setTimeout(() => resetDeviceDeleteConfirmation(remove, defaultText), DEVICE_DELETE_CONFIRMATION_MS);
+  remove.querySelector('.device-delete-label').textContent = remove.dataset.confirmText;
+  const timer = setTimeout(() => resetDeviceDeleteConfirmation(remove), DEVICE_DELETE_CONFIRMATION_MS);
   deviceDeleteConfirmationTimers.set(remove, timer);
 }
 
@@ -2105,7 +2114,7 @@ document.addEventListener('pointerdown', (event) => {
 let homeSessionRenderPending = false;
 const overflowText = window.TokenMonitorOverflowText.create({
   document, window, prefersReducedMotion,
-  enabled: element => Boolean(element.closest('.session-mode, .home-session-row')),
+  enabled: element => Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint'),
   onLeave: () => requestAnimationFrame(() => {
     if (homeSessionRenderPending && state.breakdown === 'home'
       && visibleStatsSurface() === 'main' && state.stats) renderHome();
@@ -2115,6 +2124,8 @@ const overflowText = window.TokenMonitorOverflowText.create({
 function bindHoverMarquee(element) { overflowText.bind(element); }
 function setHoverMarqueeText(element, value) { overflowText.setText(element, value); }
 
+bindHoverMarquee(els.syncConnectionEndpoint);
+
 // Two clicks to remove from sync settings: the first arms the button, the
 // second deletes. The usage view has no device-management actions.
 function createDeviceRemoveButton(deviceId, deleteText, deleteConfirmText) {
@@ -2123,14 +2134,18 @@ function createDeviceRemoveButton(deviceId, deleteText, deleteConfirmText) {
   remove.className = 'device-delete-button';
   remove.dataset.deviceId = deviceId;
   remove.dataset.idleText = deleteText;
+  remove.dataset.confirmText = deleteConfirmText;
   remove.disabled = devicesBeingDeleted.has(deviceId);
-  remove.textContent = deleteText;
+  const label = document.createElement('span');
+  label.className = 'device-delete-label';
+  label.textContent = deleteText;
+  remove.append(label);
   const resetConfirmation = () => resetDeviceDeleteConfirmation(remove);
   remove.addEventListener('blur', resetConfirmation);
   remove.addEventListener('click', async () => {
     if (devicesBeingDeleted.has(deviceId)) return;
     if (remove.dataset.confirm !== 'true') {
-      armDeviceDeleteConfirmation(remove, deleteText, deleteConfirmText);
+      armDeviceDeleteConfirmation(remove);
       return;
     }
     remove.disabled = true;
@@ -7963,6 +7978,7 @@ function syncHubModeUi() {
   syncModeSelect?.sync();
   renderSyncPanel();
   renderHubBuildStatus();
+  syncHubConnectionUi();
   syncHubSaveButton();
 }
 
@@ -8030,7 +8046,7 @@ const SYNC_UPLOAD_INTERVAL_KEYS = {
   1800000: 'settings.sync.uploadInterval.30m'
 };
 let syncPanelRows = [];
-let syncPanelListSignature = '';
+let syncPanelListScope = '';
 let syncPanelAgeTimer = 0;
 const syncPanelSignalObserver = els.syncPanelSignal && typeof IntersectionObserver === 'function'
   ? new IntersectionObserver(([entry]) => {
@@ -8040,7 +8056,7 @@ syncPanelSignalObserver?.observe(els.syncPanelSignal);
 window.addEventListener('unload', () => syncPanelSignalObserver?.disconnect(), { once: true });
 
 // The sync settings status and device list reflect what the sync backend holds. Runs on every connection/stats push while the
-// settings panel is open, so the list only rebuilds when its structure changes.
+// settings panel is open; keyed rows keep their controls through updates and sorting.
 function renderSyncPanel() {
   if (!els.syncDevicePanel) return;
   const hubMode = state.settings?.hubMode || 'local';
@@ -8049,6 +8065,7 @@ function renderSyncPanel() {
   els.syncDevicePanel.hidden = !shared;
   if (!shared) {
     syncPanelRows = [];
+    renderSyncPanelDevices(syncPanelRows);
     stopSyncPanelAgeTimer();
     return;
   }
@@ -8078,9 +8095,9 @@ function renderSyncPanelConnection(hubMode) {
   });
   els.syncPanelConnection.dataset.state = connection;
   els.syncPanelState.textContent = t(`settings.sync.panel.${connection}`);
-  els.syncPanelDetail.dataset.kind = connection === 'connected' ? 'upload' : '';
   els.syncPanelDetail.textContent = connection === 'disconnected' ? failure : '';
-  els.syncPanelDetail.hidden = connection !== 'disconnected' && connection !== 'connected';
+  els.syncPanelDetail.hidden = connection !== 'disconnected';
+  if (els.syncPanelUpload) els.syncPanelUpload.hidden = !String(state.settings?.hubUrl || '').trim();
 }
 
 function syncPanelUploadText() {
@@ -8100,8 +8117,8 @@ function syncPanelPresenceText(row) {
 }
 
 function updateSyncPanelAges() {
-  if (els.syncPanelDetail?.dataset.kind === 'upload') {
-    els.syncPanelDetail.textContent = syncPanelUploadText();
+  if (els.syncPanelUpload && !els.syncPanelUpload.hidden) {
+    els.syncPanelUpload.textContent = syncPanelUploadText() || t('settings.sync.panel.notUploaded');
   }
   const rowsByKey = new Map(syncPanelRows.map((row) => [row.key, row]));
   for (const element of els.syncDeviceList?.querySelectorAll('.sync-device-age') || []) {
@@ -8131,28 +8148,42 @@ function renderSyncPanelDevices(rows) {
   const counts = syncDevicePanelApi.deviceCounts(rows);
   els.syncPanelCount.textContent = counts.total > 0 ? t('settings.sync.panel.onlineCount', counts) : '';
   els.syncPanelOpenDevices.hidden = counts.total === 0 || !availableBreakdownIds().includes('device');
-  const signature = JSON.stringify([
-    currentLocale(),
-    state.settings?.hubMode,
-    state.mode,
-    rows.map((row) => [
-      row.key, row.name, row.hostname, row.platform, row.osName, row.osVersion, row.agentVersion, row.agentRuntime,
-      row.isLocal, row.stale, row.canRemove, devicesBeingDeleted.has(row.key)
-    ])
+  const list = els.syncDeviceList;
+  const scope = JSON.stringify([
+    state.settings?.hubMode, state.mode, state.settings?.deviceId,
+    state.settings?.hubUrl, state.settings?.secret,
+    state.settings?.hubHostPort, state.settings?.hubHostSecret
   ]);
-  if (signature === syncPanelListSignature) return;
-  syncPanelListSignature = signature;
-  for (const armed of els.syncDeviceList.querySelectorAll('.device-delete-button')) {
-    resetDeviceDeleteConfirmation(armed);
+  if (scope !== syncPanelListScope) {
+    for (const remove of list.querySelectorAll('.device-delete-button')) resetDeviceDeleteConfirmation(remove);
+    list.replaceChildren();
+    syncPanelListScope = scope;
+  }
+  const existing = new Map(Array.from(list.children, item => [item.dataset.key, item]));
+  const wanted = new Set(rows.map(row => row.key));
+  for (const [key, item] of existing) {
+    if (wanted.has(key)) continue;
+    const remove = item.querySelector('.device-delete-button');
+    if (remove) resetDeviceDeleteConfirmation(remove);
+    item.remove();
   }
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'sync-device-empty';
     empty.textContent = t(state.mode === 'sync' ? 'settings.sync.panel.empty' : 'settings.sync.panel.waiting');
-    els.syncDeviceList.replaceChildren(empty);
+    list.replaceChildren(empty);
     return;
   }
-  els.syncDeviceList.replaceChildren(...rows.map(syncDeviceRow));
+  rows.forEach((row, index) => {
+    let item = existing.get(row.key);
+    if (item) updateSyncDeviceRow(item, row);
+    else item = syncDeviceRow(row);
+    const before = list.children[index] || null;
+    if (before === item) return;
+    // Moving a live row with insertBefore would blur its confirmation button.
+    if (item.parentElement === list) list.moveBefore(item, before);
+    else list.insertBefore(item, before);
+  });
 }
 
 function syncDeviceRow(row) {
@@ -8161,8 +8192,7 @@ function syncDeviceRow(row) {
   item.dataset.key = row.key;
 
   const mark = document.createElement('span');
-  const os = osIconFor(row.platform);
-  mark.className = os ? `sync-device-mark row-icon row-icon-os-${os}` : 'sync-device-mark sync-device-mark-generic';
+  mark.className = 'sync-device-mark';
   mark.setAttribute('aria-hidden', 'true');
 
   const main = document.createElement('div');
@@ -8171,25 +8201,11 @@ function syncDeviceRow(row) {
   title.className = 'sync-device-title';
   const name = document.createElement('span');
   name.className = 'sync-device-name';
-  name.textContent = row.name;
-  name.title = row.hostname && row.hostname !== row.name ? `${row.name} · ${row.hostname}` : row.name;
   title.append(name);
-  if (row.isLocal) {
-    const badge = document.createElement('span');
-    badge.className = 'sync-device-badge';
-    badge.textContent = t('settings.sync.panel.thisDevice');
-    title.append(badge);
-  }
   const meta = document.createElement('div');
   meta.className = 'sync-device-meta';
-  const runtime = deviceRuntimeLabel(row.agentRuntime);
-  const version = row.agentVersion ? `v${row.agentVersion}` : '';
   const metaText = document.createElement('span');
   metaText.className = 'sync-device-meta-text';
-  metaText.textContent = [
-    deviceBreakdownApi.devicePlatformLabel(row.platform, row.osName, row.osVersion),
-    [runtime, version].filter(Boolean).join(' ')
-  ].filter(Boolean).join(' · ');
   meta.append(metaText);
   main.append(title, meta);
 
@@ -8205,17 +8221,67 @@ function syncDeviceRow(row) {
   age.dataset.key = row.key;
   presence.append(dot, age);
   side.append(presence);
-  if (row.canRemove && window.tokenMonitor.deleteDevice) {
-    side.append(createDeviceRemoveButton(row.key, t('devices.remove'), t('devices.removeConfirm')));
-  }
 
   item.append(mark, main, side);
+  updateSyncDeviceRow(item, row);
   return item;
+}
+
+function updateSyncDeviceRow(item, row) {
+  const signature = JSON.stringify([
+    currentLocale(), row.name, row.hostname, row.platform, row.osName, row.osVersion,
+    row.agentVersion, row.agentRuntime, row.isLocal, row.stale, row.canRemove,
+    devicesBeingDeleted.has(row.key), Boolean(window.tokenMonitor.deleteDevice)
+  ]);
+  if (item.dataset.signature === signature) return;
+  item.dataset.signature = signature;
+  item.className = `sync-device-row${row.isLocal ? ' is-local' : ''}${row.stale ? ' is-stale' : ''}`;
+  const mark = item.querySelector('.sync-device-mark');
+  const os = osIconFor(row.platform);
+  mark.className = os ? `sync-device-mark row-icon row-icon-os-${os}` : 'sync-device-mark sync-device-mark-generic';
+  const name = item.querySelector('.sync-device-name');
+  name.textContent = row.name;
+  name.title = row.hostname && row.hostname !== row.name ? `${row.name} · ${row.hostname}` : row.name;
+  const title = item.querySelector('.sync-device-title');
+  let badge = title.querySelector('.sync-device-badge');
+  if (row.isLocal) {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'sync-device-badge';
+      title.append(badge);
+    }
+    badge.textContent = t('settings.sync.panel.thisDevice');
+  } else badge?.remove();
+  item.querySelector('.sync-device-meta-text').textContent = [
+    deviceBreakdownApi.devicePlatformLabel(row.platform, row.osName, row.osVersion),
+    [deviceRuntimeLabel(row.agentRuntime), row.agentVersion ? `v${row.agentVersion}` : ''].filter(Boolean).join(' ')
+  ].filter(Boolean).join(' · ');
+  const side = item.querySelector('.sync-device-side');
+  let remove = side.querySelector('.device-delete-button');
+  if (row.canRemove && row.stale && !row.isLocal && window.tokenMonitor.deleteDevice) {
+    if (!remove) {
+      remove = createDeviceRemoveButton(row.key, t('devices.remove'), t('devices.removeConfirm'));
+      const action = document.createElement('span');
+      action.className = 'sync-device-action';
+      action.append(remove);
+      side.append(action);
+    }
+    remove.dataset.idleText = t('devices.remove');
+    remove.dataset.confirmText = t('devices.removeConfirm');
+    remove.querySelector('.device-delete-label').textContent = remove.dataset.confirm === 'true'
+      ? remove.dataset.confirmText : remove.dataset.idleText;
+    remove.disabled = devicesBeingDeleted.has(row.key);
+  } else if (remove) {
+    resetDeviceDeleteConfirmation(remove);
+    remove.parentElement.remove();
+  }
 }
 
 function renderHubBuildStatus() {
   if (!els.hubBuildStatus) return;
-  const visible = state.settings?.hubMode === 'client';
+  const savedUrl = String(state.settings?.hubUrl || '').trim().replace(/\/$/, '');
+  const visible = state.settings?.hubMode === 'client'
+    && (!state.hubBuildStatus?.hubUrl || state.hubBuildStatus.hubUrl === savedUrl);
   const model = visible ? hubBuildPresentationApi.presentation(state.hubBuildStatus) : null;
   // Label the confirmed backend, not its version status. Version notices stay
   // near the connection fields, and a matching build needs no extra message.
@@ -8321,7 +8387,8 @@ async function refreshHubBuildStatus() {
       || (result?.hubUrl && result.hubUrl !== currentUrl)) return;
     state.hubBuildStatus = result;
   } catch (_) {
-    if (request !== hubBuildStatusRequest) return;
+    const currentUrl = String(state.settings.hubUrl || '').trim().replace(/\/$/, '');
+    if (request !== hubBuildStatusRequest || currentUrl !== requestedUrl) return;
     state.hubBuildStatus = null;
   }
   renderHubBuildStatus();
@@ -8383,6 +8450,76 @@ const hubDraftDirty = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [fiel
 const hubDraftRevisions = Object.fromEntries(HUB_DRAFT_FIELDS.map(([field]) => [field, 0]));
 let hubSaveBusy = false;
 let hubSaveInFlightRevisions = null;
+const CLIENT_CONNECTION_FIELDS = ['hubUrl', 'secret', 'deviceId'];
+let clientConnectionEditing = false;
+let clientConnectionEditRevision = 0;
+let hubSaveError = false;
+
+function clientConnectionHasDraft() {
+  return CLIENT_CONNECTION_FIELDS.some(field => hubDraftDirty[field]);
+}
+
+function syncHubConnectionUi() {
+  if (!els.syncConnectionEditor) return;
+  const client = state.settings?.hubMode === 'client';
+  const configured = Boolean(String(state.settings?.hubUrl || '').trim());
+  const editing = clientConnectionEditing || clientConnectionHasDraft() || !configured;
+  const focusedEditor = els.syncConnectionEditor.contains(document.activeElement)
+    || els.syncDeviceSettings.contains(document.activeElement);
+  els.syncConnectionEdit.hidden = !client || editing;
+  if (client && !editing && focusedEditor && isSettingsSurfaceVisible()) {
+    els.syncConnectionEdit.focus({ preventScroll: true });
+  }
+  els.syncConnectionEditor.hidden = !client || !editing;
+  els.syncConnectionEditor.inert = !client || !editing;
+  els.syncDeviceSettings.hidden = client && !editing;
+  els.syncDeviceSettings.inert = client && !editing;
+  els.syncConnectionCancel.hidden = !client || !editing;
+  els.syncConnectionCancel.disabled = hubSaveBusy;
+  els.syncConnectionIdentity.hidden = !client || editing;
+  setHoverMarqueeText(els.syncConnectionEndpoint, syncDevicePanelApi.connectionEndpoint(state.settings?.hubUrl)
+    || t('settings.sync.savedEndpoint'));
+  els.syncUploadIntervalRow.hidden = !client;
+  els.syncUploadIntervalRow.inert = !client;
+  els.syncConnectionSaveError.hidden = !hubSaveError;
+  els.syncConnectionSaveError.textContent = hubSaveError ? t('settings.sync.saveFailed') : '';
+}
+
+function beginClientConnectionEdit({ focus = false } = {}) {
+  if (state.settings?.hubMode !== 'client' || clientConnectionEditing) return;
+  if (focus) syncHubDraftFields();
+  clientConnectionEditing = true;
+  clientConnectionEditRevision += 1;
+  hubSaveError = false;
+  preserveSettingsPanelScroll(() => {
+    syncHubConnectionUi();
+    if (focus) els.hubUrlInput.focus({ preventScroll: true });
+  });
+}
+
+function cancelClientConnectionEdit() {
+  if (hubSaveBusy || state.settings?.hubMode !== 'client') return;
+  clientConnectionEditing = false;
+  clientConnectionEditRevision += 1;
+  hubSaveError = false;
+  for (const [field, inputId] of HUB_DRAFT_FIELDS) {
+    if (!CLIENT_CONNECTION_FIELDS.includes(field)) continue;
+    hubDraftDirty[field] = false;
+    els[inputId].value = state.settings?.[field] || '';
+  }
+  preserveSettingsPanelScroll(() => {
+    syncHubDraftFields();
+    if (!String(state.settings?.hubUrl || '').trim()) els.hubUrlInput.focus({ preventScroll: true });
+  });
+}
+
+function finishClientConnectionSave(submittedRevisions, editRevision) {
+  if (state.settings?.hubMode !== 'client' || clientConnectionEditRevision !== editRevision
+    || !String(state.settings?.hubUrl || '').trim() || clientConnectionHasDraft()
+    || CLIENT_CONNECTION_FIELDS.some(field => hubDraftRevisions[field] !== submittedRevisions[field])) return;
+  clientConnectionEditing = false;
+  preserveSettingsPanelScroll(syncHubDraftFields);
+}
 
 function hubDraftFieldIsActive(field) {
   return field !== 'hubHostPort' || state.settings?.hubMode === 'host';
@@ -8416,18 +8553,25 @@ function markHubDraftDirty(field) {
   if (!input) return;
   hubDraftRevisions[field] += 1;
   syncHubDraftDirty(field);
+  if (CLIENT_CONNECTION_FIELDS.includes(field)) beginClientConnectionEdit();
+  hubSaveError = false;
+  syncHubConnectionUi();
   syncHubSaveButton();
 }
 
 function syncHubDraftFields() {
   reconcileHubDraftDirtyState();
+  if (clientConnectionEditing) {
+    for (const field of CLIENT_CONNECTION_FIELDS) syncHubDraftDirty(field);
+  }
   for (const [field, inputId] of HUB_DRAFT_FIELDS) {
     const input = els[inputId];
-    if (!input || hubDraftDirty[field]) continue;
+    if (!input || hubDraftDirty[field] || (clientConnectionEditing && CLIENT_CONNECTION_FIELDS.includes(field))) continue;
     input.value = field === 'hubHostPort'
       ? String(state.settings?.hubHostPort || 17321)
       : state.settings?.[field] || '';
   }
+  syncHubConnectionUi();
   syncHubSaveButton();
 }
 
@@ -11915,8 +12059,11 @@ els.settingsButton.addEventListener('click', (event) => {
 els.saveSettingsButton.addEventListener('click', async () => {
   if (hubSaveBusy || !hubDraftHasChanges()) return;
   hubSaveBusy = true;
+  hubSaveError = false;
+  syncHubConnectionUi();
   syncHubSaveButton();
   try {
+    const submittedEditRevision = clientConnectionEditRevision;
     const submittedHubFields = hubDraftValuesFromInputs();
     const patch = { ...submittedHubFields };
     if (Object.prototype.hasOwnProperty.call(submittedHubFields, 'hubHostPort')) {
@@ -11926,18 +12073,27 @@ els.saveSettingsButton.addEventListener('click', async () => {
       Object.keys(submittedHubFields).map((field) => [field, hubDraftRevisions[field]])
     );
     hubSaveInFlightRevisions = submittedHubRevisions;
-    await saveSettings(patch);
+    try {
+      await saveSettings(patch);
+    } catch (_) {
+      hubSaveError = true;
+      return;
+    }
     reconcileHubDraftsAfterSave(submittedHubFields, submittedHubRevisions);
+    finishClientConnectionSave(submittedHubRevisions, submittedEditRevision);
     await refreshHubInfo();
     void refreshHubBuildStatus();
     await refreshStats();
   } finally {
     hubSaveInFlightRevisions = null;
-    syncHubDraftFields();
     hubSaveBusy = false;
+    syncHubDraftFields();
     syncHubSaveButton();
   }
 });
+
+els.syncConnectionEdit?.addEventListener('click', () => beginClientConnectionEdit({ focus: true }));
+els.syncConnectionCancel?.addEventListener('click', cancelClientConnectionEdit);
 
 els.syncPanelOpenDevices?.addEventListener('click', () => openViewFromTray('device'));
 
@@ -12116,6 +12272,9 @@ for (const input of els.showLimitUsedInputs || []) {
 }
 for (const [field, inputId] of HUB_DRAFT_FIELDS) {
   els[inputId]?.addEventListener('input', () => markHubDraftDirty(field));
+  if (CLIENT_CONNECTION_FIELDS.includes(field)) {
+    els[inputId]?.addEventListener('focus', () => beginClientConnectionEdit());
+  }
 }
 els.syncUploadIntervalInput?.addEventListener('change', async () => {
   await saveSettings({ syncUploadIntervalMs: Number(els.syncUploadIntervalInput.value) });

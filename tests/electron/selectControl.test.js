@@ -197,7 +197,7 @@ test('keyboard separates highlight from selection and Escape cancels without sav
   f.control.destroy();
 });
 
-test('Tab and outside interactions commit without trapping focus; trigger toggling cancels', () => {
+test('Tab confirms keyboard navigation but outside clicks, blur and trigger toggling cancel', () => {
   const f = harness();
   open(f);
   key(f, 'ArrowDown');
@@ -210,11 +210,72 @@ test('Tab and outside interactions commit without trapping focus; trigger toggli
   open(f);
   key(f, 'ArrowDown');
   send(f.document, 'pointerdown');
-  assert.equal(f.select.value, 'host');
+  assert.equal(f.select.value, 'client');
+  assert.equal(f.trigger.getAttribute('aria-expanded'), 'false');
   open(f);
   key(f, 'Home');
   send(f.trigger, 'blur', { relatedTarget: f.select });
-  assert.equal(f.select.value, 'local');
+  assert.equal(f.select.value, 'client');
+  f.control.destroy();
+});
+
+test('pointer highlight clears on leave and cannot commit through dismissal or Tab', () => {
+  const f = harness({ value: 'host' });
+  let changes = 0;
+  f.select.addEventListener('change', () => changes++);
+  open(f);
+  assert.ok(f.popup.children.every(row => row.dataset.highlighted === 'false'));
+  assert.equal(f.popup.children[2].dataset.selected, 'true');
+  send(f.popup.children[0], 'pointermove', { pointerType: 'mouse' });
+  assert.equal(f.popup.children[0].dataset.highlighted, 'true');
+  assert.equal(f.select.value, 'host');
+  f.control.sync();
+  assert.equal(f.popup.children[0].dataset.highlighted, 'true');
+  send(f.popup.children[0], 'pointerleave');
+  assert.ok(f.popup.children.every(row => row.dataset.highlighted === 'false'));
+  assert.equal(f.popup.children[2].dataset.selected, 'true');
+  send(f.document, 'pointerdown');
+  assert.equal(f.select.value, 'host');
+  open(f);
+  send(f.popup.children[0], 'pointermove', { pointerType: 'mouse' });
+  key(f, 'Tab');
+  assert.equal(f.select.value, 'host');
+  open(f);
+  send(f.popup.children[1], 'pointermove', { pointerType: 'mouse' });
+  send(f.trigger, 'blur', { relatedTarget: f.select });
+  assert.equal(f.select.value, 'host');
+  assert.equal(changes, 0);
+  open(f);
+  send(f.popup.children[1], 'pointermove', { pointerType: 'mouse' });
+  send(f.popup.children[1], 'click');
+  assert.equal(f.select.value, 'client');
+  assert.equal(changes, 1, 'a direct click still selects and emits one change');
+  f.control.destroy();
+});
+
+test('keyboard highlight and pointer hover switch ownership without leaving a stale row', () => {
+  const f = harness();
+  key(f, 'ArrowDown');
+  key(f, 'ArrowDown');
+  assert.equal(f.popup.children[1].dataset.highlighted, 'true');
+  send(f.popup.children[2], 'pointermove', { pointerType: 'mouse' });
+  assert.equal(f.popup.children[1].dataset.highlighted, 'false');
+  assert.equal(f.popup.children[2].dataset.highlighted, 'true');
+  send(f.popup.children[2], 'pointerleave');
+  assert.ok(f.popup.children.every(row => row.dataset.highlighted === 'false'));
+  key(f, 'ArrowDown');
+  assert.equal(f.popup.children[2].dataset.highlighted, 'true');
+  key(f, 'Enter');
+  assert.equal(f.select.value, 'host');
+  f.control.destroy();
+});
+
+test('touch and disabled rows do not leave a pointer highlight', () => {
+  const f = harness();
+  open(f);
+  send(f.popup.children[1], 'pointermove', { pointerType: 'touch' });
+  send(f.popup.children[3], 'pointermove', { pointerType: 'mouse' });
+  assert.ok(f.popup.children.every(row => row.dataset.highlighted === 'false'));
   f.control.destroy();
 });
 

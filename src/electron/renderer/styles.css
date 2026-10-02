@@ -1547,9 +1547,64 @@ span.settings-note.settings-item-desc {
   white-space: pre;
   tab-size: 2;
 }
-.settings-sync-group.expanded > .settings-section-toggle .settings-section-summary { display: none; }
 .sync-connection-fields { display: grid; min-width: 0; }
-.sync-connection-fields > * + * { margin-top: 8px; }
+.sync-connection-fields > :not([hidden]) ~ :not([hidden]) { margin-top: 8px; }
+.sync-connection-editor,
+.sync-device-settings { display: grid; min-width: 0; gap: 8px; }
+.sync-connection-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.sync-connection-status { display: inline-flex; align-items: center; gap: 8px; min-height: 24px; }
+.sync-connection-heading .sync-connection-edit { margin-left: auto; }
+.settings-panel .sync-connection-edit,
+.settings-panel .sync-device-side .device-delete-button {
+  display: inline-grid;
+  grid-template-columns: 12px auto;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  gap: 5px;
+  min-height: 24px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.settings-panel .sync-device-side .device-delete-button { grid-template-columns: auto; }
+.sync-device-side .device-delete-label,
+.sync-device-side .device-delete-button::after { grid-column: 1; grid-row: 1; }
+.sync-device-side .device-delete-label { display: inline-flex; align-items: center; justify-self: end; gap: 5px; }
+.sync-device-side .device-delete-button::after { content: attr(data-confirm-text); padding-left: 17px; visibility: hidden; }
+.settings-panel .sync-connection-edit { color: var(--text); }
+.sync-connection-edit::before,
+.sync-device-side .device-delete-label::before {
+  content: "";
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+}
+.sync-connection-edit::before {
+  -webkit-mask: url("icons/actions/pencil-line.svg") center / contain no-repeat;
+  mask: url("icons/actions/pencil-line.svg") center / contain no-repeat;
+}
+.sync-device-side .device-delete-label::before {
+  -webkit-mask: url("icons/actions/trash.svg") center / contain no-repeat;
+  mask: url("icons/actions/trash.svg") center / contain no-repeat;
+}
+.settings-panel .sync-connection-edit:hover,
+.settings-panel .sync-connection-edit:focus-visible { background: rgba(var(--overlay-rgb), 0.06); }
+.settings-panel .sync-connection-edit:focus-visible,
+.settings-panel .sync-device-side .device-delete-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sync-connection-identity { display: grid; min-width: 0; margin-left: 22px; gap: 2px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+#syncConnectionEndpoint { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: clip; }
+#syncConnectionCancel { background: transparent; }
+#hubClientFields { container-type: inline-size; }
+#hubClientFields > .accordion-animation-inner { gap: 0; }
+#hubClientFields > .accordion-animation-inner > * { margin-top: 0; }
+#hubClientFields > .accordion-animation-inner > :not([hidden]) ~ :not([hidden]) { margin-top: 8px; }
 .sync-mode-select { position: relative; display: block; min-width: 0; }
 .settings-panel .sync-mode-select select { width: 100%; min-width: 0; padding-right: 32px; }
 .sync-mode-select:has(.select-control-trigger) > .settings-section-disclosure { display: none; }
@@ -1659,7 +1714,7 @@ span.settings-note.settings-item-desc {
 .hub-address-iface { color: var(--muted); font-size: 9.5px; flex: 0 0 auto; }
 .hub-address-row .icon-button { width: 26px; height: 26px; flex: 0 0 auto; font-size: 12px; }
 .settings-note.hub-warning { color: var(--orange); }
-/* Settings stay above the sync backend's device list, without a nested card. */
+/* Connection summary and controls stay above the device list, without a nested card. */
 .sync-panel {
   container-type: inline-size;
   display: grid;
@@ -1669,12 +1724,9 @@ span.settings-note.settings-item-desc {
 }
 .sync-panel-connection {
   --signal-rgb: 163, 173, 187;
-  display: flex;
-  align-items: flex-start;
-  flex-wrap: wrap;
-  gap: 8px 8px;
+  display: grid;
   min-width: 0;
-  padding: 0 3px 12px;
+  padding: 6px 0;
 }
 .sync-panel-connection[data-state="connected"] { --signal-rgb: var(--success-rgb); }
 .sync-panel-connection[data-state="connecting"] { --signal-rgb: 244, 160, 115; }
@@ -1684,7 +1736,6 @@ span.settings-note.settings-item-desc {
   flex: 0 0 14px;
   width: 14px;
   height: 14px;
-  margin-top: 1px;
   color: rgb(var(--signal-rgb));
 }
 .sync-panel-signal > svg { display: none; width: 14px; height: 14px; }
@@ -1699,15 +1750,16 @@ span.settings-note.settings-item-desc {
 @keyframes sync-signal-spin {
   to { transform: rotate(360deg); }
 }
-.sync-panel-state { display: grid; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.sync-panel-state { display: grid; gap: 2px; min-width: 0; }
 .sync-panel-state strong { color: var(--text); font-size: 11px; font-weight: 500; }
 .sync-panel-state > span {
+  margin-left: 22px;
   color: var(--muted);
   font-size: 10px;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
-.sync-panel-connection[data-state="disconnected"] .sync-panel-state > span { color: var(--red); }
+.sync-panel-connection[data-state="disconnected"] #syncPanelDetail { color: var(--red); }
 .sync-panel-build {
   color: var(--muted);
   font-size: 9px;
@@ -1736,11 +1788,8 @@ span.settings-note.settings-item-desc {
   min-width: 0;
   padding: 8px 3px;
   border-radius: 0;
-  transition: background 120ms ease;
 }
-.sync-device-row:hover { background: rgba(var(--overlay-rgb), 0.035); }
 .sync-device-row + .sync-device-row { box-shadow: inset 0 1px 0 rgba(var(--line-rgb), 0.06); }
-.sync-device-row + .sync-device-row:hover { box-shadow: none; }
 .sync-device-mark { justify-self: center; margin-top: 2px; width: 12px; height: 12px; color: var(--text); opacity: 0.82; }
 .sync-device-mark-generic {
   width: 7px;
@@ -1776,14 +1825,15 @@ span.settings-note.settings-item-desc {
 .sync-device-side {
   grid-column: 3;
   grid-row: 1;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  flex-wrap: wrap;
   gap: 5px 8px;
   min-width: 0;
 }
 .sync-device-row.is-stale .sync-device-side { grid-column: 2 / -1; grid-row: 3; }
-.sync-device-side .device-delete-button { margin-left: auto; }
+.sync-device-action { display: flex; align-items: center; justify-content: flex-end; height: 0; }
+.sync-device-side .device-delete-button { align-self: center; margin-left: auto; flex-shrink: 0; }
 .sync-device-presence {
   display: inline-flex;
   align-items: center;
@@ -1800,7 +1850,6 @@ span.settings-note.settings-item-desc {
   height: 6px;
   border-radius: 50%;
   background: var(--success);
-  box-shadow: 0 0 0 2px rgba(var(--success-rgb), 0.16);
 }
 .sync-device-row.is-stale .sync-device-dot {
   background: transparent;
@@ -1808,20 +1857,9 @@ span.settings-note.settings-item-desc {
 }
 .sync-device-row.is-stale .sync-device-name { color: var(--muted); }
 .sync-device-row.is-stale .sync-device-mark { opacity: 0.4; }
-.settings-panel .sync-device-side .device-delete-button {
-  align-self: center;
-  margin-top: 0;
-  padding: 2px 4px;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--muted);
-  font-size: 10px;
-  cursor: pointer;
-}
+.settings-panel .sync-device-side .device-delete-button { margin-top: 0; }
 .settings-panel .sync-device-side .device-delete-button:hover,
-.settings-panel .sync-device-side .device-delete-button[data-confirm="true"] { color: var(--red); background: transparent; }
-.settings-panel .sync-device-side .device-delete-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.settings-panel .sync-device-side .device-delete-button[data-confirm="true"] { color: var(--red); background: rgba(var(--overlay-rgb), 0.06); }
 .sync-panel-link {
   display: flex;
   align-items: center;
@@ -1846,9 +1884,9 @@ span.settings-note.settings-item-desc {
   .sync-device-title { grid-column: 2 / -1; }
   .sync-device-side { grid-column: 2 / -1; grid-row: 3; }
 }
-@container (max-width: 280px) {
-  .sync-panel-state { flex-basis: calc(100% - 22px); }
-  .sync-panel-build { margin-left: 22px; }
+@container (max-width: 240px) {
+  .sync-device-side { grid-template-columns: minmax(0, 1fr); }
+  .sync-device-action { height: auto; }
 }
 :root[data-reduce-motion="on"] .sync-panel-signal > svg { animation: none !important; }
 :root[data-reduce-motion="on"] .sync-panel-link-arrow::before { transition: none; }
@@ -2990,33 +3028,40 @@ span.settings-note.settings-item-desc {
   border-bottom: 1px solid var(--muted);
   transform: rotate(45deg);
 }
+.view-switcher-menu,
+.select-control-popup {
+  padding: 4px;
+  border: 1px solid rgba(var(--line-rgb), 0.22);
+  border-radius: 7px;
+  background:
+    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)),
+    rgba(var(--glass-rgb), 0.76);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(var(--overlay-rgb), 0.1);
+  -webkit-backdrop-filter: blur(28px) saturate(115%);
+  backdrop-filter: blur(28px) saturate(115%);
+}
 .select-control-popup {
   position: fixed;
   inset: auto;
   margin: 0;
-  padding: 4px;
   overflow: auto;
   overscroll-behavior: contain;
-  border: 1px solid rgba(var(--line-rgb), 0.19);
-  border-radius: 10px;
-  background: rgba(var(--panel-rgb), 0.97);
   color: var(--text);
-  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.38);
-  backdrop-filter: blur(18px) saturate(110%);
   font-size: 11px;
   line-height: 1.4;
   -webkit-app-region: no-drag;
 }
-.select-control-option { display: flex; min-height: 28px; align-items: flex-start; gap: 8px; padding: 7px 8px; border-radius: 6px; cursor: pointer; }
+.select-control-option { display: flex; min-height: 28px; align-items: flex-start; gap: 8px; padding: 7px 8px; border-radius: 5px; cursor: pointer; }
 .select-control-option > .select-control-icon { margin-top: 1px; }
 .select-control-option-text { display: grid; min-width: 0; gap: 3px; }
 .select-control-option-label { overflow-wrap: anywhere; }
 .select-control-description { color: var(--muted); font-size: 9.5px; line-height: 1.45; overflow-wrap: anywhere; }
-.select-control-option[data-selected="true"] { background: rgba(var(--overlay-rgb), 0.07); }
-.select-control-option[data-highlighted="true"] { background: rgba(var(--overlay-rgb), 0.12); }
+.select-control-option[data-highlighted="true"] { background: rgba(var(--overlay-rgb), 0.07); }
+.select-control-option[data-selected="true"] { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
 .select-control-option[aria-disabled="true"] { opacity: 0.5; cursor: default; }
 @supports not (backdrop-filter: blur(1px)) {
-  .select-control-popup { background: rgb(var(--panel-rgb)); }
+  .view-switcher-menu,
+  .select-control-popup { background: rgb(var(--glass-rgb)); }
 }
 /* Chromium delegates an open <select> popup to a platform-specific surface.
    Windows can give that popup a light system background while retaining our
@@ -5685,17 +5730,8 @@ html.is-windows .limit-live-badge {
   width: 100%;
   max-height: min(280px, calc(100vh - 84px));
   gap: 2px;
-  padding: 4px;
   overflow: hidden auto;
   transform-origin: left bottom;
-  border: 1px solid rgba(var(--line-rgb), 0.22);
-  border-radius: 7px;
-  background:
-    linear-gradient(180deg, rgba(var(--overlay-rgb), 0.075), rgba(var(--overlay-rgb), 0.025)),
-    rgba(var(--glass-rgb), 0.76);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(var(--overlay-rgb), 0.1);
-  -webkit-backdrop-filter: blur(28px) saturate(115%);
-  backdrop-filter: blur(28px) saturate(115%);
   opacity: 1;
   visibility: visible;
   filter: blur(0);
@@ -5742,7 +5778,7 @@ html.is-windows .limit-live-badge {
   color: var(--text);
 }
 .view-switcher-menu-item.is-current {
-  background: rgba(var(--accent-rgb), 0.08);
+  background: rgba(var(--accent-rgb), 0.12);
   color: var(--accent);
 }
 .view-switcher-menu-label {
@@ -5780,6 +5816,7 @@ html.native-liquid-glass .view-switcher-disclosure { width: 28px; flex-basis: 28
    above the native glass, so nothing but its own fill can hide the rows it
    covers. It stays a dense frosted plate; only its shape and edge follow the
    glass controls. */
+html.native-liquid-glass .select-control-popup,
 html.native-liquid-glass .view-switcher-menu {
   padding: 5px;
   border-color: rgba(var(--line-rgb), 0.16);
@@ -5789,6 +5826,7 @@ html.native-liquid-glass .view-switcher-menu {
     rgba(var(--glass-rgb), 0.86);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24), var(--liquid-glass-specular);
 }
+html.native-liquid-glass .select-control-option,
 html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .period-menu {
   -webkit-app-region: no-drag;
