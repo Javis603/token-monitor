@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const { hashKey } = require('./hashKey');
+const { SESSION_TITLE_KEYS } = require('./sessionTitlePrivacy');
 const { normalizeSessionContext } = require('./sessionContext');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
 const codexSession = require('./providers/codex/sessionMetadata');
@@ -103,8 +104,7 @@ function applyTokscaleSessionMetadata(json, { resolveProjects = true, resolveTit
   for (const row of rows) {
     if (!row || typeof row !== 'object') continue;
     if (!resolveTitles) {
-      delete row.sessionTitle;
-      delete row.session_title;
+      for (const key of SESSION_TITLE_KEYS) delete row[key];
     }
     const client = String(row.client || '').trim();
     const sessionId = String(row.sessionId ?? row.session_id ?? '').trim();

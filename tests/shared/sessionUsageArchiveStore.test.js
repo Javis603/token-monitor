@@ -7,6 +7,8 @@ const path = require('node:path');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
 const { readJson } = require('../../src/shared/config');
+const { createUsageTransform } = require('../../src/shared/usage/usageTransform');
+const { normalizePeriod, emptyPeriod } = require('../../src/shared/usage');
 
 const {
   captureSessionUsageArchive,
@@ -787,4 +789,43 @@ test('a legacy Cursor row another writer added is linked by this process', (t) =
   const linked = reader.read(capturedAt).sessions[`cursor:${legacyId}`].supersededBy;
   reader.close();
   assert.equal(linked, 'cursor:conv-1');
+});
+
+
+test('private captures retain saved titles on disk without capturing new titles', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-title-archive-'));
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir } };
+  const store = createSessionUsageArchiveStore(options);
+  let reopened;
+  t.after(() => {
+    store.close();
+    reopened?.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const initial = summary(100);
+  for (const period of Object.values(initial)) period.sessions['codex:one'].title = 'Saved title';
+  assert.equal(store.capture(initial, new Date('2026-10-02T08:00:00Z')).error, null);
+  let titlesEnabled = false;
+  const transform = createUsageTransform({ store, getSettings: () => ({ sessionTitlesEnabled: titlesEnabled }) });
+  const privateSummary = summary(150);
+  for (const period of ['today', 'month', 'allTime']) privateSummary[period] = normalizePeriod(privateSummary[period]);
+  privateSummary.updatedAt = '2026-10-02T08:01:00Z';
+  const displayed = transform.transform(privateSummary);
+  assert.doesNotMatch(JSON.stringify(displayed), /Saved title/);
+  const newSummary = summary(200, 'new');
+  newSummary.updatedAt = '2026-10-02T08:02:00Z';
+  for (const period of ['today', 'month', 'allTime']) {
+    newSummary[period].sessions['codex:new'].title = 'Unread title';
+    newSummary[period] = normalizePeriod(newSummary[period]);
+  }
+  assert.doesNotMatch(JSON.stringify(transform.transform(newSummary)), /title/);
+  titlesEnabled = true;
+  assert.match(JSON.stringify(transform.project({ allTime: emptyPeriod() }, store.read(), new Date('2026-10-02T08:03:00Z'))), /Saved title/);
+  reopened = createSessionUsageArchiveStore(options);
+  const archive = reopened.read(new Date('2026-10-02T08:03:00Z'));
+  for (const period of ['today', 'month', 'allTime']) {
+    assert.equal(archive.sessions['codex:one'].periods[period].title, 'Saved title');
+    assert.equal(archive.sessions['codex:one'].periods[period].totalTokens, 150);
+    assert.equal(archive.sessions['codex:new'].periods[period].title, '');
+  }
 });

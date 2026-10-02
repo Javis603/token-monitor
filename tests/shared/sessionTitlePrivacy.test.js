@@ -12,6 +12,7 @@ const { usageConfigFromSettings } = require('../../src/electron/runtimeConfig');
 const claude = require('../../src/shared/providers/claude/sessionMetadata');
 const codex = require('../../src/shared/providers/codex/sessionMetadata');
 const cursor = require('../../src/shared/providers/cursor/sessionMetadata');
+const opencode = require('../../src/shared/providers/opencode/session');
 const { readDshSessionState } = require('../../src/shared/providers/dsh/sessionFiles');
 const { droidSessionMetadataFromEntry } = require('../../src/shared/providers/droid/sessionMetadata');
 const { collectUsageOnce } = require('../../src/shared/collector');
@@ -50,16 +51,16 @@ test('title privacy covers snapshots, native rows, devices and all-time pulls wi
 });
 
 test('missing metadata and stale resolver cache cannot restore a title while disabled', () => {
-  const periods = { today: { sessions: { 'example:s': session() } } };
-  const metadataCache = new Map([['example:s', { title: 'PRIVATE CACHE', lastUsedAt: AT }]]);
+  const periods = { today: { sessions: { 'codex:s': session() } } };
+  const metadataCache = new Map([['codex:s', { title: 'PRIVATE CACHE', lastUsedAt: AT }]]);
   applySessionMetadata(periods, '/missing', {
-    resolveTitles: false, metadataCache, resolvedSessionKeys: new Set(['example:s']),
+    resolveTitles: false, metadataCache, resolvedSessionKeys: new Set(['codex:s']),
     sessionMetadataResolvers: new Map()
   });
-  assert.equal(periods.today.sessions['example:s'].title, undefined);
-  const empty = { today: { sessions: { 'example:s': session() } } };
+  assert.equal(periods.today.sessions['codex:s'].title, undefined);
+  const empty = { today: { sessions: { 'codex:s': session() } } };
   applySessionMetadata(empty, '/missing', { resolveTitles: false, sessionMetadataResolvers: new Map() });
-  assert.equal(empty.today.sessions['example:s'].title, undefined);
+  assert.equal(empty.today.sessions['codex:s'].title, undefined);
 });
 
 test('Tokscale title aliases are removed even when the binary emits no metadata arrays', () => {
@@ -97,10 +98,12 @@ test('Codex private mode excludes title columns but preserves background review 
   assert.equal(result.has('ordinary'), false);
   assert.doesNotMatch(queries.find((sql) => sql.startsWith('SELECT')), /\btitle\b|\bname\b/);
   const resolved = codex.resolveSessionMetadata(new Set(['s']), {
-    home: path.join(os.tmpdir(), 'missing-title-home'), metadata: new Map(), resolveTitles: false,
+    home: path.join(os.tmpdir(), 'missing-title-home'), metadata: new Map([['codex:s', { title: 'CACHED TITLE', lastUsedAt: AT }]]), resolveTitles: false,
     deps: { readCodexMeta: () => result, readT3Meta() { throw new Error('T3 title read'); }, env: {} }
   });
   assert.equal(resolved.get('s').sessionKind, 'background-review');
+  assert.equal(resolved.get('s').title, undefined);
+  assert.equal(resolved.get('s').lastUsedAt, AT);
 });
 
 test('Claude private scans retain context and turn state across off/on cache transitions', (t) => {
@@ -199,4 +202,69 @@ test('collector private mode gates resolvers and removes raw scan titles in ever
   const rows = sessionRowsForPeriod(result.today, { clientLabels: { codex: 'Codex' }, now: new Date(AT) });
   assert.equal(rows.length, 1);
   assert.doesNotMatch(rows[0].name, /PRIVATE/);
+});
+
+
+test('OpenCode injected metadata reader receives the title policy', () => {
+  assertSessionTitleContract({
+    read: (options) => opencode.resolveSessionMetadata(new Set(['s']), {
+      resolveTitles: options.resolveTitles,
+      resolveProjects: true,
+      projectIdentity: () => ({ projectId: 'project' }),
+      deps: { readOpencodeMeta(ids, policy) {
+        assert.deepEqual([...ids], ['s']);
+        assert.equal(policy.resolveTitles, options.resolveTitles);
+        return new Map([['s', { startedAt: AT, projectPath: '/project', turnEnded: true,
+          get title() {
+            assert.notEqual(policy.resolveTitles, false, 'private resolver cannot read title');
+            return 'PRIVATE TITLE';
+          } }]]);
+      } }
+    }).get('s'),
+    expectedTitle: 'PRIVATE TITLE',
+    expectedMetadata: { startedAt: AT, projectId: 'project', turnEnded: true },
+    assertPrivateRead: () => {}
+  });
+});
+
+test('DSH repeated failed private reads retain mode, context and turn observations', (t) => {
+  const file = fixture(t, 'session.jsonl', [
+    { type: 'session/title', data: { title: 'PRIVATE TITLE' } },
+    { type: 'request/context', data: { contextWindow: 100 } },
+    { type: 'turn/end' }
+  ].map(JSON.stringify).join('\n') + '\n');
+  let state = readDshSessionState(file);
+  const content = fs.readFileSync(file);
+  fs.unlinkSync(file);
+  for (let tick = 0; tick < 3; tick += 1) {
+    state = readDshSessionState(file, state, { resolveTitles: false });
+    assert.equal(state.resolveTitles, false);
+    assert.equal(state.title, '');
+    assert.equal(state.turnEnded, true);
+    assert.equal(state.contextWindow, 100);
+  }
+  fs.writeFileSync(file, content);
+  state = readDshSessionState(file, state, { resolveTitles: true });
+  assert.equal(state.title, 'PRIVATE TITLE');
+  assert.equal(state.turnEnded, true);
+});
+
+test('Claude failed mode changes remove cached titles and retry unchanged files', (t) => {
+  const file = fixture(t, 'session.jsonl', [
+    { type: 'custom-title', customTitle: 'PRIVATE TITLE' },
+    { type: 'assistant', message: { model: 'claude-opus-4-8', stop_reason: 'end_turn',
+      usage: { input_tokens: 20, cache_read_input_tokens: 10 } } }
+  ].map(JSON.stringify).join('\n') + '\n');
+  const cache = new Map();
+  assert.equal(claude.readSessionTitle(file, { cache }), 'PRIVATE TITLE');
+  const failingFs = { statSync() { throw new Error('temporary stat failure'); } };
+  for (let tick = 0; tick < 3; tick += 1) {
+    const deps = { cache, fs: failingFs, resolveTitles: false };
+    assert.equal(claude.readSessionTitle(file, deps), '');
+    assert.equal(claude.readSessionTurnEnded(file, deps), true);
+    assert.equal(claude.readSessionContext(file, deps).contextTokens, 30);
+    for (const key of ['title', 'customTitle', 'aiTitle']) assert.equal(cache.get(file)[key], '');
+  }
+  assert.equal(claude.readSessionTitle(file, { cache, resolveTitles: false }), '');
+  assert.equal(claude.readSessionTitle(file, { cache, resolveTitles: true }), 'PRIVATE TITLE');
 });

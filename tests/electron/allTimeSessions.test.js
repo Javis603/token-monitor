@@ -195,16 +195,18 @@ test('the renderer attaches the pulled list to every stats it adopts and pulls f
 });
 
 test('a title-bearing pull that lands after privacy is enabled is projected using the current policy', async () => {
-  const { withoutSessionTitleStats } = require('../../src/shared/sessionTitlePrivacy');
+  const { withoutSessionTitles } = require('../../src/shared/sessionTitlePrivacy');
   let hidden = false;
   let resolvePull;
   const input = stats();
   let adopted;
+  let projections = 0;
   const loader = createAllTimeSessionsLoader({
     fetchSessions: () => new Promise((resolve) => { resolvePull = resolve; }),
     currentSnapshot: () => input.snapshot,
     needed: () => true,
-    projectStats: (value) => hidden ? withoutSessionTitleStats(value) : value,
+    projectSessions: (value) => { projections += 1; return hidden ? withoutSessionTitles(value) : value; },
+    projectionKey: () => hidden,
     onLoaded: () => { adopted = loader.attach(input); }
   });
   loader.ensure();
@@ -215,6 +217,29 @@ test('a title-bearing pull that lands after privacy is enabled is projected usin
   assert.equal(adopted.periods.allTime.sessions['codex:s'].title, undefined);
   assert.equal(adopted.periods.allTime.sessions['codex:s'].totalTokens, 9);
   assert.equal(Object.hasOwn(input.periods.allTime, 'sessions'), false);
+  const projectedSessions = adopted.periods.allTime.sessions;
+  for (let tick = 0; tick < 5; tick += 1) {
+    assert.strictEqual(loader.attach(stats({ id: tick + 2, source: 0 })).periods.allTime.sessions, projectedSessions);
+  }
+  assert.equal(projections, 1, 'successive pushes reuse the projected map');
   hidden = false;
   assert.equal(loader.attach(input).periods.allTime.sessions['codex:s'].title, 'Private title');
+  assert.equal(projections, 2);
+});
+
+
+test('re-enabling re-pulls a titleless list for the same snapshot', async () => {
+  const { loader, calls, loaded } = harness();
+  loader.ensure();
+  await settle();
+  calls[0].resolve({ 'codex:s': { totalTokens: 9 } });
+  await settle();
+  assert.equal(loaded[0].periods.allTime.sessions['codex:s'].title, undefined);
+  loader.invalidate();
+  loader.ensure();
+  await settle();
+  assert.equal(calls[1].id, calls[0].id);
+  calls[1].resolve({ 'codex:s': { title: 'Recovered title', totalTokens: 9 } });
+  await settle();
+  assert.equal(loaded[1].periods.allTime.sessions['codex:s'].title, 'Recovered title');
 });

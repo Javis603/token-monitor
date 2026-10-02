@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { SESSION_TEXT_KEYS } = require('../../src/shared/sessionTitlePrivacy');
 
 // The caller owns the fixture, cache and source instrumentation. Keep the same
 // read closure for every mode so unchanged-file caches cannot mask transitions.
@@ -18,7 +19,7 @@ function assertSessionTitleContract({ read, expectedTitle, expectedMetadata, ass
     for (const [field, expected] of Object.entries(expectedMetadata)) {
       assert.deepEqual(metadata[field], expected, `${field} survives title mode ${enabled ? 'on' : 'off'}`);
     }
-    for (const alias of ['sessionTitle', 'session_title', 'name', 'preview', 'firstUserMessage', 'first_user_message', 'customTitle', 'custom_title', 'aiTitle', 'ai_title', 'topicTitle', 'topic_title']) {
+    for (const alias of SESSION_TEXT_KEYS.filter((field) => field !== 'title')) {
       assert.equal(Object.hasOwn(metadata, alias), false, `normalize ${alias} to title at the adapter boundary`);
     }
   }

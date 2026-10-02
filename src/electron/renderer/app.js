@@ -6497,7 +6497,13 @@ function sessionStatsForDisplay(stats) {
 function setRendererSettings(next) {
   const titlesChanged = (state.settings?.sessionTitlesEnabled !== false) !== (next.sessionTitlesEnabled !== false);
   state.settings = next;
-  state.stats = sessionStatsForDisplay(state.stats);
+  if (titlesChanged) {
+    if (next.sessionTitlesEnabled === false) state.stats = sessionStatsForDisplay(state.stats);
+    // Main may have returned a titleless map while disabled. Pull it again
+    // when re-enabled, even if no new usage snapshot has arrived.
+    allTimeSessions.invalidate();
+    allTimeSessions.ensure();
+  }
   if (titlesChanged && state.openSession?.kind === 'session') {
     // Update only the heading; keep the loaded body, error/loading state and
     // sort control intact, even when a detail request is still in flight.
@@ -12474,7 +12480,9 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   fetchSessions: (snapshotId) => window.tokenMonitor.getAllTimeSessions(snapshotId),
   currentSnapshot: () => state.stats?.snapshot,
   needed: allTimeSessionsNeeded,
-  projectStats: sessionStatsForDisplay,
+  projectSessions: (sessions) => state.settings?.sessionTitlesEnabled === false
+    ? window.TokenMonitorSessionTitlePrivacy.withoutSessionTitles(sessions) : sessions,
+  projectionKey: () => state.settings?.sessionTitlesEnabled !== false,
   onLoaded: () => {
     if (state.stats) state.stats = allTimeSessions.attach(state.stats);
     statsRenderScheduler.request();

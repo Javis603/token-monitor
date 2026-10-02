@@ -202,6 +202,11 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
       // only in what the round-trip drops is caught by the second comparison.
       if (sameWindow && sameJson(entry.periods[periodName], session)) continue;
       const nextSession = cloneJson(session);
+      // Missing metadata is not a deletion. Private captures omit titles;
+      // retain a title already saved locally without recording any new one.
+      if (!Object.hasOwn(nextSession, 'title') && entry.periods[periodName]?.title) {
+        nextSession.title = entry.periods[periodName].title;
+      }
       if (sameWindow && sameJson(entry.periods[periodName], nextSession)) continue;
       entry.client = session.client;
       entry.sessionId = session.sessionId;

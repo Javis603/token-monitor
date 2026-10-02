@@ -318,11 +318,11 @@ function resolveSessionMetadata(sessionIds, context) {
   // but a real Codex title still wins over T3's.
   const generatedTitleById = new Map();
   const readMetadata = deps.readCodexMeta || (deps.scopedHome
-    ? (ids) => readSessionMetaForHome(ids, home, { ...(deps.codexDeps || {}), resolveTitles: context.resolveTitles, titleSourceById: generatedTitleById })
-    : (ids) => readSessionMeta(ids, {
-      ...(deps.codexDeps || {}),
+    ? (ids, options) => readSessionMetaForHome(ids, home, { ...deps.codexDeps, ...options, titleSourceById: generatedTitleById })
+    : (ids, options) => readSessionMeta(ids, {
+      ...deps.codexDeps,
+      ...options,
       titleSourceById: generatedTitleById,
-      resolveTitles: context.resolveTitles,
       homeDir: home,
       env: deps.env
     }));
@@ -388,6 +388,15 @@ function resolveSessionMetadata(sessionIds, context) {
   const files = findSessionFiles(path.join(codexHome, 'sessions'), missingIds);
   for (const [sessionId, filePath] of files) {
     result.set(sessionId, decorate(sessionId, filePath));
+  }
+  // Older metadata and transcript decoration can still carry a cached title.
+  if (context.resolveTitles === false) {
+    for (const [sessionId, meta] of result) {
+      if (!Object.hasOwn(meta, 'title')) continue;
+      const privateMeta = { ...meta };
+      delete privateMeta.title;
+      result.set(sessionId, privateMeta);
+    }
   }
   return result;
 }

@@ -524,6 +524,12 @@ function readSessionTitle(filePath, deps = {}) {
     });
     return title;
   } catch (_) {
+    if (previous && !cached) {
+      // A mode change must discard old title facts even when the file cannot
+      // be read. Retain other observations, but force a complete retry.
+      cache.set(file, { ...previous, resolveTitles, identity: null,
+        title: '', customTitle: '', aiTitle: '' });
+    }
     return cached?.title || '';
   } finally {
     if (fd !== undefined) {

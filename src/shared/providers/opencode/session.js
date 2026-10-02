@@ -179,10 +179,10 @@ function readSessionMetaForHome(sessionIds, home, deps = {}) {
 function resolveSessionMetadata(sessionIds, context) {
   const { deps, home, projectIdentity, resolveProjects } = context;
   const readMetadata = deps.readOpencodeMeta || (deps.scopedHome
-    ? (ids) => readSessionMetaForHome(ids, home, { ...deps.opencodeDeps, resolveTitles: context.resolveTitles })
-    : (ids) => readSessionMeta(ids, { ...deps.opencodeDeps, resolveTitles: context.resolveTitles }));
+    ? (ids, options) => readSessionMetaForHome(ids, home, { ...deps.opencodeDeps, ...options })
+    : (ids, options) => readSessionMeta(ids, { ...deps.opencodeDeps, ...options }));
   const result = new Map();
-  for (const [sessionId, meta] of readMetadata(sessionIds)) {
+  for (const [sessionId, meta] of readMetadata(sessionIds, { resolveTitles: context.resolveTitles })) {
     const startedAt = meta.startedAt || '';
     const lastUsedAt = meta.lastUsedAt || startedAt;
     const identity = resolveProjects ? projectIdentity(meta.projectPath) : {};

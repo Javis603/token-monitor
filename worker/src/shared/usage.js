@@ -43,13 +43,8 @@ const TIMED_DURATION_KEYS = ['totalDurationMs', 'total_duration_ms', 'timedDurat
 const TIMED_TOKEN_KEYS = ['timedTokens', 'timed_tokens'];
 const STARTED_AT_KEYS = ['startedAt', 'started_at', 'createdAt', 'created_at'];
 const LAST_USED_AT_KEYS = ['lastUsedAt', 'last_used_at', 'updatedAt', 'updated_at', 'lastActivityAt', 'last_activity_at', 'timestamp'];
-const SESSION_TITLE_KEYS = ['sessionTitle', 'session_title'];
+const { SESSION_TITLE_KEYS, SESSION_TEXT_KEYS } = require('./sessionTitlePrivacy');
 const SESSION_TITLE_MAX_LENGTH = 160;
-const SESSION_TEXT_KEYS = [
-  'title', 'sessionTitle', 'session_title',
-  'name', 'preview', 'firstUserMessage', 'first_user_message',
-  'customTitle', 'custom_title', 'aiTitle', 'ai_title'
-];
 const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'factory', 'minimax']);
 
 function asNumber(value) {

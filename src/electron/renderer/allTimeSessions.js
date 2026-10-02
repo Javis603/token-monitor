@@ -28,7 +28,7 @@
   // neither attached to stats from another Hub or mode, nor kept when it lands
   // after a switch. A failed pull waits for the next stats instead of retrying
   // in a loop.
-  function createAllTimeSessionsLoader({ fetchSessions, currentSnapshot, needed, onLoaded, onError, projectStats = (stats) => stats }) {
+  function createAllTimeSessionsLoader({ fetchSessions, currentSnapshot, needed, onLoaded, onError, projectSessions = (sessions) => sessions, projectionKey = () => undefined }) {
     if (typeof fetchSessions !== 'function') throw new TypeError('fetchSessions must be a function');
     if (typeof currentSnapshot !== 'function') throw new TypeError('currentSnapshot must be a function');
     if (typeof needed !== 'function') throw new TypeError('needed must be a function');
@@ -36,13 +36,17 @@
     let pulled = null;
     let stale = true;
     let pending = false;
+    let projected = null;
 
     function attach(stats) {
-      const attached = pulled && sameSource(pulled.snapshot, stats?.snapshot)
-        ? withAllTimeSessions(stats, pulled.sessions) : stats;
-      // Apply the current privacy policy after attaching, including an older
-      // pull that completes after the user disabled titles.
-      return projectStats(attached);
+      if (!pulled || !sameSource(pulled.snapshot, stats?.snapshot)) return stats;
+      const key = projectionKey();
+      // Project only the pulled map, once per map and policy. Main already
+      // applies the policy to pushed stats; late pulls need their own guard.
+      if (projected?.input !== pulled.sessions || projected.key !== key) {
+        projected = { input: pulled.sessions, key, sessions: projectSessions(pulled.sessions) };
+      }
+      return withAllTimeSessions(stats, projected.sessions);
     }
 
     function invalidate() {

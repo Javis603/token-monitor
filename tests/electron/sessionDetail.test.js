@@ -131,6 +131,9 @@ test('session detail renders its heading before loading, errors and empty result
   // Privacy changes replace only the back/heading node. The loaded body and
   // sort control survive, and a later detail response respects the new policy.
   context.window.TokenMonitorSessionTitlePrivacy = require('../../src/shared/sessionTitlePrivacy');
+  let invalidations = 0;
+  let pulls = 0;
+  context.allTimeSessions = { invalidate: () => { invalidations += 1; }, ensure: () => { pulls += 1; } };
   const settingsStart = rendererSource.indexOf('function sessionStatsForDisplay(');
   const settingsEnd = rendererSource.indexOf('\nfunction render()', settingsStart);
   vm.runInNewContext(`${rendererSource.slice(settingsStart, settingsEnd)}\nglobalThis.setSettings = setRendererSettings;`, context);
@@ -151,6 +154,12 @@ test('session detail renders its heading before loading, errors and empty result
     assert.equal(els.sessionDetailHead.querySelector('.detail-heading'), null);
   }
   context.setSettings({ sessionTitlesEnabled: true });
+  assert.equal(invalidations, 2, 'both policy changes invalidate the old pull');
+  assert.equal(pulls, 2, 're-enabling requests titles without waiting for a stats push');
+  const adoptedStats = state.stats;
+  context.setSettings({ sessionTitlesEnabled: true });
+  assert.strictEqual(state.stats, adoptedStats, 'unrelated settings do not re-project stats');
+  assert.equal(pulls, 2);
   assert.equal(els.sessionDetailHead.querySelector('.detail-heading').textContent, 'PRIVATE TITLE');
 
   // The id the Sessions list no longer prints opens the detail body, copyable,

@@ -401,7 +401,13 @@ function decodeSessionAppend(filePath, buffer) {
 // still match. Any replacement or rewrite resets the fold, while a torn final
 // record/frame remains eligible for retry.
 function readDshSessionState(filePath, previous = {}, { resolveTitles = true } = {}) {
-  if ((previous.resolveTitles !== false) !== resolveTitles) previous = {};
+  if ((previous.resolveTitles !== false) !== resolveTitles) {
+    // Invalidate the file fingerprint, but keep observed non-title facts if
+    // the first scan in the new mode fails.
+    previous = { title: '', resolveTitles, contextWindow: previous.contextWindow || 0,
+      contextTokens: previous.contextTokens || 0,
+      ...(typeof previous.turnEnded === 'boolean' ? { turnEnded: previous.turnEnded } : {}) };
+  }
   let stat;
   try {
     stat = fs.statSync(filePath);
@@ -417,8 +423,9 @@ function readDshSessionState(filePath, previous = {}, { resolveTitles = true } =
     const carried = typeof previous?.turnEnded === 'boolean' ? previous.turnEnded : undefined;
     return {
       title: '',
-      contextWindow: 0,
-      contextTokens: 0,
+      resolveTitles,
+      contextWindow: previous.contextWindow || 0,
+      contextTokens: previous.contextTokens || 0,
       ...(carried === undefined ? {} : { turnEnded: carried }),
       offset: 0,
       size: 0,
@@ -489,9 +496,7 @@ function readDshSessionState(filePath, previous = {}, { resolveTitles = true } =
   } catch (_) {
     // Do not cache a failed read as though this file revision were observed;
     // preserving the older fingerprint makes the next tick retry it.
-    return previous && typeof previous === 'object'
-      ? previous
-      : { title: '', contextWindow: 0, contextTokens: 0, turnEnded: false, offset: 0, size: 0, mtimeMs: 0 };
+    return { ...previous, resolveTitles };
   } finally {
     if (fd !== undefined) {
       try { fs.closeSync(fd); } catch (_) {}
