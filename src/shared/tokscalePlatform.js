@@ -16,11 +16,4 @@ function tokscalePlatformKey(platform = process.platform, arch = process.arch) {
   return `${platform}-${arch}`;
 }
 
-// Written beside the binary by scripts/ensure-vendored-tokscale.js when it
-// swaps in the pinned fork build, so the app can tell that build apart from an
-// upstream release that reports the same `--version`.
-function tokscaleBuildMarkerPath(binPath) {
-  return `${binPath}.build.json`;
-}
-
-module.exports = { tokscaleBuildMarkerPath, tokscalePackageNameForPlatform, tokscalePlatformKey };
+module.exports = { tokscalePackageNameForPlatform, tokscalePlatformKey };

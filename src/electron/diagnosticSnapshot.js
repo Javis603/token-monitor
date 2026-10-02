@@ -101,7 +101,7 @@ function diagnosticTokscaleInfo(getTokscaleStatus) {
     return {
       version: status.current?.version || status.bundled?.version || 'unknown',
       source: status.current?.source || (status.bundled ? 'bundled' : 'unknown'),
-      build: status.current?.build?.releaseTag || null
+      build: status.bundledBuild?.releaseTag || null
     };
   } catch (_) {
     return { version: 'unknown', source: 'unknown', build: null };
@@ -324,7 +324,7 @@ function createDiagnosticSnapshotBuilder(options = {}) {
         chromiumVersion: versions.chrome,
         tokscaleVersion: tokScale.version,
         tokscaleSource: tokScale.source,
-        tokscaleBuild: tokScale.build,
+        tokscaleBundledBuild: tokScale.build,
         packaged: appState.packaged === true,
         platform,
         osName: osInfo.name,

@@ -342,14 +342,14 @@ test('diagnostic values preserve large token totals and archive sizes', () => {
 
 test('diagnostic environment keeps the tokscale fork build label', () => {
   const forked = formatDiagnosticReport(baseSnapshot({
-    environment: { tokscaleVersion: '4.17.0', tokscaleSource: 'bundled', tokscaleBuild: 'token-monitor-ab1067f3' }
+    environment: { tokscaleVersion: '4.17.0', tokscaleSource: 'bundled', tokscaleBundledBuild: 'token-monitor-ab1067f3' }
   }));
-  assert.match(forked.text, /tokscaleBuild: token-monitor-ab1067f3/);
+  assert.match(forked.text, /tokscaleBundledBuild: token-monitor-ab1067f3/);
 
   const upstream = formatDiagnosticReport(baseSnapshot({
-    environment: { tokscaleVersion: '4.17.0', tokscaleSource: 'bundled', tokscaleBuild: null }
+    environment: { tokscaleVersion: '4.17.0', tokscaleSource: 'bundled', tokscaleBundledBuild: null }
   }));
-  assert.match(upstream.text, /tokscaleBuild: none/);
+  assert.match(upstream.text, /tokscaleBundledBuild: none/);
 });
 
 test('configuration is allowlisted and preserves false values', () => {

@@ -432,6 +432,8 @@ Object.assign(els, {
   advancedSettingsDetails: document.getElementById('advancedSettingsDetails'),
   tokscaleGroup: document.getElementById('tokscaleGroup'),
   tokscaleInstalled: document.getElementById('tokscaleInstalled'),
+  tokscaleBundledBuild: document.getElementById('tokscaleBundledBuild'),
+  tokscaleBundledBuildRow: document.getElementById('tokscaleBundledBuildRow'),
   openTokscaleLinkButton: document.getElementById('openTokscaleLinkButton'),
   aboutVersion: document.getElementById('aboutVersion'),
   openRepositoryButton: document.getElementById('openRepositoryButton'),
@@ -1539,25 +1541,20 @@ function renderTokscaleStatus() {
   }
   els.tokscaleGroup.classList.remove('hidden');
   const current = status?.current;
-  const build = current?.build?.commit
-    ? t('settings.tokscale.forkBuild', { commit: current.build.commit.slice(0, 8) })
-    : '';
-  els.tokscaleInstalled.textContent = current?.source === 'shim'
-    ? t('settings.tokscale.jsFallback')
-    : current
-      ? `${versionText(current.version)}${build}`
-      : t(status ? 'settings.common.notFound' : 'settings.common.checking');
+  els.tokscaleInstalled.textContent = current?.version
+    ? versionText(current.version)
+    : t(status ? 'settings.tokscale.versionUnknown' : 'settings.common.checking');
+  const build = status?.bundledBuild;
+  els.tokscaleBundledBuildRow.classList.toggle('hidden', !build);
+  els.tokscaleBundledBuild.textContent = build ? `fork ${build.commit.slice(0, 8)}` : '';
 }
 
-async function refreshTokscaleStatus({ retried = false } = {}) {
+async function refreshTokscaleStatus() {
   if (!window.tokenMonitor.getTokscaleStatus) return;
   try {
     state.tokscaleStatus = await window.tokenMonitor.getTokscaleStatus();
   } catch (_) {
-    // An unreadable status is not evidence the binary is missing; keep showing
-    // "Checking..." and ask again rather than claiming "Not found".
-    state.tokscaleStatus = null;
-    if (!retried) setTimeout(() => { void refreshTokscaleStatus({ retried: true }); }, 5000);
+    state.tokscaleStatus = {};
   }
   renderTokscaleStatus();
 }

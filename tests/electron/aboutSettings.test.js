@@ -50,21 +50,32 @@ test('General settings explains Discord presence and identifies Tokscale as a bu
   assert.doesNotMatch(i18n, /'settings\.tokscale\.source': '[^']*(?:Data engine|資料引擎|数据引擎|데이터 엔진|データエンジン)/);
 });
 
-test('Tokscale renders the JS fallback explicitly instead of a missing or fabricated version', () => {
+test('Tokscale separates installed version from declared bundled build', () => {
   const source = read('app.js');
   const body = source.slice(source.indexOf('function renderTokscaleStatus()'), source.indexOf('async function refreshTokscaleStatus('));
+  let buildHidden;
   const els = {
     tokscaleGroup: { classList: { add() {}, remove() {} } },
-    tokscaleInstalled: { textContent: '' }
+    tokscaleInstalled: { textContent: '' },
+    tokscaleBundledBuild: { textContent: '' },
+    tokscaleBundledBuildRow: { classList: { toggle: (_, hidden) => { buildHidden = hidden; } } }
   };
-  vm.runInNewContext(`${body}\nrenderTokscaleStatus()`, {
-    els,
-    state: { tokscaleStatus: { supported: true, current: { source: 'shim', version: null, build: null } } },
-    t: (key) => key,
-    versionText: () => assert.fail('shim must not format an unknown version')
-  });
-  assert.equal(els.tokscaleInstalled.textContent, 'settings.tokscale.jsFallback');
-  assert.equal((read('i18n.js').match(/'settings\.tokscale\.jsFallback':/g) || []).length, 5);
+  const state = { tokscaleStatus: { supported: true, current: { source: 'bundled', version: '4.17.0' }, bundledBuild: { commit: 'a'.repeat(40) } } };
+  const context = { els, state, t: (key) => key, versionText: (version) => `v${version}` };
+  vm.runInNewContext(`${body}\nrenderTokscaleStatus()`, context);
+  assert.equal(els.tokscaleInstalled.textContent, 'v4.17.0');
+  assert.equal(els.tokscaleBundledBuild.textContent, 'fork aaaaaaaa');
+  assert.equal(buildHidden, false);
+  state.tokscaleStatus = { supported: true, current: { source: 'shim', version: null }, bundledBuild: null };
+  vm.runInNewContext(`${body}\nrenderTokscaleStatus()`, context);
+  assert.equal(els.tokscaleInstalled.textContent, 'settings.tokscale.versionUnknown');
+  assert.equal(buildHidden, true);
+  state.tokscaleStatus = {};
+  vm.runInNewContext(`${body}\nrenderTokscaleStatus()`, context);
+  assert.equal(els.tokscaleInstalled.textContent, 'settings.tokscale.versionUnknown');
+  assert.equal((read('i18n.js').match(/'settings\.tokscale\.bundledBuild':/g) || []).length, 5);
+  const pkg = JSON.parse(fs.readFileSync(path.join(rendererDir, '../../../package.json'), 'utf8'));
+  assert.ok(pkg.build.files.includes('scripts/vendor/tokscale.json'));
 });
 
 test('General settings places integrations after the complete App Updates group', () => {

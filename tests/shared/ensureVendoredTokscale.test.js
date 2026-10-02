@@ -64,41 +64,6 @@ test('ensure skips download when the installed binary already matches', async ()
     assert.equal(result.status, 'matched');
     assert.equal(downloads, 0);
     assert.deepEqual(fs.readFileSync(target), payload);
-    const marker = JSON.parse(fs.readFileSync(`${target}.build.json`, 'utf8'));
-    assert.equal(marker.releaseTag, 'token-monitor-test');
-    assert.equal(marker.size, payload.length);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('ensure still succeeds when the build marker cannot be written', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-ensure-'));
-  const target = path.join(dir, 'tokscale');
-  const payload = Buffer.from('vendored binary');
-  fs.writeFileSync(target, payload);
-  const logs = [];
-  const readOnlyFs = {
-    ...fs,
-    writeFileSync: (filePath, ...rest) => {
-      if (String(filePath).endsWith('.build.json')) {
-        throw Object.assign(new Error('EROFS: read-only file system'), { code: 'EROFS' });
-      }
-      return fs.writeFileSync(filePath, ...rest);
-    }
-  };
-
-  try {
-    const result = await ensureVendoredTokscale({
-      manifest: manifestFor(payload),
-      requestedKey: 'darwin-arm64',
-      fsImpl: readOnlyFs,
-      ...dependencies(target),
-      log: (message) => logs.push(message)
-    });
-    assert.equal(result.status, 'matched');
-    assert.equal(fs.existsSync(`${target}.build.json`), false);
-    assert.ok(logs.some((line) => line.includes('build marker')));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -130,9 +95,6 @@ test('ensure downloads, smoke-tests, and atomically replaces a mismatched binary
     assert.match(smokePath, /\.vendor-tmp-\d+-[0-9a-f]{8}$/);
     assert.deepEqual(fs.readFileSync(target), newPayload);
     assert.equal(fs.readdirSync(dir).some((name) => name.includes('.vendor-tmp-')), false);
-    const marker = JSON.parse(fs.readFileSync(`${target}.build.json`, 'utf8'));
-    assert.equal(marker.commit, '59712ada85640b7aaa00d7da92ed1a15367e961b');
-    assert.equal(marker.size, newPayload.length);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -279,7 +241,6 @@ test('mode "upstream" resolves and verifies the npm-installed target but never d
     assert.deepEqual(result, { status: 'upstream', key: 'darwin-arm64', targetBinPath: target });
     assert.ok(logs.some((line) => line.includes('upstream')));
     assert.equal(fs.readFileSync(target, 'utf8'), 'npm-installed binary');
-    assert.equal(fs.existsSync(`${target}.build.json`), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

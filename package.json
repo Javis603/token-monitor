@@ -43,6 +43,7 @@
     "files": [
       "src/electron/**/*",
       "src/shared/**/*",
+      "scripts/vendor/tokscale.json",
       "src/hub/**/*",
       "assets/icon.png",
       "assets/icons/**/*",
