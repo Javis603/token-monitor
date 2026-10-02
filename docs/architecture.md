@@ -24,7 +24,7 @@ The "Deploy to Cloudflare" button isolates `worker/` into a fresh repo, so the W
 
 Remote Hub update checks compare `src/shared/hubBuildRegistry.json`, not the product version. It hashes the portable Hub core plus separate Node and Worker adapters, so a desktop-only release does not ask users to redeploy. The marker is a registered build identity, not attestation: describe divergent metadata as unrecognized rather than claiming every fork is detectable. Run `npm run update:hub-build` once the Hub/shared change is final; the Hub-build test fails when it is stale. Never hand-edit generated Worker metadata.
 
-Only the app, agent and packaging scripts run `ensure:tokscale`, which installs the pinned binary from `scripts/vendor/tokscale.json`; install, hub, lint, test and verify never download it. The manifest's `mode` (`override`/`upstream`) gates binary provenance only — both `verify-vendored-tokscale*.js` gates run against whichever binary is authoritative. Settings and diagnostics read that same packaged manifest for the declared bundled build; this metadata does not attest the currently selected executable. Keep download checksum verification in the installer, not runtime display hashing: macOS signing changes executable bytes.
+Only the app, agent and packaging scripts run `ensure:tokscale`, which installs the pinned binary from `scripts/vendor/tokscale.json`; install, hub, lint, test and verify never download it. The manifest's `mode` (`override`/`upstream`) gates binary provenance only — both `verify-vendored-tokscale*.js` gates run against whichever binary is authoritative. Settings and diagnostics use the packaged vendor manifest to describe the declared bundled build, not to verify the currently selected executable.
 
 ## Collector pipeline
 
