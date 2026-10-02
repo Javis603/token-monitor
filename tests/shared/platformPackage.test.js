@@ -12,7 +12,7 @@ test('tokscalePackageNameForPlatform returns npm package names including Windows
   assert.equal(tokscalePackageNameForPlatform('win32', 'arm64'), '@tokscale/cli-win32-arm64-msvc');
 });
 
-test('tokscalePackageNameForPlatform returns null for unsupported updater platforms', () => {
+test('tokscalePackageNameForPlatform returns null for platforms handled outside the primary package helper', () => {
   assert.equal(tokscalePackageNameForPlatform('linux', 'x64'), null);
   assert.equal(tokscalePackageNameForPlatform('darwin', 'ia32'), null);
 });
