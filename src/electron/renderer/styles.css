@@ -327,12 +327,10 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   vertical-align: baseline;
   border-radius: 50%;
   background: #5b6471;
-  box-shadow: 0 0 0 0 rgba(var(--accent-rgb), 0);
-  transition: background 200ms ease, box-shadow 200ms ease;
+  transition: background 200ms ease;
 }
 .live-dot.live {
   background: var(--accent);
-  box-shadow: 0 0 4px rgba(var(--accent-rgb), 0.55);
 }
 /* The reveal only exists in the two collapsed title states, so its no-drag island and the
    enlarged hover targets are scoped to them. Unscoped, the live dot — which is shown in
@@ -410,16 +408,6 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 @media (prefers-reduced-motion: reduce) {
   .token-rate-reveal { transition: none; }
-}
-/* One-shot flare on data update — flares, then settles back to the resting
-   .live glow. No `infinite`, so the GPU compositor can idle between updates. */
-.live-dot.pulse {
-  animation: live-pulse 1.2s ease-out;
-}
-@keyframes live-pulse {
-  0%   { box-shadow: 0 0 3px rgba(var(--accent-rgb), 0.45); }
-  35%  { box-shadow: 0 0 9px rgba(var(--accent-rgb), 0.95); }
-  100% { box-shadow: 0 0 4px rgba(var(--accent-rgb), 0.55); }
 }
 .status { display: none; margin-top: 4px; color: var(--muted); font-size: 11px; }
 .status.error { display: block; }
@@ -1559,39 +1547,20 @@ span.settings-note.settings-item-desc {
   white-space: pre;
   tab-size: 2;
 }
-.hub-mode-options {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
+.settings-sync-group.expanded > .settings-section-toggle .settings-section-summary { display: none; }
+.sync-connection-fields { display: grid; min-width: 0; }
+.sync-connection-fields > * + * { margin-top: 8px; }
+.sync-mode-select { position: relative; display: block; min-width: 0; }
+.settings-panel .sync-mode-select select { width: 100%; min-width: 0; padding-right: 32px; }
+.sync-mode-select:has(.select-control-trigger) > .settings-section-disclosure { display: none; }
+.sync-mode-select > .settings-section-disclosure {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  pointer-events: none;
 }
-.settings-panel .hub-mode-option {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-  width: 100%;
-  padding: 8px 9px;
-  border: 1px solid rgba(var(--line-rgb), 0.10);
-  border-radius: 10px;
-  background: rgba(var(--overlay-rgb), var(--control-alpha));
-  cursor: pointer;
-  transition: border-color 120ms ease, background 120ms ease;
-}
-.settings-panel .hub-mode-option:hover { border-color: var(--line-strong); }
-.settings-panel .hub-mode-option input[type="radio"] {
-  width: auto;
-  margin: 2px 0 0;
-  flex: 0 0 auto;
-  accent-color: var(--accent);
-}
-.settings-panel .hub-mode-option:has(input:checked) {
-  border-color: rgba(var(--accent-rgb), 0.5);
-  background: rgba(var(--accent-rgb), 0.07);
-}
-.hub-mode-text { display: grid; gap: 1px; min-width: 0; }
-.hub-mode-text strong { color: var(--text); font-size: 11px; font-weight: 500; }
-.hub-mode-text span { color: var(--muted); font-size: 10px; line-height: 1.35; }
+.sync-mode-description { margin: 0 0 4px; }
 .hub-mode-fields { min-width: 0; }
 .hub-mode-fields > .accordion-animation-inner { display: grid; min-width: 0; gap: 8px; }
 .hub-secret-row { display: flex; min-width: 0; align-items: center; gap: 6px; }
@@ -1654,8 +1623,6 @@ span.settings-note.settings-item-desc {
 .hub-status.ok { color: var(--success); border-color: rgba(var(--success-rgb), 0.32); }
 .hub-status.warning { color: var(--orange); border-color: rgba(244, 160, 115, 0.4); }
 .hub-status.error { color: var(--red); border-color: rgba(244, 119, 136, 0.42); }
-.hub-mode-option.unsupported { opacity: 0.55; }
-.hub-mode-option.unsupported input { cursor: not-allowed; }
 .icloud-root-status {
   color: var(--muted);
   font-size: 10px;
@@ -1692,6 +1659,203 @@ span.settings-note.settings-item-desc {
 .hub-address-iface { color: var(--muted); font-size: 9.5px; flex: 0 0 auto; }
 .hub-address-row .icon-button { width: 26px; height: 26px; flex: 0 0 auto; font-size: 12px; }
 .settings-note.hub-warning { color: var(--orange); }
+/* Settings stay above the sync backend's device list, without a nested card. */
+.sync-panel {
+  container-type: inline-size;
+  display: grid;
+  min-width: 0;
+  padding-top: 14px;
+  border-top: 1px solid rgba(var(--line-rgb), 0.10);
+}
+.sync-panel-connection {
+  --signal-rgb: 163, 173, 187;
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px 8px;
+  min-width: 0;
+  padding: 0 3px 12px;
+}
+.sync-panel-connection[data-state="connected"] { --signal-rgb: var(--success-rgb); }
+.sync-panel-connection[data-state="connecting"] { --signal-rgb: 244, 160, 115; }
+.sync-panel-connection[data-state="disconnected"] { --signal-rgb: 244, 119, 136; }
+.sync-panel-signal {
+  display: flex;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  color: rgb(var(--signal-rgb));
+}
+.sync-panel-signal > svg { display: none; width: 14px; height: 14px; }
+.sync-panel-connection[data-state="connected"] .sync-panel-signal-linked,
+.sync-panel-connection[data-state="disconnected"] .sync-panel-signal-unlinked,
+.sync-panel-connection[data-state="notConfigured"] .sync-panel-signal-unlinked,
+.sync-panel-connection[data-state="connecting"] .sync-panel-signal-pending { display: block; }
+/* Only the visible waiting state moves; a healthy connection is at rest. */
+.shell.settings-open .settings-sync-group.expanded .sync-panel-connection[data-state="connecting"] .sync-panel-signal[data-visible="true"]:not([data-window-hidden="true"]) > .sync-panel-signal-pending {
+  animation: sync-signal-spin 1.4s linear infinite;
+}
+@keyframes sync-signal-spin {
+  to { transform: rotate(360deg); }
+}
+.sync-panel-state { display: grid; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.sync-panel-state strong { color: var(--text); font-size: 11px; font-weight: 500; }
+.sync-panel-state > span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.sync-panel-connection[data-state="disconnected"] .sync-panel-state > span { color: var(--red); }
+.sync-panel-build {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.sync-panel-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0 6px;
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 500;
+}
+.sync-panel-count { letter-spacing: 0.02em; text-transform: none; font-variant-numeric: tabular-nums; }
+.sync-device-list { display: grid; min-width: 0; }
+.sync-device-empty { padding: 6px 6px 8px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.sync-device-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: start;
+  column-gap: 9px;
+  row-gap: 3px;
+  min-width: 0;
+  padding: 8px 3px;
+  border-radius: 0;
+  transition: background 120ms ease;
+}
+.sync-device-row:hover { background: rgba(var(--overlay-rgb), 0.035); }
+.sync-device-row + .sync-device-row { box-shadow: inset 0 1px 0 rgba(var(--line-rgb), 0.06); }
+.sync-device-row + .sync-device-row:hover { box-shadow: none; }
+.sync-device-mark { justify-self: center; margin-top: 2px; width: 12px; height: 12px; color: var(--text); opacity: 0.82; }
+.sync-device-mark-generic {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(var(--accent-rgb), 0.85);
+}
+.sync-device-main { display: contents; }
+.sync-device-title { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sync-device-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sync-device-badge {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+.sync-device-meta { grid-column: 2 / -1; grid-row: 2; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sync-device-meta-text {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.sync-device-side {
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px 8px;
+  min-width: 0;
+}
+.sync-device-row.is-stale .sync-device-side { grid-column: 2 / -1; grid-row: 3; }
+.sync-device-side .device-delete-button { margin-left: auto; }
+.sync-device-presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  min-width: 0;
+}
+.sync-device-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 2px rgba(var(--success-rgb), 0.16);
+}
+.sync-device-row.is-stale .sync-device-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--muted);
+}
+.sync-device-row.is-stale .sync-device-name { color: var(--muted); }
+.sync-device-row.is-stale .sync-device-mark { opacity: 0.4; }
+.settings-panel .sync-device-side .device-delete-button {
+  align-self: center;
+  margin-top: 0;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+.settings-panel .sync-device-side .device-delete-button:hover,
+.settings-panel .sync-device-side .device-delete-button[data-confirm="true"] { color: var(--red); background: transparent; }
+.settings-panel .sync-device-side .device-delete-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sync-panel-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 0 2px;
+  border: 0;
+  border-top: 1px solid rgba(var(--line-rgb), 0.07);
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+.sync-panel-link:hover,
+.sync-panel-link:focus-visible { color: var(--text); background: rgba(var(--overlay-rgb), 0.03); }
+.sync-panel-link-arrow::before { content: '→'; display: inline-block; transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1); }
+.sync-panel-link:hover .sync-panel-link-arrow::before { transform: translateX(2px); }
+@container (max-width: 340px) {
+  .sync-device-title { grid-column: 2 / -1; }
+  .sync-device-side { grid-column: 2 / -1; grid-row: 3; }
+}
+@container (max-width: 280px) {
+  .sync-panel-state { flex-basis: calc(100% - 22px); }
+  .sync-panel-build { margin-left: 22px; }
+}
+:root[data-reduce-motion="on"] .sync-panel-signal > svg { animation: none !important; }
+:root[data-reduce-motion="on"] .sync-panel-link-arrow::before { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .sync-panel-signal > svg { animation: none !important; }
+  :root:not([data-reduce-motion="off"]) .sync-panel-link-arrow::before { transition: none; }
+}
 .currency-rate-row { display: grid; gap: 4px; min-width: 0; }
 /* The rate row is a sub-setting of the Currency row: keep them as one unseparated pair. */
 .settings-subgroup > .settings-item + .currency-rate-row { margin-top: 0; }
@@ -2795,6 +2959,65 @@ span.settings-note.settings-item-desc {
   background: rgba(var(--overlay-rgb), 0.05);
 }
 .settings-panel select:hover { border-color: var(--line-strong); }
+.select-control-trigger {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(var(--overlay-rgb), 0.05);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.select-control-trigger:hover,
+.select-control-trigger[aria-expanded="true"] { border-color: var(--line-strong); background: rgba(var(--overlay-rgb), 0.08); }
+.select-control-trigger:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.65); outline-offset: 2px; }
+.select-control-trigger:disabled { opacity: 0.5; cursor: default; }
+.select-control-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-control-icon { display: flex; flex: 0 0 14px; align-items: center; justify-content: center; color: var(--muted); }
+.select-control-icon svg { width: 14px; height: 14px; }
+.select-control-arrow {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  margin: -3px 2px 0 4px;
+  border-right: 1px solid var(--muted);
+  border-bottom: 1px solid var(--muted);
+  transform: rotate(45deg);
+}
+.select-control-popup {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 4px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid rgba(var(--line-rgb), 0.19);
+  border-radius: 10px;
+  background: rgba(var(--panel-rgb), 0.97);
+  color: var(--text);
+  box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(18px) saturate(110%);
+  font-size: 11px;
+  line-height: 1.4;
+  -webkit-app-region: no-drag;
+}
+.select-control-option { display: flex; min-height: 28px; align-items: flex-start; gap: 8px; padding: 7px 8px; border-radius: 6px; cursor: pointer; }
+.select-control-option > .select-control-icon { margin-top: 1px; }
+.select-control-option-text { display: grid; min-width: 0; gap: 3px; }
+.select-control-option-label { overflow-wrap: anywhere; }
+.select-control-description { color: var(--muted); font-size: 9.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.select-control-option[data-selected="true"] { background: rgba(var(--overlay-rgb), 0.07); }
+.select-control-option[data-highlighted="true"] { background: rgba(var(--overlay-rgb), 0.12); }
+.select-control-option[aria-disabled="true"] { opacity: 0.5; cursor: default; }
+@supports not (backdrop-filter: blur(1px)) {
+  .select-control-popup { background: rgb(var(--panel-rgb)); }
+}
 /* Chromium delegates an open <select> popup to a platform-specific surface.
    Windows can give that popup a light system background while retaining our
    light text, so make only the popup options opaque. The closed control keeps

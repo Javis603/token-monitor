@@ -126,8 +126,13 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
 
   aggregate.devices = aggregate.devices.map((device) => {
     const previous = previousDevices.get(device.deviceId);
+    // The live record replaces this device's receivedAt with the collection
+    // time; the Hub's copy is the only proof an upload landed, so it travels
+    // alongside for the sync settings panel (null until the Hub has one).
+    if (device.deviceId === localDeviceId) {
+      return { ...previous, ...device, hubReceivedAt: previous?.receivedAt || null };
+    }
     if (!previous) return device;
-    if (device.deviceId === localDeviceId) return { ...previous, ...device };
     if (hasHubStaleAfterMs) return { ...previous, ...device };
     return {
       ...previous,

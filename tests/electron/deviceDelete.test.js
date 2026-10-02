@@ -59,6 +59,15 @@ class FakeNode {
     return target === this || this.children.some((child) => child.contains?.(target));
   }
 
+  setAttribute(name, value) { this[name] = value; }
+
+  querySelectorAll(selector) {
+    return this.children.flatMap(child => [
+      ...(child.className === selector.slice(1) ? [child] : []),
+      ...child.querySelectorAll(selector)
+    ]);
+  }
+
   querySelector(selector) {
     if (selector !== '.device-delete-button') return null;
     for (const child of this.children) {
@@ -97,15 +106,22 @@ function createHarness() {
   let refreshCalls = 0;
   const context = {
     document,
-    state: { settings: { showToolIcons: false } },
+    state: { mode: 'sync', settings: { showToolIcons: false, hubMode: 'client' } },
+    els: { syncPanelCount: {}, syncPanelOpenDevices: {} },
+    syncDevicePanelApi: require('../../src/electron/renderer/syncDevicePanel'),
+    currentLocale: () => 'en',
+    availableBreakdownIds: () => ['device'],
+    osIconFor: () => '',
+    deviceRuntimeLabel: () => '',
+    deviceBreakdownApi: { devicePlatformLabel: () => '' },
     prefersReducedMotion: () => false,
     toolIconsEnabled: () => false,
     clientsWithIcon: new Set(),
     formatNumber: (value) => String(value),
     formatCompact: (value) => String(value),
     t: (key) => ({
-      'settings.sync.icloudDelete': 'Delete',
-      'settings.sync.icloudDeleteConfirm': 'Click again'
+      'devices.remove': 'Delete',
+      'devices.removeConfirm': 'Click again'
     }[key] || key),
     setTimeout(callback) {
       const id = nextTimer++;
@@ -128,14 +144,21 @@ function createHarness() {
   const end = app.indexOf('\nfunction appendAccordionMetricRow', start);
   assert.ok(start >= 0 && end > start, 'delete confirmation implementation should be present');
   vm.runInNewContext(
-    `${app.slice(start, end)}\nglobalThis.renderDeviceAccordionForTest = renderDeviceAccordion;`,
+    `${app.slice(start, end)}\nlet syncPanelListSignature = '';\n${functionSource(app, 'renderSyncPanelDevices', 'syncDeviceRow')}\n${functionSource(app, 'syncDeviceRow', 'renderHubBuildStatus')}\nglobalThis.renderDeviceAccordionForTest = renderDeviceAccordion;`,
     context
   );
   return {
     context,
     document,
     timers,
-    render: context.renderDeviceAccordionForTest,
+    render: (list, detail) => {
+      context.els.syncDeviceList = list;
+      context.renderSyncPanelDevices([{
+        key: detail.deviceId, name: detail.deviceId, hostname: '',
+        platform: '', agentVersion: detail.metaParts.join(' '),
+        stale: true, canRemove: true
+      }]);
+    },
     createNode: (tagName) => new FakeNode(tagName),
     getDeleteCalls: () => deleteCalls,
     getRefreshCalls: () => refreshCalls,
@@ -153,41 +176,16 @@ function deviceDetail(deviceId = 'remote-a', tools = []) {
   };
 }
 
-test('only stale remote iCloud devices offer removal, including historical views', () => {
+test('the device usage view has no removal actions in any sync mode', () => {
+  const harness = createHarness();
+  for (const mode of ['local', 'client', 'host', 'icloud']) {
+    harness.context.state.settings.hubMode = mode;
+    const accordion = harness.createNode('div');
+    harness.context.renderDeviceAccordionForTest(accordion, deviceDetail());
+    assert.equal(accordion.querySelector('.device-delete-button'), null);
+  }
   const source = functionSource(app, 'deviceRowsForPeriod', 'attributionComponent');
-  const active = { deviceId: 'active', stale: false, periods: { today: {} } };
-  const stale = { deviceId: 'stale', stale: true, periods: { today: {} } };
-  const local = { deviceId: 'local', stale: true, periods: { today: {} } };
-  const context = vm.createContext({
-    state: { settings: { hubMode: 'icloud', deviceId: 'local' }, period: 'today', stats: { devices: [active, stale, local] } },
-    fixedPeriodDevices: () => [active, stale, local],
-    deviceBreakdownApi: {
-      deviceBreakdownForPeriod: () => ({ totalTokens: 0, tools: [] }),
-      devicePlatformLabel: () => ''
-    },
-    clientLabels: {},
-    clientColors: { default: '#fff' },
-    deviceColor: () => '#fff',
-    deviceLabel: (device) => device.deviceId,
-    deviceRuntimeLabel: () => '',
-    deviceSyncedLabel: () => '',
-    t: () => '',
-    Boolean,
-    Number,
-    String
-  });
-  vm.runInContext(`${source}\nglobalThis.rows = deviceRowsForPeriod;`, context);
-  const eligibility = () => Object.fromEntries(context.rows().map((row) => [row.key, row.deviceDetail.canDelete]));
-
-  assert.deepEqual(eligibility(), { active: false, stale: true, local: false });
-  context.state.period = 'last30Days';
-  context.fixedPeriodDevices = () => [
-    { deviceId: 'active', stale: true, periods: { last30Days: {} } },
-    { deviceId: 'stale', stale: false, periods: { last30Days: {} } }
-  ];
-  assert.deepEqual(eligibility(), { active: false, stale: true });
-  context.state.settings.hubMode = 'client';
-  assert.deepEqual(eligibility(), { active: false, stale: false });
+  assert.doesNotMatch(source, /canDelete/);
 });
 
 test('device deletion confirmation cancels on blur, outside interaction, timeout, and changed redraw', async () => {
@@ -365,7 +363,7 @@ test('pending deletion survives a stats redraw and releases the replacement butt
     await replacement.dispatch('click');
     assert.equal(harness.getDeleteCalls(), 1);
     const recreatedAccordion = harness.createNode('div');
-    harness.render(recreatedAccordion, detail);
+    harness.render(recreatedAccordion, { ...detail, metaParts: ['recreated'] });
     const recreated = recreatedAccordion.querySelector('.device-delete-button');
     assert.equal(recreated.disabled, true);
     finish();

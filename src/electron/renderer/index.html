@@ -1362,66 +1362,89 @@
             <span class="settings-section-meta"><span id="syncSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
           </button>
           <div id="syncSettingsDetails" class="settings-section-details hidden">
-            <div id="hubModeOptions" class="hub-mode-options" role="radiogroup">
-              <label class="hub-mode-option">
-                <input type="radio" name="hubMode" value="local" />
-                <div class="hub-mode-text"><strong data-i18n="settings.sync.localOnly">Local only</strong><span data-i18n="settings.sync.localOnlyDesc">This device only.</span></div>
+            <div class="sync-connection-fields">
+              <label class="sync-mode-field" for="hubModeOptions">
+                <span data-i18n="settings.sync.mode">Sync method</span>
+                <span class="sync-mode-select">
+                  <select id="hubModeOptions" aria-describedby="syncModeDescription">
+                    <option value="local" data-i18n="settings.sync.localOnly">Local only</option>
+                    <option value="client" data-i18n="settings.sync.connectHub">Connect to a hub</option>
+                    <option value="host" data-i18n="settings.sync.hostHub">Host hub on this device</option>
+                    <option value="icloud" data-i18n="settings.sync.icloud">iCloud Drive</option>
+                  </select>
+                  <span class="settings-section-disclosure" aria-hidden="true"></span>
+                </span>
               </label>
-              <label class="hub-mode-option">
-                <input type="radio" name="hubMode" value="client" />
-                <div class="hub-mode-text"><strong data-i18n="settings.sync.connectHub">Connect to a hub</strong><span data-i18n="settings.sync.connectHubDesc">Send this device's usage to a hub elsewhere.</span></div>
-              </label>
-              <label class="hub-mode-option">
-                <input type="radio" name="hubMode" value="host" />
-                <div class="hub-mode-text"><strong data-i18n="settings.sync.hostHub">Host hub on this device</strong><span data-i18n="settings.sync.hostHubDesc">Open a hub here so other devices can connect.</span></div>
-              </label>
-              <label class="hub-mode-option">
-                <input type="radio" name="hubMode" value="icloud" />
-                <div class="hub-mode-text"><strong data-i18n="settings.sync.icloud">iCloud Drive</strong><span data-i18n="settings.sync.icloudDesc">Sync this Mac with other Macs using iCloud Drive.</span></div>
-              </label>
-            </div>
-            <div id="hubClientFields" class="hub-mode-fields hidden">
-              <label><span data-i18n="settings.sync.hubUrl">Hub URL</span><input id="hubUrlInput" type="text" spellcheck="false" placeholder="http://hub-host:17321" /></label>
-              <div class="settings-field hub-secret-field">
-                <label for="secretInput" data-i18n="settings.sync.secret">Secret</label>
-                <div class="hub-secret-row">
-                  <input id="secretInput" type="password" spellcheck="false" placeholder="optional shared secret" data-i18n-placeholder="settings.sync.secretPlaceholder" />
-                  <button id="secretPasteButton" type="button" class="icon-button" title="Paste secret" data-i18n-title="settings.sync.pasteSecret" aria-label="Paste secret" data-i18n-aria-label="settings.sync.pasteSecret">⎘</button>
+              <p id="syncModeDescription" class="settings-note sync-mode-description"></p>
+              <div id="hubClientFields" class="hub-mode-fields hidden">
+                <label><span data-i18n="settings.sync.hubUrl">Hub URL</span><input id="hubUrlInput" type="text" spellcheck="false" placeholder="http://hub-host:17321" /></label>
+                <div class="settings-field hub-secret-field">
+                  <label for="secretInput" data-i18n="settings.sync.secret">Secret</label>
+                  <div class="hub-secret-row">
+                    <input id="secretInput" type="password" spellcheck="false" placeholder="optional shared secret" data-i18n-placeholder="settings.sync.secretPlaceholder" />
+                    <button id="secretPasteButton" type="button" class="icon-button" title="Paste secret" data-i18n-title="settings.sync.pasteSecret" aria-label="Paste secret" data-i18n-aria-label="settings.sync.pasteSecret">⎘</button>
+                  </div>
                 </div>
+                <label class="sync-upload-interval-row settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.uploadInterval">Sync upload frequency</span></span>
+                  <select id="syncUploadIntervalInput">
+                    <option value="0" data-i18n="settings.sync.uploadInterval.live">Live</option>
+                    <option value="600000" data-i18n="settings.sync.uploadInterval.10m">Every 10 minutes</option>
+                    <option value="1200000" data-i18n="settings.sync.uploadInterval.20m">Every 20 minutes</option>
+                    <option value="1800000" data-i18n="settings.sync.uploadInterval.30m">Every 30 minutes</option>
+                  </select>
+                </label>
+                <div id="hubBuildStatus" class="hub-status hub-build-status" role="status" hidden></div>
               </div>
-              <label class="sync-upload-interval-row settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.uploadInterval">Sync upload frequency</span></span>
-                <select id="syncUploadIntervalInput">
-                  <option value="0" data-i18n="settings.sync.uploadInterval.live">Live</option>
-                  <option value="600000" data-i18n="settings.sync.uploadInterval.10m">Every 10 minutes</option>
-                  <option value="1200000" data-i18n="settings.sync.uploadInterval.20m">Every 20 minutes</option>
-                  <option value="1800000" data-i18n="settings.sync.uploadInterval.30m">Every 30 minutes</option>
-                </select>
-              </label>
-              <div id="syncClientStatus" class="hub-status" hidden></div>
-              <div id="hubBuildStatus" class="hub-status hub-build-status" role="status" hidden></div>
+              <div id="hubHostFields" class="hub-mode-fields hidden">
+                <label><span data-i18n="settings.sync.port">Port</span><input id="hubPortInput" type="number" min="1" max="65535" spellcheck="false" /></label>
+                <label><span data-i18n="settings.sync.sharedSecret">Shared Secret</span>
+                  <div class="hub-secret-row">
+                    <input id="hubSecretInput" type="text" spellcheck="false" readonly />
+                    <button id="hubSecretCopyButton" type="button" class="icon-button" title="Copy secret" data-i18n-title="settings.sync.copySecret">⧉</button>
+                    <button id="hubSecretRegenButton" type="button" class="icon-button" title="Regenerate" data-i18n-title="settings.sync.regenerateSecret">↺</button>
+                  </div>
+                </label>
+                <div id="hubStatusRow" class="hub-status"></div>
+                <div id="hubAddressList" class="hub-address-list"></div>
+                <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. macOS / Windows may prompt to allow incoming connections the first time. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
+                <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
+              </div>
+              <div id="icloudFields" class="hub-mode-fields hidden">
+                <div id="icloudStatus" class="hub-status" role="status" aria-live="polite"></div>
+                <div id="icloudRootStatus" class="icloud-root-status"></div>
+                <p class="settings-note" data-i18n="settings.sync.icloudNote">Sync usage, limits, history, devices and subscriptions across Macs signed into the same Apple ID. No Token Monitor server is used; updates may take a moment to appear.</p>
+              </div>
+              <label><span data-i18n="settings.sync.deviceId">Device ID</span><input id="deviceIdInput" type="text" spellcheck="false" placeholder="auto (hostname)" data-i18n-placeholder="settings.sync.deviceIdPlaceholder" /></label>
+              <div class="settings-actions">
+                <button id="saveSettingsButton" data-i18n="settings.common.save">Save</button>
+              </div>
             </div>
-            <div id="hubHostFields" class="hub-mode-fields hidden">
-              <label><span data-i18n="settings.sync.port">Port</span><input id="hubPortInput" type="number" min="1" max="65535" spellcheck="false" /></label>
-              <label><span data-i18n="settings.sync.sharedSecret">Shared Secret</span>
-                <div class="hub-secret-row">
-                  <input id="hubSecretInput" type="text" spellcheck="false" readonly />
-                  <button id="hubSecretCopyButton" type="button" class="icon-button" title="Copy secret" data-i18n-title="settings.sync.copySecret">⧉</button>
-                  <button id="hubSecretRegenButton" type="button" class="icon-button" title="Regenerate" data-i18n-title="settings.sync.regenerateSecret">↺</button>
+            <div id="syncDevicePanel" class="sync-panel" hidden>
+              <div id="syncPanelConnection" class="sync-panel-connection" role="status" aria-live="polite" hidden>
+                <span id="syncPanelSignal" class="sync-panel-signal" aria-hidden="true">
+                  <svg class="sync-panel-signal-linked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10 13a5 5 0 0 0 7 .5l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7-.5l-3 3a5 5 0 0 0 7 7l2-2" />
+                  </svg>
+                  <svg class="sync-panel-signal-unlinked" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 15l-1.5 1.5a3.5 3.5 0 0 1-5-5L6 9M15 9l1.5-1.5a3.5 3.5 0 0 1 5 5L18 15M9 3v3M3 9h3M15 21v-3M21 15h-3" />
+                  </svg>
+                  <svg class="sync-panel-signal-pending" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+                    <circle cx="12" cy="12" r="9" opacity="0.2" />
+                    <path d="M12 3a9 9 0 0 1 9 9" />
+                  </svg>
+                </span>
+                <div class="sync-panel-state">
+                  <strong id="syncPanelState"></strong>
+                  <span id="syncPanelDetail"></span>
                 </div>
-              </label>
-              <div id="hubStatusRow" class="hub-status"></div>
-              <div id="hubAddressList" class="hub-address-list"></div>
-              <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. macOS / Windows may prompt to allow incoming connections the first time. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
-              <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
-            </div>
-            <div id="icloudFields" class="hub-mode-fields hidden">
-              <div id="icloudStatus" class="hub-status" role="status" aria-live="polite"></div>
-              <div id="icloudRootStatus" class="icloud-root-status"></div>
-              <p class="settings-note" data-i18n="settings.sync.icloudNote">Sync usage, limits, history, devices and subscriptions across Macs signed into the same Apple ID. No Token Monitor server is used; updates may take a moment to appear.</p>
-            </div>
-            <label><span data-i18n="settings.sync.deviceId">Device ID</span><input id="deviceIdInput" type="text" spellcheck="false" placeholder="auto (hostname)" data-i18n-placeholder="settings.sync.deviceIdPlaceholder" /></label>
-            <div class="settings-actions">
-              <button id="saveSettingsButton" data-i18n="settings.common.save">Save</button>
+                <span id="syncPanelBuild" class="sync-panel-build" hidden></span>
+              </div>
+              <div class="sync-panel-heading">
+                <span data-i18n="settings.sync.panel.devices">Devices</span>
+                <span id="syncPanelCount" class="sync-panel-count"></span>
+              </div>
+              <div id="syncDeviceList" class="sync-device-list"></div>
+              <button id="syncPanelOpenDevices" type="button" class="sync-panel-link"><span data-i18n="settings.sync.panel.viewUsage">View usage by device</span><span class="sync-panel-link-arrow" aria-hidden="true"></span></button>
             </div>
           </div>
         </div>
@@ -1541,6 +1564,8 @@
     <script src="statsRenderScheduler.js"></script>
     <script src="allTimeSessions.js"></script>
     <script src="hubBuildPresentation.js"></script>
+    <script src="syncDevicePanel.js"></script>
+    <script src="selectControl.js"></script>
     <script src="deviceBreakdown.js"></script>
     <script src="usageAttributionRows.js"></script>
     <script src="toolDetails.js"></script>

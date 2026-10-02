@@ -1988,9 +1988,11 @@ function loadHubSettingsWiring(els, context) {
   assert.notEqual(intervalEnd, -1, 'collection cadence wiring should follow sync upload wiring');
   const vmContext = {
     els,
+    SYNC_MODE_DESCRIPTIONS: { local: 'local', client: 'client', host: 'host', icloud: 'icloud' },
+    syncModeSelect: { sync() {} },
     ...context,
     renderHubStatus: () => {},
-    renderSyncClientStatus: () => {},
+    renderSyncPanel: () => {},
     renderHubBuildStatus: () => {}
   };
   vm.runInNewContext(
@@ -2587,7 +2589,8 @@ test('remote Hub build status is wired as a separate localized sync hint', () =>
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const clientFields = html.slice(html.indexOf('<div id="hubClientFields"'), html.indexOf('<div id="hubHostFields"'));
 
-  assert.match(clientFields, /id="syncClientStatus"[\s\S]*id="hubBuildStatus"[\s\S]*role="status"[\s\S]*hidden/);
+  assert.match(clientFields, /id="hubBuildStatus"[\s\S]*role="status"[\s\S]*hidden/);
+  assert.doesNotMatch(clientFields, /id="syncClientStatus"/);
   assert.ok(html.indexOf('hubBuildPresentation.js') < html.indexOf('app.js'));
   assert.match(app, /getHubBuildStatus/);
   assert.match(app, /function renderHubBuildStatus\(\)/);
