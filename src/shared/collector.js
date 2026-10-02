@@ -123,9 +123,8 @@ function resolvePlatformBinary() {
 // The fork build reports the same `--version` as the upstream release it is
 // based on, so only the marker beside the binary identifies it. A marker whose
 // hash no longer matches belongs to a binary npm has since replaced. The size
-// check only skips hashing an obviously different file; the verdict is cached
-// per file identity because hashing the binary takes tens of milliseconds.
-let tokscaleBuildCache = { key: '', matches: false };
+// check only skips hashing an obviously different file. Status reads rehash
+// because a replacement can preserve both the binary's size and mtime.
 
 function readTokscaleBuild(binPath) {
   const marker = readJson(tokscaleBuildMarkerPath(binPath), null);
@@ -137,28 +136,25 @@ function readTokscaleBuild(binPath) {
     return null;
   }
   if (stat.size !== marker.size) return null;
-  const key = `${binPath}\0${stat.size}\0${stat.mtimeMs}\0${marker.sha256}`;
-  if (tokscaleBuildCache.key !== key) {
-    let actual = '';
-    try {
-      actual = crypto.createHash('sha256').update(fs.readFileSync(binPath)).digest('hex');
-    } catch (_) {}
-    tokscaleBuildCache = { key, matches: actual === marker.sha256.toLowerCase() };
+  try {
+    const actual = crypto.createHash('sha256').update(fs.readFileSync(binPath)).digest('hex');
+    return actual === marker.sha256.toLowerCase() ? { releaseTag: marker.releaseTag, commit: marker.commit } : null;
+  } catch (_) {
+    return null;
   }
-  return tokscaleBuildCache.matches ? { releaseTag: marker.releaseTag, commit: marker.commit } : null;
 }
 
 function getTokscaleStatus() {
   if (bundledPackageCandidates().length === 0) return { supported: false };
-  const bundled = locateBundledBinary();
+  const current = resolvePlatformBinary();
   return {
     supported: true,
-    current: bundled ? {
-      source: bundled.source,
-      version: bundled.version,
-      path: bundled.path,
-      build: readTokscaleBuild(bundled.path)
-    } : null
+    current: {
+      source: current.source,
+      version: current.version,
+      path: current.path,
+      build: current.source === 'bundled' ? readTokscaleBuild(current.path) : null
+    }
   };
 }
 

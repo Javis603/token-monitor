@@ -57,9 +57,7 @@ Other platforms are not pre-built — run from source per the [README](https://g
 
 ### tokscale dependency
 
-Tokscale is bundled with this app. See **Settings → Tokscale** for the exact version
-and the option to download a newer version directly from npm. Tokscale is MIT,
-open-source: https://github.com/junhoyeo/tokscale
+Tokscale is bundled with this app and updated through Token Monitor releases. See **Settings → Advanced → Tokscale** for the version and fork build identifier. Tokscale is MIT, open-source: https://github.com/junhoyeo/tokscale
 
 </details>
 
@@ -125,9 +123,7 @@ chmod +x "Token Monitor"*.AppImage
 
 ### tokscale 依赖
 
-Tokscale 已随应用内置。你可以在 **设置 → Tokscale** 查看确切版本，
-也可以直接从 npm 下载更新版本。Tokscale 是 MIT 开源项目：
-https://github.com/junhoyeo/tokscale
+Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你可以在 **设置 → 高级 → Tokscale** 查看版本和 fork 构建标识。Tokscale 是 MIT 开源项目：https://github.com/junhoyeo/tokscale
 
 </details>
 

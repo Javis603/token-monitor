@@ -1542,9 +1542,11 @@ function renderTokscaleStatus() {
   const build = current?.build?.commit
     ? t('settings.tokscale.forkBuild', { commit: current.build.commit.slice(0, 8) })
     : '';
-  els.tokscaleInstalled.textContent = current
-    ? `${versionText(current.version)}${build}`
-    : t(status ? 'settings.common.notFound' : 'settings.common.checking');
+  els.tokscaleInstalled.textContent = current?.source === 'shim'
+    ? t('settings.tokscale.jsFallback')
+    : current
+      ? `${versionText(current.version)}${build}`
+      : t(status ? 'settings.common.notFound' : 'settings.common.checking');
 }
 
 async function refreshTokscaleStatus({ retried = false } = {}) {

@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const { kimiWorkSessionsRoots, readTokscaleBuild } = require('../../src/shared/collector');
 
@@ -15,6 +16,9 @@ test('readTokscaleBuild trusts the fork marker only while its hash still matches
   const fork = Buffer.from('fork binary AAAA');
   try {
     fs.writeFileSync(binPath, fork);
+    const originalTime = new Date('2026-01-01T00:00:00Z');
+    fs.utimesSync(binPath, originalTime, originalTime);
+    const originalStat = fs.statSync(binPath);
     assert.equal(readTokscaleBuild(binPath), null);
 
     const marker = {
@@ -31,7 +35,8 @@ test('readTokscaleBuild trusts the fork marker only while its hash still matches
     const upstream = Buffer.from('fork binary BBBB');
     assert.equal(upstream.length, fork.length);
     fs.writeFileSync(binPath, upstream);
-    fs.utimesSync(binPath, new Date(), new Date(Date.now() + 60_000));
+    fs.utimesSync(binPath, originalStat.atime, originalStat.mtime);
+    assert.equal(fs.statSync(binPath).mtimeMs, originalStat.mtimeMs);
     assert.equal(readTokscaleBuild(binPath), null);
 
     fs.writeFileSync(binPath, 'upstream release binary');
@@ -39,6 +44,22 @@ test('readTokscaleBuild trusts the fork marker only while its hash still matches
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('getTokscaleStatus reports the selected JS fallback without a fork build', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/shared/collector.js'), 'utf8');
+  const body = source.slice(source.indexOf('function getTokscaleStatus()'), source.indexOf('// Tokscale reads a few XDG'));
+  const current = { source: 'shim', version: null, path: '/tmp/tokscale/bin.js' };
+  const status = vm.runInNewContext(`${body}\ngetTokscaleStatus()`, {
+    bundledPackageCandidates: () => ['@tokscale/cli-linux-x64-gnu'],
+    resolvePlatformBinary: () => current,
+    readTokscaleBuild: () => assert.fail('shim must not have a native build marker')
+  });
+  assert.equal(status.supported, true);
+  assert.equal(status.current.source, 'shim');
+  assert.equal(status.current.version, null);
+  assert.equal(status.current.path, current.path);
+  assert.equal(status.current.build, null);
 });
 
 test('kimiWorkSessionsRoots mirrors platform paths and relocated Windows shares', () => {

@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 
@@ -47,6 +48,23 @@ test('General settings explains Discord presence and identifies Tokscale as a bu
   assert.equal((i18n.match(/'settings\.integrations\.discordDescription':/g) || []).length, 5);
   assert.match(i18n, /'settings\.tokscale\.source': '內建的 CLI 依賴'/);
   assert.doesNotMatch(i18n, /'settings\.tokscale\.source': '[^']*(?:Data engine|資料引擎|数据引擎|데이터 엔진|データエンジン)/);
+});
+
+test('Tokscale renders the JS fallback explicitly instead of a missing or fabricated version', () => {
+  const source = read('app.js');
+  const body = source.slice(source.indexOf('function renderTokscaleStatus()'), source.indexOf('async function refreshTokscaleStatus('));
+  const els = {
+    tokscaleGroup: { classList: { add() {}, remove() {} } },
+    tokscaleInstalled: { textContent: '' }
+  };
+  vm.runInNewContext(`${body}\nrenderTokscaleStatus()`, {
+    els,
+    state: { tokscaleStatus: { supported: true, current: { source: 'shim', version: null, build: null } } },
+    t: (key) => key,
+    versionText: () => assert.fail('shim must not format an unknown version')
+  });
+  assert.equal(els.tokscaleInstalled.textContent, 'settings.tokscale.jsFallback');
+  assert.equal((read('i18n.js').match(/'settings\.tokscale\.jsFallback':/g) || []).length, 5);
 });
 
 test('General settings places integrations after the complete App Updates group', () => {
