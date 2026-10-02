@@ -159,6 +159,7 @@ function createAntigravitySelfSync({ selfSyncThrottle, tokscaleCommand }) {
     if (!antigravityDataPresent(home)) return;
     if (!selfSyncThrottle.claim('antigravity', options.minIntervalMs)) return;
     const attempt = selfSyncThrottle.beginAttempt('antigravity');
+    try { options.onAttempt?.('antigravity'); } catch (_) {}
     if (typeof options.run === 'function') {
       const cancelAttempt = () => selfSyncThrottle.cancelAttempt('antigravity', attempt);
       options.signal?.addEventListener('abort', cancelAttempt, { once: true });

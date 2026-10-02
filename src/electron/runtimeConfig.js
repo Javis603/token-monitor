@@ -115,6 +115,7 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     watchTriggersCollection: context.watchTriggersCollection !== false,
     intervalRequiresActivity: Boolean(context.intervalRequiresActivity),
     watchDebounceMs: Number(context.watchDebounceMs || 1500),
+    deferSelfSyncOnStartup: context.deferSelfSyncOnStartup === true,
     wslScanEnabled: settings.wslScanEnabled !== false,
     onError: context.onError,
     logger: context.logger
