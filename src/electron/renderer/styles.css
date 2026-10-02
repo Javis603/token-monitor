@@ -4289,6 +4289,17 @@ html.is-windows .settings-panel select option {
   line-height: 1.2;
   text-align: left;
 }
+.codex-reset-forecast-info-wrap .limit-detail-tooltip-full.is-heading {
+  color: var(--text);
+  font-weight: 600;
+  opacity: 0.82;
+}
+.codex-reset-forecast-info-wrap .limit-detail-tooltip-full.is-separated {
+  position: relative;
+  margin-top: 5px;
+  padding-top: 8px;
+  border-top: 0;
+}
 .codex-reset-forecast-info-wrap .limit-detail-tooltip::after {
   right: auto;
   left: 6px;
@@ -4477,6 +4488,7 @@ html.is-windows .limit-live-badge {
   margin-top: 10px;
   padding-top: 10px;
 }
+.codex-reset-forecast-info-wrap .limit-detail-tooltip-full.is-separated::before,
 .limit-account-row + .limit-account-row::before,
 .codex-reset-forecast::before {
   position: absolute;

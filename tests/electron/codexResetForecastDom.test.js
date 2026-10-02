@@ -56,10 +56,7 @@ test('forecast details use the shared accessible tooltip without repeating third
   const renderer = view.slice(view.indexOf('function codexResetForecastTooltip'), view.indexOf('function appendCodexResetForecast'));
   assert.match(renderer, /limitDetailInfoNode\([\s\S]*?'codex-reset-forecast-info-wrap'/);
   assert.match(renderer, /limits\.codexResetForecast\.lastReset/);
-  assert.match(renderer, /limits\.codexResetForecast\.resetType/);
-  assert.match(renderer, /forecast\?\.status === 'scheduled' \? forecast\?\.scheduledResetType : forecast\?\.latestResetType/);
-  assert.match(renderer, /limits\.codexResetForecast\.scheduledFor/);
-  assert.match(renderer, /limits\.codexResetForecast\.sourceAnnouncement/);
+  assert.match(renderer, /limits\.codexResetForecast\.scheduled/);
   assert.match(renderer, /limits\.codexResetForecast\.sourceSignal/);
   assert.match(renderer, /if \(forecast\?\.error\)[\s\S]*?limits\.codexResetForecast\.lastAttempt/);
   assert.doesNotMatch(renderer, /limits\.codexResetForecast\.checked/);
@@ -141,6 +138,7 @@ test('forecast tooltip safely stays absent before the first response arrives', (
   const tooltip = vm.runInNewContext(`(${view.slice(start, end)})`, {
     t: (key) => key,
     codexResetForecastDate: () => '',
+    codexResetForecastExpired: () => false,
     codexResetForecastTimeUntil: () => '',
     codexResetForecastAge: () => '',
     codexResetForecastSourceAuthor: () => '',
@@ -222,6 +220,59 @@ test('forecast reset type uses localized labels only for supported API values', 
   assert.equal(typeLabel('banked'), 'limits.codexResetForecast.resetType.banked');
   assert.equal(typeLabel('regular'), 'limits.codexResetForecast.resetType.regular');
   assert.equal(typeLabel('surprise'), '');
+});
+
+test('forecast tooltip keeps scheduled and historical reset types distinct', () => {
+  const start = view.indexOf('function codexResetForecastTooltip');
+  const end = view.indexOf('\n  function renderCodexResetForecast', start);
+  const { translate } = require('../../src/electron/renderer/i18n');
+  let entries;
+  const tooltip = vm.runInNewContext(`(${view.slice(start, end)})`, {
+    t: (key) => translate('zh-TW', key),
+    codexResetForecastType: (type) => ['regular', 'banked'].includes(type)
+      ? translate('zh-TW', `limits.codexResetForecast.resetType.${type}`) : '',
+    codexResetForecastDate: (value) => value || '',
+    codexResetForecastExpired: () => false,
+    codexResetForecastTimeUntil: () => '',
+    codexResetForecastAge: () => '',
+    codexResetForecastSourceAuthor: (value) => value ? `@${value}` : '',
+    limitDetailInfoNode: (values) => {
+      entries = JSON.parse(JSON.stringify(values));
+      return { querySelector: () => null };
+    }
+  });
+  const forecast = {
+    status: 'scheduled',
+    scheduledResetType: 'regular',
+    sourceAuthor: 'thsottiaux',
+    scheduledFor: '2026-10-02T17:00:00Z',
+    latestResetType: 'banked',
+    latestResetAt: '2026-09-29T19:00:00Z'
+  };
+  tooltip(forecast);
+  assert.deepEqual(entries, [
+    { full: '已排程 · 一般重置', heading: true },
+    { full: forecast.scheduledFor },
+    { full: '@thsottiaux', caption: true },
+    { full: '上次重置', heading: true, separated: true },
+    { full: `備用重置額度 · ${forecast.latestResetAt}` }
+  ]);
+  tooltip({ ...forecast, scheduledResetType: '' });
+  assert.equal(entries[0].full, '已排程', 'unknown scheduled type must not inherit the historical type');
+  tooltip({ ...forecast, status: 'active', scheduledFor: '', expiresAt: '2026-10-03T16:00:00Z' });
+  assert.deepEqual(entries, [
+    { full: '偵測到訊號', heading: true },
+    { full: '有效至 · 2026-10-03T16:00:00Z' },
+    { full: '@thsottiaux', caption: true },
+    { full: '上次重置', heading: true, separated: true },
+    { full: `備用重置額度 · ${forecast.latestResetAt}` }
+  ]);
+  tooltip({ status: 'inactive', latestResetType: 'regular', latestResetAt: forecast.latestResetAt });
+  assert.deepEqual(entries, [
+    { full: '上次重置', heading: true, separated: false },
+    { full: `一般重置 · ${forecast.latestResetAt}` }
+  ]);
+
 });
 
 test('forecast requests use the widget outbound transport', () => {

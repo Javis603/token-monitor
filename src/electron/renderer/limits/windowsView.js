@@ -500,6 +500,7 @@
         full.className = [
           'limit-detail-tooltip-full',
           entry?.caption === true ? 'is-caption' : '',
+          entry?.heading === true ? 'is-heading' : '',
           entry?.separated === true ? 'is-separated' : ''
         ].filter(Boolean).join(' ');
         full.textContent = String(entry?.full ?? '');
@@ -1832,24 +1833,26 @@
   function codexResetForecastTooltip(forecast) {
     const entries = [];
     const disclaimer = t('limits.codexResetForecast.disclaimer');
-    const resetType = codexResetForecastType(
-      forecast?.status === 'scheduled' ? forecast?.scheduledResetType : forecast?.latestResetType
-    );
-    if (resetType) {
-      entries.push([t('limits.codexResetForecast.resetType'), resetType]);
+    if (forecast?.status === 'scheduled') {
+      const resetType = codexResetForecastType(forecast.scheduledResetType);
+      entries.push({
+        full: [t('limits.codexResetForecast.scheduled'), resetType].filter(Boolean).join(' · '),
+        heading: true
+      });
+    } else if (forecast?.status === 'active' && !codexResetForecastExpired(forecast)) {
+      entries.push({ full: t('limits.codexResetForecast.signal'), heading: true });
     }
     const scheduledFor = codexResetForecastDate(forecast?.scheduledFor);
     const scheduledIn = codexResetForecastTimeUntil(forecast?.scheduledFor);
     if (scheduledFor) {
-      entries.push([
-        t('limits.codexResetForecast.scheduledFor'),
-        [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
-      ]);
+      entries.push({ full: [scheduledFor, scheduledIn].filter(Boolean).join(' · ') });
     }
-    const latestReset = codexResetForecastDate(forecast?.latestResetAt);
-    if (latestReset) {
-      const age = codexResetForecastAge(forecast.latestResetAt);
-      entries.push([t('limits.codexResetForecast.lastReset'), [latestReset, age].filter(Boolean).join(' · ')]);
+    const expiresAt = codexResetForecastDate(forecast?.expiresAt);
+    const expiresIn = codexResetForecastTimeUntil(forecast?.expiresAt);
+    if (expiresAt) {
+      entries.push({
+        full: `${t('limits.codexResetForecast.expiresLabel')} · ${[expiresAt, expiresIn].filter(Boolean).join(' · ')}`
+      });
     }
     const sourceObservedAt = forecast?.status === 'scheduled'
       ? forecast?.scheduledAnnouncedAt
@@ -1859,18 +1862,23 @@
       codexResetForecastAge(sourceObservedAt)
     ].filter(Boolean).join(' · ');
     if (source) {
-      const sourceLabel = forecast?.status === 'scheduled'
-        ? 'limits.codexResetForecast.sourceAnnouncement'
-        : 'limits.codexResetForecast.sourceSignal';
-      entries.push([t(sourceLabel), source]);
+      entries.push({
+        full: forecast?.status === 'scheduled' || forecast?.status === 'active'
+          ? source
+          : `${t('limits.codexResetForecast.sourceSignal')} · ${source}`,
+        caption: true
+      });
     }
-    const expiresAt = codexResetForecastDate(forecast?.expiresAt);
-    const expiresIn = codexResetForecastTimeUntil(forecast?.expiresAt);
-    if (expiresAt) {
-      entries.push([
-        t('limits.codexResetForecast.expiresLabel'),
-        [expiresAt, expiresIn].filter(Boolean).join(' · ')
-      ]);
+    const latestReset = codexResetForecastDate(forecast?.latestResetAt);
+    const latestResetType = codexResetForecastType(forecast?.latestResetType);
+    if (latestReset || latestResetType) {
+      const age = latestReset ? codexResetForecastAge(forecast.latestResetAt) : '';
+      entries.push({
+        full: [t('limits.codexResetForecast.lastReset'), age].filter(Boolean).join(' · '),
+        heading: true,
+        separated: entries.length > 0
+      });
+      entries.push({ full: [latestResetType, latestReset].filter(Boolean).join(' · ') });
     }
     if (forecast?.error && forecast.errorKind !== 'invalid-response') {
       entries.push([
@@ -1886,7 +1894,7 @@
     const info = limitDetailInfoNode(
       entries,
       'codex-reset-forecast-info-wrap',
-      [...entries.map(([label, value]) => `${label}: ${value}`), disclaimer].join(', ')
+      [...entries.map((entry) => Array.isArray(entry) ? `${entry[0]}: ${entry[1]}` : entry.full), disclaimer].join(', ')
     );
     const tooltip = info.querySelector('.limit-detail-tooltip');
     if (tooltip) {
