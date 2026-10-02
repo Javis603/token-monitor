@@ -190,12 +190,11 @@ function parseMinimaxTiers(body) {
   return windows;
 }
 
-// Which host the quota probe talks to. 'auto' keeps the historical behaviour —
-// probe the global endpoint first and fall back to CN only when the token is
-// rejected — so an account that works today keeps working. 'cn' / 'intl' pin the
-// probe to one host, which is what a user on a network that cannot reach the
-// other region needs. The token-plan -> legacy fallback still applies inside a
-// pinned region; only the cross-region hop is removed.
+// 'auto' probes the last successful region first, initially international,
+// and tries the other region on auth rejection or transport failure. 'cn' /
+// 'intl' pin the probe to one host regardless of that memory. The token-plan
+// -> legacy fallback still applies inside a pinned region on endpoint or
+// response migration signals; an unreachable host stops that region's probe.
 //
 // `env` defaults to {} rather than process.env on purpose: the registry calls
 // this as the write-time normalizer with an empty env, and a stored setting must
@@ -253,9 +252,8 @@ function minimaxAttemptSpecs(options = {}, env = {}) {
   return minimaxRegionOrder(options, env).flatMap(minimaxUrlsForRegion);
 }
 
-// Returns the list of request URLs to try, in order. CodexBar currently probes
-// /v1/token_plan/remains first, then falls back to the legacy coding_plan
-// endpoint for the same region before trying the other region on auth errors.
+// Candidate URLs in region order, token-plan before legacy. A transport
+// failure skips the remaining candidates on the same host.
 function minimaxAttemptOrder(options = {}, env = {}) {
   return minimaxAttemptSpecs(options, env).map((attempt) => attempt.url);
 }

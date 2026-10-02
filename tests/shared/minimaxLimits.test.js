@@ -21,6 +21,7 @@ const {
   MINIMAX_REMAINS_URL_EN
 } = require('../../src/shared/providers/minimax/limits');
 const { parseLimitProviders } = require('../../src/shared/limits/collector');
+const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
 
 const CN_REMAINS_URLS = new Set([MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
 
@@ -591,7 +592,7 @@ test('fetchMinimaxLimits retries the CN host when the global host responds 200 +
   assert.equal(r.windows[0].usedPercent, 23); // 100 - 77
 });
 
-test('fetchMinimaxLimits does NOT retry on non-auth failures (5xx, network, etc.)', async () => {
+test('fetchMinimaxLimits does not retry another region on HTTP server errors', async () => {
   const calls = [];
   const r = await fetchMinimaxLimits({}, {
     env: { MINIMAX_CODING_API_KEY: 'sk-cp-test' },
@@ -909,5 +910,183 @@ test('MiniMax pinned regions retain the legacy endpoint fallback', async () => {
     });
     assert.equal(result.status, 'ok');
     assert.deepEqual(calls, urls);
+  }
+});
+
+test('settings, legacy options, and env pins override opposite region memory on failures', async () => {
+  for (const [setting, region, url, opposite] of [
+    ['cn', 'cn', MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, 'en'],
+    ['intl', 'en', MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, 'cn']
+  ]) {
+    const pins = [
+      [{ minimaxApiRegion: setting }, {}],
+      [{ minimaxApiHost: region }, {}],
+      [{}, { TOKEN_MONITOR_MINIMAX_API_REGION: setting }],
+      [{}, { MINIMAX_API_REGION: setting }],
+      [{}, { MINIMAX_API_HOST: new URL(url).hostname }]
+    ];
+    for (const [options, env] of pins) {
+      const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, opposite]]);
+      const calls = [];
+      const result = await fetchMinimaxLimits({ ...options, minimaxApiKey: 'sk-cp-test' }, {
+        env, providerRuntimeState: state,
+        fetch: async (requestUrl) => {
+          calls.push(requestUrl);
+          throw new Error('net::ERR_NAME_NOT_RESOLVED');
+        }
+      });
+      assert.deepEqual(calls, [url]);
+      assert.equal(result.status, 'unavailable');
+      assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), opposite);
+    }
+  }
+});
+
+test('explicit Auto overrides an env pin and probes the remembered region first', async () => {
+  const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'en']]);
+  const calls = [];
+  const result = await fetchMinimaxLimits({ minimaxApiRegion: 'auto', minimaxApiKey: 'sk-cp-test' }, {
+    env: { MINIMAX_API_REGION: 'cn' }, providerRuntimeState: state,
+    fetch: async (url) => {
+      calls.push(url);
+      return okResponse(windowsBody);
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
+  assert.equal(result.status, 'ok');
+  assert.equal(result.region, 'en');
+});
+
+test('a pinned legacy endpoint success updates memory for a later Auto probe', async () => {
+  const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'en']]);
+  const calls = [];
+  const deps = {
+    env: {}, providerRuntimeState: state,
+    fetch: async (url) => {
+      calls.push(url);
+      return url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN
+        ? { ok: false, status: 404 }
+        : okResponse(windowsBody);
+    }
+  };
+  const options = { minimaxApiKey: 'sk-cp-test' };
+  const pinned = await fetchMinimaxLimits({ ...options, minimaxApiRegion: 'cn' }, deps);
+  assert.equal(pinned.status, 'ok');
+  assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
+  calls.length = 0;
+  const auto = await fetchMinimaxLimits({ ...options, minimaxApiRegion: 'auto' }, deps);
+  assert.equal(auto.status, 'ok');
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_REMAINS_URL_CN]);
+});
+
+test('Auto advances to the other region after the per-request timeout aborts', { timeout: 5000 }, async () => {
+  const calls = [];
+  const state = new Map();
+  const result = await fetchMinimaxLimits({ minimaxApiKey: 'sk-cp-test' }, {
+    env: {}, providerRuntimeState: state, fetchTimeoutMs: 10,
+    fetch: async (url, init) => {
+      calls.push(url);
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN) return okResponse(windowsBody);
+      return new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true });
+      });
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+  assert.equal(result.status, 'ok');
+  assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
+});
+
+test('Auto retries the other region when a response body disconnects during reading', async () => {
+  const calls = [];
+  const result = await fetchMinimaxLimits({ minimaxApiKey: 'sk-cp-test' }, {
+    env: {},
+    fetch: async (url) => {
+      calls.push(url);
+      return url === MINIMAX_TOKEN_PLAN_REMAINS_URL_EN
+        ? { ok: true, status: 200, json: async () => { throw new TypeError('terminated'); } }
+        : okResponse(windowsBody);
+    }
+  });
+  assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+  assert.equal(result.status, 'ok');
+});
+
+test('fallback HTTP and body auth rejections after transport failure stay unavailable', async () => {
+  const rejections = [
+    { ok: false, status: 401 },
+    { ok: false, status: 403 },
+    okResponse({ base_resp: { status_code: 1004, status_msg: 'cookie is missing, log in again' } }),
+    okResponse({ base_resp: { status_code: 2049, status_msg: 'invalid api key' } })
+  ];
+  for (const rejection of rejections) {
+    const state = new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'cn']]);
+    const calls = [];
+    const result = await fetchMinimaxLimits({ minimaxApiKey: 'sk-cp-test' }, {
+      env: {}, providerRuntimeState: state,
+      fetch: async (url) => {
+        calls.push(url);
+        if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN) throw new Error('fetch failed');
+        return rejection;
+      }
+    });
+    assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN]);
+    assert.equal(result.status, 'unavailable');
+    assert.equal(state.get(MINIMAX_REGION_MEMORY_STATE_KEY), 'cn');
+  }
+});
+
+test('MiniMax runtime retains quota after an outage and honors pinned-to-Auto changes', async () => {
+  const calls = [];
+  let outage = false;
+  const runtime = createLimitsRuntime({
+    limitProviders: ['minimax'], minimaxApiKey: 'sk-cp-test', minimaxApiRegion: 'auto'
+  }, {
+    autoStart: false, autoRetry: false, env: {},
+    fetch: async (url, init) => {
+      calls.push(url);
+      assert.equal(init.headers.Authorization, 'Bearer sk-cp-test');
+      if (url === MINIMAX_TOKEN_PLAN_REMAINS_URL_CN) {
+        if (outage) throw new Error('fetch failed');
+        return okResponse(windowsBody);
+      }
+      return outage ? unauthorized() : okResponse(windowsBody);
+    },
+    providerRuntimeState: new Map([[MINIMAX_REGION_MEMORY_STATE_KEY, 'cn']])
+  });
+  try {
+    await runtime.refresh({ provider: 'minimax' }, 'manual');
+    const good = runtime.getSnapshot().providers[0];
+    assert.equal(good.status, 'ok');
+    assert.equal(good.region, 'cn');
+    assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN]);
+
+    outage = true;
+    calls.length = 0;
+    await runtime.refresh({ provider: 'minimax' }, 'manual');
+    const retained = runtime.getSnapshot().providers[0];
+    assert.equal(retained.status, 'unavailable');
+    assert.equal(retained.accountKey, good.accountKey);
+    assert.equal(retained.region, 'cn');
+    assert.deepEqual(retained.windows, good.windows);
+    assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_CN, MINIMAX_TOKEN_PLAN_REMAINS_URL_EN, MINIMAX_REMAINS_URL_EN]);
+
+    outage = false;
+    calls.length = 0;
+    runtime.reconfigure({ minimaxApiRegion: 'intl' });
+    runtime.clear({ provider: 'minimax' }, 'settings-change');
+    await runtime.refresh({ provider: 'minimax' }, 'settings-change');
+    assert.equal(runtime.getSnapshot().providers[0].region, 'en');
+    assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
+
+    calls.length = 0;
+    runtime.reconfigure({ minimaxApiRegion: 'auto' });
+    runtime.clear({ provider: 'minimax' }, 'settings-change');
+    await runtime.refresh({ provider: 'minimax' }, 'settings-change');
+    assert.equal(runtime.getSnapshot().providers[0].status, 'ok');
+    assert.deepEqual(calls, [MINIMAX_TOKEN_PLAN_REMAINS_URL_EN]);
+  } finally {
+    runtime.stop();
   }
 });
