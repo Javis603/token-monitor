@@ -56,6 +56,7 @@ const CLAUDE_PREPAID_IDLE_TTL_FACTOR = 6;
 const CLAUDE_PREPAID_CACHE_STATE_KEY = 'claude.prepaid-cache';
 const CLAUDE_SESSION_WINDOW_MINUTES = 5 * 60;
 const CLAUDE_WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
+const CLAUDE_DESKTOP_SAMPLE_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 function shouldTryClaudeCliFallback(error) {
   return ['notConfigured', 'sourceRateLimited', 'unavailable', 'error'].includes(error?.status);
 }
@@ -1420,9 +1421,40 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
         accountName: oauthIdentity.accountName
       };
     } catch (_) {
+      if (platform === 'win32' && error?.status === 'notConfigured') {
+        const desktop = await readClaudeDesktopUsage(deps, nowMs).catch(() => null);
+        if (desktop) return desktop;
+      }
       throw error;
     }
   }
+}
+
+async function readClaudeDesktopUsage(deps = {}, nowMs = Date.now()) {
+  const appData = envValue(deps.env || process.env, 'APPDATA');
+  if (!appData) return null;
+  const filePath = pathApiForPlatform('win32').join(appData, 'Claude', 'plan-usage-history.json');
+  const history = await readJsonFile(filePath, deps);
+  if (!Array.isArray(history?.samples)) return null;
+  const sample = history.samples.reduce((latest, item) =>
+    Number.isFinite(item?.t) && (!latest || item.t > latest.t) ? item : latest, null);
+  if (!sample || typeof sample.org !== 'string' || !sample.org.trim()
+    || sample.t > nowMs + 5 * 60 * 1000 || nowMs - sample.t > CLAUDE_DESKTOP_SAMPLE_MAX_AGE_MS) return null;
+  const windows = [
+    ['session', sample.u?.fh],
+    ['weekly', sample.u?.sd]
+  ].filter(([, percent]) => Number.isFinite(percent) && percent >= 0 && percent <= 100)
+    .map(([kind, usedPercent]) => ({ kind, usedPercent }));
+  if (windows.length === 0) return null;
+  return normalizeLimitProvider({
+    provider: 'claude',
+    accountKey: hashKey('claude-account', `organization:${sample.org}`),
+    source: 'local',
+    sourceDetail: 'app',
+    status: 'ok',
+    updatedAt: nowIso(sample.t),
+    windows
+  });
 }
 
 function stripAnsiCodes(text) {

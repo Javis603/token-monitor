@@ -55,6 +55,13 @@ test('attaching copies the pulled list onto new stats without touching them', ()
   assert.equal(withAllTimeSessions(null, sessions), null);
 });
 
+test('a cached session list cannot restore suppressed account-conflict details', () => {
+  const input = { ...stats(), codexAccountActivity: { detailsSuppressed: true } };
+  const result = withAllTimeSessions(input, { 'codex:old': { totalTokens: 20 } });
+  assert.equal(result, input);
+  assert.equal(Object.hasOwn(result.periods.allTime, 'sessions'), false);
+});
+
 test('a pull starts only when the list is stale and something shows it', async () => {
   const { loader, calls, loaded, setNeeded, adopt } = harness({ needed: false });
   loader.ensure();

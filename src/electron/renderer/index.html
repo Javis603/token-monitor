@@ -538,6 +538,11 @@
             </div>
             <div class="settings-subgroup session-archive-settings">
               <div class="settings-group-header"><span data-i18n="settings.collection.sessionArchiveTitle">Session history</span></div>
+              <label class="checkbox-label settings-item">
+                <span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.collection.codexAccountActivity">Use Codex account lifetime total</span></span>
+                <input id="codexAccountActivityInput" type="checkbox" />
+                <span class="settings-note settings-item-desc" data-i18n="settings.collection.codexAccountActivityNote">Requires Codex CLI login and one account for all local Codex history. All Time and consecutive days use account activity; charts and model details stay local.</span>
+              </label>
               <label class="checkbox-label session-archive-toggle settings-item">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.collection.sessionArchiveToggle">Preserve deleted session usage</span>
@@ -1431,6 +1436,7 @@
         <div class="label-row"><span>TOTAL TOKENS</span></div>
         <div class="total-number-row"><div id="totalTokens" class="total-number">0</div><div id="totalTokensCompact" class="total-compact hidden" aria-hidden="true"></div></div>
         <div id="cost" class="cost">$0.00</div>
+        <div id="codexAccountActivityNote" class="settings-note hidden" role="status"></div>
       </section>
 
       <div id="viewBackRow" class="view-back-row hidden">

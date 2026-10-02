@@ -13,7 +13,9 @@ Claude has independent local-usage/session and account-limits planes. A Claude C
 
 ## Usage and session metadata
 
-Aggregate tokens and costs come from tokscale. The local adapter in `src/shared/providers/claude/sessionMetadata.js` enriches sessions from `CLAUDE_CONFIG_DIR` or `~/.claude`, checking `projects/` before `transcripts/`.
+Aggregate tokens and costs normally come from tokscale. In the Windows widget, setting `TOKEN_MONITOR_CC_SWITCH_CLAUDE=1` also reads CC-Switch's local SQLite usage database for Claude Code requests routed through CC-Switch. It accepts the `claude` and `claude-desktop` categories, excludes `codex` session imports and failed proxy requests, and adds archived daily rollups to live proxy logs; CC-Switch moves requests between those tables atomically. A retained numeric snapshot preserves the recovered usage if the database later disappears. This source covers CC-Switch traffic only; it does not establish a Claude account lifetime total. When local Claude sessions occupy a CC-Switch date, the collector keeps the local session reading for that date. If the local Claude total cannot be dated from its sessions, CC-Switch rows are withheld to avoid overlap. CC-Switch daily counts use local calendar dates; its request counts are not treated as conversation messages. The [CC-Switch usage guide](https://github.com/farion1231/cc-switch/blob/main/docs/user-manual/en/4-proxy/4.4-usage.md) defines its proxy and session sources; the [rollup implementation](https://github.com/farion1231/cc-switch/blob/main/src-tauri/src/database/dao/usage_rollup.rs) defines archival.
+
+The local adapter in `src/shared/providers/claude/sessionMetadata.js` enriches sessions from `CLAUDE_CONFIG_DIR` or `~/.claude`, checking `projects/` before `transcripts/`.
 
 It reads only persisted `custom-title` and `ai-title` records; it never turns prompt text into a title. Custom titles win. The index is keyed by file size and mtime, scans appended bytes after the first pass and keeps reads bounded around oversized JSONL records.
 
@@ -33,7 +35,10 @@ Cache warmth is an optional `promptCache: { observedAt, ttlSeconds }` estimate f
 
 1. an explicitly configured Claude Web `sessionKey`;
 2. Claude Code OAuth credentials discovered from env/file, Windows Credential Manager or macOS Keychain;
-3. the authenticated Claude CLI usage screen as a fallback only for not-configured, rate-limited, unavailable or generic OAuth failures.
+3. the authenticated Claude CLI usage screen as a fallback only for not-configured, rate-limited, unavailable or generic OAuth failures;
+4. on Windows with no readable OAuth credentials, a recent `Claude/plan-usage-history.json` sample from the Claude desktop app when the CLI fallback cannot provide a usage screen.
+
+The desktop sample contains five-hour and weekly utilization percentages, but no reset timestamps or plan label. It is accepted only within two hours of collection and keyed by its organization id; an absent, malformed or stale sample leaves the original provider error intact. This path reads no desktop credentials and does not infer a quota from CC-Switch traffic.
 
 An identity-resolution failure after successful OAuth quota is not allowed to fall through and mint a differently keyed CLI row. The limits runtime retains the previous stable account instead.
 
@@ -64,5 +69,5 @@ Prepaid balance is best effort and cached more slowly than usage. A failed or re
 Run the Claude session, limits and Electron transport tests when changing this note's scope:
 
 ```bash
-node --test tests/shared/claudeSessionMetadata.test.js tests/shared/limitCollector.claude.test.js tests/electron/claudeWebFetch.test.js
+node --test tests/shared/claudeSessionMetadata.test.js tests/shared/ccSwitchClaude.test.js tests/shared/limitCollector.claude.test.js tests/electron/claudeWebFetch.test.js
 ```

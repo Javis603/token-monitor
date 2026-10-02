@@ -344,13 +344,18 @@
 
   // The standalone Trends page keeps active time and peak aligned with the selected
   // period. Home uses longRangePeakDayTokens instead, matching its long-range chart;
-  // active days and current streak remain the retained-history values users know.
-  function activityStatsForPeriod({ period, fixedSnapshot, daily, historySummary, todayKey } = {}) {
+  // active days remain local; a verified Codex account streak can extend the
+  // retained-history streak when local sessions omit active account days.
+  function activityStatsForPeriod({ period, fixedSnapshot, daily, historySummary, todayKey, codexAccountActivity } = {}) {
     const history = historySummary && typeof historySummary === 'object' ? historySummary : {};
+    const localStreak = finiteNumber(history.currentStreak) || 0;
+    const currentStreak = codexAccountActivity?.status === 'applied'
+      && Number.isSafeInteger(codexAccountActivity.currentStreak)
+      ? Math.max(localStreak, codexAccountActivity.currentStreak) : localStreak;
     if (fixedSnapshot?.status === 'ready') {
       return {
         activeDays: finiteNumber(history.activeDays) || 0,
-        currentStreak: finiteNumber(history.currentStreak) || 0,
+        currentStreak,
         activeTimeMs: finiteNumber(fixedSnapshot.summary?.activeTimeMs) || 0,
         peakDayTokens: finiteNumber(fixedSnapshot.summary?.peakDayTokens) || 0
       };
@@ -358,7 +363,7 @@
     if (period === 'allTime') {
       return {
         activeDays: finiteNumber(history.activeDays) || 0,
-        currentStreak: finiteNumber(history.currentStreak) || 0,
+        currentStreak,
         activeTimeMs: finiteNumber(history.activeTimeMs) || 0,
         peakDayTokens: finiteNumber(history.peakDayTokens) || 0
       };
@@ -371,7 +376,7 @@
     });
     return {
       activeDays: finiteNumber(history.activeDays) || 0,
-      currentStreak: finiteNumber(history.currentStreak) || 0,
+      currentStreak,
       activeTimeMs: selected.reduce((sum, row) => sum + (finiteNumber(row?.activeTimeMs) || 0), 0),
       peakDayTokens: selected.reduce((peak, row) => Math.max(peak, finiteNumber(row?.tokens) || 0), 0)
     };

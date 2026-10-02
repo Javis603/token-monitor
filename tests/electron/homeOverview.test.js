@@ -762,6 +762,21 @@ test('Activity keeps long-term day and streak stats while range-shaping time and
   });
 });
 
+test('Activity uses verified Codex account streak when local history omits account days', () => {
+  const input = {
+    period: 'allTime',
+    historySummary: { activeDays: 80, currentStreak: 80, activeTimeMs: 100, peakDayTokens: 100 },
+    codexAccountActivity: { status: 'applied', currentStreak: 87 }
+  };
+  assert.equal(activityStatsForPeriod(input).currentStreak, 87);
+  assert.equal(activityStatsForPeriod({ ...input,
+    historySummary: { ...input.historySummary, currentStreak: 90 }
+  }).currentStreak, 90);
+  assert.equal(activityStatsForPeriod({ ...input,
+    codexAccountActivity: { status: 'stale', currentStreak: 87 }
+  }).currentStreak, 80);
+});
+
 test('native DAY and MONTH activity time and peak follow their calendar range', () => {
   const daily = [
     { date: '2026-07-31', tokens: 90, activeTimeMs: 9000 },

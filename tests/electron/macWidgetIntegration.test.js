@@ -98,7 +98,7 @@ test('publishes projected stats to the macOS Widget on collection and presentati
   const end = mainSource.indexOf('\nfunction statsHistoryRevision', start);
   assert.ok(start >= 0 && end > start, 'sendPush function should exist');
   const sendPush = mainSource.slice(start, end);
-  assert.match(sendPush, /latestStats = payload\.data\.stats;\s+const visibleStats = electronPresentationStats\(latestStats\);/);
+  assert.match(sendPush, /latestStats = payload\.data\.stats;[\s\S]*?const visibleStats = electronPresentationStats\(latestStats\);/);
   assert.match(sendPush, /scheduleMacWidgetSnapshot\(visibleStats, options\.widgetProducerOwner\);/);
   assert.equal((mainSource.match(/scheduleMacWidgetSnapshot\(visibleStats, options\.widgetProducerOwner\)/g) || []).length, 1);
   const refreshStart = mainSource.indexOf('function refreshLimitStatsPresentation()');

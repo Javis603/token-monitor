@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { projectAccountActivityToHistory, normalizeAccountActivity } = require('../../src/shared/providers/codex/accountActivity');
 
 const rootDir = path.join(__dirname, '..', '..');
 const read = (...p) => fs.readFileSync(path.join(rootDir, ...p), 'utf8');
@@ -69,6 +70,75 @@ test('getDashboardHistory reads local history directly without a blocking collec
   // quick close/reopen the response outlived the renderer and the dashboard
   // stuck on the empty state. The local branch must read localDevice directly.
   assert.doesNotMatch(fn[1], /localCollectorHandle\.tick/);
+});
+
+test('dashboard history uses the same validated account projection as Home', async () => {
+  const main = read('src', 'electron', 'main.js');
+  const body = /async function getDashboardHistory\(options = \{\}\)\s*\{[\s\S]*?\n\}/.exec(main)?.[0];
+  assert.ok(body);
+  const today = new Date().toISOString().slice(0, 10);
+  const month = today.slice(0, 7);
+  const snapshot = normalizeAccountActivity({ codexAccountActivity: {
+    status: 'available', source: 'codex-app-server', fetchedAt: '2026-09-28T04:00:00Z',
+    lifetimeTokens: 100, dailyUsageBuckets: [{ startDate: today, tokens: 100 }]
+  } }, 'account-a');
+  const local = { daily: [{ date: today, tokens: 30, perClient: { codex: { tokens: 20 }, claude: { tokens: 10 } } }], monthly: [{ month, tokens: 30, perClient: { codex: { tokens: 20 }, claude: { tokens: 10 } } }], summary: { totalTokens: 30 } };
+  const settings = { codexAccountActivityEnabled: true };
+  const presented = { periods: { allTime: { totalTokens: 110 } }, codexAccountActivity: { status: 'applied', source: snapshot.source, fetchedAt: snapshot.fetchedAt, lifetimeTokens: snapshot.lifetimeTokens } };
+  const getHistory = vm.runInNewContext(`(${body})`, {
+    settings, latestStats: {}, codexAccountActivity: { snapshot: () => snapshot }, electronPresentationStats: () => presented,
+    projectAccountActivityToHistory, historyResolverOptions: () => ({}), getCompleteHistory: async () => local,
+    resolveCompleteHistoryWithDevices: async () => ({ history: local, deviceHistories: [] }),
+    completeHistorySource: () => 'local', fixedPeriodHistoryMeta: () => ({}), projectModelAliasHistory: (history) => history
+  });
+  const history = await getHistory();
+  assert.equal(history.summary.totalTokens, 110);
+  assert.equal(history.daily[0].tokens, 110);
+});
+
+test('dashboard model percentages use the original grand total without account backing', () => {
+  const breakdown = { innerHTML: '' };
+  const state = { history: { daily: [{ tokens: 100, perClient: { codex: { tokens: 100 } }, perModel: { named: { tokens: 40 } } }] }, motion: 'none' };
+  const renderBreakdown = dashboardFunction('renderBreakdown', 'let statCardMeasureCanvas', {
+    document: { getElementById: () => breakdown }, state,
+    captureGeometry: () => new Map(), displayColor: (color) => color,
+    charts: { modelColor: () => '#fff', clientColors: { codex: '#fff' } },
+    formatCompact: String, t: (key) => key, applySwatchColors() {}
+  });
+  renderBreakdown();
+  assert.match(breakdown.innerHTML, /named[\s\S]*?40\.0%/);
+  state.history.codexAccountActivity = { status: 'applied' };
+  renderBreakdown();
+  assert.match(breakdown.innerHTML, /named[\s\S]*?100\.0%/);
+});
+
+test('account-backed overview labels local-only cards and both heatmap scopes', () => {
+  const cards = { innerHTML: '', style: {}, clientWidth: 900 };
+  const heatmap = { clientWidth: 900, innerHTML: '', classList: { contains: () => false } };
+  const scopeNote = { textContent: '', classList: { toggle() {} } };
+  const heatmapScope = { textContent: '' };
+  const state = {
+    history: { daily: [{ date: '2026-09-28', tokens: 100, cost: 1 }], summary: { totalTokens: 100, activeTimeMs: 60_000 }, codexAccountActivity: { status: 'applied' } },
+    locale: 'zh-CN', heatmapMetric: 'tokens', motion: 'none'
+  };
+  const renderActivity = dashboardFunction('renderActivity', 'function renderNow()', {
+    state, els: { cards, heatmap, scopeNote, heatmapScope },
+    charts: {
+      computeHeatmapIntensities: (rows) => rows, contribHeatmap: () => ({ cells: [{}], weeks: 1 }), heatmapSvg: () => '<svg/>',
+      statsCards: () => [{ key: 'totalTokens', kind: 'tokens', value: 100 }, { key: 'activeTimeMs', kind: 'duration', value: 60_000 }],
+      statsCardsHtml: (items, options) => items.map((item) => options.label(item.key)).join('|')
+    },
+    todayKey: () => '2026-09-28', monthLabel: () => '', prefersReducedMotion: () => true,
+    animateHeatmapEntry() {}, balanceStatCards() {}, renderBreakdown() {},
+    t: (key) => key, formatDurationCompact: () => '', formatCompact: () => '', formatCostCompact: () => ''
+  });
+  renderActivity();
+  assert.match(cards.innerHTML, /trends\.activeTime.*dashboard\.scope\.local/);
+  assert.equal(scopeNote.textContent, 'dashboard.scope.accountOverview');
+  assert.equal(heatmapScope.textContent, 'dashboard.scope.accountHeatmap');
+  state.heatmapMetric = 'cost';
+  renderActivity();
+  assert.equal(heatmapScope.textContent, 'dashboard.scope.localHeatmap');
 });
 
 test('fixed ranges request existing per-device History without changing ingest', () => {

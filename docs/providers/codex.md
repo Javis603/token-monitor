@@ -4,12 +4,19 @@ ids: [codex]
 read_when:
   - Changing Codex session metadata, T3 title lookup, context occupancy or turn state
   - Changing Codex OAuth/RPC limits, managed accounts or workspace identity
+  - Changing Codex account activity or its All Time presentation
   - Changing Codex login, system-account switching or reset forecasts
 ---
 
 # Codex
 
 Codex combines a tokscale-backed usage client, local rollout enrichment and a multi-account limits provider. Keep those data planes separate even though they share the `codex` id.
+
+## Optional account activity
+
+When enabled in Settings, the app can read `tokscale codex activity --json`, backed by Codex app-server `account/usage/read`, every 15 minutes. The validated lifetime total is saved under the hashed live account identity and replaces local Codex in the **All Time display projection** once the daily buckets add to that lifetime total and the selected start date covers them. It is never uploaded as per-device usage, assigned to a model/project/session, or added on top of local Codex. Home's other periods remain local. The standalone Dashboard projects the same validated account buckets onto its Token history, replacing local Codex on each account-defined date while retaining other tools' local values. Its total matches Home; active days, streak, peak and Token heatmap follow those account-defined dates. The account API does not document bucket timezone semantics, so these dates are labeled as account dates rather than local calendar days. Cost, models, messages and active time remain local. The account API has no task start/end intervals; the displayed active time is the local collector's accumulated active-time metric, which may count overlapping tasks twice. A stale reading keeps the last known account total and daily buckets but uses the local streak. If another synced device contributes Codex or multiple logins have been observed locally, the account overlap is unknown and the projection retains the original aggregate. A lower lifetime reading requires a matching second live read; an older timestamp is ignored. A reading older than one hour is marked stale and is only the last known total.
+
+The account total is disabled by default. The user can enable it in Settings after verifying that local Codex history belongs to the current login.
 
 ## Session metadata and context
 

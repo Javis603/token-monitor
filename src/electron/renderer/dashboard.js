@@ -28,8 +28,11 @@ const els = {
   rangeSelect: document.getElementById('rangeSelect'),
   chart: document.getElementById('dashChart'),
   legend: document.getElementById('dashLegend'),
+  trendsScope: document.getElementById('dashTrendsScope'),
   heatmap: document.getElementById('dashHeatmap'),
+  heatmapScope: document.getElementById('dashHeatmapScope'),
   cards: document.getElementById('dashCards'),
+  scopeNote: document.getElementById('dashScopeNote'),
   empty: document.getElementById('dashEmpty'),
   tooltip: document.getElementById('dashTooltip'),
   stackBtns: Array.from(document.querySelectorAll('[data-control="stack"] .seg-btn')),
@@ -349,6 +352,11 @@ function renderLegend(model) {
 }
 
 function renderTrends() {
+  const accountBacked = ['applied', 'stale'].includes(state.history?.codexAccountActivity?.status);
+  const trendScopeKey = state.mode !== 'kline' && state.stackBy === 'model'
+    ? 'dashboard.scope.localModels' : 'dashboard.scope.accountHeatmap';
+  els.trendsScope.classList.toggle('hidden', !accountBacked);
+  els.trendsScope.textContent = accountBacked ? t(trendScopeKey) : '';
   const previousKind = state.chartKind;
   const previousGeometry = captureGeometry(els.chart, '.bar-stack[data-motion-key]');
   const daily = charts.clampDaily(state.history?.daily || [], state.range === 'all' ? 0 : Number(state.range));
@@ -406,12 +414,14 @@ function renderBreakdown() {
     grandTotal += Number(d.tokens || 0);
   }
   
-  const buildCol = (titleKey, map, colorFn) => {
+  const accountBacked = ['applied', 'stale'].includes(state.history?.codexAccountActivity?.status);
+  const buildCol = (titleKey, map, colorFn, localOnly = false) => {
     const rows = Object.entries(map).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 5);
     if (rows.length === 0) return '';
     const maxVal = Math.max(...rows.map(x => x[1]));
+    const denominator = accountBacked && localOnly ? Object.values(map).reduce((sum, value) => sum + value, 0) : grandTotal;
     const html = rows.map(([key, val]) => {
-      const pctGrand = grandTotal > 0 ? (val / grandTotal * 100).toFixed(1) : '0.0';
+      const pctGrand = denominator > 0 ? (val / denominator * 100).toFixed(1) : '0.0';
       const pctMax = maxVal > 0 ? (val / maxVal * 100).toFixed(1) : '0.0';
       const color = displayColor(colorFn(key));
       const motionKey = `${titleKey}:${encodeURIComponent(key)}`;
@@ -422,10 +432,11 @@ function renderBreakdown() {
         <span class="dash-bd-pct">${pctGrand}%</span>
       </div>`;
     }).join('');
-    return `<div class="dash-breakdown-col"><div class="dash-breakdown-title" data-i18n="${titleKey}">${t(titleKey)}</div>${html}</div>`;
+    const title = `${t(titleKey)}${accountBacked && localOnly ? ` · ${t('dashboard.scope.local')}` : ''}`;
+    return `<div class="dash-breakdown-col"><div class="dash-breakdown-title">${title}</div>${html}</div>`;
   };
   
-  const colModel = buildCol('dashboard.stack.model', modelTotals, charts.modelColor);
+  const colModel = buildCol('dashboard.stack.model', modelTotals, charts.modelColor, true);
   const colClient = buildCol('dashboard.stack.client', clientTotals, (k) => charts.clientColors[k] || charts.clientColors.default);
   
   elsBreakdown.innerHTML = colModel + colClient;
@@ -486,6 +497,12 @@ function balanceStatCards() {
 }
 
 function renderActivity() {
+  const accountBacked = ['applied', 'stale'].includes(state.history?.codexAccountActivity?.status);
+  const staleNote = state.history?.codexAccountActivity?.status === 'stale' ? ` ${t('dashboard.scope.stale')}` : '';
+  const heatmapScopeKey = state.heatmapMetric === 'cost' ? 'dashboard.scope.localHeatmap' : 'dashboard.scope.accountHeatmap';
+  els.scopeNote.classList.toggle('hidden', !accountBacked);
+  els.scopeNote.textContent = accountBacked ? `${t('dashboard.scope.accountOverview')}${staleNote}` : '';
+  els.heatmapScope.textContent = accountBacked ? t(heatmapScopeKey) : '';
   const daily = charts.computeHeatmapIntensities(state.history?.daily || []);
   const end = todayKey();
   // Start at the 1st of the month 11 months back → exactly 12 distinct months (Jul→Jun),
@@ -516,7 +533,7 @@ function renderActivity() {
     favoriteModel: 'dashboard.stat.favoriteModel', messages: 'dashboard.stat.messages'
   };
   els.cards.innerHTML = charts.statsCardsHtml(cards, {
-    label: (k) => t(LABELS[k] || k),
+    label: (k) => `${t(LABELS[k] || k)}${accountBacked && ['totalCost', 'activeTimeMs', 'favoriteModel', 'messages'].includes(k) ? ` · ${t('dashboard.scope.local')}` : ''}`,
     format: (c) => (c.kind === 'cost' ? formatCostCompact(c.value)
       : c.kind === 'duration' ? formatDurationCompact(c.value)
         : c.kind === 'model' ? (c.value || '—') : formatCompact(c.value))

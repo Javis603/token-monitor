@@ -12,7 +12,7 @@
 })(typeof window !== 'undefined' ? window : null, function createAllTimeSessionsApi() {
   function withAllTimeSessions(stats, sessions) {
     const allTime = stats?.periods?.allTime;
-    if (!sessions || !allTime || typeof allTime !== 'object') return stats;
+    if (!sessions || !allTime || typeof allTime !== 'object' || stats.codexAccountActivity?.detailsSuppressed) return stats;
     return { ...stats, periods: { ...stats.periods, allTime: { ...allTime, sessions } } };
   }
 

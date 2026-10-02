@@ -91,6 +91,65 @@ test('Claude Web accepts only a bare or canonical sk-ant sessionKey', () => {
   assert.equal(normalizeClaudeWebCookieInput(''), '');
 });
 
+test('Windows Claude Desktop usage snapshot supplies limits when CLI login has no readable OAuth file', async () => {
+  const now = Date.parse('2026-09-28T02:30:00Z');
+  const provider = await fetchClaudeLimits({}, {
+    platform: 'win32',
+    env: { APPDATA: 'C:\\Users\\Tester\\AppData\\Roaming' },
+    now: () => now,
+    stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
+    readWindowsCredential: false,
+    isClaudeCliAuthenticated: async () => false,
+    readFile: async (file) => {
+      assert.match(file, /Claude[\\/]plan-usage-history\.json$/);
+      return JSON.stringify({ version: 1, samples: [
+        { t: now - 60_000, org: 'org-one', u: { fh: 99, sd: 27 } }
+      ] });
+    }
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.source, 'local');
+  assert.equal(provider.sourceDetail, 'app');
+  assert.deepEqual(provider.windows.map(({ kind, usedPercent }) => ({ kind, usedPercent })), [
+    { kind: 'session', usedPercent: 99 }, { kind: 'weekly', usedPercent: 27 }
+  ]);
+});
+
+test('Windows Claude Desktop snapshot rejects stale and malformed usage', async () => {
+  const now = Date.parse('2026-09-28T02:30:00Z');
+  for (const sample of [
+    { t: now - 3 * 60 * 60 * 1000, org: 'org-one', u: { fh: 99, sd: 27 } },
+    { t: now - 60_000, org: 'org-one', u: { fh: 199, sd: -3 } }
+  ]) {
+    await assert.rejects(fetchClaudeLimits({}, {
+      platform: 'win32', env: { APPDATA: 'C:\\Users\\Tester\\AppData\\Roaming' },
+      now: () => now,
+      stat: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
+      readWindowsCredential: false,
+      isClaudeCliAuthenticated: async () => false,
+      readFile: async () => JSON.stringify({ samples: [sample] })
+    }), (error) => error?.status === 'notConfigured');
+  }
+});
+
+test('Windows desktop snapshot cannot replace a configured OAuth account after an API failure', async () => {
+  let desktopRead = false;
+  await assert.rejects(fetchClaudeLimits({}, {
+    platform: 'win32',
+    env: { APPDATA: 'C:\\Users\\Tester\\AppData\\Roaming' },
+    readdirSync: () => [],
+    stat: async () => ({ mtimeMs: 1 }),
+    readWindowsCredential: false,
+    readFile: async (file) => {
+      if (file.includes('plan-usage-history')) desktopRead = true;
+      return JSON.stringify({ claudeAiOauth: { accessToken: 'test-token' } });
+    },
+    fetch: async () => ({ ok: false, status: 503 }),
+    isClaudeCliAuthenticated: async () => false
+  }), (error) => error?.status === 'unavailable');
+  assert.equal(desktopRead, false);
+});
+
 test('Claude Web source takes precedence and carries stable account metadata', async () => {
   async function collect(cookie) {
     const requests = [];

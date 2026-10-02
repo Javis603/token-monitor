@@ -25,6 +25,8 @@ const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
+const { createCodexAccountActivity } = require('./codexAccountActivity');
+const { applyAccountActivityToStats, projectAccountActivityToHistory, isAccountActivityStale } = require('../shared/providers/codex/accountActivity');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
 const { runAntigravityOAuthLogin } = require('./providers/antigravity/oauthLogin');
 const antigravityOAuth = require('../shared/providers/antigravity/oauth');
@@ -605,6 +607,7 @@ function defaultSettings() {
     showHomeLimitProviderNames: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
     historyEnabled: true,
+    codexAccountActivityEnabled: false,
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
     sessionUsageArchiveEnabled: parseBoolean(process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true),
     wslScanEnabled: parseBoolean(process.env.TOKEN_MONITOR_WSL_SCAN, true),
@@ -775,6 +778,7 @@ function electronUsageConfig(errorPrefix) {
     watchTriggersCollection: collectorWatchTriggersCollection(),
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,
+    ccSwitchClaudeEnabled: process.platform === 'win32' && parseBoolean(process.env.TOKEN_MONITOR_CC_SWITCH_CLAUDE, false),
     dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
     logger: (message) => console.log(`[${errorPrefix}] ${message}`)
@@ -1791,8 +1795,10 @@ async function switchCodexSystemAccount(id) {
   }
   codexSystemSwitchInFlight = true;
   try {
+    codexAccountActivity.observe();
     const result = await performCodexSystemAccountSwitch(id);
     if (result?.ok) {
+      codexAccountActivity.observe();
       // Publish the optimistic selection from the shared lane so the App,
       // Edge Dock and tray agree immediately regardless of which one initiated
       // the switch. Quota data catches up through one targeted refresh below.
@@ -2484,6 +2490,7 @@ function readSettings() {
     if (saved.historyEnabled !== undefined) {
       merged.historyEnabled = parseBoolean(saved.historyEnabled, false);
     }
+    merged.codexAccountActivityEnabled = parseBoolean(merged.codexAccountActivityEnabled, false);
     if (saved.projectsEnabled !== undefined) {
       merged.projectsEnabled = parseBoolean(saved.projectsEnabled, true);
     }
@@ -2873,6 +2880,16 @@ let latestHubStatsIdentity = null;
 let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
+const codexAccountActivity = createCodexAccountActivity({
+  onChange: () => {
+    if (latestStats) sendPush({ event: 'stats', data: { type: 'stats', reason: 'presentation', stats: latestStats, at: new Date().toISOString() } }, { skipExport: true });
+    if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+      try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
+    }
+  },
+  onError: (error) => console.warn(`[codex-account-activity] ${error.message}`),
+  onConflict: () => console.warn('[codex-account-activity] newer account total is lower; retaining the verified snapshot')
+});
 let macWidgetSnapshotController = null;
 let macWidgetDemand = null;
 let macWidgetPublicationReady = false;
@@ -2900,9 +2917,17 @@ function electronPresentationStats(stats) {
   };
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
-  const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null]);
+  const codexSelected = String(settings?.clients || '').split(',').includes('codex');
+  const snapshot = settings?.codexAccountActivityEnabled === true && codexSelected ? codexAccountActivity.snapshot() : null;
+  const singleCodexAccount = snapshot ? !codexAccountActivity.multipleAccounts() : true;
+  const snapshotStale = snapshot ? isAccountActivityStale(snapshot) : false;
+  const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null, settings?.allTimeSince,
+    settings?.codexAccountActivityEnabled, snapshot?.fetchedAt, snapshot?.lifetimeTokens,
+    snapshot?.dailyCoverageComplete, snapshot?.dailyUsageBuckets?.[0]?.date, singleCodexAccount, snapshotStale]);
   return presentationCache.get(stats, key, () => projectModelAliasStats(
-    projectLimitStatsForDisplay(stats, limitOptions),
+    projectLimitStatsForDisplay(snapshot
+      ? applyAccountActivityToStats(stats, snapshot, settings?.allTimeSince, settings?.deviceId, singleCodexAccount)
+      : stats, limitOptions),
     aliases,
     { grouping }
   ));
@@ -2921,6 +2946,7 @@ const snapshotLocalDevices = new WeakMap();
 // machine's own full all-time list as it stood when the snapshot was built.
 function rendererAllTimeSessions(stats) {
   if (!stats) return null;
+  if (electronPresentationStats(stats).codexAccountActivity?.detailsSuppressed) return {};
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
   const key = JSON.stringify([aliases ?? null, grouping ?? null]);
@@ -4555,6 +4581,10 @@ function sendPush(payload, options = {}) {
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    if (String(settings?.clients || '').split(',').includes('codex')) {
+      codexAccountActivity.observe();
+      if (settings?.codexAccountActivityEnabled === true) void codexAccountActivity.refresh();
+    }
     const visibleStats = electronPresentationStats(latestStats);
     migrateCodexAdditionalLimits(visibleStats);
     rendererPayload = {
@@ -4745,6 +4775,8 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
       allTimeSince: usageOptions.allTimeSince,
       projectsEnabled: usageOptions.projectsEnabled,
       customScanPaths: usageOptions.customScanPaths,
+      ccSwitchClaudeEnabled: usageOptions.ccSwitchClaudeEnabled,
+      ccSwitchDbPath: usageOptions.ccSwitchDbPath,
       wslScanEnabled: usageOptions.wslScanEnabled,
       wslSupported: process.platform === 'win32',
       hostname: os.hostname(),
@@ -6995,8 +7027,13 @@ async function getDashboardHistory(options = {}) {
     : { history: await getCompleteHistory(), deviceHistories: undefined };
   const history = resolved.history;
   const source = completeHistorySource(historyResolverOptions());
+  const accountSnapshot = settings?.historyEnabled !== false && settings?.codexAccountActivityEnabled === true && latestStats
+    ? codexAccountActivity.snapshot() : null;
+  const accountHistory = accountSnapshot
+    ? projectAccountActivityToHistory(history, accountSnapshot, electronPresentationStats(latestStats))
+    : history;
   return projectModelAliasHistory({
-    ...history,
+    ...accountHistory,
     ...(includeDevices ? { deviceHistories: resolved.deviceHistories } : {}),
     fixedPeriods: fixedPeriodHistoryMeta({
       source
@@ -7365,6 +7402,7 @@ app.whenReady().then(() => {
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
+      codexAccountActivityEnabled: parseBoolean(patch.codexAccountActivityEnabled ?? settings.codexAccountActivityEnabled, false),
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
       sessionUsageArchiveEnabled: parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true),
@@ -7521,6 +7559,13 @@ app.whenReady().then(() => {
       // Re-project the cached aggregate immediately. The Hub can be offline and
       // therefore may not send another frame after this local-only setting changes.
       refreshLimitStatsPresentation();
+    }
+    if (settings.codexAccountActivityEnabled !== previousRuntimeSettings.codexAccountActivityEnabled) {
+      refreshLimitStatsPresentation();
+      if (settings.codexAccountActivityEnabled) void codexAccountActivity.refresh();
+      if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+        try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
+      }
     }
     if (JSON.stringify(settings.modelAliases) !== JSON.stringify(previousSettingsState.modelAliases)
       || settings.modelAliasGrouping !== previousSettingsState.modelAliasGrouping) {

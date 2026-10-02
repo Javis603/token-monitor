@@ -118,6 +118,16 @@ test('the cold-start seed accepts an anchor configured for Qoder CN', () => {
   assert.deepEqual(record.trackedClients, ['claude', 'qodercn']);
 });
 
+test('the cold-start seed refuses a CC-Switch anchor from another database', () => {
+  const original = 'C:\\cc-switch\\original.db';
+  const moved = 'C:\\cc-switch\\moved.db';
+  const anchor = anchorFixture({
+    configFingerprint: configFingerprint(CLIENTS, ALL_TIME_SINCE, true, '', '', null, true, original)
+  });
+  assert.ok(deviceRecordFromAnchor(anchor, seedOptions({ ccSwitchClaudeEnabled: true, ccSwitchDbPath: original })));
+  assert.equal(deviceRecordFromAnchor(anchor, seedOptions({ ccSwitchClaudeEnabled: true, ccSwitchDbPath: moved })), null);
+});
+
 test('the seed refuses a Qoder CN anchor that predates the JSONL source', () => {
   // A DB-only fingerprint cannot cover transcript usage: reusing it would show
   // month/allTime from before the storage migration while only today's JSONL

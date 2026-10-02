@@ -125,6 +125,27 @@ test('configFingerprint invalidates the anchor when a custom scan path changes',
   assert.notEqual(configFingerprint('claude', '2024-01-01', true, '', '', { claude: [other] }), withPath);
 });
 
+test('CC-Switch anchor fingerprint includes the effective database path', () => {
+  const { DB_PATH } = require('../../src/shared/providers/claude/ccSwitch');
+  const { collectorAnchorTrust } = require('../../src/shared/collector');
+  const args = ['claude', '2024-01-01', true, '', '', null, true];
+  const original = path.join(os.tmpdir(), 'cc-switch-original.db');
+  const moved = path.join(os.tmpdir(), 'cc-switch-moved.db');
+  const fingerprint = configFingerprint(...args, original);
+  assert.ok(configFingerprint(...args).endsWith(`|ccswitch:claude:${path.resolve(DB_PATH)}`));
+  assert.notEqual(fingerprint, configFingerprint(...args, moved));
+
+  const now = new Date();
+  const anchor = {
+    dateKey: localTodayKey(now), today: {}, month: {}, allTime: {},
+    configFingerprint: fingerprint,
+    fullScanAt: new Date(now.getTime() - 60_000).toISOString()
+  };
+  const options = { clients: 'claude', allTimeSince: '2024-01-01', ccSwitchClaudeEnabled: true, now };
+  assert.ok(collectorAnchorTrust(anchor, { ...options, ccSwitchDbPath: original }));
+  assert.equal(collectorAnchorTrust(anchor, { ...options, ccSwitchDbPath: moved }), null);
+});
+
 test('anchored tick with valid anchor runs todayOnly scan and derives month/allTime', async () => {
   const dateKey = localTodayKey();
 

@@ -64,6 +64,7 @@ html.native-high-contrast .dash-cards { border-color: var(--line-strong); }
 #activityPane { align-self: center; width: 100%; max-width: 1200px; margin-inline: auto; }
 .dash-heatmap-block { flex: none; display: flex; flex-direction: column; gap: 10px; }
 .dash-heatmap-title { font-size: 13px; font-weight: 600; opacity: 0.9; }
+.dash-scope { color: var(--text); opacity: 0.78; font-size: 11px; line-height: 1.35; }
 .dash-heatmap-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .seg--sm .seg-btn { font-size: 10px; padding: 3px 8px; }
 
