@@ -32,6 +32,7 @@ const { aggregateLimits, normalizeLimitsSummary } = require('../../src/shared/li
 const { probeLimitProvider } = require('../../src/shared/limits/collector');
 const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
 const { mimoExchangeRequestHeaders, mimoRequestHeaders } = require('../../src/shared/providers/mimo/browserHeaders');
+const { mintMimoServiceSession } = require('../../src/shared/providers/mimo/session');
 
 const CONSOLE_COOKIE = 'unrelated=drop; userId=42; api-platform_serviceToken=secret; api-platform_ph=optional';
 const CONSOLE_BASE = 'https://platform.xiaomimimo.com/api/v1';
@@ -484,6 +485,65 @@ test('a Desktop logout removes the old membership while a manual console keeps a
     [mimoMembershipAccountKey('42')],
     'the runtime clears only the vanished automatic product'
   );
+});
+
+test('unavailable Desktop discovery retains accepted quotas without consuming logout or account switches', async (t) => {
+  for (const capability of ['encrypted', 'no-sqlite']) {
+    for (const saved of [false, true]) {
+      await t.test(`${capability}, ${saved ? 'with' : 'without'} a saved Console`, async () => {
+        let readDesktop = signedInDesktop();
+        let rawRows;
+        let now = Date.UTC(2026, 8, 24);
+        const runtime = createLimitsRuntime({
+          limitProviders: ['mimo'],
+          mimoManagedAccounts: saved ? [{ id: 'saved', accountKey: CONSOLE_ACCOUNT_KEY_42, cookieHeader: CONSOLE_COOKIE }] : []
+        }, {
+          autoStart: false, autoRetry: false, cleanupGraceMs: 0,
+          fetch: mimoWorld().fetch, now: () => now,
+          readMimoDesktopAccount: () => readDesktop(),
+          probeProvider: async (provider, options, context, deps) => {
+            rawRows = await probeLimitProvider(provider, options, context, deps);
+            return rawRows;
+          }
+        });
+        try {
+          await runtime.refresh({ provider: 'mimo' }, 'startup');
+          const good = runtime.getSnapshot().providers.find(row => row.accountKey === MEMBERSHIP_ACCOUNT_KEY_42);
+          assert.equal(good.status, 'ok');
+          assert.equal(good.windows.length, 1);
+          readDesktop = () => readMimoDesktopAccount({
+            candidates: ['/x/Cookies'], fs: presentFile,
+            sqlite: capability === 'no-sqlite' ? null : sqliteReturning([
+              { name: 'userId', value: '42', encrypted_value: null },
+              { name: 'passToken', value: '', encrypted_value: new Uint8Array([1]) }
+            ])
+          });
+          await runtime.refresh({ provider: 'mimo' }, 'manual');
+          assert.equal(rawRows.some(row => row.removed), false);
+          const retained = runtime.getSnapshot().providers.find(row => row.accountKey === MEMBERSHIP_ACCOUNT_KEY_42);
+          assert.ok(retained, 'a reader capability failure must not delete a healthy identity');
+          assert.deepEqual(retained.windows, good.windows);
+          assert.equal(retained.status, 'unavailable');
+          if (saved) assert.equal(runtime.getSnapshot().providers.find(row => row.accountKey === CONSOLE_ACCOUNT_KEY_42).status, 'ok');
+
+          readDesktop = signedInDesktop();
+          // The shared runtime keeps transient failures behind its retry cooldown.
+          now += 60_000;
+          await runtime.refresh({ provider: 'mimo' }, 'manual');
+          assert.equal(runtime.getSnapshot().providers.find(row => row.accountKey === MEMBERSHIP_ACCOUNT_KEY_42).status, 'ok');
+          readDesktop = absentDesktop;
+          await runtime.refresh({ provider: 'mimo' }, 'manual');
+          assert.equal(runtime.getSnapshot().providers.some(row => row.accountKey === MEMBERSHIP_ACCOUNT_KEY_42), false);
+          readDesktop = signedInDesktop('7');
+          await runtime.refresh({ provider: 'mimo' }, 'manual');
+          assert.equal(runtime.getSnapshot().providers.find(row => row.accountKey === MEMBERSHIP_ACCOUNT_KEY_7).status, 'ok');
+          assert.equal(runtime.getSnapshot().providers.some(row => row.accountKey === MEMBERSHIP_ACCOUNT_KEY_42), false);
+        } finally {
+          runtime.stop();
+        }
+      });
+    }
+  }
 });
 
 test('a superseded Desktop removal is emitted again on the next committed refresh', { timeout: 7000 }, async () => {
@@ -966,6 +1026,78 @@ test('the exchange refuses an off-list redirect without requesting it', async ()
   assert.equal(rows[1].status, 'unavailable');
 });
 
+test('exchange cookies obey path scope and expire before the callback and credential return', async (t) => {
+  for (const sample of [
+    { name: 'unrelated paths and partial directory prefixes are excluded', cookies: [
+      'outside=drop; Path=/unrelated', 'partial=drop; Path=/api/user/xiaom',
+      'exact=keep; Path=/api/user/xiaomi/me', 'directory=keep; Path=/api/user/', 'root=keep; Path=/'
+    ], expected: 'exact=keep; directory=keep; root=keep' },
+    { name: 'missing, empty and invalid paths use the issuing URL directory', issuePath: '/api/session/issue', callback: '/api/session/next', cookies: [
+      'missing=keep', 'empty=keep; Path=', 'invalid=keep; Path=other', 'root=keep; Path=/'
+    ], expected: 'missing=keep; empty=keep; invalid=keep; root=keep', returned: 'root=keep' },
+    { name: 'the default path does not match a partial directory prefix', callback: '/apiary/next', cookies: [
+      'missing=drop', 'invalid=drop; Path=other', 'root=keep; Path=/'
+    ], expected: 'root=keep', returned: 'missing=drop; invalid=drop; root=keep' },
+    { name: 'same-name paths coexist and deletion affects only its matching path', cookies: [
+      'same=root; Path=/', 'same=nested; Path=/api/user', 'same=deleted; Path=/api/user; Max-Age=0'
+    ], expected: 'same=root' },
+    { name: 'longer cookie paths are sent before shorter paths', cookies: [
+      'same=root; Path=/', 'same=nested; Path=/api/user'
+    ], expected: 'same=nested; same=root' },
+    { name: 'Max-Age zero and negative delete even with future Expires', cookies: [
+      'zero=old; Path=/', 'negative=old; Path=/',
+      'zero=drop; Path=/; Max-Age=0; Expires=Wed, 01 Jan 2031 00:00:00 GMT',
+      'negative=drop; Path=/; Max-Age=-1; Expires=Wed, 01 Jan 2031 00:00:00 GMT'
+    ], expected: '' },
+    { name: 'Expires deletes an existing matching cookie', cookies: [
+      'expired=old; Path=/', 'expired=drop; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT'
+    ], expected: '' },
+    { name: 'positive Max-Age overrides past Expires', cookies: [
+      'fresh=keep; Path=/; Max-Age=60; Expires=Thu, 01 Jan 1970 00:00:00 GMT'
+    ], expected: 'fresh=keep' },
+    { name: 'invalid expiry attributes leave a session cookie', cookies: [
+      'session=keep; Path=/; Max-Age=invalid; Expires=invalid'
+    ], expected: 'session=keep' },
+    { name: 'Max-Age expires between receiving the cookie and sending the next hop', advance: 1000, cookies: [
+      'expired=drop; Path=/; Max-Age=1'
+    ], expected: '' },
+    { name: 'expiry is checked again when credentials are returned', afterCallback: 1000, cookies: [
+      'expired=sent; Path=/; Max-Age=1'
+    ], expected: 'expired=sent', returned: '' }
+  ]) {
+    await t.test(sample.name, async () => {
+      let now = Date.UTC(2026, 9, 3);
+      let sent;
+      let hop = 0;
+      const callback = `https://mimo-server-cn.xiaomimimo.com${sample.callback || '/api/user/xiaomi/me'}`;
+      const minted = await mintMimoServiceSession({
+        baseUrl: MEMBERSHIP_BASE, entry: '/user/xiaomi/me', accountCookie: 'passToken=p; userId=42',
+        deps: { now: () => now, fetch: async (url, init) => {
+          hop += 1;
+          if (hop === 1) return reply(302, '', { location: `${LOGIN_URL}?sid=mimopc` });
+          if (hop === 2) return reply(302, '', { location: `https://mimo-server-cn.xiaomimimo.com${sample.issuePath || '/api/sts'}` });
+          if (hop === 3) {
+            const response = reply(307, '', { location: callback, 'set-cookie': sample.cookies });
+            const get = response.headers.get;
+            response.headers.get = (name) => {
+              if (name === 'location') now += sample.advance || 0;
+              return get(name);
+            };
+            return response;
+          }
+          assert.equal(String(url), callback);
+          sent = String(init.headers.Cookie || '');
+          now += sample.afterCallback || 0;
+          return reply(200, { code: 0, data: { userId: '42' } });
+        } }
+      });
+      assert.equal(minted.ok, true);
+      assert.equal(sent, sample.expected);
+      assert.equal(minted.cookieHeader, sample.returned ?? sample.expected);
+    });
+  }
+});
+
 test('the service host may use its observed HTTP callback without receiving Secure cookies', async () => {
   const world = mimoWorld();
   let callbackCookie = null;
@@ -1234,7 +1366,7 @@ test('a store that is there but cannot be read keeps the previous reading', () =
   );
 });
 
-test('a store that never held a cookie, a sealed store and no store are all nothing to discover', () => {
+test('missing cookies are not configured, while unavailable reader capabilities are transient', () => {
   assert.throws(
     () => readMimoDesktopAccount({ candidates: ['/x/Cookies'], fs: presentFile, sqlite: sqliteReturning([]) }),
     (error) => error.status === 'notConfigured'
@@ -1248,7 +1380,7 @@ test('a store that never held a cookie, a sealed store and no store are all noth
         { name: 'passToken', value: '', encrypted_value: new Uint8Array([1]) }
       ])
     }),
-    (error) => error.status === 'notConfigured',
+    (error) => error.status === 'unavailable',
     'at-rest encryption is a property of the store, never a signed-out app'
   );
   assert.throws(
@@ -1261,7 +1393,7 @@ test('a store that never held a cookie, a sealed store and no store are all noth
   );
   assert.throws(
     () => readMimoDesktopAccount({ candidates: ['/x/Cookies'], fs: presentFile, sqlite: null }),
-    (error) => error.status === 'notConfigured',
+    (error) => error.status === 'unavailable',
     'a runtime without node:sqlite has nothing to read with'
   );
 });

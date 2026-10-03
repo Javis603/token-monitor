@@ -55,9 +55,9 @@ function readAccountCookieRows(dbPath, sqlite) {
   }
 }
 
-// The signed-in MiMo Desktop's account cookie. Missing or sealed storage falls
-// back silently; an incomplete plaintext session is unauthorized; an I/O or
-// SQLite failure is transient so the runtime can retain the last good reading.
+// The signed-in MiMo Desktop's account cookie. Missing storage falls back
+// silently; an incomplete plaintext session is unauthorized. Unreadable or
+// encrypted storage retains the last reading rather than proving a logout.
 // Nothing is written back, and only the two allowlisted cookies leave this file.
 function readMimoDesktopAccount(options = {}) {
   const fsApi = options.fs || fs;
@@ -84,7 +84,7 @@ function readMimoDesktopAccount(options = {}) {
     throw errorWithStatus('notConfigured', 'MiMo Desktop cookie store not found');
   }
   if (typeof sqlite?.DatabaseSync !== 'function') {
-    throw errorWithStatus('notConfigured', 'node:sqlite is unavailable in this runtime');
+    throw errorWithStatus('unavailable', 'node:sqlite is unavailable in this runtime');
   }
 
   let rows;
@@ -108,7 +108,7 @@ function readMimoDesktopAccount(options = {}) {
   }
   const missingNames = MIMO_ACCOUNT_COOKIE_NAMES.filter((name) => !values.has(name));
   if (missingNames.some((name) => sealedNames.has(name))) {
-    throw errorWithStatus('notConfigured', 'MiMo Desktop stores this cookie encrypted');
+    throw errorWithStatus('unavailable', 'MiMo Desktop stores this cookie encrypted');
   }
 
   const userId = values.get('userId') || '';

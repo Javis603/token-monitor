@@ -80,16 +80,24 @@ function allowedExchangeUrl(value, base, serviceUrl) {
     : null;
 }
 
-// A jar for one exchange, enforcing host, Domain and Secure on every hop.
-function createMimoCookieJar() {
+// A jar for one exchange, enforcing cookie scope and lifetime on every hop.
+function createMimoCookieJar(now = Date.now) {
   const cookies = [];
 
   function store(entry, url) {
     const domain = entry.domain || url.hostname.toLowerCase();
     if (!hostMatches(url.hostname.toLowerCase(), domain)) return;
     if (!MIMO_COOKIE_DOMAINS.some((root) => hostMatches(domain, root))) return;
-    const stored = { ...entry, domain };
-    const index = cookies.findIndex((existing) => existing.name === stored.name && existing.domain === domain);
+    const path = entry.path?.startsWith('/') ? entry.path : url.pathname.slice(0, url.pathname.lastIndexOf('/')) || '/';
+    const expiresAt = Number.isFinite(entry.maxAge)
+      ? entry.maxAge <= 0 ? 0 : now() + entry.maxAge * 1000
+      : Number(entry.expires ?? NaN);
+    const stored = { ...entry, domain, path, expiresAt };
+    const index = cookies.findIndex((existing) => existing.name === stored.name && existing.domain === domain && existing.path === path);
+    if (expiresAt <= now()) {
+      if (index >= 0) cookies.splice(index, 1);
+      return;
+    }
     if (index >= 0) cookies[index] = stored;
     else cookies.push(stored);
   }
@@ -105,6 +113,7 @@ function createMimoCookieJar() {
           name: pair.slice(0, separator).trim(),
           value: pair.slice(separator + 1).trim(),
           domain: '',
+          path: '/',
           hostOnly: true,
           secure: true
         }, url);
@@ -113,15 +122,26 @@ function createMimoCookieJar() {
     absorb(setCookieLines, url) {
       for (const line of setCookieLines || []) {
         const entry = parseCookie(String(line || ''));
-        if (entry?.name) store({ ...entry, hostOnly: !entry.domain }, url);
+        if (!entry?.name) continue;
+        // parseCookie has no issuing URL for default-path, and ignores negative Max-Age.
+        for (const attribute of String(line || '').split(';').slice(1)) {
+          const match = /^\s*(path|max-age)\s*=\s*(.*?)\s*$/i.exec(attribute);
+          if (match?.[1].toLowerCase() === 'path') entry.path = match[2];
+          if (match?.[1].toLowerCase() === 'max-age' && /^-?\d+$/.test(match[2])) entry.maxAge = Number(match[2]);
+        }
+        store({ ...entry, hostOnly: !entry.domain }, url);
       }
     },
     headerFor(url) {
       const host = url.hostname.toLowerCase();
       const sent = [];
-      for (const cookie of cookies) {
+      const nowMs = now();
+      for (const cookie of [...cookies].sort((left, right) => right.path.length - left.path.length)) {
+        if (cookie.expiresAt <= nowMs) continue;
         if (cookie.hostOnly ? cookie.domain !== host : !hostMatches(host, cookie.domain)) continue;
         if (cookie.secure && url.protocol !== 'https:') continue;
+        if (url.pathname !== cookie.path && !(url.pathname.startsWith(cookie.path)
+          && (cookie.path.endsWith('/') || url.pathname[cookie.path.length] === '/'))) continue;
         sent.push(`${cookie.name}=${cookie.value}`);
       }
       return sent.join('; ');
@@ -134,7 +154,7 @@ function createMimoCookieJar() {
 // exactly the difference `deps.mimoExchangeFetch` exists to cover — a runtime
 // hands the walk a fetch that can, and this jar then needs nothing from it.
 function createJarExchange(fetchFn, seed = {}) {
-  const jar = createMimoCookieJar();
+  const jar = createMimoCookieJar(seed.now);
   const entryUrl = new URL(seed.accountHost || 'https://account.xiaomi.com/');
   const serviceUrl = seed.serviceUrl ? new URL(seed.serviceUrl) : null;
   jar.seed(seed.accountCookie, entryUrl);
@@ -251,6 +271,7 @@ async function mintMimoServiceSession(options = {}) {
     accountCookie: options.accountCookie,
     serviceCookie: options.serviceCookie,
     serviceUrl: entryUrl.href,
+    now: options.deps?.now,
     signal: options.deps?.signal
   });
   try {

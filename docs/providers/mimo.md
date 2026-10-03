@@ -49,16 +49,16 @@ GET {base}/user/xiaomi/me
   -> 200 {"code":0, "data":{"userId": …}}
 ```
 
-The hop through `/api/sts` is what **mints the service session**, and the cookie jar gains `serviceToken`, `mimopc_ph`, `mimopc_slh` and `userId` — the last under `.xiaomimimo.com`, so it covers the service host, and `mimopc_slh` arriving twice for the same reason the console lane's `api-platform_slh` does. `passInfo`, `pass_ua`, `deviceId` and `ptn_count` belong to the SSO hop above it rather than to this one, and stay on the account hosts. Measured on a live exchange, the membership host receives `serviceToken`, `userId`, `mimopc_ph` and `mimopc_slh`. The service id is `mimopc`, and the login is driven by visiting the API — the app carries no URL that constructs it.
+The hop through `/api/sts` is what **mints the service session**, and the cookie jar gains `serviceToken`, `mimopc_ph`, `mimopc_slh` and `userId` — the last under `.xiaomimimo.com`, so it covers the service host. The measured response sets a host-scoped `mimopc_slh` and deletes its parent-domain variant with a past `Expires`; the console does the same with `api-platform_slh`. Only the live variant is forwarded. `passInfo`, `pass_ua`, `deviceId` and `ptn_count` belong to the SSO hop above it rather than to this one, and stay on the account hosts. Measured on a live exchange, the membership host receives `serviceToken`, `userId`, `mimopc_ph` and `mimopc_slh`. The service id is `mimopc`, and the login is driven by visiting the API — the app carries no URL that constructs it.
 
 - **Exchange-minted service cookies stay in memory.** They are this exchange's output, and the membership lane's only credential is the account cookie it was minted from: the account cookie is read again on every refresh, and nothing minted here is stored.
 - **A service cookie is not a substitute for the identity hop.** Measured: a freshly minted `serviceToken` set answers `/user/xiaomi/subscription/self` and `/user/usage` with `code: 0`, and is answered by `/user/xiaomi/me` with a **302 back to the SSO**, so it carries no identity and no region reading. What makes that hop answer 200 is where `/sts` sends the client — `/api/user/xiaomi/me?userId=…`, a query the redirect carries — rather than the cookies: the minted set replayed against the bare path answers 302 whether it is sent whole or as `serviceToken` alone. Nothing else needs that distinction today — the lane has no paste — but the console lane's service cookie is a different service's and would not work here either.
 - **An accepted exchange re-issues `passToken`.** Observed expiry attributes extend 30 days; they do not establish the server's session lifetime. Token Monitor discards the refreshed value and never writes it back. A missing local cookie uses the normal silent fallback.
 - **The exchange is silent while the account cookie is valid.** When it is rejected, the chain stops at `account.xiaomi.com/fe/service/login` and **mints nothing** — the refusal signature, detectable with no interactive step.
-- The final followup was observed as `http://`, answering 200 with a `/sts` token not marked `Secure`. Do not force HTTPS on it: a `Secure` cookie is withheld from an `http:` hop.
+- **The vendor callback still names HTTP.** On 2026-10-03, a diagnostic transport upgraded that callback to HTTPS for each complete exchange, then read Console `/balance` and membership `/user/xiaomi/subscription/self` over HTTPS; both returned `code: 0`. This was a Node outbound-transport probe, not the widget's Chromium adapter or a vendor-native all-HTTPS chain. Production still follows the vendor URL. Its HTTP callback carries the newly minted service token, `userId`, `*_ph` and live `*_slh`; the original account cookies are HTTPS-only. The HTTP response has no transport authentication or integrity protection. The successful reads establish access to those service endpoints, not wider account permissions or server-side lifetime. Whether to require HTTPS or make automatic exchange opt-in remains a maintainer decision.
 - **The account session is one named partition**, `persist:xiaomi-account`. The app sets `X-Client-Version` and `X-Mimo-Source` on those requests; **neither is required and nothing may key on either** — their values vary by build.
 - **Keep the measured request headers.** `browserHeaders.js` sends Console `Origin` and `Referer` only to the Console host; Desktop's membership calls omit them. A causal link between omitted headers and account sign-out has not been established.
-- **Redirects are allowlisted per hop.** HTTPS may stay on the original service host or move through Xiaomi login domains; the service host may also answer over plain HTTP, because its callback returns to the endpoint that started the walk (`/api/v1/balance?userId=…` for the console, `/user/xiaomi/me` for the membership) rather than to a `/sts` path. Set-Cookie parsing uses undici’s public `parseCookie`; the exchange jar keeps host/domain scoping and withholds `Secure` cookies from HTTP.
+- **Redirects are allowlisted per hop.** HTTPS may stay on the original service host or move through Xiaomi login domains; the service host may also answer over plain HTTP, because its callback returns to the endpoint that started the walk (`/api/v1/balance?userId=…` for the console, `/user/xiaomi/me` for the membership) rather than to a `/sts` path. Set-Cookie parsing uses undici’s public `parseCookie`; the exchange jar enforces host/domain, Path and expiry, and withholds `Secure` cookies from HTTP.
 - The walk's transport is chosen at the **runtime boundary** like every other provider call; see Transport.
 
 ### Account cookie on disk
@@ -102,9 +102,9 @@ Both hosts in that chain set cookies, and only the second hop's are in scope for
 |---|---|---|
 | `account.xiaomi.com` (the SSO) | `deviceId`, `passInfo`, `pass_ua`, `uLocale`, `theme`, `passToken`, `cUserId`, `ptn_count`, `userId` | `account.xiaomi.com`, `.account.xiaomi.com` and `.xiaomi.com` — no scope that matches the console host |
 | `platform.xiaomimimo.com/sts` | `api-platform_serviceToken`, `api-platform_ph`, `api-platform_slh` | `platform.xiaomimimo.com` |
-| the same `/sts` answer | `userId`, a second `api-platform_slh` | `xiaomimimo.com`, so both also cover the console host |
+| the same `/sts` answer | `userId`; deletion of the parent-domain `api-platform_slh` | `xiaomimimo.com`, so `userId` also covers the console host |
 
-`userId` is the one worth stating outright, because the console lane requires it beside `api-platform_serviceToken` and only one of the three copies can be sent: the account cookie's own `userId` is seeded host-only on `account.xiaomi.com`, and the SSO hop re-issues one under `.account.xiaomi.com` — neither scope matches the console host, so the `/sts` answer's copy is the one that answers the requirement. Measured on a live exchange, the header that host receives is exactly `api-platform_serviceToken`, `userId`, `api-platform_ph`, `api-platform_slh`. The last appears twice with different values, because the jar keys cookies by name and domain and this response set it under two; `normalizeMimoCookieHeader` collapses the pair to the last one. With that session, all five console reads answer `code: 0`: `/balance`, `/userProfile`, `/tokenPlan/detail`, `/tokenPlan/usage` and `/usage`.
+`userId` is the one worth stating outright, because the console lane requires it beside `api-platform_serviceToken` and only one of the three copies can be sent: the account cookie's own `userId` is seeded host-only on `account.xiaomi.com`, and the SSO hop re-issues one under `.account.xiaomi.com` — neither scope matches the console host, so the `/sts` answer's copy is the one that answers the requirement. Measured on a live exchange, the header that host receives is exactly `api-platform_serviceToken`, `userId`, `api-platform_ph`, `api-platform_slh`; the expired parent-domain `slh` is excluded. Earlier live probes read all five console endpoints successfully with minted credentials: `/balance`, `/userProfile`, `/tokenPlan/detail`, `/tokenPlan/usage` and `/usage`. The HTTPS diagnostic above rechecked `/balance` only.
 
 `/tokenPlan/detail` supplies the Console plan label: the existing reader prefers `planCode` / `plan_code`, then `planName` / `plan_name`. The shared display helper capitalizes a leading lowercase letter; it does not translate Console codes through the Desktop membership tier map. The `standard` test fixture therefore displays `Standard`, a tier listed in the [official Token Plan documentation](https://mimo.mi.com/docs/en-US/tokenplan/Token%20Plan/subscription). That fixture is not a live paid-subscription response, and `Standard` is not a default assigned to every account.
 
@@ -203,7 +203,7 @@ The rejected-account-cookie row is not hypothetical. Both lanes fail the same wa
 - **The timezone of zoneless membership timestamps.** The app fixture carries no offset. Token Monitor keeps the console provider's existing UTC normalization so synced devices agree; a live active-membership response is still needed to confirm that instant.
 - **Session effects of changing client headers.** Keep the measured header shape, but do not treat the earlier sign-out incident as proof that a missing `User-Agent` invalidates the session; that incident was later attributed to account removal by the user.
 - **Long-term exchange tolerance is unknown.** Successful short probes and an unchanged local store do not establish server-side tolerance over days. The current implementation mints on refresh without a service-session cache and does not re-mint after a quota request's auth failure.
-- **Windows on disk is unverified.** The measured install is macOS, where the cookie rows are plaintext. Whether a Windows install stores them in the clear or sealed is not known here — nothing about MiMo Desktop's Windows store has been observed. What the code does is fixed either way: a required cookie that arrives sealed is refused as `notConfigured` (fixture-covered), an unreadable store keeps the last reading instead of clearing it, and the manual paste stays available. Linux has no local source because MiMo Desktop has no Linux build.
+- **Windows on disk is unverified.** The measured install is macOS, where the cookie rows are plaintext. Whether a Windows install stores them in the clear or sealed is not known here — nothing about MiMo Desktop's Windows store has been observed. A required cookie available only as ciphertext, a missing SQLite capability or an unreadable store returns `unavailable`, retaining the last reading instead of clearing it; manual paste stays available. Linux has no local source because MiMo Desktop has no Linux build.
 
 ## Wiring
 
@@ -244,12 +244,14 @@ The local reader returns `{userId, cookieHeader}` or throws a status-bearing err
 
 | Store state | Answer |
 |---|---|
-| Unsupported platform, no store, no `node:sqlite`, **sealed rows** | `notConfigured` — silence, and the user pastes instead |
-| Store exists but cannot be inspected or opened | `unavailable` — transient, so the Limits runtime retains last-good automatic rows |
+| Unsupported platform or no store | `notConfigured` — silence, and the user pastes instead |
+| Store exists but cannot be inspected or opened, no `node:sqlite`, or a required cookie available only in `encrypted_value` | `unavailable` — transient, so the Limits runtime retains last-good automatic rows without removal markers |
 | Readable and carrying **one** of the two cookies | `unauthorized` when `userId` identifies the account; without `userId`, a lone Desktop source shows `Sign in again`, while a pasted Console account remains alone rather than counting an unknown Desktop account |
 | Readable and carrying **neither** | `notConfigured` — an app nobody has signed into is the same answer as no app |
 
 At-rest encryption is a property of the store, never evidence that the user signed out.
+
+Once the store can be read again, the next accepted refresh replaces the transient reading. The shared runtime's retry cooldown still applies. A confirmed logout or account switch continues to remove the vanished automatic identities.
 
 ### Transport
 
@@ -259,7 +261,7 @@ The walk therefore takes `deps.mimoExchangeFetch` when a runtime supplies one. I
 
 The cookie jar stays this module's either way. A Chromium *session* is not an alternative: it owns the cookie policy, and that policy withholds every cookie on the https→http hop this chain's callback makes.
 
-The exchange jar handles host, Domain and Secure, with Domain parsing supplied by undici. It does not implement Path or cookie expiry; those remain limitations of this per-exchange jar, not observed failures in the measured login chain.
+The exchange jar identifies cookies by name, domain and path. Missing or invalid Path uses the issuing URL's directory; requests match on a path boundary, with longer paths first. `Max-Age` takes precedence over `Expires`, and deletion or expiry is applied both on redirect requests and when returning the minted credential. Attribute parsing uses undici, with local handling of URL-dependent default paths and negative `Max-Age`, which its parser does not provide. The jar exists only for one exchange; it is neither persisted nor written back to the Desktop partition.
 
 ### Manual console credential
 
