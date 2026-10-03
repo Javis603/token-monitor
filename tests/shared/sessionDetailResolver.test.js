@@ -18,7 +18,7 @@ function missing(args) {
 }
 
 for (const client of ['codex', 'claude']) {
-  test(`${client} continues WSL fallback when a resolved native or WSL file disappears`, (t) => {
+  test(`${client} continues WSL fallback when a resolved native or WSL file disappears`, async (t) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-detail-race-'));
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
     const homes = ['native', 'wsl-first', 'wsl-next'].map(name => path.join(root, name));
@@ -43,7 +43,7 @@ for (const client of ['codex', 'claude']) {
         if (filePath === files[disappearingIndex]) fs.unlinkSync(filePath);
         return openSync(filePath, ...options);
       });
-      const detail = resolveSessionDetailForPlatform(
+      const detail = await resolveSessionDetailForPlatform(
         { client, sessionId, period: 'total', sessionCost: 0.25 },
         { platform: 'win32', homedir: () => homes[0], env: {}, wslUsageHomes: () => homes.slice(1) }
       );
@@ -57,10 +57,10 @@ for (const client of ['codex', 'claude']) {
   });
 }
 
-test('keeps native and WSL read failures instead of reporting a missing transcript', () => {
+test('keeps native and WSL read failures instead of reporting a missing transcript', async () => {
   for (const failingHome of ['/native', '/wsl']) {
     const attempts = [];
-    const detail = resolveSessionDetailForPlatform({ client: 'codex', sessionId: 'large' }, {
+    const detail = await resolveSessionDetailForPlatform({ client: 'codex', sessionId: 'large' }, {
       platform: 'win32', homedir: () => '/native',
       wslUsageHomes: () => ['/wsl', '/other'],
       readSessionDetail: args => {
@@ -73,7 +73,7 @@ test('keeps native and WSL read failures instead of reporting a missing transcri
   }
 });
 
-test('reads a Claude transcript from a discovered WSL home', (t) => {
+test('reads a Claude transcript from a discovered WSL home', async (t) => {
   const nativeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-detail-'));
   const wslHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-wsl-detail-'));
   t.after(() => fs.rmSync(nativeHome, { recursive: true, force: true }));
@@ -93,7 +93,7 @@ test('reads a Claude transcript from a discovered WSL home', (t) => {
     })
   ].join('\n'));
 
-  const detail = resolveSessionDetailForPlatform(
+  const detail = await resolveSessionDetailForPlatform(
     { client: 'claude', sessionId, period: 'total', sessionCost: 0.25 },
     {
       platform: 'win32',
@@ -108,7 +108,7 @@ test('reads a Claude transcript from a discovered WSL home', (t) => {
   assert.equal(detail.totals.costUsd, 0.25);
 });
 
-test('WSL Claude detail ignores the host CLAUDE_CONFIG_DIR override', (t) => {
+test('WSL Claude detail ignores the host CLAUDE_CONFIG_DIR override', async (t) => {
   const nativeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-detail-'));
   const wslHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-wsl-detail-'));
   const hostConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-host-claude-'));
@@ -123,7 +123,7 @@ test('WSL Claude detail ignores the host CLAUDE_CONFIG_DIR override', (t) => {
     JSON.stringify({ type: 'assistant', timestamp: '2026-07-31T00:00:01.000Z', message: { usage: { input_tokens: 2, output_tokens: 1 }, content: [] } })
   ].join('\n'));
 
-  const detail = resolveSessionDetailForPlatform(
+  const detail = await resolveSessionDetailForPlatform(
     { client: 'claude', sessionId, period: 'total' },
     {
       platform: 'win32',
@@ -138,7 +138,7 @@ test('WSL Claude detail ignores the host CLAUDE_CONFIG_DIR override', (t) => {
   assert.equal(detail.totals.totalTokens, 3);
 });
 
-test('reads a Claude transcript from the alternate root in a discovered WSL home', (t) => {
+test('reads a Claude transcript from the alternate root in a discovered WSL home', async (t) => {
   const nativeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-detail-'));
   const wslHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-wsl-detail-'));
   t.after(() => fs.rmSync(nativeHome, { recursive: true, force: true }));
@@ -151,7 +151,7 @@ test('reads a Claude transcript from the alternate root in a discovered WSL home
     JSON.stringify({ type: 'assistant', timestamp: '2026-07-31T00:00:01.000Z', message: { usage: { input_tokens: 4, output_tokens: 2 }, content: [] } })
   ].join('\n'));
 
-  const detail = resolveSessionDetailForPlatform(
+  const detail = await resolveSessionDetailForPlatform(
     { client: 'claude', sessionId, period: 'total' },
     { platform: 'win32', homedir: () => nativeHome, wslUsageHomes: () => [wslHome] }
   );
@@ -161,7 +161,7 @@ test('reads a Claude transcript from the alternate root in a discovered WSL home
   assert.equal(detail.totals.totalTokens, 6);
 });
 
-test('reads a Codex transcript from its dated path in a discovered WSL home', (t) => {
+test('reads a Codex transcript from its dated path in a discovered WSL home', async (t) => {
   const nativeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-detail-'));
   const wslHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-wsl-detail-'));
   t.after(() => fs.rmSync(nativeHome, { recursive: true, force: true }));
@@ -174,7 +174,7 @@ test('reads a Codex transcript from its dated path in a discovered WSL home', (t
     JSON.stringify({ type: 'event_msg', timestamp: '2026-07-31T00:00:01.000Z', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 10, cached_input_tokens: 3, output_tokens: 5, reasoning_output_tokens: 2, total_tokens: 15 } } } })
   ].join('\n'));
 
-  const detail = resolveSessionDetailForPlatform(
+  const detail = await resolveSessionDetailForPlatform(
     { client: 'codex', sessionId, period: 'total', sessionCost: 0.1 },
     { platform: 'win32', homedir: () => nativeHome, wslUsageHomes: () => [wslHome] }
   );
@@ -185,9 +185,9 @@ test('reads a Codex transcript from its dated path in a discovered WSL home', (t
   assert.equal(detail.totals.costUsd, 0.1);
 });
 
-test('returns a native Claude detail without enumerating WSL homes', () => {
+test('returns a native Claude detail without enumerating WSL homes', async () => {
   let enumerated = false;
-  const detail = resolveSessionDetailForPlatform(
+  const detail = await resolveSessionDetailForPlatform(
     { client: 'claude', sessionId: 'native' },
     {
       platform: 'win32',
@@ -202,7 +202,7 @@ test('returns a native Claude detail without enumerating WSL homes', () => {
   assert.equal(enumerated, false);
 });
 
-test('resolves a Reasonix native detail through the same platform resolver', () => {
+test('resolves a Reasonix native detail through the same platform resolver', async () => {
   const nativeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-reasonix-detail-'));
   const stateHome = path.join(nativeHome, 'state');
   const sessions = path.join(stateHome, 'projects', 'opaque', 'sessions');
@@ -213,7 +213,7 @@ test('resolves a Reasonix native detail through the same platform resolver', () 
     JSON.stringify({ type: 'model.final', ts: '2026-08-08T00:00:01.000Z', usage: { prompt_tokens: 3, completion_tokens: 2 } })
   ].join('\n'));
   try {
-    const detail = resolveSessionDetailForPlatform(
+    const detail = await resolveSessionDetailForPlatform(
       { client: 'reasonix', sessionId: 'reasonix:resolver-id', period: 'total' },
       {
         platform: process.platform,
@@ -233,9 +233,9 @@ test('resolves a Reasonix native detail through the same platform resolver', () 
 });
 
 for (const client of ['claude', 'codex']) {
-  test(`falls back to running WSL homes for ${client} JSONL details on Windows`, () => {
+  test(`falls back to running WSL homes for ${client} JSONL details on Windows`, async () => {
     const homes = [];
-    const detail = resolveSessionDetailForPlatform(
+    const detail = await resolveSessionDetailForPlatform(
       { client, sessionId: 'wsl-session' },
       {
         platform: 'win32',
@@ -258,10 +258,10 @@ for (const client of ['claude', 'codex']) {
   });
 }
 
-test('does not inspect WSL homes for non-Windows or SQLite-backed clients', () => {
+test('does not inspect WSL homes for non-Windows or SQLite-backed clients', async () => {
   for (const [platform, client] of [['linux', 'claude'], ['win32', 'opencode'], ['linux', 'dsh']]) {
     let enumerated = false;
-    const detail = resolveSessionDetailForPlatform(
+    const detail = await resolveSessionDetailForPlatform(
       { client, sessionId: 'missing' },
       {
         platform,
@@ -276,9 +276,9 @@ test('does not inspect WSL homes for non-Windows or SQLite-backed clients', () =
   }
 });
 
-test('returns the native not-found result when WSL discovery fails', () => {
+test('returns the native not-found result when WSL discovery fails', async () => {
   const nativeDetail = { found: false, client: 'claude', sessionId: 'missing', exchanges: [], marker: 'native' };
-  const detail = resolveSessionDetailForPlatform(
+  const detail = await resolveSessionDetailForPlatform(
     { client: 'claude', sessionId: 'missing' },
     {
       platform: 'win32',
@@ -368,9 +368,9 @@ test('the public session detail resolver uses the worker boundary', async () => 
 // readDshSessionDetail rather than the tokscale-JSONL reader, and forwards
 // home/platform/env/cwdDir the same way the generic `deps.readSessionDetail`
 // seam already does.
-test('dsh dispatches to readDshSessionDetail with home/platform/env/cwdDir, never the generic JSONL reader', () => {
+test('dsh dispatches to readDshSessionDetail with home/platform/env/cwdDir, never the generic JSONL reader', async () => {
   let received;
-  const detail = resolveSessionDetailForPlatform(
+  const detail = await resolveSessionDetailForPlatform(
     { client: 'dsh', sessionId: 's1' },
     {
       readDshSessionDetail: (args) => { received = args; return { found: true, client: 'dsh', sessionId: 's1' }; },
@@ -392,9 +392,9 @@ test('dsh dispatches to readDshSessionDetail with home/platform/env/cwdDir, neve
 // legitimately surface in the list from a WSL distro on Windows. Detail must
 // follow the same native-miss -> WSL-hit fallback claude/codex already get,
 // through readDshSessionDetail rather than the tokscale-JSONL reader.
-test('falls back to a WSL home for a dsh session not found in the native home', () => {
+test('falls back to a WSL home for a dsh session not found in the native home', async () => {
   const attempts = [];
-  const detail = resolveSessionDetailForPlatform(
+  const detail = await resolveSessionDetailForPlatform(
     { client: 'dsh', sessionId: 's1' },
     {
       readDshSessionDetail: (args) => {
@@ -420,9 +420,9 @@ test('falls back to a WSL home for a dsh session not found in the native home', 
 // the host path, making the fallback a no-op — tokscale's own scanner
 // deliberately disables env-based root lookup for an explicit --home
 // (use_env_roots: false, lib.rs) for exactly this reason.
-test('does not let a host DSH_HOME override leak into the WSL fallback attempt', () => {
+test('does not let a host DSH_HOME override leak into the WSL fallback attempt', async () => {
   const envSeen = [];
-  const detail = resolveSessionDetailForPlatform(
+  const detail = await resolveSessionDetailForPlatform(
     { client: 'dsh', sessionId: 's1' },
     {
       readDshSessionDetail: (args) => {
