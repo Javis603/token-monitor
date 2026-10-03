@@ -1,7 +1,7 @@
 'use strict';
 
-const os = require('node:os');
 const path = require('node:path');
+const { tokscaleHomeDir } = require('../../tokscaleConfig');
 
 // Qoder CN usage is parsed by the tokscale fork (`--client qodercn`); these
 // paths only feed watching, source health and the collector anchor
@@ -16,9 +16,11 @@ const QODER_CN_DB_SUFFIX = path.join('SharedClientCache', 'cache', 'db', 'local.
 const QODER_CN_PROJECTS_SUFFIX = path.join('.qoder-cn', 'projects');
 
 function qoderCnDataPaths(options = {}) {
-  const home = options.homeDir || os.homedir();
   const env = options.env || process.env;
   const platform = options.platform || process.platform;
+  // The fork builds every default on tokscale's effective home, which on
+  // Windows is an absolute native $HOME in preference to the profile.
+  const home = tokscaleHomeDir({ env, platform, homeDir: options.homeDir });
   let appSupport;
   if (platform === 'darwin') appSupport = path.join(home, 'Library', 'Application Support');
   else if (platform === 'win32') appSupport = (typeof env.APPDATA === 'string' && env.APPDATA.length > 0) ? env.APPDATA : path.join(home, 'AppData', 'Roaming');

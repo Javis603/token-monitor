@@ -97,7 +97,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 Qoder CN のトークン使用量は API ではなくアプリのローカルデータから読み取ります。Settings → tools で有効化します（オプトイン、デフォルト無効）。現行版は Qoder 設定ディレクトリの `projects` JSONL（通常 `~/.qoder-cn/projects`）、旧版は SQLite を使用し、Token Monitor 同梱の tokscale が両方を読み取ります。JSONL パスの優先順位は `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`、既定値です。旧データベースは `TOKEN_MONITOR_QODER_CN_DB_PATH` で上書きできます。[Qoder のデータソース](docs/providers/qodercn.md)も参照してください。
 
-これは高度なローカル統合ですが、どちらの形式にも追加ランタイムは不要です。読み取れないソースは、最後に読み取れた行を保持します。旧データベースのセッションはパスではなくプロジェクト名だけを記録するため、プロジェクトなしで表示されます。実測トークン欄がある JSONL 行だけを集計します。現行のファーストパーティープラン行は credits と context 比率だけの場合があり、信頼できるセッション単位の context window がないためトークンを推測しません。Credits は AI Tool Limits に表示され、実測トークンを持つ BYOK／カスタムモデルは通常どおり集計されます。
+これは高度なローカル統合ですが、どちらの形式にも追加ランタイムは不要です。読み取れないソースは、最後に完全に読み取れたデータを保持します。旧データベースのセッションはパスではなくプロジェクト名だけを記録するため、プロジェクトなしで表示されます。実測トークン欄がある JSONL 行だけを集計します。現行のファーストパーティープラン行は credits と context 比率だけの場合があり、信頼できるセッション単位の context window がないためトークンを推測しません。Credits は AI Tool Limits に表示され、実測トークンを持つ BYOK／カスタムモデルは通常どおり集計されます。
 </details>
 
 ## ショーケース

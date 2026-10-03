@@ -8,6 +8,7 @@ const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
+const { FORK_ONLY_CLIENT_IDS } = require('./clientCatalog');
 const { antigravityCliDataDir, canonicalWatchPath, cherryStudioTranscriptRoots, clientSourceRoots, copilotExporterWatch } = require('./clientSources');
 const { clientDiagnosticRoots, clientSourceChecks, dirExists, visibleDiagnosticRoots } = require('./clientSourceObservations');
 const {
@@ -363,6 +364,42 @@ const tokscaleCapabilityResolver = createTokscaleCapabilityResolver({
 // rejected with exit 2 and takes the whole scan down with it (verified on 4.7.0
 // and 4.8.0), so the shared mapping is not a free-form place to invent
 // sub-source names.
+// Fork-only clients are split out of argv before clap parses it, so they never
+// appear in --help even on the pinned fork. Ask the binary instead: a scan of
+// only those ids over an empty home exits 0 on the fork and fails with the
+// unknown-client exit code on an upstream build.
+async function forkOnlyClientsAccepted(command, options = {}) {
+  if (FORK_ONLY_CLIENT_IDS.length === 0) return false;
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-tokscale-probe-'));
+  try {
+    await spawnTokscaleJson(
+      ['--json', '--client', FORK_ONLY_CLIENT_IDS.join(','), '--today', '--home', home, '--no-spinner'],
+      options.timeoutMs ?? TOKSCALE_CAPABILITY_PROBE_TIMEOUT_MS,
+      command,
+      undefined,
+      {
+        operation: 'tokscale capability probe',
+        terminationOptions: options.terminationOptions,
+        onTerminationUnconfirmed: options.onTerminationUnconfirmed
+      }
+    );
+    return true;
+  } catch (error) {
+    if (isUnknownTokscaleClientError(error)) return false;
+    throw error;
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
+async function probeTokscaleCapabilities(command, options = {}) {
+  const supported = await spawnTokscaleHelp(command, options);
+  if (await forkOnlyClientsAccepted(command, options)) {
+    for (const client of FORK_ONLY_CLIENT_IDS) supported.add(client);
+  }
+  return supported;
+}
+
 function tokscaleClientFilter(clients) {
   const ordered = [];
   const seen = new Set();
@@ -441,8 +478,9 @@ function waitForSharedCapabilityProbe(probe, signal) {
 
 // Reactive, not proactive: a binary that recognizes every requested client
 // never pays for a capability probe. Only once tokscale has actually
-// rejected the CSV (exit 2) do we spend one `--help` probe to learn what the
-// resolved binary really supports, then retry with just those ids. A probe
+// rejected the CSV (exit 2) do we spend one `--help` probe (plus one empty
+// fork-only scan, see forkOnlyClientsAccepted) to learn what the resolved
+// binary really supports, then retry with just those ids. A probe
 // success is cached per binary identity so a later tick on the same binary
 // filters proactively instead of failing first; a probe failure is cached
 // too (and warned once) so we don't re-probe on every subsequent failure —
@@ -456,7 +494,7 @@ function retryWithKnownCapabilities(error, requested, command, emptyResult, retr
   // superseded collector must not poison the cache for every later runtime.
   const sharedProbe = tokscaleCapabilityResolver.probe(
     command.identity,
-    () => spawnTokscaleHelp(command, options)
+    () => probeTokscaleCapabilities(command, options)
   );
   return waitForSharedCapabilityProbe(sharedProbe, signal).then((supported) => {
     throwIfAborted(signal);

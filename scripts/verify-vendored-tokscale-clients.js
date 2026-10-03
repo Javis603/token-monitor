@@ -1,8 +1,8 @@
 'use strict';
 
-// Verifies every id tokscaleClientFilter() actually sends for a DEFAULT_CLIENTS
-// scan is a client the real,
-// currently-authoritative tokscale binary recognizes. This deliberately checks
+// Verifies that the real, currently-authoritative tokscale binary recognizes
+// every id tokscaleClientFilter() actually sends for a DEFAULT_CLIENTS scan
+// (fork-only ids by a real scan, see below). This deliberately checks
 // the same expanded set collectUsageOnce hands to runTokscale/runTokscaleGraph
 // — including TOKSCALE_CLIENT_ALIASES sub-source ids like antigravity-cli —
 // not just the logical DEFAULT_CLIENTS entries, since a binary can drop an
