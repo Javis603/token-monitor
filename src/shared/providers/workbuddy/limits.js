@@ -447,6 +447,14 @@ async function fetchWorkbuddyLimits(options = {}, deps = {}) {
       ...(balance ? { balance } : {})
     });
   } catch (error) {
+    if (error?.workbuddySessionReason === WORKBUDDY_SESSION_REASON_ENCRYPTED) {
+      return normalizeLimitProvider({
+        ...source,
+        accountKey,
+        status: 'notConfigured',
+        actionRequired: WORKBUDDY_SESSION_ENCRYPTED_ACTION
+      });
+    }
     return normalizeLimitProvider({ ...source, accountKey, status: workbuddyStatus(error) });
   }
 }

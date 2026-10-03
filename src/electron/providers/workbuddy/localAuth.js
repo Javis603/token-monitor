@@ -10,6 +10,7 @@ const {
   WORKBUDDY_PERSONAL_PATH,
   WORKBUDDY_SESSION_REASON_ENCRYPTED
 } = require('../../../shared/providers/workbuddy/limits');
+const { createWorkbuddyCredentialDecoder, isEncryptedAccessToken } = require('./credentialDecoder');
 
 const WORKBUDDY_AUTH_FILE_NAME = 'workbuddy-desktop.info';
 const WORKBUDDY_LOGOUT_MARKER_SUFFIX = '.logged-out';
@@ -17,9 +18,10 @@ const WORKBUDDY_AUTH_FILE_MAX_BYTES = 1024 * 1024;
 const WORKBUDDY_SESSION_EXPIRY_SKEW_MS = 30 * 1000;
 // Newer WorkBuddy builds seal individual credential fields with the key their
 // own runtime holds, so `auth.accessToken` is a `{$wbEncrypted: 1, envelope: …}`
-// shell rather than a string. Token Monitor cannot open that envelope, and the
-// distinction matters: an unreadable credential is not the same state as a
-// signed-out app, because signing in again cannot change it.
+// shell rather than a string. Supported Windows builds can open it through the
+// short-lived WorkBuddy runtime codec; unsupported platforms or unavailable
+// codecs keep it sealed. The distinction matters: an unreadable credential is
+// not the same state as a signed-out app, because signing in again cannot change it.
 const WORKBUDDY_ENCRYPTED_FIELD_MARKER = '$wbEncrypted';
 const WORKBUDDY_SESSION_READ_REASONS = Object.freeze({
   // No canonical file, or the app left its logout marker.
@@ -30,7 +32,8 @@ const WORKBUDDY_SESSION_READ_REASONS = Object.freeze({
   malformed: 'malformed',
   // Readable document without a usable access token or account id.
   incomplete: 'incomplete',
-  // The app sealed its credential fields; Token Monitor cannot decrypt them.
+  // The app sealed its credential fields; unsupported platforms or unavailable
+  // codecs cannot decrypt them.
   encrypted: WORKBUDDY_SESSION_REASON_ENCRYPTED,
   // A usable session that is past its expiry.
   expired: 'expired'
@@ -160,7 +163,7 @@ function isEncryptedCredentialField(value) {
 // Separates "the app is not signed in" from "Token Monitor cannot read what the
 // app wrote". Only the read reason reaches the limits path; callers that just
 // need a session keep using normalizeStoredSession().
-function inspectStoredSession(value, now = Date.now()) {
+function inspectStoredSession(value, now = Date.now(), allowEncryptedMetadata = false) {
   if (!value || typeof value !== 'object') {
     return { session: null, reason: WORKBUDDY_SESSION_READ_REASONS.malformed };
   }
@@ -169,12 +172,14 @@ function inspectStoredSession(value, now = Date.now()) {
   // Only the access token gates the read: it is the one field the billing
   // request consumes, so a sealed refresh token must not mark an otherwise
   // usable session as unreadable.
-  if (isEncryptedCredentialField(auth.accessToken)) {
+  if (isEncryptedCredentialField(auth.accessToken)
+    && (!allowEncryptedMetadata || !isEncryptedAccessToken(auth.accessToken))) {
     return { session: null, reason: WORKBUDDY_SESSION_READ_REASONS.encrypted };
   }
+  const encryptedAccessToken = isEncryptedAccessToken(auth.accessToken) ? auth.accessToken : null;
   const accessToken = cleanText(auth.accessToken);
   const userId = cleanText(account.uid);
-  if (!accessToken || !userId) {
+  if ((!accessToken && !encryptedAccessToken) || !userId) {
     return { session: null, reason: WORKBUDDY_SESSION_READ_REASONS.incomplete };
   }
 
@@ -184,6 +189,7 @@ function inspectStoredSession(value, now = Date.now()) {
   return {
     session: {
       accessToken,
+      encryptedAccessToken,
       userId,
       enterpriseId,
       departmentInfo,
@@ -200,7 +206,7 @@ function normalizeStoredSession(value, now = Date.now()) {
   return inspectStoredSession(value, now).session;
 }
 
-function readSessionFile(filePath, fsApi = fs, now = Date.now()) {
+function readSessionFile(filePath, fsApi = fs, now = Date.now(), allowEncryptedMetadata = false) {
   const absent = { session: null, reason: WORKBUDDY_SESSION_READ_REASONS.absent };
   if (!filePath) return absent;
   if (fsApi.existsSync(`${filePath}${WORKBUDDY_LOGOUT_MARKER_SUFFIX}`)) return absent;
@@ -211,7 +217,7 @@ function readSessionFile(filePath, fsApi = fs, now = Date.now()) {
       encoding: 'utf8',
       maxBytes: WORKBUDDY_AUTH_FILE_MAX_BYTES
     });
-    return inspectStoredSession(JSON.parse(raw), now);
+    return inspectStoredSession(JSON.parse(raw), now, allowEncryptedMetadata);
   } catch (_) {
     // The reader rejects missing, oversized, symlinked and unreadable paths
     // with one error shape. Only a path that is genuinely gone counts as
@@ -269,8 +275,11 @@ function createWorkbuddyLocalAuth(deps = {}) {
       ? globalThis.fetch.bind(globalThis)
       : null;
   const now = typeof deps.now === 'function' ? deps.now : Date.now;
+  const decryptAccessToken = typeof deps.decryptAccessToken === 'function'
+    ? deps.decryptAccessToken
+    : createWorkbuddyCredentialDecoder(deps);
 
-  function locateSession() {
+  function locateSession(allowEncryptedMetadata = false) {
     const checkedAt = now();
     if (!supported) {
       return { session: null, reason: WORKBUDDY_SESSION_READ_REASONS.unsupported };
@@ -282,14 +291,14 @@ function createWorkbuddyLocalAuth(deps = {}) {
         if (!hasCanonicalState) continue;
         // Once the preferred location has a canonical file or logout marker,
         // do not revive a stale session from a legacy fallback directory.
-        return readSessionFile(filePath, fsApi, checkedAt);
+        return readSessionFile(filePath, fsApi, checkedAt, allowEncryptedMetadata);
       }
     }
     return { session: null, reason: WORKBUDDY_SESSION_READ_REASONS.absent };
   }
 
   function getSessionInfo() {
-    const { session, reason } = locateSession();
+    const { session, reason } = locateSession(platform === 'win32');
     if (!session) return sessionInfo(null, reason);
     return session.expired
       ? sessionInfo(null, WORKBUDDY_SESSION_READ_REASONS.expired)
@@ -301,7 +310,7 @@ function createWorkbuddyLocalAuth(deps = {}) {
     if (!isAllowedWorkbuddyApiUrl(url, requestInit.method)) {
       throw authError('unavailable', 'WorkBuddy billing endpoint is not allowed');
     }
-    const { session, reason } = locateSession();
+    const { session, reason } = locateSession(platform === 'win32');
     if (!session) throw authError('notConfigured', sessionUnavailableMessage(reason));
     if (session.expired) throw authError('unauthorized', 'WorkBuddy app session has expired');
     if (!matchesExpectedSession(expectedSession, session)) {
@@ -309,11 +318,22 @@ function createWorkbuddyLocalAuth(deps = {}) {
     }
     if (!fetcher) throw authError('unavailable', 'WorkBuddy billing transport is unavailable');
 
+    let accessToken = session.accessToken;
+    if (!accessToken && session.encryptedAccessToken) {
+      try { accessToken = cleanText(decryptAccessToken(session.encryptedAccessToken)); } catch (_) { accessToken = ''; }
+      if (!accessToken) {
+        const error = authError('unavailable', 'WorkBuddy app session codec is unavailable');
+        error.workbuddySessionReason = WORKBUDDY_SESSION_READ_REASONS.encrypted;
+        throw error;
+      }
+    }
+    if (!accessToken) throw authError('unavailable', 'WorkBuddy app session codec is unavailable');
+
     const headers = {
       ...requestInit.headers,
       Accept: requestInit.headers.Accept || 'application/json',
       'Content-Type': requestInit.headers['Content-Type'] || 'application/json',
-      Authorization: `Bearer ${session.accessToken}`,
+      Authorization: `Bearer ${accessToken}`,
       'X-User-Id': session.userId
     };
     if (session.enterpriseId) {
@@ -324,7 +344,7 @@ function createWorkbuddyLocalAuth(deps = {}) {
     if (session.departmentInfo) headers['X-Department-Info'] = session.departmentInfo;
     const response = await fetcher(url, { ...requestInit, headers });
     if (expectedSession) {
-      const { session: latestSession } = locateSession();
+      const { session: latestSession } = locateSession(platform === 'win32');
       if (!latestSession || latestSession.expired || !matchesExpectedSession(expectedSession, latestSession)) {
         throw authError('unauthorized', 'WorkBuddy app session changed during the billing request');
       }

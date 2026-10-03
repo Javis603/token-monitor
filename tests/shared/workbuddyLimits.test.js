@@ -489,6 +489,17 @@ test('fetchWorkbuddyLimits names an app-sealed credential instead of asking for 
   assert.doesNotMatch(JSON.stringify(provider), /encrypted"|envelope|eyJ/);
 });
 
+test('WorkBuddy codec failure preserves the encrypted-session action hint', async () => {
+  const error = new Error('codec unavailable');
+  error.workbuddySessionReason = 'encrypted';
+  const provider = await fetchWorkbuddyLimits({ workbuddyDesktopSessionEnabled: true }, {
+    env: {},
+    workbuddyFetch: async () => { throw error; }
+  });
+  assert.equal(provider.status, 'notConfigured');
+  assert.equal(provider.actionRequired, 'appSessionEncrypted');
+});
+
 test('other WorkBuddy session read reasons keep the existing sign-in row', async () => {
   const provider = await fetchWorkbuddyLimits(
     {
