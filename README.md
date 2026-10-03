@@ -92,12 +92,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 - The Cursor cache comes from Cursor's account-level usage export, so it covers usage from Cursor IDE, Cursor CLI, and Grok Bot. Token Monitor automatically detects accounts signed in through the Cursor desktop app and also supports adding accounts manually in Settings. The cache re-syncs automatically when stale, but newly finished sessions can take a few minutes to reach Cursor's dashboard, so usage updates on sync rather than instantly.
 
 - Custom maps numeric JSON fields from one GET balance endpoint; OpenAI or Anthropic compatibility alone is not enough.
-
-#### Qoder CN (local adapter)
-
-Qoder CN token usage is read from the app's local data, not an API — enable it in Settings → tools (opt-in, off by default). Current builds persist Claude-compatible JSONL transcripts in the Qoder config directory's `projects` tree (normally `~/.qoder-cn/projects`), while older builds wrote a SQLite database. Token Monitor's bundled tokscale build reads both. The transcript path follows `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, then `QODERCN_CONFIG_DIR/projects`, then the default; the legacy database is auto-detected per platform and can be overridden with `TOKEN_MONITOR_QODER_CN_DB_PATH`. See [Qoder source notes](docs/providers/qodercn.md).
-
-This is an advanced local integration, but neither layout needs an extra runtime. A source that cannot be read keeps the data from its last complete read. Legacy database sessions record only a project name, not a path, so they appear without a project. Only JSONL rows with reported token counts are included: current first-party plan-billed rows may expose credits and context occupancy but no reliable per-session context window, so their tokens cannot be reconstructed safely and are omitted from token totals. Their credits remain available in AI Tool Limits; BYOK/custom-model rows with measured tokens are counted normally.
+- Qoder CN is off by default; enable it in Settings → tools. Current sessions are JSONL under `~/.qoder-cn/projects` (`TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, then `QODERCN_CONFIG_DIR/projects`); older builds used a SQLite database, overridable with `TOKEN_MONITOR_QODER_CN_DB_PATH`. An unreadable source keeps its last complete read. Legacy database sessions record only a project name, so they appear without a project. Plan-billed JSONL rows that report credits but no token counts are omitted from token totals; those credits stay in AI Tool Limits, and BYOK rows with measured tokens are counted. See [Qoder source notes](docs/providers/qodercn.md).
 </details>
 
 ## Showcase
