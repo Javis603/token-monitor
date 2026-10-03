@@ -70,6 +70,7 @@ function collectUsageModelIds(value, modelIds = new Set()) {
   if (!value || typeof value !== 'object') return modelIds;
   addModelId(modelIds, value.model);
   for (const field of MODEL_MAP_FIELDS) addModelMapIds(modelIds, value[field]);
+  addModelMapIds(modelIds, value.modelThroughput);
   for (const field of ['clientModels', 'clientModelCosts']) addClientModelIds(modelIds, value[field]);
   for (const field of ['sessions', 'projects']) {
     for (const row of Object.values(value[field] || {})) collectUsageModelIds(row, modelIds);
@@ -105,7 +106,6 @@ function collectStatsModelIds(stats) {
     collectHistoryModelIds(device?.history, modelIds);
     collectHistoryModelIds(device?.historyPreview, modelIds);
   }
-  for (const row of Object.values(stats.allTimeSessionsView || {})) collectUsageModelIds(row, modelIds);
   for (const field of ['nativeSessions', 'nativeProjects']) {
     for (const period of Object.values(stats[field] || {})) {
       for (const row of Object.values(period || {})) collectUsageModelIds(row, modelIds);
@@ -132,6 +132,20 @@ function foldClientModelMaps(map, resolve) {
   return mapValues(map, (row) => foldModelMap(row, resolve));
 }
 
+function foldModelThroughput(value, resolve) {
+  if (!value || typeof value !== 'object') return value;
+  const keys = Object.keys(value);
+  if (!keys.some((model) => resolve(model) !== model)) return value;
+  const result = new Map();
+  for (const model of keys) {
+    const key = resolve(model);
+    const target = result.get(key) || { timedTokens: 0, timedOutputTokens: 0, timedDurationMs: 0 };
+    for (const field of Object.keys(target)) target[field] += num(value[model]?.[field]);
+    result.set(key, target);
+  }
+  return Object.fromEntries(result);
+}
+
 function projectNestedUsage(map, resolve) {
   return mapValues(map, (row) => projectUsage(row, resolve));
 }
@@ -141,6 +155,7 @@ function projectNestedUsage(map, resolve) {
 // project of every period of every device.
 const USAGE_PROJECTIONS = [
   ...MODEL_MAP_FIELDS.map((field) => [field, foldModelMap]),
+  ['modelThroughput', foldModelThroughput],
   ['clientModels', foldClientModelMaps],
   ['clientModelCosts', foldClientModelMaps],
   ['sessions', projectNestedUsage],
@@ -375,9 +390,6 @@ function projectModelAliasStats(stats, aliases, options = {}) {
   result.modelAliasSourceIds = [...pricingSourceIds].sort();
 
   if (Array.isArray(stats.devices)) result.devices = mapRows(stats.devices, projectRecord);
-  if (stats.allTimeSessionsView) {
-    result.allTimeSessionsView = mapValues(stats.allTimeSessionsView, (session) => projectUsage(session, plan.resolve));
-  }
   for (const field of ['nativeSessions', 'nativeProjects']) {
     if (stats[field]) {
       result[field] = mapValues(stats[field], (period) => mapValues(period, (row) => projectUsage(row, plan.resolve)));
@@ -402,11 +414,28 @@ function projectModelAliasStats(stats, aliases, options = {}) {
   return result;
 }
 
+// The renderer pulls the all-time session list apart from the stats it belongs
+// to, so its plan is read off both: the ids that shaped those stats' projection
+// and the sessions' own.
+function projectModelAliasSessions(stats, sessions, aliases, options = {}) {
+  if (!sessions || typeof sessions !== 'object') return sessions;
+  const grouping = normalizeModelAliasGrouping(options.grouping);
+  let modelIds = [];
+  if (grouping !== 'off') {
+    const ids = collectStatsModelIds(stats);
+    for (const session of Object.values(sessions)) collectUsageModelIds(session, ids);
+    modelIds = [...ids];
+  }
+  const plan = aliasPlan(modelIds, aliases, grouping);
+  return plan.active ? mapValues(sessions, (session) => projectUsage(session, plan.resolve)) : sessions;
+}
+
 module.exports = {
   normalizeModelAliases,
   normalizeModelAliasGrouping,
   inferModelAliases,
   createModelAliasResolver,
   projectModelAliasStats,
+  projectModelAliasSessions,
   projectModelAliasHistory
 };

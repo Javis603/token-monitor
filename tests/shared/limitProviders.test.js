@@ -12,7 +12,7 @@ const {
   LIMIT_PROVIDER_LABELS,
   limitProviderForClient,
   limitProvidersForDetectedClients
-} = require('../../src/shared/limitProviders');
+} = require('../../src/shared/limits/providers');
 const { parseLimitProviders, providerFetchers } = require('../../src/shared/limits/collector');
 
 const rootDir = path.join(__dirname, '..', '..');
@@ -154,7 +154,7 @@ test('the renderer derives its provider list from this catalog', () => {
   assert.doesNotMatch(app, /const LIMIT_PROVIDERS = \[/);
 
   const html = read('src', 'electron', 'renderer', 'index.html');
-  const tag = html.indexOf('<script src="../../shared/limitProviders.js"></script>');
+  const tag = html.indexOf('<script src="../../shared/limits/providers.js"></script>');
   assert.notEqual(tag, -1, 'index.html should load the provider catalog');
   assert.ok(tag < html.indexOf('<script src="app.js"></script>'), 'it must load before app.js');
 });

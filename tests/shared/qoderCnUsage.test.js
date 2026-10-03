@@ -13,8 +13,10 @@ const {
   QODER_CN_MODEL_DISPLAY_NAMES,
   buildQoderCnHistoryGraph,
   buildQoderCnPeriods,
+  collectQoderCnJsonlRows,
   collectQoderCnRows,
   normalizeQoderCnDbRow,
+  normalizeQoderCnJsonlRow,
   qoderCnDataPaths,
   readQoderCnDbRows,
   resolveQoderCnPricing,
@@ -513,4 +515,278 @@ test('reads survive a database without the chat_session table (fallback SQL)', a
   }
   assert.equal(rows.length, 1, 'fallback query still returns rows');
   assert.equal(rows[0].project_name, undefined, 'no project column in fallback');
+});
+
+// --- JSONL transcript source (Qoder CN 2026-09+ storage) ---
+
+function jsonlAssistant(overrides = {}) {
+  return JSON.stringify({
+    type: 'assistant',
+    uuid: overrides.uuid || 'u-1',
+    timestamp: overrides.timestamp || '2026-09-15T03:07:23.628Z',
+    cwd: overrides.cwd ?? '/Users/test/Fun/Mo',
+    sessionId: overrides.sessionId || 'sess-1',
+    isSidechain: overrides.isSidechain ?? false,
+    message: {
+      id: overrides.messageId || 'msg-a1',
+      role: 'assistant',
+      model: overrides.model || 'qoder-custom-0c4327ab-a1f2-4cf6-9fc8-728a0da810a0/deepseek-v4.1-flash',
+      content: [{ type: 'text', text: 'ok' }],
+      usage: overrides.usage ?? {
+        input_tokens: 26540,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 2688,
+        output_tokens: 223
+      }
+    }
+  });
+}
+
+test('qoderCnDataPaths resolves JSONL projects overrides before Qoder config and home defaults', () => {
+  const darwin = qoderCnDataPaths({ homeDir: '/Users/test', platform: 'darwin', env: {} });
+  assert.equal(darwin.projectsDir, path.join('/Users/test', '.qoder-cn', 'projects'));
+  const win = qoderCnDataPaths({ homeDir: 'C:\\Users\\test', platform: 'win32', env: {} });
+  assert.equal(win.projectsDir, path.join('C:\\Users\\test', '.qoder-cn', 'projects'));
+  const configDir = qoderCnDataPaths({
+    homeDir: '/Users/test', platform: 'darwin', env: { QODERCN_CONFIG_DIR: '/qoder/config' }
+  });
+  assert.equal(configDir.projectsDir, path.resolve('/qoder/config', 'projects'));
+  const override = qoderCnDataPaths({
+    homeDir: '/Users/test', platform: 'darwin',
+    env: {
+      TOKEN_MONITOR_QODER_CN_PROJECTS_PATH: '/custom/cn/projects',
+      QODERCN_CONFIG_DIR: '/qoder/config'
+    }
+  });
+  assert.equal(override.projectsDir, path.resolve('/custom/cn/projects'));
+});
+
+test('normalizeQoderCnJsonlRow splits the cached prefix out of the total prompt', () => {
+  const row = normalizeQoderCnJsonlRow(JSON.parse(jsonlAssistant()), 'src1');
+  assert.equal(row.model, 'deepseek-v4.1-flash', 'the qoder-custom-<id>/ prefix is stripped for pricing');
+  // CN writes input_tokens as the FULL prompt including the cached prefix
+  // (verified: input/context_usage_ratio == the model's context window on
+  // every real row), so the cached subset must not be counted twice.
+  assert.equal(row.input, 23852); // 26540 prompt - 2688 cached
+  assert.equal(row.output, 223);
+  assert.equal(row.cacheRead, 2688);
+  assert.equal(row.cacheWrite, 0);
+  assert.equal(row.createdAt, Date.parse('2026-09-15T03:07:23.628Z'));
+  assert.equal(row.projectLabel, 'Mo');
+  assert.equal(row.sessionId, 'qodercn:jsonl:src1:sess-1');
+  assert.equal(row.messageId, 'qodercn:jsonl:src1:sess-1:msg-a1');
+  assert.equal(row.messages, 1);
+});
+
+test('normalizeQoderCnJsonlRow resolves internal codes and passes unknown ones through', () => {
+  const mapped = normalizeQoderCnJsonlRow(JSON.parse(jsonlAssistant({
+    model: 'mmessage', messageId: 'm1', usage: { input_tokens: 5, output_tokens: 1 }
+  })), 's');
+  assert.equal(mapped.model, 'mmessage', 'unknown codes pass through unchanged');
+  const known = normalizeQoderCnJsonlRow(JSON.parse(jsonlAssistant({
+    model: 'mmodel', messageId: 'm2', usage: { input_tokens: 5, output_tokens: 1 }
+  })), 's');
+  assert.equal(known.model, QODER_CN_MODEL_DISPLAY_NAMES.mmodel);
+});
+
+test('normalizeQoderCnJsonlRow preserves slash-qualified custom model ids', () => {
+  // The custom-profile prefix wraps the real model id, which may itself be
+  // provider/model namespaced (OpenRouter-style); only the
+  // qoder-custom-<id>/ prefix comes off, never the inner separator.
+  const row = normalizeQoderCnJsonlRow(JSON.parse(jsonlAssistant({
+    model: 'qoder-custom-0c4327ab-a1f2-4cf6-9fc8-728a0da810a0/openrouter/anthropic/claude-sonnet-4'
+  })), 's');
+  assert.equal(row.model, 'openrouter/anthropic/claude-sonnet-4');
+});
+
+test('normalizeQoderCnJsonlRow rejects non-assistant lines and zero-token usage', () => {
+  assert.equal(normalizeQoderCnJsonlRow({ type: 'user', message: { usage: { input_tokens: 1 } } }, 's'), null);
+  assert.equal(normalizeQoderCnJsonlRow({ type: 'assistant' }, 's'), null);
+  assert.equal(normalizeQoderCnJsonlRow({ type: 'assistant', message: {} }, 's'), null);
+  // Internal routing models report real billing in `credits` but 0 tokens; a
+  // token monitor must not fabricate usage from them.
+  assert.equal(normalizeQoderCnJsonlRow(JSON.parse(jsonlAssistant({
+    model: 'qfmodel', usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, credits: 0.83 }
+  })), 's'), null);
+});
+
+test('normalizeQoderCnJsonlRow leaves remote-control sessions unattributed', () => {
+  const row = normalizeQoderCnJsonlRow(JSON.parse(jsonlAssistant({
+    cwd: '/Users/test/Library/Application Support/com.qodercn.app.stable/remote-control/sessions/abc/def'
+  })), 's');
+  assert.equal(row.projectLabel, '');
+});
+
+test('collectQoderCnJsonlRows walks sessions and side-chain subagent files', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const projects = path.join(home, '.qoder-cn', 'projects');
+  const project = path.join(projects, '-Users-test-Fun-Mo');
+  const subagents = path.join(project, 'sess-1', 'subagents');
+  fs.mkdirSync(subagents, { recursive: true });
+  fs.writeFileSync(path.join(project, 'sess-1.jsonl'), [
+    jsonlAssistant({ messageId: 'msg-a1' }),
+    JSON.stringify({ type: 'user', message: { content: 'hi' } }),
+    '{ not json'
+  ].join('\n') + '\n');
+  fs.writeFileSync(path.join(subagents, 'agent-ageneral-purpose-1.jsonl'), jsonlAssistant({
+    messageId: 'msg-sub1', sessionId: 'sess-1-sub', model: 'mmodel'
+  }) + '\n');
+
+  const rows = await collectQoderCnJsonlRows({ homeDir: home });
+  assert.equal(rows.length, 2, 'main + side-chain rows, malformed lines skipped');
+  const ids = rows.map((row) => row.messageId).sort();
+  assert.ok(ids.some((id) => id.endsWith(':msg-a1')));
+  assert.ok(ids.some((id) => id.endsWith(':msg-sub1')));
+  assert.ok(rows.every((row) => row.sessionId.startsWith('qodercn:jsonl:')));
+});
+
+test('collectQoderCnJsonlRows applies sinceMs to both mtime and row timestamps', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-since-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const project = path.join(home, '.qoder-cn', 'projects', '-Users-test-a');
+  fs.mkdirSync(project, { recursive: true });
+  const oldStamp = new Date('2026-09-01T00:00:00Z');
+  fs.writeFileSync(path.join(project, 'old.jsonl'), jsonlAssistant({
+    sessionId: 'old', messageId: 'old-1', timestamp: '2026-09-01T00:00:00.000Z'
+  }) + '\n');
+  fs.writeFileSync(path.join(project, 'new.jsonl'), jsonlAssistant({
+    sessionId: 'new', messageId: 'new-1', timestamp: '2026-09-15T00:00:00.000Z'
+  }) + '\n');
+  fs.utimesSync(path.join(project, 'old.jsonl'), oldStamp, oldStamp);
+  const sinceMs = Date.parse('2026-09-10T00:00:00Z');
+  const rows = await collectQoderCnJsonlRows({ homeDir: home, sinceMs });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].messageId.split(':').pop(), 'new-1');
+});
+
+test('collectQoderCnJsonlRows fails loudly instead of publishing partial totals', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-budget-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const project = path.join(home, '.qoder-cn', 'projects', '-Users-test-c');
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, 'a.jsonl'), jsonlAssistant({ sessionId: 'a', messageId: 'a1' }) + '\n');
+  fs.writeFileSync(path.join(project, 'b.jsonl'), jsonlAssistant({ sessionId: 'b', messageId: 'b1' }) + '\n');
+  // Each breach — files, bytes, rows — must abort the whole read with the
+  // same controlled error the SQLite reader uses, so the collector keeps its
+  // last complete snapshot instead of a filesystem-order-dependent subset.
+  const isBudgetError = (err) => err.code === 'QODER_CN_READ_BUDGET_EXCEEDED';
+  await assert.rejects(() => collectQoderCnJsonlRows({ homeDir: home, maxFiles: 1 }), isBudgetError);
+  await assert.rejects(() => collectQoderCnJsonlRows({ homeDir: home, maxReadBytes: 10 }), isBudgetError);
+  await assert.rejects(() => collectQoderCnJsonlRows({ homeDir: home, maxReadRows: 1 }), isBudgetError);
+  // A single oversized line must abort before JSON.parse, not after being
+  // buffered whole.
+  await assert.rejects(() => collectQoderCnJsonlRows({ homeDir: home, maxLineBytes: 50 }), isBudgetError);
+  const complete = await collectQoderCnJsonlRows({ homeDir: home });
+  assert.equal(complete.length, 2, 'the same tree reads fully within the default budgets');
+});
+
+test('collectQoderCnJsonlRows fails closed when the tree exceeds the depth budget', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-depth-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const deep = path.join(home, '.qoder-cn', 'projects', 'proj', 'sess-1', 'subagents', 'nested');
+  fs.mkdirSync(deep, { recursive: true });
+  fs.writeFileSync(path.join(deep, 'a.jsonl'), jsonlAssistant({ sessionId: 'a', messageId: 'a1' }) + '\n');
+  // A deeper-than-expected tree fails closed like the byte/row/file budgets
+  // instead of surfacing as an incomplete snapshot.
+  await assert.rejects(
+    () => collectQoderCnJsonlRows({ homeDir: home, maxDepth: 3 }),
+    (error) => error.code === 'QODER_CN_READ_BUDGET_EXCEEDED'
+  );
+});
+
+test('collectQoderCnJsonlRows treats only an absent root as an empty source', async () => {
+  const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
+  const denied = Object.assign(new Error('denied'), { code: 'EACCES' });
+  assert.deepEqual(await collectQoderCnJsonlRows({
+    projectsDir: '/missing',
+    fs: { readdirSync() { throw missing; } }
+  }), []);
+  await assert.rejects(
+    () => collectQoderCnJsonlRows({ projectsDir: '/denied', fs: { readdirSync() { throw denied; } } }),
+    (error) => error.code === 'EACCES'
+  );
+});
+
+test('collectQoderCnJsonlRows fails closed on traversal, stat, and stream errors', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-errors-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const projectsDir = path.join(home, 'projects');
+  const projectDir = path.join(projectsDir, 'project');
+  const filePath = path.join(projectDir, 'session.jsonl');
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(filePath, jsonlAssistant() + '\n');
+
+  const failingFs = (overrides) => new Proxy(fs, {
+    get(target, key) { return Object.prototype.hasOwnProperty.call(overrides, key) ? overrides[key] : target[key]; }
+  });
+  const fsError = (code) => Object.assign(new Error(code), { code });
+
+  await assert.rejects(() => collectQoderCnJsonlRows({
+    projectsDir,
+    fs: failingFs({
+      readdirSync(dir, options) {
+        if (dir === projectDir) throw fsError('ENOENT');
+        return fs.readdirSync(dir, options);
+      }
+    })
+  }), (error) => error.code === 'ENOENT');
+
+  await assert.rejects(() => collectQoderCnJsonlRows({
+    projectsDir,
+    sinceMs: 1,
+    fs: failingFs({ statSync() { throw fsError('EACCES'); } })
+  }), (error) => error.code === 'EACCES');
+
+  await assert.rejects(() => collectQoderCnJsonlRows({
+    projectsDir,
+    fs: failingFs({
+      createReadStream() {
+        return {
+          [Symbol.asyncIterator]() {
+            return { next() { return Promise.reject(fsError('EIO')); } };
+          },
+          destroy() {}
+        };
+      }
+    })
+  }), (error) => error.code === 'EIO');
+});
+
+test('collectQoderCnRows propagates JSONL budget failures rather than merging partials', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-propagate-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const project = path.join(home, '.qoder-cn', 'projects', '-Users-test-d');
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, 'a.jsonl'), jsonlAssistant({ sessionId: 'a', messageId: 'a1' }) + '\n');
+  await assert.rejects(
+    () => collectQoderCnRows({ homeDir: home, dbPaths: [], readDbRows: async () => [], includeJsonl: true, maxReadBytes: 1 }),
+    (err) => err.code === 'QODER_CN_READ_BUDGET_EXCEEDED'
+  );
+});
+
+test('collectQoderCnRows merges JSONL only when includeJsonl is set', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'qodercn-jsonl-merge-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const project = path.join(home, '.qoder-cn', 'projects', '-Users-test-b');
+  fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(path.join(project, 's.jsonl'), jsonlAssistant({ sessionId: 's', messageId: 'j1' }) + '\n');
+
+  const dbOnly = await collectQoderCnRows({ homeDir: home, dbPaths: [], readDbRows: async () => [] });
+  assert.equal(dbOnly.length, 0, 'DB-only callers keep their exact fixtures — no hidden home reads');
+  const merged = await collectQoderCnRows({ homeDir: home, dbPaths: [], readDbRows: async () => [], includeJsonl: true });
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].model, 'deepseek-v4.1-flash');
+});
+
+test('JSONL rows flow through buildQoderCnPeriods as qodercn entries', () => {
+  const rows = [
+    normalizeQoderCnJsonlRow(JSON.parse(jsonlAssistant({ sessionId: 's', messageId: 'j1' })), 'src'),
+    normalizeQoderCnJsonlRow(JSON.parse(jsonlAssistant({ sessionId: 's', messageId: 'j2', model: 'mmodel' })), 'src')
+  ];
+  const periods = buildQoderCnPeriods({ now: '2026-09-15T12:00:00.000Z', allTimeSince: '2026-01-01', rows });
+  assert.equal(periods.allTime.entries.length, 2, 'one entry per session+model');
+  assert.ok(periods.allTime.entries.every((entry) => entry.client === 'qodercn'));
+  assert.equal(periods.allTime.totalInput, 23852 * 2);
+  assert.equal(periods.allTime.totalMessages, 2);
 });

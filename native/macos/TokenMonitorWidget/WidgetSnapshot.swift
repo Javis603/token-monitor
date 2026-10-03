@@ -9,6 +9,11 @@ struct WidgetSnapshot: Decodable, Equatable {
     let periods: [WidgetPeriod: WidgetPeriodSnapshot]
     let presentation: WidgetPresentation
     let status: WidgetStatus
+    // Colour and artwork per mark id, written by the app from its vendor
+    // presentation table. An id missing here paints with the `default` entry;
+    // a snapshot written before the palette existed has none and paints every
+    // mark that way until the app rewrites it.
+    let vendors: [String: WidgetVendorStyle]
     private let selectedPeriod: WidgetPeriod
 
     var overview: WidgetOverview { selectedSnapshot.overview }
@@ -44,7 +49,7 @@ struct WidgetSnapshot: Decodable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, generatedAt, periods, quota, presentation, status
+        case schemaVersion, generatedAt, periods, quota, presentation, status, vendors
     }
 
     init(from decoder: Decoder) throws {
@@ -75,10 +80,12 @@ struct WidgetSnapshot: Decodable, Equatable {
         quota = try container.decode(WidgetQuotaProviderArray.self, forKey: .quota).values
         presentation = try container.decode(WidgetPresentation.self, forKey: .presentation)
         status = try container.decode(WidgetStatus.self, forKey: .status)
+        // Presentation only: a malformed palette costs the colours, not the snapshot.
+        vendors = (try? container.decodeIfPresent([String: WidgetVendorStyle].self, forKey: .vendors)) ?? [:]
         selectedPeriod = .day
     }
 
-    init(schemaVersion: Int, generatedAt: Date, quota: [WidgetQuotaProvider], periods: [WidgetPeriod: WidgetPeriodSnapshot], presentation: WidgetPresentation, status: WidgetStatus, selectedPeriod: WidgetPeriod = .day) {
+    init(schemaVersion: Int, generatedAt: Date, quota: [WidgetQuotaProvider], periods: [WidgetPeriod: WidgetPeriodSnapshot], presentation: WidgetPresentation, status: WidgetStatus, vendors: [String: WidgetVendorStyle] = [:], selectedPeriod: WidgetPeriod = .day) {
         precondition(WidgetPeriod.allCases.allSatisfy { periods[$0] != nil })
         self.schemaVersion = schemaVersion
         self.generatedAt = generatedAt
@@ -86,6 +93,7 @@ struct WidgetSnapshot: Decodable, Equatable {
         self.periods = periods
         self.presentation = presentation
         self.status = status
+        self.vendors = vendors
         self.selectedPeriod = selectedPeriod
     }
 
@@ -97,6 +105,7 @@ struct WidgetSnapshot: Decodable, Equatable {
             periods: periods,
             presentation: presentation,
             status: status,
+            vendors: vendors,
             selectedPeriod: period
         )
     }
@@ -299,15 +308,64 @@ struct WidgetModel: Decodable, Equatable, Identifiable {
 
 struct WidgetTool: Decodable, Equatable, Identifiable {
     let id: String
+    let displayName: String?
     let totalTokens: Int
     let costUsd: Double
     let sharePercent: Double
 
-    init(id: String, totalTokens: Int, costUsd: Double = 0, sharePercent: Double) {
+    init(id: String, displayName: String? = nil, totalTokens: Int, costUsd: Double = 0, sharePercent: Double) {
         self.id = id
+        self.displayName = displayName
         self.totalTokens = totalTokens
         self.costUsd = costUsd
         self.sharePercent = sharePercent
+    }
+}
+
+// How one mark id is painted: a colour, or the adaptive light ink for a
+// near-black mark that would vanish on a dark widget, plus the artwork file
+// when it is not named after the id.
+struct WidgetVendorStyle: Decodable, Equatable {
+    let color: String?
+    let ink: Bool
+    let icon: String?
+
+    init(color: String? = nil, ink: Bool = false, icon: String? = nil) {
+        self.color = color
+        self.ink = ink
+        self.icon = icon
+    }
+
+    private enum CodingKeys: String, CodingKey { case color, ink, icon }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        color = c.optionalString(.color)
+        ink = (try? c.decodeIfPresent(Bool.self, forKey: .ink)) ?? false
+        icon = c.optionalString(.icon)
+    }
+}
+
+// Colour and artwork per mark id, from the snapshot's `vendors` palette. The
+// app derives it from src/shared/vendorPresentation.js, so the widget keeps no
+// table of its own; an id the palette does not list paints with its `default`
+// entry and artwork named after the id.
+struct WidgetVendorPalette: Equatable {
+    enum Ink: Equatable {
+        case adaptive
+        case hex(String)
+    }
+
+    let styles: [String: WidgetVendorStyle]
+
+    func ink(for vendorID: String) -> Ink {
+        let style = styles[vendorID.lowercased()]
+        if style?.ink == true { return .adaptive }
+        return .hex(style?.color ?? styles["default"]?.color ?? "#6AB4F0")
+    }
+
+    func iconName(for vendorID: String) -> String {
+        styles[vendorID.lowercased()]?.icon ?? vendorID.lowercased()
     }
 }
 
@@ -470,10 +528,11 @@ extension WidgetModel {
 }
 
 extension WidgetTool {
-    private enum CodingKeys: String, CodingKey { case id, totalTokens, costUsd, sharePercent }
+    private enum CodingKeys: String, CodingKey { case id, displayName, totalTokens, costUsd, sharePercent }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
+        displayName = c.optionalString(.displayName)
         totalTokens = try c.decode(Int.self, forKey: .totalTokens)
         costUsd = try c.decode(Double.self, forKey: .costUsd)
         sharePercent = try c.decode(Double.self, forKey: .sharePercent)
@@ -570,27 +629,38 @@ extension WidgetSnapshot {
         periods: [
             .day: WidgetPeriodSnapshot(
                 overview: WidgetOverview(totalTokens: 27_800_000, costUsd: 14.86),
-                tools: [WidgetTool(id: "codex", totalTokens: 22_300_000, sharePercent: 80), WidgetTool(id: "claude", totalTokens: 5_500_000, sharePercent: 20)],
+                tools: [WidgetTool(id: "codex", displayName: "Codex", totalTokens: 22_300_000, sharePercent: 80), WidgetTool(id: "claude", displayName: "Claude", totalTokens: 5_500_000, sharePercent: 20)],
                 models: [WidgetModel(id: "model-gpt-5-6", displayName: "GPT-5.6", totalTokens: 20_900_000, sharePercent: 75), WidgetModel(id: "model-mimo", displayName: "MiMo", totalTokens: 2_900_000, sharePercent: 11)],
                 activity: WidgetActivity(activeDays: 1, days: placeholderActivityDays(count: 7)),
                 trend: WidgetTrend(points: (1...14).map { WidgetTrendPoint(date: "\($0)", totalTokens: $0 * 200_000) })
             ),
             .month: WidgetPeriodSnapshot(
                 overview: WidgetOverview(totalTokens: 61_200_000, costUsd: 237.42),
-                tools: [WidgetTool(id: "codex", totalTokens: 48_900_000, sharePercent: 80), WidgetTool(id: "claude", totalTokens: 12_300_000, sharePercent: 20)],
+                tools: [WidgetTool(id: "codex", displayName: "Codex", totalTokens: 48_900_000, sharePercent: 80), WidgetTool(id: "claude", displayName: "Claude", totalTokens: 12_300_000, sharePercent: 20)],
                 models: [WidgetModel(id: "model-gpt-5-6", displayName: "GPT-5.6", totalTokens: 44_000_000, sharePercent: 72), WidgetModel(id: "model-mimo", displayName: "MiMo", totalTokens: 7_000_000, sharePercent: 11)],
                 activity: WidgetActivity(activeDays: 18, days: placeholderActivityDays(count: 28)),
                 trend: WidgetTrend(points: (1...14).map { WidgetTrendPoint(date: "\($0)", totalTokens: $0 * 340_000) })
             ),
             .total: WidgetPeriodSnapshot(
                 overview: WidgetOverview(totalTokens: 180_000_000, costUsd: 620.15),
-                tools: [WidgetTool(id: "codex", totalTokens: 144_000_000, sharePercent: 80), WidgetTool(id: "claude", totalTokens: 36_000_000, sharePercent: 20)],
+                tools: [WidgetTool(id: "codex", displayName: "Codex", totalTokens: 144_000_000, sharePercent: 80), WidgetTool(id: "claude", displayName: "Claude", totalTokens: 36_000_000, sharePercent: 20)],
                 models: [WidgetModel(id: "model-gpt-5-6", displayName: "GPT-5.6", totalTokens: 120_000_000, sharePercent: 67), WidgetModel(id: "model-mimo", displayName: "MiMo", totalTokens: 30_000_000, sharePercent: 17)],
                 activity: WidgetActivity(activeDays: 144, days: placeholderActivityDays(count: 180)),
                 trend: WidgetTrend(points: (1...14).map { WidgetTrendPoint(date: "\($0)", totalTokens: $0 * 900_000) })
             )
         ],
         presentation: .default,
-        status: WidgetStatus(isStale: false, sourceUpdatedAt: Date())
+        status: WidgetStatus(isStale: false, sourceUpdatedAt: Date()),
+        // The gallery has no app to write a palette, so it carries the entries
+        // for the ids it shows.
+        vendors: [
+            "default": WidgetVendorStyle(color: "#6ab4f0"),
+            "claude": WidgetVendorStyle(color: "#cc7c5e"),
+            "codex": WidgetVendorStyle(color: "#49a3b0"),
+            "antigravity": WidgetVendorStyle(color: "#4285f4"),
+            "deepseek": WidgetVendorStyle(color: "#4d6bfe"),
+            "mimo": WidgetVendorStyle(ink: true, icon: "xiaomi"),
+            "xiaomi": WidgetVendorStyle(ink: true)
+        ]
     )
 }

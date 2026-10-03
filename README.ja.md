@@ -26,7 +26,7 @@
 
 ## Token Monitor とは
 
-Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 38+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップウィジェットです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。
+Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 43+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップウィジェットです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。
 
 ## 対応ツール
 
@@ -39,7 +39,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/`（`opencode*.db`、`storage/message/`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `~/.hermes/state.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor IDE / Cursor CLI | `~/.config/tokscale/cursor-cache/`（アカウント単位の使用量エクスポート） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor IDE / Cursor CLI / Grok Bot | `~/.config/tokscale/cursor-cache/`（アカウント単位の使用量エクスポート） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.gemini/`（`antigravity/`、`antigravity-ide/`、`antigravity-backup/`、`antigravity-cli/conversations/`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks (`.../saoudrizwan.claude-dev/tasks/`)、`~/.cline/data/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/amp.png" width="28" alt="Amp" /> | Amp | `~/.local/share/amp/threads/` | ✅ | — | — |
@@ -48,29 +48,34 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/`（`sessions/`、`logs/unified.jsonl`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`、`~/.copilot/`（`otel/`、`data.db`、`session-store.db`） | ✅ | ✅ | — |
-| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi / Oh My Pi | `~/.pi/agent/sessions/`, `~/.omp/agent/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`、VS Code globalStorage tasks (`.../kilocode.kilo-code/tasks/`) — 拡張機能のログは Linux およびリモート/WSL のみ | ✅ | — | — |
 | <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse Code | `~/.local/share/muse/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/`（`projects/`、`cli/db/db.sqlite`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage および `kiro-cli` DB | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code 拡張ログ | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/agent-sessions/*.jsonl` | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（中国版のみ） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（中国版のみ） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/`（`session.jsonl`、`session.jsonl.zstd`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/`（`Data/Agents/.claude/projects/` V2、`.claude/projects/` legacy） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/lmstudio.png" width="28" alt="LM Studio" /> | LM Studio | `~/.lmstudio/server-logs/**/*.log` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/unsloth.png" width="28" alt="Unsloth" /> | Unsloth Studio | `~/.unsloth/studio/studio.db` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/devin.png" width="28" alt="Devin" /> | Devin CLI / Devin Desktop | `~/.local/share/devin/cli/sessions.db`、`<platform-app-data>/Devin/User/acp-events/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/fx.png" width="28" alt="fx" /> | fx | `~/.fx/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console の Cookie（請求残高とトークン使用量からの推定支出） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API キー（使用量／キー上限。creditsアクセス許可時は残高も表示。公式文書ではManagementキーを指定） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/minimax.png" width="28" alt="Minimax" /> | Minimax | Minimax API キー（Minimax API で Token Plan クォータ取得） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key または Volcengine AK/SK（Volcengine API で Ark Coding Plan / Agent Plan クォータ取得） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/ollama.png" width="28" alt="Ollama" /> | Ollama | Ollama Cloud cookie（ollama.com/settings で session/weekly 使用量を取得） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Trae CN access token（trae.cn で Trae CN／SOLO credits を取得） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | Alibaba Cloud コンソール cookie（Bailian／Model Studio Token Plan のクォータ、Team と Personal） | — | ✅ | — |
+| <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token（Coding Plan／Token Plan のクォータ） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="サードパーティAPI" /> | サードパーティAPI | New API / Sub2API互換アカウントプリセット（互換性のあるOne APIフォークを含む）、New APIキープリセット、カスタム残高エンドポイント | — | ✅ | — |
 
 <details>
@@ -84,15 +89,15 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 - Devin はローカルの `sessions.db` から Devin CLI セッションを、`acp-events` ACP ログから Devin Desktop のエージェントセッションを追跡します。同じセッションが両方にある場合は CLI データベースが優先されます。Desktop の対象範囲は接続する ACP エージェントに依存します。ローカルに `usage_update` イベントを書き出すエージェントのみが集計対象で、Devin Desktop の既定の `devin-cloud` エージェントはサーバー側で計測されるため、既定の Desktop 構成では Desktop のトークンは報告されません。セッションタイトルとプロジェクト帰属は CLI データベースから取得します。詳しくは [Devin のデータソース](docs/providers/devin.md)を参照してください。
 
 - Command Code の transcript には実際のトークン数やメッセージごとのモデル情報が含まれません。トークン使用量は transcript テキストから推定され、モデルの帰属と推定コストには各リクエストで過去に使用したモデルではなく、現在設定されているモデルが反映される場合があります。
-- Cursor キャッシュは Cursor のアカウント単位の使用量エクスポートから取得されるため、Cursor IDE と Cursor CLI の両方が対象です。Token Monitor は Cursor デスクトップアプリでログイン済みのアカウントを自動検出し、設定から手動でアカウントを追加することもできます。古いキャッシュは自動的に再同期されますが、終了直後のセッションが Cursor ダッシュボードに届くまで数分かかる場合があるため、使用量は即時ではなく同期後に更新されます。
+- Cursor キャッシュは Cursor のアカウント単位の使用量エクスポートから取得されるため、Cursor IDE、Cursor CLI、および Grok Bot の使用量が対象です。Token Monitor は Cursor デスクトップアプリでログイン済みのアカウントを自動検出し、設定から手動でアカウントを追加することもできます。古いキャッシュは自動的に再同期されますが、終了直後のセッションが Cursor ダッシュボードに届くまで数分かかる場合があるため、使用量は即時ではなく同期後に更新されます。
 
 - Custom は1つの GET 残高エンドポイントから数値 JSON フィールドをマッピングします。OpenAI または Anthropic API 互換だけでは不十分です。
 
 #### Qoder CN（ローカルアダプター）
 
-Qoder CN のトークン使用量は API ではなくアプリのローカル SQLite データベースから読み取ります。Settings → tools で有効化します（オプトイン、デフォルト無効）。データベースはプラットフォームごとに自動検出されます：macOS `~/Library/Application Support/QoderCN/SharedClientCache/cache/db/local.db`、Windows `%APPDATA%\QoderCN\SharedClientCache\cache\db\local.db`、Linux `~/.config/QoderCN/SharedClientCache/cache/db/local.db` — `TOKEN_MONITOR_QODER_CN_DB_PATH` で上書き可能です。
+Qoder CN のトークン使用量は API ではなくアプリのローカルデータから読み取ります。Settings → tools で有効化します（オプトイン、デフォルト無効）。現行版は Qoder 設定ディレクトリの `projects` JSONL（通常 `~/.qoder-cn/projects`）、旧版は SQLite を使用し、アダプターは両方を読み取ります。JSONL パスの優先順位は `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`、既定値です。旧データベースは `TOKEN_MONITOR_QODER_CN_DB_PATH` で上書きできます。[Qoder のデータソース](docs/providers/qodercn.md)も参照してください。
 
-これは高度なローカル統合です：読み取りには PATH 上の `sqlite3` CLI、またはフラグ不要の `node:sqlite` を備えた Node ランタイム（Node ≥ 23.4、Electron では CLI が必要な場合あり）が必要です。読み取りエラーはログに記録され、完全な既存スナップショットがあればゼロ使用量で上書きせず保持します。コストはマッピングされた各モデルの models.dev カタログ料金から推定されます。Qoder がデータベーススキーマを変更すると動作しなくなる可能性があります。
+これは高度なローカル統合です。JSONL に追加ランタイムは不要ですが、旧 SQLite の読み取りには PATH 上の `sqlite3` CLI、またはフラグ不要の `node:sqlite` を備えた Node ランタイム（Node ≥ 22.15、Electron では CLI が必要な場合あり）が必要です。読み取り失敗時は最後の完全なスナップショットを保持します。実測トークン欄がある JSONL 行だけを集計します。現行のファーストパーティープラン行は credits と context 比率だけの場合があり、信頼できるセッション単位の context window がないためトークンを推測しません。Credits は AI Tool Limits に表示され、実測トークンを持つ BYOK／カスタムモデルは通常どおり集計されます。
 </details>
 
 ## ショーケース
@@ -125,7 +130,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 
 ### 使用量の追跡
 
-- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 31+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
+- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 34+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
 - **リアルタイムトークンレート** — 生成速度を `tok/s`、総消費を `tok/min` で表示する任意のライブ表示
 - **セッション別詳細** — セッションを開くとプロンプトごとのトークン、各応答のトークン分割・使用ツールまで展開（ローカル transcript/DB を必要時のみ読み込み、同期しない）
 - **キャッシュヒット統計** — ツール・モデルをクリックすると入力トークン（キャッシュ hit/miss）、出力トークン、ヒット率の詳細
@@ -135,7 +140,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 
 ### 制限・トレンド・エクスポート
 
-- **AI ツール制限検出** — Claude Code、Codex、Cursor、OpenRouter、サードパーティAPI、GLM、Kimi など 26+ プロバイダーの session/daily/weekly/billing/credits、複数の OpenRouter／サードパーティプロファイル、残高型アカウント（Claude クレジット、DeepSeek のプリペイド残高と使用履歴、サードパーティ残高）
+- **AI ツール制限検出** — Claude Code、Codex、Cursor、OpenRouter、サードパーティAPI、GLM、Kimi など 28+ プロバイダーの session/daily/weekly/billing/credits、複数の OpenRouter／サードパーティプロファイル、残高型アカウント（Claude クレジット、DeepSeek のプリペイド残高と使用履歴、サードパーティ残高）
 - **複数アカウントと Codex 切り替え** — 1 つのプロバイダーで複数アカウントを追跡し、それぞれの制限を表示。追跡済みの Codex アカウントは、再認証なしでローカルアカウントとしてワンクリック切り替え可能
 - **Codex リセット予測** — 任意で有効にできるサードパーティのリセット予測。予測されるリセット時刻、リセットタイプ（Regular / Banked）、前回のリセット時刻を表示
 - **削除されたセッション使用量を保持** — 多くのツールは古いセッションを削除します（Claude Code はデフォルトで 30 日後にトランスクリプトを削除）。有効にすると、Token Monitor は観測済みの日別ツール/モデル使用量をローカルにアーカイブし、元ファイルが消えてもヒートマップとトレンドを維持します（下記 [セッションデータの保持期間](#セッションデータの保持期間) を参照）
@@ -147,7 +152,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 
 ### マルチデバイスとデプロイ
 
-- **マルチデバイスリアルタイム同期** — Server-Sent Events。1 台の変更が数秒以内に他のデバイスに反映
+- **マルチデバイス同期** — Hub 同期は Server-Sent Events で数秒以内に他のデバイスへ反映。iCloud Drive 同期は eventual consistency
 - **ローカルファースト** — 単一デバイスではサーバー不要
 - **セルフホスト同期** — ウィジェット内 hub、Node CLI hub、Cloudflare Worker
 - **iOS ウィジェット** — Worker hub + Widgy、Scriptable
@@ -158,7 +163,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカル SQ
 - **内訳ビュー** — ツール、デバイス、モデル、セッション、プロジェクト、アカウント制限別
 - **メニューバー (macOS) / システムトレイ (Windows)** — コスト、トークン、または残量が最も少ないプロバイダー制限 % をアイコン横に表示
 - **フローティングバブル** — ドラッグ可能なミニウィンドウ、クリック/ホバープレビュー
-- **エッジドック（macOS・Windows）** — 画面の端で上限と使用量を確認でき、自動非表示または常時表示を選べます。項目にホバーすると、各アカウントの上限、最近のセッション、トークン使用量をカードで表示します。設定で項目の選択、並べ替え、調整ができ、メニューバーまたはシステムトレイからオン／オフも切り替えられます
+- **エッジドック（macOS・Windows）** — 画面の端で上限と使用量を確認でき、自動非表示、常時表示、「全画面時に自動非表示」の各モードを選べます。項目にホバーすると、各アカウントの上限、最近のセッション、トークン使用量をカードで表示します。設定で項目の選択、並べ替え、調整ができ、メニューバーまたはシステムトレイからオン／オフも切り替えられます
 - **メニューバーのレイアウト編集** — メニューバーとフローティングバブルは内蔵プリセットのほか、「カスタム…」で自分で組み立て可能。AIツールアイコン、制限バー、パーセント、リセット時間、コスト、トークンレート、カスタムテキストを追加し、ライブプレビューを見ながらドラッグで並べ替え、項目ごとに AIツール・アカウント・制限期間・フォントを指定
 - **外観** — テーマ（ライトモード含む）、ツール別カラー、ガラス透明度・ぼかし、透明ウィンドウ、フォントのカスタマイズ
 - **ネイティブ macOS ウィジェット** — macOS 14 以降で、小・中・大サイズのレイアウトにトークン使用量とコスト、推移、AI ツールごとのクォータ残量とリセット時刻、アクティビティヒートマップ、ツール・モデル別の内訳を表示します
@@ -189,7 +194,7 @@ brew install --cask token-monitor
 
 ## マルチデバイス同期
 
-すべてのデバイス（および headless agent）が接続する **hub を 1 つ** 選びます。各デバイスでウィジェットを開き、**設定 → マルチデバイス同期** でモードを選択します。ウィジェットがこのデバイスの使用量を自動的にアップロードします。ウィジェットがないマシンでのみ `npm run agent` を実行してください。
+デバイス（および headless agent）で使う **マルチデバイス同期方式を 1 つ** 選びます。各デバイスでウィジェットを開き、**設定 → マルチデバイス同期** でモードを選択します。ウィジェットがこのデバイスの使用量を自動的にアップロードします。ウィジェットがないマシンでのみ `npm run agent` を実行してください。iCloud Drive は macOS ウィジェット専用で、headless agent には対応しません。
 
 #### オプション A — ウィジェットから hub をホスト（最も簡単、CLI 不要）
 
@@ -221,6 +226,10 @@ npx wrangler deploy
 ```
 
 デプロイ URL を各デバイスの **設定 → マルチデバイス同期** に貼り付けます。iOS ウィジェットは [worker/README.md](worker/README.md)、HTTP API は [docs/API.md](docs/API.md) を参照してください。
+
+#### オプション D — iCloud Drive（macOS、Hub サーバー不要）
+
+同じ Apple ID でサインインした各 Mac で、**設定 → マルチデバイス同期 → iCloud Drive** を選択します。任意で有効にする macOS 専用モードで、Token Monitor は iCloud Drive の `Token Monitor/sync-v1/` にデバイスごと・書き込み元ごとのアトミックスナップショットを保存し、各 Mac が有効なファイルを集計します。Token Monitor のサーバー、CloudKit、資格情報は使用せず、プロバイダーの API キー、Cookie、token はローカルに残ります。iCloud Drive は結果整合性のため、別の Mac の更新が表示されるまで時間がかかることがあり、壊れたファイルや一時的に見えないファイルで最後の正常な集計が消えることはありません。
 
 ## アプリデータ
 
@@ -261,7 +270,7 @@ npm run pack         # インストーラーなしのアプリディレクトリ
     デバイス C agent ──▶
 ```
 
-ウィジェットは **設定 → マルチデバイス同期** に応じてローカル/同期を選択します。hub は `npm run hub`、Cloudflare Worker、またはウィジェット内 Host モードで実行できます。同期モードでは hub が SSE で集計統計をプッシュし、1 台の変更が数秒以内に他のデバイスに反映されます。
+ウィジェットは **設定 → マルチデバイス同期** に応じてローカル/同期を選択します。hub は `npm run hub`、Cloudflare Worker、またはウィジェット内 Host モードで実行できます。Hub Client/Host モードでは hub が SSE で集計統計をプッシュし、1 台の変更は通常数秒以内に他のデバイスに反映されます。iCloud Drive モードはファイルを直接同期する eventual consistency の方式で、反映に時間がかかる場合があります。
 
 ## セッションデータの保持期間
 

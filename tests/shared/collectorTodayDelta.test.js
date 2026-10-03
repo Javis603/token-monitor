@@ -478,3 +478,25 @@ test('startCollector: watch ticks reuse the full-scan anchor, manual ticks resca
     delete require.cache[collectorPath];
   }
 });
+
+test('anchored watch updates carry cache observations and cold clears into broader periods', async () => {
+  const { collectUsageOnce, localTodayKey } = freshCollector();
+  const { emptyPeriod } = require('../../src/shared/usage');
+  const observedAt = new Date().toISOString();
+  const warm = { observedAt, ttlSeconds: 3600 };
+  const makePeriod = () => ({ ...emptyPeriod(), totalTokens: 50, clients: { claude: 50 }, sessions: {
+    'claude:s1': { client: 'claude', sessionId: 's1', totalTokens: 50, lastUsedAt: observedAt, promptCache: warm }
+  } });
+  for (const promptCache of [{ observedAt, ttlSeconds: 300 }, null, undefined]) {
+    const anchor = { dateKey: localTodayKey(), today: makePeriod(), month: makePeriod(), allTime: makePeriod() };
+    const summary = await collectUsageOnce({
+      ...baseOptions, todayOnlyAnchor: anchor,
+      runTokscale: async () => ({ entries: [{ client: 'claude', sessionId: 's1', model: 'claude-opus-4-8', input: 60, output: 0 }] }),
+      sessionMetadataDeps: { sessionMetadataResolvers: new Map([['claude', () => new Map([['s1', { lastUsedAt: observedAt, ...(promptCache === undefined ? {} : { promptCache }) }]])]]) }
+    });
+    for (const name of ['today', 'month', 'allTime']) {
+      const expected = promptCache === undefined && name !== 'today' ? warm : promptCache;
+      assert.deepEqual(summary[name].sessions['claude:s1'].promptCache, expected, name);
+    }
+  }
+});

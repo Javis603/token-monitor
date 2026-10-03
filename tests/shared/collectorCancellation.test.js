@@ -8,7 +8,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const cursorAuth = require('../../src/shared/providers/cursor/auth');
-const { createDeviceRuntime } = require('../../src/shared/deviceRuntime');
+const { createDeviceRuntime } = require('../../src/shared/usage/deviceRuntime');
 const {
   repairAntigravitySyncLock,
   removeOwnedAntigravitySyncLock

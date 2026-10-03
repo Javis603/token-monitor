@@ -260,6 +260,43 @@ test('export never leaks devices/limits/account metadata (privacy hard rule)', (
   assert.ok(!/accountKey|accountEmail|accountLabel|deviceId|hostname/.test(text));
 });
 
+test('export never carries session text into a file the user syncs (privacy hard rule)', () => {
+  // A local period keeps `session.title` — the renderer shows it — and
+  // docs/export.md promises the export holds "only your usage numbers" and is
+  // "safe to drop into a synced vault". The Hub already strips these fields on
+  // ingest; the export has to keep them out too.
+  const periods = {
+    today: {
+      totalTokens: 20, costUsd: 2,
+      clients: { codex: 20 }, clientCosts: { codex: 2 },
+      sessions: {
+        'codex:abc': {
+          client: 'codex', sessionId: 'abc', totalTokens: 20, costUsd: 2, outputTokens: 5,
+          title: 'refactor the login password policy',
+          firstUserMessage: 'the staging database password is hunter2',
+          preview: 'refactor the login password policy…',
+          sessionKind: 'background-review'
+        }
+      }
+    }
+  };
+  const text = renderExportJson({ periods, history: {} });
+  assert.ok(!/refactor the login password policy|hunter2/.test(text), 'session text must not reach the export');
+  // Classification and counters are not quotes of the conversation, so every
+  // documented non-text field survives the strip.
+  const session = JSON.parse(text).snapshot.today.sessions['codex:abc'];
+  assert.equal(session.sessionKind, 'background-review');
+  assert.equal(session.totalTokens, 20);
+  assert.equal(session.outputTokens, 5);
+  assert.ok(!('title' in session));
+});
+
+test('exportSignature ignores session text, so a retitled session does not rewrite the folder', () => {
+  const titled = { today: { clients: { codex: 1 }, sessions: { 'codex:a': { client: 'codex', totalTokens: 1, title: 'first prompt' } } } };
+  const renamed = { today: { clients: { codex: 1 }, sessions: { 'codex:a': { client: 'codex', totalTokens: 1, title: 'renamed later' } } } };
+  assert.equal(exportSignature(titled, HISTORY), exportSignature(renamed, HISTORY));
+});
+
 test('exportSignature is stable across key order and ignores generatedAt', () => {
   const a = exportSignature({ today: { clients: { codex: 1, opus: 2 } } }, HISTORY);
   const b = exportSignature({ today: { clients: { opus: 2, codex: 1 } } }, HISTORY);

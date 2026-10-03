@@ -4,7 +4,7 @@
 // runs between, and what it has cost so far.
 //
 // This is the third of the wording modules the limits surfaces share, beside
-// `limitWindowLabels.js` (what a window is called) and `limitWindowText.js`
+// `limits/windowLabels.js` (what a window is called) and `limits/windowText.js`
 // (what a window reads). The split is the same: formatting only, no DOM, no
 // renderer state. `t`, the currency table and the locale are handed in at call
 // time, because the widget and the edge dock each hold their own.
@@ -17,7 +17,7 @@
 (function exposeSubscriptionText(root, factory) {
   const node = typeof module === 'object' && module.exports;
   const api = factory(
-    node ? require('./limitProviders') : root?.TokenMonitorLimitProviders,
+    node ? require('./limits/providers') : root?.TokenMonitorLimitProviders,
     node ? require('./subscriptionDisplay') : root?.TokenMonitorSubscriptionDisplay
   );
   if (node) module.exports = api;

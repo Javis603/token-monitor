@@ -672,7 +672,7 @@ function consoleHeaders(cookieHeader, variant, extra = {}) {
     Cookie: cookieHeader,
     Origin: variant.gatewayOrigin,
     // Bare origin on purpose. The dashboard URL carries a path, and Chromium
-    // cancels a cross-origin Referer that does. See src/electron/limitsFetch.js.
+    // cancels a cross-origin Referer that does. See src/electron/limits/fetch.js.
     Referer: `${variant.gatewayOrigin}/`,
     'User-Agent': BROWSER_USER_AGENT,
     'X-Requested-With': 'XMLHttpRequest',

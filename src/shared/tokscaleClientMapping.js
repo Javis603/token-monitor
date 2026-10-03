@@ -5,7 +5,12 @@
 // source cannot be counted by a normal scan but silently skipped by an extra
 // directory scan.
 const TOKSCALE_CLIENT_GROUPS = Object.freeze({
-  antigravity: Object.freeze({ aliases: Object.freeze(['antigravity-cli']) }),
+  antigravity: Object.freeze({
+    aliases: Object.freeze(['antigravity-cli', 'antigravity-extension']),
+    // CLI and extension parse the same *.db format. Hand each custom root to
+    // one parser so generations without responseId cannot be counted twice.
+    customScanIds: Object.freeze(['antigravity', 'antigravity-cli'])
+  }),
   // Xiaomi MiMo Desktop and the MiMo Code CLI share one `mimocode` SQLite
   // store; tokscale re-stamps a row as `micode-desktop` when its
   // `session.version` starts with `desktop-`. Both surfaces are one Token
@@ -22,14 +27,11 @@ const TOKSCALE_CLIENT_GROUPS = Object.freeze({
     aliases: Object.freeze(['micode', 'micode-desktop']),
     scanIds: Object.freeze(['micode', 'micode-desktop'])
   }),
-  // OMP delegates to Pi's parser because both products write the same JSONL
-  // format. Keep both ids in normal scans so their distinct default roots are
-  // discovered, but assign an explicit custom root to Pi only; forwarding the
-  // same root to both ids would parse every matching file twice.
-  pi: Object.freeze({
-    aliases: Object.freeze(['omp']),
-    customScanIds: Object.freeze(['pi'])
-  }),
+  // Oh My Pi wrote Pi's JSONL format and was folded into the `pi` row here
+  // until the two products were split back apart in clientIdentitySplits.js, so
+  // this table no longer groups them. Their default roots stay distinct, and
+  // each id now takes its own custom roots; neither is a sub-source of the
+  // other any more.
   // Kilo CLI loads one fixed SQLite database and Tokscale rejects extra roots
   // for it. The combined row can still accept custom Kilo Code task roots.
   kilo: Object.freeze({

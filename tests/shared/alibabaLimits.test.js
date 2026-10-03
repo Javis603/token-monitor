@@ -400,7 +400,7 @@ test('fetchAlibabaLimits posts GetSubscriptionSummary and normalizes the Team po
 });
 
 // Chromium cancels a cross-origin Referer that carries a path, so the console
-// requests send a bare origin. See src/electron/limitsFetch.js.
+// requests send a bare origin. See src/electron/limits/fetch.js.
 test('fetchAlibabaLimits sends a bare-origin Referer', async () => {
   const { calls, fetchFn } = routedFetch([
     ...NO_SEC_TOKEN,

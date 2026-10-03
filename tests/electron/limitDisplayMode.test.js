@@ -6,7 +6,7 @@ const test = require('node:test');
 const {
   limitFillPercent,
   limitModeSuffix
-} = require('../../src/electron/renderer/limitDisplayMode');
+} = require('../../src/electron/renderer/limits/displayMode');
 
 test('left mode returns the remaining percent (unchanged behaviour)', () => {
   assert.equal(limitFillPercent(70, 30, false), 70);

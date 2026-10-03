@@ -294,6 +294,87 @@ test('a terminate that never confirms falls back instead of assuming release', a
   }
 });
 
+test('polling forced by an unconfirmed terminate still respects the entry limit', async () => {
+  FakeWorker.reset();
+  const stub = stubChokidar();
+  const root = tmpTree();
+  for (let index = 0; index < 5; index += 1) fs.writeFileSync(path.join(root, `s${index}.jsonl`), '');
+  const fallbacks = [];
+  const errors = [];
+  const handlers = {
+    onHostFallback: (error, fallback) => fallbacks.push(fallback),
+    onError: (error) => errors.push(error)
+  };
+  try {
+    const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+    const first = coordinator.acquire({ dirs: [root], clients: 'claude', usePolling: false, pollingEntryLimit: 3 }, handlers);
+    const wedged = FakeWorker.last();
+    wedged.deferTerminate = true;
+    first.close();
+    coordinator.acquire({ dirs: [root], clients: 'claude', usePolling: false, pollingEntryLimit: 3 }, handlers);
+
+    wedged.failTerminate(new Error('terminate failed'));
+    await until(() => errors.length === 1);
+    // The owner asked for native events; the host chose polling on its own and
+    // has to tell it so, and has to refuse a tree over the limit all the same.
+    assert.deepEqual(fallbacks, [{ usePolling: true }]);
+    assert.equal(stub.built.length, 0, 'no polling watcher over an oversized tree');
+    assert.equal(errors[0].code, 'watch-polling-limit');
+  } finally {
+    stub.restore();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Either variable forbids polling, and either must stop the must-poll path too.
+for (const pollingEnv of ['TOKEN_MONITOR_WATCH_POLLING', 'CHOKIDAR_USEPOLLING']) test(`an unconfirmed terminate gives up watching when ${pollingEnv}=0`, async () => {
+  FakeWorker.reset();
+  const stub = stubChokidar();
+  const original = process.env[pollingEnv];
+  process.env[pollingEnv] = '0';
+  const errors = [];
+  const handlers = { onError: (error) => errors.push(error) };
+  try {
+    const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
+    const first = coordinator.acquire({ dirs: ['/a'], clients: 'claude', usePolling: false }, handlers);
+    const wedged = FakeWorker.last();
+    wedged.deferTerminate = true;
+    first.close();
+    coordinator.acquire({ dirs: ['/b'], clients: 'claude', usePolling: false }, handlers);
+
+    wedged.failTerminate(new Error('terminate failed'));
+    await until(() => errors.length === 1);
+    // The old native descriptors may still be held and polling cannot run, so
+    // any watcher here would be a second native set in flight.
+    assert.equal(stub.built.length, 0);
+    assert.equal(errors[0].code, 'watch-polling-unavailable');
+  } finally {
+    if (original === undefined) delete process.env[pollingEnv];
+    else process.env[pollingEnv] = original;
+    stub.restore();
+  }
+});
+
+test('a refused host that is already closed does not report into its successor', async () => {
+  const stub = stubChokidar();
+  const root = tmpTree();
+  for (let index = 0; index < 5; index += 1) fs.writeFileSync(path.join(root, `s${index}.jsonl`), '');
+  const errors = [];
+  try {
+    const host = createInProcessWatcherHost(
+      { dirs: [root], clients: 'claude', usePolling: true, pollingEntryLimit: 3 },
+      { onError: (error) => errors.push(error) }
+    );
+    host.close();
+    await wait(20);
+    assert.deepEqual(errors, []);
+    assert.equal(stub.built.length, 0);
+  } finally {
+    stub.restore();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('the quit path terminates instead of waiting for the slow teardown', () => {
   FakeWorker.reset();
   const coordinator = createWatcherCoordinator({ Worker: FakeWorker });
@@ -442,5 +523,96 @@ test('the in-process host still honours skipClose', () => {
     assert.equal(stub.built[0].closed, 1);
   } finally {
     stub.restore();
+  }
+});
+
+// Issue #520: on macOS chokidar holds one descriptor per watched file, and once
+// the owner's table is full below OPEN_MAX every tokscale spawn fails with
+// EBADF. The watcher has to hold those descriptors in its own process, which a
+// worker thread cannot do because it shares the owner's table.
+test('watched files do not consume descriptors in the owning process', { skip: !fs.existsSync('/dev/fd') }, async () => {
+  const root = tmpTree();
+  const files = 300;
+  for (let i = 0; i < files; i += 1) fs.writeFileSync(path.join(root, 'nested', `${i}.jsonl`), 'x');
+  const ownerDescriptors = () => fs.readdirSync('/dev/fd').length;
+  let ready = 0;
+  const coordinator = withoutEnv(() => createWatcherCoordinator());
+  let host = null;
+  try {
+    const before = ownerDescriptors();
+    host = coordinator.acquire({ dirs: [root], clients: 'claude', usePolling: false }, { onReady: () => { ready += 1; } });
+    assert.ok(await until(() => ready >= 1), 'worker never reported ready');
+    const grown = ownerDescriptors() - before;
+    assert.ok(grown < files / 10, `owner gained ${grown} descriptors for ${files} watched files`);
+  } finally {
+    host?.close({ skipClose: true });
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a worker module that fails to load falls back to watching in-process', async () => {
+  const stub = stubChokidar();
+  const fallbacks = [];
+  try {
+    const coordinator = withoutEnv(() => createWatcherCoordinator({
+      workerPath: path.join(os.tmpdir(), 'tm-missing-watcher-worker.js')
+    }));
+    coordinator.acquire({ dirs: ['/tmp/x'], clients: 'claude' }, { onHostFallback: (e) => fallbacks.push(e) });
+    // The spawn itself succeeds; the missing module only surfaces as the
+    // child's exit, which is the event the fallback waits on.
+    assert.ok(await until(() => coordinator.inspect().inProcess), 'never fell back');
+    assert.equal(fallbacks.length, 1);
+    assert.equal(stub.built.length, 1);
+  } finally {
+    stub.restore();
+  }
+});
+
+function watcherChildrenOf(ppid) {
+  const { execFileSync } = require('node:child_process');
+  return execFileSync('ps', ['-A', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' })
+    .split('\n')
+    .map((line) => line.trim().split(/\s+/))
+    .filter(([, parent, ...command]) => Number(parent) === ppid && command.join(' ').includes('watcherWorker.js'))
+    .map(([pid]) => Number(pid));
+}
+
+// Terminating a usage worker without a clean stop must not leave its watcher
+// holding descriptors for the rest of the app. The child sees its IPC channel
+// close and exits on 'disconnect'.
+test('the watch process exits when the thread that owns it is terminated', { skip: process.platform === 'win32' }, async () => {
+  const { Worker } = require('node:worker_threads');
+  const root = tmpTree();
+  const hostPath = require.resolve('../../src/shared/watcherHost');
+  // Earlier cases SIGKILL their children without waiting, so one may still be
+  // exiting. Only the child this case spawns is asserted on.
+  const earlier = new Set(watcherChildrenOf(process.pid));
+  const owner = new Worker(`
+    const { parentPort } = require('node:worker_threads');
+    const { createWatcherCoordinator } = require(${JSON.stringify(hostPath)});
+    createWatcherCoordinator().acquire(
+      { dirs: [${JSON.stringify(root)}], clients: 'claude', usePolling: false },
+      { onReady: () => parentPort.postMessage('ready') }
+    );
+    // The watcher never keeps its owner alive, so the owner needs a handle of
+    // its own to still be running when the test terminates it.
+    setInterval(() => {}, 1000);
+  `, { eval: true, env: { ...process.env, [WATCH_HOST_ENV]: '' } });
+  try {
+    await new Promise((resolve, reject) => {
+      owner.once('message', resolve);
+      owner.once('error', reject);
+      setTimeout(() => reject(new Error('watcher never reported ready')), 15000).unref();
+    });
+    const spawned = watcherChildrenOf(process.pid).filter((pid) => !earlier.has(pid));
+    assert.equal(spawned.length, 1, 'expected one watch process');
+    await owner.terminate();
+    assert.ok(
+      await until(() => !watcherChildrenOf(process.pid).includes(spawned[0]), 5000),
+      'watch process outlived its owner'
+    );
+  } finally {
+    await owner.terminate();
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

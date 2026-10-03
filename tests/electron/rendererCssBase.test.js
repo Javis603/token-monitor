@@ -63,11 +63,12 @@ test('no component restates the blanket hiding rule', () => {
     '.period-menu.hidden',
     '.hidden, [hidden]'
   ];
-  // `.hidden` as a class token wherever it appears, so a compound selector like
-  // `#claudeManualPanel.hidden` — the exact form this change deleted — is caught
-  // too. The lookahead keeps a hypothetical `.hidden-sm` out.
+  // Visibility-aware spacing is not a hiding rule. Check display declarations,
+  // including compound class tokens, without rejecting :not([hidden]) margins.
+  // The lookahead keeps a hypothetical `.hidden-sm` out.
   const offenders = rules(css)
     .filter((r) => /\.hidden(?![-\w])|\[hidden\]/.test(r.selector))
+    .filter((r) => /\bdisplay\s*:/.test(r.body))
     .filter((r) => !ANIMATED.includes(r.selector))
     .map((r) => r.selector);
   assert.deepEqual(offenders, [], 'these should rely on the blanket rule instead');

@@ -165,7 +165,7 @@ test('renderer wires visibility scheduling without deferring tray icon updates',
   assert.match(app, /onWindowVisibilityPush\?\.\(\(visible\) => \{/);
   assert.match(
     statsPush,
-    /state\.stats = overlayAllTimeSessions\(payload\.data\.stats\);[\s\S]*statsRenderScheduler\.request\(\);[\s\S]*maybeUpdateBarsIcon\(\);/
+    /state\.stats = sessionStatsForDisplay\(allTimeSessions\.attach\(payload\.data\.stats\)\);[\s\S]*statsRenderScheduler\.request\(\);[\s\S]*maybeUpdateBarsIcon\(\);/
   );
 });
 
@@ -297,6 +297,8 @@ test('a stats update repaints main and the visible Settings overlay', () => {
     visibleStatsSurface: () => 'main',
     renderConnectionStatus: (surface) => calls.push(`connection:${surface}`),
     render: () => calls.push('main'),
+    state: { settings: { limitAccountForms: [{ id: 'typesafe' }] } },
+    limitProviderAccountGroup: () => true,
     isSettingsSurfaceVisible: () => true,
     renderFloatingBubbleContent: () => calls.push('bubble'),
     signalContentReady: () => calls.push('ready')
@@ -354,8 +356,8 @@ test('heavy render roots reject work for an inactive surface', () => {
     assert.match(body(name, next), new RegExp(`function ${name}\\([^)]*\\) \\{\\n {2}if \\(!isSettingsSurfaceVisible\\(\\)\\) return;`));
   }
 
-  assert.match(body('renderOpenCodeProfiles', '\nfunction normalizeProfileName('), /\.then\(\([^)]*\) => \{\n {4}if \(!isSettingsSurfaceVisible\(\)\) return;/);
-  assert.match(body('renderNamedApiProfiles', '\nfunction renderOpenRouterProfiles('), /\.then\(\([^)]*\) => \{\n {4}if \(!isSettingsSurfaceVisible\(\)\) return;/);
+  assert.match(body('renderOpenCodeProfiles', '\nfunction normalizeProfileName('), /\.then\(\([^)]*\) => \{\n {4}if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
+  assert.match(body('renderNamedApiProfiles', '\nfunction renderOpenRouterProfiles('), /\.then\(\([^)]*\) => \{\n {4}if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
 });
 
 test('entering Status does not depend on the panel class from the previous render', () => {
@@ -446,7 +448,7 @@ test('hidden event sources defer DOM work and visible surfaces catch up', () => 
   assert.match(settingsPush, /statsRenderScheduler\.request\(\)/);
   assert.match(hubPush, /if \(settingsVisible\) renderHubStatus\(\)/);
   assert.match(hubPush, /const settingsVisible = isSettingsSurfaceVisible\(\)[\s\S]*settingsVisible && els\.hubSecretInput/);
-  assert.doesNotMatch(statsPush, /\b(?:setLiveDot|setStatus|renderSyncClientStatus)\(/);
+  assert.doesNotMatch(statsPush, /\b(?:setLiveDot|setStatus|renderSyncPanel)\(/);
   assert.match(statsPush, /if \(isRendererWindowHidden\(\)\) statsRenderScheduler\.request\(\);[\s\S]*else renderConnectionStatus\(\);/);
   assert.match(statsRender, /renderConnectionStatus\(surface\)/);
   assert.match(bubbleState, /if \(isSettingsPanelOpen\(\)\) syncSettingsForm\(\);[\s\S]*renderStatsUpdate\(\)/);

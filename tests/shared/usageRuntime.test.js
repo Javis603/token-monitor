@@ -12,7 +12,7 @@ process.on('exit', () => { try { fs.rmSync(sharedDir, { recursive: true, force: 
 
 const cursorAuth = require('../../src/shared/providers/cursor/auth');
 const { collectUsageOnce, startCollector } = require('../../src/shared/collector');
-const { createUsageRuntime } = require('../../src/shared/usageRuntime');
+const { createUsageRuntime } = require('../../src/shared/usage/usageRuntime');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
 
 installInProcessWatchHost(test);

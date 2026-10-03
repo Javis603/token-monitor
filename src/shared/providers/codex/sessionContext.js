@@ -21,176 +21,132 @@
 
 const fs = require('node:fs');
 const { normalizeSessionContext } = require('../../sessionContext');
+const { createPromptCacheState, applyPromptCacheEntry } = require('../../sessionPromptCache');
 
-// The newest `token_count` sits behind one turn's worth of response items, so
-// the first budget covers an ordinary turn and the second covers a turn with a
-// large tool output. Beyond that the session simply has no context reading
-// until its next turn lands — a bounded miss, not a full-file read on a
-// transcript that can reach tens of megabytes.
 const TAIL_READ_BUDGETS = [256 * 1024, 1024 * 1024];
-
-// Keyed by file path and invalidated by size+mtime, so an unchanged transcript
-// costs one stat. Module-level on purpose: it outlives a collection tick, the
-// same way the shared timestamp cache does, because the pass that uses it is
-// rebuilt on every tick.
-const contextCache = new Map();
-
-// Same lifetime rule as the context cache above, for the turn-boundary read.
-const turnEndCache = new Map();
-
-// The turn-boundary scan starts at the ordinary tail budget and doubles up to
-// this cap. A boundary is normally within the first window (it is the last
-// thing a turn writes), but a single Codex message can be several megabytes,
-// so the window has to be able to grow past it. The cap keeps a transcript
-// with no boundary at all (an old rollout predating the event) bounded rather
-// than read in full.
-const TURN_READ_START_BYTES = 256 * 1024;
 const TURN_READ_MAX_BYTES = 8 * 1024 * 1024;
-
-function readFileTail(filePath, size, bytes) {
-  let fd;
-  try {
-    fd = fs.openSync(filePath, 'r');
-    const length = Math.min(bytes, size);
-    const buffer = Buffer.alloc(length);
-    fs.readSync(fd, buffer, 0, length, Math.max(0, size - length));
-    return buffer.toString('utf8');
-  } catch (_) {
-    return '';
-  } finally {
-    if (fd !== undefined) {
-      try { fs.closeSync(fd); } catch (_) {}
-    }
-  }
-}
-
-function tokenCountInfo(line) {
-  let obj;
-  try { obj = JSON.parse(line); } catch (_) { return null; }
-  if (!obj || typeof obj !== 'object') return null;
-  const payload = obj.payload && typeof obj.payload === 'object' ? obj.payload : obj;
-  if (payload.type !== 'token_count') return null;
-  // Codex emits `token_count` with a null `info` when it has nothing to report
-  // (a resumed session before its first turn, for one). That is not an answer;
-  // keep walking back for an event that carries usage.
-  return payload.info && typeof payload.info === 'object' ? payload.info : null;
-}
+const MAX_METADATA_LINE_BYTES = 64 * 1024;
+const stateCache = new Map();
 
 function contextFromInfo(info) {
   const usage = info.last_token_usage || info.lastTokenUsage;
   return normalizeSessionContext({
     contextTokens: usage && typeof usage === 'object'
-      ? (usage.total_tokens ?? usage.totalTokens)
-      : 0,
+      ? (usage.total_tokens ?? usage.totalTokens) : 0,
     contextWindow: info.model_context_window ?? info.modelContextWindow ?? info.context_window ?? info.contextWindow
   });
 }
 
-function contextFromTail(text) {
-  const lines = text.split('\n');
-  // The first line of a tail read is usually cut mid-record; walking backwards
-  // reaches the newest complete event first and never depends on it.
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index].trim();
-    if (!line) continue;
-    const info = tokenCountInfo(line);
-    if (!info) continue;
-    const context = contextFromInfo(info);
-    if (context) return context;
+function applyLine(state, line, position, contextStart, cacheStart) {
+  // Metadata records are small; never decode arbitrarily large tool output.
+  if (!line.length || line.length > MAX_METADATA_LINE_BYTES) return;
+  let entry;
+  try { entry = JSON.parse(line.toString('utf8')); } catch (_) { return; }
+  if (!entry || typeof entry !== 'object') return;
+  const payload = entry.payload && typeof entry.payload === 'object' ? entry.payload : entry;
+  if (payload.type === 'token_count' && payload.info && position >= contextStart) {
+    const context = contextFromInfo(payload.info);
+    if (context) state.context = context;
   }
-  return null;
+  if (payload.type === 'task_complete' || payload.type === 'turn_aborted') state.turnEnded = true;
+  else if (payload.type === 'task_started') state.turnEnded = false;
+  if (position >= cacheStart) applyPromptCacheEntry(state.promptCacheState, entry, 'codex');
 }
 
-/**
- * The context window occupancy of one Codex rollout transcript, or null when
- * the transcript has not reported one yet.
- */
-function readCodexSessionContext(filePath, deps = {}) {
-  const cache = deps.cache || contextCache;
-  let stat;
-  try { stat = fs.statSync(filePath); } catch (_) { return null; }
-  const fingerprint = `${stat.size}:${stat.mtimeMs}`;
-  const cached = cache.get(filePath);
-  if (cached?.fingerprint === fingerprint) return cached.context;
-
-  let context = null;
-  for (const budget of TAIL_READ_BUDGETS) {
-    context = contextFromTail(readFileTail(filePath, stat.size, budget));
-    if (context || stat.size <= budget) break;
+function consumeBytes(state, chunk, start, contextStart, cacheStart) {
+  const prefix = state.trailing;
+  const bytes = prefix.length ? Buffer.concat([prefix, chunk]) : chunk;
+  const base = start - prefix.length;
+  let lineStart = 0;
+  for (let index = 0; index < bytes.length; index += 1) {
+    if (bytes[index] !== 0x0a) continue;
+    if (!state.droppingLine) applyLine(state, bytes.subarray(lineStart, index), base + lineStart, contextStart, cacheStart);
+    state.droppingLine = false;
+    lineStart = index + 1;
   }
-  cache.set(filePath, { fingerprint, context });
-  return context;
+  const remainder = bytes.subarray(lineStart);
+  if (state.droppingLine || remainder.length > MAX_METADATA_LINE_BYTES) {
+    state.trailing = Buffer.alloc(0);
+    state.droppingLine = true;
+  } else state.trailing = Buffer.from(remainder);
 }
 
-// Whether the last thing this transcript did was finish a turn. Codex writes
-// `task_complete` when the agent stops generating, and `task_started` when it
-// picks the next thing up, so the newest of the two answers the question. A
-// transcript with neither has not had a turn finish yet (or predates the
-// event), which reads as false and leaves the caller on its time window.
-//
-// A turn that was interrupted ends with `turn_aborted` instead: nothing is
-// generating, so that counts as finished too.
-function turnEndMarker(line) {
-  let obj;
-  try { obj = JSON.parse(line); } catch (_) { return ''; }
-  if (!obj || typeof obj !== 'object') return '';
-  const payload = obj.payload && typeof obj.payload === 'object' ? obj.payload : obj;
-  if (payload.type === 'task_complete' || payload.type === 'turn_aborted') return 'end';
-  if (payload.type === 'task_started') return 'start';
-  return '';
-}
-
-function codexTurnEndedFromTail(text) {
-  const lines = text.split('\n');
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const line = lines[index].trim();
-    if (!line) continue;
-    const marker = turnEndMarker(line);
-    if (marker) return marker === 'end';
-  }
-  return false;
-}
-
-/**
- * True when the newest turn-boundary event in a Codex rollout is a completion.
- */
-function readCodexTurnEnded(filePath, deps = {}) {
-  const cache = deps.cache || turnEndCache;
-  let stat;
-  // No file means no evidence, which is not the same as `false` ("a turn is
-  // under way"): only the latter may clear a `true` left by an earlier tick.
-  try { stat = fs.statSync(filePath); } catch (_) { return undefined; }
-  const fingerprint = `${stat.size}:${stat.mtimeMs}`;
-  const cached = cache.get(filePath);
-  if (cached?.fingerprint === fingerprint) return cached.turnEnded;
-  // `undefined` until a boundary is actually found: a tail with no
-  // task_complete/task_started/turn_aborted says nothing about the turn.
-  let turnEnded;
-  let budget = TURN_READ_START_BYTES;
-  while (true) {
-    const text = readFileTail(filePath, stat.size, budget);
-    // A boundary found is an answer either way, and is the newest one because
-    // the scan walks backwards from the end of this tail.
-    if (codexHasTurnBoundary(text)) {
-      turnEnded = codexTurnEndedFromTail(text);
-      break;
+// Context, boundary and cache share one decoded index. Append-only updates read
+// only new bytes and carry accounting identity across scans; a duplicate cannot
+// restart the cache clock after its original record leaves the initial tail.
+function readCodexSessionState(filePath, deps = {}) {
+  const cache = deps.cache || stateCache;
+  const fsApi = deps.fs || fs;
+  let fd;
+  try {
+    const stat = fsApi.statSync(filePath);
+    const identity = `${stat.dev}:${stat.ino}`;
+    const cached = cache.get(filePath);
+    if (cached?.identity === identity && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) return cached;
+    const appendOnly = cached?.identity === identity && stat.size > cached.size;
+    const state = appendOnly ? { ...cached, promptCacheState: { ...cached.promptCacheState } }
+      : { context: null, turnEnded: undefined, promptCacheState: createPromptCacheState(), trailing: Buffer.alloc(0), droppingLine: false };
+    fd = fsApi.openSync(filePath, 'r');
+    let start;
+    const chunks = [];
+    if (appendOnly) {
+      start = cached.size;
+    } else {
+      // Widen only for an absent turn boundary. Each earlier segment is read
+      // once; occupancy and cache still use the newest 1 MiB only.
+      start = stat.size;
+      let boundaryFound = false;
+      while (start > 0 && stat.size - start < TURN_READ_MAX_BYTES) {
+        const length = Math.min(chunks.length ? TAIL_READ_BUDGETS[0] : TAIL_READ_BUDGETS[1], start);
+        start -= length;
+        const bytes = Buffer.alloc(length);
+        const read = fsApi.readSync(fd, bytes, 0, length, start);
+        if (read !== length) throw new Error('Incomplete transcript read');
+        chunks.unshift(bytes);
+        const boundaryText = Buffer.concat([bytes, chunks[1]?.subarray(0, 128) || Buffer.alloc(0)]).toString('utf8');
+        boundaryFound = /"type"\s*:\s*"(?:task_complete|task_started|turn_aborted)"/.test(boundaryText) || boundaryFound;
+        if (stat.size - start >= TAIL_READ_BUDGETS[1] && boundaryFound) break;
+      }
+      state.droppingLine = start > 0;
     }
-    // No boundary inside this window: widen. Codex can emit a single message
-    // of several megabytes, so a fixed tail is not enough - one real session
-    // put its last boundary behind two lines that together exceeded 1 MiB.
-    if (stat.size <= budget || budget >= TURN_READ_MAX_BYTES) break;
-    budget = Math.min(budget * 2, TURN_READ_MAX_BYTES);
+    const contextStart = appendOnly ? 0 : Math.max(0, stat.size - TAIL_READ_BUDGETS[1]);
+    const cacheStart = contextStart;
+    let position = start;
+    if (appendOnly) {
+      while (position < stat.size) {
+        const length = Math.min(TAIL_READ_BUDGETS[0], stat.size - position);
+        const bytes = Buffer.alloc(length);
+        const read = fsApi.readSync(fd, bytes, 0, length, position);
+        if (read !== length) throw new Error('Incomplete transcript read');
+        consumeBytes(state, bytes, position, contextStart, cacheStart);
+        position += length;
+      }
+    } else {
+      for (const bytes of chunks) {
+        consumeBytes(state, bytes, position, contextStart, cacheStart);
+        position += bytes.length;
+      }
+    }
+    // A complete final record without a newline is valid. Keep its bytes so
+    // a later append can finish a partial record; accounting dedup is stateful.
+    if (!state.droppingLine) applyLine(state, state.trailing, stat.size - state.trailing.length, contextStart, cacheStart);
+    Object.assign(state, { identity, size: stat.size, mtimeMs: stat.mtimeMs });
+    if (cache.size >= 512 && !cache.has(filePath)) cache.delete(cache.keys().next().value);
+    cache.set(filePath, state);
+    return state;
+  } catch (_) {
+    return {};
+  } finally {
+    if (fd !== undefined) { try { fsApi.closeSync(fd); } catch (_) {} }
   }
-  cache.set(filePath, { fingerprint, turnEnded });
-  return turnEnded;
 }
 
-function codexHasTurnBoundary(text) {
-  return /"type":"(task_complete|task_started|turn_aborted)"/.test(text);
+function readCodexSessionContext(filePath, deps = {}) {
+  return readCodexSessionState(filePath, deps).context || null;
 }
 
-module.exports = {
-  TAIL_READ_BUDGETS,
-  readCodexSessionContext,
-  readCodexTurnEnded
-};
+function readCodexTurnEnded(filePath, deps = {}) {
+  return readCodexSessionState(filePath, deps).turnEnded;
+}
+
+module.exports = { TAIL_READ_BUDGETS, readCodexSessionState, readCodexSessionContext, readCodexTurnEnded };

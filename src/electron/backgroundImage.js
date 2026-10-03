@@ -24,13 +24,9 @@ async function readRegularImage(filePath, limit) {
   }
 }
 
-function imageDataUrl(bytes) {
-  return `data:image/png;base64,${bytes.toString('base64')}`;
-}
-
 async function getBackgroundImage(userDataPath) {
   try {
-    return imageDataUrl(await readRegularImage(backgroundImagePath(userDataPath), MAX_SAVED_BYTES));
+    return await readRegularImage(backgroundImagePath(userDataPath), MAX_SAVED_BYTES);
   } catch (error) {
     if (error?.code === 'ENOENT') return null;
     throw error;
@@ -60,7 +56,11 @@ async function importBackgroundImage(sourcePath, userDataPath, nativeImage) {
       if (error?.code !== 'ENOENT') throw error;
     });
   }
-  return imageDataUrl(png);
+  // Bytes, not a data URL: Blink silently truncates CSS values set through
+  // setProperty() at 2 MiB, which truncated the url("data:...") value and left
+  // larger saved PNGs invisible. The renderer turns these bytes into a blob:
+  // URL, which has no such limit.
+  return png;
 }
 
 async function clearBackgroundImage(userDataPath) {

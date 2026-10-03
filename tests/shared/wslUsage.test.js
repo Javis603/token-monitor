@@ -25,11 +25,47 @@ test('homeHasData returns the client ids whose markers are present', () => {
   assert.deepEqual([...ids].sort(), ['codex', 'hermes', 'opencode', 'zcode']);
 });
 
+test('each shared host directory discovers and attributes a WSL-only home', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\alice';
+  const entries = [
+    ['.factory/sessions', 'droid'],
+    ['.qwen/projects', 'qwen'],
+    ['.pi/agent/sessions', 'pi'],
+    ['.omp/agent/sessions', 'omp'],
+    ['.commandcode/projects', 'commandcode']
+  ];
+  for (const [marker, client] of entries) {
+    const markerPath = `${home}\\${marker.replace(/\//g, '\\')}`;
+    const deps = {
+      platform: 'win32',
+      exec: (cmd) => cmd === 'reg' ? 'Lxss' : 'Ubuntu\n',
+      readdirSync: (dir) => dir === '\\\\wsl$\\Ubuntu\\home' ? ['alice'] : [],
+      existsSync: (value) => value === markerPath
+    };
+    assert.deepEqual(homeHasData(home, deps.existsSync, deps.readdirSync), [client]);
+    assert.deepEqual(wslUsageHomes(deps), [home]);
+    const { detected } = await collectWslUsage({ clients: client, runTokscale: async () => ({ entries: [] }) }, deps);
+    assert.deepEqual(detected, [client]);
+  }
+});
+
 test('homeHasData maps an alternate-root marker to its client id', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const present = new Set([`${home}\\.kimi-code\\sessions`]);
   const ids = homeHasData(home, (p) => present.has(p));
   assert.deepEqual([...ids], ['kimi']);
+});
+
+test('homeHasData detects Muse sessions in a WSL home', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const marker = `${home}\\.local\\share\\muse\\sessions`;
+  assert.deepEqual(homeHasData(home, (path) => path === marker), ['muse']);
+});
+
+test('homeHasData detects fx sessions in a WSL home', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const marker = `${home}\\.fx\\sessions`;
+  assert.deepEqual(homeHasData(home, (path) => path === marker), ['fx']);
 });
 
 test('homeHasData attributes Kilo CLI and extension markers to one client', () => {
