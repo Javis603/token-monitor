@@ -289,7 +289,7 @@ test('session detail renders its heading before loading, errors and empty result
   assert.equal(groupHeading.parentElement, groupBack);
   groupHeading.click();
   assert.equal(state.backClicked, true);
-  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) {
     context.t = (key, params) => translate(locale, key, params);
     for (const returnTo of [null, { kind: 'background-review-group' }]) {
       const title = 'Review PR 906';

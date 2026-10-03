@@ -200,7 +200,7 @@ test('every status label the Limits list can draw is translated in every locale'
   // The silent failure the capability tags above have, one step further out: a
   // label with no LIMIT_CAPABILITY_TAG_KEYS entry is not an error —
   // translatedLimitCapabilityTag returns the label itself — so a provider-specific
-  // pill renders as raw English in all five locales while the labels beside it are
+  // pill renders as raw English in all bundled locales while the labels beside it are
   // translated. The table is read only by app.js and its keys are checked against
   // no locale anywhere, so both halves are asserted here: every label this accessor
   // can return resolves to a key, and every key resolves to copy in every locale.

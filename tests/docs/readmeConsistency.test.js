@@ -9,14 +9,15 @@ const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
 const rootDir = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(rootDir, file), 'utf8');
 
-const localizedReadmes = ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md'];
+const localizedReadmes = ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md', 'README.pt-BR.md'];
 
 const nativeMacWidgetCopy = {
   'README.md': '- **Native macOS Widgets** — View token usage and cost, trends, AI tool quota remaining and reset times, activity heatmaps, and breakdowns by tool or model in Small, Medium, and Large layouts on macOS 14+',
   'README.zh-TW.md': '- **原生 macOS 小工具**：在 macOS 14+ 上透過小型、中型與大型版面查看 Token 用量與成本、趨勢、各 AI 工具的剩餘額度與重設時間、活動熱圖，以及依工具或模型分類的明細',
   'README.zh-CN.md': '- **原生 macOS 小部件**：在 macOS 14+ 上通过小号、中号和大号布局查看 Token 用量与成本、趋势、各 AI 工具的剩余额度与重置时间、活动热力图，以及按工具或模型分类的明细',
   'README.ja.md': '- **ネイティブ macOS ウィジェット** — macOS 14 以降で、小・中・大サイズのレイアウトにトークン使用量とコスト、推移、AI ツールごとのクォータ残量とリセット時刻、アクティビティヒートマップ、ツール・モデル別の内訳を表示します',
-  'README.ko.md': '- **네이티브 macOS 위젯** — macOS 14 이상에서 소형·중형·대형 레이아웃으로 토큰 사용량과 비용, 추세, AI 도구별 잔여 할당량과 재설정 시간, 활동 히트맵, 도구·모델별 분석을 확인할 수 있습니다'
+  'README.ko.md': '- **네이티브 macOS 위젯** — macOS 14 이상에서 소형·중형·대형 레이아웃으로 토큰 사용량과 비용, 추세, AI 도구별 잔여 할당량과 재설정 시간, 활동 히트맵, 도구·모델별 분석을 확인할 수 있습니다',
+  'README.pt-BR.md': '- **Widgets nativos do macOS** — veja uso de tokens e custo, tendências, cota restante das ferramentas de IA e horários de reset, mapas de calor de atividade e detalhamentos por ferramenta ou modelo nos layouts Pequeno, Médio e Grande no macOS 14+'
 };
 
 // The supported-tools table is what a reader can actually verify, so the prose counts are
@@ -169,6 +170,11 @@ const countClaims = {
     tools: /(\d+)개 이상의 AI 코딩 도구/,
     usage: /(\d+)개 이상의 AI 도구/,
     limits: /(\d+)개 이상 공급자/
+  },
+  'README.pt-BR.md': {
+    tools: /em (\d+)\+ ferramentas de programação com IA/,
+    usage: /e (\d+)\+ ferramentas de IA/,
+    limits: /e (\d+)\+ provedores/
   }
 };
 
@@ -292,7 +298,8 @@ test('localized README settings lists keep provider credentials inside AI Tool L
     'README.zh-TW.md': 'AI 工具額度（供應商選擇、額度與憑證）',
     'README.zh-CN.md': 'AI 工具额度（提供方选择、额度与凭据）',
     'README.ja.md': 'AI ツール制限（プロバイダー選択、制限、認証情報）',
-    'README.ko.md': 'AI 도구 한도(공급자 선택, 한도, 자격 증명)'
+    'README.ko.md': 'AI 도구 한도(공급자 선택, 한도, 자격 증명)',
+    'README.pt-BR.md': 'Limites de Ferramentas de IA (seleção de provedores, limites e credenciais)'
   };
 
   for (const [file, copy] of Object.entries(mergedSectionCopy)) {
@@ -310,7 +317,7 @@ test('configuration reference keeps provider accounts inside AI Tool Limits', ()
 });
 
 test('localized README WSL claims disclose the SQLite agent boundary', () => {
-  const files = ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md'];
+  const files = ['README.md', 'README.zh-TW.md', 'README.zh-CN.md', 'README.ja.md', 'README.ko.md', 'README.pt-BR.md'];
 
   for (const file of files) {
     const line = read(file).split('\n').find((value) => value.includes('**WSL')) || '';

@@ -50,7 +50,7 @@ test('Hub build presentation labels Worker, Node, and unknown Hub runtimes', () 
 });
 
 test('matching Hub builds show only the confirmed backend in every locale', () => {
-  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) {
     for (const [runtime, label] of [['cloudflare-worker', 'Cloudflare Worker'], ['node-hub', 'Node Hub']]) {
       const { els } = renderer({ runtime, locale });
       assert.equal(els.syncPanelBuild.hidden, false);

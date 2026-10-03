@@ -75,7 +75,8 @@ function setupMenubarClock() {
     "zh-TW": "zh-Hant-HK",
     "zh-CN": "zh-Hans-CN",
     ko: "ko-KR",
-    ja: "ja-JP"
+    ja: "ja-JP",
+    "pt-BR": "pt-BR"
   };
   var timeoutId = null;
   var languageObserver = null;
@@ -584,7 +585,7 @@ function setupDashboard() {
     var active = daily.filter(function (v) { return v > 0; }).sort(function (a, b) { return a - b; });
     function q(p) { return active[Math.min(active.length - 1, Math.floor(active.length * p))]; }
     var q1 = q(0.25), q2 = q(0.5), q3 = q(0.75);
-    var localeMap = { en: "en-US", "zh-TW": "zh-Hant-HK", "zh-CN": "zh-Hans-CN", ko: "ko-KR", ja: "ja-JP" };
+    var localeMap = { en: "en-US", "zh-TW": "zh-Hant-HK", "zh-CN": "zh-Hans-CN", ko: "ko-KR", ja: "ja-JP", "pt-BR": "pt-BR" };
     var monthFormatter = new Intl.DateTimeFormat(localeMap[document.documentElement.lang] || "en-US", { month: "short", timeZone: "UTC" });
     var months = [];
     for (var month = 0; month < 12; month++) months.push(monthFormatter.format(new Date(Date.UTC(2026, 6 + month, 1))));
@@ -1465,7 +1466,7 @@ function setupWidgetHeat() {
      week * pitch, capped so the label fits inside the rendered width. */
   var monthBlocks = document.querySelectorAll("[data-wdg-months]");
   function renderMonths() {
-    var localeMap = { en: "en-US", "zh-TW": "zh-Hant-HK", "zh-CN": "zh-Hans-CN", ko: "ko-KR", ja: "ja-JP" };
+    var localeMap = { en: "en-US", "zh-TW": "zh-Hant-HK", "zh-CN": "zh-Hans-CN", ko: "ko-KR", ja: "ja-JP", "pt-BR": "pt-BR" };
     var fmt;
     try {
       fmt = new Intl.DateTimeFormat(localeMap[document.documentElement.lang] || "en-US", { month: "short" });
