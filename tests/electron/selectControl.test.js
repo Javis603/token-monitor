@@ -197,6 +197,23 @@ test('keyboard separates highlight from selection and Escape cancels without sav
   f.control.destroy();
 });
 
+for (const arrow of ['ArrowUp', 'ArrowDown']) {
+  test(`${arrow} opens on the selected option before navigating`, () => {
+    const f = harness({ value: 'client' });
+    key(f, arrow);
+    assert.equal(f.trigger.getAttribute('aria-activedescendant'), f.popup.children[1].id);
+    key(f, 'Enter');
+    assert.equal(f.select.value, 'client');
+    key(f, arrow);
+    key(f, arrow);
+    const nextIndex = arrow === 'ArrowUp' ? 0 : 2;
+    assert.equal(f.trigger.getAttribute('aria-activedescendant'), f.popup.children[nextIndex].id);
+    key(f, 'Enter');
+    assert.equal(f.select.value, f.select.options[nextIndex].value);
+    f.control.destroy();
+  });
+}
+
 test('Tab confirms keyboard navigation but outside clicks, blur and trigger toggling cancel', () => {
   const f = harness();
   open(f);

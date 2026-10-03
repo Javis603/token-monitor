@@ -10,7 +10,10 @@ const { presentation, targetKey } = require('../../src/electron/renderer/hubBuil
 const i18n = require('../../src/electron/renderer/i18n');
 
 const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-const renderSource = app.slice(app.indexOf('function renderHubBuildStatus('), app.indexOf('function renderHubAddresses('));
+const renderStart = app.indexOf('function renderHubBuildStatus(');
+const renderEnd = app.indexOf('function renderHubAddresses(');
+assert.ok(renderStart >= 0 && renderEnd > renderStart, 'Hub build renderer source markers should be present and ordered');
+const renderSource = app.slice(renderStart, renderEnd);
 
 function renderer({ status = 'current', runtime = 'cloudflare-worker', hubMode = 'client', locale = 'en' } = {}) {
   const context = vm.createContext({

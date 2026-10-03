@@ -55,6 +55,15 @@ test("this device's sync time is the Hub's receipt when the live record carries 
   assert.equal(hostOwned.syncedAt, '2026-10-02T00:00:00.000Z');
 });
 
+test('remote sync time falls back to updatedAt when receivedAt is missing', () => {
+  const [remote] = deviceRows([device('remote', {
+    receivedAt: '',
+    updatedAt: '2026-10-02T00:03:00.000Z'
+  })], { localDeviceId: 'me' });
+
+  assert.equal(remote.syncedAt, '2026-10-02T00:03:00.000Z');
+});
+
 test('client connection state separates a missing URL from a failed connection', () => {
   assert.equal(clientConnectionState({ mode: 'local', streamConnected: false }), 'notConfigured');
   assert.equal(clientConnectionState({ mode: 'sync', streamConnected: true }), 'connected');

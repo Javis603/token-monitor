@@ -179,13 +179,17 @@ test('new input while saving, including a reversion, keeps the editor open', asy
 test('new editor session or changed mode prevents save closure', async () => {
   const { context, state, els } = harness();
   context.beginClientConnectionEdit({ focus: true });
-  context.finishClientConnectionSave({ hubUrl: 0, secret: 0, deviceId: 0 }, -1);
+  const { revisions, editRevision } = vm.runInContext('({ revisions: { ...hubDraftRevisions }, editRevision: clientConnectionEditRevision })', context);
+  context.finishClientConnectionSave(revisions, editRevision - 1);
   assert.equal(els.syncConnectionEditor.hidden, false);
   state.settings = { ...state.settings, hubMode: 'host' };
-  context.finishClientConnectionSave({ hubUrl: 0, secret: 0, deviceId: 0 }, 1);
+  context.finishClientConnectionSave(revisions, editRevision);
+  assert.equal(vm.runInContext('clientConnectionEditing', context), true);
   state.settings = { ...state.settings, hubMode: 'client' };
   context.syncHubConnectionUi();
   assert.equal(els.syncConnectionEditor.hidden, false);
+  context.finishClientConnectionSave(revisions, editRevision);
+  assert.equal(els.syncConnectionEditor.hidden, true);
 });
 
 test('persistence failure keeps drafts and safe feedback until retry succeeds', async () => {

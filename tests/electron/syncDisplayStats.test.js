@@ -55,7 +55,7 @@ function usagePeriod(client, lastUsedAt, totalTokens = 1) {
 
 test('composeLocalSyncStats replaces the hub copy of the local device without double counting', () => {
   const hubStats = aggregateDevices([
-    device('local', 100),
+    device('local', 100, { updatedAt: '2026-07-16T00:01:00.000Z' }),
     device('remote', 50)
   ], 0, Date.parse('2026-07-16T00:01:00.000Z'));
   const localHubDevice = hubStats.devices.find((entry) => entry.deviceId === 'local');

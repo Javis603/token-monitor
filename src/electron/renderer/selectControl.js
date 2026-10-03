@@ -375,8 +375,8 @@
         event.preventDefault();
         const wasOpen = opened;
         open({ keyboard: true });
-        if (opened && (wasOpen || key !== 'ArrowDown')) {
-          highlight(navigate(options, active, !wasOpen && key === 'ArrowUp' ? 'first' : directions[key]));
+        if (opened && (wasOpen || (key !== 'ArrowDown' && key !== 'ArrowUp'))) {
+          highlight(navigate(options, active, directions[key]));
         }
         return;
       }

@@ -289,8 +289,9 @@ ${functionSource('renderSyncPanelDevices', 'syncDeviceRow')}`, context);
   assert.equal(list.children[0].textContent, 'settings.sync.panel.empty');
 });
 
-test('sync timestamp changes keep the existing device row and its controls', () => {
+test('sync timestamp changes reuse the device row and pass the latest data to its updater', () => {
   const list = new Element();
+  const updates = [];
   const context = vm.createContext({
     document: { createElement: () => new Element() },
     els: { syncDeviceList: list, syncPanelCount: {}, syncPanelOpenDevices: {} },
@@ -302,13 +303,15 @@ test('sync timestamp changes keep the existing device row and its controls', () 
     devicesBeingDeleted: new Set(),
     resetDeviceDeleteConfirmation() {},
     syncDeviceRow: row => { const item = new Element(); item.dataset.key = row.key; return item; },
-    updateSyncDeviceRow() {}
+    updateSyncDeviceRow(item, row) { updates.push({ item, row }); }
   });
   vm.runInContext(`let syncPanelListScope = '';
 ${functionSource('renderSyncPanelDevices', 'syncDeviceRow')}`, context);
   const [row] = panelApi.deviceRows([{ deviceId: 'remote', receivedAt: '2026-10-02T00:00:00Z' }]);
   context.renderSyncPanelDevices([row]);
   const existing = list.children[0];
-  context.renderSyncPanelDevices([{ ...row, syncedAt: '2026-10-02T00:01:00Z' }]);
+  const latest = { ...row, syncedAt: '2026-10-02T00:01:00Z' };
+  context.renderSyncPanelDevices([latest]);
   assert.equal(list.children[0], existing);
+  assert.deepEqual(updates, [{ item: existing, row: latest }]);
 });

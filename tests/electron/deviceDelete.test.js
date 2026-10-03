@@ -75,7 +75,7 @@ class FakeNode {
 
   querySelectorAll(selector) {
     return this.children.flatMap(child => [
-      ...(child.className === selector.slice(1) ? [child] : []),
+      ...(child.className?.split(/\s+/).includes(selector.slice(1)) ? [child] : []),
       ...child.querySelectorAll(selector)
     ]);
   }
@@ -89,6 +89,17 @@ class FakeNode {
     return null;
   }
 }
+
+test('device DOM queries match a class token on nested multi-class nodes', () => {
+  const root = new FakeNode('div');
+  const row = new FakeNode('div');
+  const button = new FakeNode('button');
+  button.className = 'device-delete-button armed';
+  row.append(button);
+  root.append(row);
+
+  assert.deepEqual(root.querySelectorAll('.device-delete-button'), [button]);
+});
 
 function createHarness() {
   const documentListeners = new Map();
@@ -381,24 +392,52 @@ test('main process deletion accepts only a known remote device in the current sy
   assert.equal(context.deleted, 'remote');
 });
 
-test('Hub deletion still accepts a known active remote device', async () => {
-  const source = functionSource(main, 'deleteDeviceFromCurrentSync', 'postToHub');
-  const context = vm.createContext({
-    settings: { hubMode: 'client', deviceId: 'local' },
-    icloudRuntimeHandle: null,
-    currentHubIdentity: () => 'https://example.test',
-    fetchStats: async () => ({ devices: [{ deviceId: 'active', stale: false }] }),
-    deleteDeviceFromHub: async (id) => { context.deleted = id; },
-    defaultDeviceId: () => 'fallback-device',
-    Promise,
-    String,
-    Object
-  });
-  vm.runInNewContext(`async ${source}\nglobalThis.deleteDeviceFromCurrentSync = deleteDeviceFromCurrentSync;`, context);
+for (const hubMode of ['client', 'host']) {
+  for (const stale of [false, undefined]) {
+    test(`${hubMode} deletion rejects a device whose latest stale status is ${stale}`, async () => {
+      const source = functionSource(main, 'deleteDeviceFromCurrentSync', 'postToHub');
+      let finishStats;
+      const deleted = [];
+      const context = vm.createContext({
+        settings: { hubMode, deviceId: 'local' },
+        icloudRuntimeHandle: null,
+        currentHubIdentity: () => 'https://example.test',
+        fetchStats: () => new Promise((resolve) => { finishStats = resolve; }),
+        deleteDeviceFromHub: async (id) => { deleted.push(id); },
+        defaultDeviceId: () => 'fallback-device',
+        Promise,
+        String,
+        Object
+      });
+      vm.runInContext(`async ${source}\nglobalThis.deleteDeviceFromCurrentSync = deleteDeviceFromCurrentSync;`, context);
 
-  await context.deleteDeviceFromCurrentSync('active');
-  assert.equal(context.deleted, 'active');
-});
+      const deleting = context.deleteDeviceFromCurrentSync('remote');
+      finishStats({ devices: [{ deviceId: 'remote', ...(stale === undefined ? {} : { stale }) }] });
+      await assert.rejects(deleting, (error) => error.code === 'device_not_stale');
+      assert.deepEqual(deleted, []);
+    });
+  }
+
+  test(`${hubMode} deletion accepts a known stale remote device`, async () => {
+    const source = functionSource(main, 'deleteDeviceFromCurrentSync', 'postToHub');
+    const deleted = [];
+    const context = vm.createContext({
+      settings: { hubMode, deviceId: 'local' },
+      icloudRuntimeHandle: null,
+      currentHubIdentity: () => 'https://example.test',
+      fetchStats: async () => ({ devices: [{ deviceId: 'remote', stale: true }] }),
+      deleteDeviceFromHub: async (id) => { deleted.push(id); },
+      defaultDeviceId: () => 'fallback-device',
+      Promise,
+      String,
+      Object
+    });
+    vm.runInContext(`async ${source}\nglobalThis.deleteDeviceFromCurrentSync = deleteDeviceFromCurrentSync;`, context);
+
+    await context.deleteDeviceFromCurrentSync('remote');
+    assert.deepEqual(deleted, ['remote']);
+  });
+}
 
 test('main process deletion abandons eligibility checks after a mode switch', async () => {
   const source = functionSource(main, 'deleteDeviceFromCurrentSync', 'postToHub');
