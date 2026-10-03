@@ -17,7 +17,8 @@ const {
   configFingerprint,
   collectUsageOnce,
   localTodayKey,
-  qoderCnSourcesForClients
+  qoderCnSourcesForClients,
+  pricingFingerprint
 } = require('../../src/shared/collector');
 
 const { emptyPeriod } = require('../../src/shared/usage');
@@ -40,7 +41,7 @@ test('configFingerprint normalizes clients and includes allTimeSince and project
   const b = configFingerprint('claude,codex', '2024-01-01');
   // whitespace-normalised to the same value
   assert.equal(a, b, 'whitespace should be normalized');
-  assert.match(a, /^claude,codex\|2024-01-01\|projects:on$/);
+  assert.match(a, /^claude,codex\|2024-01-01\|projects:on\|pricing:[0-9a-f]{64}$/);
 
   const c = configFingerprint('claude', '2024-01-01');
   assert.notEqual(a, c, 'different clients should differ');
@@ -88,13 +89,13 @@ test('qoderCnSourcesForClients resolves the JSONL projects dir alongside the leg
 
 test('configFingerprint handles undefined and empty clients', () => {
   const a = configFingerprint(undefined, '2024-01-01');
-  assert.equal(a, '|2024-01-01|projects:on', 'undefined clients should produce empty string before pipe');
+  assert.equal(a, `|2024-01-01|projects:on|pricing:${pricingFingerprint()}`, 'undefined clients should produce empty string before pipe');
 
   const b = configFingerprint('', '2024-01-01');
-  assert.equal(b, '|2024-01-01|projects:on', 'empty clients should produce same as undefined');
+  assert.equal(b, `|2024-01-01|projects:on|pricing:${pricingFingerprint()}`, 'empty clients should produce same as undefined');
 
   const c = configFingerprint('claude', undefined);
-  assert.match(c, /\|undefined\|projects:on$/, 'undefined allTimeSince produces string "undefined"');
+  assert.match(c, /\|undefined\|projects:on\|pricing:[0-9a-f]{64}$/, 'undefined allTimeSince produces string "undefined"');
 });
 
 test('configFingerprint labels the Qoder CN database path explicitly', () => {
@@ -107,7 +108,7 @@ test('configFingerprint labels the Qoder CN database path explicitly', () => {
   );
   assert.equal(
     fingerprint,
-    `claude,qodercn|2024-01-01|projects:on|qodercn:${path.resolve(dbPath)}`
+    `claude,qodercn|2024-01-01|projects:on|qodercn:${path.resolve(dbPath)}|pricing:${pricingFingerprint()}`
   );
 });
 

@@ -4,6 +4,8 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
+const { customPricingPath } = require('./tokscaleConfig');
 const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
@@ -767,6 +769,8 @@ async function collectHistoryOnce(options) {
       const retainedGraph = retainDailyHistory(rawGraphs, {
         ...(options.dailyHistoryArchiveOptions || {}),
         liveDays: options.dailyHistoryLiveDays,
+        pricingRevision: options.pricingRevision,
+        customPricingActive: options.customPricingActive,
         todayKey,
         capDays,
         writeEnabled: options.dailyHistoryArchiveWriteEnabled
@@ -1059,6 +1063,7 @@ async function collectUsageOnce(options) {
         ...(options.dailyHistoryArchiveOptions || {}),
         liveDays: dailyHistoryLiveDays,
         todayKey: localTodayKey(collectedAt),
+        pricingRevision: options.pricingRevision,
         writeEnabled: options.dailyHistoryArchiveWriteEnabled
       });
       dailyHistoryLiveDays = retainedLive.liveDays || {};
@@ -1170,6 +1175,8 @@ async function collectUsageOnce(options) {
       dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,
       dailyHistoryArchiveOptions: options.dailyHistoryArchiveOptions,
       dailyHistoryLiveDays,
+      pricingRevision: options.pricingRevision,
+      customPricingActive: options.customPricingActive,
       onHistoryStatus: options.onHistoryStatus,
       logger: options.logger
     });
@@ -1894,7 +1901,31 @@ function canTargetTodayPartitions(anchor, targetClients) {
   );
 }
 
-function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null) {
+// Prices affect every scan window. Read the effective file (including entries
+// hand-authored outside the widget), and distinguish fork builds whose npm
+// version is identical. No transcript cache is changed by this fingerprint.
+function pricingFingerprint(options = {}) {
+  const pricingPath = options.pricingPath || customPricingPath({
+    env: tokscaleEnvWithBlanksDropped(process.env)
+  });
+  const hash = createHash('sha256');
+  hash.update(pricingPath);
+  try { hash.update(fs.readFileSync(pricingPath)); }
+  catch (error) { hash.update(`|file:${error.code || 'unreadable'}`); }
+  if (options.binaryRevision !== undefined) {
+    hash.update(`|binary:${options.binaryRevision}`);
+  } else {
+    const binary = resolvePlatformBinary();
+    hash.update(JSON.stringify([binary.source, binary.path, binary.version, readTokscaleBundledBuild()]));
+    try {
+      const stat = fs.statSync(binary.path);
+      hash.update(JSON.stringify([stat.size, stat.mtimeMs, stat.ctimeMs]));
+    } catch (_) { hash.update('|binary:missing'); }
+  }
+  return hash.digest('hex');
+}
+
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, pricingRevision = pricingFingerprint()) {
   // Deterministic string that captures the config inputs anchor correctness
   // depends on. When this changes, the persisted anchor is invalidated.
   const qoderCn = String(qoderCnDbPath || '').trim();
@@ -1907,7 +1938,7 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qod
   // common case.
   const scanKey = customScanPathsFingerprint(customScanPaths);
   const scanPart = scanKey ? `|scan:${scanKey}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}`;
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}|pricing:${pricingRevision}`;
 }
 
 function qoderCnSourcesForClients(clientsCsv, options = {}) {
@@ -1944,7 +1975,8 @@ function collectorAnchorTrust(saved, options = {}) {
   // Old Cursor anchors preserve `default` in their broad-period model maps;
   // applying a new `cursor-auto` Today delta to them would split one mode.
   if (normalizeClientsCsv(clients).split(',').includes('cursor') && saved.cursorAutoModelVersion !== 1) return null;
-  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths)) return null;
+  const pricingRevision = options.pricingRevision ?? pricingFingerprint(options);
+  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, pricingRevision)) return null;
   const parsed = Date.parse(saved.fullScanAt || '');
   const capturedAtMs = Number.isFinite(parsed) && parsed <= now.getTime() ? parsed : null;
   return { capturedAtMs };
@@ -2262,6 +2294,7 @@ function startCollector(options) {
   // process owns the shared archive. A watch tick can then hand its value to a
   // later full/history tick instead of losing it at the tick boundary.
   let liveDailyHistoryDays = {};
+  let pricingRevision = pricingFingerprint(options);
   let lastFullScanAt = 0;
   let pendingWaiters = [];
   let debounceTimer = null;
@@ -2370,7 +2403,8 @@ function startCollector(options) {
         projectsEnabled: options.projectsEnabled,
         qoderCnDbPath,
         qoderCnProjectsDir,
-        customScanPaths: options.customScanPaths
+        customScanPaths: options.customScanPaths,
+        pricingRevision
       });
       if (trust) {
         anchor = {
@@ -2431,6 +2465,17 @@ function startCollector(options) {
     const tickStartedAt = Date.now();
     const collectedAt = collectionDate(options.now);
     const todayKey = localTodayKey(collectedAt);
+    const tickPricingRevision = pricingFingerprint(options);
+    const pricingChanged = tickPricingRevision !== pricingRevision;
+    if (pricingChanged) {
+      anchor = null;
+      wslAnchor = null;
+      wslStatusAnchor = null;
+      liveDailyHistoryDays = {};
+      lastFullScanAt = 0;
+      lastHistoryAt = 0;
+      pricingRevision = tickPricingRevision;
+    }
     // The previous live DAY becomes durable history at local midnight. Finalize
     // it before publishing the new day, even when the normal History interval
     // is not due yet, so fixed ranges never wait for the next scheduled graph.
@@ -2440,7 +2485,7 @@ function startCollector(options) {
       collectedAt.getTime(),
       lastHistoryAt,
       historyIntervalMs,
-      Boolean(tickOptions.forceHistory) || localDayRolledOver,
+      Boolean(tickOptions.forceHistory) || localDayRolledOver || pricingChanged,
       historyEnabled
     );
     if (includeHistory) {
@@ -2470,6 +2515,8 @@ function startCollector(options) {
         osInfo: deviceOsInfo,
         now: collectedAt,
         includeHistory,
+        pricingRevision: tickPricingRevision,
+        customPricingActive: Object.keys(readJson(options.pricingPath || customPricingPath({ env: tokscaleEnvWithBlanksDropped(process.env) }), {})?.models || {}).length > 0,
         // Capture after the runtime's transformUsage hook so the archive uses
         // the same today period that the user actually sees. The process-local
         // liveDays overlay is passed into any graph scan that happens first.
@@ -2503,6 +2550,7 @@ function startCollector(options) {
         onAnchorComputed: (x) => { captured = x; },
         onProgress: (partial) => {
           if (!partial.today) return;
+          if (pricingChanged || pricingFingerprint(options) !== tickPricingRevision) return;
           try {
             if (typeof onPreview === 'function') {
               // Frozen WSL snapshot, gated so a cross-day/cross-month full scan
@@ -2551,6 +2599,12 @@ function startCollector(options) {
         }
       });
       if (stopped) return;
+      // A settings save can land between the serial period scans. Discard that
+      // mixed result and replay all windows against one pricing revision.
+      if (pricingFingerprint(options) !== tickPricingRevision) {
+        void runTick('pricing-change', { forceHistory: true });
+        return;
+      }
       if (includeHistory) {
         settleRolloverHistoryAttempt(
           historyScanSucceeded,
@@ -2586,7 +2640,7 @@ function startCollector(options) {
               wslStatus: wslStatusAnchor,
               ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
               ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
-              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths),
+              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, tickPricingRevision),
               fullScanAt: new Date(lastFullScanAt).toISOString()
             }));
           } catch (_) {}
@@ -2617,6 +2671,7 @@ function startCollector(options) {
             ...(options.dailyHistoryArchiveOptions || {}),
             liveDays: liveDailyHistoryDays,
             todayKey: visibleDateKey,
+            pricingRevision: tickPricingRevision,
             // Watch ticks update the in-memory maximum on every refresh, but
             // only full/history ticks write it. This avoids a disk write for
             // every few-second watch event without dropping the value before
@@ -3151,6 +3206,7 @@ module.exports = {
   clientWatchCandidates,
   computePeriodWindows,
   collectorAnchorTrust,
+  pricingFingerprint,
   configFingerprint,
   qoderCnDbPathForClients,
   qoderCnProjectsDirForClients,
