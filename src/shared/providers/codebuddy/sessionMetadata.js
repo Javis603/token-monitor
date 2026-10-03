@@ -1,7 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
-const { findExtensionSession } = require('./extension');
+const { findExtensionSessions } = require('./extension');
 const { findSessionFiles } = require('../../sessionFiles');
 const { codebuddyProjectsRoot } = require('./paths');
 const { assistantStatus, cleanTitle, isUserPromptRecord } = require('./transcript');
@@ -226,10 +226,8 @@ function applyExtensionMetadata(sessionIds, context, result) {
     fs: deps.fs,
     dataRoots: deps.codebuddyExtensionDataRoots
   };
-  for (const sessionId of sessionIds) {
-    if (result.has(sessionId)) continue;
-    const extension = findExtensionSession(sessionId, options);
-    if (!extension) continue;
+  const unresolved = Array.from(sessionIds).filter((sessionId) => !result.has(sessionId));
+  for (const [sessionId, extension] of findExtensionSessions(unresolved, options)) {
     const identity = extension.workspaceFolder
       && context.resolveProjects !== false
       && typeof context.projectIdentity === 'function'

@@ -247,8 +247,8 @@ function parseCodexTranscript(text) {
 // they are normalized on the way in.
 function codebuddyTimestamp(value) {
   const ms = Number(value);
-  if (Number.isFinite(ms) && ms > 0) return new Date(ms).toISOString();
-  return typeof value === 'string' ? value : '';
+  const date = new Date(Number.isFinite(ms) && ms > 0 ? ms : (typeof value === 'string' ? value : NaN));
+  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
 }
 
 // CodeBuddy persists one model response per `providerData.messageId`, as either
@@ -537,9 +537,14 @@ function readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, h
   // `inputTokens` as input would count the cached part twice — the same
   // convention the CLI transcript's `prompt_tokens` follows.
   const input = num(usage.cachedMissTokens) || Math.max(0, num(usage.inputTokens) - cacheRead - cacheWrite);
+  const timestamp = codebuddyTimestamp(session.startedAt)
+    || session.entries.reduce((latest, entry) => {
+      const candidate = codebuddyTimestamp(entry.createdAt);
+      return candidate > latest ? candidate : latest;
+    }, '');
   events.push({
     kind: 'turn',
-    timestamp: codebuddyTimestamp(session.startedAt),
+    timestamp,
     tokens: makeTokens({ input, output: num(usage.outputTokens), cacheRead, cacheWrite, reasoning: 0 }),
     tools: []
   });

@@ -72,10 +72,10 @@ function collectHistoryDirs(dataRoots, fsApi) {
   return found;
 }
 
-function statKey(dir, fsApi) {
+function statKey(file, fsApi) {
   try {
-    const stat = fsApi.statSync(dir);
-    return `${stat.mtimeMs}:${stat.size ?? 0}`;
+    const stat = fsApi.statSync(file);
+    return `${stat.dev ?? ''}:${stat.ino ?? ''}:${stat.mtimeMs}:${stat.ctimeMs ?? ''}:${stat.size ?? 0}`;
   } catch (_) {
     return '';
   }
@@ -101,39 +101,47 @@ function cleanTitle(value) {
 // Titles live one level up, in the workspace index's `conversations[]`, not in
 // the conversation the trace id points at.
 function conversationTitle(workspaceDir, conversationId, fsApi) {
-  const key = statKey(workspaceDir, fsApi);
+  const key = statKey(path.join(workspaceDir, 'index.json'), fsApi);
   const cached = workspaceCache.get(workspaceDir);
-  let conversations;
+  let titles;
   if (cached && cached.key === key) {
-    conversations = cached.conversations;
+    titles = cached.titles;
   } else {
     if (!key) return '';
     try {
       const index = JSON.parse(fsApi.readFileSync(path.join(workspaceDir, 'index.json'), 'utf8'));
-      conversations = Array.isArray(index?.conversations) ? index.conversations : [];
+      const conversations = Array.isArray(index?.conversations) ? index.conversations : [];
+      titles = new Map();
+      for (const entry of conversations) {
+        if (entry?.id && !titles.has(entry.id)) titles.set(entry.id, cleanTitle(entry.name));
+      }
     } catch (_) {
-      conversations = [];
+      titles = new Map();
     }
-    workspaceCache.set(workspaceDir, { key, conversations });
+    workspaceCache.set(workspaceDir, { key, titles });
   }
-  const conversation = conversations.find((entry) => entry?.id === conversationId);
-  return cleanTitle(conversation?.name);
+  return titles.get(conversationId) || '';
 }
 
-// One conversation's parsed state: its requests, the trace ids its messages
-// carry, the title from the workspace index, and the workspace folder the
-// first user message's envelope reports. Cached by the conversation
-// directory's mtime, so a tick costs one stat per conversation and re-reads
-// only the conversations being written right now.
+// Index rewrites and message additions/rewrites do not change the parent
+// conversation directory's mtime. Check the files themselves, keeping parsed
+// state cached while unchanged. Titles have their own workspace-index cache.
 function readConversation(dir, fsApi) {
-  const key = statKey(dir, fsApi);
+  const indexPath = path.join(dir, 'index.json');
+  const indexKey = statKey(indexPath, fsApi);
+  if (!indexKey) return null;
+  const files = readdirFiles(messagesDir(dir), fsApi).sort();
+  const key = JSON.stringify([
+    indexKey,
+    statKey(messagesDir(dir), fsApi),
+    files.map((file) => [file, statKey(path.join(messagesDir(dir), file), fsApi)])
+  ]);
   const cached = conversationCache.get(dir);
   if (cached && cached.key === key) return cached.data;
-  if (!key) return null;
 
   let index;
   try {
-    index = JSON.parse(fsApi.readFileSync(path.join(dir, 'index.json'), 'utf8'));
+    index = JSON.parse(fsApi.readFileSync(indexPath, 'utf8'));
   } catch (_) {
     return null;
   }
@@ -141,7 +149,7 @@ function readConversation(dir, fsApi) {
 
   const byMessageId = new Map();
   let workspaceFolder = '';
-  for (const file of readdirFiles(messagesDir(dir), fsApi)) {
+  for (const file of files) {
     let record;
     try {
       record = JSON.parse(fsApi.readFileSync(path.join(messagesDir(dir), file), 'utf8'));
@@ -190,7 +198,6 @@ function readConversation(dir, fsApi) {
     requests,
     byTrace,
     byMessageId,
-    title: conversationTitle(path.dirname(dir), path.basename(dir), fsApi),
     workspaceFolder
   };
   conversationCache.set(dir, { key, data });
@@ -212,9 +219,10 @@ function readdirFiles(dir, fsApi) {
 // The trace id a reported session carries. Nothing about a conversation the
 // store has no requests for can be answered — an empty directory resolves to
 // no conversation rather than to an empty one.
-function findExtensionSession(sessionId, options = {}) {
-  const id = nonBlank(sessionId);
-  if (!id) return null;
+function findExtensionSessions(sessionIds, options = {}) {
+  const wanted = new Set(Array.from(sessionIds || [], nonBlank).filter(Boolean));
+  const result = new Map();
+  if (wanted.size === 0) return result;
   const fsApi = options.fs || fs;
   const homeDir = nonBlank(options.homeDir)
     || nonBlank(options.env?.USERPROFILE)
@@ -228,23 +236,33 @@ function findExtensionSession(sessionId, options = {}) {
     for (const workspaceDir of listDirectories(historyDir, fsApi)) {
       for (const conversationDir of listDirectories(workspaceDir, fsApi)) {
         const conversation = readConversation(conversationDir, fsApi);
-        const match = conversation?.byTrace.get(id);
-        if (!match) continue;
-        const entries = (match.messages || [])
-          .map((messageId) => conversation.byMessageId.get(messageId))
-          .filter(Boolean);
-        return {
-          title: conversation.title,
-          workspaceFolder: conversation.workspaceFolder,
-          state: nonBlank(match.request?.state),
-          startedAt: match.request?.startedAt,
-          usage: match.request?.usage && typeof match.request.usage === 'object' ? match.request.usage : {},
-          entries
-        };
+        if (!conversation) continue;
+        let title;
+        for (const [id, match] of conversation.byTrace) {
+          if (!wanted.has(id) || result.has(id)) continue;
+          title ??= conversationTitle(workspaceDir, path.basename(conversationDir), fsApi);
+          const entries = (match.messages || [])
+            .map((messageId) => conversation.byMessageId.get(messageId))
+            .filter(Boolean);
+          result.set(id, {
+            title,
+            workspaceFolder: conversation.workspaceFolder,
+            state: nonBlank(match.request?.state),
+            startedAt: match.request?.startedAt,
+            usage: match.request?.usage && typeof match.request.usage === 'object' ? match.request.usage : {},
+            entries
+          });
+          if (result.size === wanted.size) return result;
+        }
       }
     }
   }
-  return null;
+  return result;
+}
+
+function findExtensionSession(sessionId, options = {}) {
+  const id = nonBlank(sessionId);
+  return findExtensionSessions([id], options).get(id) || null;
 }
 
 function clearExtensionCaches() {
@@ -255,5 +273,6 @@ function clearExtensionCaches() {
 module.exports = {
   clearExtensionCaches,
   collectHistoryDirs,
-  findExtensionSession
+  findExtensionSession,
+  findExtensionSessions
 };

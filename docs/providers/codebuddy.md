@@ -161,12 +161,17 @@ the conversation id — trace ids are per request, so one conversation with
 three model calls is three reported sessions. `providers/codebuddy/extension.js`
 walks the history roots (bounded-depth, matching on the `history` directory
 name because the two intermediate levels are opaque ids), and per conversation
-caches the trace-id → request mapping keyed on the directory's mtime, so a
-tick costs one stat per conversation.
+caches the trace-id → request mapping using the conversation index's file
+identity and timestamps, the messages directory, and each message file's
+identity and timestamps. Rewriting an index or a message does not update the
+parent directory's mtime, so the directory alone cannot invalidate this cache.
+The metadata pass walks the history once for all unresolved trace ids; it
+reuses parsed conversations whose files have not changed.
 
 From there both reads work without any new data plane:
 
-- **Title**: the workspace index's `conversations[].name`. The workspace's own
+- **Title**: the workspace index's `conversations[].name`, refreshed from that
+  file's identity and timestamps independently of the conversation cache. The workspace's own
   path is not stored anywhere, but the first user message's context envelope
   opens with `Workspace Folder: <path>`, which is what joins these sessions to
   project grouping.
@@ -178,6 +183,9 @@ From there both reads work without any new data plane:
   request the store says 232098 in / 189056 cached and tokscale reports
   43042 / 189056 — the subtraction is exact, including the version where
   `cachedMissTokens` is absent and only the subtraction produces the answer.
+  The turn timestamp uses the request's `startedAt` when valid, falling back
+  to the latest message's `createdAt` so today/month filtering can retain a
+  request whose index omitted its start time.
 
 The base directories mirror the collector's extension watch roots (`Data`
 where those use `Logs`): `%LOCALAPPDATA%` on Windows, `Application Support` on

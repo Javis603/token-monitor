@@ -11,7 +11,7 @@ const {
   readCodebuddyExtensionSessionDetail,
   readSessionDetail
 } = require('../../src/shared/sessionDetail');
-const { findExtensionSession } = require('../../src/shared/providers/codebuddy/extension');
+const { clearExtensionCaches, findExtensionSession } = require('../../src/shared/providers/codebuddy/extension');
 
 const tmpDirs = [];
 test.after(() => {
@@ -98,6 +98,123 @@ function usageOf({ input, output, cache = 0, write = 0 }) {
 }
 
 const options = (home) => ({ homeDir: home, env: { LOCALAPPDATA: home }, platform: 'win32' });
+
+function extensionWorkspace(home) {
+  return path.join(home, 'AppData', 'Local', 'CodeBuddyExtension', 'Data', 'install-1', 'VSCode', 'editor-1', 'history', 'workspace-1');
+}
+
+test('refreshes rewritten request usage and state without a conversation directory change', () => {
+  const home = makeExtensionHome({
+    requests: [{ traceId: TRACE, messages: [`${TRACE}u`, `${TRACE}a`], usage: usageOf({ input: 1000, output: 50 }) }],
+    state: 'running'
+  });
+  const dir = path.join(extensionWorkspace(home), CONVERSATION);
+  const before = fs.statSync(dir).mtimeMs;
+  assert.equal(findExtensionSession(TRACE, options(home)).state, 'running');
+  fs.writeFileSync(path.join(dir, 'index.json'), conversationIndex([{
+    messages: [`${TRACE}u`, `${TRACE}a`], state: 'complete', usage: usageOf({ input: 1000, output: 500 })
+  }]));
+  assert.equal(fs.statSync(dir).mtimeMs, before);
+  const updated = findExtensionSession(TRACE, options(home));
+  assert.equal(updated.state, 'complete');
+  assert.equal(updated.usage.outputTokens, 500);
+});
+
+test('refreshes a renamed conversation independently of its request cache', () => {
+  const home = makeExtensionHome({ requests: [{ traceId: TRACE, messages: [`${TRACE}u`], usage: usageOf({ input: 1000, output: 50 }) }] });
+  const workspace = extensionWorkspace(home);
+  const before = fs.statSync(workspace).mtimeMs;
+  assert.equal(findExtensionSession(TRACE, options(home)).title, '插件会话标题');
+  fs.writeFileSync(path.join(workspace, 'index.json'), workspaceIndex([{ id: CONVERSATION, name: 'Renamed conversation' }]));
+  assert.equal(fs.statSync(workspace).mtimeMs, before);
+  assert.equal(findExtensionSession(TRACE, options(home)).title, 'Renamed conversation');
+});
+
+test('discovers a request message that arrives after its index', () => {
+  const lateTrace = 'late-trace';
+  const home = makeExtensionHome({ requests: [{ traceId: TRACE, messages: [`${TRACE}u`], usage: usageOf({ input: 1000, output: 50 }) }] });
+  const dir = path.join(extensionWorkspace(home), CONVERSATION);
+  fs.writeFileSync(path.join(dir, 'index.json'), conversationIndex([
+    { messages: [`${TRACE}u`], state: 'complete' },
+    { messages: ['late-user'], state: 'complete' }
+  ]));
+  assert.equal(findExtensionSession(lateTrace, options(home)), null);
+  const before = fs.statSync(dir).mtimeMs;
+  fs.writeFileSync(path.join(dir, 'messages', 'late-user.json'), messageFile('late-user', { role: 'user', traceId: lateTrace, prompt: 'Late prompt' }));
+  assert.equal(fs.statSync(dir).mtimeMs, before);
+  assert.equal(findExtensionSession(lateTrace, options(home)).entries[0].displayText, 'Late prompt');
+});
+
+test('refreshes an existing message rewritten without an index change', () => {
+  const home = makeExtensionHome({ requests: [{ traceId: TRACE, messages: [`${TRACE}u`], usage: usageOf({ input: 1000, output: 50 }) }] });
+  assert.equal(findExtensionSession(TRACE, options(home)).entries[0].displayText, '帮我看下这个 bug');
+  const dir = path.join(extensionWorkspace(home), CONVERSATION);
+  fs.writeFileSync(path.join(dir, 'messages', `${TRACE}u.json`), messageFile(`${TRACE}u`, { role: 'user', traceId: TRACE, prompt: 'Updated prompt after a partial write' }));
+  assert.equal(findExtensionSession(TRACE, options(home)).entries[0].displayText, 'Updated prompt after a partial write');
+});
+
+test('collects extension metadata in one history traversal for all requested trace ids', () => {
+  const home = makeExtensionHome({ requests: [] });
+  const workspace = extensionWorkspace(home);
+  const conversations = [];
+  const sessions = {};
+  for (let index = 0; index < 12; index += 1) {
+    const id = `conversation-${index}`;
+    const traceId = `trace-${index}`;
+    const dir = path.join(workspace, id);
+    fs.mkdirSync(path.join(dir, 'messages'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'index.json'), conversationIndex([{ messages: ['user'], state: 'complete', usage: usageOf({ input: 100, output: 10 }) }]));
+    fs.writeFileSync(path.join(dir, 'messages', 'user.json'), messageFile('user', { role: 'user', traceId, prompt: `Prompt ${index}` }));
+    conversations.push({ id, name: `Title ${index}` });
+    sessions[`codebuddy:${traceId}`] = { client: 'codebuddy', sessionId: traceId };
+  }
+  fs.writeFileSync(path.join(workspace, 'index.json'), workspaceIndex(conversations));
+  clearExtensionCaches();
+  let workspaceWalks = 0;
+  let workspaceIndexReads = 0;
+  const fsApi = {
+    ...fs,
+    readdirSync(dir, ...args) {
+      if (dir === workspace) workspaceWalks += 1;
+      return fs.readdirSync(dir, ...args);
+    },
+    readFileSync(file, ...args) {
+      if (file === path.join(workspace, 'index.json')) workspaceIndexReads += 1;
+      return fs.readFileSync(file, ...args);
+    }
+  };
+  applySessionMetadata({ today: { sessions } }, home, { ...options(home), fs: fsApi });
+  assert.equal(workspaceWalks, 1);
+  assert.equal(workspaceIndexReads, 1);
+  assert.deepEqual(Object.values(sessions).map((session) => session.title), conversations.map((conversation) => conversation.name));
+});
+
+test('uses message time for today and month details when request start time is missing or invalid', () => {
+  const now = new Date(2026, 8, 24, 12).getTime();
+  for (const startedAt of [undefined, 'invalid timestamp']) {
+    const home = makeExtensionHome({ requests: [{ traceId: TRACE, messages: [`${TRACE}u`, `${TRACE}a`], startedAt, usage: usageOf({ input: 1000, output: 50 }) }] });
+    const dir = path.join(extensionWorkspace(home), CONVERSATION, 'messages');
+    fs.writeFileSync(path.join(dir, `${TRACE}u.json`), messageFile(`${TRACE}u`, { role: 'user', traceId: TRACE, prompt: 'Current prompt', createdAt: now - 1000 }));
+    fs.writeFileSync(path.join(dir, `${TRACE}a.json`), messageFile(`${TRACE}a`, { role: 'assistant', traceId: TRACE, createdAt: now }));
+    for (const period of ['today', 'month']) {
+      const detail = readSessionDetail({ client: 'codebuddy', sessionId: TRACE, period, home, env: options(home).env, deps: { platform: 'win32', now: () => now } });
+      assert.equal(detail.totals.totalTokens, 1050);
+      assert.equal(detail.totals.turnCount, 1);
+      assert.equal(detail.exchanges[0].turns[0].timestamp, new Date(now).toISOString());
+    }
+  }
+});
+
+test('keeps a valid request start time when later message timestamps cross midnight', () => {
+  const now = new Date(2026, 8, 24, 0, 1).getTime();
+  const startedAt = new Date(2026, 8, 23, 23, 59).getTime();
+  const home = makeExtensionHome({ requests: [{ traceId: TRACE, messages: [`${TRACE}u`], startedAt, usage: usageOf({ input: 1000, output: 50 }) }] });
+  const file = path.join(extensionWorkspace(home), CONVERSATION, 'messages', `${TRACE}u.json`);
+  fs.writeFileSync(file, messageFile(`${TRACE}u`, { role: 'user', traceId: TRACE, prompt: 'Late reply', createdAt: now }));
+  const args = { client: 'codebuddy', sessionId: TRACE, home, env: options(home).env, deps: { platform: 'win32', now: () => now } };
+  assert.equal(readSessionDetail({ ...args, period: 'today' }).totals.turnCount, 0);
+  assert.equal(readSessionDetail({ ...args, period: 'month' }).exchanges[0].turns[0].timestamp, new Date(startedAt).toISOString());
+});
 
 test('resolves the conversation title, the workspace and the turn boundary', () => {
   const home = makeExtensionHome({
