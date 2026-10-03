@@ -2053,10 +2053,7 @@
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
     }),
     mimo: (provider, color, { grouped }) => ({
-      options: {
-        accountTitle: true,
-        ...(grouped ? { showIcon: false } : {})
-      }
+      options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
     }),
     cursor: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }

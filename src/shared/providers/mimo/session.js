@@ -155,10 +155,9 @@ function createMimoCookieJar(now = Date.now) {
 // hands the walk a fetch that can, and this jar then needs nothing from it.
 function createJarExchange(fetchFn, seed = {}) {
   const jar = createMimoCookieJar(seed.now);
-  const entryUrl = new URL(seed.accountHost || 'https://account.xiaomi.com/');
+  const entryUrl = new URL('https://account.xiaomi.com/');
   const serviceUrl = seed.serviceUrl ? new URL(seed.serviceUrl) : null;
   jar.seed(seed.accountCookie, entryUrl);
-  if (seed.serviceUrl) jar.seed(seed.serviceCookie, new URL(seed.serviceUrl));
 
   return {
     async request(url) {
@@ -269,7 +268,6 @@ async function mintMimoServiceSession(options = {}) {
 
   const exchange = openMimoExchange(options.deps, {
     accountCookie: options.accountCookie,
-    serviceCookie: options.serviceCookie,
     serviceUrl: entryUrl.href,
     now: options.deps?.now,
     signal: options.deps?.signal

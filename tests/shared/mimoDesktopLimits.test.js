@@ -36,6 +36,7 @@ const { mintMimoServiceSession } = require('../../src/shared/providers/mimo/sess
 
 const CONSOLE_COOKIE = 'unrelated=drop; userId=42; api-platform_serviceToken=secret; api-platform_ph=optional';
 const CONSOLE_BASE = 'https://platform.xiaomimimo.com/api/v1';
+const CONSOLE_STS = 'https://platform.xiaomimimo.com/sts';
 const MEMBERSHIP_BASE = 'https://mimo-server-cn.xiaomimimo.com/api';
 const LOGIN_URL = 'https://account.xiaomi.com/pass/serviceLogin';
 const CONSOLE_ACCOUNT_KEY_42 = 'sha256:9c59f5aa7d0dcd4428d62a0b03a13d9a345dbf2fc965e91bf8383f3206c0004d';
@@ -106,7 +107,7 @@ function mimoWorld(options = {}) {
       if (options.membershipRefused && sid === 'mimopc') return reply(200, '<html>login page</html>');
       if (options.consoleRefused && sid === 'api-platform') return reply(200, '<html>login page</html>');
       return reply(302, '', {
-        location: sid === 'api-platform' ? `${CONSOLE_BASE}/sts?sign=1&userId=${userId}` : `${MEMBERSHIP_BASE}/sts?sign=1&userId=${userId}`
+        location: sid === 'api-platform' ? `${CONSOLE_STS}?sign=1&userId=${userId}` : `${MEMBERSHIP_BASE}/sts?sign=1&userId=${userId}`
       });
     }
 
@@ -130,10 +131,10 @@ function mimoWorld(options = {}) {
           }
         });
     }
-    if (href.startsWith(`${CONSOLE_BASE}/sts`)) {
+    if (href.startsWith(CONSOLE_STS)) {
       consoleMints += 1;
       return reply(307, '', {
-        location: `${CONSOLE_BASE}/balance`,
+        location: `${CONSOLE_BASE}/balance?userId=${userId}`,
         'set-cookie': ['api-platform_serviceToken=minted; Path=/', `userId=${userId}; Path=/`]
       });
     }
@@ -158,9 +159,10 @@ function mimoWorld(options = {}) {
       return reply(200, { code: 0, data: options.tokenPlanUsage || {} });
     }
 
-    if (href === `${MEMBERSHIP_BASE}/user/xiaomi/me`) {
+    // The measured identity callback carries userId; bare service-cookie replay redirects to SSO.
+    if (`${parsed.origin}${parsed.pathname}` === `${MEMBERSHIP_BASE}/user/xiaomi/me`) {
       if (options.membershipStatus) return reply(options.membershipStatus, { code: options.membershipStatus });
-      if (/serviceToken=[^;]+/.test(cookie)) {
+      if (/serviceToken=[^;]+/.test(cookie) && parsed.searchParams.has('userId')) {
         return reply(200, { code: 0, data: { userId, region: options.region ?? 'CN' } });
       }
       return reply(302, '', {
@@ -170,7 +172,7 @@ function mimoWorld(options = {}) {
     if (href.startsWith(`${MEMBERSHIP_BASE}/sts`)) {
       membershipMints += 1;
       return reply(307, '', {
-        location: `${MEMBERSHIP_BASE}/user/xiaomi/me`,
+        location: `${MEMBERSHIP_BASE}/user/xiaomi/me?userId=${userId}`,
         'set-cookie': ['serviceToken=minted; Path=/', `userId=${userId}; Path=/`]
       });
     }
@@ -1120,7 +1122,7 @@ test('the service host may use its observed HTTP callback without receiving Secu
     if (href.startsWith('http://mimo-server-cn.xiaomimimo.com/api/user/xiaomi/me')) {
       callbackCookie = String(init?.headers?.Cookie || '');
       return reply(307, '', {
-        location: `${MEMBERSHIP_BASE}/user/xiaomi/me`,
+        location: `${MEMBERSHIP_BASE}/user/xiaomi/me?userId=42`,
         'set-cookie': ['serviceToken=minted; Path=/', 'userId=42; Path=/']
       });
     }
@@ -1256,7 +1258,7 @@ test('a refusal may arrive as an ordinary 200 carrying the vendor’s code', asy
   const world = mimoWorld();
   const refusing = async (url, init) => {
     const href = String(url);
-    if (href === `${MEMBERSHIP_BASE}/user/xiaomi/me` && /serviceToken=[^;]+/.test(String(init?.headers?.Cookie || ''))) {
+    if (href.split('?')[0] === `${MEMBERSHIP_BASE}/user/xiaomi/me` && /serviceToken=[^;]+/.test(String(init?.headers?.Cookie || ''))) {
       return reply(200, { code: 46109, message: 'denied' });
     }
     return world.fetch(url, init);
