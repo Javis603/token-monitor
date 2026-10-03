@@ -20,11 +20,11 @@ const {
   NON_CATALOG_CLIENT_LABELS,
   CLIENT_IDS,
   DEFAULT_CLIENT_IDS,
-  LOCALLY_PARSED_CLIENT_IDS,
+  FORK_ONLY_CLIENT_IDS,
   CLIENT_LABELS,
   KNOWN_CLIENT_LIST
 } = require('../../src/shared/clientCatalog');
-const { DEFAULT_CLIENTS, KNOWN_CLIENTS, PARSE_LOCAL_CLIENTS } = require('../../src/shared/clientTracking');
+const { DEFAULT_CLIENTS, KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
 
 const rootDir = path.join(__dirname, '..', '..');
 
@@ -43,7 +43,7 @@ test('resolved catalog entries expose boolean tracking flags', () => {
   // defaultTracked: 'false' would flip a derived list without failing anywhere.
   for (const client of CLIENT_CATALOG) {
     assert.equal(typeof client.defaultTracked, 'boolean', `${client.id} defaultTracked`);
-    assert.equal(typeof client.locallyParsed, 'boolean', `${client.id} locallyParsed`);
+    assert.equal(typeof client.forkOnly, 'boolean', `${client.id} forkOnly`);
   }
 });
 
@@ -63,9 +63,8 @@ test('derived DEFAULT_CLIENTS keeps the existing default-tracked CSV', () => {
   );
 });
 
-test('derived PARSE_LOCAL_CLIENTS still lists exactly the local adapters', () => {
-  assert.deepEqual([...PARSE_LOCAL_CLIENTS], ['proma', 'qodercn']);
-  assert.deepEqual([...LOCALLY_PARSED_CLIENT_IDS], ['proma', 'qodercn']);
+test('derived FORK_ONLY_CLIENT_IDS lists exactly the clients the tokscale fork owns', () => {
+  assert.deepEqual([...FORK_ONLY_CLIENT_IDS], ['proma', 'qodercn']);
 });
 
 test('default-tracked clients are a subset of the catalog, in catalog order', () => {

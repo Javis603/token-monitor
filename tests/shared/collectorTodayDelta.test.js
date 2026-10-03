@@ -195,7 +195,7 @@ test('an anchored watch tick does not re-read session files that only appear in 
   }
 });
 
-test('an all-client fallback preserves parse-local partitions that were not refreshed', async () => {
+test('an all-client fallback refreshes fork-only partitions from the same tokscale scan', async () => {
   const { collectUsageOnce, localTodayKey } = freshCollector();
   const calls = [];
   const anchorClients = { claude: 10, codex: 20, proma: 5 };
@@ -213,7 +213,7 @@ test('an all-client fallback preserves parse-local partitions that were not refr
   const runTokscale = async ({ clients }) => {
     calls.push(clients);
     if (clients === 'codex') return tokscaleRows({ claude: 99 });
-    return tokscaleRows({ claude: 10, codex: 20 });
+    return tokscaleRows({ claude: 10, codex: 20, proma: 7 });
   };
 
   const summary = await collectUsageOnce({
@@ -226,11 +226,11 @@ test('an all-client fallback preserves parse-local partitions that were not refr
     projectsEnabled: false
   });
 
-  assert.deepEqual(calls, ['codex', 'claude,codex']);
-  assert.equal(summary.today.totalTokens, 35);
-  assert.equal(summary.today.clients.proma, 5);
-  assert.equal(summary.month.clients.proma, 5);
-  assert.equal(summary.allTime.clients.proma, 5);
+  assert.deepEqual(calls, ['codex', 'claude,codex,proma']);
+  assert.equal(summary.today.totalTokens, 37);
+  assert.equal(summary.today.clients.proma, 7);
+  assert.equal(summary.month.clients.proma, 7);
+  assert.equal(summary.allTime.clients.proma, 7);
 });
 
 test('a partial multi-target union falls back instead of trusting a polluted partition', async () => {
