@@ -99,6 +99,12 @@ const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
 const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
+const {
+  normalizeUsageCostRules,
+  projectUsageCosts,
+  projectUsageSessions,
+  projectHistoryCosts
+} = require('./usageCostPolicy');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const {
   normalizeModelAliases,
@@ -557,6 +563,7 @@ function defaultSettings() {
     tokenRateMode: 'speed',
     heatmapMetric: 'cost',
     modelRankingMetric: 'tokens',
+    usageCostRules: [],
     homeActiveDaysWindow: 'all',
     // How a live session's context gauge reads. That direction is a choice the
     // gauge cannot make on its own, so it is stated here rather than assumed:
@@ -2494,6 +2501,7 @@ function readSettings() {
     merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
+    merged.usageCostRules = normalizeUsageCostRules(merged.usageCostRules);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
     merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
     merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
@@ -2895,11 +2903,12 @@ function electronPresentationStats(stats) {
     syncActive: syncProvenanceActive(),
     opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
   };
+  const costRules = settings?.usageCostRules;
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
-  const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
+  const key = JSON.stringify([limitOptions, costRules ?? null, aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
   return presentationCache.get(stats, key, () => projectModelAliasStats(
-    projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(stats) : stats, limitOptions),
+    projectUsageCosts(projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(stats) : stats, limitOptions), costRules),
     aliases,
     { grouping }
   ));
@@ -2918,16 +2927,22 @@ const snapshotLocalDevices = new WeakMap();
 // machine's own full all-time list as it stood when the snapshot was built.
 function rendererAllTimeSessions(stats) {
   if (!stats) return null;
+  const costRules = settings?.usageCostRules;
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
-  const key = JSON.stringify([aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
+  const key = JSON.stringify([costRules ?? null, aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
   return allTimeSessionsCache.get(stats, key, () => {
     const complete = completeLocalSyncStats(stats);
     const hubSnapshot = snapshotLocalDevices.get(stats);
     const sessions = hubSnapshot
       ? mergedLocalAllTimeSessions(complete.periods, hubSnapshot.localDevice)
       : complete.periods?.allTime?.sessions || {};
-    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, aliases, { grouping });
+    return projectModelAliasSessions(
+      stats,
+      projectUsageSessions(settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, costRules),
+      aliases,
+      { grouping }
+    );
   });
 }
 
@@ -4451,6 +4466,7 @@ function captureMacWidgetWork({ stats, owner }) {
       : null,
     activeCodexAccount: macWidgetActiveCodexAccount(),
     presentation: macWidgetPresentation(),
+    usageCostRules: normalizeUsageCostRules(settings?.usageCostRules),
     modelAliases: Object.freeze(normalizeModelAliases(settings?.modelAliases)),
     modelAliasGrouping: normalizeModelAliasGrouping(settings?.modelAliasGrouping),
     snapshotPath: widget.snapshotPath,
@@ -4490,7 +4506,11 @@ function ensureMacWidgetSnapshotController() {
       snapshotOptions: {
         activeCodexAccount: work.activeCodexAccount,
         presentation: work.presentation,
-        history: projectModelAliasHistory(history, work.modelAliases, { grouping: work.modelAliasGrouping })
+        history: projectModelAliasHistory(
+          projectHistoryCosts(history, work.usageCostRules),
+          work.modelAliases,
+          { grouping: work.modelAliasGrouping }
+        )
       },
       logger: (message) => console.warn(message)
     }),
@@ -6075,7 +6095,8 @@ function requestAppQuit() {
 // itself; callers pass only `periods` (privacy: devices/limits never enter).
 async function writeExportTo(dir, periods, options = {}) {
   if (!dir) return { ok: false, reason: 'no-dir' };
-  // Export remains lossless: local display aliases never rewrite exported IDs.
+  // Export remains lossless: local cost selections and display aliases never
+  // rewrite exported values or IDs.
   const history = await getCompleteHistory().catch(() => null);
   // History unavailable (e.g. a transient hub fetch failure) is NOT the same as
   // "no history": writing a snapshot-only set would emit empty time-series JSON
@@ -6938,18 +6959,28 @@ function createDashboardWindow() {
 
 async function getDashboardHistory(options = {}) {
   const includeDevices = options?.includeDevices === true;
+  const raw = options?.raw === true;
   const resolved = includeDevices
     ? await resolveCompleteHistoryWithDevices(historyResolverOptions())
     : { history: await getCompleteHistory(), deviceHistories: undefined };
-  const history = resolved.history;
+  const history = raw
+    ? resolved.history
+    : projectHistoryCosts(resolved.history, settings?.usageCostRules);
   const source = completeHistorySource(historyResolverOptions());
-  return projectModelAliasHistory({
+  const result = {
     ...history,
-    ...(includeDevices ? { deviceHistories: resolved.deviceHistories } : {}),
+    ...(includeDevices ? {
+      deviceHistories: raw
+        ? resolved.deviceHistories
+        : resolved.deviceHistories?.map((device) => projectUsageCosts(device, settings?.usageCostRules))
+    } : {}),
     fixedPeriods: fixedPeriodHistoryMeta({
       source
     })
-  }, settings?.modelAliases, { grouping: settings?.modelAliasGrouping });
+  };
+  return raw
+    ? result
+    : projectModelAliasHistory(result, settings?.modelAliases, { grouping: settings?.modelAliasGrouping });
 }
 
 let cursorStatusCache = { value: null, at: 0 };
@@ -7313,6 +7344,7 @@ app.whenReady().then(() => {
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
+      usageCostRules: normalizeUsageCostRules(patch.usageCostRules ?? settings.usageCostRules),
       sessionTitlesEnabled: parseBoolean(patch.sessionTitlesEnabled ?? settings.sessionTitlesEnabled, true),
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
@@ -7473,11 +7505,15 @@ app.whenReady().then(() => {
       // therefore may not send another frame after this local-only setting changes.
       refreshLimitStatsPresentation();
     }
-    if (JSON.stringify(settings.modelAliases) !== JSON.stringify(previousSettingsState.modelAliases)
-      || settings.modelAliasGrouping !== previousSettingsState.modelAliasGrouping) {
-      // No collection/pricing refresh: regroup the cached source immediately,
-      // including when the hub is offline. Revision decoration invalidates the
-      // main renderer's full-history caches; the dashboard has its own event.
+    const usageCostRulesChanged = JSON.stringify(settings.usageCostRules)
+      !== JSON.stringify(previousSettingsState.usageCostRules);
+    const modelAliasesChanged = JSON.stringify(settings.modelAliases)
+      !== JSON.stringify(previousSettingsState.modelAliases)
+      || settings.modelAliasGrouping !== previousSettingsState.modelAliasGrouping;
+    if (usageCostRulesChanged || modelAliasesChanged) {
+      // These local presentation settings must re-project the cached source even
+      // when the Hub is offline. Revision decoration invalidates the main
+      // renderer's full-history caches; the dashboard has its own event.
       refreshLimitStatsPresentation();
       if (dashboardWindow && !dashboardWindow.isDestroyed()) {
         try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}

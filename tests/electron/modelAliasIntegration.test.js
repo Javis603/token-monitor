@@ -6,6 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const test = require('node:test');
 const presentation = require('../../src/electron/modelAliasPresentation');
+const costPolicy = require('../../src/electron/usageCostPolicy');
 const { inUseModelIds } = require('../../src/electron/renderer/customPricingForm');
 const { classifySettingsChange } = require('../../src/electron/runtimeConfig');
 const { createStatsPresentationCache } = require('../../src/electron/statsPublisher');
@@ -15,7 +16,7 @@ const aliases = { 'anthropic/claude-opus-5': 'claude-opus-5' };
 function mainFunction(name, dependencies) {
   const body = source.match(new RegExp(`(?:async )?function ${name}\\([^]*?\\n\\}`))?.[0];
   assert.ok(body);
-  return vm.runInNewContext(`(${body})`, { ...presentation, ...dependencies });
+  return vm.runInNewContext(`(${body})`, { ...presentation, ...costPolicy, ...dependencies });
 }
 
 test('Electron presentation applies aliases after limit projection without changing cached stats', () => {
