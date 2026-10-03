@@ -4647,7 +4647,11 @@ function renderSessionDetail({ detail, loading, error } = {}) {
   if (idLabel) container.append(sessionIdLine(idLabel));
 
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
-  if (error || (detail && detail.found === false)) { container.append(detailNote(t('detailNotFound') || 'Transcript not found on this machine.')); return; }
+  if (error || detail?.error) {
+    container.append(detailNote(t(detail?.error === 'line-too-large' ? 'detailRecordTooLarge' : 'detailReadFailed')));
+    return;
+  }
+  if (detail && detail.found === false) { container.append(detailNote(t('detailNotFound') || 'Transcript not found on this machine.')); return; }
 
   const rows = sessionDetailApi.exchangeRows(detail, { now: new Date(), sortBy: state.detailSort });
   if (rows.length === 0) { container.append(detailNote(t('detailEmpty') || 'No activity in this period.')); return; }

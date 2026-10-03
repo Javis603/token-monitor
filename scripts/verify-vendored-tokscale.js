@@ -47,6 +47,10 @@ const EXPECTED = { client: FIXTURE_CLIENT, model: 'deepseek-reasoner', input: 28
 const MUSE_SESSION_ID = 'b1111111-2222-4333-8444-555555555555';
 const MUSE_MODEL = 'muse-spark-1.3-contributor';
 const FX_SESSION_ID = 'fxsess-0001-aaaa-bbbb-ccccdddddddd';
+// Proma and Qoder CN session ids embed a hash of the transcript path, and the
+// fixture home is a fresh temp dir, so their sessions are matched by pattern.
+const PROMA_SESSION_ID = /^proma:tm-contract@[0-9a-f]{12}$/;
+const QODER_CN_SESSION_ID = /^qodercn:qodercn:jsonl:[0-9a-f]{12}:qsess-1$/;
 // Every Tokscale-parsed client added after the legacy baseline in
 // tests/shared/tokscaleTokenContracts.test.js needs a case here. That test
 // makes a new catalog id fail locally until its real binary output and Token
@@ -143,6 +147,53 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
         sessions: [{ id: FX_SESSION_ID, title: 'Refactor the zig lexer' }]
       }));
     }
+  },
+  {
+    // Fork-only client (crates/tokscale-core/src/token_monitor/proma.rs):
+    // Anthropic-shaped usage, so input excludes the cache buckets.
+    client: 'proma',
+    expectedRow: { model: 'claude-sonnet-4-5', input: 1200, output: 340, cacheRead: 500, cacheWrite: 80, reasoning: 0 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 2120, clientTokens: 2120, clientOutputTokens: 340 },
+    expectedSession: { id: PROMA_SESSION_ID, totalTokens: 2120, outputTokens: 340, reasoningTokens: 0 },
+    writeFixture(home) {
+      const dir = path.join(home, '.proma', 'agent-sessions');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), `${JSON.stringify({
+        type: 'assistant',
+        _createdAt: '2026-09-18T10:00:00Z',
+        message: {
+          id: 'msg_1',
+          model: 'claude-sonnet-4-5',
+          usage: { input_tokens: 1200, output_tokens: 340, cache_read_input_tokens: 500, cache_creation_input_tokens: 80 }
+        }
+      })}\n`);
+    }
+  },
+  {
+    // Fork-only client (crates/tokscale-core/src/token_monitor/qodercn.rs):
+    // JSONL input_tokens includes the cached prefix, which is split out into
+    // cacheRead, and the qoder-custom-<profile>/ prefix is stripped.
+    client: 'qodercn',
+    expectedRow: { model: 'openai/gpt-5', input: 400, output: 120, cacheRead: 600, cacheWrite: 0, reasoning: 0 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 1120, clientTokens: 1120, clientOutputTokens: 120 },
+    expectedSession: { id: QODER_CN_SESSION_ID, totalTokens: 1120, outputTokens: 120, reasoningTokens: 0 },
+    writeFixture(home) {
+      const dir = path.join(home, '.qoder-cn', 'projects', 'ws');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), `${JSON.stringify({
+        type: 'assistant',
+        sessionId: 'qsess-1',
+        cwd: '/tmp/qoder-workspace',
+        timestamp: '2026-09-18T10:00:00Z',
+        message: {
+          id: 'm1',
+          model: 'qoder-custom-abc/openai/gpt-5',
+          usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 120 }
+        }
+      })}\n`);
+    }
   }
 ]);
 
@@ -207,6 +258,7 @@ function hermeticEnv(home) {
     ...process.env,
     HOME: home,
     USERPROFILE: home, // Windows equivalent of HOME for path resolution
+    APPDATA: path.join(home, 'AppData', 'Roaming'), // Qoder CN's database root on Windows
     XDG_CONFIG_HOME: path.join(home, '.config'),
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
     XDG_CACHE_HOME: path.join(home, '.cache'),
@@ -221,8 +273,12 @@ function hermeticEnv(home) {
   };
   // Scan-path overrides that must not leak in from the runner/dev shell —
   // DSH_HOME in particular would otherwise redirect the scan away from the
-  // fixture entirely, since DSH resolves it ahead of `~/.dsh`.
-  for (const key of ['NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'DSH_HOME']) {
+  // fixture entirely, since DSH resolves it ahead of `~/.dsh`. The Qoder CN
+  // overrides would do the same for the fork-only qodercn client.
+  for (const key of [
+    'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'DSH_HOME',
+    'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR'
+  ]) {
     delete env[key];
   }
   return env;
@@ -280,7 +336,11 @@ function assertTokenContract(parsed, contract) {
   }
   const usage = extractUsageFromTokscale(parsed);
   const expected = contract.expectedPeriod;
-  const session = contract.expectedSession && usage.sessions[`${contract.client}:${contract.expectedSession.id}`];
+  const sessionId = contract.expectedSession?.id;
+  const sessionKey = sessionId instanceof RegExp
+    ? Object.keys(usage.sessions).find((key) => sessionId.test(key))
+    : `${contract.client}:${sessionId}`;
+  const session = contract.expectedSession && usage.sessions[sessionKey];
   const sessionMismatches = contract.expectedSession && Object.entries(contract.expectedSession)
     .filter(([key, value]) => key !== 'id' && session?.[key] !== value);
   if (usage.totalTokens !== expected.totalTokens || usage.clients[contract.client] !== expected.clientTokens ||

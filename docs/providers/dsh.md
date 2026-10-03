@@ -81,6 +81,23 @@ record rules shared by every DSH reader:
 - dsh's writer can replay an already-flushed line; a replayed record is deduped on message
   identity + time + routing + token signature, matching tokscale's own guard.
 
+Detail lookup and parsing run asynchronously inside the session-detail worker. The
+reader uses 64 KiB chunks for plain JSONL and Node's streaming Zstd decoder for
+compressed transcripts, including a single frame whose decoded output is larger
+than the V8 string limit. It retains only prompt, usage and lineage fields, not
+raw tool output or attachments. Parsed events and deduplication state still grow
+with the number of relevant records; streaming does not bound the complete result.
+
+Each decoded JSONL record is limited to 16 MiB, matching Claude/Codex detail
+loading. Oversized records and filesystem read errors discard the entire detail
+and use the existing error messages; `ENOENT` remains a missing result eligible
+for WSL fallback. Complete Zstd frames are committed only after successful
+decoding, so a checksum-corrupt frame cannot contribute usage or resurrect later
+frames. A torn final frame retains its recoverable records, matching the existing
+DSH decoder's prefix-recovery behavior. Header lookup retains only the first
+non-empty record, verifies its compressed frame before trusting the id, and keeps
+the directory-name fallback without decoding the remaining frames.
+
 `usageTokens()` passes `outputTokens` through unmodified: dsh's reasoning is a subset of output,
 and tokscale subtracts then re-adds reasoning, so the net total is reasoning-inclusive output.
 Subtracting here would under-count every reasoning-heavy session by exactly its reasoning

@@ -9,7 +9,7 @@ const { tokscaleConfigDir, tokscaleHomeDir } = require('./tokscaleConfig');
 const { claudeSessionRoots } = require('./providers/claude/paths');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
-const { qoderCnDataPaths } = require('./providers/qodercn/usage');
+const { qoderCnDataPaths } = require('./providers/qodercn/paths');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 const {
@@ -354,8 +354,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')],
     ['workbuddy-projects', path.join(home, '.workbuddy-ai', 'projects')]
   );
-  // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
-  add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
+  // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl. The fork
+  // parses it from tokscale's effective home, like the Qoder CN paths below.
+  add('proma', ['proma-sessions', path.join(tokscaleHome, '.proma', 'agent-sessions')]);
   // Qoder CN — legacy SQLite DB under the platform Application Support dir,
   // or the JSONL transcript tree used by current builds.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform, env });

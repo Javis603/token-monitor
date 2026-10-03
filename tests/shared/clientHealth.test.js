@@ -425,6 +425,25 @@ test('TOKSCALE_CONFIG_DIR moves the Antigravity cache but not the Cursor one', (
   }]);
 });
 
+// The fork parses Proma and Qoder CN from tokscale-core home_dir() too, so their
+// watch roots must follow the same redirect rather than the Win32 profile.
+test('fork-only client roots follow an absolute Windows HOME override', () => {
+  const roots = clientSourceRoots('proma,qodercn', {
+    homeDir: 'C:\\Users\\alice',
+    platform: 'win32',
+    env: { APPDATA: 'C:\\Users\\alice\\AppData\\Roaming', HOME: 'D:\\profiles\\alice' }
+  });
+
+  assert.deepEqual(roots.proma, [{
+    id: 'proma-sessions',
+    dir: path.join('D:\\profiles\\alice', '.proma', 'agent-sessions')
+  }]);
+  assert.deepEqual(roots.qodercn.find(({ id }) => id === 'qodercn-projects'), {
+    id: 'qodercn-projects',
+    dir: path.join('D:\\profiles\\alice', '.qoder-cn', 'projects')
+  });
+});
+
 // tokscale-core home_dir() prefers an absolute $HOME on Windows, and cursor.rs
 // builds its cache path on top of it, so the probe has to follow that redirect.
 test('the Cursor cache follows an absolute Windows HOME override', () => {

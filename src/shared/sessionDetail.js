@@ -12,6 +12,39 @@ const codebuddyExtension = require('./providers/codebuddy/extension');
 const opencodeSession = require('./providers/opencode/session');
 const { readReasonixSessionEvents } = require('./providers/reasonix/sessionDetail');
 
+function* readTranscriptLines(filePath) {
+  const fd = fs.openSync(filePath, 'r');
+  let parts = [];
+  let lineBytes = 0;
+  try {
+    for (;;) {
+      const buffer = Buffer.allocUnsafe(64 * 1024);
+      const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      const chunk = buffer.subarray(0, bytesRead);
+      let start = 0;
+      while (start < chunk.length) {
+        const newline = chunk.indexOf(10, start);
+        const end = newline === -1 ? chunk.length : newline;
+        lineBytes += end - start;
+        // Bound each record before decoding; never silently drop oversized usage.
+        if (lineBytes > 16 * 1024 * 1024) {
+          throw Object.assign(new Error('Session detail record exceeds 16 MiB'), { code: 'SESSION_DETAIL_LINE_TOO_LARGE' });
+        }
+        parts.push(chunk.subarray(start, end));
+        if (newline === -1) break;
+        yield Buffer.concat(parts, lineBytes).toString('utf8');
+        parts = [];
+        lineBytes = 0;
+        start = newline + 1;
+      }
+    }
+    if (lineBytes) yield Buffer.concat(parts, lineBytes).toString('utf8');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function num(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -99,6 +132,10 @@ function codexResponseItemPrompt(payload) {
 }
 
 function parseClaudeTranscript(text) {
+  return parseClaudeTranscriptLines(String(text || '').split(/\r?\n/));
+}
+
+function parseClaudeTranscriptLines(lines) {
   const events = [];
   // Claude Code inflates a transcript two ways, both of which would otherwise multiply token counts:
   //   1. Resume replay — on resume it re-appends prior transcript entries verbatim, copying their
@@ -108,7 +145,7 @@ function parseClaudeTranscript(text) {
   //      usage once and merge the tool names so a single reply is one turn, not N.
   const seenLineUuids = new Set();
   const turnByMessageId = new Map();
-  for (const line of String(text || '').split(/\r?\n/)) {
+  for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     let obj;
@@ -157,13 +194,13 @@ function codexToolName(payload) {
   return payload.name || payload.tool_name || payload.tool || '';
 }
 
-function parseCodexTranscriptData(text) {
+function parseCodexTranscriptData(lines) {
   const events = [];
   let canonicalSessionId = '';
   let sawSessionMeta = false;
   let pendingTools = [];
   let adjacentPrompt = null;
-  for (const line of String(text || '').split(/\r?\n/)) {
+  for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     // Codex can persist the same prompt in either schema order. Snapshot and clear the candidate
@@ -239,7 +276,7 @@ function parseCodexTranscriptData(text) {
 }
 
 function parseCodexTranscript(text) {
-  return parseCodexTranscriptData(text).events;
+  return parseCodexTranscriptData(String(text || '').split(/\r?\n/)).events;
 }
 
 // CodeBuddy timestamps are epoch milliseconds; every other transcript here
@@ -260,6 +297,10 @@ function codebuddyTimestamp(value) {
 // tokscale reports for this client, and folding the same records reproduces the
 // session's input, output and cache-read totals exactly.
 function parseCodebuddyTranscript(text) {
+  return parseCodebuddyTranscriptLines(String(text || '').split(/\r?\n/));
+}
+
+function parseCodebuddyTranscriptLines(lines) {
   const events = [];
   // The turn object is pushed on first sight and filled in place: a response's
   // records are adjacent, and its usage may arrive on the call while its text
@@ -270,7 +311,7 @@ function parseCodebuddyTranscript(text) {
   // attached to one. They ride the next emitted turn, the way the Codex
   // parser consumes its pending calls.
   const pendingTools = [];
-  for (const line of String(text || '').split(/\r?\n/)) {
+  for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     let entry;
@@ -439,14 +480,6 @@ function distributeCost(exchanges, sessionCost) {
   return exchanges;
 }
 
-function parseByClient(client, text) {
-  if (client === 'claude') return parseClaudeTranscript(text);
-  // WorkBuddy writes the same transcript family as CodeBuddy Code.
-  if (client === 'codebuddy' || client === 'workbuddy') return parseCodebuddyTranscript(text);
-  if (client === 'codex') return parseCodexTranscript(text);
-  return [];
-}
-
 function totalsOf(exchanges, sessionCost) {
   const totalTokens = exchanges.reduce((acc, ex) => acc + ex.tokens.total, 0);
   const turnCount = exchanges.reduce((acc, ex) => acc + ex.turnCount, 0);
@@ -563,14 +596,24 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
     return readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, home, env, deps });
   }
   if (!filePath) return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
-  let text;
-  try { text = fs.readFileSync(filePath, 'utf8'); } catch (_) {
-    return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
+  let parsed;
+  let events;
+  try {
+    const lines = readTranscriptLines(filePath);
+    // The filename is a lookup key, not necessarily Codex's conversation identity.
+    parsed = client === 'codex' ? parseCodexTranscriptData(lines) : null;
+    // WorkBuddy writes the same transcript family as CodeBuddy Code.
+    events = parsed ? parsed.events
+      : (client === 'codebuddy' || client === 'workbuddy')
+        ? parseCodebuddyTranscriptLines(lines)
+        : parseClaudeTranscriptLines(lines);
+  } catch (error) {
+    if (error.code === 'ENOENT') return { found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost) };
+    return {
+      found: false, client, sessionId, period, exchanges: [], totals: totalsOf([], sessionCost),
+      error: error.code === 'SESSION_DETAIL_LINE_TOO_LARGE' ? 'line-too-large' : 'read-failed'
+    };
   }
-  // Reuse the on-demand transcript parse; the filename is a lookup key, not
-  // necessarily Codex's conversation identity.
-  const parsed = client === 'codex' ? parseCodexTranscriptData(text) : null;
-  const events = parsed ? parsed.events : parseByClient(client, text);
   const now = new Date((deps.now || Date.now)());
   const grouped = filterExchangesByPeriod(groupEvents(events), period, now);
   distributeCost(grouped, sessionCost);

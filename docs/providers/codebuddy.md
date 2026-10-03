@@ -120,6 +120,12 @@ whichever of its records had it. A response whose usage never arrived is still
 emitted, with `tokensAvailable: false` — the reply and its tools are worth
 showing without their numbers, and that is what the shared contract is for.
 
+On-demand file reads feed the same parser from the shared streaming line
+reader, also used by WorkBuddy. Each JSONL record is bounded to 16 MiB before
+decoding; an oversized record returns `line-too-large` with no partial usage.
+This Session Detail bound is separate from the metadata scanner's 64 KiB
+record limit described above.
+
 Token extraction subtracts cached input, because `prompt_tokens` counts it:
 
 ```

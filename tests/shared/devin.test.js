@@ -11,7 +11,8 @@ const {
   watchAttributionRootsForClients, watchIgnoreMatcher, watchPathsForClients
 } = require('../../src/shared/collector');
 const { normalizeClientHealth } = require('../../src/shared/clientHealth');
-const { clientsCsvForSetting, DEFAULT_CLIENTS, PARSE_LOCAL_CLIENTS } = require('../../src/shared/clientTracking');
+const { clientsCsvForSetting, DEFAULT_CLIENTS } = require('../../src/shared/clientTracking');
+const { FORK_ONLY_CLIENT_IDS } = require('../../src/shared/clientCatalog');
 const { extractUsageFromTokscale, normalizeClientName } = require('../../src/shared/usage');
 const { normalizeTokscaleClientName } = require('../../src/shared/history');
 const { homeHasData } = require('../../src/shared/wslUsage');
@@ -87,7 +88,7 @@ test('devin expands to the two concrete tokscale clients, never the bare umbrell
   // alias pair always travels together.
   assert.equal(tokscaleClientFilter('devin,devin'), 'devin-cli,devin-desktop');
   assert.ok(DEFAULT_CLIENTS.split(',').includes('devin'));
-  assert.ok(!PARSE_LOCAL_CLIENTS.includes('devin'));
+  assert.ok(!FORK_ONLY_CLIENT_IDS.includes('devin'));
 });
 
 test('devin concrete ids normalize to the umbrella client everywhere', () => {
