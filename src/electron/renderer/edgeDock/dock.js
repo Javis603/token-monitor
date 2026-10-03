@@ -1572,7 +1572,7 @@ function renderBubble(payload) {
   stagingLayer.replaceChildren(card);
   fitCardTotal(card);
   clampBreakdownList(card);
-  const height = Math.ceil(card.getBoundingClientRect().height);
+  const height = Math.min(Math.ceil(card.getBoundingClientRect().height), payload.maxCardHeight || Infinity);
   if (payload.placed?.cellId === cell.id && payload.placed.height === height) {
     commitCard(card, cell.id);
   } else {
