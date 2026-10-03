@@ -13,7 +13,9 @@ try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
 // test must never write: the same isolation the archive tests make with this
 // variable, applied for the whole file (node runs each test file in its own
 // process). Tests that assert on the ledger still inject their own store.
-process.env.TOKEN_MONITOR_SHARED_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'mimo-limits-tests-'));
+const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mimo-limits-tests-'));
+process.env.TOKEN_MONITOR_SHARED_DIR = testDataDir;
+test.after(() => fs.rmSync(testDataDir, { recursive: true, force: true }));
 
 const {
   fetchMimoLimits,
@@ -264,11 +266,14 @@ test('Desktop completes the membership identity of a saved account whose credent
 
 test('a stored account is spent only with an allowlisted cookie, and scope narrows to one account', () => {
   const rows = scopedMimoManagedAccounts([{ accountKey: 'sha256:a', cookieHeader: CONSOLE_COOKIE }]);
-  assert.equal(rows.length, 1);
-  assert.equal(scopedMimoManagedAccounts(
+  assert.deepEqual(rows.map(({ accountKey, cookieHeader }) => ({ accountKey, cookieHeader })), [{
+    accountKey: 'sha256:a',
+    cookieHeader: 'api-platform_ph=optional; api-platform_serviceToken=secret; userId=42'
+  }]);
+  assert.deepEqual(scopedMimoManagedAccounts(
     [{ accountKey: 'sha256:a', cookieHeader: CONSOLE_COOKIE }, { accountKey: 'sha256:b', cookieHeader: CONSOLE_COOKIE }],
     { provider: 'mimo', accountKey: 'sha256:b' }
-  ).length, 1);
+  ).map((account) => account.accountKey), ['sha256:b']);
   assert.throws(
     () => scopedMimoManagedAccounts(
       [{ accountKey: 'sha256:a', cookieHeader: CONSOLE_COOKIE }, { accountKey: 'sha256:b', cookieHeader: CONSOLE_COOKIE }],
@@ -915,11 +920,7 @@ test('a scoped refresh of one product does not answer for the other', async () =
   const rows = await fetchMimoLimits({
     mimoManagedAccounts: [{ id: 'mimo-1', accountKey, cookieHeader: CONSOLE_COOKIE }],
     limitRefreshScope: scoped
-  }, {
-    fetch: consoleWorld.fetch,
-    readMimoDesktopAccount: signedInDesktop(),
-    now: () => Date.UTC(2026, 8, 24)
-  });
+  }, consoleWorld.deps);
   // The runtime writes every row a scoped dispatch returns under the scope's own
   // identity, so answering with both would overwrite one row with the other.
   assert.deepEqual(rows.map((row) => row.accountKey), [accountKey]);
@@ -928,11 +929,7 @@ test('a scoped refresh of one product does not answer for the other', async () =
   const membershipWorld = mimoWorld();
   const membershipRows = await fetchMimoLimits({
     limitRefreshScope: { provider: 'mimo', accountKey: mimoMembershipAccountKey('42') }
-  }, {
-    fetch: membershipWorld.fetch,
-    readMimoDesktopAccount: signedInDesktop(),
-    now: () => Date.UTC(2026, 8, 24)
-  });
+  }, membershipWorld.deps);
   assert.deepEqual(membershipRows.map((row) => row.accountKey), [MEMBERSHIP_ACCOUNT_KEY_42]);
   assert.deepEqual(membershipWorld.mints(), { console: 0, membership: 1 }, 'the unselected console lane does no work');
 });
@@ -1196,8 +1193,9 @@ test('the membership plan is read the way the app reads it', () => {
   }).plan.percent, 100, 'the app caps the displayed remaining percentage at 100');
 });
 
-test('the plan label is the vendor’s name for the tier, or its own code', () => {
+test('membership tier labels follow the app and INVITE keeps its quota without a plan name', async () => {
   assert.equal(mimoMembershipPlanLabel({ tier: 1 }), 'Starter');
+  assert.equal(mimoMembershipPlanLabel({ tier: 2 }), 'Plus');
   assert.equal(mimoMembershipPlanLabel({ tier: 3 }), 'Pro');
   assert.equal(mimoMembershipPlanLabel({ tier: 4 }), 'Ultra');
   // A tier outside the vendor's table has no name to take, so the vendor's own
@@ -1210,8 +1208,14 @@ test('the plan label is the vendor’s name for the tier, or its own code', () =
   );
   assert.equal(mimoMembershipPlanLabel({ tier: 9, code: 'enterprise' }), 'Enterprise', 'and still goes through the alias table');
   assert.equal(mimoMembershipPlanLabel({ tier: 9 }), '', 'a plan with neither a known tier nor a code has nothing to print');
-  assert.equal(mimoMembershipPlanLabel({ tier: 3, source: 'INVITE' }), '', 'the app excludes an invited subscription from its current-plan card');
   assert.equal(mimoMembershipPlanLabel(null), '');
+
+  const [, invited] = await fetchMimoLimits({}, mimoWorld({
+    subscription: { code: 0, data: { current: { ...PLAN_BODY.data.current, source: 'INVITE' } } }
+  }).deps);
+  assert.equal(invited?.planLabel, '', 'an invited subscription hides its plan name');
+  assert.deepEqual(invited.windows.map((window) => [window.kind, window.usedPercent]), [['weekly', 21.5]],
+    'the quota remains published even without a plan name');
 });
 
 test('the hub keeps both products of one account, from one device or two', async () => {
@@ -1386,7 +1390,11 @@ test('missing cookies are not configured, while unavailable reader capabilities 
     'at-rest encryption is a property of the store, never a signed-out app'
   );
   assert.throws(
-    () => readMimoDesktopAccount({ candidates: ['/nonexistent/Cookies'], fs: presentFile, sqlite: sqliteReturning([]) }),
+    () => readMimoDesktopAccount({
+      candidates: ['/nonexistent/Cookies'],
+      fs: { statSync: () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); } },
+      sqlite: null
+    }),
     (error) => error.status === 'notConfigured'
   );
   assert.throws(

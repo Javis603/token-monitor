@@ -3275,8 +3275,8 @@ test('MiMo settings reuses the shared sign-in status for rejected accounts', () 
     ['mimoAccountErrorMessage', new Node()]
   ]);
   let providers = [
-    { accountKey: 'a', sourceDetail: 'managed', status: 'unauthorized' },
-    { accountKey: 'b', sourceDetail: 'app', status: 'unauthorized' }
+    { provider: 'mimo', accountKey: 'a', sourceDetail: 'managed', status: 'unauthorized' },
+    { provider: 'mimo', accountKey: 'b', sourceDetail: 'app', status: 'unauthorized' }
   ];
   const context = {
     document: { getElementById: (id) => nodes.get(id), createElement: () => new Node() },
@@ -3288,10 +3288,7 @@ test('MiMo settings reuses the shared sign-in status for rejected accounts', () 
     ] }, mimoAccountError: '' },
     accountShellApi: { render() {} },
     localProviderStatuses: () => providers,
-    limitProviderPresentationApi: {
-      limitProviderDisplayLabel: (label) => label,
-      limitProviderStatusLabel: () => ({ label: 'Sign in again', tone: 'setup' })
-    },
+    limitProviderPresentationApi: require('../../src/electron/renderer/limits/providerPresentation'),
     translatedLimitProviderTag: (tagInfo) => tagInfo?.label || '',
     renderSettingsSummaries() {},
     t: (key) => ({
@@ -3309,7 +3306,7 @@ test('MiMo settings reuses the shared sign-in status for rejected accounts', () 
   assert.equal(info[0].title, 'Sign in again');
   assert.equal(info[1].title, 'Console');
   assert.equal(info[2].title, 'Sign in again');
-  providers = [{ accountKey: 'a', sourceDetail: 'managed', status: 'ok' }];
+  providers = [{ provider: 'mimo', accountKey: 'a', sourceDetail: 'managed', status: 'ok' }];
   render();
   assert.equal([...list.children[0].walk()].find((node) => node.className === 'managed-account-info').textContent, 'Console');
 });

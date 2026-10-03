@@ -195,15 +195,6 @@ function createJarExchange(fetchFn, seed = {}) {
   };
 }
 
-// The walk's own transport. `deps.fetch` is the runtime's, and every runtime but
-// the widget's Chromium branch can walk with it — Chromium cancels a
-// `redirect: 'manual'` request — so the widget supplies `deps.mimoExchangeFetch`
-// instead: the same request shape, routed the way the rest of the widget's calls
-// are. The cookie jar is this module's either way.
-function openMimoExchange(deps = {}, seed = {}) {
-  return createJarExchange(deps.mimoExchangeFetch || deps.fetch || globalThis.fetch, seed);
-}
-
 function readAccountStatus(status, text) {
   if (status !== 200) return null;
   let envelope;
@@ -266,25 +257,27 @@ async function mintMimoServiceSession(options = {}) {
   }
   const readAnswer = options.readAnswer || readAccountStatus;
 
-  const exchange = openMimoExchange(options.deps, {
+  const { deps = {} } = options;
+  // Chromium cannot walk manual redirects; the widget supplies its exchange transport.
+  const exchange = createJarExchange(deps.mimoExchangeFetch || deps.fetch || globalThis.fetch, {
     accountCookie: options.accountCookie,
     serviceUrl: entryUrl.href,
-    now: options.deps?.now,
-    signal: options.deps?.signal
+    now: deps.now,
+    signal: deps.signal
   });
   try {
     let walked = await exchange.request(entryUrl.href);
-    throwIfAborted(options.deps?.signal);
+    throwIfAborted(deps.signal);
     if (walked.status === 401) {
       const loginUrl = readLoginUrl(401, walked.text, entryUrl);
       if (!loginUrl) return { ok: false, status: MIMO_EXCHANGE_STATUSES.rejected };
       walked = await exchange.request(loginUrl.href);
-      throwIfAborted(options.deps?.signal);
+      throwIfAborted(deps.signal);
       // The chain answers the endpoint that asked. Coming back for it is only
       // needed when it stopped somewhere else instead.
       if (!readAnswer(walked.status, walked.text)) {
         walked = await exchange.request(entryUrl.href);
-        throwIfAborted(options.deps?.signal);
+        throwIfAborted(deps.signal);
       }
     }
 
@@ -301,7 +294,7 @@ async function mintMimoServiceSession(options = {}) {
     if (!answer) return { ok: false, status: MIMO_EXCHANGE_STATUSES.unavailable };
     return { ok: true, ...answer, cookieHeader: exchange.cookiesFor(entryUrl.href) };
   } catch (error) {
-    throwIfAborted(options.deps?.signal);
+    throwIfAborted(deps.signal);
     return { ok: false, status: MIMO_EXCHANGE_STATUSES.unavailable, error };
   }
 }

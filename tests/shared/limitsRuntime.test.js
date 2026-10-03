@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const { performance } = require('node:perf_hooks');
 const test = require('node:test');
 
@@ -10,8 +11,9 @@ const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
 // app's own data directory; a test must never write there. The same isolation
 // the archive tests make with this variable, for the whole file (node runs each
 // test file in its own process).
-process.env.TOKEN_MONITOR_SHARED_DIR = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'mimo-ledger-tests-'));
-
+const testDataDir = fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'mimo-ledger-tests-'));
+process.env.TOKEN_MONITOR_SHARED_DIR = testDataDir;
+test.after(() => fs.rmSync(testDataDir, { recursive: true, force: true }));
 
 function deferred() {
   let resolve;

@@ -23,8 +23,9 @@ const SHARED_AGENT_FILE = 'src/shared/browserUserAgent.js';
 // app's own data directory; a test must never write there. The same isolation
 // the archive tests make with this variable, for the whole file (node runs each
 // test file in its own process).
-process.env.TOKEN_MONITOR_SHARED_DIR = require('node:fs').mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'mimo-ledger-tests-'));
-
+const testDataDir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'mimo-ledger-tests-'));
+process.env.TOKEN_MONITOR_SHARED_DIR = testDataDir;
+test.after(() => fs.rmSync(testDataDir, { recursive: true, force: true }));
 
 function jsFilesUnder(dir) {
   const out = [];

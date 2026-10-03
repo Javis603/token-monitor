@@ -10,7 +10,9 @@ const test = require('node:test');
 // app's own data directory; a test must never write there. The same isolation
 // the archive tests make with this variable, for the whole file (node runs each
 // test file in its own process).
-process.env.TOKEN_MONITOR_SHARED_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'mimo-ledger-tests-'));
+const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mimo-ledger-tests-'));
+process.env.TOKEN_MONITOR_SHARED_DIR = testDataDir;
+test.after(() => fs.rmSync(testDataDir, { recursive: true, force: true }));
 
 const {
   collectLimitsOnce,

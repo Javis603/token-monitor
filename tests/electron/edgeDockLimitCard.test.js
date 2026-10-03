@@ -182,49 +182,32 @@ function dockView(appearance = {}, overrides = {}) {
   });
 }
 
-test('the dock hands the shared view every dependency it destructures', () => {
-  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
-  const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
-  const required = view
-    .slice(view.indexOf('const {'), view.indexOf('} = deps;'))
-    .replace('const {', '')
-    .split('\n')
-    .map((line) => line.replace(/\/\/.*$/, '').trim())
-    // A dependency with a default is one the host may legitimately omit.
-    .filter((line) => line && !line.includes('='))
-    .map((entry) => entry.split(':')[0].replace(',', '').trim())
-    .filter(Boolean);
-  const wiring = balancedCall(dock, 'createLimitWindowsView({');
+for (const [host, file] of [
+  ['dock', 'edgeDock/dock.js'],
+  ['page', 'app.js']
+]) {
+  test(`the ${host} hands the shared view every dependency it destructures`, () => {
+    const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
+    const source = fs.readFileSync(path.join(root, 'src/electron/renderer', file), 'utf8');
+    const required = view
+      .slice(view.indexOf('const {'), view.indexOf('} = deps;'))
+      .replace('const {', '')
+      .split('\n')
+      .map((line) => line.replace(/\/\/.*$/, '').trim())
+      // A dependency with a default is one the host may legitimately omit.
+      .filter((line) => line && !line.includes('='))
+      .map((entry) => entry.split(':')[0].replace(',', '').trim())
+      .filter(Boolean);
+    const wiring = balancedCall(source, 'createLimitWindowsView({');
 
-  assert.ok(required.length > 10, 'the dependency list should have been parsed');
-  for (const name of required) {
-    assert.match(wiring, new RegExp(`(^|[\\s{,])${name}\\s*[,:]`, 'm'), `the dock must supply ${name}`);
-  }
-  // `document` is read off deps separately rather than destructured with the rest.
-  assert.match(wiring, /^\s*document,$/m);
-});
-
-test('the page hands the shared view every dependency it destructures', () => {
-  // The same completeness check as the dock's, over the page's own wiring:
-  // neither host is guarded by the other, and a missing dependency is a
-  // TypeError the first time a MiMo group renders, not a test failure.
-  const view = fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
-  const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
-  const required = view
-    .slice(view.indexOf('const {'), view.indexOf('} = deps;'))
-    .replace('const {', '')
-    .split('\n')
-    .map((line) => line.replace(/\/\/.*$/, '').trim())
-    .filter((line) => line && !line.includes('='))
-    .map((entry) => entry.split(':')[0].replace(',', '').trim())
-    .filter(Boolean);
-  const wiring = balancedCall(app, 'createLimitWindowsView({');
-
-  assert.ok(required.length > 10, 'the dependency list should have been parsed');
-  for (const name of required) {
-    assert.match(wiring, new RegExp(`(^|[\\s{,])${name}\\s*[,:]`, 'm'), `the page must supply ${name}`);
-  }
-});
+    assert.ok(required.length > 10, 'the dependency list should have been parsed');
+    for (const name of required) {
+      assert.match(wiring, new RegExp(`(^|[\\s{,])${name}\\s*[,:]`, 'm'), `the ${host} must supply ${name}`);
+    }
+    // `document` is read off deps separately rather than destructured with the rest.
+    if (host === 'dock') assert.match(wiring, /^\s*document,$/m);
+  });
+}
 
 test('session gauges reuse the detail tooltip builder without an info icon', () => {
   const view = dockView();
@@ -421,8 +404,7 @@ test('a MiMo membership row meters like any percent quota, WorkBuddy included', 
   const workbuddyCard = dockView().renderProviderWindows(workbuddyRow, '#12B7F5');
   assert.equal(workbuddyCard.find('limit-meter-fill').style['--bar-scale'], '0.785');
 
-  // A membership with no plan has no percentage to meter: the row carries no
-  // window, and the plan cell is what says there is no plan.
+  // An empty window list must not invent a percentage meter.
   const noPlan = dockView().renderProviderWindows(
     { ...membershipRow, planLabel: '', windows: [] },
     '#000000'
@@ -489,8 +471,7 @@ test('a MiMo wallet meters against its month spend and carries the spend line', 
     'the bar is the wallet against its month spend'
   );
   assert.match(labels[0], /Balance ¥9\.95 Gift ¥9\.95 · Cash ¥0\.00/);
-  // The Spend row states what the console reported, and nothing else: no Today or
-  // Week, because no endpoint reports them.
+  // This fixture has no locally tracked Today or Week spend.
   const spend = card.find('limit-spend');
   assert.ok(spend, 'the card should carry the spend row the wallet providers have');
   assert.match(spend.text, /Month ¥9\.30/);
