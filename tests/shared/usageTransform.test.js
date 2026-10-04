@@ -1,7 +1,14 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
+
+// The allTime floor reads the shared data dir; point it at an empty dir so a
+// developer machine's real daily archive can't inflate fixture totals.
+process.env.TOKEN_MONITOR_SHARED_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-usageTransform-'));
 
 const {
   USAGE_TRANSFORM_SETTING_KEYS,
