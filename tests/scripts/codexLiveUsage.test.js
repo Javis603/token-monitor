@@ -84,3 +84,23 @@ test('failed new connection never exposes an earlier account report as current d
   assert.ok(!JSON.stringify(failure).includes('PREVIOUS_ACCOUNT'));
   assert.equal(unavailableSnapshot(previous, 'ACCOUNT_CHANGED_DURING_SYNC', 'now').lastSuccessAt, null);
 });
+
+
+test('account notification discards a whole sample then recollects on same connection', { skip: process.platform === 'win32' }, () => {
+  const result = spawnSync(process.execPath, [cli, '--codex-binary', fixture, '--json'],
+    { encoding: 'utf8', timeout: 10000, env: { ...process.env, TM_USAGE_FIXTURE_MODE: 'account-update-once' } });
+  assert.equal(result.status, 0, result.stderr);
+  const snapshot = JSON.parse(result.stdout);
+  assert.equal(snapshot.state, 'fresh');
+  assert.equal(snapshot.report.account.report.summary.lifetimeTokens, 22345);
+  assert.ok(!result.stdout.includes('12345'));
+});
+
+test('a second account update aborts instead of retrying forever', { skip: process.platform === 'win32' }, () => {
+  const result = spawnSync(process.execPath, [cli, '--codex-binary', fixture, '--json'],
+    { encoding: 'utf8', timeout: 10000, env: { ...process.env, TM_USAGE_FIXTURE_MODE: 'account-update-always' } });
+  assert.equal(result.status, 1);
+  const snapshot = JSON.parse(result.stdout);
+  assert.equal(snapshot.state, 'unavailable'); assert.equal(snapshot.report, null);
+  assert.equal(snapshot.errorCode, 'ACCOUNT_CHANGED_DURING_SYNC');
+});

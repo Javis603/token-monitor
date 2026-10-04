@@ -93,6 +93,9 @@ async function syncUsage(rpc, {
   const diagnostics = [];
   const check = () => { if (signal?.aborted) throw rpcError('SYNC_ABORTED'); };
   const start = now();
+  // An update invalidates this observation, not every future observation on
+  // the connection. Never join counters from two account revisions.
+  const accountRevision = Number.isSafeInteger(rpc.accountRevision) ? rpc.accountRevision : null;
   let account = null; let accountStatus = 'unavailable';
   check();
   try {
@@ -191,7 +194,7 @@ async function syncUsage(rpc, {
       bindingEvidence: row.binding ? 'user-declared' : null, status, usage });
   }
   check();
-  if (rpc.accountChanged) throw rpcError('ACCOUNT_CHANGED_DURING_SYNC');
+  if (accountRevision === null ? rpc.accountChanged : rpc.accountRevision !== accountRevision) throw rpcError('ACCOUNT_CHANGED_DURING_SYNC');
   const measured = threads.filter((t) => t.usage?.tokens.totalTokens !== null && t.usage?.tokens.totalTokens !== undefined).length;
   return { version: 1, kind: 'codex-live-usage', startedAt: start, observedAt: now(), source: 'codex-app-server',
     accountCloudCoverage: 'unknown', canCombineWithLocal: false,

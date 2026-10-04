@@ -34,7 +34,8 @@
     "lint": "eslint .",
     "verify": "npm run lint && npm test",
     "codex:usage": "node scripts/codex-task-usage.js",
-    "codex:usage:live": "node scripts/codex-live-usage.js"
+    "codex:usage:live": "node scripts/codex-live-usage.js",
+    "codex:usage:deploy": "python3 scripts/deploy-codex-usage-test.py"
   },
   "build": {
     "appId": "com.javis.tokenmonitor",

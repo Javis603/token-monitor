@@ -117,8 +117,17 @@ async function main(argv = process.argv.slice(2), deps = {}) {
       try {
         active = deps.createRpc ? deps.createRpc({ binary, env, timeoutMs: v.timeoutMs }) : new UsageRpc({ binary, env, timeoutMs: v.timeoutMs });
         await active.initialize();
-        const report = await syncUsage(active, { threadIds: v.thread || [], bindings, discover: !!v.discover,
+        const collect = () => syncUsage(active, { threadIds: v.thread || [], bindings, discover: !!v.discover,
           includeDescendants: !v['no-descendants'], signal: aborter.signal, normalizeAccount: deps.normalizeAccount });
+        let report;
+        try { report = await collect(); }
+        catch (error) {
+          if (error.code !== 'ACCOUNT_CHANGED_DURING_SYNC' || aborter.signal.aborted) throw error;
+          // Startup/auth refresh notifications can arrive after initialize.
+          // Discard EVERY value, then recollect once on the same connection.
+          // A second update still fails; no old sample or identity is reused.
+          report = await collect();
+        }
         if (report.account.status !== 'reported' && report.inventory.measuredThreads === 0) throw rpcError('ALL_USAGE_UNAVAILABLE');
         lastReport = report; consecutiveFailures = 0;
         const snapshot = { version: 1, state: 'fresh', attemptedAt: attemptAt, lastSuccessAt: report.observedAt, report };

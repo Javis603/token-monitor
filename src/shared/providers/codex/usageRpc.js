@@ -15,7 +15,7 @@ class UsageRpc extends EventEmitter {
     if (typeof binary !== 'string' || !binary || binary.includes('\0')) throw rpcError('INVALID_BINARY');
     if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000) throw rpcError('INVALID_TIMEOUT');
     this.timeoutMs = timeoutMs; this.pending = new Map(); this.nextId = 1;
-    this.buffer = Buffer.alloc(0); this.closed = false; this.initialized = false; this.accountChanged = false;
+    this.buffer = Buffer.alloc(0); this.closed = false; this.initialized = false; this.accountChanged = false; this.accountRevision = 0;
     this.child = spawnImpl(binary, ['app-server', '--listen', 'stdio://'], {
       shell: false, env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe']
     });
@@ -59,7 +59,10 @@ class UsageRpc extends EventEmitter {
       if (msg.id !== undefined) {
         try { this.write({ id: msg.id, error: { code: -32601, message: 'Read-only usage client' } }); }
         catch (_) { this.fail('RPC_WRITE_ERROR'); }
-      } else if (msg.method === 'account/updated' && this.initialized) this.accountChanged = true;
+      } else if (msg.method === 'account/updated') {
+        this.accountRevision += 1;
+        if (this.initialized) this.accountChanged = true;
+      }
       return;
     }
     const pending = this.pending.get(msg.id);

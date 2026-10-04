@@ -1,6 +1,6 @@
 # Codex live usage reader
 
-This fork adds an opt-in service reader alongside the existing local-log ledger. The implementation is installed in this source checkout, not in the installed Electron widget. It has been exercised against a synthetic JSON-RPC peer; real account/cloud/dot acceptance is still outstanding.
+This fork adds an opt-in service reader alongside the existing local-log ledger. The implementation is installed in this source checkout, not in the installed Electron widget. It has been exercised against both a synthetic JSON-RPC peer and the installed Codex app-server. A real account total was returned; real thread token breakdowns were unavailable in the sampled parent/child pair. Cloud/dot attribution acceptance remains outstanding.
 
 ## Commands and output
 
@@ -45,7 +45,7 @@ The account summary and daily buckets overlap. They are not added together or al
 
 `taskTotalTokens` is null: the interface has not established whether a parent estimate already includes descendants. Do not add parents to children, combine this view with local Tokscale periods, or classify the service response as a per-request measured ledger. A fresh poll replaces the previous snapshot, allowing downward corrections without accumulating duplicates.
 
-Each poll opens a new connection. Account changes within a poll invalidate its result. When a new connection fails, the last report body is cleared rather than exposed under an unverified account identity; a previous success time may be retained only as a diagnostic. Failure is `unavailable`, never a fresh zero report. Explicit termination produces `stopped`. An abruptly killed viewer cannot update the last file, so timestamps remain essential even when a historical file says `fresh`.
+Each poll opens a new connection. Account changes within a poll invalidate its entire result. Notifications advance an account revision; the CLI discards all sampled values and recollects at most once on that same connection. A further notification fails closed rather than joining different revisions or retrying indefinitely. This handles delayed startup notifications without ignoring actual account changes. When a new connection fails, the last report body is cleared rather than exposed under an unverified account identity; a previous success time may be retained only as a diagnostic. Failure is `unavailable`, never a fresh zero report. Explicit termination produces `stopped`. An abruptly killed viewer cannot update the last file, so timestamps remain essential even when a historical file says `fresh`.
 
 Exports contain allowlisted usage, thread/task/dot identifiers, provenance and sanitized diagnostics. They omit conversation titles, message bodies, previews, tool arguments, working directories and raw errors. Opaque identifiers and model labels can still be sensitive; review reports before sharing.
 
@@ -61,3 +61,11 @@ npm run verify
 The fixture `tests/fixtures/codexUsageRpc.cjs` is a synthetic local process, not Codex and not an authenticated account. It verifies the CLI → stdio RPC → normalization → thread relationships → private JSON/HTML path, including failures. Fixture counters must never be presented as user usage. Current tests also reproduce and prevent unrelated catalog budget exhaustion, loss of an explicitly referenced parent, and exposure of an earlier account body after a failed reconnection.
 
 Real acceptance requires an authorized cloud/dot task record, its actual engine-thread identity, a supported usage response and a comparison that determines parent/descendant coverage. The attempted live probe in this session was blocked by platform safety checking. No equivalent request was retried through another tool, executable or agent. Offline integration continues independently; the source checkout being ready is not a claim that real cloud/dot statistics or the installed Electron dashboard have been verified.
+
+## Separate macOS test application
+
+`python3 scripts/deploy-codex-usage-test.py --apply --thread ENGINE_THREAD_ID` installs `~/Applications/Token Monitor Usage Test.app`, not the production Token Monitor. The installer rejects an existing destination and any production app name. It copies only the static local module dependency closure (Node built-ins only), records SHA-256 hashes and source commit/dirty state, and reuses the already installed Node executable. It never copies authentication files or the repository's `node_modules`.
+
+Double-clicking the test app requests one fresh service report, then opens its local HTML. Reports, a sanitized lifecycle receipt and `settings.json` live separately under `~/Library/Application Support/Token Monitor Usage Test/`. The optional `threadIds` list selects real engine roots. The companion `本地线程统计.command` uses the same packaged code to report one root and its descendants from local logs. A local-only invocation requires exactly one configured root. No startup service or automatic updater is registered.
+
+The source test launcher can be run with `--headless` for file-based acceptance without opening a browser, or `--local --thread ID --headless` for local-log acceptance. Removing the separate app rolls back deployment without affecting the production widget. Reports remain for explicit user cleanup.
