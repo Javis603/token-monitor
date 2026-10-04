@@ -769,6 +769,27 @@ span.settings-note.settings-item-desc {
   width: 64px;
   text-align: right;
 }
+/* Explicit widget width/height inputs (issue #873) */
+.widget-size-fields {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+.settings-panel .widget-size-input {
+  flex: 0 0 64px;
+  width: 64px;
+  text-align: right;
+}
+.widget-size-times { color: var(--muted); font-size: 11px; }
+.widget-size-reset {
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
 /* Inline text options (Codex-style): plain labels, the active one gets a soft pill. */
 .inline-options { display: inline-flex; align-items: center; gap: 2px; }
 .settings-panel .inline-option {
@@ -6070,6 +6091,143 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   .breakdown,
   .home-panel,
   .service-status-panel { display: none; }
+}
+
+/* Horizontal bar mode (issue #873): a wide, short widget (e.g. 600x80,
+   800x100) keeps the totals and provider limit chips on horizontal rails
+   that scroll instead of clipping. The min-aspect-ratio guard keeps these
+   rules off the narrow floating-bubble / vertical-sidebar surfaces, which
+   keep the progressive-collapse layout above. */
+@media (max-height: 200px) and (min-aspect-ratio: 3 / 1) {
+  .shell {
+    gap: 4px;
+    padding: 6px 12px;
+    -webkit-app-region: drag;
+  }
+  .shell button,
+  .shell input,
+  .shell .total-panel,
+  .shell .limits-panel,
+  .shell .home-panel,
+  .shell .breakdown { -webkit-app-region: no-drag; }
+
+  /* The bar is a glanceable surface; the titlebar controls come back when the
+     widget is enlarged. The shell itself stays draggable. */
+  .titlebar { display: none; }
+
+  /* Totals on a single centered baseline row. */
+  .total-panel {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 12px;
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 0;
+  }
+  .label-row { flex: 0 0 auto; font-size: 10px; }
+  .total-number-row { flex: 0 1 auto; }
+  .total-number { margin-top: 0; font-size: clamp(18px, 5vh, 34px); }
+  .cost { flex: 0 0 auto; margin-top: 0; font-size: clamp(10px, 2.6vh, 15px); white-space: nowrap; }
+
+  /* While the Limits view is on screen its chips own the bar; hide the
+     totals row so neither surface is vertically clipped. */
+  .shell.limits-mode .total-panel { display: none; }
+
+  /* Limits become a horizontal rail of provider chips that scrolls instead
+     of clipping the right-most values. */
+  .limits-panel {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+  }
+  .limits-panel::-webkit-scrollbar { display: none; }
+  .limit-row {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    min-width: 176px;
+    max-width: 210px;
+    padding: 2px 14px 2px 0;
+    margin-right: 14px;
+    border-bottom: 0;
+    border-right: 1px solid rgba(var(--line-rgb), 0.12);
+  }
+  .limit-row:last-child { margin-right: 0; }
+  /* Signed-out providers carry no windows; size the chip to its full header
+     ("Claude / Not signed in") instead of reserving window-row width. */
+  .limit-row:has(> .limit-windows:empty) { min-width: 0; }
+  /* Multi-account providers draw one chip per account; lay those chips on the
+     same horizontal rail instead of stacking them vertically (a vertical
+     stack would overflow the short bar and be clipped, with no way to scroll
+     to the missing accounts). The group's own header repeats each account's
+     name, so drop it at this height. */
+  .limit-row-group {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    min-width: 0;
+    max-width: none;
+    margin-right: 0;
+    padding: 0;
+    border-right: 1px solid rgba(var(--line-rgb), 0.12);
+  }
+  .limit-row-group > .limit-head { display: none; }
+  .limit-account-list {
+    display: flex;
+    flex-direction: row;
+    gap: 0;
+  }
+  /* The rule that opens a separator band above each later account belongs to the
+     stacked layout: on the one-row rail its 10px margin + 10px padding push
+     every account after the first out of a 56px bar, and its hairline is drawn
+     across the chip with nothing left to separate. */
+  .limit-account-row + .limit-account-row {
+    margin-top: 0;
+    padding-top: 0;
+  }
+  .limit-account-row + .limit-account-row::before { display: none; }
+  .limit-head { gap: 6px; align-items: baseline; }
+  .limit-title { flex: 1 1 auto; }
+  .limit-name { gap: 6px; font-size: 11px; }
+  .limit-plan {
+    flex: 0 0 auto;
+    max-width: none;
+    overflow: visible;
+    font-size: 10px;
+    text-align: right;
+    text-overflow: clip;
+    white-space: nowrap;
+  }
+  .limit-meta { display: none; }
+  .limit-windows,
+  .limit-window-group,
+  .limit-window-group-items { display: flex; flex-direction: column; gap: 1px; }
+  .limit-windows { grid-template-columns: none; }
+  .limit-window {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+  .limit-window-text { display: contents; }
+  .limit-window-text > span:first-child { color: var(--muted); }
+  .limit-window-text > span:last-child { font-weight: 600; }
+  .limit-meter { display: none; }
+  .limit-reset { margin-left: auto; font-size: 10px; white-space: nowrap; }
+  /* Credit/reset notes need a tall multi-line layout; hide them on the rail
+     rather than clipping mid-line. */
+  .limit-window-wide.limit-window-note,
+  .codex-reset-forecast { display: none; }
 }
 
 #opencodeManualPanel,
