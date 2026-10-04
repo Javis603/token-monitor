@@ -76,6 +76,17 @@ test('homeHasData detects MiniMax Code runtime stores in a WSL home', () => {
   }
 });
 
+test('homeHasData detects a WSL home that only has a MiniMax Code profile', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  for (const dir of ['.minimax-work', '.mavis-team']) {
+    const marker = `${home}\\${dir}\\v2\\sessions`;
+    const readdirSync = (p) => (p === home ? ['.bashrc', '.minimax-', dir] : []);
+    assert.deepEqual(homeHasData(home, (path) => path === marker, readdirSync), ['mcode']);
+  }
+  // A profile-looking name without a session store does not mark the home.
+  assert.deepEqual(homeHasData(home, () => false, (p) => (p === home ? ['.minimax-work'] : [])), []);
+});
+
 test('homeHasData attributes Kilo CLI and extension markers to one client', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   for (const marker of [

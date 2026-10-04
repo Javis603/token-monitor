@@ -230,6 +230,23 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
       const second = assistant('msg-b', 'turn-2', 1789725602000, { input: 500, output: 20, cacheRead: 400, cacheWrite: 0 });
       fs.writeFileSync(path.join(dir, 'snapshots', 'g000000000000--compact-1.jsonl'), `${first}\n`);
       fs.writeFileSync(path.join(dir, 'messages.jsonl'), `${first}\n${second}\n`);
+      // turn-1 was also run through `tokscale headless mcode exec`, so
+      // upstream's lane counts it from the capture and the store must not.
+      const capture = path.join(home, '.config', 'tokscale', 'headless', 'mcode');
+      fs.mkdirSync(capture, { recursive: true });
+      fs.writeFileSync(path.join(capture, 'tm-contract.jsonl'), `${JSON.stringify({
+        schemaVersion: 1,
+        timestampMs: 1789725601000,
+        sessionId: MCODE_SESSION_ID,
+        turnId: 'turn-1',
+        type: 'exec.completed',
+        result: {
+          type: 'exec.result',
+          status: 'succeeded',
+          model: { providerId: 'minimax', modelId: 'MiniMax-M2.5' },
+          usage: { inputTokens: 1000, outputTokens: 40, cacheReadTokens: 300, cacheWriteTokens: 30, totalTokens: 1040 }
+        }
+      })}\n`);
     }
   }
 ]);

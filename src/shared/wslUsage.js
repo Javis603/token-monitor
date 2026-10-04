@@ -6,6 +6,7 @@ const { throwIfAborted } = require('./abortSignal');
 const { emptyPeriod, extractUsageFromTokscale, mergePeriods } = require('./usage');
 const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 const { WSL_DATA_MARKERS, MARKER_CLIENTS } = require('./clientSourceRegistration');
+const { isMcodeProfileDir } = require('./providers/mcode/paths');
 
 const WSL_EXCLUDED_CLIENTS = new Set([REASONIX_CLIENT, 'qodercn']);
 
@@ -83,6 +84,18 @@ function homeHasData(home, existsSync, readdirSync = fs.readdirSync) {
       }
     }
   } catch (_) { /* workspaceStorage missing or unreadable */ }
+  // MiniMax Code profiles (`.minimax-<profile>`, `.mavis-<profile>`) have no
+  // fixed name to mark, and the fork reads them under --home too.
+  if (!ids.has('mcode')) {
+    try {
+      for (const name of readdirSync(home)) {
+        if (isMcodeProfileDir(name) && existsSync(wslHomePath(home, `${name}/v2/sessions`))) {
+          ids.add('mcode');
+          break;
+        }
+      }
+    } catch (_) { /* home unreadable */ }
+  }
   return [...ids];
 }
 

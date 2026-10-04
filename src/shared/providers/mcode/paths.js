@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 // MiniMax Code (CLI and desktop app) writes every Session through its shared
@@ -14,19 +15,21 @@ const MCODE_SOURCE_CHECK_ID = 'mcode-sessions';
 const ENV_OVERRIDES = ['MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR'];
 const DATA_DIR_BASENAMES = ['.minimax', '.mavis'];
 
-function isProfileDir(name) {
+function isMcodeProfileDir(name) {
   return DATA_DIR_BASENAMES.some((base) => name.startsWith(`${base}-`) && name.length > base.length + 1);
 }
 
-function mcodeDataDirs({ env = process.env, homeDir } = {}) {
+function mcodeDataDirs({ env = process.env, homeDir = os.homedir() } = {}) {
   for (const name of ENV_OVERRIDES) {
     const value = typeof env[name] === 'string' ? env[name].trim() : '';
     if (value) return [value];
   }
+  // A profile is matched by name, links included, as the fork does; a name that
+  // is not a data directory simply has no sessions to watch.
   let profiles;
   try {
     profiles = fs.readdirSync(homeDir, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && isProfileDir(entry.name))
+      .filter((entry) => (entry.isDirectory() || entry.isSymbolicLink()) && isMcodeProfileDir(entry.name))
       .map((entry) => entry.name)
       .sort();
   } catch (_) {
@@ -51,6 +54,7 @@ function mcodeSessionDirs(options = {}) {
 
 module.exports = {
   MCODE_SOURCE_CHECK_ID,
+  isMcodeProfileDir,
   mcodeDataDirs,
   mcodeSessionDirs
 };

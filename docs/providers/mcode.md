@@ -4,12 +4,12 @@ ids: [mcode]
 read_when:
   - Changing MiniMax Code source detection or watch behavior
   - Debugging missing, doubled or stale MiniMax Code usage
-  - Touching the fork's token_monitor/mcode.rs or providers/mcode/paths.js
+  - Changing how the fork reads the runtime store or where its data directories resolve
 ---
 
 # MiniMax Code
 
-`mcode` is the product's own CLI name and upstream tokscale's client id, so it is the tracked id too. It is unrelated to the `minimax` AI Tool Limits provider, which reads the Token Plan balance; `normalizeClientName()` maps only the product spellings to `mcode` and leaves the bare vendor name alone.
+`mcode` is the product's own CLI name and upstream tokscale's client id, so it is the tracked id too. It shares a README row and the MiniMax icon with the `minimax` AI Tool Limits provider, which reads the Token Plan balance, but no code; `normalizeClientName()` maps only the product spellings to `mcode` and leaves the bare vendor name alone.
 
 ## Sources
 
@@ -20,7 +20,7 @@ read_when:
 
 The supplement reports under upstream's `mcode` id rather than as a fork-only client, so nothing migrates if upstream starts reading the store; it is then removed from the fork. Upstream's headless lane runs unchanged, and a turn it already counted in the same scan is skipped by the supplement, because a capture and the store carry the same Session and turn ids.
 
-The data directory is a non-empty `MINIMAX_DATA_DIR`, else `MAVIS_DATA_DIR`, as MiniMax Code resolves it; otherwise `~/.minimax`, the earlier `~/.mavis`, and every `-<profile>` variant of either. `.mavis` is often a link to `.minimax`, so both the fork and `providers/mcode/paths.js` read a store once by its real path. A scan with `--home` (WSL) ignores the overrides, which describe the host.
+The data directory is a non-empty `MINIMAX_DATA_DIR`, else `MAVIS_DATA_DIR`, as MiniMax Code resolves it; otherwise `~/.minimax`, the earlier `~/.mavis`, and every `-<profile>` variant of either. `.mavis` is often a link to `.minimax`, so both the fork and `providers/mcode/paths.js` read a store once by its real path. A scan with `--home` (WSL) ignores the overrides, which describe the host, so WSL discovery marks a home that has `.minimax`, `.mavis` or a profile store. A profile is matched by name, as the fork does, so a profile that is a link is watched too.
 
 ## Accounting
 
@@ -35,3 +35,15 @@ Deleting or rewinding a Session in MiniMax Code removes its history, as in other
 The watcher follows each store's `v2/sessions` tree and the headless `mcode` directories. MiniMax Code writes there only during a turn, and the scan does not write back, so the watch cannot re-trigger itself. Custom scan paths are disabled for `mcode`: an extra root would reach only upstream's headless scan, never the store.
 
 The fork caches the usage rows of each history file by length and mtime in `token-monitor/mcode-<home hash>.json` under tokscale's cache directory, one file per scanned home, because history files carry whole conversations and tool output.
+
+## Known gaps
+
+The store layout was read from the open-source CLI and the shared `local-runtime-v2`, and checked against a BYOK CLI run. The desktop app is not open source, so its use of the same store, sessions from before the v2 history layout that MiniMax Code has not opened since, and the provider and model strings of a MiniMax account have not been checked against real data.
+
+## Verification
+
+```bash
+node --test tests/shared/clientHealth.test.js tests/shared/wslUsage.test.js tests/shared/usage.test.js
+```
+
+`scripts/verify-vendored-tokscale.js` runs a compacted Session plus a headless capture of one of its turns through the pinned binary, so a store turn counted again fails the gate. The supplement's own tests live in the fork: `cargo test -p tokscale-core token_monitor::mcode` and `tests/token_monitor_mcode.rs`.
