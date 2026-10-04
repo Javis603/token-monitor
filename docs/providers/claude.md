@@ -19,6 +19,8 @@ Native title lookup reads only persisted `custom-title` and `ai-title` records; 
 
 For sessions matched to T3 Code, a usable T3 sidebar title takes precedence over both native title records, which can remain stale after T3 renames a conversation. The shared read-only `src/shared/t3SessionMetadata.js` reader matches `claudeAgent` V2 rows by `nativeThreadRef.nativeId`; legacy rows use `resume_cursor_json.resume`, not their app-level `threadId`. V2 matches suppress stale legacy titles even when deleted, empty or placeholders. If T3 supplies no usable title, native metadata remains the fallback. Titles are refreshed independently of transcript changes; context, turn state and cache readings still come from the transcript index.
 
+Legacy Claude lookup requires `provider_session_runtime.provider_name = 'claudeAgent'`. Stores without that column keep native titles because the generic `resume` cursor alone cannot establish provider identity. Codex retains its older compatibility path without this column; Claude does not inherit that exception. Malformed legacy cursors are ignored without hiding other valid matches.
+
 Turn state comes from the newest assistant `stop_reason` plus any genuine user prompt written after it. `tool_use` is not an ended turn. `tool_result`, meta and compaction records are not new user prompts. The adapter emits `true`, `false` or no value deliberately: `false` must clear an older finished state, while no value means there is no evidence.
 
 ### Live context occupancy

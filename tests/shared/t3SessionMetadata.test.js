@@ -13,12 +13,17 @@ const maybe = sqlite ? test : test.skip;
 
 function store(t) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 't3-claude-'));
-  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  let db;
+  t.after(() => {
+    // Windows cannot remove the SQLite file while its connection is open.
+    try { if (db) db.close(); } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
   const dir = path.join(home, '.t3', 'userdata');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, 'statev2.sqlite');
-  const db = new sqlite.DatabaseSync(file);
-  t.after(() => db.close());
+  db = new sqlite.DatabaseSync(file);
   db.exec(`
     CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT PRIMARY KEY, title TEXT, deleted_at TEXT, updated_at TEXT);
     CREATE TABLE orchestration_v2_projection_provider_threads (thread_id TEXT, driver TEXT, provider TEXT, provider_session_id TEXT, payload_json TEXT);
@@ -62,6 +67,18 @@ maybe('Claude V2 tombstones and untitled rows shadow retained legacy titles', (t
   v2('empty', 'empty-native', '');
   for (const id of ['deleted-native', 'placeholder-native', 'empty-native']) legacy(`old-${id}`, id, 'Stale title');
   assert.equal(read(['deleted-native', 'placeholder-native', 'empty-native']).size, 0);
+});
+
+maybe('Claude legacy lookup rejects malformed cursors and stores without provider identity', (t) => {
+  const { db, legacy, read } = store(t);
+  legacy('valid-app', 'valid-native', 'Valid Claude title');
+  legacy('malformed-app', 'malformed-native', 'Malformed cursor title');
+  db.prepare('UPDATE provider_session_runtime SET resume_cursor_json = ? WHERE thread_id = ?').run('{', 'malformed-app');
+  assert.deepEqual(read(['valid-native', 'malformed-native']), new Map([
+    ['valid-native', { title: 'Valid Claude title' }]
+  ]));
+  db.exec('ALTER TABLE provider_session_runtime DROP COLUMN provider_name');
+  assert.equal(read(['valid-native']).size, 0);
 });
 
 maybe('Claude resolver prefers T3 over native custom/AI titles without changing transcript metrics', (t) => {
