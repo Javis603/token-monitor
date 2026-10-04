@@ -9,9 +9,15 @@ function resolveSqlite(deps) {
 
 function openDb(dbPath, sqliteMod) {
   const db = new sqliteMod.DatabaseSync(dbPath, { readOnly: true });
-  db.exec('PRAGMA busy_timeout = 250');
-  db.exec('PRAGMA query_only = ON');
-  return db;
+  try {
+    db.exec('PRAGMA busy_timeout = 250');
+    db.exec('PRAGMA query_only = ON');
+    return db;
+  } catch (error) {
+    // The caller only owns the connection after initialization succeeds.
+    try { db.close(); } catch (_) { /* preserve the initialization error */ }
+    throw error;
+  }
 }
 
 module.exports = { resolveSqlite, openDb };
