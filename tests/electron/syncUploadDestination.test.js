@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { destinationIdentity } = require('../../src/electron/syncContentRuntime');
+const { sameDestination } = require('../../src/electron/syncContentRuntime');
 
 function harness() {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
@@ -16,10 +16,17 @@ function harness() {
   let release;
   const held = new Promise(resolve => { release = resolve; });
   const posts = [];
+  let captured = null;
+  let opaqueIdentity = 'first-id';
+  const status = () => {
+    if (captured && !sameDestination(captured, context)) opaqueIdentity = 'second-id';
+    captured = { ...context };
+    return { identity: opaqueIdentity };
+  };
   const sandbox = vm.createContext({
-    settings: {}, console, AbortSignal, destinationIdentity,
+    settings: {}, console, AbortSignal, sameDestination,
     effectiveHubConfig: () => context, syncContentContext: () => context,
-    getSyncContentRuntime: () => ({ prepareUpload: () => held }),
+    getSyncContentRuntime: () => ({ prepareUpload: () => held, status }),
     postSyncPayload: async (_fetch, url, options) => {
       posts.push({ url, options });
       return { response: { ok: true, json: async () => ({ ok: true }) } };
@@ -31,7 +38,7 @@ function harness() {
   return {
     posts, context: () => context,
     setContext: next => { context = next; },
-    release: (aborted = false) => release({ identity: destinationIdentity(context),
+    release: (aborted = false) => release({ identity: status().identity,
       syncSessionTitles: true, sessionTitleSyncGeneration: 1, signal: { aborted } }),
     post: () => sandbox.postToHub({ deviceId: 'one' })
   };
@@ -73,9 +80,9 @@ test('the actual settings IPC handler rejects a destination change while publica
   let release;
   const held = new Promise(resolve => { release = resolve; });
   let applied = false;
-  const sandbox = vm.createContext({ destinationIdentity, syncContentContext: () => context,
+  const sandbox = vm.createContext({ syncContentContext: () => context,
     ipcMain: { handle: (_channel, callback) => { handler = callback; } },
-    getSyncContentRuntime: () => ({ publishPatch: () => held }),
+    getSyncContentRuntime: () => ({ publishPatch: () => held, status: () => ({ identity: context.url }) }),
     applySettingsPatch: () => { applied = true; }, latestUsageHost: null });
   vm.runInContext(source.slice(start, end), sandbox);
   const edit = handler(null, { customModelPricing: [] });
@@ -99,7 +106,9 @@ test('the main-process persistence adapter rolls back failed sync state writes',
     ensureCredentialStore: () => {},
     createSyncContentCredentialQueue: () => ({ read: () => [], save: () => {}, remove: () => {} }),
     createSyncContentRuntime: value => { dependencies = value; return {}; },
-    saveSettings: () => { if (failure) throw new Error('disk full'); }
+    settingsPath: '/unused/settings.json', persistedSettingsSnapshot: original,
+    stripCredentialSettings: value => value, cloneSettingsSnapshot: value => structuredClone(value),
+    writePrivateJsonAtomic: () => { if (failure) throw new Error('disk full'); }
   });
   vm.runInContext(source.slice(start, end), sandbox);
   sandbox.getSyncContentRuntime();
@@ -109,4 +118,85 @@ test('the main-process persistence adapter rolls back failed sync state writes',
   failure = false;
   dependencies.saveState(next);
   assert.equal(sandbox.settings.syncContentState, next);
+});
+
+
+test('actual main destination commit journals old context and OFF before saving replacement credentials', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = source.indexOf('    const nextSettingsState = settings;');
+  const end = source.indexOf('    const receiverPermissionChanged =', start);
+  assert.ok(start >= 0 && end > start, 'ordered destination commit extraction');
+  for (const fault of ['journal', 'commit', null]) {
+    const previous = { hubUrl: 'https://old.example', secret: 'old', syncContentState: { enabled: { sessionTitles: true } } };
+    const next = { hubUrl: 'https://new.example', secret: 'new', syncContentState: previous.syncContentState };
+    const events = [];
+    const sandbox = vm.createContext({ settings: next, previousSettingsState: previous,
+      persistedSettingsSnapshot: previous, normalizeSyncContentState: value => structuredClone(value),
+      syncContentContext: value => value,
+      contentRuntime: {
+        beforeDestinationChange: replacement => {
+          assert.equal(sandbox.settings.secret, 'old', 'preflight still sees old credentials');
+          assert.equal(replacement.secret, 'new');
+          events.push('journal');
+          if (fault === 'journal') throw new Error('journal failed');
+          sandbox.settings = { ...previous, syncContentState: { enabled: { sessionTitles: false }, pendingTitleCleanup: ['old'] } };
+          sandbox.persistedSettingsSnapshot = structuredClone(sandbox.settings);
+        },
+        invalidate: () => events.push('invalidate')
+      }, saveSettings: () => {
+        events.push('commit');
+        assert.equal(sandbox.settings.secret, 'new');
+        assert.equal(sandbox.settings.syncContentState.enabled.sessionTitles, false);
+        if (fault === 'commit') throw new Error('commit failed');
+      }
+    });
+    if (fault) assert.throws(() => vm.runInContext(source.slice(start, end), sandbox), /failed/);
+    else vm.runInContext(source.slice(start, end), sandbox);
+    assert.deepEqual(events, fault === 'journal' ? ['journal'] : fault === 'commit' ? ['journal', 'commit'] : ['journal', 'commit', 'invalidate']);
+    if (fault === 'commit') {
+      assert.equal(sandbox.settings.secret, 'old');
+      assert.equal(sandbox.settings.syncContentState.enabled.sessionTitles, false, 'rollback retains durable OFF');
+      assert.deepEqual(Array.from(sandbox.settings.syncContentState.pendingTitleCleanup), ['old']);
+    }
+  }
+});
+
+test('embedded Host cleanup targets the shared local store after port/secret rotation without admitting old contexts', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = source.indexOf('function getSyncContentRuntime() {');
+  const end = source.indexOf('\n// ---------------------------------------------------------------------------', start);
+  assert.ok(start >= 0 && end > start);
+  let dependencies;
+  const calls = [];
+  const sandbox = vm.createContext({ syncContentRuntime: null, ensureCredentialStore: () => {},
+    createSyncContentCredentialQueue: () => ({}),
+    createSyncContentRuntime: value => { dependencies = value; return {}; },
+    syncContentContext: () => ({}), normalizeSharedSyncValue: () => {},
+    embeddedHub: { port: 20000, secret: 'new-private', hub: {
+      setSyncTitlePolicy: (device, enabled) => { calls.push([device, enabled]); return { enabled, generation: 2 }; }
+    } },
+    fetch: async () => ({ status: 401, json: async () => ({}) }), AbortSignal
+  });
+  vm.runInContext(source.slice(start, end), sandbox);
+  sandbox.getSyncContentRuntime();
+  const old = { mode: 'host', url: 'http://127.0.0.1:17321', secret: 'old-private', deviceId: 'old-device' };
+  assert.equal((await dependencies.request(old, '/api/sync/titles/old-device', 'PUT', { enabled: false })).status, 200);
+  assert.deepEqual(calls, [['old-device', false]]);
+  assert.equal((await dependencies.request(old, '/api/sync/titles/old-device', 'PUT', { enabled: true })).status, 401);
+  assert.equal((await dependencies.request(old, '/api/sync/content', 'GET')).status, 401);
+  assert.deepEqual(calls, [['old-device', false]], 'old context gets only the local scrub exception');
+});
+
+test('actual secret regeneration IPC uses the same journaled settings path', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = source.indexOf("  ipcMain.handle('hub:regenerateSecret', () => {");
+  const end = source.indexOf("  ipcMain.handle('appearance:getNativeMaterial'", start);
+  assert.ok(start >= 0 && end > start);
+  let handler;
+  let patch;
+  const sandbox = vm.createContext({ ipcMain: { handle: (_name, callback) => { handler = callback; } },
+    generateHubSecret: () => 'new-private', applySettingsPatch: value => { patch = value; }, getHubInfo: () => 'info' });
+  vm.runInContext(source.slice(start, end), sandbox);
+  assert.equal(handler(), 'info');
+  assert.equal(patch.hubHostSecret, 'new-private');
 });

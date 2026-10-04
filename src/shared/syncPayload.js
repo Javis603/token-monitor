@@ -184,7 +184,19 @@ function buildSyncPayload(summary, {
   sessionTitleSyncGeneration
 } = {}) {
   if (!summary || typeof summary !== 'object') return summary;
-  const payload = stripSessionTextFromDeviceRecord({ ...summary, limits: syncLimits(summary.limits) }, {
+  // allTime session detail is never uploaded. Exclude it before the sanitizer
+  // can clone discarded text or evaluate session/title accessors.
+  const withoutAllTimeSessions = (period) => {
+    if (!period || typeof period !== 'object') return period;
+    return Object.fromEntries(Object.keys(period).filter((key) => key !== 'sessions')
+      .map((key) => [key, period[key]]));
+  };
+  const source = { ...summary, limits: syncLimits(summary.limits) };
+  if (hasOwn(source, 'allTime')) source.allTime = withoutAllTimeSessions(source.allTime);
+  if (source.periods && typeof source.periods === 'object' && hasOwn(source.periods, 'allTime')) {
+    source.periods = { ...source.periods, allTime: withoutAllTimeSessions(source.periods.allTime) };
+  }
+  const payload = stripSessionTextFromDeviceRecord(source, {
     preserveSessionTitles: syncSessionTitles === true
   });
   delete payload.sessionTitleSyncGeneration;
@@ -220,9 +232,7 @@ function buildSyncPayload(summary, {
     }
   }
 
-  if (summary.allTime && typeof summary.allTime === 'object') {
-    payload.allTime = { ...summary.allTime };
-    delete payload.allTime.sessions;
+  if (payload.allTime && typeof payload.allTime === 'object') {
     if (!projectsEnabled) delete payload.allTime.projects;
     if (omitAllTimeProjects && hasOwn(payload.allTime, 'projects')) {
       delete payload.allTime.projects;

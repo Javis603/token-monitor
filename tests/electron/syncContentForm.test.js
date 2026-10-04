@@ -21,17 +21,25 @@ function dom() {
     const classes = new Set(['hidden']);
     const listeners = {};
     return {
-      id, hidden: false, checked: false, disabled: false, open: false, value: '', textContent: '', children: [],
+      id, hidden: false, checked: false, disabled: false, open: false, value: '', textContent: '', children: [], listeners,
       classList: { add: key => classes.add(key), remove: key => classes.delete(key), contains: key => classes.has(key), toggle: (key, active) => active ? classes.add(key) : classes.delete(key) },
-      append(...children) { this.children.push(...children); },
-      replaceChildren(...children) { this.children = children; },
+      append(...children) { children.forEach(child => { child.parentNode = this; }); this.children.push(...children); },
+      replaceChildren(...children) { this.children = []; this.append(...children); },
       get options() { return this.children; },
       removeEventListener(event, fn) { listeners[event] = (listeners[event] || []).filter(item => item.fn !== fn); },
       addEventListener(event, fn, capture = false) { (listeners[event] ||= []).push({ fn, capture }); },
       async dispatch(event, data = {}) {
         // DOM dispatch runs listeners synchronously, including an async listener's
         // prefix. Await their results only after every listener has been invoked.
-        const work = (listeners[event] || []).slice().sort((a, b) => Number(b.capture) - Number(a.capture)).map(({ fn }) => fn({ target: this, preventDefault() {}, ...data }));
+        const path = [];
+        for (let current = this; current; current = current.parentNode) path.push(current);
+        const work = [];
+        const eventData = { target: this, preventDefault() {}, ...data };
+        const invoke = (node, capture) => {
+          for (const listener of node.listeners[event] || []) if (listener.capture === capture) work.push(listener.fn(eventData));
+        };
+        for (const node of path.slice().reverse()) invoke(node, true);
+        for (const node of path) invoke(node, false);
         await Promise.all(work);
       },
       click() { if (!this.disabled) return this.dispatch('click'); },
@@ -41,7 +49,15 @@ function dom() {
       matches(selector) { return selector === ':popover-open' && this.popoverOpen; },
       showPopover() { this.popoverOpen = true; }, hidePopover() { this.popoverOpen = false; },
       contains(other) { return this === other || this.children.includes(other); },
-      setAttribute(name, value) { this[name] = value; }, closest() { return null; }
+      setAttribute(name, value) { this[name] = value; },
+      closest(selector) {
+        // The real alias setup captures row clicks on its list ancestor.
+        if (selector !== '.custom-pricing-edit') return null;
+        for (let current = this; current; current = current.parentNode) {
+          if (String(current.className || '').split(' ').includes('custom-pricing-edit')) return current;
+        }
+        return null;
+      }
     };
   }
   return document;
@@ -135,6 +151,8 @@ test('title enable sends confirmed:true only after consent; disabling never asks
   await f.get('Confirm').click();
   assert.deepEqual(f.calls.configure[0], { kind: 'sessionTitles', enabled: true, identity: 'hub-one', confirmed: true });
   assert.equal(f.get('sessionTitles').checked, true);
+  assert.equal(f.get('sessionTitles').disabled, false);
+  assert.equal(f.document.activeElement, f.get('sessionTitles'));
   await f.get('sessionTitles').change(false);
   assert.equal(f.get('Dialog').open, false);
   assert.deepEqual(f.calls.configure[1], { kind: 'sessionTitles', enabled: false, identity: 'hub-one' });
@@ -307,7 +325,14 @@ test('five locales contain all sync content messages and matching parameters', (
 });
 
 const app = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
-function functionSource(name, next) { return app.slice(app.indexOf(`function ${name}(`), app.indexOf(`\nfunction ${next}(`)); }
+function sourceBetween(startAnchor, endAnchor) {
+  const start = app.indexOf(startAnchor);
+  const end = app.indexOf(endAnchor, start + startAnchor.length);
+  assert.ok(start >= 0, `Missing source anchor: ${startAnchor}`);
+  assert.ok(end > start, `Missing or unordered source anchor: ${endAnchor}`);
+  return app.slice(start, end);
+}
+function functionSource(name, next) { return sourceBetween(`function ${name}(`, `\nfunction ${next}(`); }
 
 test('alias editor keeps its open values and base when a newer shared push arrives', async () => {
   const document = dom();
@@ -384,7 +409,7 @@ test('grouping and pricing removal conflicts are visible next to their controls 
   const document = dom();
   const context = { document, window: { TokenMonitorSyncContentForm: api }, t: key => i18n.translate('en', key) };
   vm.createContext(context);
-  vm.runInContext(app.slice(app.indexOf('function setSyncContentEditError('), app.indexOf('\nasync function saveSettings(')), context);
+  vm.runInContext(sourceBetween('function setSyncContentEditError(', '\nasync function saveSettings('), context);
   for (const [patch, id] of [[{ modelAliasGrouping: 'prefix' }, 'modelAliasesError'], [{ customModelPricing: [] }, 'customPricingSyncError']]) {
     context.setSyncContentEditError(patch, Error('CAS 409 conflict'));
     assert.equal(document.getElementById(id).classList.contains('hidden'), false);
@@ -414,7 +439,8 @@ test('closing while settings preview is pending prevents a late confirmation dia
   let resolve;
   f.bridge.previewSyncContent = () => new Promise(done => { resolve = done; });
   const changing = f.get('modelAliases').change(true);
-  while (!resolve) await new Promise(done => setImmediate(done));
+  await new Promise(done => setImmediate(done));
+  assert.equal(typeof resolve, 'function', 'the preview request must have started');
   f.form.setExpanded(false);
   resolve({ ok: true, identity: 'hub-one', kind: 'modelAliases', revision: 2, equal: false, hasServerValue: true });
   await changing;
@@ -463,4 +489,142 @@ test('title help responds to hover and permits crossing the gap into its popover
   f.push(status());
   assert.equal(trigger.hidden, true);
   assert.deepEqual(f.calls.configure, []);
+});
+
+
+for (const action of ['edit', 'remove']) test(`alias ${action} uses the displayed collection and base when the revision push arrives first`, async () => {
+  const document = dom();
+  let current = status({ enabled: { modelAliases: true } });
+  const state = { settings: { modelAliases: { a: 'original', b: 'original' }, modelAliasGrouping: 'off' } };
+  const writes = [];
+  const context = { document, state, structuredClone, queueMicrotask,
+    t: key => key, setAccountGroupExpanded() {},
+    window: { TokenMonitorModelAliasForm: aliasApi, TokenMonitorSyncContentForm: api },
+    syncContentForm: { base: () => api.snapshotBase(current) },
+    saveSettings: async (patch, base) => {
+      writes.push(api.decorateSettingsPatch(patch, current, base));
+      if (base.revisions.modelAliases !== current.revisions.modelAliases) throw Error('CAS 409 conflict');
+      state.settings = { ...state.settings, ...patch };
+    }
+  };
+  vm.createContext(context);
+  vm.runInContext(`let modelAliasForm = null; let modelAliasEdit = null; let modelAliasSaveConflict = false; ${functionSource('setupModelAliasesUI', 'customPricingMeta')} setupModelAliasesUI();`, context);
+  // A status push can precede the matching settings push. Clicking the row
+  // must not pair its old map with revision 3, which CAS would otherwise admit.
+  current = status({ enabled: { modelAliases: true }, revisions: { modelAliases: 3, customPricing: 4 } });
+  const row = document.getElementById('modelAliasesList').children[0];
+  if (action === 'remove') await row.children[1].click();
+  else {
+    await row.children[0].click();
+    document.getElementById('modelAliasesCanonicalInput').value = 'user-value';
+    state.settings.modelAliases = { a: 'remote', c: 'new' };
+    vm.runInContext('modelAliasForm.syncSettings();', context);
+    await document.getElementById('modelAliasesSaveButton').click();
+  }
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].syncContentBase.revisions.modelAliases, 2);
+  assert.deepEqual(writes[0].modelAliases, action === 'remove' ? { b: 'original' } : { a: 'user-value', b: 'original' });
+  assert.equal(document.getElementById('modelAliasesError').textContent, 'settings.sync.content.conflict');
+  if (action === 'edit') {
+    assert.equal(document.getElementById('modelAliasesCanonicalInput').value, 'user-value');
+    assert.equal(document.getElementById('modelAliasesForm').classList.contains('hidden'), false);
+  }
+});
+
+test('a destination change during consent confirmation cannot restore focus or apply stale success', async () => {
+  const f = fixture();
+  await f.form.refresh();
+  await f.get('sessionTitles').change(true);
+  let resolve;
+  f.bridge.configureSyncContent = () => new Promise(done => { resolve = done; });
+  const confirmation = f.get('Confirm').click();
+  await new Promise(done => setImmediate(done));
+  assert.equal(typeof resolve, 'function');
+  f.push(status({ destination: 'other.example:17321' }));
+  resolve({ ok: true, status: status({ enabled: { sessionTitles: true } }) });
+  await confirmation;
+  assert.equal(f.form.status().destination, 'other.example:17321');
+  assert.equal(f.get('sessionTitles').checked, false);
+  assert.notEqual(f.document.activeElement, f.get('sessionTitles'));
+  assert.equal(f.get('Dialog').open, false);
+});
+
+test('title-help headings reuse the existing localized deployment target labels', () => {
+  const html = fs.readFileSync(require.resolve('../../src/electron/renderer/index.html'), 'utf8');
+  for (const target of ['Node', 'Worker']) {
+    const key = `settings.sync.hubBuild.target${target}`;
+    assert.match(html, new RegExp(`<dt data-i18n="${key.replaceAll('.', '\\.')}">`));
+    for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) assert.ok(i18n.MESSAGES[locale][key]);
+  }
+});
+
+
+for (const source of ['catch-up', 'server-adoption']) test(`alias ${source} pairs settings push with its new revision before rendering rows`, async () => {
+  const { createSyncContentRuntime, normalizeSyncContentState } = require('../../src/electron/syncContentRuntime');
+  const { normalizeSharedSyncValue } = require('../../src/shared/syncContent');
+  const document = dom();
+  const state = { settings: { hubMode: 'client', modelAliases: { a: 'old', b: 'old' }, modelAliasGrouping: 'off' } };
+  let saved = normalizeSyncContentState(null);
+  let remote = { version: 1, revision: 2, value: { modelAliases: { a: 'old', b: 'old' }, modelAliasGrouping: 'off' } };
+  let push;
+  let context;
+  const writes = [];
+  const runtime = createSyncContentRuntime({
+    getContext: () => ({ mode: 'client', url: 'https://hub.example', secret: 'secret', deviceId: 'one' }),
+    getState: () => saved, saveState: next => { saved = next; }, normalizeValue: normalizeSharedSyncValue,
+    getLocalValue: () => ({ modelAliases: state.settings.modelAliases, modelAliasGrouping: state.settings.modelAliasGrouping }),
+    applyLocalValue: (_kind, value) => {
+      state.settings = { ...state.settings, ...value, syncContentStatus: runtime.status() };
+      form.syncSettings();
+      vm.runInContext('modelAliasForm.syncSettings();', context);
+    },
+    onStatus: next => push?.(next),
+    request: async (_ctx, path, method, body) => {
+      if (path.endsWith('/content')) return { status: 200, body: { version: 1, sharedSettings: true, sessionTitles: { enabled: true } } };
+      if (method === 'PUT') {
+        writes.push(body);
+        if (body.baseRevision !== remote.revision) return { status: 409, body: remote };
+        remote = { ...remote, revision: remote.revision + 1, value: body.value };
+      }
+      return { status: 200, body: structuredClone(remote) };
+    }
+  });
+  const form = api.createSyncContentForm({ document, bridge: { onSyncContentPush: callback => { push = callback; } },
+    t: key => key, saveSettings: async () => {}, getSettings: () => state.settings });
+  context = { document, state, structuredClone, t: key => key, setAccountGroupExpanded() {},
+    window: { TokenMonitorModelAliasForm: aliasApi, TokenMonitorSyncContentForm: api }, syncContentForm: form,
+    saveSettings: async (patch, base) => {
+      await runtime.publishPatch(patch, base);
+      state.settings = { ...state.settings, ...patch };
+    }
+  };
+  vm.createContext(context);
+  vm.runInContext(`let modelAliasForm = null; let modelAliasSaveConflict = false; ${functionSource('setupModelAliasesUI', 'customPricingMeta')} setupModelAliasesUI();`, context);
+  const preview = await runtime.preview('modelAliases');
+  await runtime.configure({ ...preview, enabled: true, source: 'server' });
+  remote = { ...remote, revision: 3, value: { modelAliases: { a: 'remote', c: 'new' }, modelAliasGrouping: 'off' } };
+  if (source === 'catch-up') await runtime.refresh();
+  else {
+    await runtime.configure({ identity: runtime.status().identity, kind: 'modelAliases', enabled: false });
+    const adoption = await runtime.preview('modelAliases');
+    await runtime.configure({ ...adoption, enabled: true, source: 'server' });
+  }
+  assert.equal(form.base().revisions.modelAliases, 3);
+  assert.deepEqual(state.settings.modelAliases, { a: 'remote', c: 'new' });
+  await document.getElementById('modelAliasesList').children[0].children[1].click();
+  assert.equal(writes.at(-1).baseRevision, 3);
+  assert.deepEqual(writes.at(-1).value.modelAliases, { c: 'new' });
+  assert.equal(document.getElementById('modelAliasesError').textContent, '');
+  form.dispose();
+});
+
+
+test('rerendering the same paired settings DTO does not replace a newer status push', async () => {
+  const f = fixture();
+  await f.form.refresh(false);
+  f.settings({ syncContentStatus: status() });
+  f.push(status({ revisions: { modelAliases: 3, customPricing: 4 } }));
+  f.form.syncSettings();
+  assert.equal(f.form.base().revisions.modelAliases, 3);
+  f.form.dispose();
 });

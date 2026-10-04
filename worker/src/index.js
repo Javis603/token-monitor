@@ -104,7 +104,8 @@ export class HubDO {
     this.encoder = new TextEncoder();
     this.mutationTail = Promise.resolve();
     this.titlePrivacyServerEnabled = null;
-    this.ready = this.mutate(() => this.cleanTitlePrivacy());
+    this.titlePrivacyCleanup = null;
+    this.ready = this.scheduleTitlePrivacy();
   }
 
   // Storage awaits allow request interleaving. Every record/policy/config write
@@ -157,10 +158,23 @@ export class HubDO {
     this.titlePrivacyServerEnabled = enabled;
   }
 
+  scheduleTitlePrivacy() {
+    if (this.titlePrivacyCleanup) return this.titlePrivacyCleanup;
+    const operation = this.mutate(async () => {
+      // Recheck inside the mutation lane so concurrent readers share one scan.
+      if (this.titlePrivacyServerEnabled !== this.syncSessionTitles) await this.cleanTitlePrivacy();
+    });
+    this.titlePrivacyCleanup = operation;
+    const settled = () => { this.titlePrivacyCleanup = null; };
+    // Attach the rejection handler immediately, before the first request exists.
+    // The original promise still rejects to callers; the next read retries.
+    operation.then(settled, settled);
+    return operation;
+  }
+
   async ensureTitlePrivacy() {
-    await this.ready;
-    if (this.titlePrivacyServerEnabled !== this.syncSessionTitles) {
-      await this.mutate(() => this.cleanTitlePrivacy());
+    while (this.titlePrivacyCleanup || this.titlePrivacyServerEnabled !== this.syncSessionTitles) {
+      await this.scheduleTitlePrivacy();
     }
   }
 

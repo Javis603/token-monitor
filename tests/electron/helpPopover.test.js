@@ -13,7 +13,7 @@ function target(extra = {}) {
   };
 }
 function fixture() {
-  const document = target({ activeElement: null });
+  const document = target({ activeElement: null, body: {} });
   const window = target({ innerWidth: 320, innerHeight: 600 });
   document.defaultView = window;
   function pair(id) {
@@ -67,7 +67,8 @@ test('hover gap, Escape, external scroll and resize close correctly without clos
   p.controller.dispose();
 });
 
-test('hidden triggers cannot open help and dispose removes listeners and pending close work', async () => {
+test('hidden triggers cannot open help and dispose cancels pending close work before it executes', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const f = fixture(), p = f.pair('test');
   p.trigger.ancestorHidden = true;
   p.trigger.emit('pointerenter');
@@ -75,10 +76,71 @@ test('hidden triggers cannot open help and dispose removes listeners and pending
   p.trigger.ancestorHidden = false;
   p.trigger.emit('click');
   p.trigger.emit('pointerleave');
+  let attributeWrites = 0;
+  const setAttribute = p.trigger.setAttribute;
+  p.trigger.setAttribute = function (...args) { attributeWrites += 1; setAttribute.apply(this, args); };
   p.controller.dispose();
-  await new Promise(resolve => setTimeout(resolve, 20));
+  const afterDispose = attributeWrites;
+  t.mock.timers.tick(20);
+  assert.equal(attributeWrites, afterDispose, 'the cancelled callback must not run after disposal');
   assert.equal(p.controller.isOpen(), false);
   assert.equal(p.trigger.count() + p.popover.count() + f.document.count() + f.window.count(), 0);
   p.controller.open();
   assert.equal(p.controller.isOpen(), false);
+});
+
+
+test('focus inside help survives trigger blur; leaving focus closes it', () => {
+  const f = fixture(), p = f.pair('test');
+  const focusable = {};
+  p.popover.contains = node => node === p.popover || node === focusable;
+  p.trigger.emit('focus');
+  p.trigger.emit('blur', { relatedTarget: focusable });
+  f.document.activeElement = focusable;
+  f.document.emit('focusin', { target: focusable });
+  assert.equal(p.controller.isOpen(), true);
+  p.popover.emit('focusout', { relatedTarget: p.trigger });
+  assert.equal(p.controller.isOpen(), true);
+  f.document.emit('focusin', { target: {} });
+  assert.equal(p.controller.isOpen(), false);
+  p.trigger.emit('click');
+  p.trigger.emit('blur', { relatedTarget: {} });
+  assert.equal(p.controller.isOpen(), false);
+  p.trigger.emit('click');
+  f.document.emit('pointerdown', { target: {} });
+  assert.equal(p.controller.isOpen(), false);
+  p.controller.dispose();
+});
+
+test('focus inside help suppresses hover dismissal until focus truly leaves', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = fixture(), p = f.pair('test');
+  p.trigger.emit('focus');
+  f.document.activeElement = p.popover;
+  p.trigger.emit('blur', { relatedTarget: p.popover });
+  p.popover.emit('pointerleave');
+  t.mock.timers.tick(20);
+  assert.equal(p.controller.isOpen(), true);
+  p.popover.emit('focusout', { relatedTarget: {} });
+  assert.equal(p.controller.isOpen(), false);
+  p.controller.dispose();
+});
+
+
+test('plain text selection inside help survives null or body blur targets', () => {
+  const f = fixture(), p = f.pair('test');
+  const text = {};
+  p.popover.contains = node => node === p.popover || node === text;
+  p.trigger.emit('focus');
+  f.document.emit('pointerdown', { target: text });
+  p.trigger.emit('blur', { relatedTarget: null });
+  f.document.emit('focusin', { target: f.document.body });
+  assert.equal(p.controller.isOpen(), true, 'nonfocusable selectable text has no relatedTarget');
+  p.popover.emit('focusout', { relatedTarget: f.document.body });
+  assert.equal(p.controller.isOpen(), true);
+  f.document.emit('pointerup', { target: text });
+  assert.equal(p.controller.isOpen(), true);
+  f.document.emit('pointerdown', { target: {} });
+  assert.equal(p.controller.isOpen(), false);
+  p.controller.dispose();
 });

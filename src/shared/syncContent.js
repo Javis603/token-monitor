@@ -129,12 +129,24 @@ function acceptsSessionTitles(serverEnabled, policy, generation) {
 // catches server reconfiguration without adding GET+PUT to every collector tick.
 function createSessionTitleSyncNegotiator({ fetchFn, now = Date.now, refreshMs = 60000, timeoutMs = 5000 } = {}) {
   const cache = new Map();
+  let destinationKey;
+  let consent;
+  let negotiationVersion = 0;
   async function negotiate({ hubUrl, headers = {}, deviceId, enabled = false }) {
     const key = JSON.stringify([hubUrl, headers, deviceId]);
+    if (destinationKey !== key || consent !== enabled) {
+      cache.clear();
+      destinationKey = key;
+      consent = enabled;
+      negotiationVersion += 1;
+    }
+    const version = negotiationVersion;
     const cached = cache.get(key);
     if (cached && cached.enabled === enabled && now() < cached.expiresAt) return cached.result;
+    cache.delete(key);
     const disabled = { syncSessionTitles: false };
     let result = disabled;
+    let acknowledged = false;
     try {
       const response = await fetchFn(`${hubUrl}/api/sync/content`, { headers, redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
       const capability = response.ok ? await response.json() : null;
@@ -145,15 +157,21 @@ function createSessionTitleSyncNegotiator({ fetchFn, now = Date.now, refreshMs =
           redirect: 'error', signal: AbortSignal.timeout(timeoutMs), body: JSON.stringify({ enabled: desired })
         });
         const policy = policyResponse.ok ? await policyResponse.json() : null;
-        if (desired && policy?.ok === true && policy.enabled === true && Number.isSafeInteger(policy.generation) && policy.generation > 0) {
+        acknowledged = policy?.ok === true && policy.enabled === desired
+          && Number.isSafeInteger(policy.generation) && policy.generation > 0;
+        if (desired && acknowledged) {
           result = { syncSessionTitles: true, sessionTitleSyncGeneration: policy.generation };
         }
       }
     } catch (_) { /* A failed negotiation still permits a text-free usage upload. */ }
-    cache.set(key, { enabled, result, expiresAt: now() + refreshMs });
-    return result;
+    // Only an acknowledged local OFF survives the TTL. Failed revocations retry
+    // on the next upload; local ON keeps probing for server permission changes.
+    if (acknowledged && negotiationVersion === version) {
+      cache.set(key, { enabled, result, expiresAt: enabled === false ? Infinity : now() + refreshMs });
+    }
+    return negotiationVersion === version ? result : disabled;
   }
-  return { negotiate, invalidate: () => cache.clear() };
+  return { negotiate, invalidate: () => { cache.clear(); destinationKey = undefined; negotiationVersion += 1; } };
 }
 
 module.exports = {

@@ -138,6 +138,8 @@ test('agent entrypoint honors default/CLI/env consent and wires safe negotiation
     let resolveDelivery;
     let rejectDelivery;
     const delivered = new Promise((resolve, reject) => { resolveDelivery = resolve; rejectDelivery = reject; });
+    const deliveryTimeout = setTimeout(() => rejectDelivery(new Error(`agent delivery timed out: ${JSON.stringify(scenario)}`)), 5000);
+    t.after(() => clearTimeout(deliveryTimeout));
     const summary = { deviceId: 'a', today: { totalTokens: 1, sessions: { a: {
       client: 'codex', sessionId: 'a', totalTokens: 1, title: 'private title', preview: 'never send'
     } } }, month: { totalTokens: 1 }, allTime: { totalTokens: 1 } };
@@ -162,7 +164,7 @@ test('agent entrypoint honors default/CLI/env consent and wires safe negotiation
       fetch: backend.fetchFn, console: { log() {}, warn() {}, error(error) { if (error instanceof Error) rejectDelivery(error); } }
     };
     vm.runInNewContext(source, context, { filename });
-    await delivered;
+    try { await delivered; } finally { clearTimeout(deliveryTimeout); }
     const posts = backend.requests.filter((entry) => entry.url.endsWith('/api/ingest'));
     assert.equal(posts.length, 1);
     assert.equal(backend.requests[0].url, 'https://hub.example/api/sync/content');
@@ -175,4 +177,99 @@ test('agent entrypoint honors default/CLI/env consent and wires safe negotiation
     assert.doesNotMatch(JSON.stringify(posts), /never send/);
     if (!scenario.old) assert.equal(backend.requests[1].payload.enabled, scenario.consent);
   }
+});
+
+
+test('acknowledged local OFF survives TTL but destination, consent and invalidation revoke its cache', async () => {
+  let time = 0;
+  const backend = fakeBackend();
+  const negotiator = createSessionTitleSyncNegotiator({ fetchFn: backend.fetchFn, now: () => time });
+  const off = { ...request, enabled: false };
+  await negotiator.negotiate(off);
+  time = 60001;
+  await negotiator.negotiate(off);
+  time = 600001;
+  await negotiator.negotiate(off);
+  assert.equal(backend.requests.length, 2);
+  await negotiator.negotiate(request);
+  assert.equal(backend.generation, 2);
+  await negotiator.negotiate(off);
+  assert.equal(backend.generation, 3);
+  negotiator.invalidate();
+  await negotiator.negotiate(off);
+  assert.equal(backend.generation, 4);
+  for (const changed of [
+    { ...off, hubUrl: 'https://other.example' },
+    { ...off, headers: { authorization: 'Bearer other' } },
+    { ...off, deviceId: 'other' }
+  ]) {
+    const previous = backend.requests.length;
+    await negotiator.negotiate(changed);
+    await negotiator.negotiate(off);
+    assert.equal(backend.requests.length, previous + 4, 'returning to an old destination must negotiate again');
+  }
+});
+
+test('failed OFF negotiation retries immediately and only exact acknowledged policies are cached', async () => {
+  for (const failure of ['network', 'denied', 'enabled', 'generation', 'legacy']) {
+    let failed = true;
+    const backend = fakeBackend();
+    const negotiator = createSessionTitleSyncNegotiator({ fetchFn: async (url, options) => {
+      if (failed && (url.includes('/api/sync/titles/') || failure === 'legacy')) {
+        if (failure === 'network') throw new Error('offline');
+        if (failure === 'denied' || failure === 'legacy') return new Response('no', { status: 403 });
+        return Response.json({ ok: true, enabled: failure === 'enabled', generation: failure === 'generation' ? '1' : 1 });
+      }
+      return backend.fetchFn(url, options);
+    } });
+    const off = { ...request, enabled: false };
+    assert.deepEqual(await negotiator.negotiate(off), { syncSessionTitles: false });
+    failed = false;
+    await negotiator.negotiate(off);
+    assert.equal(backend.generation, 1, failure);
+    const count = backend.requests.length;
+    await negotiator.negotiate(off);
+    assert.equal(backend.requests.length, count);
+  }
+});
+
+test('invalidation during an OFF request prevents that old acknowledgement from repopulating cache', async () => {
+  const backend = fakeBackend();
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const negotiator = createSessionTitleSyncNegotiator({ fetchFn: async (url, options) => {
+    if (url.includes('/api/sync/titles/')) await held;
+    return backend.fetchFn(url, options);
+  } });
+  const off = { ...request, enabled: false };
+  const pending = negotiator.negotiate(off);
+  negotiator.invalidate();
+  release();
+  await pending;
+  await negotiator.negotiate(off);
+  assert.equal(backend.requests.length, 4);
+});
+
+
+test('local ON keeps refreshing server-denied permission and invalidated ON requests cannot return title authorization', async () => {
+  const backend = fakeBackend();
+  let allowed = false;
+  let time = 0;
+  let release;
+  let held;
+  const negotiator = createSessionTitleSyncNegotiator({ now: () => time, fetchFn: async (url, options) => {
+    if (url.endsWith('/api/sync/content')) return Response.json(capability(allowed));
+    if (held) await held;
+    return backend.fetchFn(url, options);
+  } });
+  assert.equal((await negotiator.negotiate(request)).syncSessionTitles, false);
+  allowed = true;
+  time = 60001;
+  assert.equal((await negotiator.negotiate(request)).syncSessionTitles, true);
+  time = 120002;
+  held = new Promise((resolve) => { release = resolve; });
+  const pending = negotiator.negotiate(request);
+  negotiator.invalidate();
+  release();
+  assert.deepEqual(await pending, { syncSessionTitles: false });
 });

@@ -148,6 +148,16 @@ for (const runtime of ['Node', 'Worker']) {
     await client.send('/api/ingest', 'POST', titledPayload(enabled.generation));
     await client.send('/api/ingest', 'POST', { ...titledPayload(enabled.generation, 'current limits title'), limitsOnly: true });
     assert.equal((await readDevice(client)).periods.today.sessions['codex:a'].title, 'current limits title');
+    for (const generation of [enabled.generation, enabled.generation + 1]) {
+      for (const marker of [undefined, { today: 1, month: 1 }, { today: '1' }, { today: -1 }]) {
+        await client.send('/api/ingest', 'POST', titledPayload(enabled.generation));
+        await client.send('/api/ingest', 'POST', { deviceId: 'a', limitsOnly: true,
+          sessionTitleSyncGeneration: generation, ...(marker === undefined ? {} : { sessionDetailsOmitted: marker }) });
+        const omitted = await readDevice(client);
+        assert.equal(omitted.periods.today.sessions['codex:a'].totalTokens, 4);
+        assert.equal(omitted.periods.today.sessions['codex:a'].title, '', 'omission never reauthorizes a previously saved title');
+      }
+    }
     await client.send('/api/ingest', 'POST', titledPayload(enabled.generation));
     for (const malformed of [{}, { enabled: 'false' }, { enabled: null }, { enabled: false, settings: {} }, null, []]) {
       assert.equal((await client.send('/api/sync/titles/a', 'PUT', malformed)).status, 400);
@@ -258,18 +268,24 @@ for (const runtime of ['Node', 'Worker']) {
     t.after(async () => { abort.abort(); try { await reader.cancel(); } catch (_) {} });
     let buffer = '';
     async function event(reason) {
-      for (;;) {
-        let boundary;
-        while ((boundary = buffer.indexOf('\n\n')) >= 0) {
-          const frame = buffer.slice(0, boundary);
-          buffer = buffer.slice(boundary + 2);
-          const data = frame.match(/^data: (.+)$/m)?.[1];
-          if (data) { const value = JSON.parse(data); if (value.reason === reason) return value; }
+      const deadline = setTimeout(() => {
+        abort.abort(new Error(`SSE event timed out: ${reason}`));
+        void reader.cancel().catch(() => {});
+      }, 5000);
+      try {
+        for (;;) {
+          let boundary;
+          while ((boundary = buffer.indexOf('\n\n')) >= 0) {
+            const frame = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            const data = frame.match(/^data: (.+)$/m)?.[1];
+            if (data) { const value = JSON.parse(data); if (value.reason === reason) return value; }
+          }
+          const chunk = await reader.read();
+          assert.equal(chunk.done, false, `SSE ended before ${reason}: ${String(abort.signal.reason || '')}`);
+          buffer += new TextDecoder().decode(chunk.value);
         }
-        const chunk = await reader.read();
-        assert.equal(chunk.done, false);
-        buffer += new TextDecoder().decode(chunk.value);
-      }
+      } finally { clearTimeout(deadline); }
     }
     assert.equal((await event('snapshot')).stats.periods.today.sessions['codex:a'].title, 'private title');
     await client.send('/api/sync/settings/customPricing', 'PUT', { baseRevision: 0, value: [] });
@@ -336,32 +352,129 @@ test('Node CLI: camel/kebab flags override server environment with explicit fals
   ]) {
     const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-hub-sync-cli-'));
     t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-    const socket = net.createServer();
-    socket.listen(0, '127.0.0.1');
-    await once(socket, 'listening');
-    const port = socket.address().port;
-    await new Promise((resolve) => socket.close(resolve));
-    const child = spawn(process.execPath, [path.resolve(__dirname, '../../src/hub/server.js'),
-      '--host=127.0.0.1', `--port=${port}`, `--dataFile=${path.join(directory, 'devices.json')}`, ...scenario.flags], {
-      env: { ...process.env, TOKEN_MONITOR_SECRET: 'secret', TOKEN_MONITOR_SYNC_SESSION_TITLES: scenario.env },
-      stdio: ['ignore', 'pipe', 'pipe']
-    });
-    t.after(async () => {
-      if (child.exitCode !== null || child.signalCode !== null) return;
-      const exited = once(child, 'exit'); child.kill(); await exited;
-    });
-    await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => { child.kill(); reject(new Error('CLI startup timed out')); }, 5000);
-      let output = '';
-      child.stdout.on('data', (chunk) => {
-        output += chunk;
-        if (output.includes('hub listening')) { clearTimeout(timeout); resolve(); }
+    let child;
+    let port;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const socket = net.createServer();
+      socket.listen(0, '127.0.0.1');
+      try {
+        await once(socket, 'listening', { signal: AbortSignal.timeout(5000) });
+        port = socket.address().port;
+      } finally { await new Promise((resolve) => socket.close(resolve)); }
+      child = spawn(process.execPath, [path.resolve(__dirname, '../../src/hub/server.js'),
+        '--host=127.0.0.1', `--port=${port}`, `--dataFile=${path.join(directory, 'devices.json')}`, ...scenario.flags], {
+        env: { ...process.env, TOKEN_MONITOR_SECRET: 'secret', TOKEN_MONITOR_SYNC_SESSION_TITLES: scenario.env },
+        stdio: ['ignore', 'pipe', 'pipe']
       });
-      child.on('error', (error) => { clearTimeout(timeout); reject(error); });
-      child.on('exit', (code) => { clearTimeout(timeout); reject(new Error(`CLI exited ${code}`)); });
+      const launched = child;
+      t.after(async () => {
+        if (launched.exitCode !== null || launched.signalCode !== null) return;
+        const exited = once(launched, 'exit', { signal: AbortSignal.timeout(5000) });
+        launched.kill();
+        await exited;
+      });
+      try {
+        await new Promise((resolve, reject) => {
+          let output = '';
+          let errors = '';
+          const finish = (error) => {
+            clearTimeout(timeout);
+            child.stdout.off('data', stdout);
+            child.stderr.off('data', stderr);
+            child.off('error', onError);
+            child.off('exit', onExit);
+            if (error) reject(error); else resolve();
+          };
+          const stdout = (chunk) => { output += chunk; if (output.includes('hub listening')) finish(); };
+          const stderr = (chunk) => { errors += chunk; };
+          const onError = (error) => finish(error);
+          const onExit = (code) => {
+            const error = new Error(`CLI exited ${code}: ${errors}`);
+            if (/EADDRINUSE/.test(errors)) error.code = 'EADDRINUSE';
+            finish(error);
+          };
+          const timeout = setTimeout(() => { child.kill(); finish(new Error(`CLI startup timed out: ${errors}`)); }, 5000);
+          child.stdout.on('data', stdout);
+          child.stderr.on('data', stderr);
+          child.on('error', onError);
+          child.on('exit', onExit);
+        });
+        break;
+      } catch (error) {
+        // The child CLI reports its requested port, so port=0 cannot reveal its
+        // actual listener here. Retry only the bind race, with a bounded budget.
+        if (error.code !== 'EADDRINUSE' || attempt === 2) throw error;
+      }
+    }
+    const response = await fetch(`http://127.0.0.1:${port}/api/sync/content`, {
+      headers: { authorization: 'Bearer secret' }, signal: AbortSignal.timeout(5000)
     });
-    const response = await fetch(`http://127.0.0.1:${port}/api/sync/content`, { headers: { authorization: 'Bearer secret' } });
     assert.equal((await response.json()).sessionTitles.enabled, scenario.enabled);
-    const exited = once(child, 'exit'); child.kill(); await exited;
+    const exited = once(child, 'exit', { signal: AbortSignal.timeout(5000) }); child.kill(); await exited;
   }
+});
+
+test('Worker: rejected startup cleanup retries once for concurrent reads and never escapes the input gate', async () => {
+  const { HubDO } = await import(pathToFileURL(path.resolve(__dirname, '../../worker/src/index.js')).href);
+  const state = workerState();
+  state.map.set('dev:a', titledPayload(1));
+  state.map.set('title-policy:a', { enabled: true, generation: 1 });
+  const list = state.storage.list;
+  let scans = 0;
+  let failures = 2;
+  state.storage.list = async (options) => {
+    if (options.prefix === 'title-policy:') {
+      scans += 1;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      if (failures > 0) { failures -= 1; throw new Error('transient storage failure'); }
+    }
+    return list(options);
+  };
+  const env = { TOKEN_MONITOR_SECRET: 'secret', PUBLIC_STATS_ENABLED: 'true' };
+  const hub = new HubDO(state, env);
+  // Let startup reject before attaching a request handler: node:test would report
+  // an unhandled rejection if the constructor had no immediate rejection handler.
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  await assert.rejects(hub.ready, /transient storage failure/);
+  const read = (endpoint) => hub.fetch(new Request(`https://hub.example${endpoint}`, { headers: { authorization: 'Bearer secret' } }));
+  const failed = await Promise.allSettled([read('/api/health'), read('/api/devices'), read('/api/public/stats')]);
+  assert.ok(failed.every((result) => result.status === 'rejected'));
+  assert.equal(scans, 2, 'one serialized retry shared by concurrent readers');
+  assert.match(JSON.stringify(state.map.get('dev:a')), /private/);
+  const responses = await Promise.all([read('/api/health'), read('/api/devices'), read('/api/public/stats')]);
+  assert.ok(responses.every((response) => response.status === 200));
+  assert.equal(scans, 3);
+  assert.doesNotMatch(JSON.stringify([...state.map]), /private title|secret preview|secret message|secret legacy|secret name/);
+  assert.deepEqual(state.map.get('title-policy:a'), { enabled: false, generation: 2 });
+  assert.equal(state.resets, 0, 'storage rejection is thrown outside blockConcurrencyWhile');
+  await Promise.all([read('/api/health'), read('/api/devices')]);
+  assert.equal(scans, 3, 'unchanged requests do not rescan policies');
+  const restarted = new HubDO(state, { ...env, TOKEN_MONITOR_SYNC_SESSION_TITLES: 'true' });
+  await restarted.ready;
+  await restarted.fetch(new Request('https://hub.example/api/ingest', {
+    method: 'POST', headers: { authorization: 'Bearer secret', 'content-type': 'application/json' }, body: JSON.stringify(titledPayload(1))
+  }));
+  assert.doesNotMatch(JSON.stringify(state.map.get('dev:a')), /private title/);
+});
+
+
+test('Worker: a scrub write failure rolls policy revocation back and the next read retries safely', async () => {
+  const { HubDO } = await import(pathToFileURL(path.resolve(__dirname, '../../worker/src/index.js')).href);
+  const state = workerState();
+  state.map.set('dev:a', titledPayload(1));
+  state.map.set('title-policy:a', { enabled: true, generation: 1 });
+  const put = state.storage.put;
+  let failed = false;
+  state.storage.put = async (key, value) => {
+    if (!failed && key === 'dev:a') { failed = true; throw new Error('scrub write failed'); }
+    return put(key, value);
+  };
+  const hub = new HubDO(state, { TOKEN_MONITOR_SECRET: 'secret' });
+  await assert.rejects(hub.ready, /scrub write failed/);
+  assert.deepEqual(state.map.get('title-policy:a'), { enabled: true, generation: 1 });
+  assert.equal(state.resets, 0);
+  const response = await hub.fetch(new Request('https://hub.example/api/health'));
+  assert.equal(response.status, 200);
+  assert.deepEqual(state.map.get('title-policy:a'), { enabled: false, generation: 2 });
+  assert.doesNotMatch(JSON.stringify(state.map.get('dev:a')), /private title|secret preview/);
 });

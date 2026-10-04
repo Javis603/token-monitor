@@ -16,6 +16,7 @@
     let closeTimer = null;
     let observer = null;
     let disposed = false;
+    let pointerInPopover = false;
     const isOpen = () => popover.matches(':popover-open');
     const cancelClose = () => { clearTimeout(closeTimer); closeTimer = null; };
     const listen = (target, type, handler, capture = false) => {
@@ -28,6 +29,7 @@
 
     function close() {
       cancelClose();
+      pointerInPopover = false;
       if (isOpen()) popover.hidePopover();
       trigger.setAttribute('aria-expanded', 'false');
       observer?.disconnect();
@@ -64,10 +66,17 @@
     }
 
     function leave(event) {
-      if (document.activeElement === trigger || trigger.contains(event.relatedTarget)
+      if (trigger.contains(document.activeElement) || popover.contains(document.activeElement) || trigger.contains(event.relatedTarget)
         || popover.contains(event.relatedTarget)) return;
       cancelClose();
       closeTimer = setTimeout(close, closeDelay);
+    }
+    const inside = node => trigger.contains(node) || popover.contains(node);
+    function blur(event) {
+      // Selectable plain text is not a focus target: pointerdown inside the
+      // popover can blur the trigger with relatedTarget=null (or body).
+      if (inside(event.relatedTarget) || (pointerInPopover && (!event.relatedTarget || event.relatedTarget === document.body))) return;
+      close();
     }
     const escape = event => { if (event.key === 'Escape' && isOpen()) { close(); event.preventDefault(); } };
     const controller = { open, close, isOpen, dispose() { close(); disposed = true; listeners.splice(0).forEach(remove => remove()); } };
@@ -78,17 +87,29 @@
     listen(trigger, 'focus', open);
     listen(trigger, 'click', open);
     listen(trigger, 'pointerleave', leave);
-    listen(trigger, 'blur', close);
+    listen(trigger, 'blur', blur);
     listen(trigger, 'keydown', escape);
     listen(popover, 'pointerenter', cancelClose);
+    listen(popover, 'focusout', blur);
     listen(popover, 'pointerleave', leave);
     listen(popover, 'toggle', event => {
       trigger.setAttribute('aria-expanded', String(event.newState === 'open'));
       if (event.newState === 'closed' && !isOpen()) close();
     });
+    listen(document, 'pointerdown', event => {
+      pointerInPopover = popover.contains(event.target);
+      if (!inside(event.target)) close();
+      else cancelClose();
+    }, true);
+    listen(document, 'pointerup', () => { pointerInPopover = false; }, true);
+    listen(document, 'focusin', event => {
+      if (inside(event.target)) cancelClose();
+      else if (!(pointerInPopover && event.target === document.body)) close();
+    });
     listen(document, 'keydown', escape);
     listen(document, 'scroll', event => { if (!popover.contains(event.target)) close(); }, true);
     listen(window, 'resize', close);
+    listen(window, 'blur', close);
     return controller;
   }
   return { createHelpPopover };

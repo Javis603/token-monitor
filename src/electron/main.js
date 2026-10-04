@@ -100,7 +100,7 @@ const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
 const { normalizeSharedSyncValue } = require('../shared/syncContent');
-const { createSyncContentRuntime, normalizeSyncContentState, destinationIdentity } = require('./syncContentRuntime');
+const { createSyncContentRuntime, normalizeSyncContentState, sameDestination } = require('./syncContentRuntime');
 const { createSyncContentCredentialQueue } = require('./syncContentCredentials');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const {
@@ -3176,16 +3176,16 @@ function drainPendingRuntimeActions(runtime) {
   drainPendingUsageClientRefreshes(runtime);
 }
 
-function effectiveHubConfig() {
-  if (settings?.hubMode === 'host') {
+function effectiveHubConfig(sourceSettings = settings) {
+  if (sourceSettings?.hubMode === 'host') {
     return {
-      url: `http://127.0.0.1:${normalizeHubPort(settings.hubHostPort)}`,
-      secret: settings.hubHostSecret || ''
+      url: `http://127.0.0.1:${normalizeHubPort(sourceSettings.hubHostPort)}`,
+      secret: sourceSettings.hubHostSecret || ''
     };
   }
-  if (settings?.hubMode === 'client') {
-    const url = String(settings.hubUrl || '').trim();
-    return { url: url || null, secret: settings.secret || '' };
+  if (sourceSettings?.hubMode === 'client') {
+    const url = String(sourceSettings.hubUrl || '').trim();
+    return { url: url || null, secret: sourceSettings.secret || '' };
   }
   return { url: null, secret: '' };
 }
@@ -3232,8 +3232,14 @@ async function startEmbeddedHub() {
   if (embeddedHub) return embeddedHub;
   embeddedHubError = null;
   if (!settings.hubHostSecret) {
-    settings.hubHostSecret = generateHubSecret();
-    saveSettings();
+    const next = { ...settings, hubHostSecret: generateHubSecret() };
+    getSyncContentRuntime().beforeDestinationChange(syncContentContext(next));
+    next.syncContentState = normalizeSyncContentState(settings.syncContentState);
+    const previous = settings;
+    settings = next;
+    try { saveSettings({ throwOnError: true }); }
+    catch (error) { settings = previous; throw error; }
+    getSyncContentRuntime().invalidate();
   }
   const port = normalizeHubPort(settings.hubHostPort);
   try {
@@ -3246,7 +3252,7 @@ async function startEmbeddedHub() {
       logger: { error: (err) => console.log(`[hub] ${err?.message || err}`) }
     });
     await hub.start();
-    embeddedHub = { hub, port };
+    embeddedHub = { hub, port, secret: settings.hubHostSecret };
     console.log(`[hub] listening on 0.0.0.0:${port}`);
     sendHubPush({ type: 'listening', info: getHubInfo() });
     return embeddedHub;
@@ -3332,7 +3338,8 @@ async function deleteDeviceFromCurrentSync(deviceId) {
 
 async function postToHub(summary) {
   const { url: hubUrl, secret } = effectiveHubConfig();
-  const uploadIdentity = destinationIdentity(syncContentContext());
+  const uploadIdentity = getSyncContentRuntime().status().identity;
+  const uploadContext = syncContentContext();
   if (!hubUrl) throw new Error('hub not configured');
   const stale = settings.lastPostedDeviceId;
   if (stale && stale !== summary.deviceId) {
@@ -3343,7 +3350,8 @@ async function postToHub(summary) {
   const runtime = getSyncContentRuntime();
   const syncOptions = await runtime.prepareUpload();
   if (syncOptions.identity !== uploadIdentity || syncOptions.signal.aborted
-    || syncOptions.identity !== destinationIdentity(syncContentContext())
+    || syncOptions.identity !== getSyncContentRuntime().status().identity
+    || !sameDestination(uploadContext, syncContentContext())
     || summary.deviceId !== syncContentContext().deviceId) throw new Error('hub_changed');
   const fetchForUpload = (target, options) => fetch(target, { ...options, redirect: 'error',
     signal: AbortSignal.any([syncOptions.signal, AbortSignal.timeout(15_000)]) });
@@ -3369,15 +3377,16 @@ async function postToHub(summary) {
 let syncContentRuntime = null;
 let applySyncSettingsPatch = null;
 
-function syncContentContext() {
-  const endpoint = effectiveHubConfig();
-  return { ...endpoint, mode: settings?.hubMode, deviceId: settings?.deviceId || defaultDeviceId() };
+function syncContentContext(sourceSettings = settings) {
+  const endpoint = effectiveHubConfig(sourceSettings);
+  return { ...endpoint, mode: sourceSettings?.hubMode, deviceId: sourceSettings?.deviceId || defaultDeviceId() };
 }
 
 function getSyncContentRuntime() {
   if (syncContentRuntime) return syncContentRuntime;
   const cleanupCredentials = createSyncContentCredentialQueue(ensureCredentialStore);
   syncContentRuntime = createSyncContentRuntime({
+    resolveIdentity: cleanupCredentials.resolveIdentity,
     loadCleanupContexts: cleanupCredentials.read,
     saveCleanupContext: cleanupCredentials.save,
     removeCleanupContext: cleanupCredentials.remove,
@@ -3386,8 +3395,12 @@ function getSyncContentRuntime() {
     saveState: (next) => {
       const previous = settings;
       settings = { ...settings, syncContentState: next };
-      try { saveSettings({ throwOnError: true }); }
-      catch (error) { settings = previous; throw error; }
+      try {
+        // Sync policy changes never alter credentials. Persist OFF independently
+        // so a failed private journal write cannot block the preference journal.
+        writePrivateJsonAtomic(settingsPath, stripCredentialSettings(settings));
+        persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
+      } catch (error) { settings = previous; throw error; }
     },
     getLocalValue: (kind) => kind === 'modelAliases'
       ? { modelAliases: settings.modelAliases, modelAliasGrouping: settings.modelAliasGrouping }
@@ -3400,7 +3413,12 @@ function getSyncContentRuntime() {
     request: async (context, pathname, method, body) => {
       // The embedded Hub uses the same authenticated protocol in-process. Its
       // own usage must keep working when outbound loopback traffic is blocked.
-      if (context.mode === 'host' && embeddedHub) {
+      if (context.mode === 'host' && embeddedHub
+        && ((context.url === `http://127.0.0.1:${embeddedHub.port}` && context.secret === embeddedHub.secret)
+          // Every embedded host generation shares this app's hubDataFile. Old
+          // host journals may scrub that same store after port/secret rotation;
+          // they cannot read or admit a new generation through this exception.
+          || (method === 'PUT' && /^\/api\/sync\/titles\//.test(pathname) && body?.enabled === false))) {
         const hub = embeddedHub.hub;
         try {
           if (pathname === '/api/sync/content') return { status: 200, body: hub.getSyncContent() };
@@ -4313,11 +4331,13 @@ function startHostCollector() {
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       if (!embeddedHub) return;
       const handle = embeddedHub;
-      const uploadIdentity = destinationIdentity(syncContentContext());
+      const uploadIdentity = getSyncContentRuntime().status().identity;
+      const uploadContext = syncContentContext();
       void (async () => {
         const options = await getSyncContentRuntime().prepareUpload();
         if (handle !== embeddedHub || options.identity !== uploadIdentity || options.signal.aborted
-          || options.identity !== destinationIdentity(syncContentContext())
+          || options.identity !== getSyncContentRuntime().status().identity
+          || !sameDestination(uploadContext, syncContentContext())
           || visibleSummary.deviceId !== syncContentContext().deviceId) return;
         const stale = settings.lastPostedDeviceId;
         if (stale && stale !== visibleSummary.deviceId) {
@@ -7269,9 +7289,12 @@ app.whenReady().then(() => {
   // pausing the session archive must not be reported done while the worker can
   // still capture under the old value.
   ipcMain.handle('settings:update', async (_event, patch) => {
-    const settingsIdentity = destinationIdentity(syncContentContext());
-    await getSyncContentRuntime().publishPatch(patch, patch?.syncContentBase);
-    if (settingsIdentity !== destinationIdentity(syncContentContext())) throw new Error('hub_changed');
+    const contentRuntime = getSyncContentRuntime();
+    const sharedEdit = patch.modelAliases !== undefined || patch.modelAliasGrouping !== undefined
+      || patch.customModelPricing !== undefined;
+    const settingsIdentity = contentRuntime.status().identity;
+    await contentRuntime.publishPatch(patch, patch?.syncContentBase);
+    if (sharedEdit && settingsIdentity !== contentRuntime.status().identity) throw new Error('hub_changed');
     const result = applySettingsPatch(patch);
     await latestUsageHost?.transformSettingsApplied?.();
     return result;
@@ -7477,15 +7500,24 @@ app.whenReady().then(() => {
     settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
     if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
     delete settings.edgeDrawerEnabled;
+    const nextSettingsState = settings;
+    settings = previousSettingsState;
     try {
+      // Journal the previous title context and OFF while the old connection is
+      // still active. No replacement credentials/device may commit before this.
+      contentRuntime.beforeDestinationChange(syncContentContext(nextSettingsState));
+      nextSettingsState.syncContentState = normalizeSyncContentState(settings.syncContentState);
+      settings = nextSettingsState;
       saveSettings({ throwOnError: true });
     } catch (error) {
-      settings = previousSettingsState;
+      // Keep any OFF/cleanup journal already committed by the preflight.
+      settings = { ...previousSettingsState,
+        syncContentState: normalizeSyncContentState(persistedSettingsSnapshot?.syncContentState || settings.syncContentState) };
       throw error;
     }
     contentRuntime.invalidate();
     const receiverPermissionChanged = settings.hubSyncSessionTitles !== previousSettingsState.hubSyncSessionTitles;
-    if (receiverPermissionChanged) contentRuntime.receiverPermissionChanged();
+    if (receiverPermissionChanged) contentRuntime.receiverPermissionChanged(settings.hubSyncSessionTitles);
     // A worker-hosted transform holds its own copy of the settings it reads.
     // Update it now rather than when the usage reconfigure settles: pausing the
     // session archive must stop captures from the next summary on.
@@ -7775,9 +7807,7 @@ app.whenReady().then(() => {
   ipcMain.handle('hub:getInfo', () => getHubInfo());
   ipcMain.handle('hub:getBuildStatus', () => getHubBuildStatus());
   ipcMain.handle('hub:regenerateSecret', () => {
-    settings.hubHostSecret = generateHubSecret();
-    saveSettings({ throwOnError: true });
-    if (settings.hubMode === 'host') startMode();
+    applySettingsPatch({ hubHostSecret: generateHubSecret() });
     return getHubInfo();
   });
   ipcMain.handle('appearance:getNativeMaterial', (event) => {

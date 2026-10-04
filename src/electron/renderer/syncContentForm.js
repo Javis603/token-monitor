@@ -29,22 +29,34 @@
     let status = null;
     let settings = getSettings() || {};
     let connection = '';
+    let settingsStatusSnapshot = '';
     let busy = false;
     let request = null;
     let generation = 0;
     let disclosureGeneration = 0;
     let pushRevision = 0;
     let decision = null;
+    let pendingFocus = null;
     let message = '';
     const text = (key, params) => t(`settings.sync.content.${key}`, params);
     const errorKey = error => ['unsupported', 'unreachable', 'conflict', 'cleanup_pending', 'hub_changed', 'unauthorized'].includes(error) ? error : 'unreachable';
     const available = () => Boolean(status?.supported && status.identity && !['unreachable', 'unsupported', 'unauthorized', 'hub_changed'].includes(status.error));
 
-    function closeDecision() {
-      const focus = decision?.focus;
+    function restoreDecisionFocus() {
+      const saved = pendingFocus;
+      pendingFocus = null;
+      if (saved && saved.generation === generation && saved.disclosureGeneration === disclosureGeneration
+          && saved.identity === status?.identity && saved.destination === status?.destination
+          && status?.supported && !saved.focus.disabled && saved.focus.isConnected !== false
+          && !saved.focus.closest('[hidden], [inert], .hidden')) saved.focus.focus({ preventScroll: true });
+    }
+
+    function closeDecision({ restoreFocus = true } = {}) {
+      const saved = decision;
       decision = null;
+      pendingFocus = restoreFocus && saved ? { ...saved, generation, disclosureGeneration } : null;
       if (el('Dialog').open) el('Dialog').close();
-      focus?.focus({ preventScroll: true });
+      if (!busy) restoreDecisionFocus();
     }
 
     const help = helpApi.createHelpPopover({ trigger: el('TitleHelp'), popover: el('TitleHelpPopover'), document });
@@ -87,7 +99,7 @@
       if (!next) return;
       if (decision && (next.identity !== decision.identity || next.destination !== decision.destination || !next.supported
           || (decision.kind === 'sessionTitles' && !next.serverTitlesEnabled))) {
-        closeDecision();
+        closeDecision({ restoreFocus: false });
         message = 'hub_changed';
       }
       if (status?.identity !== next.identity) closeHelp();
@@ -142,8 +154,10 @@
     async function configure(kind, enabled, extra = {}) {
       const epoch = generation;
       const identity = status.identity;
+      const destination = status.destination;
       const result = await bridge.configureSyncContent({ kind, enabled, identity, ...extra });
-      if (epoch !== generation || status?.identity !== identity) { message = 'hub_changed'; return result; }
+      if (epoch !== generation || status?.identity !== identity || status?.destination !== destination
+          || (enabled && kind === 'sessionTitles' && !status?.serverTitlesEnabled)) { message = 'hub_changed'; return result; }
       applyStatus(result.status);
       if (result.ok) {
         message = '';
@@ -163,6 +177,7 @@
       try { await action(); } catch (_) { message = 'unreachable'; } finally {
         busy = false;
         render();
+        restoreDecisionFocus();
         if (decision && document.activeElement === el('Dialog')) el('Cancel').focus();
       }
     }
@@ -218,7 +233,7 @@
     function setExpanded(expanded) {
       disclosureGeneration += 1;
       if (expanded) void refresh();
-      else { closeHelp(); closeDecision(); }
+      else { closeHelp(); closeDecision({ restoreFocus: false }); }
     }
     el('Retry').addEventListener('click', refresh);
     el('DialogRetry').addEventListener('click', () => {
@@ -257,20 +272,30 @@
       if (next !== connection) {
         closeHelp();
         connection = next;
+        settingsStatusSnapshot = '';
         generation += 1;
         request = null;
         status = null;
-        if (decision) { closeDecision(); message = 'hub_changed'; }
+        pendingFocus = null;
+        if (decision) { closeDecision({ restoreFocus: false }); message = 'hub_changed'; }
         if (!el('Details').classList.contains('hidden')) void refresh();
       }
-      render();
+      // The settings DTO pairs applied shared values with their revision. Use
+      // it before callers rebuild editors; a separate status push may follow.
+      const pairedStatus = settings.syncContentStatus;
+      const pairedSnapshot = pairedStatus ? JSON.stringify(pairedStatus) : '';
+      if (pairedStatus && pairedSnapshot !== settingsStatusSnapshot) {
+        settingsStatusSnapshot = pairedSnapshot;
+        pushRevision += 1;
+        applyStatus(pairedStatus);
+      } else render();
     }
     syncSettings();
     return {
       refresh, syncSettings, setExpanded, closeHelp, status: () => status, base: () => snapshotBase(status),
       decoratePatch: (patch, base) => decorateSettingsPatch(patch, status, base),
       reportSettingsError: error => { if (isConflictError(error)) { message = 'conflict'; render(); } },
-      dispose: () => { generation += 1; unsubscribe?.(); help.dispose(); closeDecision(); }
+      dispose: () => { generation += 1; unsubscribe?.(); help.dispose(); closeDecision({ restoreFocus: false }); }
     };
   }
   return { createSyncContentForm, snapshotBase, decorateSettingsPatch, isConflictError };

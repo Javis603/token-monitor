@@ -16019,7 +16019,6 @@ function setCursorCheckboxesEnabled(enabled) {
 
 let openCustomPricingForm = null;
 let modelAliasForm = null;
-let modelAliasEdit = null;
 let modelAliasSaveConflict = false;
 
 function setupModelAliasesUI() {
@@ -16027,29 +16026,12 @@ function setupModelAliasesUI() {
   if (!toggle) return;
   toggle.addEventListener('click', () => setAccountGroupExpanded('modelAliases', !state.modelAliasesExpanded, 'modelAliasesExpanded'));
   setAccountGroupExpanded('modelAliases', false, 'modelAliasesExpanded');
-  const pinAliasEdit = () => {
-    modelAliasSaveConflict = false;
-    modelAliasEdit = { base: syncContentForm?.base(), aliases: structuredClone(state.settings?.modelAliases || {}) };
-  };
-  // The existing form owns its open callbacks. Capture before those callbacks
-  // run, so later settings/status pushes cannot reinterpret an open edit.
-  document.getElementById('modelAliasesAddButton').addEventListener('click', pinAliasEdit, true);
-  document.getElementById('modelAliasesList').addEventListener('click', event => {
-    if (event.target.closest('.custom-pricing-edit')) pinAliasEdit();
-  }, true);
-  let savingAliasEdit = false;
-  document.getElementById('modelAliasesSaveButton').addEventListener('click', () => {
-    savingAliasEdit = true;
-    // Invalid input returns before saveAliases is called.
-    queueMicrotask(() => { savingAliasEdit = false; });
-  }, true);
   modelAliasForm = window.TokenMonitorModelAliasForm.createModelAliasForm({
     document, t: (key, params) => t(key === 'settings.modelAliases.saveError' && modelAliasSaveConflict ? 'settings.sync.content.conflict' : key, params),
-    getAliases: () => savingAliasEdit && modelAliasEdit ? modelAliasEdit.aliases : state.settings?.modelAliases || {},
+    getAliases: () => state.settings?.modelAliases || {},
+    getBase: () => syncContentForm?.base(),
     getGrouping: () => state.settings?.modelAliasGrouping || 'off',
-    saveAliases: async (modelAliases) => {
-      const base = savingAliasEdit ? modelAliasEdit?.base : syncContentForm?.base();
-      savingAliasEdit = false;
+    saveAliases: async (modelAliases, base) => {
       modelAliasSaveConflict = false;
       try {
         await saveSettings({ modelAliases }, base);

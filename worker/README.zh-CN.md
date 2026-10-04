@@ -268,3 +268,10 @@ npm run tail
 ```
 
 实时流式输出 Worker + Durable Object 日志。
+
+
+## 可选共享内容
+
+`wrangler.toml` 中的 `TOKEN_MONITOR_SYNC_SESSION_TITLES = "false"` 是默认关闭的服务端标题接收权限。只有需要允许设备发送标题时才设为 `"true"`；设备仍需单独选择加入，通过身份验证访问 `/api/sync/content`，并与 `/api/sync/titles/:deviceId` 协商。关闭权限会清除离线设备已保存的标题，并使已启用的代次令牌失效。公开统计始终不包含标题、共享设置及其版本标记。
+
+经过身份验证的 `/api/sync/settings/modelAliases` 和 `/api/sync/settings/customPricing` 只保存有大小限制的共享分组，使用整数 `baseRevision` 进行比较并交换（CAS）。从未初始化的值为 `null`；主动清空的分组具有正数修订版本。过期写入返回 `409` 和当前分组，客户端必须先刷新并处理冲突。私有统计和 SSE 通过 `syncSettingsRevisions` 通知变化。设置和标题策略使用独立于 `dev:` 的存储前缀；删除设备仍会保留已禁用的策略记录，防止旧上传恢复标题。完整请求格式见主项目的 `docs/API.md`。

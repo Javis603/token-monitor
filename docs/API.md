@@ -446,7 +446,7 @@ Authenticated capability discovery (never use public health to authorize sending
 {"ok":true,"version":1,"sessionTitles":{"enabled":false},"sharedSettings":true}
 ```
 
-`sessionTitles.enabled` is the server permission, independent of the sending device's local consent. Node `createHub({syncSessionTitles: false})` and Worker `TOKEN_MONITOR_SYNC_SESSION_TITLES` default off. Node Hub and headless agent each accept `TOKEN_MONITOR_SYNC_SESSION_TITLES=1`, `--sync-session-titles` or `--syncSessionTitles`; explicit `=false`/`=0` overrides the environment. Set the flag separately on the server and agent. A missing/unsupported capability endpoint means no titles may be transmitted. The agent caches negotiation per destination/credentials/device/consent and revalidates at most once a minute; failed negotiation sends usage without text.
+`sessionTitles.enabled` is the server permission, independent of the sending device's local consent. Node `createHub({syncSessionTitles: false})` and Worker `TOKEN_MONITOR_SYNC_SESSION_TITLES` default off. Node Hub and headless agent each accept `TOKEN_MONITOR_SYNC_SESSION_TITLES=1`, `--sync-session-titles` or `--syncSessionTitles`; explicit `=false`/`=0` overrides the environment. Set the flag separately on the server and agent. A missing/unsupported capability endpoint means no titles may be transmitted. The agent caches negotiation per destination/credentials/device/consent. Enabled consent is revalidated at most once a minute. A successfully acknowledged disabled policy is remembered until the destination or consent changes or the cache is invalidated, avoiding repeated revocation writes. Failed negotiation sends usage without text and is retried on a later upload.
 
 ## `PUT /api/sync/titles/:deviceId`
 

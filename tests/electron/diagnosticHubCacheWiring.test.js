@@ -18,7 +18,7 @@ test('late Hub responses cannot replace the active mode cache', () => {
   );
   const startMode = mainSource.match(/function startMode\(\) \{([\s\S]*?)\n\}/)?.[1];
   assert.ok(startMode, 'startMode exists');
-  assert.match(startMode, /hubModeGeneration \+= 1;\s*advanceMacWidgetProducerAndSourceEpoch\(\);\s*clearLatestHubStatsCache\(\);/);
+  assert.match(startMode, /^\s*getSyncContentRuntime\(\)\.invalidate\(\);\s*hubModeGeneration \+= 1;\s*advanceMacWidgetProducerAndSourceEpoch\(\);\s*clearLatestHubStatsCache\(\);/);
   assert.match(mainSource, /function setLatestHubStatsCache\(stats, source, generation, identity\)/);
   assert.match(
     mainSource,
