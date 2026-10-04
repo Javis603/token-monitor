@@ -6603,9 +6603,86 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 
 
 
+.custom-pricing-rates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.custom-pricing-rates input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.custom-pricing-rate-wide { grid-column: 1 / -1; }
+.custom-pricing-rate-heading { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+
+.custom-pricing-advanced { min-width: 0; }
+.custom-pricing-advanced summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  list-style: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  user-select: none;
+}
+.custom-pricing-advanced summary::-webkit-details-marker { display: none; }
+.custom-pricing-advanced summary:hover { color: var(--blue); }
+.custom-pricing-advanced summary:focus-visible {
+  border-radius: 3px;
+  outline: 1px solid rgba(115, 189, 245, 0.72);
+  outline-offset: 3px;
+}
+.custom-pricing-advanced-meta { display: flex; align-items: center; gap: 8px; }
+.cursor-account-group .custom-pricing-advanced > summary .cursor-disclosure-icon { transform: rotate(0deg); }
+.cursor-account-group .custom-pricing-advanced[open] > summary .cursor-disclosure-icon { transform: rotate(180deg); }
+.custom-pricing-advanced-body { display: grid; gap: 8px; padding-top: 8px; }
+.custom-pricing-help-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.custom-pricing-help-row > .settings-note { flex: 1 1 200px; }
+.custom-pricing-help-button {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--blue);
+  font-size: 10px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+.custom-pricing-help-button:hover { text-decoration: underline; }
+.custom-pricing-help-button:focus-visible,
+.custom-pricing-help button:focus-visible { outline: 1px solid rgba(115, 189, 245, 0.72); outline-offset: 3px; }
+.custom-pricing-help {
+  position: fixed;
+  inset: auto;
+  position-area: top span-left;
+  position-try-fallbacks: flip-block, flip-inline;
+  width: min(300px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
+  margin: 8px 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid rgba(var(--line-rgb), 0.22);
+  border-radius: 10px;
+  background: rgb(var(--glass-rgb));
+  color: var(--text);
+  font-size: 10px;
+}
+.custom-pricing-help:popover-open { display: grid; gap: 10px; }
+.custom-pricing-help::backdrop { background: transparent; }
+.custom-pricing-help-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+
 .custom-pricing-approx {
-  margin-left: 8px;
-  opacity: 0.7;
+  color: var(--muted);
   font-size: 0.85em;
 }
 
@@ -6635,12 +6712,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 
 .custom-pricing-row .managed-account-meta {
   min-width: 0;
-  overflow: hidden;
   color: var(--muted);
   font-size: 9px;
   line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
 }
 

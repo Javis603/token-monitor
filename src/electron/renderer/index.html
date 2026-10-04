@@ -649,18 +649,49 @@
                     <select id="customPricingModelSelect"></select>
                     <input id="customPricingModelInput" class="hidden" type="text" />
                   </label>
-                  <label><span data-i18n="settings.customPricing.cacheRead">Input (cache hit)</span>
-                    <input id="customPricingCacheRead" type="number" min="0" step="any" /><span id="customPricingCacheReadApprox" class="custom-pricing-approx"></span>
-                  </label>
-                  <label><span data-i18n="settings.customPricing.input">Input (cache miss)</span>
-                    <input id="customPricingInput" type="number" min="0" step="any" /><span id="customPricingInputApprox" class="custom-pricing-approx"></span>
-                  </label>
-                  <label><span data-i18n="settings.customPricing.output">Output</span>
-                    <input id="customPricingOutput" type="number" min="0" step="any" /><span id="customPricingOutputApprox" class="custom-pricing-approx"></span>
-                  </label>
-                  <p class="settings-note" data-i18n="settings.customPricing.perMillion">USD / 1M tokens</p>
+                  <p id="customPricingRateUnits" class="custom-pricing-rate-heading" data-i18n="settings.customPricing.rateUnits">Rates · USD / 1M tokens</p>
+                  <div class="custom-pricing-rates">
+                    <label><span data-i18n="settings.customPricing.cacheRead">Input (cache hit)</span>
+                      <input id="customPricingCacheRead" type="number" min="0" step="any" /><span id="customPricingCacheReadApprox" class="custom-pricing-approx"></span>
+                    </label>
+                    <label><span data-i18n="settings.customPricing.input">Input (cache miss)</span>
+                      <input id="customPricingInput" type="number" min="0" step="any" /><span id="customPricingInputApprox" class="custom-pricing-approx"></span>
+                    </label>
+                    <label class="custom-pricing-rate-wide"><span data-i18n="settings.customPricing.output">Output</span>
+                      <input id="customPricingOutput" type="number" min="0" step="any" /><span id="customPricingOutputApprox" class="custom-pricing-approx"></span>
+                    </label>
+                  </div>
+                  <details id="customPricingAdvanced" class="custom-pricing-advanced">
+                    <summary><span data-i18n="settings.customPricing.advanced">Cache-write pricing</span><span class="custom-pricing-advanced-meta"><span id="customPricingAdvancedSummary" class="settings-note"></span><span class="cursor-disclosure-icon" aria-hidden="true"></span></span></summary>
+                    <div class="custom-pricing-advanced-body">
+                      <div class="custom-pricing-rates">
+                        <label><span data-i18n="settings.customPricing.cacheWrite">Cache write</span>
+                          <input id="customPricingCacheWrite" type="number" min="0" step="any" /><span id="customPricingCacheWriteApprox" class="custom-pricing-approx"></span>
+                        </label>
+                        <div>
+                          <label><span data-i18n="settings.customPricing.cacheWrite1h">Cache write (1 hour)</span>
+                            <input id="customPricingCacheWrite1h" type="number" min="0" step="any" /><span id="customPricingCacheWrite1hApprox" class="custom-pricing-approx"></span>
+                          </label>
+                          <span id="customPricingWriteNote" class="settings-note" data-i18n="settings.customPricing.writeNote">Leave blank to use the regular cache-write price.</span>
+                        </div>
+                      </div>
+                    </div>
+                  </details>
+                  <div class="custom-pricing-help-row">
+                    <p id="customPricingCoverageNote" class="settings-note" data-i18n="settings.customPricing.coverageNote">If the supplied rates cannot price the usage, the original cost is kept.</p>
+                    <button id="customPricingHelpButton" class="custom-pricing-help-button" type="button" popovertarget="customPricingHelp" data-i18n="settings.customPricing.help">Pricing guide</button>
+                  </div>
+                  <div id="customPricingHelp" class="custom-pricing-help" popover="auto" role="dialog" aria-labelledby="customPricingHelpTitle">
+                    <div class="custom-pricing-help-header">
+                      <strong id="customPricingHelpTitle" data-i18n="settings.customPricing.help">Pricing guide</strong>
+                      <button type="button" class="app-update-popover-close" popovertarget="customPricingHelp" popovertargetaction="hide" data-i18n-aria-label="settings.appUpdate.close" aria-label="Close" autofocus>×</button>
+                    </div>
+                    <p class="settings-note" data-i18n="settings.customPricing.partialNote">Unused rates can be left blank. Custom pricing applies only when the rates cover every used token type.</p>
+                    <p id="customPricingFreeNote" class="settings-note" data-i18n="settings.customPricing.freeNote">For a free model, set both input and output to 0 and leave other prices blank or 0.</p>
+                    <p class="settings-note" data-i18n="settings.customPricing.cacheNote">Cache-write rates are only needed for providers that bill cache writes separately. If the 1-hour rate differs, enter it manually.</p>
+                  </div>
                   <p id="customPricingHint" class="settings-note"></p>
-                  <div id="customPricingError" class="settings-note error hidden"></div>
+                  <div id="customPricingError" class="settings-note error hidden" role="alert"></div>
                   <div class="settings-actions">
                     <button id="customPricingSaveButton" type="button" data-i18n="settings.customPricing.save">Save</button>
                     <button id="customPricingCancelButton" type="button" data-i18n="settings.customPricing.cancel">Cancel</button>
