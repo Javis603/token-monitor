@@ -584,6 +584,8 @@ function resolveSessionMetadata(sessionIds, context) {
       filePath,
       metadata.get(`claude:${sessionId}`)
     );
+    // A transcript supersedes any cached title-only catalog result.
+    delete meta.titleOnly;
     const title = readSessionTitle(filePath, deps.claudeMetadataDeps);
     // The turn boundary rides the same scan and its cache, so asking for it
     // costs no second pass. Reported for every session rather than only a recent
@@ -625,7 +627,12 @@ function resolveSessionMetadata(sessionIds, context) {
     useEnvRoot: !deps.scopedHome
   });
   for (const [sessionId, meta] of t3Metadata) {
-    result.set(sessionId, { ...(result.get(sessionId) || metadata.get(`claude:${sessionId}`) || {}), title: meta.title });
+    const transcriptMeta = result.get(sessionId);
+    result.set(sessionId, {
+      ...(transcriptMeta || metadata.get(`claude:${sessionId}`) || {}),
+      title: meta.title,
+      ...(!transcriptMeta ? { titleOnly: true } : {})
+    });
   }
   return result;
 }

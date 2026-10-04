@@ -7,6 +7,8 @@ const path = require('node:path');
 const test = require('node:test');
 const { readT3SessionMeta } = require('../../src/shared/t3SessionMetadata');
 const claude = require('../../src/shared/providers/claude/sessionMetadata');
+const { applySessionMetadata } = require('../../src/shared/sessionMetadata');
+const { sessionActivityState } = require('../../src/shared/sessionLive');
 let sqlite;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
 const maybe = sqlite ? test : test.skip;
@@ -110,7 +112,9 @@ maybe('Claude resolver prefers T3 over native custom/AI titles without changing 
   const result = claude.resolveSessionMetadata(ids, context);
   assert.equal(result.get('t3-native').title, 'Current T3 sidebar title');
   assert.equal(result.get('ordinary-native').title, 'Native custom title');
-  assert.deepEqual(result.get('no-transcript-native'), { projectLabel: 'Existing project', title: 'Title without transcript' });
+  assert.deepEqual(result.get('no-transcript-native'), {
+    projectLabel: 'Existing project', title: 'Title without transcript', titleOnly: true
+  });
   const { title: _title, ...metrics } = result.get('t3-native');
   const { title: _otherTitle, ...otherMetrics } = result.get('ordinary-native');
   assert.deepEqual(metrics, otherMetrics);
@@ -134,4 +138,53 @@ maybe('scoped homes ignore host T3CODE_HOME and missing SQLite keeps native meta
   };
   assert.equal(claude.resolveSessionMetadata(new Set(['native']), context).size, 0);
   assert.equal(readT3SessionMeta(['native'], { homeDir: home, driver: 'claudeAgent', sqlite: null }).size, 0);
+});
+
+maybe('T3 title-only updates preserve Claude activity until a transcript supplies new evidence', (t) => {
+  const { home, v2 } = store(t);
+  const now = Date.parse('2026-10-04T00:01:00Z');
+  const original = {
+    client: 'claude', sessionId: 'native', title: 'Previous title', turnEnded: true,
+    startedAt: '2026-10-03T23:00:00Z', lastUsedAt: '2026-10-04T00:00:00Z',
+    projectId: 'existing-project', projectLabel: 'Existing project',
+    contextTokens: 130, contextWindow: 200000,
+    promptCache: { observedAt: '2026-10-04T00:00:00Z', ttlSeconds: 300 }
+  };
+  v2('app', 'native', 'Current T3 title');
+  const session = structuredClone(original);
+  const periods = { today: { sessions: { 'claude:native': session } } };
+  const deps = {
+    now, scopedHome: true, metadataCache: new Map(),
+    claudeMetadataDeps: { sqlite, cache: new Map() }
+  };
+  assert.equal(sessionActivityState(session, now), 'ended');
+  applySessionMetadata(periods, home, deps);
+  assert.deepEqual(session, { ...original, title: 'Current T3 title' });
+  assert.equal(sessionActivityState(session, now), 'ended');
+
+  // The same title-only cached entry must not suppress a later transcript read.
+  const projects = path.join(home, '.claude', 'projects', 'test-project');
+  fs.mkdirSync(projects, { recursive: true });
+  const transcript = path.join(projects, 'native.jsonl');
+  fs.writeFileSync(transcript, JSON.stringify({
+    type: 'assistant', timestamp: '2026-10-04T00:00:30Z',
+    message: { stop_reason: 'tool_use' }
+  }) + '\n');
+  applySessionMetadata(periods, home, deps);
+  assert.equal(session.title, 'Current T3 title');
+  assert.equal(session.turnEnded, false);
+  assert.equal(sessionActivityState(session, now), 'running');
+
+  // Each collector tick starts with a fresh metadata cache.
+  fs.unlinkSync(transcript);
+  const beforeMissing = structuredClone(session);
+  applySessionMetadata(periods, home, { ...deps, metadataCache: new Map() });
+  assert.deepEqual(session, beforeMissing);
+
+  // A readable transcript with no boundary still clears an old finished state.
+  fs.writeFileSync(transcript, JSON.stringify({ type: 'ai-title', aiTitle: 'Native title' }) + '\n');
+  session.turnEnded = true;
+  applySessionMetadata(periods, home, { ...deps, metadataCache: new Map() });
+  assert.equal(Object.hasOwn(session, 'turnEnded'), false);
+  assert.equal(sessionActivityState(session, now), 'running');
 });
