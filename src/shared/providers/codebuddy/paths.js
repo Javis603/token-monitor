@@ -31,7 +31,9 @@ function codebuddyExtensionDataRoots(options = {}) {
   const env = options.env || process.env;
   const platform = options.platform || process.platform;
   const homeDir = String(options.homeDir ?? '');
-  const bases = [];
+  // Tokscale scans this home-relative Windows-shaped root on every platform,
+  // including homes moved from Windows to macOS or Linux.
+  const bases = [path.join(homeDir, 'AppData', 'Local', 'CodeBuddyExtension')];
   if (platform === 'darwin') {
     bases.push(path.join(homeDir, 'Library', 'Application Support', 'CodeBuddyExtension'));
   } else if (platform === 'linux') {
@@ -40,7 +42,6 @@ function codebuddyExtensionDataRoots(options = {}) {
   } else {
     const localAppData = nonBlank(env.LOCALAPPDATA) || path.join(homeDir, 'AppData', 'Local');
     bases.push(path.join(localAppData, 'CodeBuddyExtension'));
-    bases.push(path.join(homeDir, 'AppData', 'Local', 'CodeBuddyExtension'));
   }
   return [...new Set(bases.map((base) => path.join(base, 'Data')))].filter(nonBlank);
 }

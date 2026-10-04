@@ -194,8 +194,11 @@ From there both reads work without any new data plane:
   request whose index omitted its start time.
 
 The base directories mirror the collector's extension watch roots (`Data`
-where those use `Logs`): `%LOCALAPPDATA%` on Windows, `Application Support` on
-macOS, and the XDG data home on Linux. There is deliberately no env override —
+where those use `Logs`): `~/AppData/Local/CodeBuddyExtension` on every platform,
+then the native root under `%LOCALAPPDATA%` on Windows, `Application Support`
+on macOS, or the XDG data home on Linux, with duplicates removed. The
+Windows-shaped root remains readable when a home is moved to macOS or Linux.
+There is deliberately no provider-specific env override —
 the same reasoning as `CODEBUDDY_CONFIG_DIR` above applies to this root too.
 
 ## WorkBuddy writes the same family

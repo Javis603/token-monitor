@@ -12,6 +12,7 @@ const {
   readSessionDetail
 } = require('../../src/shared/sessionDetail');
 const { clearExtensionCaches, findExtensionSession } = require('../../src/shared/providers/codebuddy/extension');
+const { codebuddyExtensionDataRoots } = require('../../src/shared/providers/codebuddy/paths');
 
 const tmpDirs = [];
 test.after(() => {
@@ -102,6 +103,40 @@ const options = (home) => ({ homeDir: home, env: { LOCALAPPDATA: home }, platfor
 function extensionWorkspace(home) {
   return path.join(home, 'AppData', 'Local', 'CodeBuddyExtension', 'Data', 'install-1', 'VSCode', 'editor-1', 'history', 'workspace-1');
 }
+
+for (const platform of ['darwin', 'linux']) {
+  test(`${platform} resolves metadata and Detail from a Windows-shaped extension home`, () => {
+    const home = makeExtensionHome({
+      requests: [{ traceId: TRACE, messages: [`${TRACE}u`, `${TRACE}a`], usage: usageOf({ input: 1000, output: 50, cache: 400 }) }]
+    });
+    const env = platform === 'linux' ? { XDG_DATA_HOME: path.join(home, 'xdg-data') } : {};
+    assert.deepEqual(codebuddyExtensionDataRoots({ homeDir: home, env, platform }), [
+      path.join(home, 'AppData', 'Local', 'CodeBuddyExtension', 'Data'),
+      platform === 'darwin'
+        ? path.join(home, 'Library', 'Application Support', 'CodeBuddyExtension', 'Data')
+        : path.join(home, 'xdg-data', 'CodeBuddyExtension', 'Data')
+    ]);
+    const periods = { today: { sessions: { [`codebuddy:${TRACE}`]: { client: 'codebuddy', sessionId: TRACE } } } };
+    applySessionMetadata(periods, home, { env, platform });
+    const session = periods.today.sessions[`codebuddy:${TRACE}`];
+    assert.equal(session.title, '插件会话标题');
+    assert.equal(session.turnEnded, true);
+    const detail = readSessionDetail({ client: 'codebuddy', sessionId: TRACE, home, env, deps: { platform } });
+    assert.equal(detail.found, true);
+    assert.equal(detail.exchanges[0].promptPreview, '帮我看下这个 bug');
+    assert.deepEqual(
+      [detail.exchanges[0].tokens.input, detail.exchanges[0].tokens.output, detail.exchanges[0].tokens.cacheRead],
+      [600, 50, 400]
+    );
+  });
+}
+
+test('deduplicates the native Windows extension root when it matches the home-relative root', () => {
+  const home = path.join(os.tmpdir(), 'codebuddy-home');
+  assert.deepEqual(codebuddyExtensionDataRoots({ homeDir: home, platform: 'win32', env: { LOCALAPPDATA: path.join(home, 'AppData', 'Local') } }), [
+    path.join(home, 'AppData', 'Local', 'CodeBuddyExtension', 'Data')
+  ]);
+});
 
 test('refreshes rewritten request usage and state without a conversation directory change', () => {
   const home = makeExtensionHome({
