@@ -15,8 +15,8 @@ CodeBuddy has three data planes, and they are deliberately separate:
 | Data plane | Read by | Source |
 | --- | --- | --- |
 | Token usage (periods, dashboard, history) | the shared usage collector, through `tokscale` | `~/.codebuddy/projects/**/*.jsonl` and the CodeBuddy IDE / VS Code extension logs, parsed by tokscale's `codebuddy.rs` |
-| Session metadata (title, turn boundary) | collector enrichment, through `providers/codebuddy/sessionMetadata.js` | the same transcripts, scanned locally |
-| Session Detail (per-turn breakdown, prompts, tools) | `parseCodebuddyTranscript()` in `sessionDetail.js`, on demand | the same transcripts, parsed locally |
+| Session metadata (title, turn boundary) | collector enrichment, through `providers/codebuddy/sessionMetadata.js` | local transcripts, with an extension conversation-store fallback |
+| Session Detail (per-turn breakdown, prompts, tools) | shared streaming transcript parser and extension reader in `sessionDetail.js`, on demand | local transcripts, with an extension conversation-store fallback |
 
 ## Where the data lives
 
@@ -37,12 +37,13 @@ its title or transcript from another. A relocated root therefore keeps token
 usage and loses title/Session Detail, exactly as `providers/droid/sessionMetadata.js`
 documents for `FACTORY_HOME_OVERRIDE`.
 
-The scan also counts sessions that exist only in the CodeBuddy IDE / VS Code
-extension logs (`codebuddy-extension-log`, `CodeBuddy CN`, `CodeBuddyIDE`). Those
-have no transcript on disk, so their rows keep their usage and read
-“Transcript not found on this machine.” — the same behaviour as a Claude Code
-session whose transcript has been pruned. On one machine 317 of the 376
-scan-reported sessions resolved to a transcript.
+The scan also counts CodeBuddy IDE / VS Code extension logs
+(`codebuddy-extension-log`, `CodeBuddy CN`, `CodeBuddyIDE`). When no CLI
+transcript resolves, Session Detail tries the extension conversation store
+described below, keyed by the request's trace id. A log-only session with no
+matching store request keeps its usage and reads “Transcript not found on this
+machine.” On one machine 317 of the 376 scan-reported sessions resolved to a
+CLI transcript.
 
 ## What a record is
 
@@ -100,11 +101,10 @@ the same reason — a second pass per tick for a field in the same file is waste
   identity, size and mtime, and a transcript that changed is re-read in full
   rather than resumed from an offset (one file per tick, the session being
   written right now).
-- Records over 64 KiB are dropped rather than retained. Tool output is what every
-  oversized record is — one `function_call_result` on a real machine was 2 MB —
-  while the reading that can be lost is a turn boundary, never a title (an
-  `ai-title` record is a few hundred bytes). 313 of 53248 records exceeded the
-  bound and only 3 of those were `message` records.
+- Records over 64 KiB are dropped rather than retained. In one sample, 313 of
+  53248 records exceeded the bound, including 3 `message` records. Skipping an
+  oversized user prompt or assistant response can leave the previous turn
+  status in place. This is a known metadata limitation shared with WorkBuddy.
 
 Timestamps and project attribution need no CodeBuddy-specific code: the shared
 `fileSessionMetadata()` reads `cwd` out of the same transcript for the shared
@@ -219,7 +219,7 @@ differences, both handled by the shared readers in this folder:
 
 `providers/workbuddy/sessionMetadata.js` binds this folder's readers to
 WorkBuddy's two roots; see that provider's own notes for its limits and
-credential planes.
+credential planes in [workbuddy.md](workbuddy.md).
 
 ## Known gaps
 
