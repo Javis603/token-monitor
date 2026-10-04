@@ -2461,6 +2461,8 @@ function startCollector(options) {
     }, historyRetryMs);
   }
 
+  const pricingChangedDuringScan = Symbol('pricing changed during scan');
+
   async function performTick(reason, tickOptions = {}) {
     const tickStartedAt = Date.now();
     const collectedAt = collectionDate(options.now);
@@ -2602,8 +2604,7 @@ function startCollector(options) {
       // A settings save can land between the serial period scans. Discard that
       // mixed result and replay all windows against one pricing revision.
       if (pricingFingerprint(options) !== tickPricingRevision) {
-        void runTick('pricing-change', { forceHistory: true });
-        return;
+        return pricingChangedDuringScan;
       }
       if (includeHistory) {
         settleRolloverHistoryAttempt(
@@ -2776,8 +2777,26 @@ function startCollector(options) {
       return new Promise((resolve) => pendingWaiters.push(resolve));
     }
     tickInFlight = true;
+    let pricingReplayUsed = false;
+    const performWithPricingReplay = async (tickReason, scanOptions) => {
+      const result = await performTick(tickReason, scanOptions);
+      if (result !== pricingChangedDuringScan || pricingReplayUsed || stopped) return result;
+      pricingReplayUsed = true;
+      // At most one automatic replay belongs to this initiating tick, including
+      // its coalesced work. A second mismatch waits for a normal tick; neither
+      // mixed result is published. Already acknowledged source sync stays consumed.
+      return performTick('pricing-change', {
+        ...scanOptions,
+        forceHistory: true,
+        todayOnly: false,
+        targetClients: [],
+        forceSelfSync: null,
+        sourceSelfSync: null,
+        acknowledgedSourceSync: null
+      });
+    };
     try {
-      const initialResult = await performTick(reason, {
+      const initialResult = await performWithPricingReplay(reason, {
         ...effectiveTickOptions,
         acknowledgedSourceSync: sourceSyncQueue.acknowledge(effectiveTickOptions.forceSelfSync)
       });
@@ -2802,7 +2821,7 @@ function startCollector(options) {
         pendingTargetClients = null;
         pendingActivityRevision = null;
         const acknowledgedSourceSync = sourceSyncQueue.acknowledge(forceSelfSync);
-        const result = await performTick('coalesced', {
+        const result = await performWithPricingReplay('coalesced', {
           forceHistory,
           rolloverHistoryRetry,
           forceSelfSync,

@@ -125,3 +125,77 @@ test('a price change during serial scans discards the mixed result and replays a
   assert.equal(updates.length, 1);
   for (const period of ['today', 'month', 'allTime']) assert.equal(updates[0][period].costUsd, 5);
 });
+
+for (const changes of [1, 5]) {
+  test(`pricing replay is bounded and reports its result with ${changes} pending price changes`, async t => {
+    const f = fixture(t);
+    let price = 1;
+    f.setPrice(price);
+    let calls = 0;
+    let armed = false;
+    let mutations = 0;
+    const updates = [];
+    const handle = startCollector({
+      clients: 'claude', pricingPath: f.pricingPath, binaryRevision: 'fork-a', intervalMs: 3600000,
+      anchorPersistenceEnabled: false, watchEnabled: false, wslScanEnabled: false,
+      projectsEnabled: false, historyEnabled: false,
+      runTokscale: async () => {
+        calls += 1;
+        const captured = price;
+        if (armed && calls % 3 === 1 && mutations < changes) {
+          mutations += 1;
+          f.setPrice(++price);
+        }
+        return { entries: [{ client: 'claude', sessionId: 's', model: 'test', input: 100, output: 0, cost: captured }] };
+      },
+      onUpdate: summary => updates.push(summary)
+    });
+    t.after(() => handle.stop());
+    await handle.whenIdle();
+    armed = true;
+    const before = calls;
+    const result = await handle.tick('manual');
+    assert.equal(calls - before, 6, 'one full scan and at most one full replay');
+    assert.equal(result, changes === 1, 'a successful replay is the initiating tick result');
+    assert.equal(updates.length, changes === 1 ? 2 : 1, 'mixed scans never publish');
+    armed = false;
+    assert.equal(await handle.tick('watch:test', { todayOnly: true }), true);
+    for (const period of ['today', 'month', 'allTime']) assert.equal(updates.at(-1)[period].costUsd, price);
+  });
+}
+
+test('a pricing replay preserves independently queued tick waiters', async t => {
+  const f = fixture(t);
+  f.setPrice(1);
+  let enterScan;
+  let releaseScan;
+  const entered = new Promise(resolve => { enterScan = resolve; });
+  const gate = new Promise(resolve => { releaseScan = resolve; });
+  let armed = false;
+  let calls = 0;
+  const handle = startCollector({
+    clients: 'claude', pricingPath: f.pricingPath, binaryRevision: 'fork-a', intervalMs: 3600000,
+    anchorPersistenceEnabled: false, watchEnabled: false, wslScanEnabled: false,
+    projectsEnabled: false, historyEnabled: false,
+    runTokscale: async () => {
+      calls += 1;
+      const price = JSON.parse(fs.readFileSync(f.pricingPath)).models.test.input_cost_per_million_tokens;
+      if (armed) {
+        armed = false;
+        enterScan();
+        await gate;
+      }
+      return { entries: [{ client: 'claude', sessionId: 's', model: 'test', input: 100, output: 0, cost: price }] };
+    }, onUpdate() {}
+  });
+  t.after(() => { releaseScan(); handle.stop(); });
+  await handle.whenIdle();
+  armed = true;
+  const initiating = handle.tick('manual');
+  await entered;
+  const queued = handle.tick('manual:queued');
+  f.setPrice(5);
+  releaseScan();
+  assert.deepEqual(await Promise.all([initiating, queued]), [true, true]);
+  assert.equal(calls, 12, 'initial, discarded manual, replay, and independently queued full scan');
+});

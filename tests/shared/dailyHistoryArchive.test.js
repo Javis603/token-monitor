@@ -75,18 +75,39 @@ test('fresh pricing replaces stale live costs in either direction, including zer
   }
 });
 
-test('archive pricing revisions reconcile changed prices without erasing legacy unknown graph prices', () => {
+test('archive pricing revisions reconcile legacy prices without overrides and preserve stamps after empty scans', () => {
   const date = '2026-08-18';
   const previous = captureLiveDailyHistory({}, livePeriod(100, 2), { todayKey: date });
   const zeroGraph = graph(date, [client('claude', 'opus', 100, 0, 1)]);
   const first = captureDailyHistoryArchive(previous, zeroGraph, { todayKey: date, pricingRevision: 'first', customPricingActive: false });
-  assert.equal(Object.values(first.liveDays[date].observations)[0].cost, 2, 'adopting the revision stamp alone keeps a known live price');
+  assert.equal(Object.values(first.liveDays[date].observations)[0].cost, 0, 'unversioned live prices are legacy even without custom overrides');
   assert.equal(first.pricingRevision, 'first');
   const failed = captureDailyHistoryArchive(first, [], { todayKey: date, pricingRevision: 'second', customPricingActive: true });
   assert.equal(failed.pricingRevision, 'first', 'an empty graph cannot confirm a new price revision');
   const repriced = captureDailyHistoryArchive(failed, zeroGraph, { todayKey: date, pricingRevision: 'second', customPricingActive: true });
   assert.equal(Object.values(repriced.liveDays[date].observations)[0].cost, 0);
   assert.equal(repriced.pricingRevision, 'second');
+});
+
+test('legacy live metadata cannot override corrected binary graph prices, including zero', () => {
+  const date = '2026-08-18';
+  for (const cost of [0, 1]) {
+    const previous = { liveDays: { [date]: { date, observations: [
+      { client: 'claude', modelId: 'opus', tokens: 100, cost: 2, tokenComponentsAvailable: true, outputTokens: 20 },
+      { client: 'claude', modelId: 'deleted', tokens: 50, cost: 3, tokenComponentsAvailable: true }
+    ] } } };
+    const fresh = graph(date, [client('claude', 'opus', 100, cost, 1)]);
+    const options = { todayKey: date, pricingRevision: 'new-binary', customPricingActive: false };
+    const next = captureDailyHistoryArchive(previous, fresh, options);
+    const live = Object.values(next.liveDays[date].observations);
+    assert.equal(live.find(row => row.modelId === 'opus').cost, cost);
+    assert.equal(live.find(row => row.modelId === 'deleted').cost, 3);
+    const displayed = graphFromDailyHistoryArchive(fresh, next, options).contributions[0].clients;
+    assert.equal(displayed.find(row => row.modelId === 'opus').cost, cost);
+    assert.equal(displayed.find(row => row.modelId === 'deleted').cost, 3);
+    const returned = captureDailyHistoryArchive(JSON.parse(JSON.stringify(next)), graph(date, [client('claude', 'deleted', 50, 0, 1)]), options);
+    assert.equal(Object.values(returned.liveDays[date].observations).find(row => row.modelId === 'deleted').cost, 0);
+  }
 });
 
 test('a source returning after a partial pricing scan still replaces its stale live price', () => {
@@ -130,6 +151,30 @@ test('repricing an equal live snapshot keeps richer retained token components', 
   assert.equal(observation.cacheWriteTokens, 30);
   assert.equal(observation.tokenComponentsAvailable, true);
 });
+
+for (const revision of ['same', 'new']) {
+  test(`equal-token model reattribution keeps incoming identities with ${revision} pricing revision`, () => {
+    const date = '2026-08-18';
+    const previous = { liveDays: { [date]: { date, observations: [
+      { client: 'claude', modelId: 'opus', tokens: 60, cost: 2, pricingRevision: 'same', tokenComponentsAvailable: true, outputTokens: 20 },
+      { client: 'claude', modelId: 'haiku', tokens: 40, cost: 1, pricingRevision: 'same', tokenComponentsAvailable: true, cacheWriteTokens: 10 }
+    ] } } };
+    const period = {
+      totalTokens: 100, costUsd: 3, clients: { claude: 100 }, clientCosts: { claude: 3 },
+      models: { sonnet: 60, haiku: 40 }, modelCosts: { sonnet: 2, haiku: 1 },
+      clientModels: { claude: { sonnet: 60, haiku: 40 } }, clientModelCosts: { claude: { sonnet: 2, haiku: 1 } }
+    };
+    const next = captureLiveDailyHistory(previous, period, { todayKey: date, pricingRevision: revision });
+    const rows = Object.values(normalizeDailyHistoryArchive(JSON.parse(JSON.stringify(next))).liveDays[date].observations);
+    assert.deepEqual(rows.map(row => row.modelId).sort(), ['haiku', 'sonnet']);
+    const sonnet = rows.find(row => row.modelId === 'sonnet');
+    assert.equal(sonnet.tokens, 60);
+    assert.equal(sonnet.cost, 2);
+    assert.equal(sonnet.outputTokens, undefined, 'components from a different model are not transferred');
+    assert.equal(rows.find(row => row.modelId === 'haiku').cacheWriteTokens, 10);
+    assert.ok(rows.every(row => row.pricingRevision === revision));
+  });
+}
 
 test('normalizeDailyHistoryArchive rejects malformed days and observations', () => {
   assert.deepEqual(normalizeDailyHistoryArchive({ days: { nope: {}, '2026-07-18': { observations: [{}] } } }), {

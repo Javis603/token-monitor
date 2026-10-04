@@ -291,8 +291,7 @@ function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
   if (typeof options.pricingRevision === 'string') {
     // Stamp each retained observation before adopting the new revision. A
     // source absent from this scan must still be repriced when it reappears.
-    const previousRevision = archive.pricingRevision
-      ?? (options.customPricingActive === true ? 'legacy' : options.pricingRevision);
+    const previousRevision = archive.pricingRevision ?? 'legacy';
     for (const day of Object.values(archive.liveDays || {})) {
       for (const observation of Object.values(day.observations)) {
         observation.pricingRevision ??= previousRevision;
@@ -541,8 +540,8 @@ function mergeLiveDayMetadata(liveDay, previousDay) {
         cacheWriteTokens: num(previous.cacheWriteTokens),
         outputTokens: num(previous.outputTokens)
       } : {}),
-      ...(unclassifiedTokens > 0 ? { unclassifiedTokens } : {}),
-      ...(unclassifiedTokens === 0 ? { tokenComponentsAvailable: true } : {}),
+      unclassifiedTokens,
+      tokenComponentsAvailable: unclassifiedTokens === 0,
       ...(Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) > 0
         ? { reasoningTokens: Math.max(num(observation.reasoningTokens), num(previous.reasoningTokens)) }
         : {})
@@ -571,15 +570,29 @@ function captureLiveDailyHistory(existingArchive, period, options = {}) {
     }
   }
   const previous = archive.liveDays?.[date];
-  const revisionChanged = previous && typeof options.pricingRevision === 'string'
-    && dayTokens(incoming) === dayTokens(previous)
-    && Object.entries(incoming.observations).some(([key, observation]) => (
-      observation.pricingRevision !== previous.observations[key]?.pricingRevision
+  const equalUsage = previous && dayTokens(incoming) === dayTokens(previous);
+  // Revision provenance comes from the retained rows, not a missing model key.
+  // Equal totals can also be reattributed by a parser correction independently
+  // of pricing. Keep the incoming identities and merge only matching metadata.
+  const revisionChanged = equalUsage && typeof options.pricingRevision === 'string'
+    && Object.values(previous.observations).some(observation => (
+      observation.pricingRevision !== options.pricingRevision
     ));
-  if (!previous || liveDayIsGreater(incoming, previous) || revisionChanged) {
-    const selected = revisionChanged && dayComponentQuality(incoming) < dayComponentQuality(previous)
-      ? withReconciledGraphCosts(previous, incoming, previous, true, options.pricingRevision)
-      : incoming;
+  const attributionChanged = equalUsage && (
+    Object.keys(incoming.observations).length !== Object.keys(previous.observations).length
+    || Object.entries(incoming.observations).some(([key, observation]) => (
+      observation.tokens !== previous.observations[key]?.tokens
+    ))
+  );
+  if (!previous || liveDayIsGreater(incoming, previous) || revisionChanged || attributionChanged) {
+    let selected = incoming;
+    if (equalUsage && dayComponentQuality(incoming) < dayComponentQuality(previous)) {
+      selected = mergeLiveDayMetadata(incoming, previous);
+      // A whole-day component summary is reusable only for identical attribution.
+      if (!attributionChanged && previous.componentSummary) {
+        selected.componentSummary = previous.componentSummary;
+      }
+    }
     archive.liveDays = { ...(archive.liveDays || {}), [date]: selected };
   }
   return archive;
