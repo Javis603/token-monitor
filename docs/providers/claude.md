@@ -23,7 +23,7 @@ Legacy Claude lookup requires `provider_session_runtime.provider_name = 'claudeA
 
 If the Claude transcript is unavailable, a T3 title updates only the displayed title and preserves the session's existing activity and transcript metadata. When the transcript becomes available again, its turn boundary and other readings apply normally.
 
-A confirmed V2 tombstone invalidates a cached title-only T3 result within the collection. Previously decorated rows recover their prior title, while fresh native labels are preserved. Missing or unreadable stores do not count as deletion and keep cached titles.
+Cached overrides record their T3 source explicitly, independently of whether a transcript exists. A confirmed V2 tombstone, empty title or placeholder invalidates that override within the collection. Previously decorated rows recover their prior title, while fresh native labels are preserved. Cached T3 titles are separated from native metadata before a transcript is read, so a transcript with no title cannot inherit a stale override. Missing or unreadable stores do not invalidate overrides and keep cached T3 titles.
 
 Turn state comes from the newest assistant `stop_reason` plus any genuine user prompt written after it. `tool_use` is not an ended turn. `tool_result`, meta and compaction records are not new user prompts. The adapter emits `true`, `false` or no value deliberately: `false` must clear an older finished state, while no value means there is no evidence.
 

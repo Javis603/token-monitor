@@ -41,7 +41,7 @@ Claude and Codex derive prompt-cache observations in their existing provider-own
 
 A resolver can mark catalog metadata `titleOnly: true` when no transcript was read. `applySessionMetadata()` then applies only its title, preserving activity, context, cache and attribution. A subsequent transcript result must remove this marker from reused metadata so new observations apply normally. The marker stays in the local metadata cache and is never copied into session records.
 
-The local metadata cache also records `titleFallback` before a title-only override. An authoritative catalog deletion can remove its cached title and name it in `invalidatedTitle`; the applier restores the fallback only on rows still showing that exact title. Newer native labels are left alone. These fields are not copied into session records, and a generic reader failure never invalidates a title.
+The local metadata cache records T3 overrides in `t3Title` and keeps the native or pre-override label in `titleFallback`. Provenance is independent of the `titleOnly` activity marker. An authoritative V2 tombstone, empty title or placeholder removes the cached override and names it in `invalidatedTitle`; the applier restores the fallback only on rows still showing that exact title. Newer native labels are left alone. These fields are not copied into session records, and a generic reader failure never invalidates a title.
 
 ### Watching
 

@@ -350,7 +350,7 @@ function applySessionMetadata(periods, home, deps = {}) {
         if (meta.titleFallback) session.title = meta.titleFallback;
         else delete session.title;
       }
-      if (meta.titleOnly === true && meta.title && !Object.prototype.hasOwnProperty.call(meta, 'titleFallback')) {
+      if (meta.t3Title && !Object.prototype.hasOwnProperty.call(meta, 'titleFallback')) {
         meta.titleFallback = session.title;
       }
       if (meta.title) session.title = meta.title;

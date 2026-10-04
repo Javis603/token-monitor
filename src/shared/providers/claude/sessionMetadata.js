@@ -578,7 +578,7 @@ function resolveSessionMetadata(sessionIds, context) {
     env: deps.env,
     useEnvRoots: !deps.scopedHome
   });
-  const deletedSessionIds = new Set();
+  const invalidatedSessionIds = new Set();
   const t3Metadata = readT3SessionMeta(sessionIds, {
     ...(deps.claudeMetadataDeps || {}),
     driver: 'claudeAgent',
@@ -586,22 +586,32 @@ function resolveSessionMetadata(sessionIds, context) {
     homeDir: home,
     env: deps.env,
     useEnvRoot: !deps.scopedHome,
-    deletedSessionIds
+    invalidatedSessionIds
   });
-  // Drop only a title-only T3 result confirmed deleted by an authoritative row.
-  // Do this before reading transcripts so their native titles remain the fallback.
-  for (const sessionId of deletedSessionIds) {
+  // Provenance is independent of transcript availability. Remove only a T3
+  // override confirmed unusable by V2 before reading native fallback metadata.
+  for (const sessionId of invalidatedSessionIds) {
     const key = `claude:${sessionId}`;
     const cached = metadata.get(key);
-    if (cached?.titleOnly !== true || !cached.title) continue;
-    const { title, ...rest } = cached;
-    metadata.set(key, { ...rest, invalidatedTitle: title });
+    if (!cached?.t3Title) continue;
+    const invalidated = { ...cached, titleOnly: true, invalidatedTitle: cached.t3Title };
+    delete invalidated.title;
+    delete invalidated.t3Title;
+    metadata.set(key, invalidated);
   }
   const applyFile = (sessionId, filePath) => {
+    const cached = metadata.get(`claude:${sessionId}`);
+    let nativeMetadata = cached;
+    if (cached?.t3Title) {
+      nativeMetadata = { ...cached };
+      delete nativeMetadata.title;
+      delete nativeMetadata.t3Title;
+      if (cached.titleFallback) nativeMetadata.title = cached.titleFallback;
+    }
     const meta = context.fileSessionMetadata(
       sessionId,
       filePath,
-      metadata.get(`claude:${sessionId}`)
+      nativeMetadata
     );
     // A transcript supersedes any cached title-only catalog result.
     delete meta.titleOnly;
@@ -637,11 +647,17 @@ function resolveSessionMetadata(sessionIds, context) {
   for (const [sessionId, filePath] of transcriptFiles) applyFile(sessionId, filePath);
   // T3's sidebar title may have changed independently of the transcript's
   // custom/AI title. Native sessions without a usable T3 title keep their own.
-  for (const [sessionId, meta] of t3Metadata) {
+  for (const sessionId of sessionIds) {
+    const cached = metadata.get(`claude:${sessionId}`);
+    // A failed lookup may reuse an explicit override, never an unlabelled title.
+    const t3Title = t3Metadata.get(sessionId)?.title || cached?.t3Title;
+    if (!t3Title) continue;
     const transcriptMeta = result.get(sessionId);
     result.set(sessionId, {
-      ...(transcriptMeta || metadata.get(`claude:${sessionId}`) || {}),
-      title: meta.title,
+      ...(transcriptMeta || cached || {}),
+      title: t3Title,
+      t3Title,
+      ...(transcriptMeta?.title ? { titleFallback: transcriptMeta.title } : {}),
       ...(!transcriptMeta ? { titleOnly: true } : {})
     });
   }

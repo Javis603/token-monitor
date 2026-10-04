@@ -113,9 +113,10 @@ maybe('Claude resolver prefers T3 over native custom/AI titles without changing 
   assert.equal(result.get('t3-native').title, 'Current T3 sidebar title');
   assert.equal(result.get('ordinary-native').title, 'Native custom title');
   assert.deepEqual(result.get('no-transcript-native'), {
-    projectLabel: 'Existing project', title: 'Title without transcript', titleOnly: true
+    projectLabel: 'Existing project', title: 'Title without transcript',
+    t3Title: 'Title without transcript', titleOnly: true
   });
-  const { title: _title, ...metrics } = result.get('t3-native');
+  const { title: _title, t3Title: _t3Title, titleFallback: _titleFallback, ...metrics } = result.get('t3-native');
   const { title: _otherTitle, ...otherMetrics } = result.get('ordinary-native');
   assert.deepEqual(metrics, otherMetrics);
   assert.equal(metrics.contextTokens, 130);
@@ -234,3 +235,51 @@ maybe('Claude V2 tombstones invalidate cached T3 titles without treating reader 
   applySessionMetadata(periods, home, deps);
   assert.equal(original.title, 'Current native transcript title');
 });
+
+for (const unusable of [
+  { label: 'tombstone', title: 'Old T3 title', deleted: '2026-10-04' },
+  { label: 'empty title', title: '', deleted: null },
+  { label: 'placeholder', title: 'New thread', deleted: null }
+]) {
+  maybe(`Claude invalidates all cached T3 overrides on an authoritative V2 ${unusable.label}`, (t) => {
+    const { home, db, v2, legacy } = store(t);
+    const projects = path.join(home, '.claude', 'projects', 'test-project');
+    fs.mkdirSync(projects, { recursive: true });
+    const sessions = {};
+    for (const id of ['untitled-transcript', 'named-transcript', 'missing-transcript']) {
+      v2(`app-${id}`, id, 'Old T3 title');
+      legacy(`legacy-${id}`, id, 'Stale legacy title');
+      sessions[`claude:${id}`] = { client: 'claude', sessionId: id, lastUsedAt: '2026-10-04T00:00:00Z' };
+      if (id === 'missing-transcript') {
+        sessions[`claude:${id}`].title = 'Scanned native title';
+        continue;
+      }
+      const records = [{ type: 'assistant', timestamp: '2026-10-04T00:00:00Z', message: { stop_reason: 'end_turn' } }];
+      if (id === 'named-transcript') records.push({ type: 'custom-title', customTitle: 'Native custom title' });
+      fs.writeFileSync(path.join(projects, `${id}.jsonl`), records.map((record) => JSON.stringify(record)).join('\n') + '\n');
+    }
+    const deps = {
+      scopedHome: true, now: Date.parse('2026-10-04T00:01:00Z'),
+      metadataCache: new Map(), claudeMetadataDeps: { sqlite, cache: new Map() }
+    };
+    const periods = { today: { sessions } };
+    applySessionMetadata(periods, home, deps);
+    assert.equal(deps.metadataCache.get('claude:untitled-transcript').titleOnly, undefined);
+    for (const session of Object.values(sessions)) assert.equal(session.title, 'Old T3 title');
+    db.prepare('UPDATE orchestration_v2_projection_threads SET title = ?, deleted_at = ?').run(unusable.title, unusable.deleted);
+    applySessionMetadata(periods, home, deps);
+    assert.equal(Object.hasOwn(sessions['claude:untitled-transcript'], 'title'), false);
+    assert.equal(sessions['claude:untitled-transcript'].turnEnded, true);
+    assert.equal(sessions['claude:named-transcript'].title, 'Native custom title');
+    assert.equal(sessions['claude:missing-transcript'].title, 'Scanned native title');
+    for (const meta of deps.metadataCache.values()) assert.equal(Object.hasOwn(meta, 't3Title'), false);
+
+    db.prepare('UPDATE orchestration_v2_projection_threads SET title = ?, deleted_at = NULL').run('Old T3 title');
+    applySessionMetadata(periods, home, deps);
+    for (const session of Object.values(sessions)) assert.equal(session.title, 'Old T3 title');
+    applySessionMetadata(periods, home, {
+      ...deps, claudeMetadataDeps: { ...deps.claudeMetadataDeps, sqlite: null }
+    });
+    for (const session of Object.values(sessions)) assert.equal(session.title, 'Old T3 title');
+  });
+}

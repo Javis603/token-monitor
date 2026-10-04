@@ -145,7 +145,7 @@ function readT3SessionMeta(sessionIds, deps = {}) {
   const candidateIds = [...new Set([...candidatesBySession.values()].flat())];
   const titleByThreadId = new Map();
   const v2SeenThreadIds = new Set();
-  const v2DeletedThreadIds = new Set();
+  const v2UnavailableTitleIds = new Set();
   const legacyTitles = new Map();
 
   for (const dbPath of dbPaths) {
@@ -169,12 +169,15 @@ function readT3SessionMeta(sessionIds, deps = {}) {
             if (query.authoritative) {
               v2SeenThreadIds.add(threadId);
               if (row.deleted) {
-                v2DeletedThreadIds.add(threadId);
+                v2UnavailableTitleIds.add(threadId);
                 continue;
               }
             } else if (legacyTitles.has(threadId)) continue;
             const title = cleanTitle(row.title);
-            if (!title || T3_DEFAULT_TITLES.has(title.toLowerCase())) continue;
+            if (!title || T3_DEFAULT_TITLES.has(title.toLowerCase())) {
+              if (query.authoritative) v2UnavailableTitleIds.add(threadId);
+              continue;
+            }
             (query.authoritative ? titleByThreadId : legacyTitles).set(threadId, title);
           }
         }
@@ -191,9 +194,10 @@ function readT3SessionMeta(sessionIds, deps = {}) {
   for (const [sessionId, candidates] of candidatesBySession) {
     const title = candidates.map((id) => titleByThreadId.get(id)).find(Boolean);
     if (title) out.set(sessionId, { title });
-    // An explicit tombstone can invalidate cached titles; a failed read cannot.
-    else if (deps.deletedSessionIds instanceof Set && candidates.some((id) => v2DeletedThreadIds.has(id))) {
-      deps.deletedSessionIds.add(sessionId);
+    // Authoritative absence of a usable title invalidates an override; read
+    // failures and absent stores do not prove the title was removed.
+    else if (deps.invalidatedSessionIds instanceof Set && candidates.some((id) => v2UnavailableTitleIds.has(id))) {
+      deps.invalidatedSessionIds.add(sessionId);
     }
   }
   return out;
