@@ -1,5 +1,5 @@
 ---
-summary: "MiniMax Code usage: upstream's headless captures plus the fork's read of the shared CLI/desktop runtime store."
+summary: "MiniMax Code usage: upstream's headless captures plus the fork's read of the local runtime store."
 ids: [mcode]
 read_when:
   - Changing MiniMax Code source detection or watch behavior
@@ -16,7 +16,7 @@ read_when:
 | Source | Reader |
 | --- | --- |
 | `tokscale headless mcode exec` captures under the tokscale headless roots | upstream `sessions/mcode.rs` |
-| The runtime store the CLI and desktop app share: `<data-dir>/v2/sessions/<yyyy>/<mm>/<dd>/<dir>/` | the fork's supplement, `crates/tokscale-core/src/token_monitor/mcode.rs` in Javis603/tokscale |
+| The runtime store the CLI writes, on the local runtime the desktop app is also built on (see Known gaps): `<data-dir>/v2/sessions/<yyyy>/<mm>/<dd>/<dir>/` | the fork's supplement, `crates/tokscale-core/src/token_monitor/mcode.rs` in Javis603/tokscale |
 
 The supplement reports under upstream's `mcode` id rather than as a fork-only client, so nothing migrates if upstream starts reading the store; it is then removed from the fork. Upstream's headless lane runs unchanged, and a turn it already counted in the same scan is skipped by the supplement, because a capture and the store carry the same Session and turn ids.
 
