@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const { createPromptCacheState, applyPromptCacheEntry } = require('../../sessionPromptCache');
 const { claudeSessionRoots } = require('./paths');
 const { findSessionFiles } = require('../../sessionFiles');
+const { readT3SessionMeta } = require('../../t3SessionMetadata');
 const { normalizeSessionContext, shouldReadSessionContext } = require('../../sessionContext');
 
 const TITLE_MAX_CODE_POINTS = 96;
@@ -613,6 +614,19 @@ function resolveSessionMetadata(sessionIds, context) {
   const missingIds = new Set([...sessionIds].filter((sessionId) => !projectFiles.has(sessionId)));
   const transcriptFiles = findSessionFiles(roots.transcripts, missingIds);
   for (const [sessionId, filePath] of transcriptFiles) applyFile(sessionId, filePath);
+  // T3's sidebar title may have changed independently of the transcript's
+  // custom/AI title. Native sessions without a usable T3 title keep their own.
+  const t3Metadata = readT3SessionMeta(sessionIds, {
+    ...(deps.claudeMetadataDeps || {}),
+    driver: 'claudeAgent',
+    cleanTitle,
+    homeDir: home,
+    env: deps.env,
+    useEnvRoot: !deps.scopedHome
+  });
+  for (const [sessionId, meta] of t3Metadata) {
+    result.set(sessionId, { ...(result.get(sessionId) || metadata.get(`claude:${sessionId}`) || {}), title: meta.title });
+  }
   return result;
 }
 
