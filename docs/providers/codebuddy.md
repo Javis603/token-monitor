@@ -132,7 +132,7 @@ Token conversion mirrors `BuddyUsage::to_breakdown()` in the pinned Tokscale Ten
 
 For repeated `messageId` records, the largest token total wins, with the later record winning a tie. The turn uses that usage-bearing record's timestamp for Today/Month filtering; an earlier companion timestamp is only a fallback for a turn without timestamped usage.
 
-**Verification.** `node --test tests/shared/sessionDetail.buddyAccounting.test.js tests/shared/sessionDetail.codebuddy.test.js tests/shared/workbuddySessionMetadata.test.js` covers the pinned Rust regression fixtures for both clients, usage-source precedence, explicit zero cache misses, additive reasoning/cache writes and period boundaries. Keep these fixtures aligned when changing the Tokscale pin.
+**Verification.** `node --test tests/shared/sessionDetail.buddyAccounting.test.js tests/shared/sessionDetail.codebuddy.test.js tests/shared/workbuddySessionMetadata.test.js tests/shared/codebuddyExtension.test.js` covers the pinned Rust regression fixtures for both clients, usage-source precedence, explicit zero cache misses, additive reasoning/cache writes and period boundaries. Keep these fixtures aligned when changing the Tokscale pin.
 
 ## The VS Code extension's own store
 
@@ -170,11 +170,12 @@ From there both reads work without any new data plane:
 - **Session Detail**: one request is one exchange. Its user messages carry the
   prompt the user actually saw in `extra.sourceContentBlocks` (the `message`
   payload itself is the context-wrapped form), and the request's `usage` is
-  the turn: `cachedMissTokens` is the uncached input and `cacheTokens` /
-  `cachedWriteTokens` are the cache fields. Verified against a scan: for one
-  request the store says 232098 in / 189056 cached and tokscale reports
-  43042 / 189056 — the subtraction is exact, including the version where
-  `cachedMissTokens` is absent and only the subtraction produces the answer.
+  the turn. It uses the same `buddyUsageTokens()` conversion as CLI records,
+  including explicit zero cache misses, conditional cache-read subtraction,
+  cache-write aliases and additive reasoning. Both paths preserve the pinned
+  parser's signed subtraction result when an inconsistent inclusive count
+  reports cache reads larger than input. Missing usage keeps the turn's
+  tokens unavailable instead of claiming measured zero usage.
   The turn timestamp uses the request's `startedAt` when valid, falling back
   to the latest message's `createdAt` so today/month filtering can retain a
   request whose index omitted its start time.

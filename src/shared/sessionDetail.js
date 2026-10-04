@@ -6,6 +6,7 @@ const {
   isUserPromptRecord,
   messageIdOf,
   usageTokens,
+  buddyUsageTokens,
   userPromptText
 } = require('./providers/codebuddy/transcript');
 const codebuddyExtension = require('./providers/codebuddy/extension');
@@ -562,15 +563,7 @@ function readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, h
     if (!prompt) continue;
     events.push({ kind: 'prompt', timestamp: codebuddyTimestamp(entry.createdAt), text: prompt });
   }
-  const usage = session.usage || {};
-  const cacheRead = num(usage.cacheTokens);
-  const cacheWrite = num(usage.cachedWriteTokens);
-  // `cachedMissTokens` is what the client reports as uncached input, and it is
-  // exactly `inputTokens` minus the cache fields; the subtraction is the
-  // fallback for a record that states only the totals. Reading the gross
-  // `inputTokens` as input would count the cached part twice — the same
-  // convention the CLI transcript's `prompt_tokens` follows.
-  const input = num(usage.cachedMissTokens) || Math.max(0, num(usage.inputTokens) - cacheRead - cacheWrite);
+  const tokens = buddyUsageTokens(session.usage);
   const timestamp = codebuddyTimestamp(session.startedAt)
     || session.entries.reduce((latest, entry) => {
       const candidate = codebuddyTimestamp(entry.createdAt);
@@ -579,7 +572,8 @@ function readCodebuddyExtensionSessionDetail({ sessionId, period, sessionCost, h
   events.push({
     kind: 'turn',
     timestamp,
-    tokens: makeTokens({ input, output: num(usage.outputTokens), cacheRead, cacheWrite, reasoning: 0 }),
+    tokens: tokens || emptyTokens(),
+    tokensAvailable: Boolean(tokens),
     tools: []
   });
 

@@ -135,8 +135,12 @@ function usageTokens(entry) {
   if (entry?.status != null && entry.status !== 'completed') return null;
   const usage = [entry?.message?.usage, entry?.providerData?.usage, entry?.providerData?.rawUsage]
     .find((value) => value && typeof value === 'object' && !Array.isArray(value));
-  if (!usage) return null;
+  return buddyUsageTokens(usage);
+}
 
+// Raw Buddy usage conversion shared by JSONL responses and extension requests.
+function buddyUsageTokens(usage) {
+  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return null;
   const cacheRead = firstPositive([
     usage.cache_read_input_tokens, usage.cacheReadInputTokens, usage.cacheTokens,
     usage.prompt_cache_hit_tokens, usage.cached_tokens
@@ -155,6 +159,8 @@ function usageTokens(entry) {
   // Cache-miss fields already exclude cache. Otherwise only an inclusive total
   // proves cache reads are part of input; ambiguous input must stay intact.
   if (miss == null && reportedTotal != null && cacheRead > 0 && Math.max(0, reportedTotal) === input + output) {
+    // Rust uses signed i64: saturating_sub prevents integer overflow,
+    // but does not clamp a representable negative result to zero.
     input -= cacheRead;
   }
   // Tencent Buddy reasoning is additive in Tokscale, unlike the informational
@@ -172,5 +178,6 @@ module.exports = {
   userPromptText,
   assistantStatus,
   messageIdOf,
-  usageTokens
+  usageTokens,
+  buddyUsageTokens
 };

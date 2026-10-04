@@ -1,5 +1,5 @@
 {
-  "source": "Javis603/tokscale@8f99629a28f381b357f77bdb1b18dccfcf9d4934 crates/tokscale-core/src/sessions/tencent_buddy.rs",
+  "source": "Javis603/tokscale@37e347fedf8fee1059742e9fffa2deb8b4ad3bc9 crates/tokscale-core/src/sessions/tencent_buddy.rs",
   "cases": [
     {
       "name": "parse_jsonl_file_reads_assistant_usage",
@@ -154,6 +154,29 @@
         "cacheWrite": 0,
         "reasoning": 0,
         "total": 105
+      }
+    },
+    {
+      "name": "signed_cache_subtraction_matches_binary",
+      "entry": {
+        "type": "message",
+        "role": "assistant",
+        "message": {
+          "usage": {
+            "inputTokens": 3,
+            "outputTokens": 2,
+            "totalTokens": 5,
+            "cacheTokens": 4
+          }
+        }
+      },
+      "tokens": {
+        "input": -1,
+        "output": 2,
+        "cacheRead": 4,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "total": 5
       }
     }
   ]

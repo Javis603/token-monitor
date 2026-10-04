@@ -360,3 +360,42 @@ test('reports not found when neither store has the session', () => {
   assert.equal(detail.found, false);
   assert.deepEqual(detail.exchanges, []);
 });
+
+// Run the same pinned usage fixtures through the real extension-store fallback,
+// not just the CLI parser. This locks both entrances to the same accounting.
+const { cases: buddyUsageCases } = require('../fixtures/tencentBuddyUsage.json');
+const { parseCodebuddyTranscript } = require('../../src/shared/sessionDetail');
+const { extractUsageFromTokscale } = require('../../src/shared/usage');
+for (const fixture of [
+  ...buddyUsageCases.map(({ name, entry, tokens }) => ({ name, usage: entry.message?.usage || entry.providerData.usage || entry.providerData.rawUsage, tokens })),
+  {
+    name: 'inclusive cache with writes and reasoning',
+    usage: { inputTokens: 100, outputTokens: 5, totalTokens: 105, cacheTokens: 50, cachedWriteTokens: 10, reasoningTokens: 7 },
+    tokens: { input: 50, output: 5, cacheRead: 50, cacheWrite: 10, reasoning: 7, total: 122 }
+  },
+  {
+    name: 'explicit zero miss with cache-write and reasoning aliases',
+    usage: { inputTokens: 100, outputTokens: 5, cachedMissTokens: 0, cacheReadInputTokens: 100, cacheCreationInputTokens: 4, completionThinkingTokens: 7 },
+    tokens: { input: 0, output: 5, cacheRead: 100, cacheWrite: 4, reasoning: 7, total: 116 }
+  }
+]) {
+  test(`extension and CLI Detail share Buddy accounting: ${fixture.name}`, () => {
+    const home = makeExtensionHome({ requests: [{ traceId: TRACE, messages: [`${TRACE}u`], usage: fixture.usage }] });
+    const extension = readSessionDetail({ client: 'codebuddy', sessionId: TRACE, home, env: {}, deps: { platform: 'linux' } });
+    const [cli] = parseCodebuddyTranscript(JSON.stringify({ type: 'message', role: 'assistant', message: { usage: fixture.usage } }));
+    assert.equal(extension.found, true);
+    assert.deepEqual(extension.exchanges[0].tokens, fixture.tokens);
+    assert.deepEqual(extension.exchanges[0].tokens, cli.tokens);
+    const { total: _total, ...buckets } = fixture.tokens;
+    const row = extractUsageFromTokscale([{ client: 'codebuddy', sessionId: TRACE, model: 'glm-5.2', ...buckets }]);
+    assert.equal(extension.totals.totalTokens, row.sessions[`codebuddy:${TRACE}`].totalTokens);
+  });
+}
+
+test('extension Detail keeps a turn with missing usage unavailable', () => {
+  const home = makeExtensionHome({ requests: [{ traceId: TRACE, messages: [`${TRACE}u`] }] });
+  const detail = readSessionDetail({ client: 'codebuddy', sessionId: TRACE, home, env: {}, deps: { platform: 'linux' } });
+  assert.equal(detail.found, true);
+  assert.equal(detail.exchanges[0].turns[0].tokensAvailable, false);
+  assert.equal(detail.totals.totalTokens, 0);
+});
