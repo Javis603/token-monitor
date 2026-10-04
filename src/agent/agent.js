@@ -16,7 +16,7 @@ const {
   parseLimitProviders
 } = require('../shared/limits/collector');
 const { postSyncPayload } = require('../shared/syncPayload');
-const { createSessionTitleSyncNegotiator } = require('../shared/syncContent');
+const { createAgentTitleSync } = require('./titleSync');
 const { HUB_RESPONSE_HEADER, HUB_RESPONSE_MINIMAL } = require('../shared/hubProtocol');
 const { applyProjectRollups } = require('../shared/usage');
 const { runAgent, runAgentOnce } = require('./runtime');
@@ -141,7 +141,7 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
 }
 
-const titleSyncNegotiator = createSessionTitleSyncNegotiator({ fetchFn: fetch });
+const titleSyncNegotiator = createAgentTitleSync({ dataDir: path.dirname(pidFilePath()), fetchFn: fetch });
 
 async function postUsage(summary) {
   const authHeaders = secret ? { authorization: `Bearer ${secret}` } : {};
@@ -197,6 +197,11 @@ async function main() {
   if (!dryRun) registerPidFile(() => {
     runtimeHandle?.stop();
     sessionUsageArchiveStore.close();
+  });
+  // Reconcile old destinations even if the first collector scan later fails.
+  // Dry runs never read/write private cleanup state or make sync requests.
+  if (!dryRun) await titleSyncNegotiator.negotiate({
+    hubUrl, deviceId, headers: secret ? { authorization: `Bearer ${secret}` } : {}, enabled: syncSessionTitles
   });
   const runtimeOptions = {
     envelope: { deviceId, agentVersion: appVersion(), agentRuntime: 'headless-agent' },

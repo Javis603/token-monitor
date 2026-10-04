@@ -273,3 +273,54 @@ test('local ON keeps refreshing server-denied permission and invalidated ON requ
   release();
   assert.deepEqual(await pending, { syncSessionTitles: false });
 });
+
+test('actual agent startup reconciles the previous device before a failed scan, and dry runs leave journals untouched', async t => {
+  const { createAgentTitleSync } = require('../../src/agent/titleSync');
+  const filename = path.resolve(__dirname, '../../src/agent/agent.js');
+  const agentRequire = createRequire(filename);
+  const source = fs.readFileSync(filename, 'utf8');
+  for (const dryRun of [false, true]) {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-agent-startup-journal-'));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const backend = fakeBackend();
+    await createAgentTitleSync({ dataDir: directory, fetchFn: backend.fetchFn }).negotiate(request);
+    const journal = path.join(directory, 'agent-sync-credentials.json');
+    const before = fs.readFileSync(journal, 'utf8');
+    backend.requests.length = 0;
+    let complete;
+    const finished = new Promise(resolve => { complete = resolve; });
+    const scanFailure = new Error('collector fixture failed');
+    const context = {
+      require(id) {
+        if (id === '../shared/config') return { ...agentRequire(id), loadDotEnv() {}, pidFilePath: () => path.join(directory, 'agent.pid') };
+        if (id === './seedClients') return { seedAgentClients: clients => clients };
+        if (id === '../shared/usage/sessionUsageArchiveStore') return { createSessionUsageArchiveStore: () => ({ close() {} }) };
+        if (id === '../shared/providers/cursor/usageEvents') return { createCursorUsageEventIndex: () => ({}) };
+        if (id === './runtime') return { async runAgentOnce(options) {
+          assert.equal(options.dryRun, dryRun);
+          if (dryRun) assert.equal(backend.requests.length, 0);
+          else {
+            assert.equal(backend.requests[0].url, 'https://hub.example/api/sync/titles/a%2Fb');
+            assert.deepEqual(backend.requests[0].payload, { enabled: false });
+            assert.equal(backend.requests[0].headers.authorization, 'Bearer secret');
+          }
+          throw scanFailure;
+        } };
+        return agentRequire(id);
+      },
+      process: { argv: ['node', filename, '--once', '--sync-session-titles', ...(dryRun ? ['--dry-run'] : [])], pid: 123,
+        env: { TOKEN_MONITOR_HUB_URL: 'https://hub.example', TOKEN_MONITOR_SECRET: 'secret', TOKEN_MONITOR_DEVICE_ID: 'replacement', TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED: 'false' }, on() {} },
+      fetch: backend.fetchFn, console: { log() {}, warn() {}, error(error) { if (error instanceof Error) complete(error); } }
+    };
+    vm.runInNewContext(source, context, { filename });
+    assert.equal(await finished, scanFailure);
+    assert.equal(backend.requests.some(r => r.url.endsWith('/api/ingest')), false);
+    if (dryRun) assert.equal(fs.readFileSync(journal, 'utf8'), before);
+    else {
+      const { CredentialStore } = require('../../src/shared/credentialStore');
+      const state = new CredentialStore(directory, { filePath: journal }).readDocument().credentials.hub.titleSync;
+      assert.equal(state.active.deviceId, 'replacement');
+      assert.equal(state.pending.length, 0);
+    }
+  }
+});
