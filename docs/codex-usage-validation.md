@@ -19,12 +19,10 @@ Runtime: macOS, Node.js `v25.9.0`.
 
 Three new regressions were first observed failing, then fixed and rerun: explicit roots now scope ancestry discovery instead of losing children when unrelated catalog entries consume the budget; declared missing parents remain represented; a failed new connection does not expose the previous account report body. An inherited test's unnecessary template-literal escaping was corrected for lint without changing fixture bytes.
 
-## Unverified / blocked
+## Device acceptance update
 
-A real account, catalog and parent/child usage probe was blocked by platform safety checking. That operation was not retried through another tool, alternate executable, private endpoint or delegated agent. No new model turn or hosted task was started for telemetry.
-
-The successful stdio/CLI tests use `tests/fixtures/codexUsageRpc.cjs`, a synthetic peer, not the real account. They do not establish access to the user's hosted cloud tasks or dot-delegated tasks. A real task-to-engine-thread mapping, actual service response and parent-versus-descendant coverage reconciliation are still missing. `accountCloudCoverage` remains unknown and service estimates remain separate from measured local usage. No combined parent/child task total is claimed.
+The subsequent explicit real-device deployment request was exercised through the normal entry point. Actual account usage and thread metadata reads succeeded; all sampled per-thread token reports remained unavailable. A delayed account notification exposed and led to a whole-observation resampling fix. See [device deployment acceptance](codex-usage-device-validation.md) for verified scope, tests, timings and remaining hosted-cloud/dot gaps.
 
 ## Deployment state
 
-The source checkout is integrated and verified. The installed Token Monitor app, public GitHub branch and any background service are unchanged. Usage CLI instructions and resource/privacy limits are in [the live reader guide](codex-live-usage.md) and [the local ledger guide](codex-task-usage.md).
+A separate `Token Monitor Usage Test.app` is installed under `~/Applications`, with private reports/settings outside the production widget. The installed Token Monitor 0.65.0 application and Codex global configuration are unchanged by hash comparison. No GitHub push or startup service was created. Source and package verification are not a claim of full cloud/dot token coverage.
