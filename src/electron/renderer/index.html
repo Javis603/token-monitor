@@ -1482,12 +1482,12 @@
             </div>
             <div id="syncContentGroup" class="settings-group cursor-account-group theme-color-accordion">
               <button id="syncContentToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="syncContentDetails">
-                <span data-i18n="settings.sync.content.title">Sync content</span>
+                <span data-i18n="settings.sync.content.title">Additional sync</span>
                 <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
               </button>
               <div id="syncContentDetails" class="cursor-settings-details hidden" inert>
                 <div class="sync-content-body">
-                  <p class="settings-note" data-i18n="settings.sync.content.basis">Usage and cost sync automatically.</p>
+                  <p class="settings-note" data-i18n="settings.sync.content.basis">Usage, cost, tool limits and subscriptions sync automatically.</p>
                   <p id="syncContentLocalNote" class="settings-note" data-i18n="settings.sync.content.localNote">Optional content sync is available when connected to or hosting a hub.</p>
                   <div id="syncContentNotice" class="sync-content-notice" hidden>
                     <p id="syncContentStatus" class="settings-note" role="status" aria-live="polite" hidden></p>
@@ -1495,7 +1495,7 @@
                   </div>
                   <div id="syncContentOptions" class="sync-content-options" hidden>
                     <label id="syncContentHostRow" class="settings-item checkbox-label sync-content-option" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.hostPermission">Allow devices to sync session titles</span><span class="settings-item-desc" data-i18n="settings.sync.content.hostNote">Controls what this hub accepts. Each device chooses separately whether to send titles.</span></span><input id="syncContentHostPermission" type="checkbox" /></label>
-                    <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.sessionTitles">Session titles</span><span class="settings-item-desc" data-i18n="settings.sync.content.titleNote">Share titles; local display stays independent.</span></span><input id="syncContentsessionTitles" type="checkbox" aria-describedby="syncContentStatus syncContentTitleUnavailable syncContentCleanup" disabled /></label>
+                    <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.sessionTitles">Session titles</span><span class="settings-item-desc" data-i18n="settings.sync.content.titleNote">Let other devices display session titles.</span></span><input id="syncContentsessionTitles" type="checkbox" aria-describedby="syncContentStatus syncContentTitleUnavailable syncContentCleanup" disabled /></label>
                     <p id="syncContentTitleUnavailable" class="settings-note" data-i18n="settings.sync.content.titleUnavailable" hidden>This server does not allow session title sync. Ask its administrator to enable it.</p>
                     <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.modelAliases">Model aliases and grouping</span><span class="settings-item-desc" data-i18n="settings.sync.content.aliasesNote">Use the same model names and groups on your devices.</span></span><input id="syncContentmodelAliases" type="checkbox" aria-describedby="syncContentStatus" disabled /></label>
                     <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.customPricing">Custom pricing</span><span class="settings-item-desc" data-i18n="settings.sync.content.pricingNote">Use the same custom rates on your devices.</span></span><input id="syncContentcustomPricing" type="checkbox" aria-describedby="syncContentStatus" disabled /></label>
