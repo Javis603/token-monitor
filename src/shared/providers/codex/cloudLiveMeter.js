@@ -6,6 +6,9 @@ const { normalizeUsage } = require('./taskUsage');
 const { identifier, error } = require('./cloudUsage');
 const { escapeHtml } = require('./usageView');
 
+const copyUsage = (usage) => usage ? { ...usage } : null;
+const copySample = (sample) => ({ ...sample, total: copyUsage(sample.total), last: copyUsage(sample.last) });
+
 class CloudLiveMeter {
   constructor(threadId, { maxSamples = 1024 } = {}) {
     this.threadId = identifier(threadId);
@@ -30,15 +33,15 @@ class CloudLiveMeter {
     const sample = { threadId: this.threadId, turnId, total, last, observedAt };
     this.latest = { ...sample, key };
     if (this.samples.length < this.maxSamples) this.samples.push(sample); else this.truncated = true;
-    return sample;
+    return copySample(sample);
   }
   report() {
     return { version: 1, kind: 'codex-cloud-live-token-count', source: 'hosted-engine-token-notification',
       threadId: this.threadId, measurement: this.latest ? 'engine-reported-cumulative' : 'unavailable',
       status: this.problem ? 'ambiguous' : this.latest ? 'observed' : 'no-usage-notification',
-      total: this.problem ? null : this.latest?.total || null,
-      lastRequest: this.latest?.last || null, lastTurnId: this.latest?.turnId || null,
-      observedAt: this.latest?.observedAt || null, samples: this.samples.map((s) => ({ ...s })),
+      total: this.problem ? null : copyUsage(this.latest?.total),
+      lastRequest: copyUsage(this.latest?.last), lastTurnId: this.latest?.turnId || null,
+      observedAt: this.latest?.observedAt || null, samples: this.samples.map(copySample),
       coverage: { receivedEvents: this.received, duplicateEvents: this.duplicates,
         retainedSamples: this.samples.length, sampleHistoryTruncated: this.truncated,
         completeRequestHistory: false, historicalBackfill: false, accountCloudCoverage: 'unknown' },

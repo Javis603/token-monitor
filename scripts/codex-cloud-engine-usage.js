@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 const fs = require('node:fs');
+const path = require('node:path');
 const { parseArgs } = require('node:util');
 const { CloudEngineUsage } = require('../src/shared/providers/codex/cloudEngineUsage');
 const { renderCloudLiveHtml } = require('../src/shared/providers/codex/cloudLiveMeter');
@@ -25,8 +26,15 @@ function argumentsFor(argv) {
   identifier(v.thread);
   v.waitSeconds = Number(v['wait-seconds'] ?? 30);
   if (!Number.isInteger(v.waitSeconds) || v.waitSeconds < 1 || v.waitSeconds > 120) throw error('INVALID_WAIT');
-  const destinations = [v.output, v.events, v.html].filter(Boolean);
-  if (new Set(destinations).size !== destinations.length || destinations.some((f) => fs.existsSync(f))) throw error('OUTPUT_EXISTS');
+  const destinations = [v.output, v.events, v.html].filter(Boolean).map((f) => {
+    const resolved = path.resolve(f);
+    const parent = fs.realpathSync(path.dirname(resolved));
+    const canonical = path.join(parent, path.basename(resolved));
+    try { fs.lstatSync(canonical); throw error('OUTPUT_EXISTS'); }
+    catch (e) { if (e.code !== 'ENOENT') throw e; }
+    return canonical;
+  });
+  if (new Set(destinations).size !== destinations.length) throw error('OUTPUT_EXISTS');
   return v;
 }
 async function main(argv = process.argv.slice(2)) {
@@ -41,7 +49,7 @@ async function main(argv = process.argv.slice(2)) {
     observer = new CloudEngineUsage({ budgetMs: Math.min(180000, v.waitSeconds * 1000 + 45000), timeoutMs: 20000 });
     const r = await observer.capture(v.thread, { acknowledgeAttach: true, waitMs: v.waitSeconds * 1000, signal: controller.signal,
       onSample: eventFd === undefined ? undefined : (sample) => {
-        fs.writeSync(eventFd, JSON.stringify({ source: 'hosted-engine-token-notification', sample }) + '\n'); fs.fsyncSync(eventFd);
+        fs.writeSync(eventFd, JSON.stringify({ source: 'hosted-engine-token-notification', scopeFingerprint: observer.scopeFingerprint, sample }) + '\n'); fs.fsyncSync(eventFd);
       } });
     if (v.output) fs.writeFileSync(v.output, JSON.stringify(r, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
     if (v.html) fs.writeFileSync(v.html, renderCloudLiveHtml(r), { flag: 'wx', mode: 0o600 });

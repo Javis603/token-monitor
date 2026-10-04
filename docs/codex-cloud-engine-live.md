@@ -30,13 +30,13 @@ Run it before or while the selected hosted task is executing. `--wait-seconds` i
 
 The input UUID is the actual cloud engine thread ID, not a guessed dot profile or task card ID. Captured events are filtered by exact thread and turn identity. No other thread's event is silently folded into the result. The observer attempts `thread/unsubscribe` and closes its socket; tested hosted responses required the disconnect fallback. It does not invoke thread stop/archive on an existing user task.
 
-Output paths must be new. Valid numeric events are persisted as private NDJSON as soon as they arrive; the final private JSON and optional static HTML contain only allowlisted counts/identifiers, provenance and lifecycle state. Conversation text, prompts, tool arguments and authentication material are not retained. Ctrl+C ends this observation; it is not a background service or autostart installation.
+Output paths must be new and distinct after canonical parent-path resolution; existing files, dangling symlinks and parent aliases are rejected before connecting. Valid numeric events are persisted as private NDJSON as soon as they arrive; each event includes an opaque account-scope fingerprint, and the final private JSON and optional static HTML contain only allowlisted counts/identifiers, provenance and lifecycle state. The current login is checked before every accepted event reaches persistence, not only when the observation ends. A write failure stops observation rather than silently dropping subsequent counts. Conversation text, prompts, tool arguments and authentication material are not retained. Ctrl+C ends this observation; it is not a background service or autostart installation.
 
 The standalone source is in the repository. The previously installed parallel test app has not been upgraded with this new entry, and the production Token Monitor is unchanged. Use the direct script above, not the older `--cloud` fee/turn-history mode, for the new live-event recorder.
 
 ## Counting and failure rules
 
-`cloudLiveMeter.js` stores the latest valid engine cumulative snapshot. Successive totals are never added together. Consecutive identical notifications are ignored. A later lower counter, invalid arithmetic, unsafe integer or last-request count greater than the cumulative value makes the aggregate ambiguous rather than silently retaining a plausible number. An earlier equal snapshot after a higher one is a decrease, not a duplicate to suppress.
+`cloudLiveMeter.js` stores the latest valid engine cumulative snapshot. The observation callback and exported reports receive independent counter objects, so caller mutation cannot corrupt retained counts. Successive totals are never added together. Consecutive identical notifications are ignored. A later lower counter, invalid arithmetic, unsafe integer or last-request count greater than the cumulative value makes the aggregate ambiguous rather than silently retaining a plausible number. An earlier equal snapshot after a higher one is a decrease, not a duplicate to suppress.
 
 Cached input is included in input; reasoning output is included in output. Missing optional breakdowns remain null; an explicit zero is distinct from no notification. A turn ID attached to a snapshot does not turn a lifetime cumulative count into that turn's own usage. No task-tree sum or daily allocation is synthesized.
 
@@ -51,11 +51,16 @@ In this session, metadata-only attachment to a cloud aeon child, a coding thread
 ## Verification scope
 
 ```sh
-node --test tests/shared/codexCloudLiveMeter.test.js
+node --test tests/shared/codexCloudLiveMeter.test.js tests/scripts/codexCloudEngineSafety.test.js
 node --check src/shared/providers/codex/cloudLiveMeter.js
 node --check src/shared/providers/codex/cloudEngineUsage.js
 node --check scripts/codex-cloud-engine-usage.js
 node scripts/codex-cloud-engine-usage.js --help
 ```
 
-Twenty new pure-ledger tests passed: cumulative replacement, duplicate notifications, foreign-thread and text rejection, invalid counters, counter decreases, sample bounds, subset arithmetic, missing-versus-zero, and static HTML escaping. The live two-connection experiment additionally exercised the actual observer transport/lifecycle against a real new hosted task. The previous full-suite result applies to the earlier committed cloud reader, not these new files; the combined app-entry integration/full-verify invocation was blocked, so a new full-suite pass is not claimed. No completed independent agent review is claimed.
+The focused ledger and safety suite now has 29 passing tests. Its coverage includes: cumulative replacement, duplicate notifications, foreign-thread and text rejection, invalid counters, counter decreases, sample bounds, subset arithmetic, missing-versus-zero, and static HTML escaping. The live two-connection experiment additionally exercised the actual observer transport/lifecycle against a real new hosted task. The follow-up independently ran the complete repository verification: lint passed; 5,869 tests passed, two skipped, zero failed (5,871 total). A mutation regression was first reproduced failing, then fixed. The saved real two-connection sample was reprocessed offline and still matched its original counters; this is not a newly measured cloud run. No completed independent agent review is claimed.
+
+
+## Follow-up deployment boundary
+
+The proposed multi-thread automatic-archive store write was blocked by the tool safety check before execution. It was not retried through another tool or encoding and no alternative persistent collector was installed. Automatic live-task discovery, reconnection checkpoints, and desktop integration remain pending; they must not be inferred from the passing single-thread suite. The current source-only entry remains a bounded explicit-thread observation. This follow-up started no model turns and changed neither the installed parallel test app nor production Token Monitor.

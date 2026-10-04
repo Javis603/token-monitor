@@ -68,3 +68,19 @@ test('HTML has no remote resources and escapes all external text', () => {
   const m = new CloudLiveMeter(tid); m.observe(message()); const r = m.report(); r.threadId = '<script>bad</script>'; r.testOnly = true;
   const html = renderCloudLiveHtml(r); assert.ok(!html.includes('<script>')); assert.ok(html.includes('&lt;script&gt;')); assert.ok(html.includes("default-src 'none'")); assert.ok(html.includes('隔离云端验证任务'));
 });
+
+
+test('callers cannot mutate retained engine counters through observe or report', () => {
+  const meter = new CloudLiveMeter(tid);
+  const delivered = meter.observe(message());
+  delivered.total.totalTokens = 999999;
+  delivered.last.inputTokens = 999999;
+  const first = meter.report();
+  first.total.inputTokens = 555555;
+  first.samples[0].total.totalTokens = 666666;
+  const next = meter.report();
+  assert.equal(next.total.inputTokens, 90);
+  assert.equal(next.total.totalTokens, 100);
+  assert.equal(next.lastRequest.inputTokens, 90);
+  assert.equal(next.samples[0].total.totalTokens, 100);
+});

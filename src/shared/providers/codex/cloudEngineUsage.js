@@ -18,10 +18,14 @@ class CloudEngineUsage extends CloudTransport {
       if (buffer && buffer.length <= MAX_BYTES) {
         let message;
         try { message = JSON.parse(buffer.toString('utf8')); } catch (_) {}
-        if (message) {
+        if (message && message.method === 'thread/tokenUsage/updated' && message.id === undefined && message.params?.threadId === this.target) {
+          // Verify ownership before persisting an event, not only when the
+          // observation window ends. Never attribute a switched login's data.
+          try { this.assertIdentity(); }
+          catch (_) { this.fail('LOGIN_CHANGED'); return; }
           const sample = this.meter.observe(message);
           if (sample && this.onSample) {
-            try { this.onSample(sample); } catch (_) { this.storageError = 'EVENT_PERSIST_FAILED'; }
+            try { this.onSample(sample); } catch (_) { this.storageError = 'EVENT_PERSIST_FAILED'; this.fail(this.storageError); }
           }
         }
       }
@@ -37,6 +41,7 @@ class CloudEngineUsage extends CloudTransport {
     let response = null; let observationFailure = null;
     try {
       await this.initialize();
+      if (signal?.aborted) throw error('OBSERVATION_ABORTED');
       // Viewer attachment may load environment/MCP state. It does not submit
       // input, change thread settings, or start a model turn. Cheap metadata
       // attachment intentionally stays distinct from unverified history replay.
