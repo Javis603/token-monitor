@@ -6190,7 +6190,7 @@ function regenerateTokscalePricing() {
 async function refreshAfterPricingChange() {
   try {
     if (ownsUsageRuntime()) {
-      await deviceRuntimeHandle.tick('manual', {});
+      await deviceRuntimeHandle.tick('manual', { forceHistory: true });
     }
   } catch (error) {
     console.warn(`[pricing] refresh after pricing change failed: ${error.message}`);

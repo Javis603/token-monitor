@@ -18,8 +18,8 @@ const THREAD_ID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 // the same Codex harness, so the rollout transcript under `~/.codex/sessions` is
 // shared, but T3 never writes the display title back to the Codex thread row.
 // The generated title lives only in T3's own store, joined to the Codex thread id
-// through its per-thread provider cursor, so a reader that only looks at the
-// Codex database sees the first user message and never T3's title.
+// through its native thread reference (or the legacy provider cursor), so a
+// Codex-only reader sees the first user message and never T3's title.
 const T3_DEFAULT_TITLES = new Set(['new thread', 'start a new conversation']);
 
 function cleanText(value) {
@@ -90,8 +90,8 @@ function discoverT3DbPaths(options = {}) {
     return [...new Set(options.t3DbPaths.map(String).filter(Boolean))];
   }
   const root = t3HomeDir(options);
-  return [...new Set([
-    path.join(root, 'userdata', 'state.sqlite'),
+  const stateDirs = [
+    path.join(root, 'userdata'),
     // A dev server keeps its state beside the base directory rather than in it.
     // T3 picks that state directory from two rules that can disagree on which
     // subdirectory applies: the desktop app uses `dev` when the run is a dev one
@@ -100,9 +100,13 @@ function discoverT3DbPaths(options = {}) {
     // explicit and lands under `dev/userdata`. Check both dev layouts; the
     // leading `userdata` path stays first because an installed app is the common
     // case and is the authoritative store when it exists.
-    path.join(root, 'dev', 'userdata', 'state.sqlite'),
-    path.join(root, 'dev', 'state.sqlite')
-  ])];
+    path.join(root, 'dev', 'userdata'),
+    path.join(root, 'dev')
+  ];
+  // V2 leaves the legacy database behind; its titles can be stale after migration.
+  return [...new Set(stateDirs.flatMap((dir) => [
+    path.join(dir, 'statev2.sqlite'), path.join(dir, 'state.sqlite')
+  ]))];
 }
 
 function versionedDbFiles(dir, deps = {}) {
@@ -240,17 +244,53 @@ function readSessionMetaForHome(sessionIds, homeDir, deps = {}) {
 }
 
 // The title T3 Code generated for a Codex thread, keyed by the Codex thread id.
-// T3 stores its own thread row (whose id is unrelated to Codex's) and joins it to
-// the Codex thread through the runtime cursor it resumes with, so the join is
-// cursor -> Codex thread id -> display title. T3's placeholder title for a
-// never-titled thread is not an answer.
+// T3's app thread id is unrelated to Codex's. V2 provider threads retain the
+// native id even after a provider switch; provider_session_id can be shared by
+// many conversations and must never be used as the Codex identity.
+function t3TitleQueries(db, tables) {
+  const queries = [];
+  const columnsFor = (table) => new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((column) => String(column.name)));
+  const v2Threads = 'orchestration_v2_projection_threads';
+  const v2Providers = 'orchestration_v2_projection_provider_threads';
+  if (tables.has(v2Threads) && tables.has(v2Providers)) {
+    const columns = columnsFor(v2Threads);
+    const providerColumns = columnsFor(v2Providers);
+    if (columns.has('title') && providerColumns.has('payload_json')
+      && (providerColumns.has('driver') || providerColumns.has('provider'))) {
+      const driver = providerColumns.has('driver')
+        ? (providerColumns.has('provider') ? 'COALESCE(r.driver, r.provider)' : 'r.driver')
+        : 'r.provider';
+      queries.push({
+        authoritative: true,
+        // One malformed payload must not hide every other title in the batch.
+        threadId: "(CASE WHEN json_valid(r.payload_json) THEN json_extract(r.payload_json, '$.nativeThreadRef.nativeId') END)",
+        from: `FROM ${v2Threads} t JOIN ${v2Providers} r ON r.thread_id = t.thread_id`,
+        // Tombstones still own the native id and suppress retained V1 titles.
+        deleted: columns.has('deleted_at') ? '(t.deleted_at IS NOT NULL)' : '0',
+        where: `${driver} = 'codex' AND `,
+        order: columns.has('updated_at') ? ' ORDER BY t.updated_at DESC, t.thread_id' : ''
+      });
+    }
+  }
+  if (tables.has('projection_threads') && tables.has('provider_session_runtime')) {
+    const columns = columnsFor('projection_threads');
+    const runtimeColumns = columnsFor('provider_session_runtime');
+    if (columns.has('title') && runtimeColumns.has('resume_cursor_json')) {
+      queries.push({
+        threadId: "(json_extract(r.resume_cursor_json, '$.threadId'))",
+        from: 'FROM projection_threads t JOIN provider_session_runtime r ON r.thread_id = t.thread_id',
+        where: `${columns.has('deleted_at') ? 't.deleted_at IS NULL AND ' : ''}${runtimeColumns.has('provider_name') ? "r.provider_name = 'codex' AND " : ''}`,
+        order: ''
+      });
+    }
+  }
+  return queries;
+}
+
 function readT3SessionMeta(sessionIds, deps = {}) {
   const ids = [...new Set(Array.from(sessionIds || []).map(String).filter(Boolean))];
   const out = new Map();
   if (ids.length === 0) return out;
-  // A parenthesized left-hand side keeps `FROM` on its own line for the
-  // schema-introspecting tests that expect a single select expression there.
-  const cursorThreadId = "(json_extract(r.resume_cursor_json, '$.threadId'))";
   const sqliteMod = resolveSqlite(deps);
   if (!sqliteMod) return out;
   // Most machines do not run T3 at all, and a full tick can carry thousands of
@@ -267,41 +307,45 @@ function readT3SessionMeta(sessionIds, deps = {}) {
   const candidatesBySession = new Map(ids.map((id) => [id, threadIdCandidates(id)]));
   const candidateIds = [...new Set([...candidatesBySession.values()].flat())];
   const titleByThreadId = new Map();
+  const v2SeenThreadIds = new Set();
+  const legacyTitles = new Map();
 
   for (const dbPath of dbPaths) {
     let db;
     try {
       db = openDb(dbPath, sqliteMod);
       const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => String(row.name)));
-      if (!tables.has('projection_threads') || !tables.has('provider_session_runtime')) continue;
-      const columns = new Set(db.prepare('PRAGMA table_info(projection_threads)').all().map((column) => String(column.name)));
-      if (!columns.has('title')) continue;
-      // Older T3 stores have no soft-delete column; absence of the column is
-      // not the same as a thread being deleted, so the filter is omitted.
-      const liveOnly = columns.has('deleted_at') ? 't.deleted_at IS NULL AND ' : '';
-      // T3 also drives other providers; only its Codex threads share id space
-      // with the sessions being resolved here.
-      const runtimeColumns = new Set(db.prepare('PRAGMA table_info(provider_session_runtime)').all().map((column) => String(column.name)));
-      const codexOnly = runtimeColumns.has('provider_name') ? "r.provider_name = 'codex' AND " : '';
-      for (let offset = 0; offset < candidateIds.length; offset += QUERY_CHUNK_SIZE) {
-        const chunk = candidateIds.slice(offset, offset + QUERY_CHUNK_SIZE).filter((id) => !titleByThreadId.has(id));
-        if (chunk.length === 0) continue;
-        const placeholders = chunk.map(() => '?').join(',');
-        const sql = `SELECT ${cursorThreadId} AS cursorThreadId, t.title AS title
-                     FROM projection_threads t
-                     JOIN provider_session_runtime r ON r.thread_id = t.thread_id
-                     WHERE ${liveOnly}${codexOnly}${cursorThreadId} IN (${placeholders})`;
-        for (const row of db.prepare(sql).all(...chunk)) {
-          const threadId = cleanText(row.cursorThreadId);
-          if (!threadId || titleByThreadId.has(threadId)) continue;
-          const title = cleanSessionTitle(row.title);
-          if (!title || T3_DEFAULT_TITLES.has(title.toLowerCase())) continue;
-          titleByThreadId.set(threadId, title);
+      for (const query of t3TitleQueries(db, tables)) {
+        for (let offset = 0; offset < candidateIds.length; offset += QUERY_CHUNK_SIZE) {
+          const chunk = candidateIds.slice(offset, offset + QUERY_CHUNK_SIZE).filter(
+            (id) => !v2SeenThreadIds.has(id) && (query.authoritative || !legacyTitles.has(id))
+          );
+          if (chunk.length === 0) continue;
+          const placeholders = chunk.map(() => '?').join(',');
+          const sql = `SELECT ${query.threadId} AS cursorThreadId, t.title AS title, ${query.deleted || '0'} AS deleted
+                       ${query.from}
+                       WHERE ${query.where}${query.threadId} IN (${placeholders})${query.order}`;
+          for (const row of db.prepare(sql).all(...chunk)) {
+            const threadId = cleanText(row.cursorThreadId);
+            if (!threadId || v2SeenThreadIds.has(threadId)) continue;
+            if (query.authoritative) {
+              v2SeenThreadIds.add(threadId);
+              if (row.deleted) continue;
+            } else if (legacyTitles.has(threadId)) continue;
+            const title = cleanSessionTitle(row.title);
+            if (!title || T3_DEFAULT_TITLES.has(title.toLowerCase())) continue;
+            (query.authoritative ? titleByThreadId : legacyTitles).set(threadId, title);
+          }
         }
       }
     } catch (_) { /* skip missing, locked, or incompatible databases */ } finally {
       if (db) { try { db.close(); } catch (_) {} }
     }
+  }
+  // A later V2 database also shadows an earlier legacy match. Delay fallback
+  // until every store has been checked, without keeping their connections open.
+  for (const [threadId, title] of legacyTitles) {
+    if (!v2SeenThreadIds.has(threadId)) titleByThreadId.set(threadId, title);
   }
   for (const [sessionId, candidates] of candidatesBySession) {
     const title = candidates.map((id) => titleByThreadId.get(id)).find(Boolean);

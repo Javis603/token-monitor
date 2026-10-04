@@ -51,6 +51,7 @@ const FX_SESSION_ID = 'fxsess-0001-aaaa-bbbb-ccccdddddddd';
 // fixture home is a fresh temp dir, so their sessions are matched by pattern.
 const PROMA_SESSION_ID = /^proma:tm-contract@[0-9a-f]{12}$/;
 const QODER_CN_SESSION_ID = /^qodercn:qodercn:jsonl:[0-9a-f]{12}:qsess-1$/;
+const MCODE_SESSION_ID = 'mvs_0123456789abcdef0123456789abcdef';
 // Every Tokscale-parsed client added after the legacy baseline in
 // tests/shared/tokscaleTokenContracts.test.js needs a case here. That test
 // makes a new catalog id fail locally until its real binary output and Token
@@ -210,6 +211,59 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
         }
       })}\n`);
     }
+  },
+  {
+    // The fork's `mcode` supplement (crates/tokscale-core/src/token_monitor/
+    // mcode.rs) reads MiniMax Code's runtime store. Pi usage keeps cache reads
+    // out of `input`, and a message retained across compaction appears in both
+    // the snapshot and the active history but is counted once.
+    client: 'mcode',
+    expectedRow: { model: 'minimax-m2.5', input: 1500, output: 60, cacheRead: 700, cacheWrite: 30, reasoning: 0 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 2290, clientTokens: 2290, clientOutputTokens: 60 },
+    expectedSession: { id: MCODE_SESSION_ID, totalTokens: 2290, outputTokens: 60, reasoningTokens: 0 },
+    writeFixture(home) {
+      const dir = path.join(home, '.minimax', 'v2', 'sessions', '2026', '09', '18', '10-00-00-000-session_tm-contract');
+      fs.mkdirSync(path.join(dir, 'snapshots'), { recursive: true });
+      fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
+        schemaVersion: 1,
+        sessionId: MCODE_SESSION_ID,
+        createdAtMs: 1789725600000
+      }));
+      const assistant = (messageId, turnId, timestamp, usage) => JSON.stringify({
+        message_id: messageId,
+        turn_id: turnId,
+        message: {
+          role: 'assistant',
+          api: 'openai-completions',
+          provider: 'minimax',
+          model: 'MiniMax-M2.5',
+          usage: { ...usage, totalTokens: 0, cost: { total: 0 } },
+          timestamp
+        }
+      });
+      const first = assistant('msg-a', 'turn-1', 1789725601000, { input: 1000, output: 40, cacheRead: 300, cacheWrite: 30 });
+      const second = assistant('msg-b', 'turn-2', 1789725602000, { input: 500, output: 20, cacheRead: 400, cacheWrite: 0 });
+      fs.writeFileSync(path.join(dir, 'snapshots', 'g000000000000--compact-1.jsonl'), `${first}\n`);
+      fs.writeFileSync(path.join(dir, 'messages.jsonl'), `${first}\n${second}\n`);
+      // turn-1 was also run through `tokscale headless mcode exec`, so
+      // upstream's lane counts it from the capture and the store must not.
+      const capture = path.join(home, '.config', 'tokscale', 'headless', 'mcode');
+      fs.mkdirSync(capture, { recursive: true });
+      fs.writeFileSync(path.join(capture, 'tm-contract.jsonl'), `${JSON.stringify({
+        schemaVersion: 1,
+        timestampMs: 1789725601000,
+        sessionId: MCODE_SESSION_ID,
+        turnId: 'turn-1',
+        type: 'exec.completed',
+        result: {
+          type: 'exec.result',
+          status: 'succeeded',
+          model: { providerId: 'minimax', modelId: 'MiniMax-M2.5' },
+          usage: { inputTokens: 1000, outputTokens: 40, cacheReadTokens: 300, cacheWriteTokens: 30, totalTokens: 1040 }
+        }
+      })}\n`);
+    }
   }
 ]);
 
@@ -290,10 +344,12 @@ function hermeticEnv(home) {
   // Scan-path overrides that must not leak in from the runner/dev shell —
   // DSH_HOME in particular would otherwise redirect the scan away from the
   // fixture entirely, since DSH resolves it ahead of `~/.dsh`. The Qoder CN
-  // overrides would do the same for the fork-only qodercn client.
+  // overrides would do the same for the fork-only qodercn client, and the
+  // MiniMax data-directory overrides for the fork's mcode supplement.
   for (const key of [
     'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'DSH_HOME',
-    'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR'
+    'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
+    'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR'
   ]) {
     delete env[key];
   }

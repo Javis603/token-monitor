@@ -16019,6 +16019,8 @@ function customPricingMeta(ov) {
   if (typeof ov.cacheReadPerM === 'number') parts.push(`${t('settings.customPricing.cacheRead')} $${ov.cacheReadPerM}`);
   if (typeof ov.inputPerM === 'number') parts.push(`${t('settings.customPricing.input')} $${ov.inputPerM}`);
   if (typeof ov.outputPerM === 'number') parts.push(`${t('settings.customPricing.output')} $${ov.outputPerM}`);
+  if (typeof ov.cacheWritePerM === 'number') parts.push(`${t('settings.customPricing.cacheWrite')} $${ov.cacheWritePerM}`);
+  if (typeof ov.cacheWrite1hPerM === 'number') parts.push(`${t('settings.customPricing.cacheWrite1h')} $${ov.cacheWrite1hPerM}`);
   return parts.length ? `${parts.join(' · ')} / 1M` : '';
 }
 
@@ -16083,6 +16085,17 @@ function setupCustomPricingUI() {
   const inputEl = document.getElementById('customPricingInput');
   const outputEl = document.getElementById('customPricingOutput');
   const cacheReadEl = document.getElementById('customPricingCacheRead');
+  const cacheWriteEl = document.getElementById('customPricingCacheWrite');
+  const cacheWrite1hEl = document.getElementById('customPricingCacheWrite1h');
+  const advanced = document.getElementById('customPricingAdvanced');
+  const advancedSummary = document.getElementById('customPricingAdvancedSummary');
+  const help = document.getElementById('customPricingHelp');
+  const rateFields = [
+    [inputEl, 'inputPerM'], [outputEl, 'outputPerM'], [cacheReadEl, 'cacheReadPerM'],
+    [cacheWriteEl, 'cacheWritePerM'], [cacheWrite1hEl, 'cacheWrite1hPerM']
+  ];
+  let lookupRevision = 0;
+  const editedFields = new Set();
   const hintEl = document.getElementById('customPricingHint');
   const errorEl = document.getElementById('customPricingError');
   const saveButton = document.getElementById('customPricingSaveButton');
@@ -16094,10 +16107,15 @@ function setupCustomPricingUI() {
   const selectedModelId = () => (select.value === '__manual__' ? manualInput.value.trim() : select.value);
 
   const resetForm = () => {
-    inputEl.value = ''; outputEl.value = ''; cacheReadEl.value = '';
+    lookupRevision += 1;
+    editedFields.clear();
+    advanced.open = false;
+    if (help.matches(':popover-open')) help.hidePopover();
+    for (const [el] of rateFields) el.value = '';
+    updateAdvancedSummary();
     manualInput.value = ''; manualInput.classList.add('hidden');
-    for (const id of ['customPricingInputApprox', 'customPricingOutputApprox', 'customPricingCacheReadApprox']) {
-      const span = document.getElementById(id);
+    for (const [el] of rateFields) {
+      const span = document.getElementById(el.id + 'Approx');
       if (span) span.textContent = '';
     }
     showHint(''); showError('');
@@ -16139,10 +16157,11 @@ function setupCustomPricingUI() {
         manualInput.classList.remove('hidden');
         manualInput.value = prefill.modelId;
       }
-      inputEl.value = prefill.inputPerM ?? '';
-      outputEl.value = prefill.outputPerM ?? '';
-      cacheReadEl.value = prefill.cacheReadPerM ?? '';
-      for (const el of [inputEl, outputEl, cacheReadEl]) el.dispatchEvent(new Event('input'));
+      for (const [el, key] of rateFields) {
+        el.value = prefill[key] ?? '';
+        updateApproximation(el);
+      }
+      advanced.open = cacheWriteEl.value !== '' || cacheWrite1hEl.value !== '';
     }
     form.classList.remove('hidden');
     addButton.classList.add('hidden');
@@ -16152,6 +16171,10 @@ function setupCustomPricingUI() {
   cancelButton.addEventListener('click', closeForm);
 
   select.addEventListener('change', async () => {
+    const revision = ++lookupRevision;
+    editedFields.clear();
+    advanced.open = false;
+    for (const [el] of rateFields) { el.value = ''; updateApproximation(el); }
     showError('');
     manualInput.classList.toggle('hidden', select.value !== '__manual__');
     if (!select.value || select.value === '__manual__') { showHint(''); return; }
@@ -16159,27 +16182,42 @@ function setupCustomPricingUI() {
     showHint(t('settings.customPricing.lookingUp'));
     try {
       const res = await window.tokenMonitor.lookupModelPricing(id);
+      if (revision !== lookupRevision) return;
       if (res?.ok && res.result?.pricing) {
         const p = customPricingFormApi.perMillionFromPricing(res.result);
-        if (p.inputPerM !== undefined) inputEl.value = p.inputPerM;
-        if (p.outputPerM !== undefined) outputEl.value = p.outputPerM;
-        if (p.cacheReadPerM !== undefined) cacheReadEl.value = p.cacheReadPerM;
-        for (const el of [inputEl, outputEl, cacheReadEl]) el.dispatchEvent(new Event('input'));
+        for (const [el, key] of rateFields) {
+          if (!editedFields.has(key)) el.value = p[key] ?? '';
+          updateApproximation(el);
+        }
         showHint(t('settings.customPricing.currentPrice', { key: res.result.matchedKey || id, source: res.result.source || '' }));
       } else {
         showHint(t('settings.customPricing.noCurrentPrice'));
       }
     } catch (_) {
+      if (revision !== lookupRevision) return;
       showHint(t('settings.customPricing.noCurrentPrice'));
     }
   });
 
-  for (const el of [inputEl, outputEl, cacheReadEl]) {
+  function updateAdvancedSummary() {
+    const count = [cacheWriteEl, cacheWrite1hEl].filter(el => el.value !== '').length;
+    advancedSummary.textContent = count ? t('settings.customPricing.advancedConfigured', { count }) : '';
+  }
+
+  function updateApproximation(el) {
+    updateAdvancedSummary();
+    const span = document.getElementById(el.id + 'Approx');
+    if (!span) return;
+    const v = Number(el.value);
+    span.textContent = (el.value !== '' && Number.isFinite(v)) ? `≈ ${formatCost(v)} / 1M` : '';
+  }
+
+  for (const [el, key] of rateFields) {
+    const writeDescription = el === cacheWrite1hEl ? ' customPricingWriteNote' : '';
+    el.setAttribute('aria-describedby', 'customPricingRateUnits customPricingCoverageNote customPricingHint customPricingError' + writeDescription);
     el.addEventListener('input', () => {
-      const span = document.getElementById(el.id + 'Approx');
-      if (!span) return;
-      const v = Number(el.value);
-      span.textContent = (el.value !== '' && Number.isFinite(v)) ? `≈ ${formatCost(v)} / 1M` : '';
+      editedFields.add(key);
+      updateApproximation(el);
     });
   }
 
@@ -16187,17 +16225,24 @@ function setupCustomPricingUI() {
     showError('');
     const modelId = selectedModelId();
     if (!modelId) { showError(t('settings.customPricing.errorNoModel')); return; }
-    const entry = {
-      modelId,
-      inputPerM: inputEl.value === '' ? undefined : Number(inputEl.value),
-      outputPerM: outputEl.value === '' ? undefined : Number(outputEl.value),
-      cacheReadPerM: cacheReadEl.value === '' ? undefined : Number(cacheReadEl.value)
-    };
-    if (!customPricingFormApi.hasUsableBasePrice(entry)) { showError(t('settings.customPricing.errorNoPrice')); return; }
+    const entry = { modelId };
+    for (const [el, key] of rateFields) entry[key] = el.value === '' ? undefined : Number(el.value);
+    if (!customPricingFormApi.hasUsableBasePrice(entry)) {
+      if ([entry.cacheWritePerM, entry.cacheWrite1hPerM].some(value => value !== undefined && (!Number.isFinite(value) || value < 0))) advanced.open = true;
+      showError(t('settings.customPricing.errorNoPrice'));
+      return;
+    }
     const next = customPricingFormApi.upsertOverride(state.settings?.customModelPricing || [], entry);
-    await saveSettings({ customModelPricing: next });
-    closeForm();
-    renderCustomPricing();
+    saveButton.disabled = true;
+    try {
+      await saveSettings({ customModelPricing: next });
+      closeForm();
+      renderCustomPricing();
+    } catch (_) {
+      showError(t('settings.customPricing.saveFailed'));
+    } finally {
+      saveButton.disabled = false;
+    }
   });
 
   renderCustomPricing();
