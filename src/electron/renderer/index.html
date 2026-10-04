@@ -1602,12 +1602,14 @@
       <p id="syncContentCounts"></p>
       <p id="syncContentNoShared" class="settings-note" data-i18n="settings.sync.content.noShared" hidden>No shared settings yet. Use server settings to wait for a future shared edit, or publish this device's settings.</p>
       <p id="syncContentDialogStatus" class="settings-note error" role="status" aria-live="polite" hidden></p>
+      <div id="syncContentSourceChoices" class="sync-content-source-choices" hidden>
+        <button id="syncContentUseServer" type="button" data-i18n="settings.sync.content.useServer">Use server settings</button>
+        <button id="syncContentPublish" type="button" data-i18n="settings.sync.content.publish">Publish this device's settings</button>
+      </div>
       <div class="settings-actions">
         <button id="syncContentCancel" type="button" data-i18n="settings.common.cancel" autofocus>Cancel</button>
         <button id="syncContentDialogRetry" type="button" data-i18n="settings.sync.content.retry" hidden>Reload sync status</button>
         <button id="syncContentConfirm" class="sync-content-primary" type="button" data-i18n="settings.sync.content.enableTitles">Enable title sync</button>
-        <button id="syncContentUseServer" type="button" data-i18n="settings.sync.content.useServer">Use server settings</button>
-        <button id="syncContentPublish" type="button" data-i18n="settings.sync.content.publish">Publish this device's settings</button>
       </div>
     </dialog>
     <button id="floatingBubbleTab" class="floating-bubble-tab" type="button" title="Show Token Monitor" aria-label="Show Token Monitor" data-i18n-title="floatingBubble.expand" data-i18n-aria-label="floatingBubble.expand">

@@ -115,6 +115,7 @@ for (const cancel of ['Cancel', 'escape']) test(`title consent supports ${cancel
   await f.form.refresh();
   await f.get('sessionTitles').change(true);
   assert.equal(f.get('Dialog').open, true);
+  assert.equal(f.get('SourceChoices').hidden, true);
   assert.equal(f.document.activeElement, f.get('Cancel'));
   assert.equal(f.get('sessionTitles').checked, false);
   assert.match(f.get('DialogCopy').textContent, /hub\.example:17321/);

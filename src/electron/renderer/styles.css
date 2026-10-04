@@ -1749,6 +1749,8 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .sync-content-dialog > strong { display: block; font-size: 12px; }
 .sync-content-dialog p { overflow-wrap: anywhere; }
 .sync-content-dialog .settings-actions { flex-wrap: wrap; gap: 6px; }
+.sync-content-source-choices { display: grid; gap: 6px; margin: 14px 0 10px; }
+.sync-content-source-choices > button { width: 100%; min-width: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; font: inherit; }
 .sync-content-dialog button { min-height: 30px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: rgba(var(--overlay-rgb), var(--control-alpha)); color: var(--text); cursor: pointer; }
 .sync-content-dialog button:hover { background: rgba(var(--overlay-rgb), 0.12); }
 .sync-content-dialog #syncContentCancel { background: transparent; color: var(--muted); }

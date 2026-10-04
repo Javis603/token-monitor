@@ -130,6 +130,7 @@
       el('Counts').hidden = titles;
       el('Counts').textContent = titles ? '' : text('counts', { local: preview.localCount, server: preview.serverCount });
       el('NoShared').hidden = titles || preview.hasServerValue;
+      el('SourceChoices').hidden = titles;
       el('Confirm').hidden = !titles;
       el('UseServer').hidden = titles;
       el('Publish').hidden = titles;
