@@ -778,8 +778,11 @@ function setupDashboard() {
     heatEl.innerHTML = heatmapSvg();
   }
   renderHeatmap();
-  window.addEventListener("token-monitor-languagechange", renderHeatmap);
   renderChart();
+  /* Both draw locale-dependent labels — the heatmap months and the chart axis through
+     xLabel — so both have to follow the language change applyLanguage() announces. */
+  window.addEventListener("token-monitor-languagechange", renderHeatmap);
+  window.addEventListener("token-monitor-languagechange", renderChart);
 
   function wireSeg(seg, attr, apply) {
     if (!seg) return;
