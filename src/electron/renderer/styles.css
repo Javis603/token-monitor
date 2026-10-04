@@ -1719,7 +1719,7 @@ span.settings-note.settings-item-desc {
 .settings-panel .sync-content-options .sync-content-option { flex-wrap: nowrap; align-items: center; min-height: 44px; padding: 8px 0; box-sizing: border-box; }
 .sync-content-options > .sync-content-option ~ .sync-content-option { border-top: 1px solid rgba(var(--line-rgb), 0.06); }
 .sync-content-option .settings-item-text { flex: 1 1 0; gap: 3px; }
-.sync-content-option:has(> input:disabled) .settings-item-text { opacity: 0.5; }
+.sync-content-option:has(> input:disabled) .settings-item-title { color: var(--muted); }
 .sync-content-notice { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 6px; background: rgba(var(--overlay-rgb), 0.04); }
 .sync-content-notice > .settings-note { flex: 1 1 0; min-width: 0; }
 .settings-panel button.sync-content-retry { flex: 0 0 auto; margin: 0; padding: 0; min-height: 0; border: 0; border-radius: 2px; background: transparent; color: var(--accent); font: inherit; font-size: 10px; line-height: 1.45; cursor: pointer; }

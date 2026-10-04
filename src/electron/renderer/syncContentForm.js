@@ -60,6 +60,7 @@
           || (kind === 'sessionTitles' && (!status.serverTitlesEnabled || status.pendingTitleCleanup))));
       }
       el('TitleUnavailable').hidden = !shared || !status || status.serverTitlesEnabled || !status.supported;
+      el('TitleNote').hidden = !el('TitleUnavailable').hidden;
       el('Cleanup').hidden = !status?.pendingTitleCleanup;
       el('CleanupRetry').disabled = busy || !available();
       const issue = message || (shared && (!status || status.error) ? (status ? errorKey(status.error) : 'checking') : '');

@@ -96,11 +96,14 @@ test('all optional checkboxes default off and stay disabled until a supported st
   f.push(status({ serverTitlesEnabled: false }));
   assert.equal(f.get('sessionTitles').disabled, true);
   assert.equal(f.get('TitleUnavailable').hidden, false);
+  assert.equal(f.get('TitleNote').hidden, true);
   f.push(status({ supported: false, error: 'unsupported' }));
   assert.equal(f.get('modelAliases').disabled, true);
   assert.match(f.get('Status').textContent, /Update the server/);
   assert.equal(f.get('Retry').hidden, false);
   assert.equal(f.get('Notice').hidden, false);
+  assert.equal(f.get('TitleUnavailable').hidden, true);
+  assert.equal(f.get('TitleNote').hidden, false);
 });
 
 for (const cancel of ['Cancel', 'escape']) test(`title consent supports ${cancel}, focus and a fresh destination without saving`, async () => {
