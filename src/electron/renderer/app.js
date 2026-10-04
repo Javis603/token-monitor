@@ -16003,6 +16003,10 @@ function setupModelAliasesUI() {
     document, t,
     getAliases: () => state.settings?.modelAliases || {},
     getGrouping: () => state.settings?.modelAliasGrouping || 'off',
+    getModelIds: () => [
+      ...customPricingFormApi.inUseModelIds(state.stats),
+      ...(state.settings?.customModelPricing || []).map(entry => entry.modelId)
+    ],
     saveAliases: (modelAliases) => saveSettings({ modelAliases })
   });
   for (const input of document.querySelectorAll('input[name="modelAliasGrouping"]')) {

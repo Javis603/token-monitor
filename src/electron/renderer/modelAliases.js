@@ -155,20 +155,36 @@
   }
 
   function upsertModelAlias(value, source, target, previousSource) {
-    if (typeof source !== 'string' || typeof target !== 'string') return null;
-    const alias = source.trim();
-    const canonical = target.trim();
-    if (!validPair(alias, canonical)) return null;
+    return upsertModelAliasBatch(value, [source], target, previousSource);
+  }
 
-    const aliasKey = matchKey(alias);
+  function modelAliasChoices(modelIds, value) {
+    const entries = Object.entries(normalizeModelAliases(value));
+    return discoveredModelIds([...(Array.isArray(modelIds) ? modelIds : []), ...entries.flat()]).sort();
+  }
+
+  function upsertModelAliasBatch(value, sources, target, previousSource) {
+    if (!Array.isArray(sources) || !sources.length || sources.length > MAX_ALIASES || typeof target !== 'string') return null;
+    const canonical = target.trim();
+    const replacements = [];
+    const sourceKeys = new Set();
+    for (const source of sources) {
+      if (typeof source !== 'string') return null;
+      const alias = source.trim();
+      const key = matchKey(alias);
+      if (!validPair(alias, canonical) || sourceKeys.has(key)) return null;
+      sourceKeys.add(key);
+      replacements.push([alias, canonical]);
+    }
+
     const previousKey = matchKey(previousSource);
     const entries = Object.entries(normalizeModelAliases(value))
       .filter(([key]) => {
         const normalized = matchKey(key);
-        return normalized !== aliasKey && (!previousKey || normalized !== previousKey);
+        return !sourceKeys.has(normalized) && (!previousKey || normalized !== previousKey);
       });
-    if (entries.length >= MAX_ALIASES) return null;
-    return Object.fromEntries([...entries, [alias, canonical]]);
+    if (entries.length + replacements.length > MAX_ALIASES) return null;
+    return Object.fromEntries([...entries, ...replacements]);
   }
 
   return {
@@ -176,6 +192,8 @@
     normalizeModelAliasGrouping,
     inferModelAliases,
     createModelAliasResolver,
-    upsertModelAlias
+    upsertModelAlias,
+    upsertModelAliasBatch,
+    modelAliasChoices
   };
 });

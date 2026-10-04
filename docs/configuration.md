@@ -28,6 +28,12 @@ iCloud Drive sync is available only to the macOS widget. It stores per-device us
 
 The `⇧` button in the title bar cycles the window behavior.
 
+### Model aliases
+
+Under **Collection → Model aliases**, select an existing model ID for the alias and its **Group as** target, or choose **Other** to type an ID. Choices include the original IDs from usage, saved aliases and their targets, and models with custom pricing. **Add another alias** adds more IDs to the same target; **Save** validates and saves the whole form. Each saved alias can still be edited or removed independently.
+
+Aliases group displayed usage; custom pricing continues to use the original reported IDs. To change a model's cost, set its price under **Custom model pricing**.
+
 ---
 
 ## Headless agent & hub (`.env`)

@@ -6,10 +6,88 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorModelAliasForm = api;
 })(typeof window !== 'undefined' ? window : null, function createModelAliasFormApi(aliasesApi) {
-  function createModelAliasForm({ document, t, getAliases, getGrouping, saveAliases }) {
+  function createModelAliasForm({ document, t, getAliases, getGrouping, getModelIds = () => [], saveAliases }) {
     const el = (suffix) => document.getElementById(`modelAliases${suffix}`);
     let editingAlias;
     let busy = false;
+    const extraSources = [];
+    const choices = () => aliasesApi.modelAliasChoices(getModelIds(), getAliases());
+    function picker(select, input, label) {
+      select.setAttribute('aria-label', t(label));
+      input.setAttribute('aria-label', t(label));
+      let optionsKey;
+      const currentOptionsKey = () => JSON.stringify([choices(), t('settings.customPricing.selectModel'), t('settings.customPricing.manualEntry'), t(label)]);
+      const value = () => select.value === '__manual__' ? input.value : select.value.slice(6);
+      function populate(id, manual = false) {
+        select.setAttribute('aria-label', t(label));
+        input.setAttribute('aria-label', t(label));
+        const ids = choices();
+        optionsKey = currentOptionsKey();
+        select.replaceChildren();
+        const option = (key, text) => {
+          const opt = document.createElement('option');
+          opt.value = key;
+          opt.textContent = text;
+          select.append(opt);
+        };
+        option('', t('settings.customPricing.selectModel'));
+        for (const model of ids) option(`model:${model}`, model);
+        option('__manual__', t('settings.customPricing.manualEntry'));
+        select.value = manual || (id && !ids.includes(id)) ? '__manual__' : id ? `model:${id}` : '';
+        input.value = id;
+        input.classList.toggle('hidden', select.value !== '__manual__');
+      }
+      select.addEventListener('change', () => {
+        input.classList.toggle('hidden', select.value !== '__manual__');
+        if (select.value === '__manual__') input.focus();
+        error('');
+      });
+      return {
+        value, populate, select, input,
+        refresh: () => {
+          if (optionsKey === currentOptionsKey()) return;
+          const draft = input.value;
+          const manual = select.value === '__manual__';
+          populate(value(), manual);
+          if (manual || select.value !== '__manual__') input.value = draft;
+        },
+        focus: () => (select.value === '__manual__' ? input : select).focus()
+      };
+    }
+    const aliasPicker = picker(el('AliasSelect'), el('AliasInput'), 'settings.modelAliases.alias');
+    const canonicalPicker = picker(el('CanonicalSelect'), el('CanonicalInput'), 'settings.modelAliases.canonical');
+    const allPickers = () => [aliasPicker, ...extraSources.map(source => source.picker), canonicalPicker];
+    function addSource() {
+      if (busy) return;
+      const row = document.createElement('div');
+      row.className = 'model-alias-source';
+      const label = document.createElement('label');
+      const title = document.createElement('span');
+      title.textContent = t('settings.modelAliases.alias');
+      title.setAttribute('data-i18n', 'settings.modelAliases.alias');
+      const select = document.createElement('select');
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.maxLength = 256;
+      input.spellcheck = false;
+      input.placeholder = el('AliasInput').placeholder;
+      label.append(title, select, input);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = t('settings.modelAliases.remove');
+      const source = { row, picker: picker(select, input, 'settings.modelAliases.alias'), remove };
+      remove.addEventListener('click', () => {
+        if (busy) return;
+        extraSources.splice(extraSources.indexOf(source), 1);
+        row.remove();
+        el('AddSourceButton').focus();
+      });
+      row.append(label, remove);
+      extraSources.push(source);
+      el('MoreSources').append(row);
+      source.picker.populate('');
+      source.picker.focus();
+    }
     const error = (key) => {
       el('Error').textContent = key ? t(key) : '';
       el('Error').classList.toggle('hidden', !key);
@@ -22,16 +100,21 @@
     const open = (alias = '', canonical = '') => {
       if (busy) return;
       editingAlias = alias || undefined;
-      el('AliasInput').value = alias;
-      el('CanonicalInput').value = canonical;
+      extraSources.length = 0;
+      el('MoreSources').replaceChildren();
+      aliasPicker.populate(alias);
+      canonicalPicker.populate(canonical);
       el('Form').classList.remove('hidden');
       error('');
-      el('AliasInput').focus();
+      aliasPicker.focus();
     };
     async function persist(next) {
       if (busy) return;
       busy = true;
-      el('SaveButton').disabled = true;
+      for (const field of allPickers()) { field.select.disabled = true; field.input.disabled = true; }
+      for (const source of extraSources) source.remove.disabled = true;
+      for (const suffix of ['SaveButton', 'CancelButton', 'AddSourceButton']) el(suffix).disabled = true;
+      render();
       error('');
       try {
         await saveAliases(next);
@@ -40,11 +123,16 @@
         error('settings.modelAliases.saveError');
       } finally {
         busy = false;
-        el('SaveButton').disabled = false;
+        for (const field of allPickers()) { field.select.disabled = false; field.input.disabled = false; }
+        for (const source of extraSources) source.remove.disabled = false;
+        for (const suffix of ['SaveButton', 'CancelButton', 'AddSourceButton']) el(suffix).disabled = false;
         render();
       }
     }
     function render() {
+      if (!busy && !el('Form').classList.contains('hidden')) {
+        for (const field of allPickers()) field.refresh();
+      }
       const entries = Object.entries(aliasesApi.normalizeModelAliases(getAliases()));
       // The pill names the grouping mode rather than claiming "automatic", which read
       // as active even with grouping off and no aliases — the default state.
@@ -60,6 +148,7 @@
         edit.type = 'button';
         edit.className = 'managed-account-main custom-pricing-edit';
         edit.title = t('settings.modelAliases.edit');
+        edit.disabled = busy;
         const name = document.createElement('div');
         name.className = 'managed-account-email';
         name.textContent = alias;
@@ -79,10 +168,12 @@
       }
     }
     el('AddButton').addEventListener('click', () => open());
+    el('AddSourceButton').addEventListener('click', addSource);
     el('CancelButton').addEventListener('click', () => { if (!busy) close(); });
     el('SaveButton').addEventListener('click', async () => {
       if (busy) return;
-      const next = aliasesApi.upsertModelAlias(getAliases(), el('AliasInput').value, el('CanonicalInput').value, editingAlias);
+      const sources = [aliasPicker, ...extraSources.map(source => source.picker)].map(field => field.value());
+      const next = aliasesApi.upsertModelAliasBatch(getAliases(), sources, canonicalPicker.value(), editingAlias);
       if (!next) { error('settings.modelAliases.invalid'); return; }
       await persist(next);
     });
