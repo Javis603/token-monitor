@@ -13,6 +13,7 @@ Usage: npm run codex:usage -- [options]
   --no-local        Import only; never open local Codex databases
   --json            Emit machine-readable JSON
   --output FILE     Create an export (refuses to overwrite an existing file)
+  --cloud           Read hosted cloud thread/turn usage (separate source)
   --help            Show this help
 Cloud/dot automatic account-wide fetching is not implemented.
 See docs/codex-task-usage.md for event and manifest contracts.\n`;
@@ -34,6 +35,10 @@ function formatReport(report) {
 }
 
 async function main(args = process.argv.slice(2)) {
+  if (args.includes('--cloud')) {
+    if (args.includes('--live')) throw Object.assign(new Error('Choose a single usage source'), { code: 'CONFLICTING_SOURCE' });
+    return require('./codex-cloud-usage').main(args.filter((arg) => arg !== '--cloud'));
+  }
   if (args.includes('--live')) {
     return require('./codex-live-usage').main(args.filter((arg) => arg !== '--live'));
   }

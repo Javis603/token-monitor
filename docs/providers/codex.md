@@ -33,6 +33,10 @@ The fork's opt-in `npm run codex:usage` command uses `taskUsage.js` and `taskUsa
 
 `usageRpc.js`, `usageSync.js` and `usageView.js` power `codex:usage -- --live` and `codex:usage:live`. This separate read-only account/thread view does not change the existing collector or local period totals. Explicit roots use bounded ancestry queries; unavailable mappings, child counters and account continuity remain explicit gaps. Thread service estimates never enter the reported-token ledger. See [live usage, provenance and acceptance boundaries](../codex-live-usage.md).
 
+## Hosted cloud turns and allowance
+
+The `--cloud` source uses `cloudTransport.js`, `cloudUsage.js` and `cloudView.js` to read hosted history and query exact thread/turn estimates. It does not route cloud IDs through the local app-server or add overlapping local/account totals. A forbidden token query preserves unknown token values while independently available quota percentages remain separate. PlanMeter provenance, MIT license, bounded discovery, account isolation and real-account findings are in [hosted cloud usage](../codex-cloud-turn-usage.md).
+
 ## Limits sources
 
 The live account normally reads the ChatGPT/Codex backend with the current `auth.json`. The configured `chatgpt_base_url` selects the matching backend path family. The app-server RPC path is a fallback, not an interchangeable authority.

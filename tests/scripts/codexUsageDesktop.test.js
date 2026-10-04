@@ -64,3 +64,12 @@ test('installer refuses the production app name before writing', { skip: process
   const r = spawnSync('python3', [installer, '--destination', dest, '--apply'], { encoding: 'utf8' });
   assert.notEqual(r.status, 0); assert.equal(fs.existsSync(dest), false);
 });
+
+
+test('cloud desktop entry requires explicit cloud roots and cannot mix local mode', async (t) => {
+  let spawned = false;
+  const deps = { dataRoot: temp(t), spawn: () => { spawned = true; } };
+  await assert.rejects(launch(['--cloud', '--headless'], deps), /CLOUD_REQUIRES_EXPLICIT_THREAD/);
+  await assert.rejects(launch(['--cloud', '--local', '--thread', 'root'], deps), /CLOUD_REQUIRES_EXPLICIT_THREAD/);
+  assert.equal(spawned, false);
+});

@@ -35,7 +35,8 @@
     "verify": "npm run lint && npm test",
     "codex:usage": "node scripts/codex-task-usage.js",
     "codex:usage:live": "node scripts/codex-live-usage.js",
-    "codex:usage:deploy": "python3 scripts/deploy-codex-usage-test.py"
+    "codex:usage:deploy": "python3 scripts/deploy-codex-usage-test.py",
+    "codex:usage:cloud": "node scripts/codex-cloud-usage.js"
   },
   "build": {
     "appId": "com.javis.tokenmonitor",

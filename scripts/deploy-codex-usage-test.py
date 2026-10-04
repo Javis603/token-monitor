@@ -26,6 +26,8 @@ def dependencies(repo):
         for module in re.findall(r'''require\(['"]([^'"]+)['"]\)''', file.read_text()):
             if module.startswith('node:'):
                 continue
+            if module == 'undici':
+                continue  # Existing pinned runtime is verified and copied below.
             if not module.startswith('.'):
                 raise ValueError('Non-builtin dependency: ' + module)
             candidate = (file.parent / module).resolve()
@@ -35,6 +37,19 @@ def dependencies(repo):
                 raise ValueError('Unresolved dependency: ' + module)
             pending.append(target)
     return sorted(files)
+
+
+def runtime_files(repo):
+    root = repo / 'node_modules/undici'
+    package = json.loads((root / 'package.json').read_text())
+    if package.get('name') != 'undici' or package.get('dependencies'):
+        raise ValueError('Unexpected undici runtime dependency graph')
+    if not (root / 'LICENSE').is_file():
+        raise ValueError('Missing undici license')
+    files = sorted(p for p in root.rglob('*') if p.is_file())
+    if any(p.is_symlink() for p in files):
+        raise ValueError('Symlink runtime dependency is not bundled')
+    return files
 
 
 def install(repo, destination, node, thread_ids=()):
@@ -48,7 +63,7 @@ def install(repo, destination, node, thread_ids=()):
         raise ValueError('Node executable is unavailable')
     if any(not re.fullmatch(r'[A-Za-z0-9_.:-]{1,200}', t) for t in thread_ids):
         raise ValueError('Invalid thread identifier')
-    source = dependencies(repo)
+    source = dependencies(repo) + runtime_files(repo) + [repo / 'docs/licenses/planmeter.txt']
     commit = subprocess.check_output(['git', '-C', str(repo), 'rev-parse', 'HEAD'], text=True).strip()
     dirty = bool(subprocess.check_output(['git', '-C', str(repo), 'status', '--porcelain'], text=True).strip())
     data = Path.home() / 'Library/Application Support/Token Monitor Usage Test'
