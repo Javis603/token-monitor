@@ -17,7 +17,7 @@ function missing(args) {
   return { found: false, client: args.client, sessionId: args.sessionId, exchanges: [] };
 }
 
-for (const client of ['codex', 'claude']) {
+for (const client of ['codex', 'claude', 'codebuddy', 'workbuddy']) {
   test(`${client} continues WSL fallback when a resolved native or WSL file disappears`, async (t) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-detail-race-'));
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -26,13 +26,15 @@ for (const client of ['codex', 'claude']) {
     const files = homes.map(home => {
       const dir = client === 'codex'
         ? path.join(home, '.codex', 'sessions')
-        : path.join(home, '.claude', 'projects', 'test');
+        : path.join(home, `.${client}`, 'projects', 'test');
       fs.mkdirSync(dir, { recursive: true });
       return path.join(dir, `${sessionId}.jsonl`);
     });
     const turn = JSON.stringify(client === 'codex'
       ? { type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 10, output_tokens: 5 } } } }
-      : { type: 'assistant', message: { usage: { input_tokens: 10, output_tokens: 5 } } });
+      : client === 'claude'
+        ? { type: 'assistant', message: { usage: { input_tokens: 10, output_tokens: 5 } } }
+        : { type: 'message', role: 'assistant', providerData: { messageId: 'response', usage: { input_tokens: 10, output_tokens: 5 } } });
     const openSync = fs.openSync;
     for (const disappearingIndex of [0, 1]) {
       fs.writeFileSync(files[disappearingIndex], turn);
@@ -232,7 +234,7 @@ test('resolves a Reasonix native detail through the same platform resolver', asy
   }
 });
 
-for (const client of ['claude', 'codex']) {
+for (const client of ['claude', 'codebuddy', 'codex', 'workbuddy']) {
   test(`falls back to running WSL homes for ${client} JSONL details on Windows`, async () => {
     const homes = [];
     const detail = await resolveSessionDetailForPlatform(
