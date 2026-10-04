@@ -1159,7 +1159,7 @@ async function collectUsageOnce(options) {
   if (typeof options.onAnchorComputed === 'function') {
     // Title provenance belongs to the local anchor, never to published rows.
     const t3Titles = { ...localSessionMetadataDeps.t3Titles };
-    for (const key of localSessionMetadataDeps.invalidatedTitleKeys) delete t3Titles[key];
+    for (const key of localSessionMetadataDeps.invalidatedTitleKeys) t3Titles[key] = null;
     for (const [key, meta] of localSessionMetadataDeps.metadataCache) {
       if (meta.t3Title) t3Titles[key] = meta.t3Title;
     }
@@ -2427,6 +2427,7 @@ function startCollector(options) {
           month: saved.month,
           allTime: saved.allTime,
           t3Titles: saved.t3Titles,
+          todayT3Titles: saved.todayT3Titles,
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -2442,6 +2443,28 @@ function startCollector(options) {
         // a full scan on the first interval tick (see loop()).
         if (trust.capturedAtMs !== null) lastFullScanAt = trust.capturedAtMs;
       }
+    } catch (_) {}
+  }
+
+  function persistAnchor(tickPricingRevision) {
+    if (options.anchorPersistenceEnabled === false) return;
+    try {
+      fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
+      fs.writeFileSync(anchorPath, JSON.stringify({
+        dateKey: anchor.dateKey,
+        cursorAutoModelVersion: 1,
+        today: anchor.today,
+        month: anchor.month,
+        allTime: anchor.allTime,
+        t3Titles: anchor.t3Titles,
+        todayT3Titles: anchor.todayT3Titles,
+        wslBundle: wslAnchor,
+        wslStatus: wslStatusAnchor,
+        ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
+        ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
+        configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, tickPricingRevision),
+        fullScanAt: new Date(lastFullScanAt).toISOString()
+      }));
     } catch (_) {}
   }
 
@@ -2645,29 +2668,29 @@ function startCollector(options) {
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
         lastFullScanAt = Date.now();
-        if (options.anchorPersistenceEnabled !== false) {
-          try {
-            fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
-            fs.writeFileSync(anchorPath, JSON.stringify({
-              dateKey: anchor.dateKey,
-              cursorAutoModelVersion: 1,
-              today: anchor.today,
-              month: anchor.month,
-              allTime: anchor.allTime,
-              t3Titles: anchor.t3Titles,
-              wslBundle: wslAnchor,
-              wslStatus: wslStatusAnchor,
-              ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
-              ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
-              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, tickPricingRevision),
-              fullScanAt: new Date(lastFullScanAt).toISOString()
-            }));
-          } catch (_) {}
-        }
+        persistAnchor(tickPricingRevision);
       } else if (anchored && captured) {
         // Keep the rolling per-client today partitions fresh for targeted
         // watch ticks. WSL stays independently frozen between interval ticks.
         if (captured.todayPartitions) anchor.todayPartitions = captured.todayPartitions;
+        const titlesChanged = JSON.stringify(anchor.todayT3Titles || anchor.t3Titles || {}) !== JSON.stringify(captured.t3Titles);
+        if (titlesChanged) {
+          // Only labels move: the exact usage baseline and full-scan time stay
+          // frozen. This also keeps cold-start previews at the latest title.
+          for (const [key, title] of Object.entries(captured.t3Titles || {})) {
+            for (const period of ['today', 'month', 'allTime']) {
+              const session = anchor[period]?.sessions?.[key];
+              if (!session) continue;
+              if (title) session.title = title;
+              else if (session.title === anchor.t3Titles?.[key]) {
+                const fallback = summary[period]?.sessions?.[key]?.title;
+                if (fallback) session.title = fallback;
+                else delete session.title;
+              }
+            }
+          }
+          anchor.t3Titles = captured.t3Titles;
+        }
         anchor.todayT3Titles = captured.t3Titles;
         if (captured.nativeSessions) anchor.nativeSessions = captured.nativeSessions;
         if (captured.nativeProjects) anchor.nativeProjects = captured.nativeProjects;
@@ -2675,6 +2698,7 @@ function startCollector(options) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
         }
+        if (titlesChanged) persistAnchor(tickPricingRevision);
       }
       const transformedSummary = await onUpdate?.(summary, reason);
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'

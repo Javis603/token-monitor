@@ -237,6 +237,52 @@ maybe('Claude V2 tombstones invalidate cached T3 titles without treating reader 
   assert.equal(original.title, 'Current native transcript title');
 });
 
+maybe('watch titles learned or renamed after a full scan survive T3 read misses', async (t) => {
+  const { home, db, v2 } = store(t);
+  let captured;
+  const options = {
+    clients: 'claude', homeDir: home, projectsEnabled: false, historyEnabled: false,
+    wslScanEnabled: false, osInfo: {},
+    sessionMetadataDeps: { scopedHome: true, claudeMetadataDeps: { sqlite, cache: new Map() } },
+    runTokscale: async () => ({ entries: [{ client: 'claude', sessionId: 'native', model: 'claude-opus', input: 10, output: 0, cost: 0 }] }),
+    onAnchorComputed: (value) => { captured = value; }
+  };
+  const initial = await collectUsageOnce(options);
+  const anchor = {
+    dateKey: localTodayKey(), today: initial.today, month: initial.month, allTime: initial.allTime,
+    todayPartitions: captured.todayPartitions, t3Titles: captured.t3Titles
+  };
+  const watch = async (sqliteMod = sqlite) => {
+    const summary = await collectUsageOnce({
+      ...options, todayOnlyAnchor: anchor,
+      sessionMetadataDeps: { scopedHome: true, claudeMetadataDeps: { sqlite: sqliteMod, cache: new Map() } }
+    });
+    anchor.todayPartitions = captured.todayPartitions;
+    anchor.todayT3Titles = captured.t3Titles;
+    return summary;
+  };
+  const expectTitles = (summary, expected) => {
+    for (const period of ['today', 'month', 'allTime']) {
+      assert.equal(summary[period].sessions['claude:native'].title || '', expected);
+      assert.equal(summary[period].totalTokens, initial[period].totalTokens);
+    }
+  };
+  v2('app', 'native', 'Late T3 title');
+  expectTitles(await watch(), 'Late T3 title');
+  expectTitles(await watch(null), 'Late T3 title');
+  expectTitles(await watch(null), 'Late T3 title');
+  db.prepare('UPDATE orchestration_v2_projection_threads SET title = ?').run('Renamed T3 title');
+  expectTitles(await watch(), 'Renamed T3 title');
+  expectTitles(await watch(null), 'Renamed T3 title');
+  assert.equal(initial.month.sessions['claude:native'].title || '', '', 'watch labels do not rewrite the full-scan anchor');
+  db.prepare('UPDATE orchestration_v2_projection_threads SET deleted_at = ?').run('2026-10-05');
+  expectTitles(await watch(), '');
+  expectTitles(await watch(null), '');
+  db.prepare('UPDATE orchestration_v2_projection_threads SET title = ?, deleted_at = NULL').run('Revived T3 title');
+  expectTitles(await watch(), 'Revived T3 title');
+  expectTitles(await watch(null), 'Revived T3 title');
+});
+
 for (const unusable of [
   { label: 'tombstone', title: 'Old T3 title', deleted: '2026-10-04' },
   { label: 'empty title', title: '', deleted: null },
@@ -334,7 +380,7 @@ for (const unusable of [
     });
     for (const period of ['month', 'allTime']) {
       for (const id of ids) assert.equal(transient[period].sessions[`claude:${id}`].title,
-        id === 'named-transcript' ? 'Native title' : id === 'native-only' ? 'Native scan label' : 'Old T3 title');
+        id === 'native-only' ? 'Native scan label' : 'Old T3 title');
     }
 
     db.prepare('UPDATE orchestration_v2_projection_threads SET title = ?, deleted_at = ?').run(unusable.title, unusable.deleted);
@@ -377,6 +423,17 @@ for (const unusable of [
       assert.equal(untargeted[period].sessions['claude:untitled-transcript'].title || '', '');
       assert.equal(untargeted[period].sessions['claude:missing-transcript'].title || '', '');
       assert.equal(untargeted[period].sessions['claude:named-transcript'].title, 'Native title');
+    }
+    anchor.todayPartitions = captured.todayPartitions;
+    anchor.todayT3Titles = captured.t3Titles;
+    const afterRemovalMiss = await collectUsageOnce({
+      ...watchOptions,
+      sessionMetadataDeps: { scopedHome: true, claudeMetadataDeps: { sqlite: null, cache: new Map() } }
+    });
+    for (const period of ['today', 'month', 'allTime']) {
+      assert.equal(afterRemovalMiss[period].sessions['claude:untitled-transcript'].title || '', '');
+      assert.equal(afterRemovalMiss[period].sessions['claude:missing-transcript'].title || '', '');
+      assert.equal(afterRemovalMiss[period].sessions['claude:named-transcript'].title, 'Native title');
     }
   });
 }

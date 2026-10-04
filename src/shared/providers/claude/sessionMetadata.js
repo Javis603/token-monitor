@@ -588,6 +588,11 @@ function resolveSessionMetadata(sessionIds, context) {
     useEnvRoot: !deps.scopedHome,
     invalidatedSessionIds
   });
+  // Keep a confirmed removal across watch ticks that cannot read the store.
+  // A fresh usable title can revive it; a miss cannot revive the frozen anchor.
+  for (const sessionId of sessionIds) {
+    if (!t3Metadata.has(sessionId) && deps.t3Titles?.[`claude:${sessionId}`] === null) invalidatedSessionIds.add(sessionId);
+  }
   // Provenance is independent of transcript availability. Remove only a T3
   // override confirmed unusable by V2 before reading native fallback metadata.
   for (const sessionId of invalidatedSessionIds) {
@@ -653,7 +658,8 @@ function resolveSessionMetadata(sessionIds, context) {
   for (const sessionId of sessionIds) {
     const cached = metadata.get(`claude:${sessionId}`);
     // A failed lookup may reuse an explicit override, never an unlabelled title.
-    const t3Title = t3Metadata.get(sessionId)?.title || cached?.t3Title;
+    const t3Title = t3Metadata.get(sessionId)?.title || cached?.t3Title
+      || (!invalidatedSessionIds.has(sessionId) && deps.t3Titles?.[`claude:${sessionId}`]);
     if (!t3Title) continue;
     const transcriptMeta = result.get(sessionId);
     result.set(sessionId, {

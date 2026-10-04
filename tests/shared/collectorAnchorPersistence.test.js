@@ -283,6 +283,87 @@ test('restart restores local T3 title provenance and clears deleted titles on th
   }
 });
 
+for (const update of ['deleted', 'renamed']) {
+  test(`a confirmed T3 ${update} title survives reader failure and restart without moving usage anchors`, async () => {
+    const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-t3-lifetime-'));
+    const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+    process.env.TOKEN_MONITOR_SHARED_DIR = tmpShared;
+    let state = 'original';
+    let scans = 0;
+    let handle;
+    const updates = [];
+    const expected = update === 'deleted' ? '' : 'New T3 title';
+    const options = {
+      ...baseOptions, homeDir: tmpShared, projectsEnabled: false,
+      intervalMs: 60 * 60 * 1000, watchEnabled: false, wslScanEnabled: false,
+      runTokscale: async ({ flags }) => {
+        scans++;
+        const input = flags.includes('--month') ? 100 : flags.includes('--since') ? 1000 : state === 'original' ? 10 : 20;
+        return { entries: [{ client: 'claude', sessionId: 'native', model: 'claude-opus', input, output: 0, cost: 0 }] };
+      },
+      sessionMetadataDeps: {
+        sessionMetadataResolvers: new Map([['claude', (ids, { deps }) => {
+          assert.ok(ids.has('native'));
+          if (state === 'deleted' || (state === 'failure' && deps.t3Titles['claude:native'] === null)) {
+            deps.invalidatedTitleKeys.add('claude:native');
+            return new Map();
+          }
+          const title = state === 'failure' ? deps.t3Titles['claude:native'] : state === 'renamed' ? 'New T3 title' : 'Old T3 title';
+          return title ? new Map([['native', { title, t3Title: title, titleOnly: true }]]) : new Map();
+        }]])
+      },
+      onUpdate: (summary) => updates.push(summary)
+    };
+    const check = (summary) => {
+      for (const period of ['today', 'month', 'allTime']) assert.equal(summary[period].sessions['claude:native'].title || '', expected);
+      assert.equal(summary.today.totalTokens, 20);
+      assert.equal(summary.month.totalTokens, 110);
+      assert.equal(summary.allTime.totalTokens, 1010);
+    };
+    try {
+      handle = freshCollector().startCollector(options);
+      await waitForCondition(() => updates.length === 1);
+      const file = path.join(tmpShared, 'collector-anchor.json');
+      const original = JSON.parse(fs.readFileSync(file, 'utf8'));
+      state = update;
+      await handle.refreshClient('claude');
+      check(updates.at(-1));
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      assert.deepEqual(saved.todayT3Titles, { 'claude:native': update === 'deleted' ? null : 'New T3 title' });
+      for (const period of ['today', 'month', 'allTime']) {
+        const { title: _oldTitle, ...before } = original[period].sessions['claude:native'];
+        const { title: _newTitle, ...after } = saved[period].sessions['claude:native'];
+        assert.deepEqual(after, before);
+        assert.equal(saved[period].totalTokens, original[period].totalTokens);
+        assert.equal(saved[period].sessions['claude:native'].title || '', expected);
+      }
+      assert.equal(saved.fullScanAt, original.fullScanAt);
+      const seed = require('../../src/shared/anchorSeed').deviceRecordFromAnchor(saved, {
+        clients: 'claude', allTimeSince: baseOptions.allTimeSince, projectsEnabled: false, homeDir: tmpShared
+      });
+      for (const period of ['today', 'month', 'allTime']) assert.equal(seed[period].sessions['claude:native'].title || '', expected);
+      state = 'failure';
+      await handle.refreshClient('claude');
+      check(updates.at(-1));
+      assert.equal(fs.readFileSync(file, 'utf8'), JSON.stringify(saved), 'unchanged title state does not rewrite the anchor');
+      handle.stop();
+      handle = null;
+      const beforeRestart = scans;
+      const beforeUpdates = updates.length;
+      handle = freshCollector().startCollector(options);
+      await waitForCondition(() => updates.length > beforeUpdates);
+      assert.equal(scans - beforeRestart, 1);
+      check(updates.at(-1));
+    } finally {
+      if (handle) handle.stop();
+      if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+      else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+      delete require.cache[collectorPath];
+      fs.rmSync(tmpShared, { recursive: true, force: true });
+    }
+  });
+}
+
 test('full anchors persist local-only Reasonix native views alongside aggregate periods', async () => {
   const tmpShared = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-native-anchor-'));
   const nativeView = {
