@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="edgeDock/composer.css" />
   </head>
   <body>
+    <div id="mainWindowAutoHideGrip" aria-hidden="true"></div>
     <main class="shell">
       <header class="titlebar">
         <div>
@@ -245,6 +246,17 @@
                 </select>
                 <span class="settings-note settings-item-desc" data-i18n="settings.display.windowBehaviorNote">Desktop pinned keeps the widget below other apps and locks drag/resize while staying clickable.</span>
               </label>
+              <label id="mainWindowAutoHideRow" class="checkbox-label settings-item hidden">
+                <span class="settings-item-text">
+                  <span class="settings-item-title" data-i18n="settings.display.mainWindowAutoHide">Hide main window at screen edge</span>
+                </span>
+                <input id="mainWindowAutoHideInput" type="checkbox" />
+                <span class="settings-note settings-item-desc" data-i18n="settings.display.mainWindowAutoHideNote">Drag the main window to an outer screen edge. Move away to hide it; hover over the thin strip to reveal it.</span>
+              </label>
+              <label id="hideAppIconRow" class="checkbox-label settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.hideAppIcon">Hide taskbar/Dock icon</span></span><input id="hideAppIconInput" type="checkbox" /></label>
+              <div id="hideAppIconOptions" class="presence-feature-body hidden">
+                <p class="settings-note" data-i18n="settings.display.hideAppIconNote">The widget stays on the desktop; use the tray icon or the shortcut to bring it to the front.</p>
+              </div>
               <label id="keepAboveTaskbarRow" class="checkbox-label settings-item hidden">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.display.keepAboveTaskbar">Keep above taskbar (Experimental)</span>
@@ -346,10 +358,6 @@
                   <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.trayMode">Tray-only mode</span></span><input id="trayModeInput" type="checkbox" /></label>
                   <div id="trayOptions" class="presence-feature-body hidden">
                     <p class="settings-note" data-i18n="settings.display.trayNote">Hide the main window; show a popover from the macOS menu bar or Windows system tray.</p>
-                  </div>
-                  <label id="hideAppIconRow" class="checkbox-label settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.hideAppIcon">Hide taskbar/Dock icon</span></span><input id="hideAppIconInput" type="checkbox" /></label>
-                  <div id="hideAppIconOptions" class="presence-feature-body hidden">
-                    <p class="settings-note" data-i18n="settings.display.hideAppIconNote">The widget stays on the desktop; use the tray icon or the shortcut to bring it to the front.</p>
                   </div>
                 </div>
               </div>

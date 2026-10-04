@@ -128,6 +128,12 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   moveFloatingBubble: (delta) => ipcRenderer.invoke('floatingBubble:move', delta),
   signalContentReady: () => ipcRenderer.send('window:contentReady'),
   setViewState: (patch) => ipcRenderer.send('window:viewState', patch),
+  setAutoHideInteraction: (active) => ipcRenderer.send('window:autoHideInteraction', active === true),
+  onAutoHideState: (callback) => {
+    const listener = (_event, state) => callback(state);
+    ipcRenderer.on('window:autoHideState', listener);
+    return () => ipcRenderer.removeListener('window:autoHideState', listener);
+  },
   peekFloatingBubble: () => ipcRenderer.invoke('floatingBubble:peek'),
   collapseFloatingBubbleIfIdle: () => ipcRenderer.invoke('floatingBubble:collapseIfIdle'),
   setFloatingBubbleCollapsedSize: (size) => ipcRenderer.invoke('floatingBubble:setCollapsedSize', size),
