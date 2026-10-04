@@ -61,6 +61,27 @@ function makeT3Db(rows, { cursorColumn = 'resume_cursor_json', deletedColumn = '
   return file;
 }
 
+function makeT3V2Db(rows, stateDir) {
+  const root = stateDir || fs.mkdtempSync(path.join(os.tmpdir(), 't3-v2-meta-'));
+  if (!stateDir) tmpDirs.push(root);
+  fs.mkdirSync(root, { recursive: true });
+  const file = path.join(root, 'statev2.sqlite');
+  const db = new sqlite.DatabaseSync(file);
+  db.exec('CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT PRIMARY KEY, title TEXT, default_provider TEXT, deleted_at TEXT, updated_at TEXT)');
+  db.exec('CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT PRIMARY KEY, thread_id TEXT, provider TEXT, driver TEXT, provider_session_id TEXT, payload_json TEXT)');
+  rows.forEach((row, index) => {
+    db.prepare('INSERT OR REPLACE INTO orchestration_v2_projection_threads VALUES (?, ?, ?, ?, ?)')
+      .run(row.t3ThreadId, row.title, row.defaultProvider || 'codex', row.deletedAt || null, row.updatedAt || '2026-10-04T00:00:00Z');
+    db.prepare('INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, ?, ?, ?, ?)')
+      .run(`provider-${index}`, row.t3ThreadId, row.provider || 'codex', row.driver || 'codex',
+        'provider-session:provider-instance:codex:shared', row.payload ?? JSON.stringify({
+          nativeThreadRef: { driver: row.driver || 'codex', nativeId: row.codexThreadId }
+        }));
+  });
+  db.close();
+  return file;
+}
+
 maybe('reads persisted display titles and classifies guardian reviews without exposing their prompts', () => {
   const file = makeDb([
     { id: 'named', name: '繼續目前工作', preview: 'ignored preview' },
@@ -152,6 +173,66 @@ maybe('an untitled T3 thread and an unreachable store are skipped rather than fa
   }).size, 0);
 });
 
+maybe('T3 V2 maps native threads separately even when their provider session is shared', () => {
+  const first = '01a10238-ae80-72a2-a21f-8db41915b3dc';
+  const second = '01a10293-14c7-76d3-8df9-9a71c4b49659';
+  const file = makeT3V2Db([
+    { t3ThreadId: 'pricing', codexThreadId: first, title: 'Tokscale 自訂定價覆蓋限制', defaultProvider: 'claudeAgent' },
+    // A custom provider instance still uses the Codex driver.
+    { t3ThreadId: 'codebuddy', codexThreadId: second, title: 'Review CodeBuddy Usage Tracking', provider: 'custom-codex' },
+    { t3ThreadId: 'bad-json', title: 'Malformed payload', payload: '{' },
+    { t3ThreadId: 'pending', title: 'Not started', payload: '{}' },
+    { t3ThreadId: 'placeholder', codexThreadId: 'placeholder', title: 'New thread' },
+    { t3ThreadId: 'deleted', codexThreadId: 'deleted', title: 'Deleted title', deletedAt: '2026-10-04T00:00:00Z' },
+    { t3ThreadId: 'claude', codexThreadId: 'claude', title: 'Claude title', driver: 'claudeAgent' }
+  ]);
+  const rollout = `rollout-2026-10-03T00-00-00-${first}`;
+  const merged = `${rollout}_rollout-2026-10-03T01-00-00-${second}`;
+  const result = metadata.readT3SessionMeta([first, second, rollout, merged, 'placeholder', 'deleted', 'claude'], { t3DbPaths: [file], sqlite });
+  assert.deepEqual(result, new Map([
+    [first, { title: 'Tokscale 自訂定價覆蓋限制' }],
+    [second, { title: 'Review CodeBuddy Usage Tracking' }],
+    [rollout, { title: 'Tokscale 自訂定價覆蓋限制' }],
+    [merged, { title: 'Tokscale 自訂定價覆蓋限制' }]
+  ]));
+
+  const db = new sqlite.DatabaseSync(file);
+  db.prepare('UPDATE orchestration_v2_projection_threads SET title = ? WHERE thread_id = ?').run('Renamed pricing thread', 'pricing');
+  db.close();
+  assert.deepEqual(metadata.readT3SessionMeta([first], { t3DbPaths: [file], sqlite }).get(first), { title: 'Renamed pricing thread' });
+});
+
+maybe('T3 V2 discovers the new store before stale legacy titles and preserves Codex names', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 't3-v2-home-'));
+  tmpDirs.push(home);
+  const first = '01a10238-ae80-72a2-a21f-8db41915b3dc';
+  const second = '01a10293-14c7-76d3-8df9-9a71c4b49659';
+  const legacyOnly = '01a10295-0c81-7aa1-a22a-a94d8ceed1ed';
+  const stateDir = path.join(home, '.t3', 'userdata');
+  makeT3V2Db([
+    { t3ThreadId: 'v2-first', codexThreadId: first, title: 'Current T3 title' },
+    { t3ThreadId: 'v2-second', codexThreadId: second, title: 'Other T3 title' }
+  ], stateDir);
+  const legacy = makeT3Db([
+    { t3ThreadId: 'legacy-first', codexThreadId: first, title: 'Stale legacy title' },
+    { t3ThreadId: 'legacy-only', codexThreadId: legacyOnly, title: 'Legacy-only title' }
+  ]);
+  fs.copyFileSync(legacy, path.join(stateDir, 'state.sqlite'));
+  const codex = makeDb([
+    { id: first, title: 'First user message' },
+    { id: second, name: 'Real Codex name', title: 'Another first message' }
+  ]);
+  const result = metadata.resolveSessionMetadata(new Set([first, second, legacyOnly]), {
+    deps: { scopedHome: true, codexDeps: { dbPaths: [codex], sqlite } },
+    home,
+    metadata: new Map(),
+    fileSessionMetadata: (_sessionId, _filePath, existing) => existing || {}
+  });
+  assert.equal(result.get(first).title, 'Current T3 title');
+  assert.equal(result.get(second).title, 'Real Codex name');
+  assert.equal(result.get(legacyOnly).title, 'Legacy-only title');
+});
+
 test('discovers the newest state database first and honors CODEX_HOME', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
   tmpDirs.push(root);
@@ -175,7 +256,10 @@ test('the default T3 discovery covers every installed and dev state layout', () 
   const paths = metadata.discoverT3DbPaths({ homeDir: home });
 
   // An installed app is the common case, so its store stays first.
-  assert.equal(paths[0], path.join(root, 'userdata', 'state.sqlite'));
+  assert.equal(paths[0], path.join(root, 'userdata', 'statev2.sqlite'));
+  assert.equal(paths[1], path.join(root, 'userdata', 'state.sqlite'));
+  assert.ok(paths.includes(path.join(root, 'dev', 'userdata', 'statev2.sqlite')), 'V2 dev-runner layout missing');
+  assert.ok(paths.includes(path.join(root, 'dev', 'statev2.sqlite')), 'V2 dev layout missing');
   assert.ok(paths.includes(path.join(root, 'dev', 'userdata', 'state.sqlite')), 'dev-runner layout missing');
   assert.ok(paths.includes(path.join(root, 'dev', 'state.sqlite')), 'dev layout missing');
   assert.equal(new Set(paths).size, paths.length, 'paths must be deduped');
