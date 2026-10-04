@@ -338,3 +338,25 @@ test('WSL SQLite guides state and verify the Node.js prerequisite', () => {
     assert.match(guide, /node --version\nnpm --version\n/, file);
   }
 });
+
+// A localized README translates its headings, so its internal links have to point at
+// the localized anchor. Copying the English one from the source README leaves a link
+// that reads fine in the diff and scrolls nowhere — `#session-data-retention` against a
+// translated "Retenção de dados de sessão" — and nothing else here checks it.
+const githubSlug = (heading) => heading
+  .trim()
+  .toLowerCase()
+  .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+  .replace(/\s+/g, '-');
+
+test('localized README internal links resolve to their own heading anchors', () => {
+  for (const file of localizedReadmes) {
+    const text = read(file);
+    const anchors = new Set([...text.matchAll(/^#{2,3} (.+)$/gm)].map((match) => githubSlug(match[1])));
+    const targets = [...text.matchAll(/\]\(#([^)]+)\)/g)].map((match) => match[1]);
+    assert.ok(targets.length > 0, `${file}: no internal anchor links found`);
+    for (const target of targets) {
+      assert.ok(anchors.has(target), `${file}: #${target} does not match any heading in this README`);
+    }
+  }
+});
