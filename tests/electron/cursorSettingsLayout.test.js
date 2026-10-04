@@ -3213,10 +3213,9 @@ test('MiMo lists the detected Desktop session without controls the user does not
   // built for.
   assert.match(main, /withDetectedMimoAccount\(accounts, mimoDetectedAccount\(\)\)/);
   assert.match(main, /function mimoDetectedAccount\(\)/);
-  assert.match(main, /mimoAccountKey\('', \{ userId: read\.userId \}\)/);
-  // Its credential is read for the count and discarded, so nothing of it reaches
-  // the renderer projection.
-  assert.doesNotMatch(main, /mimoAccountsForRenderer[\s\S]{0,400}cookieHeader: read/);
+  assert.match(main, /const accountKey = detectedMimoAccountKey\(\)/);
+  // The detected projection carries no raw credential or user id.
+  assert.doesNotMatch(functionBody(main, 'mimoDetectedAccount', 'mimoAccountsForRenderer'), /cookieHeader|userId/);
 
   // Nothing was pasted for it, so there is no stored preference to toggle and
   // nothing here to remove — the rule Cursor's panel states for the accounts it

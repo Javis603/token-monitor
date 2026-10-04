@@ -38,6 +38,8 @@ At-rest encryption does not prove logout. Recovery follows the shared retry cool
 
 An enabled saved Console credential wins for its account. A disabled saved credential must not be revived by discovery, but does not disable that account's independent membership source. Settings lists the disabled manual source and active detected source separately. Detected rows have no editable/removable controls or raw credentials.
 
+Settings caches only a successfully detected account fingerprint in the Electron adapter (`accountMetadata.js`), never Cookies or raw user ids. An unchanged Cookie DB/WAL signature reuses it without reopening SQLite; signature changes invalidate it. Empty results and observed failures retry next projection. This is local identity metadata, not proof of current database readability or service validity. Quota refreshes independently read the current Desktop session.
+
 The existing manual form requires `api-platform_serviceToken` and `userId`; one Cookie covers wallet and Token Plan. Its allowlist, account keys and stored-account format remain unchanged. The membership lane has no manual entry: Console and membership use different Xiaomi service ids.
 
 The tested inference `sk-` key did not authorize the checked billing routes: inference-host routes returned 404 and Console Bearer requests returned `401` with a login URL. This integration supports Console Cookies, without ruling out future key-authenticated billing APIs.
@@ -141,7 +143,7 @@ Saving is a read-only, scoped Console probe: it does not write the spend ledger 
 ## Verification
 
 ```bash
-node --test tests/shared/mimo*.test.js tests/electron/mimoExchangeFetch.test.js
+node --test tests/shared/mimo*.test.js tests/electron/mimoExchangeFetch.test.js tests/electron/mimoAccountMetadata.test.js
 ```
 
 `mimoLimits.test.js` covers Console; `mimoDesktopLimits.test.js` covers composition, exchange, retention/removal and read-only SQLite with injected responses. Neither contacts MiMo. `mimoExchangeFetch.test.js` includes a real local CONNECT proxy. Rendering regressions live in the existing Limits, Home, Dock, tray and widget suites.

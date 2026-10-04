@@ -274,11 +274,10 @@ const {
   MIMO_PLATFORM_CONSOLE_URL,
   createMimoManagedAccount,
   fetchMimoLimits,
-  mimoAccountKey,
   normalizeMimoCookieHeader,
   withDetectedMimoAccount
 } = require('../shared/providers/mimo/limits');
-const { readMimoDesktopAccount } = require('../shared/providers/mimo/desktop');
+const { createMimoAccountMetadataReader } = require('./providers/mimo/accountMetadata');
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
 const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
 const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
@@ -1263,24 +1262,15 @@ function normalizeMimoManagedAccounts(value) {
 // Synthetic settings-row id for the session discovered from MiMo Desktop. It is
 // local UI state, not a provider id.
 const MIMO_DETECTED_ACCOUNT_ID = 'mimo-local-session';
+const detectedMimoAccountKey = createMimoAccountMetadataReader();
 
-// The account a signed-in MiMo Desktop answers for, read here so the panel can
-// count it. The cookie it was read from is discarded: it is never part of this
-// projection and never part of settings.
+// Settings lists a detected Desktop identity without retaining its credential.
 function mimoDetectedAccount() {
-  let read;
-  try {
-    read = readMimoDesktopAccount();
-  } catch (_) {
-    // Signed out, sealed, never signed in, and no store at all arrive as one
-    // refusal; none of them is an account this panel can list.
-    return null;
-  }
+  const accountKey = detectedMimoAccountKey();
+  if (!accountKey) return null;
   return {
     id: MIMO_DETECTED_ACCOUNT_ID,
-    // The key the collector computes for the same account, so the panel names the
-    // account the rows are keyed by instead of a second identity for it.
-    accountKey: mimoAccountKey('', { userId: read.userId }),
+    accountKey,
     accountEmail: '',
     accountLabel: '',
     enabled: true
