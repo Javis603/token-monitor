@@ -116,6 +116,38 @@ test('the user\u2019s custom title outranks the generated one', () => {
   assert.equal(session.projectLabel, identity.projectLabel);
 });
 
+for (const cached of [false, true]) {
+  test(`isolates equal CodeBuddy and WorkBuddy session IDs with ${cached ? 'cached' : 'missing'} WorkBuddy metadata`, () => {
+    const home = makeHome('.workbuddy');
+    const workbuddyFile = resolveSessionFile('workbuddy', SESSION, home);
+    fs.writeFileSync(workbuddyFile, JSON.stringify({ type: 'message', role: 'user', timestamp: 1776418025188, content: [] }) + '\n');
+    const codebuddyDir = path.join(home, '.codebuddy', 'projects', 'other-project');
+    fs.mkdirSync(codebuddyDir, { recursive: true });
+    fs.writeFileSync(path.join(codebuddyDir, `${SESSION}.jsonl`), [
+      JSON.stringify({ type: 'ai-title', aiTitle: 'CodeBuddy title' }),
+      JSON.stringify({ type: 'message', role: 'assistant', status: 'completed', cwd: '/codebuddy-project', timestamp: 1776418025188 })
+    ].join('\n'));
+    const workbuddyMeta = cached
+      ? { title: 'WorkBuddy title', turnEnded: false, ...projectIdentity('/workbuddy-project') }
+      : {};
+    const metadataCache = new Map(cached ? [[`workbuddy:${SESSION}`, workbuddyMeta]] : []);
+    const sessions = {
+      [`codebuddy:${SESSION}`]: { client: 'codebuddy', sessionId: SESSION },
+      [`workbuddy:${SESSION}`]: { client: 'workbuddy', sessionId: SESSION }
+    };
+    applySessionMetadata({ today: { sessions } }, home, { metadataCache });
+    const codebuddy = sessions[`codebuddy:${SESSION}`];
+    const workbuddy = sessions[`workbuddy:${SESSION}`];
+    assert.equal(codebuddy.title, 'CodeBuddy title');
+    assert.equal(codebuddy.turnEnded, true);
+    assert.equal(codebuddy.projectId, projectIdentity('/codebuddy-project').projectId);
+    for (const field of ['title', 'turnEnded', 'projectId', 'projectLabel']) {
+      assert.equal(workbuddy[field], workbuddyMeta[field], `WorkBuddy ${field} stays in its client namespace`);
+      assert.equal(metadataCache.get(`workbuddy:${SESSION}`)[field], workbuddyMeta[field]);
+    }
+  });
+}
+
 test('parses a workbuddy transcript into the shared detail shape', () => {
   const home = makeHome('.workbuddy');
   const detail = readSessionDetail({

@@ -25,6 +25,8 @@ Local App quota monitoring runs in the Electron main process on macOS and Window
 
 Session discovery checks `~/.workbuddy/projects/**/*.jsonl`, then `~/.workbuddy-ai/projects/**/*.jsonl`; the latter is the home used by WorkBuddy 5.5. Both remain supported because tokscale scans both, and the first matching transcript wins. `providers/workbuddy/sessionMetadata.js` binds the shared CodeBuddy metadata reader to these roots. Token totals continue to come from tokscale, independently of whether a local transcript can be resolved.
 
+The shared resolver receives the client id in its context and keeps existing metadata under `workbuddy:<sessionId>`. Bare session ids can coincide with CodeBuddy ids; sharing a parser must not share cached titles, turn state or project identity across clients.
+
 WorkBuddy shares the [CodeBuddy transcript format and readers](codebuddy.md#workbuddy-writes-the-same-family), with two compatibility rules: a non-empty `custom-title` takes priority over `ai-title`, and older records without `providerData.messageId` or cache details still produce turns from their usage-bearing records. WorkBuddy's `<user_query>` prompt is extracted from the surrounding context envelope.
 
 On-demand Session Detail uses the shared streaming line reader and CodeBuddy parser. It retains the 16 MiB per-record bound and explicit read-error results; Windows detail resolution follows the async native-to-WSL fallback contract. There is no CodeBuddy VS Code extension-store fallback for WorkBuddy, whose conversations use the transcript roots above.

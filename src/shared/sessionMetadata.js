@@ -295,6 +295,7 @@ function sessionMetadataMap(periods, home = os.homedir(), deps = {}) {
   // cannot disagree about whether a session is recent enough to read.
   const now = Number.isFinite(deps.now) ? deps.now : Date.now();
   const contextFor = (client) => ({
+    client,
     deps,
     home,
     metadata,
