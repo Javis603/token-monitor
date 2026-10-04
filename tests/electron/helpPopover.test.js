@@ -144,3 +144,20 @@ test('plain text selection inside help survives null or body blur targets', () =
   assert.equal(p.controller.isOpen(), false);
   p.controller.dispose();
 });
+
+for (const scenario of [
+  { name: 'fits below', top: 40, height: 350, expectedTop: 62, expectedLimit: 530 },
+  { name: 'fits above', top: 520, height: 400, expectedTop: 116, expectedLimit: 508 },
+  { name: 'exceeds both sides', top: 260, height: 700, expectedTop: 282, expectedLimit: 310 }
+]) test(`help uses available viewport height when content ${scenario.name}`, () => {
+  const f = fixture(), p = f.pair('test');
+  p.trigger.getBoundingClientRect = () => ({ left: 290, right: 308, top: scenario.top, bottom: scenario.top + 18, width: 18 });
+  p.popover.scrollHeight = scenario.height;
+  p.popover.offsetHeight = p.popover.clientHeight = scenario.height;
+  p.trigger.emit('pointerenter');
+  assert.equal(p.popover.style.maxHeight, `${scenario.expectedLimit}px`);
+  assert.equal(p.popover.style.top, `${scenario.expectedTop}px`);
+  assert.ok(parseFloat(p.popover.style.top) >= 8);
+  assert.ok(parseFloat(p.popover.style.top) + Math.min(scenario.height, scenario.expectedLimit) <= f.window.innerHeight - 8);
+  p.controller.dispose();
+});

@@ -45,7 +45,7 @@
       popover.style.maxHeight = '';
       const result = positionApi.popupPosition(trigger.getBoundingClientRect(),
         { width: window.innerWidth, height: window.innerHeight },
-        { width, height: popover.scrollHeight + popover.offsetHeight - popover.clientHeight, align });
+        { width, height: popover.scrollHeight + popover.offsetHeight - popover.clientHeight, align, heightLimit: window.innerHeight });
       Object.assign(popover.style, { left: `${result.left}px`, top: `${result.top}px`, maxHeight: `${result.maxHeight}px` });
     }
 

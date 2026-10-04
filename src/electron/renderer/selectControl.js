@@ -30,14 +30,14 @@
     return current;
   }
 
-  function popupPosition(rect, viewport, { width = rect.width, height = 320, align = 'start' } = {}) {
+  function popupPosition(rect, viewport, { width = rect.width, height = 320, align = 'start', heightLimit = 320 } = {}) {
     const gutter = 8;
     const gap = 4;
     const popupWidth = Math.max(0, Math.min(Math.max(rect.width, width), viewport.width - gutter * 2));
     const below = Math.max(0, viewport.height - rect.bottom - gap - gutter);
     const above = Math.max(0, rect.top - gap - gutter);
     const opensAbove = height > below && above > below;
-    const maxHeight = Math.min(320, opensAbove ? above : below);
+    const maxHeight = Math.min(heightLimit, opensAbove ? above : below);
     const actualHeight = Math.min(height, maxHeight);
     const left = Math.max(gutter, Math.min(
       align === 'end' ? rect.right - popupWidth : rect.left,
