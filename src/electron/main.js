@@ -1946,6 +1946,7 @@ function normalizeLanguageSetting(value, fallback = 'auto') {
   if (lower === 'en' || lower.startsWith('en-')) return 'en';
   if (lower === 'zh-tw' || lower.startsWith('zh-hant') || /-(tw|hk|mo)\b/i.test(raw)) return 'zh-TW';
   if (lower === 'zh-cn' || lower.startsWith('zh-hans') || /-(cn|sg|my)\b/i.test(raw)) return 'zh-CN';
+  if (lower === 'pt' || lower.startsWith('pt-')) return 'pt-BR';
   return LANGUAGE_VALUES.has(raw) ? raw : fallback;
 }
 

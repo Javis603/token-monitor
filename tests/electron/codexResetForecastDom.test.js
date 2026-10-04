@@ -181,7 +181,7 @@ test('scheduled reset labels exist in every locale', () => {
     'limits.codexResetForecast.schedulePending',
     'limits.codexResetForecast.expected'
   ]) {
-    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+    assert.equal(i18n.split(`'${key}':`).length - 1, 6, `${key} should exist in all bundled locales`);
   }
   assert.match(i18n, /'limits\.codexResetForecast\.scheduled': '已排程'/);
   assert.doesNotMatch(i18n, /'limits\.codexResetForecast\.scheduled': '重置已排程'/);

@@ -45,7 +45,7 @@ test('General settings explains Discord presence and identifies Tokscale as a bu
   const i18n = read('i18n.js');
 
   assert.match(html, /id="discordRpcInput"[^>]*aria-describedby="discordRpcDescription"[\s\S]*id="discordRpcDescription" class="settings-item-desc"[^>]*settings\.integrations\.discordDescription/);
-  assert.equal((i18n.match(/'settings\.integrations\.discordDescription':/g) || []).length, 5);
+  assert.equal((i18n.match(/'settings\.integrations\.discordDescription':/g) || []).length, 6);
   assert.match(i18n, /'settings\.tokscale\.source': '內建的 CLI 依賴'/);
   assert.doesNotMatch(i18n, /'settings\.tokscale\.source': '[^']*(?:Data engine|資料引擎|数据引擎|데이터 엔진|データエンジン)/);
 });
@@ -73,7 +73,7 @@ test('Tokscale separates installed version from declared bundled build', () => {
   state.tokscaleStatus = {};
   vm.runInNewContext(`${body}\nrenderTokscaleStatus()`, context);
   assert.equal(els.tokscaleInstalled.textContent, 'settings.tokscale.versionUnknown');
-  assert.equal((read('i18n.js').match(/'settings\.tokscale\.bundledBuild':/g) || []).length, 5);
+  assert.equal((read('i18n.js').match(/'settings\.tokscale\.bundledBuild':/g) || []).length, 6);
   const pkg = JSON.parse(fs.readFileSync(path.join(rendererDir, '../../../package.json'), 'utf8'));
   assert.ok(pkg.build.files.includes('scripts/vendor/tokscale.json'));
 });

@@ -941,7 +941,7 @@ test('Volcengine keeps its hand-built panel and saves through the shared credent
   const { limitProviderEntry } = require('../../src/shared/limits/registry');
   assert.equal(limitProviderEntry('volcengine').form.kind, 'custom');
   for (const key of ['secretRequired', 'agentSecretRequired']) {
-    assert.equal(readRendererFile('i18n.js').split(`'settings.volcengine.${key}':`).length - 1, 5, key);
+    assert.equal(readRendererFile('i18n.js').split(`'settings.volcengine.${key}':`).length - 1, 6, key);
   }
 });
 
@@ -1047,7 +1047,7 @@ test('Zed account panel follows the manual browser Cookie flow without exposing 
     'settings.zed.saveCookie',
     'settings.zed.statusInvalid'
   ]) {
-    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+    assert.equal(i18n.split(`'${key}':`).length - 1, 6, `${key} should exist in all bundled locales`);
   }
 });
 
@@ -1131,7 +1131,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     rejected: 'settings.claude.cookieRejected'
   });
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
-  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) {
     for (const key of ['organization', 'organizationChoose', 'organizationRequired', 'organizationSelect', 'organizationUnavailable', 'organizationLoadFailed']) {
       assert.ok(MESSAGES[locale][`settings.claude.${key}`], `${locale} ${key}`);
     }
@@ -1359,7 +1359,7 @@ test('Devin account panel uses the shared status label and opens the allowlisted
   assert.match(i18n, /'settings\.devin\.statusNotSet': 'Not configured'/);
   assert.match(i18n, /'settings\.devin\.statusNotSet': '尚未設定'/);
   for (const key of ['settings.devin.statusNotSet', 'settings.devin.credentialsRequired']) {
-    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+    assert.equal(i18n.split(`'${key}':`).length - 1, 6, `${key} should exist in all bundled locales`);
   }
 
 
@@ -1413,7 +1413,7 @@ test('Factory API key validation keeps its translated rejection message', () => 
   assert.deepEqual({ ...form.messages }, { rejected: 'settings.factory.validationInvalid' });
 
   const i18n = readRendererFile('i18n.js');
-  assert.equal(i18n.match(/'settings\.factory\.validationInvalid':/g)?.length, 5);
+  assert.equal(i18n.match(/'settings\.factory\.validationInvalid':/g)?.length, 6);
   assert.doesNotMatch(i18n, /settings\.factory\.validation(RateLimited|Unavailable)/);
 });
 
@@ -1438,7 +1438,7 @@ test('Factory identifies environment and Droid .env credentials separately', () 
   assert.deepEqual(Array.from(labels), ['settings.factory.statusEnv', 'settings.factory.statusDroidEnv']);
 
   const i18n = readRendererFile('i18n.js');
-  assert.equal((i18n.match(/'settings\.factory\.statusDroidEnv'/g) || []).length, 5);
+  assert.equal((i18n.match(/'settings\.factory\.statusDroidEnv'/g) || []).length, 6);
 });
 
 test('Cline account form keeps sign-in precedence, accessible input, and allowlisted setup URL', () => {
@@ -1494,7 +1494,7 @@ test('Cline API key validation keeps its rejection copy in every locale', () => 
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'cline');
   assert.deepEqual({ ...form.messages }, { rejected: 'settings.cline.validationInvalid' });
 
-  // Every cline string the UI can render exists in all five locales — the same
+  // Every cline string the UI can render exists in all bundled locales — the same
   // completeness Antigravity copy is held to, derived here from the source of truth
   // rather than hand-listed so a key added later cannot skip a locale.
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
@@ -1565,7 +1565,8 @@ test('Cline names the credential lane that went bad, not always the key field', 
     'zh-TW': '開啟 Cline',
     'zh-CN': '打开 Cline',
     ko: 'Cline 열기',
-    ja: 'Cline を開く'
+    ja: 'Cline を開く',
+    'pt-BR': 'Abrir o Cline'
   });
   assert.deepEqual(Object.fromEntries(Object.entries(MESSAGES).map(([locale, messages]) => [
     locale,
@@ -1575,7 +1576,8 @@ test('Cline names the credential lane that went bad, not always the key field', 
     'zh-TW': '已連線',
     'zh-CN': '已连接',
     ko: '연결됨',
-    ja: '接続済み'
+    ja: '接続済み',
+    'pt-BR': 'Conectado'
   });
 });
 
@@ -2656,8 +2658,8 @@ test('remote Hub build status is wired as a separate localized sync hint', () =>
   assert.match(app, /handleWindowVisibilityChange[\s\S]*hubBuildStatusRefreshDue\(\)[\s\S]*void refreshHubBuildStatus\(\)/);
   assert.match(preload, /getHubBuildStatus: \(\) => ipcRenderer\.invoke\('hub:getBuildStatus'\)/);
   assert.match(main, /ipcMain\.handle\('hub:getBuildStatus'/);
-  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.current':/g)].length, 5);
-  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.updateAvailable':/g)].length, 5);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.current':/g)].length, 6);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.updateAvailable':/g)].length, 6);
   assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.legacy':/g)].length, 0);
 });
 
@@ -3244,8 +3246,8 @@ test('a ZCode-discovered GLM login reads as connected, not API-key configured', 
   assert.match(statusBody, /source === 'env' \? `settings\.\$\{providerName\}\.statusEnv` : `settings\.\$\{providerName\}\.statusSet`/);
 
   const i18n = readRendererFile('i18n.js');
-  // Five locales carry the key; translate() falls back to the raw key, so a
+  // All bundled locales carry the key; translate() falls back to the raw key, so a
   // missing entry would surface as literal text on the pill.
-  assert.equal((i18n.match(/'settings\.zai\.statusLinked'/g) || []).length, 5);
+  assert.equal((i18n.match(/'settings\.zai\.statusLinked'/g) || []).length, 6);
   assert.ok(/'settings\.zai\.statusLinked': 'Connected'/.test(i18n));
 });

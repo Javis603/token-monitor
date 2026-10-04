@@ -181,11 +181,11 @@ test('Windows exposes an accessible Acrylic and experimental Accent selector', (
   assert.match(app, /windowsBackdropRow\?\.classList\.toggle\('hidden', !windowsGlass\.showBackdropControl\)/);
   assert.match(app, /classList\.toggle\('hidden', !windowsGlass\.showAccentNote\)/);
   assert.doesNotMatch(app, /backdropControlDisabled/);
-  assert.equal((i18n.match(/'settings\.appearance\.glassEffectSystem':/g) || []).length, 5);
-  assert.equal((i18n.match(/'settings\.appearance\.glassEffectTransparent':/g) || []).length, 5);
-  assert.equal((i18n.match(/'settings\.appearance\.windowsBackdrop':/g) || []).length, 5);
-  assert.equal((i18n.match(/'settings\.appearance\.windowsBackdropAccent':/g) || []).length, 5);
-  assert.equal((i18n.match(/'settings\.appearance\.windowsBackdropFallback':/g) || []).length, 5);
+  assert.equal((i18n.match(/'settings\.appearance\.glassEffectSystem':/g) || []).length, 6);
+  assert.equal((i18n.match(/'settings\.appearance\.glassEffectTransparent':/g) || []).length, 6);
+  assert.equal((i18n.match(/'settings\.appearance\.windowsBackdrop':/g) || []).length, 6);
+  assert.equal((i18n.match(/'settings\.appearance\.windowsBackdropAccent':/g) || []).length, 6);
+  assert.equal((i18n.match(/'settings\.appearance\.windowsBackdropFallback':/g) || []).length, 6);
   assert.match(i18n, /Keeps the background translucent and blurred, even when the window is not focused\./);
   assert.doesNotMatch(css, /windows-native-blur-only/);
 });
