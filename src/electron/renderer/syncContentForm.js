@@ -64,6 +64,7 @@
       const issue = message || (shared && (!status || status.error) ? (status ? errorKey(status.error) : 'checking') : '');
       el('Status').textContent = issue ? text(issue) : '';
       el('Status').hidden = !issue;
+      el('Notice').hidden = !issue || issue === 'cleanup_pending';
       el('DialogStatus').textContent = message ? text(message) : '';
       el('DialogStatus').hidden = !message;
       el('Retry').hidden = !shared || !issue || issue === 'checking' || issue === 'cleanup_pending';

@@ -92,6 +92,7 @@ test('all optional checkboxes default off and stay disabled until a supported st
   }
   await f.form.refresh();
   assert.equal(f.get('modelAliases').disabled, false);
+  assert.equal(f.get('Notice').hidden, true);
   f.push(status({ serverTitlesEnabled: false }));
   assert.equal(f.get('sessionTitles').disabled, true);
   assert.equal(f.get('TitleUnavailable').hidden, false);
@@ -99,6 +100,7 @@ test('all optional checkboxes default off and stay disabled until a supported st
   assert.equal(f.get('modelAliases').disabled, true);
   assert.match(f.get('Status').textContent, /Update the server/);
   assert.equal(f.get('Retry').hidden, false);
+  assert.equal(f.get('Notice').hidden, false);
 });
 
 for (const cancel of ['Cancel', 'escape']) test(`title consent supports ${cancel}, focus and a fresh destination without saving`, async () => {
@@ -153,6 +155,7 @@ test('failed title cleanup applies the confirmed off status and keeps the remova
   assert.equal(f.get('sessionTitles').checked, false);
   assert.equal(f.get('sessionTitles').disabled, true);
   assert.equal(f.get('Cleanup').hidden, false);
+  assert.equal(f.get('Notice').hidden, true, 'cleanup keeps its dedicated warning without a duplicate notice');
   assert.match(f.get('Status').textContent, /previously shared titles/);
   await f.get('CleanupRetry').click();
   assert.equal(f.calls.cleanup, 1);
