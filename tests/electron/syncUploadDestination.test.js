@@ -200,3 +200,70 @@ test('actual secret regeneration IPC uses the same journaled settings path', () 
   assert.equal(handler(), 'info');
   assert.equal(patch.hubHostSecret, 'new-private');
 });
+
+for (const failure of ['cleanup', 'preferences', 'bind']) test(`host ${failure} startup failure surfaces an error and keeps local collection running`, async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const extract = (startText, endText) => {
+    const start = source.indexOf(startText);
+    const end = source.indexOf(endText, start);
+    assert.ok(start >= 0 && end > start);
+    return source.slice(start, end);
+  };
+  const events = [];
+  let failing = true;
+  const originalState = { identity: 'old', enabled: { sessionTitles: true }, pendingTitleCleanup: [] };
+  const sandbox = vm.createContext({
+    settings: { hubMode: 'host', hubHostPort: 17321, hubHostSecret: '', syncContentState: originalState },
+    embeddedHub: null, embeddedHubError: null, modeQueue: Promise.resolve(), hubModeGeneration: 0,
+    console: { log: () => {} }, normalizeHubPort: value => value,
+    normalizeSyncContentState: value => structuredClone(value), generateHubSecret: () => 'generated-secret',
+    syncContentContext: value => value,
+    getSyncContentRuntime: () => ({
+      invalidate: () => {}, refresh: async () => {},
+      beforeDestinationChange: () => {
+        sandbox.settings = { ...sandbox.settings, syncContentState: {
+          ...originalState, enabled: { sessionTitles: false }, pendingTitleCleanup: [{ identity: 'old', deviceId: 'one' }]
+        } };
+        if (failing && failure === 'cleanup') throw Object.assign(new Error('cleanup_pending'), { code: 'cleanup_pending' });
+      }
+    }),
+    saveSettings: () => {
+      events.push('save');
+      if (failing && failure === 'preferences') throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+    },
+    hubDataFile: () => '/unused',
+    createHub: () => { events.push('create'); return {
+      start: async () => { if (failing && failure === 'bind') throw Object.assign(new Error('occupied'), { code: 'EADDRINUSE' }); }, stop: async () => {}
+    }; },
+    getHubInfo: () => ({ error: sandbox.embeddedHubError, listening: Boolean(sandbox.embeddedHub), secret: sandbox.settings.hubHostSecret }),
+    sendHubPush: payload => events.push(payload),
+    advanceMacWidgetProducerAndSourceEpoch: () => {}, clearLatestHubStatsCache: () => {},
+    stopIcloudRuntime: async () => {}, stopLocalCollector: () => events.push('stopLocal'),
+    stopStatsStream: () => {}, stopHostStats: () => {}, stopSyncCollector: () => {},
+    syncStatsPublication: { cancel: () => {} },
+    startLocalCollector: () => events.push('local'), startHostStats: () => events.push('hostStats'),
+    startHostCollector: () => events.push('hostCollector'), reconcileSharedSubscriptions: () => {}
+  });
+  vm.runInContext(extract('async function startEmbeddedHub() {', '\nfunction isExternalAgentActive()')
+    + extract('function startMode() {', '\n// Reconciled on every mode change'), sandbox);
+  sandbox.startMode();
+  await sandbox.modeQueue;
+  assert.ok(events.includes('local'), 'failed Hub must reach the real mode reconciliation fallback');
+  assert.equal(sandbox.embeddedHub, null);
+  assert.equal(sandbox.embeddedHubError.code, { cleanup: 'cleanup_pending', preferences: 'ENOSPC', bind: 'EADDRINUSE' }[failure]);
+  const notification = events.find(event => event?.type === 'error');
+  assert.ok(notification, 'renderer receives the startup error');
+  assert.equal(notification.info.listening, false);
+  assert.equal(sandbox.settings.syncContentState.enabled.sessionTitles, false, 'keep preflight OFF state');
+  assert.equal(sandbox.settings.syncContentState.pendingTitleCleanup.length, 1, 'keep cleanup obligation');
+  if (failure !== 'bind') {
+    assert.equal(sandbox.settings.hubHostSecret, '', 'unsaved generated secret cannot remain active');
+    assert.ok(!events.includes('create'), 'do not create a Hub before durable secret save');
+  }
+  failing = false;
+  sandbox.startMode();
+  await sandbox.modeQueue;
+  assert.ok(sandbox.embeddedHub);
+  assert.equal(sandbox.embeddedHubError, null);
+  assert.ok(events.includes('hostCollector'));
+});

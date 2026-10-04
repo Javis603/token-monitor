@@ -3231,18 +3231,23 @@ async function getHubBuildStatus() {
 async function startEmbeddedHub() {
   if (embeddedHub) return embeddedHub;
   embeddedHubError = null;
-  if (!settings.hubHostSecret) {
-    const next = { ...settings, hubHostSecret: generateHubSecret() };
-    getSyncContentRuntime().beforeDestinationChange(syncContentContext(next));
-    next.syncContentState = normalizeSyncContentState(settings.syncContentState);
-    const previous = settings;
-    settings = next;
-    try { saveSettings({ throwOnError: true }); }
-    catch (error) { settings = previous; throw error; }
-    getSyncContentRuntime().invalidate();
-  }
   const port = normalizeHubPort(settings.hubHostPort);
   try {
+    if (!settings.hubHostSecret) {
+      const previous = settings;
+      try {
+        const next = { ...settings, hubHostSecret: generateHubSecret() };
+        getSyncContentRuntime().beforeDestinationChange(syncContentContext(next));
+        next.syncContentState = normalizeSyncContentState(settings.syncContentState);
+        settings = next;
+        saveSettings({ throwOnError: true });
+      } catch (error) {
+        // Restore connection settings without undoing a preflight OFF/journal.
+        settings = { ...previous, syncContentState: normalizeSyncContentState(settings.syncContentState) };
+        throw error;
+      }
+      getSyncContentRuntime().invalidate();
+    }
     const hub = createHub({
       port,
       host: '0.0.0.0',
@@ -5993,9 +5998,9 @@ function startMode() {
         return;
       }
       if (!handle) {
-        // Bind failed (e.g. EADDRINUSE). The error is already surfaced via
-        // hub:push; fall back to the local collector so the widget still
-        // shows data while the user fixes the port.
+        // Hub startup or secret persistence failed. The error is already
+        // surfaced via hub:push; keep local collection available while the
+        // user resolves the startup failure.
         startLocalCollector();
         return;
       }
