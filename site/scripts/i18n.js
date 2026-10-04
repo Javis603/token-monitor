@@ -1459,7 +1459,7 @@ var translations = {
     "surfaces.menubar.title": "Barra de menus e bandeja personalizadas",
     "surfaces.menubar.body": "Monte uma exibição ao vivo com ícones de ferramentas, barras de cota, horários de reset, custo, tokens, tok/s ao vivo e texto, com prévia instantânea.",
     "surfaces.bubble.title": "Bolha flutuante",
-    "surfaces.bubble.body": "Reduza o widget a uma mini-janela arrastável com prévia por clique ou mouse.",
+    "surfaces.bubble.body": "Reduza o widget a uma mini-janela arrastável com prévia ao clicar ou passar o mouse.",
     "surfaces.discord.playing": "Jogando",
     "surfaces.discord.title": "Discord Rich Presence",
     "surfaces.discord.body": "Transmita os tokens de hoje, o custo e a ferramenta mais usada no seu perfil. Opcional.",

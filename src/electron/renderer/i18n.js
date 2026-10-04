@@ -9393,7 +9393,7 @@
       'reasonix.native.completion': 'Conclusão',
       'reasonix.native.reasoning': 'Raciocínio',
       'reasonix.native.cacheHit': 'Acerto no cache',
-      'reasonix.native.cacheMiss': 'Erro no cache',
+      'reasonix.native.cacheMiss': 'Fora do cache',
       'reasonix.native.providerRequests': 'Requisições ao provedor',
       'reasonix.native.reportedCost': 'Custo informado pelo Reasonix',
       'serviceStatus.ok': 'Operacional',
