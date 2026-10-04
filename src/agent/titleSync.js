@@ -6,6 +6,10 @@ const path = require('node:path');
 const { CredentialStore } = require('../shared/credentialStore');
 const { createSessionTitleSyncNegotiator } = require('../shared/syncContent');
 
+// A restarted container may reuse this PID. Only claims held by this process
+// are live locally; abandoned same-PID claims must remain reclaimable.
+const heldClaims = new Set();
+
 const disabled = () => ({ syncSessionTitles: false });
 const same = (a, b) => a && b && a.hubUrl === b.hubUrl && a.deviceId === b.deviceId
   && a.headers.authorization === b.headers.authorization;
@@ -39,12 +43,13 @@ function createAgentTitleSync({ dataDir, fetchFn, logger = console, timeoutMs = 
   let cachedAdmissionId;
 
   function acquire() {
-    const directory = `${store.filePath}.locks`;
+    const directory = path.resolve(`${store.filePath}.locks`);
     fsApi.mkdirSync(directory, { recursive: true, mode: 0o700 });
     const ownPath = path.join(directory, `${process.pid}-${crypto.randomUUID()}.json`);
     let descriptor;
     try {
       descriptor = fsApi.openSync(ownPath, 'wx', 0o600);
+      heldClaims.add(ownPath);
       fsApi.writeFileSync(descriptor, JSON.stringify({ pid: process.pid }), 'utf8');
       fsApi.fsyncSync(descriptor);
       fsApi.closeSync(descriptor);
@@ -59,15 +64,16 @@ function createAgentTitleSync({ dataDir, fetchFn, logger = console, timeoutMs = 
         if (!match) throw new Error('journal_busy');
         const pid = Number(match[1]);
         if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('journal_busy');
-        if (isAlive(pid)) throw new Error('journal_busy');
+        if (pid === process.pid ? heldClaims.has(claim) : isAlive(pid)) throw new Error('journal_busy');
         // No asynchronous enable can survive its owning process. Only remove
         // this dead process's unique claim; its private cleanup journal stays.
         const stat = fsApi.lstatSync(claim);
         if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('journal_busy');
         try { fsApi.unlinkSync(claim); } catch (error) { if (error.code !== 'ENOENT') throw error; }
       }
-      return () => fsApi.unlinkSync(ownPath);
+      return () => { heldClaims.delete(ownPath); fsApi.unlinkSync(ownPath); };
     } catch (error) {
+      heldClaims.delete(ownPath);
       if (descriptor !== undefined) try { fsApi.closeSync(descriptor); } catch (_) {}
       try { fsApi.unlinkSync(ownPath); } catch (_) {}
       throw error;

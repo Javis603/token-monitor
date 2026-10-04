@@ -217,8 +217,9 @@ test('live overlapping writer fails closed and dead-process lock recovery preser
   await f.make().negotiate(request);
   const locks = f.filePath + '.locks';
   fs.mkdirSync(locks, { recursive: true });
-  const lock = path.join(locks, `${process.pid}-00000000-0000-4000-8000-000000000000.json`);
-  fs.writeFileSync(lock, JSON.stringify({ pid: process.pid }));
+  const otherPid = process.pid + 1;
+  const lock = path.join(locks, `${otherPid}-00000000-0000-4000-8000-000000000000.json`);
+  fs.writeFileSync(lock, JSON.stringify({ pid: otherPid }));
   const count = f.calls.length;
   assert.equal((await f.make({ isAlive: () => true }).negotiate(request)).syncSessionTitles, false);
   assert.equal(f.calls.length, count);
@@ -367,4 +368,50 @@ test('another process replacing the same admission invalidates a running agents 
     summary: { deviceId: binding.deviceId, today: { totalTokens: 2, sessions: { 'codex:s': { client: 'codex', sessionId: 's', totalTokens: 2, title: 'fresh parent title' } } } }, ...resumed });
   assert.equal(sent.response.ok, true);
   assert.equal(hub.getDevices()[0].periods.today.sessions['codex:s'].title, 'fresh parent title');
+});
+
+test('reused current PID stale claim cannot strand pending title revocation', async t => {
+  const f = fixture(t);
+  f.upload('a.example', 'one', await f.make().negotiate(request));
+  const locks = f.filePath + '.locks';
+  const stale = path.join(locks, `${process.pid}-00000000-0000-4000-8000-000000000001.json`);
+  fs.writeFileSync(stale, JSON.stringify({ pid: process.pid }));
+  await f.make().negotiate({ ...request, enabled: false });
+  assert.equal(f.policy('a.example', 'one').enabled, false);
+  assert.equal(f.hubs.get('a.example').getDevices()[0].periods.today.sessions['codex:s'].title, undefined);
+  assert.equal(fs.existsSync(stale), false);
+  assert.equal(f.state().pending.length, 0);
+});
+
+test('a genuinely held same-process claim still excludes another controller', async t => {
+  const f = fixture(t);
+  let release, arrived;
+  const gate = new Promise(r => { release = r; });
+  const waiting = new Promise(r => { arrived = r; });
+  f.intercept(async call => { if (call.payload?.enabled === true) { arrived(); await gate; } });
+  const first = f.make().negotiate(request);
+  await waiting;
+  const before = f.calls.length;
+  try {
+    assert.equal((await f.make().negotiate({ ...request, enabled: false })).syncSessionTitles, false);
+    assert.equal(f.calls.length, before);
+    assert.equal(fs.readdirSync(f.filePath + '.locks').length, 1);
+  } finally { release(); }
+  assert.equal((await first).syncSessionTitles, true);
+  assert.equal(fs.readdirSync(f.filePath + '.locks').length, 0);
+});
+
+test('failed release unlink leaves a reclaimable same-process claim', async t => {
+  const f = fixture(t);
+  let fail = true;
+  const fsApi = Object.create(fs);
+  fsApi.unlinkSync = file => {
+    if (fail && file.startsWith(f.filePath + '.locks')) { fail = false; throw Object.assign(new Error('fixture release failure'), { code: 'EIO' }); }
+    return fs.unlinkSync(file);
+  };
+  await f.make({ fsApi }).negotiate(request);
+  assert.equal(fs.readdirSync(f.filePath + '.locks').length, 1);
+  await f.make().negotiate({ ...request, enabled: false });
+  assert.equal(f.policy('a.example', 'one').enabled, false);
+  assert.equal(fs.readdirSync(f.filePath + '.locks').length, 0);
 });
