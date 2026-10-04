@@ -261,10 +261,13 @@ function t3TitleQueries(db, tables) {
         ? (providerColumns.has('provider') ? 'COALESCE(r.driver, r.provider)' : 'r.driver')
         : 'r.provider';
       queries.push({
+        authoritative: true,
         // One malformed payload must not hide every other title in the batch.
         threadId: "(CASE WHEN json_valid(r.payload_json) THEN json_extract(r.payload_json, '$.nativeThreadRef.nativeId') END)",
         from: `FROM ${v2Threads} t JOIN ${v2Providers} r ON r.thread_id = t.thread_id`,
-        where: `${columns.has('deleted_at') ? 't.deleted_at IS NULL AND ' : ''}${driver} = 'codex' AND `,
+        // Tombstones still own the native id and suppress retained V1 titles.
+        deleted: columns.has('deleted_at') ? '(t.deleted_at IS NOT NULL)' : '0',
+        where: `${driver} = 'codex' AND `,
         order: columns.has('updated_at') ? ' ORDER BY t.updated_at DESC, t.thread_id' : ''
       });
     }
@@ -304,6 +307,8 @@ function readT3SessionMeta(sessionIds, deps = {}) {
   const candidatesBySession = new Map(ids.map((id) => [id, threadIdCandidates(id)]));
   const candidateIds = [...new Set([...candidatesBySession.values()].flat())];
   const titleByThreadId = new Map();
+  const v2SeenThreadIds = new Set();
+  const legacyTitles = new Map();
 
   for (const dbPath of dbPaths) {
     let db;
@@ -312,24 +317,35 @@ function readT3SessionMeta(sessionIds, deps = {}) {
       const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => String(row.name)));
       for (const query of t3TitleQueries(db, tables)) {
         for (let offset = 0; offset < candidateIds.length; offset += QUERY_CHUNK_SIZE) {
-          const chunk = candidateIds.slice(offset, offset + QUERY_CHUNK_SIZE).filter((id) => !titleByThreadId.has(id));
+          const chunk = candidateIds.slice(offset, offset + QUERY_CHUNK_SIZE).filter(
+            (id) => !v2SeenThreadIds.has(id) && (query.authoritative || !legacyTitles.has(id))
+          );
           if (chunk.length === 0) continue;
           const placeholders = chunk.map(() => '?').join(',');
-          const sql = `SELECT ${query.threadId} AS cursorThreadId, t.title AS title
+          const sql = `SELECT ${query.threadId} AS cursorThreadId, t.title AS title, ${query.deleted || '0'} AS deleted
                        ${query.from}
                        WHERE ${query.where}${query.threadId} IN (${placeholders})${query.order}`;
           for (const row of db.prepare(sql).all(...chunk)) {
             const threadId = cleanText(row.cursorThreadId);
-            if (!threadId || titleByThreadId.has(threadId)) continue;
+            if (!threadId || v2SeenThreadIds.has(threadId)) continue;
+            if (query.authoritative) {
+              v2SeenThreadIds.add(threadId);
+              if (row.deleted) continue;
+            } else if (legacyTitles.has(threadId)) continue;
             const title = cleanSessionTitle(row.title);
             if (!title || T3_DEFAULT_TITLES.has(title.toLowerCase())) continue;
-            titleByThreadId.set(threadId, title);
+            (query.authoritative ? titleByThreadId : legacyTitles).set(threadId, title);
           }
         }
       }
     } catch (_) { /* skip missing, locked, or incompatible databases */ } finally {
       if (db) { try { db.close(); } catch (_) {} }
     }
+  }
+  // A later V2 database also shadows an earlier legacy match. Delay fallback
+  // until every store has been checked, without keeping their connections open.
+  for (const [threadId, title] of legacyTitles) {
+    if (!v2SeenThreadIds.has(threadId)) titleByThreadId.set(threadId, title);
   }
   for (const [sessionId, candidates] of candidatesBySession) {
     const title = candidates.map((id) => titleByThreadId.get(id)).find(Boolean);

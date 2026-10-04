@@ -41,10 +41,10 @@ function makeDb(rows, schema = 'full') {
 // T3 Code keeps its own thread catalog: a T3 thread id (unrelated to Codex's)
 // whose runtime cursor names the Codex thread it drives. The generated display
 // title lives only on that T3 row, so it is only reachable through this join.
-function makeT3Db(rows, { cursorColumn = 'resume_cursor_json', deletedColumn = 'deleted_at' } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't3-meta-'));
-  tmpDirs.push(root);
-  const file = path.join(root, 'state.sqlite');
+function makeT3Db(rows, { cursorColumn = 'resume_cursor_json', deletedColumn = 'deleted_at', targetFile } = {}) {
+  const root = targetFile ? path.dirname(targetFile) : fs.mkdtempSync(path.join(os.tmpdir(), 't3-meta-'));
+  if (!targetFile) tmpDirs.push(root);
+  const file = targetFile || path.join(root, 'state.sqlite');
   const db = new sqlite.DatabaseSync(file);
   const deleted = deletedColumn ? `, ${deletedColumn} TEXT` : '';
   db.exec(`CREATE TABLE projection_threads (thread_id TEXT PRIMARY KEY, title TEXT${deleted})`);
@@ -231,6 +231,43 @@ maybe('T3 V2 discovers the new store before stale legacy titles and preserves Co
   assert.equal(result.get(first).title, 'Current T3 title');
   assert.equal(result.get(second).title, 'Real Codex name');
   assert.equal(result.get(legacyOnly).title, 'Legacy-only title');
+});
+
+for (const layout of ['separate stores', 'retained V1 tables in the V2 store']) {
+  maybe(`V2 suppresses legacy titles for deleted, placeholder and empty threads with ${layout}`, () => {
+    const ids = ['deleted-native', 'placeholder-native', 'empty-native'];
+    const v2 = makeT3V2Db([
+      { t3ThreadId: 'deleted', codexThreadId: ids[0], title: 'Deleted V2 title', deletedAt: '2026-10-04T00:00:00Z' },
+      { t3ThreadId: 'placeholder', codexThreadId: ids[1], title: 'New thread' },
+      { t3ThreadId: 'empty', codexThreadId: ids[2], title: '' }
+    ]);
+    const legacy = makeT3Db([
+      ...ids.map((id) => ({ t3ThreadId: `legacy-${id}`, codexThreadId: id, title: `Stale ${id}` })),
+      { t3ThreadId: 'legacy-only', codexThreadId: 'legacy-only', title: 'Unmigrated title' }
+    ], layout === 'separate stores' ? {} : { targetFile: v2 });
+    const result = metadata.readT3SessionMeta([...ids, 'legacy-only'], { t3DbPaths: [v2, legacy], sqlite });
+    assert.deepEqual(result, new Map([['legacy-only', { title: 'Unmigrated title' }]]));
+  });
+}
+
+maybe('later V2 stores override and suppress earlier legacy matches across state directories', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 't3-cross-layout-'));
+  tmpDirs.push(home);
+  const root = path.join(home, '.t3');
+  const legacy = makeT3Db([
+    { t3ThreadId: 'legacy-live', codexThreadId: 'live', title: 'Stale live title' },
+    { t3ThreadId: 'legacy-deleted', codexThreadId: 'deleted', title: 'Stale deleted title' }
+  ]);
+  const installedDir = path.join(root, 'userdata');
+  fs.mkdirSync(installedDir, { recursive: true });
+  fs.copyFileSync(legacy, path.join(installedDir, 'state.sqlite'));
+  const v2 = makeT3V2Db([
+    { t3ThreadId: 'v2-live', codexThreadId: 'live', title: 'Current V2 title' },
+    { t3ThreadId: 'v2-deleted', codexThreadId: 'deleted', title: 'Deleted V2 title', deletedAt: '2026-10-04T00:00:00Z' }
+  ], path.join(root, 'dev', 'userdata'));
+  const expected = new Map([['live', { title: 'Current V2 title' }]]);
+  assert.deepEqual(metadata.readT3SessionMeta(['live', 'deleted'], { homeDir: home, env: {}, sqlite }), expected);
+  assert.deepEqual(metadata.readT3SessionMeta(['live', 'deleted'], { t3DbPaths: [legacy, v2], sqlite }), expected);
 });
 
 test('discovers the newest state database first and honors CODEX_HOME', () => {
