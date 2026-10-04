@@ -641,6 +641,7 @@
               <div id="customPricingSettingsDetails" class="cursor-settings-details hidden">
                 <p class="settings-note" data-i18n="settings.customPricing.note">Override a model's price (USD per 1M tokens) when its auto-detected price is wrong. Applies to all providers of that model.</p>
                 <div id="customPricingList" class="managed-account-list"></div>
+                <p id="customPricingSyncError" class="settings-note error hidden" role="alert"></p>
                 <div class="settings-actions">
                   <button id="customPricingAddButton" type="button" data-i18n="settings.customPricing.add">Add override</button>
                 </div>
@@ -1479,6 +1480,23 @@
                 </select>
               </label>
             </div>
+            <details id="syncContentDetails" class="sync-content-details">
+              <summary><span data-i18n="settings.sync.content.title">Sync content</span><span class="settings-section-disclosure" aria-hidden="true"></span></summary>
+              <div class="sync-content-body">
+                <p class="settings-note" data-i18n="settings.sync.content.basis">Basic usage and cost are always included when syncing.</p>
+                <p id="syncContentLocalNote" class="settings-note" data-i18n="settings.sync.content.localNote">Optional content sync is available when connected to or hosting a hub.</p>
+                <div id="syncContentOptions" hidden>
+                  <label id="syncContentHostRow" class="settings-item checkbox-label" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.hostPermission">Allow devices to sync session titles</span><span class="settings-item-desc" data-i18n="settings.sync.content.hostNote">Controls what this hub accepts. Each device chooses separately whether to send titles.</span></span><input id="syncContentHostPermission" type="checkbox" /></label>
+                  <label class="settings-item checkbox-label"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.sessionTitles">Session titles</span><span class="settings-item-desc" data-i18n="settings.sync.content.titleNote">Sharing titles is separate from showing them on this device.</span></span><input id="syncContentsessionTitles" type="checkbox" aria-describedby="syncContentTitleUnavailable syncContentCleanup" disabled /></label>
+                  <p id="syncContentTitleUnavailable" class="settings-note" data-i18n="settings.sync.content.titleUnavailable" hidden>This server does not allow session title sync. Ask its administrator to enable it.</p>
+                  <label class="settings-item checkbox-label"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.modelAliases">Model aliases and grouping</span></span><input id="syncContentmodelAliases" type="checkbox" disabled /></label>
+                  <label class="settings-item checkbox-label"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.customPricing">Custom pricing</span></span><input id="syncContentcustomPricing" type="checkbox" disabled /></label>
+                </div>
+                <div id="syncContentCleanup" class="sync-content-cleanup" hidden><p class="settings-note hub-warning" data-i18n="settings.sync.content.cleanup_pending">Title sync is off, but previously shared titles still need to be removed from the server. Retry when connected.</p><div class="settings-actions"><button id="syncContentCleanupRetry" type="button" data-i18n="settings.sync.content.cleanupRetry">Retry title removal</button></div></div>
+                <p id="syncContentStatus" class="settings-note" role="status" aria-live="polite" hidden></p>
+                <div class="settings-actions"><button id="syncContentRetry" type="button" data-i18n="settings.sync.content.retry" hidden>Reload sync status</button></div>
+              </div>
+            </details>
             <div id="syncDevicePanel" class="sync-panel" hidden>
               <div class="sync-panel-heading">
                 <span data-i18n="settings.sync.panel.devices">Devices</span>
@@ -1553,6 +1571,20 @@
         </div>
       </div>
     </main>
+    <dialog id="syncContentDialog" class="sync-content-dialog" aria-labelledby="syncContentDialogTitle" aria-describedby="syncContentDialogCopy">
+      <strong id="syncContentDialogTitle"></strong>
+      <p id="syncContentDialogCopy"></p>
+      <p id="syncContentCounts"></p>
+      <p id="syncContentNoShared" class="settings-note" data-i18n="settings.sync.content.noShared" hidden>No shared settings yet. Use server settings to wait for a future shared edit, or publish this device's settings.</p>
+      <p id="syncContentDialogStatus" class="settings-note error" role="status" aria-live="polite" hidden></p>
+      <div class="settings-actions">
+        <button id="syncContentCancel" type="button" data-i18n="settings.common.cancel" autofocus>Cancel</button>
+        <button id="syncContentDialogRetry" type="button" data-i18n="settings.sync.content.retry" hidden>Reload sync status</button>
+        <button id="syncContentConfirm" type="button" data-i18n="settings.sync.content.enableTitles">Enable title sync</button>
+        <button id="syncContentUseServer" type="button" data-i18n="settings.sync.content.useServer">Use server settings</button>
+        <button id="syncContentPublish" type="button" data-i18n="settings.sync.content.publish">Publish this device's settings</button>
+      </div>
+    </dialog>
     <button id="floatingBubbleTab" class="floating-bubble-tab" type="button" title="Show Token Monitor" aria-label="Show Token Monitor" data-i18n-title="floatingBubble.expand" data-i18n-aria-label="floatingBubble.expand">
       <span id="floatingBubbleContent" aria-hidden="true">Σ</span>
     </button>
@@ -1616,6 +1648,7 @@
     <script src="customPricingForm.js"></script>
     <script src="modelAliases.js"></script>
     <script src="modelAliasForm.js"></script>
+    <script src="syncContentForm.js"></script>
     <script src="../windowShortcut.js"></script>
     <script src="../../shared/currency.js"></script>
     <script src="../../shared/subscriptionDisplay.js"></script>

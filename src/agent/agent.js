@@ -16,6 +16,7 @@ const {
   parseLimitProviders
 } = require('../shared/limits/collector');
 const { postSyncPayload } = require('../shared/syncPayload');
+const { createSessionTitleSyncNegotiator } = require('../shared/syncContent');
 const { HUB_RESPONSE_HEADER, HUB_RESPONSE_MINIMAL } = require('../shared/hubProtocol');
 const { applyProjectRollups } = require('../shared/usage');
 const { runAgent, runAgentOnce } = require('./runtime');
@@ -56,6 +57,7 @@ const limitProviders = parseLimitProviders(args.limitProviders ?? process.env.TO
 const limitsRefreshMs = normalizeLimitsRefreshMs(args.limitsRefreshMs || process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS);
 const limitsRefreshMode = normalizeLimitsRefreshMode(args.limitsRefreshMode || process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE);
 const historyEnabled = parseBoolean(args.history ?? args.historyEnabled ?? process.env.TOKEN_MONITOR_HISTORY_ENABLED, true);
+const syncSessionTitles = parseBoolean(args.syncSessionTitles ?? args['sync-session-titles'] ?? process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES, false);
 const projectsEnabled = parseBoolean(args.projects ?? args.projectsEnabled ?? process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true);
 const sessionUsageArchiveEnabled = parseBoolean(args.sessionArchive ?? args.sessionUsageArchiveEnabled ?? process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true);
 const wslScanEnabled = parseBoolean(args.wslScan ?? args.wslScanEnabled ?? process.env.TOKEN_MONITOR_WSL_SCAN, true);
@@ -139,17 +141,27 @@ function summaryWithSessionUsageArchive(summary, now = new Date()) {
   return projectsEnabled ? applyProjectRollups(visibleSummary) : visibleSummary;
 }
 
+const titleSyncNegotiator = createSessionTitleSyncNegotiator({ fetchFn: fetch });
+
 async function postUsage(summary) {
-  const { response } = await postSyncPayload(fetch, `${hubUrl}/api/ingest`, {
+  const authHeaders = secret ? { authorization: `Bearer ${secret}` } : {};
+  const titleSyncOptions = await titleSyncNegotiator.negotiate({
+    hubUrl, headers: authHeaders, deviceId: summary.deviceId || deviceId, enabled: syncSessionTitles
+  });
+  const { response } = await postSyncPayload((url, options) => fetch(url, { ...options, redirect: 'error' }), `${hubUrl}/api/ingest`, {
     headers: {
       'content-type': 'application/json',
       [HUB_RESPONSE_HEADER]: HUB_RESPONSE_MINIMAL,
-      ...(secret ? { authorization: `Bearer ${secret}` } : {})
+      ...authHeaders
     },
     summary,
+    ...titleSyncOptions,
     logger: (message) => console.warn(`[sync] ${message}`)
   });
-  if (!response.ok) throw new Error(`Hub responded ${response.status}: ${(await response.text()).slice(0, 300)}`);
+  if (!response.ok) {
+    titleSyncNegotiator.invalidate();
+    throw new Error(`Hub responded ${response.status}: ${(await response.text()).slice(0, 300)}`);
+  }
   return response.json();
 }
 

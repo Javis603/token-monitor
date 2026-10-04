@@ -1,0 +1,163 @@
+'use strict';
+
+const SHARED_SYNC_KINDS = Object.freeze(['modelAliases', 'customPricing']);
+const RATE_KEYS = Object.freeze(['inputPerM', 'outputPerM', 'cacheReadPerM', 'cacheWritePerM', 'cacheWrite1hPerM']);
+const MAX_ENTRIES = 4096;
+const MAX_MODEL_LENGTH = 256;
+
+function badRequest(message) {
+  const error = new Error(message);
+  error.code = 'bad_request';
+  return error;
+}
+
+function object(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function onlyKeys(value, keys) {
+  if (!object(value) || Object.keys(value).some((key) => !keys.includes(key))) {
+    throw badRequest(`expected an object containing only ${keys.join(', ')}`);
+  }
+}
+
+function modelText(value) {
+  if (typeof value !== 'string' || !value.trim() || value.trim().length > MAX_MODEL_LENGTH) {
+    throw badRequest(`model names must be non-empty strings of at most ${MAX_MODEL_LENGTH} characters`);
+  }
+  return value.trim();
+}
+
+function aliasKey(value) {
+  return value.toLowerCase().replace(/[._\s]+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+// Refuse malformed replacements rather than filtering them into successful
+// clears. This whitelist is intentionally independent of settings.json.
+function normalizeSharedSyncValue(kind, value) {
+  if (kind === 'modelAliases') {
+    onlyKeys(value, ['modelAliases', 'modelAliasGrouping']);
+    if (!object(value.modelAliases) || !['off', 'duplicates', 'prefix'].includes(value.modelAliasGrouping)) {
+      throw badRequest('modelAliases must be a map and modelAliasGrouping must be off, duplicates or prefix');
+    }
+    const entries = Object.entries(value.modelAliases);
+    if (entries.length > MAX_ENTRIES) throw badRequest('too many model aliases');
+    const seen = new Set();
+    const aliases = entries.map(([source, target]) => {
+      const alias = modelText(source);
+      const canonical = modelText(target);
+      const key = aliasKey(alias);
+      if (!key || key === aliasKey(canonical) || seen.has(key)) throw badRequest('duplicate or self-referencing model alias');
+      seen.add(key);
+      return [alias, canonical];
+    }).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+    return { modelAliases: Object.fromEntries(aliases), modelAliasGrouping: value.modelAliasGrouping };
+  }
+  if (kind === 'customPricing') {
+    if (!Array.isArray(value) || value.length > MAX_ENTRIES) throw badRequest('customPricing must be a bounded array');
+    const seen = new Set();
+    return value.map((raw) => {
+      onlyKeys(raw, ['modelId', ...RATE_KEYS]);
+      const modelId = modelText(raw.modelId);
+      if (seen.has(modelId)) throw badRequest('duplicate custom pricing model');
+      seen.add(modelId);
+      const entry = { modelId };
+      for (const key of RATE_KEYS) {
+        const rate = raw[key];
+        // Existing Tokscale semantics: blank/null/omitted is unknown; 0 is free.
+        if (rate === '' || rate === null || rate === undefined) continue;
+        if (typeof rate !== 'number' || !Number.isFinite(rate) || rate < 0) throw badRequest(`invalid ${key}`);
+        entry[key] = rate;
+      }
+      if (entry.inputPerM === undefined && entry.outputPerM === undefined) {
+        throw badRequest('custom pricing needs an input or output rate');
+      }
+      return entry;
+    }).sort((a, b) => a.modelId < b.modelId ? -1 : a.modelId > b.modelId ? 1 : 0);
+  }
+  throw badRequest('unknown shared settings kind');
+}
+
+function emptySharedSyncDocument() {
+  return { version: 1, revision: 0, updatedAt: '', value: null };
+}
+
+function nextSharedSyncDocument(kind, stored, payload) {
+  onlyKeys(payload, ['baseRevision', 'value']);
+  if (!Number.isSafeInteger(payload.baseRevision) || payload.baseRevision < 0) throw badRequest('baseRevision must be a non-negative integer');
+  const value = normalizeSharedSyncValue(kind, payload.value);
+  if (payload.baseRevision !== stored.revision) {
+    const error = new Error('stale_write');
+    error.code = 'stale_write';
+    error.current = stored;
+    throw error;
+  }
+  if (stored.revision >= Number.MAX_SAFE_INTEGER) throw new Error('shared settings revision exhausted');
+  return { version: 1, revision: stored.revision + 1, updatedAt: new Date().toISOString(), value };
+}
+
+function syncContentCapability(enabled = false) {
+  return { ok: true, version: 1, sessionTitles: { enabled: enabled === true }, sharedSettings: true };
+}
+
+function syncSessionTitlesEnabled(value) {
+  return value === true || ['1', 'true', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase());
+}
+
+function normalizeTitlePolicy(policy) {
+  return {
+    enabled: policy?.enabled === true,
+    generation: Number.isSafeInteger(policy?.generation) && policy.generation >= 0 ? policy.generation : 0
+  };
+}
+
+function nextTitlePolicy(policy, enabled) {
+  if (typeof enabled !== 'boolean') throw badRequest('enabled must be a boolean');
+  const previous = normalizeTitlePolicy(policy);
+  if (enabled && previous.enabled) return previous;
+  if (previous.generation >= Number.MAX_SAFE_INTEGER) throw new Error('session title generation exhausted');
+  return { enabled, generation: previous.generation + 1 };
+}
+
+function acceptsSessionTitles(serverEnabled, policy, generation) {
+  const current = normalizeTitlePolicy(policy);
+  return serverEnabled === true && current.enabled && Number.isSafeInteger(generation) && generation === current.generation;
+}
+
+// One negotiator per agent, keyed by destination, credentials, device and consent.
+// Never send text to a legacy/failed capability probe. Periodic revalidation
+// catches server reconfiguration without adding GET+PUT to every collector tick.
+function createSessionTitleSyncNegotiator({ fetchFn, now = Date.now, refreshMs = 60000, timeoutMs = 5000 } = {}) {
+  const cache = new Map();
+  async function negotiate({ hubUrl, headers = {}, deviceId, enabled = false }) {
+    const key = JSON.stringify([hubUrl, headers, deviceId]);
+    const cached = cache.get(key);
+    if (cached && cached.enabled === enabled && now() < cached.expiresAt) return cached.result;
+    const disabled = { syncSessionTitles: false };
+    let result = disabled;
+    try {
+      const response = await fetchFn(`${hubUrl}/api/sync/content`, { headers, redirect: 'error', signal: AbortSignal.timeout(timeoutMs) });
+      const capability = response.ok ? await response.json() : null;
+      if (capability?.ok === true && capability.version === 1 && capability.sharedSettings === true && typeof capability.sessionTitles?.enabled === 'boolean') {
+        const desired = enabled === true && capability.sessionTitles.enabled;
+        const policyResponse = await fetchFn(`${hubUrl}/api/sync/titles/${encodeURIComponent(deviceId)}`, {
+          method: 'PUT', headers: { ...headers, 'content-type': 'application/json' },
+          redirect: 'error', signal: AbortSignal.timeout(timeoutMs), body: JSON.stringify({ enabled: desired })
+        });
+        const policy = policyResponse.ok ? await policyResponse.json() : null;
+        if (desired && policy?.ok === true && policy.enabled === true && Number.isSafeInteger(policy.generation) && policy.generation > 0) {
+          result = { syncSessionTitles: true, sessionTitleSyncGeneration: policy.generation };
+        }
+      }
+    } catch (_) { /* A failed negotiation still permits a text-free usage upload. */ }
+    cache.set(key, { enabled, result, expiresAt: now() + refreshMs });
+    return result;
+  }
+  return { negotiate, invalidate: () => cache.clear() };
+}
+
+module.exports = {
+  SHARED_SYNC_KINDS, normalizeSharedSyncValue, emptySharedSyncDocument, nextSharedSyncDocument,
+  syncContentCapability, syncSessionTitlesEnabled, normalizeTitlePolicy, nextTitlePolicy,
+  acceptsSessionTitles, createSessionTitleSyncNegotiator
+};

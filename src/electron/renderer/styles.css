@@ -1714,6 +1714,24 @@ span.settings-note.settings-item-desc {
 .hub-address-iface { color: var(--muted); font-size: 9.5px; flex: 0 0 auto; }
 .hub-address-row .icon-button { width: 26px; height: 26px; flex: 0 0 auto; font-size: 12px; }
 .settings-note.hub-warning { color: var(--orange); }
+.sync-content-details { min-width: 0; border-top: 1px solid var(--line); padding-top: 8px; }
+.sync-content-details > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; color: var(--text); font-size: 11px; cursor: pointer; list-style: none; }
+.sync-content-details > summary::-webkit-details-marker { display: none; }
+.sync-content-details[open] > summary .settings-section-disclosure { transform: rotate(180deg); }
+.sync-content-details > summary:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.sync-content-body { display: grid; gap: 8px; padding-top: 6px; }
+.sync-content-cleanup { display: grid; gap: 6px; }
+.settings-panel .sync-content-body .checkbox-label > input[type="checkbox"] { appearance: auto; width: 14px; height: 14px; flex: 0 0 14px; margin: 0; border: initial; background: initial; accent-color: var(--accent); }
+.settings-panel .sync-content-body .checkbox-label > input[type="checkbox"]::before { content: none; }
+.sync-content-dialog { width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-sizing: border-box; overflow-y: auto; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: rgb(var(--panel-rgb)); color: var(--text); font-size: 11px; line-height: 1.5; }
+.sync-content-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.sync-content-dialog > strong { display: block; font-size: 12px; }
+.sync-content-dialog p { overflow-wrap: anywhere; }
+.sync-content-dialog .settings-actions { flex-wrap: wrap; gap: 6px; }
+.sync-content-dialog button { min-height: 30px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: rgba(var(--overlay-rgb), var(--control-alpha)); color: var(--text); cursor: pointer; }
+.sync-content-dialog button:hover { background: rgba(var(--overlay-rgb), 0.12); }
+.sync-content-dialog button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.sync-content-dialog button:disabled { opacity: 0.5; cursor: not-allowed; }
 /* Connection summary and controls stay above the device list, without a nested card. */
 .sync-panel {
   container-type: inline-size;

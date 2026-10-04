@@ -45,7 +45,7 @@ class Element {
   setAttribute(name, value) { this[name] = value; }
 }
 
-test('sync connection summary and inline editor precede frequency and devices without another disclosure', () => {
+test('sync connection stays inline and optional content follows frequency before devices', () => {
   const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
   const start = html.indexOf('id="syncSettingsDetails"');
   const end = html.indexOf('<section class="total-panel">', start);
@@ -54,8 +54,11 @@ test('sync connection summary and inline editor precede frequency and devices wi
   assert.ok(section.indexOf('id="syncPanelConnection"') < section.indexOf('id="hubUrlInput"'));
   assert.ok(section.indexOf('id="saveSettingsButton"') < section.indexOf('id="syncUploadIntervalRow"'));
   assert.ok(section.indexOf('id="syncUploadIntervalRow"') < section.indexOf('id="syncDevicePanel"'));
+  assert.ok(section.indexOf('id="syncUploadIntervalRow"') < section.indexOf('id="syncContentDetails"'));
+  assert.ok(section.indexOf('id="syncContentDetails"') < section.indexOf('id="syncDevicePanel"'));
   assert.equal((section.match(/id="syncPanelConnection"/g) || []).length, 1);
-  assert.doesNotMatch(section, /<details|<summary|syncConnectionSettings|syncConnectionMode/);
+  assert.doesNotMatch(section.slice(0, section.indexOf('id="syncContentDetails"')), /<summary|syncConnectionSettings|syncConnectionMode/);
+  assert.match(section, /<details id="syncContentDetails"/);
   assert.match(section, /class="sync-mode-select"[\s\S]*?<select id="hubModeOptions"[\s\S]*?<span class="settings-section-disclosure" aria-hidden="true">/);
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
   assert.doesNotMatch(css.match(/\.sync-connection-fields\s*\{([^}]+)\}/)?.[1] || '', /\bgap:/);
@@ -163,6 +166,7 @@ test('sync method selects the corresponding fields without touching draft input 
     const hidden = {};
     const field = id => ({ classList: { toggle(name, value) { hidden[id] = value; } } });
     const context = vm.createContext({
+      syncContentForm: null,
       state: { settings: { hubMode: mode }, appInfo: { platform: 'win32' } },
       els: {
         hubModeOptions: {}, syncModeDescription: {}, icloudModeOption: {},

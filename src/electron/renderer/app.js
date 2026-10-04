@@ -17,6 +17,7 @@ const accountProfileRequests = accountShellApi.createRequestGuard();
 const accountProfileStatuses = accountShellApi.createRequestGuard();
 const accountProfileSaves = accountShellApi.createBusyGuard();
 const accountShellErrors = Object.create(null);
+let syncContentForm = null;
 
 function setAccountShellError(id, message) {
   accountShellErrors[id] = message || '';
@@ -723,6 +724,7 @@ function setSettingsSectionExpanded(section, expanded) {
   }
   state.settingsSections[id] = next;
   applySettingsSectionDom(id, next);
+  if (id === 'sync' && next) void syncContentForm?.refresh();
 }
 
 // Expanding a section auto-collapses the previously open one. When that one
@@ -7850,6 +7852,7 @@ async function saveAppearanceFromControls() {
 }
 
 function syncHubModeUi() {
+  syncContentForm?.syncSettings();
   const mode = state.settings.hubMode || 'local';
   els.hubModeOptions.value = mode;
   if (els.syncModeDescription) els.syncModeDescription.textContent = t(SYNC_MODE_DESCRIPTIONS[mode] || SYNC_MODE_DESCRIPTIONS.local);
@@ -11626,15 +11629,32 @@ function preserveSettingsPanelScroll(callback) {
   return result;
 }
 
-async function saveSettings(patch) {
+function setSyncContentEditError(patch, error) {
+  const conflict = window.TokenMonitorSyncContentForm.isConflictError(error);
+  for (const [changed, id] of [
+    [patch.modelAliases !== undefined || patch.modelAliasGrouping !== undefined, 'modelAliasesError'],
+    [patch.customModelPricing !== undefined, 'customPricingSyncError']
+  ]) {
+    if (!changed) continue;
+    const node = document.getElementById(id);
+    if (!node) continue;
+    node.textContent = conflict ? t('settings.sync.content.conflict') : '';
+    node.classList.toggle('hidden', !conflict);
+  }
+}
+
+async function saveSettings(patch, syncContentBase) {
+  setSyncContentEditError(patch, null);
   for (const key of Object.keys(patch)) delete appearancePreview[key];
   const settingsPushRevision = state.settingsPushRevision;
   let next;
   pendingSettingsPatches.add(patch);
   try {
-    next = await window.tokenMonitor.updateSettings(patch);
+    next = await window.tokenMonitor.updateSettings(syncContentForm?.decoratePatch(patch, syncContentBase) || patch);
   } catch (error) {
     pendingSettingsPatches.delete(patch);
+    syncContentForm?.reportSettingsError(error);
+    setSyncContentEditError(patch, error);
     console.error('Could not persist settings:', error);
     try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
     applyEffectiveCurrencyRates();
@@ -11752,6 +11772,8 @@ async function init() {
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  syncContentForm?.syncSettings();
+  await syncContentForm?.refresh(false);
   applyEffectiveCurrencyRates();
   deliverTrayProviderIcons();
 
@@ -12850,6 +12872,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   }
   if (!wasStreamConnected && state.streamConnected && state.settings?.hubMode === 'client') {
     void refreshHubBuildStatus();
+    void syncContentForm?.refresh();
   }
   if (payload.data?.stats) {
     if (fixedPeriodRangesApi.isDerived(state.period)) {
@@ -15993,22 +16016,50 @@ function setCursorCheckboxesEnabled(enabled) {
 
 let openCustomPricingForm = null;
 let modelAliasForm = null;
+let modelAliasEdit = null;
+let modelAliasSaveConflict = false;
 
 function setupModelAliasesUI() {
   const toggle = document.getElementById('modelAliasesSettingsToggle');
   if (!toggle) return;
   toggle.addEventListener('click', () => setAccountGroupExpanded('modelAliases', !state.modelAliasesExpanded, 'modelAliasesExpanded'));
   setAccountGroupExpanded('modelAliases', false, 'modelAliasesExpanded');
+  const pinAliasEdit = () => {
+    modelAliasSaveConflict = false;
+    modelAliasEdit = { base: syncContentForm?.base(), aliases: structuredClone(state.settings?.modelAliases || {}) };
+  };
+  // The existing form owns its open callbacks. Capture before those callbacks
+  // run, so later settings/status pushes cannot reinterpret an open edit.
+  document.getElementById('modelAliasesAddButton').addEventListener('click', pinAliasEdit, true);
+  document.getElementById('modelAliasesList').addEventListener('click', event => {
+    if (event.target.closest('.custom-pricing-edit')) pinAliasEdit();
+  }, true);
+  let savingAliasEdit = false;
+  document.getElementById('modelAliasesSaveButton').addEventListener('click', () => {
+    savingAliasEdit = true;
+    // Invalid input returns before saveAliases is called.
+    queueMicrotask(() => { savingAliasEdit = false; });
+  }, true);
   modelAliasForm = window.TokenMonitorModelAliasForm.createModelAliasForm({
-    document, t,
-    getAliases: () => state.settings?.modelAliases || {},
+    document, t: (key, params) => t(key === 'settings.modelAliases.saveError' && modelAliasSaveConflict ? 'settings.sync.content.conflict' : key, params),
+    getAliases: () => savingAliasEdit && modelAliasEdit ? modelAliasEdit.aliases : state.settings?.modelAliases || {},
     getGrouping: () => state.settings?.modelAliasGrouping || 'off',
-    saveAliases: (modelAliases) => saveSettings({ modelAliases })
+    saveAliases: async (modelAliases) => {
+      const base = savingAliasEdit ? modelAliasEdit?.base : syncContentForm?.base();
+      savingAliasEdit = false;
+      modelAliasSaveConflict = false;
+      try {
+        await saveSettings({ modelAliases }, base);
+      } catch (error) {
+        modelAliasSaveConflict = window.TokenMonitorSyncContentForm.isConflictError(error);
+        throw error;
+      }
+    }
   });
   for (const input of document.querySelectorAll('input[name="modelAliasGrouping"]')) {
     input.addEventListener('change', async () => {
       if (!input.checked) return;
-      await saveSettings({ modelAliasGrouping: input.value });
+      try { await saveSettings({ modelAliasGrouping: input.value }); } catch (_) { return; }
       modelAliasForm?.syncSettings();
     });
   }
@@ -16030,6 +16081,7 @@ function renderCustomPricing() {
   const statusEl = document.getElementById('customPricingStatus');
   if (!listEl) return;
   const overrides = state.settings?.customModelPricing || [];
+  const pricingBase = syncContentForm?.base();
   if (statusEl) {
     statusEl.textContent = overrides.length
       ? t('settings.customPricing.count', { count: overrides.length })
@@ -16063,8 +16115,8 @@ function renderCustomPricing() {
     remove.className = 'managed-account-remove custom-pricing-remove';
     remove.textContent = t('settings.customPricing.remove');
     remove.addEventListener('click', async () => {
-      const next = customPricingFormApi.removeOverride(state.settings?.customModelPricing || [], ov.modelId);
-      await saveSettings({ customModelPricing: next });
+      const next = customPricingFormApi.removeOverride(overrides, ov.modelId);
+      try { await saveSettings({ customModelPricing: next }, pricingBase); } catch (_) { return; }
       renderCustomPricing();
     });
     row.append(main, remove);
@@ -16095,6 +16147,7 @@ function setupCustomPricingUI() {
     [cacheWriteEl, 'cacheWritePerM'], [cacheWrite1hEl, 'cacheWrite1hPerM']
   ];
   let lookupRevision = 0;
+  let pricingEdit = null;
   const editedFields = new Set();
   const hintEl = document.getElementById('customPricingHint');
   const errorEl = document.getElementById('customPricingError');
@@ -16146,6 +16199,7 @@ function setupCustomPricingUI() {
     resetForm();
   };
   openCustomPricingForm = (prefill) => {
+    pricingEdit = { base: syncContentForm?.base(), entries: structuredClone(state.settings?.customModelPricing || []) };
     resetForm();
     populateModels();
     if (prefill && prefill.modelId) {
@@ -16232,14 +16286,14 @@ function setupCustomPricingUI() {
       showError(t('settings.customPricing.errorNoPrice'));
       return;
     }
-    const next = customPricingFormApi.upsertOverride(state.settings?.customModelPricing || [], entry);
+    const next = customPricingFormApi.upsertOverride(pricingEdit?.entries || [], entry);
     saveButton.disabled = true;
     try {
-      await saveSettings({ customModelPricing: next });
+      await saveSettings({ customModelPricing: next }, pricingEdit?.base);
       closeForm();
       renderCustomPricing();
-    } catch (_) {
-      showError(t('settings.customPricing.saveFailed'));
+    } catch (error) {
+      showError(t(window.TokenMonitorSyncContentForm.isConflictError(error) ? 'settings.sync.content.conflict' : 'settings.customPricing.saveFailed'));
     } finally {
       saveButton.disabled = false;
     }
@@ -17101,6 +17155,9 @@ function initSettingsAnimationWrappers() {
 }
 
 initSettingsAnimationWrappers();
+syncContentForm = window.TokenMonitorSyncContentForm.createSyncContentForm({
+  document, bridge: window.tokenMonitor, t, saveSettings, getSettings: () => state.settings
+});
 setupSettingsSections();
 setupCursorAccountUI();
 setupCustomPricingUI();

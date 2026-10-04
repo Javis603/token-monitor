@@ -26,6 +26,10 @@ Click the `⚙` button in the bottom-right corner of the widget to open the sett
 
 iCloud Drive sync is available only to the macOS widget. It stores per-device usage snapshots and per-writer subscription snapshots under `iCloud Drive/Token Monitor/sync-v1/`; updates are eventually consistent. Provider credentials and raw provider responses are excluded. If iCloud Drive is not available, the widget reports that state and retains its last-good aggregate.
 
+Under **Multi-device Sync → Sync content**, Node Hub and Worker connections offer default-off session titles, model aliases/grouping and custom pricing. Basic usage and cost remain part of normal sync. Titles require server permission plus a destination-specific confirmation on the sending device; hosting a Hub exposes a separate receiver-permission checkbox. Changing the saved connection or device ID clears the optional selections. Disabling titles requests removal from the active server store and shows pending cleanup until it succeeds.
+
+When first enabling aliases or prices, choose the current server settings or publish this device's settings if they differ. Future edits share a server revision; a conflict asks you to reload instead of silently overwriting another device. Devices that leave an option off keep their own local settings. An older server without these endpoints continues basic sync and disables optional controls. See [privacy](privacy.md) and the [sync API](API.md#get-apisynccontent).
+
 The `⇧` button in the title bar cycles the window behavior.
 
 ---
