@@ -5,35 +5,39 @@ struct BreakdownItem: View {
     let entry: BreakdownEntry
     let total: Double
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
-        HStack(spacing: 9) {
+        HStack(alignment: .top, spacing: 12) {
             Image(kind.assetName(for: entry.id))
                 .renderingMode(.template)
                 .resizable()
                 .scaledToFit()
                 .foregroundStyle(kind.color(for: entry.id))
-                .frame(width: 20, height: 20)
+                .frame(width: 24, height: 24)
                 .accessibilityHidden(true)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(kind.displayName(for: entry.id))
-                    .font(.subheadline)
-                    .lineLimit(1)
-
-                HStack(spacing: 5) {
+            VStack(alignment: .leading, spacing: 8) {
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                    : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+                layout {
+                    Text(kind.displayName(for: entry.id))
+                        .font(.subheadline.weight(.medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
                     Text(MetricFormatter.tokens(entry.value))
-                        .bold()
+                        .font(.subheadline.weight(.semibold))
                         .monospacedDigit()
-
-                    Text(MetricFormatter.percent(share * 100))
-                        .foregroundStyle(.tertiary)
                 }
-                .font(.footnote)
+                ProgressView(value: share, total: 1)
+                    .tint(DesignTokens.accent.opacity(0.8))
+                    .accessibilityHidden(true)
+                Text(MetricFormatter.percent(share * 100))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 

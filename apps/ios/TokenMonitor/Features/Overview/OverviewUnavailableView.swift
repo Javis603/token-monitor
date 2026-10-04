@@ -6,12 +6,12 @@ struct OverviewUnavailableView: View {
 
     var body: some View {
         ContentUnavailableView {
-            Label(title, systemImage: symbol)
+            Label(LocalizedStringKey(title), systemImage: symbol)
         } description: {
-            Text(message)
+            Text(LocalizedStringKey(message))
         } actions: {
             Button("Open Settings", action: openSettings)
-                .buttonStyle(.glassProminent)
+                .modifier(AppActionStyle())
         }
     }
 

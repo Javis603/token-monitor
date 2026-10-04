@@ -14,9 +14,26 @@ nonisolated struct LimitWindow: Decodable, Identifiable, Sendable {
     let detail: String?
     let currency: String?
     let showMeter: Bool?
+    var limitId: String? = nil
+    var additional: Bool? = nil
+    var windowMinutes: Double? = nil
+
+    func displayLabel(providerID: String?) -> String {
+        let explicit = label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !explicit.isEmpty { return explicit }
+        switch kind?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "session":
+            let fiveHour = ["alibaba", "antigravity", "cline", "commandcode", "kimi", "volcengine", "zai", "zaiteam"]
+            return fiveHour.contains(providerID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "") ? "5-hour" : "Session"
+        case "daily": return "Daily"
+        case "weekly": return "Weekly"
+        case "billing": return "Monthly"
+        default: return "Quota"
+        }
+    }
 
     var id: String {
-        [kind, metric, label, resetsAt]
+        [limitId, kind, metric, label, additional.map(String.init), windowMinutes.map { String($0) }]
             .compactMap { $0 }
             .joined(separator: ":")
     }

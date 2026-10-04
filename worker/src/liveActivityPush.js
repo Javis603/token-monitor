@@ -1,3 +1,5 @@
+import { liveActivityStaleDate } from './shared/liveActivity.js';
+
 const DEFAULT_BUNDLE_ID = 'com.javis.tokenmonitor.ios';
 
 function base64urlBytes(bytes) {
@@ -44,6 +46,7 @@ function derToJose(signature) {
 function createLiveActivityPushClient({
   env,
   fetchImpl = fetch,
+  requestTimeoutMs = 10_000,
   now = () => Date.now(),
   logger = console
 } = {}) {
@@ -75,7 +78,7 @@ function createLiveActivityPushClient({
 
   async function providerToken() {
     const issuedAt = Math.floor(now() / 1000);
-    if (cachedToken && issuedAt - cachedToken.issuedAt < 50 * 60) {
+    if (cachedToken && issuedAt >= cachedToken.issuedAt && issuedAt - cachedToken.issuedAt < 50 * 60) {
       return cachedToken.value;
     }
     const header = base64urlJSON({ alg: 'ES256', kid: keyID });
@@ -103,6 +106,7 @@ function createLiveActivityPushClient({
     const timestamp = Math.floor(now() / 1000);
     const response = await fetchImpl(endpoint(activityToken), {
       method: 'POST',
+      signal: AbortSignal.timeout(requestTimeoutMs),
       headers: {
         authorization: `bearer ${await providerToken()}`,
         'content-type': 'application/json',
@@ -115,7 +119,7 @@ function createLiveActivityPushClient({
         aps: {
           timestamp,
           event: 'update',
-          'stale-date': timestamp + 600,
+          'stale-date': liveActivityStaleDate(contentState, timestamp),
           'content-state': contentState
         }
       })

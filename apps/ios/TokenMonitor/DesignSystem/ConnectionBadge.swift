@@ -4,14 +4,14 @@ struct ConnectionBadge: View {
     let phase: ConnectionPhase
 
     var body: some View {
-        Label(title, systemImage: symbol)
+        Label(LocalizedStringKey(title), systemImage: symbol)
             .font(.caption)
             .bold()
             .foregroundStyle(color)
             .padding(.horizontal, 10)
-            .frame(minHeight: 28)
+            .padding(.vertical, 5)
             .background(color.opacity(0.13), in: .capsule)
-            .accessibilityLabel(accessibilityLabel)
+            .accessibilityLabel(Text(accessibilityLabel))
     }
 
     private var title: String {
@@ -41,7 +41,7 @@ struct ConnectionBadge: View {
         }
     }
 
-    private var accessibilityLabel: String {
+    private var accessibilityLabel: LocalizedStringKey {
         switch phase {
         case .idle:
             "Hub is not configured"
@@ -51,6 +51,41 @@ struct ConnectionBadge: View {
             "Hub is live"
         case let .failed(message):
             "Hub is offline. \(message)"
+        }
+    }
+}
+
+struct ConnectionStatusNotice: View {
+    let phase: ConnectionPhase
+    let retry: () -> Void
+
+    var body: some View {
+        switch phase {
+        case let .failed(message):
+            SurfaceCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label("Offline", systemImage: "wifi.slash")
+                        .font(.headline)
+                    Text("Showing the last received data. Pull to refresh or check your Hub connection.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    Button("Refresh", systemImage: "arrow.clockwise", action: retry)
+                        .modifier(AppActionStyle())
+                }
+            }
+        case .connecting:
+            HStack(spacing: 10) {
+                ProgressView()
+                Text("Connecting to Hub")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        case .idle, .live:
+            EmptyView()
         }
     }
 }

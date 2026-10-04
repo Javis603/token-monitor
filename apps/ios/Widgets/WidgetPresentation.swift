@@ -87,61 +87,42 @@ nonisolated enum WidgetPresentation {
         return "VendorNewAPI"
     }
 
-    static func tokens(_ value: Double) -> String {
-        value.formatted(
-            .number
-                .notation(.compactName)
-                .precision(.fractionLength(0...1))
-        )
+    static func tokens(_ value: Double, locale: Locale = .autoupdatingCurrent) -> String {
+        guard value.isFinite, value >= 0 else { return "—" }
+        return value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(locale))
     }
 
-    static func currencyFromUSD(_ value: Double, displayCode: String) -> String {
-        currency(value, sourceCode: "USD", displayCode: displayCode)
+    static func currencyFromUSD(_ value: Double, displayCode: String, locale: Locale = .autoupdatingCurrent) -> String {
+        currency(value, sourceCode: "USD", displayCode: displayCode, locale: locale)
     }
 
-    static func currency(
-        _ value: Double,
-        sourceCode: String,
-        displayCode: String
-    ) -> String {
-        let sourceRate = rate(for: sourceCode)
-        let displayRate = rate(for: displayCode)
-        guard let sourceRate, let displayRate else {
-            return symbol(for: sourceCode) + decimal(value)
+    static func currency(_ value: Double, sourceCode: String, displayCode: String, locale: Locale = .autoupdatingCurrent) -> String {
+        guard value.isFinite else { return "—" }
+        let source = sourceCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let display = displayCode.uppercased()
+        // Match the fixed display rates used by AppCurrency and the Hub.
+        let rates: [String: Double] = ["USD": 1, "TWD": 31.5, "HKD": 7.8, "CNY": 6.8]
+        let symbols = ["USD": "$", "TWD": "NT$", "HKD": "HK$", "CNY": "¥"]
+        if let sourceRate = rates[source], let displayRate = rates[display], let symbol = symbols[display] {
+            return symbol + (value / sourceRate * displayRate).formatted(
+                .number.grouping(.automatic).precision(.fractionLength(2)).locale(locale)
+            )
         }
-        return symbol(for: displayCode) + decimal(value / sourceRate * displayRate)
+        return value.formatted(.currency(code: source).presentation(.isoCode).precision(.fractionLength(0...2)).locale(locale))
     }
 
-    private static func rate(for code: String) -> Double? {
-        switch code.uppercased() {
-        case "USD": 1
-        case "TWD": 31.5
-        case "HKD": 7.8
-        case "CNY": 6.8
-        default: nil
-        }
+    static func fraction(_ value: Double?, total: Double = 1) -> Double? {
+        guard let value, value.isFinite, total.isFinite, total > 0 else { return nil }
+        return min(1, max(0, value / total))
     }
 
-    private static func symbol(for code: String) -> String {
-        switch code.uppercased() {
-        case "USD": "$"
-        case "TWD": "NT$"
-        case "HKD": "HK$"
-        case "CNY": "¥"
-        default: code.uppercased() + " "
-        }
-    }
-
-    private static func decimal(_ value: Double) -> String {
-        value.formatted(.number.precision(.fractionLength(0...2)))
-    }
-
-    static func percent(_ value: Double) -> String {
-        "\(Int(value.rounded()))%"
+    static func percent(_ value: Double, locale: Locale = .autoupdatingCurrent) -> String {
+        guard let fraction = fraction(value, total: 100) else { return "—" }
+        return fraction.formatted(.percent.precision(.fractionLength(0)).locale(locale))
     }
 
     static func remaining(_ value: Double, locale: Locale) -> String {
-        let percentage = percent(value)
+        let percentage = percent(value, locale: locale)
         let identifier = locale.identifier.lowercased()
         if identifier.hasPrefix("zh") {
             let traditional = identifier.contains("hant")

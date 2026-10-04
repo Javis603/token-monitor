@@ -17,10 +17,17 @@ struct TokenMonitorWidgetProvider: AppIntentTimelineProvider {
         in context: Context
     ) async -> Timeline<TokenMonitorWidgetEntry> {
         let entry = entry(for: configuration)
-        return Timeline(
-            entries: [entry],
-            policy: .after(.now.addingTimeInterval(15 * 60))
-        )
+        var entries = [entry]
+        // Render the stale state even if WidgetKit defers the next reload.
+        if let staleDate = entry.freshnessDate, staleDate > entry.date {
+            entries.append(TokenMonitorWidgetEntry(
+                date: staleDate,
+                snapshot: entry.snapshot,
+                preferences: entry.preferences,
+                configuration: configuration
+            ))
+        }
+        return Timeline(entries: entries, policy: .after(entry.date.addingTimeInterval(15 * 60)))
     }
 
     private func entry(

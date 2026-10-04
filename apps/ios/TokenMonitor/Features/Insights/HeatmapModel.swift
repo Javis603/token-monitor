@@ -6,6 +6,7 @@ struct HeatmapModel: Equatable {
         let tokens: Double
         let cost: Double
         let intensity: Int
+        let isFuture: Bool
 
         var id: Date { date }
     }
@@ -43,17 +44,16 @@ struct HeatmapModel: Equatable {
         ) ?? weekStart
 
         let valuesByDate = Dictionary(
-            uniqueKeysWithValues: days.compactMap { day -> (Date, HistoryDay)? in
-                guard let date = day.dateValue else {
+            days.compactMap { day -> (Date, HistoryDay)? in
+                guard let date = day.dateValue, date <= endDate, date >= firstWeekStart else {
                     return nil
                 }
                 return (calendar.startOfDay(for: date), day)
-            }
+            }, uniquingKeysWith: { _, latest in latest }
         )
-        let peak = max(
-            0,
-            valuesByDate.values.map { value(for: $0, metric: metric) }.max() ?? 0
-        )
+        let readings = valuesByDate.values.map { value(for: $0, metric: metric) }
+            .filter { $0.isFinite && $0 >= 0 }
+        let peak = readings.max() ?? .nan
 
         let weeks = (0..<max(1, weekCount)).map { weekIndex in
             let cells = (0..<7).map { dayIndex in
@@ -64,14 +64,15 @@ struct HeatmapModel: Equatable {
                     to: firstWeekStart
                 ) ?? firstWeekStart
                 let day = valuesByDate[date]
-                let tokens = day?.tokens ?? 0
-                let cost = day?.cost ?? 0
+                let tokens = day?.tokens ?? .nan
+                let cost = day?.cost ?? .nan
                 let value = metric == .tokens ? tokens : cost
                 return Cell(
                     date: date,
                     tokens: tokens,
                     cost: cost,
-                    intensity: intensity(for: value, maximum: peak)
+                    intensity: intensity(for: value, maximum: peak),
+                    isFuture: date > endDate
                 )
             }
             return Week(index: weekIndex, cells: cells)
@@ -90,7 +91,7 @@ struct HeatmapModel: Equatable {
         for day: HistoryDay,
         metric: TrendMetric
     ) -> Double {
-        metric == .tokens ? day.tokens ?? 0 : day.cost ?? 0
+        metric == .tokens ? day.tokens ?? .nan : day.cost ?? .nan
     }
 
     private static func intensity(for value: Double, maximum: Double) -> Int {

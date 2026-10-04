@@ -2,7 +2,7 @@ import Foundation
 
 extension HubStats {
     static var sample: HubStats {
-        let today = UsagePeriod(
+        var today = UsagePeriod(
             totalTokens: 165_164_772,
             costUsd: 136.08,
             cacheReadTokens: 132_400_000,
@@ -34,7 +34,10 @@ extension HubStats {
             ]
         )
 
-        let month = UsagePeriod(
+        let sampleSessions = Data(#"{"design":{"client":"codex","sessionId":"design","title":"Refine usage dashboard","projectLabel":"Token Monitor","totalTokens":128400,"costUsd":0.42,"models":{"gpt-5.5":128400},"turnEnded":false},"widget":{"client":"claude","sessionId":"widget","title":"Improve widget layouts","projectLabel":"Token Monitor","totalTokens":84200,"costUsd":0.31,"models":{"claude-opus-4-8":84200},"turnEnded":true}}"#.utf8)
+        today.sessions = try? JSONDecoder().decode([String: SessionUsage].self, from: sampleSessions)
+
+        var month = UsagePeriod(
             totalTokens: 2_147_220_793,
             costUsd: 1_794.91,
             cacheReadTokens: 1_650_000_000,
@@ -45,6 +48,8 @@ extension HubStats {
             models: today.models,
             modelCosts: today.modelCosts
         )
+
+        month.sessions = today.sessions
 
         let allTime = UsagePeriod(
             totalTokens: 5_837_996_083,

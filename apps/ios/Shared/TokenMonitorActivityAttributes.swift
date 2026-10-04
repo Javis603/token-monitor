@@ -65,6 +65,7 @@ nonisolated struct TokenMonitorActivityAttributes: ActivityAttributes {
         let lockScreenPrimaryField: String?
         let lockScreenSecondaryField: String?
         let lockScreenBottomField: String?
+        var sourceStale: Bool? = nil
     }
 
     let title: String

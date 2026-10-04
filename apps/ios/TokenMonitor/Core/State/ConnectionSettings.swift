@@ -37,12 +37,12 @@ final class ConnectionSettings {
             return nil
         }
         do {
-            defaults.set(configuration.baseURL.absoluteString, forKey: "hubURL")
             if configuration.secret.isEmpty {
                 try keychain.delete()
             } else {
                 try keychain.save(configuration.secret)
             }
+            defaults.set(configuration.baseURL.absoluteString, forKey: "hubURL")
             hubURL = configuration.baseURL.absoluteString
             validationMessage = nil
             return configuration

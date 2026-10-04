@@ -11,10 +11,10 @@ final class TokenMonitorStore {
     var isRefreshing = false
 
     @ObservationIgnored
-    private let client: HubClient
+    private let client: any HubDataClient
 
     @ObservationIgnored
-    private let systemSurfaces: SystemSurfaceCoordinator
+    private let systemSurfaces: any SystemSurfacePublishing
 
     @ObservationIgnored
     private var connectionTask: Task<Void, Never>?
@@ -22,9 +22,17 @@ final class TokenMonitorStore {
     @ObservationIgnored
     private var configuration: HubConfiguration?
 
+    @ObservationIgnored private var generation = UUID()
+    @ObservationIgnored private var publication = 0
+    @ObservationIgnored private var historyRevision: String?
+    @ObservationIgnored private var refreshID: UUID?
+    @ObservationIgnored private var historyTask: Task<Void, Never>?
+    @ObservationIgnored private var historyRequestID: UUID?
+    @ObservationIgnored private var requestedHistoryRevision: String?
+
     init(
-        client: HubClient = HubClient(),
-        systemSurfaces: SystemSurfaceCoordinator = SystemSurfaceCoordinator()
+        client: any HubDataClient = HubClient(),
+        systemSurfaces: any SystemSurfacePublishing = SystemSurfaceCoordinator()
     ) {
         self.client = client
         self.systemSurfaces = systemSurfaces
@@ -32,10 +40,11 @@ final class TokenMonitorStore {
 
     deinit {
         connectionTask?.cancel()
+        historyTask?.cancel()
     }
 
     var currentPeriod: UsagePeriod {
-        stats?.period(selectedPeriod) ?? .empty
+        stats?.period(selectedPeriod) ?? .unknown
     }
 
     var currentHistory: UsageHistory {
@@ -43,94 +52,129 @@ final class TokenMonitorStore {
     }
 
     func configure(_ configuration: HubConfiguration?) {
+        guard self.configuration != configuration || connectionTask == nil else { return }
         connectionTask?.cancel()
+        connectionTask = nil
+        historyTask?.cancel()
+        historyTask = nil
+        historyRequestID = nil
+        requestedHistoryRevision = nil
+        generation = UUID()
+        publication = 0
+        refreshID = nil
+        isRefreshing = false
         self.configuration = configuration
-        guard let configuration else {
-            phase = .idle
-            stats = nil
-            history = nil
-            return
-        }
+        stats = nil
+        history = nil
+        historyRevision = nil
+        phase = configuration == nil ? .idle : .connecting
+        systemSurfaces.configure(configuration)
+        guard let configuration else { return }
+        let generation = generation
         connectionTask = Task { [weak self] in
-            await self?.connectionLoop(configuration: configuration)
+            await self?.connectionLoop(configuration: configuration, generation: generation)
         }
     }
 
     func refresh() async {
-        guard let configuration else {
-            phase = .idle
-            return
-        }
+        guard let configuration, !isRefreshing else { return }
+        let generation = generation
+        let publication = publication
+        let id = UUID()
+        refreshID = id
         isRefreshing = true
-        defer { isRefreshing = false }
+        defer {
+            if refreshID == id { isRefreshing = false; refreshID = nil }
+        }
         do {
             let incoming = try await client.fetchStats(configuration: configuration)
-            await accept(incoming, configuration: configuration)
-            phase = .live
-        } catch is CancellationError {
-            return
+            // A newer stream frame wins over an older in-flight manual fetch.
+            guard isCurrent(generation), self.publication == publication else { return }
+            await accept(incoming, configuration: configuration, generation: generation)
         } catch {
+            guard isCurrent(generation), self.publication == publication else { return }
             phase = .failed(error.localizedDescription)
         }
     }
 
-    func resume() async {
-        guard configuration != nil else {
-            return
-        }
-        await refresh()
+    func resume() async { await refresh() }
+
+    private func isCurrent(_ generation: UUID) -> Bool {
+        self.generation == generation && !Task.isCancelled
     }
 
-    private func connectionLoop(configuration: HubConfiguration) async {
-        while !Task.isCancelled {
+    private func connectionLoop(configuration: HubConfiguration, generation: UUID) async {
+        var retrySeconds = 1.0
+        while isCurrent(generation) {
             do {
                 phase = .connecting
+                let publication = publication
                 let incoming = try await client.fetchStats(configuration: configuration)
-                await accept(incoming, configuration: configuration)
-                phase = .live
-
+                guard isCurrent(generation) else { return }
+                if self.publication == publication {
+                    await accept(incoming, configuration: configuration, generation: generation)
+                }
+                guard isCurrent(generation) else { return }
                 let stream = await client.statsStream(configuration: configuration)
                 for try await update in stream {
-                    try Task.checkCancellation()
-                    await accept(update, configuration: configuration)
-                    phase = .live
+                    guard isCurrent(generation) else { return }
+                    await accept(update, configuration: configuration, generation: generation)
+                    retrySeconds = 1
                 }
-            } catch is CancellationError {
-                return
+                throw HubClientError.streamEnded
             } catch {
+                guard isCurrent(generation) else { return }
                 phase = .failed(error.localizedDescription)
                 do {
-                    try await Task.sleep(for: .seconds(4))
-                } catch {
-                    return
-                }
+                    try await Task.sleep(for: .seconds(retrySeconds))
+                    retrySeconds = min(30, retrySeconds * 2)
+                } catch { return }
             }
         }
     }
 
     private func accept(
         _ incoming: HubStats,
-        configuration: HubConfiguration
+        configuration: HubConfiguration,
+        generation: UUID
     ) async {
-        let previousRevision = stats?.historyRevision
+        guard isCurrent(generation) else { return }
+        publication += 1
+        let publication = publication
         stats = incoming
-
-        let needsHistory = history == nil
-            || (
-                incoming.historyRevision?.isEmpty == false
-                    && incoming.historyRevision != previousRevision
-            )
-        if needsHistory {
+        phase = .live
+        // Publish stats immediately; history must not block fresh usage or widgets.
+        await systemSurfaces.publish(stats: incoming, history: currentHistory, configuration: configuration)
+        guard isCurrent(generation), self.publication == publication else { return }
+        let needsHistory = history == nil || incoming.historyRevision != historyRevision
+        guard needsHistory else { return }
+        if historyTask != nil, requestedHistoryRevision == incoming.historyRevision { return }
+        historyTask?.cancel()
+        let requestID = UUID()
+        historyRequestID = requestID
+        requestedHistoryRevision = incoming.historyRevision
+        historyTask = Task { [weak self, client] in
             do {
-                history = try await client.fetchHistory(configuration: configuration)
-            } catch is CancellationError {
-                return
+                let loaded = try await client.fetchHistory(configuration: configuration)
+                guard let self, self.isCurrent(generation), self.historyRequestID == requestID else { return }
+                self.history = loaded
+                self.historyRevision = incoming.historyRevision
+                self.historyTask = nil
+                self.historyRequestID = nil
+                // Use the latest usage/freshness frame, never the frame that started history.
+                if let latest = self.stats {
+                    await self.systemSurfaces.publish(stats: latest, history: loaded, configuration: configuration)
+                }
             } catch {
-                history = incoming.historyPreview ?? history
+                guard let self, self.isCurrent(generation), self.historyRequestID == requestID else { return }
+                self.historyTask = nil
+                self.historyRequestID = nil
+                // Leave the revision unacknowledged so the next frame can retry.
+                self.history = self.stats?.historyPreview ?? self.history
             }
         }
-        await systemSurfaces.publish(stats: incoming, history: currentHistory)
     }
+
 }
 
 extension TokenMonitorStore {

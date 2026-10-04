@@ -7,10 +7,10 @@ struct LimitsSummaryHeader: View {
     let updatedAt: String?
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(MetricFormatter.accountCount(providers.count, locale: locale))
-                    .font(.headline)
+                    .font(.title2.bold())
                     .contentTransition(.numericText())
 
                 if let updatedDate = Date.hubTimestamp(from: updatedAt) {
@@ -20,7 +20,6 @@ struct LimitsSummaryHeader: View {
                 }
             }
 
-            Spacer()
 
             if attentionCount > 0 {
                 Label(

@@ -20,7 +20,8 @@ struct TokenMonitorWidgetEntry: TimelineEntry {
     }
 
     var providerID: String? {
-        configuration.provider?.id ?? preferences.widgetProviderID
+        let selected = configuration.provider?.id ?? preferences.widgetProviderID
+        return selected.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     var showsCost: Bool {
@@ -50,17 +51,31 @@ struct TokenMonitorWidgetEntry: TimelineEntry {
     }
 
     var preferredLimit: TokenMonitorSharedPayload.Limit? {
-        if let providerID,
-           let selected = snapshot?.limits.first(
-               where: { $0.providerID == providerID }
-           ) {
-            return selected
+        if let providerID {
+            // A missing configured provider must not silently show another account.
+            return snapshot?.limits.first { $0.providerID == providerID }
         }
         return snapshot?.limits.min { lhs, rhs in
             let left = lhs.windows.compactMap(\.remainingPercent).min() ?? 101
             let right = rhs.windows.compactMap(\.remainingPercent).min() ?? 101
             return left < right
         }
+    }
+
+    // A snapshot is historical data, never evidence of an active connection.
+    static let freshnessInterval: TimeInterval = 15 * 60
+
+    var freshnessDate: Date? {
+        let updated = content == "limits" ? preferredLimit?.updatedAt : snapshot?.updatedAt
+        return updated?.addingTimeInterval(Self.freshnessInterval)
+    }
+
+    var isStale: Bool {
+        if content == "limits" {
+            if preferredLimit?.sourceStale == true { return true }
+        } else if snapshot?.sourceStale == true { return true }
+        guard let freshnessDate else { return snapshot != nil }
+        return date >= freshnessDate
     }
 
     var currencyCode: String {

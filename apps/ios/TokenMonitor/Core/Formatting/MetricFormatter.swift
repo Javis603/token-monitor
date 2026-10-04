@@ -2,7 +2,8 @@ import Foundation
 
 nonisolated enum MetricFormatter {
     static func tokens(_ value: Double) -> String {
-        value.formatted(
+        guard value.isFinite else { return "—" }
+        return value.formatted(
             .number
                 .notation(.compactName)
                 .precision(.fractionLength(0...1))
@@ -10,10 +11,12 @@ nonisolated enum MetricFormatter {
     }
 
     static func exactTokens(_ value: Double) -> String {
-        value.formatted(.number.precision(.fractionLength(0)))
+        guard value.isFinite else { return "—" }
+        return value.formatted(.number.precision(.fractionLength(0)))
     }
 
     static func currency(_ value: Double, code: String = "USD") -> String {
+        guard value.isFinite else { return "—" }
         let normalizedCode = normalizedCurrencyCode(code)
         let symbol = AppCurrency(rawValue: normalizedCode)?.symbol ?? normalizedCode + " "
         return symbol + decimalCurrency(value)
@@ -23,7 +26,8 @@ nonisolated enum MetricFormatter {
         _ value: Double,
         currency: AppCurrency
     ) -> String {
-        currency.symbol + decimalCurrency(value * currency.rateFromUSD)
+        guard value.isFinite else { return "—" }
+        return currency.symbol + decimalCurrency(value * currency.rateFromUSD)
     }
 
     static func currency(
@@ -40,7 +44,8 @@ nonisolated enum MetricFormatter {
     }
 
     static func percent(_ value: Double) -> String {
-        (value / 100).formatted(.percent.precision(.fractionLength(0)))
+        guard value.isFinite else { return "—" }
+        return (value / 100).formatted(.percent.precision(.fractionLength(0)))
     }
 
     static func remaining(_ value: Double, locale: Locale) -> String {

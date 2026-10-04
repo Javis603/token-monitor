@@ -8,7 +8,7 @@ struct WidgetSurfacePreview: View {
     let showsUpdateTime: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 7) {
                 Image(systemName: content.systemImage)
                     .foregroundStyle(DesignTokens.accent)
@@ -24,9 +24,9 @@ struct WidgetSurfacePreview: View {
             case .overview:
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Text("62.8M")
-                        .font(.title2.weight(.bold))
+                        .font(.system(.largeTitle, design: .rounded, weight: .bold))
                         .monospacedDigit()
-                    Text("tokens")
+                    Text("Tokens")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -36,36 +36,40 @@ struct WidgetSurfacePreview: View {
                         Text(providerName)
                             .font(.subheadline.weight(.semibold))
                         Spacer()
-                        Text("91% left")
+                        Text("90% left")
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(DesignTokens.accent)
                     }
-                    ProgressView(value: 0.91)
+                    ProgressView(value: 0.9)
                         .tint(DesignTokens.accent)
                 }
             case .activity:
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Text("2.7M").font(.title2.bold()).monospacedDigit()
+                    Text("Tokens").font(.caption).foregroundStyle(.secondary)
+                }
                 LazyVGrid(
                     columns: Array(
                         repeating: GridItem(.flexible(), spacing: 3),
-                        count: 14
+                        count: 7
                     ),
                     spacing: 3
                 ) {
-                    ForEach(0..<42, id: \.self) { index in
+                    ForEach(0..<28, id: \.self) { index in
                         RoundedRectangle(cornerRadius: 2)
                             .fill(
                                 DesignTokens.accent.opacity(
                                     0.12 + Double(index % 5) * 0.16
                                 )
                             )
-                            .frame(height: 7)
+                            .frame(height: 10)
                     }
                 }
             }
 
             HStack {
                 if showsCost {
-                    Label("$48.40", systemImage: "dollarsign.circle")
+                    Label("USD 48.40", systemImage: "dollarsign.circle")
                 }
                 Spacer(minLength: 0)
                 if showsUpdateTime {
@@ -75,15 +79,14 @@ struct WidgetSurfacePreview: View {
             .font(.caption2)
             .foregroundStyle(.secondary)
         }
-        .foregroundStyle(.white)
-        .padding(14)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.black, in: .rect(cornerRadius: 18))
+        .background(Color(uiColor: .tertiarySystemGroupedBackground), in: .rect(cornerRadius: 22))
         .overlay {
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(.white.opacity(0.12), lineWidth: 1)
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(Color(uiColor: .separator).opacity(0.2), lineWidth: 1)
         }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Widget preview")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Widget preview, sample data")
     }
 }

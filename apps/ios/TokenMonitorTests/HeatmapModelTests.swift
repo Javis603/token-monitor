@@ -67,4 +67,22 @@ struct HeatmapModelTests {
         #expect(model.activeDays == 5)
         #expect(model.peakValue == 100)
     }
+    @Test func distinguishesMissingHistoryFromReportedZeroAndExcludesFutureDays() throws {
+        let referenceDate = try #require(ISO8601DateFormatter().date(from: "2026-07-31T12:00:00Z"))
+        let days = [
+            HistoryDay(date: "2026-07-30", tokens: 0, cost: nil, messages: nil, activeTimeMs: nil),
+            HistoryDay(date: "2026-08-01", tokens: 999, cost: 10, messages: nil, activeTimeMs: nil)
+        ]
+        let model = HeatmapModel.make(days: days, metric: .tokens, weekCount: 1, referenceDate: referenceDate)
+        let cells = model.weeks.flatMap(\.cells)
+        #expect(cells.filter { $0.tokens == 0 }.count == 1)
+        #expect(cells.filter { !$0.tokens.isFinite }.count == 6)
+        #expect(cells.filter(\.isFuture).count == 1)
+        #expect(model.peakValue == 0)
+        #expect(model.activeDays == 0)
+        let empty = HeatmapModel.make(days: [], metric: .cost, weekCount: 1, referenceDate: referenceDate)
+        #expect(empty.weeks.flatMap(\.cells).allSatisfy { !$0.cost.isFinite })
+        #expect(!empty.peakValue.isFinite)
+    }
+
 }

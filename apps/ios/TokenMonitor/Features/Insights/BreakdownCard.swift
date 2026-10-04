@@ -9,39 +9,29 @@ struct BreakdownCard: View {
     let limit: Int
 
     var body: some View {
-        NavigationLink {
-            BreakdownDetailView(kind: kind)
-        } label: {
-            VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 20) {
+            NavigationLink {
+                BreakdownDetailView(kind: kind)
+            } label: {
                 HStack {
-                    Label {
-                        Text(LocalizedStringKey(title))
-                    } icon: {
-                        Image(imageName)
-                    }
+                    Text(LocalizedStringKey(title))
                         .font(.headline)
                     Spacer()
                     Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-
-                if entries.isEmpty {
-                    Label("No breakdown available", systemImage: "chart.bar.xaxis")
-                        .font(.subheadline)
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
-                        .padding(.vertical, 10)
-                } else {
-                    BreakdownList(
-                        kind: kind,
-                        entries: entries,
-                        total: total,
-                        limit: limit
-                    )
                 }
+                .frame(minHeight: DesignTokens.controlHeight, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if entries.isEmpty {
+                Label("No breakdown available", systemImage: "chart.bar.xaxis")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                BreakdownList(kind: kind, entries: entries, total: total, limit: limit)
             }
         }
-        .buttonStyle(.plain)
-        .padding(.vertical, 4)
     }
 }

@@ -26,6 +26,6 @@ nonisolated struct DeviceSnapshot: Decodable, Identifiable, Sendable {
     }
 
     func period(_ key: UsagePeriodKey) -> UsagePeriod {
-        periods?[key.rawValue] ?? .empty
+        periods?[key.rawValue] ?? .unknown
     }
 }

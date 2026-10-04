@@ -3,18 +3,22 @@ import SwiftUI
 struct LimitWindowRow: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.locale) private var locale
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let provider: LimitProvider
     let window: LimitWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 5))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            layout {
                 Text(LocalizedStringKey(windowTitle))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
-                Spacer()
+                if !dynamicTypeSize.isAccessibilitySize { Spacer() }
 
                 if let headline {
                     Text(headline)
@@ -26,7 +30,7 @@ struct LimitWindowRow: View {
             }
 
             if window.showMeter != false, let remainingPercent {
-                ProgressView(value: remainingPercent, total: 100)
+                ProgressView(value: min(100, max(0, remainingPercent)), total: 100)
                     .tint(statusColor)
                     .accessibilityLabel("\(windowTitle) remaining")
                     .accessibilityValue(MetricFormatter.percent(remainingPercent))
@@ -38,11 +42,11 @@ struct LimitWindowRow: View {
                     Text(resetDate, format: .relative(presentation: .numeric))
                 }
                 .font(.footnote)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
             } else if let description = nonEmpty(window.resetDescription) {
                 Text(description)
                     .font(.footnote)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.secondary)
             }
 
             if let detail = nonEmpty(window.detail) {
@@ -55,9 +59,7 @@ struct LimitWindowRow: View {
     }
 
     private var windowTitle: String {
-        nonEmpty(window.label)
-            ?? nonEmpty(window.kind?.capitalized)
-            ?? "Quota"
+        window.displayLabel(providerID: provider.provider)
     }
 
     private var remainingPercent: Double? {
@@ -104,7 +106,7 @@ struct LimitWindowRow: View {
         if remainingPercent <= 35 {
             return DesignTokens.warning
         }
-        return ProviderPresentation.color(for: provider.provider)
+        return DesignTokens.accent
     }
 
     private func nonEmpty(_ value: String?) -> String? {

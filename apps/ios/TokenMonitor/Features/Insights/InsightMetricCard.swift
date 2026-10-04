@@ -13,17 +13,14 @@ struct InsightMetricCard: View {
                     .foregroundStyle(.secondary)
             } icon: {
                 Image(systemName: systemImage)
-                    .foregroundStyle(tint)
+                    .foregroundStyle(.secondary)
             }
             .font(.footnote)
-            .lineLimit(1)
-            .minimumScaleFactor(0.85)
 
             Text(value)
-                .font(.headline)
+                .font(.title2.weight(.semibold))
                 .bold()
                 .monospacedDigit()
-                .contentTransition(.numericText())
         }
         .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
         .accessibilityElement(children: .combine)

@@ -10,8 +10,24 @@ nonisolated struct HubStats: Decodable, Sendable {
     let staleAfterMs: Double?
     let projectsIncomplete: Bool?
 
+    func sourceUpdatedAt(now: Date = .now) -> Date? {
+        let sources = devices ?? []
+        if !sources.isEmpty {
+            return sources.compactMap { Date.hubTimestamp(from: $0.updatedAt) }
+                .filter { $0 <= now }.max()
+        }
+        guard let date = Date.hubTimestamp(from: updatedAt), date <= now else { return nil }
+        return date
+    }
+
+    var allSourcesStale: Bool? {
+        guard let devices, !devices.isEmpty else { return nil }
+        if devices.contains(where: { $0.stale == false }) { return false }
+        return devices.allSatisfy { $0.stale == true } ? true : nil
+    }
+
     func period(_ key: UsagePeriodKey) -> UsagePeriod {
-        periods?[key.rawValue] ?? .empty
+        periods?[key.rawValue] ?? .unknown
     }
 
     var sortedDevices: [DeviceSnapshot] {

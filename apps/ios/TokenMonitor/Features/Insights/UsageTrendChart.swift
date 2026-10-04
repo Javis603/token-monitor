@@ -2,6 +2,7 @@ import Charts
 import SwiftUI
 
 struct UsageTrendChart: View {
+    @Environment(AppPreferences.self) private var preferences
     let days: [HistoryDay]
     let metric: TrendMetric
 
@@ -14,32 +15,51 @@ struct UsageTrendChart: View {
             .foregroundStyle(
                 LinearGradient(
                     colors: [
-                        DesignTokens.accent.opacity(0.35),
+                        DesignTokens.accent.opacity(0.18),
                         DesignTokens.accent.opacity(0.02)
                     ],
                     startPoint: .top,
                     endPoint: .bottom
                 )
             )
-            .interpolationMethod(.catmullRom)
+            .interpolationMethod(.linear)
 
             LineMark(
                 x: .value("Date", day.dateValue ?? .now),
                 y: .value(metric.label, value(for: day))
             )
             .foregroundStyle(DesignTokens.accent)
-            .lineStyle(.init(lineWidth: 3, lineCap: .round, lineJoin: .round))
-            .interpolationMethod(.catmullRom)
+            .lineStyle(.init(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            .interpolationMethod(.linear)
         }
-        .chartXAxis(.hidden)
-        .chartYAxis(.hidden)
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 3)) { _ in
+                AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+            }
+        }
+        .chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { axis in
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3]))
+                AxisValueLabel {
+                    if let value = axis.as(Double.self) {
+                        Text(metric == .tokens
+                            ? MetricFormatter.tokens(value)
+                            : MetricFormatter.currencyFromUSD(value, currency: preferences.currency))
+                    }
+                }
+            }
+        }
         .chartYScale(domain: 0...upperBound)
         .frame(minHeight: 150)
         .accessibilityLabel("\(metric.label) trend for the last \(validDays.count) days")
     }
 
     private var validDays: [HistoryDay] {
-        days.filter { $0.dateValue != nil }
+        days.filter { day in
+            guard day.dateValue != nil else { return false }
+            let amount = metric == .tokens ? day.tokens : day.cost
+            return amount.map { $0.isFinite && $0 >= 0 } ?? false
+        }
     }
 
     private var upperBound: Double {

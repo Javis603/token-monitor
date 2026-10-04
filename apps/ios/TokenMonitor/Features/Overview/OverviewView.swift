@@ -18,61 +18,60 @@ struct OverviewView: View {
                         alignment: .leading,
                         spacing: DesignTokens.sectionSpacing
                     ) {
+                        ConnectionStatusNotice(phase: store.phase, retry: refresh)
                         PeriodPicker(selection: $store.selectedPeriod)
-
                         HeroSummaryCard(
                             periodKey: store.selectedPeriod,
                             period: store.currentPeriod,
                             updatedAt: stats.updatedAt
                         )
-
-                        Divider()
+                        NavigationLink {
+                            SessionsView()
+                        } label: {
+                            HStack {
+                                Label("Sessions", systemImage: "bubble.left.and.bubble.right")
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .font(.headline)
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 18)
+                        }
+                        .modifier(AppActionStyle())
 
                         LimitPreviewSection(
-                            providers: Array(
-                                stats.sortedLimits.prefix(preferences.homeLimitCount)
-                            ),
+                            providers: Array(stats.sortedLimits.prefix(preferences.homeLimitCount)),
                             showAll: showLimits
                         )
-                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                        Divider()
-
-                        UsageTrendCard(
-                            history: store.currentHistory,
-                            metric: .tokens
-                        )
-
-                        Divider()
-
-                        BreakdownCard(
-                            title: "Tools",
-                            imageName: "SectionTools",
-                            kind: .tool,
-                            entries: store.currentPeriod.clientEntries,
-                            total: store.currentPeriod.totalTokens ?? 0,
-                            limit: 6
-                        )
-
-                        Divider()
-
-                        BreakdownCard(
-                            title: "Models",
-                            imageName: "SectionModels",
-                            kind: .model,
-                            entries: store.currentPeriod.modelEntries,
-                            total: store.currentPeriod.totalTokens ?? 0,
-                            limit: 6
-                        )
-
-                        Divider()
-
-                        DeviceListCard(
-                            devices: Array(stats.sortedDevices.prefix(4)),
-                            period: store.selectedPeriod
-                        )
+                        SurfaceCard {
+                            UsageTrendCard(history: store.currentHistory, metric: .tokens)
+                        }
+                        VStack(alignment: .leading, spacing: 16) {
+                            Text("Usage breakdown")
+                                .font(.title2.bold())
+                                .accessibilityAddTraits(.isHeader)
+                            SurfaceCard {
+                                BreakdownCard(
+                                    title: "Tools", imageName: "SectionTools", kind: .tool,
+                                    entries: store.currentPeriod.clientEntries,
+                                    total: store.currentPeriod.totalTokens ?? 0, limit: 3
+                                )
+                            }
+                            SurfaceCard {
+                                BreakdownCard(
+                                    title: "Models", imageName: "SectionModels", kind: .model,
+                                    entries: store.currentPeriod.modelEntries,
+                                    total: store.currentPeriod.totalTokens ?? 0, limit: 3
+                                )
+                            }
+                        }
+                        SurfaceCard {
+                            DeviceListCard(devices: stats.sortedDevices, period: store.selectedPeriod)
+                        }
                     }
                     .padding(.horizontal, DesignTokens.screenPadding)
+                    .padding(.top, 8)
                     .padding(.bottom, DesignTokens.sectionSpacing)
                 }
                 .refreshable {

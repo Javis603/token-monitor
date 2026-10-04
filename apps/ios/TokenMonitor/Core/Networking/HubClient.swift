@@ -1,11 +1,45 @@
 import Foundation
 
-actor HubClient {
+nonisolated protocol HubDataClient: Sendable {
+    func fetchStats(configuration: HubConfiguration) async throws -> HubStats
+    func fetchHistory(configuration: HubConfiguration) async throws -> UsageHistory
+    func statsStream(configuration: HubConfiguration) async -> AsyncThrowingStream<HubStats, any Error>
+}
+
+nonisolated protocol LiveActivityClient: Sendable {
+    func registerLiveActivity(activityID: String, pushToken: Data,
+        preferences: TokenMonitorSharedPayload.Preferences, locale: String,
+        configuration: HubConfiguration) async throws -> Bool
+    func unregisterLiveActivity(activityID: String, configuration: HubConfiguration) async throws
+}
+
+// Credentials must never follow an HTTP redirect, even within the same host:
+// a reverse proxy may redirect an authenticated API request to a login service.
+nonisolated final class HubRedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
+    }
+}
+
+actor HubClient: HubDataClient, LiveActivityClient {
     private let session: URLSession
     private let decoder = JSONDecoder()
 
-    init(session: URLSession = .shared) {
-        self.session = session
+    private let redirectGuard = HubRedirectGuard()
+
+    init(session: URLSession? = nil) {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.urlCredentialStorage = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.timeoutIntervalForRequest = 60
+        configuration.timeoutIntervalForResource = 60 * 60
+        self.session = session ?? URLSession(configuration: configuration)
     }
 
     func fetchStats(configuration: HubConfiguration) async throws -> HubStats {
@@ -36,7 +70,7 @@ actor HubClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(payload)
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request, delegate: redirectGuard)
         try Self.validate(response)
         let result = try decoder.decode(
             LiveActivityRegistrationResponse.self,
@@ -54,26 +88,31 @@ actor HubClient {
             configuration: configuration
         )
         request.httpMethod = "DELETE"
-        let (_, response) = try await session.data(for: request)
+        let (_, response) = try await session.data(for: request, delegate: redirectGuard)
         try Self.validate(response)
     }
 
     func statsStream(
         configuration: HubConfiguration
     ) -> AsyncThrowingStream<HubStats, any Error> {
-        let request = request(path: "api/stats/stream", configuration: configuration)
+        var request = request(path: "api/stats/stream", configuration: configuration)
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        request.setValue("2", forHTTPHeaderField: "x-token-monitor-stream")
         let session = session
 
-        return AsyncThrowingStream { continuation in
+        return AsyncThrowingStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
             let task = Task {
                 do {
-                    let (bytes, response) = try await session.bytes(for: request)
+                    let (bytes, response) = try await session.bytes(for: request, delegate: redirectGuard)
                     try Self.validate(response)
+                    guard response.mimeType?.lowercased() == "text/event-stream" else {
+                        throw HubClientError.invalidResponse
+                    }
                     var parser = SSEDecoder()
                     let eventDecoder = JSONDecoder()
-                    for try await line in bytes.lines {
+                    for try await byte in bytes {
                         try Task.checkCancellation()
-                        if let stats = try parser.consume(line: line, decoder: eventDecoder) {
+                        if let stats = try parser.consume(byte: byte, decoder: eventDecoder) {
                             continuation.yield(stats)
                         }
                     }
@@ -96,7 +135,7 @@ actor HubClient {
         configuration: HubConfiguration
     ) async throws -> Value {
         let (data, response) = try await session.data(
-            for: request(path: path, configuration: configuration)
+            for: request(path: path, configuration: configuration), delegate: redirectGuard
         )
         try Self.validate(response)
         return try decoder.decode(type, from: data)
@@ -105,6 +144,8 @@ actor HubClient {
     private func request(path: String, configuration: HubConfiguration) -> URLRequest {
         var request = URLRequest(url: configuration.baseURL.appending(path: path))
         request.httpMethod = "GET"
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.httpShouldHandleCookies = false
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if !configuration.secret.isEmpty {
             request.setValue(
@@ -115,7 +156,7 @@ actor HubClient {
         return request
     }
 
-    private static func validate(_ response: URLResponse) throws {
+    nonisolated private static func validate(_ response: URLResponse) throws {
         guard let response = response as? HTTPURLResponse else {
             throw HubClientError.invalidResponse
         }

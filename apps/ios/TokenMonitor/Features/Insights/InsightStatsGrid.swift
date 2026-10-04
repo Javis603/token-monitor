@@ -3,82 +3,75 @@ import SwiftUI
 struct InsightStatsGrid: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.locale) private var locale
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let summary: HistorySummary?
 
     var body: some View {
         LazyVGrid(
-                columns: [
-                    GridItem(.flexible(), spacing: 18),
-                    GridItem(.flexible(), spacing: 18)
-                ],
+                columns: Array(
+                    repeating: GridItem(.flexible(), spacing: 20),
+                    count: dynamicTypeSize.isAccessibilitySize ? 1 : 2
+                ),
                 alignment: .leading,
-                spacing: 14
+                spacing: 24
             ) {
                 InsightMetricCard(
                     title: "Total tokens",
-                    value: MetricFormatter.tokens(summary?.totalTokens ?? 0),
+                    value: summary?.totalTokens.map(MetricFormatter.tokens) ?? "—",
                     systemImage: "number",
                     tint: DesignTokens.accent
                 )
 
                 InsightMetricCard(
                     title: "Total cost",
-                    value: MetricFormatter.currencyFromUSD(
-                        summary?.totalCost ?? 0,
-                        currency: preferences.currency
-                    ),
+                    value: summary?.totalCost.map {
+                        MetricFormatter.currencyFromUSD($0, currency: preferences.currency)
+                    } ?? "—",
                     systemImage: "dollarsign.circle.fill",
                     tint: .green
                 )
 
                 InsightMetricCard(
                     title: "Active days",
-                    value: MetricFormatter.exactTokens(summary?.activeDays ?? 0),
+                    value: summary?.activeDays.map(MetricFormatter.exactTokens) ?? "—",
                     systemImage: "calendar.badge.checkmark",
                     tint: DesignTokens.accent
                 )
 
                 InsightMetricCard(
                     title: "Current streak",
-                    value: MetricFormatter.days(
-                        summary?.currentStreak ?? 0,
-                        locale: locale
-                    ),
+                    value: summary?.currentStreak.map { MetricFormatter.days($0, locale: locale) } ?? "—",
                     systemImage: "flame.fill",
                     tint: DesignTokens.warning
                 )
 
                 InsightMetricCard(
                     title: "Active time",
-                    value: MetricFormatter.duration(
-                        milliseconds: summary?.activeTimeMs ?? 0,
-                        locale: locale
-                    ),
+                    value: summary?.activeTimeMs.map {
+                        MetricFormatter.duration(milliseconds: $0, locale: locale)
+                    } ?? "—",
                     systemImage: "clock.fill",
                     tint: .indigo
                 )
 
                 InsightMetricCard(
                     title: "Messages",
-                    value: MetricFormatter.tokens(summary?.messages ?? 0),
+                    value: summary?.messages.map(MetricFormatter.tokens) ?? "—",
                     systemImage: "bubble.left.and.bubble.right.fill",
                     tint: .purple
                 )
 
                 InsightMetricCard(
                     title: "Longest streak",
-                    value: MetricFormatter.days(
-                        summary?.longestStreak ?? 0,
-                        locale: locale
-                    ),
+                    value: summary?.longestStreak.map { MetricFormatter.days($0, locale: locale) } ?? "—",
                     systemImage: "trophy.fill",
                     tint: .yellow
                 )
 
                 InsightMetricCard(
                     title: "Peak day",
-                    value: MetricFormatter.tokens(summary?.peakDayTokens ?? 0),
+                    value: summary?.peakDayTokens.map(MetricFormatter.tokens) ?? "—",
                     systemImage: "chart.line.uptrend.xyaxis",
                     tint: .orange
                 )

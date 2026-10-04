@@ -113,6 +113,14 @@
 		F92A74F53720C14A8DE004A7 /* ProviderMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB2E33BFFEA34B817D502FF0 /* ProviderMark.swift */; };
 		FA8FDA0A60C934874BE51844 /* BreakdownEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D2DB1A0AE60BE0653249C10 /* BreakdownEntry.swift */; };
 		FC3B6B26403B8E1339595AAD /* LimitWindowRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 740427D2593A45BA914D2AC6 /* LimitWindowRow.swift */; };
+		FC354E2A0C4163ECF1D71E83 /* SessionUsage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47AC82CADD13CB2FBFEEF9AC /* SessionUsage.swift */; };
+		B98FDDE9593EBA60F3B18123 /* SessionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B51ED462D158CC0CC7F6B38F /* SessionsView.swift */; };
+		2A40487F6695C3C6D9B7A1FD /* SessionUsageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 718C7AE5C08E281B02452649 /* SessionUsageTests.swift */; };
+		CC181F20300DA01F7A8FC9AE /* LiveActivityRegistrationCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 973FC1BCA64B83E78C7019FE /* LiveActivityRegistrationCoordinator.swift */; };
+		37E8EE307686E4AB453BCC73 /* SourceFreshnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 851BE1E11A2FFE0503C0D2AE /* SourceFreshnessTests.swift */; };
+		2E42BB9BF22D5EE202F5D0B5 /* LiveActivityRegistrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80B3D026387241393F6C526C /* LiveActivityRegistrationTests.swift */; };
+		2A377900BF4D26C7B2FFC9B6 /* SystemSurfaceCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7559F17E1F57D6559528151D /* SystemSurfaceCoordinatorTests.swift */; };
+		44AA5EFAB278F352F5908652 /* TokenMonitorStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EAABE2993B014DE0B472F43 /* TokenMonitorStoreTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -253,6 +261,14 @@
 		E83CA979BC52ACD6A31B0A2F /* UsageHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageHistory.swift; sourceTree = "<group>"; };
 		EB2E33BFFEA34B817D502FF0 /* ProviderMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderMark.swift; sourceTree = "<group>"; };
 		F6EA2F15DE69A9153C22840B /* DeviceRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceRow.swift; sourceTree = "<group>"; };
+		47AC82CADD13CB2FBFEEF9AC /* SessionUsage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Core/Models/SessionUsage.swift"; sourceTree = SOURCE_ROOT; };
+		B51ED462D158CC0CC7F6B38F /* SessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Features/Sessions/SessionsView.swift"; sourceTree = SOURCE_ROOT; };
+		718C7AE5C08E281B02452649 /* SessionUsageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitorTests/SessionUsageTests.swift"; sourceTree = SOURCE_ROOT; };
+		973FC1BCA64B83E78C7019FE /* LiveActivityRegistrationCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitor/Core/State/LiveActivityRegistrationCoordinator.swift"; sourceTree = SOURCE_ROOT; };
+		851BE1E11A2FFE0503C0D2AE /* SourceFreshnessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SourceFreshnessTests.swift; sourceTree = "<group>"; };
+		80B3D026387241393F6C526C /* LiveActivityRegistrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityRegistrationTests.swift; sourceTree = "<group>"; };
+		7559F17E1F57D6559528151D /* SystemSurfaceCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSurfaceCoordinatorTests.swift; sourceTree = "<group>"; };
+		8EAABE2993B014DE0B472F43 /* TokenMonitorStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorStoreTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -299,6 +315,10 @@
 		09C15EE9C0B7D0606A17B164 /* TokenMonitorTests */ = {
 			isa = PBXGroup;
 			children = (
+				8EAABE2993B014DE0B472F43 /* TokenMonitorStoreTests.swift */,
+				7559F17E1F57D6559528151D /* SystemSurfaceCoordinatorTests.swift */,
+				80B3D026387241393F6C526C /* LiveActivityRegistrationTests.swift */,
+				851BE1E11A2FFE0503C0D2AE /* SourceFreshnessTests.swift */,
 				110000000000000000000030 /* AppPreferencesTests.swift */,
 				A587C66837238C4A5784FF24 /* CreditsMeterTests.swift */,
 				110000000000000000000031 /* HeatmapModelTests.swift */,
@@ -656,6 +676,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				44AA5EFAB278F352F5908652 /* TokenMonitorStoreTests.swift in Sources */,
+				2A377900BF4D26C7B2FFC9B6 /* SystemSurfaceCoordinatorTests.swift in Sources */,
+				2E42BB9BF22D5EE202F5D0B5 /* LiveActivityRegistrationTests.swift in Sources */,
+				37E8EE307686E4AB453BCC73 /* SourceFreshnessTests.swift in Sources */,
+				2A40487F6695C3C6D9B7A1FD /* SessionUsageTests.swift in Sources */,
 				120000000000000000000030 /* AppPreferencesTests.swift in Sources */,
 				1A1B4834A5FAE1CAC0BB22CA /* CreditsMeterTests.swift in Sources */,
 				120000000000000000000031 /* HeatmapModelTests.swift in Sources */,
@@ -691,6 +716,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CC181F20300DA01F7A8FC9AE /* LiveActivityRegistrationCoordinator.swift in Sources */,
+				B98FDDE9593EBA60F3B18123 /* SessionsView.swift in Sources */,
+				FC354E2A0C4163ECF1D71E83 /* SessionUsage.swift in Sources */,
 				12000000000000000000000B /* ActivityHeatmap.swift in Sources */,
 				120000000000000000000003 /* AppAppearance.swift in Sources */,
 				120000000000000000000033 /* AppCurrency.swift in Sources */,

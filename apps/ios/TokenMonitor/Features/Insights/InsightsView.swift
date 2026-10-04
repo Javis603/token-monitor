@@ -13,50 +13,47 @@ struct InsightsView: View {
             if store.stats != nil {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 22) {
-                            Text("Lifetime")
-                                .font(.title3.bold())
-
-                            InsightStatsGrid(
-                                summary: store.currentHistory.summary
-                            )
-
-                            InsightTrendCard(
-                                history: store.currentHistory
-                            )
-
+                        LazyVStack(alignment: .leading, spacing: DesignTokens.sectionSpacing) {
+                            ConnectionStatusNotice(phase: store.phase) {
+                                Task { await store.refresh() }
+                            }
+                            InsightTrendCard(history: store.currentHistory)
+                            VStack(alignment: .leading, spacing: 16) {
+                                Text("Lifetime")
+                                    .font(.title2.bold())
+                                    .accessibilityAddTraits(.isHeader)
+                                SurfaceCard {
+                                    InsightStatsGrid(summary: store.currentHistory.summary)
+                                }
+                            }
                             MonthlyHistorySection(
                                 months: store.currentHistory.monthly ?? [],
                                 currency: preferences.currency
                             )
                             .id("monthly-history")
-
-                            VStack(alignment: .leading, spacing: 14) {
+                            VStack(alignment: .leading, spacing: 16) {
                                 Text("Usage breakdown")
-                                    .font(.title3.bold())
-
-                                BreakdownCard(
-                                    title: "Tools",
-                                    imageName: "SectionTools",
-                                    kind: .tool,
-                                    entries: store.currentPeriod.clientEntries,
-                                    total: store.currentPeriod.totalTokens ?? 0,
-                                    limit: 4
-                                )
-
-                                Divider()
-
-                                BreakdownCard(
-                                    title: "Models",
-                                    imageName: "SectionModels",
-                                    kind: .model,
-                                    entries: store.currentPeriod.modelEntries,
-                                    total: store.currentPeriod.totalTokens ?? 0,
-                                    limit: 4
-                                )
+                                    .font(.title2.bold())
+                                    .accessibilityAddTraits(.isHeader)
+                                PeriodPicker(selection: $store.selectedPeriod)
+                                SurfaceCard {
+                                    BreakdownCard(
+                                        title: "Tools", imageName: "SectionTools", kind: .tool,
+                                        entries: store.currentPeriod.clientEntries,
+                                        total: store.currentPeriod.totalTokens ?? 0, limit: 4
+                                    )
+                                }
+                                SurfaceCard {
+                                    BreakdownCard(
+                                        title: "Models", imageName: "SectionModels", kind: .model,
+                                        entries: store.currentPeriod.modelEntries,
+                                        total: store.currentPeriod.totalTokens ?? 0, limit: 4
+                                    )
+                                }
                             }
                         }
                         .padding(.horizontal, DesignTokens.screenPadding)
+                        .padding(.top, 8)
                         .padding(.bottom, DesignTokens.sectionSpacing)
                     }
                     .refreshable {

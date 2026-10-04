@@ -30,22 +30,28 @@ final class LiveActivityController {
     private(set) var remoteUpdatesEnabled = false
     private(set) var remoteUpdateMessage: String?
 
-    private let client: HubClient
+    private let registrations: LiveActivityRegistrationCoordinator
     private var configuration: HubConfiguration?
+    private var configured = false
+    private var generation = UUID()
+    private var endingTask: Task<Void, Never>?
     private var latestPreferences = TokenMonitorSharedPayload.Preferences.default
     private var pushTokens: [String: Data] = [:]
     private var tokenTasks: [String: Task<Void, Never>] = [:]
 
-    private static let remoteActivityMigrationKey =
-        "tokenMonitor.liveActivity.remoteTokenMigration.v1"
-
-    init(client: HubClient = HubClient()) {
-        self.client = client
+    init(client: any LiveActivityClient = HubClient(),
+         bindingStore: any LiveActivityBindingStore = KeychainLiveActivityBindingStore()) {
+        registrations = LiveActivityRegistrationCoordinator(client: client, bindingStore: bindingStore)
         isActive = !Activity<TokenMonitorActivityAttributes>.activities.isEmpty
     }
 
     func configure(_ configuration: HubConfiguration?) {
+        guard !configured || self.configuration != configuration else { return }
+        configured = true
+        generation = UUID()
         self.configuration = configuration
+        registrations.configure(configuration)
+        retireActivities()
     }
 
     func setEnabled(
@@ -59,7 +65,6 @@ final class LiveActivityController {
                 errorMessage = "Connect to a Hub before starting Live Activity."
                 return
             }
-            await migrateExistingActivityIfNeeded()
             await update(snapshot: snapshot, preferences: preferences)
         } else {
             await endAll()
@@ -73,10 +78,14 @@ final class LiveActivityController {
         guard preferences.liveActivityEnabled else {
             return
         }
+        let generation = generation
+        await endingTask?.value
+        guard self.generation == generation, !Task.isCancelled else { return }
         latestPreferences = preferences
+        let state = contentState(snapshot: snapshot, preferences: preferences)
         let content = ActivityContent(
-            state: contentState(snapshot: snapshot, preferences: preferences),
-            staleDate: snapshot.updatedAt.addingTimeInterval(600)
+            state: state,
+            staleDate: state.sourceStale == true ? .distantPast : state.updatedAt.addingTimeInterval(600)
         )
         do {
             let activities = Activity<TokenMonitorActivityAttributes>.activities
@@ -100,6 +109,7 @@ final class LiveActivityController {
             } else {
                 for activity in activities {
                     await ActivityReference(activity: activity).update(content)
+                    guard self.generation == generation, !Task.isCancelled else { return }
                     observePushToken(for: activity)
                     if let pushToken = pushTokens[activity.id] ?? activity.pushToken {
                         pushTokens[activity.id] = pushToken
@@ -113,49 +123,40 @@ final class LiveActivityController {
                     }
                 }
             }
+            guard self.generation == generation, !Task.isCancelled else { return }
             errorMessage = nil
             isActive = true
         } catch {
+            guard self.generation == generation, !Task.isCancelled else { return }
             errorMessage = error.localizedDescription
             isActive = false
         }
     }
 
     private func endAll() async {
-        for activity in Activity<TokenMonitorActivityAttributes>.activities {
-            tokenTasks[activity.id]?.cancel()
-            tokenTasks.removeValue(forKey: activity.id)
-            pushTokens.removeValue(forKey: activity.id)
-            if let configuration {
-                try? await client.unregisterLiveActivity(
-                    activityID: activity.id,
-                    configuration: configuration
-                )
+        generation = UUID()
+        retireActivities()
+        await endingTask?.value
+    }
+
+    private func retireActivities() {
+        registrations.retireAll()
+        tokenTasks.values.forEach { $0.cancel() }
+        tokenTasks.removeAll()
+        pushTokens.removeAll()
+        let activities = Activity<TokenMonitorActivityAttributes>.activities.map { ActivityReference(activity: $0) }
+        for reference in activities { registrations.retire(activityID: reference.activity.id) }
+        let previous = endingTask
+        endingTask = Task {
+            await previous?.value
+            for reference in activities {
+                await reference.end(nil, dismissalPolicy: .immediate)
             }
-            await ActivityReference(activity: activity).end(nil, dismissalPolicy: .immediate)
         }
         errorMessage = nil
         isActive = false
         remoteUpdatesEnabled = false
         remoteUpdateMessage = nil
-    }
-
-    private func migrateExistingActivityIfNeeded() async {
-        guard configuration != nil,
-              !UserDefaults.standard.bool(forKey: Self.remoteActivityMigrationKey) else {
-            return
-        }
-
-        for activity in Activity<TokenMonitorActivityAttributes>.activities {
-            tokenTasks[activity.id]?.cancel()
-            tokenTasks.removeValue(forKey: activity.id)
-            pushTokens.removeValue(forKey: activity.id)
-            await ActivityReference(activity: activity).end(
-                nil,
-                dismissalPolicy: .immediate
-            )
-        }
-        UserDefaults.standard.set(true, forKey: Self.remoteActivityMigrationKey)
     }
 
     private func observePushToken(
@@ -165,9 +166,10 @@ final class LiveActivityController {
             return
         }
         let activityID = activity.id
+        let generation = generation
         tokenTasks[activityID] = Task { [weak self] in
             for await pushToken in activity.pushTokenUpdates {
-                guard let self else { return }
+                guard let self, self.generation == generation, !Task.isCancelled else { return }
                 self.pushTokens[activityID] = pushToken
                 self.remoteUpdateMessage = nil
                 await self.registerPushToken(
@@ -184,22 +186,24 @@ final class LiveActivityController {
         activityID: String,
         preferences: TokenMonitorSharedPayload.Preferences
     ) async {
-        guard let configuration else {
+        guard configuration != nil else {
             return
         }
+        let generation = generation
         do {
-            let pushEnabled = try await client.registerLiveActivity(
+            let result = try await registrations.register(
                 activityID: activityID,
                 pushToken: pushToken,
                 preferences: preferences,
-                locale: resolvedLocaleIdentifier(for: preferences),
-                configuration: configuration
+                locale: resolvedLocaleIdentifier(for: preferences)
             )
+            guard self.generation == generation, !Task.isCancelled, let pushEnabled = result else { return }
             remoteUpdatesEnabled = pushEnabled
             remoteUpdateMessage = pushEnabled
                 ? nil
                 : "Hub accepted the Activity, but APNs remote updates are not configured."
         } catch {
+            guard self.generation == generation, !Task.isCancelled else { return }
             remoteUpdatesEnabled = false
             remoteUpdateMessage = "Hub registration failed; remote updates are unavailable."
         }
@@ -218,9 +222,10 @@ final class LiveActivityController {
         }
     }
 
-    private func contentState(
+    func contentState(
         snapshot: TokenMonitorSharedPayload.Snapshot,
-        preferences: TokenMonitorSharedPayload.Preferences
+        preferences: TokenMonitorSharedPayload.Preferences,
+        now: Date = .now
     ) -> TokenMonitorActivityAttributes.ContentState {
         let usage = snapshot.usage(for: preferences.livePeriod)
         let limit = preferredLimit(
@@ -247,9 +252,14 @@ final class LiveActivityController {
             currency: currency
         )
         let limitValue: String? = {
-            guard let remaining = limit?.windows.first?.remainingPercent else {
-                return nil
+            guard let window = limit?.windows.first else { return nil }
+            if let amount = window.amount, amount.isFinite {
+                guard let code = window.currency, !code.isEmpty else {
+                    return amount.formatted(.number.precision(.fractionLength(0...2)))
+                }
+                return MetricFormatter.currency(amount, code: code)
             }
+            guard let remaining = window.remainingPercent else { return nil }
             return MetricFormatter.remaining(remaining, locale: locale)
         }()
 
@@ -262,16 +272,7 @@ final class LiveActivityController {
                 nil
             )
         case "limit":
-            if let limit, let window = limit.windows.first,
-               let remaining = window.remainingPercent {
-                primary = (
-                    ProviderPresentation.displayName(for: limit.providerID),
-                    MetricFormatter.remaining(remaining, locale: locale),
-                    remaining / 100
-                )
-            } else {
-                primary = ("Tokens", tokensValue, nil)
-            }
+            primary = (providerName, limitValue ?? "—", limit?.windows.first?.remainingPercent.map { $0 / 100 })
         default:
             primary = ("Tokens", tokensValue, nil)
         }
@@ -299,17 +300,22 @@ final class LiveActivityController {
                 "Cost",
                 costValue
             )
-        } else if let limit, let window = limit.windows.first,
-                  let remaining = window.remainingPercent {
-            secondary = (
-                ProviderPresentation.displayName(for: limit.providerID),
-                MetricFormatter.remaining(remaining, locale: locale)
-            )
+        } else if let limitValue {
+            secondary = (providerName, limitValue)
         } else {
             secondary = nil
         }
 
-        let progress = shouldProvideProgress ? primary.2 : nil
+        let progress = shouldProvideProgress
+            ? limit?.windows.first?.remainingPercent.flatMap { value in
+                value.isFinite ? min(1, max(0, value / 100)) : nil
+            }
+            : nil
+        let usesLimit = preferences.livePrimaryMetric == "limit"
+        let candidate = usesLimit ? limit?.updatedAt ?? .distantPast : snapshot.updatedAt
+        let sourceDate = candidate <= now ? candidate : .distantPast
+        let sourceStale = (usesLimit ? limit?.sourceStale == true : snapshot.sourceStale == true)
+            || now.timeIntervalSince(sourceDate) >= 600
 
         return TokenMonitorActivityAttributes.ContentState(
             primaryLabel: primary.0,
@@ -317,7 +323,7 @@ final class LiveActivityController {
             secondaryLabel: secondary?.0,
             secondaryValue: secondary?.1,
             progress: progress,
-            updatedAt: snapshot.updatedAt,
+            updatedAt: sourceDate,
             providerID: dataProviderID,
             providerName: providerName,
             iconProviderID: iconProviderID,
@@ -331,7 +337,8 @@ final class LiveActivityController {
             expandedBottomField: preferences.liveExpandedBottomField,
             lockScreenPrimaryField: preferences.liveLockScreenPrimaryField,
             lockScreenSecondaryField: preferences.liveLockScreenSecondaryField,
-            lockScreenBottomField: preferences.liveLockScreenBottomField
+            lockScreenBottomField: preferences.liveLockScreenBottomField,
+            sourceStale: sourceStale
         )
     }
 
@@ -346,11 +353,8 @@ final class LiveActivityController {
         in snapshot: TokenMonitorSharedPayload.Snapshot,
         providerID: String?
     ) -> TokenMonitorSharedPayload.Limit? {
-        if let providerID,
-           let selected = snapshot.limits.first(
-               where: { $0.providerID == providerID }
-           ) {
-            return selected
+        if let providerID = nonEmpty(providerID) {
+            return snapshot.limits.first(where: { $0.providerID == providerID })
         }
         return snapshot.limits.min { lhs, rhs in
             let left = lhs.windows.compactMap(\.remainingPercent).min() ?? 101

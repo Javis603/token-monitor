@@ -18,9 +18,10 @@ struct TokenMonitorWidget: Widget {
             .systemSmall,
             .systemMedium,
             .systemLarge,
-            .accessoryRectangular
+            .accessoryRectangular,
+            .accessoryCircular,
+            .accessoryInline
         ])
-        .contentMarginsDisabled()
         .containerBackgroundRemovable(true)
     }
 }

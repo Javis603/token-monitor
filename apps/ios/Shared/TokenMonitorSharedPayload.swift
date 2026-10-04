@@ -24,6 +24,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
         let allTime: Usage
         let limits: [Limit]
         let activity: [Day]
+        var sourceStale: Bool? = nil
 
         func usage(for period: String) -> Usage {
             switch period {
@@ -44,6 +45,12 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
         let outputTokens: Double
         let tools: [Breakdown]
         let models: [Breakdown]
+        // Additive metadata keeps the numeric widget API and old cache decoding.
+        var tokensKnown: Bool? = nil
+        var costKnown: Bool? = nil
+        var tokenComponentsKnown: Bool? = nil
+        var throughputKnown: Bool? = nil
+        var unclassifiedTokens: Double? = nil
 
         static let empty = Usage(
             tokens: 0,
@@ -65,6 +72,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
         let providerID: String
         let updatedAt: Date?
         let windows: [LimitWindow]
+        var sourceStale: Bool? = nil
     }
 
     struct LimitWindow: Codable, Equatable, Identifiable, Sendable {
@@ -355,5 +363,77 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             currencyCode: "USD",
             languageCode: "auto"
         )
+    }
+}
+
+nonisolated extension TokenMonitorSharedPayload.Usage {
+    private enum CodingKeys: String, CodingKey {
+        case tokens, cost, cacheReadTokens, outputTokens, tools, models
+        case tokensKnown, costKnown, tokenComponentsKnown, throughputKnown, unclassifiedTokens
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            tokens: try values.decodeIfPresent(Double.self, forKey: .tokens) ?? .nan,
+            cost: try values.decodeIfPresent(Double.self, forKey: .cost) ?? .nan,
+            cacheReadTokens: try values.decodeIfPresent(Double.self, forKey: .cacheReadTokens) ?? .nan,
+            outputTokens: try values.decodeIfPresent(Double.self, forKey: .outputTokens) ?? .nan,
+            tools: try values.decodeIfPresent([TokenMonitorSharedPayload.Breakdown].self, forKey: .tools) ?? [],
+            models: try values.decodeIfPresent([TokenMonitorSharedPayload.Breakdown].self, forKey: .models) ?? [],
+            tokensKnown: try values.decodeIfPresent(Bool.self, forKey: .tokensKnown),
+            costKnown: try values.decodeIfPresent(Bool.self, forKey: .costKnown),
+            tokenComponentsKnown: try values.decodeIfPresent(Bool.self, forKey: .tokenComponentsKnown),
+            throughputKnown: try values.decodeIfPresent(Bool.self, forKey: .throughputKnown),
+            unclassifiedTokens: try values.decodeIfPresent(Double.self, forKey: .unclassifiedTokens)
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        // JSON has no NaN. Omission is the portable unknown representation.
+        try values.encodeIfPresent(tokens.isFinite ? tokens : nil, forKey: .tokens)
+        try values.encodeIfPresent(cost.isFinite ? cost : nil, forKey: .cost)
+        try values.encodeIfPresent(cacheReadTokens.isFinite ? cacheReadTokens : nil, forKey: .cacheReadTokens)
+        try values.encodeIfPresent(outputTokens.isFinite ? outputTokens : nil, forKey: .outputTokens)
+        try values.encode(tools, forKey: .tools)
+        try values.encode(models, forKey: .models)
+        try values.encodeIfPresent(tokensKnown, forKey: .tokensKnown)
+        try values.encodeIfPresent(costKnown, forKey: .costKnown)
+        try values.encodeIfPresent(tokenComponentsKnown, forKey: .tokenComponentsKnown)
+        try values.encodeIfPresent(throughputKnown, forKey: .throughputKnown)
+        try values.encodeIfPresent(unclassifiedTokens, forKey: .unclassifiedTokens)
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        func equal(_ left: Double, _ right: Double) -> Bool {
+            left == right || (left.isNaN && right.isNaN)
+        }
+        return equal(lhs.tokens, rhs.tokens) && equal(lhs.cost, rhs.cost)
+            && equal(lhs.cacheReadTokens, rhs.cacheReadTokens) && equal(lhs.outputTokens, rhs.outputTokens)
+            && lhs.tools == rhs.tools && lhs.models == rhs.models
+            && lhs.tokensKnown == rhs.tokensKnown && lhs.costKnown == rhs.costKnown
+            && lhs.tokenComponentsKnown == rhs.tokenComponentsKnown && lhs.throughputKnown == rhs.throughputKnown
+            && lhs.unclassifiedTokens == rhs.unclassifiedTokens
+    }
+}
+
+nonisolated extension TokenMonitorSharedPayload.Day {
+    private enum CodingKeys: String, CodingKey { case date, tokens, cost }
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(date: try values.decode(String.self, forKey: .date),
+            tokens: try values.decodeIfPresent(Double.self, forKey: .tokens) ?? .nan,
+            cost: try values.decodeIfPresent(Double.self, forKey: .cost) ?? .nan)
+    }
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(date, forKey: .date)
+        try values.encodeIfPresent(tokens.isFinite ? tokens : nil, forKey: .tokens)
+        try values.encodeIfPresent(cost.isFinite ? cost : nil, forKey: .cost)
+    }
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.date == rhs.date && (lhs.tokens == rhs.tokens || (lhs.tokens.isNaN && rhs.tokens.isNaN))
+            && (lhs.cost == rhs.cost || (lhs.cost.isNaN && rhs.cost.isNaN))
     }
 }

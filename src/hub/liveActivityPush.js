@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const http2 = require('node:http2');
+const { liveActivityStaleDate } = require('../shared/liveActivity');
 
 const DEFAULT_BUNDLE_ID = 'com.javis.tokenmonitor.ios';
 const DEFAULT_MIN_INTERVAL_MS = 15_000;
@@ -35,7 +36,7 @@ function createProviderToken({ keyID, teamID, privateKey, now = () => Date.now()
   let cached;
   return () => {
     const issuedAt = Math.floor(now() / 1000);
-    if (cached && issuedAt - cached.issuedAt < 50 * 60) return cached.value;
+    if (cached && issuedAt >= cached.issuedAt && issuedAt - cached.issuedAt < 50 * 60) return cached.value;
     const header = base64url(JSON.stringify({ alg: 'ES256', kid: keyID }));
     const payload = base64url(JSON.stringify({ iss: teamID, iat: issuedAt }));
     const unsigned = `${header}.${payload}`;
@@ -57,18 +58,28 @@ function sendHttp2(urlText, options) {
     const url = new URL(urlText);
     const client = http2.connect(`${url.protocol}//${url.host}`);
     let settled = false;
+    const abort = () => finish(() => reject(options.signal.reason || new Error('APNs request aborted')));
     const finish = (callback) => {
       if (settled) return;
       settled = true;
-      try { client.close(); } catch (_) {}
+      options.signal?.removeEventListener('abort', abort);
+      // Destroy also closes stalled streams; graceful close alone can hang forever.
+      try { client.destroy(); } catch (_) {}
       callback();
     };
     client.once('error', (error) => finish(() => reject(error)));
-    const request = client.request({
-      ':method': options.method || 'GET',
-      ':path': `${url.pathname}${url.search}`,
-      ...options.headers
-    });
+    if (options.signal?.aborted) return abort();
+    options.signal?.addEventListener('abort', abort, { once: true });
+    let request;
+    try {
+      request = client.request({
+        ':method': options.method || 'GET',
+        ':path': `${url.pathname}${url.search}`,
+        ...options.headers
+      });
+    } catch (error) {
+      return finish(() => reject(error));
+    }
     const chunks = [];
     let status = 500;
     request.setEncoding('utf8');
@@ -99,6 +110,7 @@ function createLiveActivityPushClient({
   environment = 'production',
   minIntervalMs = DEFAULT_MIN_INTERVAL_MS,
   fetchImpl,
+  requestTimeoutMs = 10_000,
   requestImpl = sendHttp2,
   now = () => Date.now(),
   logger = console
@@ -138,8 +150,10 @@ function createLiveActivityPushClient({
   async function send(activityToken, contentState) {
     if (!enabled) return { sent: false, skipped: true };
     const transport = typeof fetchImpl === 'function' ? fetchImpl : requestImpl;
+    const timestamp = Math.floor(now() / 1000);
     const response = await transport(endpoint(activityToken), {
       method: 'POST',
+      signal: AbortSignal.timeout(requestTimeoutMs),
       headers: {
         authorization: `bearer ${token()}`,
         'content-type': 'application/json',
@@ -150,9 +164,9 @@ function createLiveActivityPushClient({
       },
       body: JSON.stringify({
         aps: {
-          timestamp: Math.floor(now() / 1000),
+          timestamp,
           event: 'update',
-          'stale-date': Math.floor(now() / 1000) + 600,
+          'stale-date': liveActivityStaleDate(contentState, timestamp),
           'content-state': contentState
         }
       })

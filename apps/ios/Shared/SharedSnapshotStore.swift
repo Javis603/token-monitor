@@ -31,6 +31,13 @@ nonisolated struct SharedSnapshotStore: Sendable {
         try save(payload)
     }
 
+    func clearSnapshot() throws {
+        // Clearing must also recover a damaged cache, while keeping any readable preferences.
+        var payload = (try? load()) ?? TokenMonitorSharedPayload()
+        payload.snapshot = nil
+        try save(payload)
+    }
+
     func updatePreferences(_ preferences: TokenMonitorSharedPayload.Preferences) throws {
         var payload = try load()
         payload.preferences = preferences
@@ -47,7 +54,7 @@ nonisolated struct SharedSnapshotStore: Sendable {
             withIntermediateDirectories: true
         )
         let data = try JSONEncoder().encode(payload)
-        try data.write(to: fileURL, options: .atomic)
+        try data.write(to: fileURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 
     private static func defaultFileURL() -> URL? {

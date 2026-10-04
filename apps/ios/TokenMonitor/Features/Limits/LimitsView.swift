@@ -11,7 +11,8 @@ struct LimitsView: View {
             if let stats = store.stats {
                 let providers = stats.sortedLimits
                 ScrollView {
-                    LazyVStack(spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: 20) {
+                        ConnectionStatusNotice(phase: store.phase, retry: refresh)
                         LimitsSummaryHeader(
                             providers: providers,
                             updatedAt: stats.limits?.updatedAt
@@ -27,15 +28,15 @@ struct LimitsView: View {
                             )
                             .padding(.vertical, 50)
                         } else {
-                            ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
-                                if index > 0 {
-                                    Divider()
+                            ForEach(providers) { provider in
+                                SurfaceCard {
+                                    ProviderLimitCard(provider: provider)
                                 }
-                                ProviderLimitCard(provider: provider)
                             }
                         }
                     }
                     .padding(.horizontal, DesignTokens.screenPadding)
+                    .padding(.top, 8)
                     .padding(.bottom, DesignTokens.sectionSpacing)
                 }
                 .refreshable {

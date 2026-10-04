@@ -10,6 +10,23 @@ nonisolated struct UsagePeriod: Decodable, Sendable {
     let clientCosts: [String: Double]?
     let models: [String: Double]?
     let modelCosts: [String: Double]?
+    var sessions: [String: SessionUsage]? = nil
+    var sessionDetailsOmitted: Int? = nil
+    var capabilities: Capabilities? = nil
+    var unclassifiedTokens: Double? = nil
+    var timedTokens: Double? = nil
+    var timedOutputTokens: Double? = nil
+    var timedDurationMs: Double? = nil
+
+    struct Capabilities: Decodable, Sendable {
+        let tokenComponents: Bool?
+        let throughput: Bool?
+    }
+
+    // Missing periods carry unknown counters. A wire-level zero remains zero.
+    static let unknown = UsagePeriod(totalTokens: nil, costUsd: nil,
+        cacheReadTokens: nil, cacheWriteTokens: nil, outputTokens: nil,
+        clients: nil, clientCosts: nil, models: nil, modelCosts: nil)
 
     static let empty = UsagePeriod(
         totalTokens: 0,

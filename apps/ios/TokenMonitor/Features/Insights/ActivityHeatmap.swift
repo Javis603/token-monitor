@@ -3,6 +3,7 @@ import SwiftUI
 struct ActivityHeatmap: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let model: HeatmapModel
     let metric: TrendMetric
@@ -37,10 +38,10 @@ struct ActivityHeatmap: View {
 
             if let selectedCell {
                 selectedDayCallout(for: selectedCell)
-                    .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96)))
             }
         }
-        .animation(.snappy(duration: 0.2), value: selectedCell?.date)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: selectedCell?.date)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
             "\(model.activeDays) active days. Peak \(metric.label.lowercased()) \(formattedPeak)."
@@ -71,7 +72,7 @@ struct ActivityHeatmap: View {
             selectedCell = selectedCell?.date == cell.date ? nil : cell
         } label: {
             RoundedRectangle(cornerRadius: 3)
-                .fill(color(for: cell.intensity))
+                .fill(cell.isFuture ? Color.clear : color(for: cell.intensity))
                 .frame(width: cellSize, height: cellSize)
                 .overlay {
                     if selectedCell?.date == cell.date {
@@ -81,6 +82,8 @@ struct ActivityHeatmap: View {
                 }
         }
         .buttonStyle(.plain)
+        .disabled(cell.isFuture)
+        .accessibilityHidden(cell.isFuture)
         .contentShape(Rectangle())
         .frame(width: columnWidth, height: columnWidth)
         .accessibilityLabel(
@@ -125,11 +128,12 @@ struct ActivityHeatmap: View {
             }
             .labelStyle(.iconOnly)
             .foregroundStyle(.secondary)
+            .frame(minWidth: 44, minHeight: 44)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(.thinMaterial, in: .capsule)
-        .accessibilityElement(children: .combine)
+        .background(Color(uiColor: .tertiarySystemGroupedBackground), in: .rect(cornerRadius: 16))
+        .accessibilityElement(children: .contain)
     }
 
     private var formattedPeak: String {

@@ -10,7 +10,8 @@ struct SettingsView: View {
 
     var body: some View {
         settingsForm
-        .formStyle(.grouped)
+            .formStyle(.grouped)
+            .listSectionSpacing(24)
         .scrollContentBackground(.hidden)
         .background {
             AppBackground()
@@ -50,41 +51,110 @@ struct SettingsView: View {
     @ViewBuilder
     private var settingsForm: some View {
         Form {
-            connectionSections(settings: settings, preferences: preferences)
-            liveActivitySections(preferences: preferences)
-            accountSections(preferences: preferences)
+            Section {
+                HStack(spacing: 14) {
+                    Image(systemName: "chart.bar.xaxis")
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(DesignTokens.accent)
+                        .frame(width: 52, height: 52)
+                        .background(DesignTokens.accent.opacity(0.1), in: .rect(cornerRadius: 16))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Token Monitor").font(.title3.bold())
+                        Text("Your usage, at a glance")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.vertical, 8)
+                LabeledContent("Connection") { ConnectionBadge(phase: store.phase) }
+                if let updated = store.stats?.sourceUpdatedAt() {
+                    LabeledContent("Last update") {
+                        Text(updated.updateDescription(locale: preferences.language.locale))
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            hubSection(settings: settings)
+            Section("Personalize") {
+                NavigationLink {
+                    settingsPage("Appearance") { appearanceSection(preferences: preferences) }
+                } label: {
+                    Label("Appearance", systemImage: "circle.lefthalf.filled")
+                }
+                NavigationLink {
+                    settingsPage("Language & Region") { regionalSection(preferences: preferences) }
+                } label: {
+                    Label("Language & Region", systemImage: "globe")
+                }
+                NavigationLink {
+                    settingsPage("Overview") { overviewSection(preferences: preferences) }
+                } label: {
+                    Label("Overview", systemImage: "house")
+                }
+            }
+            Section {
+                WidgetSurfacePreview(
+                    content: preferences.widgetContent,
+                    period: preferences.widgetPeriod,
+                    providerName: preferences.widgetProviderID.isEmpty
+                        ? "Automatic"
+                        : ProviderPresentation.displayName(for: preferences.widgetProviderID),
+                    showsCost: preferences.widgetShowsCost,
+                    showsUpdateTime: preferences.widgetShowsUpdateTime
+                )
+                .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                NavigationLink {
+                    settingsPage("Widgets") { widgetSection(preferences: preferences) }
+                } label: {
+                    Label("Customize widgets", systemImage: "widget.small")
+                }
+            } header: {
+                Text("Widgets")
+            } footer: {
+                Text("Preview uses sample data. Your widgets use the latest snapshot from your Hub.")
+            }
+            liveActivitySection(preferences: preferences)
+            if preferences.liveActivityEnabled {
+                Section {
+                    NavigationLink {
+                        settingsPage("Live Activity & Dynamic Island") {
+                            liveActivityPreviewSection(preferences: preferences)
+                            liveActivityIconSection(preferences: preferences)
+                            liveActivityCompactSection(preferences: preferences)
+                            liveActivityExpandedSection(preferences: preferences)
+                            liveActivityLockScreenSection(preferences: preferences)
+                        }
+                    } label: {
+                        Label("Customize Live Activity", systemImage: "slider.horizontal.3")
+                    }
+                }
+            }
+            Section {
+                NavigationLink {
+                    settingsPage("Status") { statusSection }
+                } label: { Label("Status", systemImage: "waveform.path.ecg") }
+                NavigationLink {
+                    settingsPage("Privacy") { privacySection }
+                } label: { Label("Privacy", systemImage: "lock.shield") }
+                NavigationLink {
+                    settingsPage("About") { aboutSection }
+                } label: { Label("About", systemImage: "info.circle") }
+            }
         }
     }
 
-    @ViewBuilder
-    private func connectionSections(
-        settings: ConnectionSettings,
-        preferences: AppPreferences
+    private func settingsPage<Content: View>(
+        _ title: LocalizedStringKey,
+        @ViewBuilder content: () -> Content
     ) -> some View {
-        hubSection(settings: settings)
-        regionalSection(preferences: preferences)
-        overviewSection(preferences: preferences)
-        widgetSection(preferences: preferences)
-    }
-
-    @ViewBuilder
-    private func liveActivitySections(preferences: AppPreferences) -> some View {
-        liveActivitySection(preferences: preferences)
-        if preferences.liveActivityEnabled {
-            liveActivityPreviewSection(preferences: preferences)
-            liveActivityIconSection(preferences: preferences)
-            liveActivityCompactSection(preferences: preferences)
-            liveActivityExpandedSection(preferences: preferences)
-            liveActivityLockScreenSection(preferences: preferences)
-        }
-    }
-
-    @ViewBuilder
-    private func accountSections(preferences: AppPreferences) -> some View {
-        appearanceSection(preferences: preferences)
-        statusSection
-        privacySection
-        aboutSection
+        Form { content() }
+            .formStyle(.grouped)
+            .listSectionSpacing(24)
+            .scrollContentBackground(.hidden)
+            .background { AppBackground() }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .tint(DesignTokens.accent)
     }
 
     @ViewBuilder
@@ -126,8 +196,9 @@ struct SettingsView: View {
                 .textContentType(.password)
 
             Button("Save & Connect", systemImage: "link", action: saveAndConnect)
-                .buttonStyle(.glassProminent)
+                .modifier(AppActionStyle())
                 .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
 
             if let validationMessage = settings.validationMessage {
                 Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
@@ -241,6 +312,8 @@ struct SettingsView: View {
                     "Limit data",
                     selection: $preferences.liveProviderID
                 )
+                Toggle("Show secondary metric", isOn: $preferences.liveShowsSecondaryMetric)
+                Toggle("Show progress", isOn: $preferences.liveShowsProgress)
 
                 LabeledContent("Status") {
                     Text(
@@ -280,7 +353,7 @@ struct SettingsView: View {
     @ViewBuilder
     private func liveActivityPreviewSection(preferences: AppPreferences) -> some View {
         Section {
-            AnyView(LiveActivitySurfacePreview(
+            LiveActivitySurfacePreview(
                 iconProviderID: previewProviderID(preferences: preferences),
                 providerName: previewProviderName(preferences: preferences),
                 compactTrailingField: liveField(
@@ -314,10 +387,15 @@ struct SettingsView: View {
                 lockScreenBottomField: liveField(
                     preferences.liveLockScreenBottomField,
                     fallback: .progress
-                )
-            ))
+                ),
+                primaryMetric: preferences.livePrimaryMetric,
+                showsProgress: preferences.liveShowsProgress,
+                showsSecondary: preferences.liveShowsSecondaryMetric
+            )
         } header: {
             Text("Preview")
+        } footer: {
+            Text("Preview uses sample data. Your widgets use the latest snapshot from your Hub.")
         }
     }
 
@@ -428,7 +506,7 @@ struct SettingsView: View {
                     Text(LocalizedStringKey(appearance.title)).tag(appearance)
                 }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.inline)
         } header: {
             Label("Appearance", systemImage: "circle.lefthalf.filled")
         }
@@ -447,7 +525,7 @@ struct SettingsView: View {
             }
 
             LabeledContent("Devices") {
-                Text(store.stats?.devices?.count ?? 0, format: .number)
+                Text(store.stats?.devices.map { $0.count.formatted() } ?? "—")
                     .monospacedDigit()
             }
         }
@@ -483,7 +561,7 @@ struct SettingsView: View {
             Set(
                 (store.stats?.sortedLimits ?? []).compactMap {
                     $0.provider?.lowercased()
-                }
+                } + [preferences.widgetProviderID, preferences.liveProviderID].filter { !$0.isEmpty }
             )
         )
         .sorted {
@@ -535,10 +613,11 @@ struct SettingsView: View {
 
                 Text(title)
                     .font(.caption2)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(width: 72, height: 68)
+            .frame(width: 88)
+            .padding(.vertical, 12)
             .background(
                 isSelected
                     ? DesignTokens.accent.opacity(0.18)

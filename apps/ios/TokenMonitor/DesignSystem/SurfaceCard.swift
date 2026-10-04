@@ -1,28 +1,32 @@
 import SwiftUI
 
+/// Content has a quiet, opaque surface. Glass belongs to navigation and actions.
 struct SurfaceCard<Content: View>: View {
-    @ViewBuilder let content: Content
+    let content: Content
 
     init(@ViewBuilder content: () -> Content) {
         self.content = content()
     }
 
-    @ViewBuilder
     var body: some View {
-        if #available(iOS 26, *) {
-            content
-                .padding(DesignTokens.cardPadding)
-                .glassEffect(
-                    .regular,
-                    in: .rect(cornerRadius: DesignTokens.cardRadius)
-                )
+        content
+            .padding(DesignTokens.cardPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                Color(uiColor: .secondarySystemGroupedBackground),
+                in: .rect(cornerRadius: DesignTokens.cardRadius)
+            )
+    }
+}
+
+struct AppActionStyle: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *), !reduceTransparency {
+            content.buttonStyle(.glassProminent)
         } else {
-            content
-                .padding(DesignTokens.cardPadding)
-                .background(
-                    .regularMaterial,
-                    in: .rect(cornerRadius: DesignTokens.cardRadius)
-                )
+            content.buttonStyle(.borderedProminent)
         }
     }
 }

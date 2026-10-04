@@ -3,24 +3,26 @@ import Foundation
 extension TokenMonitorSharedPayload.Snapshot {
     static func make(
         stats: HubStats,
-        history: UsageHistory
+        history: UsageHistory,
+        now: Date = .now
     ) -> TokenMonitorSharedPayload.Snapshot {
         TokenMonitorSharedPayload.Snapshot(
-            updatedAt: Date.hubTimestamp(from: stats.updatedAt) ?? .now,
+            updatedAt: stats.sourceUpdatedAt(now: now) ?? .distantPast,
             today: usage(from: stats.period(.today)),
             month: usage(from: stats.period(.month)),
             allTime: usage(from: stats.period(.allTime)),
-            limits: limits(from: stats.sortedLimits),
+            limits: limits(from: stats.sortedLimits, now: now),
             activity: (history.daily ?? []).compactMap { day in
                 guard let date = day.date else {
                     return nil
                 }
                 return TokenMonitorSharedPayload.Day(
                     date: date,
-                    tokens: day.tokens ?? 0,
-                    cost: day.cost ?? 0
+                    tokens: day.tokens ?? .nan,
+                    cost: day.cost ?? .nan
                 )
-            }
+            },
+            sourceStale: stats.allSourcesStale
         )
     }
 
@@ -28,21 +30,27 @@ extension TokenMonitorSharedPayload.Snapshot {
         from period: UsagePeriod
     ) -> TokenMonitorSharedPayload.Usage {
         TokenMonitorSharedPayload.Usage(
-            tokens: period.totalTokens ?? 0,
-            cost: period.costUsd ?? 0,
-            cacheReadTokens: period.cacheReadTokens ?? 0,
-            outputTokens: period.outputTokens ?? 0,
+            tokens: period.totalTokens ?? .nan,
+            cost: period.costUsd ?? .nan,
+            cacheReadTokens: period.cacheReadTokens ?? .nan,
+            outputTokens: period.outputTokens ?? .nan,
             tools: period.clientEntries.prefix(5).map {
                 TokenMonitorSharedPayload.Breakdown(id: $0.id, value: $0.value)
             },
             models: period.modelEntries.prefix(5).map {
                 TokenMonitorSharedPayload.Breakdown(id: $0.id, value: $0.value)
-            }
+            },
+            tokensKnown: period.totalTokens != nil,
+            costKnown: period.costUsd != nil,
+            tokenComponentsKnown: period.capabilities?.tokenComponents,
+            throughputKnown: period.capabilities?.throughput,
+            unclassifiedTokens: period.unclassifiedTokens
         )
     }
 
     private static func limits(
-        from providers: [LimitProvider]
+        from providers: [LimitProvider],
+        now: Date
     ) -> [TokenMonitorSharedPayload.Limit] {
         providers.enumerated().compactMap { index, provider in
             guard let providerID = provider.provider?.lowercased(),
@@ -54,7 +62,7 @@ extension TokenMonitorSharedPayload.Snapshot {
                 window in
                 TokenMonitorSharedPayload.LimitWindow(
                     id: "\(window.kind ?? "quota")-\(windowIndex)",
-                    label: window.label ?? window.kind?.capitalized ?? "Quota",
+                    label: window.displayLabel(providerID: provider.provider),
                     remainingPercent: provider.remainingPercent(for: window),
                     amount: window.isCredits
                         ? window.remaining ?? provider.balance?.amount
@@ -66,8 +74,9 @@ extension TokenMonitorSharedPayload.Snapshot {
             return TokenMonitorSharedPayload.Limit(
                 id: "\(providerID)-\(index)",
                 providerID: providerID,
-                updatedAt: Date.hubTimestamp(from: provider.updatedAt),
-                windows: windows
+                updatedAt: Date.hubTimestamp(from: provider.updatedAt).flatMap { $0 <= now ? $0 : nil },
+                windows: windows,
+                sourceStale: provider.stale
             )
         }
     }

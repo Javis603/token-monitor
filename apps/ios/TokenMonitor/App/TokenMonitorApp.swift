@@ -81,7 +81,6 @@ struct TokenMonitorApp: App {
             #endif
             return
         }
-        liveActivityController.configure(settings.configuration)
         store.configure(settings.configuration)
         systemSurfaces.scheduleBackgroundRefresh()
         let payload = try? snapshotStore.load()

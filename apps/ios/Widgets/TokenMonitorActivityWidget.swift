@@ -3,213 +3,177 @@ import SwiftUI
 import WidgetKit
 
 struct TokenMonitorActivityWidget: Widget {
+    @Environment(\.dynamicTypeSize) private var typeSize
     var body: some WidgetConfiguration {
-        ActivityConfiguration(
-            for: TokenMonitorActivityAttributes.self
-        ) { context in
-            lockScreenView(context: context)
-                .activityBackgroundTint(.clear)
+        ActivityConfiguration(for: TokenMonitorActivityAttributes.self) { context in
+            lockScreen(context)
+                // Leave the Lock Screen material and contrast treatment to ActivityKit.
                 .activitySystemActionForegroundColor(.primary)
                 .widgetURL(URL(string: "tokenmonitor://overview"))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    fieldView(
-                        rawField: context.state.expandedLeadingField,
-                        fallback: .provider,
-                        state: context.state
-                    )
+                    field(context.state.expandedLeadingField, fallback: .provider, context: context)
                 }
-
                 DynamicIslandExpandedRegion(.trailing) {
-                    fieldView(
-                        rawField: context.state.expandedTrailingField,
-                        fallback: .primary,
-                        state: context.state,
-                        alignment: .trailing
-                    )
+                    field(context.state.expandedTrailingField, fallback: .primary, context: context, alignment: .trailing)
                 }
-
                 DynamicIslandExpandedRegion(.center) {
-                    fieldView(
-                        rawField: context.state.expandedCenterField,
-                        fallback: .primary,
-                        state: context.state,
-                        alignment: .center
-                    )
+                    field(context.state.expandedCenterField, fallback: .primary, context: context, alignment: .center)
                 }
-
                 DynamicIslandExpandedRegion(.bottom) {
-                    fieldView(
-                        rawField: context.state.expandedBottomField,
-                        fallback: .progress,
-                        state: context.state,
-                        alignment: .center
-                    )
+                    VStack(alignment: .leading, spacing: 8) {
+                        field(context.state.expandedBottomField, fallback: .progress, context: context)
+                        if isStale(context) { staleLabel }
+                    }
+                    .padding(.top, 4)
                 }
             } compactLeading: {
-                activityMark(for: context.state, size: 17)
+                mark(context, size: 18)
             } compactTrailing: {
-                fieldView(
-                    rawField: context.state.compactTrailingField,
-                    fallback: .primary,
-                    state: context.state,
-                    compact: true
-                )
+                field(context.state.compactTrailingField, fallback: .primary, context: context, compact: true)
+                    .frame(maxWidth: 64)
             } minimal: {
-                activityMark(for: context.state, size: 20)
-                    .padding(5)
+                mark(context, size: 20)
             }
             .widgetURL(URL(string: "tokenmonitor://overview"))
-            .keylineTint(WidgetPresentation.accent)
+            .keylineTint(isStale(context) ? .secondary : WidgetPresentation.accent)
         }
     }
 
-    private func lockScreenView(
-        context: ActivityViewContext<TokenMonitorActivityAttributes>
-    ) -> some View {
-        HStack(spacing: 14) {
-            activityMark(for: context.state, size: 26)
-
-            fieldView(
-                rawField: context.state.lockScreenPrimaryField,
-                fallback: .primary,
-                state: context.state
-            )
-
-            Spacer(minLength: 8)
-
-            fieldView(
-                rawField: context.state.lockScreenSecondaryField,
-                fallback: .secondary,
-                state: context.state,
-                alignment: .trailing
-            )
+    private func lockScreen(_ context: ActivityViewContext<TokenMonitorActivityAttributes>) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 7) {
+                mark(context, size: 18)
+                Text(context.attributes.title).font(.caption.weight(.semibold)).lineLimit(1)
+                Spacer(minLength: 0)
+                if isStale(context) { staleLabel }
+            }
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+                : AnyLayout(HStackLayout(alignment: .top, spacing: 20))
+            layout {
+                field(context.state.lockScreenPrimaryField, fallback: .primary, context: context)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                field(context.state.lockScreenSecondaryField, fallback: .secondary, context: context,
+                      alignment: typeSize.isAccessibilitySize ? .leading : .trailing)
+                    .frame(maxWidth: .infinity, alignment: typeSize.isAccessibilitySize ? .leading : .trailing)
+            }
+            // A real layout row reserves space; it cannot overlap the metrics.
+            field(context.state.lockScreenBottomField, fallback: .progress, context: context)
         }
         .padding(16)
-        .overlay(alignment: .bottom) {
-            fieldView(
-                rawField: context.state.lockScreenBottomField,
-                fallback: .progress,
-                state: context.state,
-                alignment: .center
-            )
-            .padding(.horizontal, 16)
-            .padding(.bottom, 8)
+    }
+
+    private func isStale(_ context: ActivityViewContext<TokenMonitorActivityAttributes>) -> Bool {
+        context.isStale || context.state.sourceStale == true
+    }
+
+    private var staleLabel: some View {
+        Label("Data may be out of date", systemImage: "clock.badge.exclamationmark")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder private func mark(_ context: ActivityViewContext<TokenMonitorActivityAttributes>, size: CGFloat) -> some View {
+        if isStale(context) {
+            Image(systemName: "clock.badge.exclamationmark")
+                .font(.system(size: size))
+                .accessibilityLabel("Data may be out of date")
+        } else if let provider = context.state.iconProviderID ?? context.state.providerID {
+            Image(WidgetPresentation.assetName(for: provider))
+                .resizable().scaledToFit().frame(width: size, height: size)
+                .accessibilityLabel(context.state.providerName ?? "Token Monitor")
+        } else {
+            Image(systemName: "chart.bar.fill")
+                .font(.system(size: size))
+                .foregroundStyle(WidgetPresentation.accent)
+                .accessibilityLabel("Token Monitor")
         }
     }
 
-    private func activityMark(
-        for state: TokenMonitorActivityAttributes.ContentState,
-        size: CGFloat
-    ) -> some View {
-        Image(
-            WidgetPresentation.assetName(
-                for: state.iconProviderID ?? state.providerID
-            )
-        )
-        .resizable()
-        .scaledToFit()
-        .foregroundStyle(WidgetPresentation.accent)
-        .frame(width: size, height: size)
-        .accessibilityLabel(state.providerName ?? "AI provider")
-    }
-
-    @ViewBuilder
-    private func fieldView(
-        rawField: String?,
+    @ViewBuilder private func field(
+        _ raw: String?,
         fallback: TokenMonitorActivityAttributes.Field,
-        state: TokenMonitorActivityAttributes.ContentState,
+        context: ActivityViewContext<TokenMonitorActivityAttributes>,
         alignment: HorizontalAlignment = .leading,
         compact: Bool = false
     ) -> some View {
-        let field = resolvedField(rawField, fallback: fallback)
-
-        switch field {
+        let selected = raw.flatMap(TokenMonitorActivityAttributes.Field.init(rawValue:)) ?? fallback
+        let state = context.state
+        switch selected {
         case .none:
             EmptyView()
         case .progress:
-            if let progress = state.progress {
-                ProgressView(value: progress)
-                    .tint(WidgetPresentation.accent)
-                    .frame(maxWidth: compact ? 46 : .infinity)
+            if let progress = WidgetPresentation.fraction(state.progress) {
+                if compact {
+                    Gauge(value: progress) { Text("AI limit") }
+                        .gaugeStyle(.accessoryCircularCapacity)
+                        .frame(width: 22, height: 22)
+                        .scaleEffect(0.6)
+                        .accessibilityValue(WidgetPresentation.percent(progress * 100))
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("AI limit")
+                            Spacer(minLength: 4)
+                            if let limit = state.limitValue { Text(limit).monospacedDigit() }
+                        }
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        ProgressView(value: progress)
+                            .tint(isStale(context) ? .secondary : WidgetPresentation.accent)
+                            .accessibilityLabel("AI limit")
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            } else {
+                Text("—").accessibilityLabel("No limit data")
+                    .foregroundStyle(.secondary)
             }
         case .updated:
-            if compact {
+            VStack(alignment: alignment, spacing: 3) {
+                if !compact {
+                    Text("Updated").font(.caption).foregroundStyle(.secondary)
+                }
                 Text(state.updatedAt, style: .relative)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(compact ? .caption.monospacedDigit() : .subheadline.monospacedDigit())
                     .lineLimit(1)
-            } else {
-                VStack(alignment: alignment, spacing: 2) {
-                    Text("Updated")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(state.updatedAt, style: .relative)
-                        .font(.subheadline.monospacedDigit().weight(.semibold))
-                }
             }
+            .accessibilityElement(children: .combine)
         default:
-            if let value = value(for: field, state: state) {
-                if compact {
-                    Text(value.value)
-                        .font(.caption2.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(WidgetPresentation.accent)
-                        .minimumScaleFactor(0.6)
-                        .lineLimit(1)
-                } else {
-                    VStack(alignment: alignment, spacing: 2) {
-                        Text(value.label)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                        Text(value.value)
-                            .font(.subheadline.monospacedDigit().weight(.semibold))
-                            .minimumScaleFactor(0.7)
-                            .lineLimit(1)
-                    }
+            let metric = value(selected, state: state)
+            if compact {
+                Text(metric.value)
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                    .accessibilityLabel(LocalizedStringKey(metric.label))
+                    .accessibilityValue(metric.value)
+            } else {
+                VStack(alignment: alignment, spacing: 3) {
+                    Text(LocalizedStringKey(metric.label))
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(metric.value)
+                        .font(.system(.title3, design: .rounded, weight: .semibold))
+                        .monospacedDigit()
+                        .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                        .minimumScaleFactor(0.8)
                 }
+                .accessibilityElement(children: .combine)
             }
         }
     }
 
-    private func resolvedField(
-        _ rawField: String?,
-        fallback: TokenMonitorActivityAttributes.Field
-    ) -> TokenMonitorActivityAttributes.Field {
-        guard let rawField,
-              let field = TokenMonitorActivityAttributes.Field(rawValue: rawField)
-        else {
-            return fallback
-        }
-        return field
-    }
-
-    private func value(
-        for field: TokenMonitorActivityAttributes.Field,
-        state: TokenMonitorActivityAttributes.ContentState
-    ) -> (label: String, value: String)? {
+    private func value(_ field: TokenMonitorActivityAttributes.Field, state: TokenMonitorActivityAttributes.ContentState) -> (label: String, value: String) {
         switch field {
-        case .primary:
-            return (state.primaryLabel, state.primaryValue)
-        case .secondary:
-            guard let label = state.secondaryLabel,
-                  let value = state.secondaryValue else { return nil }
-            return (label, value)
-        case .provider:
-            guard let providerName = state.providerName else { return nil }
-            return ("Provider", providerName)
-        case .tokens:
-            guard let tokensValue = state.tokensValue else { return nil }
-            return ("Tokens", tokensValue)
-        case .cost:
-            guard let costValue = state.costValue else { return nil }
-            return ("Cost", costValue)
-        case .limit:
-            guard let limitValue = state.limitValue else { return nil }
-            return ("AI limit", limitValue)
-        case .progress, .updated, .none:
-            return nil
+        case .primary: (state.primaryLabel, state.primaryValue.isEmpty ? "—" : state.primaryValue)
+        case .secondary: (state.secondaryLabel ?? "Secondary metric", state.secondaryValue ?? "—")
+        case .provider: ("Provider", state.providerName ?? "—")
+        case .tokens: ("Tokens", state.tokensValue ?? "—")
+        case .cost: ("Cost", state.costValue ?? "—")
+        case .limit: ("AI limit", state.limitValue ?? "—")
+        case .progress, .updated, .none: ("", "—")
         }
     }
 }

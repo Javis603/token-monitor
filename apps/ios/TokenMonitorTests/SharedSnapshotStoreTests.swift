@@ -3,6 +3,23 @@ import Testing
 @testable import TokenMonitor
 
 struct SharedSnapshotStoreTests {
+    @Test func clearPreservesPreferencesAndRecoversCorruptCache() throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let fileURL = directory.appending(path: "surfaces.json")
+        let store = SharedSnapshotStore(fileURL: fileURL)
+        var preferences = TokenMonitorSharedPayload.Preferences.default
+        preferences.widgetPeriod = "month"
+        try store.updatePreferences(preferences)
+        try store.updateSnapshot(.make(stats: .sample, history: .empty))
+        try store.clearSnapshot()
+        #expect(try store.load().snapshot == nil)
+        #expect(try store.load().preferences == preferences)
+        try Data("broken cache".utf8).write(to: fileURL)
+        try store.clearSnapshot()
+        #expect(try store.load().snapshot == nil)
+    }
+
     @Test
     func roundTripsVersionedPrivacySafePayload() throws {
         let directory = FileManager.default.temporaryDirectory

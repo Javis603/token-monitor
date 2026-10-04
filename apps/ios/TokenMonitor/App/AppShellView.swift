@@ -5,7 +5,15 @@ struct AppShellView: View {
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var selectedTab: AppTab = .overview
+    @State private var overviewPath = NavigationPath()
+    @State private var limitsPath = NavigationPath()
+    @State private var insightsPath = NavigationPath()
+    @State private var settingsPath = NavigationPath()
     private let sampleDetail: String?
+
+    private enum OverviewDestination: Hashable {
+        case sessions
+    }
 
     init() {
         #if DEBUG
@@ -33,13 +41,21 @@ struct AppShellView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             Tab(value: .overview) {
-                NavigationStack {
+                NavigationStack(path: $overviewPath) {
+                    Group {
                     if sampleDetail == "tools" {
                         BreakdownDetailView(kind: .tool)
                     } else if sampleDetail == "models" {
                         BreakdownDetailView(kind: .model)
+                    } else if sampleDetail == "sessions" {
+                        SessionsView()
                     } else {
                         OverviewView(selectedTab: $selectedTab)
+                    }
+                    }
+                    // Sessions remains an Overview destination, preserving native back navigation.
+                    .navigationDestination(for: OverviewDestination.self) { _ in
+                        SessionsView()
                     }
                 }
             } label: {
@@ -47,7 +63,7 @@ struct AppShellView: View {
             }
 
             Tab(value: .limits) {
-                NavigationStack {
+                NavigationStack(path: $limitsPath) {
                     LimitsView()
                 }
             } label: {
@@ -55,7 +71,7 @@ struct AppShellView: View {
             }
 
             Tab(value: .insights) {
-                NavigationStack {
+                NavigationStack(path: $insightsPath) {
                     InsightsView()
                 }
             } label: {
@@ -63,7 +79,7 @@ struct AppShellView: View {
             }
 
             Tab(value: .settings) {
-                NavigationStack {
+                NavigationStack(path: $settingsPath) {
                     SettingsView()
                 }
             } label: {
@@ -77,6 +93,16 @@ struct AppShellView: View {
                 return
             }
             selectedTab = tab
+            switch tab {
+            case .overview:
+                overviewPath = NavigationPath()
+                if AppTab.opensSessions(url) {
+                    overviewPath.append(OverviewDestination.sessions)
+                }
+            case .limits: limitsPath = NavigationPath()
+            case .insights: insightsPath = NavigationPath()
+            case .settings: settingsPath = NavigationPath()
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             guard newPhase == .active else {
