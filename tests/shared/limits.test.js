@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 const test = require('node:test');
 
 const {
@@ -14,6 +15,14 @@ const {
 const { collectLimitsOnce } = require('../../src/shared/limits/collector');
 const { codexAccountKey } = require('../../src/shared/providers/codex/auth');
 const { hashKey } = require('../../src/shared/hashKey');
+
+// These cases reach the MiMo provider, whose console ledger defaults to the
+// app's own data directory; a test must never write there. The same isolation
+// the archive tests make with this variable, for the whole file (node runs each
+// test file in its own process).
+const testDataDir = fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(), 'mimo-ledger-tests-'));
+process.env.TOKEN_MONITOR_SHARED_DIR = testDataDir;
+test.after(() => fs.rmSync(testDataDir, { recursive: true, force: true }));
 
 function codexProvider(accountKey, accountEmail, remainingPercent, updatedAt) {
   return {
@@ -1076,7 +1085,8 @@ test('collectLimitsOnce flattens multiple providers returned by a provider fetch
     providerFetchers: {
       codex: async () => [
         codexProvider('sha256:codex-a', 'a@example.com', 18, '2026-06-14T10:00:00.000Z'),
-        codexProvider('sha256:codex-b', 'b@example.com', 72, '2026-06-14T10:01:00.000Z')
+        codexProvider('sha256:codex-b', 'b@example.com', 72, '2026-06-14T10:01:00.000Z'),
+        { provider: 'codex', accountKey: 'sha256:removed', removed: true }
       ]
     }
   });
@@ -1086,6 +1096,7 @@ test('collectLimitsOnce flattens multiple providers returned by a provider fetch
     new Set(summary.providers.map((provider) => provider.accountKey)),
     new Set(['sha256:codex-a', 'sha256:codex-b'])
   );
+  assert.equal(JSON.stringify(summary).includes('removed'), false, 'runtime removals never enter a one-shot wire snapshot');
 });
 
 test('aggregateLimits preserves distinct Cursor accounts and deduplicates the same account across devices', () => {

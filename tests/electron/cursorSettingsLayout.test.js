@@ -1290,6 +1290,11 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(details, /id="mimoAddDetails" class="opencode-add-details accordion-animated-container hidden"/);
   assert.match(details, /id="mimoSaveAccountButton"/);
   assert.match(details, /id="mimoManualPanel"/);
+  // The membership is read from the machine's own MiMo Desktop session and is
+  // not sold on the developer platform, so the panel offers no paste for it —
+  // the console entry above is the only manual one this provider has.
+  assert.doesNotMatch(details, /mimoMembershipCookieInput|mimoSaveMembershipCookieButton|mimoClearMembershipCookieButton/);
+  assert.doesNotMatch(app, /mimoMembershipCookie|saveMembershipCookie/);
   assert.match(details, /<strong>1\.<\/strong>[\s\S]*<strong>4\.<\/strong>/);
   assert.match(details, /data-i18n="settings\.mimo\.step3Before">In Network, select<\/span> <code>balance<\/code>/);
   assert.match(details, /data-i18n="settings\.mimo\.step4">Paste it below, then click Save account\.<\/span>/);
@@ -1314,12 +1319,13 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.match(preload, /openConsole: \(\) => ipcRenderer\.invoke\('mimo:openConsole'\)/);
   assert.match(main, /ipcMain\.handle\('mimo:openConsole'/);
   assert.match(main, /ipcMain\.handle\('mimo:addAccount', \(_event, cookieHeader\) => addMimoManagedAccount\(cookieHeader\)\)/);
+  assert.doesNotMatch(main, /saveMimoMembershipCookie|mimoMembershipCookie/);
   // Limits rows mask through the shared resolver; the settings list stays readable.
   assert.match(readRendererFile('limits/windowsView.js'), /maskEmail: limitAccountEmailsMasked\(\)/);
   assert.match(app, /function mimoSettingsAccountTitle\(account, index\) \{[\s\S]*account\?\.accountEmail[\s\S]*`Account \$\{index \+ 1\}`/);
   assert.match(app, /const accountName = mimoSettingsAccountTitle\(account, index\);/);
   const addBody = functionBody(main, 'addMimoManagedAccount', 'removeMimoManagedAccount');
-  assert.match(addBody, /const \[validation\] = await fetchMimoLimits\(\{ mimoManagedAccounts: \[result\.account\] \}, electronProviderDeps\(\)\)/);
+  assert.match(addBody, /limitRefreshScope: \{ provider: 'mimo', accountKey: result\.account\.accountKey \}/);
   assert.ok(addBody.indexOf('fetchMimoLimits') < addBody.indexOf('settings.mimoManagedAccounts ='), 'validation must happen before persistence');
   assert.match(addBody, /result\.account\.accountEmail = String\(validation\.accountEmail/);
   assert.doesNotMatch(main, /new BrowserWindow\([\s\S]{0,300}Sign in to MiMo/);
@@ -2785,6 +2791,7 @@ test('main settings migrateLimitProviders normalizes without expanding old defau
 test('Home limits groups multiple MiMo accounts like Codex', () => {
   const app = readRendererFile('app.js');
   const groupBody = viewBody('renderLimitProviderGroup');
+  const frameBody = viewBody('renderLimitProviderGroupFrame', 'appendMimoAccountProducts');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   // accountGroup marks the synthetic header provider, so a subscription card on
   // it summarises the group instead of adopting one member's record — and
@@ -2792,12 +2799,13 @@ test('Home limits groups multiple MiMo accounts like Codex', () => {
   // for its own rows and not for every account the provider has. The count
   // phrase is the catalog's own, keyed by provider id.
   assert.match(
-    groupBody,
+    frameBody,
     /const groupProvider = \{\s*provider: providerId,\s*status: 'ok',\s*windows: \[\],\s*accountGroup: true,\s*groupAccounts: providers\s*\};/
   );
-  assert.match(groupBody, /planText: limitGroupCountText\(providerId, providers\.length\)/);
+  assert.match(frameBody, /planText: count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(groupBody, /renderLimitProviderGroupFrame\(\s*providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
-  assert.match(readRendererFile('limits/windowsView.js'), /mimo: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
+
   // The page's dispatch is by account count with no provider branch left.
   assert.match(renderLimitsBody, /if \(Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
   assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
@@ -3248,4 +3256,113 @@ test('a ZCode-discovered GLM login reads as connected, not API-key configured', 
   // missing entry would surface as literal text on the pill.
   assert.equal((i18n.match(/'settings\.zai\.statusLinked'/g) || []).length, 5);
   assert.ok(/'settings\.zai\.statusLinked': 'Connected'/.test(i18n));
+});
+
+test('MiMo lists the detected Desktop session without controls the user does not own', () => {
+  const app = readRendererFile('app.js');
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const render = app.match(/function renderMimoStatus\(\) \{[\s\S]*?\n\}/)?.[0] || '';
+
+  // The detected session is an account the provider answers for, so the panel
+  // counts it — `zaiApiKeyConfigured`'s rule, that a discovered sign-in counts as
+  // configured, or the pill reads "Not configured" on the machine the provider is
+  // built for.
+  assert.match(main, /withDetectedMimoAccount\(accounts, mimoDetectedAccount\(\)\)/);
+  assert.match(main, /function mimoDetectedAccount\(\)/);
+  assert.match(main, /mimoAccountKey\('', \{ userId: read\.userId \}\)/);
+  // Its credential is read for the count and discarded, so nothing of it reaches
+  // the renderer projection.
+  assert.doesNotMatch(main, /mimoAccountsForRenderer[\s\S]{0,400}cookieHeader: read/);
+
+  // Nothing was pasted for it, so there is no stored preference to toggle and
+  // nothing here to remove — the rule Cursor's panel states for the accounts it
+  // detects, where removal is available only for manually added ones.
+  assert.match(render, /const detected = account\.removable === false;/);
+  assert.match(render, /const input = detected \? null : document\.createElement\('input'\)/);
+  assert.match(render, /const remove = detected \? null : document\.createElement\('button'\)/);
+  assert.match(render, /if \(remove\) right\.append\(remove\)/);
+  assert.match(app, /if \(account\?\.removable === false\) return t\('settings\.mimo\.desktopAccount'\)/);
+});
+
+test('MiMo refreshes its detected account when the settings section is expanded again', async () => {
+  const app = readRendererFile('app.js');
+  const refresh = functionBody(app, 'refreshMimoAccounts', 'setCopilotAccountExpanded');
+  let detected = [{ id: 'desktop-a', removable: false }];
+  let rendered = 0;
+  const state = { settings: { mimoManagedAccounts: [] } };
+  const context = {
+    state,
+    window: { tokenMonitor: { mimo: { accounts: async () => detected } } },
+    renderMimoStatus: () => { rendered += 1; }
+  };
+  const refreshAccounts = vm.runInNewContext(`${refresh}\nrefreshMimoAccounts`, context);
+
+  await refreshAccounts();
+  assert.equal(state.settings.mimoManagedAccounts[0].id, 'desktop-a');
+  detected = [{ id: 'desktop-b', removable: false }];
+  await refreshAccounts();
+  assert.equal(state.settings.mimoManagedAccounts[0].id, 'desktop-b');
+  detected = [];
+  await refreshAccounts();
+  assert.equal(state.settings.mimoManagedAccounts.length, 0);
+  assert.equal(rendered, 3);
+  assert.match(app, /if \(expanding\) void refreshMimoAccounts\(\)/);
+});
+
+test('MiMo settings reuses the shared sign-in status for rejected accounts', () => {
+  const app = readRendererFile('app.js');
+  const source = functionBody(app, 'mimoSettingsAccountTitle', 'copilotProviderStatus');
+  class Node {
+    constructor() {
+      this.children = [];
+      this.classList = { toggle() {} };
+    }
+    append(...children) { this.children.push(...children); }
+    replaceChildren(...children) { this.children = children; }
+    addEventListener() {}
+    setAttribute() {}
+    *walk() { yield this; for (const child of this.children) yield* child.walk(); }
+  }
+  const list = new Node();
+  const nodes = new Map([
+    ['mimoAccountStatus', new Node()],
+    ['mimoAccountList', list],
+    ['mimoAccountEmpty', new Node()],
+    ['mimoAccountErrorMessage', new Node()]
+  ]);
+  let providers = [
+    { provider: 'mimo', accountKey: 'a', sourceDetail: 'managed', status: 'unauthorized' },
+    { provider: 'mimo', accountKey: 'b', sourceDetail: 'app', status: 'unauthorized' }
+  ];
+  const context = {
+    document: { getElementById: (id) => nodes.get(id), createElement: () => new Node() },
+    isSettingsSurfaceVisible: () => true,
+    state: { settings: { mimoManagedAccounts: [
+      { id: 'a', accountKey: 'a', accountEmail: 'a@example.com', accountLabel: 'Console' },
+      { id: 'b', accountKey: 'b', accountEmail: 'b@example.com', accountLabel: 'Console' },
+      { id: 'desktop', accountKey: 'b', removable: false, accountLabel: 'Desktop app' }
+    ] }, mimoAccountError: '' },
+    accountShellApi: { render() {} },
+    localProviderStatuses: () => providers,
+    limitProviderPresentationApi: require('../../src/electron/renderer/limits/providerPresentation'),
+    translatedLimitProviderTag: (tagInfo) => tagInfo?.label || '',
+    renderSettingsSummaries() {},
+    t: (key) => ({
+      'settings.limits.status.signInAgain': 'Sign in again',
+      'settings.mimo.desktopAccount': 'MiMo Desktop'
+    })[key] || key
+  };
+  const render = vm.runInNewContext(`${source}\nrenderMimoStatus`, context);
+  render();
+  assert.ok(list.children.every((row) => row.children.length === 3), 'read-only rows retain the shared checkbox column');
+  assert.equal(list.children[2].children[0].type, undefined);
+  assert.equal(list.children[2].children[2].children.length, 1, 'the detected account has no remove control');
+  const info = list.children.map((row) => [...row.walk()].find((node) => node.className === 'managed-account-info'));
+  assert.deepEqual(info.map((node) => node.textContent), ['Sign in again', 'Console', 'Sign in again']);
+  assert.equal(info[0].title, 'Sign in again');
+  assert.equal(info[1].title, 'Console');
+  assert.equal(info[2].title, 'Sign in again');
+  providers = [{ provider: 'mimo', accountKey: 'a', sourceDetail: 'managed', status: 'ok' }];
+  render();
+  assert.equal([...list.children[0].walk()].find((node) => node.className === 'managed-account-info').textContent, 'Console');
 });
