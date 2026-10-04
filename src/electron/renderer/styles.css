@@ -1733,7 +1733,7 @@ span.settings-note.settings-item-desc {
 .settings-help-popover { width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-sizing: border-box; overflow-y: auto; padding: 16px; color: var(--text); font-size: 11px; line-height: 1.5; -webkit-app-region: no-drag; }
 .sync-title-heading { display: flex; align-items: center; gap: 3px; }
 .settings-panel .sync-title-heading > label { display: inline; margin: 0; color: inherit; font-size: inherit; }
-button.settings-help-trigger { position: relative; display: inline-grid; place-items: center; flex: 0 0 18px; width: 18px; height: 18px; margin: -2px 0; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: inherit; font-size: 8px; line-height: 1; cursor: help; pointer-events: auto; -webkit-app-region: no-drag; }
+button.settings-help-trigger { position: relative; display: inline-grid; place-items: center; flex: 0 0 18px; width: 18px; height: 18px; margin: -2px 0; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: inherit; font-size: 8px; line-height: 1; cursor: pointer; pointer-events: auto; -webkit-app-region: no-drag; }
 button.settings-help-trigger::before { content: ''; position: absolute; width: 11px; height: 11px; border: 1px solid currentColor; border-radius: 50%; opacity: 0.6; }
 button.settings-help-trigger:hover { background: transparent; color: var(--text); }
 button.settings-help-trigger:hover::before { opacity: 1; }
