@@ -32,7 +32,9 @@
     "verify:release-artifact-names": "node scripts/verify-updater-artifact-names.js dist",
     "benchmark:hub-bandwidth": "node scripts/benchmark-hub-bandwidth.js",
     "lint": "eslint .",
-    "verify": "npm run lint && npm test"
+    "verify": "npm run lint && npm test",
+    "codex:usage": "node scripts/codex-task-usage.js",
+    "codex:usage:live": "node scripts/codex-live-usage.js"
   },
   "build": {
     "appId": "com.javis.tokenmonitor",

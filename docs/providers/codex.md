@@ -25,6 +25,14 @@ Rollout filenames are transcript lookup keys and can contain multiple UUIDs; do 
 
 Cache warmth is an optional `promptCache: { observedAt, ttlSeconds }` estimate from that shared rollout index; it adds no separate file read or JSON parse. Valid cache read/write activity starts a fixed 30-minute display estimate regardless of the model name or route, including third-party and custom APIs. This is a product estimate, not a reported Codex or provider TTL; actual cache retention can differ. Cold responses, model changes and compaction clear it. Repeated unchanged `token_count` accounting never refreshes the anchor. The anchor is a response observation, so remaining time may be overstated; quota accounting and successful reuse are not implied. Home, Edge Dock and Sessions share one metrics slot: recent context takes priority, with the context token/window counts and cache countdown available in the shared detail tooltip by hovering its bar or percentage; then a still-valid cache estimate appears after 10 minutes of inactivity, with the last recorded context counts still available on hover. Turn completion alone clears neither reading; the cache countdown ends at the observed TTL.
 
+## Task and delegated-thread usage
+
+The fork's opt-in `npm run codex:usage` command uses `taskUsage.js` and `taskUsageReader.js` for a separate observed-lifetime ledger. It reads local thread relationships and request usage, or imports explicitly supplied App Server/rollout events. It does not modify Tokscale period totals, fetch hosted-cloud account history, or infer dot lineage from display names. Coverage and missing usage remain explicit. See [the task-usage contract and CLI guide](../codex-task-usage.md) before extending these modules.
+
+## Opt-in live service usage
+
+`usageRpc.js`, `usageSync.js` and `usageView.js` power `codex:usage -- --live` and `codex:usage:live`. This separate read-only account/thread view does not change the existing collector or local period totals. Explicit roots use bounded ancestry queries; unavailable mappings, child counters and account continuity remain explicit gaps. Thread service estimates never enter the reported-token ledger. See [live usage, provenance and acceptance boundaries](../codex-live-usage.md).
+
 ## Limits sources
 
 The live account normally reads the ChatGPT/Codex backend with the current `auth.json`. The configured `chatgpt_base_url` selects the matching backend path family. The app-server RPC path is a fallback, not an interchangeable authority.
