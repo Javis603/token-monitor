@@ -1729,7 +1729,7 @@ span.settings-note.settings-item-desc {
 .sync-content-cleanup { display: grid; gap: 6px; }
 .settings-panel .sync-content-body .checkbox-label > input[type="checkbox"] { appearance: auto; width: 14px; height: 14px; flex: 0 0 14px; margin: 0; border: initial; background: initial; accent-color: var(--accent); }
 .settings-panel .sync-content-body .checkbox-label > input[type="checkbox"]::before { content: none; }
-.sync-content-dialog { width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-sizing: border-box; overflow-y: auto; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: rgb(var(--panel-rgb)); color: var(--text); font-size: 11px; line-height: 1.5; }
+.sync-content-dialog { width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-sizing: border-box; overflow-y: auto; padding: 16px; color: var(--text); font-size: 11px; line-height: 1.5; -webkit-app-region: no-drag; }
 .sync-content-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 .sync-content-dialog > strong { display: block; font-size: 12px; }
 .sync-content-dialog p { overflow-wrap: anywhere; }
@@ -3053,8 +3053,10 @@ span.settings-note.settings-item-desc {
   transform: rotate(45deg);
 }
 .view-switcher-menu,
-.select-control-popup {
-  padding: 4px;
+.select-control-popup { padding: 4px; }
+.view-switcher-menu,
+.select-control-popup,
+.sync-content-dialog {
   border: 1px solid rgba(var(--line-rgb), 0.22);
   border-radius: 7px;
   background:
@@ -3085,7 +3087,8 @@ span.settings-note.settings-item-desc {
 .select-control-option[aria-disabled="true"] { opacity: 0.5; cursor: default; }
 @supports not (backdrop-filter: blur(1px)) {
   .view-switcher-menu,
-  .select-control-popup { background: rgb(var(--glass-rgb)); }
+  .select-control-popup,
+  .sync-content-dialog { background: rgb(var(--glass-rgb)); }
 }
 /* Chromium delegates an open <select> popup to a platform-specific surface.
    Windows can give that popup a light system background while retaining our
@@ -5841,8 +5844,10 @@ html.native-liquid-glass .view-switcher-disclosure { width: 28px; flex-basis: 28
    covers. It stays a dense frosted plate; only its shape and edge follow the
    glass controls. */
 html.native-liquid-glass .select-control-popup,
-html.native-liquid-glass .view-switcher-menu {
-  padding: 5px;
+html.native-liquid-glass .view-switcher-menu { padding: 5px; }
+html.native-liquid-glass .select-control-popup,
+html.native-liquid-glass .view-switcher-menu,
+html.native-liquid-glass .sync-content-dialog {
   border-color: rgba(var(--line-rgb), 0.16);
   border-radius: 14px;
   background:
