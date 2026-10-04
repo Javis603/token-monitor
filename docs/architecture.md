@@ -41,6 +41,8 @@ Claude and Codex derive prompt-cache observations in their existing provider-own
 
 A resolver can mark catalog metadata `titleOnly: true` when no transcript was read. `applySessionMetadata()` then applies only its title, preserving activity, context, cache and attribution. A subsequent transcript result must remove this marker from reused metadata so new observations apply normally. The marker stays in the local metadata cache and is never copied into session records.
 
+The local metadata cache also records `titleFallback` before a title-only override. An authoritative catalog deletion can remove its cached title and name it in `invalidatedTitle`; the applier restores the fallback only on rows still showing that exact title. Newer native labels are left alone. These fields are not copied into session records, and a generic reader failure never invalidates a title.
+
 ### Watching
 
 - There is no cooldown on top of the debounce, because the product promises 3–5 s updates. The debounce is instead capped by `watchMaxWaitMs` (5 s, floored at the debounce), because a trailing debounce never fires while agents keep writing faster than it. Time behind an in-flight tick does not count toward the cap, so a slow tick cannot chain scans back-to-back.

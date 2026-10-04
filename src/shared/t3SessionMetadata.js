@@ -145,6 +145,7 @@ function readT3SessionMeta(sessionIds, deps = {}) {
   const candidateIds = [...new Set([...candidatesBySession.values()].flat())];
   const titleByThreadId = new Map();
   const v2SeenThreadIds = new Set();
+  const v2DeletedThreadIds = new Set();
   const legacyTitles = new Map();
 
   for (const dbPath of dbPaths) {
@@ -167,7 +168,10 @@ function readT3SessionMeta(sessionIds, deps = {}) {
             if (!threadId || v2SeenThreadIds.has(threadId)) continue;
             if (query.authoritative) {
               v2SeenThreadIds.add(threadId);
-              if (row.deleted) continue;
+              if (row.deleted) {
+                v2DeletedThreadIds.add(threadId);
+                continue;
+              }
             } else if (legacyTitles.has(threadId)) continue;
             const title = cleanTitle(row.title);
             if (!title || T3_DEFAULT_TITLES.has(title.toLowerCase())) continue;
@@ -187,6 +191,10 @@ function readT3SessionMeta(sessionIds, deps = {}) {
   for (const [sessionId, candidates] of candidatesBySession) {
     const title = candidates.map((id) => titleByThreadId.get(id)).find(Boolean);
     if (title) out.set(sessionId, { title });
+    // An explicit tombstone can invalidate cached titles; a failed read cannot.
+    else if (deps.deletedSessionIds instanceof Set && candidates.some((id) => v2DeletedThreadIds.has(id))) {
+      deps.deletedSessionIds.add(sessionId);
+    }
   }
   return out;
 }

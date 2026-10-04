@@ -345,6 +345,14 @@ function applySessionMetadata(periods, home, deps = {}) {
     for (const [key, session] of Object.entries(period?.sessions || {})) {
       const meta = metadata.get(key);
       if (!meta) continue;
+      // Restore only the catalog title we replaced, leaving newer native labels.
+      if (meta.invalidatedTitle && session.title === meta.invalidatedTitle) {
+        if (meta.titleFallback) session.title = meta.titleFallback;
+        else delete session.title;
+      }
+      if (meta.titleOnly === true && meta.title && !Object.prototype.hasOwnProperty.call(meta, 'titleFallback')) {
+        meta.titleFallback = session.title;
+      }
       if (meta.title) session.title = meta.title;
       // A catalog title is not evidence about transcript state or activity.
       if (meta.titleOnly === true) continue;

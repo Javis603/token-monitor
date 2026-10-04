@@ -188,3 +188,49 @@ maybe('T3 title-only updates preserve Claude activity until a transcript supplie
   assert.equal(Object.hasOwn(session, 'turnEnded'), false);
   assert.equal(sessionActivityState(session, now), 'running');
 });
+
+maybe('Claude V2 tombstones invalidate cached T3 titles without treating reader failures as deletion', (t) => {
+  const { home, db, v2, legacy } = store(t);
+  v2('deleted-app', 'deleted-native', 'Deleted T3 title');
+  v2('active-app', 'active-native', 'Active T3 title');
+  legacy('stale-app', 'deleted-native', 'Stale legacy title');
+  const makeSession = (sessionId, title) => ({
+    client: 'claude', sessionId, title, turnEnded: true,
+    lastUsedAt: '2026-10-04T00:00:00Z'
+  });
+  const original = makeSession('deleted-native', 'Native fallback');
+  const active = makeSession('active-native', 'Other native title');
+  const periods = { today: { sessions: {
+    'claude:deleted-native': original, 'claude:active-native': active
+  } } };
+  const deps = {
+    scopedHome: true, now: Date.parse('2026-10-04T00:01:00Z'),
+    metadataCache: new Map(), claudeMetadataDeps: { sqlite, cache: new Map() }
+  };
+  applySessionMetadata(periods, home, deps);
+  assert.equal(original.title, 'Deleted T3 title');
+  const transient = makeSession('deleted-native', 'Native fallback');
+  applySessionMetadata({ month: { sessions: { 'claude:deleted-native': transient } } }, home, {
+    ...deps, claudeMetadataDeps: { ...deps.claudeMetadataDeps, sqlite: null }
+  });
+  assert.equal(transient.title, 'Deleted T3 title');
+
+  db.prepare('UPDATE orchestration_v2_projection_threads SET deleted_at = ? WHERE thread_id = ?').run('2026-10-04', 'deleted-app');
+  applySessionMetadata(periods, home, deps);
+  assert.equal(original.title, 'Native fallback');
+  assert.equal(original.turnEnded, true);
+  assert.equal(active.title, 'Active T3 title');
+
+  const fresh = makeSession('deleted-native', 'Newer native title');
+  applySessionMetadata({ allTime: { sessions: { 'claude:deleted-native': fresh } } }, home, deps);
+  assert.equal(fresh.title, 'Newer native title');
+  assert.equal(fresh.turnEnded, true);
+
+  const projects = path.join(home, '.claude', 'projects', 'test-project');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(path.join(projects, 'deleted-native.jsonl'), JSON.stringify({
+    type: 'custom-title', customTitle: 'Current native transcript title'
+  }) + '\n');
+  applySessionMetadata(periods, home, deps);
+  assert.equal(original.title, 'Current native transcript title');
+});
