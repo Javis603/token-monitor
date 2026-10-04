@@ -23,11 +23,14 @@ const CUSTOM_SCAN_PATH_LIMIT_ERRORS = Object.freeze({
 // similarly misleading. Keep both controls hidden rather than accepting paths
 // that appear healthy but contribute no usage. Token Monitor's Kilo row combines
 // the `kilo` CLI database and `kilocode` extension sources; the former rejects
-// extra roots, so persisted Kilo roots are forwarded to the latter.
+// extra roots, so persisted Kilo roots are forwarded to the latter. MiniMax
+// Code's runtime store is read by the fork only from its data directories, so
+// an extra `mcode` root would reach upstream's headless-capture scan alone.
 const UNSUPPORTED_CUSTOM_SCAN_CLIENTS = new Set([
   ...FORK_ONLY_CLIENT_IDS,
   'opencode',
-  'cursor'
+  'cursor',
+  'mcode'
 ]);
 const CUSTOM_SCAN_CLIENT_IDS = Object.freeze(
   CLIENT_IDS.filter((id) => !UNSUPPORTED_CUSTOM_SCAN_CLIENTS.has(id))

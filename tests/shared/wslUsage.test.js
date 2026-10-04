@@ -68,6 +68,14 @@ test('homeHasData detects fx sessions in a WSL home', () => {
   assert.deepEqual(homeHasData(home, (path) => path === marker), ['fx']);
 });
 
+test('homeHasData detects MiniMax Code runtime stores in a WSL home', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  for (const dir of ['.minimax', '.mavis']) {
+    const marker = `${home}\\${dir}\\v2\\sessions`;
+    assert.deepEqual(homeHasData(home, (path) => path === marker), ['mcode']);
+  }
+});
+
 test('homeHasData attributes Kilo CLI and extension markers to one client', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   for (const marker of [

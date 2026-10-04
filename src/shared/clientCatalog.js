@@ -85,7 +85,8 @@
     { id: 'lmstudio', label: 'LM Studio' },
     { id: 'unsloth', label: 'Unsloth' },
     { id: 'devin', label: 'Devin' },
-    { id: 'fx', label: 'fx' }
+    { id: 'fx', label: 'fx' },
+    { id: 'mcode', label: 'MiniMax Code' }
   ].map((client) => Object.freeze({
     defaultTracked: true,
     forkOnly: false,
