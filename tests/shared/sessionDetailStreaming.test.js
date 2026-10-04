@@ -13,7 +13,7 @@ function transcript(t, client = 'codex') {
   const sessionId = 'stream-test';
   const dir = client === 'codex'
     ? path.join(home, '.codex', 'sessions')
-    : path.join(home, '.claude', 'projects', 'test');
+    : path.join(home, `.${client}`, 'projects', 'test');
   fs.mkdirSync(dir, { recursive: true });
   return { file: path.join(dir, `${sessionId}.jsonl`), args: { client, sessionId, home, env: {}, sessionCost: 1 } };
 }
@@ -22,37 +22,49 @@ const codexTurn = JSON.stringify({ type: 'event_msg', payload: {
   type: 'token_count', info: { last_token_usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 10 } }
 } });
 
-test('reads a transcript larger than the V8 string limit without losing the final usage', (t) => {
-  const { file, args } = transcript(t);
-  const fd = fs.openSync(file, 'w');
-  try {
-    // Synthetic tool output keeps the fixture private and the parsed result small.
-    const output = Buffer.from(JSON.stringify({ type: 'response_item', payload: {
-      type: 'function_call_output', output: 'x'.repeat(1024 * 1024)
-    } }) + '\n');
-    for (let i = 0; i < 513; i += 1) fs.writeSync(fd, output);
-    fs.writeSync(fd, codexTurn);
-  } finally {
-    fs.closeSync(fd);
-  }
-  assert.ok(fs.statSync(file).size > require('node:buffer').constants.MAX_STRING_LENGTH);
-  const detail = readSessionDetail(args);
-  assert.equal(detail.found, true);
-  assert.equal(detail.totals.totalTokens, 110);
-  assert.equal(detail.totals.turnCount, 1);
-  assert.equal(detail.totals.costUsd, 1);
-});
+function promptOf(client, text) {
+  if (client === 'codex') return JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: text } });
+  if (client === 'claude') return JSON.stringify({ type: 'user', message: { content: text } });
+  return JSON.stringify({ type: 'message', role: 'user', content: [{ type: 'input_text', text }] });
+}
 
-for (const client of ['codex', 'claude']) {
+function turnOf(client) {
+  if (client === 'codex') return codexTurn;
+  if (client === 'claude') return JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 10 } } });
+  return JSON.stringify({ type: 'message', role: 'assistant', providerData: {
+    messageId: 'response', rawUsage: { prompt_tokens: 100, prompt_cache_hit_tokens: 80, completion_tokens: 10, total_tokens: 110 }
+  } });
+}
+
+for (const client of ['codex', 'codebuddy', 'workbuddy']) {
+  test(`${client} reads a transcript larger than the V8 string limit without losing the final usage`, (t) => {
+    const { file, args } = transcript(t, client);
+    const fd = fs.openSync(file, 'w');
+    try {
+      // Synthetic tool output keeps the fixture private and the parsed result small.
+      const output = Buffer.from(JSON.stringify({ type: 'response_item', payload: {
+        type: 'function_call_output', output: 'x'.repeat(1024 * 1024)
+      } }) + '\n');
+      for (let i = 0; i < 513; i += 1) fs.writeSync(fd, output);
+      fs.writeSync(fd, turnOf(client));
+    } finally {
+      fs.closeSync(fd);
+    }
+    assert.ok(fs.statSync(file).size > require('node:buffer').constants.MAX_STRING_LENGTH);
+    const detail = readSessionDetail(args);
+    assert.equal(detail.found, true);
+    assert.equal(detail.totals.totalTokens, 110);
+    assert.equal(detail.totals.turnCount, 1);
+    assert.equal(detail.totals.costUsd, 1);
+  });
+}
+
+for (const client of ['codex', 'claude', 'codebuddy', 'workbuddy']) {
   test(`${client} preserves UTF-8 across chunks, CRLF and an unterminated final record`, (t) => {
     const { file, args } = transcript(t, client);
     const text = '繁體中文🙂';
-    const prompt = JSON.stringify(client === 'codex'
-      ? { type: 'event_msg', payload: { type: 'user_message', message: text } }
-      : { type: 'user', message: { content: text } });
-    const turn = client === 'codex' ? codexTurn : JSON.stringify({ type: 'assistant', message: {
-      usage: { input_tokens: 100, output_tokens: 10 }
-    } });
+    const prompt = promptOf(client, text);
+    const turn = turnOf(client);
     const prefixBytes = Buffer.byteLength(prompt.slice(0, prompt.indexOf(text)));
     const padding = ' '.repeat(65535 - prefixBytes - 2) + '\r\n';
     fs.writeFileSync(file, `${padding}${prompt}\r\n{torn json\r\n${turn}`);
@@ -64,14 +76,16 @@ for (const client of ['codex', 'claude']) {
   });
 }
 
-test('rejects an oversized record without publishing partial usage', (t) => {
-  const { file, args } = transcript(t);
-  fs.writeFileSync(file, codexTurn + '\n' + 'x'.repeat(16 * 1024 * 1024 + 1));
-  const detail = readSessionDetail(args);
-  assert.equal(detail.found, false);
-  assert.equal(detail.error, 'line-too-large');
-  assert.deepEqual(detail.exchanges, []);
-});
+for (const client of ['codex', 'codebuddy', 'workbuddy']) {
+  test(`${client} rejects an oversized record without publishing partial usage`, (t) => {
+    const { file, args } = transcript(t, client);
+    fs.writeFileSync(file, turnOf(client) + '\n' + 'x'.repeat(16 * 1024 * 1024 + 1));
+    const detail = readSessionDetail(args);
+    assert.equal(detail.found, false);
+    assert.equal(detail.error, 'line-too-large');
+    assert.deepEqual(detail.exchanges, []);
+  });
+}
 
 test('reports read failures separately from missing transcripts', (t) => {
   const { file, args } = transcript(t);
@@ -83,7 +97,7 @@ test('reports read failures separately from missing transcripts', (t) => {
   assert.deepEqual(detail.exchanges, []);
 });
 
-for (const client of ['codex', 'claude']) {
+for (const client of ['codex', 'claude', 'codebuddy', 'workbuddy']) {
   test(`${client} returns the missing result when the transcript disappears before opening`, (t) => {
     const { file, args } = transcript(t, client);
     const expected = readSessionDetail(args);

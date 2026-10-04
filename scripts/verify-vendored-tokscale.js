@@ -57,6 +57,22 @@ const MCODE_SESSION_ID = 'mvs_0123456789abcdef0123456789abcdef';
 // makes a new catalog id fail locally until its real binary output and Token
 // Monitor normalization are both exercised by this release gate.
 const TOKEN_CONTRACT_CASES = Object.freeze([
+  ...['codebuddy', 'workbuddy'].map((client) => ({
+    client,
+    // Pinned Tencent Buddy raw-usage regression: ambiguous input stays intact;
+    // both cache writes and reasoning are independent additive buckets.
+    expectedRow: { model: 'glm-5.2', input: 3, output: 2, cacheRead: 4, cacheWrite: 4, reasoning: 5 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 18, clientTokens: 18, clientOutputTokens: 7 },
+    expectedSession: { id: 'session-2', totalTokens: 18, outputTokens: 7, reasoningTokens: 5 },
+    writeFixture(home) {
+      const { cases } = require('../tests/fixtures/tencentBuddyUsage.json');
+      const fixture = cases.find(({ name }) => name === 'parse_jsonl_file_keeps_ambiguous_raw_usage_input_unchanged');
+      const dir = path.join(home, `.${client}`, 'projects', 'tm-contract');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'session-2.jsonl'), `${JSON.stringify(fixture.entry)}\n`);
+    }
+  })),
   {
     client: 'muse',
     // Responses usage includes 5105 cached input and 278 reasoning output.
