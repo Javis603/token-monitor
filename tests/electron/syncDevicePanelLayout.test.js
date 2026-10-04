@@ -58,7 +58,8 @@ test('sync connection stays inline and optional content follows frequency before
   assert.ok(section.indexOf('id="syncContentDetails"') < section.indexOf('id="syncDevicePanel"'));
   assert.equal((section.match(/id="syncPanelConnection"/g) || []).length, 1);
   assert.doesNotMatch(section.slice(0, section.indexOf('id="syncContentDetails"')), /<summary|syncConnectionSettings|syncConnectionMode/);
-  assert.match(section, /<details id="syncContentDetails"/);
+  assert.match(section, /id="syncContentToggle"[^>]*class="settings-group-header cursor-settings-toggle"[^>]*aria-expanded="false"[^>]*aria-controls="syncContentDetails"/);
+  assert.match(section, /id="syncContentDetails" class="cursor-settings-details hidden" inert/);
   assert.match(section, /class="sync-mode-select"[\s\S]*?<select id="hubModeOptions"[\s\S]*?<span class="settings-section-disclosure" aria-hidden="true">/);
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
   assert.doesNotMatch(css.match(/\.sync-connection-fields\s*\{([^}]+)\}/)?.[1] || '', /\bgap:/);

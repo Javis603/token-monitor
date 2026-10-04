@@ -31,6 +31,7 @@
     let busy = false;
     let request = null;
     let generation = 0;
+    let disclosureGeneration = 0;
     let pushRevision = 0;
     let decision = null;
     let message = '';
@@ -161,12 +162,14 @@
       // value before awaiting any IPC, including the privacy confirmation.
       render();
       const epoch = generation;
+      const disclosureEpoch = disclosureGeneration;
       return run(async () => {
         if (!enabled) {
           if (status?.identity) await configure(kind, false);
           return;
         }
         await refresh();
+        if (disclosureEpoch !== disclosureGeneration) return;
         if (epoch !== generation) { message = 'hub_changed'; return; }
         if (!available()) return;
         if (kind === 'sessionTitles') {
@@ -177,6 +180,7 @@
         }
         const identity = status.identity;
         const preview = await bridge.previewSyncContent(kind);
+        if (disclosureEpoch !== disclosureGeneration) return;
         if (epoch !== generation || status?.identity !== identity) { message = 'hub_changed'; return; }
         if (!preview.ok) { applyStatus(preview.status); message = errorKey(preview.error); return; }
         if (preview.identity !== identity) { message = 'hub_changed'; return; }
@@ -201,10 +205,11 @@
     }
 
     for (const kind of KINDS) inputs[kind].addEventListener('change', () => toggle(kind, inputs[kind].checked));
-    el('Details').addEventListener('toggle', () => {
-      if (el('Details').open) void refresh();
+    function setExpanded(expanded) {
+      disclosureGeneration += 1;
+      if (expanded) void refresh();
       else closeDecision();
-    });
+    }
     el('Retry').addEventListener('click', refresh);
     el('DialogRetry').addEventListener('click', () => {
       const kind = decision?.kind;
@@ -245,13 +250,13 @@
         request = null;
         status = null;
         if (decision) { closeDecision(); message = 'hub_changed'; }
-        if (el('Details').open) void refresh();
+        if (!el('Details').classList.contains('hidden')) void refresh();
       }
       render();
     }
     syncSettings();
     return {
-      refresh, syncSettings, status: () => status, base: () => snapshotBase(status),
+      refresh, syncSettings, setExpanded, status: () => status, base: () => snapshotBase(status),
       decoratePatch: (patch, base) => decorateSettingsPatch(patch, status, base),
       reportSettingsError: error => { if (isConflictError(error)) { message = 'conflict'; render(); } },
       dispose: () => { generation += 1; unsubscribe?.(); closeDecision(); }

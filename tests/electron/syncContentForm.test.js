@@ -385,3 +385,31 @@ test('grouping and pricing removal conflicts are visible next to their controls 
     assert.equal(document.getElementById(id).classList.contains('hidden'), true);
   }
 });
+
+
+test('shared disclosure refreshes on opening and cancels unconfirmed consent on closing', async () => {
+  const f = fixture();
+  f.form.setExpanded(true);
+  await f.form.refresh();
+  assert.deepEqual(f.calls.refresh, [true]);
+  await f.get('sessionTitles').change(true);
+  assert.equal(f.get('Dialog').open, true);
+  f.form.setExpanded(false);
+  assert.equal(f.get('Dialog').open, false);
+  assert.equal(f.get('sessionTitles').checked, false);
+  assert.deepEqual(f.calls.configure, []);
+});
+
+test('closing while settings preview is pending prevents a late confirmation dialog', async () => {
+  const f = fixture();
+  await f.form.refresh();
+  let resolve;
+  f.bridge.previewSyncContent = () => new Promise(done => { resolve = done; });
+  const changing = f.get('modelAliases').change(true);
+  while (!resolve) await new Promise(done => setImmediate(done));
+  f.form.setExpanded(false);
+  resolve({ ok: true, identity: 'hub-one', kind: 'modelAliases', revision: 2, equal: false, hasServerValue: true });
+  await changing;
+  assert.equal(f.get('Dialog').open, false);
+  assert.deepEqual(f.calls.configure, []);
+});

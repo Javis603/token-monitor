@@ -1714,12 +1714,7 @@ span.settings-note.settings-item-desc {
 .hub-address-iface { color: var(--muted); font-size: 9.5px; flex: 0 0 auto; }
 .hub-address-row .icon-button { width: 26px; height: 26px; flex: 0 0 auto; font-size: 12px; }
 .settings-note.hub-warning { color: var(--orange); }
-.sync-content-details { min-width: 0; border-top: 1px solid var(--line); padding-top: 8px; }
-.sync-content-details > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; color: var(--text); font-size: 11px; cursor: pointer; list-style: none; }
-.sync-content-details > summary::-webkit-details-marker { display: none; }
-.sync-content-details[open] > summary .settings-section-disclosure { transform: rotate(180deg); }
-.sync-content-details > summary:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
-.sync-content-body { display: grid; gap: 10px; padding-top: 6px; }
+.sync-content-body { display: grid; min-width: 0; gap: 10px; }
 .sync-content-options { min-width: 0; }
 .settings-panel .sync-content-options .sync-content-option { flex-wrap: nowrap; align-items: center; min-height: 44px; padding: 8px 0; box-sizing: border-box; }
 .sync-content-options > .sync-content-option ~ .sync-content-option { border-top: 1px solid rgba(var(--line-rgb), 0.06); }

@@ -12338,10 +12338,11 @@ function setSettingsAccordionExpanded(group, toggle, details, expanded) {
   details.inert = !open;
   group.classList.toggle('expanded', open);
 }
-function setupSettingsAccordion(group, toggle, details) {
+function setupSettingsAccordion(group, toggle, details, onExpandedChange) {
   if (!group || !toggle || !details) return;
   toggle.addEventListener('click', () => {
     setSettingsAccordionExpanded(group, toggle, details, details.classList.contains('hidden'));
+    onExpandedChange?.(!details.classList.contains('hidden'));
   });
   setSettingsAccordionExpanded(group, toggle, details, false);
 }
@@ -17158,6 +17159,10 @@ initSettingsAnimationWrappers();
 syncContentForm = window.TokenMonitorSyncContentForm.createSyncContentForm({
   document, bridge: window.tokenMonitor, t, saveSettings, getSettings: () => state.settings
 });
+setupSettingsAccordion(
+  document.getElementById('syncContentGroup'), document.getElementById('syncContentToggle'),
+  document.getElementById('syncContentDetails'), expanded => syncContentForm.setExpanded(expanded)
+);
 setupSettingsSections();
 setupCursorAccountUI();
 setupCustomPricingUI();
