@@ -1,10 +1,11 @@
 'use strict';
 
 (function exposeSyncContentForm(root, factory) {
-  const api = factory();
+  const helpApi = typeof module === 'object' && module.exports ? require('./helpPopover') : root.TokenMonitorHelpPopover;
+  const api = factory(helpApi);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorSyncContentForm = api;
-})(typeof window !== 'undefined' ? window : null, function createSyncContentFormApi() {
+})(typeof window !== 'undefined' ? window : null, function createSyncContentFormApi(helpApi) {
   const KINDS = ['sessionTitles', 'modelAliases', 'customPricing'];
   const SETTINGS_KINDS = { modelAliases: 'modelAliases', modelAliasGrouping: 'modelAliases', customModelPricing: 'customPricing' };
 
@@ -22,7 +23,7 @@
       || /\b409\b|\bconflict\b|shared settings changed/i.test(String(error?.message || error || ''));
   }
 
-  function createSyncContentForm({ document, bridge, t, saveSettings, getSettings, positionHelp = () => {} }) {
+  function createSyncContentForm({ document, bridge, t, saveSettings, getSettings }) {
     const el = suffix => document.getElementById(`syncContent${suffix}`);
     const inputs = Object.fromEntries(KINDS.map(kind => [kind, el(kind)]));
     let status = null;
@@ -32,7 +33,6 @@
     let request = null;
     let generation = 0;
     let disclosureGeneration = 0;
-    let helpCloseTimer = null;
     let pushRevision = 0;
     let decision = null;
     let message = '';
@@ -47,21 +47,8 @@
       focus?.focus({ preventScroll: true });
     }
 
-    function closeHelp() {
-      clearTimeout(helpCloseTimer);
-      helpCloseTimer = null;
-      if (el('TitleHelpPopover').matches(':popover-open')) el('TitleHelpPopover').hidePopover();
-      el('TitleHelp').setAttribute('aria-expanded', 'false');
-    }
-
-    function openHelp() {
-      clearTimeout(helpCloseTimer);
-      helpCloseTimer = null;
-      if (el('TitleHelp').hidden) return;
-      if (!el('TitleHelpPopover').matches(':popover-open')) el('TitleHelpPopover').showPopover();
-      positionHelp(el('TitleHelp'), el('TitleHelpPopover'));
-      el('TitleHelp').setAttribute('aria-expanded', 'true');
-    }
+    const help = helpApi.createHelpPopover({ trigger: el('TitleHelp'), popover: el('TitleHelpPopover'), document });
+    const closeHelp = () => help.close();
 
     function render() {
       const mode = settings?.hubMode || 'local';
@@ -232,24 +219,6 @@
       if (expanded) void refresh();
       else { closeHelp(); closeDecision(); }
     }
-    el('TitleHelp').addEventListener('pointerenter', openHelp);
-    el('TitleHelp').addEventListener('focus', openHelp);
-    el('TitleHelp').addEventListener('click', openHelp);
-    el('TitleHelp').addEventListener('pointerleave', event => {
-      if (event.relatedTarget !== el('TitleHelpPopover') && !el('TitleHelpPopover').contains(event.relatedTarget)
-          && document.activeElement !== el('TitleHelp')) helpCloseTimer = setTimeout(closeHelp, 150);
-    });
-    el('TitleHelp').addEventListener('blur', closeHelp);
-    el('TitleHelp').addEventListener('keydown', event => {
-      if (event.key === 'Escape') { closeHelp(); event.preventDefault(); }
-    });
-    el('TitleHelpPopover').addEventListener('pointerenter', () => { clearTimeout(helpCloseTimer); helpCloseTimer = null; });
-    el('TitleHelpPopover').addEventListener('pointerleave', () => {
-      if (document.activeElement !== el('TitleHelp')) closeHelp();
-    });
-    el('TitleHelpPopover').addEventListener('toggle', event => {
-      el('TitleHelp').setAttribute('aria-expanded', String(event.newState === 'open'));
-    });
     el('Retry').addEventListener('click', refresh);
     el('DialogRetry').addEventListener('click', () => {
       const kind = decision?.kind;
@@ -300,7 +269,7 @@
       refresh, syncSettings, setExpanded, closeHelp, status: () => status, base: () => snapshotBase(status),
       decoratePatch: (patch, base) => decorateSettingsPatch(patch, status, base),
       reportSettingsError: error => { if (isConflictError(error)) { message = 'conflict'; render(); } },
-      dispose: () => { generation += 1; unsubscribe?.(); closeHelp(); closeDecision(); }
+      dispose: () => { generation += 1; unsubscribe?.(); help.dispose(); closeDecision(); }
     };
   }
   return { createSyncContentForm, snapshotBase, decorateSettingsPatch, isConflictError };

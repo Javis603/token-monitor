@@ -26,6 +26,7 @@ function dom() {
       append(...children) { this.children.push(...children); },
       replaceChildren(...children) { this.children = children; },
       get options() { return this.children; },
+      removeEventListener(event, fn) { listeners[event] = (listeners[event] || []).filter(item => item.fn !== fn); },
       addEventListener(event, fn, capture = false) { (listeners[event] ||= []).push({ fn, capture }); },
       async dispatch(event, data = {}) {
         // DOM dispatch runs listeners synchronously, including an async listener's
@@ -40,7 +41,7 @@ function dom() {
       matches(selector) { return selector === ':popover-open' && this.popoverOpen; },
       showPopover() { this.popoverOpen = true; }, hidePopover() { this.popoverOpen = false; },
       contains(other) { return this === other || this.children.includes(other); },
-      setAttribute(name, value) { this[name] = value; }, closest() { return this; }
+      setAttribute(name, value) { this[name] = value; }, closest() { return null; }
     };
   }
   return document;
@@ -456,6 +457,7 @@ test('title help responds to hover and permits crossing the gap into its popover
   await new Promise(done => setTimeout(done, 180));
   assert.equal(popover.popoverOpen, true);
   await popover.dispatch('pointerleave');
+  await new Promise(done => setTimeout(done, 180));
   assert.equal(popover.popoverOpen, false);
   f.push(status());
   assert.equal(trigger.hidden, true);
