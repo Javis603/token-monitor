@@ -37,7 +37,10 @@ function dom() {
       change(checked) { if (this.disabled) return; this.checked = checked; return this.dispatch('change'); },
       focus() { if (!this.disabled) document.activeElement = this; },
       showModal() { this.open = true; document.activeElement = this; }, close() { this.open = false; },
-      matches: () => false, setAttribute() {}, closest() { return this; }
+      matches(selector) { return selector === ':popover-open' && this.popoverOpen; },
+      showPopover() { this.popoverOpen = true; }, hidePopover() { this.popoverOpen = false; },
+      contains(other) { return this === other || this.children.includes(other); },
+      setAttribute(name, value) { this[name] = value; }, closest() { return this; }
     };
   }
   return document;
@@ -414,5 +417,28 @@ test('closing while settings preview is pending prevents a late confirmation dia
   resolve({ ok: true, identity: 'hub-one', kind: 'modelAliases', revision: 2, equal: false, hasServerValue: true });
   await changing;
   assert.equal(f.get('Dialog').open, false);
+  assert.deepEqual(f.calls.configure, []);
+});
+
+
+test('server-title help opens with focus or click and closes on Escape, collapse and permission changes', async () => {
+  const f = fixture({ initial: status({ serverTitlesEnabled: false }) });
+  await f.form.refresh();
+  const trigger = f.get('TitleHelp'), popover = f.get('TitleHelpPopover');
+  await trigger.dispatch('focus');
+  assert.equal(popover.popoverOpen, true);
+  assert.equal(trigger['aria-expanded'], 'true');
+  await trigger.dispatch('keydown', { key: 'Escape' });
+  assert.equal(popover.popoverOpen, false);
+  await trigger.click();
+  assert.equal(popover.popoverOpen, true);
+  f.form.setExpanded(false);
+  assert.equal(popover.popoverOpen, false);
+  await trigger.click();
+  f.push(status({ identity: 'hub-two', serverTitlesEnabled: false }));
+  assert.equal(popover.popoverOpen, false);
+  await trigger.click();
+  f.push(status({ identity: 'hub-two' }));
+  assert.equal(popover.popoverOpen, false);
   assert.deepEqual(f.calls.configure, []);
 });

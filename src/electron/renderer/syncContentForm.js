@@ -22,7 +22,7 @@
       || /\b409\b|\bconflict\b|shared settings changed/i.test(String(error?.message || error || ''));
   }
 
-  function createSyncContentForm({ document, bridge, t, saveSettings, getSettings }) {
+  function createSyncContentForm({ document, bridge, t, saveSettings, getSettings, positionHelp = () => {} }) {
     const el = suffix => document.getElementById(`syncContent${suffix}`);
     const inputs = Object.fromEntries(KINDS.map(kind => [kind, el(kind)]));
     let status = null;
@@ -46,6 +46,18 @@
       focus?.focus({ preventScroll: true });
     }
 
+    function closeHelp() {
+      if (el('TitleHelpPopover').matches(':popover-open')) el('TitleHelpPopover').hidePopover();
+      el('TitleHelp').setAttribute('aria-expanded', 'false');
+    }
+
+    function openHelp() {
+      if (el('TitleUnavailable').hidden) return;
+      if (!el('TitleHelpPopover').matches(':popover-open')) el('TitleHelpPopover').showPopover();
+      positionHelp(el('TitleHelp'), el('TitleHelpPopover'));
+      el('TitleHelp').setAttribute('aria-expanded', 'true');
+    }
+
     function render() {
       const mode = settings?.hubMode || 'local';
       const shared = mode === 'host' || mode === 'client';
@@ -61,6 +73,7 @@
       }
       el('TitleUnavailable').hidden = !shared || !status || status.serverTitlesEnabled || !status.supported;
       el('TitleNote').hidden = !el('TitleUnavailable').hidden;
+      if (el('TitleUnavailable').hidden) closeHelp();
       el('Cleanup').hidden = !status?.pendingTitleCleanup;
       el('CleanupRetry').disabled = busy || !available();
       const issue = message || (shared && (!status || status.error) ? (status ? errorKey(status.error) : 'checking') : '');
@@ -84,6 +97,7 @@
         closeDecision();
         message = 'hub_changed';
       }
+      if (status?.identity !== next.identity) closeHelp();
       status = next;
       render();
     }
@@ -115,6 +129,7 @@
     }
 
     function showDecision(kind, preview) {
+      closeHelp();
       decision = { kind, preview, identity: status.identity, destination: status.destination, focus: inputs[kind] };
       const titles = kind === 'sessionTitles';
       el('DialogTitle').textContent = text(titles ? 'titleWarning' : kind);
@@ -209,8 +224,25 @@
     function setExpanded(expanded) {
       disclosureGeneration += 1;
       if (expanded) void refresh();
-      else closeDecision();
+      else { closeHelp(); closeDecision(); }
     }
+    el('TitleHelp').addEventListener('pointerenter', openHelp);
+    el('TitleHelp').addEventListener('focus', openHelp);
+    el('TitleHelp').addEventListener('click', openHelp);
+    el('TitleHelp').addEventListener('pointerleave', event => {
+      if (event.relatedTarget !== el('TitleHelpPopover') && !el('TitleHelpPopover').contains(event.relatedTarget)
+          && document.activeElement !== el('TitleHelp')) closeHelp();
+    });
+    el('TitleHelp').addEventListener('blur', closeHelp);
+    el('TitleHelp').addEventListener('keydown', event => {
+      if (event.key === 'Escape') { closeHelp(); event.preventDefault(); }
+    });
+    el('TitleHelpPopover').addEventListener('pointerleave', () => {
+      if (document.activeElement !== el('TitleHelp')) closeHelp();
+    });
+    el('TitleHelpPopover').addEventListener('toggle', event => {
+      el('TitleHelp').setAttribute('aria-expanded', String(event.newState === 'open'));
+    });
     el('Retry').addEventListener('click', refresh);
     el('DialogRetry').addEventListener('click', () => {
       const kind = decision?.kind;
@@ -246,6 +278,7 @@
       settings = getSettings() || {};
       const next = JSON.stringify([settings.hubMode, settings.hubUrl, settings.secret, settings.hubHostPort, settings.hubHostSecret, settings.deviceId]);
       if (next !== connection) {
+        closeHelp();
         connection = next;
         generation += 1;
         request = null;
@@ -257,10 +290,10 @@
     }
     syncSettings();
     return {
-      refresh, syncSettings, setExpanded, status: () => status, base: () => snapshotBase(status),
+      refresh, syncSettings, setExpanded, closeHelp, status: () => status, base: () => snapshotBase(status),
       decoratePatch: (patch, base) => decorateSettingsPatch(patch, status, base),
       reportSettingsError: error => { if (isConflictError(error)) { message = 'conflict'; render(); } },
-      dispose: () => { generation += 1; unsubscribe?.(); closeDecision(); }
+      dispose: () => { generation += 1; unsubscribe?.(); closeHelp(); closeDecision(); }
     };
   }
   return { createSyncContentForm, snapshotBase, decorateSettingsPatch, isConflictError };

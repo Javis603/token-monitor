@@ -1729,7 +1729,20 @@ span.settings-note.settings-item-desc {
 .sync-content-cleanup { display: grid; gap: 6px; }
 .settings-panel .sync-content-body .checkbox-label > input[type="checkbox"] { appearance: auto; width: 14px; height: 14px; flex: 0 0 14px; margin: 0; border: initial; background: initial; accent-color: var(--accent); }
 .settings-panel .sync-content-body .checkbox-label > input[type="checkbox"]::before { content: none; }
-.sync-content-dialog { width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-sizing: border-box; overflow-y: auto; padding: 16px; color: var(--text); font-size: 11px; line-height: 1.5; -webkit-app-region: no-drag; }
+.sync-content-dialog,
+.sync-title-help-popover { width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-sizing: border-box; overflow-y: auto; padding: 16px; color: var(--text); font-size: 11px; line-height: 1.5; -webkit-app-region: no-drag; }
+.sync-title-unavailable { display: flex; align-items: center; gap: 5px; }
+.sync-title-unavailable > span { min-width: 0; }
+.settings-panel button.sync-title-help-trigger { display: inline-grid; place-items: center; flex: 0 0 16px; width: 16px; height: 16px; margin: 0; padding: 0; border: 1px solid var(--line-strong); border-radius: 50%; background: transparent; color: var(--muted); font: inherit; font-size: 10px; line-height: 1; cursor: help; }
+.settings-panel button.sync-title-help-trigger:hover { color: var(--text); }
+.settings-panel button.sync-title-help-trigger:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+.sync-title-help-popover { position: fixed; inset: auto; margin: 0; width: min(300px, calc(100vw - 16px)); padding: 12px; }
+.sync-title-help-popover > strong { font-size: 11px; }
+.sync-title-help-popover dl { margin: 10px 0; }
+.sync-title-help-popover dt { margin-top: 8px; font-weight: 600; }
+.sync-title-help-popover dd { margin: 3px 0 0; color: var(--muted); }
+.sync-title-help-popover code { display: block; margin-top: 4px; color: var(--text); font-size: 10px; overflow-wrap: anywhere; white-space: normal; user-select: text; }
+.sync-title-help-popover > p { margin: 8px 0 0; color: var(--muted); font-size: 9.5px; }
 .sync-content-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 .sync-content-dialog > strong { display: block; font-size: 12px; }
 .sync-content-dialog p { overflow-wrap: anywhere; }
@@ -3056,7 +3069,8 @@ span.settings-note.settings-item-desc {
 .select-control-popup { padding: 4px; }
 .view-switcher-menu,
 .select-control-popup,
-.sync-content-dialog {
+.sync-content-dialog,
+.sync-title-help-popover {
   border: 1px solid rgba(var(--line-rgb), 0.22);
   border-radius: 7px;
   background:
@@ -3088,7 +3102,8 @@ span.settings-note.settings-item-desc {
 @supports not (backdrop-filter: blur(1px)) {
   .view-switcher-menu,
   .select-control-popup,
-  .sync-content-dialog { background: rgb(var(--glass-rgb)); }
+  .sync-content-dialog,
+  .sync-title-help-popover { background: rgb(var(--glass-rgb)); }
 }
 /* Chromium delegates an open <select> popup to a platform-specific surface.
    Windows can give that popup a light system background while retaining our
@@ -5847,7 +5862,8 @@ html.native-liquid-glass .select-control-popup,
 html.native-liquid-glass .view-switcher-menu { padding: 5px; }
 html.native-liquid-glass .select-control-popup,
 html.native-liquid-glass .view-switcher-menu,
-html.native-liquid-glass .sync-content-dialog {
+html.native-liquid-glass .sync-content-dialog,
+html.native-liquid-glass .sync-title-help-popover {
   border-color: rgba(var(--line-rgb), 0.16);
   border-radius: 14px;
   background:

@@ -702,7 +702,7 @@ function applySettingsTranslations() {
 }
 
 function applySettingsSectionDom(id, open) {
-  if (id === 'sync' && !open) syncModeSelect?.close();
+  if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
   const details = document.getElementById(`${id}SettingsDetails`);
   const group = toggle?.closest('.settings-collapsible-group');
@@ -5047,6 +5047,7 @@ function openViewFromTray(viewId) {
   stopWindowShortcutRecording();
   resetSettingsListSearch();
   syncModeSelect?.close();
+  syncContentForm?.closeHelp();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   state.openSession = null;
@@ -11967,6 +11968,7 @@ els.settingsButton.addEventListener('click', (event) => {
     syncSettingsForm();
   } else {
     syncModeSelect?.close();
+    syncContentForm?.closeHelp();
     resetSettingsListSearch();
     stopWindowShortcutRecording();
   }
@@ -17157,12 +17159,22 @@ function initSettingsAnimationWrappers() {
 
 initSettingsAnimationWrappers();
 syncContentForm = window.TokenMonitorSyncContentForm.createSyncContentForm({
-  document, bridge: window.tokenMonitor, t, saveSettings, getSettings: () => state.settings
+  document, bridge: window.tokenMonitor, t, saveSettings, getSettings: () => state.settings,
+  positionHelp: (trigger, popover) => {
+    const width = Math.min(300, window.innerWidth - 16);
+    const position = window.TokenMonitorSelectControl.popupPosition(trigger.getBoundingClientRect(),
+      { width: window.innerWidth, height: window.innerHeight }, { width, height: popover.scrollHeight + 2, align: 'end' });
+    Object.assign(popover.style, { left: `${position.left}px`, top: `${position.top}px`, maxHeight: `${position.maxHeight}px` });
+  }
 });
 setupSettingsAccordion(
   document.getElementById('syncContentGroup'), document.getElementById('syncContentToggle'),
   document.getElementById('syncContentDetails'), expanded => syncContentForm.setExpanded(expanded)
 );
+document.addEventListener('scroll', event => {
+  if (!document.getElementById('syncContentTitleHelpPopover').contains(event.target)) syncContentForm?.closeHelp();
+}, true);
+window.addEventListener('resize', () => syncContentForm?.closeHelp());
 setupSettingsSections();
 setupCursorAccountUI();
 setupCustomPricingUI();
