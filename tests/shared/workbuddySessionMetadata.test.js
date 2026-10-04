@@ -217,3 +217,29 @@ test('reads an older transcript that groups neither id nor cache fields', () => 
   assert.deepEqual([second.tokens.input, second.tokens.output], [48294, 274]);
   assert.equal(detail.totals.turnCount, 2);
 });
+
+for (const client of ['codebuddy', 'workbuddy']) {
+  test(`${client} keeps ungrouped tools within real user prompt boundaries`, () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'buddy-tools-boundary-'));
+    tmpDirs.push(home);
+    const dir = path.join(home, `.${client}`, 'projects', 'test');
+    fs.mkdirSync(dir, { recursive: true });
+    const prompt = (text) => ({ type: 'message', role: 'user', content: [{ type: 'input_text', text }] });
+    for (const realPrompt of [true, false]) {
+      const records = [
+        prompt('A'),
+        { type: 'function_call', name: 'Read' },
+        prompt(realPrompt ? 'B' : '<system-reminder>tool context</system-reminder>'),
+        { type: 'function_call', name: 'Edit' },
+        { type: 'message', role: 'assistant', providerData: { usage: { input_tokens: 7, output_tokens: 2 } } }
+      ];
+      fs.writeFileSync(path.join(dir, 'boundary.jsonl'), records.map(JSON.stringify).join('\n'));
+      const detail = readSessionDetail({ client, sessionId: 'boundary', home, env: {} });
+      assert.equal(detail.found, true);
+      assert.deepEqual(detail.exchanges.map((exchange) => exchange.promptPreview), realPrompt ? ['B'] : ['A']);
+      assert.deepEqual(detail.exchanges.map((exchange) => exchange.tools), realPrompt ? [['Edit']] : [['Read', 'Edit']]);
+      assert.equal(detail.totals.turnCount, 1);
+      assert.equal(detail.totals.totalTokens, 9);
+    }
+  });
+}

@@ -319,6 +319,8 @@ function parseCodebuddyTranscriptLines(lines) {
     try { entry = JSON.parse(trimmed); } catch (_) { continue; }
 
     if (isUserPromptRecord(entry)) {
+      // Ungrouped calls cannot belong to a response after a new prompt.
+      pendingTools.length = 0;
       const prompt = userPromptText(entry);
       events.push({ kind: 'prompt', timestamp: codebuddyTimestamp(entry.timestamp), text: prompt });
       continue;
