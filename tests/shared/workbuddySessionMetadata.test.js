@@ -56,6 +56,7 @@ function transcript() {
         model: 'glm-5.3-flash',
         rawUsage: {
           prompt_tokens: 1000,
+          total_tokens: 1050,
           completion_tokens: 50,
           prompt_cache_hit_tokens: 400,
           completion_thinking_tokens: 10

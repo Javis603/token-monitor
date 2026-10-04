@@ -126,27 +126,13 @@ decoding; an oversized record returns `line-too-large` with no partial usage.
 This Session Detail bound is separate from the metadata scanner's 64 KiB
 record limit described above.
 
-Token extraction subtracts cached input, because `prompt_tokens` counts it:
+Token conversion mirrors `BuddyUsage::to_breakdown()` in the pinned Tokscale Tencent Buddy parser. It selects one usage object in order: `message.usage`, `providerData.usage`, then `providerData.rawUsage`. Explicit zero input, output and cache-miss fields remain authoritative; cache aliases select the first positive count. Fields from different objects are not merged. Records with an explicit status other than `completed` do not contribute usage.
 
-```
-input = max(0, prompt_tokens - cached)   output = completion_tokens
-cacheRead = cached                        reasoning = completion_thinking_tokens  (a subset of output)
-```
+`cachedMissTokens` / `cacheMissTokens` already exclude cached input. Other input fields stay unchanged unless a reported `total_tokens` / `totalTokens` equals input plus output and proves cache reads were included; only then are cache reads subtracted. Cache-read and cache-write aliases follow the pinned parser's precedence. Tencent Buddy reasoning is an additive bucket, so the total includes input, output, cache reads, cache writes and reasoning. Nested token-detail arrays are not additional sources in that parser. Live usage and history normalization also treat both Buddy clients' reasoning as additive; their public output bucket includes it, while Detail retains the separate output and reasoning fields.
 
-`cached` is not a stable field across client versions, and summing the wrong one
-inflates input by the same amount it loses from cache — one session came out as
-9.1M input / 0 cache against tokscale's 1.2M / 7.9M. `transcript.js` checks
-`rawUsage.prompt_cache_hit_tokens`, then `rawUsage.prompt_tokens_details.cached_tokens`,
-then `usage.inputTokensDetails[].cached_tokens`.
+For repeated `messageId` records, the largest token total wins, with the later record winning a tie. The turn uses that usage-bearing record's timestamp for Today/Month filtering; an earlier companion timestamp is only a fallback for a turn without timestamped usage.
 
-**Verification.** Folding every usage-bearing transcript record this way
-reproduces tokscale's own numbers exactly — per-session `input`, `output` and
-`cacheRead` matched on 314 of the 316 resolvable sessions on one machine. The
-two exceptions are a session that was still being written when the scan ran, and
-one the scan counted partly from the extension-log source, which holds no
-transcript. The response count also equals tokscale's `messageCount`, which is
-the check that the `messageId` grouping is the client's own unit and not an
-invention of this parser.
+**Verification.** `node --test tests/shared/sessionDetail.buddyAccounting.test.js tests/shared/sessionDetail.codebuddy.test.js tests/shared/workbuddySessionMetadata.test.js` covers the pinned Rust regression fixtures for both clients, usage-source precedence, explicit zero cache misses, additive reasoning/cache writes and period boundaries. Keep these fixtures aligned when changing the Tokscale pin.
 
 ## The VS Code extension's own store
 

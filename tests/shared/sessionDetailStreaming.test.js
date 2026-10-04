@@ -32,7 +32,7 @@ function turnOf(client) {
   if (client === 'codex') return codexTurn;
   if (client === 'claude') return JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 100, output_tokens: 10 } } });
   return JSON.stringify({ type: 'message', role: 'assistant', providerData: {
-    messageId: 'response', rawUsage: { prompt_tokens: 100, prompt_cache_hit_tokens: 80, completion_tokens: 10 }
+    messageId: 'response', rawUsage: { prompt_tokens: 100, prompt_cache_hit_tokens: 80, completion_tokens: 10, total_tokens: 110 }
   } });
 }
 

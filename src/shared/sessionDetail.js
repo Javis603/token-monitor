@@ -340,7 +340,7 @@ function parseCodebuddyTranscriptLines(lines) {
         events.push({
           kind: 'turn',
           timestamp: codebuddyTimestamp(entry.timestamp),
-          tokens: makeTokens(usage),
+          tokens: usage,
           tokensAvailable: true,
           tools
         });
@@ -365,11 +365,12 @@ function parseCodebuddyTranscriptLines(lines) {
     // A response whose usage never arrived keeps `tokensAvailable: false`, which
     // the shared grouping and the detail view both understand: the reply is
     // still shown, with its tools, and only its token numbers are missing.
-    if (!turn.tokensAvailable) {
-      if (usage) {
-        turn.tokens = makeTokens(usage);
-        turn.tokensAvailable = true;
-      }
+    // Tokscale keeps the largest usage for a repeated response, replacing it
+    // on a tie. Its period follows that usage record, not an earlier companion.
+    if (usage && (!turn.tokensAvailable || usage.total >= turn.tokens.total)) {
+      turn.tokens = usage;
+      turn.tokensAvailable = true;
+      turn.timestamp = codebuddyTimestamp(entry.timestamp) || turn.timestamp;
     }
   }
   return events;

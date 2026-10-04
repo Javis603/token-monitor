@@ -47,11 +47,6 @@ const NON_PROMPT_FLAGS = Object.freeze([
 // show it as one extra prompt row rather than break the timeline.
 const SYNTHETIC_PROMPT_PREFIX = /^<\/?(?:command-name|command-message|command-args|local-command-stdout|local-command-caveat|bash-input|bash-stdout|bash-stderr|system-reminder|task-notification|teammate-message|conversation_history_summary|cb_summary)\b/;
 
-function num(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
-
 function cleanTitle(value) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   const chars = Array.from(text);
@@ -121,69 +116,51 @@ function messageIdOf(entry) {
   return typeof id === 'string' && id ? id : '';
 }
 
-// Cache reads are reported three ways across client versions, and the field
-// that is present is not stable: `prompt_cache_hit_tokens` is the common one,
-// a session written by a newer build leaves it absent while filling
-// `prompt_tokens_details.cached_tokens`, and the `usage` mirror repeats the same
-// number under `inputTokensDetails`. Summing the wrong one under-reports cache
-// reads and inflates input by the same amount, which is exactly how a session
-// came out with 9.1M input / 0 cache against tokscale's 1.2M / 7.9M.
-function cachedTokens(rawUsage, usage) {
-  const hit = num(rawUsage.prompt_cache_hit_tokens);
-  if (hit) return hit;
-  let total = 0;
-  const details = rawUsage.prompt_tokens_details;
-  if (Array.isArray(details)) {
-    for (const part of details) total += num(part?.cached_tokens);
-  } else {
-    total += num(details?.cached_tokens);
-  }
-  if (total) return total;
-  for (const part of Array.isArray(usage.inputTokensDetails) ? usage.inputTokensDetails : []) {
-    total += num(part?.cached_tokens);
-  }
-  return total;
+// Mirror BuddyUsage::to_breakdown() in the pinned Tokscale Tencent Buddy
+// parser. Select one usage object; merging the raw and friendly representations
+// changes field precedence and loses explicit zero values.
+function firstOption(values) {
+  return values.find((value) => Number.isInteger(value));
 }
 
-function reasoningTokens(rawUsage, usage) {
-  const thinking = num(rawUsage.completion_thinking_tokens);
-  if (thinking) return thinking;
-  // Same instability as the cache count above: a build that leaves the friendly
-  // field empty fills `completion_tokens_details` instead, so the raw field is
-  // read before the `usage` mirror.
-  const details = num(rawUsage.completion_tokens_details?.reasoning_tokens);
-  if (details) return details;
-  let total = 0;
-  for (const part of Array.isArray(usage.outputTokensDetails) ? usage.outputTokensDetails : []) {
-    total += num(part?.reasoning_tokens);
-  }
-  return total;
+function firstPresent(values) {
+  return Math.max(0, firstOption(values) ?? 0);
 }
 
-// The token split of one model response, or null when the record states none.
-// `prompt_tokens` counts cached input, so the cached part is subtracted out and
-// reported as `cacheRead` — the same convention as Codex, and the reason its
-// parser subtracts there too. `reasoning` stays a subset of `output` rather
-// than a fourth bucket, so `input + output + cacheRead` is the whole total.
+function firstPositive(values) {
+  return Math.max(0, values.find((value) => Number.isInteger(value) && value > 0) ?? firstOption(values) ?? 0);
+}
+
 function usageTokens(entry) {
-  const providerData = entry?.providerData;
-  if (!providerData || typeof providerData !== 'object') return null;
-  const rawUsage = providerData.rawUsage && typeof providerData.rawUsage === 'object' ? providerData.rawUsage : {};
-  const usage = providerData.usage && typeof providerData.usage === 'object' ? providerData.usage : {};
-  // Older WorkBuddy builds wrote a bare snake-case `usage` with no mirror and
-  // no cache detail at all; both spellings are read rather than assuming the
-  // newer shape.
-  const prompt = num(rawUsage.prompt_tokens) || num(usage.inputTokens) || num(usage.input_tokens);
-  const output = num(rawUsage.completion_tokens) || num(usage.outputTokens) || num(usage.output_tokens);
-  if (!prompt && !output) return null;
-  const cacheRead = cachedTokens(rawUsage, usage);
-  return {
-    input: Math.max(0, prompt - cacheRead),
-    output,
-    cacheRead,
-    cacheWrite: 0,
-    reasoning: reasoningTokens(rawUsage, usage)
-  };
+  if (entry?.status != null && entry.status !== 'completed') return null;
+  const usage = [entry?.message?.usage, entry?.providerData?.usage, entry?.providerData?.rawUsage]
+    .find((value) => value && typeof value === 'object' && !Array.isArray(value));
+  if (!usage) return null;
+
+  const cacheRead = firstPositive([
+    usage.cache_read_input_tokens, usage.cacheReadInputTokens, usage.cacheTokens,
+    usage.prompt_cache_hit_tokens, usage.cached_tokens
+  ]);
+  const output = firstPresent([usage.output_tokens, usage.outputTokens, usage.completion_tokens]);
+  const cacheWrite = firstPositive([
+    usage.cache_creation_input_tokens, usage.cacheCreationInputTokens,
+    usage.cachedWriteTokens, usage.prompt_cache_write_tokens
+  ]);
+  const reasoning = firstPresent([
+    usage.completion_thinking_tokens, usage.completionThinkingTokens, usage.reasoningTokens
+  ]);
+  const miss = firstOption([usage.cachedMissTokens, usage.cacheMissTokens]);
+  let input = miss == null ? firstPresent([usage.input_tokens, usage.inputTokens, usage.prompt_tokens]) : Math.max(0, miss);
+  const reportedTotal = firstOption([usage.total_tokens, usage.totalTokens]);
+  // Cache-miss fields already exclude cache. Otherwise only an inclusive total
+  // proves cache reads are part of input; ambiguous input must stay intact.
+  if (miss == null && reportedTotal != null && cacheRead > 0 && Math.max(0, reportedTotal) === input + output) {
+    input -= cacheRead;
+  }
+  // Tencent Buddy reasoning is additive in Tokscale, unlike the informational
+  // reasoning field of the generic Session Detail token helper.
+  const total = input + output + cacheRead + cacheWrite + reasoning;
+  return total > 0 ? { input, output, cacheRead, cacheWrite, reasoning, total } : null;
 }
 
 module.exports = {

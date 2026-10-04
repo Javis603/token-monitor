@@ -19,27 +19,23 @@ function tmpDir(prefix) {
   return dir;
 }
 
-// The client writes the same numbers twice, under `usage` and `rawUsage`, and
-// the cached part is reported differently by version — either as
-// `prompt_cache_hit_tokens` or only inside the token-details arrays.
-function usageOf({ prompt, completion, hit = 0, thinking = 0, hitViaDetails = false }) {
-  const rawUsage = {
-    prompt_tokens: prompt,
-    completion_tokens: completion,
-    total_tokens: prompt + completion,
-    completion_tokens_details: { reasoning_tokens: thinking }
-  };
-  if (hitViaDetails) rawUsage.prompt_tokens_details = { cached_tokens: hit };
-  else rawUsage.prompt_cache_hit_tokens = hit;
+// Both representations carry the pinned parser's direct token fields. The
+// friendly usage object takes precedence over rawUsage when both are present.
+function usageOf({ prompt, completion, hit = 0, thinking = 0 }) {
   return {
-    rawUsage,
+    rawUsage: {
+      prompt_tokens: prompt,
+      completion_tokens: completion,
+      total_tokens: prompt + completion,
+      prompt_cache_hit_tokens: hit,
+      completion_thinking_tokens: thinking
+    },
     usage: {
-      requests: 1,
       inputTokens: prompt,
       outputTokens: completion,
       totalTokens: prompt + completion,
-      inputTokensDetails: [{ cached_tokens: hit }],
-      outputTokensDetails: [{ reasoning_tokens: thinking }]
+      cacheTokens: hit,
+      reasoningTokens: thinking
     }
   };
 }
@@ -94,10 +90,9 @@ test('emits one turn per response and keeps the response\u2019s tools', () => {
   assert.equal(first.timestamp, new Date(1788851509000).toISOString());
 });
 
-test('subtracts cached input and keeps reasoning inside output', () => {
-  // `prompt_tokens` counts cached input, so the cache is subtracted out —
-  // otherwise the cache is counted twice, which is the bug the Codex parser
-  // documents. `reasoning` is a subset of `output` and must not be added again.
+test('subtracts proven inclusive cache input and adds Tencent Buddy reasoning', () => {
+  // The reported total proves the input includes cache reads. Tokscale counts
+  // Tencent Buddy reasoning separately from output.
   const events = parseCodebuddyTranscript([
     user('hi'),
     call('m1', 'Bash', usageOf({ prompt: 30530, completion: 371, hit: 1408, thinking: 154 }))
@@ -110,72 +105,24 @@ test('subtracts cached input and keeps reasoning inside output', () => {
     cacheRead: 1408,
     cacheWrite: 0,
     reasoning: 154,
-    total: 30901
+    total: 31055
   });
 });
 
-test('reads the cached count from whichever field the client filled', () => {
-  // A newer build leaves `prompt_cache_hit_tokens` empty while filling the
-  // token details. Reading only the first field reported a session as 9.1M
-  // input / 0 cache where tokscale had 1.2M / 7.9M.
-  const viaDetails = parseCodebuddyTranscript([
-    user('hi'),
-    call('m1', 'Read', usageOf({ prompt: 1000, completion: 10, hit: 700, hitViaDetails: true }))
-  ].join('\n'));
-  assert.equal(viaDetails[1].tokens.cacheRead, 700);
-  assert.equal(viaDetails[1].tokens.input, 300);
-
-  // ...and when only the mirror carries it.
-  const onlyMirror = JSON.stringify({
-    type: 'function_call',
-    timestamp: 1788851509000,
-    name: 'Read',
-    providerData: {
-      messageId: 'm2',
-      rawUsage: { prompt_tokens: 1000, completion_tokens: 10 },
-      usage: { inputTokens: 1000, outputTokens: 10, inputTokensDetails: [{ cached_tokens: 250 }] }
-    }
-  });
-  const events = parseCodebuddyTranscript([user('hi'), onlyMirror].join('\n'));
-  assert.equal(events[1].tokens.cacheRead, 250);
-  assert.equal(events[1].tokens.input, 750);
-});
-
-test('reads reasoning from whichever field the client filled', () => {
-  // `completion_thinking_tokens` is what the client usually writes, but a build
-  // that leaves it empty fills `completion_tokens_details` instead — the same
-  // instability the cached count has, and here the raw field is the only source
-  // when the `usage` mirror is missing too.
+test('does not infer cache or reasoning from fields the pinned parser ignores', () => {
   const viaDetails = JSON.stringify({
     type: 'function_call',
-    timestamp: 1788851509000,
-    name: 'Read',
     providerData: {
       messageId: 'm1',
       rawUsage: {
-        prompt_tokens: 100,
-        completion_tokens: 50,
+        prompt_tokens: 100, completion_tokens: 50,
+        prompt_tokens_details: { cached_tokens: 40 },
         completion_tokens_details: { reasoning_tokens: 30 }
       }
     }
   });
-  const fromDetails = parseCodebuddyTranscript([user('hi'), viaDetails].join('\n'));
-  assert.equal(fromDetails[1].tokens.reasoning, 30);
-  // ...and reasoning stays a subset of output rather than a fourth bucket.
-  assert.equal(fromDetails[1].tokens.total, 150);
-
-  const viaMirror = JSON.stringify({
-    type: 'function_call',
-    timestamp: 1788851509000,
-    name: 'Read',
-    providerData: {
-      messageId: 'm2',
-      rawUsage: { prompt_tokens: 10, completion_tokens: 5 },
-      usage: { inputTokens: 10, outputTokens: 5, outputTokensDetails: [{ reasoning_tokens: 4 }] }
-    }
-  });
-  const fromMirror = parseCodebuddyTranscript([user('hi'), viaMirror].join('\n'));
-  assert.equal(fromMirror[1].tokens.reasoning, 4);
+  const [turn] = parseCodebuddyTranscript(viaDetails);
+  assert.deepEqual(turn.tokens, { input: 100, output: 50, cacheRead: 0, cacheWrite: 0, reasoning: 0, total: 150 });
 });
 
 test('keeps a reply whose usage never arrived instead of dropping it', () => {

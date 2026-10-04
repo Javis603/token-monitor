@@ -1,0 +1,160 @@
+{
+  "source": "Javis603/tokscale@8f99629a28f381b357f77bdb1b18dccfcf9d4934 crates/tokscale-core/src/sessions/tencent_buddy.rs",
+  "cases": [
+    {
+      "name": "parse_jsonl_file_reads_assistant_usage",
+      "entry": {
+        "id": "assistant-1",
+        "timestamp": 1780000000100,
+        "type": "message",
+        "role": "assistant",
+        "status": "completed",
+        "sessionId": "session-1",
+        "cwd": "/Users/alice/repo",
+        "providerData": {
+          "model": "glm-5.2",
+          "messageId": "msg-1"
+        },
+        "message": {
+          "usage": {
+            "input_tokens": 24486,
+            "output_tokens": 3,
+            "total_tokens": 24489,
+            "cache_read_input_tokens": 14720
+          }
+        }
+      },
+      "tokens": {
+        "input": 9766,
+        "output": 3,
+        "cacheRead": 14720,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "total": 24489
+      }
+    },
+    {
+      "name": "parse_jsonl_file_keeps_ambiguous_raw_usage_input_unchanged",
+      "entry": {
+        "id": "call-1",
+        "timestamp": 1780000000100,
+        "type": "function_call",
+        "sessionId": "session-2",
+        "providerData": {
+          "requestModelId": "glm-5.2",
+          "messageId": "msg-2",
+          "rawUsage": {
+            "prompt_tokens": 3,
+            "completion_tokens": 2,
+            "prompt_cache_hit_tokens": 4,
+            "prompt_cache_write_tokens": 4,
+            "completion_thinking_tokens": 5
+          }
+        }
+      },
+      "tokens": {
+        "input": 3,
+        "output": 2,
+        "cacheRead": 4,
+        "cacheWrite": 4,
+        "reasoning": 5,
+        "total": 18
+      }
+    },
+    {
+      "name": "parse_jsonl_file_does_not_double_count_inclusive_cache_input",
+      "entry": {
+        "id": "assistant-1",
+        "timestamp": 1780000000100,
+        "type": "message",
+        "role": "assistant",
+        "status": "completed",
+        "sessionId": "session-cache",
+        "cwd": "/Users/alice/repo",
+        "providerData": {
+          "model": "glm-5.2",
+          "messageId": "msg-1"
+        },
+        "message": {
+          "usage": {
+            "input_tokens": 113415,
+            "output_tokens": 990,
+            "total_tokens": 114405,
+            "cache_read_input_tokens": 112224
+          }
+        }
+      },
+      "tokens": {
+        "input": 1191,
+        "output": 990,
+        "cacheRead": 112224,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "total": 114405
+      }
+    },
+    {
+      "name": "parse_jsonl_file_keeps_ambiguous_codebuddy_input_unchanged",
+      "entry": {
+        "id": "assistant-1",
+        "timestamp": 1780000000100,
+        "type": "message",
+        "role": "assistant",
+        "status": "completed",
+        "sessionId": "session-ambiguous",
+        "cwd": "/Users/alice/repo",
+        "providerData": {
+          "model": "glm-5.2",
+          "messageId": "msg-1"
+        },
+        "message": {
+          "usage": {
+            "inputTokens": 7,
+            "outputTokens": 2,
+            "cacheTokens": 10
+          }
+        }
+      },
+      "tokens": {
+        "input": 7,
+        "output": 2,
+        "cacheRead": 10,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "total": 19
+      }
+    },
+    {
+      "name": "parse_jsonl_file_keeps_zero_cached_miss_tokens_exclusive",
+      "entry": {
+        "id": "assistant-1",
+        "timestamp": 1780000000100,
+        "type": "message",
+        "role": "assistant",
+        "status": "completed",
+        "sessionId": "session-zero-cache-miss",
+        "cwd": "/Users/alice/repo",
+        "providerData": {
+          "model": "glm-5.2",
+          "messageId": "msg-1"
+        },
+        "message": {
+          "usage": {
+            "inputTokens": 100,
+            "outputTokens": 5,
+            "cacheTokens": 100,
+            "cachedMissTokens": 0
+          }
+        }
+      },
+      "tokens": {
+        "input": 0,
+        "output": 5,
+        "cacheRead": 100,
+        "cacheWrite": 0,
+        "reasoning": 0,
+        "total": 105
+      }
+    }
+  ]
+}
