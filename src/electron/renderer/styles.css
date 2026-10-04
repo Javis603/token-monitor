@@ -1738,13 +1738,14 @@ button.settings-help-trigger::before { content: ''; position: absolute; width: 1
 button.settings-help-trigger:hover { background: transparent; color: var(--text); }
 button.settings-help-trigger:hover::before { opacity: 1; }
 button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.settings-help-popover { position: fixed; inset: auto; margin: 0; width: min(280px, calc(100vw - 16px)); padding: 10px; font-size: 10px; }
-.settings-help-popover > strong { font-size: 10px; }
-.settings-help-popover dl { margin: 8px 0; }
-.settings-help-popover dt { margin-top: 6px; font-weight: 600; }
-.settings-help-popover dd { margin: 2px 0 0; color: var(--muted); }
-.settings-help-popover code { display: block; margin-top: 3px; color: var(--text); font-size: 9.5px; overflow-wrap: anywhere; white-space: normal; user-select: text; }
-.settings-help-popover > p { margin: 6px 0 0; color: var(--muted); font-size: 9.5px; }
+.settings-help-popover { position: fixed; inset: auto; margin: 0; width: min(280px, calc(100vw - 16px)); padding: 12px; font-size: 10px; line-height: 1.6; }
+.settings-help-popover > strong { display: block; font-size: 12px; font-weight: 600; line-height: 1.4; }
+.settings-help-popover dl { margin: 12px 0 0; }
+.settings-help-popover dt { margin-top: 14px; font-size: 10.5px; font-weight: 600; line-height: 1.4; }
+.settings-help-popover dt:first-child { margin-top: 0; }
+.settings-help-popover dd { margin: 5px 0 0; color: var(--muted); }
+.settings-help-popover code { display: block; margin-top: 7px; padding: 6px 8px; border: 1px solid rgba(var(--line-rgb), 0.12); border-radius: 4px; background: rgba(var(--overlay-rgb), 0.04); color: var(--text); font-size: 9.5px; line-height: 1.5; overflow-wrap: anywhere; white-space: normal; user-select: text; }
+.settings-help-popover > p { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid rgba(var(--line-rgb), 0.14); color: var(--muted); font-size: 9.5px; line-height: 1.6; }
 .sync-content-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 .sync-content-dialog > strong { display: block; font-size: 12px; }
 .sync-content-dialog p { overflow-wrap: anywhere; }
