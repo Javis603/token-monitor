@@ -17161,7 +17161,7 @@ initSettingsAnimationWrappers();
 syncContentForm = window.TokenMonitorSyncContentForm.createSyncContentForm({
   document, bridge: window.tokenMonitor, t, saveSettings, getSettings: () => state.settings,
   positionHelp: (trigger, popover) => {
-    const width = Math.min(300, window.innerWidth - 16);
+    const width = Math.min(280, window.innerWidth - 16);
     const position = window.TokenMonitorSelectControl.popupPosition(trigger.getBoundingClientRect(),
       { width: window.innerWidth, height: window.innerHeight }, { width, height: popover.scrollHeight + 2, align: 'end' });
     Object.assign(popover.style, { left: `${position.left}px`, top: `${position.top}px`, maxHeight: `${position.maxHeight}px` });

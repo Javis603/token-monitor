@@ -442,3 +442,22 @@ test('server-title help opens with focus or click and closes on Escape, collapse
   assert.equal(popover.popoverOpen, false);
   assert.deepEqual(f.calls.configure, []);
 });
+
+
+test('title help responds to hover and permits crossing the gap into its popover', async () => {
+  const f = fixture({ initial: status({ serverTitlesEnabled: false }) });
+  await f.form.refresh();
+  const trigger = f.get('TitleHelp'), popover = f.get('TitleHelpPopover');
+  assert.equal(trigger.hidden, false);
+  await trigger.dispatch('pointerenter');
+  assert.equal(popover.popoverOpen, true);
+  await trigger.dispatch('pointerleave', { relatedTarget: null });
+  await popover.dispatch('pointerenter');
+  await new Promise(done => setTimeout(done, 180));
+  assert.equal(popover.popoverOpen, true);
+  await popover.dispatch('pointerleave');
+  assert.equal(popover.popoverOpen, false);
+  f.push(status());
+  assert.equal(trigger.hidden, true);
+  assert.deepEqual(f.calls.configure, []);
+});

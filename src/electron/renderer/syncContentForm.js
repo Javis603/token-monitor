@@ -32,6 +32,7 @@
     let request = null;
     let generation = 0;
     let disclosureGeneration = 0;
+    let helpCloseTimer = null;
     let pushRevision = 0;
     let decision = null;
     let message = '';
@@ -47,12 +48,16 @@
     }
 
     function closeHelp() {
+      clearTimeout(helpCloseTimer);
+      helpCloseTimer = null;
       if (el('TitleHelpPopover').matches(':popover-open')) el('TitleHelpPopover').hidePopover();
       el('TitleHelp').setAttribute('aria-expanded', 'false');
     }
 
     function openHelp() {
-      if (el('TitleUnavailable').hidden) return;
+      clearTimeout(helpCloseTimer);
+      helpCloseTimer = null;
+      if (el('TitleHelp').hidden) return;
       if (!el('TitleHelpPopover').matches(':popover-open')) el('TitleHelpPopover').showPopover();
       positionHelp(el('TitleHelp'), el('TitleHelpPopover'));
       el('TitleHelp').setAttribute('aria-expanded', 'true');
@@ -73,6 +78,7 @@
       }
       el('TitleUnavailable').hidden = !shared || !status || status.serverTitlesEnabled || !status.supported;
       el('TitleNote').hidden = !el('TitleUnavailable').hidden;
+      el('TitleHelp').hidden = el('TitleUnavailable').hidden;
       if (el('TitleUnavailable').hidden) closeHelp();
       el('Cleanup').hidden = !status?.pendingTitleCleanup;
       el('CleanupRetry').disabled = busy || !available();
@@ -231,12 +237,13 @@
     el('TitleHelp').addEventListener('click', openHelp);
     el('TitleHelp').addEventListener('pointerleave', event => {
       if (event.relatedTarget !== el('TitleHelpPopover') && !el('TitleHelpPopover').contains(event.relatedTarget)
-          && document.activeElement !== el('TitleHelp')) closeHelp();
+          && document.activeElement !== el('TitleHelp')) helpCloseTimer = setTimeout(closeHelp, 150);
     });
     el('TitleHelp').addEventListener('blur', closeHelp);
     el('TitleHelp').addEventListener('keydown', event => {
       if (event.key === 'Escape') { closeHelp(); event.preventDefault(); }
     });
+    el('TitleHelpPopover').addEventListener('pointerenter', () => { clearTimeout(helpCloseTimer); helpCloseTimer = null; });
     el('TitleHelpPopover').addEventListener('pointerleave', () => {
       if (document.activeElement !== el('TitleHelp')) closeHelp();
     });
