@@ -85,7 +85,7 @@ const supportedToolOrder = [
   'Unsloth Studio',
   'Devin CLI / Devin Desktop',
   'fx',
-  'MiniMax Code',
+  'MiniMax / MiniMax Code',
   'TypeSafe',
   'OpenRouter',
   'Volcengine',

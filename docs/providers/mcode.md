@@ -9,7 +9,7 @@ read_when:
 
 # MiniMax Code
 
-`mcode` is the product's own CLI name and upstream tokscale's client id, so it is the tracked id too. It shares a README row and the MiniMax icon with the `minimax` AI Tool Limits provider, which reads the Token Plan balance, but no code; `normalizeClientName()` maps only the product spellings to `mcode` and leaves the bare vendor name alone.
+`mcode` is the product's own CLI name and upstream tokscale's client id, so it is the tracked id too. It shares a README row with the `minimax` AI Tool Limits provider, which reads the Token Plan balance, and `LIMIT_PROVIDER_BY_CLIENT` maps it there, so a detected MiniMax Code seeds that provider on a first run and its usage is attributed to it. The ids stay separate; `normalizeClientName()` maps only the product spellings to `mcode` and leaves the bare vendor name alone.
 
 ## Sources
 

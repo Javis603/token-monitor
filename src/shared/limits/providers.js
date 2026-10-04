@@ -75,7 +75,8 @@
     droid: 'factory',
     zcode: 'zai',
     qodercn: 'qoder',
-    dsh: 'deepseek'
+    dsh: 'deepseek',
+    mcode: 'minimax'
   });
 
   const LIMIT_PROVIDER_ID_SET = new Set(LIMIT_PROVIDER_IDS);
