@@ -745,9 +745,10 @@ function setupDashboard() {
   function showHeatTip(d, ev) {
     var dt = new Date(Date.now() - (DAYS - 1 - d) * 86400000);
     var tokens = daily[d] * scale;
+    var messages = translations[document.documentElement.lang] || translations.en;
     var html = '<div class="tt-head">' + dt.toLocaleDateString(dateLocale(), { month: "short", day: "numeric", year: "numeric" }) + "</div>"
       + '<div class="tt-row"><span class="tt-name">Tokens</span><span class="tt-val">' + fmtCompact(tokens) + "</span></div>";
-    if (tokens > 0) html += '<div class="tt-row"><span class="tt-name">Cost</span><span class="tt-val">' + fmtCost(tokens * COST_RATE) + "</span></div>";
+    if (tokens > 0) html += '<div class="tt-row"><span class="tt-name">' + (messages["dash.heatmap.cost"] || "Cost") + '</span><span class="tt-val">' + fmtCost(tokens * COST_RATE) + "</span></div>";
     tip.innerHTML = html;
     positionTip(ev);
   }
