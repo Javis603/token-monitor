@@ -3,14 +3,12 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { resolveSqlite, openDb } = require('../../sqliteReadOnly');
 const { findSessionFiles, codexSessionFile } = require('../../sessionFiles');
 const t3SessionMetadata = require('../../t3SessionMetadata');
 const { expandHomePath, t3HomeDir, discoverT3DbPaths } = t3SessionMetadata;
 const { shouldReadSessionContext } = require('../../sessionContext');
 const { readCodexSessionState, readCodexSessionContext, readCodexTurnEnded } = require('./sessionContext');
-
-let sqlite = null;
-try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
 
 const TITLE_MAX_CODE_POINTS = 96;
 const QUERY_CHUNK_SIZE = 400;
@@ -72,17 +70,6 @@ function discoverDbPaths(options = {}) {
     ...versionedDbFiles(root, options),
     ...versionedDbFiles(path.join(root, 'sqlite'), options)
   ])];
-}
-
-function resolveSqlite(deps) {
-  return deps.sqlite !== undefined ? deps.sqlite : sqlite;
-}
-
-function openDb(dbPath, sqliteMod) {
-  const db = new sqliteMod.DatabaseSync(dbPath, { readOnly: true });
-  db.exec('PRAGMA busy_timeout = 250');
-  db.exec('PRAGMA query_only = ON');
-  return db;
 }
 
 function isBackgroundReview(row) {

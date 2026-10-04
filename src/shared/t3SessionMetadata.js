@@ -3,9 +3,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-
-let sqlite = null;
-try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
+const { resolveSqlite, openDb } = require('./sqliteReadOnly');
 
 const QUERY_CHUNK_SIZE = 400;
 const T3_DEFAULT_TITLES = new Set(['new thread', 'start a new conversation']);
@@ -74,17 +72,6 @@ function discoverT3DbPaths(options = {}) {
   return [...new Set(stateDirs.flatMap((dir) => [
     path.join(dir, 'statev2.sqlite'), path.join(dir, 'state.sqlite')
   ]))];
-}
-
-function resolveSqlite(deps) {
-  return deps.sqlite !== undefined ? deps.sqlite : sqlite;
-}
-
-function openDb(dbPath, sqliteMod) {
-  const db = new sqliteMod.DatabaseSync(dbPath, { readOnly: true });
-  db.exec('PRAGMA busy_timeout = 250');
-  db.exec('PRAGMA query_only = ON');
-  return db;
 }
 
 // Provider native ids survive switches. T3 app thread ids and shared provider
