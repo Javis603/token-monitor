@@ -344,12 +344,12 @@ function applySessionMetadata(periods, home, deps = {}) {
   for (const period of Object.values(periods || {})) {
     for (const [key, session] of Object.entries(period?.sessions || {})) {
       const meta = metadata.get(key);
-      if (!meta) continue;
       // Restore only the catalog title we replaced, leaving newer native labels.
-      if (meta.invalidatedTitle && session.title === meta.invalidatedTitle) {
+      if (meta?.invalidatedTitle && session.title === meta.invalidatedTitle) {
         if (meta.titleFallback) session.title = meta.titleFallback;
         else delete session.title;
-      }
+      } else if (deps.invalidatedTitleKeys?.has(key) && session.title === deps.t3Titles?.[key]) delete session.title;
+      if (!meta) continue;
       if (meta.t3Title && !Object.prototype.hasOwnProperty.call(meta, 'titleFallback')) {
         meta.titleFallback = session.title;
       }

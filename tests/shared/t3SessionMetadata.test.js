@@ -9,6 +9,7 @@ const { readT3SessionMeta } = require('../../src/shared/t3SessionMetadata');
 const claude = require('../../src/shared/providers/claude/sessionMetadata');
 const { applySessionMetadata } = require('../../src/shared/sessionMetadata');
 const { sessionActivityState } = require('../../src/shared/sessionLive');
+const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
 let sqlite;
 try { sqlite = require('node:sqlite'); } catch (_) { sqlite = null; }
 const maybe = sqlite ? test : test.skip;
@@ -281,5 +282,101 @@ for (const unusable of [
       ...deps, claudeMetadataDeps: { ...deps.claudeMetadataDeps, sqlite: null }
     });
     for (const session of Object.values(sessions)) assert.equal(session.title, 'Old T3 title');
+  });
+
+  maybe(`anchored Claude collection propagates an authoritative V2 ${unusable.label}`, async (t) => {
+    const { home, db, v2, legacy } = store(t);
+    const ids = ['untitled-transcript', 'named-transcript', 'missing-transcript', 'native-only'];
+    const projects = path.join(home, '.claude', 'projects', 'test-project');
+    fs.mkdirSync(projects, { recursive: true });
+    for (const id of ids) {
+      v2(`app-${id}`, id, id === 'native-only' ? 'New thread' : 'Old T3 title');
+      legacy(`legacy-${id}`, id, 'Stale legacy title');
+      if (id === 'missing-transcript' || id === 'native-only') continue;
+      const records = [{ type: 'assistant', timestamp: new Date().toISOString(), message: { stop_reason: 'end_turn' } }];
+      if (id === 'named-transcript') records.push({ type: 'custom-title', customTitle: 'Native title' });
+      fs.writeFileSync(path.join(projects, `${id}.jsonl`), records.map((record) => JSON.stringify(record)).join('\n') + '\n');
+    }
+    let scans = 0;
+    let captured;
+    let nativeScanTitle = true;
+    const options = {
+      clients: 'claude', homeDir: home, projectsEnabled: false, historyEnabled: false,
+      wslScanEnabled: false, osInfo: {},
+      sessionMetadataDeps: { scopedHome: true, claudeMetadataDeps: { sqlite, cache: new Map() } },
+      runTokscale: async ({ flags }) => {
+        scans++;
+        const input = flags.includes('--month') ? 100 : flags.includes('--since') ? 1000 : 10;
+        return { entries: ids.map((sessionId) => ({
+          client: 'claude', sessionId, model: 'claude-opus', input, output: 0, cost: 0,
+          ...(sessionId === 'native-only' && nativeScanTitle ? { sessionTitle: 'Native scan label' } : {})
+        })) };
+      },
+      onAnchorComputed: (value) => { captured = value; }
+    };
+    const initial = await collectUsageOnce(options);
+    assert.equal(scans, 3);
+    for (const period of ['today', 'month', 'allTime']) {
+      for (const id of ids) assert.equal(initial[period].sessions[`claude:${id}`].title,
+        id === 'native-only' ? 'Native scan label' : 'Old T3 title');
+    }
+    const anchor = JSON.parse(JSON.stringify({
+      dateKey: localTodayKey(), today: initial.today, month: initial.month, allTime: initial.allTime,
+      todayPartitions: captured.todayPartitions, t3Titles: captured.t3Titles
+    }));
+    const watchOptions = { ...options, todayOnlyAnchor: anchor, targetClients: ['claude'] };
+    nativeScanTitle = false;
+
+    // A reader failure is a miss: broader periods retain their known title.
+    const transient = await collectUsageOnce({
+      ...watchOptions,
+      sessionMetadataDeps: { scopedHome: true, claudeMetadataDeps: { sqlite: null, cache: new Map() } }
+    });
+    for (const period of ['month', 'allTime']) {
+      for (const id of ids) assert.equal(transient[period].sessions[`claude:${id}`].title,
+        id === 'named-transcript' ? 'Native title' : id === 'native-only' ? 'Native scan label' : 'Old T3 title');
+    }
+
+    db.prepare('UPDATE orchestration_v2_projection_threads SET title = ?, deleted_at = ?').run(unusable.title, unusable.deleted);
+    const before = scans;
+    const invalidated = await collectUsageOnce(watchOptions);
+    assert.equal(scans - before, 1, 'watch collection still scans only today');
+    const periods = [invalidated.today, invalidated.month, invalidated.allTime, captured.todayPartitions.claude];
+    for (const period of periods) {
+      assert.equal(period.sessions['claude:untitled-transcript'].title || '', '');
+      assert.equal(period.sessions['claude:missing-transcript'].title || '', '');
+      assert.equal(period.sessions['claude:named-transcript'].title, 'Native title');
+      assert.equal(period.sessions['claude:untitled-transcript'].turnEnded, true);
+      for (const session of Object.values(period.sessions)) {
+        assert.equal(Object.hasOwn(session, 'invalidatedTitleKeys'), false);
+        assert.equal(Object.hasOwn(session, 't3Title'), false);
+      }
+    }
+    for (const period of ['month', 'allTime']) assert.equal(invalidated[period].sessions['claude:native-only'].title, 'Native scan label');
+    assert.equal(invalidated.today.totalTokens, initial.today.totalTokens);
+    assert.equal(invalidated.month.totalTokens, initial.month.totalTokens);
+    assert.equal(invalidated.allTime.totalTokens, initial.allTime.totalTokens);
+    assert.equal(initial.month.sessions['claude:untitled-transcript'].title, 'Old T3 title', 'the full-scan anchor remains immutable');
+    assert.equal(Object.hasOwn(invalidated, 't3Titles'), false);
+
+    db.prepare('UPDATE orchestration_v2_projection_threads SET title = ?, deleted_at = NULL').run('Revived T3 title');
+    const revived = await collectUsageOnce(watchOptions);
+    for (const period of ['today', 'month', 'allTime']) {
+      for (const id of ids) assert.equal(revived[period].sessions[`claude:${id}`].title, 'Revived T3 title');
+    }
+    // A partition can carry a more recent T3 rename than the frozen full scan.
+    anchor.todayPartitions = captured.todayPartitions;
+    anchor.todayT3Titles = captured.t3Titles;
+    db.prepare('UPDATE orchestration_v2_projection_threads SET title = ?, deleted_at = ?').run(unusable.title, unusable.deleted);
+    const untargeted = await collectUsageOnce({
+      ...watchOptions, clients: 'claude,codex', targetClients: ['codex'],
+      todayOnlyAnchor: { ...anchor, todayPartitions: { ...anchor.todayPartitions, codex: { sessions: {} } } },
+      runTokscale: async () => ({ entries: [] })
+    });
+    for (const period of ['today', 'month', 'allTime']) {
+      assert.equal(untargeted[period].sessions['claude:untitled-transcript'].title || '', '');
+      assert.equal(untargeted[period].sessions['claude:missing-transcript'].title || '', '');
+      assert.equal(untargeted[period].sessions['claude:named-transcript'].title, 'Native title');
+    }
   });
 }

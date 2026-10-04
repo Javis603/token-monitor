@@ -43,6 +43,8 @@ A resolver can mark catalog metadata `titleOnly: true` when no transcript was re
 
 The local metadata cache records T3 overrides in `t3Title` and keeps the native or pre-override label in `titleFallback`. Provenance is independent of the `titleOnly` activity marker. An authoritative V2 tombstone, empty title or placeholder removes the cached override and names it in `invalidatedTitle`; the applier restores the fallback only on rows still showing that exact title. Newer native labels are left alone. These fields are not copied into session records, and a generic reader failure never invalidates a title.
 
+Watch propagation carries confirmed invalidations in a per-collection `invalidatedTitleKeys` set. Local anchors keep T3 title provenance separately for the frozen full-scan periods and rolling today partitions; a titleless fresh session clears only a matching T3 override from either source. A miss preserves anchored titles, and a fresh native title replaces them. Provenance stays in the local anchor file and never enters published session rows. Older anchors without provenance keep their titles until a full scan rebuilds it.
+
 ### Watching
 
 - There is no cooldown on top of the debounce, because the product promises 3–5 s updates. The debounce is instead capped by `watchMaxWaitMs` (5 s, floored at the debounce), because a trailing debounce never fires while agents keep writing faster than it. Time behind an in-flight tick does not count toward the cap, so a slow tick cannot chain scans back-to-back.

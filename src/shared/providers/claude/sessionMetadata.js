@@ -592,6 +592,9 @@ function resolveSessionMetadata(sessionIds, context) {
   // override confirmed unusable by V2 before reading native fallback metadata.
   for (const sessionId of invalidatedSessionIds) {
     const key = `claude:${sessionId}`;
+    // Fresh watch scans have no cached override, but their anchor may still
+    // carry it. Keep the deletion evidence local to this collection.
+    deps.invalidatedTitleKeys?.add(key);
     const cached = metadata.get(key);
     if (!cached?.t3Title) continue;
     const invalidated = { ...cached, titleOnly: true, invalidatedTitle: cached.t3Title };
