@@ -23,6 +23,27 @@ def invoke(args, check=True, timeout=30):
     return subprocess.run(args, capture_output=True, text=True, check=check, timeout=timeout)
 
 
+def restore_service(domain, plist):
+    target = f'{domain}/{LABEL}'
+    invoke(['/bin/launchctl', 'enable', target])
+    last = None
+    for attempt in range(4):
+        loaded = invoke(['/bin/launchctl', 'print', target], check=False)
+        if loaded.returncode == 0:
+            break
+        result = invoke(['/bin/launchctl', 'bootstrap', domain, str(plist)], check=False)
+        if result.returncode == 0:
+            break
+        last = result
+        time.sleep(1 + attempt)
+    else:
+        raise RuntimeError('Service bootstrap failed: ' + str(last.returncode))
+    started = invoke(['/bin/launchctl', 'kickstart', target], check=False)
+    state = invoke(['/bin/launchctl', 'print', target], check=False)
+    if started.returncode and state.returncode:
+        raise RuntimeError('Service start failed: ' + str(started.returncode))
+
+
 def running_app_pids(executable):
     result = invoke(['/bin/ps', '-axo', 'pid=,comm=']).stdout
     return [int(parts[0]) for line in result.splitlines()
@@ -108,10 +129,26 @@ def install(apply=False):
         replaced = True
         # Keep a same-account last-known snapshot for native display, not a sum.
         shutil.copy2(data / 'report.json', backup / 'pre-migration-report.json')
-        shutil.copy2(data / 'report.json', retained)
+        current_report = json.loads((data / 'report.json').read_text())
+        try:
+            previous_report = json.loads(retained.read_text())
+        except (OSError, ValueError):
+            previous_report = None
+        # An earlier rollback may have restarted the collector. Preserve valid
+        # previous values until a new per-thread event replaces them; never add.
+        if isinstance(previous_report, dict) and previous_report.get('scopeFingerprint') == current_report.get('scopeFingerprint'):
+            old_rows = {r.get('threadId'): r for r in previous_report.get('threads', []) if isinstance(r, dict) and r.get('total') is not None and r.get('status') == 'observed' and not r.get('problem')}
+            for index, row in enumerate(current_report.get('threads', [])):
+                if row.get('total') is None and row.get('status') == 'no-usage-notification' and row.get('threadId') in old_rows:
+                    current_report['threads'][index] = old_rows[row['threadId']]
+        retained.write_text(json.dumps(current_report, ensure_ascii=False, indent=2) + '\n')
         retained.chmod(0o600)
         invoke(['/bin/launchctl', 'bootout', f'{domain}/{LABEL}'], check=False)
         service_unloaded = True
+        # launchd removal and process exit can outlast bootout's return.
+        until = time.monotonic() + 10
+        while invoke(['/bin/launchctl', 'print', f'{domain}/{LABEL}'], check=False).returncode == 0 and time.monotonic() < until:
+            time.sleep(.2)
         spec['ProgramArguments'][1] = str(target / relative)
         temporary = plist.with_suffix('.new')
         with temporary.open('xb') as handle:
@@ -120,8 +157,7 @@ def install(apply=False):
         temporary.replace(plist)
         service_changed = True
         if was_running:
-            invoke(['/bin/launchctl', 'bootstrap', domain, str(plist)])
-            invoke(['/bin/launchctl', 'kickstart', f'{domain}/{LABEL}'])
+            restore_service(domain, plist)
         plan.update({'dryRun': False, 'backup': str(backup), 'serviceRestarted': was_running,
                      'runtimeScript': spec['ProgramArguments'][1],
                      'sourceCommit': invoke(['git', '-C', str(repo), 'rev-parse', 'HEAD']).stdout.strip(),
@@ -130,7 +166,11 @@ def install(apply=False):
         record.write_text(json.dumps(plan, ensure_ascii=False, indent=2) + '\n')
         record.chmod(0o600)
         return plan
-    except Exception:
+    except Exception as exc:
+        diagnostic = {'errorType': type(exc).__name__}
+        if isinstance(exc, subprocess.CalledProcessError):
+            diagnostic.update({'command': exc.cmd, 'returnCode': exc.returncode, 'stderr': (exc.stderr or '')[-2000:]})
+        (backup / 'install-failure.json').write_text(json.dumps(diagnostic, indent=2))
         if service_changed:
             invoke(['/bin/launchctl', 'bootout', f'{domain}/{LABEL}'], check=False)
             shutil.copy2(backup / plist.name, plist)
@@ -140,7 +180,7 @@ def install(apply=False):
         elif not target.exists() and (backup / 'Installed-original.app').exists():
             (backup / 'Installed-original.app').rename(target)
         if was_running and service_unloaded:
-            invoke(['/bin/launchctl', 'bootstrap', domain, str(plist)], check=False)
+            restore_service(domain, plist)
         raise
     finally:
         if staging.exists():
