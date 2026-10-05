@@ -7047,15 +7047,28 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .opencode-profile-item .profile-rename-btn {
   grid-area: rename;
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
   background: none;
   border: none;
   color: var(--muted);
   cursor: pointer;
-  font-size: 0.625rem;
-  padding: 0 3px;
+  padding: 0;
   border-radius: 3px;
   opacity: 0;
   transition: opacity 0.15s;
+}
+.opencode-profile-item .profile-rename-btn::before {
+  content: "";
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/pencil-line.svg") center / contain no-repeat;
+  mask: url("icons/actions/pencil-line.svg") center / contain no-repeat;
 }
 .opencode-profile-item:hover .profile-rename-btn {
   opacity: 0.6;

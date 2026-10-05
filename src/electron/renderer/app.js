@@ -15115,9 +15115,10 @@ function renderOpenCodeProfiles() {
       nameInput.value = name;
 
       const renameBtn = document.createElement('button');
+      renameBtn.type = 'button';
       renameBtn.className = 'profile-rename-btn';
-      renameBtn.textContent = '✎';
       renameBtn.title = t('settings.opencode.rename');
+      renameBtn.setAttribute('aria-label', renameBtn.title);
 
       let editing = false;
       function beginRename() {
@@ -15696,9 +15697,10 @@ function appendNamedApiProfileRow(listEl, config) {
     nameInput.type = 'text';
     nameInput.value = name;
     const renameBtn = document.createElement('button');
+    renameBtn.type = 'button';
     renameBtn.className = 'profile-rename-btn';
-    renameBtn.textContent = '✎';
     renameBtn.title = t('settings.profiles.rename');
+    renameBtn.setAttribute('aria-label', renameBtn.title);
     let editing = false;
     const finishRename = async (save) => {
       if (!editing) return;
