@@ -23,13 +23,10 @@ function parseProxyResolveResults(value) {
   return (entries.length ? entries : ['DIRECT']).map(parseProxyRoute);
 }
 
-// The exchange's transport in the widget. It cannot be the runtime's own fetch:
-// Chromium answers a `redirect: 'manual'` request with `net::ERR_ABORTED`, and a
-// Chromium *session* is no substitute either — its cookie policy withholds every
-// cookie on the https→http hop this chain's callback makes, so it cannot walk the
-// chain at all (measured). The walk therefore keeps its own jar in shared code and
-// takes its requests from here. Explicit proxy environment settings win; without
-// those, each hop follows the route Chromium resolves from the system/PAC proxy.
+// Chromium cancels `redirect: 'manual'` with net::ERR_ABORTED, so the shared
+// exchange keeps its own jar and uses this transport to inspect each hop.
+// Explicit proxy environment settings win; otherwise each hop follows the
+// system/PAC route Chromium resolves. The shared walker enforces HTTPS.
 function createMimoExchangeFetch({
   session,
   fetch: fetchImpl = undiciFetch,

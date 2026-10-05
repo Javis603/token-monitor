@@ -1097,86 +1097,77 @@ test('exchange cookies obey path scope and expire before the callback and creden
   }
 });
 
-test('the service host may use its observed HTTP callback without receiving Secure cookies', async () => {
-  const world = mimoWorld();
-  let callbackCookie = null;
-  const fetch = async (url, init) => {
-    const href = String(url);
-    const parsed = new URL(href);
-    if (parsed.hostname === 'account.xiaomi.com' && parsed.searchParams.get('sid') === 'mimopc') {
-      return reply(302, '', { location: `${MEMBERSHIP_BASE}/sts?sign=1` });
-    }
-    if (href === `${MEMBERSHIP_BASE}/sts?sign=1`) {
-      return reply(307, '', {
-        location: 'http://mimo-server-cn.xiaomimimo.com/api/user/xiaomi/me',
-        'set-cookie': [
-          'serviceToken=sealed; Domain=.xiaomimimo.com; Secure',
-          'scoped=service; Domain=.XIAOMIMIMO.COM',
-          'outside=rejected; Domain=.example.com'
-        ]
+test('vendor HTTP callbacks are upgraded before Cookie selection and never fall back to HTTP', async (t) => {
+  for (const [product, index, sts, entry, token] of [
+    ['Console', 0, CONSOLE_STS, `${CONSOLE_BASE}/balance`, 'api-platform_serviceToken'],
+    ['Membership', 1, `${MEMBERSHIP_BASE}/sts`, `${MEMBERSHIP_BASE}/user/xiaomi/me`, 'serviceToken']
+  ]) {
+    for (const failHttps of [false, true]) {
+      await t.test(`${product}: ${failHttps ? 'HTTPS failure retains the reading' : 'HTTPS success'}`, async () => {
+        const world = mimoWorld();
+        const callback = `${entry}?userId=42&sign=a%2Fb%2Bc`;
+        const requested = [];
+        let exerciseCallback = false;
+        let callbackCookie;
+        const runtime = createLimitsRuntime({ limitProviders: ['mimo'] }, {
+          ...world.deps, autoStart: false, autoRetry: false, probe: true,
+          fetch: async (url, init) => {
+            const href = String(url);
+            if (exerciseCallback) requested.push(href);
+            if (exerciseCallback && href.startsWith(sts)) {
+              return reply(307, '', {
+                location: callback.replace('https:', 'http:'),
+                'set-cookie': [
+                  `${token}=sealed; Domain=.XIAOMIMIMO.COM; Path=/; Secure`, 'userId=42; Path=/; Secure',
+                  'outside=drop; Domain=.example.com; Path=/'
+                ]
+              });
+            }
+            if (exerciseCallback && href === callback) {
+              callbackCookie = String(init.headers.Cookie || '');
+              if (failHttps) throw new Error('HTTPS connection failed');
+            }
+            return world.fetch(url, init);
+          }
+        });
+        try {
+          await runtime.refresh({ provider: 'mimo' }, 'startup');
+          const good = runtime.getSnapshot().providers[index];
+          assert.equal(good.status, 'ok');
+          assert.ok(good.windows.length);
+          exerciseCallback = true;
+          await runtime.refresh({ provider: 'mimo' }, 'manual');
+          assert.equal(requested.includes(callback), true, 'host, path and encoded query survive the upgrade');
+          assert.equal(requested.every(url => new URL(url).protocol === 'https:'), true, 'no HTTP request is dispatched');
+          assert.equal(callbackCookie, `${token}=sealed; userId=42`, 'Secure service Cookies are selected after upgrading; account and off-domain Cookies stay out');
+          const rows = runtime.getSnapshot().providers;
+          const refreshed = rows.find(row => row.accountKey === good.accountKey);
+          assert.equal(refreshed.status, failHttps ? 'unavailable' : 'ok');
+          assert.deepEqual(refreshed.windows, good.windows, 'a failed HTTPS exchange retains the accepted quota');
+          assert.equal(rows.find(row => row.accountKey !== good.accountKey).status, 'ok', 'the other product keeps answering');
+        } finally {
+          runtime.stop();
+        }
       });
     }
-    if (href.startsWith('http://mimo-server-cn.xiaomimimo.com/api/user/xiaomi/me')) {
-      callbackCookie = String(init?.headers?.Cookie || '');
-      return reply(307, '', {
-        location: `${MEMBERSHIP_BASE}/user/xiaomi/me?userId=42`,
-        'set-cookie': ['serviceToken=minted; Path=/', 'userId=42; Path=/']
-      });
-    }
-    return world.fetch(url, init);
-  };
-  const rows = await fetchMimoLimits({}, {
-    fetch,
-    readMimoDesktopAccount: signedInDesktop(),
-    now: () => Date.UTC(2026, 8, 24)
-  });
-  assert.equal(callbackCookie, 'scoped=service', 'Domain is normalized; Secure and off-domain cookies stay off the callback');
-  assert.equal(rows[1].status, 'ok');
+  }
 });
 
-test('the plain-HTTP exception is the service host, not any host', async () => {
-  // The callback returns to the entry endpoint over plain HTTP, so a service-host
-  // path is followed whatever it is; the exception does not extend to another
-  // host, and the account cookies never travel over it (they are `Secure`).
+test('an HTTP redirect to a login domain is still rejected without requesting it', async () => {
   const world = mimoWorld();
   let escaped = false;
   const fetch = async (url, init) => {
-    const href = String(url);
-    const parsed = new URL(href);
+    const parsed = new URL(url);
     if (parsed.hostname === 'account.xiaomi.com' && parsed.searchParams.get('sid') === 'mimopc') {
       return reply(302, '', { location: 'http://account.xiaomi.com/pass/serviceLogin?sid=mimopc' });
     }
-    if (parsed.protocol === 'http:' && parsed.hostname === 'account.xiaomi.com') escaped = true;
+    if (parsed.protocol === 'http:') escaped = true;
     return world.fetch(url, init);
-
   };
-  const rows = await fetchMimoLimits({}, {
-    fetch,
-    readMimoDesktopAccount: signedInDesktop(),
-    now: () => Date.UTC(2026, 8, 24)
-  });
-  assert.equal(escaped, false, 'a login domain is never followed over plain HTTP');
+  const rows = await fetchMimoLimits({}, { ...world.deps, fetch, probe: true });
+  assert.equal(escaped, false);
   assert.equal(rows[0].status, 'ok');
   assert.equal(rows[1].status, 'unavailable');
-
-  const serviceHost = mimoWorld();
-  const followed = [];
-  const serviceFetch = async (url, init) => {
-    const href = String(url);
-    const parsed = new URL(href);
-    if (parsed.hostname === 'account.xiaomi.com' && parsed.searchParams.get('sid') === 'mimopc') {
-      return reply(302, '', { location: 'http://mimo-server-cn.xiaomimimo.com/api/user/xiaomi/me?userId=42' });
-    }
-    if (parsed.protocol === 'http:') followed.push(href);
-    return serviceHost.fetch(url, init);
-  };
-  const serviceRows = await fetchMimoLimits({}, {
-    fetch: serviceFetch,
-    readMimoDesktopAccount: signedInDesktop(),
-    now: () => Date.UTC(2026, 8, 24)
-  });
-  assert.equal(followed.length > 0, true, 'the service host answers its own plain-HTTP callback and is followed');
-  assert.equal(serviceRows[0].status, 'ok');
 });
 
 test('the membership plan is read the way the app reads it', () => {

@@ -67,13 +67,13 @@ Minted sessions stay in memory for one exchange and are never persisted or writt
 
 Provider reads use the injected runtime transport. The exchange uses `deps.mimoExchangeFetch` when supplied, otherwise `deps.fetch`: it must inspect each redirect's `Location` and `Set-Cookie` without following automatically. Chromium `net.fetch` cancels `redirect: 'manual'` with `net::ERR_ABORTED`, so the widget supplies `src/electron/providers/mimo/exchangeFetch.js` to both collection and credential probes.
 
-Explicit proxy environment settings retain the repository's precedence and `NO_PROXY` behavior. Otherwise the adapter resolves each host through Chromium's `session.resolveProxy` and tries its ordered system/PAC routes using undici. Unsupported proxy types fail unless a later supported route is available; cancellation stops every hop. A Chromium session cannot replace the private jar because its https-to-http cookie policy prevented this measured chain from completing.
+Explicit proxy environment settings retain the repository's precedence and `NO_PROXY` behavior. Otherwise the adapter resolves each host through Chromium's `session.resolveProxy` and tries its ordered system/PAC routes using undici. Unsupported proxy types fail unless a later supported route is available; cancellation stops every hop.
 
 Console requests retain the measured browser headers. `browserHeaders.js` sends Console `Origin`/`Referer` only to that host; membership and SSO omit them. No causal link between changed headers and account sign-out was established. Client-version/source headers vary by build and are not required.
 
-Redirects allow only the original service host or Xiaomi login domains. Login-domain requests must use HTTPS; the current service-host exception permits HTTP callbacks. The jar enforces Domain/host-only, Secure, Path and expiry. Cookie identity is name/domain/path; absent or invalid Path uses the issuing URL directory, path matching uses a directory boundary, and longer paths are sent first. `Max-Age` overrides `Expires`; deletion/expiry applies to both redirected requests and returned credentials. undici supplies attribute parsing, with local handling for default paths and negative `Max-Age` that its parser does not provide.
+Redirects allow only the original service host or Xiaomi login domains. Vendor-generated HTTP callbacks to the original service host are upgraded to HTTPS, preserving host, path and query, before Cookie selection and dispatch. Login-domain redirects must already use HTTPS; other hosts remain rejected. HTTPS failure uses the existing unavailable/retained-reading behavior, with no HTTP fallback. The jar enforces Domain/host-only, Secure, Path and expiry. Cookie identity is name/domain/path; absent or invalid Path uses the issuing URL directory, path matching uses a directory boundary, and longer paths are sent first. `Max-Age` overrides `Expires`; deletion/expiry applies to both redirected requests and returned credentials. undici supplies attribute parsing, with local handling for default paths and negative `Max-Age` that its parser does not provide.
 
-### HTTPS evidence and shipping boundary
+### HTTPS evidence
 
 On 2026-10-03, a diagnostic using the repository's Node outbound transport upgraded each vendor callback to HTTPS before sending it. Both complete exchanges succeeded, followed by authenticated HTTPS reads:
 
@@ -82,7 +82,7 @@ On 2026-10-03, a diagnostic using the repository's Node outbound transport upgra
 | Console | `http://platform.xiaomimimo.com/api/v1/balance` | `/balance`: 200, `code: 0` |
 | Membership | `http://mimo-server-cn.xiaomimimo.com/api/user/xiaomi/me` | `/user/xiaomi/subscription/self`: 200, `code: 0`, `current: null` |
 
-This proves a working exchange and service read with an upgraded callback, not a vendor-native all-HTTPS chain or the widget's Chromium adapter. Production still follows the vendor HTTP URL. That hop carries the service Cookies listed above, not the original account Cookies; its response lacks transport authentication and integrity. The successful reads establish access to those endpoints, not broader authority or server-side lifetime. The maintainer decides HTTPS enforcement, defer/opt-in/default shipping; no lifetime or permission testing has established more.
+A read-only check of the production shared walker on 2026-10-05 repeated both upgrades: the callbacks and subsequent Console billing and membership subscription requests returned HTTP 200, with no HTTP requests sent. These Node-transport observations do not establish a vendor-native all-HTTPS chain or a live widget-adapter exchange. The shared walker now applies that upgrade to both automatic products, as requested by the maintainer in PR #824. Successful reads establish endpoint access, not broader authority or server-side session lifetime.
 
 ## Console data
 
