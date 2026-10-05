@@ -1,71 +1,70 @@
 import ActivityKit
 import Foundation
 
+// ContentState v2 mirrors `src/shared/liveActivity.js` — structured data on the
+// wire; the extension formats and localises. Dates are seconds since the
+// 2001-01-01 Cocoa reference date (the standard Codable `Date` encoding, which
+// is what `aps.timestamp` uses).
 nonisolated struct TokenMonitorActivityAttributes: ActivityAttributes {
-    enum Field: String, Codable, CaseIterable, Identifiable, Sendable {
-        case primary
-        case secondary
-        case provider
-        case tokens
-        case cost
-        case limit
-        case progress
-        case updated
-        case none
+    struct ContentState: Codable, Hashable, Sendable {
+        var updatedAt: Date
+        var sourceStale: Bool?
+        var period: String          // "today" | "month" | "allTime"
+        var tokens: Double?
+        var costUSD: Double?
+        var quota: Quota?
+        var layout: Layout
 
-        var id: String { rawValue }
+        struct Quota: Codable, Hashable, Sendable {
+            var providerID: String
+            var planLabel: String?
+            var updatedAt: Date?
+            var stale: Bool?
+            /// Canonical (non-additional) windows, display order, at most two.
+            var windows: [Window]
+        }
 
-        var title: String {
-            switch self {
-            case .primary: "Primary metric"
-            case .secondary: "Secondary metric"
-            case .provider: "Provider"
-            case .tokens: "Tokens"
-            case .cost: "Cost"
-            case .limit: "AI limit"
-            case .progress: "Progress"
-            case .updated: "Updated"
-            case .none: "Off"
+        struct Window: Codable, Hashable, Sendable {
+            var label: String
+            var remainingPercent: Double?
+            var resetsAt: Date?
+            var creditsAmount: Double?
+            var creditsCurrency: String?
+        }
+
+        struct Layout: Codable, Hashable, Sendable {
+            var compactLeading: String   // "mark" | "ring" | "tokens" | "cost"
+            var compactTrailing: String  // "percent" | "reset" | "tokens" | "cost" | "ring"
+            var expanded: String         // "quota" | "usage" | "combined"
+            var lockScreen: String       // "quota" | "usage" | "combined"
+            var currencyCode: String     // USD | TWD | HKD | CNY
+            var languageCode: String     // auto | en | zh-TW | zh-CN | ja | ko
+
+            var compactLeadingOption: CompactLeadingOption {
+                CompactLeadingOption(rawValue: compactLeading) ?? .mark
+            }
+            var compactTrailingOption: CompactTrailingOption {
+                CompactTrailingOption(rawValue: compactTrailing) ?? .percent
+            }
+            var expandedStyle: SurfaceStyle {
+                SurfaceStyle(rawValue: expanded) ?? .quota
+            }
+            var lockScreenStyle: SurfaceStyle {
+                SurfaceStyle(rawValue: lockScreen) ?? .combined
             }
         }
 
-        var systemImage: String {
-            switch self {
-            case .primary: "chart.bar.fill"
-            case .secondary: "rectangle.2.swap"
-            case .provider: "building.2"
-            case .tokens: "number"
-            case .cost: "dollarsign.circle"
-            case .limit: "gauge"
-            case .progress: "chart.bar"
-            case .updated: "clock"
-            case .none: "minus"
-            }
+        enum CompactLeadingOption: String, CaseIterable, Sendable {
+            case mark, ring, tokens, cost
         }
-    }
 
-    struct ContentState: Codable, Hashable {
-        let primaryLabel: String
-        let primaryValue: String
-        let secondaryLabel: String?
-        let secondaryValue: String?
-        let progress: Double?
-        let updatedAt: Date
-        let providerID: String?
-        let providerName: String?
-        let iconProviderID: String?
-        let tokensValue: String?
-        let costValue: String?
-        let limitValue: String?
-        let compactTrailingField: String?
-        let expandedLeadingField: String?
-        let expandedCenterField: String?
-        let expandedTrailingField: String?
-        let expandedBottomField: String?
-        let lockScreenPrimaryField: String?
-        let lockScreenSecondaryField: String?
-        let lockScreenBottomField: String?
-        var sourceStale: Bool? = nil
+        enum CompactTrailingOption: String, CaseIterable, Sendable {
+            case percent, reset, tokens, cost, ring
+        }
+
+        enum SurfaceStyle: String, CaseIterable, Sendable {
+            case quota, usage, combined
+        }
     }
 
     let title: String

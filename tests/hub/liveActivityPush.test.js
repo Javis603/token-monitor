@@ -23,7 +23,7 @@ test('ActivityKit push client sends an authenticated update payload', async () =
   });
 
   assert.equal(client.enabled, true);
-  assert.deepEqual(await client.send('a'.repeat(64), { primaryValue: '1.2K' }), { sent: true });
+  assert.deepEqual(await client.send('a'.repeat(64), { tokens: 1200 }), { sent: true });
   assert.equal(requests.length, 1);
   assert.match(requests[0].url, /^https:\/\/api\.sandbox\.push\.apple\.com\/3\/device\//);
   assert.equal(requests[0].options.headers['apns-push-type'], 'liveactivity');
@@ -31,7 +31,7 @@ test('ActivityKit push client sends an authenticated update payload', async () =
   assert.match(requests[0].options.headers.authorization, /^bearer [^.]+\.[^.]+\.[^.]+$/);
   const payload = JSON.parse(requests[0].options.body);
   assert.equal(payload.aps.event, 'update');
-  assert.deepEqual(payload.aps['content-state'], { primaryValue: '1.2K' });
+  assert.deepEqual(payload.aps['content-state'], { tokens: 1200 });
 });
 
 test('APNs HTTP/2 timeout destroys a stalled connection instead of hanging the push lane', async (t) => {
@@ -109,19 +109,19 @@ test('Node APNs stale-date follows source age and status while timestamp stays c
     keyID: 'KEY', teamID: 'TEAM', privateKey: pem, now: () => now,
     fetchImpl
   });
-  const registration = { preferences: { livePeriod: 'today', livePrimaryMetric: 'tokens' } };
+  const registration = { preferences: { livePeriod: 'today' } };
   const staleSource = buildLiveActivityContentState({
     updatedAt: new Date(now).toISOString(),
     devices: [{ updatedAt: '2026-10-03T00:00:00Z', stale: true }]
   }, registration, now);
   const cases = [
-    [staleSource, Date.parse('2026-10-03T00:00:00Z') / 1000 + 600],
-    [{ updatedAt: timestamp - reference - 100 }, timestamp + 500],
-    [{ updatedAt: timestamp - reference - 600 }, timestamp],
-    [{ updatedAt: timestamp - reference - 601 }, timestamp - 1],
+    [staleSource, Date.parse('2026-10-03T00:00:00Z') / 1000 + 900],
+    [{ updatedAt: timestamp - reference - 100 }, timestamp + 800],
+    [{ updatedAt: timestamp - reference - 600 }, timestamp + 300],
+    [{ updatedAt: timestamp - reference - 601 }, timestamp + 299],
     [{ updatedAt: timestamp - reference, sourceStale: true }, timestamp],
     [{ updatedAt: timestamp - reference + 1 }, timestamp],
-    [{ updatedAt: -reference }, 600],
+    [{ updatedAt: -reference }, 900],
     [{}, timestamp],
     [{ updatedAt: null }, timestamp],
     [{ updatedAt: 'invalid' }, timestamp],

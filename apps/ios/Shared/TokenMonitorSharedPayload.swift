@@ -70,6 +70,8 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
     struct Limit: Codable, Equatable, Identifiable, Sendable {
         let id: String
         let providerID: String
+        let planLabel: String?
+        let status: String?
         let updatedAt: Date?
         let windows: [LimitWindow]
         var sourceStale: Bool? = nil
@@ -99,22 +101,16 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
         var widgetShowsCost: Bool
         var widgetShowsUpdateTime: Bool
         var liveActivityEnabled: Bool
-        var livePrimaryMetric: String
         var livePeriod: String
         var liveProviderID: String?
-        var liveShowsSecondaryMetric: Bool
-        var liveShowsProgress: Bool
-        var liveIconProviderID: String?
-        var liveCompactTrailingField: String
-        var liveExpandedLeadingField: String
-        var liveExpandedCenterField: String
-        var liveExpandedTrailingField: String
-        var liveExpandedBottomField: String
-        var liveLockScreenPrimaryField: String
-        var liveLockScreenSecondaryField: String
-        var liveLockScreenBottomField: String
+        var liveCompactLeading: String
+        var liveCompactTrailing: String
+        var liveExpandedStyle: String
+        var liveLockScreenStyle: String
         var currencyCode: String?
         var languageCode: String?
+        var limitProviderOrder: [String]?
+        var hiddenLimitProviders: [String]?
 
         init(
             widgetContent: String = "overview",
@@ -123,22 +119,16 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             widgetShowsCost: Bool = true,
             widgetShowsUpdateTime: Bool = true,
             liveActivityEnabled: Bool = false,
-            livePrimaryMetric: String = "tokens",
             livePeriod: String = "today",
             liveProviderID: String? = nil,
-            liveShowsSecondaryMetric: Bool = true,
-            liveShowsProgress: Bool = true,
-            liveIconProviderID: String? = nil,
-            liveCompactTrailingField: String = "primary",
-            liveExpandedLeadingField: String = "provider",
-            liveExpandedCenterField: String = "primary",
-            liveExpandedTrailingField: String = "secondary",
-            liveExpandedBottomField: String = "progress",
-            liveLockScreenPrimaryField: String = "primary",
-            liveLockScreenSecondaryField: String = "cost",
-            liveLockScreenBottomField: String = "progress",
+            liveCompactLeading: String = "mark",
+            liveCompactTrailing: String = "percent",
+            liveExpandedStyle: String = "quota",
+            liveLockScreenStyle: String = "combined",
             currencyCode: String? = "USD",
-            languageCode: String? = "auto"
+            languageCode: String? = "auto",
+            limitProviderOrder: [String]? = nil,
+            hiddenLimitProviders: [String]? = nil
         ) {
             self.widgetContent = widgetContent
             self.widgetPeriod = widgetPeriod
@@ -146,22 +136,16 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             self.widgetShowsCost = widgetShowsCost
             self.widgetShowsUpdateTime = widgetShowsUpdateTime
             self.liveActivityEnabled = liveActivityEnabled
-            self.livePrimaryMetric = livePrimaryMetric
             self.livePeriod = livePeriod
             self.liveProviderID = liveProviderID
-            self.liveShowsSecondaryMetric = liveShowsSecondaryMetric
-            self.liveShowsProgress = liveShowsProgress
-            self.liveIconProviderID = liveIconProviderID
-            self.liveCompactTrailingField = liveCompactTrailingField
-            self.liveExpandedLeadingField = liveExpandedLeadingField
-            self.liveExpandedCenterField = liveExpandedCenterField
-            self.liveExpandedTrailingField = liveExpandedTrailingField
-            self.liveExpandedBottomField = liveExpandedBottomField
-            self.liveLockScreenPrimaryField = liveLockScreenPrimaryField
-            self.liveLockScreenSecondaryField = liveLockScreenSecondaryField
-            self.liveLockScreenBottomField = liveLockScreenBottomField
+            self.liveCompactLeading = liveCompactLeading
+            self.liveCompactTrailing = liveCompactTrailing
+            self.liveExpandedStyle = liveExpandedStyle
+            self.liveLockScreenStyle = liveLockScreenStyle
             self.currencyCode = currencyCode
             self.languageCode = languageCode
+            self.limitProviderOrder = limitProviderOrder
+            self.hiddenLimitProviders = hiddenLimitProviders
         }
 
         init(from decoder: Decoder) throws {
@@ -191,10 +175,6 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
                     Bool.self,
                     forKey: .liveActivityEnabled
                 ) ?? false,
-                livePrimaryMetric: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .livePrimaryMetric
-                ) ?? "tokens",
                 livePeriod: try container.decodeIfPresent(
                     String.self,
                     forKey: .livePeriod
@@ -203,50 +183,22 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
                     String.self,
                     forKey: .liveProviderID
                 ),
-                liveShowsSecondaryMetric: try container.decodeIfPresent(
-                    Bool.self,
-                    forKey: .liveShowsSecondaryMetric
-                ) ?? true,
-                liveShowsProgress: try container.decodeIfPresent(
-                    Bool.self,
-                    forKey: .liveShowsProgress
-                ) ?? true,
-                liveIconProviderID: try container.decodeIfPresent(
+                liveCompactLeading: try container.decodeIfPresent(
                     String.self,
-                    forKey: .liveIconProviderID
-                ),
-                liveCompactTrailingField: try container.decodeIfPresent(
+                    forKey: .liveCompactLeading
+                ) ?? "mark",
+                liveCompactTrailing: try container.decodeIfPresent(
                     String.self,
-                    forKey: .liveCompactTrailingField
-                ) ?? "primary",
-                liveExpandedLeadingField: try container.decodeIfPresent(
+                    forKey: .liveCompactTrailing
+                ) ?? "percent",
+                liveExpandedStyle: try container.decodeIfPresent(
                     String.self,
-                    forKey: .liveExpandedLeadingField
-                ) ?? "provider",
-                liveExpandedCenterField: try container.decodeIfPresent(
+                    forKey: .liveExpandedStyle
+                ) ?? "quota",
+                liveLockScreenStyle: try container.decodeIfPresent(
                     String.self,
-                    forKey: .liveExpandedCenterField
-                ) ?? "primary",
-                liveExpandedTrailingField: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .liveExpandedTrailingField
-                ) ?? "secondary",
-                liveExpandedBottomField: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .liveExpandedBottomField
-                ) ?? "progress",
-                liveLockScreenPrimaryField: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .liveLockScreenPrimaryField
-                ) ?? "primary",
-                liveLockScreenSecondaryField: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .liveLockScreenSecondaryField
-                ) ?? "secondary",
-                liveLockScreenBottomField: try container.decodeIfPresent(
-                    String.self,
-                    forKey: .liveLockScreenBottomField
-                ) ?? "progress",
+                    forKey: .liveLockScreenStyle
+                ) ?? "combined",
                 currencyCode: try container.decodeIfPresent(
                     String.self,
                     forKey: .currencyCode
@@ -254,7 +206,15 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
                 languageCode: try container.decodeIfPresent(
                     String.self,
                     forKey: .languageCode
-                ) ?? "auto"
+                ) ?? "auto",
+                limitProviderOrder: try container.decodeIfPresent(
+                    [String].self,
+                    forKey: .limitProviderOrder
+                ),
+                hiddenLimitProviders: try container.decodeIfPresent(
+                    [String].self,
+                    forKey: .hiddenLimitProviders
+                )
             )
         }
 
@@ -266,52 +226,22 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             try container.encode(widgetShowsCost, forKey: .widgetShowsCost)
             try container.encode(widgetShowsUpdateTime, forKey: .widgetShowsUpdateTime)
             try container.encode(liveActivityEnabled, forKey: .liveActivityEnabled)
-            try container.encode(livePrimaryMetric, forKey: .livePrimaryMetric)
             try container.encode(livePeriod, forKey: .livePeriod)
             try container.encodeIfPresent(liveProviderID, forKey: .liveProviderID)
-            try container.encode(
-                liveShowsSecondaryMetric,
-                forKey: .liveShowsSecondaryMetric
-            )
-            try container.encode(liveShowsProgress, forKey: .liveShowsProgress)
-            try container.encodeIfPresent(
-                liveIconProviderID,
-                forKey: .liveIconProviderID
-            )
-            try container.encode(
-                liveCompactTrailingField,
-                forKey: .liveCompactTrailingField
-            )
-            try container.encode(
-                liveExpandedLeadingField,
-                forKey: .liveExpandedLeadingField
-            )
-            try container.encode(
-                liveExpandedCenterField,
-                forKey: .liveExpandedCenterField
-            )
-            try container.encode(
-                liveExpandedTrailingField,
-                forKey: .liveExpandedTrailingField
-            )
-            try container.encode(
-                liveExpandedBottomField,
-                forKey: .liveExpandedBottomField
-            )
-            try container.encode(
-                liveLockScreenPrimaryField,
-                forKey: .liveLockScreenPrimaryField
-            )
-            try container.encode(
-                liveLockScreenSecondaryField,
-                forKey: .liveLockScreenSecondaryField
-            )
-            try container.encode(
-                liveLockScreenBottomField,
-                forKey: .liveLockScreenBottomField
-            )
+            try container.encode(liveCompactLeading, forKey: .liveCompactLeading)
+            try container.encode(liveCompactTrailing, forKey: .liveCompactTrailing)
+            try container.encode(liveExpandedStyle, forKey: .liveExpandedStyle)
+            try container.encode(liveLockScreenStyle, forKey: .liveLockScreenStyle)
             try container.encodeIfPresent(currencyCode, forKey: .currencyCode)
             try container.encodeIfPresent(languageCode, forKey: .languageCode)
+            try container.encodeIfPresent(
+                limitProviderOrder,
+                forKey: .limitProviderOrder
+            )
+            try container.encodeIfPresent(
+                hiddenLimitProviders,
+                forKey: .hiddenLimitProviders
+            )
         }
 
         private enum CodingKeys: String, CodingKey {
@@ -321,22 +251,16 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             case widgetShowsCost
             case widgetShowsUpdateTime
             case liveActivityEnabled
-            case livePrimaryMetric
             case livePeriod
             case liveProviderID
-            case liveShowsSecondaryMetric
-            case liveShowsProgress
-            case liveIconProviderID
-            case liveCompactTrailingField
-            case liveExpandedLeadingField
-            case liveExpandedCenterField
-            case liveExpandedTrailingField
-            case liveExpandedBottomField
-            case liveLockScreenPrimaryField
-            case liveLockScreenSecondaryField
-            case liveLockScreenBottomField
+            case liveCompactLeading
+            case liveCompactTrailing
+            case liveExpandedStyle
+            case liveLockScreenStyle
             case currencyCode
             case languageCode
+            case limitProviderOrder
+            case hiddenLimitProviders
         }
 
         static let `default` = Preferences(
@@ -346,20 +270,12 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             widgetShowsCost: true,
             widgetShowsUpdateTime: true,
             liveActivityEnabled: false,
-            livePrimaryMetric: "tokens",
             livePeriod: "today",
             liveProviderID: nil,
-            liveShowsSecondaryMetric: true,
-            liveShowsProgress: true,
-            liveIconProviderID: nil,
-            liveCompactTrailingField: "primary",
-            liveExpandedLeadingField: "provider",
-            liveExpandedCenterField: "primary",
-            liveExpandedTrailingField: "secondary",
-            liveExpandedBottomField: "progress",
-            liveLockScreenPrimaryField: "primary",
-            liveLockScreenSecondaryField: "cost",
-            liveLockScreenBottomField: "progress",
+            liveCompactLeading: "mark",
+            liveCompactTrailing: "percent",
+            liveExpandedStyle: "quota",
+            liveLockScreenStyle: "combined",
             currencyCode: "USD",
             languageCode: "auto"
         )

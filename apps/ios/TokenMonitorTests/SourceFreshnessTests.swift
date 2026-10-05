@@ -66,46 +66,63 @@ struct SourceFreshnessTests {
     }
 
     #if os(iOS)
-    @MainActor @Test func localActivityAndRemoteContentPreserveExplicitSourceStale() throws {
+    @Test func activityContentPreservesSourceStaleAndCarriesQuotaFreshness() throws {
         let now = Date.now
-        let stats = try decode("{\"updatedAt\":\"\(now.formatted(.iso8601))\",\"devices\":[{\"updatedAt\":\"\(now.formatted(.iso8601))\",\"stale\":true}],\"limits\":{\"providers\":[{\"provider\":\"codex\",\"updatedAt\":\"\(now.formatted(.iso8601))\",\"stale\":true,\"windows\":[{\"kind\":\"weekly\",\"remainingPercent\":80}]}]}}")
+        let stats = try decode("{\"updatedAt\":\"\(now.formatted(.iso8601))\",\"devices\":[{\"updatedAt\":\"\(now.formatted(.iso8601))\",\"stale\":true}],\"limits\":{\"providers\":[{\"provider\":\"codex\",\"status\":\"ok\",\"stale\":true,\"updatedAt\":\"\(now.formatted(.iso8601))\",\"windows\":[{\"kind\":\"weekly\",\"remainingPercent\":80}]}]}}")
         let snapshot = TokenMonitorSharedPayload.Snapshot.make(stats: stats, history: .empty, now: now)
-        let controller = LiveActivityController(bindingStore: SourceBindingStore())
-        var preferences = TokenMonitorSharedPayload.Preferences.default
-        #expect(controller.contentState(snapshot: snapshot, preferences: preferences, now: now).sourceStale == true)
-        preferences.liveShowsProgress = true
-        for primary in ["tokens", "cost"] {
-            preferences.livePrimaryMetric = primary
-            #expect(controller.contentState(snapshot: snapshot, preferences: preferences, now: now).progress == 0.8)
-        }
-        preferences.livePrimaryMetric = "limit"
-        let state = controller.contentState(snapshot: snapshot, preferences: preferences, now: now)
+        let state = LiveActivityController.contentState(
+            snapshot: snapshot,
+            preferences: .default,
+            now: now
+        )
         #expect(state.sourceStale == true)
-        #expect(state.updatedAt == snapshot.limits.first?.updatedAt)
-        let decoded = try JSONDecoder().decode(TokenMonitorActivityAttributes.ContentState.self, from: JSONEncoder().encode(state))
-        #expect(decoded.sourceStale == true)
+        #expect(state.updatedAt == snapshot.updatedAt)
+        #expect(state.quota?.providerID == "codex")
+        #expect(state.quota?.stale == true)
+        #expect(state.quota?.windows.first?.remainingPercent == 80)
+        let decoded = try JSONDecoder().decode(
+            TokenMonitorActivityAttributes.ContentState.self,
+            from: JSONEncoder().encode(state)
+        )
+        #expect(decoded == state)
     }
-    @MainActor @Test func localActivityShowsMoneyBalancesAndMissingConfiguredProvider() throws {
+
+    @Test func activityQuotaAutoSkipsUnhealthyAndStaleProviders() throws {
         let now = Date.now
-        let stats = try decode(#"{"limits":{"providers":[{"provider":"deepseek","balance":{"amount":20,"currency":"USD","monthSpend":80},"windows":[{"kind":"billing","metric":"credits"}]}]}}"#)
+        let stats = try decode(#"{"limits":{"providers":[{"provider":"cursor","status":"notConfigured","windows":[{"remainingPercent":5}]},{"provider":"claude","status":"ok","windows":[{"remainingPercent":40}]},{"provider":"codex","status":"ok","windows":[{"remainingPercent":10}]}]}}"#)
         let snapshot = TokenMonitorSharedPayload.Snapshot.make(stats: stats, history: .empty, now: now)
-        let controller = LiveActivityController(bindingStore: SourceBindingStore())
+        let state = LiveActivityController.contentState(
+            snapshot: snapshot,
+            preferences: .default,
+            now: now
+        )
+        #expect(state.quota?.providerID == "codex")
+
+        var specific = TokenMonitorSharedPayload.Preferences.default
+        specific.liveProviderID = "absent"
+        #expect(
+            LiveActivityController.contentState(
+                snapshot: snapshot,
+                preferences: specific,
+                now: now
+            ).quota == nil
+        )
+    }
+
+    @Test func activityQuotaExposesCreditsWindowsAsAmounts() throws {
+        let now = Date.now
+        let stats = try decode(#"{"limits":{"providers":[{"provider":"deepseek","status":"ok","balance":{"amount":20,"currency":"USD","monthSpend":80},"windows":[{"kind":"billing","metric":"credits"}]}]}}"#)
+        let snapshot = TokenMonitorSharedPayload.Snapshot.make(stats: stats, history: .empty, now: now)
         var preferences = TokenMonitorSharedPayload.Preferences.default
         preferences.liveProviderID = "deepseek"
-        preferences.livePrimaryMetric = "limit"
-        let state = controller.contentState(snapshot: snapshot, preferences: preferences, now: now)
-        #expect(state.primaryValue == "$20.00")
-        #expect(state.limitValue == "$20.00")
-        #expect(state.progress == 0.2)
-        preferences.liveProviderID = "absent"
-        #expect(controller.contentState(snapshot: snapshot, preferences: preferences, now: now).primaryValue == "—")
+        let state = LiveActivityController.contentState(
+            snapshot: snapshot,
+            preferences: preferences,
+            now: now
+        )
+        #expect(state.quota?.windows.first?.creditsAmount == 20)
+        #expect(state.quota?.windows.first?.creditsCurrency == "USD")
+        #expect(state.quota?.windows.first?.remainingPercent == 20)
     }
     #endif
 }
-
-#if os(iOS)
-@MainActor private struct SourceBindingStore: LiveActivityBindingStore {
-    func load() throws -> [LiveActivityBinding] { [] }
-    func save(_ bindings: [LiveActivityBinding]) throws {}
-}
-#endif

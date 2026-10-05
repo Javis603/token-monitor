@@ -3,9 +3,10 @@ import SwiftUI
 enum DesignTokens {
     static let screenPadding = 20.0
     static let sectionSpacing = 24.0
-    static let cardPadding = 20.0
-    static let cardRadius = 20.0
+    static let cardPadding = 16.0
+    static let cardRadius = 24.0
     static let compactRadius = 16.0
+    static let headerToCardSpacing = 10.0
     static let controlHeight = 44.0
     static let accent = Color.blue
     static let critical = Color.red

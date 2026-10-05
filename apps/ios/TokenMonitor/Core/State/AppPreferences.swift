@@ -32,23 +32,21 @@ final class AppPreferences {
         }
     }
 
-    enum LiveMetric: String, CaseIterable, Identifiable {
-        case tokens
-        case cost
-        case limit
-
+    // Live Activity layout values — the wire values the Hub pushes back in
+    // `content-state.layout`; defaults match the documented fallbacks.
+    enum LiveCompactLeading: String, CaseIterable, Identifiable {
+        case mark, ring, tokens, cost
         var id: String { rawValue }
+    }
 
-        var title: String {
-            switch self {
-            case .tokens:
-                "Tokens"
-            case .cost:
-                "Cost"
-            case .limit:
-                "AI limit"
-            }
-        }
+    enum LiveCompactTrailing: String, CaseIterable, Identifiable {
+        case percent, reset, tokens, cost, ring
+        var id: String { rawValue }
+    }
+
+    enum LiveSurfaceStyle: String, CaseIterable, Identifiable {
+        case quota, usage, combined
+        var id: String { rawValue }
     }
 
     var appearance: AppAppearance {
@@ -64,6 +62,25 @@ final class AppPreferences {
             }
             persistLocalPreferences()
         }
+    }
+
+    /// Limits provider order; empty means the desktop catalog order.
+    var limitProviderOrder: [String] {
+        didSet {
+            persistLocalPreferences()
+            persistSharedPreferences()
+        }
+    }
+
+    var hiddenLimitProviders: Set<String> {
+        didSet {
+            persistLocalPreferences()
+            persistSharedPreferences()
+        }
+    }
+
+    var masksAccountEmails: Bool {
+        didSet { persistLocalPreferences() }
     }
 
     var currency: AppCurrency {
@@ -104,10 +121,6 @@ final class AppPreferences {
         didSet { persistSharedPreferences() }
     }
 
-    var livePrimaryMetric: LiveMetric {
-        didSet { persistSharedPreferences() }
-    }
-
     var livePeriod: UsagePeriodKey {
         didSet { persistSharedPreferences() }
     }
@@ -116,47 +129,19 @@ final class AppPreferences {
         didSet { persistSharedPreferences() }
     }
 
-    var liveShowsSecondaryMetric: Bool {
+    var liveCompactLeading: LiveCompactLeading {
         didSet { persistSharedPreferences() }
     }
 
-    var liveShowsProgress: Bool {
+    var liveCompactTrailing: LiveCompactTrailing {
         didSet { persistSharedPreferences() }
     }
 
-    var liveIconProviderID: String {
+    var liveExpandedStyle: LiveSurfaceStyle {
         didSet { persistSharedPreferences() }
     }
 
-    var liveCompactTrailingField: String {
-        didSet { persistSharedPreferences() }
-    }
-
-    var liveExpandedLeadingField: String {
-        didSet { persistSharedPreferences() }
-    }
-
-    var liveExpandedCenterField: String {
-        didSet { persistSharedPreferences() }
-    }
-
-    var liveExpandedTrailingField: String {
-        didSet { persistSharedPreferences() }
-    }
-
-    var liveExpandedBottomField: String {
-        didSet { persistSharedPreferences() }
-    }
-
-    var liveLockScreenPrimaryField: String {
-        didSet { persistSharedPreferences() }
-    }
-
-    var liveLockScreenSecondaryField: String {
-        didSet { persistSharedPreferences() }
-    }
-
-    var liveLockScreenBottomField: String {
+    var liveLockScreenStyle: LiveSurfaceStyle {
         didSet { persistSharedPreferences() }
     }
 
@@ -180,6 +165,11 @@ final class AppPreferences {
             8,
             max(1, defaults.object(forKey: Keys.homeLimitCount) as? Int ?? 3)
         )
+        limitProviderOrder = defaults.stringArray(forKey: Keys.limitProviderOrder) ?? []
+        hiddenLimitProviders = Set(
+            defaults.stringArray(forKey: Keys.hiddenLimitProviders) ?? []
+        )
+        masksAccountEmails = defaults.object(forKey: Keys.masksAccountEmails) as? Bool ?? true
         currency = AppCurrency(
             rawValue: defaults.string(forKey: Keys.currency) ?? ""
         ) ?? .usd
@@ -194,24 +184,12 @@ final class AppPreferences {
         widgetShowsCost = shared.widgetShowsCost
         widgetShowsUpdateTime = shared.widgetShowsUpdateTime
         liveActivityEnabled = shared.liveActivityEnabled
-        livePrimaryMetric = LiveMetric(rawValue: shared.livePrimaryMetric) ?? .tokens
         livePeriod = UsagePeriodKey(rawValue: shared.livePeriod) ?? .today
         liveProviderID = shared.liveProviderID ?? ""
-        liveShowsSecondaryMetric = shared.liveShowsSecondaryMetric
-        liveShowsProgress = shared.liveShowsProgress
-        liveIconProviderID = shared.liveIconProviderID ?? ""
-        liveCompactTrailingField = shared.liveCompactTrailingField
-        liveExpandedLeadingField = shared.liveExpandedLeadingField
-        liveExpandedCenterField = shared.liveExpandedCenterField
-        liveExpandedTrailingField = shared.liveExpandedTrailingField
-        liveExpandedBottomField = shared.liveExpandedBottomField
-        liveLockScreenPrimaryField = shared.liveLockScreenPrimaryField
-        liveLockScreenSecondaryField = shared.liveShowsSecondaryMetric
-            ? shared.liveLockScreenSecondaryField
-            : TokenMonitorActivityAttributes.Field.none.rawValue
-        liveLockScreenBottomField = shared.liveShowsProgress
-            ? shared.liveLockScreenBottomField
-            : TokenMonitorActivityAttributes.Field.none.rawValue
+        liveCompactLeading = LiveCompactLeading(rawValue: shared.liveCompactLeading) ?? .mark
+        liveCompactTrailing = LiveCompactTrailing(rawValue: shared.liveCompactTrailing) ?? .percent
+        liveExpandedStyle = LiveSurfaceStyle(rawValue: shared.liveExpandedStyle) ?? .quota
+        liveLockScreenStyle = LiveSurfaceStyle(rawValue: shared.liveLockScreenStyle) ?? .combined
     }
 
     var sharedPreferences: TokenMonitorSharedPayload.Preferences {
@@ -222,22 +200,16 @@ final class AppPreferences {
             widgetShowsCost: widgetShowsCost,
             widgetShowsUpdateTime: widgetShowsUpdateTime,
             liveActivityEnabled: liveActivityEnabled,
-            livePrimaryMetric: livePrimaryMetric.rawValue,
             livePeriod: livePeriod.rawValue,
             liveProviderID: liveProviderID.nilIfEmpty,
-            liveShowsSecondaryMetric: liveShowsSecondaryMetric,
-            liveShowsProgress: liveShowsProgress,
-            liveIconProviderID: liveIconProviderID.nilIfEmpty,
-            liveCompactTrailingField: liveCompactTrailingField,
-            liveExpandedLeadingField: liveExpandedLeadingField,
-            liveExpandedCenterField: liveExpandedCenterField,
-            liveExpandedTrailingField: liveExpandedTrailingField,
-            liveExpandedBottomField: liveExpandedBottomField,
-            liveLockScreenPrimaryField: liveLockScreenPrimaryField,
-            liveLockScreenSecondaryField: liveLockScreenSecondaryField,
-            liveLockScreenBottomField: liveLockScreenBottomField,
+            liveCompactLeading: liveCompactLeading.rawValue,
+            liveCompactTrailing: liveCompactTrailing.rawValue,
+            liveExpandedStyle: liveExpandedStyle.rawValue,
+            liveLockScreenStyle: liveLockScreenStyle.rawValue,
             currencyCode: currency.rawValue,
-            languageCode: language.rawValue
+            languageCode: language.rawValue,
+            limitProviderOrder: limitProviderOrder,
+            hiddenLimitProviders: hiddenLimitProviders.sorted()
         )
     }
 
@@ -246,6 +218,9 @@ final class AppPreferences {
         defaults.set(homeLimitCount, forKey: Keys.homeLimitCount)
         defaults.set(currency.rawValue, forKey: Keys.currency)
         defaults.set(language.rawValue, forKey: Keys.language)
+        defaults.set(limitProviderOrder, forKey: Keys.limitProviderOrder)
+        defaults.set(hiddenLimitProviders.sorted(), forKey: Keys.hiddenLimitProviders)
+        defaults.set(masksAccountEmails, forKey: Keys.masksAccountEmails)
     }
 
     private func persistSharedPreferences() {
@@ -258,6 +233,9 @@ final class AppPreferences {
         static let homeLimitCount = "homeLimitCount"
         static let currency = "currency"
         static let language = "language"
+        static let limitProviderOrder = "limitProviderOrder"
+        static let hiddenLimitProviders = "hiddenLimitProviders"
+        static let masksAccountEmails = "masksAccountEmails"
     }
 }
 

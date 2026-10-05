@@ -34,10 +34,7 @@ test('Hub registers a Live Activity and pushes the latest state after ingest', a
       locale: 'en-US',
       preferences: {
         liveActivityEnabled: true,
-        livePrimaryMetric: 'tokens',
-        livePeriod: 'today',
-        liveShowsSecondaryMetric: false,
-        liveShowsProgress: false
+        livePeriod: 'today'
       }
     });
     hub.ingest({
@@ -50,7 +47,7 @@ test('Hub registers a Live Activity and pushes the latest state after ingest', a
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(pushes.length, 1);
     assert.equal(pushes[0].token, 'b'.repeat(64));
-    assert.equal(pushes[0].state.primaryValue, '1.2K');
+    assert.equal(pushes[0].state.tokens, 1200);
     assert.equal(hub.unregisterLiveActivity('activity-1'), true);
   } finally {
     await hub.stop();
@@ -93,7 +90,7 @@ test('Hub serializes pushes, coalesces latest state and preserves a replacement 
     release({ invalid: true });
     await waitFor(() => pushes.length === 2);
     assert.equal(pushes[1].token, 'b'.repeat(64));
-    assert.equal(pushes[1].state.tokensValue, '200');
+    assert.equal(pushes[1].state.tokens, 200);
     assert.equal(JSON.parse(fs.readFileSync(dataFile)).liveActivities.activity.token, 'b'.repeat(64));
   } finally {
     release({ sent: true });
@@ -206,7 +203,7 @@ test('Hub cooldown sends only the latest snapshot and cancels deleted or stopped
     t.mock.timers.tick(1);
     await flush();
     assert.equal(pushes.length, 2);
-    assert.equal(pushes[1].state.tokensValue, '500');
+    assert.equal(pushes[1].state.tokens, 500);
 
     hub.ingest({ deviceId: 'device', periods: { today: { totalTokens: 600 } } });
     hub.unregisterLiveActivity('activity');

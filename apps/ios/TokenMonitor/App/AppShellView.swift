@@ -10,6 +10,7 @@ struct AppShellView: View {
     @State private var insightsPath = NavigationPath()
     @State private var settingsPath = NavigationPath()
     private let sampleDetail: String?
+    private let sampleSettingsPage: String?
 
     private enum OverviewDestination: Hashable {
         case sessions
@@ -35,6 +36,14 @@ struct AppShellView: View {
             .map { String($0.dropFirst(detailPrefix.count)) }
         #else
         sampleDetail = nil
+        #endif
+        #if DEBUG
+        let pagePrefix = "--sample-settings-page="
+        sampleSettingsPage = ProcessInfo.processInfo.arguments
+            .first(where: { $0.hasPrefix(pagePrefix) })
+            .map { String($0.dropFirst(pagePrefix.count)) }
+        #else
+        sampleSettingsPage = nil
         #endif
     }
 
@@ -80,7 +89,18 @@ struct AppShellView: View {
 
             Tab(value: .settings) {
                 NavigationStack(path: $settingsPath) {
+                    #if DEBUG
+                    switch sampleSettingsPage {
+                    case "hub":
+                        HubConnectionView()
+                    case "live", "customizer":
+                        LiveActivityCustomizerView()
+                    default:
+                        SettingsView()
+                    }
+                    #else
                     SettingsView()
+                    #endif
                 }
             } label: {
                 Label("Settings", systemImage: "gearshape")
@@ -105,11 +125,21 @@ struct AppShellView: View {
             }
         }
         .onChange(of: scenePhase) { _, newPhase in
-            guard newPhase == .active else {
-                return
-            }
-            Task {
-                await store.resume()
+            switch newPhase {
+            case .active:
+                Task {
+                    await store.resume()
+                }
+            case .background:
+                // One last fetch + Live Activity update while the system still
+                // grants time; remote pushes take over afterwards.
+                let taskID = UIApplication.shared.beginBackgroundTask()
+                Task {
+                    await store.refresh()
+                    UIApplication.shared.endBackgroundTask(taskID)
+                }
+            default:
+                break
             }
         }
     }

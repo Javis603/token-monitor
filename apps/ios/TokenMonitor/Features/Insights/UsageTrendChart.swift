@@ -1,119 +1,101 @@
 import Charts
 import SwiftUI
 
+/// Smooth desktop-style trend: accent area + line over date buckets (days or
+/// weeks), three x-axis labels (start / middle / end), and a scrubbed rule +
+/// point whose selection is snapped to the nearest bucket. `days` is expected
+/// sorted and pre-filtered by the caller.
 struct UsageTrendChart: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(AppPreferences.self) private var preferences
     @Environment(\.locale) private var locale
+
     let days: [HistoryDay]
     let metric: TrendMetric
-    @State private var selectedDate: Date?
+    @Binding var selection: Date?
 
     var body: some View {
-        VStack(spacing: 10) {
-            Chart {
-                ForEach(validDays) { day in
-                    AreaMark(
-                        x: .value("Date", day.dateValue ?? .now),
-                        y: .value(metric.label, value(for: day))
+        Chart {
+            ForEach(validDays) { day in
+                AreaMark(
+                    x: .value("Date", day.dateValue ?? .now),
+                    y: .value(metric.label, value(for: day))
+                )
+                .foregroundStyle(
+                    LinearGradient(
+                        colors: [lineColor.opacity(0.28), lineColor.opacity(0)],
+                        startPoint: .top,
+                        endPoint: .bottom
                     )
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [lineColor.opacity(0.13), lineColor.opacity(0)],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .alignsMarkStylesWithPlotArea()
-                    .interpolationMethod(.monotone)
+                )
+                .alignsMarkStylesWithPlotArea()
+                .interpolationMethod(.monotone)
 
-                    LineMark(
-                        x: .value("Date", day.dateValue ?? .now),
-                        y: .value(metric.label, value(for: day))
-                    )
+                LineMark(
+                    x: .value("Date", day.dateValue ?? .now),
+                    y: .value(metric.label, value(for: day))
+                )
+                .foregroundStyle(lineColor)
+                .lineStyle(.init(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                .interpolationMethod(.monotone)
+            }
+
+            if let day = selectedDay, let date = day.dateValue {
+                RuleMark(x: .value("Date", date))
+                    .foregroundStyle(.secondary.opacity(0.35))
+                    .lineStyle(.init(lineWidth: 1, dash: [3, 3]))
+                PointMark(x: .value("Date", date), y: .value(metric.label, value(for: day)))
                     .foregroundStyle(lineColor)
-                    .lineStyle(.init(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-                    .interpolationMethod(.monotone)
-                }
-
-                if let day = selectedDay, let date = day.dateValue {
-                    RuleMark(x: .value("Date", date))
-                        .foregroundStyle(.secondary.opacity(0.35))
-                        .lineStyle(.init(lineWidth: 1, dash: [3, 3]))
-                        .annotation(
-                            position: .top, spacing: 4,
-                            overflowResolution: .init(x: .fit(to: .chart), y: .fit(to: .chart))
-                        ) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(date.formatted(.dateTime.month(.abbreviated).day().locale(locale)))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                Text(metric == .tokens
-                                    ? MetricFormatter.tokens(value(for: day))
-                                    : MetricFormatter.currencyFromUSD(value(for: day), currency: preferences.currency))
-                                    .font(.subheadline.weight(.semibold).monospacedDigit())
-                            }
-                            .foregroundStyle(.primary)
-                            .padding(10)
-                            .background(
-                                Color(uiColor: .secondarySystemGroupedBackground),
-                                in: .rect(cornerRadius: 10)
-                            )
-                            .accessibilityElement(children: .combine)
-                        }
-                    PointMark(x: .value("Date", date), y: .value(metric.label, value(for: day)))
-                        .foregroundStyle(lineColor)
-                        .symbolSize(40)
-                }
-            }
-            .chartXAxis(.hidden)
-            .chartYAxis(.hidden)
-            .chartXScale(domain: dateRange)
-            .chartYScale(domain: 0...upperBound)
-            .chartXSelection(value: $selectedDate)
-            .chartGesture { proxy in
-                SpatialTapGesture().onEnded { value in
-                    proxy.selectXValue(at: value.location.x)
-                }
-            }
-            .padding(.horizontal, 2)
-            .accessibilityLabel("\(metric.label) trend for the last \(validDays.count) days")
-            .accessibilityValue(selectedReading)
-
-            if let first = validDays.first?.dateValue, let last = validDays.last?.dateValue {
-                HStack(spacing: 4) {
-                    Text(dateLabel(first))
-                    Spacer(minLength: 0)
-                    if first != last {
-                        Text(dateLabel(first.addingTimeInterval(last.timeIntervalSince(first) / 2)))
-                        Spacer(minLength: 0)
-                        Text(dateLabel(last))
-                    }
-                }
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
+                    .symbolSize(40)
             }
         }
-        .frame(minHeight: 110)
+        .chartYAxis(.hidden)
+        .chartXAxis {
+            // Edge labels anchor inward so they render on the shared baseline
+            // below the plot without clipping at the card edge.
+            AxisMarks(values: axisDates) { value in
+                let date = value.as(Date.self)
+                let anchor: UnitPoint? =
+                    date == axisDates.first ? .leading
+                    : date == axisDates.last ? .trailing
+                    : nil
+                AxisValueLabel(
+                    format: .dateTime.month(.abbreviated).day().locale(locale),
+                    anchor: anchor
+                )
+            }
+        }
+        .chartXScale(domain: dateRange)
+        .chartYScale(domain: 0...upperBound)
+        .chartXSelection(value: snappedSelection)
+        .accessibilityLabel("\(metric.label) trend for the last \(validDays.count) days")
     }
 
     private var lineColor: Color { DesignTokens.trendLine(for: colorScheme) }
 
-    private var selectedDay: HistoryDay? {
-        guard let selectedDate else { return nil }
-        return validDays.min {
-            abs(($0.dateValue ?? .distantPast).timeIntervalSince(selectedDate))
-                < abs(($1.dateValue ?? .distantPast).timeIntervalSince(selectedDate))
-        }
+    /// The raw chart x-selection snapped to the nearest bucket date.
+    private var snappedSelection: Binding<Date?> {
+        Binding(
+            get: { selection },
+            set: { newValue in
+                selection = newValue.flatMap { date in
+                    nearestDay(to: date)?.dateValue
+                }
+            }
+        )
     }
 
-    private var selectedReading: String {
-        guard let day = selectedDay, let date = day.dateValue else { return "" }
-        let amount = metric == .tokens
-            ? MetricFormatter.exactTokens(value(for: day))
-            : MetricFormatter.currencyFromUSD(value(for: day), currency: preferences.currency)
-        return "\(date.formatted(.dateTime.month(.abbreviated).day().locale(locale))) \(amount)"
+    /// The selected bucket. `chartXSelection` reports nil again once the scrub
+    /// ends, so the readout only tracks the finger while it is down.
+    var selectedDay: HistoryDay? {
+        guard let selection else { return nil }
+        return nearestDay(to: selection)
+    }
+
+    private func nearestDay(to date: Date) -> HistoryDay? {
+        validDays.min {
+            abs(($0.dateValue ?? .distantPast).timeIntervalSince(date))
+                < abs(($1.dateValue ?? .distantPast).timeIntervalSince(date))
+        }
     }
 
     private var validDays: [HistoryDay] {
@@ -125,18 +107,27 @@ struct UsageTrendChart: View {
     }
 
     private var upperBound: Double {
-        max(1, (validDays.map(value(for:)).max() ?? 1) * 1.12)
+        max(1, (validDays.map(value(for:)).max() ?? 1) * 1.1)
     }
 
+    /// Slightly padded so the edge x-axis labels render below the plot
+    /// without clipping instead of overlapping the first/last points.
     private var dateRange: ClosedRange<Date> {
         let first = validDays.first?.dateValue ?? .now
         let last = validDays.last?.dateValue ?? first
-        return first...(last > first ? last : first.addingTimeInterval(86_400))
+        let span = max(86_400, last.timeIntervalSince(first))
+        let pad = span * 0.04
+        return first.addingTimeInterval(-pad)...last.addingTimeInterval(pad)
     }
 
-    private func dateLabel(_ date: Date) -> String {
-        let calendar = Calendar(identifier: .gregorian)
-        return "\(calendar.component(.month, from: date))/\(calendar.component(.day, from: date))"
+    /// Exactly three x labels: first / middle / last bucket.
+    private var axisDates: [Date] {
+        guard let first = validDays.first?.dateValue,
+              let last = validDays.last?.dateValue else {
+            return []
+        }
+        let mid = Date(timeIntervalSince1970: (first.timeIntervalSince1970 + last.timeIntervalSince1970) / 2)
+        return first == last ? [first] : [first, mid, last]
     }
 
     private func value(for day: HistoryDay) -> Double {

@@ -42,6 +42,8 @@ struct SharedSnapshotStoreTests {
                 .init(
                     id: "codex-0",
                     providerID: "codex",
+                    planLabel: nil,
+                    status: nil,
                     updatedAt: nil,
                     windows: [
                         .init(

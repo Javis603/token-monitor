@@ -36,7 +36,7 @@ final class SystemSurfaceCoordinator: SystemSurfacePublishing {
         snapshotStore: SharedSnapshotStore = SharedSnapshotStore(),
         liveActivityController: LiveActivityController = LiveActivityController(),
         widgetInterval: TimeInterval = 60,
-        liveInterval: TimeInterval = 15,
+        liveInterval: TimeInterval = 5,
         reloadWidgets: @escaping @MainActor () -> Void = { WidgetCenter.shared.reloadAllTimelines() },
         updateLiveActivity: (@MainActor (TokenMonitorSharedPayload.Snapshot, TokenMonitorSharedPayload.Preferences) async -> Void)? = nil
     ) {
@@ -109,7 +109,13 @@ final class SystemSurfaceCoordinator: SystemSurfacePublishing {
     func publish(stats: HubStats, history: UsageHistory, configuration: HubConfiguration) async {
         guard !Task.isCancelled, configured, self.configuration == configuration else { return }
         publication += 1
-        let snapshot = TokenMonitorSharedPayload.Snapshot.make(stats: stats, history: history)
+        let preferences = (try? snapshotStore.load().preferences) ?? .default
+        let snapshot = TokenMonitorSharedPayload.Snapshot.make(
+            stats: stats,
+            history: history,
+            limitProviderOrder: preferences.limitProviderOrder ?? [],
+            hiddenLimitProviders: Set(preferences.hiddenLimitProviders ?? [])
+        )
         do {
             try snapshotStore.updateSnapshot(snapshot)
         } catch { return }
@@ -130,7 +136,6 @@ final class SystemSurfaceCoordinator: SystemSurfacePublishing {
                 self.lastWidgetReloadAt = .now
             }
         }
-        let preferences = (try? snapshotStore.load().preferences) ?? .default
         if !preferences.liveActivityEnabled {
             liveTask?.cancel()
             liveTask = nil

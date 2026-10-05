@@ -62,7 +62,7 @@ final class LiveActivityController {
         latestPreferences = preferences
         if enabled {
             guard let snapshot else {
-                errorMessage = "Connect to a Hub before starting Live Activity."
+                errorMessage = String(localized: "Connect to a Hub before starting Live Activity.")
                 return
             }
             await update(snapshot: snapshot, preferences: preferences)
@@ -82,19 +82,31 @@ final class LiveActivityController {
         await endingTask?.value
         guard self.generation == generation, !Task.isCancelled else { return }
         latestPreferences = preferences
-        let state = contentState(snapshot: snapshot, preferences: preferences)
+        let state = Self.contentState(snapshot: snapshot, preferences: preferences)
         let content = ActivityContent(
             state: state,
-            staleDate: state.sourceStale == true ? .distantPast : state.updatedAt.addingTimeInterval(600)
+            staleDate: state.sourceStale == true ? .distantPast : state.updatedAt.addingTimeInterval(900)
         )
         do {
             let activities = Activity<TokenMonitorActivityAttributes>.activities
             if activities.isEmpty {
-                let activity = try Activity.request(
-                    attributes: TokenMonitorActivityAttributes(title: "Token Monitor"),
-                    content: content,
-                    pushType: .token
-                )
+                // Unsigned/debug builds lack `aps-environment`, which makes a
+                // `pushType: .token` request throw outright. Fall back to a
+                // local-only activity so the surfaces still run.
+                let attributes = TokenMonitorActivityAttributes(title: "Token Monitor")
+                let activity: Activity<TokenMonitorActivityAttributes>
+                do {
+                    activity = try Activity.request(
+                        attributes: attributes,
+                        content: content,
+                        pushType: .token
+                    )
+                } catch {
+                    activity = try Activity.request(
+                        attributes: attributes,
+                        content: content
+                    )
+                }
                 observePushToken(for: activity)
                 if let pushToken = activity.pushToken {
                     pushTokens[activity.id] = pushToken
@@ -104,7 +116,7 @@ final class LiveActivityController {
                         preferences: preferences
                     )
                 } else {
-                    remoteUpdateMessage = "Waiting for an APNs push token."
+                    remoteUpdateMessage = String(localized: "Waiting for an APNs push token.")
                 }
             } else {
                 for activity in activities {
@@ -119,7 +131,7 @@ final class LiveActivityController {
                             preferences: preferences
                         )
                     } else {
-                        remoteUpdateMessage = "Waiting for an APNs push token."
+                        remoteUpdateMessage = String(localized: "Waiting for an APNs push token.")
                     }
                 }
             }
@@ -201,11 +213,21 @@ final class LiveActivityController {
             remoteUpdatesEnabled = pushEnabled
             remoteUpdateMessage = pushEnabled
                 ? nil
-                : "Hub accepted the Activity, but APNs remote updates are not configured."
+                : String(localized: "Hub accepted the Activity, but APNs remote updates are not configured.")
         } catch {
             guard self.generation == generation, !Task.isCancelled else { return }
             remoteUpdatesEnabled = false
-            remoteUpdateMessage = "Hub registration failed; remote updates are unavailable."
+            // A Hub without the live-activities route answers 404 — the fix is
+            // deploying a current Worker, not reconnecting.
+            if case .httpStatus(404) = error as? HubClientError {
+                remoteUpdateMessage = String(
+                    localized: "This Hub doesn't support Live Activity push yet. Deploy the latest Worker with APNs configured to get background updates."
+                )
+            } else {
+                remoteUpdateMessage = String(
+                    localized: "Hub registration failed; remote updates are unavailable."
+                )
+            }
         }
     }
 
@@ -222,144 +244,95 @@ final class LiveActivityController {
         }
     }
 
-    func contentState(
+    /// Structured ContentState v2 — identical selection semantics to
+    /// `buildLiveActivityContentState` in `src/shared/liveActivity.js` so the
+    /// locally driven and APNs-driven updates draw the same thing.
+    nonisolated static func contentState(
         snapshot: TokenMonitorSharedPayload.Snapshot,
         preferences: TokenMonitorSharedPayload.Preferences,
         now: Date = .now
     ) -> TokenMonitorActivityAttributes.ContentState {
         let usage = snapshot.usage(for: preferences.livePeriod)
-        let limit = preferredLimit(
-            in: snapshot,
-            providerID: preferences.liveProviderID
-        )
-        let currency = AppCurrency(
-            rawValue: preferences.currencyCode ?? "USD"
-        ) ?? .usd
-        let locale = AppLanguage(
-            rawValue: preferences.languageCode ?? "auto"
-        )?.locale ?? .autoupdatingCurrent
-
-        let dataProviderID = limit?.providerID ?? nonEmpty(preferences.liveProviderID)
-        let iconProviderID = nonEmpty(preferences.liveIconProviderID)
-            ?? dataProviderID
-            ?? usage.models.first.flatMap {
-                ProviderPresentation.modelVendor(for: $0.id)
-            }
-        let providerName = ProviderPresentation.displayName(for: dataProviderID)
-        let tokensValue = MetricFormatter.tokens(usage.tokens)
-        let costValue = MetricFormatter.currencyFromUSD(
-            usage.cost,
-            currency: currency
-        )
-        let limitValue: String? = {
-            guard let window = limit?.windows.first else { return nil }
-            if let amount = window.amount, amount.isFinite {
-                guard let code = window.currency, !code.isEmpty else {
-                    return amount.formatted(.number.precision(.fractionLength(0...2)))
-                }
-                return MetricFormatter.currency(amount, code: code)
-            }
-            guard let remaining = window.remainingPercent else { return nil }
-            return MetricFormatter.remaining(remaining, locale: locale)
-        }()
-
-        let primary: (String, String, Double?)
-        switch preferences.livePrimaryMetric {
-        case "cost":
-            primary = (
-                "Cost",
-                costValue,
-                nil
-            )
-        case "limit":
-            primary = (providerName, limitValue ?? "—", limit?.windows.first?.remainingPercent.map { $0 / 100 })
-        default:
-            primary = ("Tokens", tokensValue, nil)
-        }
-
-        let configuredFields = [
-            preferences.liveCompactTrailingField,
-            preferences.liveExpandedLeadingField,
-            preferences.liveExpandedCenterField,
-            preferences.liveExpandedTrailingField,
-            preferences.liveExpandedBottomField,
-            preferences.liveLockScreenPrimaryField,
-            preferences.liveLockScreenSecondaryField,
-            preferences.liveLockScreenBottomField
-        ]
-        let shouldProvideSecondary = preferences.liveShowsSecondaryMetric
-            || configuredFields.contains(TokenMonitorActivityAttributes.Field.secondary.rawValue)
-        let shouldProvideProgress = preferences.liveShowsProgress
-            || configuredFields.contains(TokenMonitorActivityAttributes.Field.progress.rawValue)
-
-        let secondary: (String, String)?
-        if !shouldProvideSecondary {
-            secondary = nil
-        } else if preferences.livePrimaryMetric == "limit" {
-            secondary = (
-                "Cost",
-                costValue
-            )
-        } else if let limitValue {
-            secondary = (providerName, limitValue)
-        } else {
-            secondary = nil
-        }
-
-        let progress = shouldProvideProgress
-            ? limit?.windows.first?.remainingPercent.flatMap { value in
-                value.isFinite ? min(1, max(0, value / 100)) : nil
-            }
-            : nil
-        let usesLimit = preferences.livePrimaryMetric == "limit"
-        let candidate = usesLimit ? limit?.updatedAt ?? .distantPast : snapshot.updatedAt
-        let sourceDate = candidate <= now ? candidate : .distantPast
-        let sourceStale = (usesLimit ? limit?.sourceStale == true : snapshot.sourceStale == true)
-            || now.timeIntervalSince(sourceDate) >= 600
-
+        let limit = quotaLimit(in: snapshot.limits, providerID: preferences.liveProviderID)
+        let sourceDate = snapshot.updatedAt <= now ? snapshot.updatedAt : .distantPast
+        let sourceStale = snapshot.sourceStale == true
+            || sourceDate == .distantPast
+            || now.timeIntervalSince(sourceDate) >= 900
         return TokenMonitorActivityAttributes.ContentState(
-            primaryLabel: primary.0,
-            primaryValue: primary.1,
-            secondaryLabel: secondary?.0,
-            secondaryValue: secondary?.1,
-            progress: progress,
             updatedAt: sourceDate,
-            providerID: dataProviderID,
-            providerName: providerName,
-            iconProviderID: iconProviderID,
-            tokensValue: tokensValue,
-            costValue: costValue,
-            limitValue: limitValue,
-            compactTrailingField: preferences.liveCompactTrailingField,
-            expandedLeadingField: preferences.liveExpandedLeadingField,
-            expandedCenterField: preferences.liveExpandedCenterField,
-            expandedTrailingField: preferences.liveExpandedTrailingField,
-            expandedBottomField: preferences.liveExpandedBottomField,
-            lockScreenPrimaryField: preferences.liveLockScreenPrimaryField,
-            lockScreenSecondaryField: preferences.liveLockScreenSecondaryField,
-            lockScreenBottomField: preferences.liveLockScreenBottomField,
-            sourceStale: sourceStale
+            sourceStale: sourceStale,
+            period: preferences.livePeriod,
+            tokens: usage.tokens.isFinite ? usage.tokens : nil,
+            costUSD: usage.cost.isFinite ? usage.cost : nil,
+            quota: limit.map { limit in
+                TokenMonitorActivityAttributes.ContentState.Quota(
+                    providerID: limit.providerID,
+                    planLabel: limit.planLabel,
+                    updatedAt: limit.updatedAt,
+                    stale: limit.sourceStale,
+                    windows: limit.windows.prefix(2).map { window in
+                        .init(
+                            label: window.label,
+                            remainingPercent: window.remainingPercent,
+                            resetsAt: window.resetAt,
+                            creditsAmount: window.amount,
+                            creditsCurrency: window.currency
+                        )
+                    }
+                )
+            },
+            layout: .init(
+                compactLeading: preferences.liveCompactLeading,
+                compactTrailing: preferences.liveCompactTrailing,
+                expanded: preferences.liveExpandedStyle,
+                lockScreen: preferences.liveLockScreenStyle,
+                currencyCode: preferences.currencyCode ?? "USD",
+                languageCode: preferences.languageCode ?? "auto"
+            )
         )
     }
 
-    private func nonEmpty(_ value: String?) -> String? {
-        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return nil
-        }
-        return value
-    }
-
-    private func preferredLimit(
-        in snapshot: TokenMonitorSharedPayload.Snapshot,
+    /// Quota selection shared with the Hub: a specific id picks that provider's
+    /// lowest-remaining account; Auto considers only `ok`, non-stale providers,
+    /// lowest canonical remaining wins, and ties or an empty pool fall back to
+    /// the default catalog order.
+    nonisolated private static func quotaLimit(
+        in limits: [TokenMonitorSharedPayload.Limit],
         providerID: String?
     ) -> TokenMonitorSharedPayload.Limit? {
-        if let providerID = nonEmpty(providerID) {
-            return snapshot.limits.first(where: { $0.providerID == providerID })
+        func remaining(_ limit: TokenMonitorSharedPayload.Limit) -> Double? {
+            limit.windows.compactMap(\.remainingPercent).min()
         }
-        return snapshot.limits.min { lhs, rhs in
-            let left = lhs.windows.compactMap(\.remainingPercent).min() ?? 101
-            let right = rhs.windows.compactMap(\.remainingPercent).min() ?? 101
-            return left < right
+        func catalogRank(_ limit: TokenMonitorSharedPayload.Limit) -> Int {
+            LimitProviderOrder.defaultOrder.firstIndex(of: limit.providerID)
+                ?? LimitProviderOrder.defaultOrder.count
+        }
+        if let providerID, !providerID.isEmpty {
+            return limits
+                .filter { $0.providerID == providerID.lowercased() }
+                .min { left, right in
+                    switch (remaining(left), remaining(right)) {
+                    case let (left?, right?): return left < right
+                    case (_?, nil): return true
+                    default: return false
+                    }
+                }
+        }
+        let eligible = limits.filter {
+            ($0.status ?? "ok") == "ok" && $0.sourceStale != true
+        }
+        let pool = eligible.isEmpty ? limits : eligible
+        return pool.min { left, right in
+            switch (remaining(left), remaining(right)) {
+            case let (left?, right?) where left != right:
+                return left < right
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                return catalogRank(left) < catalogRank(right)
+            }
         }
     }
 }

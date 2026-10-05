@@ -1,15 +1,16 @@
 import SwiftUI
 
+/// One cell in the lifetime stat grid: a small tinted symbol + caption label,
+/// then the value.
 struct InsightMetricCard: View {
-    @ScaledMetric(relativeTo: .subheadline) private var iconWidth = 18
+    @ScaledMetric(relativeTo: .caption) private var iconWidth = 14
     let title: String
     let value: String
     let systemImage: String
     let tint: Color
-    var prominent = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 5) {
             Label {
                 Text(LocalizedStringKey(title))
                     .foregroundStyle(.secondary)
@@ -19,14 +20,14 @@ struct InsightMetricCard: View {
                     .frame(width: iconWidth)
                     .accessibilityHidden(true)
             }
-            .font(.subheadline)
+            .font(.caption)
 
             Text(value)
-                .font(prominent ? .title3.weight(.semibold) : .headline)
+                .font(.headline)
                 .monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .frame(maxWidth: .infinity, minHeight: 56, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .combine)
     }
 }

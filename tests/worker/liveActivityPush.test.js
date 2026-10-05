@@ -22,7 +22,7 @@ test('Worker APNs signs valid ES256 JWTs and distinguishes invalid tokens from t
       return { ok: status === 200, status, async json() { return status === 410 ? { reason: 'Unregistered' } : {}; } };
     }
   });
-  assert.deepEqual(await client.send('a'.repeat(64), { primaryValue: '123' }), { sent: true });
+  assert.deepEqual(await client.send('a'.repeat(64), { tokens: 123 }), { sent: true });
   const { url, options } = requests[0];
   assert.ok(options.signal instanceof AbortSignal);
   assert.match(url, /^https:\/\/api.sandbox.push.apple.com\//);
@@ -31,7 +31,7 @@ test('Worker APNs signs valid ES256 JWTs and distinguishes invalid tokens from t
   assert.ok(crypto.verify('sha256', Buffer.from(`${header}.${payload}`), { key: publicKey, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature, 'base64url')));
   const body = JSON.parse(options.body);
   assert.equal(body.aps.timestamp, 1_700_000_000);
-  assert.deepEqual(body.aps['content-state'], { primaryValue: '123' });
+  assert.deepEqual(body.aps['content-state'], { tokens: 123 });
   status = 410;
   assert.equal((await client.send('a'.repeat(64), {})).invalid, true);
   status = 503;
@@ -54,19 +54,19 @@ test('Worker APNs stale-date follows source age and status while timestamp stays
     env: { TOKEN_MONITOR_APNS_KEY_ID: 'KEY', TOKEN_MONITOR_APNS_TEAM_ID: 'TEAM', TOKEN_MONITOR_APNS_PRIVATE_KEY: pem },
     now: () => now, fetchImpl
   });
-  const registration = { preferences: { livePeriod: 'today', livePrimaryMetric: 'tokens' } };
+  const registration = { preferences: { livePeriod: 'today' } };
   const staleSource = buildLiveActivityContentState({
     updatedAt: new Date(now).toISOString(),
     devices: [{ updatedAt: '2026-10-03T00:00:00Z', stale: true }]
   }, registration, now);
   const cases = [
-    [staleSource, Date.parse('2026-10-03T00:00:00Z') / 1000 + 600],
-    [{ updatedAt: timestamp - reference - 100 }, timestamp + 500],
-    [{ updatedAt: timestamp - reference - 600 }, timestamp],
-    [{ updatedAt: timestamp - reference - 601 }, timestamp - 1],
+    [staleSource, Date.parse('2026-10-03T00:00:00Z') / 1000 + 900],
+    [{ updatedAt: timestamp - reference - 100 }, timestamp + 800],
+    [{ updatedAt: timestamp - reference - 600 }, timestamp + 300],
+    [{ updatedAt: timestamp - reference - 601 }, timestamp + 299],
     [{ updatedAt: timestamp - reference, sourceStale: true }, timestamp],
     [{ updatedAt: timestamp - reference + 1 }, timestamp],
-    [{ updatedAt: -reference }, 600],
+    [{ updatedAt: -reference }, 900],
     [{}, timestamp],
     [{ updatedAt: null }, timestamp],
     [{ updatedAt: 'invalid' }, timestamp],

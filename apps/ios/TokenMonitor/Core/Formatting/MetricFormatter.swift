@@ -69,16 +69,6 @@ nonisolated enum MetricFormatter {
         }
     }
 
-    static func attentionCount(_ count: Int, locale: Locale) -> String {
-        switch language(for: locale) {
-        case "zh-Hant": "\(count) 項需要留意"
-        case "zh-Hans": "\(count) 项需要注意"
-        case "ja": "要確認 \(count) 件"
-        case "ko": "확인 필요 \(count)개"
-        default: "\(count) need attention"
-        }
-    }
-
     static func duration(
         milliseconds: Double,
         locale: Locale = .autoupdatingCurrent

@@ -1,46 +1,49 @@
 import SwiftUI
 
+/// Overview preview: the first `homeLimitCount` provider groups in the user's
+/// limits order, compact (at most two windows per account).
 struct LimitPreviewSection: View {
-    let providers: [LimitProvider]
+    let groups: [LimitProviderGroup]
     let showAll: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline) {
-                    heading
-                    Spacer()
-                    allButton
+        VStack(alignment: .leading, spacing: DesignTokens.headerToCardSpacing) {
+            SectionHeader("AI Limits") {
+                Button(action: showAll) {
+                    Label("All", systemImage: "chevron.right")
+                        .labelStyle(ReversedTitleIcon())
                 }
-                VStack(alignment: .leading, spacing: 8) {
-                    heading
-                    allButton
-                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
             }
-            if providers.isEmpty {
-                Label("No limit data from this Hub", systemImage: "gauge.open.with.lines.needle.33percent")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(Array(LimitProviderGroup.grouped(providers).enumerated()), id: \.element.id) { index, group in
-                    if index > 0 {
-                        Divider().padding(.vertical, 4)
+
+            SurfaceCard {
+                if groups.isEmpty {
+                    Label("No limit data from this Hub", systemImage: "gauge.open.with.lines.needle.33percent")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
+                            if index > 0 {
+                                Divider()
+                            }
+                            ProviderLimitCard(providers: group.accounts, compact: true)
+                        }
                     }
-                    CompactLimitProviderCard(providers: group.accounts)
                 }
             }
         }
     }
+}
 
-    private var heading: some View {
-        Label("AI Limits", systemImage: "gauge")
-            .font(.title3.weight(.semibold))
-            .accessibilityAddTraits(.isHeader)
-    }
-
-    private var allButton: some View {
-        Button("View all", systemImage: "arrow.right", action: showAll)
-            .font(.subheadline.weight(.semibold))
-            .frame(minHeight: DesignTokens.controlHeight)
+/// Trailing chevron after the title, for header accessories like "All ›".
+struct ReversedTitleIcon: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 3) {
+            configuration.title
+            configuration.icon
+                .font(.caption.weight(.semibold))
+        }
     }
 }

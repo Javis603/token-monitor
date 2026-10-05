@@ -3,57 +3,23 @@
 
 'use strict';
 
-const { creditsAmount, creditsCurrency, creditsMeterPercent, formatMoney } = require('./limits/balanceDisplay');
+// Live Activity content state v2: the Hub push builder emits the structured
+// payload the iOS extension decodes into TokenMonitorActivityAttributes
+// .ContentState — no pre-formatted strings cross the wire; the device renders
+// and localises. Keep the field names identical to the Swift struct.
+
+const { creditsMeterPercent } = require('./limits/balanceDisplay');
+const { LIMIT_PROVIDER_IDS } = require('./limits/providers');
+const { limitWindowLabel } = require('./limits/windowLabels');
 
 const DATE_REFERENCE_SECONDS = 978307200;
+const STALE_AGE_SECONDS = 15 * 60;
 const VALID_CURRENCIES = new Set(['USD', 'TWD', 'HKD', 'CNY']);
 const VALID_LANGUAGES = new Set(['auto', 'en', 'zh-TW', 'zh-CN', 'ja', 'ko']);
-const VALID_FIELDS = new Set([
-  'primary',
-  'secondary',
-  'provider',
-  'tokens',
-  'cost',
-  'limit',
-  'progress',
-  'updated',
-  'none'
-]);
-const VALID_METRICS = new Set(['tokens', 'cost', 'limit']);
 const VALID_PERIODS = new Set(['today', 'month', 'allTime']);
-const CURRENCY_RATES_FROM_USD = {
-  USD: 1,
-  TWD: 31.5,
-  HKD: 7.8,
-  CNY: 6.8
-};
-const CURRENCY_SYMBOLS = {
-  USD: '$',
-  TWD: 'NT$',
-  HKD: 'HK$',
-  CNY: '¥'
-};
-const PROVIDER_NAMES = {
-  claude: 'Claude',
-  codex: 'Codex',
-  cursor: 'Cursor',
-  antigravity: 'Antigravity',
-  opencode: 'OpenCode',
-  openrouter: 'OpenRouter',
-  deepseek: 'DeepSeek',
-  minimax: 'MiniMax',
-  mimo: 'MiMo',
-  grok: 'Grok',
-  copilot: 'GitHub Copilot',
-  kiro: 'Kiro',
-  zai: 'Z.ai',
-  zaiteam: 'Z.ai Team',
-  volcengine: 'Volcengine',
-  qoder: 'Qoder',
-  kimi: 'Kimi',
-  ollama: 'Ollama',
-  thirdparty: 'Custom Provider'
-};
+const VALID_COMPACT_LEADING = new Set(['mark', 'ring', 'tokens', 'cost']);
+const VALID_COMPACT_TRAILING = new Set(['percent', 'reset', 'tokens', 'cost', 'ring']);
+const VALID_STYLES = new Set(['quota', 'usage', 'combined']);
 
 function asNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -78,9 +44,9 @@ function normalizedProvider(value) {
   return provider || null;
 }
 
-function normalizedField(value, fallback) {
-  const field = normalizedString(value, 32);
-  return VALID_FIELDS.has(field) ? field : fallback;
+function normalizedOption(value, valid, fallback) {
+  const option = normalizedString(value, 32);
+  return valid.has(option) ? option : fallback;
 }
 
 function languageLocale(languageCode, locale) {
@@ -119,113 +85,16 @@ function normalizeLiveActivityRegistration(input) {
     registeredAt: new Date().toISOString(),
     preferences: {
       liveActivityEnabled: raw.liveActivityEnabled !== false,
-      livePrimaryMetric: VALID_METRICS.has(raw.livePrimaryMetric)
-        ? raw.livePrimaryMetric
-        : 'tokens',
-      livePeriod: VALID_PERIODS.has(raw.livePeriod)
-        ? raw.livePeriod
-        : 'today',
+      livePeriod: VALID_PERIODS.has(raw.livePeriod) ? raw.livePeriod : 'today',
       liveProviderID: normalizedProvider(raw.liveProviderID),
-      liveShowsSecondaryMetric: raw.liveShowsSecondaryMetric !== false,
-      liveShowsProgress: raw.liveShowsProgress !== false,
-      liveIconProviderID: normalizedProvider(raw.liveIconProviderID),
-      liveCompactTrailingField: normalizedField(raw.liveCompactTrailingField, 'primary'),
-      liveExpandedLeadingField: normalizedField(raw.liveExpandedLeadingField, 'provider'),
-      liveExpandedCenterField: normalizedField(raw.liveExpandedCenterField, 'primary'),
-      liveExpandedTrailingField: normalizedField(raw.liveExpandedTrailingField, 'secondary'),
-      liveExpandedBottomField: normalizedField(raw.liveExpandedBottomField, 'progress'),
-      liveLockScreenPrimaryField: normalizedField(raw.liveLockScreenPrimaryField, 'primary'),
-      liveLockScreenSecondaryField: normalizedField(raw.liveLockScreenSecondaryField, 'secondary'),
-      liveLockScreenBottomField: normalizedField(raw.liveLockScreenBottomField, 'progress'),
+      liveCompactLeading: normalizedOption(raw.liveCompactLeading, VALID_COMPACT_LEADING, 'mark'),
+      liveCompactTrailing: normalizedOption(raw.liveCompactTrailing, VALID_COMPACT_TRAILING, 'percent'),
+      liveExpandedStyle: normalizedOption(raw.liveExpandedStyle, VALID_STYLES, 'quota'),
+      liveLockScreenStyle: normalizedOption(raw.liveLockScreenStyle, VALID_STYLES, 'combined'),
       currencyCode,
       languageCode
     }
   };
-}
-
-function localeFor(registration) {
-  return registration.locale || languageLocale(
-    registration.preferences?.languageCode,
-    undefined
-  );
-}
-
-function formatNumber(value, locale, options = {}) {
-  const number = Number.isFinite(value) ? value : 0;
-  try {
-    return new Intl.NumberFormat(locale, options).format(number);
-  } catch (_) {
-    return new Intl.NumberFormat('en', options).format(number);
-  }
-}
-
-function formatTokens(value, locale) {
-  return formatNumber(value, locale, {
-    notation: 'compact',
-    maximumFractionDigits: 1
-  });
-}
-
-function formatCurrencyFromUSD(value, currencyCode, locale) {
-  const code = VALID_CURRENCIES.has(currencyCode) ? currencyCode : 'USD';
-  const converted = (Number.isFinite(value) ? value : 0) * CURRENCY_RATES_FROM_USD[code];
-  return CURRENCY_SYMBOLS[code] + formatNumber(converted, locale, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  });
-}
-
-function languageFamily(locale) {
-  const identifier = String(locale || '').toLowerCase();
-  if (identifier.startsWith('zh-hant') || identifier.startsWith('zh-tw') || identifier.startsWith('zh-hk')) {
-    return 'zh-Hant';
-  }
-  if (identifier.startsWith('zh')) return 'zh-Hans';
-  if (identifier.startsWith('ja')) return 'ja';
-  if (identifier.startsWith('ko')) return 'ko';
-  return 'en';
-}
-
-function formatRemaining(value, locale) {
-  const percentage = formatNumber(clamp(Number(value) || 0, 0, 100) / 100, locale, {
-    style: 'percent',
-    maximumFractionDigits: 0
-  });
-  switch (languageFamily(locale)) {
-    case 'zh-Hant': return `${percentage} 剩餘`;
-    case 'zh-Hans': return `${percentage} 剩余`;
-    case 'ja': return `残り ${percentage}`;
-    case 'ko': return `${percentage} 남음`;
-    default: return `${percentage} left`;
-  }
-}
-
-function providerName(providerID) {
-  const normalized = normalizedProvider(providerID);
-  if (!normalized) return 'Provider';
-  return PROVIDER_NAMES[normalized]
-    || normalized.slice(0, 1).toUpperCase() + normalized.slice(1);
-}
-
-function modelVendor(modelID) {
-  const model = String(modelID || '').toLowerCase();
-  if (model === 'auto' || model === 'cursor-auto') return 'cursor';
-  if (/claude|anthropic|sonnet|opus|haiku/.test(model)) return 'claude';
-  if (/gpt|openai|codex|chatgpt|^o[134](?:-|$)/.test(model)) return 'codex';
-  if (/gemini|gemma|google/.test(model)) return 'gemini';
-  if (/grok|xai/.test(model)) return 'grok';
-  if (/deepseek/.test(model)) return 'deepseek';
-  if (/llama|meta/.test(model)) return 'meta';
-  if (/mistral|mixtral|codestral/.test(model)) return 'mistral';
-  if (/qwen|qwq|qvq/.test(model)) return 'qwen';
-  if (/kimi|moonshot/.test(model)) return 'kimi';
-  if (/chatglm|glm-|z\.ai|zhipu/.test(model)) return 'zai';
-  if (/cohere|command-r/.test(model)) return 'cohere';
-  if (/mimo|xiaomi/.test(model)) return 'xiaomi';
-  if (/minimax|abab/.test(model)) return 'minimax';
-  if (/doubao|^seed-/.test(model)) return 'doubao';
-  if (model === 'big-pickle') return 'opencode';
-  return null;
 }
 
 function providerWindowRemaining(provider, window) {
@@ -246,28 +115,69 @@ function displayWindows(provider) {
   ));
 }
 
-function preferredLimit(stats, providerID) {
+// The shared views show the canonical lanes only; promo/additional windows
+// never reach the island or lock screen.
+function canonicalWindows(provider) {
+  return displayWindows(provider).filter((window) => window?.additional !== true);
+}
+
+function lowestRemaining(provider) {
+  const values = canonicalWindows(provider)
+    .map((window) => providerWindowRemaining(provider, window))
+    .filter((value) => value !== null);
+  return values.length ? Math.min(...values) : null;
+}
+
+function providerStatus(provider) {
+  return normalizedProvider(provider?.status) || 'ok';
+}
+
+function catalogIndex(provider) {
+  const index = LIMIT_PROVIDER_IDS.indexOf(normalizedProvider(provider?.provider));
+  return index === -1 ? LIMIT_PROVIDER_IDS.length : index;
+}
+
+// Identical to the Swift auto pick: healthy (status ok / absent) non-stale
+// providers, the lowest canonical remaining % wins; ties and empty pools fall
+// back to the default catalog order.
+function selectLiveActivityProvider(stats, providerID) {
   const providers = Array.isArray(stats?.limits?.providers)
     ? stats.limits.providers
     : [];
+  if (!providers.length) return null;
   if (providerID) {
-    const selected = providers.find((provider) => (
+    const matches = providers.filter((provider) => (
       normalizedProvider(provider?.provider) === providerID
     ));
-    return selected || null;
+    if (!matches.length) return null;
+    return matches.reduce((best, provider) => {
+      if (!best) return provider;
+      const left = lowestRemaining(provider);
+      const right = lowestRemaining(best);
+      if (left === null) return best;
+      if (right === null || left < right) return provider;
+      return best;
+    }, null);
   }
-  return providers.reduce((best, provider) => {
+  const eligible = providers.filter((provider) => (
+    providerStatus(provider) === 'ok' && provider?.stale !== true
+  ));
+  const pool = eligible.length ? eligible : providers;
+  return pool.reduce((best, provider) => {
     if (!best) return provider;
-    const left = Math.min(...displayWindows(provider)
-      .map((window) => providerWindowRemaining(provider, window))
-      .filter((value) => value !== null));
-    const right = Math.min(...displayWindows(best)
-      .map((window) => providerWindowRemaining(best, window))
-      .filter((value) => value !== null));
-    if (!Number.isFinite(left)) return best;
-    if (!Number.isFinite(right) || left < right) return provider;
-    return best;
-  }, null) || providers[0] || null;
+    const left = lowestRemaining(provider);
+    const right = lowestRemaining(best);
+    if (left === null) {
+      // No candidate has a meter yet — catalog order decides.
+      return right === null && catalogIndex(provider) < catalogIndex(best)
+        ? provider
+        : best;
+    }
+    if (right === null || left < right) return provider;
+    return left === right && catalogIndex(provider) < catalogIndex(best)
+      ? provider
+      : best;
+  }, null);
 }
 
 function sourceTimestamp(value, nowMs) {
@@ -276,14 +186,18 @@ function sourceTimestamp(value, nowMs) {
   return Number.isFinite(parsed) && parsed <= nowMs ? parsed : null;
 }
 
-function activitySource(stats, selectedLimit, primaryMetric, nowMs) {
+function appleSeconds(timestampMs) {
+  return timestampMs === null ? null
+    : Math.floor(timestampMs / 1000) - DATE_REFERENCE_SECONDS;
+}
+
+// The top-level timestamp describes the usage feed (devices first, then the
+// stats envelope) — the quota carries its own updatedAt/stale.
+function activitySource(stats, nowMs) {
   const devices = Array.isArray(stats?.devices) ? stats.devices : [];
   let milliseconds;
   let stale;
-  if (primaryMetric === 'limit') {
-    milliseconds = sourceTimestamp(selectedLimit?.updatedAt, nowMs);
-    stale = selectedLimit?.stale === true;
-  } else if (devices.length) {
+  if (devices.length) {
     const timestamps = devices.map((device) => sourceTimestamp(device?.updatedAt, nowMs))
       .filter((value) => value !== null);
     milliseconds = timestamps.length ? Math.max(...timestamps) : null;
@@ -294,8 +208,8 @@ function activitySource(stats, selectedLimit, primaryMetric, nowMs) {
   }
   return {
     // An unknown source must never acquire the transport's current timestamp.
-    updatedAt: Math.floor((milliseconds ?? 0) / 1000) - DATE_REFERENCE_SECONDS,
-    sourceStale: stale || milliseconds === null || nowMs - milliseconds >= 600_000
+    updatedAt: appleSeconds(milliseconds) ?? -DATE_REFERENCE_SECONDS,
+    sourceStale: stale || milliseconds === null || nowMs - milliseconds >= STALE_AGE_SECONDS * 1000
   };
 }
 
@@ -305,96 +219,69 @@ function liveActivityStaleDate(contentState, timestamp) {
     ? Math.floor(updatedAt + DATE_REFERENCE_SECONDS)
     : null;
   if (sourceSeconds === null || sourceSeconds > timestamp) return timestamp;
-  const deadline = sourceSeconds + 600;
-  // Explicit stale status can precede the ten-minute age threshold.
+  const deadline = sourceSeconds + STALE_AGE_SECONDS;
+  // Explicit stale status can precede the fifteen-minute age threshold.
   return contentState?.sourceStale === true ? Math.min(deadline, timestamp) : deadline;
+}
+
+function quotaWindow(provider, providerID, window) {
+  const isCredits = window?.metric === 'credits';
+  const credits = isCredits
+    ? asNumber(window?.remaining) ?? asNumber(provider?.balance?.amount)
+    : null;
+  const currency = isCredits
+    ? normalizedString(window?.currency, 8).toUpperCase()
+      || normalizedString(provider?.balance?.currency, 8).toUpperCase() || null
+    : null;
+  return {
+    label: limitWindowLabel(providerID, window, 'Quota'),
+    remainingPercent: providerWindowRemaining(provider, window),
+    resetsAt: appleSeconds(sourceTimestamp(window?.resetsAt, Number.MAX_SAFE_INTEGER)),
+    creditsAmount: credits,
+    creditsCurrency: currency
+  };
+}
+
+function liveActivityQuota(stats, preferences, nowMs) {
+  const provider = selectLiveActivityProvider(stats, preferences.liveProviderID);
+  if (!provider) return null;
+  const providerID = normalizedProvider(provider.provider);
+  return {
+    providerID,
+    planLabel: normalizedString(provider.planLabel) || normalizedString(provider.accountLabel) || null,
+    updatedAt: appleSeconds(sourceTimestamp(provider.updatedAt, nowMs)),
+    stale: provider.stale === true || null,
+    windows: canonicalWindows(provider).slice(0, 2)
+      .map((window) => quotaWindow(provider, providerID, window))
+  };
+}
+
+function layoutFor(preferences) {
+  return {
+    compactLeading: normalizedOption(preferences.liveCompactLeading, VALID_COMPACT_LEADING, 'mark'),
+    compactTrailing: normalizedOption(preferences.liveCompactTrailing, VALID_COMPACT_TRAILING, 'percent'),
+    expanded: normalizedOption(preferences.liveExpandedStyle, VALID_STYLES, 'quota'),
+    lockScreen: normalizedOption(preferences.liveLockScreenStyle, VALID_STYLES, 'combined'),
+    currencyCode: VALID_CURRENCIES.has(preferences.currencyCode)
+      ? preferences.currencyCode
+      : 'USD',
+    languageCode: VALID_LANGUAGES.has(preferences.languageCode)
+      ? preferences.languageCode
+      : 'auto'
+  };
 }
 
 function buildLiveActivityContentState(stats, registration, nowMs = Date.now()) {
   const preferences = registration?.preferences || {};
-  const locale = localeFor(registration || {});
-  const period = stats?.periods?.[preferences.livePeriod] || {};
-  const tokens = asNumber(period.totalTokens);
-  const cost = asNumber(period.costUsd);
-  const tokensValue = tokens === null ? '—' : formatTokens(tokens, locale);
-  const costValue = cost === null ? '—' : formatCurrencyFromUSD(
-    cost,
-    preferences.currencyCode,
-    locale
-  );
-  const selectedLimit = preferredLimit(stats, preferences.liveProviderID);
-  const selectedProviderID = normalizedProvider(selectedLimit?.provider);
-  const selectedWindow = displayWindows(selectedLimit)[0] || null;
-  const remaining = selectedWindow
-    ? providerWindowRemaining(selectedLimit, selectedWindow)
-    : null;
-  const limitValue = selectedWindow?.metric === 'credits'
-    ? formatMoney(creditsAmount(selectedLimit, selectedWindow), creditsCurrency(selectedLimit, selectedWindow)) || '—'
-    : remaining === null ? null : formatRemaining(remaining, locale);
-  const modelIDs = Object.keys(period.models || {});
-  const dataProviderID = selectedProviderID
-    || preferences.liveProviderID
-    || modelVendor(modelIDs[0]);
-  const iconProviderID = preferences.liveIconProviderID
-    || dataProviderID
-    || modelVendor(modelIDs[0]);
-  const dataProviderName = providerName(dataProviderID);
-
-  let primaryLabel = 'Tokens';
-  let primaryValue = tokensValue;
-  if (preferences.livePrimaryMetric === 'cost') {
-    primaryLabel = 'Cost';
-    primaryValue = costValue;
-  } else if (preferences.livePrimaryMetric === 'limit') {
-    primaryLabel = dataProviderName;
-    primaryValue = limitValue ?? '—';
-  }
-
-  const configuredFields = [
-    preferences.liveCompactTrailingField,
-    preferences.liveExpandedLeadingField,
-    preferences.liveExpandedCenterField,
-    preferences.liveExpandedTrailingField,
-    preferences.liveExpandedBottomField,
-    preferences.liveLockScreenPrimaryField,
-    preferences.liveLockScreenSecondaryField,
-    preferences.liveLockScreenBottomField
-  ];
-  const showSecondary = preferences.liveShowsSecondaryMetric
-    || configuredFields.includes('secondary');
-  const showProgress = preferences.liveShowsProgress
-    || configuredFields.includes('progress');
-  let secondaryLabel = null;
-  let secondaryValue = null;
-  if (showSecondary && preferences.livePrimaryMetric === 'limit') {
-    secondaryLabel = 'Cost';
-    secondaryValue = costValue;
-  } else if (showSecondary && limitValue !== null) {
-    secondaryLabel = dataProviderName;
-    secondaryValue = limitValue;
-  }
-
+  const period = VALID_PERIODS.has(preferences.livePeriod) ? preferences.livePeriod : 'today';
+  const usage = stats?.periods?.[period] || {};
   return {
-    primaryLabel,
-    primaryValue,
-    secondaryLabel,
-    secondaryValue,
-    progress: showProgress && remaining !== null ? remaining / 100 : null,
-    ...activitySource(stats, selectedLimit, preferences.livePrimaryMetric, nowMs),
-    providerID: dataProviderID || null,
-    providerName: dataProviderID ? dataProviderName : null,
-    iconProviderID: iconProviderID || null,
-    tokensValue,
-    costValue,
-    limitValue,
-    compactTrailingField: preferences.liveCompactTrailingField,
-    expandedLeadingField: preferences.liveExpandedLeadingField,
-    expandedCenterField: preferences.liveExpandedCenterField,
-    expandedTrailingField: preferences.liveExpandedTrailingField,
-    expandedBottomField: preferences.liveExpandedBottomField,
-    lockScreenPrimaryField: preferences.liveLockScreenPrimaryField,
-    lockScreenSecondaryField: preferences.liveLockScreenSecondaryField,
-    lockScreenBottomField: preferences.liveLockScreenBottomField
+    ...activitySource(stats, nowMs),
+    period,
+    tokens: asNumber(usage.totalTokens),
+    costUSD: asNumber(usage.costUsd),
+    quota: liveActivityQuota(stats, preferences, nowMs),
+    layout: layoutFor(preferences)
   };
 }
 

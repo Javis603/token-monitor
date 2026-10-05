@@ -1,35 +1,27 @@
 import SwiftUI
 
-struct SectionHeader: View {
+/// A section title above a SurfaceCard, with an optional trailing accessory.
+struct SectionHeader<Accessory: View>: View {
     let title: String
-    let systemImage: String
-    let actionTitle: String?
-    let action: (() -> Void)?
+    let accessory: Accessory
 
-    init(
-        _ title: String,
-        systemImage: String,
-        actionTitle: String? = nil,
-        action: (() -> Void)? = nil
-    ) {
+    init(_ title: String, @ViewBuilder accessory: () -> Accessory) {
         self.title = title
-        self.systemImage = systemImage
-        self.actionTitle = actionTitle
-        self.action = action
+        self.accessory = accessory()
+    }
+
+    init(_ title: String) where Accessory == EmptyView {
+        self.init(title) { EmptyView() }
     }
 
     var body: some View {
-        HStack {
-            Label(title, systemImage: systemImage)
-                .font(.headline)
-
-            Spacer()
-
-            if let actionTitle, let action {
-                Button(actionTitle, action: action)
-                    .font(.subheadline)
-                    .bold()
-            }
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(LocalizedStringKey(title))
+                .font(.title3.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            accessory
         }
+        .padding(.horizontal, 4)
     }
 }

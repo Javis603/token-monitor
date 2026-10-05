@@ -1,27 +1,25 @@
 import SwiftUI
 
+/// Card content: one row per reporting device. The "Devices" SectionHeader sits
+/// above the card at the call site.
 struct DeviceListCard: View {
     let devices: [DeviceSnapshot]
     let period: UsagePeriodKey
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-                SectionHeader("Devices", systemImage: "desktopcomputer")
-
-                if devices.isEmpty {
-                    Label("No devices reported", systemImage: "desktopcomputer.trianglebadge.exclamationmark")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 10)
-                } else {
-                    ForEach(devices) { device in
-                        DeviceRow(device: device, period: period)
-                        if device.id != devices.last?.id {
-                            Divider()
-                        }
+        if devices.isEmpty {
+            Label("No devices reported", systemImage: "desktopcomputer.trianglebadge.exclamationmark")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        } else {
+            VStack(alignment: .leading, spacing: 14) {
+                ForEach(Array(devices.enumerated()), id: \.element.id) { index, device in
+                    if index > 0 {
+                        Divider()
                     }
+                    DeviceRow(device: device, period: period)
                 }
+            }
         }
-        .padding(.vertical, 4)
     }
 }

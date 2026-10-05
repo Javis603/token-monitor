@@ -71,11 +71,36 @@ struct TokenMonitorApp: App {
 
             if ProcessInfo.processInfo.arguments.contains("--sample-live-activity") {
                 surfacePreferences.liveActivityEnabled = true
-                surfacePreferences.livePrimaryMetric = "tokens"
-                surfacePreferences.liveLockScreenPrimaryField = "tokens"
-                surfacePreferences.liveLockScreenSecondaryField = "cost"
-                surfacePreferences.liveLockScreenBottomField = "progress"
-                surfacePreferences.liveShowsProgress = true
+                // Debug layout overrides for screenshots, e.g.
+                // --sample-live-lock=combined --sample-live-expanded=usage
+                // --sample-live-leading=ring --sample-live-trailing=cost
+                let arguments = ProcessInfo.processInfo.arguments
+                func option(_ name: String) -> String? {
+                    let prefix = "--sample-live-\(name)="
+                    return arguments.first(where: { $0.hasPrefix(prefix) })
+                        .map { String($0.dropFirst(prefix.count)) }
+                }
+                if let value = option("lock") {
+                    surfacePreferences.liveLockScreenStyle = value
+                    preferences.liveLockScreenStyle =
+                        .init(rawValue: value) ?? preferences.liveLockScreenStyle
+                }
+                if let value = option("expanded") {
+                    surfacePreferences.liveExpandedStyle = value
+                    preferences.liveExpandedStyle =
+                        .init(rawValue: value) ?? preferences.liveExpandedStyle
+                }
+                if let value = option("leading") {
+                    surfacePreferences.liveCompactLeading = value
+                    preferences.liveCompactLeading =
+                        .init(rawValue: value) ?? preferences.liveCompactLeading
+                }
+                if let value = option("trailing") {
+                    surfacePreferences.liveCompactTrailing = value
+                    preferences.liveCompactTrailing =
+                        .init(rawValue: value) ?? preferences.liveCompactTrailing
+                }
+                try? snapshotStore.updatePreferences(surfacePreferences)
                 await liveActivityController.setEnabled(
                     true,
                     snapshot: snapshot,

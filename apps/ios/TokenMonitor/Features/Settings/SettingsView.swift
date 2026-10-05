@@ -6,139 +6,184 @@ struct SettingsView: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(LiveActivityController.self) private var liveActivity
 
-    private let snapshotStore = SharedSnapshotStore()
-
     var body: some View {
         settingsForm
             .formStyle(.grouped)
             .listSectionSpacing(24)
-        .scrollContentBackground(.hidden)
-        .background {
-            AppBackground()
-        }
-        .navigationTitle("Settings")
-        .onChange(of: preferences.liveActivityEnabled) { _, enabled in
-            Task {
-                await updateLiveActivity(enabled: enabled)
+            .scrollContentBackground(.hidden)
+            .background {
+                AppBackground()
             }
-        }
-        .onChange(of: livePreferencesSignature) { _, _ in
-            Task { await refreshLiveActivity() }
-        }
-    }
-
-    private var livePreferencesSignature: String {
-        [
-            preferences.livePrimaryMetric.rawValue,
-            preferences.livePeriod.rawValue,
-            preferences.liveProviderID,
-            preferences.liveShowsSecondaryMetric.description,
-            preferences.liveShowsProgress.description,
-            preferences.liveIconProviderID,
-            preferences.liveCompactTrailingField,
-            preferences.liveExpandedLeadingField,
-            preferences.liveExpandedCenterField,
-            preferences.liveExpandedTrailingField,
-            preferences.liveExpandedBottomField,
-            preferences.liveLockScreenPrimaryField,
-            preferences.liveLockScreenSecondaryField,
-            preferences.liveLockScreenBottomField,
-            preferences.currency.rawValue,
-            preferences.language.rawValue
-        ].joined(separator: "|")
+            .navigationTitle("Settings")
     }
 
     @ViewBuilder
     private var settingsForm: some View {
         Form {
             Section {
-                HStack(spacing: 14) {
-                    Image(systemName: "chart.bar.xaxis")
-                        .font(.title2.weight(.semibold))
-                        .foregroundStyle(DesignTokens.accent)
-                        .frame(width: 52, height: 52)
-                        .background(DesignTokens.accent.opacity(0.1), in: .rect(cornerRadius: 16))
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("Token Monitor").font(.title3.bold())
-                        Text("Your usage, at a glance")
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    }
-                }
-                .padding(.vertical, 8)
-                LabeledContent("Connection") { ConnectionBadge(phase: store.phase) }
-                if let updated = store.stats?.sourceUpdatedAt() {
-                    LabeledContent("Last update") {
-                        Text(updated.updateDescription(locale: preferences.language.locale))
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            hubSection(settings: settings)
-            Section("Personalize") {
                 NavigationLink {
-                    settingsPage("Appearance") { appearanceSection(preferences: preferences) }
+                    HubConnectionView()
                 } label: {
-                    Label("Appearance", systemImage: "circle.lefthalf.filled")
-                }
-                NavigationLink {
-                    settingsPage("Language & Region") { regionalSection(preferences: preferences) }
-                } label: {
-                    Label("Language & Region", systemImage: "globe")
-                }
-                NavigationLink {
-                    settingsPage("Overview") { overviewSection(preferences: preferences) }
-                } label: {
-                    Label("Overview", systemImage: "house")
-                }
-            }
-            Section {
-                WidgetSurfacePreview(
-                    content: preferences.widgetContent,
-                    period: preferences.widgetPeriod,
-                    providerName: preferences.widgetProviderID.isEmpty
-                        ? "Automatic"
-                        : ProviderPresentation.displayName(for: preferences.widgetProviderID),
-                    showsCost: preferences.widgetShowsCost,
-                    showsUpdateTime: preferences.widgetShowsUpdateTime
-                )
-                .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
-                NavigationLink {
-                    settingsPage("Widgets") { widgetSection(preferences: preferences) }
-                } label: {
-                    Label("Customize widgets", systemImage: "widget.small")
-                }
-            } header: {
-                Text("Widgets")
-            } footer: {
-                Text("Preview uses sample data. Your widgets use the latest snapshot from your Hub.")
-            }
-            liveActivitySection(preferences: preferences)
-            if preferences.liveActivityEnabled {
-                Section {
-                    NavigationLink {
-                        settingsPage("Live Activity & Dynamic Island") {
-                            liveActivityPreviewSection(preferences: preferences)
-                            liveActivityIconSection(preferences: preferences)
-                            liveActivityCompactSection(preferences: preferences)
-                            liveActivityExpandedSection(preferences: preferences)
-                            liveActivityLockScreenSection(preferences: preferences)
+                    HStack(spacing: 12) {
+                        SettingsIcon(systemImage: "network", tint: DesignTokens.accent)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Hub")
+                            Text(LocalizedStringKey(hubHost))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
-                    } label: {
-                        Label("Customize Live Activity", systemImage: "slider.horizontal.3")
+                        Spacer(minLength: 8)
+                        if sampleMode && !hubConfigured {
+                            // Sample mode has no Hub — never claim a live
+                            // connection.
+                            Text("Sample data")
+                                .font(.caption)
+                                .bold()
+                                .foregroundStyle(DesignTokens.accent)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(
+                                    DesignTokens.accent.opacity(0.13),
+                                    in: .capsule
+                                )
+                        } else {
+                            ConnectionBadge(phase: store.phase)
+                        }
                     }
                 }
             }
+
+            Section("Customize") {
+                customizeRow(
+                    "Appearance",
+                    icon: "circle.lefthalf.filled",
+                    tint: Color(red: 0.42, green: 0.45, blue: 0.95)
+                ) {
+                    appearanceSection(preferences: preferences)
+                }
+                customizeRow(
+                    "Language & Region",
+                    icon: "globe",
+                    tint: Color(red: 0.16, green: 0.6, blue: 0.86)
+                ) {
+                    regionalSection(preferences: preferences)
+                }
+                customizeRow(
+                    "Overview",
+                    icon: "house.fill",
+                    tint: Color(red: 0.95, green: 0.58, blue: 0.2)
+                ) {
+                    overviewSection(preferences: preferences)
+                }
+                NavigationLink {
+                    LimitProviderOrderEditor()
+                        .navigationBarTitleDisplayMode(.inline)
+                } label: {
+                    Label {
+                        Text("AI Limits")
+                    } icon: {
+                        SettingsIcon(
+                            systemImage: "gauge.with.needle",
+                            tint: Color(red: 0.25, green: 0.62, blue: 0.55)
+                        )
+                    }
+                }
+                customizeRow(
+                    "Widgets",
+                    icon: "widget.small.badge.plus",
+                    tint: Color(red: 0.62, green: 0.4, blue: 0.92)
+                ) {
+                    widgetSection(preferences: preferences)
+                }
+                NavigationLink {
+                    LiveActivityCustomizerView()
+                } label: {
+                    Label {
+                        Text("Live Activity")
+                    } icon: {
+                        SettingsIcon(
+                            systemImage: "platter.filled.bottom.and.arrow.down.iphone",
+                            tint: Color(red: 0.28, green: 0.7, blue: 0.4)
+                        )
+                    }
+                }
+            }
+
             Section {
                 NavigationLink {
                     settingsPage("Status") { statusSection }
-                } label: { Label("Status", systemImage: "waveform.path.ecg") }
+                } label: {
+                    Label {
+                        Text("Status")
+                    } icon: {
+                        SettingsIcon(
+                            systemImage: "waveform.path.ecg",
+                            tint: Color(red: 0.9, green: 0.3, blue: 0.35)
+                        )
+                    }
+                }
                 NavigationLink {
                     settingsPage("Privacy") { privacySection }
-                } label: { Label("Privacy", systemImage: "lock.shield") }
+                } label: {
+                    Label {
+                        Text("Privacy")
+                    } icon: {
+                        SettingsIcon(
+                            systemImage: "lock.shield.fill",
+                            tint: Color(red: 0.2, green: 0.55, blue: 0.85)
+                        )
+                    }
+                }
                 NavigationLink {
                     settingsPage("About") { aboutSection }
-                } label: { Label("About", systemImage: "info.circle") }
+                } label: {
+                    Label {
+                        Text("About")
+                    } icon: {
+                        SettingsIcon(
+                            systemImage: "info.circle.fill",
+                            tint: Color(red: 0.55, green: 0.6, blue: 0.66)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var hubHost: String {
+        let raw = settings.hubURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else {
+            return sampleMode ? "Sample data" : "Not configured"
+        }
+        return URL(string: raw)?.host() ?? raw
+    }
+
+    private var hubConfigured: Bool {
+        !settings.hubURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var sampleMode: Bool {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("--sample-data")
+        #else
+        return false
+        #endif
+    }
+
+    private func customizeRow<Content: View>(
+        _ title: LocalizedStringKey,
+        icon: String,
+        tint: Color,
+        @ViewBuilder content: @escaping () -> Content
+    ) -> some View {
+        NavigationLink {
+            settingsPage(title, content: content)
+        } label: {
+            Label {
+                Text(title)
+            } icon: {
+                SettingsIcon(systemImage: icon, tint: tint)
             }
         }
     }
@@ -178,39 +223,6 @@ struct SettingsView: View {
             Label("Language & Region", systemImage: "globe")
         } footer: {
             Text("Hub costs are stored in USD and converted for display using the same rates as Token Monitor Desktop.")
-        }
-    }
-
-    @ViewBuilder
-    private func hubSection(settings: ConnectionSettings) -> some View {
-        @Bindable var settings = settings
-
-        Section {
-            TextField("Hub URL", text: $settings.hubURL)
-                .keyboardType(.URL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .textContentType(.URL)
-
-            SecureField("Shared secret", text: $settings.secret)
-                .textContentType(.password)
-
-            Button("Save & Connect", systemImage: "link", action: saveAndConnect)
-                .modifier(AppActionStyle())
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 6)
-
-            if let validationMessage = settings.validationMessage {
-                Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(DesignTokens.critical)
-            }
-        } header: {
-            Label("Hub Connection", systemImage: "network")
-        } footer: {
-            Text(
-                "The iOS app reads your existing Token Monitor Hub. It never runs local collectors."
-            )
         }
     }
 
@@ -289,217 +301,6 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
-    private func liveActivitySection(preferences: AppPreferences) -> some View {
-        @Bindable var preferences = preferences
-
-        Section {
-            Toggle("Live Activity", isOn: $preferences.liveActivityEnabled)
-
-            if preferences.liveActivityEnabled {
-                Picker("Period", selection: $preferences.livePeriod) {
-                    ForEach(UsagePeriodKey.allCases) { period in
-                        Text(LocalizedStringKey(period.title)).tag(period)
-                    }
-                }
-
-                Picker("Default metric", selection: $preferences.livePrimaryMetric) {
-                    ForEach(AppPreferences.LiveMetric.allCases) { metric in
-                        Text(LocalizedStringKey(metric.title)).tag(metric)
-                    }
-                }
-
-                providerPicker(
-                    "Limit data",
-                    selection: $preferences.liveProviderID
-                )
-                Toggle("Show secondary metric", isOn: $preferences.liveShowsSecondaryMetric)
-                Toggle("Show progress", isOn: $preferences.liveShowsProgress)
-
-                LabeledContent("Status") {
-                    Text(
-                        liveActivity.isActive
-                            ? (liveActivity.remoteUpdatesEnabled
-                                ? "Active · Remote"
-                                : "Active · Local")
-                            : "Waiting"
-                    )
-                        .foregroundStyle(
-                            liveActivity.isActive
-                                ? DesignTokens.accent
-                                : .secondary
-                        )
-                }
-            }
-
-            if let errorMessage = liveActivity.errorMessage {
-                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                    .font(.footnote)
-                    .foregroundStyle(DesignTokens.critical)
-            }
-            if let remoteUpdateMessage = liveActivity.remoteUpdateMessage {
-                Label(remoteUpdateMessage, systemImage: "network.slash")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            Label("Live Activity & Dynamic Island", systemImage: "platter.filled.bottom.and.arrow.down.iphone")
-        } footer: {
-            Text(
-                "Choose the icon and content independently for the compact island, expanded island, and Lock Screen activity. With Hub APNs configured, updates can arrive while the app is suspended; otherwise open the app periodically for fresh Hub data."
-            )
-        }
-    }
-
-    @ViewBuilder
-    private func liveActivityPreviewSection(preferences: AppPreferences) -> some View {
-        Section {
-            LiveActivitySurfacePreview(
-                iconProviderID: previewProviderID(preferences: preferences),
-                providerName: previewProviderName(preferences: preferences),
-                compactTrailingField: liveField(
-                    preferences.liveCompactTrailingField,
-                    fallback: .primary
-                ),
-                expandedLeadingField: liveField(
-                    preferences.liveExpandedLeadingField,
-                    fallback: .provider
-                ),
-                expandedCenterField: liveField(
-                    preferences.liveExpandedCenterField,
-                    fallback: .primary
-                ),
-                expandedTrailingField: liveField(
-                    preferences.liveExpandedTrailingField,
-                    fallback: .secondary
-                ),
-                expandedBottomField: liveField(
-                    preferences.liveExpandedBottomField,
-                    fallback: .progress
-                ),
-                lockScreenPrimaryField: liveField(
-                    preferences.liveLockScreenPrimaryField,
-                    fallback: .primary
-                ),
-                lockScreenSecondaryField: liveField(
-                    preferences.liveLockScreenSecondaryField,
-                    fallback: .secondary
-                ),
-                lockScreenBottomField: liveField(
-                    preferences.liveLockScreenBottomField,
-                    fallback: .progress
-                ),
-                primaryMetric: preferences.livePrimaryMetric,
-                showsProgress: preferences.liveShowsProgress,
-                showsSecondary: preferences.liveShowsSecondaryMetric,
-                quotaProviderID: preferences.liveProviderID.isEmpty
-                    ? store.stats?.sortedLimits.first?.provider
-                    : preferences.liveProviderID
-            )
-        } header: {
-            Text("Preview")
-        } footer: {
-            Text("Preview uses sample data. Your widgets use the latest snapshot from your Hub.")
-        }
-    }
-
-    @ViewBuilder
-    private func liveActivityIconSection(preferences: AppPreferences) -> some View {
-        @Bindable var preferences = preferences
-
-        Section {
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    iconChoice(
-                        providerID: "",
-                        title: "Automatic",
-                        selection: $preferences.liveIconProviderID
-                    )
-
-                    ForEach(
-                        iconProviderIDs(preferences: preferences),
-                        id: \.self
-                    ) { providerID in
-                        iconChoice(
-                            providerID: providerID,
-                            title: ProviderPresentation.displayName(for: providerID),
-                            selection: $preferences.liveIconProviderID
-                        )
-                    }
-                }
-                .padding(.vertical, 3)
-            }
-            .scrollIndicators(.hidden)
-        } header: {
-            Text("Activity icon")
-        } footer: {
-            Text("Automatic follows the selected limit provider, then the most active model.")
-        }
-    }
-
-    @ViewBuilder
-    private func liveActivityCompactSection(preferences: AppPreferences) -> some View {
-        @Bindable var preferences = preferences
-
-        Section {
-            liveFieldPicker(
-                "Trailing item",
-                selection: $preferences.liveCompactTrailingField,
-                excluding: [.progress]
-            )
-        } header: {
-            Text("Compact Dynamic Island")
-        }
-    }
-
-    @ViewBuilder
-    private func liveActivityExpandedSection(preferences: AppPreferences) -> some View {
-        @Bindable var preferences = preferences
-
-        Section {
-            liveFieldPicker(
-                "Leading",
-                selection: $preferences.liveExpandedLeadingField
-            )
-            liveFieldPicker(
-                "Center",
-                selection: $preferences.liveExpandedCenterField
-            )
-            liveFieldPicker(
-                "Trailing",
-                selection: $preferences.liveExpandedTrailingField
-            )
-            liveFieldPicker(
-                "Bottom",
-                selection: $preferences.liveExpandedBottomField
-            )
-        } header: {
-            Text("Expanded Dynamic Island")
-        }
-    }
-
-    @ViewBuilder
-    private func liveActivityLockScreenSection(preferences: AppPreferences) -> some View {
-        @Bindable var preferences = preferences
-
-        Section {
-            liveFieldPicker(
-                "Primary",
-                selection: $preferences.liveLockScreenPrimaryField
-            )
-            liveFieldPicker(
-                "Secondary",
-                selection: $preferences.liveLockScreenSecondaryField
-            )
-            liveFieldPicker(
-                "Bottom",
-                selection: $preferences.liveLockScreenBottomField
-            )
-        } header: {
-            Text("Live Activity")
-        }
-    }
-
-    @ViewBuilder
     private func appearanceSection(preferences: AppPreferences) -> some View {
         @Bindable var preferences = preferences
 
@@ -560,156 +361,11 @@ struct SettingsView: View {
     }
 
     private var providerIDs: [String] {
-        Array(
-            Set(
-                (store.stats?.sortedLimits ?? []).compactMap {
-                    $0.provider?.lowercased()
-                } + [preferences.widgetProviderID, preferences.liveProviderID].filter { !$0.isEmpty }
-            )
+        LimitProviderOrder.sortedIDs(
+            (store.stats?.limits?.providers ?? []).map(\.normalizedProviderID)
+                + [preferences.widgetProviderID, preferences.liveProviderID].filter { !$0.isEmpty },
+            order: preferences.limitProviderOrder
         )
-        .sorted {
-            ProviderPresentation.displayName(for: $0)
-                .localizedStandardCompare(
-                    ProviderPresentation.displayName(for: $1)
-                ) == .orderedAscending
-        }
-    }
-
-    private func providerPicker(
-        _ title: LocalizedStringKey,
-        selection: Binding<String>
-    ) -> some View {
-        Picker(title, selection: selection) {
-            Text("Automatic").tag("")
-            ForEach(providerIDs, id: \.self) { providerID in
-                Label(
-                    ProviderPresentation.displayName(for: providerID),
-                    image: ProviderPresentation.assetName(for: providerID)
-                )
-                .tag(providerID)
-            }
-        }
-    }
-
-    private func iconChoice(
-        providerID: String,
-        title: String,
-        selection: Binding<String>
-    ) -> some View {
-        let isSelected = selection.wrappedValue == providerID
-
-        return Button {
-            selection.wrappedValue = providerID
-        } label: {
-            VStack(spacing: 5) {
-                if providerID.isEmpty {
-                    Image(systemName: "sparkles")
-                        .font(.title3)
-                        .foregroundStyle(DesignTokens.accent)
-                        .frame(width: 32, height: 32)
-                } else {
-                    Image(ProviderPresentation.assetName(for: providerID))
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 32, height: 32)
-                }
-
-                Text(title)
-                    .font(.caption2)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(width: 88)
-            .padding(.vertical, 12)
-            .background(
-                isSelected
-                    ? DesignTokens.accent.opacity(0.18)
-                    : Color.clear,
-                in: .rect(cornerRadius: 14)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(
-                        isSelected
-                            ? DesignTokens.accent
-                            : Color.primary.opacity(0.12),
-                        lineWidth: isSelected ? 1.5 : 1
-                    )
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-    }
-
-    private func liveFieldPicker(
-        _ title: LocalizedStringKey,
-        selection: Binding<String>,
-        excluding fields: Set<TokenMonitorActivityAttributes.Field> = []
-    ) -> some View {
-        Picker(title, selection: selection) {
-            ForEach(
-                TokenMonitorActivityAttributes.Field.allCases.filter {
-                    !fields.contains($0)
-                }
-            ) { field in
-                Label(
-                    LocalizedStringKey(field.title),
-                    systemImage: field.systemImage
-                )
-                .tag(field.rawValue)
-            }
-        }
-    }
-
-    private func liveField(
-        _ rawValue: String,
-        fallback: TokenMonitorActivityAttributes.Field
-    ) -> TokenMonitorActivityAttributes.Field {
-        TokenMonitorActivityAttributes.Field(rawValue: rawValue) ?? fallback
-    }
-
-    private func previewProviderID(preferences: AppPreferences) -> String? {
-        if !preferences.liveIconProviderID.isEmpty {
-            return preferences.liveIconProviderID
-        }
-        if !preferences.liveProviderID.isEmpty {
-            return preferences.liveProviderID
-        }
-        return providerIDs.first ?? "codex"
-    }
-
-    private func previewProviderName(preferences: AppPreferences) -> String {
-        if !preferences.liveIconProviderID.isEmpty {
-            return ProviderPresentation.displayName(
-                for: preferences.liveIconProviderID
-            )
-        }
-        if !preferences.liveProviderID.isEmpty {
-            return ProviderPresentation.displayName(
-                for: preferences.liveProviderID
-            )
-        }
-        return providerIDs.first.map {
-            ProviderPresentation.displayName(for: $0)
-        } ?? "Automatic"
-    }
-
-    private func iconProviderIDs(preferences: AppPreferences) -> [String] {
-        let modelVendors = store.currentPeriod.modelEntries.compactMap {
-            ProviderPresentation.modelVendor(for: $0.id)
-        }
-        let commonVendors = ["claude", "codex", "cursor", "gemini", "opencode"]
-        let selectedVendor = preferences.liveIconProviderID.isEmpty
-            ? []
-            : [preferences.liveIconProviderID]
-        return Array(
-            Set(providerIDs + modelVendors + commonVendors + selectedVendor)
-        ).sorted {
-            ProviderPresentation.displayName(for: $0)
-                .localizedStandardCompare(
-                    ProviderPresentation.displayName(for: $1)
-                ) == .orderedAscending
-        }
     }
 
     private func saveAndConnect() {
@@ -719,26 +375,71 @@ struct SettingsView: View {
         liveActivity.configure(configuration)
         store.configure(configuration)
     }
+}
 
-    private func updateLiveActivity(enabled: Bool) async {
-        let payload = try? snapshotStore.load()
-        await liveActivity.setEnabled(
-            enabled,
-            snapshot: payload?.snapshot,
-            preferences: preferences.sharedPreferences
-        )
-    }
+/// The Hub connection page — URL, secret, Save & Connect, last error.
+struct HubConnectionView: View {
+    @Environment(ConnectionSettings.self) private var settings
+    @Environment(TokenMonitorStore.self) private var store
+    @Environment(LiveActivityController.self) private var liveActivity
 
-    private func refreshLiveActivity() async {
-        guard preferences.liveActivityEnabled,
-              let payload = try? snapshotStore.load(),
-              let snapshot = payload.snapshot else {
-            return
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section {
+                TextField("Hub URL", text: $settings.hubURL)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .textContentType(.URL)
+
+                SecureField("Shared secret", text: $settings.secret)
+                    .textContentType(.password)
+
+                Button("Save & Connect", systemImage: "link") {
+                    guard let configuration = settings.save() else { return }
+                    liveActivity.configure(configuration)
+                    store.configure(configuration)
+                }
+                .modifier(AppActionStyle())
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 6)
+
+                if let validationMessage = settings.validationMessage {
+                    Label(validationMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(DesignTokens.critical)
+                }
+            } header: {
+                Label("Hub Connection", systemImage: "network")
+            } footer: {
+                Text(
+                    "The iOS app reads your existing Token Monitor Hub. It never runs local collectors."
+                )
+            }
         }
-        await liveActivity.update(
-            snapshot: snapshot,
-            preferences: preferences.sharedPreferences
-        )
+        .formStyle(.grouped)
+        .listSectionSpacing(24)
+        .scrollContentBackground(.hidden)
+        .background { AppBackground() }
+        .navigationTitle("Hub")
+        .navigationBarTitleDisplayMode(.inline)
+        .tint(DesignTokens.accent)
+    }
+}
+
+/// iOS-Settings-style colored rounded-square icon.
+private struct SettingsIcon: View {
+    let systemImage: String
+    let tint: Color
+
+    var body: some View {
+        Image(systemName: systemImage)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.white)
+            .frame(width: 30, height: 30)
+            .background(tint, in: .rect(cornerRadius: 8, style: .continuous))
+            .accessibilityHidden(true)
     }
 }
 

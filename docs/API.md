@@ -36,23 +36,21 @@ Example payload:
   "locale": "zh-Hant",
   "preferences": {
     "liveActivityEnabled": true,
-    "livePrimaryMetric": "tokens",
     "livePeriod": "today",
-    "liveShowsSecondaryMetric": true,
-    "liveShowsProgress": true,
-    "liveCompactTrailingField": "primary",
-    "liveExpandedLeadingField": "provider",
-    "liveExpandedCenterField": "primary",
-    "liveExpandedTrailingField": "secondary",
-    "liveExpandedBottomField": "progress",
-    "liveLockScreenPrimaryField": "primary",
-    "liveLockScreenSecondaryField": "secondary",
-    "liveLockScreenBottomField": "progress",
+    "liveProviderID": "codex",
+    "liveCompactLeading": "mark",
+    "liveCompactTrailing": "percent",
+    "liveExpandedStyle": "quota",
+    "liveLockScreenStyle": "combined",
     "currencyCode": "USD",
     "languageCode": "auto"
   }
 }
 ```
+
+`livePeriod` is `today` | `month` | `allTime`; `liveCompactLeading` is `mark` | `ring` | `tokens` | `cost`; `liveCompactTrailing` is `percent` | `reset` | `tokens` | `cost` | `ring`; `liveExpandedStyle` and `liveLockScreenStyle` are `quota` | `usage` | `combined`. Unknown values fall back to `mark` / `percent` / `quota` / `combined`. An absent `liveProviderID` means "Auto — most constrained": among providers whose `status` is `ok` and that are not stale, the one with the lowest canonical window remaining percent; ties or none fall back to the default catalog order.
+
+Pushes carry a structured `content-state` (`updatedAt`, `sourceStale`, `period`, `tokens`, `costUSD`, `quota`, `layout`) — the app renders and localises it. All dates are seconds since the 2001-01-01 Cocoa reference date (`aps` epoch minus 978307200), including `quota.updatedAt` and `window.resetsAt`. `aps.stale-date` is `content-state.updatedAt` + 15 minutes, or earlier when the source is already flagged stale.
 
 A successful registration returns `{ "ok": true, "activityID": "…", "pushEnabled": true }`. `pushEnabled` reports whether the Hub has APNs configuration; it does not confirm delivery. Registering the same activity ID replaces its token and presentation preferences. Activity IDs must contain 1–128 ASCII letters, digits, underscores or hyphens; tokens must be even-length hexadecimal strings of 32–4096 characters. Malformed registrations return `400`. Node applies the same request-body limit as ingest and returns `413` when exceeded.
 

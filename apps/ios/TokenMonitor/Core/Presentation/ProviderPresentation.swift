@@ -140,7 +140,8 @@ nonisolated enum ProviderPresentation {
     static func fallbackSymbol(for provider: String?) -> String? {
         switch normalizedID(provider) {
         case "factory", "droid": "terminal"
-        case "commandcode", "amp", "fx": "chevron.left.forwardslash.chevron.right"
+        case "commandcode": "command"
+        case "amp", "fx": "chevron.left.forwardslash.chevron.right"
         case "devin": "person.crop.square"
         case "typesafe": "checkmark.shield"
         case "trae": "curlybraces"

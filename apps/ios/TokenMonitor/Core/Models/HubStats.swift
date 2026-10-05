@@ -41,6 +41,21 @@ nonisolated struct HubStats: Decodable, Sendable {
         }
     }
 
+    /// Display order for every limits surface: the user's order over the
+    /// desktop catalog default, minus hidden providers.
+    func orderedLimits(
+        order: [String],
+        hidden: Set<String> = []
+    ) -> [LimitProvider] {
+        LimitProviderOrder.ordered(
+            limits?.providers ?? [],
+            order: order,
+            hidden: hidden
+        )
+    }
+
+    /// Lowest-remaining-first; kept only for the "Auto — most constrained"
+    /// Live Activity/widget selection.
     var sortedLimits: [LimitProvider] {
         (limits?.providers ?? []).sorted { lhs, rhs in
             switch (lhs.lowestRemainingPercent, rhs.lowestRemainingPercent) {

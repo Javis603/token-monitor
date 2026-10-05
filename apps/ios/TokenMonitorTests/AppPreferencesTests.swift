@@ -45,18 +45,11 @@ struct AppPreferencesTests {
         preferences.widgetPeriod = .month
         preferences.widgetProviderID = "claude"
         preferences.liveActivityEnabled = true
-        preferences.livePrimaryMetric = .limit
-        preferences.liveShowsSecondaryMetric = false
-        preferences.liveShowsProgress = false
-        preferences.liveIconProviderID = "claude"
-        preferences.liveCompactTrailingField = "cost"
-        preferences.liveExpandedLeadingField = "provider"
-        preferences.liveExpandedCenterField = "limit"
-        preferences.liveExpandedTrailingField = "updated"
-        preferences.liveExpandedBottomField = "progress"
-        preferences.liveLockScreenPrimaryField = "tokens"
-        preferences.liveLockScreenSecondaryField = "cost"
-        preferences.liveLockScreenBottomField = "none"
+        preferences.liveProviderID = "codex"
+        preferences.liveCompactLeading = .ring
+        preferences.liveCompactTrailing = .cost
+        preferences.liveExpandedStyle = .usage
+        preferences.liveLockScreenStyle = .combined
         preferences.currency = .hkd
         preferences.language = .traditionalChinese
 
@@ -65,18 +58,11 @@ struct AppPreferencesTests {
         #expect(persisted.widgetPeriod == "month")
         #expect(persisted.widgetProviderID == "claude")
         #expect(persisted.liveActivityEnabled)
-        #expect(persisted.livePrimaryMetric == "limit")
-        #expect(!persisted.liveShowsSecondaryMetric)
-        #expect(!persisted.liveShowsProgress)
-        #expect(persisted.liveIconProviderID == "claude")
-        #expect(persisted.liveCompactTrailingField == "cost")
-        #expect(persisted.liveExpandedLeadingField == "provider")
-        #expect(persisted.liveExpandedCenterField == "limit")
-        #expect(persisted.liveExpandedTrailingField == "updated")
-        #expect(persisted.liveExpandedBottomField == "progress")
-        #expect(persisted.liveLockScreenPrimaryField == "tokens")
-        #expect(persisted.liveLockScreenSecondaryField == "cost")
-        #expect(persisted.liveLockScreenBottomField == "none")
+        #expect(persisted.liveProviderID == "codex")
+        #expect(persisted.liveCompactLeading == "ring")
+        #expect(persisted.liveCompactTrailing == "cost")
+        #expect(persisted.liveExpandedStyle == "usage")
+        #expect(persisted.liveLockScreenStyle == "combined")
         #expect(persisted.currencyCode == "HKD")
         #expect(persisted.languageCode == "zh-TW")
     }
@@ -127,7 +113,9 @@ struct AppPreferencesTests {
     }
 
     @Test
-    func legacySurfacePreferencesKeepNewLiveActivityOptionsEnabled() throws {
+    func legacySurfacePreferencesDecodeWithLayoutDefaults() throws {
+        // Old payloads carry the removed live*Field keys; unknown keys are
+        // ignored and the layout options fall back to the documented defaults.
         let data = Data(
             """
             {
@@ -138,6 +126,9 @@ struct AppPreferencesTests {
               "liveActivityEnabled": false,
               "livePrimaryMetric": "tokens",
               "livePeriod": "today",
+              "liveIconProviderID": "claude",
+              "liveCompactTrailingField": "cost",
+              "liveLockScreenBottomField": "progress",
               "currencyCode": "USD",
               "languageCode": "auto"
             }
@@ -149,17 +140,11 @@ struct AppPreferencesTests {
             from: data
         )
 
-        #expect(preferences.liveShowsSecondaryMetric)
-        #expect(preferences.liveShowsProgress)
-        #expect(preferences.liveIconProviderID == nil)
-        #expect(preferences.liveCompactTrailingField == "primary")
-        #expect(preferences.liveExpandedLeadingField == "provider")
-        #expect(preferences.liveExpandedCenterField == "primary")
-        #expect(preferences.liveExpandedTrailingField == "secondary")
-        #expect(preferences.liveExpandedBottomField == "progress")
-        #expect(preferences.liveLockScreenPrimaryField == "primary")
-        #expect(preferences.liveLockScreenSecondaryField == "secondary")
-        #expect(preferences.liveLockScreenBottomField == "progress")
+        #expect(preferences.liveProviderID == nil)
+        #expect(preferences.liveCompactLeading == "mark")
+        #expect(preferences.liveCompactTrailing == "percent")
+        #expect(preferences.liveExpandedStyle == "quota")
+        #expect(preferences.liveLockScreenStyle == "combined")
     }
 
     @Test

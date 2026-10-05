@@ -11,7 +11,7 @@ struct HeroSummaryCard: View {
     let updatedAt: String?
 
     var body: some View {
-        SurfaceCard(glass: true) {
+        SurfaceCard {
             VStack(alignment: .leading, spacing: 20) {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .firstTextBaseline) {
@@ -56,6 +56,7 @@ struct HeroSummaryCard: View {
                     metric("Cache write", value: period.cacheWriteTokens)
                     metric("Output", value: period.outputTokens)
                 }
+                Divider()
                 NavigationLink {
                     SessionsView()
                 } label: {
@@ -63,15 +64,15 @@ struct HeroSummaryCard: View {
                         Label("Sessions", systemImage: "bubble.left.and.bubble.right")
                             .font(.subheadline.weight(.medium))
                         Spacer()
-                        Image(systemName: "arrow.up.right")
+                        Image(systemName: "chevron.right")
                             .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
                     }
                     .foregroundStyle(.primary)
                     .frame(minHeight: DesignTokens.controlHeight)
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .padding(.top, -8)
                 .padding(.bottom, -10)
             }
         }

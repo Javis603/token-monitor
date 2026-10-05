@@ -15,6 +15,7 @@ const BUILD_ID_PATTERN = /^sha256:[a-f0-9]{64}$/;
 const WORKER_SHARED_MODULES = Object.freeze([
   'limits/providers.js',
   'limits/core.js',
+  'limits/windowLabels.js',
   'liveActivity.js',
   'limits/balanceDisplay.js',
   'compactTokens.js',

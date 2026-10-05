@@ -37,6 +37,10 @@
 		12000000000000000000001A /* TokenMonitorWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001A /* TokenMonitorWidget.swift */; };
 		12000000000000000000001B /* TokenMonitorActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001B /* TokenMonitorActivityWidget.swift */; };
 		12000000000000000000001C /* TokenMonitorWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001C /* TokenMonitorWidgets.swift */; };
+		120000000000000000000051 /* ActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000042 /* ActivityViews.swift */; };
+		120000000000000000000052 /* ActivityViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000042 /* ActivityViews.swift */; };
+		120000000000000000000053 /* LiveActivityCustomizerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000043 /* LiveActivityCustomizerView.swift */; };
+		120000000000000000000054 /* WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000016 /* WidgetPresentation.swift */; };
 		12000000000000000000001D /* SharedSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000007 /* SharedSnapshotStore.swift */; };
 		12000000000000000000001E /* TokenMonitorActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000008 /* TokenMonitorActivityAttributes.swift */; };
 		12000000000000000000001F /* TokenMonitorSharedPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000009 /* TokenMonitorSharedPayload.swift */; };
@@ -51,7 +55,10 @@
 		120000000000000000000036 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000036 /* Localizable.xcstrings */; };
 		120000000000000000000037 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000036 /* Localizable.xcstrings */; };
 		120000000000000000000040 /* WidgetSurfacePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000040 /* WidgetSurfacePreview.swift */; };
-		120000000000000000000041 /* LiveActivitySurfacePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000041 /* LiveActivitySurfacePreview.swift */; };
+		120000000000000000000042 /* AccountIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000043 /* AccountIdentity.swift */; };
+		120000000000000000000044 /* LimitProviderOrder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000045 /* LimitProviderOrder.swift */; };
+		120000000000000000000046 /* LimitProviderOrderEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000047 /* LimitProviderOrderEditor.swift */; };
+		120000000000000000000048 /* LimitProviderOrderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 120000000000000000000049 /* LimitProviderOrderTests.swift */; };
 		13188ADE465A1882B8A28721 /* LimitsSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90A266099249876C9E03A203 /* LimitsSummary.swift */; };
 		16D725EDE9E50EADC84ECB77 /* HubStatsDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63A39C521B2429E690FA44A8 /* HubStatsDecodingTests.swift */; };
 		16DC547A7773B3E4AB91F3F8 /* UsagePeriod.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F1C49F9A70D0608FE003A34 /* UsagePeriod.swift */; };
@@ -61,7 +68,6 @@
 		2768BC3E922E465D4246A209 /* HistorySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B111953CF5AF356A58AD413 /* HistorySummary.swift */; };
 		29FD242BD5E2C2DA64BBBC9A /* OverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CFAC75BE4F19FEA45D7EA4E /* OverviewView.swift */; };
 		33E3F65BD6F3A38824EA7C25 /* BreakdownKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CC723D8B8E73CDA9A5F0549 /* BreakdownKind.swift */; };
-		357B8F52D774DBA721670D4E /* LimitsSummaryHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = E302C20CC1E98211DAFECD0A /* LimitsSummaryHeader.swift */; };
 		3D30B2712EED04170164F305 /* HubStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B4D1FC26409F9A599A44CA8 /* HubStats.swift */; };
 		41F77693A7793A94B5BAB359 /* UsageHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E83CA979BC52ACD6A31B0A2F /* UsageHistory.swift */; };
 		4354798727C8AF4FF4560240 /* LimitWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9143856A90ADED92E26DA6EB /* LimitWindow.swift */; };
@@ -83,9 +89,8 @@
 		85395C770639C11C3F0624A2 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3344AB257C48E4C2CB0B0B01 /* SettingsView.swift */; };
 		856EACD4A4AEF9613B9DE935 /* HubStats+Sample.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20FA5F2729465E56F3D222A7 /* HubStats+Sample.swift */; };
 		8DAB3DA0F9D2DD3B9DCE50D8 /* LimitsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 688BF62BE23B46A2E27A160F /* LimitsView.swift */; };
-		8E7B0990BEBFF6A30CE5E37E /* CompactLimitProviderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAE084A91B7C302A63ECA11B /* CompactLimitProviderCard.swift */; };
 		907B1838EA879DB20AD723D0 /* UsagePeriodKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17439276EEA562BC9BF20A4A /* UsagePeriodKey.swift */; };
-		938D1AE0E397670880CECED2 /* InsightStatsGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D643293126EA86329465C5C /* InsightStatsGrid.swift */; };
+		938D1AE0E397670880CECED2 /* LifetimeCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D643293126EA86329465C5C /* LifetimeCard.swift */; };
 		97C5BA50B970F1768E24AFE3 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4943BE75BECA1A6ECEFE6F7 /* KeychainStore.swift */; };
 		A6AC339786A0FA6A18ABA432 /* PeriodPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CCFE7E5AB1522533EC5F8C5 /* PeriodPicker.swift */; };
 		A6E9918B2C7373D9325FA53A /* SSEDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A336B133A3DC5726C2FC9E26 /* SSEDecoderTests.swift */; };
@@ -106,7 +111,6 @@
 		EADE83C05A6E9A01831D6C1A /* HistoryDay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E4BC91B45C270E40519F8CA /* HistoryDay.swift */; };
 		ED754554A989A56EED7FF1D6 /* TrendMetric.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F090E4E1F835EFAC443688A /* TrendMetric.swift */; };
 		EF929A9613A59121B44719FA /* ProviderLimitCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A198D4E2D18CF0BB636E754 /* ProviderLimitCard.swift */; };
-		F2324E25A6BDBA28CCF21AC8 /* UsageTrendCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E59EBE352FD5F9FC99063596 /* UsageTrendCard.swift */; };
 		F5BA8A378D3659C4916B88DD /* ProviderBalance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 513888980D24576FDAEBC182 /* ProviderBalance.swift */; };
 		F68DD571094490C2A6FA79E6 /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A018067FCC84722C201DEF07 /* InsightsView.swift */; };
 		F83ECD92A9CA0ADC965E8B28 /* AppBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34D03DF50064C6F59F2B8E62 /* AppBackground.swift */; };
@@ -170,6 +174,8 @@
 		110000000000000000000007 /* SharedSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedSnapshotStore.swift; sourceTree = "<group>"; };
 		110000000000000000000008 /* TokenMonitorActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorActivityAttributes.swift; sourceTree = "<group>"; };
 		110000000000000000000009 /* TokenMonitorSharedPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorSharedPayload.swift; sourceTree = "<group>"; };
+		110000000000000000000042 /* ActivityViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityViews.swift; sourceTree = "<group>"; };
+		110000000000000000000043 /* LiveActivityCustomizerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityCustomizerView.swift; sourceTree = "<group>"; };
 		11000000000000000000000A /* BreakdownItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreakdownItem.swift; sourceTree = "<group>"; };
 		11000000000000000000000B /* ActivityHeatmap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityHeatmap.swift; sourceTree = "<group>"; };
 		11000000000000000000000C /* HeatmapModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeatmapModel.swift; sourceTree = "<group>"; };
@@ -198,7 +204,10 @@
 		110000000000000000000035 /* BreakdownDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreakdownDetailView.swift; sourceTree = "<group>"; };
 		110000000000000000000036 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		110000000000000000000040 /* WidgetSurfacePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSurfacePreview.swift; sourceTree = "<group>"; };
-		110000000000000000000041 /* LiveActivitySurfacePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivitySurfacePreview.swift; sourceTree = "<group>"; };
+		120000000000000000000043 /* AccountIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountIdentity.swift; sourceTree = "<group>"; };
+		120000000000000000000045 /* LimitProviderOrder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitProviderOrder.swift; sourceTree = "<group>"; };
+		120000000000000000000047 /* LimitProviderOrderEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitProviderOrderEditor.swift; sourceTree = "<group>"; };
+		120000000000000000000049 /* LimitProviderOrderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitProviderOrderTests.swift; sourceTree = "<group>"; };
 		17439276EEA562BC9BF20A4A /* UsagePeriodKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePeriodKey.swift; sourceTree = "<group>"; };
 		17E754338B27452B51451EDD /* TokenMonitorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorApp.swift; sourceTree = "<group>"; };
 		1CFAC75BE4F19FEA45D7EA4E /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
@@ -226,7 +235,7 @@
 		63A39C521B2429E690FA44A8 /* HubStatsDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubStatsDecodingTests.swift; sourceTree = "<group>"; };
 		688BF62BE23B46A2E27A160F /* LimitsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitsView.swift; sourceTree = "<group>"; };
 		6B111953CF5AF356A58AD413 /* HistorySummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySummary.swift; sourceTree = "<group>"; };
-		6D643293126EA86329465C5C /* InsightStatsGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightStatsGrid.swift; sourceTree = "<group>"; };
+		6D643293126EA86329465C5C /* LifetimeCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifetimeCard.swift; sourceTree = "<group>"; };
 		740427D2593A45BA914D2AC6 /* LimitWindowRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitWindowRow.swift; sourceTree = "<group>"; };
 		7F292CCD355D6C5D151A0991 /* InsightMetricCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightMetricCard.swift; sourceTree = "<group>"; };
 		8A198D4E2D18CF0BB636E754 /* ProviderLimitCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderLimitCard.swift; sourceTree = "<group>"; };
@@ -242,7 +251,6 @@
 		A336B133A3DC5726C2FC9E26 /* SSEDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEDecoderTests.swift; sourceTree = "<group>"; };
 		A587C66837238C4A5784FF24 /* CreditsMeterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditsMeterTests.swift; sourceTree = "<group>"; };
 		AA9277927F9024B51067B143 /* HubStreamEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubStreamEvent.swift; sourceTree = "<group>"; };
-		AAE084A91B7C302A63ECA11B /* CompactLimitProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactLimitProviderCard.swift; sourceTree = "<group>"; };
 		AD8B375339D1B333D2F23612 /* Token Monitor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Token Monitor.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AF28F4EBA6B33376D42B87DB /* AppShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellView.swift; sourceTree = "<group>"; };
 		B4943BE75BECA1A6ECEFE6F7 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
@@ -255,9 +263,7 @@
 		D82C6D49CBFE861A4417A4D6 /* HeroSummaryCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroSummaryCard.swift; sourceTree = "<group>"; };
 		D9ACB1DD5D847519D67AE761 /* KeychainError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainError.swift; sourceTree = "<group>"; };
 		DB10E7FBD8CCD8046CAAF7EA /* HistoryMonth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMonth.swift; sourceTree = "<group>"; };
-		E302C20CC1E98211DAFECD0A /* LimitsSummaryHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitsSummaryHeader.swift; sourceTree = "<group>"; };
 		E3765AFD2282C06B0C308CDD /* TokenMonitorTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TokenMonitorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		E59EBE352FD5F9FC99063596 /* UsageTrendCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageTrendCard.swift; sourceTree = "<group>"; };
 		E83CA979BC52ACD6A31B0A2F /* UsageHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageHistory.swift; sourceTree = "<group>"; };
 		EB2E33BFFEA34B817D502FF0 /* ProviderMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderMark.swift; sourceTree = "<group>"; };
 		F6EA2F15DE69A9153C22840B /* DeviceRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceRow.swift; sourceTree = "<group>"; };
@@ -324,6 +330,7 @@
 				110000000000000000000031 /* HeatmapModelTests.swift */,
 				63A39C521B2429E690FA44A8 /* HubStatsDecodingTests.swift */,
 				A336B133A3DC5726C2FC9E26 /* SSEDecoderTests.swift */,
+				120000000000000000000049 /* LimitProviderOrderTests.swift */,
 				110000000000000000000032 /* SharedSnapshotStoreTests.swift */,
 			);
 			path = TokenMonitorTests;
@@ -347,6 +354,7 @@
 				11000000000000000000000D /* SharedAssets.xcassets */,
 				110000000000000000000007 /* SharedSnapshotStore.swift */,
 				110000000000000000000008 /* TokenMonitorActivityAttributes.swift */,
+				110000000000000000000042 /* ActivityViews.swift */,
 				110000000000000000000009 /* TokenMonitorSharedPayload.swift */,
 			);
 			path = Shared;
@@ -396,14 +404,12 @@
 		658EA8BF3372544500CE00DA /* Overview */ = {
 			isa = PBXGroup;
 			children = (
-				AAE084A91B7C302A63ECA11B /* CompactLimitProviderCard.swift */,
 				D0202B69BD46AFA44BDFD05B /* DeviceListCard.swift */,
 				F6EA2F15DE69A9153C22840B /* DeviceRow.swift */,
 				D82C6D49CBFE861A4417A4D6 /* HeroSummaryCard.swift */,
 				0011336A905F5CC4BE2CBEF9 /* LimitPreviewSection.swift */,
 				8B3A1BCEA080127053F8A292 /* OverviewUnavailableView.swift */,
 				1CFAC75BE4F19FEA45D7EA4E /* OverviewView.swift */,
-				E59EBE352FD5F9FC99063596 /* UsageTrendCard.swift */,
 			);
 			path = Overview;
 			sourceTree = "<group>";
@@ -411,7 +417,7 @@
 		76C75215FF3A559B5D8AD15D /* Limits */ = {
 			isa = PBXGroup;
 			children = (
-				E302C20CC1E98211DAFECD0A /* LimitsSummaryHeader.swift */,
+				120000000000000000000047 /* LimitProviderOrderEditor.swift */,
 				688BF62BE23B46A2E27A160F /* LimitsView.swift */,
 				740427D2593A45BA914D2AC6 /* LimitWindowRow.swift */,
 				8A198D4E2D18CF0BB636E754 /* ProviderLimitCard.swift */,
@@ -441,7 +447,7 @@
 		B5259151C4328942E9A7144F /* Settings */ = {
 			isa = PBXGroup;
 			children = (
-				110000000000000000000041 /* LiveActivitySurfacePreview.swift */,
+				110000000000000000000043 /* LiveActivityCustomizerView.swift */,
 				3344AB257C48E4C2CB0B0B01 /* SettingsView.swift */,
 				110000000000000000000040 /* WidgetSurfacePreview.swift */,
 			);
@@ -461,6 +467,7 @@
 		CDA66A6363D3DDF9A9C08322 /* Formatting */ = {
 			isa = PBXGroup;
 			children = (
+				120000000000000000000043 /* AccountIdentity.swift */,
 				018B7CE8DB6ACDBED2F6C8B8 /* Date+Hub.swift */,
 				110000000000000000000001 /* Date+RelativeUpdate.swift */,
 				53CCAE18F706F3BFB1EA04BB /* MetricFormatter.swift */,
@@ -479,7 +486,7 @@
 				4E18EFA7AE78DE0EB4C876C1 /* BreakdownList.swift */,
 				11000000000000000000000C /* HeatmapModel.swift */,
 				7F292CCD355D6C5D151A0991 /* InsightMetricCard.swift */,
-				6D643293126EA86329465C5C /* InsightStatsGrid.swift */,
+				6D643293126EA86329465C5C /* LifetimeCard.swift */,
 				A018067FCC84722C201DEF07 /* InsightsView.swift */,
 				D404C9513DA568EC7D251189 /* InsightTrendCard.swift */,
 				3F090E4E1F835EFAC443688A /* TrendMetric.swift */,
@@ -492,6 +499,7 @@
 			isa = PBXGroup;
 			children = (
 				CDA66A6363D3DDF9A9C08322 /* Formatting */,
+				120000000000000000000045 /* LimitProviderOrder.swift */,
 				0225BB732D7CFD362C137524 /* Models */,
 				F3EB2A1DD23D40F5BC13F79B /* Networking */,
 				7B0EFE762689309F6BEF1D6D /* Presentation */,
@@ -684,6 +692,7 @@
 				120000000000000000000030 /* AppPreferencesTests.swift in Sources */,
 				1A1B4834A5FAE1CAC0BB22CA /* CreditsMeterTests.swift in Sources */,
 				120000000000000000000031 /* HeatmapModelTests.swift in Sources */,
+				120000000000000000000048 /* LimitProviderOrderTests.swift in Sources */,
 				16D725EDE9E50EADC84ECB77 /* HubStatsDecodingTests.swift in Sources */,
 				A6E9918B2C7373D9325FA53A /* SSEDecoderTests.swift in Sources */,
 				120000000000000000000032 /* SharedSnapshotStoreTests.swift in Sources */,
@@ -694,6 +703,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				120000000000000000000052 /* ActivityViews.swift in Sources */,
 				120000000000000000000014 /* ProviderEntity.swift in Sources */,
 				12000000000000000000001D /* SharedSnapshotStore.swift in Sources */,
 				12000000000000000000001B /* TokenMonitorActivityWidget.swift in Sources */,
@@ -734,7 +744,6 @@
 				33E3F65BD6F3A38824EA7C25 /* BreakdownKind.swift in Sources */,
 				B10800D2676DF408B19DEA2D /* BreakdownList.swift in Sources */,
 				55B1022106F8EC26914EF6BC /* ClientPresentation.swift in Sources */,
-				8E7B0990BEBFF6A30CE5E37E /* CompactLimitProviderCard.swift in Sources */,
 				D63AB0C91CD8730B24972660 /* ConnectionBadge.swift in Sources */,
 				5CC6231F1A769FBA334174E9 /* ConnectionPhase.swift in Sources */,
 				480B0BB9B4F6C641D8A9AFBE /* ConnectionSettings.swift in Sources */,
@@ -745,6 +754,7 @@
 				D20224BCD6CF7D889FF299CC /* DevicePresentation.swift in Sources */,
 				D1E2A87EDA220EFF0B6CADE0 /* DeviceRow.swift in Sources */,
 				55AA95620B673CE4EE5BD4BD /* DeviceSnapshot.swift in Sources */,
+				120000000000000000000042 /* AccountIdentity.swift in Sources */,
 				E24BBA0279AD227C46980112 /* HeroSummaryCard.swift in Sources */,
 				12000000000000000000000C /* HeatmapModel.swift in Sources */,
 				EADE83C05A6E9A01831D6C1A /* HistoryDay.swift in Sources */,
@@ -757,7 +767,7 @@
 				3D30B2712EED04170164F305 /* HubStats.swift in Sources */,
 				7009D259F2876349EA805820 /* HubStreamEvent.swift in Sources */,
 				643478983D9CAE8F4BFCDA8C /* InsightMetricCard.swift in Sources */,
-				938D1AE0E397670880CECED2 /* InsightStatsGrid.swift in Sources */,
+				938D1AE0E397670880CECED2 /* LifetimeCard.swift in Sources */,
 				5170C46D91407453349C1BAC /* InsightTrendCard.swift in Sources */,
 				F68DD571094490C2A6FA79E6 /* InsightsView.swift in Sources */,
 				A848CF51B0B80989A908CF0C /* KeychainError.swift in Sources */,
@@ -768,7 +778,8 @@
 				4354798727C8AF4FF4560240 /* LimitWindow.swift in Sources */,
 				FC3B6B26403B8E1339595AAD /* LimitWindowRow.swift in Sources */,
 				13188ADE465A1882B8A28721 /* LimitsSummary.swift in Sources */,
-				357B8F52D774DBA721670D4E /* LimitsSummaryHeader.swift in Sources */,
+				120000000000000000000044 /* LimitProviderOrder.swift in Sources */,
+				120000000000000000000046 /* LimitProviderOrderEditor.swift in Sources */,
 				8DAB3DA0F9D2DD3B9DCE50D8 /* LimitsView.swift in Sources */,
 				D1ED3F79D7ECA56A08967C31 /* MetricFormatter.swift in Sources */,
 				5CF413FBB2A0E7698D979A0E /* OverviewUnavailableView.swift in Sources */,
@@ -782,20 +793,21 @@
 				120000000000000000000007 /* SharedSnapshotStore.swift in Sources */,
 				BB6FC55D3CA70FD85EFFF1D3 /* SectionHeader.swift in Sources */,
 				85395C770639C11C3F0624A2 /* SettingsView.swift in Sources */,
-				120000000000000000000041 /* LiveActivitySurfacePreview.swift in Sources */,
 				01942276D4783199323D77C2 /* SurfaceCard.swift in Sources */,
 				120000000000000000000006 /* SystemSurfaceCoordinator.swift in Sources */,
+				120000000000000000000051 /* ActivityViews.swift in Sources */,
 				120000000000000000000008 /* TokenMonitorActivityAttributes.swift in Sources */,
 				06013428F8C212F797CD3D88 /* TokenMonitorApp.swift in Sources */,
 				120000000000000000000002 /* TokenMonitorSharedPayload+Hub.swift in Sources */,
 				120000000000000000000009 /* TokenMonitorSharedPayload.swift in Sources */,
 				183A37778D52EAC8012DC58B /* TokenMonitorStore.swift in Sources */,
+				120000000000000000000053 /* LiveActivityCustomizerView.swift in Sources */,
+				120000000000000000000054 /* WidgetPresentation.swift in Sources */,
 				ED754554A989A56EED7FF1D6 /* TrendMetric.swift in Sources */,
 				21374BF9412C4E972DB9552F /* UsageHistory+Sample.swift in Sources */,
 				41F77693A7793A94B5BAB359 /* UsageHistory.swift in Sources */,
 				16DC547A7773B3E4AB91F3F8 /* UsagePeriod.swift in Sources */,
 				907B1838EA879DB20AD723D0 /* UsagePeriodKey.swift in Sources */,
-				F2324E25A6BDBA28CCF21AC8 /* UsageTrendCard.swift in Sources */,
 				702669D174DD36A2AD2741A5 /* UsageTrendChart.swift in Sources */,
 				120000000000000000000040 /* WidgetSurfacePreview.swift in Sources */,
 			);

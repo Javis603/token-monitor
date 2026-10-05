@@ -1,19 +1,17 @@
 import SwiftUI
 
-/// The Overview summary uses native glass; other enclosed surfaces remain opaque.
+/// The one section container: glass where the system supports it, opaque elsewhere.
 struct SurfaceCard<Content: View>: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     let content: Content
-    let glass: Bool
 
-    init(glass: Bool = false, @ViewBuilder content: () -> Content) {
+    init(@ViewBuilder content: () -> Content) {
         self.content = content()
-        self.glass = glass
     }
 
     var body: some View {
-        if #available(iOS 26, *), glass, !reduceTransparency {
+        if #available(iOS 26, *), !reduceTransparency {
             paddedContent
                 .glassEffect(.regular, in: .rect(cornerRadius: DesignTokens.cardRadius))
         } else {

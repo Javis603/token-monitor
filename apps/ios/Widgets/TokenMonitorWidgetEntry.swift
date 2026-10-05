@@ -116,6 +116,8 @@ extension TokenMonitorWidgetEntry {
                     .init(
                         id: "codex",
                         providerID: "codex",
+                        planLabel: nil,
+                        status: nil,
                         updatedAt: .now,
                         windows: [
                             .init(

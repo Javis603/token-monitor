@@ -9,13 +9,13 @@ nonisolated struct LimitProviderGroup: Identifiable {
         var groups: [LimitProviderGroup] = []
         var indices: [String: Int] = [:]
         for provider in providers {
-            let key = provider.provider?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            let id = key.flatMap { $0.isEmpty ? nil : $0 } ?? provider.id
-            if let index = indices[id] {
+            let id = provider.normalizedProviderID
+            let key = id.isEmpty ? provider.id : id
+            if let index = indices[key] {
                 groups[index].accounts.append(provider)
             } else {
-                indices[id] = groups.count
-                groups.append(LimitProviderGroup(id: id, accounts: [provider]))
+                indices[key] = groups.count
+                groups.append(LimitProviderGroup(id: key, accounts: [provider]))
             }
         }
         return groups
@@ -39,71 +39,125 @@ struct ProviderLimitCard: View {
     }
 
     var body: some View {
-        if let first = providers.first {
-            VStack(alignment: .leading, spacing: 12) {
-                header(for: first)
+        if providers.count == 1, let provider = providers.first {
+            singleAccount(provider)
+        } else {
+            multiAccount
+        }
+    }
 
-                ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
-                    if index > 0 {
-                        Divider()
-                            .padding(.vertical, 2)
-                    }
-                    LimitAccountSection(
-                        provider: provider,
-                        showsPlan: providers.count > 1,
-                        compact: compact
-                    )
+    /// Single-account provider: name + plan on the header row, freshness under
+    /// the name, then windows. No redundant account line.
+    private func singleAccount(_ provider: LimitProvider) -> some View {
+        VStack(alignment: .leading, spacing: compact ? 10 : 12) {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            layout {
+                providerName(provider)
+                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
+                planCellText(provider)
+            }
+            freshnessLine(provider)
+            windows(for: provider)
+        }
+    }
+
+    /// Multi-account group: name + "N accounts", then one divided block per
+    /// account (title + plan baseline, freshness, windows).
+    private var multiAccount: some View {
+        VStack(alignment: .leading, spacing: compact ? 10 : 12) {
+            if let first = providers.first {
+                let layout = dynamicTypeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                    : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+                layout {
+                    providerName(first)
+                    if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
+                    Text(MetricFormatter.accountCount(providers.count, locale: locale))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
+            }
+            ForEach(Array(providers.enumerated()), id: \.element.id) { index, provider in
+                if index > 0 {
+                    Divider()
+                }
+                LimitAccountSection(provider: provider, compact: compact)
             }
         }
     }
 
-    private func header(for provider: LimitProvider) -> some View {
-        let layout = dynamicTypeSize.isAccessibilitySize
-            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
-            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
-        return layout {
-            Text(ProviderPresentation.displayName(for: provider.provider))
-                .font(compact ? .subheadline.weight(.semibold) : .headline)
-                .padding(.leading, 32)
-                .overlay(alignment: .leading) {
-                    ProviderMark(provider: provider.provider)
-                }
-                .accessibilityAddTraits(.isHeader)
-            if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
-            if providers.count > 1 {
-                Text(MetricFormatter.accountCount(providers.count, locale: locale))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else if let plan = provider.secondaryTitle {
-                Text(plan)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
+    private func providerName(_ provider: LimitProvider) -> some View {
+        Text(ProviderPresentation.displayName(for: provider.provider))
+            .font(compact ? .subheadline.weight(.semibold) : .headline)
+            .padding(.leading, 32)
+            .overlay(alignment: .leading) {
+                ProviderMark(provider: provider.provider)
             }
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    @ViewBuilder
+    private func planCellText(_ provider: LimitProvider) -> some View {
+        let text = switch provider.planCell {
+        case let .plan(plan):
+            Text(plan)
+        case let .status(key):
+            Text(LocalizedStringKey(key))
+        case nil:
+            Text("")
+        }
+        text
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
+    }
+
+    @ViewBuilder
+    private func freshnessLine(_ provider: LimitProvider) -> some View {
+        if provider.showsFreshnessLine,
+           let text = provider.freshnessText(locale: locale) {
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 32)
+        }
+    }
+
+    @ViewBuilder
+    private func windows(for provider: LimitProvider) -> some View {
+        if provider.displayWindows.isEmpty {
+            Text("No quota windows available")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 32)
+        } else {
+            LimitWindowGrid(
+                provider: provider,
+                windows: compact
+                    ? Array(provider.displayWindows.prefix(2))
+                    : provider.displayWindows
+            )
         }
     }
 }
 
 private struct LimitAccountSection: View {
+    @Environment(AppPreferences.self) private var preferences
     @Environment(\.locale) private var locale
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let provider: LimitProvider
-    let showsPlan: Bool
     let compact: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
                 accountHeading
-                if let updatedDate = Date.hubTimestamp(from: provider.updatedAt) {
-                    Text(updatedDate.updateDescription(locale: locale))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if provider.status != "ok" || provider.stale == true {
-                    Label(LocalizedStringKey(statusTitle), systemImage: statusSymbol)
+                if provider.showsFreshnessLine,
+                   let text = provider.freshnessText(locale: locale) {
+                    Text(text)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -111,18 +165,15 @@ private struct LimitAccountSection: View {
             .accessibilityElement(children: .combine)
 
             if provider.displayWindows.isEmpty {
-                Label(
-                    LocalizedStringKey(provider.status == "not_configured"
-                        ? "Not configured on reporting devices"
-                        : "No quota windows available"),
-                    systemImage: "gauge.open.with.lines.needle.33percent"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Text("No quota windows available")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } else {
                 LimitWindowGrid(
                     provider: provider,
-                    windows: compact ? Array(provider.displayWindows.prefix(2)) : provider.displayWindows
+                    windows: compact
+                        ? Array(provider.displayWindows.prefix(2))
+                        : provider.displayWindows
                 )
             }
         }
@@ -133,39 +184,38 @@ private struct LimitAccountSection: View {
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
         return layout {
-            Text(provider.accountTitle)
-                .font(.subheadline.weight(showsPlan ? .medium : .regular))
-                .foregroundStyle(showsPlan ? .primary : .secondary)
+            Text(provider.accountTitle(maskingEmails: preferences.masksAccountEmails))
+                .font(.subheadline.weight(.medium))
                 .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                 .privacySensitive()
-            if showsPlan, let plan = provider.secondaryTitle {
+            switch provider.planCell {
+            case let .plan(plan):
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
                 Text(plan)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
+            case let .status(key):
+                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 4) }
+                Text(LocalizedStringKey(key))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(dynamicTypeSize.isAccessibilitySize ? .leading : .trailing)
+            case nil:
+                EmptyView()
             }
         }
     }
+}
 
-    private var statusTitle: String {
-        if provider.stale == true { return "Stale" }
-        return switch provider.status {
-        case "ok": "Up to date"
-        case "not_configured": "Setup needed"
-        case "timeout": "Timed out"
-        case "rate_limited": "Rate limited"
-        case "unavailable": "Unavailable"
-        default: provider.status?.capitalized ?? "Unknown"
+extension LimitProvider {
+    /// Freshness line under a provider name: "Updated …", or "Stale · …" once
+    /// the report is stale; nil when the Hub sent no timestamp.
+    func freshnessText(locale: Locale) -> String? {
+        let isStale = stale == true
+        if let date = Date.hubTimestamp(from: updatedAt) {
+            return date.limitFreshnessDescription(stale: isStale, locale: locale)
         }
-    }
-
-    private var statusSymbol: String {
-        if provider.stale == true { return "clock.badge.exclamationmark" }
-        return switch provider.status {
-        case "ok": "checkmark.circle.fill"
-        case "not_configured": "gearshape.fill"
-        default: "exclamationmark.triangle.fill"
-        }
+        return isStale ? Date.staleWord(for: locale) : nil
     }
 }

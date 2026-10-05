@@ -156,13 +156,16 @@ extension HubStats {
         ]
     }
 
+    /// Mirrors the real Hub shape: alphabetical by provider id then account
+    /// label, `planLabel` empty with the plan in `accountLabel`, three Codex
+    /// accounts, one signed-out provider, and a Command Code "GOAT" account.
     private static var sampleLimits: [LimitProvider] {
         [
             LimitProvider(
                 provider: "claude",
                 accountKey: "claude-sample",
                 accountLabel: "Max",
-                planLabel: "Max",
+                planLabel: "",
                 accountName: "Javis",
                 accountEmail: "javis@example.com",
                 workspaceKind: nil,
@@ -207,25 +210,36 @@ extension HubStats {
                 sourceDeviceId: "macbook-m5",
                 stale: false
             ),
+            sampleCodexAccount(key: "codex-sample", email: "javis@icloud.com", name: "Javis", weekly: 88),
+            sampleCodexAccount(key: "codex-secondary", email: "sample@example.com", name: "Sample", weekly: 55),
+            sampleCodexAccount(key: "codex-third", email: "demo@example.com", name: "Demo", weekly: 51),
             LimitProvider(
-                provider: "codex",
-                accountKey: "codex-sample",
-                accountLabel: "Plus",
-                planLabel: "Plus",
-                accountName: "Javis",
-                accountEmail: "javis@icloud.com",
-                workspaceKind: nil,
+                provider: "commandcode",
+                accountKey: "commandcode-sample",
+                accountLabel: "GOAT",
+                planLabel: "",
+                accountName: nil,
+                accountEmail: nil,
+                workspaceKind: "personal",
                 status: "ok",
-                source: "oauth",
+                source: "local",
                 sourceDetail: nil,
                 updatedAt: Date.now.formatted(.iso8601),
                 windows: [
                     LimitWindow(
-                        kind: "session", metric: nil, label: "Session",
-                        used: nil, limit: nil, remaining: nil,
-                        usedPercent: 2, remainingPercent: 98,
-                        resetsAt: Date.now.addingTimeInterval(15_420).formatted(.iso8601),
-                        resetDescription: "", detail: "", currency: nil, showMeter: true
+                        kind: "session",
+                        metric: nil,
+                        label: "Session",
+                        used: nil,
+                        limit: nil,
+                        remaining: nil,
+                        usedPercent: 30,
+                        remainingPercent: 70,
+                        resetsAt: Date.now.addingTimeInterval(10_800).formatted(.iso8601),
+                        resetDescription: "",
+                        detail: "",
+                        currency: nil,
+                        showMeter: true
                     ),
                     LimitWindow(
                         kind: "weekly",
@@ -234,9 +248,9 @@ extension HubStats {
                         used: nil,
                         limit: nil,
                         remaining: nil,
-                        usedPercent: 12,
-                        remainingPercent: 88,
-                        resetsAt: Date.now.addingTimeInterval(594_000).formatted(.iso8601),
+                        usedPercent: 42,
+                        remainingPercent: 58,
+                        resetsAt: Date.now.addingTimeInterval(356_400).formatted(.iso8601),
                         resetDescription: "",
                         detail: "",
                         currency: nil,
@@ -249,10 +263,28 @@ extension HubStats {
                 stale: false
             ),
             LimitProvider(
+                provider: "cursor",
+                accountKey: "cursor-sample",
+                accountLabel: "",
+                planLabel: "",
+                accountName: nil,
+                accountEmail: nil,
+                workspaceKind: nil,
+                status: "notConfigured",
+                source: nil,
+                sourceDetail: nil,
+                updatedAt: Date.now.formatted(.iso8601),
+                windows: [],
+                balanceUsd: nil,
+                balance: nil,
+                sourceDeviceId: "macbook-m5",
+                stale: false
+            ),
+            LimitProvider(
                 provider: "opencode",
                 accountKey: "opencode-sample",
                 accountLabel: "Go",
-                planLabel: "Go",
+                planLabel: "",
                 accountName: "OpenCode",
                 accountEmail: nil,
                 workspaceKind: nil,
@@ -297,16 +329,18 @@ extension HubStats {
                 sourceDeviceId: "macbook-m5",
                 stale: false
             )
-        ] + [
-            sampleCodexAccount(key: "codex-secondary", email: "sample@example.com", weekly: 55),
-            sampleCodexAccount(key: "codex-third", email: "demo@example.com", weekly: 51)
         ]
     }
 
-    private static func sampleCodexAccount(key: String, email: String, weekly: Double) -> LimitProvider {
+    private static func sampleCodexAccount(
+        key: String,
+        email: String,
+        name: String,
+        weekly: Double
+    ) -> LimitProvider {
         LimitProvider(
-            provider: "codex", accountKey: key, accountLabel: "Plus", planLabel: "Plus",
-            accountName: "Sample", accountEmail: email, workspaceKind: nil,
+            provider: "codex", accountKey: key, accountLabel: "Plus", planLabel: "",
+            accountName: name, accountEmail: email, workspaceKind: nil,
             status: "ok", source: "oauth", sourceDetail: nil,
             updatedAt: Date.now.formatted(.iso8601),
             windows: [
