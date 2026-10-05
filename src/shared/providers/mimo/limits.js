@@ -690,7 +690,7 @@ function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, upd
     }));
   }
 
-  if (!entry.membership) return rows;
+  if (!membership) return rows;
   // A region the app does not carry resolves no membership endpoint at all, so
   // the row is absent rather than mislabelled: there is nothing for this account
   // to sign in to.
@@ -698,7 +698,7 @@ function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, upd
 
   if (!membership?.ok) {
     return [...rows, statusProvider(membership?.status || 'unavailable', updatedAt, {
-      accountKey: entry.membershipKey || entry.accountKey,
+      accountKey: entry.membershipKey,
       accountName: identity.name,
       accountEmail: identity.email,
       accountLabel: MIMO_MEMBERSHIP_LABEL,
@@ -718,7 +718,7 @@ function mimoRowsForEntry(entry, { consoleRow, consoleFailure, membership }, upd
     sourceDetail: 'app',
     status: 'ok',
     updatedAt,
-    accountKey: entry.membershipKey || entry.accountKey,
+    accountKey: entry.membershipKey,
     accountName: identity.name,
     accountEmail: identity.email,
     accountLabel: MIMO_MEMBERSHIP_LABEL,
