@@ -87,8 +87,8 @@ test('forecast details use the shared accessible tooltip without repeating third
   // What stays per-caller is which side it hangs from and how tightly it sets.
   assert.match(styles, /\.codex-reset-forecast-info-wrap \.limit-detail-tooltip\s*\{[^}]*left: calc\(anchor\(left\) - 1px\);/s);
   assert.match(styles, /max-width: min\(230px, calc\(100vw - 48px\)\)/);
-  assert.match(styles, /\.codex-reset-forecast-info-wrap \.limit-detail-tooltip\s*\{[^}]*font-size: 10px;[^}]*font-weight: 400;[^}]*line-height: 1\.2;/s);
-  assert.match(styles, /\.codex-reset-forecast-disclaimer\s*\{[^}]*font-size: 8px;[^}]*white-space: normal;/s);
+  assert.match(styles, /\.codex-reset-forecast-info-wrap \.limit-detail-tooltip\s*\{[^}]*font-size: 0\.625rem;[^}]*font-weight: 400;[^}]*line-height: 1\.2;/s);
+  assert.match(styles, /\.codex-reset-forecast-disclaimer\s*\{[^}]*font-size: 0\.5rem;[^}]*white-space: normal;/s);
 });
 
 test('forecast date uses a compact relative calendar label for nearby dates', () => {

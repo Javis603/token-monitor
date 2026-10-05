@@ -68,7 +68,7 @@ test('Home multi-account provider names are opt-in and persist through the setti
   assert.match(app, /requiredReasonText\.className = 'home-limit-provider-names-reason'/);
   assert.match(app, /providerNamesInput\.setAttribute\('aria-describedby', requiredReasonText\.id\)/);
   assert.match(css, /\.home-limit-provider-names-copy\s*\{[^}]*display:\s*grid/s);
-  assert.match(css, /\.home-limit-provider-names-reason\s*\{[^}]*font-size:\s*10px/s);
+  assert.match(css, /\.home-limit-provider-names-reason\s*\{[^}]*font-size:\s*0\.625rem/s);
   assert.match(app, /saveSettings\(\{ showHomeLimitProviderNames: providerNamesInput\.checked \}\)/);
   assert.match(app, /renderHomeIfVisible\(\)/);
   assert.match(app, /els\.toolIconsInput\.addEventListener\('change', async \(\) => \{\s*state\.settings\.showToolIcons = els\.toolIconsInput\.checked;\s*renderHomeIfVisible\(\);\s*await saveAppearanceFromControls\(\);\s*\}\);/);

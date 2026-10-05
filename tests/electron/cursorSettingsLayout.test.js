@@ -863,7 +863,7 @@ test('API key account entries share styling and Copilot uses the folded token en
   {
     // Every generated control carries .credential-input wherever it is placed,
     // so a region select above the paste panel is styled like the inputs in it.
-    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes(".credential-input,") && match[2].includes("font-size: 12px;"));
+    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes(".credential-input,") && match[2].includes("font-size: 0.75rem;"));
     assert.ok(rule, 'shared credential input style should exist');
     for (const selector of [".credential-input", "#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", "#mimoManualPanel input", "#mimoManualPanel textarea", "#volcengineManualPanel input"]) {
       assert.ok(rule[1].split(',').map((value) => value.trim()).includes(selector), selector);
@@ -877,7 +877,7 @@ test('API key account entries share styling and Copilot uses the folded token en
     }
   }
 
-  assert.match(css, /\.thirdparty-field :is\(input, select\)\s*\{[\s\S]*?font-size: 12px;/);
+  assert.match(css, /\.thirdparty-field :is\(input, select\)\s*\{[\s\S]*?font-size: 0.75rem;/);
 });
 
 test('Copilot account panel provides GitHub sign-in plus manual token fallback', () => {
@@ -1160,7 +1160,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   )));
   assert.ok(cssRulesForSelector(css, '.credential-input').some(rule => (
     declaration(rule, 'width') === '100%'
-      && declaration(rule, 'font-size') === '12px'
+      && declaration(rule, 'font-size') === '0.75rem'
   )));
   assert.ok(cssRulesForSelector(css, '.credential-input:not(select)').some(rule => declaration(rule, 'font-family') === 'monospace'));
   const textareaControlRules = cssRulesForSelector(css, '.settings-panel textarea');
@@ -1299,7 +1299,7 @@ test('MiMo account panel matches the manual Cookie provider layout', () => {
   assert.ok(details.indexOf('mimoAddToggle') < details.indexOf('mimoOpenConsoleButton'));
   assert.ok(details.indexOf('mimoOpenConsoleButton') < details.indexOf('mimoCookieInput'));
   assert.ok(details.indexOf('mimoCookieInput') < details.indexOf('mimoSaveAccountButton'));
-  assert.match(css, /#mimoManualPanel textarea,[\s\S]*font-size: 12px/);
+  assert.match(css, /#mimoManualPanel textarea,[\s\S]*font-size: 0\.75rem/);
   assert.match(css, /\.credential-input:not\(select\),[\s\S]*#mimoManualPanel textarea,[\s\S]*font-family: monospace/);
   assert.match(css, /\.managed-account-list:empty \{ display: none; \}/);
   assert.match(app, /getElementById\('mimoManualPanel'\)\?\.classList\.toggle\('expanded', next\)/);

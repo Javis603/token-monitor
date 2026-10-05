@@ -1427,7 +1427,7 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(limitDetailTooltipShouldHoldRender, /state\.limitDetailTooltipActive/);
   assert.match(renderLimits, /const holdLimitDetailTooltipRender = limitDetailTooltipShouldHoldRender\(\);/);
   assert.match(renderLimits, /if \(holdLimitDetailTooltipRender \|\| holdCodexSwitchPopoverRender\)/);
-  assert.match(styles, /\.limit-reset-credits\s*\{[^}]*min-height: 11px;[^}]*font-size: 9px;/s);
+  assert.match(styles, /\.limit-reset-credits\s*\{[^}]*min-height: 11px;[^}]*font-size: 0\.5625rem;/s);
   assert.match(styles, /\.limit-reset-credits-line\s*\{[^}]*justify-content: space-between;/s);
   assert.match(styles, /\.limit-reset-credits-expiry-group\s*\{[^}]*flex: 0 0 auto;/s);
   assert.match(styles, /\.limit-reset-credits-timeline\s*\{[^}]*opacity: 0\.66;/s);
@@ -1629,7 +1629,7 @@ test('Claude reset grants wrap their label and clears as full-width lines', () =
   assert.match(styles, /\.limit-detail-tooltip-full\s*\{[^}]*grid-column: 1 \/ -1;/s);
   assert.match(styles, /\.limit-detail-tooltip-full\s*\{[^}]*white-space: normal;/s);
   assert.match(styles, /\.limit-detail-tooltip-full\.is-separated\s*\{[^}]*border-top:/s);
-  assert.match(styles, /\.limit-detail-tooltip-full\.is-caption\s*\{[^}]*font-size: 8px;/s);
+  assert.match(styles, /\.limit-detail-tooltip-full\.is-caption\s*\{[^}]*font-size: 0\.5rem;/s);
 });
 
 test('Home uses explicit billing labels so Copilot Premium and Chat stay distinct', () => {

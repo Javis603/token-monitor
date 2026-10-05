@@ -22,10 +22,10 @@ function rules(css) {
 
 // Without a base size the fallback is the browser's 16px, roughly double this
 // UI's body text, so anything that forgets a font-size renders unmistakably
-// wrong. It is on `body` rather than `html` so `rem` keeps meaning 16px.
+// wrong. The standard root remains 16px; only text scales through rem.
 test('the renderer declares its own base type size', () => {
   const css = readRendererFile('styles.css');
-  assert.match(css, /\nbody \{ font-size: 11px; \}/);
+  assert.match(css, /\nbody \{ font-size: 0\.6875rem; \}/);
   assert.doesNotMatch(css, /\nhtml, body \{[^}]*font-size/);
 });
 

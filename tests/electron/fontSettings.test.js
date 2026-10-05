@@ -165,3 +165,24 @@ test('font settings wiring keeps renderer defaults concrete and technical monosp
   assert.match(dashboardStyles, /font-family: var\(--display-font, inherit\)/);
   assert.match(styles, /font-family: var\(--mono-font, ui-monospace/);
 });
+
+
+test('text size defaults remain compact across missing and invalid saved preferences', () => {
+  for (const value of [undefined, null, '', 1.2, {}, '__proto__', 'unknown']) {
+    assert.equal(fontSettings.normalizeTextSize(value), 'standard');
+    assert.equal(fontSettings.textScaleForSize(value), 1);
+  }
+  assert.equal(fontSettings.textScaleForSize('standard'), 1);
+  assert.equal(fontSettings.textScaleForSize('larger'), 1.1);
+  assert.equal(fontSettings.textScaleForSize('largest'), 1.2);
+});
+
+
+test('text size labels exist in every supported locale', () => {
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const [locale, messages] of Object.entries(MESSAGES)) {
+    for (const suffix of ['textSize', 'textSizeStandard', 'textSizeLarger', 'textSizeLargest', 'textSizeNote']) {
+      assert.ok(messages[`settings.appearance.${suffix}`], `${locale}: ${suffix}`);
+    }
+  }
+});

@@ -129,7 +129,7 @@ test('About links stay visually secondary and wrap in narrow settings', () => {
   const css = read('styles.css');
 
   assert.match(css, /\.about-settings-links \{[\s\S]*flex-wrap: wrap;/);
-  assert.match(css, /\.about-settings-links \.inline-link \{ font-size: 10px; \}/);
+  assert.match(css, /\.about-settings-links \.inline-link \{ font-size: 0\.625rem; \}/);
 });
 
 test('About diagnostics open from the support links and separate generate, view and copy actions', () => {

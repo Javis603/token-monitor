@@ -523,6 +523,7 @@ Object.assign(els, {
   themeAdvancedGroup: document.getElementById('themeAdvancedGroup'),
   themeAdvancedToggle: document.getElementById('themeAdvancedToggle'),
   themeAdvancedDetails: document.getElementById('themeAdvancedDetails'),
+  textSizeInput: document.getElementById('textSizeInput'),
   interfaceFontPreset: document.getElementById('interfaceFontPreset'),
   interfaceFontInput: document.getElementById('interfaceFontInput'),
   interfaceFontCustomRow: document.getElementById('interfaceFontCustomRow'),
@@ -6919,6 +6920,8 @@ function applyFontSettings(settings) {
   const source = { ...(state.settings || {}), ...(settings || {}) };
   const root = document.documentElement.style;
   const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(source);
+  document.documentElement.dataset.textSize = fontSettingsApi.normalizeTextSize(source.textSize);
+  root.setProperty('--ui-text-scale', String(fontSettingsApi.textScaleForSize(source.textSize)));
   root.setProperty('--ui-font', interfaceFont);
   root.setProperty('--display-font', displayFont);
 }
@@ -7817,6 +7820,7 @@ async function resetDisplayFont() {
 }
 
 function syncFontSettingsControls() {
+  if (els.textSizeInput) els.textSizeInput.value = fontSettingsApi.normalizeTextSize(state.settings?.textSize);
   for (const [role, settingKey] of [['interface', 'interfaceFontFamily'], ['display', 'displayFontFamily']]) {
     const controls = fontControlsFor(role);
     const value = fontSettingsApi.normalizeFontFamily(state.settings?.[settingKey]);
@@ -12316,6 +12320,9 @@ els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBac
 void loadBackgroundImage();
 els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}));
 els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
+els.textSizeInput?.addEventListener('change', async () => {
+  await saveSettings({ textSize: fontSettingsApi.normalizeTextSize(els.textSizeInput.value) });
+});
 els.interfaceFontPreset?.addEventListener('change', () => handleFontPresetChange('interface'));
 els.displayFontPreset?.addEventListener('change', () => handleFontPresetChange('display'));
 els.interfaceFontInput?.addEventListener('input', previewFontSettings);

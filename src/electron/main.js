@@ -572,6 +572,7 @@ function defaultSettings() {
     periodMonthMode: 'month',
     themeColors: {},
     vendorColors: {},
+    textSize: 'standard',
     interfaceFontFamily: '',
     displayFontFamily: fontSettingsApi.DEFAULT_DISPLAY_FONT,
     floatingBubbleEnabled: false,
@@ -2511,6 +2512,7 @@ function readSettings() {
     merged.syncContentState = normalizeSyncContentState(merged.syncContentState);
     merged.hubSyncSessionTitles = parseBoolean(merged.hubSyncSessionTitles, false);
     merged.modelAliasGrouping = normalizeModelAliasGrouping(merged.modelAliasGrouping);
+    merged.textSize = fontSettingsApi.normalizeTextSize(merged.textSize);
     merged.interfaceFontFamily = fontSettingsApi.normalizeFontFamily(merged.interfaceFontFamily);
     merged.displayFontFamily = fontSettingsApi.normalizeFontFamily(merged.displayFontFamily);
     merged.tokenRateMode = normalizeTokenRateMode(merged.tokenRateMode);
@@ -7400,6 +7402,7 @@ app.whenReady().then(() => {
       compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
       modelAliases: normalizeModelAliases(patch.modelAliases ?? settings.modelAliases),
       modelAliasGrouping: normalizeModelAliasGrouping(patch.modelAliasGrouping ?? settings.modelAliasGrouping),
+      textSize: fontSettingsApi.normalizeTextSize(patch.textSize ?? settings.textSize),
       interfaceFontFamily: fontSettingsApi.normalizeFontFamily(
         patch.interfaceFontFamily ?? settings.interfaceFontFamily
       ),

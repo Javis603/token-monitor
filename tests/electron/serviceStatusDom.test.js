@@ -212,7 +212,7 @@ test('Home module jump icons align optically with their titles', () => {
 
 test('Home limit percentages use the compact Limits view typography', () => {
   const css = readRendererFile('styles.css');
-  assert.match(cssRule(css, '.home-limit-window .home-list-value'), /font-size:\s*10px/);
+  assert.match(cssRule(css, '.home-limit-window .home-list-value'), /font-size:\s*0\.625rem/);
   assert.match(cssRule(css, '.home-limit-window .home-list-value'), /line-height:\s*1\.1/);
 });
 
