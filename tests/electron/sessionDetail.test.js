@@ -57,7 +57,7 @@ test('session detail renders its heading before loading, errors and empty result
   const end = rendererSource.indexOf('function backgroundReviewRunNode(', start);
   let render;
   const context = {
-    els, state, document: { createElement: element, querySelectorAll: () => [els.sessionDetailHead.querySelector('.detail-heading')].filter(Boolean) }, window: { addEventListener() {} }, t: (key, params) => translate('en', key, params),
+    els, state, document: { getElementById: () => null, createElement: element, querySelectorAll: () => [els.sessionDetailHead.querySelector('.detail-heading')].filter(Boolean) }, window: { addEventListener() {} }, t: (key, params) => translate('en', key, params),
     sessionDetailBack() { state.backClicked = true; },
     detailNote: text => ({ textContent: text }),
     sessionDetailApi: { exchangeRows: detail => detail?.exchanges || [] },

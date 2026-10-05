@@ -7,7 +7,7 @@
     <script src="floatingBubbleBoot.js"></script>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="edgeDock/composer.css" />
-    <link rel="stylesheet" href="cloudUsagePanel.css" />
+    <link rel="stylesheet" href="cloudSessions.css" />
   </head>
   <body>
     <main class="shell">
@@ -100,6 +100,12 @@
             </div>
             <div class="settings-subgroup">
               <div class="settings-group-header"><span data-i18n="settings.integrations.title">Integrations</span></div>
+              <label class="checkbox-label settings-item">
+                <span class="settings-item-text"><span id="cloudSessionsSettingTitle" class="settings-item-title">Automatically monitor Codex cloud sessions</span></span>
+                <input id="cloudSessionsEnabled" type="checkbox" aria-describedby="cloudSessionsSettingNote" disabled />
+                <span id="cloudSessionsSettingNote" class="settings-item-desc">Show cloud tasks and subagents in Sessions.</span>
+                <span id="cloudSessionsSettingStatus" class="settings-note" role="status" aria-live="polite"></span>
+              </label>
               <label class="checkbox-label settings-item">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.integrations.discord">Discord Rich Presence</span>
@@ -1508,6 +1514,7 @@
       <section id="fixedPeriodMessage" class="fixed-period-message hidden" role="status" aria-live="polite"></section>
 
       <section id="homePanel" class="home-panel hidden"></section>
+      <p id="cloudSessionsScope" class="cloud-sessions-scope hidden"></p>
       <section id="breakdown" class="breakdown"></section>
       <div id="session-detail-head" class="detail-head hidden"></div>
       <div id="session-detail" class="session-detail hidden"></div>
@@ -1537,7 +1544,6 @@
         </div>
         <span id="footerActionSlot">
           <span id="utilityActions" class="utility-actions">
-            <button id="cloudUsageButton" class="icon-button" type="button" title="Codex Cloud" aria-label="Codex Cloud">☁</button>
             <button id="refreshButton" class="refresh-button" title="Refresh" aria-label="Refresh"><span class="refresh-button-icon" aria-hidden="true">↻</span><span class="refresh-button-spinner" aria-hidden="true"></span></button>
             <button id="settingsButton" class="icon-button settings-icon-button" title="Settings" aria-label="Settings"></button>
           </span>
@@ -1601,6 +1607,7 @@
     <script src="../../shared/providers/reasonix/sessionGuard.js"></script>
     <script src="../../shared/sessionLive.js"></script>
     <script src="../sessionTitleDisplay.js"></script>
+    <script src="cloudSessionRows.js"></script>
     <script src="sessionRows.js"></script>
     <script src="overflowText.js"></script>
     <script src="breakdownRenderPolicy.js"></script>
@@ -1638,6 +1645,5 @@
     <script src="trayComposer.js"></script>
     <script src="diagnosticsPanel.js"></script>
     <script src="app.js"></script>
-    <script src="cloudUsageShortcut.js"></script>
   </body>
 </html>

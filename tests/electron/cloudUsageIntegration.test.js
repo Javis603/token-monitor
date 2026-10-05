@@ -6,7 +6,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { pathToFileURL } = require('node:url');
 const { createCloudUsageBridge, projectReport, trustedSender, registerCloudUsageIpc, readJson, LABEL } = require('../../src/electron/cloudUsageBridge');
-const panel = require('../../src/electron/renderer/cloudUsagePanel');
+const sessionRows = require('../../src/electron/renderer/cloudSessionRows');
 const tid = '01900000-0000-7000-8000-000000000001';
 const child = '01900000-0000-7000-8000-000000000002';
 const NOW = Date.parse('2026-10-05T10:00:00Z');
@@ -103,17 +103,17 @@ test('new IPC is guarded and does not expose filesystem paths or generic exec', 
   handlers.get('cloudUsage:open')(f.event); assert.equal(opened, true);
   assert.throws(() => handlers.get('cloudUsage:get')({}), { code: 'UNTRUSTED_CLOUD_SENDER' });
 });
-test('native view escapes identifiers, preserves unknown and provides no summed total', () => {
-  const r = project(); r.threads[0].threadId = '<img src=x onerror=alert(1)>';
-  const html = panel.rowsHtml(r.threads, 'zh-CN'); assert.ok(html.includes('&lt;img')); assert.ok(!html.includes('<img')); assert.ok(html.includes('未知')); assert.ok(html.includes('100'));
-  assert.equal(panel.selectRows(project(), 'measured', '').length, 1); assert.equal(panel.selectRows(project(), 'listening', '').length, 1); assert.equal(panel.selectRows(project(), 'all', child).length, 1);
+test('native projection supplies cloud rows to the existing session builder', () => {
+  const snapshot = project(); const rows = sessionRows.mergeRows([], {}, snapshot, { period: 'allTime', locale: 'zh-CN', now: new Date(NOW) });
+  assert.equal(rows.length, 2); assert.equal(rows[0].cloudOnly, true);
+  assert.equal(rows[0].value, 100); assert.equal(rows[1].tokenDataUnavailable, true);
 });
 test('normal product entry points include the cloud pane without changing local data sources', () => {
   const read = (name) => fs.readFileSync(path.join(__dirname, '../../', name), 'utf8');
   const main = read('src/electron/main.js'), preload = read('src/electron/preload.js');
   assert.match(main, /registerCloudUsageIpc/); assert.match(preload, /cloudUsage: \{/);
-  assert.match(read('src/electron/renderer/dashboard.html'), /id="cloudTab"/); assert.match(read('src/electron/renderer/index.html'), /id="cloudUsageButton"/);
-  assert.match(read('src/electron/renderer/dashboard.js'), /cloudPanel\?\.dispose/);
+  assert.doesNotMatch(read('src/electron/renderer/dashboard.html'), /id="cloudTab"/); assert.match(read('src/electron/renderer/index.html'), /id="cloudSessionsEnabled"/);
+  assert.match(read('src/electron/renderer/app.js'), /cloudSessionsSource\.dispose/);
   for (const file of ['src/shared/collector.js', 'src/shared/stats.js']) { if (fs.existsSync(path.join(__dirname, '../../', file))) assert.doesNotMatch(read(file), /cloudUsageBridge|cloudAutoWatch/); }
 });
 
@@ -131,4 +131,11 @@ test('a current count or ambiguity never gets overwritten by a prior run', () =>
   const r = project(current, { previous }); assert.equal(r.threads[0].retainedFromPriorRun, false);
   current.threads[0].status = 'ambiguous'; current.threads[0].problem = 'reset'; current.threads[0].total = null;
   assert.equal(project(current, { previous }).threads[0].total, null);
+});
+
+
+test('session filtering dates come from engine metadata instead of discovery or receipt time', () => {
+  const r = raw(); r.threads[0].createdMs = NOW - 86400000; r.threads[0].updatedMs = NOW - 3600000;
+  const row = project(r).threads[0]; assert.equal(row.createdAt, new Date(NOW - 86400000).toISOString()); assert.equal(row.lastActivityAt, new Date(NOW - 3600000).toISOString());
+  delete r.threads[0].updatedMs; assert.equal(project(r).threads[0].lastActivityAt, null);
 });

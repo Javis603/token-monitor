@@ -1,3 +1,3 @@
-# Cloud dashboard preview
+# Unified Sessions preview
 
-`codex-cloud-dashboard.png` renders the actual native cloud panel with illustrative fixture data for the upstream pull request. All thread IDs, counts and timestamps shown are synthetic; it contains no account data. The preview is UI evidence, not a new live usage measurement.
+`codex-unified-sessions.png` and `codex-unified-session-detail.png` show the actual Sessions list/detail renderer with synthetic illustrative data. Local and cloud sessions share the same list; the source marker is not a separate view. All IDs, titles, counters and timestamps are fixtures, not account records. These images are UI evidence, not new cloud measurements.

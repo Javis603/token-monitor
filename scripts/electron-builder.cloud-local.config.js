@@ -9,7 +9,7 @@ module.exports = {
   directories: { ...base.directories, output: 'dist/cloud-native' },
   npmRebuild: false,
   publish: null,
-  extraMetadata: { version: '0.66.0-cloud.1', tokenMonitorBuild: { localCloudIntegration: true } },
+  extraMetadata: { version: '0.66.0-cloud.2', tokenMonitorBuild: { localCloudIntegration: true } },
   files: [...base.files, 'docs/licenses/planmeter.txt'],
   // extraResources exclusions remove matching source dirs from app.asar.
   // Copy the standalone observer after ordinary app packaging instead, so

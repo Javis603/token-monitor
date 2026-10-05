@@ -17,6 +17,7 @@ const id = (v) => typeof v === 'string' && UUID.test(v) ? v : null;
 const number = (v) => Number.isSafeInteger(v) && v >= 0 ? v : null;
 const stamp = (v) => typeof v === 'string' && v.length <= 40 && Number.isFinite(Date.parse(v)) ? new Date(v).toISOString() : null;
 const enumValue = (v, allowed, fallback = 'unknown') => allowed.includes(v) ? v : fallback;
+const millisStamp = (v) => Number.isSafeInteger(v) && v > 0 && v <= 8640000000000000 ? new Date(v).toISOString() : null;
 function fault(code) { return Object.assign(new Error(code), { code }); }
 function safeError(e) { return /^[A-Z_]{1,60}$/.test(e?.code || '') ? e.code : 'CLOUD_SERVICE_UNAVAILABLE'; }
 function readJson(file) {
@@ -64,6 +65,7 @@ function projectReport(raw, { scopeFingerprint, now = Date.now(), service = {}, 
     const invalid = t.total != null && !total;
     const ambiguous = t.status === 'ambiguous' || Boolean(t.problem);
     rows.push({ threadId: t.threadId,
+      createdAt: millisStamp(t.createdMs), lastActivityAt: millisStamp(t.updatedMs),
       kind: enumValue(t.kind, ['user', 'aeon', 'aeon_child', 'subagent', 'dreaming', 'unknown']),
       engineParentId: id(t.engineParentId), delegationParentId: id(t.delegationParentId),
       runtimeStatus: enumValue(t.runtimeStatus, ['active', 'idle', 'notLoaded', 'systemError', 'unknown']),

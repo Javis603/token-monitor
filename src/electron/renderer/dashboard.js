@@ -25,7 +25,6 @@ const els = {
   tabs: Array.from(document.querySelectorAll('.dash-tab')),
   trendsPane: document.getElementById('trendsPane'),
   activityPane: document.getElementById('activityPane'),
-  cloudPane: document.getElementById('cloudPane'),
   rangeSelect: document.getElementById('rangeSelect'),
   chart: document.getElementById('dashChart'),
   legend: document.getElementById('dashLegend'),
@@ -40,7 +39,7 @@ const els = {
 
 const RANGES = ['7', '30', '90', '365', 'all'];
 const state = {
-  tab: new URLSearchParams(window.location.search).get('tab') === 'cloud' ? 'cloud' : 'activity', range: '30', stackBy: 'client', mode: 'bars', flat: false,
+  tab: 'activity', range: '30', stackBy: 'client', mode: 'bars', flat: false,
   locale: 'en', currency: 'USD', compactTokenUnits: 'western', history: null, chartModel: null,
   chartKind: 'bars', motion: 'none', reduceMotion: 'system',
   heatmapMetric: 'cost'
@@ -54,7 +53,6 @@ const HEATMAP_MOTION_MS = 720;
 const HEAT_CELL_MOTION_MS = 280;
 let heatmapMotionGeneration = 0;
 let dashboardReady = false;
-let cloudPanel = null;
 let dashboardRefreshFrame = 0;
 
 function prefersReducedMotion() {
@@ -530,12 +528,7 @@ function renderActivity() {
 function renderNow() {
   hideTooltip();
   const hasData = (state.history?.daily || []).length > 0 || (state.history?.monthly || []).length > 0;
-  els.empty.classList.toggle('hidden', hasData || state.tab === 'cloud');
-  if (els.cloudPane) {
-    els.cloudPane.classList.toggle('hidden', state.tab !== 'cloud');
-    cloudPanel?.setActive(state.tab === 'cloud');
-    document.getElementById('cloudTab').textContent = window.TokenMonitorCloudUsagePanel.strings(state.locale).title;
-  }
+  els.empty.classList.toggle('hidden', hasData);
   els.trendsPane.classList.toggle('hidden', state.tab !== 'trends');
   els.activityPane.classList.toggle('hidden', state.tab !== 'activity');
   els.modeBtns.forEach((b) => b.classList.toggle('active', b.dataset.mode === state.mode));
@@ -546,7 +539,7 @@ function renderNow() {
     heatmapMotionGeneration += 1;
     els.heatmap.classList.remove('is-motion-pending');
     renderTrends();
-  } else if (state.tab === 'activity') {
+  } else {
     renderActivity();
   }
   state.motion = 'none';
@@ -632,7 +625,6 @@ let refreshRunning = false;
 let refreshQueued = false;
 
 async function refresh() {
-  if (state.tab === 'cloud' && cloudPanel) { await cloudPanel.refresh(); return; }
   if (refreshRunning) {
     refreshQueued = true;
     return;
@@ -686,8 +678,6 @@ async function boot() {
   applyAppearance(settings);
   applyTranslations();
   populateRangeSelect();
-  cloudPanel = window.TokenMonitorCloudUsagePanel.createPanel({ root: document.getElementById('cloudUsageRoot'), api: window.tokenMonitor.cloudUsage, getLocale: () => state.locale });
-  els.tabs.forEach((button) => button.classList.toggle('active', button.dataset.tab === state.tab));
   render();
   await refresh();
   dashboardReady = true;
@@ -821,5 +811,4 @@ function handleDashboardFocus() {
 
 window.addEventListener('focus', handleDashboardFocus);
 
-window.addEventListener('beforeunload', () => cloudPanel?.dispose(), { once: true });
 boot();

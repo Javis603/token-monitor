@@ -6877,13 +6877,12 @@ function discardFailedDashboardWindow(win, reason) {
   win.destroy();
 }
 
-function createDashboardWindow(initialTab = 'activity') {
+function createDashboardWindow() {
   if (dashboardWindow && !dashboardWindow.isDestroyed()) {
     // Reload so a reopened window always picks up the latest renderer + fresh history,
     // instead of showing whatever was loaded when it first opened.
     dashboardWindow.hide();
-    dashboardWindow.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'), { query: { tab: initialTab === 'cloud' ? 'cloud' : 'activity' } })
-      .catch((error) => discardFailedDashboardWindow(dashboardWindow, `load failed: ${error.message}`));
+    dashboardWindow.webContents.reload();
     return dashboardWindow;
   }
   const glass = nativeBlurEnabled();
@@ -6934,7 +6933,7 @@ function createDashboardWindow(initialTab = 'activity') {
   win.on('closed', () => {
     dashboardWindow = null;
   });
-  win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'), { query: { tab: initialTab === 'cloud' ? 'cloud' : 'activity' } })
+  win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
     .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
   return win;
 }
@@ -8703,7 +8702,7 @@ app.whenReady().then(() => {
   });
   require('./cloudUsageBridge').registerCloudUsageIpc({
     ipcMain, getWindows: () => [mainWindow, dashboardWindow],
-    rendererDir: path.join(__dirname, 'renderer'), open: () => createDashboardWindow('cloud')
+    rendererDir: path.join(__dirname, 'renderer'), open: () => openViewFromTray('session')
   });
   ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
   ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
@@ -8734,11 +8733,11 @@ app.whenReady().then(() => {
   });
   maybeRunBackgroundUpdateCheck();
   startAppUpdateBackgroundChecks();
-  if (process.argv.includes('--cloud-usage')) createDashboardWindow('cloud');
+  if (process.argv.includes('--cloud-usage') || process.argv.includes('--sessions')) openViewFromTray('session');
 });
 
 app.on('second-instance', focusExistingWindow);
-app.on('second-instance', (_event, argv) => { if (argv.includes('--cloud-usage')) createDashboardWindow('cloud'); });
+app.on('second-instance', (_event, argv) => { if (argv.includes('--cloud-usage') || argv.includes('--sessions')) openViewFromTray('session'); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 // Every quit route (Cmd+Q, last window closed, system shutdown) lands here.
 // performQuit is synchronous through to the exit, so there is nothing to wait

@@ -275,7 +275,9 @@ test('stats-derived Settings rows refresh behind an open panel', () => {
   assert.match(archiveBody, /sessionRowsApi\.archivedSessionCount\(state\.stats\)/);
   assert.doesNotMatch(archiveBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
   assert.match(renderBody, /renderSessionUsageArchiveStatus\(\);/);
-  assert.doesNotMatch(renderBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
+  // The cloud reader may inspect Settings visibility to schedule its own read;
+  // the ordinary render must still never return early because Settings is open.
+  assert.doesNotMatch(renderBody, /if \(\s*(?:isSettingsSurfaceVisible|isSettingsPanelOpen)\(/);
   assert.doesNotMatch(surfaceBody, /isSettingsPanelOpen/);
 });
 
@@ -422,6 +424,7 @@ test('a direct main render defers only while the window is hidden', () => {
   const render = rendererFunction('render', '\nfunction setStatus(', {
     visibleStatsSurface: () => surface,
     statsRenderScheduler: { request() { scheduled += 1; } },
+    cloudSessionsSource: { setActive() {} },
     state: { stats: null }
   });
 

@@ -16,7 +16,7 @@ import time
 
 LABEL = 'local.chengong.tokenmonitor.cloudauto'
 APP_ID = 'com.javis.tokenmonitor'
-VERSION = '0.66.0-cloud.1'
+VERSION = '0.66.0-cloud.2'
 
 
 def invoke(args, check=True, timeout=30):

@@ -12,7 +12,7 @@ test('local cloud build retains ordinary app source and never declares overlappi
   assert.ok(config.files.includes('src/electron/**/*'));
   assert.ok(!(config.extraResources || []).some((r) => r.from === 'src/shared'));
   assert.equal(typeof config.afterPack, 'function');
-  assert.equal(config.extraMetadata.version, '0.66.0-cloud.1');
+  assert.equal(config.extraMetadata.version, '0.66.0-cloud.2');
   assert.equal(config.extraMetadata.tokenMonitorBuild.localCloudIntegration, true);
   assert.equal(config.publish, null);
 });

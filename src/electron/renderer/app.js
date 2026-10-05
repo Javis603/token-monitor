@@ -175,6 +175,7 @@ const subscriptionText = window.TokenMonitorSubscriptionText;
 const compactTokenApi = window.TokenMonitorCompactTokens;
 const trayLayoutApi = window.TokenMonitorTrayLayout;
 const sessionRowsApi = window.TokenMonitorSessionRows;
+const cloudSessionRowsApi = window.TokenMonitorCloudSessionRows;
 const breakdownRenderPolicyApi = window.TokenMonitorBreakdownRenderPolicy;
 const {
   barScaleMax,
@@ -2326,7 +2327,7 @@ function updateRowLive(row, activityState, activityAt) {
   dot.classList.add('pulse');
 }
 
-function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime }) {
+function updateRow(row, { name, subtitle, activity, detail, value, cost, barValue, max, color, barBackground, accordionRows, deviceDetail, stale, platform, local, client, kind, cacheReadTokens, outputTokens, unclassifiedTokens, modelRows, modelLabel, modelTooltipEntries, tokenDataUnavailable, sessionDetailAvailable, reviewGroup, running, activityState, context, promptCache, contextSnapshot, sortTime, cloudThreadId, cloudOnly, costLabel: metricLabel }) {
   const width = rowWidth(barValue, max);
   const isExpanded = row.classList.contains('expanded');
   // `running` still drives the row class for layout, but the mark's own state
@@ -2345,6 +2346,8 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   if (platform !== undefined) row.dataset.platform = platform || '';
   if (client !== undefined) row.dataset.client = client || '';
   if (kind !== undefined) row.dataset.kind = kind || '';
+  if (cloudThreadId) row.dataset.cloudThreadId = cloudThreadId; else delete row.dataset.cloudThreadId;
+  row.dataset.cloudOnly = String(cloudOnly === true);
   if (reviewGroup === true) row.dataset.reviewGroup = 'true';
   else delete row.dataset.reviewGroup;
   if (kind === 'session' && client === 'reasonix') {
@@ -2419,7 +2422,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   }
   valueEl.dataset.motionValue = String(Number(value) || 0);
   row.dataset.motionValue = String(Number(value) || 0);
-  row.querySelector('.row-cost').textContent = tokenDataUnavailable === true ? '' : formatCost(cost || 0);
+  row.querySelector('.row-cost').textContent = metricLabel || (tokenDataUnavailable === true ? '' : formatCost(cost || 0));
   // The row builder already applied the shared gate (recent enough to have a
   // reading), so this draws whatever arrived rather than re-deciding from
   // `running` - that second gate is exactly what made the dock card and this
@@ -2494,7 +2497,7 @@ function updateRow(row, { name, subtitle, activity, detail, value, cost, barValu
   const tokenLabel = tokenDataUnavailable === true
     ? (t('detailTokenUnavailable') || 'Unavailable')
     : formatNumber(value);
-  const costLabel = tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0)}`;
+  const costLabel = metricLabel ? `, ${metricLabel}` : tokenDataUnavailable === true ? '' : `, ${t('dashboard.stat.totalCost')}: ${formatCost(cost || 0)}`;
   sessionRowsApi.applyBreakdownRowSemantics(row, rowHead, {
     interactive,
     hasAccordion,
@@ -2803,7 +2806,7 @@ function modelRowsForPeriod(period, rankingMetric = state.settings?.modelRanking
 }
 
 function rawSessionRowsForPeriod(period) {
-  return sessionRowsApi.sessionRowsForPeriod(period, {
+  const localRows = sessionRowsApi.sessionRowsForPeriod(period, {
     clientLabels,
     clientColors,
     modelColor,
@@ -2812,6 +2815,9 @@ function rawSessionRowsForPeriod(period) {
     archivedLabel: t('session.archived'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
     nativeSessions: state.stats?.nativeSessions?.[state.period] || {}
+  });
+  return cloudSessionRowsApi.mergeRows(localRows, period, cloudSessionsSource.snapshot(), {
+    period: state.period, locale: currentLocale(), color: clientColors.codex
   });
 }
 
@@ -4591,11 +4597,12 @@ function applySessionDetailResult(request, options) {
   renderSessionDetail(options);
 }
 
-async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null }) {
+async function openSessionDetail({ client, sessionId, sessionCost, title, returnTo = null, cloudThreadId = null, cloudOnly = false }) {
   const request = { kind: 'session', client, sessionId, sessionCost,
     title: state.settings?.sessionTitlesEnabled === false && returnTo?.kind !== 'background-review-group' ? '' : title,
-    period: state.period, detail: null, returnTo };
+    period: state.period, detail: null, returnTo, cloudThreadId, cloudOnly };
   state.openSession = request;
+  if (cloudOnly) { renderSessionDetail({}); return; }
   renderSessionDetail({ loading: true });
   try {
     const detail = await window.tokenMonitor.getSessionDetail({ client, sessionId, period: request.period, sessionCost });
@@ -4606,6 +4613,25 @@ async function openSessionDetail({ client, sessionId, sessionCost, title, return
   } catch (_) {
     applySessionDetailResult(request, { error: true });
   }
+}
+
+function renderCloudSessionDetail() {
+  if (!state.openSession?.cloudThreadId) return;
+  const body = els.sessionDetail;
+  let section = body.querySelector('.cloud-session-detail');
+  if (!section) { section = document.createElement('section'); section.className = 'cloud-session-detail'; body.prepend(section); }
+  const data = cloudSessionRowsApi.detail(cloudSessionsSource.snapshot(), state.openSession.cloudThreadId, currentLocale());
+  const signature = JSON.stringify(data);
+  if (section.dataset.signature === signature) return;
+  section.dataset.signature = signature;
+  const title = document.createElement('h3'); title.textContent = data.title;
+  const note = detailNote(data.note);
+  const fields = document.createElement('dl');
+  for (const [label, value] of data.fields) {
+    const key = document.createElement('dt'), item = document.createElement('dd');
+    key.textContent = label; item.textContent = value; fields.append(key, item);
+  }
+  section.replaceChildren(title, note, fields);
 }
 
 function toggleDetailSort() {
@@ -4633,6 +4659,7 @@ function sessionDetailBack() {
 }
 
 function renderSessionDetail({ detail, loading, error } = {}) {
+  document.getElementById('cloudSessionsScope')?.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
@@ -4645,6 +4672,8 @@ function renderSessionDetail({ detail, loading, error } = {}) {
 
   const idLabel = sessionRowsApi.sessionDetailIdLabel(state.openSession?.client, state.openSession?.sessionId, detail);
   if (idLabel) container.append(sessionIdLine(idLabel));
+  if (state.openSession?.cloudThreadId) renderCloudSessionDetail();
+  if (state.openSession?.cloudOnly) return;
 
   if (loading) { container.append(detailNote(t('detailLoading') || 'Loading…')); return; }
   if (error || detail?.error) {
@@ -5033,6 +5062,8 @@ function openSettingsPanel() {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
+  cloudSessionsSource.setActive(!isRendererWindowHidden());
+  renderCloudSessionSettings();
   syncSettingsForm();
   ensureServiceStatusTicker();
   els.shell.style.transform = 'translateZ(0)';
@@ -6482,10 +6513,12 @@ function setRendererSettings(next) {
 
 function render() {
   const surface = visibleStatsSurface();
+  cloudSessionsSource.setActive(surface === 'main' && (state.breakdown === 'session' || isSettingsPanelOpen()));
   if (surface !== 'main') {
     if (!surface) statsRenderScheduler.request();
     return;
   }
+  renderCloudSessionSettings();
   if (!state.stats) return;
   allTimeSessions.ensure();
   stopHomeSessionRepaint();
@@ -6562,6 +6595,10 @@ function render() {
   renderTokenRate();
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');
+  const cloudScope = document.getElementById('cloudSessionsScope');
+  cloudScope.textContent = cloudSessionRowsApi.labels(currentLocale()).note;
+  cloudScope.classList.toggle('hidden', state.breakdown !== 'session' || Boolean(state.openSession)
+    || !rawSessionRowsForPeriod(period).some((row) => row.cloudThreadId));
   els.shell.classList.toggle('home-mode', state.breakdown === 'home');
   if (state.breakdown !== 'session' || state.openSession) els.sessionPagerHost.classList.add('hidden');
   els.viewBackRow?.classList.toggle('hidden', state.breakdown === 'home' || !state.homeReturnVisible);
@@ -6613,13 +6650,13 @@ function render() {
       // mid-read (and a keyboard focus with it); hold until it closes, as the
       // session and home lists already do.
       if (!sessionTooltipShouldHoldRender()) renderBackgroundReviewDetail(state.openSession);
-    }
-    refreshSessionDetailHeading();
+    } else refreshSessionDetailHeading();
     if (state.openSession.renderOptions) {
       const options = state.openSession.renderOptions;
       state.openSession.renderOptions = null;
       renderSessionDetail(options);
     }
+    if (state.openSession.cloudThreadId) renderCloudSessionDetail();
   } else {
     els.homePanel.classList.add('hidden');
     els.limitsPanel.classList.add('hidden');
@@ -11904,6 +11941,12 @@ els.breakdown.addEventListener('click', (event) => {
     }
     return;
   }
+  if (rowEl.dataset.cloudOnly === 'true') {
+    openSessionDetail({ client: 'codex', sessionId: rowEl.dataset.cloudThreadId,
+      cloudThreadId: rowEl.dataset.cloudThreadId, cloudOnly: true,
+      title: rowEl.querySelector('.row-title')?.textContent || '' });
+    return;
+  }
   const key = rowEl.dataset.key || '';            // "session:<client>:<sessionId>"
   const client = rowEl.dataset.client || '';
   if (client !== 'claude' && client !== 'codex' && client !== 'opencode' && client !== 'reasonix' && client !== 'dsh' && client !== 'codebuddy' && client !== 'workbuddy') return;
@@ -11919,7 +11962,8 @@ els.breakdown.addEventListener('click', (event) => {
     client,
     sessionId,
     sessionCost: client === 'reasonix' ? Number(session?.reportedCostUsd || 0) : Number(session?.costUsd || 0),
-    title: rowEl.querySelector('.row-title')?.textContent || ''
+    title: rowEl.querySelector('.row-title')?.textContent || '',
+    cloudThreadId: rowEl.dataset.cloudThreadId || null
   });
 });
 
@@ -11938,6 +11982,8 @@ els.settingsButton.addEventListener('click', (event) => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.toggle('hidden');
   const settingsOpen = isSettingsPanelOpen();
+  cloudSessionsSource.setActive(!isRendererWindowHidden() && (settingsOpen || state.breakdown === 'session'));
+  renderCloudSessionSettings();
   // Settings is an overlay over a surface that keeps rendering behind it, so
   // closing it needs no catch-up repaint. Only the panel's own DOM has to be
   // caught up when it opens, because its renderers idle while it is closed.
@@ -12789,7 +12835,35 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   },
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
 });
+let cloudSessionControlBusy = false;
+let cloudSessionControlError = false;
+function renderCloudSessionSettings() {
+  const text = cloudSessionRowsApi.labels(currentLocale()), snapshot = cloudSessionsSource.snapshot();
+  document.getElementById('cloudSessionsSettingTitle').textContent = text.setting;
+  document.getElementById('cloudSessionsSettingNote').textContent = text.settingNote;
+  const toggle = document.getElementById('cloudSessionsEnabled');
+  toggle.disabled = cloudSessionControlBusy || !snapshot?.service?.canControl;
+  if (!cloudSessionControlBusy) toggle.checked = snapshot?.service?.running === true;
+  document.getElementById('cloudSessionsSettingStatus').textContent = cloudSessionControlError ? text.failed
+    : !snapshot ? text.error : !snapshot.service?.installed ? text.missing : snapshot.errorCode ? text.error : snapshot.service.running ? text.enabled : text.disabled;
+}
+const cloudSessionsSource = cloudSessionRowsApi.createSource({
+  get: () => window.tokenMonitor.cloudUsage.get(),
+  onChange: () => { statsRenderScheduler.request(); renderCloudSessionSettings(); }
+});
+document.getElementById('cloudSessionsEnabled').addEventListener('change', async (event) => {
+  if (cloudSessionControlBusy) return;
+  cloudSessionControlBusy = true; cloudSessionControlError = false;
+  const action = event.target.checked ? 'start' : 'stop';
+  renderCloudSessionSettings();
+  try { const result = await window.tokenMonitor.cloudUsage.control(action); if (!result?.ok) throw new Error('Not confirmed'); }
+  catch (_) { cloudSessionControlError = true; }
+  finally { cloudSessionControlBusy = false; await cloudSessionsSource.refresh(); }
+});
+window.addEventListener('beforeunload', () => cloudSessionsSource.dispose(), { once: true });
+
 function handleWindowVisibilityChange() {
+  cloudSessionsSource.setActive(visibleStatsSurface() === 'main' && (state.breakdown === 'session' || isSettingsPanelOpen()));
   if (els.syncPanelSignal) els.syncPanelSignal.dataset.windowHidden = String(isRendererWindowHidden());
   if (!statsRenderScheduler.visibilityChanged()) return;
   if (isRendererWindowHidden()) cancelTokenRateBoost();
