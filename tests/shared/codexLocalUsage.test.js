@@ -35,7 +35,7 @@ function fixture(t) {
   const env = { TOKEN_MONITOR_SHARED_DIR: home, CODEX_HOME: path.join(home, '.codex'), TOKEN_MONITOR_CODEX_LOCAL_USAGE: '0' };
   const store = createLocalUsageStore({ env });
   const closeables = [store];
-  t.after(() => { for (const item of closeables) item.close(); fs.rmSync(home, { recursive: true, force: true }); });
+  t.after(async () => { for (const item of closeables) await item.close(); fs.rmSync(home, { recursive: true, force: true }); });
   return { home, env, store, closeables };
 }
 
@@ -66,8 +66,9 @@ test('canonical input excludes cached tokens; reasoning remains a subset of outp
 });
 
 test('persistent checkpoints deduplicate two collectors, restarts and late notifications without importing old totals', (t) => {
-  const { env, store } = fixture(t);
+  const { env, store, closeables } = fixture(t);
   const other = createLocalUsageStore({ env });
+  closeables.push(other);
   t.after(() => other.close());
   assert.equal(store.observe(event()), true);
   assert.equal(other.observe(event()), false);
@@ -305,8 +306,9 @@ test('a live notification drives the real collector debounce and exact warm peri
 });
 
 test('observer lease admits one writer, releases only its owner and recovers dead/expired owners', (t) => {
-  const { env, store } = fixture(t);
+  const { env, store, closeables } = fixture(t);
   const other = createLocalUsageStore({ env });
+  closeables.push(other);
   t.after(() => other.close());
   assert.equal(store.claimObserver('widget', 101, 1000, () => true), true);
   assert.equal(other.claimObserver('agent', 202, 1001, () => true), false);
@@ -408,7 +410,7 @@ test('default and explicit disable do not construct the source, while keeping st
 });
 
 test('separate processes serialize duplicate ledger updates and transfer ownership after a crash', { timeout: 20000 }, async (t) => {
-  const { home, store } = fixture(t);
+  const { home, store, closeables } = fixture(t);
   const modulePath = require.resolve('../../src/shared/providers/codex/localUsageStore');
   const script = `
     const store = require(process.argv[1]).createLocalUsageStore({ databasePath: process.argv[2] });
@@ -421,10 +423,10 @@ test('separate processes serialize duplicate ledger updates and transfer ownersh
     });
   `;
   const children = [0, 1].map(() => spawn(process.execPath, ['-e', script, modulePath, path.join(home, 'codex-local-usage.sqlite')], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }));
-  t.after(async () => {
+  closeables.push({ close: async () => {
     await Promise.all(children.map((child) => child.exitCode != null || child.signalCode
       ? null : new Promise((resolve) => { child.once('close', resolve); child.kill('SIGKILL'); })));
-  });
+  } });
   const rpc = (child, message) => new Promise((resolve, reject) => {
     const failed = () => reject(new Error('ledger test subprocess exited before replying'));
     child.once('exit', failed);
