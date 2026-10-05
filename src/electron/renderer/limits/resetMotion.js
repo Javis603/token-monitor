@@ -83,6 +83,16 @@
     return Math.round(900 + (Math.abs(to - from) * 7));
   }
 
+  // A refill batch lands on full together: the group takes the longest
+  // member's duration instead of each meter pacing its own distance.
+  function groupDurationMs(durations = []) {
+    let longest = 0;
+    for (const duration of durations) {
+      if (Number.isFinite(duration) && duration > longest) longest = duration;
+    }
+    return longest;
+  }
+
   function shouldAnimateReset(previous, current) {
     const from = finitePercent(previous?.remainingPercent);
     const to = finitePercent(current?.remainingPercent);
@@ -99,6 +109,7 @@
   return {
     displayPercent,
     durationMs,
+    groupDurationMs,
     providerKey,
     remainingPercent,
     shouldAnimateReset,

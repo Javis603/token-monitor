@@ -135,6 +135,72 @@ test('late startup reads cannot restore a video after the user clears it', async
   assert.equal(f.shell.classList.contains('has-background-video'), false);
 });
 
+test('clearing a video blocks new selections and repeated removal until it finishes', async () => {
+  const f = fixture();
+  await f.controller.load();
+  let finish;
+  let clears = 0;
+  let selections = 0;
+  f.api.clearBackgroundVideo = () => {
+    clears += 1;
+    return new Promise((resolve) => { finish = resolve; });
+  };
+  f.api.chooseBackgroundVideo = async () => {
+    selections += 1;
+    return { canceled: true };
+  };
+
+  const clearing = f.controller.clear();
+  assert.equal(f.controller.isBusy(), true);
+  for (const id of ['chooseBackgroundVideoButton', 'clearBackgroundVideoButton', 'chooseBackgroundImageButton', 'clearBackgroundImageButton']) {
+    assert.equal(f.nodes.get(id).disabled, true);
+  }
+  f.nodes.get('chooseBackgroundVideoButton').dispatchEvent(new Event('click'));
+  f.nodes.get('clearBackgroundVideoButton').dispatchEvent(new Event('click'));
+  assert.equal(selections, 0);
+  assert.equal(clears, 1);
+
+  finish();
+  await clearing;
+  assert.equal(f.controller.isBusy(), false);
+  assert.equal(f.shell.children.length, 0);
+  assert.equal(f.nodes.get('chooseBackgroundVideoButton').disabled, false);
+  assert.equal(f.nodes.get('chooseBackgroundImageButton').disabled, false);
+});
+
+test('choosing an image can clear the video while the image controls are busy', async () => {
+  const f = fixture();
+  await f.controller.load();
+  let clears = 0;
+  f.api.clearBackgroundVideo = async () => { clears += 1; };
+  f.setImageBusy(true);
+
+  await f.controller.clear();
+
+  assert.equal(clears, 1);
+  assert.equal(f.shell.children.length, 0);
+  assert.equal(f.controller.isBusy(), false);
+  assert.equal(f.nodes.get('chooseBackgroundImageButton').disabled, true);
+  f.setImageBusy(false); f.controller.sync();
+  assert.equal(f.nodes.get('chooseBackgroundImageButton').disabled, false);
+});
+
+test('a failed clear releases the busy state and preserves the existing video', async () => {
+  const f = fixture();
+  await f.controller.load();
+  const existing = f.shell.children[0];
+  f.api.clearBackgroundVideo = async () => { throw new Error('Cannot remove saved video'); };
+
+  await assert.rejects(f.controller.clear(), /Cannot remove saved video/);
+
+  assert.equal(f.controller.isBusy(), false);
+  assert.equal(f.shell.children[0], existing);
+  assert.equal(f.shell.classList.contains('has-background-video'), true);
+  assert.equal(f.nodes.get('clearBackgroundVideoButton').classList.contains('hidden'), false);
+  assert.equal(f.nodes.get('chooseBackgroundVideoButton').disabled, false);
+  assert.equal(f.nodes.get('chooseBackgroundImageButton').disabled, false);
+});
+
 test('video status and shared opacity controls follow live language changes', async () => {
   const f = fixture();
   await f.controller.load();

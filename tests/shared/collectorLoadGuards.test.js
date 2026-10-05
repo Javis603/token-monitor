@@ -13,7 +13,6 @@ const path = require('node:path');
 const { performance } = require('node:perf_hooks');
 
 const { emptyPeriod } = require('../../src/shared/usage');
-const { localDayKey } = require('../../src/shared/history');
 const {
   clampTimerDelayMs, SYNC_MIN_INTERVAL_MS, SYNC_SOURCE_EVENT_MIN_INTERVAL_MS
 } = require('../../src/shared/selfSyncThrottle');
@@ -3276,97 +3275,7 @@ test('a zcode shm event does not spawn a scan while a -wal change still does', a
   }
 });
 
-test('collector preserves Qoder CN while publishing other clients after a bounded SQLite read fails', async () => {
-  const tmp = withTmpHome([]);
-  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
-
-  const qoderCnUsagePath = require.resolve('../../src/shared/providers/qodercn/usage');
-  const qoderCnUsage = require(qoderCnUsagePath);
-  const originalRows = qoderCnUsage.collectQoderCnRows;
-  const originalPeriods = qoderCnUsage.buildQoderCnPeriods;
-  let failReads = false;
-  let claudeTokens = 3;
-  const qoderCnReadOptions = [];
-  qoderCnUsage.collectQoderCnRows = async (options) => {
-    qoderCnReadOptions.push(options);
-    if (failReads) {
-      const error = new Error('qodercn sqlite read budget exceeded (rows limit 100000)');
-      error.code = 'QODER_CN_READ_BUDGET_EXCEEDED';
-      throw error;
-    }
-    return [];
-  };
-  qoderCnUsage.buildQoderCnPeriods = () => ({
-    today: { entries: [{ client: 'qodercn', model: 'qmodel', input: 7 }] },
-    month: { entries: [{ client: 'qodercn', model: 'qmodel', input: 7 }] },
-    allTime: { entries: [{ client: 'qodercn', model: 'qmodel', input: 7 }] }
-  });
-  delete require.cache[collectorPath];
-
-  let handle = null;
-  try {
-    const { startCollector } = freshCollector();
-    const previews = [];
-    const updates = [];
-    const collectorOptions = {
-      clients: 'claude,qodercn',
-      allTimeSince: '2024-01-01',
-      commandTimeoutMs: 1000,
-      deviceId: 'test-device',
-      agentVersion: 'test',
-      intervalMs: 60 * 60 * 1000,
-      watchEnabled: false,
-      limitsEnabled: false,
-      historyEnabled: false,
-      runTokscale: async () => ({ entries: [{ client: 'claude', model: 'm', input: claudeTokens }] })
-    };
-    handle = startCollector({
-      ...collectorOptions,
-      onPreview: (summary) => previews.push(summary),
-      onUpdate: (summary) => updates.push(summary)
-    });
-
-    await waitForCondition(() => updates.length === 1);
-    assert.equal(qoderCnReadOptions[0].includeJsonl, true, 'production collection includes current JSONL transcripts');
-    const anchorPath = path.join(tmp, 'collector-anchor.json');
-    const firstAnchor = JSON.parse(fs.readFileSync(anchorPath, 'utf8'));
-    assert.equal(firstAnchor.qoderCnPeriods.today.clients.qodercn, 7);
-    const initialPreviewCount = previews.length;
-    failReads = true;
-    claudeTokens = 5;
-    await handle.tick('manual');
-
-    assert.equal(updates.length, 2, 'a Qoder CN failure must not suppress fresh data from other clients');
-    assert.equal(updates.at(-1).today.clients.qodercn, 7, 'final update keeps the last Qoder CN period');
-    assert.equal(updates.at(-1).today.clients.claude, 5, 'final update publishes the fresh Claude period');
-    const fallbackAnchor = JSON.parse(fs.readFileSync(anchorPath, 'utf8'));
-    assert.equal(fallbackAnchor.fullScanAt, firstAnchor.fullScanAt, 'a fallback is not recorded as a successful full scan');
-    const failedPreviews = previews.slice(initialPreviewCount);
-    assert.equal(failedPreviews.length, 2, 'the failed full scan still emits its two host previews');
-    assert.equal(Object.prototype.hasOwnProperty.call(failedPreviews.at(-1), 'qoderCnStatus'), false);
-    assert.equal(failedPreviews.at(-1).today.clients.qodercn, 7, 'preview keeps the anchored Qoder CN today partition');
-    assert.equal('month' in failedPreviews.at(-1), false, 'preview keeps the last complete month while Qoder CN is unavailable');
-
-    handle.stop();
-    handle = startCollector({
-      ...collectorOptions,
-      onUpdate: (summary) => updates.push(summary)
-    });
-    await waitForCondition(() => updates.length === 3);
-    assert.equal(updates.at(-1).today.clients.qodercn, 7, 'a persisted anchor keeps Qoder CN data after restart');
-  } finally {
-    if (handle) handle.stop();
-    qoderCnUsage.collectQoderCnRows = originalRows;
-    qoderCnUsage.buildQoderCnPeriods = originalPeriods;
-    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
-    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
-    delete require.cache[collectorPath];
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test('collector does not reuse persisted Qoder CN periods after the DB path changes', async () => {
+test('collector does not reuse a persisted anchor after the Qoder CN DB path changes', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   const originalQoderCnDbPath = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
@@ -3382,20 +3291,11 @@ test('collector does not reuse persisted Qoder CN periods after the DB path chan
   fs.writeFileSync(path.join(tmp, 'collector-anchor.json'), JSON.stringify({
     dateKey: initialCollector.localTodayKey(),
     today: emptyPeriod(),
-    month: emptyPeriod(),
-    allTime: emptyPeriod(),
-    qoderCnPeriods: { today: oldQoderCnPeriod, month: oldQoderCnPeriod, allTime: oldQoderCnPeriod },
-    configFingerprint: initialCollector.configFingerprint('claude,qodercn', '2024-01-01', true, oldDbPath),
+    month: oldQoderCnPeriod,
+    allTime: oldQoderCnPeriod,
+    configFingerprint: initialCollector.configFingerprint('claude,qodercn', '2024-01-01', true, oldDbPath, initialCollector.qoderCnProjectsDirForClients('claude,qodercn')),
     fullScanAt: new Date(Date.now() - 5 * 60 * 1000).toISOString()
   }));
-
-  const qoderCnUsagePath = require.resolve('../../src/shared/providers/qodercn/usage');
-  const qoderCnUsage = require(qoderCnUsagePath);
-  const originalRows = qoderCnUsage.collectQoderCnRows;
-  qoderCnUsage.collectQoderCnRows = async () => {
-    throw new Error('new Qoder CN database is temporarily unavailable');
-  };
-  delete require.cache[collectorPath];
 
   let handle = null;
   try {
@@ -3417,134 +3317,14 @@ test('collector does not reuse persisted Qoder CN periods after the DB path chan
 
     await waitForCondition(() => updates.length === 1);
     assert.equal(updates.at(-1).today.clients.claude, 3);
-    assert.equal(updates.at(-1).today.clients.qodercn || 0, 0, 'old-path Qoder CN fallback must not leak into the new path');
+    assert.equal(updates.at(-1).month.clients.qodercn || 0, 0, 'the old-path anchor must not leak into the new path');
+    assert.equal(updates.at(-1).allTime.clients.qodercn || 0, 0, 'the old-path anchor must not leak into the new path');
   } finally {
     if (handle) handle.stop();
-    qoderCnUsage.collectQoderCnRows = originalRows;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     if (originalQoderCnDbPath === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
     else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = originalQoderCnDbPath;
-    delete require.cache[collectorPath];
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test('collector publishes other clients when Qoder CN fails before the first complete snapshot', async () => {
-  const tmp = withTmpHome([]);
-  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
-
-  const qoderCnUsagePath = require.resolve('../../src/shared/providers/qodercn/usage');
-  const qoderCnUsage = require(qoderCnUsagePath);
-  const originalRows = qoderCnUsage.collectQoderCnRows;
-  let qoderCnReads = 0;
-  let claudeTokens = 3;
-  qoderCnUsage.collectQoderCnRows = async () => {
-    qoderCnReads += 1;
-    throw new Error('Qoder CN unavailable before first complete snapshot');
-  };
-  delete require.cache[collectorPath];
-
-  let handle = null;
-  try {
-    const { startCollector } = freshCollector();
-    const updates = [];
-    handle = startCollector({
-      clients: 'claude,qodercn',
-      allTimeSince: '2024-01-01',
-      commandTimeoutMs: 1000,
-      deviceId: 'test-device',
-      agentVersion: 'test',
-      intervalMs: 60 * 60 * 1000,
-      watchEnabled: false,
-      anchorPersistenceEnabled: false,
-      limitsEnabled: false,
-      historyEnabled: false,
-      runTokscale: async () => ({ entries: [{ client: 'claude', model: 'm', input: claudeTokens }] }),
-      onUpdate: (summary) => updates.push(summary)
-    });
-
-    await waitForCondition(() => updates.length === 1);
-    claudeTokens = 5;
-    await handle.tick('incremental', { todayOnly: true });
-
-    assert.equal(qoderCnReads, 2, 'Qoder CN is retried on the incremental read');
-    assert.equal(updates.length, 2, 'a first-read Qoder CN failure must not suppress other clients');
-    assert.equal(updates.at(-1).today.clients.claude, 5, 'the incremental Claude period is published');
-  } finally {
-    if (handle) handle.stop();
-    qoderCnUsage.collectQoderCnRows = originalRows;
-    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
-    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
-    delete require.cache[collectorPath];
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
-});
-
-test('collector publishes live periods when only Qoder CN history read fails', async () => {
-  const tmp = withTmpHome([]);
-  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
-
-  const qoderCnUsagePath = require.resolve('../../src/shared/providers/qodercn/usage');
-  const qoderCnUsage = require(qoderCnUsagePath);
-  const originalRows = qoderCnUsage.collectQoderCnRows;
-  const originalHistory = qoderCnUsage.buildQoderCnHistoryGraph;
-  let failHistory = false;
-  const todayKey = localDayKey();
-  qoderCnUsage.collectQoderCnRows = async () => [];
-  qoderCnUsage.buildQoderCnHistoryGraph = () => {
-    if (failHistory) throw new Error('temporary Qoder CN history read failure');
-    return {
-      contributions: [{
-        date: todayKey,
-        clients: [{ client: 'qodercn', modelId: 'qmodel', tokens: { input: 2 }, cost: 0, messages: 1 }]
-      }]
-    };
-  };
-  delete require.cache[collectorPath];
-
-  let handle = null;
-  try {
-    const { startCollector } = freshCollector();
-    const updates = [];
-    handle = startCollector({
-      clients: 'claude,qodercn',
-      allTimeSince: '2024-01-01',
-      commandTimeoutMs: 1000,
-      deviceId: 'test-device',
-      agentVersion: 'test',
-      intervalMs: 60 * 60 * 1000,
-      watchEnabled: false,
-      anchorPersistenceEnabled: false,
-      limitsEnabled: false,
-      historyEnabled: true,
-      runTokscale: async () => ({ entries: [{ client: 'claude', model: 'm', input: 3 }] }),
-      runGraph: async () => ({
-        contributions: [{
-          date: todayKey,
-          clients: [{ client: 'claude', modelId: 'm', tokens: { input: 3 }, cost: 0, messages: 1 }]
-        }]
-      }),
-      onUpdate: (summary) => updates.push(summary)
-    });
-
-    await waitForCondition(() => updates.length === 1);
-    failHistory = true;
-    await handle.tick('manual', { forceHistory: true });
-
-    assert.equal(updates.length, 2, 'history-only failure must not suppress fresh live periods');
-    assert.equal(Object.prototype.hasOwnProperty.call(updates.at(-1), 'qoderCnStatus'), false);
-    assert.equal(updates.at(-1).history.daily[0].perClient.claude.tokens, 3);
-    assert.equal(updates.at(-1).history.daily[0].perClient.qodercn.tokens, 2);
-    assert.equal(updates.at(-1).today.clients.claude, 3);
-  } finally {
-    if (handle) handle.stop();
-    qoderCnUsage.collectQoderCnRows = originalRows;
-    qoderCnUsage.buildQoderCnHistoryGraph = originalHistory;
-    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
-    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -3875,6 +3655,96 @@ test('watch-descriptor exhaustion degrades to polling and stays there', async ()
   }
 });
 
+test('descriptor exhaustion over a tree too large to poll degrades to interval collection', async () => {
+  const tmp = withTmpHome([path.join('.claude', 'projects')]);
+  for (let index = 0; index < 5; index += 1) {
+    fs.writeFileSync(path.join(tmp, '.claude', 'projects', `session-${index}.jsonl`), '');
+  }
+  const originalHomedir = os.homedir;
+  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
+  os.homedir = () => tmp;
+  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
+
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  const watchOptions = [];
+  const errorHandlers = [];
+  let closed = 0;
+  chokidar.watch = (_dirs, options) => {
+    watchOptions.push(options);
+    return {
+      on: (event, handler) => { if (event === 'error') errorHandlers.push(handler); },
+      close: () => { closed += 1; }
+    };
+  };
+
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = recordingSpawn(calls);
+
+  let handle = null;
+  const logs = [];
+  const events = [];
+  const updates = [];
+  try {
+    const { startCollector } = freshCollector();
+    handle = startCollector({
+      clients: 'claude',
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      intervalMs: 80,
+      watchEnabled: true,
+      watchTriggersCollection: false,
+      intervalRequiresActivity: true,
+      watchPollingEntryLimit: 3,
+      limitsEnabled: false,
+      historyEnabled: false,
+      logger: (line) => logs.push(line),
+      onDiagnosticEvent: (event) => events.push(event),
+      onUpdate: (_summary, reason) => updates.push(reason)
+    });
+
+    await waitForCondition(() => errorHandlers.length === 1 && updates.length === 1);
+    const emfile = new Error('EMFILE: too many open files, watch');
+    emfile.code = 'EMFILE';
+    errorHandlers[0](emfile);
+
+    await waitForCondition(() => events.some((event) => event.code === 'watcher-interval-fallback'));
+    assert.equal(watchOptions.length, 1, 'no polling watcher is built over the oversized tree');
+    assert.equal(closed, 1, 'the exhausted native watcher is still released');
+    assert.deepEqual(events.at(-1), { subsystem: 'watcher', code: 'watcher-interval-fallback', detailCode: 'EMFILE' });
+    const diagnostics = handle.getDiagnostics();
+    assert.equal(diagnostics.watchMode, 'interval');
+    assert.equal(diagnostics.watchFallbackCode, 'EMFILE');
+    assert.ok(logs.some((line) => line.includes('Cannot watch safely')));
+
+    // Smart mode would otherwise wait for watch activity that can no longer
+    // arrive, and scan nothing but the hourly reconciliation.
+    const scansBefore = calls.length;
+    await waitForCondition(() => calls.length > scansBefore);
+    const interval = calls.at(-1);
+    assert.equal(interval.includes('--client') ? interval[interval.indexOf('--client') + 1] : 'claude', 'claude');
+
+    // Sticky: a later rebuild must not bring a watcher back.
+    fs.mkdirSync(path.join(tmp, '.claude', 'transcripts'), { recursive: true });
+    await handle.tick('manual');
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(watchOptions.length, 1);
+  } finally {
+    if (handle) handle.stop();
+    childProcess.spawn = originalSpawn;
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('a successful watcher rebuild clears the current watcher failure', async () => {
   const tmp = withTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;
@@ -4089,14 +3959,17 @@ test('the ignore matcher agrees with the roots chokidar was actually handed', as
   }
 });
 
-test('TOKEN_MONITOR_WATCH_POLLING=0 opts out of the descriptor fallback', async () => {
+// chokidar's own variable forbids polling just as ours does: it overrides the
+// options chokidar is handed, so a fallback that asked for polling would still
+// run native while diagnostics claimed otherwise.
+for (const pollingEnv of ['TOKEN_MONITOR_WATCH_POLLING', 'CHOKIDAR_USEPOLLING']) test(`${pollingEnv}=0 opts out of the descriptor fallback`, async () => {
   const tmp = withTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  const originalPolling = process.env.TOKEN_MONITOR_WATCH_POLLING;
+  const originalPolling = process.env[pollingEnv];
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
-  process.env.TOKEN_MONITOR_WATCH_POLLING = '0';
+  process.env[pollingEnv] = '0';
 
   const chokidar = require('chokidar');
   const originalWatch = chokidar.watch;
@@ -4138,6 +4011,7 @@ test('TOKEN_MONITOR_WATCH_POLLING=0 opts out of the descriptor fallback', async 
 
     await new Promise((resolve) => setTimeout(resolve, 40));
     assert.equal(watchOptions.length, 1, 'an explicit "never poll" must survive descriptor exhaustion');
+    assert.equal(handle.getDiagnostics().watchMode, 'native');
   } finally {
     if (handle) handle.stop();
     childProcess.spawn = originalSpawn;
@@ -4145,8 +4019,8 @@ test('TOKEN_MONITOR_WATCH_POLLING=0 opts out of the descriptor fallback', async 
     os.homedir = originalHomedir;
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
-    if (originalPolling === undefined) delete process.env.TOKEN_MONITOR_WATCH_POLLING;
-    else process.env.TOKEN_MONITOR_WATCH_POLLING = originalPolling;
+    if (originalPolling === undefined) delete process.env[pollingEnv];
+    else process.env[pollingEnv] = originalPolling;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -4928,6 +4802,164 @@ test('custom Tokscale scan paths stay visible and use recursive extra-root watch
     assert.equal(copilotIgnored(path.join(copilotCustom, 'nested', 'session.jsonl')), false);
   } finally {
     os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('custom roots prune dependency and VCS trees without touching built-in roots', () => {
+  const tmp = withTmpHome([path.join('.codex', 'sessions')]);
+  const originalHomedir = os.homedir;
+  const originalCodexHome = process.env.CODEX_HOME;
+  delete process.env.CODEX_HOME;
+  os.homedir = () => tmp;
+  try {
+    const { watchIgnoreMatcher } = freshCollector();
+    // #857: the custom root was a whole projects directory.
+    const projects = path.join(tmp, 'projects');
+    fs.mkdirSync(projects, { recursive: true });
+    const ignored = watchIgnoreMatcher('codex', { customScanPaths: { codex: [projects] } });
+
+    assert.equal(ignored(projects), false, 'the root itself is always kept');
+    assert.equal(ignored(path.join(projects, 'agent', 'sessions', 'rollout.jsonl')), false);
+    for (const pruned of ['node_modules', '.git', '.venv', '__pycache__']) {
+      assert.equal(ignored(path.join(projects, 'app', pruned)), true, `${pruned} is pruned`);
+      assert.equal(ignored(path.join(projects, 'app', pruned, 'deep', 'x.jsonl')), true, `below ${pruned} is pruned`);
+    }
+
+    // The built-in root beside it keeps its whole-tree contract.
+    const builtIn = path.join(tmp, '.codex', 'sessions');
+    assert.equal(ignored(path.join(builtIn, 'node_modules', 'x.jsonl')), false);
+
+    // A custom root nested in a pruned directory is its own source and survives.
+    const nested = path.join(projects, 'app', '.git', 'captured');
+    fs.mkdirSync(nested, { recursive: true });
+    const nestedIgnored = watchIgnoreMatcher('codex', { customScanPaths: { codex: [projects, nested] } });
+    assert.equal(nestedIgnored(path.join(nested, 'rollout.jsonl')), false);
+    assert.equal(nestedIgnored(path.join(projects, 'app', '.git', 'objects')), true);
+
+    // A client naming its own built-in root as a custom path does not turn
+    // that root into a pruned one.
+    const duplicateIgnored = watchIgnoreMatcher('codex', { customScanPaths: { codex: [projects, builtIn] } });
+    assert.equal(duplicateIgnored(path.join(builtIn, 'node_modules', 'x.jsonl')), false);
+    assert.equal(duplicateIgnored(path.join(projects, 'node_modules')), true);
+
+    // A directory that is a built-in root for any client keeps everything, even
+    // where another client names it as a custom root.
+    const sharedIgnored = watchIgnoreMatcher('codex,claude', { customScanPaths: { codex: [projects], claude: [builtIn] } });
+    assert.equal(sharedIgnored(path.join(builtIn, 'node_modules', 'x.jsonl')), false);
+    assert.equal(sharedIgnored(path.join(projects, 'node_modules')), true);
+  } finally {
+    os.homedir = originalHomedir;
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('the polling bound follows symlinked directories the way chokidar does', () => {
+  const tmp = withTmpHome([]);
+  try {
+    const { openWatch } = freshCollector();
+    const root = path.join(tmp, 'root');
+    const elsewhere = path.join(tmp, 'elsewhere');
+    fs.mkdirSync(root, { recursive: true });
+    fs.mkdirSync(elsewhere, { recursive: true });
+    for (let index = 0; index < 10; index += 1) fs.writeFileSync(path.join(elsewhere, `f${index}`), '');
+    const built = [];
+    const chokidar = { watch: (dirs, options) => { built.push(options); return {}; } };
+    const config = { dirs: [root], clients: 'claude', usePolling: true, pollingEntryLimit: 15 };
+
+    // chokidar follows symlinks by default, so a link into a large tree counts
+    // toward the bound like the tree itself.
+    fs.symlinkSync(elsewhere, path.join(root, 'first'), 'junction');
+    openWatch(chokidar, config);
+    assert.equal(built.length, 1, 'one link into a 10-entry tree fits under 15');
+
+    // chokidar dedupes links by their own path, not their target, so a second
+    // alias of the same tree is a second tree to poll.
+    fs.symlinkSync(elsewhere, path.join(root, 'second'), 'junction');
+    assert.throws(() => openWatch(chokidar, config), { code: 'watch-polling-limit' });
+    assert.equal(built.length, 1);
+
+    // Native watching is not bounded here; the descriptor fallback covers it.
+    openWatch(chokidar, { ...config, usePolling: false });
+    assert.equal(built.length, 2);
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('a symlink cycle ends the polling count instead of hanging it', () => {
+  const tmp = withTmpHome([]);
+  try {
+    const { openWatch } = freshCollector();
+    const root = path.join(tmp, 'root');
+    fs.mkdirSync(root, { recursive: true });
+    fs.symlinkSync(root, path.join(root, 'loop'), 'junction');
+    const chokidar = { watch: () => ({}) };
+    // Where the walk stops is the platform's symlink limit or the counter,
+    // whichever comes first; either answer is acceptable, never returning is not.
+    try {
+      openWatch(chokidar, { dirs: [root], clients: 'claude', usePolling: true, pollingEntryLimit: 20000 });
+    } catch (error) {
+      assert.equal(error.code, 'watch-polling-limit');
+    }
+  } finally {
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('CHOKIDAR_USEPOLLING cannot switch chokidar to polling around the bound', () => {
+  const tmp = withTmpHome([]);
+  const original = process.env.CHOKIDAR_USEPOLLING;
+  try {
+    const { openWatch, resolveWatchUsePolling } = freshCollector();
+    const root = path.join(tmp, 'root');
+    fs.mkdirSync(root, { recursive: true });
+    for (let index = 0; index < 5; index += 1) fs.writeFileSync(path.join(root, `f${index}`), '');
+    const built = [];
+    const chokidar = { watch: (dirs, options) => { built.push(options); return {}; } };
+    const config = { dirs: [root], clients: 'claude', usePolling: false, pollingEntryLimit: 3 };
+
+    process.env.CHOKIDAR_USEPOLLING = 'true';
+    // chokidar applies the variable after our options, so native was asked for
+    // and polling is what would run.
+    assert.throws(() => openWatch(chokidar, config), { code: 'watch-polling-limit' });
+    assert.equal(built.length, 0);
+    // Diagnostics must report the mode chokidar really runs, over our own
+    // override as well.
+    assert.equal(resolveWatchUsePolling(false, { CHOKIDAR_USEPOLLING: '1', TOKEN_MONITOR_WATCH_POLLING: '0' }), true);
+    assert.equal(resolveWatchUsePolling(true, { CHOKIDAR_USEPOLLING: 'false' }), false);
+
+    process.env.CHOKIDAR_USEPOLLING = '0';
+    openWatch(chokidar, { ...config, usePolling: true });
+    assert.equal(built.length, 1, 'turned off, a polling request over the limit runs native');
+    assert.equal(built[0].usePolling, false);
+    // A host that must not open native descriptors gets no watcher at all.
+    assert.throws(
+      () => openWatch(chokidar, { ...config, usePolling: true, requirePolling: true }),
+      { code: 'watch-polling-unavailable' }
+    );
+    assert.equal(built.length, 1);
+
+    // chokidar's variable outranks ours, so it can still permit what ours forbids.
+    process.env.CHOKIDAR_USEPOLLING = '1';
+    const originalOwn = process.env.TOKEN_MONITOR_WATCH_POLLING;
+    process.env.TOKEN_MONITOR_WATCH_POLLING = '0';
+    try {
+      openWatch(chokidar, { ...config, pollingEntryLimit: 100, requirePolling: true });
+      assert.equal(built.at(-1).usePolling, true);
+    } finally {
+      if (originalOwn === undefined) delete process.env.TOKEN_MONITOR_WATCH_POLLING;
+      else process.env.TOKEN_MONITOR_WATCH_POLLING = originalOwn;
+    }
+  } finally {
+    if (original === undefined) delete process.env.CHOKIDAR_USEPOLLING;
+    else process.env.CHOKIDAR_USEPOLLING = original;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }

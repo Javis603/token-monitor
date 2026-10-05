@@ -165,8 +165,32 @@ test('renderer wires visibility scheduling without deferring tray icon updates',
   assert.match(app, /onWindowVisibilityPush\?\.\(\(visible\) => \{/);
   assert.match(
     statsPush,
-    /state\.stats = allTimeSessions\.attach\(payload\.data\.stats\);[\s\S]*statsRenderScheduler\.request\(\);[\s\S]*maybeUpdateBarsIcon\(\);/
+    /state\.stats = sessionStatsForDisplay\(allTimeSessions\.attach\(payload\.data\.stats\)\);[\s\S]*statsRenderScheduler\.request\(\);[\s\S]*maybeUpdateBarsIcon\(\);/
   );
+});
+
+test('visibility notifications sync video and connection state before the stats edge guard', () => {
+  let hidden = false;
+  let videoSyncs = 0;
+  const signal = { dataset: {} };
+  const handleWindowVisibilityChange = rendererFunction(
+    'handleWindowVisibilityChange',
+    "\ndocument.addEventListener('visibilitychange'",
+    {
+      backgroundVideoController: { sync() { videoSyncs += 1; } },
+      els: { syncPanelSignal: signal },
+      isRendererWindowHidden: () => hidden,
+      statsRenderScheduler: { visibilityChanged: () => false }
+    }
+  );
+
+  for (const nextHidden of [false, true, true, false]) {
+    hidden = nextHidden;
+    const previousSyncs = videoSyncs;
+    handleWindowVisibilityChange();
+    assert.equal(videoSyncs, previousSyncs + 1);
+    assert.equal(signal.dataset.windowHidden, String(hidden));
+  }
 });
 
 test('native window visibility covers a tray window that has never been shown', () => {
@@ -448,7 +472,7 @@ test('hidden event sources defer DOM work and visible surfaces catch up', () => 
   assert.match(settingsPush, /statsRenderScheduler\.request\(\)/);
   assert.match(hubPush, /if \(settingsVisible\) renderHubStatus\(\)/);
   assert.match(hubPush, /const settingsVisible = isSettingsSurfaceVisible\(\)[\s\S]*settingsVisible && els\.hubSecretInput/);
-  assert.doesNotMatch(statsPush, /\b(?:setLiveDot|setStatus|renderSyncClientStatus)\(/);
+  assert.doesNotMatch(statsPush, /\b(?:setLiveDot|setStatus|renderSyncPanel)\(/);
   assert.match(statsPush, /if \(isRendererWindowHidden\(\)\) statsRenderScheduler\.request\(\);[\s\S]*else renderConnectionStatus\(\);/);
   assert.match(statsRender, /renderConnectionStatus\(surface\)/);
   assert.match(bubbleState, /if \(isSettingsPanelOpen\(\)\) syncSettingsForm\(\);[\s\S]*renderStatsUpdate\(\)/);

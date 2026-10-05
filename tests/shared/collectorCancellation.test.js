@@ -273,7 +273,10 @@ test('usage replacement abandons its wait for a shared capability probe without 
     helpChild.stdout.emit('data', '--client [possible values: claude]');
     helpChild.emit('close', 0);
     helpClosed = true;
-    await nextTurn();
+    // The probe settles only after its empty fork-only scan closes too (see
+    // forkOnlyClientsAccepted in collector.js).
+    await waitFor(() => calls.some((args) => args.includes('--home')));
+    for (let turn = 0; turn < 3; turn += 1) await nextTurn();
 
     const callsBeforeCacheCheck = calls.length;
     await fresh.collectUsageOnce({

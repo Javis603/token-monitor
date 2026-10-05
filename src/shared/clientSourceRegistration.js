@@ -55,7 +55,10 @@ const SOURCE_MARKERS = [
   { marker: '.config/Devin/User/acp-events', client: 'devin' },
   { marker: '.config/devin/User/acp-events', client: 'devin' },
   { marker: 'AppData/Roaming/Devin/User/acp-events', client: 'devin' },
-  { marker: 'Library/Application Support/Devin/User/acp-events', client: 'devin' }
+  { marker: 'Library/Application Support/Devin/User/acp-events', client: 'devin' },
+  { marker: '.fx/sessions', client: 'fx', hostCheckId: 'fx-sessions' },
+  { marker: '.minimax/v2/sessions', client: 'mcode' },
+  { marker: '.mavis/v2/sessions', client: 'mcode' }
 ];
 
 const WSL_DATA_MARKERS = SOURCE_MARKERS.map(({ marker }) => marker);

@@ -17,7 +17,8 @@ const {
 } = require('../../src/shared/collector');
 const { CLIENT_LABELS } = require('../../src/shared/clientCatalog');
 const { CUSTOM_SCAN_CLIENT_IDS, tokscaleExtraDirsEnv } = require('../../src/shared/customScanPaths');
-const { DEFAULT_CLIENTS, PARSE_LOCAL_CLIENTS } = require('../../src/shared/clientTracking');
+const { DEFAULT_CLIENTS } = require('../../src/shared/clientTracking');
+const { FORK_ONLY_CLIENT_IDS } = require('../../src/shared/clientCatalog');
 const { extractUsageFromTokscale, normalizeClientName } = require('../../src/shared/usage');
 const { homeHasData } = require('../../src/shared/wslUsage');
 
@@ -37,9 +38,9 @@ test('Amp keeps the canonical amp id without matching unrelated client names', (
   assert.equal(normalizeClientName('pramp'), 'pramp');
 });
 
-test('Amp is a default-tracked Tokscale client, not a local adapter', () => {
+test('Amp is a default-tracked upstream Tokscale client, not a fork-only one', () => {
   assert.ok(DEFAULT_CLIENTS.split(',').includes('amp'));
-  assert.ok(!PARSE_LOCAL_CLIENTS.includes('amp'));
+  assert.ok(!FORK_ONLY_CLIENT_IDS.includes('amp'));
 });
 
 test('Amp threads feed the XDG source root, watcher, and health paths', () => {

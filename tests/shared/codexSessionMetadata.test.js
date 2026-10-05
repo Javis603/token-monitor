@@ -41,10 +41,10 @@ function makeDb(rows, schema = 'full') {
 // T3 Code keeps its own thread catalog: a T3 thread id (unrelated to Codex's)
 // whose runtime cursor names the Codex thread it drives. The generated display
 // title lives only on that T3 row, so it is only reachable through this join.
-function makeT3Db(rows, { cursorColumn = 'resume_cursor_json', deletedColumn = 'deleted_at' } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 't3-meta-'));
-  tmpDirs.push(root);
-  const file = path.join(root, 'state.sqlite');
+function makeT3Db(rows, { cursorColumn = 'resume_cursor_json', deletedColumn = 'deleted_at', targetFile } = {}) {
+  const root = targetFile ? path.dirname(targetFile) : fs.mkdtempSync(path.join(os.tmpdir(), 't3-meta-'));
+  if (!targetFile) tmpDirs.push(root);
+  const file = targetFile || path.join(root, 'state.sqlite');
   const db = new sqlite.DatabaseSync(file);
   const deleted = deletedColumn ? `, ${deletedColumn} TEXT` : '';
   db.exec(`CREATE TABLE projection_threads (thread_id TEXT PRIMARY KEY, title TEXT${deleted})`);
@@ -57,6 +57,27 @@ function makeT3Db(rows, { cursorColumn = 'resume_cursor_json', deletedColumn = '
     db.prepare(`INSERT INTO provider_session_runtime (thread_id, provider_name, ${cursorColumn}) VALUES (?, ?, ?)`)
       .run(row.t3ThreadId, row.providerName || 'codex', JSON.stringify({ threadId: row.codexThreadId }));
   }
+  db.close();
+  return file;
+}
+
+function makeT3V2Db(rows, stateDir) {
+  const root = stateDir || fs.mkdtempSync(path.join(os.tmpdir(), 't3-v2-meta-'));
+  if (!stateDir) tmpDirs.push(root);
+  fs.mkdirSync(root, { recursive: true });
+  const file = path.join(root, 'statev2.sqlite');
+  const db = new sqlite.DatabaseSync(file);
+  db.exec('CREATE TABLE orchestration_v2_projection_threads (thread_id TEXT PRIMARY KEY, title TEXT, default_provider TEXT, deleted_at TEXT, updated_at TEXT)');
+  db.exec('CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT PRIMARY KEY, thread_id TEXT, provider TEXT, driver TEXT, provider_session_id TEXT, payload_json TEXT)');
+  rows.forEach((row, index) => {
+    db.prepare('INSERT OR REPLACE INTO orchestration_v2_projection_threads VALUES (?, ?, ?, ?, ?)')
+      .run(row.t3ThreadId, row.title, row.defaultProvider || 'codex', row.deletedAt || null, row.updatedAt || '2026-10-04T00:00:00Z');
+    db.prepare('INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, ?, ?, ?, ?)')
+      .run(`provider-${index}`, row.t3ThreadId, row.provider || 'codex', row.driver || 'codex',
+        'provider-session:provider-instance:codex:shared', row.payload ?? JSON.stringify({
+          nativeThreadRef: { driver: row.driver || 'codex', nativeId: row.codexThreadId }
+        }));
+  });
   db.close();
   return file;
 }
@@ -152,6 +173,103 @@ maybe('an untitled T3 thread and an unreachable store are skipped rather than fa
   }).size, 0);
 });
 
+maybe('T3 V2 maps native threads separately even when their provider session is shared', () => {
+  const first = '01a10238-ae80-72a2-a21f-8db41915b3dc';
+  const second = '01a10293-14c7-76d3-8df9-9a71c4b49659';
+  const file = makeT3V2Db([
+    { t3ThreadId: 'pricing', codexThreadId: first, title: 'Tokscale 自訂定價覆蓋限制', defaultProvider: 'claudeAgent' },
+    // A custom provider instance still uses the Codex driver.
+    { t3ThreadId: 'codebuddy', codexThreadId: second, title: 'Review CodeBuddy Usage Tracking', provider: 'custom-codex' },
+    { t3ThreadId: 'bad-json', title: 'Malformed payload', payload: '{' },
+    { t3ThreadId: 'pending', title: 'Not started', payload: '{}' },
+    { t3ThreadId: 'placeholder', codexThreadId: 'placeholder', title: 'New thread' },
+    { t3ThreadId: 'deleted', codexThreadId: 'deleted', title: 'Deleted title', deletedAt: '2026-10-04T00:00:00Z' },
+    { t3ThreadId: 'claude', codexThreadId: 'claude', title: 'Claude title', driver: 'claudeAgent' }
+  ]);
+  const rollout = `rollout-2026-10-03T00-00-00-${first}`;
+  const merged = `${rollout}_rollout-2026-10-03T01-00-00-${second}`;
+  const result = metadata.readT3SessionMeta([first, second, rollout, merged, 'placeholder', 'deleted', 'claude'], { t3DbPaths: [file], sqlite });
+  assert.deepEqual(result, new Map([
+    [first, { title: 'Tokscale 自訂定價覆蓋限制' }],
+    [second, { title: 'Review CodeBuddy Usage Tracking' }],
+    [rollout, { title: 'Tokscale 自訂定價覆蓋限制' }],
+    [merged, { title: 'Tokscale 自訂定價覆蓋限制' }]
+  ]));
+
+  const db = new sqlite.DatabaseSync(file);
+  db.prepare('UPDATE orchestration_v2_projection_threads SET title = ? WHERE thread_id = ?').run('Renamed pricing thread', 'pricing');
+  db.close();
+  assert.deepEqual(metadata.readT3SessionMeta([first], { t3DbPaths: [file], sqlite }).get(first), { title: 'Renamed pricing thread' });
+});
+
+maybe('T3 V2 discovers the new store before stale legacy titles and preserves Codex names', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 't3-v2-home-'));
+  tmpDirs.push(home);
+  const first = '01a10238-ae80-72a2-a21f-8db41915b3dc';
+  const second = '01a10293-14c7-76d3-8df9-9a71c4b49659';
+  const legacyOnly = '01a10295-0c81-7aa1-a22a-a94d8ceed1ed';
+  const stateDir = path.join(home, '.t3', 'userdata');
+  makeT3V2Db([
+    { t3ThreadId: 'v2-first', codexThreadId: first, title: 'Current T3 title' },
+    { t3ThreadId: 'v2-second', codexThreadId: second, title: 'Other T3 title' }
+  ], stateDir);
+  const legacy = makeT3Db([
+    { t3ThreadId: 'legacy-first', codexThreadId: first, title: 'Stale legacy title' },
+    { t3ThreadId: 'legacy-only', codexThreadId: legacyOnly, title: 'Legacy-only title' }
+  ]);
+  fs.copyFileSync(legacy, path.join(stateDir, 'state.sqlite'));
+  const codex = makeDb([
+    { id: first, title: 'First user message' },
+    { id: second, name: 'Real Codex name', title: 'Another first message' }
+  ]);
+  const result = metadata.resolveSessionMetadata(new Set([first, second, legacyOnly]), {
+    deps: { scopedHome: true, codexDeps: { dbPaths: [codex], sqlite } },
+    home,
+    metadata: new Map(),
+    fileSessionMetadata: (_sessionId, _filePath, existing) => existing || {}
+  });
+  assert.equal(result.get(first).title, 'Current T3 title');
+  assert.equal(result.get(second).title, 'Real Codex name');
+  assert.equal(result.get(legacyOnly).title, 'Legacy-only title');
+});
+
+for (const layout of ['separate stores', 'retained V1 tables in the V2 store']) {
+  maybe(`V2 suppresses legacy titles for deleted, placeholder and empty threads with ${layout}`, () => {
+    const ids = ['deleted-native', 'placeholder-native', 'empty-native'];
+    const v2 = makeT3V2Db([
+      { t3ThreadId: 'deleted', codexThreadId: ids[0], title: 'Deleted V2 title', deletedAt: '2026-10-04T00:00:00Z' },
+      { t3ThreadId: 'placeholder', codexThreadId: ids[1], title: 'New thread' },
+      { t3ThreadId: 'empty', codexThreadId: ids[2], title: '' }
+    ]);
+    const legacy = makeT3Db([
+      ...ids.map((id) => ({ t3ThreadId: `legacy-${id}`, codexThreadId: id, title: `Stale ${id}` })),
+      { t3ThreadId: 'legacy-only', codexThreadId: 'legacy-only', title: 'Unmigrated title' }
+    ], layout === 'separate stores' ? {} : { targetFile: v2 });
+    const result = metadata.readT3SessionMeta([...ids, 'legacy-only'], { t3DbPaths: [v2, legacy], sqlite });
+    assert.deepEqual(result, new Map([['legacy-only', { title: 'Unmigrated title' }]]));
+  });
+}
+
+maybe('later V2 stores override and suppress earlier legacy matches across state directories', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 't3-cross-layout-'));
+  tmpDirs.push(home);
+  const root = path.join(home, '.t3');
+  const legacy = makeT3Db([
+    { t3ThreadId: 'legacy-live', codexThreadId: 'live', title: 'Stale live title' },
+    { t3ThreadId: 'legacy-deleted', codexThreadId: 'deleted', title: 'Stale deleted title' }
+  ]);
+  const installedDir = path.join(root, 'userdata');
+  fs.mkdirSync(installedDir, { recursive: true });
+  fs.copyFileSync(legacy, path.join(installedDir, 'state.sqlite'));
+  const v2 = makeT3V2Db([
+    { t3ThreadId: 'v2-live', codexThreadId: 'live', title: 'Current V2 title' },
+    { t3ThreadId: 'v2-deleted', codexThreadId: 'deleted', title: 'Deleted V2 title', deletedAt: '2026-10-04T00:00:00Z' }
+  ], path.join(root, 'dev', 'userdata'));
+  const expected = new Map([['live', { title: 'Current V2 title' }]]);
+  assert.deepEqual(metadata.readT3SessionMeta(['live', 'deleted'], { homeDir: home, env: {}, sqlite }), expected);
+  assert.deepEqual(metadata.readT3SessionMeta(['live', 'deleted'], { t3DbPaths: [legacy, v2], sqlite }), expected);
+});
+
 test('discovers the newest state database first and honors CODEX_HOME', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-home-'));
   tmpDirs.push(root);
@@ -175,7 +293,10 @@ test('the default T3 discovery covers every installed and dev state layout', () 
   const paths = metadata.discoverT3DbPaths({ homeDir: home });
 
   // An installed app is the common case, so its store stays first.
-  assert.equal(paths[0], path.join(root, 'userdata', 'state.sqlite'));
+  assert.equal(paths[0], path.join(root, 'userdata', 'statev2.sqlite'));
+  assert.equal(paths[1], path.join(root, 'userdata', 'state.sqlite'));
+  assert.ok(paths.includes(path.join(root, 'dev', 'userdata', 'statev2.sqlite')), 'V2 dev-runner layout missing');
+  assert.ok(paths.includes(path.join(root, 'dev', 'statev2.sqlite')), 'V2 dev layout missing');
   assert.ok(paths.includes(path.join(root, 'dev', 'userdata', 'state.sqlite')), 'dev-runner layout missing');
   assert.ok(paths.includes(path.join(root, 'dev', 'state.sqlite')), 'dev layout missing');
   assert.equal(new Set(paths).size, paths.length, 'paths must be deduped');
@@ -279,4 +400,88 @@ maybe('the T3 title outranks a prompt-derived Codex label but never a generated 
 
   assert.equal(result.get(promptTitled).title, '修正 Droid 標籤與 Provider 排序');
   assert.equal(result.get(appTitled).title, 'T3 Code Thread Title Display');
+});
+
+maybe('T3 lookup only receives sessions whose title it can still improve', () => {
+  const named = '01a0a091-18da-7123-b874-e75d66eaae9c';
+  const other = '01a0a0d2-3da6-7151-9e15-7673a4b40d1f';
+  const rollout = `rollout-2026-09-14T23-37-38-${named}`;
+  const merged = `${rollout}_rollout-2026-09-14T23-38-00-${other}`;
+  const codexFile = makeDb([
+    { id: named, name: 'Codex generated', title: 'First prompt' },
+    { id: other, title: 'Another prompt' },
+    { id: 'prompt', title: 'First prompt' },
+    { id: 'stripped', name: '[@image.png](file:///private/a.png)', title: 'First prompt' },
+    { id: 'blank', name: '   ' },
+    { id: 'review', name: 'Private review', threadSource: 'guardian_review' }
+  ]);
+  const fallbackIds = ['prompt', 'stripped', 'blank', 'missing', 'review'];
+  const t3File = makeT3Db([named, other, ...fallbackIds].map((id) => ({
+    t3ThreadId: `t3-${id}`, codexThreadId: id, title: `T3 ${id}`
+  })));
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-t3-filter-'));
+  tmpDirs.push(home);
+  const requested = [];
+  const resolve = () => metadata.resolveSessionMetadata(new Set([rollout, merged, ...fallbackIds]), {
+    deps: {
+      scopedHome: true,
+      codexDeps: { dbPaths: [codexFile], sqlite },
+      readT3Meta(ids) {
+        requested.push([...ids]);
+        return metadata.readT3SessionMeta(ids, { t3DbPaths: [t3File], sqlite });
+      }
+    },
+    home,
+    metadata: new Map(),
+    resolveProjects: false,
+    fileSessionMetadata: (_sessionId, _filePath, existing) => existing || {}
+  });
+
+  const result = resolve();
+  assert.deepEqual(requested, [fallbackIds]);
+  assert.equal(result.get(rollout).title, 'Codex generated');
+  assert.equal(result.get(merged).title, 'Codex generated');
+  for (const id of fallbackIds) assert.equal(result.get(id).title, `T3 ${id}`);
+  assert.equal(result.get('review').sessionKind, 'background-review');
+
+  // Eligibility comes from this pass's Codex rows, not a persistent title cache.
+  // Removing a generated name must restore T3 fallback on the very next pass;
+  // assigning one must immediately stop that session's fallback query.
+  const db = new sqlite.DatabaseSync(codexFile);
+  db.prepare('UPDATE threads SET name = ? WHERE id = ?').run('', named);
+  db.prepare('UPDATE threads SET name = ? WHERE id = ?').run('New Codex name', 'prompt');
+  db.close();
+  const renamed = resolve();
+  assert.deepEqual(requested[1], [rollout, merged, 'stripped', 'blank', 'missing', 'review']);
+  assert.equal(renamed.get(rollout).title, `T3 ${named}`);
+  assert.equal(renamed.get(merged).title, `T3 ${named}`);
+  assert.equal(renamed.get('prompt').title, 'New Codex name');
+});
+
+maybe('an already named Codex history does not open the T3 database', () => {
+  const rows = Array.from({ length: 401 }, (_, index) => ({ id: `named-${index}`, name: `Codex ${index}` }));
+  const codexFile = makeDb(rows);
+  const t3File = makeT3Db([
+    { t3ThreadId: 't3-0', codexThreadId: rows[0].id, title: 'Unused T3 title' }
+  ]);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-t3-named-'));
+  tmpDirs.push(home);
+  let t3Opens = 0;
+  const observedSqlite = {
+    DatabaseSync: function(file, options) {
+      if (file === t3File) t3Opens += 1;
+      return new sqlite.DatabaseSync(file, options);
+    }
+  };
+  const result = metadata.resolveSessionMetadata(new Set(rows.map((row) => row.id)), {
+    deps: { scopedHome: true, codexDeps: { dbPaths: [codexFile], t3DbPaths: [t3File], sqlite: observedSqlite } },
+    home,
+    metadata: new Map(),
+    resolveProjects: false,
+    fileSessionMetadata: (_sessionId, _filePath, existing) => existing || {}
+  });
+
+  // Count work rather than elapsed time: this remains deterministic on slow CI.
+  assert.equal(t3Opens, 0);
+  assert.deepEqual(result, new Map(rows.map((row) => [row.id, { title: row.name }])));
 });

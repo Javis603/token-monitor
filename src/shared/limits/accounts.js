@@ -112,13 +112,14 @@ const LIMIT_PROVIDER_ACCOUNTS = Object.freeze([
   registerProvider(require('../providers/qoder/account'), () => require('../providers/qoder/limits')),
   registerProvider(require('../providers/deepseek/account'), () => require('../providers/deepseek/limits')),
   registerProvider(require('../providers/devin/account'), () => require('../providers/devin/limits')),
+  registerProvider(require('../providers/minimax/account'), () => require('../providers/minimax/limits')),
   registerProvider(require('../providers/typesafe/account'), () => require('../providers/typesafe/limits')),
   registerProvider(require('../providers/openrouter/account'), () => require('../providers/openrouter/limits')),
-  registerProvider(require('../providers/minimax/account'), () => require('../providers/minimax/limits')),
   registerProvider(require('../providers/volcengine/account'), () => require('../providers/volcengine/limits')),
   registerProvider(require('../providers/ollama/account'), () => require('../providers/ollama/limits')),
   registerProvider(require('../providers/trae/account'), () => require('../providers/trae/limits')),
   registerProvider(require('../providers/alibaba/account'), () => require('../providers/alibaba/limits')),
+  registerProvider(require('../providers/stepfun/account'), () => require('../providers/stepfun/limits')),
   registerProvider(require('../providers/thirdparty/account'), () => require('../providers/thirdparty/limits'))
 ].map((decl) => Object.freeze({
   ...decl,

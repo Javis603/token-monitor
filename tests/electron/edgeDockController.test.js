@@ -35,6 +35,7 @@ class FakeBrowserWindow extends EventEmitter {
     this.backgroundMaterials = [];
     this.vibrancyCalls = [];
     this.hasShadowCalls = [];
+    this.zOrderCalls = [];
     FakeBrowserWindow.instances.push(this);
   }
 
@@ -49,9 +50,9 @@ class FakeBrowserWindow extends EventEmitter {
   getBounds() { return { ...this.bounds }; }
   setOpacity(value) { this.opacity = value; }
   setIgnoreMouseEvents(value) { this.ignoreMouse = value; }
-  showInactive() { this.visible = true; }
+  showInactive() { this.visible = true; this.zOrderCalls.push('showInactive'); }
   setBounds(bounds) { this.bounds = { ...bounds }; }
-  setAlwaysOnTop() {}
+  setAlwaysOnTop(flag, level) { this.zOrderCalls.push(['setAlwaysOnTop', flag, level]); }
   setVisibleOnAllWorkspaces() {}
   setHiddenInMissionControl() {}
   setShape(rects) { this.shapeCalls.push(rects); }
@@ -132,6 +133,7 @@ function createFixture(options = {}) {
     liquidGlass: () => (typeof options.liquidGlass === 'function' ? options.liquidGlass() : options.liquidGlass || null),
     createGlass: options.createGlass,
     prefersReducedMotion: () => true,
+    isFullScreen: options.isFullScreen,
     applyShapeMask: (win) => {
       maskWindows.push(win);
       return options.maskAvailable !== false;
@@ -157,6 +159,33 @@ function createFixture(options = {}) {
   const windowFor = (surface) => FakeBrowserWindow.instances.filter((win) => !win.destroyed && win.surface === surface).at(-1);
   return { controller, hapticCalls, haptics, ipcMain, maskWindows, placements, screen, settings, windowFor };
 }
+
+test('Windows Edge Dock reasserts topmost after each surface is first shown and rebuilt', (t) => {
+  const fixture = createFixture();
+  t.after(() => fixture.controller.stop());
+  const surfaces = ['peek', 'rail', 'bubble'];
+  const expected = ['showInactive', ['setAlwaysOnTop', true, 'pop-up-menu']];
+
+  for (const surface of surfaces) {
+    const win = fixture.windowFor(surface);
+    assert.equal(win.options.alwaysOnTop, true);
+    assert.deepEqual(win.zOrderCalls, expected, `${surface} reasserts topmost after showing`);
+  }
+
+  fixture.controller.sync();
+  for (const surface of surfaces) {
+    assert.deepEqual(fixture.windowFor(surface).zOrderCalls, expected, `${surface} is not repeatedly raised`);
+  }
+
+  fixture.controller.stop();
+  fixture.controller.sync();
+  for (const win of FakeBrowserWindow.instances.filter((win) => !win.destroyed)) {
+    win.webContents.emit('did-finish-load');
+  }
+  for (const surface of surfaces) {
+    assert.deepEqual(fixture.windowFor(surface).zOrderCalls, expected, `${surface} reasserts topmost after rebuild`);
+  }
+});
 
 test('auto-hide haptics distinguish the handle reveal from the first hovered item', async (t) => {
   const fixture = createFixture({ platform: 'darwin', settings: { edgeDockMode: 'autoHide' } });
@@ -515,6 +544,92 @@ test('a peek payload carries the handle, and an open rail keeps it away', (t) =>
   fixture.controller.sync();
   assert.equal(sentPayload(peek, 'peek').peeking, true);
   assert.equal(peek.ignoreMouse, false);
+});
+
+test('always-except-full-screen keeps the rail up on the desktop and auto-hides over a full-screen app', async (t) => {
+  let fullScreen = false;
+  const probed = [];
+  const fixture = createFixture({
+    settings: { edgeDockMode: 'alwaysExceptFullScreen' },
+    isFullScreen: (display) => {
+      probed.push(display);
+      return fullScreen;
+    }
+  });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const peek = fixture.windowFor('peek');
+  assert.equal(probed[0], fixture.screen.displays[0], 'the probe is asked about the dock display');
+  assert.equal(rail.opacity, 1);
+  assert.equal(sentPayload(rail, 'rail').always, true);
+  assert.equal(sentPayload(peek, 'peek').peeking, false);
+
+  // The pointer is away from the edge; the poll alone notices the full-screen app.
+  fixture.screen.point = { x: 10, y: 10 };
+  fullScreen = true;
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  assert.equal(rail.opacity, 0, 'a full-screen app retracts the rail');
+  assert.equal(sentPayload(rail, 'rail').always, false);
+  assert.equal(sentPayload(peek, 'peek').peeking, true);
+
+  fullScreen = false;
+  await new Promise((resolve) => setTimeout(resolve, 650));
+  assert.equal(rail.opacity, 1, 'back on the desktop the rail returns');
+  assert.equal(sentPayload(rail, 'rail').always, true);
+  assert.equal(sentPayload(peek, 'peek').peeking, false);
+});
+
+test('a display change re-checks full screen for the display the dock lands on', (t) => {
+  const primary = {
+    id: 1,
+    scaleFactor: 1,
+    bounds: { x: 0, y: 0, width: 1200, height: 900 },
+    workArea: { x: 0, y: 0, width: 1200, height: 860 }
+  };
+  const secondary = {
+    id: 2,
+    scaleFactor: 1,
+    bounds: { x: 1200, y: 0, width: 1600, height: 1000 },
+    workArea: { x: 1200, y: 0, width: 1600, height: 960 }
+  };
+  const fixture = createFixture({
+    displays: [primary, secondary],
+    settings: { edgeDockMode: 'alwaysExceptFullScreen', edgeDockDisplayId: '2' },
+    // Only the primary display has a full-screen app.
+    isFullScreen: (display) => display.id === 1
+  });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const peek = fixture.windowFor('peek');
+  assert.equal(rail.opacity, 1, 'the dock display is on its desktop');
+
+  // Unplugging the dock's display moves it to the primary, and the primary's
+  // full-screen app applies at once rather than on the next poll.
+  fixture.screen.displays.splice(1, 1);
+  fixture.screen.emit('display-removed');
+  assert.equal(rail.opacity, 0);
+  assert.equal(sentPayload(rail, 'rail').always, false);
+  assert.equal(sentPayload(peek, 'peek').peeking, true);
+});
+
+test('only the full-screen mode probes for full-screen apps', async (t) => {
+  let probes = 0;
+  const fixture = createFixture({
+    settings: { edgeDockMode: 'always' },
+    isFullScreen: () => {
+      probes += 1;
+      return true;
+    }
+  });
+  t.after(() => fixture.controller.stop());
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.equal(probes, 0);
+  assert.equal(fixture.windowFor('rail').opacity, 1, 'plain always-visible ignores full-screen apps');
+
+  fixture.settings.edgeDockMode = 'alwaysExceptFullScreen';
+  fixture.controller.sync();
+  assert.equal(probes, 1, 'switching into the mode checks straight away');
+  assert.equal(fixture.windowFor('rail').opacity, 0);
 });
 
 test('display metric changes hide and remeasure an open card against the new work area', (t) => {

@@ -4,6 +4,8 @@ Sources:
 - Lucide Icons: https://github.com/lucide-icons/lucide
   - actions/arrow-left.svg: arrow-left
   - actions/settings.svg: settings
+  - actions/pencil-line.svg: pencil-line
+  - actions/trash.svg: trash
   - settings/general.svg: sliders-horizontal
   - settings/main.svg: panels-top-left
   - settings/collection.svg: database

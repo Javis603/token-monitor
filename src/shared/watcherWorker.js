@@ -31,7 +31,7 @@ const port = parentPort || {
 // process would otherwise keep holding every descriptor it watches.
 if (!parentPort) process.on('disconnect', () => process.exit(0));
 
-const { watcherOptions, watchIgnoreMatcher } = require('./collector');
+const { openWatch } = require('./collector');
 
 // Latest-wins rather than a queue. A teardown can run for seconds, and a user
 // flipping several settings in that window must not make the worker replay
@@ -87,10 +87,7 @@ async function pump() {
       if (desired !== target) continue;
       if (target.config) {
         try {
-          const { dirs, clients, customScanPaths, usePolling } = target.config;
-          const instance = chokidar.watch(dirs, watcherOptions(usePolling === true, watchIgnoreMatcher(clients, {
-            customScanPaths
-          })));
+          const instance = openWatch(chokidar, target.config);
           watcher = instance;
           watcherRevision = target.revision;
           appliedRevision = target.revision;

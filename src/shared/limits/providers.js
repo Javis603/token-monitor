@@ -53,13 +53,14 @@
     { id: 'qoder', label: 'Qoder' },
     { id: 'deepseek', label: 'DeepSeek' },
     { id: 'devin', label: 'Devin' },
+    { id: 'minimax', label: 'Minimax' },
     { id: 'typesafe', label: 'TypeSafe' },
     { id: 'openrouter', label: 'OpenRouter' },
-    { id: 'minimax', label: 'Minimax' },
     { id: 'volcengine', label: 'Volcengine' },
     { id: 'ollama', label: 'Ollama' },
     { id: 'trae', label: 'Trae CN' },
     { id: 'alibaba', label: 'Alibaba Cloud' },
+    { id: 'stepfun', label: 'StepFun' },
     { id: 'thirdparty', label: 'Third-party APIs' }
   ].map((provider) => Object.freeze({ ...provider })));
 
@@ -74,7 +75,8 @@
     droid: 'factory',
     zcode: 'zai',
     qodercn: 'qoder',
-    dsh: 'deepseek'
+    dsh: 'deepseek',
+    mcode: 'minimax'
   });
 
   const LIMIT_PROVIDER_ID_SET = new Set(LIMIT_PROVIDER_IDS);

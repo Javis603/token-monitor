@@ -55,7 +55,7 @@ function usagePeriod(client, lastUsedAt, totalTokens = 1) {
 
 test('composeLocalSyncStats replaces the hub copy of the local device without double counting', () => {
   const hubStats = aggregateDevices([
-    device('local', 100),
+    device('local', 100, { updatedAt: '2026-07-16T00:01:00.000Z' }),
     device('remote', 50)
   ], 0, Date.parse('2026-07-16T00:01:00.000Z'));
   const localHubDevice = hubStats.devices.find((entry) => entry.deviceId === 'local');
@@ -77,6 +77,10 @@ test('composeLocalSyncStats replaces the hub copy of the local device without do
   assert.equal(result.devices.length, 2);
   assert.equal(result.devices.find((entry) => entry.deviceId === 'local').periods.today.totalTokens, 120);
   assert.equal(result.devices.find((entry) => entry.deviceId === 'local').displayName, 'This Mac');
+  // The live record owns receivedAt; the Hub's copy is kept as proof of upload.
+  assert.equal(result.devices.find((entry) => entry.deviceId === 'local').receivedAt, '2026-07-16T00:02:00.000Z');
+  assert.equal(result.devices.find((entry) => entry.deviceId === 'local').hubReceivedAt, '2026-07-16T00:00:00.000Z');
+  assert.equal(Object.hasOwn(result.devices.find((entry) => entry.deviceId === 'remote'), 'hubReceivedAt'), false);
   assert.equal(result.devices.find((entry) => entry.deviceId === 'remote').displayName, 'Studio');
   assert.equal(result.devices.find((entry) => entry.deviceId === 'remote').stale, true);
   assert.equal(result.devices.find((entry) => entry.deviceId === 'remote').ageMs, 900000);
@@ -105,6 +109,7 @@ test('composeLocalSyncStats can render a local device before the first hub snaps
   assert.equal(result.periods.today.totalTokens, 25);
   assert.equal(result.devices.length, 1);
   assert.equal(result.devices[0].deviceId, 'local');
+  assert.equal(result.devices[0].hubReceivedAt, null);
 });
 
 test('composeLocalSyncStats restores local titles over a title-free hub device', () => {

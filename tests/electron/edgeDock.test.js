@@ -131,7 +131,7 @@ const {
 const { canUseEdgeDock } = require('../../src/electron/edgeDock/controller');
 const { bubbleCommands, peekCommands, railCommands, toPolygons, toSvgPath } = require('../../src/electron/renderer/edgeDock/shapes');
 const { rasterizeMask, shapeRectsFromPolygons } = require('../../src/electron/edgeDock/mask');
-const { DEFAULT_LIMIT_COUNT, normalizeEdgeDockItems, reorderEdgeDockItems } = require('../../src/electron/renderer/edgeDock/items');
+const { DEFAULT_LIMIT_COUNT, limitWindowKey, normalizeEdgeDockItems, reorderEdgeDockItems } = require('../../src/electron/renderer/edgeDock/items');
 const { SESSIONS_METRIC } = require('../../src/electron/renderer/edgeDock/presentation');
 const edgeDockPresentation = require('../../src/electron/renderer/edgeDock/presentation');
 // The predicate the projection, the rail and the card all answer with, so these
@@ -274,7 +274,9 @@ test('the dock keeps the token total, adds headroom, and dots running rows inste
   assert.match(sessions, /if \(context\) meta\.append\(context\)/);
   // Running is a dot beside the name, not a recoloured title.
   assert.match(sessions, /nameNode\.append\(stateMark\(session, key, state\)\)/);
-  assert.match(sessions, /nameNode\.append\(document\.createTextNode\(name\)\)/);
+  assert.match(sessions, /el\('span', 'edge-dock-session-title', name\)/);
+  assert.match(sessions, /overflowText\.bind\(title\)/);
+  assert.match(sessions, /nameNode\.append\(title\)/);
   assert.doesNotMatch(css, /\.edge-dock-session\.is-running \.edge-dock-session-name\s*\{[^}]*color/);
   // Three states: a spinner while working, a check once the transcript said the
   // turn finished, and a faint dot for a session that has gone quiet. The
@@ -1535,6 +1537,59 @@ test('the rail headline reports the pool that gates the account, not just the se
   assert.equal(cells6[0].windowKind, 'session');
 });
 
+test('a pinned rail window ignores automatic exhaustion and keeps its identity across refreshes', () => {
+  const session = { kind: 'session', label: 'Session', remainingPercent: 85 };
+  const weekly = { kind: 'weekly', label: 'Weekly', remainingPercent: 0 };
+  const scoped = { kind: 'session', label: 'Fable', remainingPercent: 35 };
+  const record = provider('claude', { windows: [session, weekly, scoped] });
+  const key = limitWindowKey(session);
+  const items = normalizeEdgeDockItems([{ type: 'limit', provider: 'claude', windowKey: key }]);
+  const build = (windows) => buildEdgeDockCells({ limits: { providers: [provider('claude', { windows })] } }, { items })[0];
+  const pinned = build(record.windows);
+  assert.equal(pinned.remainingPercent, 85);
+  assert.equal(pinned.windowKind, 'session');
+  assert.equal(pinned.severityPercent, 85);
+  assert.equal(build([scoped, weekly, { ...session, remainingPercent: 72 }]).remainingPercent, 72);
+  assert.equal(build([scoped, weekly]).remainingPercent, null);
+  assert.equal(build([scoped, weekly]).status, 'error');
+});
+
+test('backend identity separates same-label windows and survives label changes', () => {
+  const first = { kind: 'session', label: 'Some quota', limitId: 'feature-a', windowMinutes: 300, additional: true, remainingPercent: 30 };
+  const second = { ...first, limitId: 'feature-b', remainingPercent: 70 };
+  const secondary = { ...second, windowMinutes: 600, remainingPercent: 55 };
+  const items = normalizeEdgeDockItems([{ type: 'limit', provider: 'codex', windowKey: limitWindowKey(second) }]);
+  assert.notEqual(limitWindowKey(first), limitWindowKey(second));
+  assert.notEqual(limitWindowKey(second), limitWindowKey(secondary));
+  assert.equal(items[0].windowKey, limitWindowKey(second));
+  const renamed = { ...second, label: 'New display name' };
+  assert.equal(limitWindowKey(second), limitWindowKey(renamed));
+  const [cell] = buildEdgeDockCells({ limits: { providers: [provider('codex', { windows: [secondary, renamed, first] })] } }, { items });
+  assert.equal(cell.remainingPercent, 70);
+  assert.equal(cell.accounts[0].headlineWindow.label, 'New display name');
+
+  // A saved pre-identity pin is safe only when its structural match is unique.
+  const legacyItems = [{ ...items[0], windowKey: JSON.stringify(['session', 'Some quota', '', true]) }];
+  const build = (windows) => buildEdgeDockCells({ limits: { providers: [provider('codex', { windows })] } }, { items: legacyItems })[0];
+  assert.equal(build([second]).remainingPercent, 70);
+  assert.equal(build([first, second]).remainingPercent, null);
+});
+
+test('turning off Codex additional limits suspends a pinned window until re-enabled', () => {
+  const additional = { kind: 'session', label: 'Some quota', limitId: 'feature-a', windowMinutes: 300, additional: true, remainingPercent: 30 };
+  const canonical = { kind: 'session', label: 'Session', remainingPercent: 90 };
+  const stats = { limits: { providers: [provider('codex', { windows: [canonical, additional] })] } };
+  const items = normalizeEdgeDockItems([{ type: 'limit', provider: 'codex', windowKey: limitWindowKey(additional) }]);
+  const build = (showCodexAdditionalLimits) => buildEdgeDockCells(stats, { items, showCodexAdditionalLimits })[0];
+  assert.equal(build(true).remainingPercent, 30);
+  assert.equal(build(false).remainingPercent, null);
+  assert.equal(build(false).severityPercent, null);
+  assert.equal(build(false).accounts[0].headlineWindow, null);
+  assert.equal(build(true).remainingPercent, 30);
+  const automatic = buildEdgeDockCells(stats, { showCodexAdditionalLimits: false })[0];
+  assert.equal(automatic.remainingPercent, 90);
+});
+
 test('explicit items keep their order, their empty providers, and add usage readouts', () => {
   const stats = {
     periods: {
@@ -2147,8 +2202,10 @@ test('item settings normalize to null for automatic and drop unknown entries', (
   ]);
   assert.deepEqual(
     normalizeEdgeDockItems([{ type: 'limit', provider: 'CODEX', hiddenAccounts: ['k', 'k', 7, ''] }]),
-    [{ type: 'limit', provider: 'codex', hiddenAccounts: ['k', '7'], showUsage: true, showSessions: true, accountMode: 'active' }]
+    [{ type: 'limit', provider: 'codex', hiddenAccounts: ['k', '7'], showUsage: true, showSessions: true, windowKey: '', accountMode: 'active' }]
   );
+  assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'codex', windowKey: '["weekly","Weekly","",false]' }])[0].windowKey, '["weekly","Weekly","",false]');
+  assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'codex', windowKey: 'junk' }])[0].windowKey, '');
   assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'codex', accountMode: 'lowest' }])[0].accountMode, 'lowest');
   assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'claude', accountMode: 'active' }])[0].accountMode, 'lowest');
 });
@@ -2384,4 +2441,37 @@ test('the handle retreats into the edge while the window can still show it', () 
   // and a page that loads with the rail already open starts in the withdrawn pose.
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   assert.match(dock, /root\.classList\.toggle\('is-handle-hidden', payload\.peeking !== true\);/);
+});
+
+test('live rate card renders device model rows with vendor marks and retains every row', () => {
+  const devices = [{ id: 'a', name: 'MacBook', models: [{ model: 'gpt-6.1-sol', speed: 40, burn: 2400 }] }, { id: 'b', name: 'Desktop', models: Array.from({ length: 8 }, (_, i) => ({ model: `claude-${i}`, speed: i + 1, burn: 60 * (i + 1) })) }];
+  const [cell] = buildEdgeDockCells({}, { items: [{ type: 'stat', metric: 'liveRate' }], liveRate: { speed: 76, burn: 4560, idle: false, devices } });
+  assert.deepEqual(cell.rateDevices, devices);
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const body = dock.slice(dock.indexOf('function appendLiveRateDetails('), dock.indexOf('function statCard('));
+  const node = (tag, className, text) => ({ tag, className, text, children: [], classes: new Set(), classList: { toggle(name, enabled) { if (enabled) this.owner.classes.add(name); else this.owner.classes.delete(name); } }, setAttribute() {}, append(...children) { this.children.push(...children); } });
+  const createNode = (...args) => { const result = node(...args); result.classList.owner = result; return result; };
+  const render = Function('window', 'el', 'formatRate', 'markNode', 'modelVendorFor', `return (${body})`)(
+    { TokenMonitorTokenRate: require('../../src/electron/renderer/tokenRatePresentation') }, createNode, String,
+    (vendor) => createNode('span', vendor), require('../../src/electron/renderer/usageCharts').modelVendorFor
+  );
+  const card = node('section', '');
+  render(card, cell);
+  const rows = card.children[0].children.filter((row) => row.className === 'edge-dock-rate-model');
+  assert.equal(rows.length, 9);
+  assert.equal(rows[0].children[0].className, 'codex');
+  assert.equal(rows[0].children[2].text, '40 tok/s');
+  assert.equal(rows[1].children[0].className, 'claude');
+  const headings = card.children[0].children.filter((row) => row.className === 'edge-dock-rate-device');
+  assert.deepEqual(headings.map((row) => row.text), ['MacBook', 'Desktop']);
+  assert.deepEqual(headings.map((row) => row.classes.has('is-separated')), [false, true]);
+  const single = node('section', '');
+  render(single, { rateDevices: [devices[0]] });
+  assert.equal(single.children[0].children.some((row) => row.className === 'edge-dock-rate-device'), false);
+  const mixed = node('section', '');
+  render(mixed, { rateDevices: [devices[0]], deviceCount: 2 });
+  assert.equal(mixed.children[0].children[0].text, 'MacBook');
+  const empty = node('section', '');
+  render(empty, { rateDevices: [] });
+  assert.equal(empty.children.length, 0);
 });

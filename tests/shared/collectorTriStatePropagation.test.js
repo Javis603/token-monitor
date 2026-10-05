@@ -57,8 +57,7 @@ function anchorFrom(full) {
     today: full.today,
     month: full.month,
     allTime: full.allTime,
-    todayPartitions: { dsh: full.today },
-    qoderCnPeriods: null
+    todayPartitions: { dsh: full.today }
   };
 }
 

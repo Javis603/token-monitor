@@ -10,6 +10,8 @@ Videos stay on this device. After a frame successfully decodes, the main process
 
 The renderer receives an opaque `token-monitor-background:` URL instead of a filesystem path or the video's bytes over IPC. The protocol resolves only the currently selected preview or saved video and forwards byte-range requests to Electron's file loader. Register the scheme before Electron is ready and keep it in the `media-src` CSP directive. No additional network listener is required.
 
+Publication and removal run serially. Clearing removes the saved video before its manifest; if the video cannot be deleted, the error is reported and the saved record remains available for retry, including after restarting the app. Failed imports only clean up files created by that import.
+
 ## Preview
 
 Focused appearance-control preview using a generated H.264 test video:

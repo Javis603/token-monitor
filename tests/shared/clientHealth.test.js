@@ -425,6 +425,25 @@ test('TOKSCALE_CONFIG_DIR moves the Antigravity cache but not the Cursor one', (
   }]);
 });
 
+// The fork parses Proma and Qoder CN from tokscale-core home_dir() too, so their
+// watch roots must follow the same redirect rather than the Win32 profile.
+test('fork-only client roots follow an absolute Windows HOME override', () => {
+  const roots = clientSourceRoots('proma,qodercn', {
+    homeDir: 'C:\\Users\\alice',
+    platform: 'win32',
+    env: { APPDATA: 'C:\\Users\\alice\\AppData\\Roaming', HOME: 'D:\\profiles\\alice' }
+  });
+
+  assert.deepEqual(roots.proma, [{
+    id: 'proma-sessions',
+    dir: path.join('D:\\profiles\\alice', '.proma', 'agent-sessions')
+  }]);
+  assert.deepEqual(roots.qodercn.find(({ id }) => id === 'qodercn-projects'), {
+    id: 'qodercn-projects',
+    dir: path.join('D:\\profiles\\alice', '.qoder-cn', 'projects')
+  });
+});
+
 // tokscale-core home_dir() prefers an absolute $HOME on Windows, and cursor.rs
 // builds its cache path on top of it, so the probe has to follow that redirect.
 test('the Cursor cache follows an absolute Windows HOME override', () => {
@@ -475,6 +494,45 @@ test('Muse watches the same XDG sessions root used for source detection', () => 
   assert.deepEqual(clientSourceRoots('muse', options).muse, [{ id: 'muse-sessions', dir }]);
   assert.deepEqual(clientWatchCandidates('muse', options).muse, [dir]);
   assert.deepEqual(clientSourceChecks('muse', options).muse.map((check) => check.id), ['muse-sessions']);
+});
+
+test('fx watches the home-relative sessions root used for source detection', () => {
+  const homeDir = path.join(os.tmpdir(), 'fx-source-home');
+  const options = { homeDir };
+  const dir = path.join(homeDir, '.fx', 'sessions');
+  assert.deepEqual(clientSourceRoots('fx', options).fx, [{ id: 'fx-sessions', dir }]);
+  assert.deepEqual(clientWatchCandidates('fx', options).fx, [dir]);
+  assert.deepEqual(clientSourceChecks('fx', options).fx.map((check) => check.id), ['fx-sessions']);
+});
+
+test('MiniMax Code watches every runtime store and the headless captures', () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-mcode-source-'));
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-mcode-linked-'));
+  try {
+    fs.mkdirSync(path.join(homeDir, '.minimax-work'));
+    fs.mkdirSync(path.join(homeDir, '.minimax'));
+    fs.symlinkSync(path.join(homeDir, '.minimax'), path.join(homeDir, '.mavis'), 'junction');
+    // A profile that is itself a link is still read by the fork, so it is watched too.
+    fs.symlinkSync(elsewhere, path.join(homeDir, '.mavis-team'), 'junction');
+    const env = { HOME: homeDir };
+    const options = { homeDir, env };
+    const sessions = (name) => path.join(homeDir, name, 'v2', 'sessions');
+    const headless = (...parts) => path.join(homeDir, ...parts, 'tokscale', 'headless', 'mcode');
+    assert.deepEqual(clientSourceRoots('mcode', options).mcode, [
+      { id: 'mcode-sessions', dir: sessions('.minimax') },
+      { id: 'mcode-sessions', dir: sessions('.mavis-team'), optional: true },
+      { id: 'mcode-sessions', dir: sessions('.minimax-work'), optional: true },
+      { id: 'mcode-sessions', dir: headless('.config'), optional: true },
+      { id: 'mcode-sessions', dir: headless('Library', 'Application Support'), optional: true }
+    ]);
+
+    const custom = path.join(homeDir, 'custom-data');
+    const overridden = clientSourceRoots('mcode', { homeDir, env: { ...env, MAVIS_DATA_DIR: custom } }).mcode;
+    assert.deepEqual(overridden.slice(0, 1), [{ id: 'mcode-sessions', dir: path.join(custom, 'v2', 'sessions') }]);
+  } finally {
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(elsewhere, { recursive: true, force: true });
+  }
 });
 
 test('source observations keep exact files, optional roots and WSL health in sync with diagnostics', () => {

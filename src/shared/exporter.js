@@ -3,6 +3,8 @@
 // Pure serialization for the data-export feature. NO fs, NO electron — so it is
 // node:test-able and its signatures physically exclude devices/limits (privacy).
 
+const { stripSessionTextFromPeriod } = require('./usage');
+
 const BOM = '﻿';
 const PERIODS = ['today', 'month', 'allTime'];
 const SNAPSHOT_COLUMNS = ['period', 'dimension', 'name', 'tokens', 'cost_usd'];
@@ -144,7 +146,15 @@ function periodSnapshot(periods, key) {
   // included) — pass it through untouched to honor the "lossless JSON" contract.
   // The privacy boundary is the function signature: devices/limits are siblings
   // of `periods` in the aggregate and never reach this module.
-  return p && typeof p === 'object' ? p : {};
+  //
+  // Session text is the one exception, and it is not a judgment call: these are
+  // the same fields `SESSION_TEXT_KEYS` already strips before a record reaches
+  // the Hub, and docs/export.md promises the export carries "only your usage
+  // numbers" and is "safe to drop into a synced vault". A local period keeps
+  // `session.title` (the renderer shows it), so a lossless pass-through would
+  // write conversation titles into a file the user is told to sync. Everything
+  // that classifies rather than quotes — sessionKind, ids, counters — stays.
+  return p && typeof p === 'object' ? stripSessionTextFromPeriod(p) : {};
 }
 
 function renderSnapshotCsv(periods) {

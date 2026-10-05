@@ -303,7 +303,8 @@ function runProviderSpendNode(source, balance, provider = null) {
       'settings.thirdparty.outputTokens': 'Output tokens',
       'settings.thirdparty.requests': 'Requests'
     })[key] || key,
-    limitNoteRowNode: (options) => options
+    limitNoteRowNode: (options) => options,
+    tagUsageItem: (node) => node
   };
   vm.runInNewContext(
     `${optionalNumber}\n${spendEntries}\n${spendNode}\n`
@@ -1240,6 +1241,10 @@ test('Z.ai and Team keep all billing windows and render MCP full width after pai
       limitWindowNode: (label, window, _color, _tone, _value, detail) => Object.assign(makeNode(), { label, window, detail }),
       providerWindowLabel: (p, window, fallback = '') => limitWindowLabel(p?.provider, window, fallback),
       providerWindowText: (p, window) => limitWindowText(p, window, { showLimitUsed: false }),
+      tagUsageItem: (node) => node,
+      hideUsageItems() {},
+      usageItems: { hiddenUsageItemSet: () => new Set() },
+      settings: () => ({}),
       provider: { provider, windows: [
         { kind: 'weekly', label: 'Weekly' },
         { kind: 'billing', label: 'MCP' },
@@ -1288,7 +1293,11 @@ test('OpenCode reads the Zen balance from its credits window without metering it
     optionalFiniteNumber: (value) => (Number.isFinite(Number(value)) && value !== null && value !== '' ? Number(value) : null),
     formatLimitAmount: (value) => `$${Number(value).toFixed(2)}`,
     providerWindowLabel: (p, window, fallback = '') => limitWindowLabel(p?.provider, window, fallback),
-    limitWindowNode: (label, window, _color, _tone, value) => Object.assign(makeNode(), { label, window, value })
+    limitWindowNode: (label, window, _color, _tone, value) => Object.assign(makeNode(), { label, window, value }),
+    tagUsageItem: (node) => node,
+    hideUsageItems() {},
+    usageItems: { hiddenUsageItemSet: () => new Set() },
+    settings: () => ({})
   };
   const balanceWindow = { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 8.5, currency: 'USD', showMeter: false };
 
@@ -1363,7 +1372,9 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   // The edge dock builds the same rows from the same view, so the preference
   // reaches that renderer through its appearance projection.
   assert.match(main, /showCodexAdditionalLimits: source\.showCodexAdditionalLimits,/);
-  assert.match(app, /key: 'showCodexAdditionalLimits',[\s\S]*?defaultValue: true/);
+  // The switch is retired from the options in favour of the usage-items
+  // checklist; a stored `false` is carried over by codexAdditionalLimitsMigration.
+  assert.doesNotMatch(app, /key: 'showCodexAdditionalLimits'/);
   assert.match(renderProviderWindows, /settings\(\)\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
   assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);
   assert.match(renderProviderWindows, /additionalNode\.classList\.add\('limit-window-wide'\);/);
@@ -1631,7 +1642,7 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
 
   assert.match(homeLabel, /if \(window\?\.kind === 'billing'\) \{/);
   assert.match(homeLabel, /limitProviderCompactWindowLabel\(providerId, window, visibleWindows\)/);
-  assert.match(homeRows, /limitProviderCompactWindows\(provider, provider\.windows\)/);
+  assert.match(homeRows, /limitProviderCompactWindows\(\s*provider,\s*\(provider\.windows \|\| \[\]\)\.filter\(/);
   assert.match(homeLabel, /const label = String\(window\?\.label \|\| ''\)\.trim\(\);/);
   assert.match(homeLabel, /if \(label\) return label;/);
   assert.match(homeLabel, /billing: 'home\.limit\.billing'/);

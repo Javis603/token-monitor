@@ -9,7 +9,8 @@ const { tokscaleConfigDir, tokscaleHomeDir } = require('./tokscaleConfig');
 const { claudeSessionRoots } = require('./providers/claude/paths');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
-const { qoderCnDataPaths } = require('./providers/qodercn/usage');
+const { qoderCnDataPaths } = require('./providers/qodercn/paths');
+const { MCODE_SOURCE_CHECK_ID, mcodeSessionDirs } = require('./providers/mcode/paths');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 const {
@@ -354,8 +355,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ['workbuddy-projects', path.join(home, '.workbuddy', 'projects')],
     ['workbuddy-projects', path.join(home, '.workbuddy-ai', 'projects')]
   );
-  // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl
-  add('proma', ['proma-sessions', path.join(home, '.proma', 'agent-sessions')]);
+  // Proma — session transcripts at ~/.proma/agent-sessions/*.jsonl. The fork
+  // parses it from tokscale's effective home, like the Qoder CN paths below.
+  add('proma', ['proma-sessions', path.join(tokscaleHome, '.proma', 'agent-sessions')]);
   // Qoder CN — legacy SQLite DB under the platform Application Support dir,
   // or the JSONL transcript tree used by current builds.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform, env });
@@ -363,6 +365,15 @@ function clientSourceRoots(clientsCsv, options = {}) {
     'qodercn',
     ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]),
     ['qodercn-projects', qoderCnPaths.projectsDir]
+  );
+  // MiniMax Code — upstream reads only captured `tokscale headless mcode exec`
+  // streams; the fork adds the CLI and desktop runtime store from tokscale's
+  // effective home (providers/mcode/paths.js). Only the default `.minimax`
+  // store is expected; `.mavis`, profiles and captures are optional.
+  add(
+    'mcode',
+    ...mcodeSessionDirs({ env, homeDir: tokscaleHome }).map((dir, index) => [MCODE_SOURCE_CHECK_ID, dir, null, index > 0]),
+    ...tokscaleHeadlessRoots(home).map(({ dir, optional }) => [MCODE_SOURCE_CHECK_ID, path.join(dir, 'mcode'), null, optional])
   );
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
@@ -463,6 +474,10 @@ function clientSourceRoots(clientsCsv, options = {}) {
     ...devinRoots.cli.map((dir) => [DEVIN_CLI_SOURCE_CHECK_ID, dir, path.join(dir, 'sessions.db')]),
     ...devinRoots.desktop.map((dir) => [DEVIN_DESKTOP_SOURCE_CHECK_ID, dir])
   );
+  // fx (vercel-labs): one home-relative `~/.fx/sessions` tree on every
+  // platform (clients.rs PathRoot::Home), holding per-session
+  // `usage-v2.json` snapshots plus the shared `index.json` titles file.
+  add('fx', ...simpleHostSourceRoots('fx', home));
   const customScanPaths = normalizeCustomScanPaths(options.customScanPaths, { platform });
   for (const [client, dirs] of Object.entries(customScanPaths)) {
     if (!enabled.has(client)) continue;

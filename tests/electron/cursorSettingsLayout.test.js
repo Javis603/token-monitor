@@ -748,12 +748,16 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   const css = readRendererFile('styles.css');
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const forms = limitAccountFormsForRenderer();
+  const expectedFields = {
+    deepseek: [['deepseekApiKey', 'password']],
+    minimax: [['minimaxApiRegion', 'select'], ['minimaxApiKey', 'password']]
+  };
   for (const id of ['deepseek', 'minimax']) {
     assert.doesNotMatch(html, new RegExp(`id="${id}(AccountGroup|ManualPanel|ApiKeyInput)"`), id);
     assert.doesNotMatch(css, new RegExp(`#${id}ManualPanel`), id);
     const form = forms.find((candidate) => candidate.id === id);
     assert.equal(form.kind, 'credential', id);
-    assert.deepEqual(form.fields.map(({ key, input }) => [key, input]), [[`${id}ApiKey`, 'password']], id);
+    assert.deepEqual(form.fields.map(({ key, input }) => [key, input]), expectedFields[id], id);
     assert.deepEqual(form.manual[0], { note: `settings.${id}.note` }, id);
     assert.deepEqual(form.status, {
       configuredKey: `${id}ApiKeyConfigured`,
@@ -763,18 +767,50 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
     for (const key of ['titleKey', 'openKey', 'clearKey', 'saveKey', 'emptyKey', 'failedKey']) {
       assert.match(form[key], new RegExp(`^settings\\.${id}\\.`), `${id} ${key}`);
     }
-    assert.match(form.fields[0].placeholderKey, new RegExp(`^settings\\.${id}\\.`), id);
+    assert.match(
+      form.fields.find(({ key }) => key === `${id}ApiKey`).placeholderKey,
+      new RegExp(`^settings\\.${id}\\.`),
+      id
+    );
   }
   assert.deepEqual(forms.find(({ id }) => id === 'deepseek').openUrl, { url: 'https://platform.deepseek.com/api_keys' });
 
-  // MiniMax keeps landing on the region its last successful poll resolved to;
+  // MiniMax follows the selection, with successful-probe status for Auto;
   // the form declares that, so the renderer has no MiniMax branch of its own.
   const app = readRendererFile('app.js');
   assert.deepEqual(forms.find(({ id }) => id === 'minimax').openUrl, {
+    byField: 'minimaxApiRegion',
+    urls: {
+      cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
+      intl: 'https://platform.minimax.io/user-center/payment/token-plan'
+    },
     byStatus: 'region',
-    urls: { en: 'https://platform.minimax.io/user-center/payment/token-plan' },
+    statusUrls: {
+      cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
+      en: 'https://platform.minimax.io/user-center/payment/token-plan'
+    },
     default: 'https://platform.minimaxi.com/user-center/payment/token-plan'
   });
+
+  // The region is a plain setting beside the credential, so Clear leaves it
+  // alone and it stays reachable once a key is saved — a user whose auto-probe
+  // keeps flapping needs the switch after linking, not before.
+  const minimax = forms.find(({ id }) => id === 'minimax');
+  const region = minimax.fields.find(({ key }) => key === 'minimaxApiRegion');
+  assert.equal(region.saveOnChange, true);
+  assert.deepEqual(region.options.map(({ value }) => value), ['auto', 'cn', 'intl']);
+  for (const { labelKey } of region.options) {
+    assert.match(labelKey, /^settings\.minimax\./, labelKey);
+  }
+  assert.deepEqual(minimax.top, [{ field: 'minimaxApiRegion' }]);
+
+  // The region never becomes a credential: no store path, so it stays in
+  // settings.json only after a selection; an implicit default stays empty.
+  const { initialAccountSettings } = require('../../src/electron/limits/accountSettings');
+  assert.equal(initialAccountSettings({}).minimaxApiRegion, '');
+  assert.equal(initialAccountSettings({ MINIMAX_API_REGION: 'cn' }).minimaxApiRegion, '');
+  assert.equal(initialAccountSettings({ TOKEN_MONITOR_MINIMAX_API_REGION: 'intl' }).minimaxApiRegion, '');
+  assert.equal(initialAccountSettings({ MINIMAX_API_HOST: 'api.minimax.io' }).minimaxApiRegion, '');
   assert.match(app, /limitAccountPanelsApi\.resolveOpenUrl\(form, \{\s*document,\s*provider: externalProviderForAccount\(form\.id\)/);
   assert.doesNotMatch(app, /minimaxPlatformUrl|form\.id === 'minimax'/);
   const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
@@ -1084,8 +1120,10 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     { field: 'claudeWebCookie' }
   ]);
   assert.deepEqual(form.fields.map(({ key, input, placeholderKey }) => [key, input, placeholderKey]), [
-    ['claudeWebCookie', 'textarea', 'settings.claude.cookiePlaceholder']
+    ['claudeWebCookie', 'textarea', 'settings.claude.cookiePlaceholder'],
+    ['claudeWebOrganizationId', 'select', undefined]
   ]);
+  assert.deepEqual(form.top, [{ field: 'claudeWebOrganizationId' }]);
   assert.deepEqual(form.openUrl, { url: 'https://claude.ai/settings/usage' });
   assert.deepEqual(form.messages, {
     required: 'settings.claude.cookieRequired',
@@ -1093,6 +1131,11 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     rejected: 'settings.claude.cookieRejected'
   });
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+    for (const key of ['organization', 'organizationChoose', 'organizationRequired', 'organizationSelect', 'organizationUnavailable', 'organizationLoadFailed']) {
+      assert.ok(MESSAGES[locale][`settings.claude.${key}`], `${locale} ${key}`);
+    }
+  }
   assert.equal(MESSAGES.en['settings.claude.title'], 'Claude Account');
   assert.match(MESSAGES.en['settings.claude.note'], /detected automatically when Web login is not configured/);
   assert.match(MESSAGES.en['settings.claude.step2'], /Application\/Storage[\s\S]*Cookies[\s\S]*https:\/\/claude\.ai/);
@@ -1660,7 +1703,8 @@ test('an account message survives the stats re-renders until its own condition r
 
 test('account credentials persist through the settings:update body, not a second write path', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  assert.match(main, /ipcMain\.handle\('settings:update', async \(_event, patch\) => \{\s*const result = applySettingsPatch\(patch\);/);
+  const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf('function applySettingsPatch(patch) {'));
+  assert.match(updateHandler, /const result = applySettingsPatch\(patch\);/);
   assert.match(main, /createCredentialCommands\(\{\s*getSettings: \(\) => settings,\s*applySettingsPatch,\s*probeDeps: credentialProbeDeps\s*\}\)/);
   const body = main.slice(main.indexOf('function applySettingsPatch(patch) {'), main.indexOf("ipcMain.handle('appearance:preview'"));
   assert.match(body, /credentialCommands\.noteSettingsPatch\(patch\);/);
@@ -1910,9 +1954,9 @@ test('collection cadence setting is exposed in the Collection panel', () => {
 
 test('sync upload interval setting is exposed in the Multi-device Sync panel', () => {
   const html = readRendererFile('index.html');
-  const controls = html.match(/<label class="sync-upload-interval-row[^"]*"[\s\S]*?<select id="syncUploadIntervalInput"[\s\S]*?<\/select>[\s\S]*?<\/label>/)?.[0] || '';
-  const clientFields = html.slice(html.indexOf('<div id="hubClientFields"'), html.indexOf('<div id="hubHostFields"'));
-  assert.match(clientFields, /sync-upload-interval-row/);
+  const controls = html.match(/<label id="syncUploadIntervalRow" class="sync-upload-interval-row[^"]*"[\s\S]*?<select id="syncUploadIntervalInput"[\s\S]*?<\/select>[\s\S]*?<\/label>/)?.[0] || '';
+  assert.ok(html.indexOf('id="syncUploadIntervalRow"') > html.indexOf('id="saveSettingsButton"'));
+  assert.ok(html.indexOf('id="syncUploadIntervalRow"') < html.indexOf('id="syncDevicePanel"'));
   assert.match(controls, /data-i18n="settings\.sync\.uploadInterval"/);
   assert.match(controls, /<option value="0"[\s\S]*data-i18n="settings\.sync\.uploadInterval\.live"/);
   assert.match(controls, /<option value="600000"[\s\S]*data-i18n="settings\.sync\.uploadInterval\.10m"/);
@@ -1941,6 +1985,8 @@ function fakeHubControl(value = '') {
   return {
     value,
     disabled: false,
+    contains() { return false; },
+    focus() { this.focused = true; },
     addEventListener(type, listener) {
       const current = listeners.get(type) || [];
       current.push(listener);
@@ -1962,6 +2008,9 @@ function fakeHubControl(value = '') {
 }
 
 function loadHubSettingsWiring(els, context) {
+  for (const id of ['syncConnectionEditor', 'syncConnectionIdentity', 'syncConnectionEndpoint', 'syncConnectionEdit', 'syncConnectionCancel', 'syncConnectionSaveError', 'syncDeviceSettings', 'syncUploadIntervalRow']) {
+    els[id] ||= fakeHubControl();
+  }
   const app = readRendererFile('app.js');
   const modeStart = app.indexOf('function syncHubModeUi()');
   const modeEnd = app.indexOf('function renderHubStatus()', modeStart);
@@ -1981,9 +2030,18 @@ function loadHubSettingsWiring(els, context) {
   assert.notEqual(intervalEnd, -1, 'collection cadence wiring should follow sync upload wiring');
   const vmContext = {
     els,
+    syncContentForm: null,
+    SYNC_MODE_DESCRIPTIONS: { local: 'local', client: 'client', host: 'host', icloud: 'icloud' },
+    syncModeSelect: { sync() {} },
+    document: { activeElement: null },
+    preserveSettingsPanelScroll: callback => callback(),
+    isSettingsSurfaceVisible: () => true,
+    setHoverMarqueeText: (element, value) => { element.textContent = value; },
+    t: key => key,
+    syncDevicePanelApi: require('../../src/electron/renderer/syncDevicePanel'),
     ...context,
     renderHubStatus: () => {},
-    renderSyncClientStatus: () => {},
+    renderSyncPanel: () => {},
     renderHubBuildStatus: () => {}
   };
   vm.runInNewContext(
@@ -2042,7 +2100,11 @@ test('Hub Save disables for clean and reverted drafts', async () => {
 
   state.settings.hubUrl = 'https://pushed.example';
   vmContext.syncHubDraftFields();
+  assert.equal(els.hubUrlInput.value, 'https://saved.example');
+  assert.equal(els.saveSettingsButton.disabled, false);
+  vmContext.cancelClientConnectionEdit();
   assert.equal(els.hubUrlInput.value, 'https://pushed.example');
+  assert.equal(els.syncConnectionEditor.hidden, true);
 });
 
 test('Hub Save exposes busy state and ignores repeated clicks', async () => {
@@ -2133,7 +2195,9 @@ test('Hub Save re-enables a failed draft after clearing busy state', async () =>
 
   els.hubUrlInput.value = 'https://draft.example';
   await els.hubUrlInput.dispatch('input');
-  await assert.rejects(els.saveSettingsButton.dispatch('click'), /save failed/);
+  await els.saveSettingsButton.dispatch('click');
+  assert.equal(els.syncConnectionSaveError.hidden, false);
+  assert.equal(els.syncConnectionSaveError.textContent, 'settings.sync.saveFailed');
 
   assert.equal(els.saveSettingsButton.disabled, false);
   assert.equal(els.saveSettingsButton.getAttribute('aria-busy'), null);
@@ -2580,7 +2644,8 @@ test('remote Hub build status is wired as a separate localized sync hint', () =>
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const clientFields = html.slice(html.indexOf('<div id="hubClientFields"'), html.indexOf('<div id="hubHostFields"'));
 
-  assert.match(clientFields, /id="syncClientStatus"[\s\S]*id="hubBuildStatus"[\s\S]*role="status"[\s\S]*hidden/);
+  assert.match(clientFields, /id="hubBuildStatus"[\s\S]*role="status"[\s\S]*hidden/);
+  assert.doesNotMatch(clientFields, /id="syncClientStatus"/);
   assert.ok(html.indexOf('hubBuildPresentation.js') < html.indexOf('app.js'));
   assert.match(app, /getHubBuildStatus/);
   assert.match(app, /function renderHubBuildStatus\(\)/);

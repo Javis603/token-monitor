@@ -1,8 +1,10 @@
 'use strict';
 
 const fs = require('node:fs');
+const { createPromptCacheState, applyPromptCacheEntry } = require('../../sessionPromptCache');
 const { claudeSessionRoots } = require('./paths');
 const { findSessionFiles } = require('../../sessionFiles');
+const { readT3SessionMeta } = require('../../t3SessionMetadata');
 const { normalizeSessionContext, shouldReadSessionContext } = require('../../sessionContext');
 
 const TITLE_MAX_CODE_POINTS = 96;
@@ -221,6 +223,7 @@ function applyMetadataLine(state, line) {
   if (!line.length) return;
   try {
     const entry = JSON.parse(line.toString('utf8'));
+    applyPromptCacheEntry(state.promptCacheState, entry, 'claude');
     if (entry?.type === 'custom-title') {
       const candidate = cleanTitle(entry.customTitle);
       if (candidate) state.customTitle = candidate;
@@ -349,6 +352,7 @@ function emptyIndex() {
     droppingLongLine: false,
     longLineHead: Buffer.alloc(0),
     longLineTail: Buffer.alloc(0),
+    promptCacheState: createPromptCacheState(),
     contextObserved: false,
     contextTokens: 0,
     contextWindow: 0
@@ -405,7 +409,21 @@ function applyLongLineFragments(state) {
     // precedes `usage` in `message`, so a tail carrying usage has already
     // written the statement, and a record still being written yields no usage.
     const contextUsage = contextUsageFromFragments(head, tail);
-    if (contextUsage) applyContextUsage(state, contextUsage.model, contextUsage.usage);
+    if (contextUsage) {
+      applyContextUsage(state, contextUsage.model, contextUsage.usage);
+      // Response metadata can trail large content. Use the existing bounded
+      // fragments, never a second file read or a parse of the content itself.
+      const fragments = `${head}\n${tail}`;
+      const timestamp = /"timestamp"\s*:\s*"([^"]+)"/.exec(tail)?.[1]
+        || /"timestamp"\s*:\s*"([^"]+)"/.exec(head)?.[1];
+      const id = /"id"\s*:\s*"([^"]+)"/.exec(head)?.[1];
+      applyPromptCacheEntry(state.promptCacheState, {
+        timestamp, type: 'assistant',
+        isSidechain: /"isSidechain"\s*:\s*true/.test(fragments),
+        isApiErrorMessage: /"isApiErrorMessage"\s*:\s*true/.test(fragments),
+        message: { id, usage: contextUsage.usage }
+      }, 'claude');
+    }
     // stop_reason is the last occurrence, and it trails the assistant text.
     const matches = [...tail.matchAll(/"stop_reason"\s*:\s*"([^"]*)"/g)];
     const reason = matches.length ? matches[matches.length - 1][1] : '';
@@ -427,6 +445,8 @@ function applyLongLineFragments(state) {
   if (/"isMeta"\s*:\s*true/.test(flags)) return;
   if (/"isCompactSummary"\s*:\s*true/.test(flags)) {
     clearContextUsage(state);
+    state.promptCacheState.observation = null;
+    state.promptCacheState.previousMessage = '';
     return;
   }
   // This has to agree with what isUserPrompt() accepts, or the same record is a
@@ -482,6 +502,7 @@ function readSessionTitle(filePath, deps = {}) {
         // to finish reading that record's boundary from the fragments it kept.
         longLineHead: Buffer.isBuffer(cached.longLineHead) ? Buffer.from(cached.longLineHead) : Buffer.alloc(0),
         longLineTail: Buffer.isBuffer(cached.longLineTail) ? Buffer.from(cached.longLineTail) : Buffer.alloc(0),
+        promptCacheState: { ...cached.promptCacheState },
         contextObserved: cached.contextObserved === true,
         contextTokens: tokenCount(cached.contextTokens),
         contextWindow: tokenCount(cached.contextWindow)
@@ -544,6 +565,11 @@ function readSessionContext(filePath, deps = {}) {
   return normalizeSessionContext(cached) || { contextTokens: 0, contextWindow: 0 };
 }
 
+function readSessionPromptCache(filePath, deps = {}) {
+  readSessionTitle(filePath, deps);
+  return (deps.cache || titleCache).get(String(filePath || ''))?.promptCacheState?.observation;
+}
+
 function resolveSessionMetadata(sessionIds, context) {
   const { deps, home, metadata } = context;
   const result = new Map();
@@ -552,12 +578,51 @@ function resolveSessionMetadata(sessionIds, context) {
     env: deps.env,
     useEnvRoots: !deps.scopedHome
   });
+  const invalidatedSessionIds = new Set();
+  const t3Metadata = readT3SessionMeta(sessionIds, {
+    ...(deps.claudeMetadataDeps || {}),
+    driver: 'claudeAgent',
+    cleanTitle,
+    homeDir: home,
+    env: deps.env,
+    useEnvRoot: !deps.scopedHome,
+    invalidatedSessionIds
+  });
+  // Keep a confirmed removal across watch ticks that cannot read the store.
+  // A fresh usable title can revive it; a miss cannot revive the frozen anchor.
+  for (const sessionId of sessionIds) {
+    if (!t3Metadata.has(sessionId) && deps.t3Titles?.[`claude:${sessionId}`] === null) invalidatedSessionIds.add(sessionId);
+  }
+  // Provenance is independent of transcript availability. Remove only a T3
+  // override confirmed unusable by V2 before reading native fallback metadata.
+  for (const sessionId of invalidatedSessionIds) {
+    const key = `claude:${sessionId}`;
+    // Fresh watch scans have no cached override, but their anchor may still
+    // carry it. Keep the deletion evidence local to this collection.
+    deps.invalidatedTitleKeys?.add(key);
+    const cached = metadata.get(key);
+    if (!cached?.t3Title) continue;
+    const invalidated = { ...cached, titleOnly: true, invalidatedTitle: cached.t3Title };
+    delete invalidated.title;
+    delete invalidated.t3Title;
+    metadata.set(key, invalidated);
+  }
   const applyFile = (sessionId, filePath) => {
+    const cached = metadata.get(`claude:${sessionId}`);
+    let nativeMetadata = cached;
+    if (cached?.t3Title) {
+      nativeMetadata = { ...cached };
+      delete nativeMetadata.title;
+      delete nativeMetadata.t3Title;
+      if (cached.titleFallback) nativeMetadata.title = cached.titleFallback;
+    }
     const meta = context.fileSessionMetadata(
       sessionId,
       filePath,
-      metadata.get(`claude:${sessionId}`)
+      nativeMetadata
     );
+    // A transcript supersedes any cached title-only catalog result.
+    delete meta.titleOnly;
     const title = readSessionTitle(filePath, deps.claudeMetadataDeps);
     // The turn boundary rides the same scan and its cache, so asking for it
     // costs no second pass. Reported for every session rather than only a recent
@@ -569,12 +634,15 @@ function resolveSessionMetadata(sessionIds, context) {
     // has to reach the merge to clear a `true` from an earlier tick; omitting it
     // left the stale completion in place and the row read Finished while the
     // model was generating. `undefined` is reserved for "no evidence".
-    const turnEnded = readSessionTurnEnded(filePath, deps.claudeMetadataDeps);
-    const sessionContext = shouldReadSessionContext(meta.lastUsedAt, context.now)
-      ? readSessionContext(filePath, deps.claudeMetadataDeps)
-      : undefined;
+    const index = (deps.claudeMetadataDeps?.cache || titleCache).get(filePath);
+    const turnEnded = index?.stopReason
+      ? index.stopReason !== 'tool_use' && index.userSinceStop !== true : undefined;
+    const sessionContext = shouldReadSessionContext(meta.lastUsedAt, context.now) && index?.contextObserved
+      ? normalizeSessionContext(index) || { contextTokens: 0, contextWindow: 0 } : undefined;
     result.set(sessionId, {
       ...meta,
+      ...(index?.promptCacheState?.observation === undefined ? {}
+        : { promptCache: index.promptCacheState.observation }),
       ...(title ? { title } : {}),
       ...(turnEnded === undefined ? {} : { turnEnded }),
       ...(sessionContext || {})
@@ -585,6 +653,23 @@ function resolveSessionMetadata(sessionIds, context) {
   const missingIds = new Set([...sessionIds].filter((sessionId) => !projectFiles.has(sessionId)));
   const transcriptFiles = findSessionFiles(roots.transcripts, missingIds);
   for (const [sessionId, filePath] of transcriptFiles) applyFile(sessionId, filePath);
+  // T3's sidebar title may have changed independently of the transcript's
+  // custom/AI title. Native sessions without a usable T3 title keep their own.
+  for (const sessionId of sessionIds) {
+    const cached = metadata.get(`claude:${sessionId}`);
+    // A failed lookup may reuse an explicit override, never an unlabelled title.
+    const t3Title = t3Metadata.get(sessionId)?.title || cached?.t3Title
+      || (!invalidatedSessionIds.has(sessionId) && deps.t3Titles?.[`claude:${sessionId}`]);
+    if (!t3Title) continue;
+    const transcriptMeta = result.get(sessionId);
+    result.set(sessionId, {
+      ...(transcriptMeta || cached || {}),
+      title: t3Title,
+      t3Title,
+      ...(transcriptMeta?.title ? { titleFallback: transcriptMeta.title } : {}),
+      ...(!transcriptMeta ? { titleOnly: true } : {})
+    });
+  }
   return result;
 }
 
@@ -594,6 +679,7 @@ module.exports = {
   claudeContextWindow,
   cleanTitle,
   readSessionContext,
+  readSessionPromptCache,
   readSessionTitle,
   readSessionTurnEnded,
   resolveSessionMetadata

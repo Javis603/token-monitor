@@ -127,9 +127,17 @@
     }
 
     async function clear() {
+      if (busy) return;
       generation += 1;
-      await api.clearBackgroundVideo();
-      await apply(null);
+      busy = true;
+      sync();
+      try {
+        await api.clearBackgroundVideo();
+        await apply(null);
+      } finally {
+        busy = false;
+        sync();
+      }
     }
 
     async function chooseVideo() {

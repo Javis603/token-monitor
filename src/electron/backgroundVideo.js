@@ -20,7 +20,7 @@ function validateVideoFile(stat) {
   }
 }
 
-async function copyBoundedVideo(sourcePath, destination) {
+async function copyBoundedVideo(sourcePath, destination, onCreated) {
   const source = await fs.open(sourcePath, 'r');
   try {
     validateVideoFile(await source.stat());
@@ -34,10 +34,12 @@ async function copyBoundedVideo(sourcePath, destination) {
     });
     // Pin the opened file and read at most one byte beyond the limit, even
     // if a download or sync client keeps growing it during the copy.
+    const target = createWriteStream(destination, { flags: 'wx', mode: 0o600 });
+    target.once('open', onCreated);
     await pipeline(
       source.createReadStream({ start: 0, end: MAX_VIDEO_BYTES }),
       limit,
-      createWriteStream(destination, { flags: 'wx', mode: 0o600 })
+      target
     );
     validateVideoFile(await fs.stat(destination));
   } finally {
@@ -47,6 +49,14 @@ async function copyBoundedVideo(sourcePath, destination) {
 
 function createBackgroundVideoManager(userDataPath) {
   let pending = null;
+  let mutation = Promise.resolve();
+  // Serialize publication and removal so each operation sees the last saved
+  // record and a duplicate commit cannot clean up another writer's files.
+  function mutate(operation) {
+    const result = mutation.then(operation);
+    mutation = result.catch(() => {});
+    return result;
+  }
   const manifestPath = path.join(userDataPath, MANIFEST);
   const publicRecord = (record, preview = false) => ({
     id: record.id,
@@ -81,31 +91,50 @@ function createBackgroundVideoManager(userDataPath) {
   async function commit(id) {
     if (!pending || pending.id !== id) throw new Error('Select the video again');
     const selection = pending;
-    const previous = await readRecord();
-    const fileName = `background-video-${id}${selection.extension}`;
-    const destination = path.join(userDataPath, fileName);
-    const temporaryManifest = path.join(userDataPath, `.background-video-${id}.json`);
-    const record = { id, name: selection.name, fileName };
-    await fs.mkdir(userDataPath, { recursive: true });
-    try {
-      await copyBoundedVideo(selection.sourcePath, destination);
-      await fs.writeFile(temporaryManifest, JSON.stringify(record), { flag: 'wx', mode: 0o600 });
-      await fs.rename(temporaryManifest, manifestPath);
-    } catch (error) {
-      await fs.unlink(destination).catch(() => {});
-      await fs.unlink(temporaryManifest).catch(() => {});
-      throw error;
-    }
-    pending = null;
-    if (previous) await fs.unlink(path.join(userDataPath, previous.fileName)).catch(() => {});
-    return publicRecord(record);
+    return mutate(async () => {
+      if (pending !== selection) throw new Error('Select the video again');
+      const previous = await readRecord();
+      const fileName = `background-video-${id}${selection.extension}`;
+      const destination = path.join(userDataPath, fileName);
+      const temporaryManifest = path.join(userDataPath, `.background-video-${id}.json`);
+      const record = { id, name: selection.name, fileName };
+      let ownsVideo = false;
+      let ownsManifest = false;
+      await fs.mkdir(userDataPath, { recursive: true });
+      try {
+        await copyBoundedVideo(selection.sourcePath, destination, () => { ownsVideo = true; });
+        const manifest = await fs.open(temporaryManifest, 'wx', 0o600);
+        ownsManifest = true;
+        try {
+          await manifest.writeFile(JSON.stringify(record));
+        } finally {
+          await manifest.close();
+        }
+        await fs.rename(temporaryManifest, manifestPath);
+      } catch (error) {
+        // An exclusive-create failure does not give us ownership of the path.
+        if (ownsVideo) await fs.unlink(destination).catch(() => {});
+        if (ownsManifest) await fs.unlink(temporaryManifest).catch(() => {});
+        throw error;
+      }
+      if (pending === selection) pending = null;
+      if (previous) await fs.unlink(path.join(userDataPath, previous.fileName)).catch(() => {});
+      return publicRecord(record);
+    });
   }
 
   async function clear() {
-    const previous = await readRecord();
-    await fs.unlink(manifestPath).catch((error) => { if (error.code !== 'ENOENT') throw error; });
-    pending = null;
-    if (previous) await fs.unlink(path.join(userDataPath, previous.fileName)).catch(() => {});
+    const selection = pending;
+    return mutate(async () => {
+      const previous = await readRecord();
+      // Keep the manifest until deletion succeeds so a locked/private copy
+      // remains discoverable and removal can be retried, even after restart.
+      if (previous) {
+        await fs.unlink(path.join(userDataPath, previous.fileName)).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+      }
+      await fs.unlink(manifestPath).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+      if (pending === selection) pending = null;
+    });
   }
 
   async function resolve(url) {
