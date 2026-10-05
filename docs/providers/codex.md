@@ -74,3 +74,7 @@ node --test tests/shared/codex*.test.js tests/shared/limitCollector.codex*.test.
 ## Desktop live-capture entry
 
 `codex-cloud-capture-desktop.js` wraps the existing explicitly selected cloud event observer with a native UUID dialog, bounded duration and per-run private reports. The separate test-app installer verifies the old package and preserves a rollback backup; it does not install an account-wide scanner or a new archive. See [desktop capture and deployment](../codex-cloud-capture-desktop.md).
+
+## Automatic hosted-cloud observation
+
+`cloudAutoWatch.js` and `codex-cloud-auto-watch.js` automatically union the live cloud catalogs and attach to running tasks without manual IDs. Per-thread engine counters survive connection retries within the process, but are not summed into local/account totals. A separate user LaunchAgent runs the tested observer with an explicit automatic-attachment flag. Scope, persistence limits, controls and real validation are documented in [automatic cloud monitoring](../codex-cloud-auto-watch.md).
