@@ -135,6 +135,7 @@
           providerId: account.providerId || '',
           iconId: account.iconId || '',
           name: account.name || '',
+          plan: account.plan || '',
           color: account.color || '',
           lowestRemaining: Math.min(...windows.map((window) => window.remainingPercent ?? 100)),
           windows,
@@ -232,6 +233,7 @@
     limit = 3,
     sort = 'remaining',
     accountName,
+    accountPlan,
     accountColor,
     accountIcon,
     isWindowHidden = null
@@ -249,6 +251,7 @@
           key: `${id}:${index}`,
           providerId: id,
           name: typeof accountName === 'function' ? accountName(provider, index, providerEntries) : label,
+          plan: typeof accountPlan === 'function' ? accountPlan(provider) : '',
           color: typeof accountColor === 'function'
             ? accountColor(provider, id, colors[id] || colors.default || '')
             : (colors[id] || colors.default || ''),

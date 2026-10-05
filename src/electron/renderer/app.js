@@ -5614,6 +5614,10 @@ function homeLimitRows() {
     colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
+    accountPlan: (provider) => {
+      const label = String(provider.planLabel || provider.accountLabel || '').trim();
+      return label ? limitProviderPresentationApi.limitProviderPlanDisplayLabel(provider, label) : '';
+    },
     accountColor: (provider, id, fallbackColor) => (
       id === 'thirdparty'
         ? limitProviderPresentationApi.thirdPartyAdapterVisual(provider, fallbackColor).color
@@ -5685,6 +5689,7 @@ function renderHomeLimitModule() {
     body.append(empty);
     return module;
   }
+  const showBars = state.settings?.homeLimitDisplayMode === 'bars';
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-limit-account';
@@ -5696,8 +5701,15 @@ function renderHomeLimitModule() {
     name.className = 'home-list-name';
     name.textContent = row.name;
     account.append(mark, name);
+    if (row.plan) {
+      const plan = document.createElement('span');
+      plan.className = 'home-limit-plan';
+      plan.textContent = row.plan;
+      plan.title = row.plan;
+      account.append(plan);
+    }
     const windows = document.createElement('div');
-    windows.className = 'home-limit-windows';
+    windows.className = showBars ? 'home-limit-windows home-limit-windows-bars' : 'home-limit-windows';
     for (const window of row.windows) {
       const metric = document.createElement('div');
       metric.className = 'home-limit-window';
@@ -5721,6 +5733,18 @@ function renderHomeLimitModule() {
       }
       line.append(label, value);
       metric.append(line);
+      // Money and fixed labels retain a remaining meter; only percentage
+      // labels follow the global used/remaining display preference.
+      if (showBars && window.showMeter !== false) {
+        const remainingPercent = optionalFiniteNumber(window.remainingPercent);
+        if (remainingPercent != null) {
+          const fillPercent = limitFillPercent(remainingPercent, null, showUsed && !isCreditsWindow(window) && !window.value);
+          const tone = window.kind === 'session' || window.kind === 'daily' ? 0.95 : 0.68;
+          const meter = limitWindowsView.limitMeterNode(row.color, fillPercent, tone);
+          meter.setAttribute('aria-hidden', 'true');
+          metric.append(meter);
+        }
+      }
       const resetLabel = window.resetsAt
         ? formatLimitBoundary(window) || ''
         : window.resetDescription
@@ -9227,6 +9251,24 @@ function renderHomeLimitProviderList() {
     .orderedLimitProviders(LIMIT_PROVIDERS, homeLimitProviderOrderValue())
     .filter(({ id }) => enabled.has(id));
   const hasCustomOrder = Boolean(state.settings?.homeLimitProviderOrder);
+  const displayLabel = document.createElement('label');
+  displayLabel.className = 'settings-item';
+  const displayText = document.createElement('span');
+  displayText.className = 'settings-item-text';
+  const displayTitle = document.createElement('span');
+  displayTitle.className = 'settings-item-title';
+  displayTitle.textContent = t('settings.home.limitDisplayMode');
+  const displayInput = document.createElement('select');
+  for (const mode of ['text', 'bars']) {
+    const option = document.createElement('option');
+    option.value = mode;
+    option.textContent = t(`settings.home.limitDisplayMode.${mode}`);
+    displayInput.append(option);
+  }
+  displayInput.value = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  displayInput.addEventListener('change', () => void saveSettings({ homeLimitDisplayMode: displayInput.value }));
+  displayText.append(displayTitle);
+  displayLabel.append(displayText, displayInput);
   const statusLabel = document.createElement('label');
   statusLabel.className = 'checkbox-label home-limit-status-setting';
   const statusInput = document.createElement('input');
@@ -9311,7 +9353,7 @@ function renderHomeLimitProviderList() {
   showAll.addEventListener('click', () => void showAllHomeLimitProviders());
   headerActions.append(reset, showAll);
   header.append(note, headerActions);
-  wrap.append(statusLabel, providerNamesLabel, countLabel, header);
+  wrap.append(displayLabel, statusLabel, providerNamesLabel, countLabel, header);
   for (const { id, label, settingsLabel } of providers) {
     const isHidden = hidden.has(id);
     const row = document.createElement('div');

@@ -4,10 +4,126 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
+const preferences = require('../../src/electron/renderer/homeModulePreferences');
+const { limitFillPercent } = require('../../src/electron/renderer/limits/displayMode');
+const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
 
 function read(relativePath) {
   return fs.readFileSync(path.join(__dirname, '../..', relativePath), 'utf8');
 }
+
+function renderHomeWindow(window, settings = {}, plan = '') {
+  class Element {
+    constructor() {
+      this.children = [];
+      this.style = { setProperty(name, value) { this[name] = value; } };
+      this.attributes = {};
+      this.classList = { add() {} };
+    }
+    append(...children) { this.children.push(...children); }
+    setAttribute(name, value) { this.attributes[name] = value; }
+  }
+  const document = { createElement: () => new Element() };
+  const module = new Element();
+  const body = new Element();
+  const app = read('src/electron/renderer/app.js');
+  const start = app.indexOf('function renderHomeLimitModule()');
+  const end = app.indexOf('function renderHomeModelModule(', start);
+  const context = {
+    document,
+    state: { settings },
+    homeModulePreferencesApi: preferences,
+    homeModuleShell: () => ({ module, body }),
+    homeLimitRows: () => [{ name: 'Claude', plan, color: '#d97757', windows: [window] }],
+    applyHomeListMark() {},
+    iconKindFor: () => 'claude',
+    homeLimitWindowLabel: () => 'Session',
+    formatHomeLimitWindowValue: () => 'value',
+    isCreditsWindow: (window) => window.metric === 'credits',
+    limitFillPercent,
+    optionalFiniteNumber: (value) => value == null || !Number.isFinite(Number(value)) ? null : Number(value),
+    limitWindowsView: createLimitWindowsView({
+      document,
+      colorWithAlpha: (color, alpha) => `${color}/${alpha}`,
+      applyBarScale: (fill, scale) => fill.style.setProperty('--bar-scale', String(scale))
+    }),
+    t: (key) => key,
+    formatLimitBoundary: () => 'Reset 4h',
+    limitProviderPresentationApi: { limitProviderCompactWindowPeriodLabel: () => '' }
+  };
+  vm.runInNewContext(`${app.slice(start, end)}; renderHomeLimitModule();`, context);
+  const metric = body.children[0].children[1].children[0];
+  metric.accountHead = body.children[0].children[0];
+  return metric;
+}
+
+test('Home shows the plan on the account heading in both modes and omits unknown plans', () => {
+  for (const homeLimitDisplayMode of ['text', 'bars']) {
+    const known = renderHomeWindow({ remainingPercent: 88 }, { homeLimitDisplayMode }, 'Pro More');
+    assert.equal(known.accountHead.children[2].className, 'home-limit-plan');
+    assert.equal(known.accountHead.children[2].textContent, 'Pro More');
+    assert.equal(known.accountHead.children[2].title, 'Pro More');
+    const unknown = renderHomeWindow({ remainingPercent: 88 }, { homeLimitDisplayMode });
+    assert.equal(unknown.accountHead.children.length, 2);
+  }
+});
+
+test('Home text and bar modes preserve text and reset information', () => {
+  const window = { remainingPercent: 88, showMeter: true, resetsAt: '2026-10-06T12:00:00Z' };
+  for (const mode of [undefined, 'text', 'invalid']) {
+    const metric = renderHomeWindow(window, { homeLimitDisplayMode: mode });
+    assert.deepEqual(metric.children.map((child) => child.className), ['home-limit-window-line', 'home-limit-reset']);
+  }
+  const metric = renderHomeWindow(window, { homeLimitDisplayMode: 'bars' });
+  assert.deepEqual(metric.children.map((child) => child.className), ['home-limit-window-line', 'limit-meter', 'home-limit-reset']);
+  assert.equal(metric.children[1].children[0].style['--bar-scale'], '0.88');
+  assert.equal(metric.children[1].children[0].style.background, '#d97757');
+  assert.equal(metric.children[1].attributes['aria-hidden'], 'true');
+  assert.equal(metric.children[2].textContent, 'Reset 4h');
+});
+
+test('Home meters flip percentage usage but retain remaining money and fixed values', () => {
+  for (const [window, expected] of [
+    [{ remainingPercent: 88 }, '0.12'],
+    [{ remainingPercent: 40, metric: 'credits', remaining: 4 }, '0.4'],
+    [{ remainingPercent: 40, value: '$4' }, '0.4'],
+    [{ remainingPercent: 0 }, '1'],
+    [{ remainingPercent: 100 }, '0']
+  ]) {
+    const metric = renderHomeWindow(window, { homeLimitDisplayMode: 'bars', showLimitUsed: true });
+    assert.equal(metric.children[1].children[0].style['--bar-scale'], expected);
+  }
+});
+
+test('Home bars do not invent percentages for unknown, unlimited or non-meter windows', () => {
+  for (const window of [
+    { remainingPercent: null }, { remainingPercent: NaN },
+    { remainingPercent: null, metric: 'credits', remaining: 4 },
+    { remainingPercent: null, detail: 'unlimited' },
+    { remainingPercent: null, planStatus: 'expired', showMeter: false },
+    { remainingPercent: 80, showMeter: false }
+  ]) {
+    assert.equal(renderHomeWindow(window, { homeLimitDisplayMode: 'bars' }).children.length, 1);
+  }
+  const empty = renderHomeWindow({ remainingPercent: 0 }, { homeLimitDisplayMode: 'bars' });
+  assert.equal(empty.children[1].children[0].style['--bar-scale'], '0');
+});
+
+test('Home display mode persists separately from low-limit highlighting and is translated', () => {
+  const main = read('src/electron/main.js');
+  const app = read('src/electron/renderer/app.js');
+  assert.match(main, /homeLimitDisplayMode: 'text'/);
+  assert.match(main, /merged\.homeLimitDisplayMode = normalizeHomeLimitDisplayMode\(merged\.homeLimitDisplayMode\)/);
+  assert.match(main, /homeLimitDisplayMode: normalizeHomeLimitDisplayMode\(patch\.homeLimitDisplayMode \?\? settings\.homeLimitDisplayMode\)/);
+  assert.match(app, /saveSettings\(\{ homeLimitDisplayMode: displayInput\.value \}\)/);
+  assert.equal(preferences.normalizeHomeLimitDisplayMode('bars'), 'bars');
+  assert.equal(preferences.normalizeHomeLimitDisplayMode('invalid'), 'text');
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const messages of Object.values(MESSAGES)) {
+    for (const suffix of ['', '.text', '.bars']) assert.ok(messages[`settings.home.limitDisplayMode${suffix}`]);
+  }
+});
 
 test('Home low-limit indicators are opt-in and persist through the settings boundary', () => {
   const main = read('src/electron/main.js');

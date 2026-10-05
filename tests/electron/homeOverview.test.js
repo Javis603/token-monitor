@@ -576,6 +576,26 @@ test('homeLimitAccountsForProviders keeps provider order and filters hidden prov
   assert.equal(rows[0].name, 'Codex');
 });
 
+test('Home retains each account plan through quota sorting without borrowing another account plan', () => {
+  const presentation = require('../../src/electron/renderer/limits/providerPresentation');
+  const rows = homeLimitAccountsForProviders({
+    providers: [
+      { provider: 'codex', accountEmail: 'pro@example.com', planLabel: 'Pro More', windows: [{ kind: 'weekly', remainingPercent: 93 }] },
+      { provider: 'codex', accountEmail: 'plus@example.com', planLabel: 'Plus', windows: [{ kind: 'weekly', remainingPercent: 30 }] },
+      { provider: 'zed', planLabel: 'Zed Student', windows: [{ kind: 'monthly', remainingPercent: 60 }] },
+      { provider: 'claude', windows: [{ kind: 'session', remainingPercent: 70 }] }
+    ],
+    providerOptions: [{ id: 'codex', label: 'Codex' }, { id: 'zed', label: 'Zed' }, { id: 'claude', label: 'Claude' }],
+    enabledProviderIds: ['codex', 'zed', 'claude'],
+    limit: 4,
+    accountName: (provider) => provider.accountEmail || provider.provider,
+    accountPlan: (provider) => presentation.limitProviderPlanDisplayLabel(provider, provider.planLabel)
+  });
+  assert.deepEqual(rows.map((row) => [row.name, row.plan]), [
+    ['plus@example.com', 'Plus'], ['zed', 'Student'], ['claude', ''], ['pro@example.com', 'Pro More']
+  ]);
+});
+
 test('homeLimitAccountsForProviders can preserve configured provider order over remaining quota', () => {
   const rows = homeLimitAccountsForProviders({
     providers: [

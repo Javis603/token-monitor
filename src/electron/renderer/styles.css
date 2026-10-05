@@ -3667,7 +3667,7 @@ html.is-windows .settings-panel select option {
 .home-limit-account {
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: 8px;
 }
 .home-limit-account-head {
   display: grid;
@@ -3676,12 +3676,28 @@ html.is-windows .settings-panel select option {
   gap: 8px;
   align-items: center;
 }
+.home-limit-account-head:has(> .home-limit-plan) {
+  grid-template-columns: 10px minmax(0, 1fr) fit-content(42%);
+}
+.home-limit-plan {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--readable-muted);
+  font-size: 0.625rem;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .home-limit-windows {
   display: grid;
   min-width: 0;
   margin-left: 18px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  gap: 16px;
+}
+.home-limit-windows-bars {
+  margin-left: 0;
+  gap: 10px;
 }
 .home-limit-window:only-child {
   grid-column: 1 / -1;

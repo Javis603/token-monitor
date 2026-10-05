@@ -180,6 +180,7 @@ const {
 const {
   defaultHomeModulePreferences,
   normalizeHiddenHomeModules,
+  normalizeHomeLimitDisplayMode,
   normalizeHomeModuleOrder
 } = require('./renderer/homeModulePreferences');
 const {
@@ -617,6 +618,7 @@ function defaultSettings() {
     homeModuleOrder: defaultHomeModulePreferences().homeModuleOrder,
     hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
     showHomeLimitBars: false,
+    homeLimitDisplayMode: 'text',
     showHomeLimitProviderNames: false,
     projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
     historyEnabled: true,
@@ -2510,6 +2512,7 @@ function readSettings() {
       merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
     }
     merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
+    merged.homeLimitDisplayMode = normalizeHomeLimitDisplayMode(merged.homeLimitDisplayMode);
     merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
     merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
     merged.showCodexAdditionalLimits = parseBoolean(merged.showCodexAdditionalLimits, true);
@@ -7493,6 +7496,7 @@ app.whenReady().then(() => {
       homeModuleOrder: patch.homeModuleOrder !== undefined ? normalizeHomeModuleOrder(patch.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',') : normalizeHomeModuleOrder(settings.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(','),
       hiddenHomeModules: patch.hiddenHomeModules !== undefined ? normalizeHiddenHomeModules(patch.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST) : normalizeHiddenHomeModules(settings.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST),
       showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
+      homeLimitDisplayMode: normalizeHomeLimitDisplayMode(patch.homeLimitDisplayMode ?? settings.homeLimitDisplayMode),
       showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
       hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
