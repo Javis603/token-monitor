@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const path = require('node:path');
 const { throwIfAborted } = require('../../abortSignal');
+const { runWithProbeDeadline } = require('../../probeDeadline');
 const { sharedDataDir } = require('../../config');
 const { hashKey } = require('../../hashKey');
 const { MIMO_CONSOLE_PRODUCT } = require('../../limits/windowLabels');
@@ -380,28 +381,18 @@ async function fetchMimoAccount(account, deps = {}) {
 async function runMimoAccountTaskWithTimeout(run, fallback, deps = {}) {
   const timeoutMs = Number(deps.accountTimeoutMs ?? MIMO_ACCOUNT_TIMEOUT_MS);
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return run(deps.signal);
-  const AbortControllerImpl = deps.AbortController || globalThis.AbortController;
-  const controller = AbortControllerImpl ? new AbortControllerImpl() : null;
-  const signal = controller?.signal && deps.signal
-    ? AbortSignal.any([controller.signal, deps.signal])
-    : controller?.signal || deps.signal;
-  throwIfAborted(signal);
-  const setTimer = deps.setTimeout || setTimeout;
-  const clearTimer = deps.clearTimeout || clearTimeout;
-  let timer;
-  const timeout = new Promise((resolve) => {
-    timer = setTimer(() => {
-      controller?.abort();
-      resolve(fallback());
-    }, timeoutMs);
-  });
   try {
-    return await Promise.race([
-      run(signal),
-      timeout
-    ]);
-  } finally {
-    if (timer) clearTimer(timer);
+    return await runWithProbeDeadline(({ signal }) => run(signal), {
+      deadlineMs: timeoutMs,
+      signal: deps.signal,
+      AbortController: deps.AbortController,
+      setTimeout: deps.setTimeout,
+      clearTimeout: deps.clearTimeout
+    });
+  } catch (error) {
+    throwIfAborted(deps.signal);
+    if (error?.code === 'PROBE_TIMEOUT') return fallback();
+    throw error;
   }
 }
 
