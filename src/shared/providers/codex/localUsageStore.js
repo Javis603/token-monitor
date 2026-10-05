@@ -39,7 +39,7 @@ function createLocalUsageStore(options = {}) {
     fs.chmodSync(databasePath, 0o600);
     try { database.exec(`
       PRAGMA busy_timeout = 2000;
-      PRAGMA journal_mode = WAL;
+      BEGIN IMMEDIATE;
       CREATE TABLE IF NOT EXISTS threads (
         account_key TEXT NOT NULL, thread_id TEXT NOT NULL, metadata TEXT NOT NULL,
         checkpoint TEXT, PRIMARY KEY (account_key, thread_id)
@@ -57,6 +57,7 @@ function createLocalUsageStore(options = {}) {
       CREATE TABLE IF NOT EXISTS agent_observer_intent (
         singleton INTEGER PRIMARY KEY CHECK(singleton = 1), pid INTEGER NOT NULL, expires_at INTEGER NOT NULL
       );
+      COMMIT;
     `); } catch (error) {
       database.close();
       database = null;
