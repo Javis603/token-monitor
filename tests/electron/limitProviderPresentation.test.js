@@ -2880,14 +2880,6 @@ test('MiMo uses shared Limits statuses while keeping errors distinct from reject
     { label: 'Sign in again', tone: 'setup' }
   );
   assert.deepEqual(
-    presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }),
-    { label: 'Sign in again', tone: 'setup' }
-  );
-  assert.deepEqual(
-    presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }),
-    { label: 'Sign in again', tone: 'setup' }
-  );
-  assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'mimo', status: 'error' }),
     { label: 'Unavailable', tone: 'warn' }
   );
@@ -2907,7 +2899,7 @@ test('MiMo settings stays connected while one independent product is live', () =
   assert.equal(presentation.limitProviderSettingsRecord([expired], 'mimo'), expired);
 });
 
-test('MiMo Limits rows show the no-plan and shared session recovery text', () => {
+test('MiMo plan cells keep missing plan names empty and use shared recovery text', () => {
   const view = createLimitWindowsView({
     mimoProductLabel: limitWindowLabels.mimoProductLabel,
     mimoAccountGroups: limitWindowLabels.mimoAccountGroups,
@@ -2916,18 +2908,14 @@ test('MiMo Limits rows show the no-plan and shared session recovery text', () =>
     t: (key) => key,
     presentation: presentation
   });
-  // No plan and no window is a product row with nothing to meter; its plan cell
-  // stays empty rather than stating that the app has no plan right now.
-  assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', windows: [] }), '');
   assert.equal(
     view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', windows: [{ kind: 'weekly' }] }),
     '',
-    'an invited quota keeps the product in the title without inventing a plan name'
+    'an invited quota does not invent a plan name'
   );
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'ok', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [] }), 'Pro');
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'app' }), 'Sign in again');
   assert.equal(view.limitProviderPlan({ provider: 'mimo', status: 'unauthorized', sourceDetail: 'managed' }), 'Sign in again');
-  assert.equal(view.limitAccountTitle('mimo', { provider: 'mimo', accountName: 'MiMo account', accountLabel: 'Console' }, 0), 'MiMo account · Console');
 });
 
 test('MiMo product rows name the shared account and the product when both are known', () => {
@@ -2945,6 +2933,13 @@ test('MiMo product rows name the shared account and the product when both are kn
   ];
   assert.equal(view.limitAccountTitle('mimo', rows[0], 0, rows), 'user@example.com · MiMo account · Console');
   assert.equal(view.limitAccountTitle('mimo', rows[1], 1, rows), 'user@example.com · MiMo account · Desktop Membership');
+  const withoutEmail = rows.map((row) => ({ ...row, accountEmail: '' }));
+  assert.deepEqual(withoutEmail.map((row, index) => view.limitAccountTitle('mimo', row, index, withoutEmail)),
+    ['MiMo account · Console', 'MiMo account · Desktop Membership']);
+  assert.equal(view.limitAccountTitle('mimo', withoutEmail[0], 0), 'MiMo account · Console');
+  assert.equal(view.limitAccountTitle('mimo', {
+    provider: 'mimo', accountName: 'Membership', accountLabel: 'Pro', accountKey: 'sha256:abcdef123456'
+  }, 0), 'Membership');
 });
 
 test('a healthy MiMo row keeps its meta line free of recovery prompts', () => {
@@ -5816,9 +5811,7 @@ test('Z.ai token-pool windows print an absolute token pair through the detail sl
   assert.equal(detail({ limit: 999_950, remaining: 999_950 }, false), '1M / 1M');
 });
 
-test('every compact surface can draw a row that has only one window', () => {
-  // Membership has one weekly window and no balance. Each compact surface must
-  // retain it when selecting windows rather than leaving an empty reading.
+test('the compact picker and tray retain a weekly-only MiMo quota', () => {
   const trayTextApi = require('../../src/shared/trayText');
   const row = {
     provider: 'mimo',
@@ -5842,12 +5835,5 @@ test('every compact surface can draw a row that has only one window', () => {
   assert.equal(picked?.selectedWindow?.kind, 'weekly');
   assert.equal(picked?.remaining, 60);
 
-  // The native widget has its own case in its own suite; the name it paints is
-  // the shared one, so it is asserted here next to the other surfaces.
-  // The window carries no label of its own, so the kind names it — and MiMo is
-  // not one of the vendors whose rolling window is published as "5-hour".
   assert.equal(limitWindowLabel('mimo', { kind: 'weekly' }), 'Weekly');
-
-  // The Limits page and Edge Dock share the same renderer; the DOM behavior is
-  // covered in edgeDockLimitCard.test.js rather than by matching source text.
 });

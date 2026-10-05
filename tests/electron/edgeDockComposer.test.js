@@ -34,32 +34,31 @@ class Element {
   contains(node) { return this === node || this.children.some((child) => child.contains(node)); }
 }
 
+function accountChoices(provider, rows, presentationApi) {
+  const root = new Element('div');
+  const composer = createEdgeDockComposer({
+    root, itemsApi, t: (key) => key,
+    presentationApi,
+    getSettings: () => ({ edgeDockItems: [{ type: 'limit', provider }] }),
+    getStats: () => ({ limits: { providers: rows } }), save: () => {},
+    providerLabel: (id) => id, providerColor: () => '#000000', hasProviderMark: () => false,
+    maskEmail: (email) => email, mimoProductLabel,
+    createRowDrag: () => ({ deferRender: () => false })
+  });
+  const all = (node) => [node, ...node.children.flatMap(all)];
+  composer.render();
+  all(root).find((node) => node.className === 'edge-dock-composer-item').listeners.click();
+  return {
+    composer,
+    names: () => all(root).filter((node) => node.className === 'edge-dock-composer-account-name').map((node) => node.textContent)
+  };
+}
+
 test('dock account choices distinguish MiMo products without changing sibling providers', () => {
   const previousDocument = global.document;
   global.document = { createElement: (tag) => new Element(tag), activeElement: null };
   try {
-    const labels = (provider, rows) => {
-      const root = new Element('div');
-      const composer = createEdgeDockComposer({
-        root,
-        t: (key) => key,
-        itemsApi,
-        presentationApi: { connectedLimitProviders: () => [provider] },
-        getSettings: () => ({ edgeDockItems: [{ type: 'limit', provider }] }),
-        getStats: () => ({ limits: { providers: rows } }),
-        save: () => {},
-        providerLabel: (id) => id,
-        providerColor: () => '#000000',
-        hasProviderMark: () => false,
-        maskEmail: (email) => email,
-        mimoProductLabel,
-        createRowDrag: () => ({ deferRender: () => false })
-      });
-      composer.render();
-      const all = (node) => [node, ...node.children.flatMap(all)];
-      all(root).find((node) => node.className === 'edge-dock-composer-item').listeners.click();
-      return all(root).filter((node) => node.className === 'edge-dock-composer-account-name').map((node) => node.textContent);
-    };
+    const labels = (provider, rows) => accountChoices(provider, rows, { connectedLimitProviders: () => [provider] }).names();
     assert.deepEqual(labels('mimo', [
       { provider: 'mimo', accountKey: 'console', accountName: 'MiMo abcdef1', accountLabel: 'Console' },
       { provider: 'mimo', accountKey: 'membership', accountName: 'MiMo abcdef1', accountLabel: 'Desktop Membership' }
@@ -85,20 +84,8 @@ test('a MiMo product label change repaints its account choices', () => {
   const previousDocument = global.document;
   global.document = { createElement: (tag) => new Element(tag), activeElement: null };
   try {
-    const root = new Element('div');
     const rows = ['a', 'b'].map((accountKey) => ({ provider: 'mimo', accountKey, accountName: 'MiMo abcdef1', planLabel: 'Pro' }));
-    const composer = createEdgeDockComposer({
-      root, itemsApi, t: (key) => key, presentationApi: {},
-      getSettings: () => ({ edgeDockItems: [{ type: 'limit', provider: 'mimo' }] }),
-      getStats: () => ({ limits: { providers: rows } }), save: () => {},
-      providerLabel: (id) => id, providerColor: () => '#000000', hasProviderMark: () => false,
-      maskEmail: (email) => email, mimoProductLabel,
-      createRowDrag: () => ({ deferRender: () => false })
-    });
-    const all = (node) => [node, ...node.children.flatMap(all)];
-    const names = () => all(root).filter((node) => node.className === 'edge-dock-composer-account-name').map((node) => node.textContent);
-    composer.render();
-    all(root).find((node) => node.className === 'edge-dock-composer-item').listeners.click();
+    const { composer, names } = accountChoices('mimo', rows, {});
     assert.deepEqual(names(), ['MiMo abcdef1', 'MiMo abcdef1']);
     rows[1].accountLabel = 'Desktop Membership';
     composer.render();

@@ -371,10 +371,8 @@ test('a disabled manual console is not revived by discovery, while membership st
     }]
   };
   const deps = {
-    fetch: world.fetch,
-    readMimoDesktopAccount: signedInDesktop(),
-    providerRuntimeState,
-    now: () => Date.UTC(2026, 8, 24)
+    ...world.deps,
+    providerRuntimeState
   };
   const rows = await fetchMimoLimits(options, deps);
   assert.deepEqual(rows.map((row) => row.accountLabel), ['Desktop Membership']);
@@ -398,11 +396,7 @@ test('a saved account and a different Desktop account land beside each other', a
   const world = mimoWorld({ balances: { '42': 9.96, '7': 7.51 } });
   const rows = await fetchMimoLimits({
     mimoManagedAccounts: [{ id: 'mimo-1', accountKey: mimoAccountKey('', { userId: '7' }), cookieHeader: 'api-platform_serviceToken=own; userId=7' }]
-  }, {
-    fetch: world.fetch,
-    readMimoDesktopAccount: signedInDesktop('42'),
-    now: () => Date.UTC(2026, 8, 24)
-  });
+  }, world.deps);
   assert.deepEqual(
     rows.map((row) => row.accountKey).sort(),
     [
@@ -454,11 +448,10 @@ test('a half Desktop sign-in does not hide membership behind a healthy manual co
       cookieHeader: CONSOLE_COOKIE
     }]
   }, {
-    fetch: mimoWorld().fetch,
+    ...mimoWorld().deps,
     readMimoDesktopAccount: () => {
       throw Object.assign(new Error('half'), { status: 'unauthorized', userId: '42' });
-    },
-    now: () => Date.UTC(2026, 8, 24)
+    }
   });
   assert.equal(rows.length, 2);
   assert.equal(rows[0].status, 'ok');
@@ -481,9 +474,8 @@ test('a Desktop logout removes the old membership while a manual console keeps a
       cookieHeader: CONSOLE_COOKIE
     }]
   }, {
-    fetch: mimoWorld().fetch,
-    readMimoDesktopAccount: absentDesktop,
-    now: () => Date.UTC(2026, 8, 24)
+    ...mimoWorld().deps,
+    readMimoDesktopAccount: absentDesktop
   });
 
   assert.equal(rows.find((row) => row.accountLabel === 'Console')?.status, 'ok');
@@ -566,12 +558,11 @@ test('a superseded Desktop removal is emitted again on the next committed refres
     limitProviders: ['mimo'],
     mimoManagedAccounts: [{ id: 'mimo-1', accountKey: CONSOLE_ACCOUNT_KEY_42, cookieHeader: CONSOLE_COOKIE }]
   }, {
+    ...mimoWorld().deps,
     autoStart: false,
     cleanupGraceMs: 0,
     providerPhysicalBoundMs: () => 5_000,
-    fetch: mimoWorld().fetch,
     readMimoDesktopAccount: () => readDesktop(),
-    now: () => Date.UTC(2026, 8, 24),
     probeProvider: async (provider, options, context, deps) => {
       const rows = await probeLimitProvider(provider, options, context, deps);
       if (rows.some((row) => row.removed)) removalProbes += 1;
@@ -606,16 +597,11 @@ test('a superseded Desktop removal is emitted again on the next committed refres
 });
 
 test('switching the Desktop account removes both automatic rows from the previous account', async () => {
-  const previous = await fetchMimoLimits({}, {
-    fetch: mimoWorld({ balances: { '42': 9.96, '7': 7.51 } }).fetch,
-    readMimoDesktopAccount: signedInDesktop('42'),
-    now: () => Date.UTC(2026, 8, 24)
-  });
+  const previous = await fetchMimoLimits({}, mimoWorld({ balances: { '42': 9.96, '7': 7.51 } }).deps);
 
   const rows = await fetchMimoLimits({ previousLimits: { providers: previous } }, {
-    fetch: mimoWorld({ balances: { '42': 9.96, '7': 7.51 } }).fetch,
-    readMimoDesktopAccount: signedInDesktop('7'),
-    now: () => Date.UTC(2026, 8, 24)
+    ...mimoWorld({ balances: { '42': 9.96, '7': 7.51 } }).deps,
+    readMimoDesktopAccount: signedInDesktop('7')
   });
   assert.deepEqual(rows.filter((row) => !row.removed).map((row) => row.accountKey), [
     CONSOLE_ACCOUNT_KEY_7,
@@ -642,10 +628,9 @@ test('a restart seeds automatic identity removal from the previous limits snapsh
     },
     mimoManagedAccounts: [{ id: 'mimo-1', accountKey: consoleKey, cookieHeader: CONSOLE_COOKIE }]
   }, {
-    fetch: mimoWorld().fetch,
+    ...mimoWorld().deps,
     readMimoDesktopAccount: absentDesktop,
-    providerRuntimeState: new Map(),
-    now: () => Date.UTC(2026, 8, 24)
+    providerRuntimeState: new Map()
   });
 
   assert.equal(rows.some((row) => row.accountKey === consoleKey && !row.removed), true);
@@ -674,10 +659,9 @@ test('an unattributed half sign-in prompts alone but never invents an account be
       cookieHeader: CONSOLE_COOKIE
     }]
   }, {
-    fetch: mimoWorld().fetch,
+    ...mimoWorld().deps,
     readMimoDesktopAccount: () => { throw Object.assign(new Error('half'), { status: 'unauthorized' }); },
-    providerRuntimeState,
-    now: () => Date.UTC(2026, 8, 24)
+    providerRuntimeState
   });
   assert.deepEqual(alongsideManual.filter((row) => !row.removed).map((row) => [row.accountLabel, row.status]), [
     ['Console', 'ok']
@@ -693,10 +677,8 @@ test('an unattributed half sign-in prompts alone but never invents an account be
       cookieHeader: CONSOLE_COOKIE
     }]
   }, {
-    fetch: mimoWorld().fetch,
-    readMimoDesktopAccount: signedInDesktop(),
-    providerRuntimeState,
-    now: () => Date.UTC(2026, 8, 24)
+    ...mimoWorld().deps,
+    providerRuntimeState
   });
   assert.equal(recovered.filter((row) => row.removed).length, 0);
   assert.equal(recovered.some((row) => row.accountLabel === 'Desktop Membership'), true);
@@ -743,16 +725,15 @@ test('an active Token Plan keeps its name when the optional usage meter is unava
       cookieHeader: CONSOLE_COOKIE
     }]
   }, {
-    fetch: mimoWorld({
+    ...mimoWorld({
       tokenPlanDetail: {
         planCode: 'mimo-cn-pro',
         planStatus: 'active',
         currentPeriodEnd: '2026-10-01T00:00:00Z'
       },
       tokenPlanUsageStatus: 500
-    }).fetch,
-    readMimoDesktopAccount: absentDesktop,
-    now: () => Date.UTC(2026, 8, 24)
+    }).deps,
+    readMimoDesktopAccount: absentDesktop
   });
 
   assert.equal(rows[0].status, 'ok', 'the wallet and plan identity still answered');
@@ -905,9 +886,8 @@ test('a scoped refresh spends only the account it names', async () => {
     mimoManagedAccounts: [{ id: 'mimo-1', accountKey: mimoAccountKey('', { userId: '42' }), cookieHeader: CONSOLE_COOKIE }],
     limitRefreshScope: { provider: 'mimo', accountKey: mimoAccountKey('', { userId: '42' }) }
   }, {
-    fetch: world.fetch,
-    readMimoDesktopAccount: absentDesktop,
-    now: () => Date.UTC(2026, 8, 24)
+    ...world.deps,
+    readMimoDesktopAccount: absentDesktop
   });
   assert.equal(rows.length, 1);
   assert.deepEqual(world.mints(), { console: 0, membership: 0 }, 'nothing is discovered for a scoped refresh');
@@ -937,20 +917,16 @@ test('a scoped refresh of one product does not answer for the other', async () =
 test('a scoped membership refresh keeps the account identity learned by the full refresh', async () => {
   const providerRuntimeState = new Map();
   const fullRows = await fetchMimoLimits({}, {
-    fetch: mimoWorld().fetch,
-    readMimoDesktopAccount: signedInDesktop(),
-    providerRuntimeState,
-    now: () => Date.UTC(2026, 8, 24)
+    ...mimoWorld().deps,
+    providerRuntimeState
   });
   assert.equal(fullRows[1].accountEmail, 'user@example.com');
 
   const scopedRows = await fetchMimoLimits({
     limitRefreshScope: { provider: 'mimo', accountKey: mimoMembershipAccountKey('42') }
   }, {
-    fetch: mimoWorld().fetch,
-    readMimoDesktopAccount: signedInDesktop(),
-    providerRuntimeState,
-    now: () => Date.UTC(2026, 8, 24)
+    ...mimoWorld().deps,
+    providerRuntimeState
   });
   assert.equal(scopedRows[0].accountEmail, 'user@example.com');
 });
@@ -1273,9 +1249,8 @@ test('a machine with no Desktop session has no membership row at all', async () 
   const rows = await fetchMimoLimits({
     mimoManagedAccounts: [{ id: 'mimo-1', accountKey: mimoAccountKey('', { userId: '42' }), cookieHeader: CONSOLE_COOKIE }]
   }, {
-    fetch: world.fetch,
-    readMimoDesktopAccount: absentDesktop,
-    now: () => Date.UTC(2026, 8, 24)
+    ...world.deps,
+    readMimoDesktopAccount: absentDesktop
   });
   assert.equal(rows.length, 1, 'the console product answers for the account on its own');
   assert.equal(rows[0].status, 'ok');

@@ -509,7 +509,6 @@ test('a MiMo Console card renders Token Plan states from normalized and persiste
     provider: 'mimo',
     status: 'ok',
     accountLabel: 'Console',
-    planLabel: 'Pro',
     windows: [
       { kind: 'billing', label: 'Token Plan', used: 25, limit: 100, usedPercent: 25, remainingPercent: 75 },
       { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 9.95, currency: 'CNY' }

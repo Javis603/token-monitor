@@ -3262,29 +3262,11 @@ test('a ZCode-discovered GLM login reads as connected, not API-key configured', 
   assert.ok(/'settings\.zai\.statusLinked': 'Connected'/.test(i18n));
 });
 
-test('MiMo lists the detected Desktop session without controls the user does not own', () => {
-  const app = readRendererFile('app.js');
+test('MiMo main projects the detected Desktop account without raw credentials', () => {
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
-  const render = app.match(/function renderMimoStatus\(\) \{[\s\S]*?\n\}/)?.[0] || '';
-
-  // The detected session is an account the provider answers for, so the panel
-  // counts it — `zaiApiKeyConfigured`'s rule, that a discovered sign-in counts as
-  // configured, or the pill reads "Not configured" on the machine the provider is
-  // built for.
   assert.match(main, /withDetectedMimoAccount\(accounts, mimoDetectedAccount\(\)\)/);
-  assert.match(main, /function mimoDetectedAccount\(\)/);
   assert.match(main, /const accountKey = detectedMimoAccountKey\(\)/);
-  // The detected projection carries no raw credential or user id.
   assert.doesNotMatch(functionBody(main, 'mimoDetectedAccount', 'mimoAccountsForRenderer'), /cookieHeader|userId/);
-
-  // Nothing was pasted for it, so there is no stored preference to toggle and
-  // nothing here to remove — the rule Cursor's panel states for the accounts it
-  // detects, where removal is available only for manually added ones.
-  assert.match(render, /const detected = account\.removable === false;/);
-  assert.match(render, /const input = detected \? null : document\.createElement\('input'\)/);
-  assert.match(render, /const remove = detected \? null : document\.createElement\('button'\)/);
-  assert.match(render, /if \(remove\) right\.append\(remove\)/);
-  assert.match(app, /if \(account\?\.removable === false\) return t\('settings\.mimo\.desktopAccount'\)/);
 });
 
 test('MiMo refreshes its detected account when the settings section is expanded again', async () => {
@@ -3358,6 +3340,7 @@ test('MiMo settings reuses the shared sign-in status for rejected accounts', () 
   const render = vm.runInNewContext(`${source}\nrenderMimoStatus`, context);
   render();
   assert.ok(list.children.every((row) => row.children.length === 3), 'read-only rows retain the shared checkbox column');
+  assert.equal([...list.children[2].walk()].find((node) => node.className === 'managed-account-email').textContent, 'MiMo Desktop');
   assert.equal(list.children[2].children[0].type, undefined);
   assert.equal(list.children[2].children[2].children.length, 1, 'the detected account has no remove control');
   const info = list.children.map((row) => [...row.walk()].find((node) => node.className === 'managed-account-info'));

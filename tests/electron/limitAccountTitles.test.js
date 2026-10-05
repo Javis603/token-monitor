@@ -263,29 +263,6 @@ test('accounts sharing a visible email are disambiguated', () => {
   ]);
 });
 
-test('MiMo products keep their shared account identity in the title', () => {
-  const view = readRendererFile('limits/windowsView.js');
-  const peers = [
-    { provider: 'mimo', accountName: 'MiMo account', accountLabel: 'Console', accountKey: 'sha256:abcdef123456' },
-    { provider: 'mimo', accountName: 'MiMo account', accountLabel: 'Desktop Membership', accountKey: 'sha256:abcdef654321' }
-  ];
-  assert.deepEqual(peers.map((peer, index) => runTitle(
-    view,
-    `limitAccountTitle('mimo', ${JSON.stringify(peer)}, ${index}, ${JSON.stringify(peers)})`,
-    titleContext(true)
-  )), ['MiMo account · Console', 'MiMo account · Desktop Membership']);
-  assert.equal(runTitle(
-    view,
-    `limitAccountTitle('mimo', ${JSON.stringify(peers[0])}, 0)`,
-    titleContext(true)
-  ), 'MiMo account · Console');
-  assert.equal(runTitle(
-    view,
-    "limitAccountTitle('mimo', { accountName: 'Membership', accountLabel: 'Pro', accountKey: 'sha256:abcdef123456' }, 0)",
-    titleContext(true)
-  ), 'Membership');
-});
-
 test('accountEmailLabel keeps duplicate addresses apart regardless of masking', () => {
   const peers = [
     { accountEmail: 'member@example.com', accountName: 'Personal' },

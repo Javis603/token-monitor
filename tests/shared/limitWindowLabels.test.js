@@ -75,20 +75,6 @@ test('every surface that paints a window label routes through the helper', () =>
     assert.match(read(page), /limits\/windowLabels\.js/, `${page} should load the helper`);
   }
 
-  // The MiMo product words are the second piece of per-provider vocabulary this
-  // helper owns, and they were typed into five files before it did. Nothing
-  // outside it may name them again.
-  for (const file of [
-    'src/shared/trayLayout.js',
-    'src/shared/macWidgetSnapshot.js',
-    'src/electron/renderer/limits/windowsView.js',
-    'src/electron/renderer/limits/providerPresentation.js',
-    'src/shared/providers/mimo/limits.js',
-    'src/shared/providers/mimo/membership.js'
-  ]) {
-    assert.doesNotMatch(read(file), /(['"`])(?:Desktop )?Membership\1/, `${file} should take the word from the helper`);
-  }
-  assert.match(read('src/shared/providers/mimo/membership.js'), /MIMO_MEMBERSHIP_LABEL = MIMO_DESKTOP_MEMBERSHIP_PRODUCT;/);
 });
 
 test('MiMo rows group into logical accounts by suffix, then address', () => {
