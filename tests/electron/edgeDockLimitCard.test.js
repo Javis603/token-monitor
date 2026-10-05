@@ -822,8 +822,8 @@ test('a provider that drops its mark inside a group keeps it standing alone', ()
 test('MiMo groups products under each account and keeps their own plan and status', () => {
   const view = dockView();
   const rows = [
-    { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef123456', accountName: 'MiMo abcdef1', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [] },
-    { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef654321', accountName: 'MiMo abcdef6', accountLabel: 'Desktop Membership', windows: [] }
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef123456', accountName: 'MiMo abcdef1', accountLabel: 'Desktop Membership', planLabel: 'Pro', windows: [{ kind: 'weekly', usedPercent: 40 }] },
+    { provider: 'mimo', status: 'ok', accountKey: 'sha256:abcdef654321', accountName: 'MiMo abcdef6', accountLabel: 'Desktop Membership', windows: [{ kind: 'weekly', usedPercent: 25 }] }
   ];
   const group = view.renderLimitProviderGroup('mimo', 'MiMo', rows, '#000000');
   const accounts = group.find('limit-account-list').children;
@@ -838,6 +838,9 @@ test('MiMo groups products under each account and keeps their own plan and statu
   }
   assert.equal(products[0].find('limit-plan').textContent, 'Pro');
   assert.equal(products[1].find('limit-plan')?.textContent ?? '', '');
+  // INVITE hides the plan name but retains the quota that identifies the row.
+  assert.match(products[1].text, /Weekly/);
+  assert.match(products[1].text, /75%/);
 });
 
 test('one MiMo account uses the provider heading and separate product rows', () => {
