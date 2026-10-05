@@ -22,9 +22,9 @@ Desktop endpoints and subscription fields were checked against the unpacked clie
 
 ## Local discovery and credentials
 
-The measured store is `~/Library/Application Support/Xiaomi MiMo/Partitions/xiaomi-account/Cookies`, the app's `persist:xiaomi-account` Chromium partition. `desktop.js` opens SQLite read-only and selects only `passToken` and `userId` on `.account.xiaomi.com`. Selecting by name alone would include cookies on other domains; the partition also contains unrelated third-party sessions.
+The verified stores are `~/Library/Application Support/Xiaomi MiMo/Partitions/xiaomi-account/Cookies` on macOS and `%APPDATA%\Xiaomi MiMo\Partitions\xiaomi-account\Network\Cookies` on Windows, under the app's `persist:xiaomi-account` Chromium partition. `desktop.js` opens SQLite read-only and selects only `passToken` and `userId` on `.account.xiaomi.com`. Selecting by name alone would include cookies on other domains; the partition also contains unrelated third-party sessions.
 
-Both cookies are required for the measured exchange; dropping `cUserId` changes nothing. The measured rows are plaintext and contain no MiMo service cookies. Windows paths follow Electron's `%APPDATA%` rule but the Windows store is unverified. MiMo Desktop has no Linux build, so Linux uses the existing manual Console fallback.
+Both cookies are required for the measured exchange; dropping `cUserId` changes nothing. The measured macOS rows are plaintext and contain no MiMo service cookies; the inspected macOS and Windows builds disable Cookie encryption. MiMo Desktop has no Linux build, so Linux uses the existing manual Console fallback.
 
 The app's cookie-name login predicate indicates presence, not service validity. The exchange decides whether the account session is accepted. Discovery returns `{userId, cookieHeader}` or a status-bearing error:
 
@@ -137,7 +137,7 @@ Saving is a read-only, scoped Console probe: it does not write the spend ledger 
 ## Unverified conditions
 
 - Live active Token Plan/membership responses, including active reset cycles and zone-less timestamp timezone.
-- Windows cookie-store shape and encryption; unreadable/encrypted storage still uses the tested unavailable/retention behavior.
+- Live Windows SQLite reads and service exchanges while Desktop is running; unreadable/encrypted storage still uses the tested unavailable/retention behavior.
 - Long-term exchange tolerance, broader credential authority and server-side lifetime. Successful short reads do not establish these.
 
 ## Verification

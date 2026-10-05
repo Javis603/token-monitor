@@ -6,11 +6,9 @@ const path = require('node:path');
 
 const { errorWithStatus } = require('../../limits/providerHelpers');
 
-// The app's own Electron session partition: `persist:xiaomi-account` is a literal
-// in its bundle, and `Partitions/<name>/` under userData is Electron's rule for
-// one. macOS is measured on disk; Windows is not measured at all, so its root
-// follows Electron's `%APPDATA%` rule without confirmation. MiMo Desktop has no
-// Linux build, so Linux has no store to read.
+// The app's `persist:xiaomi-account` partition lives under userData. Verified
+// stores use Cookies on macOS and Network/Cookies on Windows. MiMo Desktop has
+// no Linux build, so Linux has no store to read.
 const MIMO_PARTITION_DIR = path.join('Partitions', 'xiaomi-account');
 const MIMO_COOKIE_FILE = 'Cookies';
 
@@ -36,8 +34,8 @@ function mimoDesktopCookieCandidates(options = {}) {
   if (platform === 'win32') {
     const candidates = [];
     const appData = String(env?.APPDATA || '').trim();
-    if (appData) candidates.push(path.join(appData, 'Xiaomi MiMo', MIMO_PARTITION_DIR, MIMO_COOKIE_FILE));
-    candidates.push(path.join(home, 'AppData', 'Roaming', 'Xiaomi MiMo', MIMO_PARTITION_DIR, MIMO_COOKIE_FILE));
+    if (appData) candidates.push(path.join(appData, 'Xiaomi MiMo', MIMO_PARTITION_DIR, 'Network', MIMO_COOKIE_FILE));
+    candidates.push(path.join(home, 'AppData', 'Roaming', 'Xiaomi MiMo', MIMO_PARTITION_DIR, 'Network', MIMO_COOKIE_FILE));
     return candidates;
   }
   return [];
