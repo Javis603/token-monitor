@@ -2,11 +2,14 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const fs = require('node:fs');
+const vm = require('node:vm');
 const { createModelAliasForm } = require('../../src/electron/renderer/modelAliasForm');
 const { normalizeModelAliases, upsertModelAlias, upsertModelAliasBatch, modelAliasChoices } = require('../../src/electron/renderer/modelAliases');
 const i18n = require('../../src/electron/renderer/i18n');
+const pricingApi = require('../../src/electron/renderer/customPricingForm');
 
-function fixture(save, initial = {}) {
+function documentFixture() {
   const nodes = new Map();
   function node() {
     const classes = new Set();
@@ -26,12 +29,17 @@ function fixture(save, initial = {}) {
         previous?.dispatchEvent({ type: 'blur' });
       } };
   }
-  const document = { activeElement: null, createElement: node, getElementById: (id) => { if (!nodes.has(id)) nodes.set(id, Object.assign(node(), { id })); return nodes.get(id); } };
+  const document = { activeElement: null, querySelectorAll: () => [], createElement: node, getElementById: (id) => { if (!nodes.has(id)) nodes.set(id, Object.assign(node(), { id })); return nodes.get(id); } };
+  document.getElementById('modelAliasesForm').classList.add('hidden');
+  return document;
+}
+
+function fixture(save, initial = {}) {
+  const document = documentFixture();
   let aliases = initial.aliases || {};
   let modelIds = initial.modelIds || [];
   let locale = initial.locale;
   const t = key => locale ? i18n.translate(locale, key) : key;
-  document.getElementById('modelAliasesForm').classList.add('hidden');
   const form = createModelAliasForm({ document, t, getAliases: () => aliases, getModelIds: () => modelIds, saveAliases: async (value) => { if (save) await save(value); aliases = normalizeModelAliases(value); } });
   const get = (suffix) => document.getElementById(`modelAliases${suffix}`);
   const select = (suffix, id) => { get(`${suffix}Select`).focus(); get(`${suffix}Select`).value = id === null ? '__manual__' : `model:${id}`; get(`${suffix}Select`).dispatchEvent({ type: 'change' }); };
@@ -78,6 +86,26 @@ test('invalid form and failed persistence keep the existing mapping and expose a
 
 test('model choices merge supplied IDs with saved aliases without invalid or duplicate options', () => {
   assert.deepEqual(modelAliasChoices(['raw/id', 'raw/id', 'priced-only', '', null, 'x'.repeat(257)], { saved: 'target' }), ['priced-only', 'raw/id', 'saved', 'target']);
+});
+
+test('app setup supplies custom pricing config IDs absent from raw usage to both alias selectors', () => {
+  const document = documentFixture();
+  const state = { stats: { modelAliasSourceIds: ['usage-only'] },
+    settings: { modelAliases: {}, customModelPricing: [{ modelId: 'config-only', inputPerM: 1 }] } };
+  const context = { document, state, customPricingFormApi: pricingApi, t: key => key, setAccountGroupExpanded() {},
+    window: { TokenMonitorModelAliasForm: { createModelAliasForm } }, syncContentForm: null, saveSettings: async () => {} };
+  const app = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
+  const start = app.indexOf('function setupModelAliasesUI(');
+  const end = app.indexOf('\nfunction customPricingMeta(', start);
+  assert.ok(start >= 0 && end > start);
+  vm.createContext(context);
+  vm.runInContext(`let modelAliasForm = null; let modelAliasSaveConflict = false; ${app.slice(start, end)} setupModelAliasesUI();`, context);
+  document.getElementById('modelAliasesAddButton').click();
+  for (const suffix of ['Alias', 'Canonical']) {
+    const options = document.getElementById(`modelAliases${suffix}Select`).children.map(option => option.value);
+    assert.ok(options.includes('model:usage-only'));
+    assert.ok(options.includes('model:config-only'));
+  }
 });
 
 test('choice refresh waits for a focused picker to blur and leaves unchanged options intact', () => {

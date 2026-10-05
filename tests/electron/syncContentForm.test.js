@@ -334,23 +334,6 @@ function sourceBetween(startAnchor, endAnchor) {
 }
 function functionSource(name, next) { return sourceBetween(`function ${name}(`, `\nfunction ${next}(`); }
 
-test('alias selectors include custom pricing config IDs absent from raw usage', async () => {
-  const document = dom();
-  const state = { stats: { modelAliasSourceIds: ['usage-only'] },
-    settings: { modelAliases: {}, customModelPricing: [{ modelId: 'config-only', inputPerM: 1 }] } };
-  const context = { document, state, customPricingFormApi: pricingApi, t: key => key, setAccountGroupExpanded() {},
-    window: { TokenMonitorModelAliasForm: aliasApi, TokenMonitorSyncContentForm: api },
-    syncContentForm: null, saveSettings: async () => {} };
-  vm.createContext(context);
-  vm.runInContext(`let modelAliasForm = null; let modelAliasSaveConflict = false; ${functionSource('setupModelAliasesUI', 'customPricingMeta')} setupModelAliasesUI();`, context);
-  await document.getElementById('modelAliasesAddButton').click();
-  for (const suffix of ['Alias', 'Canonical']) {
-    const options = document.getElementById(`modelAliases${suffix}Select`).options.map(option => option.value);
-    assert.ok(options.includes('model:usage-only'));
-    assert.ok(options.includes('model:config-only'));
-  }
-});
-
 test('alias batch editor keeps selected and manual drafts and base when a newer shared push arrives', async () => {
   const document = dom();
   let current = status({ enabled: { modelAliases: true } });
