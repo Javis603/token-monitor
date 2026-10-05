@@ -13,44 +13,42 @@ struct InsightsView: View {
             if store.stats != nil {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: DesignTokens.sectionSpacing) {
+                        LazyVStack(alignment: .leading, spacing: 20) {
                             ConnectionStatusNotice(phase: store.phase) {
                                 Task { await store.refresh() }
                             }
-                            InsightTrendCard(history: store.currentHistory)
                             VStack(alignment: .leading, spacing: 16) {
                                 Text("Lifetime")
-                                    .font(.title2.bold())
+                                    .font(.title3.weight(.semibold))
                                     .accessibilityAddTraits(.isHeader)
-                                SurfaceCard {
-                                    InsightStatsGrid(summary: store.currentHistory.summary)
-                                }
+                                InsightStatsGrid(summary: store.currentHistory.summary)
                             }
+                            .padding(.bottom, 8)
+                            InsightTrendCard(history: store.currentHistory)
+                            Divider()
+                            VStack(alignment: .leading, spacing: 16) {
+                                Text("Usage breakdown")
+                                    .font(.title3.weight(.semibold))
+                                    .accessibilityAddTraits(.isHeader)
+                                PeriodPicker(selection: $store.selectedPeriod)
+                                BreakdownCard(
+                                    title: "Tools", imageName: "SectionTools", kind: .tool,
+                                    entries: store.currentPeriod.clientEntries,
+                                    total: store.currentPeriod.totalTokens ?? 0, limit: 4
+                                )
+                                Divider()
+                                BreakdownCard(
+                                    title: "Models", imageName: "SectionModels", kind: .model,
+                                    entries: store.currentPeriod.modelEntries,
+                                    total: store.currentPeriod.totalTokens ?? 0, limit: 4
+                                )
+                            }
+                            Divider()
                             MonthlyHistorySection(
                                 months: store.currentHistory.monthly ?? [],
                                 currency: preferences.currency
                             )
                             .id("monthly-history")
-                            VStack(alignment: .leading, spacing: 16) {
-                                Text("Usage breakdown")
-                                    .font(.title2.bold())
-                                    .accessibilityAddTraits(.isHeader)
-                                PeriodPicker(selection: $store.selectedPeriod)
-                                SurfaceCard {
-                                    BreakdownCard(
-                                        title: "Tools", imageName: "SectionTools", kind: .tool,
-                                        entries: store.currentPeriod.clientEntries,
-                                        total: store.currentPeriod.totalTokens ?? 0, limit: 4
-                                    )
-                                }
-                                SurfaceCard {
-                                    BreakdownCard(
-                                        title: "Models", imageName: "SectionModels", kind: .model,
-                                        entries: store.currentPeriod.modelEntries,
-                                        total: store.currentPeriod.totalTokens ?? 0, limit: 4
-                                    )
-                                }
-                            }
                         }
                         .padding(.horizontal, DesignTokens.screenPadding)
                         .padding(.top, 8)
@@ -102,7 +100,7 @@ private struct MonthlyHistorySection: View {
         if !visibleMonths.isEmpty {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Monthly history")
-                    .font(.title3.bold())
+                    .font(.headline)
 
                 ForEach(Array(visibleMonths.enumerated()), id: \.element.id) { index, month in
                     if index > 0 {
@@ -113,26 +111,23 @@ private struct MonthlyHistorySection: View {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(monthTitle(month))
                                 .font(.headline)
-                            Text(
+                            Text(month.activeTimeMs.map {
                                 MetricFormatter.duration(
-                                    milliseconds: month.activeTimeMs ?? 0,
+                                    milliseconds: $0,
                                     locale: locale
                                 )
-                            )
+                            } ?? "—")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
                         VStack(alignment: .trailing, spacing: 3) {
-                            Text(MetricFormatter.tokens(month.tokens ?? 0))
+                            Text(month.tokens.map(MetricFormatter.tokens) ?? "—")
                                 .bold()
                                 .monospacedDigit()
-                            Text(
-                                MetricFormatter.currencyFromUSD(
-                                    month.cost ?? 0,
-                                    currency: currency
-                                )
-                            )
+                            Text(month.cost.map {
+                                MetricFormatter.currencyFromUSD($0, currency: currency)
+                            } ?? "—")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                         }
@@ -144,7 +139,9 @@ private struct MonthlyHistorySection: View {
     }
 
     private var visibleMonths: [HistoryMonth] {
-        Array(months.suffix(6).reversed())
+        Array(months.sorted {
+            ($0.dateValue ?? .distantPast) > ($1.dateValue ?? .distantPast)
+        }.prefix(6))
     }
 
     private func monthTitle(_ month: HistoryMonth) -> String {

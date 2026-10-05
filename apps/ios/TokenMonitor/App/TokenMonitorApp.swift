@@ -71,7 +71,11 @@ struct TokenMonitorApp: App {
 
             if ProcessInfo.processInfo.arguments.contains("--sample-live-activity") {
                 surfacePreferences.liveActivityEnabled = true
-                surfacePreferences.livePrimaryMetric = "limit"
+                surfacePreferences.livePrimaryMetric = "tokens"
+                surfacePreferences.liveLockScreenPrimaryField = "tokens"
+                surfacePreferences.liveLockScreenSecondaryField = "cost"
+                surfacePreferences.liveLockScreenBottomField = "progress"
+                surfacePreferences.liveShowsProgress = true
                 await liveActivityController.setEnabled(
                     true,
                     snapshot: snapshot,

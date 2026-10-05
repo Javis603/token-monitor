@@ -8,33 +8,38 @@ struct BreakdownItem: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(kind.assetName(for: entry.id))
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .foregroundStyle(kind.color(for: entry.id))
-                .frame(width: 24, height: 24)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 8) {
-                let layout = dynamicTypeSize.isAccessibilitySize
-                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
-                    : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
-                layout {
-                    Text(kind.displayName(for: entry.id))
-                        .font(.subheadline.weight(.medium))
-                        .fixedSize(horizontal: false, vertical: true)
-                    if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 0) }
-                    Text(MetricFormatter.tokens(entry.value))
-                        .font(.subheadline.weight(.semibold))
-                        .monospacedDigit()
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            layout {
+                Text(kind.displayName(for: entry.id))
+                    .font(.subheadline.weight(.medium))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 30)
+                    .overlay(alignment: .leading) {
+                        Image(kind.assetName(for: entry.id))
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(.primary)
+                            .frame(width: 20, height: 20)
+                            .accessibilityHidden(true)
+                    }
+                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
+                Text(MetricFormatter.tokens(entry.value))
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            HStack(spacing: 12) {
                 ProgressView(value: share, total: 1)
-                    .tint(DesignTokens.accent.opacity(0.8))
+                    .tint(kind.color(for: entry.id))
                     .accessibilityHidden(true)
                 Text(MetricFormatter.percent(share * 100))
-                    .font(.caption)
+                    .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
+                    .frame(width: 42, alignment: .trailing)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

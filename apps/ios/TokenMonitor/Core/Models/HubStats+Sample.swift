@@ -221,6 +221,13 @@ extension HubStats {
                 updatedAt: Date.now.formatted(.iso8601),
                 windows: [
                     LimitWindow(
+                        kind: "session", metric: nil, label: "Session",
+                        used: nil, limit: nil, remaining: nil,
+                        usedPercent: 2, remainingPercent: 98,
+                        resetsAt: Date.now.addingTimeInterval(15_420).formatted(.iso8601),
+                        resetDescription: "", detail: "", currency: nil, showMeter: true
+                    ),
+                    LimitWindow(
                         kind: "weekly",
                         metric: nil,
                         label: "Weekly",
@@ -290,6 +297,33 @@ extension HubStats {
                 sourceDeviceId: "macbook-m5",
                 stale: false
             )
+        ] + [
+            sampleCodexAccount(key: "codex-secondary", email: "sample@example.com", weekly: 55),
+            sampleCodexAccount(key: "codex-third", email: "demo@example.com", weekly: 51)
         ]
+    }
+
+    private static func sampleCodexAccount(key: String, email: String, weekly: Double) -> LimitProvider {
+        LimitProvider(
+            provider: "codex", accountKey: key, accountLabel: "Plus", planLabel: "Plus",
+            accountName: "Sample", accountEmail: email, workspaceKind: nil,
+            status: "ok", source: "oauth", sourceDetail: nil,
+            updatedAt: Date.now.formatted(.iso8601),
+            windows: [
+                LimitWindow(
+                    kind: "session", metric: nil, label: "Session",
+                    used: nil, limit: nil, remaining: nil, usedPercent: 2, remainingPercent: 98,
+                    resetsAt: Date.now.addingTimeInterval(15_420).formatted(.iso8601),
+                    resetDescription: "", detail: "", currency: nil, showMeter: true
+                ),
+                LimitWindow(
+                    kind: "weekly", metric: nil, label: "Weekly",
+                    used: nil, limit: nil, remaining: nil, usedPercent: 100 - weekly, remainingPercent: weekly,
+                    resetsAt: Date.now.addingTimeInterval(410_400).formatted(.iso8601),
+                    resetDescription: "", detail: "", currency: nil, showMeter: true
+                )
+            ],
+            balanceUsd: nil, balance: nil, sourceDeviceId: "macbook-m5", stale: false
+        )
     }
 }

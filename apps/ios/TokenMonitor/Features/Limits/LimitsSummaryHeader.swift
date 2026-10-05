@@ -30,7 +30,7 @@ struct LimitsSummaryHeader: View {
                 .foregroundStyle(DesignTokens.warning)
             }
         }
-        .padding(.horizontal, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 

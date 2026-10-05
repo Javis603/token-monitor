@@ -2,7 +2,7 @@ import SwiftUI
 
 nonisolated enum ProviderPresentation {
     static func displayName(for provider: String?) -> String {
-        switch provider?.lowercased() {
+        switch normalizedID(provider) {
         case "claude": "Claude"
         case "codex": "Codex"
         case "cursor": "Cursor"
@@ -11,52 +11,78 @@ nonisolated enum ProviderPresentation {
         case "openrouter": "OpenRouter"
         case "deepseek": "DeepSeek"
         case "minimax": "MiniMax"
-        case "mimo": "MiMo"
+        case "mimo", "micode": "Xiaomi MiMo"
         case "grok": "Grok"
         case "copilot": "GitHub Copilot"
         case "kiro": "Kiro"
-        case "zai": "Z.ai"
-        case "zaiteam": "Z.ai Team"
+        case "zai": "GLM"
+        case "zaiteam": "GLM Team"
         case "volcengine": "Volcengine"
         case "qoder": "Qoder"
         case "kimi": "Kimi"
         case "ollama": "Ollama"
-        case "thirdparty": "Custom Provider"
+        case "cline": "Cline"
+        case "factory", "droid": "Factory Droid"
+        case "zed": "Zed"
+        case "commandcode": "Command Code"
+        case "workbuddy": "WorkBuddy"
+        case "codebuddy": "CodeBuddy"
+        case "devin": "Devin"
+        case "typesafe": "TypeSafe"
+        case "trae": "Trae CN"
+        case "alibaba": "Alibaba Cloud"
+        case "stepfun": "StepFun"
+        case "thirdparty": "Third-party APIs"
+        case "newapi": "New API"
+        case "sub2api": "Sub2API"
+        case "qodercn": "Qoder CN"
+        case "kilo", "kilocode": "Kilo"
+        case "amp": "Amp"
+        case "omp": "Oh My Pi"
+        case "muse": "Muse Code"
+        case "zcode": "ZCode"
+        case "reasonix": "Reasonix"
+        case "dsh": "DeepSeek Harness"
+        case "cherrystudio": "Cherry Studio"
+        case "lmstudio": "LM Studio"
+        case "unsloth": "Unsloth"
+        case "fx": "fx"
+        case "mcode": "MiniMax Code"
         default:
             provider?.capitalized ?? "Provider"
         }
     }
 
     static func assetName(for provider: String?) -> String {
-        switch provider?.lowercased() {
+        switch normalizedID(provider) {
         case "claude": "VendorClaude"
         case "codex": "VendorCodex"
         case "cursor": "VendorCursor"
         case "antigravity": "VendorAntigravity"
         case "opencode": "VendorOpenCode"
         case "openrouter": "VendorOpenRouter"
-        case "deepseek": "VendorDeepSeek"
-        case "minimax": "VendorMiniMax"
+        case "deepseek", "dsh": "VendorDeepSeek"
+        case "minimax", "mcode": "VendorMiniMax"
         case "mimo", "micode", "xiaomi": "VendorXiaomi"
         case "grok", "xai": "VendorGrok"
         case "copilot": "VendorCopilot"
         case "kiro": "VendorKiro"
-        case "zai", "zaiteam": "VendorZai"
+        case "zai", "zaiteam", "zcode": "VendorZai"
         case "volcengine": "VendorVolcengine"
-        case "qoder": "VendorQoder"
+        case "qoder", "qodercn": "VendorQoder"
         case "kimi": "VendorKimi"
         case "ollama": "VendorOllama"
         case "hermes": "VendorHermes"
         case "gemini": "VendorGemini"
         case "cline": "VendorCline"
         case "cohere": "VendorCohere"
-        case "meta": "VendorMeta"
+        case "meta", "muse": "VendorMeta"
         case "mistral": "VendorMistral"
         case "moonshot": "VendorMoonshot"
-        case "qwen": "VendorQwen"
-        case "pi": "VendorPi"
+        case "qwen", "alibaba": "VendorQwen"
+        case "pi", "omp": "VendorPi"
         case "zed": "VendorZed"
-        case "kilocode": "VendorKiloCode"
+        case "kilocode", "kilo": "VendorKiloCode"
         case "codebuddy": "VendorCodeBuddy"
         case "workbuddy": "VendorWorkBuddy"
         case "proma": "VendorProma"
@@ -66,28 +92,79 @@ nonisolated enum ProviderPresentation {
         }
     }
 
+    /// Raw Desktop brand colors from src/shared/vendorPresentation.js.
+    /// Monochrome brands use adaptive ink so meters remain visible in dark mode.
     static func color(for provider: String?) -> Color {
-        switch provider?.lowercased() {
-        case "claude": Color(red: 0.80, green: 0.49, blue: 0.37)
-        case "codex": Color(red: 0.29, green: 0.64, blue: 0.69)
-        case "cursor": Color(red: 0.42, green: 0.71, blue: 0.94)
-        case "antigravity", "gemini": Color(red: 0.26, green: 0.52, blue: 0.96)
-        case "opencode": Color(red: 0.64, green: 0.69, blue: 0.75)
-        case "openrouter": Color(red: 0.40, green: 0.40, blue: 0.95)
-        case "deepseek": Color(red: 0.30, green: 0.42, blue: 1)
-        case "minimax": Color(red: 0.95, green: 0.25, blue: 0.36)
-        case "mimo", "micode", "xiaomi": Color(red: 1, green: 0.40, blue: 0)
-        case "grok": .primary
-        case "copilot": Color(red: 0.66, green: 0.70, blue: 0.75)
-        case "kiro": Color(red: 0.56, green: 0.27, blue: 1)
-        case "zai", "zaiteam": Color(red: 0.42, green: 0.71, blue: 0.94)
-        case "volcengine": Color(red: 0, green: 0.43, blue: 1)
-        case "qoder": Color(red: 0.16, green: 0.86, blue: 0.36)
-        case "kimi", "moonshot": Color(red: 0.45, green: 0.55, blue: 0.70)
-        case "ollama": Color(red: 0.53, green: 0.53, blue: 0.53)
-        case "hermes": Color(red: 0.83, green: 0.69, blue: 0.22)
-        default: Color(red: 0.42, green: 0.71, blue: 0.94)
+        switch normalizedID(provider) {
+        case "claude": rgb(0xcc7c5e)
+        case "codex": rgb(0x49a3b0)
+        case "antigravity", "gemini": rgb(0x4285f4)
+        case "openrouter": rgb(0x6566f1)
+        case "deepseek", "dsh", "reasonix": rgb(0x4d6bfe)
+        case "minimax", "mcode": rgb(0xf23f5d)
+        case "kiro": rgb(0x9046ff)
+        case "volcengine": rgb(0x006eff)
+        case "qoder", "qodercn": rgb(0x2adb5c)
+        case "ollama": rgb(0x888888)
+        case "hermes": rgb(0xd4af37)
+        case "cline": rgb(0x9d4edd)
+        case "amp": rgb(0xf34e3f)
+        case "openclaw": rgb(0xff4d4d)
+        case "qwen", "alibaba": rgb(0x615ced)
+        case "omp": rgb(0xed4abf)
+        case "zed": rgb(0x4173e7)
+        case "kilo", "kilocode": rgb(0xf8f676)
+        case "commandcode": rgb(0x8c4edd)
+        case "muse": rgb(0x0866ff)
+        case "codebuddy": rgb(0x6c4dff)
+        case "workbuddy": rgb(0x0dc8a5)
+        case "cherrystudio": rgb(0xea5e5d)
+        case "lmstudio": rgb(0x6c5ce7)
+        case "unsloth": rgb(0x40b85a)
+        case "meta": rgb(0x1d65c1)
+        case "mistral": rgb(0xfa520f)
+        case "cohere": rgb(0x39594d)
+        case "doubao": rgb(0x1e37fc)
+        case "hunyuan": rgb(0x0053e0)
+        case "trae": rgb(0x32f08c)
+        case "nvidia": rgb(0x74b71b)
+        case "thirdparty": rgb(0x8090a6)
+        case "opencode", "cursor", "factory", "droid", "kimi", "moonshot", "grok", "xai",
+             "copilot", "pi", "mimo", "micode", "xiaomi", "zai", "zaiteam", "zcode",
+             "proma", "devin", "fx", "stepfun", "typesafe": .primary
+        default: rgb(0x6ab4f0)
         }
+    }
+
+    /// Use related bundled artwork where available, and meaningful SF Symbols otherwise.
+    static func fallbackSymbol(for provider: String?) -> String? {
+        switch normalizedID(provider) {
+        case "factory", "droid": "terminal"
+        case "commandcode", "amp", "fx": "chevron.left.forwardslash.chevron.right"
+        case "devin": "person.crop.square"
+        case "typesafe": "checkmark.shield"
+        case "trae": "curlybraces"
+        case "stepfun": "square.stack.3d.up"
+        case "reasonix": "brain"
+        case "cherrystudio": "bubble.left.and.bubble.right"
+        case "lmstudio": "desktopcomputer"
+        case "unsloth": "leaf"
+        case "hunyuan": "sparkles"
+        case "nvidia": "cpu"
+        default: nil
+        }
+    }
+
+    private static func normalizedID(_ provider: String?) -> String? {
+        provider?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private static func rgb(_ hex: UInt32) -> Color {
+        Color(
+            red: Double((hex >> 16) & 0xff) / 255,
+            green: Double((hex >> 8) & 0xff) / 255,
+            blue: Double(hex & 0xff) / 255
+        )
     }
 
     static func modelVendor(for model: String) -> String? {

@@ -135,7 +135,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             liveExpandedTrailingField: String = "secondary",
             liveExpandedBottomField: String = "progress",
             liveLockScreenPrimaryField: String = "primary",
-            liveLockScreenSecondaryField: String = "secondary",
+            liveLockScreenSecondaryField: String = "cost",
             liveLockScreenBottomField: String = "progress",
             currencyCode: String? = "USD",
             languageCode: String? = "auto"
@@ -358,7 +358,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             liveExpandedTrailingField: "secondary",
             liveExpandedBottomField: "progress",
             liveLockScreenPrimaryField: "primary",
-            liveLockScreenSecondaryField: "secondary",
+            liveLockScreenSecondaryField: "cost",
             liveLockScreenBottomField: "progress",
             currencyCode: "USD",
             languageCode: "auto"

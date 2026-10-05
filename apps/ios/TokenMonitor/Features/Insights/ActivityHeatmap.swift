@@ -4,42 +4,64 @@ struct ActivityHeatmap: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .caption2) private var monthLabelPadding = 28
 
     let model: HeatmapModel
     let metric: TrendMetric
     let currency: AppCurrency
 
-    @State private var selectedCell: HeatmapModel.Cell?
+    @State private var selectedDate = Calendar.current.startOfDay(for: Date.now)
+    @State private var showsDayDetails = false
 
-    private let cellSize = 12.0
+    private let cellSize = 14.0
     private let columnWidth = 14.0
-    private let cellGap = 2.0
+    private let cellGap = 3.0
 
     var body: some View {
+        let selectedCell = selectedCell
         VStack(alignment: .leading, spacing: 8) {
             ScrollView(.horizontal) {
                 VStack(alignment: .leading, spacing: 6) {
                     monthHeader
-
                     HStack(alignment: .top, spacing: cellGap) {
                         ForEach(model.weeks) { week in
                             VStack(spacing: cellGap) {
                                 ForEach(week.cells) { cell in
-                                    dayButton(cell)
+                                    dayCell(cell, isSelected: selectedCell?.date == cell.date)
                                 }
                             }
                         }
                     }
                 }
                 .padding(.horizontal, 2)
+                .padding(.trailing, monthLabelPadding)
+                .accessibilityHidden(true)
             }
             .defaultScrollAnchor(.trailing)
             .scrollIndicators(.hidden)
 
-            if let selectedCell {
-                selectedDayCallout(for: selectedCell)
-                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96)))
+            DisclosureGroup(isExpanded: $showsDayDetails) {
+                if let selectedCell {
+                    selectedDayControls(for: selectedCell)
+                        .padding(.top, 8)
+                }
+            } label: {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("\(model.activeDays) active days")
+                        Spacer(minLength: 4)
+                        Text("Peak \(formattedPeak)")
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(model.activeDays) active days")
+                        Text("Peak \(formattedPeak)")
+                    }
+                }
+                .foregroundStyle(.secondary)
+                .frame(minHeight: DesignTokens.controlHeight)
             }
+            .font(.caption.monospacedDigit())
+            .tint(.secondary)
         }
         .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: selectedCell?.date)
         .accessibilityElement(children: .contain)
@@ -67,73 +89,64 @@ struct ActivityHeatmap: View {
         }
     }
 
-    private func dayButton(_ cell: HeatmapModel.Cell) -> some View {
-        Button {
-            selectedCell = selectedCell?.date == cell.date ? nil : cell
-        } label: {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(cell.isFuture ? Color.clear : color(for: cell.intensity))
-                .frame(width: cellSize, height: cellSize)
-                .overlay {
-                    if selectedCell?.date == cell.date {
-                        RoundedRectangle(cornerRadius: 3)
-                            .stroke(.primary.opacity(0.9), lineWidth: 1.5)
-                    }
-                }
-        }
-        .buttonStyle(.plain)
-        .disabled(cell.isFuture)
-        .accessibilityHidden(cell.isFuture)
-        .contentShape(Rectangle())
-        .frame(width: columnWidth, height: columnWidth)
-        .accessibilityLabel(
-            cell.date.formatted(
-                .dateTime
-                    .weekday(.wide)
-                    .month(.wide)
-                    .day()
-                    .locale(locale)
-            )
-        )
-        .accessibilityValue(accessibilityValue(for: cell))
-        .accessibilityAddTraits(
-            selectedCell?.date == cell.date ? .isSelected : []
-        )
+    private var selectableCells: [HeatmapModel.Cell] {
+        model.weeks.flatMap(\.cells).filter { !$0.isFuture }
     }
 
-    private func selectedDayCallout(for cell: HeatmapModel.Cell) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "calendar")
-                .foregroundStyle(DesignTokens.accent)
+    private var selectedCell: HeatmapModel.Cell? {
+        selectableCells.first {
+            Calendar.current.isDate($0.date, inSameDayAs: selectedDate)
+        } ?? selectableCells.last
+    }
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(
-                    cell.date,
-                    format: .dateTime
-                        .weekday(.wide)
-                        .month(.wide)
-                        .day()
-                )
-                .font(.footnote.weight(.semibold))
+    private var selectionRange: ClosedRange<Date> {
+        let last = selectableCells.last?.date ?? Calendar.current.startOfDay(for: .now)
+        return (selectableCells.first?.date ?? last)...last
+    }
 
-                Text(selectedValue(for: cell))
-                    .font(.footnote.monospacedDigit())
-                    .foregroundStyle(.secondary)
+    // Dense cells are a visual map; the native date control owns day selection.
+    private func dayCell(_ cell: HeatmapModel.Cell, isSelected: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 3)
+            .fill(cell.isFuture ? Color.clear : color(for: cell.intensity))
+            .frame(width: cellSize, height: cellSize)
+            .overlay {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 3)
+                        .stroke(.primary.opacity(0.9), lineWidth: 1.5)
+                }
             }
+            .frame(width: columnWidth, height: columnWidth)
+    }
 
-            Spacer(minLength: 4)
-
-            Button("Dismiss", systemImage: "xmark") {
-                selectedCell = nil
+    private func selectedDayControls(for cell: HeatmapModel.Cell) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                dayPicker
+                Spacer(minLength: 4)
+                selectedReading(for: cell)
             }
-            .labelStyle(.iconOnly)
-            .foregroundStyle(.secondary)
-            .frame(minWidth: 44, minHeight: 44)
+            VStack(alignment: .leading, spacing: 8) {
+                dayPicker
+                selectedReading(for: cell)
+            }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(Color(uiColor: .tertiarySystemGroupedBackground), in: .rect(cornerRadius: 16))
         .accessibilityElement(children: .contain)
+    }
+
+    private var dayPicker: some View {
+        DatePicker("Date", selection: $selectedDate, in: selectionRange,
+                   displayedComponents: .date)
+            .datePickerStyle(.compact)
+            .labelsHidden()
+            .frame(minHeight: DesignTokens.controlHeight)
+    }
+
+    private func selectedReading(for cell: HeatmapModel.Cell) -> some View {
+        Text(selectedValue(for: cell))
+            .font(.footnote.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .accessibilityLabel(LocalizedStringKey(metric.label))
+            .accessibilityValue(selectedValue(for: cell))
     }
 
     private var formattedPeak: String {
@@ -155,10 +168,6 @@ struct ActivityHeatmap: View {
         case .cost:
             MetricFormatter.currencyFromUSD(cell.cost, currency: currency)
         }
-    }
-
-    private func accessibilityValue(for cell: HeatmapModel.Cell) -> String {
-        selectedValue(for: cell)
     }
 
     private func monthLabel(for week: HeatmapModel.Week) -> String? {
@@ -186,7 +195,11 @@ struct ActivityHeatmap: View {
     }
 
     private func color(for intensity: Int) -> Color {
-        switch intensity {
+        if colorScheme == .light, intensity > 0 {
+            return Color.blue
+                .opacity([0.0, 0.12, 0.24, 0.38, 0.56][min(4, intensity)])
+        }
+        return switch intensity {
         case 1:
             Color(red: 90 / 255, green: 170 / 255, blue: 1).opacity(0.18)
         case 2:

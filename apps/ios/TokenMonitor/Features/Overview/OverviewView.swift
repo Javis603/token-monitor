@@ -16,7 +16,7 @@ struct OverviewView: View {
                 ScrollView {
                     LazyVStack(
                         alignment: .leading,
-                        spacing: DesignTokens.sectionSpacing
+                        spacing: 16
                     ) {
                         ConnectionStatusNotice(phase: store.phase, retry: refresh)
                         PeriodPicker(selection: $store.selectedPeriod)
@@ -25,50 +25,32 @@ struct OverviewView: View {
                             period: store.currentPeriod,
                             updatedAt: stats.updatedAt
                         )
-                        NavigationLink {
-                            SessionsView()
-                        } label: {
-                            HStack {
-                                Label("Sessions", systemImage: "bubble.left.and.bubble.right")
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.weight(.semibold))
-                            }
-                            .font(.headline)
-                            .padding(.vertical, 12)
-                            .padding(.horizontal, 18)
-                        }
-                        .modifier(AppActionStyle())
-
+                        Divider()
                         LimitPreviewSection(
                             providers: Array(stats.sortedLimits.prefix(preferences.homeLimitCount)),
                             showAll: showLimits
                         )
-                        SurfaceCard {
-                            UsageTrendCard(history: store.currentHistory, metric: .tokens)
-                        }
+                        Divider()
+                        UsageTrendCard(history: store.currentHistory, metric: .tokens)
+                        Divider()
                         VStack(alignment: .leading, spacing: 16) {
                             Text("Usage breakdown")
-                                .font(.title2.bold())
+                                .font(.title3.weight(.semibold))
                                 .accessibilityAddTraits(.isHeader)
-                            SurfaceCard {
-                                BreakdownCard(
-                                    title: "Tools", imageName: "SectionTools", kind: .tool,
-                                    entries: store.currentPeriod.clientEntries,
-                                    total: store.currentPeriod.totalTokens ?? 0, limit: 3
-                                )
-                            }
-                            SurfaceCard {
-                                BreakdownCard(
-                                    title: "Models", imageName: "SectionModels", kind: .model,
-                                    entries: store.currentPeriod.modelEntries,
-                                    total: store.currentPeriod.totalTokens ?? 0, limit: 3
-                                )
-                            }
+                            BreakdownCard(
+                                title: "Tools", imageName: "SectionTools", kind: .tool,
+                                entries: store.currentPeriod.clientEntries,
+                                total: store.currentPeriod.totalTokens ?? 0, limit: 3
+                            )
+                            Divider()
+                            BreakdownCard(
+                                title: "Models", imageName: "SectionModels", kind: .model,
+                                entries: store.currentPeriod.modelEntries,
+                                total: store.currentPeriod.totalTokens ?? 0, limit: 3
+                            )
                         }
-                        SurfaceCard {
-                            DeviceListCard(devices: stats.sortedDevices, period: store.selectedPeriod)
-                        }
+                        Divider()
+                        DeviceListCard(devices: stats.sortedDevices, period: store.selectedPeriod)
                     }
                     .padding(.horizontal, DesignTokens.screenPadding)
                     .padding(.top, 8)

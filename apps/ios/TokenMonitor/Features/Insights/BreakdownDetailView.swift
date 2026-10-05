@@ -3,6 +3,7 @@ import SwiftUI
 struct BreakdownDetailView: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(TokenMonitorStore.self) private var store
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     let kind: BreakdownKind
 
@@ -51,41 +52,47 @@ struct BreakdownDetailView: View {
     }
 
     private func detailRow(_ entry: BreakdownEntry) -> some View {
-        HStack(spacing: 12) {
-            Image(kind.assetName(for: entry.id))
-                .renderingMode(.template)
-                .resizable()
-                .scaledToFit()
-                .foregroundStyle(kind.color(for: entry.id))
-                .frame(width: 26, height: 26)
-
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(kind.displayName(for: entry.id))
-                        .font(.headline)
-                        .lineLimit(1)
-                    Spacer()
-                    Text(MetricFormatter.tokens(entry.value))
-                        .bold()
-                        .monospacedDigit()
-                }
-
-                ProgressView(value: share(for: entry), total: 1)
-                    .tint(kind.color(for: entry.id))
-
-                HStack {
-                    Text(MetricFormatter.percent(share(for: entry) * 100))
-                    Spacer()
-                    Text(
-                        MetricFormatter.currencyFromUSD(
-                            entry.cost,
-                            currency: preferences.currency
-                        )
-                    )
-                }
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            let layout = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+            layout {
+                Text(kind.displayName(for: entry.id))
+                    .font(.headline)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 30)
+                    .overlay(alignment: .leading) {
+                        Image(kind.assetName(for: entry.id))
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(.primary)
+                            .frame(width: 20, height: 20)
+                            .accessibilityHidden(true)
+                    }
+                if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
+                Text(MetricFormatter.tokens(entry.value))
+                    .font(.headline)
+                    .monospacedDigit()
+                    .fixedSize(horizontal: true, vertical: false)
             }
+
+            ProgressView(value: share(for: entry), total: 1)
+                .tint(kind.color(for: entry.id))
+                .accessibilityHidden(true)
+
+            HStack(alignment: .firstTextBaseline) {
+                Text(MetricFormatter.percent(share(for: entry) * 100))
+                Spacer()
+                Text(
+                    MetricFormatter.currencyFromUSD(
+                        entry.cost,
+                        currency: preferences.currency
+                    )
+                )
+            }
+            .font(.footnote.monospacedDigit())
+            .foregroundStyle(.secondary)
         }
         .padding(.vertical, 14)
         .accessibilityElement(children: .combine)

@@ -1,38 +1,33 @@
 import SwiftUI
 
 struct UsageTrendCard: View {
-    @Environment(AppPreferences.self) private var preferences
-
     let history: UsageHistory
     let metric: TrendMetric
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack {
-                Label("Activity", systemImage: "chart.line.uptrend.xyaxis")
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Daily activity")
                     .font(.headline)
-
                 Spacer()
-
-                Text("\(heatmap.activeDays) active days")
-                    .font(.footnote)
+                Text("Last 14 days")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
-
-            ActivityHeatmap(
-                model: heatmap,
-                metric: metric,
-                currency: preferences.currency
-            )
+            if days.isEmpty {
+                Text("No Usage Yet")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                UsageTrendChart(days: days, metric: metric)
+                    .frame(height: 120)
+            }
         }
-        .padding(.vertical, 4)
     }
 
-    private var heatmap: HeatmapModel {
-        HeatmapModel.make(
-            days: history.daily ?? [],
-            metric: metric,
-            weekCount: 26
-        )
+    private var days: [HistoryDay] {
+        Array((history.daily ?? []).sorted {
+            ($0.dateValue ?? .distantPast) < ($1.dateValue ?? .distantPast)
+        }.suffix(14))
     }
 }

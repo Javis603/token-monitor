@@ -1,6 +1,9 @@
 import SwiftUI
 
 struct LiveActivitySurfacePreview: View {
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     let iconProviderID: String?
     let providerName: String
     let compactTrailingField: TokenMonitorActivityAttributes.Field
@@ -14,27 +17,25 @@ struct LiveActivitySurfacePreview: View {
     var primaryMetric: AppPreferences.LiveMetric = .tokens
     var showsProgress = true
     var showsSecondary = true
+    var quotaProviderID: String? = nil
+    // These are explicitly sample values, never a fallback for real Activity data.
+    var sampleTokens: String? = "62.8M"
+    var sampleCost: String? = "USD 48.40"
+    var sampleLimit: String? = "90% left"
+    var sampleProgress: Double? = 0.9
+    var sourceStale = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            surfaceHeading(
-                "Compact Dynamic Island",
-                systemImage: "rectangle.portrait.and.arrow.forward"
-            )
+            surfaceHeading("Compact Dynamic Island", systemImage: "rectangle.portrait.and.arrow.forward")
             compactIsland
                 .environment(\.colorScheme, .dark)
 
-            surfaceHeading(
-                "Expanded Dynamic Island",
-                systemImage: "rectangle.expand.vertical"
-            )
+            surfaceHeading("Expanded Dynamic Island", systemImage: "rectangle.expand.vertical")
             expandedIsland
                 .environment(\.colorScheme, .dark)
 
-            surfaceHeading(
-                "Live Activity",
-                systemImage: "platter.filled.bottom.and.arrow.down.iphone"
-            )
+            surfaceHeading("Live Activity", systemImage: "platter.filled.bottom.and.arrow.down.iphone")
             lockScreenActivity
         }
         .padding(.vertical, 8)
@@ -44,175 +45,286 @@ struct LiveActivitySurfacePreview: View {
 
     private var compactIsland: some View {
         HStack(spacing: 10) {
-            providerIcon(size: 18)
+            if sourceStale {
+                Image(systemName: "clock.badge.exclamationmark")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("Data may be out of date")
+            } else {
+                providerIcon(size: 18)
+            }
             Spacer(minLength: 8)
             previewField(compactTrailingField, compact: true)
+                .frame(maxWidth: 72)
         }
         .padding(.horizontal, 14)
         .frame(minHeight: 46)
-        .padding(.vertical, 10)
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .background(.black, in: .capsule)
-        .overlay {
-            Capsule()
-                .stroke(.white.opacity(0.18), lineWidth: 1)
-        }
     }
 
     private var expandedIsland: some View {
-        VStack(spacing: 10) {
-            HStack(alignment: .top) {
-                previewField(expandedLeadingField)
-                Spacer(minLength: 10)
-                previewField(expandedTrailingField, alignment: .trailing)
+        VStack(spacing: 6) {
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
+            layout {
+                if expandedLeadingField != .none {
+                    previewField(expandedLeadingField, includesProviderMark: true)
+                }
+                if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
+                if expandedTrailingField != .none {
+                    previewField(expandedTrailingField, alignment: typeSize.isAccessibilitySize ? .leading : .trailing)
+                }
             }
-
-            previewField(expandedCenterField, alignment: .center)
-                .frame(maxWidth: .infinity)
-
-            previewField(expandedBottomField, alignment: .center)
-                .frame(maxWidth: .infinity)
+            if expandedCenterField != .none {
+                previewField(expandedCenterField, alignment: .center)
+                    .frame(maxWidth: .infinity)
+            }
+            if expandedBottomField != .none || sourceStale {
+                VStack(alignment: .leading, spacing: 6) {
+                    previewField(expandedBottomField)
+                    if sourceStale { staleLabel }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 2)
+            }
         }
         .padding(14)
-        .foregroundStyle(.white)
-        .frame(maxWidth: .infinity, minHeight: 106)
-        .background(.black, in: .rect(cornerRadius: 18))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(.white.opacity(0.18), lineWidth: 1)
-        }
+        .foregroundStyle(.primary)
+        .frame(maxWidth: .infinity)
+        .background(.black, in: .rect(cornerRadius: 26))
     }
 
-    private var lockScreenActivity: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 7) {
-                providerIcon(size: 18)
-                Text("Token Monitor").font(.caption.weight(.semibold))
+    private var lockScreenContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            let headerLayout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+                : AnyLayout(HStackLayout(spacing: 8))
+            headerLayout {
+                HStack(spacing: 6) {
+                    providerIcon(size: 16)
+                    if !lockScreenFields.contains(.provider), !providerName.isEmpty {
+                        Text(providerName).font(.caption.weight(.semibold))
+                            .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                    }
+                }
+                if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
+                if sourceStale {
+                    staleLabel
+                } else if !lockScreenFields.contains(.updated) {
+                    HStack(spacing: 4) {
+                        Text("Updated")
+                        Text("Just now")
+                    }
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityElement(children: .combine)
+                }
             }
-            HStack(alignment: .top, spacing: 20) {
-                previewField(lockScreenPrimaryField)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                previewField(lockScreenSecondaryField, alignment: .trailing)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+            let layout = typeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+                : AnyLayout(HStackLayout(alignment: .top, spacing: 20))
+            if lockScreenPrimaryField != .none || lockScreenSecondaryField != .none {
+                layout {
+                    if lockScreenPrimaryField != .none {
+                        previewField(lockScreenPrimaryField, prominent: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if lockScreenSecondaryField != .none {
+                        previewField(lockScreenSecondaryField,
+                                     alignment: typeSize.isAccessibilitySize ? .leading : .trailing,
+                                     prominent: true)
+                            .frame(maxWidth: .infinity, alignment: typeSize.isAccessibilitySize ? .leading : .trailing)
+                    }
+                }
             }
-            previewField(lockScreenBottomField)
+            if lockScreenBottomField != .none {
+                previewField(lockScreenBottomField)
+            }
         }
-        .padding(16)
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(uiColor: .tertiarySystemGroupedBackground), in: .rect(cornerRadius: 22))
-        .overlay {
-            RoundedRectangle(cornerRadius: 22)
-                .stroke(Color(uiColor: .separator).opacity(0.2), lineWidth: 1)
+    }
+
+    @ViewBuilder private var lockScreenActivity: some View {
+        if reduceTransparency {
+            lockScreenContent
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: .rect(cornerRadius: 26))
+        } else {
+            // App-only simulation. ActivityKit supplies this material in the actual widget.
+            lockScreenContent
+                .glassEffect(.regular, in: .rect(cornerRadius: 26))
         }
     }
 
-    private func surfaceHeading(
-        _ title: LocalizedStringKey,
-        systemImage: String
-    ) -> some View {
+    private var staleLabel: some View {
+        Label("Data may be out of date", systemImage: "clock.badge.exclamationmark")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var lockScreenFields: [TokenMonitorActivityAttributes.Field] {
+        [lockScreenPrimaryField, lockScreenSecondaryField, lockScreenBottomField]
+    }
+
+    private var configuredFields: [TokenMonitorActivityAttributes.Field] {
+        [compactTrailingField, expandedLeadingField, expandedCenterField,
+         expandedTrailingField, expandedBottomField] + lockScreenFields
+    }
+
+    private var progress: Double? {
+        guard showsProgress || configuredFields.contains(.progress),
+              let sampleProgress, sampleProgress.isFinite else { return nil }
+        return min(1, max(0, sampleProgress))
+    }
+
+    private var progressColor: Color {
+        sourceStale ? .secondary : ProviderPresentation.color(for: quotaProviderID ?? iconProviderID)
+    }
+
+    private func surfaceHeading(_ title: LocalizedStringKey, systemImage: String) -> some View {
         Label(title, systemImage: systemImage)
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
     }
 
-    private func providerIcon(size: CGFloat) -> some View {
-        Image(
-            ProviderPresentation.assetName(
-                for: iconProviderID ?? "codex"
-            )
-        )
-        .resizable()
-        .scaledToFit()
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
+    @ViewBuilder private func providerIcon(size: CGFloat) -> some View {
+        if let iconProviderID {
+            Image(ProviderPresentation.assetName(for: iconProviderID))
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: size, height: size)
+                .foregroundStyle(.primary)
+                .accessibilityHidden(true)
+        } else {
+            Image(systemName: "chart.bar.fill")
+                .font(.system(size: size))
+                .foregroundStyle(.primary)
+                .accessibilityHidden(true)
+        }
     }
 
-    @ViewBuilder
-    private func previewField(
+    @ViewBuilder private func previewField(
         _ field: TokenMonitorActivityAttributes.Field,
         alignment: HorizontalAlignment = .leading,
-        compact: Bool = false
+        compact: Bool = false,
+        prominent: Bool = false,
+        includesProviderMark: Bool = false
     ) -> some View {
         switch field {
         case .none:
             EmptyView()
         case .progress:
-            if showsProgress {
-                VStack(alignment: .leading, spacing: 4) {
-                    if !compact {
-                        HStack {
+            if let progress {
+                if compact {
+                    ProgressView(value: progress)
+                        .tint(progressColor)
+                        .frame(width: 32)
+                        .accessibilityLabel("AI limit")
+                        .accessibilityValue(progress.formatted(.percent.precision(.fractionLength(0))))
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        let layout = typeSize.isAccessibilitySize
+                            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+                            : AnyLayout(HStackLayout(spacing: 4))
+                        layout {
                             Text("AI limit")
-                            Spacer()
-                            Text("90% left").monospacedDigit()
+                            if !typeSize.isAccessibilitySize { Spacer(minLength: 4) }
+                            Text(displayValue(sampleLimit)).monospacedDigit()
                         }
                         .font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                        ProgressView(value: progress)
+                            .tint(progressColor)
+                            .progressViewStyle(.linear)
+                            .accessibilityLabel("AI limit")
                     }
-                    ProgressView(value: 0.9)
-                        .tint(DesignTokens.accent)
-                        .frame(maxWidth: compact ? 44 : .infinity)
+                    .accessibilityElement(children: .combine)
                 }
+            } else {
+                Text("—")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .accessibilityLabel("No limit data")
             }
         case .updated:
+            VStack(alignment: alignment, spacing: 3) {
+                if !compact {
+                    Text("Updated").font(.caption2).foregroundStyle(.secondary)
+                }
+                Text(LocalizedStringKey(sourceStale ? "—" : "Just now"))
+                    .font(compact ? .caption.monospacedDigit() : .subheadline.monospacedDigit().weight(.semibold))
+                    .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+            }
+            .accessibilityElement(children: .combine)
+        case .provider where includesProviderMark:
+            HStack(spacing: 6) {
+                providerIcon(size: 16)
+                Text(displayValue(providerName))
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+            }
+            .accessibilityElement(children: .combine)
+        default:
+            let metric = value(field)
             if compact {
-                Text("Now")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                Text(metric.value)
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                    .accessibilityLabel(LocalizedStringKey(metric.label))
+                    .accessibilityValue(metric.value)
             } else {
-                VStack(alignment: alignment, spacing: 2) {
-                    Text(LocalizedStringKey(field.title))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("Just now")
-                        .font(.subheadline.monospacedDigit().weight(.semibold))
+                VStack(alignment: alignment, spacing: 3) {
+                    Text(LocalizedStringKey(metric.label))
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(metric.value)
+                        .font(field == .provider
+                              ? .subheadline.weight(.semibold)
+                              : .system(prominent ? .title2 : .title3, design: .rounded, weight: .semibold))
+                        .monospacedDigit()
+                        .lineLimit(typeSize.isAccessibilitySize ? 2 : 1)
+                        .minimumScaleFactor(0.8)
                 }
+                .accessibilityElement(children: .combine)
             }
-        case .provider:
-            fieldValue("Provider", providerName, alignment: alignment, compact: compact)
-        case .primary:
-            switch primaryMetric {
-            case .tokens: fieldValue("Tokens", "62.8M", alignment: alignment, compact: compact)
-            case .cost: fieldValue("Cost", "USD 48.40", alignment: alignment, compact: compact)
-            case .limit: fieldValue("AI limit", "90% left", alignment: alignment, compact: compact)
-            }
-        case .secondary:
-            if showsSecondary {
-                if primaryMetric == .limit {
-                    fieldValue("Tokens", "62.8M", alignment: alignment, compact: compact)
-                } else {
-                    fieldValue("AI limit", "90% left", alignment: alignment, compact: compact)
-                }
-            }
-        case .tokens:
-            fieldValue("Tokens", "62.8M", alignment: alignment, compact: compact)
-        case .cost:
-            fieldValue("Cost", "USD 48.40", alignment: alignment, compact: compact)
-        case .limit:
-            fieldValue("AI limit", "90% left", alignment: alignment, compact: compact)
         }
     }
 
-    @ViewBuilder
-    private func fieldValue(
-        _ label: LocalizedStringKey,
-        _ value: String,
-        alignment: HorizontalAlignment,
-        compact: Bool
-    ) -> some View {
-        if compact {
-            Text(value)
-                .font(.caption2.monospacedDigit().weight(.semibold))
-                .foregroundStyle(DesignTokens.accent)
-                .lineLimit(1)
-        } else {
-            VStack(alignment: alignment, spacing: 2) {
-                Text(label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(value)
-                    .font(.subheadline.monospacedDigit().weight(.semibold))
-                    .fixedSize(horizontal: false, vertical: true)
+    private func value(_ field: TokenMonitorActivityAttributes.Field) -> (label: String, value: String) {
+        switch field {
+        case .primary:
+            switch primaryMetric {
+            case .tokens: ("Tokens", displayValue(sampleTokens))
+            case .cost: ("Cost", displayValue(sampleCost))
+            case .limit: (displayValue(providerName), displayValue(sampleLimit))
             }
+        case .secondary:
+            if showsSecondary || configuredFields.contains(.secondary) {
+                if primaryMetric == .limit {
+                    ("Cost", displayValue(sampleCost))
+                } else if sampleLimit != nil {
+                    (displayValue(providerName), displayValue(sampleLimit))
+                } else {
+                    ("Secondary metric", "—")
+                }
+            } else {
+                ("Secondary metric", "—")
+            }
+        case .provider: ("Provider", displayValue(providerName))
+        case .tokens: ("Tokens", displayValue(sampleTokens))
+        case .cost: ("Cost", displayValue(sampleCost))
+        case .limit: ("AI limit", displayValue(sampleLimit))
+        case .progress, .updated, .none: ("", "—")
         }
+    }
+
+    private func displayValue(_ value: String?) -> String {
+        guard let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return "—" }
+        return value
     }
 }

@@ -1,21 +1,38 @@
 import SwiftUI
 
-/// Content has a quiet, opaque surface. Glass belongs to navigation and actions.
+/// The Overview summary uses native glass; other enclosed surfaces remain opaque.
 struct SurfaceCard<Content: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     let content: Content
+    let glass: Bool
 
-    init(@ViewBuilder content: () -> Content) {
+    init(glass: Bool = false, @ViewBuilder content: () -> Content) {
         self.content = content()
+        self.glass = glass
     }
 
     var body: some View {
+        if #available(iOS 26, *), glass, !reduceTransparency {
+            paddedContent
+                .glassEffect(.regular, in: .rect(cornerRadius: DesignTokens.cardRadius))
+        } else {
+            paddedContent
+                .background(
+                    Color(uiColor: .secondarySystemGroupedBackground),
+                    in: .rect(cornerRadius: DesignTokens.cardRadius)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: DesignTokens.cardRadius)
+                        .strokeBorder(DesignTokens.border(for: colorScheme), lineWidth: 0.5)
+                }
+        }
+    }
+
+    private var paddedContent: some View {
         content
             .padding(DesignTokens.cardPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                Color(uiColor: .secondarySystemGroupedBackground),
-                in: .rect(cornerRadius: DesignTokens.cardRadius)
-            )
     }
 }
 

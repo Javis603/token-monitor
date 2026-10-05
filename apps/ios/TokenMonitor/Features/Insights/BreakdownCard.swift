@@ -13,7 +13,7 @@ struct BreakdownCard: View {
             NavigationLink {
                 BreakdownDetailView(kind: kind)
             } label: {
-                HStack {
+                HStack(alignment: .firstTextBaseline) {
                     Text(LocalizedStringKey(title))
                         .font(.headline)
                     Spacer()

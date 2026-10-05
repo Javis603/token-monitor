@@ -18,24 +18,23 @@ struct LimitPreviewSection: View {
                 }
             }
             if providers.isEmpty {
-                SurfaceCard {
-                    Label("No limit data from this Hub", systemImage: "gauge.open.with.lines.needle.33percent")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+                Label("No limit data from this Hub", systemImage: "gauge.open.with.lines.needle.33percent")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             } else {
-                ForEach(providers) { provider in
-                    SurfaceCard {
-                        CompactLimitProviderCard(provider: provider)
+                ForEach(Array(LimitProviderGroup.grouped(providers).enumerated()), id: \.element.id) { index, group in
+                    if index > 0 {
+                        Divider().padding(.vertical, 4)
                     }
+                    CompactLimitProviderCard(providers: group.accounts)
                 }
             }
         }
     }
 
     private var heading: some View {
-        Text("AI Limits")
-            .font(.title2.bold())
+        Label("AI Limits", systemImage: "gauge")
+            .font(.title3.weight(.semibold))
             .accessibilityAddTraits(.isHeader)
     }
 

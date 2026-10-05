@@ -2,7 +2,6 @@ import SwiftUI
 
 struct LimitsView: View {
     @Environment(TokenMonitorStore.self) private var store
-    @Environment(AppPreferences.self) private var preferences
 
     var body: some View {
         ZStack {
@@ -11,7 +10,7 @@ struct LimitsView: View {
             if let stats = store.stats {
                 let providers = stats.sortedLimits
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 20) {
+                    LazyVStack(alignment: .leading, spacing: 16) {
                         ConnectionStatusNotice(phase: store.phase, retry: refresh)
                         LimitsSummaryHeader(
                             providers: providers,
@@ -28,10 +27,12 @@ struct LimitsView: View {
                             )
                             .padding(.vertical, 50)
                         } else {
-                            ForEach(providers) { provider in
-                                SurfaceCard {
-                                    ProviderLimitCard(provider: provider)
+                            ForEach(Array(LimitProviderGroup.grouped(providers).enumerated()), id: \.element.id) { index, group in
+                                if index > 0 {
+                                    Divider().padding(.vertical, 8)
                                 }
+                                ProviderLimitCard(providers: group.accounts)
+                                    .padding(.vertical, 8)
                             }
                         }
                     }

@@ -20,7 +20,8 @@ struct InsightStatsGrid: View {
                     title: "Total tokens",
                     value: summary?.totalTokens.map(MetricFormatter.tokens) ?? "—",
                     systemImage: "number",
-                    tint: DesignTokens.accent
+                    tint: DesignTokens.accent,
+                    prominent: true
                 )
 
                 InsightMetricCard(
@@ -29,7 +30,8 @@ struct InsightStatsGrid: View {
                         MetricFormatter.currencyFromUSD($0, currency: preferences.currency)
                     } ?? "—",
                     systemImage: "dollarsign.circle.fill",
-                    tint: .green
+                    tint: .green,
+                    prominent: true
                 )
 
                 InsightMetricCard(

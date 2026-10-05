@@ -3,6 +3,18 @@ import Testing
 @testable import TokenMonitor
 
 struct HeatmapModelTests {
+    @Test func includesTodaysReadingAtLocalMidnight() {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        let components = calendar.dateComponents([.year, .month, .day], from: today)
+        let dayKey = String(format: "%04d-%02d-%02d", components.year!, components.month!, components.day!)
+        let day = HistoryDay(date: dayKey, tokens: 42, cost: 1, messages: nil, activeTimeMs: nil)
+        let model = HeatmapModel.make(days: [day], metric: .tokens, weekCount: 1, referenceDate: today)
+        let cell = model.weeks.flatMap(\.cells).first { calendar.isDate($0.date, inSameDayAs: today) }
+        #expect(cell?.tokens == 42)
+        #expect(model.activeDays == 1)
+    }
+
     @Test
     func usesDesktopHeatmapIntensityThresholds() throws {
         let referenceDate = try #require(

@@ -390,7 +390,10 @@ struct SettingsView: View {
                 ),
                 primaryMetric: preferences.livePrimaryMetric,
                 showsProgress: preferences.liveShowsProgress,
-                showsSecondary: preferences.liveShowsSecondaryMetric
+                showsSecondary: preferences.liveShowsSecondaryMetric,
+                quotaProviderID: preferences.liveProviderID.isEmpty
+                    ? store.stats?.sortedLimits.first?.provider
+                    : preferences.liveProviderID
             )
         } header: {
             Text("Preview")

@@ -9,31 +9,39 @@ struct LimitWindowRow: View {
     let window: LimitWindow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            let layout = dynamicTypeSize.isAccessibilitySize
-                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 5))
-                : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
-            layout {
-                Text(LocalizedStringKey(windowTitle))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-
-                if !dynamicTypeSize.isAccessibilitySize { Spacer() }
-
-                if let headline {
-                    Text(headline)
-                        .bold()
-                        .monospacedDigit()
-                        .foregroundStyle(statusColor)
-                        .contentTransition(.numericText())
+        VStack(alignment: .leading, spacing: 6) {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 4) {
+                    title
+                    value
+                }
+            } else {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        title.fixedSize(horizontal: true, vertical: false)
+                        Spacer(minLength: 4)
+                        value.fixedSize(horizontal: true, vertical: false)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        title
+                        value
+                    }
                 }
             }
 
             if window.showMeter != false, let remainingPercent {
-                ProgressView(value: min(100, max(0, remainingPercent)), total: 100)
-                    .tint(statusColor)
-                    .accessibilityLabel("\(windowTitle) remaining")
-                    .accessibilityValue(MetricFormatter.percent(remainingPercent))
+                let color = ProviderPresentation.color(for: provider.provider)
+                GeometryReader { geometry in
+                    Capsule()
+                        .fill(color.opacity(0.14))
+                        .overlay(alignment: .leading) {
+                            Capsule()
+                                .fill(color)
+                                .frame(width: geometry.size.width * min(100, max(0, remainingPercent)) / 100)
+                        }
+                }
+                .frame(height: 6)
+                .accessibilityHidden(true)
             }
 
             if let resetDate = Date.hubTimestamp(from: window.resetsAt) {
@@ -41,17 +49,17 @@ struct LimitWindowRow: View {
                     Text("Reset")
                     Text(resetDate, format: .relative(presentation: .numeric))
                 }
-                .font(.footnote)
+                .font(dynamicTypeSize.isAccessibilitySize ? .footnote : .caption2)
                 .foregroundStyle(.secondary)
             } else if let description = nonEmpty(window.resetDescription) {
                 Text(description)
-                    .font(.footnote)
+                    .font(dynamicTypeSize.isAccessibilitySize ? .footnote : .caption2)
                     .foregroundStyle(.secondary)
             }
 
             if let detail = nonEmpty(window.detail) {
                 Text(detail)
-                    .font(.footnote)
+                    .font(dynamicTypeSize.isAccessibilitySize ? .footnote : .caption2)
                     .foregroundStyle(.secondary)
             }
         }
@@ -96,17 +104,18 @@ struct LimitWindowRow: View {
         return nil
     }
 
-    private var statusColor: Color {
-        guard let remainingPercent else {
-            return .primary
-        }
-        if remainingPercent <= 15 {
-            return DesignTokens.critical
-        }
-        if remainingPercent <= 35 {
-            return DesignTokens.warning
-        }
-        return DesignTokens.accent
+    private var title: some View {
+        Text(LocalizedStringKey(windowTitle))
+            .font(dynamicTypeSize.isAccessibilitySize ? .subheadline : .caption)
+            .foregroundStyle(.secondary)
+    }
+
+    private var value: some View {
+        Text(headline ?? "—")
+            .font(dynamicTypeSize.isAccessibilitySize ? .subheadline.weight(.semibold) : .caption.weight(.semibold))
+            .monospacedDigit()
+            .foregroundStyle(.primary)
+            .contentTransition(.numericText())
     }
 
     private func nonEmpty(_ value: String?) -> String? {
@@ -114,5 +123,27 @@ struct LimitWindowRow: View {
             return nil
         }
         return value
+    }
+}
+
+/// Desktop quota windows read across a row; accessibility text gets the full width.
+struct LimitWindowGrid: View {
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    let provider: LimitProvider
+    let windows: [LimitWindow]
+
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+            ForEach(windows) { window in
+                LimitWindowRow(provider: provider, window: window)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+        }
+    }
+
+    private var columns: [GridItem] {
+        let count = dynamicTypeSize.isAccessibilitySize || windows.count == 1 ? 1 : 2
+        return Array(repeating: GridItem(.flexible(minimum: 0), spacing: 12, alignment: .top), count: count)
     }
 }

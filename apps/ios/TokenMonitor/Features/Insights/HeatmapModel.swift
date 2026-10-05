@@ -45,10 +45,16 @@ struct HeatmapModel: Equatable {
 
         let valuesByDate = Dictionary(
             days.compactMap { day -> (Date, HistoryDay)? in
-                guard let date = day.dateValue, date <= endDate, date >= firstWeekStart else {
+                guard let date = day.dateValue else { return nil }
+                // Hub day keys are calendar dates, not UTC instants on the user's clock.
+                var sourceCalendar = Calendar(identifier: .gregorian)
+                sourceCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
+                let components = sourceCalendar.dateComponents([.year, .month, .day], from: date)
+                guard let localDate = calendar.date(from: components),
+                      localDate <= endDate, localDate >= firstWeekStart else {
                     return nil
                 }
-                return (calendar.startOfDay(for: date), day)
+                return (localDate, day)
             }, uniquingKeysWith: { _, latest in latest }
         )
         let readings = valuesByDate.values.map { value(for: $0, metric: metric) }
