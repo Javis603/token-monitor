@@ -444,9 +444,11 @@ function clientSourceRoots(clientsCsv, options = {}) {
     platform: options.platform || process.platform,
     env: options.env || process.env
   });
+  const cherryDataDir = path.resolve(cherryRoots[1][1], '..', '..', 'Data');
   add(
     'cherrystudio',
-    ...cherryRoots
+    ...cherryRoots,
+    ['cherrystudio-db', cherryDataDir, path.join(cherryDataDir, 'cherrystudio.sqlite')]
   );
   // LM Studio's OpenAI-compatible local server writes nested monthly `.log`
   // files under this root. Tokscale's PathRoot::EnvVar treats a blank override
