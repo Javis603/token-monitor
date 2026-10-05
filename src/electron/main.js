@@ -23,7 +23,6 @@ const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
-const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
 const { VIDEO_SCHEME, VIDEO_PRIVILEGES, installBackgroundVideo } = require('./backgroundVideo');
 protocol.registerSchemesAsPrivileged([{ scheme: VIDEO_SCHEME, privileges: VIDEO_PRIVILEGES }]);
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
@@ -7207,17 +7206,17 @@ app.whenReady().then(() => {
   syncEdgeDock();
   ipcMain.handle('settings:get', () => settingsForRenderer());
   const backgroundVideo = installBackgroundVideo({ app, ipcMain, dialog, protocol, net, getWindow: () => mainWindow });
-  ipcMain.handle('appearance:getBackgroundImage', () => getBackgroundImage(app.getPath('userData')));
+  ipcMain.handle('appearance:getBackgroundImage', () => backgroundVideo.getImage());
   ipcMain.handle('appearance:chooseBackgroundImage', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile'],
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }]
     });
     if (result.canceled || !result.filePaths[0]) return { canceled: true };
-    return { bytes: await importBackgroundImage(result.filePaths[0], app.getPath('userData'), nativeImage, () => backgroundVideo.clear()) };
+    return { bytes: await backgroundVideo.importImage(result.filePaths[0], nativeImage) };
   });
   ipcMain.handle('appearance:clearBackgroundImage', async () => {
-    await clearBackgroundImage(app.getPath('userData'));
+    await backgroundVideo.clearImage();
     return true;
   });
 

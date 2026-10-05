@@ -10,9 +10,9 @@ Videos stay on this device. After a frame successfully decodes, the main process
 
 The renderer receives an opaque `token-monitor-background:` URL instead of a filesystem path or the video's bytes over IPC. The protocol resolves only the currently selected preview or saved video and forwards byte-range requests to Electron's file loader. Register the scheme before Electron is ready and keep it in the `media-src` CSP directive. No additional network listener is required.
 
-Publication and removal run serially. Clearing removes the saved video before its manifest; if the video cannot be deleted, the error is reported and the saved record remains available for retry, including after restarting the app. Failed imports only clean up files created by that import.
+Image and video mutations share one serial queue. Clearing removes tracked retired videos and the current video before its manifest. Failed removal remains tracked, reports an error, and leaves **Remove video** available to retry, including after restart. Video manifests without cleanup entries remain supported; cleanup accepts only managed video basenames.
 
-Switching to an image first validates and stages its PNG privately. The saved image is replaced only after video removal succeeds, so a removal error leaves the previously saved image unchanged.
+Switching to an image privately stages its PNG and saves a recovery journal with the previous image before publishing. The video is deleted only after PNG publication succeeds. If video removal fails before that deletion, recovery restores the previous PNG; a failed restore keeps the backup and blocks newer mutations until recovery can finish. After video deletion, cleanup failures preserve the newly published PNG and retain recovery metadata for retry. The renderer refreshes the saved state after errors instead of continuing to show deleted media. Private staging directories and recovery files stay local and are cleaned on retry or startup.
 
 ## Preview
 

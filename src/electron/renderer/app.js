@@ -7006,13 +7006,16 @@ function applyAppearanceSettings(settings) {
 let backgroundImageActive = false;
 let backgroundImageBusy = false;
 let backgroundImageError = false;
+let backgroundImageStorageError = false;
 let backgroundImageRequest = 0;
 let backgroundImageObjectUrl = null;
 let backgroundVideoController = null;
 
 function syncBackgroundImageStatus() {
   if (els.backgroundImageStatus) {
-    els.backgroundImageStatus.textContent = t(backgroundImageError
+    els.backgroundImageStatus.textContent = t(backgroundImageStorageError
+      ? 'settings.appearance.backgroundImageStorageError'
+      : backgroundImageError
       ? 'settings.appearance.backgroundImageError'
       : backgroundImageActive
         ? (nativeMaterialState.reducedTransparency || nativeMaterialState.type === 'opaque'
@@ -7048,6 +7051,7 @@ function applyBackgroundImage(bytes) {
   }
   els.shell.classList.toggle('has-custom-background', backgroundImageActive);
   backgroundImageError = false;
+  backgroundImageStorageError = false;
   syncBackgroundImageStatus();
 }
 
@@ -7080,7 +7084,10 @@ async function changeBackgroundImage(clear = false) {
       }
     }
   } catch (_) {
-    backgroundImageError = true;
+    // A video may already be removed when metadata cleanup fails. Reconcile
+    // both layers with storage instead of keeping a now-deleted video visible.
+    await Promise.all([loadBackgroundImage(), backgroundVideoController?.load()]);
+    backgroundImageStorageError = true;
     syncBackgroundImageStatus();
   } finally {
     backgroundImageBusy = false;

@@ -7,6 +7,7 @@ const { pipeline } = require('node:stream/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { pathToFileURL } = require('node:url');
+const { clearBackgroundImage, getBackgroundImage, getRecoverableBackgroundImage, importBackgroundImage, recoverBackgroundImage } = require('./backgroundImage');
 
 const VIDEO_SCHEME = 'token-monitor-background';
 const MAX_VIDEO_BYTES = 256 * 1024 * 1024;
@@ -52,8 +53,15 @@ function createBackgroundVideoManager(userDataPath) {
   let mutation = Promise.resolve();
   // Serialize publication and removal so each operation sees the last saved
   // record and a duplicate commit cannot clean up another writer's files.
-  function mutate(operation) {
-    const result = mutation.then(operation);
+  function mutate(operation, allowRecoveryFailure = false) {
+    const result = mutation.then(async () => {
+      let recoveryError;
+      try { await recoverBackgroundImage(userDataPath, await currentVideoId()); } catch (error) {
+        if (!allowRecoveryFailure) throw error;
+        recoveryError = error;
+      }
+      return operation(recoveryError);
+    });
     mutation = result.catch(() => {});
     return result;
   }
@@ -65,18 +73,57 @@ function createBackgroundVideoManager(userDataPath) {
   });
 
   async function readRecord() {
+    let record;
     try {
-      const record = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
-      if (!VIDEO_FILE.test(record.fileName || '') || record.fileName !== `background-video-${record.id}${path.extname(record.fileName)}`) {
-        throw new Error('Invalid saved background video');
-      }
-      const stat = await fs.stat(path.join(userDataPath, record.fileName));
-      if (!stat.isFile() || stat.size === 0) throw new Error('Saved background video is unavailable');
-      return record;
+      record = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
     } catch (error) {
       if (error.code === 'ENOENT') return null;
       throw error;
     }
+    if (!VIDEO_FILE.test(record.fileName || '') || record.fileName !== `background-video-${record.id}${path.extname(record.fileName)}`
+      || (record.cleanupFiles !== undefined && (!Array.isArray(record.cleanupFiles)
+        || record.cleanupFiles.some((file) => typeof file !== 'string' || !VIDEO_FILE.test(file) || file === record.fileName)))) {
+      throw new Error('Invalid saved background video');
+    }
+    let available = false;
+    try {
+      const stat = await fs.stat(path.join(userDataPath, record.fileName));
+      if (!stat.isFile() || stat.size === 0) throw new Error('Saved background video is unavailable');
+      available = true;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    // Missing active media is a cleanup tombstone, not an absent manifest:
+    // its retired files and failed metadata deletion still need to be retried.
+    return { ...record, available };
+  }
+
+  async function currentVideoId() {
+    const record = await readRecord();
+    return record?.available ? record.id : null;
+  }
+
+  async function removeFile(file) {
+    try { await fs.unlink(path.join(userDataPath, file)); } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+
+  async function cleanupRetired(record) {
+    for (const file of record?.cleanupFiles || []) await removeFile(file);
+  }
+
+  async function getSaved() {
+    const record = await readRecord();
+    if (!record) return null;
+    if (!record.available) return { cleanupPending: true };
+    let cleanupPending = false;
+    for (const file of record.cleanupFiles || []) {
+      try { await fs.stat(path.join(userDataPath, file)); cleanupPending = true; } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    }
+    return { ...publicRecord(record), ...(cleanupPending ? { cleanupPending: true } : {}) };
   }
 
   async function prepare(sourcePath) {
@@ -94,10 +141,12 @@ function createBackgroundVideoManager(userDataPath) {
     return mutate(async () => {
       if (pending !== selection) throw new Error('Select the video again');
       const previous = await readRecord();
+      await cleanupRetired(previous);
       const fileName = `background-video-${id}${selection.extension}`;
       const destination = path.join(userDataPath, fileName);
       const temporaryManifest = path.join(userDataPath, `.background-video-${id}.json`);
-      const record = { id, name: selection.name, fileName };
+      const cleanupFiles = previous ? [previous.fileName] : [];
+      const record = { id, name: selection.name, fileName, ...(cleanupFiles.length ? { cleanupFiles } : {}) };
       let ownsVideo = false;
       let ownsManifest = false;
       await fs.mkdir(userDataPath, { recursive: true });
@@ -118,22 +167,37 @@ function createBackgroundVideoManager(userDataPath) {
         throw error;
       }
       if (pending === selection) pending = null;
-      if (previous) await fs.unlink(path.join(userDataPath, previous.fileName)).catch(() => {});
+      // Publish cleanup ownership with the new record before deleting the old
+      // copy. A locked retired video stays discoverable across restart/retry.
+      await cleanupRetired(record);
       return publicRecord(record);
     });
   }
 
+  async function clearSaved(selection) {
+    const previous = await readRecord();
+    await cleanupRetired(previous);
+    // Deleting the active media is the irreversible commit point. A later
+    // metadata error must be reported, but must not roll back a published PNG.
+    if (previous) await removeFile(previous.fileName);
+    if (pending === selection) pending = null;
+    await removeFile(MANIFEST);
+  }
+
   async function clear() {
     const selection = pending;
+    return mutate(() => clearSaved(selection));
+  }
+
+  async function importImage(sourcePath, nativeImage) {
+    const selection = pending;
     return mutate(async () => {
-      const previous = await readRecord();
-      // Keep the manifest until deletion succeeds so a locked/private copy
-      // remains discoverable and removal can be retried, even after restart.
-      if (previous) {
-        await fs.unlink(path.join(userDataPath, previous.fileName)).catch((error) => { if (error.code !== 'ENOENT') throw error; });
-      }
-      await fs.unlink(manifestPath).catch((error) => { if (error.code !== 'ENOENT') throw error; });
-      if (pending === selection) pending = null;
+      // Resolve older cleanup before publishing a PNG, including a tombstone
+      // with no active video. A locked retired copy must leave the old PNG alone.
+      await cleanupRetired(await readRecord());
+      return importBackgroundImage(sourcePath, userDataPath, nativeImage, {
+        clearVideo: () => clearSaved(selection), getVideoId: currentVideoId
+      });
     });
   }
 
@@ -144,13 +208,19 @@ function createBackgroundVideoManager(userDataPath) {
     if (parsed.pathname === '/preview') return pending?.id === id ? pending.sourcePath : null;
     if (parsed.pathname !== '/current') return null;
     const record = await readRecord();
-    return record?.id === id ? path.join(userDataPath, record.fileName) : null;
+    return record?.available && record.id === id ? path.join(userDataPath, record.fileName) : null;
   }
 
   return {
-    prepare, commit, clear, resolve,
+    prepare, commit, clear, resolve, importImage,
+    clearImage: () => mutate(() => clearBackgroundImage(userDataPath)),
+    getImage: () => mutate(async (recoveryError) => recoveryError
+      ? getRecoverableBackgroundImage(userDataPath, await currentVideoId()) : getBackgroundImage(userDataPath), true),
     cancel(id) { if (pending?.id === id) pending = null; },
-    async get() { const record = await readRecord(); return record ? publicRecord(record) : null; }
+    get: () => mutate(async (recoveryError) => {
+      const record = await getSaved();
+      return recoveryError ? { ...record, cleanupPending: true } : record;
+    }, true)
   };
 }
 

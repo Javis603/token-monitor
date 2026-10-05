@@ -19,6 +19,7 @@
     let video = null;
     let busy = false;
     let failed = false;
+    let storageFailed = false;
     let generation = 0;
     const text = (key, params) => t(`settings.appearance.${key}`, params);
 
@@ -87,9 +88,11 @@
         else if (video.paused) void video.play().catch(() => {});
       }
       const key = busy ? 'backgroundVideoLoading'
-        : failed ? 'backgroundVideoError'
-          : video ? (hidden ? 'backgroundVideoHidden' : paused ? 'backgroundVideoPaused' : 'backgroundVideoActive')
-            : 'backgroundVideoNone';
+        : record?.cleanupPending ? 'backgroundVideoCleanupError'
+          : storageFailed ? 'backgroundVideoStorageError'
+            : failed ? 'backgroundVideoError'
+              : video ? (hidden ? 'backgroundVideoHidden' : paused ? 'backgroundVideoPaused' : 'backgroundVideoActive')
+                : 'backgroundVideoNone';
       status.textContent = text(key, { name: record?.name || '' });
       status.title = status.textContent;
     }
@@ -97,7 +100,7 @@
     // Reset only the presentation after main has removed the saved video.
     function reset() {
       generation += 1;
-      release(video); video = null; record = null; failed = false;
+      release(video); video = null; record = null; failed = false; storageFailed = false;
       shell.classList.remove('has-background-video');
       sync();
     }
@@ -105,6 +108,20 @@
     async function apply(next) {
       if (!next) {
         reset();
+        return;
+      }
+      if (next.cleanupPending && !next.url) {
+        reset();
+        record = next;
+        failed = true;
+        sync();
+        return;
+      }
+      if (video && record?.id === next.id && record.url === next.url) {
+        record = next;
+        storageFailed = false;
+        failed = next.cleanupPending === true;
+        sync();
         return;
       }
       const current = ++generation;
@@ -115,7 +132,8 @@
         release(video);
         video = candidate;
         record = next;
-        failed = false;
+        storageFailed = false;
+        failed = next.cleanupPending === true;
         shell.prepend(video);
         shell.classList.add('has-background-video');
         video.addEventListener('error', () => {
@@ -140,6 +158,10 @@
       try {
         await api.clearBackgroundVideo();
         reset();
+      } catch (error) {
+        await load();
+        storageFailed = true;
+        throw error;
       } finally {
         busy = false;
         sync();
@@ -149,9 +171,10 @@
     async function chooseVideo() {
       if (busy || imageBusy()) return;
       generation += 1;
-      busy = true; failed = false; sync();
+      busy = true; failed = false; storageFailed = false; sync();
       let preview;
       let candidate;
+      let committing = false;
       try {
         const selection = await api.chooseBackgroundVideo();
         if (selection.canceled) return;
@@ -161,9 +184,15 @@
         // or canceled selection must leave the previous image/video intact.
         await loadPlayable(candidate, preview.url);
         release(candidate); candidate = null;
-        await apply(await api.commitBackgroundVideo(preview.id));
+        committing = true;
+        const saved = await api.commitBackgroundVideo(preview.id);
+        committing = false;
+        await apply(saved);
       } catch (_) {
-        failed = true;
+        if (committing) {
+          await load();
+          storageFailed = true;
+        } else failed = true;
       } finally {
         release(candidate);
         if (preview) await api.cancelBackgroundVideo(preview.id).catch(() => {});
@@ -176,18 +205,16 @@
     document.addEventListener('visibilitychange', sync);
     window.addEventListener('pagehide', () => { generation += 1; release(video); video = null; });
     sync();
-    return {
-      sync, clear, reset, isBusy: () => busy,
-      async load() {
-        const request = ++generation;
-        try {
-          const saved = await api.getBackgroundVideo();
-          if (request === generation) await apply(saved);
-        } catch (_) {
-          if (request === generation) { failed = true; sync(); }
-        }
+    async function load() {
+      const request = ++generation;
+      try {
+        const saved = await api.getBackgroundVideo();
+        if (request === generation) await apply(saved);
+      } catch (_) {
+        if (request === generation) { storageFailed = true; sync(); }
       }
-    };
+    }
+    return { sync, clear, reset, load, isBusy: () => busy };
   }
   root.TokenMonitorBackgroundVideo = { createBackgroundVideoController, isBackgroundVideoBlocked };
 })(window);

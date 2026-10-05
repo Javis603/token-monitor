@@ -269,7 +269,7 @@ for (const outcome of ['canceled', 'failed']) {
     assert.equal(f.shell.children[0], oldVideo);
     assert.equal(f.nodes.get('chooseBackgroundImageButton').disabled, false);
     assert.equal(f.nodes.get('chooseBackgroundVideoButton').disabled, false);
-    if (outcome === 'failed') assert.match(f.nodes.get('backgroundImageStatus').textContent, /Could not load/);
+    if (outcome === 'failed') assert.match(f.nodes.get('backgroundImageStatus').textContent, /saving or cleaning/);
   });
 }
 
@@ -302,4 +302,97 @@ test('video status and shared opacity controls follow live language changes', as
   await f.controller.clear();
   assert.equal(f.nodes.get('backgroundImageOpacityLabel').textContent,
     translate('ja', 'settings.appearance.backgroundImageOpacity'));
+});
+
+
+test('an image cleanup failure reloads the committed PNG and replaces a deleted video with a retryable cleanup state', async () => {
+  const f = fixture(true);
+  f.applyImage(Buffer.from('old-image'));
+  await f.controller.load();
+  const oldImage = f.styles.get('--custom-background-image');
+  let reads = 0;
+  f.api.getBackgroundImage = async () => { reads += 1; return Buffer.from('committed-image'); };
+  f.api.getBackgroundVideo = async () => ({ cleanupPending: true });
+  f.api.chooseBackgroundImage = async () => { throw new Error('Metadata cleanup failed'); };
+  await f.changeImage();
+  assert.equal(reads, 1);
+  assert.notEqual(f.styles.get('--custom-background-image'), oldImage);
+  assert.equal(f.shell.children.length, 0);
+  assert.equal(f.nodes.get('clearBackgroundVideoButton').classList.contains('hidden'), false);
+  assert.equal(f.nodes.get('clearBackgroundVideoButton').disabled, false);
+  assert.match(f.nodes.get('backgroundImageStatus').textContent, /saving or cleaning/);
+  assert.match(f.nodes.get('backgroundVideoStatus').textContent, /Remove video to retry/);
+  f.api.clearBackgroundVideo = async () => {};
+  await f.controller.clear();
+  assert.equal(f.nodes.get('clearBackgroundVideoButton').classList.contains('hidden'), true);
+});
+
+test('a post-deletion clear failure releases the missing video and offers metadata cleanup retry', async () => {
+  const f = fixture();
+  await f.controller.load();
+  f.api.getBackgroundVideo = async () => ({ cleanupPending: true });
+  f.api.clearBackgroundVideo = async () => { throw new Error('Manifest locked'); };
+  await assert.rejects(f.controller.clear(), /Manifest locked/);
+  assert.equal(f.shell.children.length, 0);
+  assert.equal(f.shell.classList.contains('has-background-video'), false);
+  assert.equal(f.nodes.get('clearBackgroundVideoButton').classList.contains('hidden'), false);
+  assert.equal(f.controller.isBusy(), false);
+  assert.match(f.nodes.get('backgroundVideoStatus').textContent, /Remove video to retry/);
+});
+
+test('a committed video with failed old-copy cleanup is displayed and reports a storage error', async () => {
+  const f = fixture();
+  await f.controller.load();
+  f.api.chooseBackgroundVideo = async () => ({ preview: { id: 'new', name: 'new.mp4', url: 'video://good-new' } });
+  f.api.getBackgroundVideo = async () => ({ id: 'new', name: 'new.mp4', url: 'video://good-new', cleanupPending: true });
+  f.api.commitBackgroundVideo = async () => { throw new Error('Retired file locked'); };
+  f.nodes.get('chooseBackgroundVideoButton').dispatchEvent(new Event('click'));
+  await new Promise(setImmediate);
+  assert.equal(f.shell.children[0].src, 'video://good-new');
+  assert.equal(f.controller.isBusy(), false);
+  for (const locale of ['en', 'zh-CN', 'zh-TW', 'ko', 'ja']) {
+    f.setLocale(locale); f.controller.sync();
+    const message = f.nodes.get('backgroundVideoStatus').textContent;
+    assert.equal(message, translate(locale, 'settings.appearance.backgroundVideoCleanupError'));
+    assert.notEqual(message, translate(locale, 'settings.appearance.backgroundVideoError'));
+  }
+});
+
+
+test('real storage reconciliation releases deleted video even while image-journal cleanup stays locked', async (t) => {
+  const os = require('node:os');
+  const { createBackgroundVideoManager } = require('../../src/electron/backgroundVideo');
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'background-renderer-recovery-'));
+  t.after(() => fs.promises.rm(directory, { recursive: true, force: true }));
+  const data = path.join(directory, 'data');
+  await fs.promises.mkdir(data);
+  const source = path.join(directory, 'source.mp4');
+  const image = path.join(directory, 'source.png');
+  await fs.promises.writeFile(source, 'video');
+  await fs.promises.writeFile(image, 'source-image');
+  await fs.promises.writeFile(path.join(data, 'background-image.png'), 'old-image');
+  const manager = createBackgroundVideoManager(data);
+  const preview = await manager.prepare(source);
+  await manager.commit(preview.id);
+  const f = fixture(true);
+  f.api.getBackgroundVideo = () => manager.get();
+  f.api.getBackgroundImage = () => manager.getImage();
+  f.applyImage(await manager.getImage());
+  await f.controller.load();
+  const oldImage = f.styles.get('--custom-background-image');
+  const nativeImage = { createFromBuffer: () => ({
+    isEmpty: () => false, getSize: () => ({ width: 10, height: 10 }), toPNG: () => Buffer.from('new-image')
+  }) };
+  f.api.chooseBackgroundImage = async () => ({ bytes: await manager.importImage(image, nativeImage) });
+  const unlink = fs.promises.unlink.bind(fs.promises);
+  t.mock.method(fs.promises, 'unlink', async (file) => {
+    if (file === path.join(data, '.background-image-recovery.json')) throw new Error('Journal locked');
+    return unlink(file);
+  });
+  await f.changeImage();
+  assert.equal((await manager.getImage()).toString(), 'new-image');
+  assert.notEqual(f.styles.get('--custom-background-image'), oldImage);
+  assert.equal(f.shell.children.length, 0);
+  assert.equal(f.nodes.get('clearBackgroundVideoButton').classList.contains('hidden'), false);
+  assert.match(f.nodes.get('backgroundVideoStatus').textContent, /Remove video to retry/);
 });

@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
-const { installBackgroundVideo } = require('../../src/electron/backgroundVideo');
+const { createBackgroundVideoManager, installBackgroundVideo } = require('../../src/electron/backgroundVideo');
 const {
   backgroundImagePath,
   clearBackgroundImage,
@@ -44,10 +44,11 @@ async function imagePickerFixture(t) {
   const selection = await manager.prepare(videoSource);
   const saved = await manager.commit(selection.id);
   return { data, output, dialog, nativeImage, manager, saved,
-    choose: () => handlers.get('appearance:chooseBackgroundImage')() };
+    source, videoSource, choose: () => handlers.get('appearance:chooseBackgroundImage')(),
+    remove: () => handlers.get('appearance:clearBackgroundImage')() };
 }
 
-test('image picker stages a private PNG and clears the video before publishing it', async (t) => {
+test('image picker publishes a private PNG with a durable backup before clearing the video', async (t) => {
   const f = await imagePickerFixture(t);
   const savedVideo = await f.manager.resolve(f.saved.url);
   const unlink = fs.promises.unlink.bind(fs.promises);
@@ -55,12 +56,15 @@ test('image picker stages a private PNG and clears the video before publishing i
   t.mock.method(fs.promises, 'unlink', async (file) => {
     if (file === savedVideo) {
       clears += 1;
-      assert.equal((await getBackgroundImage(f.data)).toString(), 'saved-image');
-      const temporary = (await fs.promises.readdir(f.data)).filter((name) => name.startsWith('.background-image-'));
-      assert.equal(temporary.length, 1);
-      const staged = path.join(f.data, temporary[0]);
-      assert.deepEqual(await fs.promises.readFile(staged), f.output);
-      if (process.platform !== 'win32') assert.equal((await fs.promises.stat(staged)).mode & 0o777, 0o600);
+      assert.deepEqual(await getBackgroundImage(f.data), f.output);
+      const recovery = path.join(f.data, '.background-image-recovery.json');
+      const saved = JSON.parse(await fs.promises.readFile(recovery, 'utf8'));
+      assert.equal(Buffer.from(saved.previousImage, 'base64').toString(), 'saved-image');
+      assert.equal(saved.previousVideoId, f.saved.id);
+      if (process.platform !== 'win32') {
+        assert.equal((await fs.promises.stat(recovery)).mode & 0o777, 0o600);
+        assert.equal((await fs.promises.stat(backgroundImagePath(f.data))).mode & 0o777, 0o600);
+      }
     }
     return unlink(file);
   });
@@ -100,17 +104,228 @@ for (const outcome of ['canceled', 'invalid', 'staging failure']) {
     const clear = t.mock.method(f.manager, 'clear', async () => { throw new Error('Must not clear'); });
     if (outcome === 'canceled') f.dialog.showOpenDialog = async () => ({ canceled: true });
     else if (outcome === 'invalid') f.nativeImage.createFromBuffer = () => ({ isEmpty: () => true });
-    else t.mock.method(fs.promises, 'writeFile', async () => { throw new Error('Disk full'); });
+    else {
+      const open = fs.promises.open.bind(fs.promises);
+      t.mock.method(fs.promises, 'open', async (file, ...args) => {
+        if (path.basename(file) === 'candidate.png') throw new Error('Disk full');
+        return open(file, ...args);
+      });
+    }
 
     if (outcome === 'canceled') assert.equal((await f.choose()).canceled, true);
     else await assert.rejects(f.choose(), outcome === 'invalid' ? /not supported/ : /Disk full/);
 
+    t.mock.restoreAll();
     assert.equal(clear.mock.callCount(), 0);
     assert.equal((await getBackgroundImage(f.data)).toString(), 'saved-image');
     assert.deepEqual(await f.manager.get(), f.saved);
     assert.deepEqual((await fs.promises.readdir(f.data)).sort(), before);
   });
 }
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
+test('a failed image publication preserves the old PNG and video without deleting either', async (t) => {
+  const f = await imagePickerFixture(t);
+  const before = (await fs.promises.readdir(f.data)).sort();
+  const failure = new Error('Cannot publish PNG');
+  const rename = fs.promises.rename.bind(fs.promises);
+  t.mock.method(fs.promises, 'rename', async (...args) => {
+    if (args[1] === backgroundImagePath(f.data)) throw failure;
+    return rename(...args);
+  });
+  await assert.rejects(f.choose(), failure);
+  assert.equal((await getBackgroundImage(f.data)).toString(), 'saved-image');
+  assert.deepEqual(await f.manager.get(), f.saved);
+  assert.deepEqual((await fs.promises.readdir(f.data)).sort(), before);
+});
+
+test('a failed recovery journal creation cannot clear the video or publish the candidate', async (t) => {
+  const f = await imagePickerFixture(t);
+  const before = (await fs.promises.readdir(f.data)).sort();
+  const open = fs.promises.open.bind(fs.promises);
+  t.mock.method(fs.promises, 'open', async (file, ...args) => {
+    if (path.basename(file) === 'recovery.json' && args[0] === 'wx') throw new Error('Cannot save backup');
+    return open(file, ...args);
+  });
+  await assert.rejects(f.choose(), /Cannot save backup/);
+  assert.equal((await getBackgroundImage(f.data)).toString(), 'saved-image');
+  assert.deepEqual(await f.manager.get(), f.saved);
+  assert.deepEqual((await fs.promises.readdir(f.data)).sort(), before);
+});
+
+test('failed PNG restoration preserves its private backup and blocks later mutations until restart recovery', async (t) => {
+  const f = await imagePickerFixture(t);
+  const video = await f.manager.resolve(f.saved.url);
+  const unlink = fs.promises.unlink.bind(fs.promises);
+  const rename = fs.promises.rename.bind(fs.promises);
+  let publishes = 0;
+  t.mock.method(fs.promises, 'rename', async (...args) => {
+    if (args[1] === backgroundImagePath(f.data) && ++publishes > 1) throw new Error('Restore blocked');
+    return rename(...args);
+  });
+  t.mock.method(fs.promises, 'unlink', async (file) => {
+    if (file === video) throw new Error('Video locked');
+    return unlink(file);
+  });
+  await assert.rejects(f.choose(), (error) => error.errors?.some((cause) => cause.message === 'Restore blocked'));
+  const recovery = path.join(f.data, '.background-image-recovery.json');
+  const saved = JSON.parse(await fs.promises.readFile(recovery, 'utf8'));
+  assert.equal(Buffer.from(saved.previousImage, 'base64').toString(), 'saved-image');
+  assert.equal(await fs.promises.readFile(video, 'utf8'), 'saved-video');
+  assert.deepEqual(await getBackgroundImage(f.data), f.output);
+  assert.equal((await f.manager.getImage()).toString(), 'saved-image');
+  assert.deepEqual(await f.manager.get(), { ...f.saved, cleanupPending: true });
+  await assert.rejects(f.remove(), /Restore blocked/);
+  await assert.rejects(f.manager.clear(), /Restore blocked/);
+  assert.equal(await fs.promises.readFile(video, 'utf8'), 'saved-video');
+  t.mock.restoreAll();
+  const restarted = createBackgroundVideoManager(f.data);
+  assert.equal((await restarted.getImage()).toString(), 'saved-image');
+  assert.deepEqual(await restarted.get(), f.saved);
+  await assert.rejects(fs.promises.stat(recovery), { code: 'ENOENT' });
+  await restarted.importImage(f.source, f.nativeImage);
+  assert.deepEqual(await restarted.getImage(), f.output);
+  assert.equal(await restarted.get(), null);
+});
+
+test('failed manifest removal keeps the committed PNG and exposes metadata cleanup for restart retry', async (t) => {
+  const f = await imagePickerFixture(t);
+  const video = await f.manager.resolve(f.saved.url);
+  const manifest = path.join(f.data, 'background-video.json');
+  const unlink = fs.promises.unlink.bind(fs.promises);
+  const failure = new Error('Metadata locked');
+  t.mock.method(fs.promises, 'unlink', async (file) => {
+    if (file === manifest) throw failure;
+    return unlink(file);
+  });
+  await assert.rejects(f.choose(), failure);
+  assert.deepEqual(await getBackgroundImage(f.data), f.output);
+  await assert.rejects(fs.promises.stat(video), { code: 'ENOENT' });
+  assert.deepEqual(await f.manager.get(), { cleanupPending: true });
+  const restarted = createBackgroundVideoManager(f.data);
+  assert.deepEqual(await restarted.get(), { cleanupPending: true });
+  t.mock.restoreAll();
+  await restarted.clear();
+  assert.deepEqual(await fs.promises.readdir(f.data), ['background-image.png']);
+});
+
+test('failed journal cleanup reports partial success and never restores the retired image after restart', async (t) => {
+  const f = await imagePickerFixture(t);
+  const recovery = path.join(f.data, '.background-image-recovery.json');
+  const unlink = fs.promises.unlink.bind(fs.promises);
+  t.mock.method(fs.promises, 'unlink', async (file) => {
+    if (file === recovery) throw new Error('Backup cleanup locked');
+    return unlink(file);
+  });
+  await assert.rejects(f.choose(), /Backup cleanup locked/);
+  assert.deepEqual(await getBackgroundImage(f.data), f.output);
+  await assert.rejects(f.manager.clearImage(), /Backup cleanup locked/);
+  assert.deepEqual(await f.manager.getImage(), f.output);
+  assert.deepEqual(await f.manager.get(), { cleanupPending: true });
+  const saved = JSON.parse(await fs.promises.readFile(recovery, 'utf8'));
+  assert.equal(Buffer.from(saved.previousImage, 'base64').toString(), 'saved-image');
+  t.mock.restoreAll();
+  const restarted = createBackgroundVideoManager(f.data);
+  assert.deepEqual(await restarted.getImage(), f.output);
+  assert.equal(await restarted.get(), null);
+  assert.deepEqual(await fs.promises.readdir(f.data), ['background-image.png']);
+});
+
+test('image publication, image removal, and a newer video commit share one mutation lane', async (t) => {
+  const f = await imagePickerFixture(t);
+  const ready = deferred();
+  const release = deferred();
+  const rename = fs.promises.rename.bind(fs.promises);
+  t.after(() => release.resolve());
+  t.mock.method(fs.promises, 'rename', async (...args) => {
+    if (args[1] === backgroundImagePath(f.data)) { ready.resolve(); await release.promise; }
+    return rename(...args);
+  });
+  const choosing = f.choose();
+  await ready.promise;
+  const removing = f.remove();
+  const preview = await f.manager.prepare(f.videoSource);
+  const committing = f.manager.commit(preview.id);
+  assert.equal((await getBackgroundImage(f.data)).toString(), 'saved-image');
+  release.resolve();
+  const [, , saved] = await Promise.all([choosing, removing, committing]);
+  assert.equal(await f.manager.getImage(), null);
+  assert.deepEqual(await f.manager.get(), saved);
+  assert.equal(await fs.promises.readFile(await f.manager.resolve(saved.url), 'utf8'), 'saved-video');
+});
+
+test('failed exclusive staging-directory creation preserves a directory the importer does not own', async (t) => {
+  const f = await imagePickerFixture(t);
+  const collision = path.join(f.data, '.background-image-stage-collision');
+  await fs.promises.mkdir(collision);
+  await fs.promises.writeFile(path.join(collision, 'candidate.png'), 'not-owned');
+  t.mock.method(fs.promises, 'mkdtemp', async () => { throw Object.assign(new Error('Collision'), { code: 'EEXIST' }); });
+  await assert.rejects(f.choose(), { code: 'EEXIST' });
+  assert.equal(await fs.promises.readFile(path.join(collision, 'candidate.png'), 'utf8'), 'not-owned');
+  assert.equal((await getBackgroundImage(f.data)).toString(), 'saved-image');
+  assert.deepEqual(await f.manager.get(), f.saved);
+});
+
+for (const stage of ['candidate write', 'candidate close', 'journal write', 'journal close']) {
+  test(`failed ${stage} and cleanup retain discoverable staging and recover on retry`, async (t) => {
+    const f = await imagePickerFixture(t);
+    const target = stage.startsWith('candidate') ? 'candidate.png' : 'recovery.json';
+    const open = fs.promises.open.bind(fs.promises);
+    const unlink = fs.promises.unlink.bind(fs.promises);
+    t.mock.method(fs.promises, 'open', async (file, ...args) => {
+      const handle = await open(file, ...args);
+      if (path.basename(file) === target && args[0] === 'wx') {
+        if (stage.endsWith('write')) {
+          const writeFile = handle.writeFile.bind(handle);
+          t.mock.method(handle, 'writeFile', async () => { await writeFile('partial'); throw new Error('Write failed'); });
+        } else {
+          const close = handle.close.bind(handle);
+          t.mock.method(handle, 'close', async () => { await close(); throw new Error('Close failed'); });
+        }
+      }
+      return handle;
+    });
+    t.mock.method(fs.promises, 'unlink', async (file) => {
+      if (path.basename(file) === target) throw new Error('Cleanup locked');
+      return unlink(file);
+    });
+    await assert.rejects(f.choose(), /cleanup failed/);
+    assert.equal((await getBackgroundImage(f.data)).toString(), 'saved-image');
+    await assert.rejects(fs.promises.stat(path.join(f.data, '.background-image-recovery.json')), { code: 'ENOENT' });
+    const stages = (await fs.promises.readdir(f.data)).filter((name) => name.startsWith('.background-image-stage-'));
+    assert.equal(stages.length, 1);
+    await assert.rejects(f.manager.clear(), /Cleanup locked/);
+    t.mock.restoreAll();
+    const restarted = createBackgroundVideoManager(f.data);
+    assert.equal((await restarted.getImage()).toString(), 'saved-image');
+    assert.deepEqual(await restarted.get(), f.saved);
+    assert.equal((await fs.promises.readdir(f.data)).some((name) => name.startsWith('.background-image-')), false);
+    await restarted.importImage(f.source, f.nativeImage);
+    assert.deepEqual(await restarted.getImage(), f.output);
+  });
+}
+
+test('a locked retired copy in a cleanup-only manifest cannot replace the old PNG', async (t) => {
+  const f = await imagePickerFixture(t);
+  const oldVideo = await f.manager.resolve(f.saved.url);
+  const selection = await f.manager.prepare(f.videoSource);
+  const unlink = fs.promises.unlink.bind(fs.promises);
+  t.mock.method(fs.promises, 'unlink', async (file) => {
+    if (file === oldVideo) throw new Error('Retired video locked');
+    return unlink(file);
+  });
+  await assert.rejects(f.manager.commit(selection.id), /Retired video locked/);
+  const current = await f.manager.get();
+  await unlink(await f.manager.resolve(current.url));
+  await assert.rejects(f.choose(), /Retired video locked/);
+  assert.equal((await getBackgroundImage(f.data)).toString(), 'saved-image');
+  assert.equal(await fs.promises.readFile(oldVideo, 'utf8'), 'saved-video');
+});
 
 test('chosen background survives source removal and can be cleared', async (t) => {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'token-background-test-'));

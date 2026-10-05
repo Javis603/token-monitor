@@ -358,11 +358,83 @@ test('clear tolerates an already removed video and retries a failed manifest del
     return unlink(file);
   });
   await assert.rejects(f.manager.clear(), failure);
-  assert.equal(await f.manager.get(), null);
+  assert.deepEqual(await f.manager.get(), { cleanupPending: true });
   assert.equal(JSON.parse(await fs.readFile(manifest, 'utf8')).id, saved.id);
   await assert.rejects(fs.stat(destination), { code: 'ENOENT' });
   mocked.mock.restore();
   await f.manager.clear();
   await f.manager.clear();
   assert.deepEqual(await fs.readdir(f.data), ['background-image.png']);
+});
+
+
+test('failed retired-video cleanup stays tracked and prevents later replacement from dropping it', async (t) => {
+  const f = await fixture(t);
+  const original = await f.manager.prepare(f.source);
+  const old = await f.manager.commit(original.id);
+  const oldFile = await f.manager.resolve(old.url);
+  const next = await f.manager.prepare(f.source);
+  const unlink = fs.unlink.bind(fs);
+  t.mock.method(fs, 'unlink', async (file) => {
+    if (file === oldFile) throw new Error('Old video locked');
+    return unlink(file);
+  });
+  await assert.rejects(f.manager.commit(next.id), /Old video locked/);
+  const current = await f.manager.get();
+  assert.equal(current.id, next.id);
+  assert.equal(current.cleanupPending, true);
+  assert.equal(await fs.readFile(oldFile, 'utf8'), 'video-fixture');
+  const manifest = JSON.parse(await fs.readFile(path.join(f.data, 'background-video.json'), 'utf8'));
+  assert.deepEqual(manifest.cleanupFiles, [path.basename(oldFile)]);
+  const restarted = createBackgroundVideoManager(f.data);
+  const newer = await restarted.prepare(f.source);
+  await assert.rejects(restarted.commit(newer.id), /Old video locked/);
+  assert.equal((await restarted.get()).id, next.id);
+  await assert.rejects(restarted.clear(), /Old video locked/);
+  assert.equal(await fs.readFile(await restarted.resolve(current.url), 'utf8'), 'video-fixture');
+  t.mock.restoreAll();
+  await restarted.clear();
+  assert.deepEqual(await fs.readdir(f.data), ['background-image.png']);
+});
+
+for (const file of ['../private.mp4', '/tmp/private.mp4', 'background-image.png', null]) {
+  test(`invalid cleanup entry ${file} cannot authorize deletion`, async (t) => {
+    const f = await fixture(t);
+    const preview = await f.manager.prepare(f.source);
+    const saved = await f.manager.commit(preview.id);
+    const manifest = path.join(f.data, 'background-video.json');
+    const record = JSON.parse(await fs.readFile(manifest, 'utf8'));
+    record.cleanupFiles = [file];
+    await fs.writeFile(manifest, JSON.stringify(record));
+    await assert.rejects(f.manager.clear(), /Invalid saved background/);
+    assert.equal(await fs.readFile(path.join(f.data, record.fileName), 'utf8'), 'video-fixture');
+    assert.equal(record.id, saved.id);
+  });
+}
+
+
+test('an absent user-data directory reads empty and is created on the first video commit', async (t) => {
+  const f = await fixture(t);
+  const missing = path.join(f.root, 'not-yet-created');
+  const manager = createBackgroundVideoManager(missing);
+  assert.equal(await manager.get(), null);
+  assert.equal(await manager.getImage(), null);
+  const preview = await manager.prepare(f.source);
+  const saved = await manager.commit(preview.id);
+  assert.deepEqual(await manager.get(), saved);
+});
+
+test('a manifest cleanup failure invalidates the old preview at the media deletion commit point', async (t) => {
+  const f = await fixture(t);
+  const original = await f.manager.prepare(f.source);
+  await f.manager.commit(original.id);
+  const preview = await f.manager.prepare(f.source);
+  const unlink = fs.unlink.bind(fs);
+  t.mock.method(fs, 'unlink', async (file) => {
+    if (file === path.join(f.data, 'background-video.json')) throw new Error('Manifest locked');
+    return unlink(file);
+  });
+  await assert.rejects(f.manager.clear(), /Manifest locked/);
+  assert.equal(await f.manager.resolve(preview.url), null);
+  await assert.rejects(f.manager.commit(preview.id), /Select the video again/);
 });
