@@ -616,18 +616,20 @@
                   <button id="modelAliasesAddButton" type="button" data-i18n="settings.modelAliases.add">Add alias</button>
                 </div>
                 <div id="modelAliasesForm" class="model-alias-form hidden">
-                  <label><span data-i18n="settings.modelAliases.alias">Alias (reported model ID)</span>
+                  <div class="model-alias-field">
+                    <label id="modelAliasesAliasLabel" for="modelAliasesAliasSelect" data-i18n="settings.modelAliases.alias">Alias (reported model ID)</label>
                     <select id="modelAliasesAliasSelect"></select>
                     <input id="modelAliasesAliasInput" class="hidden" type="text" maxlength="256" placeholder="anthropic/claude-opus-5" spellcheck="false" />
-                  </label>
+                  </div>
                   <div id="modelAliasesMoreSources" class="model-alias-form"></div>
                   <div class="settings-actions">
                     <button id="modelAliasesAddSourceButton" type="button" data-i18n="settings.modelAliases.addSource">Add another alias</button>
                   </div>
-                  <label><span data-i18n="settings.modelAliases.canonical">Group as (model ID)</span>
+                  <div class="model-alias-field">
+                    <label id="modelAliasesCanonicalLabel" for="modelAliasesCanonicalSelect" data-i18n="settings.modelAliases.canonical">Group as (model ID)</label>
                     <select id="modelAliasesCanonicalSelect"></select>
                     <input id="modelAliasesCanonicalInput" class="hidden" type="text" maxlength="256" placeholder="claude-opus-5" spellcheck="false" />
-                  </label>
+                  </div>
                   <p class="settings-note" data-i18n="settings.modelAliases.multipleNote">All aliases above will point to this model ID.</p>
                   <div class="settings-actions">
                     <button id="modelAliasesSaveButton" type="button" data-i18n="settings.modelAliases.save">Save</button>

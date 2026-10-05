@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createModelAliasForm } = require('../../src/electron/renderer/modelAliasForm');
 const { normalizeModelAliases, upsertModelAlias, upsertModelAliasBatch, modelAliasChoices } = require('../../src/electron/renderer/modelAliases');
+const i18n = require('../../src/electron/renderer/i18n');
 
 function fixture(save, initial = {}) {
   const nodes = new Map();
@@ -17,21 +18,31 @@ function fixture(save, initial = {}) {
       setAttribute(key, value) { this[key] = value; },
       addEventListener: (event, handler) => { listeners[event] = handler; },
       dispatchEvent: (event) => listeners[event.type]?.(event),
-      click() { if (!this.disabled) return listeners.click?.(); }, focus() {} };
+      click() { if (!this.disabled) return listeners.click?.(); },
+      focus() {
+        if (document.activeElement === this) return;
+        const previous = document.activeElement;
+        document.activeElement = this;
+        previous?.dispatchEvent({ type: 'blur' });
+      } };
   }
-  const document = { createElement: node, getElementById: (id) => { if (!nodes.has(id)) nodes.set(id, node()); return nodes.get(id); } };
+  const document = { activeElement: null, createElement: node, getElementById: (id) => { if (!nodes.has(id)) nodes.set(id, Object.assign(node(), { id })); return nodes.get(id); } };
   let aliases = initial.aliases || {};
   let modelIds = initial.modelIds || [];
+  let locale = initial.locale;
+  const t = key => locale ? i18n.translate(locale, key) : key;
   document.getElementById('modelAliasesForm').classList.add('hidden');
-  const form = createModelAliasForm({ document, t: (key) => key, getAliases: () => aliases, getModelIds: () => modelIds, saveAliases: async (value) => { if (save) await save(value); aliases = normalizeModelAliases(value); } });
+  const form = createModelAliasForm({ document, t, getAliases: () => aliases, getModelIds: () => modelIds, saveAliases: async (value) => { if (save) await save(value); aliases = normalizeModelAliases(value); } });
   const get = (suffix) => document.getElementById(`modelAliases${suffix}`);
-  const select = (suffix, id) => { get(`${suffix}Select`).value = id === null ? '__manual__' : `model:${id}`; get(`${suffix}Select`).dispatchEvent({ type: 'change' }); };
+  const select = (suffix, id) => { get(`${suffix}Select`).focus(); get(`${suffix}Select`).value = id === null ? '__manual__' : `model:${id}`; get(`${suffix}Select`).dispatchEvent({ type: 'change' }); };
   const manual = (suffix, id) => { select(suffix, null); get(`${suffix}Input`).value = id; };
   const extra = (index = 0) => {
     const row = get('MoreSources').children[index];
-    return { select: row.children[0].children[1], input: row.children[0].children[2], remove: row.children[1] };
+    return { label: row.children[0].children[0], select: row.children[0].children[1], input: row.children[0].children[2], remove: row.children[1] };
   };
-  return { form, get, select, manual, extra, aliases: () => aliases, updateModels: (ids) => { modelIds = ids; form.syncSettings(); } };
+  return { form, get, select, manual, extra, aliases: () => aliases,
+    updateModels: (ids) => { modelIds = ids; form.syncSettings(); },
+    updateLocale: next => { locale = next; form.syncSettings(); } };
 }
 
 test('alias editor adds, edits and removes a persisted mapping', async () => {
@@ -65,8 +76,66 @@ test('invalid form and failed persistence keep the existing mapping and expose a
   assert.deepEqual(f.aliases(), {});
 });
 
-test('model choices include raw usage, saved aliases and custom-priced IDs without invalid or duplicate options', () => {
+test('model choices merge supplied IDs with saved aliases without invalid or duplicate options', () => {
   assert.deepEqual(modelAliasChoices(['raw/id', 'raw/id', 'priced-only', '', null, 'x'.repeat(257)], { saved: 'target' }), ['priced-only', 'raw/id', 'saved', 'target']);
+});
+
+test('choice refresh waits for a focused picker to blur and leaves unchanged options intact', () => {
+  const f = fixture(null, { modelIds: ['raw/a', 'target'] });
+  f.get('AddButton').click();
+  f.select('Alias', 'raw/a');
+  const select = f.get('AliasSelect');
+  const original = select.children.slice();
+  f.updateModels(['raw/a', 'new/id', 'target']);
+  f.updateModels(['raw/a', 'new/id', 'latest/id', 'target']);
+  assert.deepEqual(select.children, original);
+  assert.equal(select.value, 'model:raw/a');
+  f.get('CancelButton').focus();
+  assert.ok(select.children.some(option => option.value === 'model:latest/id'));
+  assert.ok(select.children.some(option => option.value === 'model:new/id'));
+  assert.equal(select.value, 'model:raw/a');
+  const refreshed = select.children.slice();
+  f.form.syncSettings();
+  assert.deepEqual(select.children, refreshed);
+});
+
+test('static and extra captions follow the selected or manual control with unique row IDs', () => {
+  const f = fixture(null, { modelIds: ['a', 'target'] });
+  f.get('AddButton').click();
+  for (const suffix of ['Alias', 'Canonical']) {
+    assert.equal(f.get(`${suffix}Label`).for, f.get(`${suffix}Select`).id);
+    f.manual(suffix, 'draft');
+    assert.equal(f.get(`${suffix}Label`).for, f.get(`${suffix}Input`).id);
+    f.select(suffix, suffix === 'Alias' ? 'a' : 'target');
+    assert.equal(f.get(`${suffix}Label`).for, f.get(`${suffix}Select`).id);
+  }
+  f.get('AddSourceButton').click();
+  const first = f.extra();
+  assert.equal(first.label.for, first.select.id);
+  first.select.value = '__manual__';
+  first.select.dispatchEvent({ type: 'change' });
+  assert.equal(first.label.for, first.input.id);
+  first.remove.click();
+  f.get('AddSourceButton').click();
+  assert.notEqual(f.extra().select.id, first.select.id);
+  assert.notEqual(f.extra().input.id, first.input.id);
+});
+
+test('language changes refresh existing extra row text and accessible names without changing drafts', () => {
+  const f = fixture(null, { locale: 'en' });
+  f.get('AddButton').click();
+  f.get('AddSourceButton').click();
+  const extra = f.extra();
+  extra.select.value = '__manual__';
+  extra.select.dispatchEvent({ type: 'change' });
+  extra.input.value = 'custom/draft';
+  f.updateLocale('zh-CN');
+  assert.equal(extra.label.textContent, i18n.translate('zh-CN', 'settings.modelAliases.alias'));
+  assert.equal(extra.remove.textContent, i18n.translate('zh-CN', 'settings.modelAliases.remove'));
+  assert.equal(extra.input['aria-label'], i18n.translate('zh-CN', 'settings.modelAliases.alias'));
+  assert.equal(extra.select.children.at(-1).textContent, i18n.translate('zh-CN', 'settings.customPricing.manualEntry'));
+  assert.equal(extra.input.value, 'custom/draft');
+  assert.equal(extra.select.value, '__manual__');
 });
 
 test('selectors and manual entry can save multiple aliases to the same target', async () => {

@@ -6652,12 +6652,12 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   margin-top: 8px;
 }
 
-.model-alias-form label { display: grid; gap: 4px; min-width: 0; }
+.model-alias-field { display: grid; gap: 4px; min-width: 0; }
 .model-alias-form input,
 .model-alias-form select { width: 100%; min-width: 0; box-sizing: border-box; }
 .model-alias-form .model-alias-form { margin-top: 0; }
 .model-alias-source { display: flex; align-items: end; gap: 8px; }
-.model-alias-source label { flex: 1; }
+.model-alias-source .model-alias-field { flex: 1; }
 .model-alias-source button { flex: 0 0 auto; }
 
 

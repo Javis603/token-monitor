@@ -12,17 +12,26 @@
     let displayed;
     let editSnapshot;
     let busy = false;
+    let sourceId = 0;
     const extraSources = [];
     const choices = () => aliasesApi.modelAliasChoices(getModelIds(), getAliases());
-    function picker(select, input, label) {
-      select.setAttribute('aria-label', t(label));
-      input.setAttribute('aria-label', t(label));
+    function picker(select, input, label, caption) {
+      function translate() {
+        caption.textContent = t(label);
+        select.setAttribute('aria-label', t(label));
+        input.setAttribute('aria-label', t(label));
+      }
+      function syncMode() {
+        const manual = select.value === '__manual__';
+        input.classList.toggle('hidden', !manual);
+        caption.setAttribute('for', manual ? input.id : select.id);
+      }
+      translate();
       let optionsKey;
       const currentOptionsKey = () => JSON.stringify([choices(), t('settings.customPricing.selectModel'), t('settings.customPricing.manualEntry'), t(label)]);
       const value = () => select.value === '__manual__' ? input.value : select.value.slice(6);
       function populate(id, manual = false) {
-        select.setAttribute('aria-label', t(label));
-        input.setAttribute('aria-label', t(label));
+        translate();
         const ids = choices();
         optionsKey = currentOptionsKey();
         select.replaceChildren();
@@ -37,54 +46,62 @@
         option('__manual__', t('settings.customPricing.manualEntry'));
         select.value = manual || (id && !ids.includes(id)) ? '__manual__' : id ? `model:${id}` : '';
         input.value = id;
-        input.classList.toggle('hidden', select.value !== '__manual__');
+        syncMode();
       }
       select.addEventListener('change', () => {
-        input.classList.toggle('hidden', select.value !== '__manual__');
+        syncMode();
         if (select.value === '__manual__') input.focus();
         error('');
       });
+      function refresh(blurred = false) {
+        translate();
+        // Native select popups close when options are replaced. Apply pending
+        // choices on blur so live collection does not interrupt a selection.
+        if (busy || (!blurred && document.activeElement === select) || optionsKey === currentOptionsKey()) return;
+        const draft = input.value;
+        const manual = select.value === '__manual__';
+        populate(value(), manual);
+        if (manual || select.value !== '__manual__') input.value = draft;
+      }
+      select.addEventListener('blur', () => refresh(true));
       return {
-        value, populate, select, input,
-        refresh: () => {
-          if (optionsKey === currentOptionsKey()) return;
-          const draft = input.value;
-          const manual = select.value === '__manual__';
-          populate(value(), manual);
-          if (manual || select.value !== '__manual__') input.value = draft;
-        },
+        value, populate, select, input, refresh,
         focus: () => (select.value === '__manual__' ? input : select).focus()
       };
     }
-    const aliasPicker = picker(el('AliasSelect'), el('AliasInput'), 'settings.modelAliases.alias');
-    const canonicalPicker = picker(el('CanonicalSelect'), el('CanonicalInput'), 'settings.modelAliases.canonical');
+    const aliasPicker = picker(el('AliasSelect'), el('AliasInput'), 'settings.modelAliases.alias', el('AliasLabel'));
+    const canonicalPicker = picker(el('CanonicalSelect'), el('CanonicalInput'), 'settings.modelAliases.canonical', el('CanonicalLabel'));
     const allPickers = () => [aliasPicker, ...extraSources.map(source => source.picker), canonicalPicker];
     function addSource() {
       if (busy) return;
       const row = document.createElement('div');
       row.className = 'model-alias-source';
-      const label = document.createElement('label');
-      const title = document.createElement('span');
-      title.textContent = t('settings.modelAliases.alias');
+      const field = document.createElement('div');
+      field.className = 'model-alias-field';
+      const title = document.createElement('label');
       title.setAttribute('data-i18n', 'settings.modelAliases.alias');
       const select = document.createElement('select');
       const input = document.createElement('input');
+      const id = `modelAliasesSource${++sourceId}`;
+      select.id = `${id}Select`;
+      input.id = `${id}Input`;
       input.type = 'text';
       input.maxLength = 256;
       input.spellcheck = false;
       input.placeholder = el('AliasInput').placeholder;
-      label.append(title, select, input);
+      field.append(title, select, input);
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.textContent = t('settings.modelAliases.remove');
-      const source = { row, picker: picker(select, input, 'settings.modelAliases.alias'), remove };
+      remove.setAttribute('data-i18n', 'settings.modelAliases.remove');
+      const source = { row, picker: picker(select, input, 'settings.modelAliases.alias', title), remove };
       remove.addEventListener('click', () => {
         if (busy) return;
         extraSources.splice(extraSources.indexOf(source), 1);
         row.remove();
         el('AddSourceButton').focus();
       });
-      row.append(label, remove);
+      row.append(field, remove);
       extraSources.push(source);
       el('MoreSources').append(row);
       source.picker.populate('');
@@ -134,6 +151,10 @@
       }
     }
     function render() {
+      for (const source of extraSources) {
+        source.remove.textContent = t('settings.modelAliases.remove');
+        source.picker.input.placeholder = el('AliasInput').placeholder;
+      }
       if (!busy && !el('Form').classList.contains('hidden')) {
         for (const field of allPickers()) field.refresh();
       }
