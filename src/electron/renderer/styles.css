@@ -33,11 +33,16 @@
   --success: #b7ead4;
   --success-rgb: 183, 234, 212;
   --number: #f3fbf7;
-  /* Semantic blue, exposed as a triplet so the trend line and its area fill can
-     share one hue (and match the blue heatmap ramp) instead of the fill borrowing
-     the customisable --accent. */
+  /* Informational blue stays independent from custom chart colours. */
   --blue-rgb: 115, 189, 245;
   --blue: rgb(var(--blue-rgb));
+  --chart-rgb: 115, 189, 245;
+  --chart-color: rgb(var(--chart-rgb));
+  --chart-bar: #6ab4f0;
+  --chart-heat-1-rgb: 90, 170, 255;
+  --chart-heat-2-rgb: 120, 190, 255;
+  --chart-heat-3-rgb: 150, 210, 255;
+  --chart-heat-4-rgb: 180, 230, 255;
   --orange: #f4a073;
   --purple: #b394f4;
   --yellow: #f1d973;
@@ -3741,14 +3746,14 @@ html.is-windows .settings-panel select option {
   fill: url(#area-line-grad);
 }
 .area-line-grad-top {
-  stop-color: rgba(var(--blue-rgb), 0.22);
+  stop-color: rgba(var(--chart-rgb), 0.22);
 }
 .area-line-grad-bottom {
-  stop-color: rgba(var(--blue-rgb), 0);
+  stop-color: rgba(var(--chart-rgb), 0);
 }
 .area-line-stroke {
   fill: none;
-  stroke: var(--blue);
+  stroke: var(--chart-color);
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -3851,16 +3856,16 @@ html.is-windows .settings-panel select option {
   opacity: 1;
 }
 .home-activity-canvas .heat.lvl-1 {
-  fill: rgba(90, 170, 255, 0.18);
+  fill: rgba(var(--chart-heat-1-rgb), 0.18);
 }
 .home-activity-canvas .heat.lvl-2 {
-  fill: rgba(120, 190, 255, 0.45);
+  fill: rgba(var(--chart-heat-2-rgb), 0.45);
 }
 .home-activity-canvas .heat.lvl-3 {
-  fill: rgba(150, 210, 255, 0.8);
+  fill: rgba(var(--chart-heat-3-rgb), 0.8);
 }
 .home-activity-canvas .heat.lvl-4 {
-  fill: rgba(180, 230, 255, 1);
+  fill: rgba(var(--chart-heat-4-rgb), 1);
 }
 .home-activity-canvas .heat-bright {
   fill: rgba(var(--overlay-rgb), 0.12);
@@ -6451,14 +6456,14 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .trends-spark:hover { background: rgba(var(--overlay-rgb), 0.05); }
 .trends-spark .sparkline { width: 100%; height: 100%; display: block; }
 .trends-spark .spark-bar {
-  fill: #6ab4f0;
+  fill: var(--chart-bar);
   opacity: 0.5;
   transform-box: fill-box;
   transform-origin: bottom center;
 }
 .trends-spark .spark-bar--last { opacity: 1; }
 .trends-spark .spark-zero-marker {
-  stroke: #6ab4f0;
+  stroke: var(--chart-bar);
   stroke-width: 1;
   opacity: 0.24;
   pointer-events: stroke;
