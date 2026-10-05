@@ -1,3 +1,5 @@
+import { buildLiveActivityContentState, normalizeLiveActivityRegistration } from './shared/liveActivity.js';
+import { createLiveActivityPushClient } from './liveActivityPush.js';
 import { publicLimits } from './shared/limits/core.js';
 import subscriptionDisplay from './shared/subscriptionDisplay.js';
 import currency from './shared/currency.js';
@@ -102,6 +104,15 @@ export class HubDO {
     this.broadcastTimer = null;
     this.lastSseContentKey = '';
     this.encoder = new TextEncoder();
+    this.apns = createLiveActivityPushClient({ env });
+    const configuredMinInterval = Number(env?.TOKEN_MONITOR_APNS_MIN_INTERVAL_MS);
+    this.apnsMinIntervalMs = Number.isFinite(configuredMinInterval)
+      ? Math.max(0, configuredMinInterval)
+      : 15000;
+    this.liveActivityPushPromise = null;
+    this.liveActivityPushTimer = null;
+    this.lastLiveActivityPushAt = 0;
+    this.liveActivityPushPending = false;
     this.mutationTail = Promise.resolve();
     this.titlePrivacyServerEnabled = null;
     this.titlePrivacyCleanup = null;
@@ -263,6 +274,84 @@ export class HubDO {
     return stats;
   }
 
+  async listLiveActivities() {
+    const entries = await this.state.storage.list({ prefix: 'activity:' });
+    return Array.from(entries.values());
+  }
+
+  async registerLiveActivity(input) {
+    const registration = normalizeLiveActivityRegistration(input);
+    // Re-registering the same token can change preferences within one millisecond.
+    // A late APNs result belongs to this exact stored registration, not its token.
+    registration.registrationID = crypto.randomUUID();
+    await this.mutate(() => this.state.storage.put(`activity:${registration.activityID}`, registration));
+    this.scheduleLiveActivityPush();
+    return registration;
+  }
+
+  async unregisterLiveActivity(activityID) {
+    const key = `activity:${String(activityID || '').trim()}`;
+    await this.mutate(() => this.state.storage.delete(key));
+  }
+
+  keepAlive(promise) {
+    if (typeof this.state.waitUntil === 'function') this.state.waitUntil(promise);
+  }
+
+  scheduleLiveActivityPush() {
+    if (!this.apns.enabled) return;
+    this.liveActivityPushPending = true;
+    if (this.liveActivityPushPromise || this.liveActivityPushTimer) return;
+    const waitMs = Math.max(0, this.lastLiveActivityPushAt + this.apnsMinIntervalMs - Date.now());
+    // Hold the entire delay + dispatch + cleanup chain in the DO lifetime.
+    this.liveActivityPushPromise = new Promise((resolve) => {
+      this.liveActivityPushTimer = setTimeout(() => {
+        this.liveActivityPushTimer = null;
+        resolve();
+      }, waitMs);
+    }).then(async () => {
+      this.liveActivityPushPending = false;
+      this.lastLiveActivityPushAt = Date.now();
+      await this.pushLiveActivityStats(await this.getStats());
+    }).catch((error) => {
+      console.warn(`ActivityKit push update failed: ${error.message}`);
+    }).finally(() => {
+      this.liveActivityPushPromise = null;
+      if (this.liveActivityPushPending) this.scheduleLiveActivityPush();
+    });
+    this.keepAlive(this.liveActivityPushPromise);
+  }
+
+  async pushLiveActivityStats(stats) {
+    const registrations = await this.listLiveActivities();
+    if (!registrations.length || !this.apns.enabled) return;
+    const results = await Promise.allSettled(registrations.map(async (registration) => {
+      if (registration.preferences?.liveActivityEnabled === false) {
+        return { registration, result: null };
+      }
+      const state = buildLiveActivityContentState(stats, registration);
+      const result = await this.apns.send(registration.token, state);
+      return { registration, result };
+    }));
+    for (const outcome of results) {
+      if (outcome.status === 'rejected') {
+        console.warn(`ActivityKit push update failed: ${outcome.reason?.message || 'transport error'}`);
+        continue;
+      }
+      const { registration, result } = outcome.value;
+      if (!result?.invalid) continue;
+      await this.mutate(async () => {
+        const key = `activity:${registration.activityID}`;
+        const current = await this.state.storage.get(key);
+        if (current?.token === registration.token
+          && current?.registeredAt === registration.registeredAt
+          && current?.registrationID === registration.registrationID) {
+          await this.state.storage.delete(key);
+        }
+      });
+    }
+  }
+
   ensureHeartbeat() {
     if (this.heartbeatTimer || this.sseClients.size === 0) return;
     this.heartbeatTimer = setInterval(() => {
@@ -352,6 +441,7 @@ export class HubDO {
         hubBuild: hubBuildIdentity.currentHubBuild('cloudflare-worker'),
         deviceCount: devices.length,
         secretRequired: Boolean(this.secret),
+        liveActivityPushEnabled: Boolean(this.apns.enabled),
         now: new Date().toISOString()
       }, {}, request);
     }
@@ -423,6 +513,36 @@ export class HubDO {
       return jsonResponse(200, aggregateHistory(devices), {}, request);
     }
 
+    if (request.method === 'POST' && url.pathname === '/api/live-activities/register') {
+      let payload;
+      try { payload = await request.json(); }
+      catch (error) { return jsonResponse(400, { error: 'bad_request', message: error.message }); }
+      try {
+        const registration = await this.registerLiveActivity(payload);
+        return jsonResponse(200, {
+          ok: true,
+          activityID: registration.activityID,
+          pushEnabled: Boolean(this.apns.enabled)
+        });
+      } catch (error) {
+        if (error.message === 'invalid_live_activity_registration') {
+          return jsonResponse(400, { error: error.message });
+        }
+        throw error;
+      }
+    }
+
+    if (request.method === 'DELETE' && url.pathname.startsWith('/api/live-activities/')) {
+      let activityID;
+      try { activityID = decodeURIComponent(url.pathname.slice('/api/live-activities/'.length)); }
+      catch (_) { return jsonResponse(400, { error: 'invalid_live_activity_id' }); }
+      if (!/^[A-Za-z0-9_-]{1,128}$/.test(activityID)) {
+        return jsonResponse(400, { error: 'invalid_live_activity_id' });
+      }
+      await this.unregisterLiveActivity(activityID);
+      return jsonResponse(200, { ok: true, activityID });
+    }
+
     if (request.method === 'GET' && url.pathname === '/api/stats/stream') {
       const stats = await this.statsWithSubscriptionVersion();
       const { readable, writable } = new TransformStream();
@@ -463,6 +583,7 @@ export class HubDO {
         return next;
       });
       this.queueBroadcast();
+      this.scheduleLiveActivityPush();
       const response = { ok: true, deviceId: record.deviceId };
       return jsonResponse(
         200,
@@ -535,6 +656,7 @@ export class HubDO {
         await storage.delete(`dev:${deviceId}`);
       }));
       this.broadcast('delete').catch(() => {});
+      this.scheduleLiveActivityPush();
       return jsonResponse(200, { ok: true, deviceId });
     }
 

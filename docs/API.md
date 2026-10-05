@@ -20,6 +20,49 @@ X-Token-Monitor-Secret: <secret>
 
 The Node hub is header-only. The Cloudflare Worker still accepts `?secret=` as a limited compatibility / migration path for iOS widget runtimes that cannot set `Authorization`. A secret in the URL can appear in proxy, platform, and history logs; new clients should send a header.
 
+## `POST /api/live-activities/register`
+
+Registers an iOS ActivityKit push token with the authenticated Hub. The token
+is stored as private Hub state and is never included in `/api/stats` or device
+records. The Hub uses the registered presentation preferences to construct the
+ActivityKit `content-state` payload when new usage data arrives.
+
+Example payload:
+
+```json
+{
+  "activityID": "7C4D9D4A-0A57-4E7A-AF7B-4A2D5C3A0D8F",
+  "token": "<hex ActivityKit push token>",
+  "locale": "zh-Hant",
+  "preferences": {
+    "liveActivityEnabled": true,
+    "livePrimaryMetric": "tokens",
+    "livePeriod": "today",
+    "liveShowsSecondaryMetric": true,
+    "liveShowsProgress": true,
+    "liveCompactTrailingField": "primary",
+    "liveExpandedLeadingField": "provider",
+    "liveExpandedCenterField": "primary",
+    "liveExpandedTrailingField": "secondary",
+    "liveExpandedBottomField": "progress",
+    "liveLockScreenPrimaryField": "primary",
+    "liveLockScreenSecondaryField": "secondary",
+    "liveLockScreenBottomField": "progress",
+    "currencyCode": "USD",
+    "languageCode": "auto"
+  }
+}
+```
+
+A successful registration returns `{ "ok": true, "activityID": "…", "pushEnabled": true }`. `pushEnabled` reports whether the Hub has APNs configuration; it does not confirm delivery. Registering the same activity ID replaces its token and presentation preferences. Activity IDs must contain 1–128 ASCII letters, digits, underscores or hyphens; tokens must be even-length hexadecimal strings of 32–4096 characters. Malformed registrations return `400`. Node applies the same request-body limit as ingest and returns `413` when exceeded.
+
+Both backends coalesce remote updates independently of SSE connections, send the latest snapshot at dispatch and serialize batches. Invalid APNs tokens are removed only if that registration has not been replaced. Network failures leave registrations available for the next data update.
+
+## `DELETE /api/live-activities/{activityID}`
+
+Removes a previously registered ActivityKit push token. The iOS app calls this
+when the Live Activity is disabled or ended.
+
 ## `GET /api/health`
 
 Health check. Does not require authentication.
@@ -42,6 +85,7 @@ Example response:
   },
   "deviceCount": 2,
   "secretRequired": true,
+  "liveActivityPushEnabled": true,
   "now": "2026-05-18T00:00:00.000Z"
 }
 ```

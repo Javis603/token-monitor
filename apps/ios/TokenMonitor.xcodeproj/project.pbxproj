@@ -1,0 +1,1099 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		014B39BA70826BD1E946E54A /* DeviceListCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0202B69BD46AFA44BDFD05B /* DeviceListCard.swift */; };
+		01942276D4783199323D77C2 /* SurfaceCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3178094369BAA5B3858309E4 /* SurfaceCard.swift */; };
+		048DF6E785B24302B735041C /* SSEDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = C86AF8B6020FC392B8CD9AB7 /* SSEDecoder.swift */; };
+		06013428F8C212F797CD3D88 /* TokenMonitorApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17E754338B27452B51451EDD /* TokenMonitorApp.swift */; };
+		0D7E3E509162FF7FFECE2970 /* Date+Hub.swift in Sources */ = {isa = PBXBuildFile; fileRef = 018B7CE8DB6ACDBED2F6C8B8 /* Date+Hub.swift */; };
+		120000000000000000000001 /* Date+RelativeUpdate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000001 /* Date+RelativeUpdate.swift */; };
+		120000000000000000000002 /* TokenMonitorSharedPayload+Hub.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000002 /* TokenMonitorSharedPayload+Hub.swift */; };
+		120000000000000000000003 /* AppAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000003 /* AppAppearance.swift */; };
+		120000000000000000000004 /* AppPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000004 /* AppPreferences.swift */; };
+		120000000000000000000005 /* LiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000005 /* LiveActivityController.swift */; };
+		120000000000000000000006 /* SystemSurfaceCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000006 /* SystemSurfaceCoordinator.swift */; };
+		120000000000000000000007 /* SharedSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000007 /* SharedSnapshotStore.swift */; };
+		120000000000000000000008 /* TokenMonitorActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000008 /* TokenMonitorActivityAttributes.swift */; };
+		120000000000000000000009 /* TokenMonitorSharedPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000009 /* TokenMonitorSharedPayload.swift */; };
+		12000000000000000000000A /* BreakdownItem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000000A /* BreakdownItem.swift */; };
+		12000000000000000000000B /* ActivityHeatmap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000000B /* ActivityHeatmap.swift */; };
+		12000000000000000000000C /* HeatmapModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000000C /* HeatmapModel.swift */; };
+		12000000000000000000000D /* SharedAssets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000000D /* SharedAssets.xcassets */; };
+		120000000000000000000011 /* WidgetContentOption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000011 /* WidgetContentOption.swift */; };
+		120000000000000000000012 /* WidgetPeriodOption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000012 /* WidgetPeriodOption.swift */; };
+		120000000000000000000013 /* WidgetVisibilityOption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000013 /* WidgetVisibilityOption.swift */; };
+		120000000000000000000014 /* ProviderEntity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000014 /* ProviderEntity.swift */; };
+		120000000000000000000015 /* TokenMonitorWidgetIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000015 /* TokenMonitorWidgetIntent.swift */; };
+		120000000000000000000016 /* WidgetPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000016 /* WidgetPresentation.swift */; };
+		120000000000000000000017 /* TokenMonitorWidgetEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000017 /* TokenMonitorWidgetEntry.swift */; };
+		120000000000000000000018 /* TokenMonitorWidgetProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000018 /* TokenMonitorWidgetProvider.swift */; };
+		120000000000000000000019 /* TokenMonitorWidgetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000019 /* TokenMonitorWidgetView.swift */; };
+		12000000000000000000001A /* TokenMonitorWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001A /* TokenMonitorWidget.swift */; };
+		12000000000000000000001B /* TokenMonitorActivityWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001B /* TokenMonitorActivityWidget.swift */; };
+		12000000000000000000001C /* TokenMonitorWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001C /* TokenMonitorWidgets.swift */; };
+		12000000000000000000001D /* SharedSnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000007 /* SharedSnapshotStore.swift */; };
+		12000000000000000000001E /* TokenMonitorActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000008 /* TokenMonitorActivityAttributes.swift */; };
+		12000000000000000000001F /* TokenMonitorSharedPayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000009 /* TokenMonitorSharedPayload.swift */; };
+		120000000000000000000020 /* SharedAssets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 11000000000000000000000D /* SharedAssets.xcassets */; };
+		120000000000000000000021 /* TokenMonitorWidgets.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 11000000000000000000001F /* TokenMonitorWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		120000000000000000000030 /* AppPreferencesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000030 /* AppPreferencesTests.swift */; };
+		120000000000000000000031 /* HeatmapModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000031 /* HeatmapModelTests.swift */; };
+		120000000000000000000032 /* SharedSnapshotStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000032 /* SharedSnapshotStoreTests.swift */; };
+		120000000000000000000033 /* AppCurrency.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000033 /* AppCurrency.swift */; };
+		120000000000000000000034 /* AppLanguage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000034 /* AppLanguage.swift */; };
+		120000000000000000000035 /* BreakdownDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000035 /* BreakdownDetailView.swift */; };
+		120000000000000000000036 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000036 /* Localizable.xcstrings */; };
+		120000000000000000000037 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000036 /* Localizable.xcstrings */; };
+		120000000000000000000040 /* WidgetSurfacePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000040 /* WidgetSurfacePreview.swift */; };
+		120000000000000000000041 /* LiveActivitySurfacePreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110000000000000000000041 /* LiveActivitySurfacePreview.swift */; };
+		13188ADE465A1882B8A28721 /* LimitsSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90A266099249876C9E03A203 /* LimitsSummary.swift */; };
+		16D725EDE9E50EADC84ECB77 /* HubStatsDecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63A39C521B2429E690FA44A8 /* HubStatsDecodingTests.swift */; };
+		16DC547A7773B3E4AB91F3F8 /* UsagePeriod.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F1C49F9A70D0608FE003A34 /* UsagePeriod.swift */; };
+		183A37778D52EAC8012DC58B /* TokenMonitorStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59CB045CAB567B9AB46ECCFB /* TokenMonitorStore.swift */; };
+		1A1B4834A5FAE1CAC0BB22CA /* CreditsMeterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A587C66837238C4A5784FF24 /* CreditsMeterTests.swift */; };
+		21374BF9412C4E972DB9552F /* UsageHistory+Sample.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A3F88B5E02BC6DBA3888A63 /* UsageHistory+Sample.swift */; };
+		2768BC3E922E465D4246A209 /* HistorySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B111953CF5AF356A58AD413 /* HistorySummary.swift */; };
+		29FD242BD5E2C2DA64BBBC9A /* OverviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CFAC75BE4F19FEA45D7EA4E /* OverviewView.swift */; };
+		33E3F65BD6F3A38824EA7C25 /* BreakdownKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CC723D8B8E73CDA9A5F0549 /* BreakdownKind.swift */; };
+		357B8F52D774DBA721670D4E /* LimitsSummaryHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = E302C20CC1E98211DAFECD0A /* LimitsSummaryHeader.swift */; };
+		3D30B2712EED04170164F305 /* HubStats.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B4D1FC26409F9A599A44CA8 /* HubStats.swift */; };
+		41F77693A7793A94B5BAB359 /* UsageHistory.swift in Sources */ = {isa = PBXBuildFile; fileRef = E83CA979BC52ACD6A31B0A2F /* UsageHistory.swift */; };
+		4354798727C8AF4FF4560240 /* LimitWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9143856A90ADED92E26DA6EB /* LimitWindow.swift */; };
+		467B1D6E455937747519FE39 /* ProviderPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2185651F29A70E12A064FF39 /* ProviderPresentation.swift */; };
+		480B0BB9B4F6C641D8A9AFBE /* ConnectionSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = C157BAD5E58891D80FA93120 /* ConnectionSettings.swift */; };
+		4C4688FA5BB7F5587D316D97 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C372F3CDA4D1B85A28E4739 /* DesignTokens.swift */; };
+		5170C46D91407453349C1BAC /* InsightTrendCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D404C9513DA568EC7D251189 /* InsightTrendCard.swift */; };
+		55749DD2E0B2D9C28F9387C4 /* HubClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C00DE85A3A375454A3973A75 /* HubClient.swift */; };
+		55AA95620B673CE4EE5BD4BD /* DeviceSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F17C2BBD25309E790584A34 /* DeviceSnapshot.swift */; };
+		55B1022106F8EC26914EF6BC /* ClientPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EF18F43A1A5C5F160C1FF56 /* ClientPresentation.swift */; };
+		5CC6231F1A769FBA334174E9 /* ConnectionPhase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D746A8507967FF0967F96B2 /* ConnectionPhase.swift */; };
+		5CF413FBB2A0E7698D979A0E /* OverviewUnavailableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B3A1BCEA080127053F8A292 /* OverviewUnavailableView.swift */; };
+		5F1B083540EFE28D64C8CA83 /* HubConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2FC1E265F941DC3217AC08F /* HubConfiguration.swift */; };
+		643478983D9CAE8F4BFCDA8C /* InsightMetricCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F292CCD355D6C5D151A0991 /* InsightMetricCard.swift */; };
+		7009D259F2876349EA805820 /* HubStreamEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA9277927F9024B51067B143 /* HubStreamEvent.swift */; };
+		702669D174DD36A2AD2741A5 /* UsageTrendChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4466B84B10AC1986046A1BC9 /* UsageTrendChart.swift */; };
+		812A9011526AC43976E9EE51 /* LimitProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F43B72A681FC31E8DD30576 /* LimitProvider.swift */; };
+		8457C617C5EE23AE73F189A2 /* BreakdownCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FFE7EE75F16179ECE1092E4 /* BreakdownCard.swift */; };
+		85395C770639C11C3F0624A2 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3344AB257C48E4C2CB0B0B01 /* SettingsView.swift */; };
+		856EACD4A4AEF9613B9DE935 /* HubStats+Sample.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20FA5F2729465E56F3D222A7 /* HubStats+Sample.swift */; };
+		8DAB3DA0F9D2DD3B9DCE50D8 /* LimitsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 688BF62BE23B46A2E27A160F /* LimitsView.swift */; };
+		8E7B0990BEBFF6A30CE5E37E /* CompactLimitProviderCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAE084A91B7C302A63ECA11B /* CompactLimitProviderCard.swift */; };
+		907B1838EA879DB20AD723D0 /* UsagePeriodKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17439276EEA562BC9BF20A4A /* UsagePeriodKey.swift */; };
+		938D1AE0E397670880CECED2 /* InsightStatsGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D643293126EA86329465C5C /* InsightStatsGrid.swift */; };
+		97C5BA50B970F1768E24AFE3 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4943BE75BECA1A6ECEFE6F7 /* KeychainStore.swift */; };
+		A6AC339786A0FA6A18ABA432 /* PeriodPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CCFE7E5AB1522533EC5F8C5 /* PeriodPicker.swift */; };
+		A6E9918B2C7373D9325FA53A /* SSEDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A336B133A3DC5726C2FC9E26 /* SSEDecoderTests.swift */; };
+		A848CF51B0B80989A908CF0C /* KeychainError.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9ACB1DD5D847519D67AE761 /* KeychainError.swift */; };
+		A85BF842113836B76D663D15 /* HubClientError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3263CD17AA09D8FD800500C7 /* HubClientError.swift */; };
+		B10800D2676DF408B19DEA2D /* BreakdownList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E18EFA7AE78DE0EB4C876C1 /* BreakdownList.swift */; };
+		BB6FC55D3CA70FD85EFFF1D3 /* SectionHeader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD7D3921C228188DBD97B0F6 /* SectionHeader.swift */; };
+		C8CFD16EF10BAD97C64842DC /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 9680EE6F5D06E8DD04A946F2 /* Assets.xcassets */; };
+		CC349439DBAC95967F46CE72 /* LimitPreviewSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0011336A905F5CC4BE2CBEF9 /* LimitPreviewSection.swift */; };
+		D1E2A87EDA220EFF0B6CADE0 /* DeviceRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6EA2F15DE69A9153C22840B /* DeviceRow.swift */; };
+		D1ED3F79D7ECA56A08967C31 /* MetricFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53CCAE18F706F3BFB1EA04BB /* MetricFormatter.swift */; };
+		D20224BCD6CF7D889FF299CC /* DevicePresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06CB8B9F96081713CA40142A /* DevicePresentation.swift */; };
+		D23305BE47BACA424FB39393 /* AppShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF28F4EBA6B33376D42B87DB /* AppShellView.swift */; };
+		D63AB0C91CD8730B24972660 /* ConnectionBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02A406E897FC40B3FF3918F1 /* ConnectionBadge.swift */; };
+		D6E3ED28AC82F39418BFDEF5 /* HistoryMonth.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB10E7FBD8CCD8046CAAF7EA /* HistoryMonth.swift */; };
+		E24BBA0279AD227C46980112 /* HeroSummaryCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D82C6D49CBFE861A4417A4D6 /* HeroSummaryCard.swift */; };
+		E45C909FBD714649DCC61655 /* AppTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A77229488B0BFC6CCAE0BB5 /* AppTab.swift */; };
+		EADE83C05A6E9A01831D6C1A /* HistoryDay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E4BC91B45C270E40519F8CA /* HistoryDay.swift */; };
+		ED754554A989A56EED7FF1D6 /* TrendMetric.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F090E4E1F835EFAC443688A /* TrendMetric.swift */; };
+		EF929A9613A59121B44719FA /* ProviderLimitCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A198D4E2D18CF0BB636E754 /* ProviderLimitCard.swift */; };
+		F2324E25A6BDBA28CCF21AC8 /* UsageTrendCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E59EBE352FD5F9FC99063596 /* UsageTrendCard.swift */; };
+		F5BA8A378D3659C4916B88DD /* ProviderBalance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 513888980D24576FDAEBC182 /* ProviderBalance.swift */; };
+		F68DD571094490C2A6FA79E6 /* InsightsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A018067FCC84722C201DEF07 /* InsightsView.swift */; };
+		F83ECD92A9CA0ADC965E8B28 /* AppBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34D03DF50064C6F59F2B8E62 /* AppBackground.swift */; };
+		F92A74F53720C14A8DE004A7 /* ProviderMark.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB2E33BFFEA34B817D502FF0 /* ProviderMark.swift */; };
+		FA8FDA0A60C934874BE51844 /* BreakdownEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D2DB1A0AE60BE0653249C10 /* BreakdownEntry.swift */; };
+		FC3B6B26403B8E1339595AAD /* LimitWindowRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 740427D2593A45BA914D2AC6 /* LimitWindowRow.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		160000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 39D47C510AE44B3AF603F06E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 140000000000000000000001;
+			remoteInfo = TokenMonitorWidgets;
+		};
+		51921060918F97018B15CE92 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 39D47C510AE44B3AF603F06E /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2DC308A297ADA89B45462757;
+			remoteInfo = TokenMonitor;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		150000000000000000000001 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				120000000000000000000021 /* TokenMonitorWidgets.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		0011336A905F5CC4BE2CBEF9 /* LimitPreviewSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitPreviewSection.swift; sourceTree = "<group>"; };
+		018B7CE8DB6ACDBED2F6C8B8 /* Date+Hub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Date+Hub.swift"; sourceTree = "<group>"; };
+		02A406E897FC40B3FF3918F1 /* ConnectionBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionBadge.swift; sourceTree = "<group>"; };
+		06CB8B9F96081713CA40142A /* DevicePresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DevicePresentation.swift; sourceTree = "<group>"; };
+		0C372F3CDA4D1B85A28E4739 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
+		0E4BC91B45C270E40519F8CA /* HistoryDay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryDay.swift; sourceTree = "<group>"; };
+		110000000000000000000001 /* Date+RelativeUpdate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Date+RelativeUpdate.swift"; sourceTree = "<group>"; };
+		110000000000000000000002 /* TokenMonitorSharedPayload+Hub.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "TokenMonitorSharedPayload+Hub.swift"; sourceTree = "<group>"; };
+		110000000000000000000003 /* AppAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAppearance.swift; sourceTree = "<group>"; };
+		110000000000000000000004 /* AppPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferences.swift; sourceTree = "<group>"; };
+		110000000000000000000005 /* LiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityController.swift; sourceTree = "<group>"; };
+		110000000000000000000006 /* SystemSurfaceCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSurfaceCoordinator.swift; sourceTree = "<group>"; };
+		110000000000000000000007 /* SharedSnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedSnapshotStore.swift; sourceTree = "<group>"; };
+		110000000000000000000008 /* TokenMonitorActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorActivityAttributes.swift; sourceTree = "<group>"; };
+		110000000000000000000009 /* TokenMonitorSharedPayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorSharedPayload.swift; sourceTree = "<group>"; };
+		11000000000000000000000A /* BreakdownItem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreakdownItem.swift; sourceTree = "<group>"; };
+		11000000000000000000000B /* ActivityHeatmap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityHeatmap.swift; sourceTree = "<group>"; };
+		11000000000000000000000C /* HeatmapModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeatmapModel.swift; sourceTree = "<group>"; };
+		11000000000000000000000D /* SharedAssets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = SharedAssets.xcassets; sourceTree = "<group>"; };
+		11000000000000000000000E /* TokenMonitor.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TokenMonitor.entitlements; sourceTree = "<group>"; };
+		110000000000000000000011 /* WidgetContentOption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetContentOption.swift; sourceTree = "<group>"; };
+		110000000000000000000012 /* WidgetPeriodOption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPeriodOption.swift; sourceTree = "<group>"; };
+		110000000000000000000013 /* WidgetVisibilityOption.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetVisibilityOption.swift; sourceTree = "<group>"; };
+		110000000000000000000014 /* ProviderEntity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderEntity.swift; sourceTree = "<group>"; };
+		110000000000000000000015 /* TokenMonitorWidgetIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorWidgetIntent.swift; sourceTree = "<group>"; };
+		110000000000000000000016 /* WidgetPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPresentation.swift; sourceTree = "<group>"; };
+		110000000000000000000017 /* TokenMonitorWidgetEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorWidgetEntry.swift; sourceTree = "<group>"; };
+		110000000000000000000018 /* TokenMonitorWidgetProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorWidgetProvider.swift; sourceTree = "<group>"; };
+		110000000000000000000019 /* TokenMonitorWidgetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorWidgetView.swift; sourceTree = "<group>"; };
+		11000000000000000000001A /* TokenMonitorWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorWidget.swift; sourceTree = "<group>"; };
+		11000000000000000000001B /* TokenMonitorActivityWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorActivityWidget.swift; sourceTree = "<group>"; };
+		11000000000000000000001C /* TokenMonitorWidgets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorWidgets.swift; sourceTree = "<group>"; };
+		11000000000000000000001D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		11000000000000000000001E /* TokenMonitorWidgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = TokenMonitorWidgets.entitlements; sourceTree = "<group>"; };
+		11000000000000000000001F /* TokenMonitorWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = TokenMonitorWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		110000000000000000000030 /* AppPreferencesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPreferencesTests.swift; sourceTree = "<group>"; };
+		110000000000000000000031 /* HeatmapModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeatmapModelTests.swift; sourceTree = "<group>"; };
+		110000000000000000000032 /* SharedSnapshotStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SharedSnapshotStoreTests.swift; sourceTree = "<group>"; };
+		110000000000000000000033 /* AppCurrency.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCurrency.swift; sourceTree = "<group>"; };
+		110000000000000000000034 /* AppLanguage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLanguage.swift; sourceTree = "<group>"; };
+		110000000000000000000035 /* BreakdownDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreakdownDetailView.swift; sourceTree = "<group>"; };
+		110000000000000000000036 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		110000000000000000000040 /* WidgetSurfacePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSurfacePreview.swift; sourceTree = "<group>"; };
+		110000000000000000000041 /* LiveActivitySurfacePreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivitySurfacePreview.swift; sourceTree = "<group>"; };
+		17439276EEA562BC9BF20A4A /* UsagePeriodKey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePeriodKey.swift; sourceTree = "<group>"; };
+		17E754338B27452B51451EDD /* TokenMonitorApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorApp.swift; sourceTree = "<group>"; };
+		1CFAC75BE4F19FEA45D7EA4E /* OverviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewView.swift; sourceTree = "<group>"; };
+		20FA5F2729465E56F3D222A7 /* HubStats+Sample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HubStats+Sample.swift"; sourceTree = "<group>"; };
+		2185651F29A70E12A064FF39 /* ProviderPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderPresentation.swift; sourceTree = "<group>"; };
+		2B4D1FC26409F9A599A44CA8 /* HubStats.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubStats.swift; sourceTree = "<group>"; };
+		3178094369BAA5B3858309E4 /* SurfaceCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SurfaceCard.swift; sourceTree = "<group>"; };
+		3263CD17AA09D8FD800500C7 /* HubClientError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubClientError.swift; sourceTree = "<group>"; };
+		3344AB257C48E4C2CB0B0B01 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		34D03DF50064C6F59F2B8E62 /* AppBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppBackground.swift; sourceTree = "<group>"; };
+		3A3F88B5E02BC6DBA3888A63 /* UsageHistory+Sample.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UsageHistory+Sample.swift"; sourceTree = "<group>"; };
+		3EF18F43A1A5C5F160C1FF56 /* ClientPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClientPresentation.swift; sourceTree = "<group>"; };
+		3F090E4E1F835EFAC443688A /* TrendMetric.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrendMetric.swift; sourceTree = "<group>"; };
+		3F17C2BBD25309E790584A34 /* DeviceSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceSnapshot.swift; sourceTree = "<group>"; };
+		3F1C49F9A70D0608FE003A34 /* UsagePeriod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsagePeriod.swift; sourceTree = "<group>"; };
+		3F43B72A681FC31E8DD30576 /* LimitProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitProvider.swift; sourceTree = "<group>"; };
+		3FFE7EE75F16179ECE1092E4 /* BreakdownCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreakdownCard.swift; sourceTree = "<group>"; };
+		4466B84B10AC1986046A1BC9 /* UsageTrendChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageTrendChart.swift; sourceTree = "<group>"; };
+		4E18EFA7AE78DE0EB4C876C1 /* BreakdownList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreakdownList.swift; sourceTree = "<group>"; };
+		513888980D24576FDAEBC182 /* ProviderBalance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderBalance.swift; sourceTree = "<group>"; };
+		53CCAE18F706F3BFB1EA04BB /* MetricFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetricFormatter.swift; sourceTree = "<group>"; };
+		59CB045CAB567B9AB46ECCFB /* TokenMonitorStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenMonitorStore.swift; sourceTree = "<group>"; };
+		5CC723D8B8E73CDA9A5F0549 /* BreakdownKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreakdownKind.swift; sourceTree = "<group>"; };
+		5D746A8507967FF0967F96B2 /* ConnectionPhase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionPhase.swift; sourceTree = "<group>"; };
+		63A39C521B2429E690FA44A8 /* HubStatsDecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubStatsDecodingTests.swift; sourceTree = "<group>"; };
+		688BF62BE23B46A2E27A160F /* LimitsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitsView.swift; sourceTree = "<group>"; };
+		6B111953CF5AF356A58AD413 /* HistorySummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistorySummary.swift; sourceTree = "<group>"; };
+		6D643293126EA86329465C5C /* InsightStatsGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightStatsGrid.swift; sourceTree = "<group>"; };
+		740427D2593A45BA914D2AC6 /* LimitWindowRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitWindowRow.swift; sourceTree = "<group>"; };
+		7F292CCD355D6C5D151A0991 /* InsightMetricCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightMetricCard.swift; sourceTree = "<group>"; };
+		8A198D4E2D18CF0BB636E754 /* ProviderLimitCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderLimitCard.swift; sourceTree = "<group>"; };
+		8B3A1BCEA080127053F8A292 /* OverviewUnavailableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverviewUnavailableView.swift; sourceTree = "<group>"; };
+		90A266099249876C9E03A203 /* LimitsSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitsSummary.swift; sourceTree = "<group>"; };
+		9143856A90ADED92E26DA6EB /* LimitWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitWindow.swift; sourceTree = "<group>"; };
+		9680EE6F5D06E8DD04A946F2 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		9A77229488B0BFC6CCAE0BB5 /* AppTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTab.swift; sourceTree = "<group>"; };
+		9CCFE7E5AB1522533EC5F8C5 /* PeriodPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeriodPicker.swift; sourceTree = "<group>"; };
+		9D2DB1A0AE60BE0653249C10 /* BreakdownEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BreakdownEntry.swift; sourceTree = "<group>"; };
+		A018067FCC84722C201DEF07 /* InsightsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightsView.swift; sourceTree = "<group>"; };
+		A2FC1E265F941DC3217AC08F /* HubConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubConfiguration.swift; sourceTree = "<group>"; };
+		A336B133A3DC5726C2FC9E26 /* SSEDecoderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEDecoderTests.swift; sourceTree = "<group>"; };
+		A587C66837238C4A5784FF24 /* CreditsMeterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreditsMeterTests.swift; sourceTree = "<group>"; };
+		AA9277927F9024B51067B143 /* HubStreamEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubStreamEvent.swift; sourceTree = "<group>"; };
+		AAE084A91B7C302A63ECA11B /* CompactLimitProviderCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactLimitProviderCard.swift; sourceTree = "<group>"; };
+		AD8B375339D1B333D2F23612 /* Token Monitor.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Token Monitor.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		AF28F4EBA6B33376D42B87DB /* AppShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellView.swift; sourceTree = "<group>"; };
+		B4943BE75BECA1A6ECEFE6F7 /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
+		C00DE85A3A375454A3973A75 /* HubClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HubClient.swift; sourceTree = "<group>"; };
+		C157BAD5E58891D80FA93120 /* ConnectionSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionSettings.swift; sourceTree = "<group>"; };
+		C86AF8B6020FC392B8CD9AB7 /* SSEDecoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSEDecoder.swift; sourceTree = "<group>"; };
+		CD7D3921C228188DBD97B0F6 /* SectionHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionHeader.swift; sourceTree = "<group>"; };
+		D0202B69BD46AFA44BDFD05B /* DeviceListCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceListCard.swift; sourceTree = "<group>"; };
+		D404C9513DA568EC7D251189 /* InsightTrendCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InsightTrendCard.swift; sourceTree = "<group>"; };
+		D82C6D49CBFE861A4417A4D6 /* HeroSummaryCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HeroSummaryCard.swift; sourceTree = "<group>"; };
+		D9ACB1DD5D847519D67AE761 /* KeychainError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainError.swift; sourceTree = "<group>"; };
+		DB10E7FBD8CCD8046CAAF7EA /* HistoryMonth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryMonth.swift; sourceTree = "<group>"; };
+		E302C20CC1E98211DAFECD0A /* LimitsSummaryHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LimitsSummaryHeader.swift; sourceTree = "<group>"; };
+		E3765AFD2282C06B0C308CDD /* TokenMonitorTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = TokenMonitorTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E59EBE352FD5F9FC99063596 /* UsageTrendCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageTrendCard.swift; sourceTree = "<group>"; };
+		E83CA979BC52ACD6A31B0A2F /* UsageHistory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageHistory.swift; sourceTree = "<group>"; };
+		EB2E33BFFEA34B817D502FF0 /* ProviderMark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderMark.swift; sourceTree = "<group>"; };
+		F6EA2F15DE69A9153C22840B /* DeviceRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceRow.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		0225BB732D7CFD362C137524 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				9D2DB1A0AE60BE0653249C10 /* BreakdownEntry.swift */,
+				3F17C2BBD25309E790584A34 /* DeviceSnapshot.swift */,
+				0E4BC91B45C270E40519F8CA /* HistoryDay.swift */,
+				DB10E7FBD8CCD8046CAAF7EA /* HistoryMonth.swift */,
+				6B111953CF5AF356A58AD413 /* HistorySummary.swift */,
+				2B4D1FC26409F9A599A44CA8 /* HubStats.swift */,
+				20FA5F2729465E56F3D222A7 /* HubStats+Sample.swift */,
+				AA9277927F9024B51067B143 /* HubStreamEvent.swift */,
+				3F43B72A681FC31E8DD30576 /* LimitProvider.swift */,
+				90A266099249876C9E03A203 /* LimitsSummary.swift */,
+				9143856A90ADED92E26DA6EB /* LimitWindow.swift */,
+				513888980D24576FDAEBC182 /* ProviderBalance.swift */,
+				110000000000000000000002 /* TokenMonitorSharedPayload+Hub.swift */,
+				E83CA979BC52ACD6A31B0A2F /* UsageHistory.swift */,
+				3A3F88B5E02BC6DBA3888A63 /* UsageHistory+Sample.swift */,
+				3F1C49F9A70D0608FE003A34 /* UsagePeriod.swift */,
+				17439276EEA562BC9BF20A4A /* UsagePeriodKey.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		06E0F5CCD9F48B22E5CF1AB5 /* State */ = {
+			isa = PBXGroup;
+			children = (
+				110000000000000000000003 /* AppAppearance.swift */,
+				110000000000000000000033 /* AppCurrency.swift */,
+				110000000000000000000034 /* AppLanguage.swift */,
+				110000000000000000000004 /* AppPreferences.swift */,
+				5D746A8507967FF0967F96B2 /* ConnectionPhase.swift */,
+				C157BAD5E58891D80FA93120 /* ConnectionSettings.swift */,
+				110000000000000000000005 /* LiveActivityController.swift */,
+				110000000000000000000006 /* SystemSurfaceCoordinator.swift */,
+				59CB045CAB567B9AB46ECCFB /* TokenMonitorStore.swift */,
+			);
+			path = State;
+			sourceTree = "<group>";
+		};
+		09C15EE9C0B7D0606A17B164 /* TokenMonitorTests */ = {
+			isa = PBXGroup;
+			children = (
+				110000000000000000000030 /* AppPreferencesTests.swift */,
+				A587C66837238C4A5784FF24 /* CreditsMeterTests.swift */,
+				110000000000000000000031 /* HeatmapModelTests.swift */,
+				63A39C521B2429E690FA44A8 /* HubStatsDecodingTests.swift */,
+				A336B133A3DC5726C2FC9E26 /* SSEDecoderTests.swift */,
+				110000000000000000000032 /* SharedSnapshotStoreTests.swift */,
+			);
+			path = TokenMonitorTests;
+			sourceTree = "<group>";
+		};
+		0A878BDE3F10CE3B14F91E54 /* Features */ = {
+			isa = PBXGroup;
+			children = (
+				DA913478CA918FEB2DA29615 /* Insights */,
+				76C75215FF3A559B5D8AD15D /* Limits */,
+				658EA8BF3372544500CE00DA /* Overview */,
+				B5259151C4328942E9A7144F /* Settings */,
+			);
+			path = Features;
+			sourceTree = "<group>";
+		};
+		130000000000000000000001 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				110000000000000000000036 /* Localizable.xcstrings */,
+				11000000000000000000000D /* SharedAssets.xcassets */,
+				110000000000000000000007 /* SharedSnapshotStore.swift */,
+				110000000000000000000008 /* TokenMonitorActivityAttributes.swift */,
+				110000000000000000000009 /* TokenMonitorSharedPayload.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		130000000000000000000002 /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				11000000000000000000001D /* Info.plist */,
+				110000000000000000000014 /* ProviderEntity.swift */,
+				11000000000000000000001B /* TokenMonitorActivityWidget.swift */,
+				11000000000000000000001A /* TokenMonitorWidget.swift */,
+				110000000000000000000017 /* TokenMonitorWidgetEntry.swift */,
+				110000000000000000000015 /* TokenMonitorWidgetIntent.swift */,
+				110000000000000000000018 /* TokenMonitorWidgetProvider.swift */,
+				110000000000000000000019 /* TokenMonitorWidgetView.swift */,
+				11000000000000000000001C /* TokenMonitorWidgets.swift */,
+				11000000000000000000001E /* TokenMonitorWidgets.entitlements */,
+				110000000000000000000011 /* WidgetContentOption.swift */,
+				110000000000000000000012 /* WidgetPeriodOption.swift */,
+				110000000000000000000016 /* WidgetPresentation.swift */,
+				110000000000000000000013 /* WidgetVisibilityOption.swift */,
+			);
+			path = Widgets;
+			sourceTree = "<group>";
+		};
+		130000000000000000000003 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				11000000000000000000000E /* TokenMonitor.entitlements */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		30D07ABCD9FE265545C7FD11 = {
+			isa = PBXGroup;
+			children = (
+				F5BF7D03C052D45A3D1879C1 /* TokenMonitor */,
+				130000000000000000000001 /* Shared */,
+				130000000000000000000002 /* Widgets */,
+				130000000000000000000003 /* Config */,
+				09C15EE9C0B7D0606A17B164 /* TokenMonitorTests */,
+				C0393174A95E8960F25B98D0 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		658EA8BF3372544500CE00DA /* Overview */ = {
+			isa = PBXGroup;
+			children = (
+				AAE084A91B7C302A63ECA11B /* CompactLimitProviderCard.swift */,
+				D0202B69BD46AFA44BDFD05B /* DeviceListCard.swift */,
+				F6EA2F15DE69A9153C22840B /* DeviceRow.swift */,
+				D82C6D49CBFE861A4417A4D6 /* HeroSummaryCard.swift */,
+				0011336A905F5CC4BE2CBEF9 /* LimitPreviewSection.swift */,
+				8B3A1BCEA080127053F8A292 /* OverviewUnavailableView.swift */,
+				1CFAC75BE4F19FEA45D7EA4E /* OverviewView.swift */,
+				E59EBE352FD5F9FC99063596 /* UsageTrendCard.swift */,
+			);
+			path = Overview;
+			sourceTree = "<group>";
+		};
+		76C75215FF3A559B5D8AD15D /* Limits */ = {
+			isa = PBXGroup;
+			children = (
+				E302C20CC1E98211DAFECD0A /* LimitsSummaryHeader.swift */,
+				688BF62BE23B46A2E27A160F /* LimitsView.swift */,
+				740427D2593A45BA914D2AC6 /* LimitWindowRow.swift */,
+				8A198D4E2D18CF0BB636E754 /* ProviderLimitCard.swift */,
+			);
+			path = Limits;
+			sourceTree = "<group>";
+		};
+		77A0AE5C9BD757D21BCCDB54 /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				D9ACB1DD5D847519D67AE761 /* KeychainError.swift */,
+				B4943BE75BECA1A6ECEFE6F7 /* KeychainStore.swift */,
+			);
+			path = Security;
+			sourceTree = "<group>";
+		};
+		7B0EFE762689309F6BEF1D6D /* Presentation */ = {
+			isa = PBXGroup;
+			children = (
+				3EF18F43A1A5C5F160C1FF56 /* ClientPresentation.swift */,
+				06CB8B9F96081713CA40142A /* DevicePresentation.swift */,
+				2185651F29A70E12A064FF39 /* ProviderPresentation.swift */,
+			);
+			path = Presentation;
+			sourceTree = "<group>";
+		};
+		B5259151C4328942E9A7144F /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				110000000000000000000041 /* LiveActivitySurfacePreview.swift */,
+				3344AB257C48E4C2CB0B0B01 /* SettingsView.swift */,
+				110000000000000000000040 /* WidgetSurfacePreview.swift */,
+			);
+			path = Settings;
+			sourceTree = "<group>";
+		};
+		C0393174A95E8960F25B98D0 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AD8B375339D1B333D2F23612 /* Token Monitor.app */,
+				11000000000000000000001F /* TokenMonitorWidgets.appex */,
+				E3765AFD2282C06B0C308CDD /* TokenMonitorTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		CDA66A6363D3DDF9A9C08322 /* Formatting */ = {
+			isa = PBXGroup;
+			children = (
+				018B7CE8DB6ACDBED2F6C8B8 /* Date+Hub.swift */,
+				110000000000000000000001 /* Date+RelativeUpdate.swift */,
+				53CCAE18F706F3BFB1EA04BB /* MetricFormatter.swift */,
+			);
+			path = Formatting;
+			sourceTree = "<group>";
+		};
+		DA913478CA918FEB2DA29615 /* Insights */ = {
+			isa = PBXGroup;
+			children = (
+				11000000000000000000000B /* ActivityHeatmap.swift */,
+				3FFE7EE75F16179ECE1092E4 /* BreakdownCard.swift */,
+				110000000000000000000035 /* BreakdownDetailView.swift */,
+				11000000000000000000000A /* BreakdownItem.swift */,
+				5CC723D8B8E73CDA9A5F0549 /* BreakdownKind.swift */,
+				4E18EFA7AE78DE0EB4C876C1 /* BreakdownList.swift */,
+				11000000000000000000000C /* HeatmapModel.swift */,
+				7F292CCD355D6C5D151A0991 /* InsightMetricCard.swift */,
+				6D643293126EA86329465C5C /* InsightStatsGrid.swift */,
+				A018067FCC84722C201DEF07 /* InsightsView.swift */,
+				D404C9513DA568EC7D251189 /* InsightTrendCard.swift */,
+				3F090E4E1F835EFAC443688A /* TrendMetric.swift */,
+				4466B84B10AC1986046A1BC9 /* UsageTrendChart.swift */,
+			);
+			path = Insights;
+			sourceTree = "<group>";
+		};
+		DC67CF08568D5908CD48CC5F /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				CDA66A6363D3DDF9A9C08322 /* Formatting */,
+				0225BB732D7CFD362C137524 /* Models */,
+				F3EB2A1DD23D40F5BC13F79B /* Networking */,
+				7B0EFE762689309F6BEF1D6D /* Presentation */,
+				77A0AE5C9BD757D21BCCDB54 /* Security */,
+				06E0F5CCD9F48B22E5CF1AB5 /* State */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		E61328BFB3E8256CE5486CE3 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				AF28F4EBA6B33376D42B87DB /* AppShellView.swift */,
+				9A77229488B0BFC6CCAE0BB5 /* AppTab.swift */,
+				17E754338B27452B51451EDD /* TokenMonitorApp.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		F3EB2A1DD23D40F5BC13F79B /* Networking */ = {
+			isa = PBXGroup;
+			children = (
+				C00DE85A3A375454A3973A75 /* HubClient.swift */,
+				3263CD17AA09D8FD800500C7 /* HubClientError.swift */,
+				A2FC1E265F941DC3217AC08F /* HubConfiguration.swift */,
+				C86AF8B6020FC392B8CD9AB7 /* SSEDecoder.swift */,
+			);
+			path = Networking;
+			sourceTree = "<group>";
+		};
+		F581ADA566FCF0C5B91C0ADC /* DesignSystem */ = {
+			isa = PBXGroup;
+			children = (
+				34D03DF50064C6F59F2B8E62 /* AppBackground.swift */,
+				02A406E897FC40B3FF3918F1 /* ConnectionBadge.swift */,
+				0C372F3CDA4D1B85A28E4739 /* DesignTokens.swift */,
+				9CCFE7E5AB1522533EC5F8C5 /* PeriodPicker.swift */,
+				EB2E33BFFEA34B817D502FF0 /* ProviderMark.swift */,
+				CD7D3921C228188DBD97B0F6 /* SectionHeader.swift */,
+				3178094369BAA5B3858309E4 /* SurfaceCard.swift */,
+			);
+			path = DesignSystem;
+			sourceTree = "<group>";
+		};
+		F5BF7D03C052D45A3D1879C1 /* TokenMonitor */ = {
+			isa = PBXGroup;
+			children = (
+				9680EE6F5D06E8DD04A946F2 /* Assets.xcassets */,
+				E61328BFB3E8256CE5486CE3 /* App */,
+				DC67CF08568D5908CD48CC5F /* Core */,
+				F581ADA566FCF0C5B91C0ADC /* DesignSystem */,
+				0A878BDE3F10CE3B14F91E54 /* Features */,
+			);
+			path = TokenMonitor;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		140000000000000000000001 /* TokenMonitorWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 180000000000000000000001 /* Build configuration list for PBXNativeTarget "TokenMonitorWidgets" */;
+			buildPhases = (
+				150000000000000000000002 /* Sources */,
+				150000000000000000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = TokenMonitorWidgets;
+			packageProductDependencies = (
+			);
+			productName = TokenMonitorWidgets;
+			productReference = 11000000000000000000001F /* TokenMonitorWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		2DC308A297ADA89B45462757 /* TokenMonitor */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 579DE5F870294F6962C74C3F /* Build configuration list for PBXNativeTarget "TokenMonitor" */;
+			buildPhases = (
+				DCEDB3D0436B5BC9E3DFF9A9 /* Sources */,
+				70C6416B2FE025874D6FAC25 /* Resources */,
+				150000000000000000000001 /* Embed App Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				190000000000000000000001 /* PBXTargetDependency */,
+			);
+			name = TokenMonitor;
+			packageProductDependencies = (
+			);
+			productName = TokenMonitor;
+			productReference = AD8B375339D1B333D2F23612 /* Token Monitor.app */;
+			productType = "com.apple.product-type.application";
+		};
+		75BEE323A7131358090A2957 /* TokenMonitorTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3DA5E3D19D4B24C7C0EEC853 /* Build configuration list for PBXNativeTarget "TokenMonitorTests" */;
+			buildPhases = (
+				07091336059E0BAA4AEA71E1 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8F0B5CA1612BF396B2109147 /* PBXTargetDependency */,
+			);
+			name = TokenMonitorTests;
+			packageProductDependencies = (
+			);
+			productName = TokenMonitorTests;
+			productReference = E3765AFD2282C06B0C308CDD /* TokenMonitorTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		39D47C510AE44B3AF603F06E /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					140000000000000000000001 = {
+						ProvisioningStyle = Automatic;
+					};
+					2DC308A297ADA89B45462757 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = F6524C134AD0D58A22B71C66 /* Build configuration list for PBXProject "TokenMonitor" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+				ja,
+				ko,
+				"zh-Hans",
+				"zh-Hant",
+			);
+			mainGroup = 30D07ABCD9FE265545C7FD11;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = C0393174A95E8960F25B98D0 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				2DC308A297ADA89B45462757 /* TokenMonitor */,
+				140000000000000000000001 /* TokenMonitorWidgets */,
+				75BEE323A7131358090A2957 /* TokenMonitorTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		150000000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				120000000000000000000037 /* Localizable.xcstrings in Resources */,
+				120000000000000000000020 /* SharedAssets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		70C6416B2FE025874D6FAC25 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C8CFD16EF10BAD97C64842DC /* Assets.xcassets in Resources */,
+				120000000000000000000036 /* Localizable.xcstrings in Resources */,
+				12000000000000000000000D /* SharedAssets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		07091336059E0BAA4AEA71E1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				120000000000000000000030 /* AppPreferencesTests.swift in Sources */,
+				1A1B4834A5FAE1CAC0BB22CA /* CreditsMeterTests.swift in Sources */,
+				120000000000000000000031 /* HeatmapModelTests.swift in Sources */,
+				16D725EDE9E50EADC84ECB77 /* HubStatsDecodingTests.swift in Sources */,
+				A6E9918B2C7373D9325FA53A /* SSEDecoderTests.swift in Sources */,
+				120000000000000000000032 /* SharedSnapshotStoreTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		150000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				120000000000000000000014 /* ProviderEntity.swift in Sources */,
+				12000000000000000000001D /* SharedSnapshotStore.swift in Sources */,
+				12000000000000000000001B /* TokenMonitorActivityWidget.swift in Sources */,
+				12000000000000000000001E /* TokenMonitorActivityAttributes.swift in Sources */,
+				12000000000000000000001A /* TokenMonitorWidget.swift in Sources */,
+				120000000000000000000017 /* TokenMonitorWidgetEntry.swift in Sources */,
+				120000000000000000000015 /* TokenMonitorWidgetIntent.swift in Sources */,
+				120000000000000000000018 /* TokenMonitorWidgetProvider.swift in Sources */,
+				120000000000000000000019 /* TokenMonitorWidgetView.swift in Sources */,
+				12000000000000000000001C /* TokenMonitorWidgets.swift in Sources */,
+				12000000000000000000001F /* TokenMonitorSharedPayload.swift in Sources */,
+				120000000000000000000011 /* WidgetContentOption.swift in Sources */,
+				120000000000000000000012 /* WidgetPeriodOption.swift in Sources */,
+				120000000000000000000016 /* WidgetPresentation.swift in Sources */,
+				120000000000000000000013 /* WidgetVisibilityOption.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DCEDB3D0436B5BC9E3DFF9A9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				12000000000000000000000B /* ActivityHeatmap.swift in Sources */,
+				120000000000000000000003 /* AppAppearance.swift in Sources */,
+				120000000000000000000033 /* AppCurrency.swift in Sources */,
+				120000000000000000000034 /* AppLanguage.swift in Sources */,
+				120000000000000000000004 /* AppPreferences.swift in Sources */,
+				F83ECD92A9CA0ADC965E8B28 /* AppBackground.swift in Sources */,
+				D23305BE47BACA424FB39393 /* AppShellView.swift in Sources */,
+				E45C909FBD714649DCC61655 /* AppTab.swift in Sources */,
+				8457C617C5EE23AE73F189A2 /* BreakdownCard.swift in Sources */,
+				120000000000000000000035 /* BreakdownDetailView.swift in Sources */,
+				FA8FDA0A60C934874BE51844 /* BreakdownEntry.swift in Sources */,
+				12000000000000000000000A /* BreakdownItem.swift in Sources */,
+				33E3F65BD6F3A38824EA7C25 /* BreakdownKind.swift in Sources */,
+				B10800D2676DF408B19DEA2D /* BreakdownList.swift in Sources */,
+				55B1022106F8EC26914EF6BC /* ClientPresentation.swift in Sources */,
+				8E7B0990BEBFF6A30CE5E37E /* CompactLimitProviderCard.swift in Sources */,
+				D63AB0C91CD8730B24972660 /* ConnectionBadge.swift in Sources */,
+				5CC6231F1A769FBA334174E9 /* ConnectionPhase.swift in Sources */,
+				480B0BB9B4F6C641D8A9AFBE /* ConnectionSettings.swift in Sources */,
+				0D7E3E509162FF7FFECE2970 /* Date+Hub.swift in Sources */,
+				120000000000000000000001 /* Date+RelativeUpdate.swift in Sources */,
+				4C4688FA5BB7F5587D316D97 /* DesignTokens.swift in Sources */,
+				014B39BA70826BD1E946E54A /* DeviceListCard.swift in Sources */,
+				D20224BCD6CF7D889FF299CC /* DevicePresentation.swift in Sources */,
+				D1E2A87EDA220EFF0B6CADE0 /* DeviceRow.swift in Sources */,
+				55AA95620B673CE4EE5BD4BD /* DeviceSnapshot.swift in Sources */,
+				E24BBA0279AD227C46980112 /* HeroSummaryCard.swift in Sources */,
+				12000000000000000000000C /* HeatmapModel.swift in Sources */,
+				EADE83C05A6E9A01831D6C1A /* HistoryDay.swift in Sources */,
+				D6E3ED28AC82F39418BFDEF5 /* HistoryMonth.swift in Sources */,
+				2768BC3E922E465D4246A209 /* HistorySummary.swift in Sources */,
+				55749DD2E0B2D9C28F9387C4 /* HubClient.swift in Sources */,
+				A85BF842113836B76D663D15 /* HubClientError.swift in Sources */,
+				5F1B083540EFE28D64C8CA83 /* HubConfiguration.swift in Sources */,
+				856EACD4A4AEF9613B9DE935 /* HubStats+Sample.swift in Sources */,
+				3D30B2712EED04170164F305 /* HubStats.swift in Sources */,
+				7009D259F2876349EA805820 /* HubStreamEvent.swift in Sources */,
+				643478983D9CAE8F4BFCDA8C /* InsightMetricCard.swift in Sources */,
+				938D1AE0E397670880CECED2 /* InsightStatsGrid.swift in Sources */,
+				5170C46D91407453349C1BAC /* InsightTrendCard.swift in Sources */,
+				F68DD571094490C2A6FA79E6 /* InsightsView.swift in Sources */,
+				A848CF51B0B80989A908CF0C /* KeychainError.swift in Sources */,
+				97C5BA50B970F1768E24AFE3 /* KeychainStore.swift in Sources */,
+				120000000000000000000005 /* LiveActivityController.swift in Sources */,
+				CC349439DBAC95967F46CE72 /* LimitPreviewSection.swift in Sources */,
+				812A9011526AC43976E9EE51 /* LimitProvider.swift in Sources */,
+				4354798727C8AF4FF4560240 /* LimitWindow.swift in Sources */,
+				FC3B6B26403B8E1339595AAD /* LimitWindowRow.swift in Sources */,
+				13188ADE465A1882B8A28721 /* LimitsSummary.swift in Sources */,
+				357B8F52D774DBA721670D4E /* LimitsSummaryHeader.swift in Sources */,
+				8DAB3DA0F9D2DD3B9DCE50D8 /* LimitsView.swift in Sources */,
+				D1ED3F79D7ECA56A08967C31 /* MetricFormatter.swift in Sources */,
+				5CF413FBB2A0E7698D979A0E /* OverviewUnavailableView.swift in Sources */,
+				29FD242BD5E2C2DA64BBBC9A /* OverviewView.swift in Sources */,
+				A6AC339786A0FA6A18ABA432 /* PeriodPicker.swift in Sources */,
+				F5BA8A378D3659C4916B88DD /* ProviderBalance.swift in Sources */,
+				EF929A9613A59121B44719FA /* ProviderLimitCard.swift in Sources */,
+				F92A74F53720C14A8DE004A7 /* ProviderMark.swift in Sources */,
+				467B1D6E455937747519FE39 /* ProviderPresentation.swift in Sources */,
+				048DF6E785B24302B735041C /* SSEDecoder.swift in Sources */,
+				120000000000000000000007 /* SharedSnapshotStore.swift in Sources */,
+				BB6FC55D3CA70FD85EFFF1D3 /* SectionHeader.swift in Sources */,
+				85395C770639C11C3F0624A2 /* SettingsView.swift in Sources */,
+				120000000000000000000041 /* LiveActivitySurfacePreview.swift in Sources */,
+				01942276D4783199323D77C2 /* SurfaceCard.swift in Sources */,
+				120000000000000000000006 /* SystemSurfaceCoordinator.swift in Sources */,
+				120000000000000000000008 /* TokenMonitorActivityAttributes.swift in Sources */,
+				06013428F8C212F797CD3D88 /* TokenMonitorApp.swift in Sources */,
+				120000000000000000000002 /* TokenMonitorSharedPayload+Hub.swift in Sources */,
+				120000000000000000000009 /* TokenMonitorSharedPayload.swift in Sources */,
+				183A37778D52EAC8012DC58B /* TokenMonitorStore.swift in Sources */,
+				ED754554A989A56EED7FF1D6 /* TrendMetric.swift in Sources */,
+				21374BF9412C4E972DB9552F /* UsageHistory+Sample.swift in Sources */,
+				41F77693A7793A94B5BAB359 /* UsageHistory.swift in Sources */,
+				16DC547A7773B3E4AB91F3F8 /* UsagePeriod.swift in Sources */,
+				907B1838EA879DB20AD723D0 /* UsagePeriodKey.swift in Sources */,
+				F2324E25A6BDBA28CCF21AC8 /* UsageTrendCard.swift in Sources */,
+				702669D174DD36A2AD2741A5 /* UsageTrendChart.swift in Sources */,
+				120000000000000000000040 /* WidgetSurfacePreview.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		190000000000000000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 140000000000000000000001 /* TokenMonitorWidgets */;
+			targetProxy = 160000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		8F0B5CA1612BF396B2109147 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2DC308A297ADA89B45462757 /* TokenMonitor */;
+			targetProxy = 51921060918F97018B15CE92 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		170000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Widgets/TokenMonitorWidgets.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = Z9JR236A9N;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Widgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.javis.tokenmonitor.ios.widgets;
+				PRODUCT_MODULE_NAME = TokenMonitorWidgetsExtension;
+				PRODUCT_NAME = TokenMonitorWidgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		170000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = Widgets/TokenMonitorWidgets.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = Z9JR236A9N;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Widgets/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.javis.tokenmonitor.ios.widgets;
+				PRODUCT_MODULE_NAME = TokenMonitorWidgetsExtension;
+				PRODUCT_NAME = TokenMonitorWidgets;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		3099C6C5CBB22D12213E1EFA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		8C8C1943CB10009C8F57674A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		8E011227ABF38B4426F07A60 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				APS_ENVIRONMENT = production;
+				CODE_SIGN_ENTITLEMENTS = Config/TokenMonitor.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = Z9JR236A9N;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Config/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.javis.tokenmonitor.ios;
+				PRODUCT_MODULE_NAME = TokenMonitor;
+				PRODUCT_NAME = "Token Monitor";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		AA474A0DB6FBF6785694076E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				APS_ENVIRONMENT = development;
+				CODE_SIGN_ENTITLEMENTS = Config/TokenMonitor.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = Z9JR236A9N;
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Config/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.javis.tokenmonitor.ios;
+				PRODUCT_MODULE_NAME = TokenMonitor;
+				PRODUCT_NAME = "Token Monitor";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		ABBA7860ED4C6987A66E4105 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.javis.tokenmonitor.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Token Monitor.app/Token Monitor";
+			};
+			name = Release;
+		};
+		F6874434707C5F5A6A3622E0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.javis.tokenmonitor.ios.tests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Token Monitor.app/Token Monitor";
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		180000000000000000000001 /* Build configuration list for PBXNativeTarget "TokenMonitorWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				170000000000000000000001 /* Debug */,
+				170000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		3DA5E3D19D4B24C7C0EEC853 /* Build configuration list for PBXNativeTarget "TokenMonitorTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F6874434707C5F5A6A3622E0 /* Debug */,
+				ABBA7860ED4C6987A66E4105 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		579DE5F870294F6962C74C3F /* Build configuration list for PBXNativeTarget "TokenMonitor" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA474A0DB6FBF6785694076E /* Debug */,
+				8E011227ABF38B4426F07A60 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		F6524C134AD0D58A22B71C66 /* Build configuration list for PBXProject "TokenMonitor" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8C8C1943CB10009C8F57674A /* Debug */,
+				3099C6C5CBB22D12213E1EFA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 39D47C510AE44B3AF603F06E /* Project object */;
+}

@@ -31,6 +31,9 @@ const {
 const { isAuthorized, readJsonBody, sendJson, sendText } = require('../shared/http');
 const { loadDotEnv, parseArgs, projectRoot, readJson, writeJsonAtomic } = require('../shared/config');
 
+const { buildLiveActivityContentState, normalizeLiveActivityRegistration } = require('../shared/liveActivity');
+const { createLiveActivityPushClientFromEnv } = require('./liveActivityPush');
+
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
 
 // Without a secret the hub cannot tell its own widget from any other caller, so it
@@ -51,7 +54,8 @@ function createHub({
   staleAfterMs = DEFAULT_STALE_AFTER_MS,
   broadcastDelayMs = 100,
   dataFile = path.join(projectRoot(), 'data', 'devices.json'),
-  logger = console
+  logger = console,
+  apns = createLiveActivityPushClientFromEnv({ logger })
 } = {}) {
   const store = readJson(dataFile, { version: 1, devices: {} }) || { version: 1, devices: {} };
   if (!store.devices || typeof store.devices !== 'object') store.devices = {};
@@ -64,6 +68,7 @@ function createHub({
   store.devices = Object.assign(Object.create(null), store.devices);
   store.syncTitlePolicies = Object.assign(Object.create(null), store.syncTitlePolicies || {});
   store.syncSettings = Object.assign(Object.create(null), store.syncSettings || {});
+  store.liveActivities = Object.assign(Object.create(null), store.liveActivities || {});
   const bindHost = resolveBindHost(host, secret);
 
   // Apply the permission at startup, including records from offline devices.
@@ -113,6 +118,11 @@ function createHub({
   const statsListeners = new Set();
   let broadcastTimer = null;
   let lastSseContentKey = '';
+  let liveActivityPushTimer = null;
+  let liveActivityPushPromise = null;
+  let liveActivityPushPending = false;
+  let lastLiveActivityPushAt = 0;
+  let stopped = false;
 
   function sseFormat(event, data) {
     return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -175,6 +185,89 @@ function createHub({
     broadcastTimer = setTimeout(flushQueuedStatsBroadcast, Math.max(0, Number(broadcastDelayMs) || 0));
   }
 
+  function scheduleLiveActivityPush() {
+    if (stopped || !apns?.enabled || Object.keys(store.liveActivities).length === 0) return;
+    liveActivityPushPending = true;
+    if (liveActivityPushTimer || liveActivityPushPromise) return;
+    const waitMs = Math.max(0, Number(apns.minIntervalMs || 0) - (Date.now() - lastLiveActivityPushAt));
+    liveActivityPushTimer = setTimeout(() => {
+      liveActivityPushTimer = null;
+      if (stopped) return;
+      liveActivityPushPending = false;
+      lastLiveActivityPushAt = Date.now();
+      // Build at dispatch, not ingest time: a coalesced batch must use latest data.
+      liveActivityPushPromise = pushLiveActivityStats(getStats())
+        .catch((error) => logger.warn?.(`ActivityKit push update failed: ${error.message}`))
+        .finally(() => {
+          liveActivityPushPromise = null;
+          if (liveActivityPushPending) scheduleLiveActivityPush();
+        });
+    }, waitMs);
+  }
+
+  async function pushLiveActivityStats(stats) {
+    const registrations = Object.values(store.liveActivities);
+    if (!registrations.length || !apns?.enabled) return;
+    const results = await Promise.allSettled(registrations.map(async (registration) => {
+      if (registration.preferences?.liveActivityEnabled === false) {
+        return { registration, sent: false };
+      }
+      const state = buildLiveActivityContentState(stats, registration);
+      const result = await apns.send(registration.token, state);
+      return { registration, result };
+    }));
+    let removed = false;
+    for (const outcome of results) {
+      if (outcome.status === 'rejected') {
+        logger.warn?.(`ActivityKit push update failed: ${outcome.reason?.message || 'transport error'}`);
+        continue;
+      }
+      const { registration, result } = outcome.value;
+      if (!result?.invalid) continue;
+      // A late rejection of the old token must not delete its replacement.
+      if (!stopped && store.liveActivities[registration.activityID] === registration) {
+        delete store.liveActivities[registration.activityID];
+        removed = true;
+      }
+    }
+    if (removed) persist();
+  }
+
+  function registerLiveActivity(input) {
+    const registration = normalizeLiveActivityRegistration(input);
+    const previous = store.liveActivities[registration.activityID];
+    store.liveActivities[registration.activityID] = registration;
+    try { persist(); } catch (error) {
+      if (previous) store.liveActivities[registration.activityID] = previous;
+      else delete store.liveActivities[registration.activityID];
+      throw error;
+    }
+    scheduleLiveActivityPush();
+    return registration;
+  }
+
+  function unregisterLiveActivity(activityID) {
+    const key = normalizedActivityID(activityID);
+    const existed = Boolean(store.liveActivities[key]);
+    if (existed) {
+      const previous = store.liveActivities[key];
+      delete store.liveActivities[key];
+      try { persist(); } catch (error) {
+        store.liveActivities[key] = previous;
+        throw error;
+      }
+    }
+    return existed;
+  }
+
+  function normalizedActivityID(value) {
+    const activityID = String(value || '').trim();
+    if (!activityID || activityID.length > 128 || !/^[A-Za-z0-9_-]+$/.test(activityID)) {
+      throw new Error('invalid_live_activity_id');
+    }
+    return activityID;
+  }
+
   // Transport-agnostic core: both the HTTP POST handler and the same-process
   // widget call these, so a host-mode widget never has to loopback to itself.
   function ingest(payload) {
@@ -189,6 +282,7 @@ function createHub({
     persist();
     if (statsListeners.size > 0) notifyStatsListeners('ingest');
     queueStatsBroadcast();
+    scheduleLiveActivityPush();
     return record;
   }
 
@@ -207,6 +301,7 @@ function createHub({
       throw error;
     }
     broadcastStats('delete');
+    scheduleLiveActivityPush();
   }
 
   function getSyncContent() {
@@ -335,6 +430,7 @@ function createHub({
         hubBuild: currentHubBuild('node-hub'),
         deviceCount: Object.keys(store.devices).length,
         secretRequired: Boolean(secret),
+        liveActivityPushEnabled: Boolean(apns?.enabled),
         now: new Date().toISOString()
       });
     }
@@ -370,6 +466,44 @@ function createHub({
     if (req.method === 'GET' && url.pathname === '/api/stats') return sendJson(res, 200, getStats());
     if (req.method === 'GET' && url.pathname === '/api/devices') return sendJson(res, 200, { devices: getDevices() });
     if (req.method === 'GET' && url.pathname === '/api/history') return sendJson(res, 200, getHistory());
+
+    if (req.method === 'POST' && url.pathname === '/api/live-activities/register') {
+      try {
+        const registration = registerLiveActivity(await readJsonBody(req));
+        return sendJson(res, 200, {
+          ok: true,
+          activityID: registration.activityID,
+          pushEnabled: Boolean(apns?.enabled)
+        });
+      } catch (error) {
+        if (error.code === 'payload_too_large') {
+          res.shouldKeepAlive = false;
+          return sendJson(res, 413, { error: 'payload_too_large' }, { connection: 'close' });
+        }
+        if (error instanceof SyntaxError || error.message.startsWith('Invalid JSON body:')) {
+          return sendJson(res, 400, { error: 'bad_request' });
+        }
+        if (error.message === 'invalid_live_activity_registration') {
+          return sendJson(res, 400, { error: error.message });
+        }
+        throw error;
+      }
+    }
+
+    if (req.method === 'DELETE' && url.pathname.startsWith('/api/live-activities/')) {
+      try {
+        const activityID = normalizedActivityID(
+          decodeURIComponent(url.pathname.slice('/api/live-activities/'.length))
+        );
+        unregisterLiveActivity(activityID);
+        return sendJson(res, 200, { ok: true, activityID });
+      } catch (error) {
+        if (error instanceof URIError || error.message === 'invalid_live_activity_id') {
+          return sendJson(res, 400, { error: error.message });
+        }
+        throw error;
+      }
+    }
 
     if (req.method === 'GET' && url.pathname === '/api/stats/stream') {
       const stats = getStats();
@@ -467,6 +601,10 @@ function createHub({
   }
 
   function stop() {
+    stopped = true;
+    liveActivityPushPending = false;
+    if (liveActivityPushTimer) clearTimeout(liveActivityPushTimer);
+    liveActivityPushTimer = null;
     return new Promise((resolve) => {
       if (broadcastTimer) clearTimeout(broadcastTimer);
       broadcastTimer = null;
@@ -478,6 +616,7 @@ function createHub({
 
   return {
     start, stop, server, getStats, getHistory, getDevices, ingest, deleteDevice, onStats, bindHost,
+    registerLiveActivity, unregisterLiveActivity,
     getSubscriptions, setSubscriptions, getSyncContent, getSyncSettings, setSyncSettings, setSyncTitlePolicy
   };
 }

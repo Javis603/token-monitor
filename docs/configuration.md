@@ -41,6 +41,13 @@ The agent and hub have no UI. Configure them with a `.env` file in the project r
 ```env
 TOKEN_MONITOR_HUB_URL=               # required in sync mode — Worker URL or http://<lan-ip>:17321
 TOKEN_MONITOR_SECRET=                # shared secret; must match the hub
+TOKEN_MONITOR_APNS_KEY_ID=           # optional ActivityKit APNs key id
+TOKEN_MONITOR_APNS_TEAM_ID=          # optional Apple Developer team id
+TOKEN_MONITOR_APNS_PRIVATE_KEY_FILE= # optional path to the APNs .p8 key
+TOKEN_MONITOR_APNS_PRIVATE_KEY=      # optional inline APNs .p8 key
+TOKEN_MONITOR_APNS_BUNDLE_ID=com.javis.tokenmonitor.ios
+TOKEN_MONITOR_APNS_ENVIRONMENT=production # production or sandbox
+TOKEN_MONITOR_APNS_MIN_INTERVAL_MS=15000 # coalesce remote Live Activity updates
 TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to the hostname
 TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS= # optional — 0/live, 600000/10min, 1200000/20min, 1800000/30min
 TOKEN_MONITOR_CLIENTS=               # optional — defaults to all supported tools; empty disables tracking
@@ -68,6 +75,10 @@ TOKEN_MONITOR_WORKBUDDY_LOCALE=       # headless only — en or zh
 Provider credentials (Grok, DeepSeek, Minimax, Copilot, GLM / GLM Team, Volcengine, Qoder, Command Code, WorkBuddy, Ollama, Kimi, Alibaba Token Plan, …) and proxy settings live in the same file. **`.env.example` is the complete, authoritative list** — start from it rather than copying keys by hand, since it stays in sync with the code. The desktop widget automatically reads the session owned by the local WorkBuddy app when that provider is enabled; the WorkBuddy token fields above remain only for headless/CLI deployments.
 
 The widget reads most settings as first-run defaults. WorkBuddy follows the same provider checkbox as other auto-detected integrations on macOS and Windows; Linux local-app monitoring is unsupported. Desktop users do not copy a token, and the WorkBuddy token fields above apply only to the headless agent/CLI. The agent and hub take a CLI flag over an env var over the built-in default.
+
+### iOS Live Activity remote updates
+
+The iOS Live Activity registers its ActivityKit push token with the authenticated Hub. When APNs credentials are configured, the Hub sends a remote ActivityKit update after new data is ingested, so the Dynamic Island can update while the iOS app is suspended. Set `TOKEN_MONITOR_APNS_KEY_ID`, `TOKEN_MONITOR_APNS_TEAM_ID`, and either `TOKEN_MONITOR_APNS_PRIVATE_KEY_FILE` or `TOKEN_MONITOR_APNS_PRIVATE_KEY`; the bundle id must match the signed iOS app. The Hub coalesces updates at `TOKEN_MONITOR_APNS_MIN_INTERVAL_MS` (15 seconds by default) to respect ActivityKit's system budget. APNs delivery remains best-effort, and the existing iOS background refresh remains a fallback.
 
 One-shot run (collect once and exit — useful for cron / launchd):
 
