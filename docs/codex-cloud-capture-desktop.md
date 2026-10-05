@@ -41,3 +41,15 @@ npm run verify
 The new tests use synthetic subprocess results and temporary fixture repositories only; they do not connect to an account or generate model usage. They cover explicit selection, cancellation, process arguments, separate output directories, unknown counters, wrong-thread rejection, private permissions, symlinks, malformed reports, browser failure, dependency packaging, source conflicts, production protection and rollback collisions.
 
 Real engine counts were established in the earlier separate-connection experiment; the desktop tests do not recreate that model execution or claim historical coverage. The current observer continues to use the known live-event path. Automatic child discovery, unattended reconnection, cross-connection reconciliation, historical backfill and reliable parent/child sum remain outside this desktop wrapper.
+
+## Device acceptance, 2026-10-05
+
+The desktop source was committed as `f07ce71706c85a89283ad7f56e70db2c4e8cb0d4` and installed into the existing parallel test app after verification and backup. All 236 packaged source/runtime/license hashes matched. The new shortcut's help entry executed from the deployed location, and the actual native dialog text compiled with AppleScript without displaying a prompt during automated checks.
+
+The packaged shortcut performed one real one-second observation against the previously selected existing cloud task. Viewer attachment succeeded, output JSON/HTML and the lifecycle receipt were produced, and the process exited normally after approximately 14 seconds including connection and detachment overhead. The idle sample produced no new token notification; the report retained null with `no-usage-notification`. The observer audit recorded zero model-turn starts. This verifies packaged attachment and output handling, not a new positive live token sample.
+
+The deployed counting module was independently checked against the previously saved real two-connection evidence: the normalized input/output/total matched the saved execution connection, including the earlier 9,099 total. That was replayed prior evidence, not new cloud execution or newly incurred test usage.
+
+The new wrapper/installer suite passed 19 tests. The full repository `npm run verify` passed lint plus 5,888 tests, with two skips and zero failures (5,890 total). Tests used temporary repositories and synthetic subprocess reports; they do not count as cloud-service verification. The live check above is recorded separately in private task-notes `capture-desktop-acceptance.json`.
+
+The production Token Monitor application, Codex global routing and account credentials were not changed by these deployment commands. The new archive, automatic task/child discovery, sustained reconnect and historical backfill were not implemented as part of this desktop-entry change. The existing app's default click behavior remains the older account report; use the explicitly named new shortcut for live engine counts.
