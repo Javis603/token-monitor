@@ -12,7 +12,9 @@ new_sqlite_classes = ["HubDO"]
 
 [vars]
 STALE_AFTER_MS = "600000"
+# Server permission only; each sending device must also opt in and negotiate its generation.
+TOKEN_MONITOR_SYNC_SESSION_TITLES = "false"
 
 # Set the shared secret with:
 #   wrangler secret put TOKEN_MONITOR_SECRET
-# Leave it unset only for trusted/private deployments.
+# Required for all private data routes.

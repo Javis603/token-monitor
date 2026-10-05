@@ -33,11 +33,16 @@
   --success: #b7ead4;
   --success-rgb: 183, 234, 212;
   --number: #f3fbf7;
-  /* Semantic blue, exposed as a triplet so the trend line and its area fill can
-     share one hue (and match the blue heatmap ramp) instead of the fill borrowing
-     the customisable --accent. */
+  /* Informational blue stays independent from custom chart colours. */
   --blue-rgb: 115, 189, 245;
   --blue: rgb(var(--blue-rgb));
+  --chart-rgb: 115, 189, 245;
+  --chart-color: rgb(var(--chart-rgb));
+  --chart-bar: #6ab4f0;
+  --chart-heat-1-rgb: 90, 170, 255;
+  --chart-heat-2-rgb: 120, 190, 255;
+  --chart-heat-3-rgb: 150, 210, 255;
+  --chart-heat-4-rgb: 180, 230, 255;
   --orange: #f4a073;
   --purple: #b394f4;
   --yellow: #f1d973;
@@ -1714,6 +1719,52 @@ span.settings-note.settings-item-desc {
 .hub-address-iface { color: var(--muted); font-size: 9.5px; flex: 0 0 auto; }
 .hub-address-row .icon-button { width: 26px; height: 26px; flex: 0 0 auto; font-size: 12px; }
 .settings-note.hub-warning { color: var(--orange); }
+.sync-content-body { display: grid; min-width: 0; gap: 10px; }
+.sync-content-options { min-width: 0; }
+.settings-panel .sync-content-options .sync-content-option { flex-wrap: nowrap; align-items: center; min-height: 44px; padding: 8px 0; box-sizing: border-box; }
+.sync-content-options > .sync-content-option ~ .sync-content-option { border-top: 1px solid rgba(var(--line-rgb), 0.06); }
+.sync-content-option .settings-item-text { flex: 1 1 0; gap: 3px; }
+.sync-content-option:has(> input:disabled) .settings-item-title { color: var(--muted); }
+.sync-content-notice { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 6px; background: rgba(var(--overlay-rgb), 0.04); }
+.sync-content-notice > .settings-note { flex: 1 1 0; min-width: 0; }
+.settings-panel button.sync-content-retry { flex: 0 0 auto; margin: 0; padding: 0; min-height: 0; border: 0; border-radius: 2px; background: transparent; color: var(--accent); font: inherit; font-size: 10px; line-height: 1.45; cursor: pointer; }
+.settings-panel button.sync-content-retry:hover { text-decoration: underline; background: transparent; }
+.settings-panel button.sync-content-retry:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+.settings-panel button.sync-content-retry:disabled { opacity: 0.5; cursor: default; }
+.sync-content-cleanup { display: grid; gap: 6px; }
+.settings-panel .sync-content-body .checkbox-label > input[type="checkbox"] { appearance: auto; width: 14px; height: 14px; flex: 0 0 14px; margin: 0; border: initial; background: initial; accent-color: var(--accent); }
+.settings-panel .sync-content-body .checkbox-label > input[type="checkbox"]::before { content: none; }
+.sync-content-dialog,
+.settings-help-popover { width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-sizing: border-box; overflow-y: auto; padding: 16px; color: var(--text); font-size: 11px; line-height: 1.5; -webkit-app-region: no-drag; }
+.sync-title-heading { display: flex; align-items: center; gap: 3px; }
+.settings-panel .sync-title-heading > label { display: inline; margin: 0; color: inherit; font-size: inherit; }
+button.settings-help-trigger { position: relative; display: inline-grid; place-items: center; flex: 0 0 18px; width: 18px; height: 18px; margin: -2px 0; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: inherit; font-size: 8px; line-height: 1; cursor: pointer; pointer-events: auto; -webkit-app-region: no-drag; }
+button.settings-help-trigger::before { content: ''; position: absolute; width: 11px; height: 11px; border: 1px solid currentColor; border-radius: 50%; opacity: 0.6; }
+button.settings-help-trigger:hover { background: transparent; color: var(--text); }
+button.settings-help-trigger:hover::before { opacity: 1; }
+button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.settings-help-popover { position: fixed; inset: auto; margin: 0; width: min(280px, calc(100vw - 16px)); padding: 12px; font-size: 10px; line-height: 1.6; }
+.settings-help-popover > strong { display: block; font-size: 12px; font-weight: 600; line-height: 1.4; }
+.settings-help-popover dl { margin: 12px 0 0; }
+.settings-help-popover dt { margin-top: 14px; font-size: 10.5px; font-weight: 600; line-height: 1.4; }
+.settings-help-popover dt:first-child { margin-top: 0; }
+.settings-help-popover dd { margin: 5px 0 0; color: var(--muted); }
+.settings-help-popover code { display: block; margin-top: 7px; padding: 6px 8px; border: 1px solid rgba(var(--line-rgb), 0.12); border-radius: 4px; background: rgba(var(--overlay-rgb), 0.04); color: var(--text); font-size: 9.5px; line-height: 1.5; overflow-wrap: anywhere; white-space: normal; user-select: text; }
+.settings-help-popover > p { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid rgba(var(--line-rgb), 0.14); color: var(--muted); font-size: 9.5px; line-height: 1.6; }
+.sync-content-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.sync-content-dialog > strong { display: block; font-size: 12px; }
+.sync-content-dialog p { overflow-wrap: anywhere; }
+.sync-content-dialog .settings-actions { flex-wrap: wrap; gap: 6px; }
+.sync-content-source-choices { display: grid; gap: 6px; margin: 14px 0 10px; }
+.sync-content-source-choices > button { width: 100%; min-width: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; font: inherit; }
+.sync-content-dialog button { min-height: 30px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: rgba(var(--overlay-rgb), var(--control-alpha)); color: var(--text); cursor: pointer; }
+.sync-content-dialog button:hover { background: rgba(var(--overlay-rgb), 0.12); }
+.sync-content-dialog #syncContentCancel { background: transparent; color: var(--muted); }
+.sync-content-dialog #syncContentCancel:hover:not(:disabled) { background: rgba(var(--overlay-rgb), 0.06); color: var(--text); }
+.sync-content-dialog button.sync-content-primary { border-color: rgba(var(--accent-rgb), 0.35); background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
+.sync-content-dialog button.sync-content-primary:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.2); border-color: rgba(var(--accent-rgb), 0.5); }
+.sync-content-dialog button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.sync-content-dialog button:disabled { opacity: 0.5; cursor: not-allowed; }
 /* Connection summary and controls stay above the device list, without a nested card. */
 .sync-panel {
   container-type: inline-size;
@@ -3029,8 +3080,11 @@ span.settings-note.settings-item-desc {
   transform: rotate(45deg);
 }
 .view-switcher-menu,
-.select-control-popup {
-  padding: 4px;
+.select-control-popup { padding: 4px; }
+.view-switcher-menu,
+.select-control-popup,
+.sync-content-dialog,
+.settings-help-popover {
   border: 1px solid rgba(var(--line-rgb), 0.22);
   border-radius: 7px;
   background:
@@ -3061,7 +3115,9 @@ span.settings-note.settings-item-desc {
 .select-control-option[aria-disabled="true"] { opacity: 0.5; cursor: default; }
 @supports not (backdrop-filter: blur(1px)) {
   .view-switcher-menu,
-  .select-control-popup { background: rgb(var(--glass-rgb)); }
+  .select-control-popup,
+  .sync-content-dialog,
+  .settings-help-popover { background: rgb(var(--glass-rgb)); }
 }
 /* Chromium delegates an open <select> popup to a platform-specific surface.
    Windows can give that popup a light system background while retaining our
@@ -3690,14 +3746,14 @@ html.is-windows .settings-panel select option {
   fill: url(#area-line-grad);
 }
 .area-line-grad-top {
-  stop-color: rgba(var(--blue-rgb), 0.22);
+  stop-color: rgba(var(--chart-rgb), 0.22);
 }
 .area-line-grad-bottom {
-  stop-color: rgba(var(--blue-rgb), 0);
+  stop-color: rgba(var(--chart-rgb), 0);
 }
 .area-line-stroke {
   fill: none;
-  stroke: var(--blue);
+  stroke: var(--chart-color);
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -3800,31 +3856,31 @@ html.is-windows .settings-panel select option {
   opacity: 1;
 }
 .home-activity-canvas .heat.lvl-1 {
-  fill: rgba(90, 170, 255, 0.18);
+  fill: rgba(var(--chart-heat-1-rgb), 0.18);
 }
 .home-activity-canvas .heat.lvl-2 {
-  fill: rgba(120, 190, 255, 0.45);
+  fill: rgba(var(--chart-heat-2-rgb), 0.45);
 }
 .home-activity-canvas .heat.lvl-3 {
-  fill: rgba(150, 210, 255, 0.8);
+  fill: rgba(var(--chart-heat-3-rgb), 0.8);
 }
 .home-activity-canvas .heat.lvl-4 {
-  fill: rgba(180, 230, 255, 1);
+  fill: rgba(var(--chart-heat-4-rgb), 1);
 }
 .home-activity-canvas .heat-bright {
   fill: rgba(var(--overlay-rgb), 0.12);
 }
 .home-activity-canvas .heat-bright.lvl-1 {
-  fill: rgba(99, 183, 255, 0.38);
+  fill: rgba(var(--chart-heat-bright-1-rgb, 99, 183, 255), 0.38);
 }
 .home-activity-canvas .heat-bright.lvl-2 {
-  fill: rgba(112, 196, 255, 0.66);
+  fill: rgba(var(--chart-heat-bright-2-rgb, 112, 196, 255), 0.66);
 }
 .home-activity-canvas .heat-bright.lvl-3 {
-  fill: rgba(146, 216, 255, 0.9);
+  fill: rgba(var(--chart-heat-bright-3-rgb, 146, 216, 255), 0.9);
 }
 .home-activity-canvas .heat-bright.lvl-4 {
-  fill: rgb(200, 238, 255);
+  fill: rgb(var(--chart-heat-bright-4-rgb, 200, 238, 255));
 }
 .home-activity-canvas .heat-month {
   fill: rgba(var(--line-rgb), 0.5);
@@ -5817,8 +5873,11 @@ html.native-liquid-glass .view-switcher-disclosure { width: 28px; flex-basis: 28
    covers. It stays a dense frosted plate; only its shape and edge follow the
    glass controls. */
 html.native-liquid-glass .select-control-popup,
-html.native-liquid-glass .view-switcher-menu {
-  padding: 5px;
+html.native-liquid-glass .view-switcher-menu { padding: 5px; }
+html.native-liquid-glass .select-control-popup,
+html.native-liquid-glass .view-switcher-menu,
+html.native-liquid-glass .sync-content-dialog,
+html.native-liquid-glass .settings-help-popover {
   border-color: rgba(var(--line-rgb), 0.16);
   border-radius: 14px;
   background:
@@ -6397,14 +6456,14 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .trends-spark:hover { background: rgba(var(--overlay-rgb), 0.05); }
 .trends-spark .sparkline { width: 100%; height: 100%; display: block; }
 .trends-spark .spark-bar {
-  fill: #6ab4f0;
+  fill: var(--chart-bar);
   opacity: 0.5;
   transform-box: fill-box;
   transform-origin: bottom center;
 }
 .trends-spark .spark-bar--last { opacity: 1; }
 .trends-spark .spark-zero-marker {
-  stroke: #6ab4f0;
+  stroke: var(--chart-bar);
   stroke-width: 1;
   opacity: 0.24;
   pointer-events: stroke;
@@ -6603,9 +6662,86 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 
 
 
+.custom-pricing-rates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.custom-pricing-rates input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.custom-pricing-rate-wide { grid-column: 1 / -1; }
+.custom-pricing-rate-heading { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+
+.custom-pricing-advanced { min-width: 0; }
+.custom-pricing-advanced summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  list-style: none;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.45;
+  user-select: none;
+}
+.custom-pricing-advanced summary::-webkit-details-marker { display: none; }
+.custom-pricing-advanced summary:hover { color: var(--blue); }
+.custom-pricing-advanced summary:focus-visible {
+  border-radius: 3px;
+  outline: 1px solid rgba(115, 189, 245, 0.72);
+  outline-offset: 3px;
+}
+.custom-pricing-advanced-meta { display: flex; align-items: center; gap: 8px; }
+.cursor-account-group .custom-pricing-advanced > summary .cursor-disclosure-icon { transform: rotate(0deg); }
+.cursor-account-group .custom-pricing-advanced[open] > summary .cursor-disclosure-icon { transform: rotate(180deg); }
+.custom-pricing-advanced-body { display: grid; gap: 8px; padding-top: 8px; }
+.custom-pricing-help-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.custom-pricing-help-row > .settings-note { flex: 1 1 200px; }
+.custom-pricing-help-button {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--blue);
+  font-size: 10px;
+  line-height: 1.45;
+  cursor: pointer;
+}
+.custom-pricing-help-button:hover { text-decoration: underline; }
+.custom-pricing-help-button:focus-visible,
+.custom-pricing-help button:focus-visible { outline: 1px solid rgba(115, 189, 245, 0.72); outline-offset: 3px; }
+.custom-pricing-help {
+  position: fixed;
+  inset: auto;
+  position-area: top span-left;
+  position-try-fallbacks: flip-block, flip-inline;
+  width: min(300px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
+  margin: 8px 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid rgba(var(--line-rgb), 0.22);
+  border-radius: 10px;
+  background: rgb(var(--glass-rgb));
+  color: var(--text);
+  font-size: 10px;
+}
+.custom-pricing-help:popover-open { display: grid; gap: 10px; }
+.custom-pricing-help::backdrop { background: transparent; }
+.custom-pricing-help-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+
 .custom-pricing-approx {
-  margin-left: 8px;
-  opacity: 0.7;
+  color: var(--muted);
   font-size: 0.85em;
 }
 
@@ -6635,12 +6771,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 
 .custom-pricing-row .managed-account-meta {
   min-width: 0;
-  overflow: hidden;
   color: var(--muted);
   font-size: 9px;
   line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
 }
 

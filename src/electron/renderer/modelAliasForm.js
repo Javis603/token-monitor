@@ -6,9 +6,11 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorModelAliasForm = api;
 })(typeof window !== 'undefined' ? window : null, function createModelAliasFormApi(aliasesApi) {
-  function createModelAliasForm({ document, t, getAliases, getGrouping, saveAliases }) {
+  function createModelAliasForm({ document, t, getAliases, getBase, getGrouping, saveAliases }) {
     const el = (suffix) => document.getElementById(`modelAliases${suffix}`);
     let editingAlias;
+    let displayed;
+    let editSnapshot;
     let busy = false;
     const error = (key) => {
       el('Error').textContent = key ? t(key) : '';
@@ -16,25 +18,27 @@
     };
     const close = () => {
       editingAlias = undefined;
+      editSnapshot = null;
       el('Form').classList.add('hidden');
       error('');
     };
-    const open = (alias = '', canonical = '') => {
+    const open = (alias = '', canonical = '', snapshot = displayed) => {
       if (busy) return;
       editingAlias = alias || undefined;
+      editSnapshot = snapshot;
       el('AliasInput').value = alias;
       el('CanonicalInput').value = canonical;
       el('Form').classList.remove('hidden');
       error('');
       el('AliasInput').focus();
     };
-    async function persist(next) {
+    async function persist(next, base) {
       if (busy) return;
       busy = true;
       el('SaveButton').disabled = true;
       error('');
       try {
-        await saveAliases(next);
+        await saveAliases(next, base);
         close();
       } catch (_) {
         error('settings.modelAliases.saveError');
@@ -45,7 +49,11 @@
       }
     }
     function render() {
-      const entries = Object.entries(aliasesApi.normalizeModelAliases(getAliases()));
+      // Pair the displayed collection and its revision once. A later status
+      // push must not retarget a button or an already open edit to a newer base.
+      const snapshot = { aliases: aliasesApi.normalizeModelAliases(getAliases()), base: getBase?.() };
+      displayed = snapshot;
+      const entries = Object.entries(snapshot.aliases);
       // The pill names the grouping mode rather than claiming "automatic", which read
       // as active even with grouping off and no aliases — the default state.
       const grouping = typeof getGrouping === 'function' ? getGrouping() : 'off';
@@ -67,13 +75,13 @@
         target.className = 'managed-account-meta';
         target.textContent = `→ ${canonical}`;
         edit.append(name, target);
-        edit.addEventListener('click', () => open(alias, canonical));
+        edit.addEventListener('click', () => open(alias, canonical, snapshot));
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'managed-account-remove custom-pricing-remove';
         remove.textContent = t('settings.modelAliases.remove');
         remove.disabled = busy;
-        remove.addEventListener('click', () => persist(Object.fromEntries(Object.entries(getAliases()).filter(([key]) => key !== alias))));
+        remove.addEventListener('click', () => persist(Object.fromEntries(entries.filter(([key]) => key !== alias)), snapshot.base));
         row.append(edit, remove);
         el('List').append(row);
       }
@@ -82,9 +90,9 @@
     el('CancelButton').addEventListener('click', () => { if (!busy) close(); });
     el('SaveButton').addEventListener('click', async () => {
       if (busy) return;
-      const next = aliasesApi.upsertModelAlias(getAliases(), el('AliasInput').value, el('CanonicalInput').value, editingAlias);
+      const next = aliasesApi.upsertModelAlias(editSnapshot?.aliases || displayed.aliases, el('AliasInput').value, el('CanonicalInput').value, editingAlias);
       if (!next) { error('settings.modelAliases.invalid'); return; }
-      await persist(next);
+      await persist(next, (editSnapshot || displayed).base);
     });
     render();
     return { syncSettings: render };

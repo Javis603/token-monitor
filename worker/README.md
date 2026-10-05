@@ -305,3 +305,10 @@ npm run tail
 ```
 
 Streams Worker + Durable Object logs in real time.
+
+
+## Optional shared content
+
+`TOKEN_MONITOR_SYNC_SESSION_TITLES = "false"` in `wrangler.toml` is the server's default-off title permission. Set it to `"true"` only to permit devices that separately opt in, discover `/api/sync/content` with authentication and negotiate `/api/sync/titles/:deviceId`. Disabling it purges saved titles for offline devices and invalidates enabled generation tokens. Public stats never include titles, shared settings or their version markers.
+
+Authenticated `/api/sync/settings/modelAliases` and `/api/sync/settings/customPricing` store only the bounded shared groups, with integer `baseRevision` CAS. Never-initialized values are `null`; intentionally empty groups have a positive revision. Stale writes return `409` with the current group and require client reconciliation. Private stats/SSE announce changes through `syncSettingsRevisions`. Settings and title policies use separate storage prefixes outside `dev:`; deletion retains a disabled policy tombstone so old uploads cannot restore titles. The main project’s `docs/API.md` documents the complete request shapes.

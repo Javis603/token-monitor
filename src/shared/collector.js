@@ -4,6 +4,8 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
+const { customPricingPath } = require('./tokscaleConfig');
 const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
@@ -643,7 +645,7 @@ function computePeriodWindows(now = new Date()) {
 // in the delta-derived periods. Used on watch ticks, where month/allTime are not
 // re-decorated: a session that started today is absent from the anchor, so its
 // project label would otherwise be missing from the broader-period breakdown.
-function propagateTodayProjects(today, periods) {
+function propagateTodayProjects(today, periods, titleMetadata = {}) {
   for (const [key, session] of Object.entries(today?.sessions || {})) {
     if (!session) continue;
     for (const period of periods) {
@@ -656,9 +658,10 @@ function propagateTodayProjects(today, periods) {
       // The fresh scan's title is authoritative and replaces the anchor's, like
       // the context pair below: a Cursor rename arrives only through this path
       // on watch ticks, so gap-filling would leave derived periods showing the
-      // old name until the hourly full scan. A fresh miss keeps the old title —
-      // a transient reader failure is not a deletion.
+      // old name until the hourly full scan. An authoritative removal clears
+      // the anchor; a metadata miss or transient reader failure keeps it.
       if (session.title) target.title = session.title;
+      else if (titleMetadata.invalidatedTitleKeys?.has(key) && target.title === titleMetadata.t3Titles?.[key]) delete target.title;
       if (session.sessionKind && !target.sessionKind) target.sessionKind = session.sessionKind;
       // Context occupancy is replaced rather than gap-filled: the derived
       // periods carry the last full scan's reading, which is older than this
@@ -767,6 +770,8 @@ async function collectHistoryOnce(options) {
       const retainedGraph = retainDailyHistory(rawGraphs, {
         ...(options.dailyHistoryArchiveOptions || {}),
         liveDays: options.dailyHistoryLiveDays,
+        pricingRevision: options.pricingRevision,
+        customPricingActive: options.customPricingActive,
         todayKey,
         capDays,
         writeEnabled: options.dailyHistoryArchiveWriteEnabled
@@ -849,11 +854,13 @@ async function collectUsageOnce(options) {
     customScanPaths: options.customScanPaths,
     metadataCache: new Map(),
     resolvedSessionKeys: new Set(),
-    attemptedSessionKeys: new Set()
+    attemptedSessionKeys: new Set(),
+    invalidatedTitleKeys: new Set(),
+    t3Titles: {}
     // dshSessionFileCache is deliberately NOT reset here: it's module-level
     // (declared with jsonlTimestampCache above) precisely so it survives
-    // across collectUsageOnce calls — every field in this object, unlike
-    // that one, is intentionally rebuilt fresh on every call.
+    // across collectUsageOnce calls. These caches and sets start fresh each
+    // call; watch ticks recover title provenance from their local anchor below.
   };
   const decorateLocalPeriods = (periods, { retryMisses = false } = {}) => applySessionMetadata(
     periods,
@@ -879,6 +886,7 @@ async function collectUsageOnce(options) {
     && anchor.dateKey === localTodayKey(collectedAt)
     && canTargetTodayPartitions(anchor, targetClients)
   );
+  if (anchorUsed) localSessionMetadataDeps.t3Titles = anchor.todayT3Titles || anchor.t3Titles || {};
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
     try { options.onProgress({ ...periods, updatedAt: new Date().toISOString() }); } catch (_) {}
@@ -985,14 +993,17 @@ async function collectUsageOnce(options) {
       // (the perceived UI stutter). Decorate only today, then propagate its freshly
       // resolved identities onto sessions that started today (absent from the anchor).
       decorateLocalPeriods({ today }, { retryMisses: true });
-      propagateTodayProjects(today, [month, allTime]);
+      propagateTodayProjects(today, [month, allTime], {
+        invalidatedTitleKeys: localSessionMetadataDeps.invalidatedTitleKeys,
+        t3Titles: anchor.t3Titles
+      });
     } else {
       decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
     // period: a later targeted tick re-merges these sessions into `today`.
-    propagateTodayProjects(today, Object.values(todayPartitions));
+    propagateTodayProjects(today, Object.values(todayPartitions), localSessionMetadataDeps);
   }
 
   // WSL contribution (Windows only; no-op elsewhere). Full tick scans running WSL
@@ -1059,6 +1070,7 @@ async function collectUsageOnce(options) {
         ...(options.dailyHistoryArchiveOptions || {}),
         liveDays: dailyHistoryLiveDays,
         todayKey: localTodayKey(collectedAt),
+        pricingRevision: options.pricingRevision,
         writeEnabled: options.dailyHistoryArchiveWriteEnabled
       });
       dailyHistoryLiveDays = retainedLive.liveDays || {};
@@ -1145,9 +1157,16 @@ async function collectUsageOnce(options) {
     }
   }
   if (typeof options.onAnchorComputed === 'function') {
+    // Title provenance belongs to the local anchor, never to published rows.
+    const t3Titles = { ...localSessionMetadataDeps.t3Titles };
+    for (const key of localSessionMetadataDeps.invalidatedTitleKeys) t3Titles[key] = null;
+    for (const [key, meta] of localSessionMetadataDeps.metadataCache) {
+      if (meta.t3Title) t3Titles[key] = meta.t3Title;
+    }
     options.onAnchorComputed({
       windowsPeriods,
       todayPartitions,
+      t3Titles,
       wslBundle,
       wslStatus,
       ...(summary.nativeSessions ? { nativeSessions: summary.nativeSessions } : {}),
@@ -1170,6 +1189,8 @@ async function collectUsageOnce(options) {
       dailyHistoryArchiveWriteEnabled: options.dailyHistoryArchiveWriteEnabled,
       dailyHistoryArchiveOptions: options.dailyHistoryArchiveOptions,
       dailyHistoryLiveDays,
+      pricingRevision: options.pricingRevision,
+      customPricingActive: options.customPricingActive,
       onHistoryStatus: options.onHistoryStatus,
       logger: options.logger
     });
@@ -1894,7 +1915,31 @@ function canTargetTodayPartitions(anchor, targetClients) {
   );
 }
 
-function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null) {
+// Prices affect every scan window. Read the effective file (including entries
+// hand-authored outside the widget), and distinguish fork builds whose npm
+// version is identical. No transcript cache is changed by this fingerprint.
+function pricingFingerprint(options = {}) {
+  const pricingPath = options.pricingPath || customPricingPath({
+    env: tokscaleEnvWithBlanksDropped(process.env)
+  });
+  const hash = createHash('sha256');
+  hash.update(pricingPath);
+  try { hash.update(fs.readFileSync(pricingPath)); }
+  catch (error) { hash.update(`|file:${error.code || 'unreadable'}`); }
+  if (options.binaryRevision !== undefined) {
+    hash.update(`|binary:${options.binaryRevision}`);
+  } else {
+    const binary = resolvePlatformBinary();
+    hash.update(JSON.stringify([binary.source, binary.path, binary.version, readTokscaleBundledBuild()]));
+    try {
+      const stat = fs.statSync(binary.path);
+      hash.update(JSON.stringify([stat.size, stat.mtimeMs, stat.ctimeMs]));
+    } catch (_) { hash.update('|binary:missing'); }
+  }
+  return hash.digest('hex');
+}
+
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, pricingRevision = pricingFingerprint()) {
   // Deterministic string that captures the config inputs anchor correctness
   // depends on. When this changes, the persisted anchor is invalidated.
   const qoderCn = String(qoderCnDbPath || '').trim();
@@ -1907,7 +1952,7 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qod
   // common case.
   const scanKey = customScanPathsFingerprint(customScanPaths);
   const scanPart = scanKey ? `|scan:${scanKey}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}`;
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}|pricing:${pricingRevision}`;
 }
 
 function qoderCnSourcesForClients(clientsCsv, options = {}) {
@@ -1944,7 +1989,8 @@ function collectorAnchorTrust(saved, options = {}) {
   // Old Cursor anchors preserve `default` in their broad-period model maps;
   // applying a new `cursor-auto` Today delta to them would split one mode.
   if (normalizeClientsCsv(clients).split(',').includes('cursor') && saved.cursorAutoModelVersion !== 1) return null;
-  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths)) return null;
+  const pricingRevision = options.pricingRevision ?? pricingFingerprint(options);
+  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, pricingRevision)) return null;
   const parsed = Date.parse(saved.fullScanAt || '');
   const capturedAtMs = Number.isFinite(parsed) && parsed <= now.getTime() ? parsed : null;
   return { capturedAtMs };
@@ -2262,6 +2308,7 @@ function startCollector(options) {
   // process owns the shared archive. A watch tick can then hand its value to a
   // later full/history tick instead of losing it at the tick boundary.
   let liveDailyHistoryDays = {};
+  let pricingRevision = pricingFingerprint(options);
   let lastFullScanAt = 0;
   let pendingWaiters = [];
   let debounceTimer = null;
@@ -2370,7 +2417,8 @@ function startCollector(options) {
         projectsEnabled: options.projectsEnabled,
         qoderCnDbPath,
         qoderCnProjectsDir,
-        customScanPaths: options.customScanPaths
+        customScanPaths: options.customScanPaths,
+        pricingRevision
       });
       if (trust) {
         anchor = {
@@ -2378,6 +2426,8 @@ function startCollector(options) {
           today: saved.today,
           month: saved.month,
           allTime: saved.allTime,
+          t3Titles: saved.t3Titles,
+          todayT3Titles: saved.todayT3Titles,
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -2393,6 +2443,28 @@ function startCollector(options) {
         // a full scan on the first interval tick (see loop()).
         if (trust.capturedAtMs !== null) lastFullScanAt = trust.capturedAtMs;
       }
+    } catch (_) {}
+  }
+
+  function persistAnchor(tickPricingRevision) {
+    if (options.anchorPersistenceEnabled === false) return;
+    try {
+      fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
+      fs.writeFileSync(anchorPath, JSON.stringify({
+        dateKey: anchor.dateKey,
+        cursorAutoModelVersion: 1,
+        today: anchor.today,
+        month: anchor.month,
+        allTime: anchor.allTime,
+        t3Titles: anchor.t3Titles,
+        todayT3Titles: anchor.todayT3Titles,
+        wslBundle: wslAnchor,
+        wslStatus: wslStatusAnchor,
+        ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
+        ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
+        configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, tickPricingRevision),
+        fullScanAt: new Date(lastFullScanAt).toISOString()
+      }));
     } catch (_) {}
   }
 
@@ -2427,10 +2499,23 @@ function startCollector(options) {
     }, historyRetryMs);
   }
 
+  const pricingChangedDuringScan = Symbol('pricing changed during scan');
+
   async function performTick(reason, tickOptions = {}) {
     const tickStartedAt = Date.now();
     const collectedAt = collectionDate(options.now);
     const todayKey = localTodayKey(collectedAt);
+    const tickPricingRevision = pricingFingerprint(options);
+    const pricingChanged = tickPricingRevision !== pricingRevision;
+    if (pricingChanged) {
+      anchor = null;
+      wslAnchor = null;
+      wslStatusAnchor = null;
+      liveDailyHistoryDays = {};
+      lastFullScanAt = 0;
+      lastHistoryAt = 0;
+      pricingRevision = tickPricingRevision;
+    }
     // The previous live DAY becomes durable history at local midnight. Finalize
     // it before publishing the new day, even when the normal History interval
     // is not due yet, so fixed ranges never wait for the next scheduled graph.
@@ -2440,7 +2525,7 @@ function startCollector(options) {
       collectedAt.getTime(),
       lastHistoryAt,
       historyIntervalMs,
-      Boolean(tickOptions.forceHistory) || localDayRolledOver,
+      Boolean(tickOptions.forceHistory) || localDayRolledOver || pricingChanged,
       historyEnabled
     );
     if (includeHistory) {
@@ -2470,6 +2555,8 @@ function startCollector(options) {
         osInfo: deviceOsInfo,
         now: collectedAt,
         includeHistory,
+        pricingRevision: tickPricingRevision,
+        customPricingActive: Object.keys(readJson(options.pricingPath || customPricingPath({ env: tokscaleEnvWithBlanksDropped(process.env) }), {})?.models || {}).length > 0,
         // Capture after the runtime's transformUsage hook so the archive uses
         // the same today period that the user actually sees. The process-local
         // liveDays overlay is passed into any graph scan that happens first.
@@ -2503,6 +2590,7 @@ function startCollector(options) {
         onAnchorComputed: (x) => { captured = x; },
         onProgress: (partial) => {
           if (!partial.today) return;
+          if (pricingChanged || pricingFingerprint(options) !== tickPricingRevision) return;
           try {
             if (typeof onPreview === 'function') {
               // Frozen WSL snapshot, gated so a cross-day/cross-month full scan
@@ -2551,6 +2639,11 @@ function startCollector(options) {
         }
       });
       if (stopped) return;
+      // A settings save can land between the serial period scans. Discard that
+      // mixed result and replay all windows against one pricing revision.
+      if (pricingFingerprint(options) !== tickPricingRevision) {
+        return pricingChangedDuringScan;
+      }
       if (includeHistory) {
         settleRolloverHistoryAttempt(
           historyScanSucceeded,
@@ -2567,40 +2660,45 @@ function startCollector(options) {
           month: captured.windowsPeriods.month,
           allTime: captured.windowsPeriods.allTime,
           todayPartitions: captured.todayPartitions,
+          t3Titles: captured.t3Titles,
+          todayT3Titles: captured.t3Titles,
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {})
         };
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
         lastFullScanAt = Date.now();
-        if (options.anchorPersistenceEnabled !== false) {
-          try {
-            fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
-            fs.writeFileSync(anchorPath, JSON.stringify({
-              dateKey: anchor.dateKey,
-              cursorAutoModelVersion: 1,
-              today: anchor.today,
-              month: anchor.month,
-              allTime: anchor.allTime,
-              wslBundle: wslAnchor,
-              wslStatus: wslStatusAnchor,
-              ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
-              ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
-              configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths),
-              fullScanAt: new Date(lastFullScanAt).toISOString()
-            }));
-          } catch (_) {}
-        }
+        persistAnchor(tickPricingRevision);
       } else if (anchored && captured) {
         // Keep the rolling per-client today partitions fresh for targeted
         // watch ticks. WSL stays independently frozen between interval ticks.
         if (captured.todayPartitions) anchor.todayPartitions = captured.todayPartitions;
+        const titlesChanged = JSON.stringify(anchor.todayT3Titles || anchor.t3Titles || {}) !== JSON.stringify(captured.t3Titles);
+        if (titlesChanged) {
+          // Only labels move: the exact usage baseline and full-scan time stay
+          // frozen. This also keeps cold-start previews at the latest title.
+          for (const [key, title] of Object.entries(captured.t3Titles || {})) {
+            for (const period of ['today', 'month', 'allTime']) {
+              const session = anchor[period]?.sessions?.[key];
+              if (!session) continue;
+              if (title) session.title = title;
+              else if (session.title === anchor.t3Titles?.[key]) {
+                const fallback = summary[period]?.sessions?.[key]?.title;
+                if (fallback) session.title = fallback;
+                else delete session.title;
+              }
+            }
+          }
+          anchor.t3Titles = captured.t3Titles;
+        }
+        anchor.todayT3Titles = captured.t3Titles;
         if (captured.nativeSessions) anchor.nativeSessions = captured.nativeSessions;
         if (captured.nativeProjects) anchor.nativeProjects = captured.nativeProjects;
         if (refreshWsl) {
           wslAnchor = captured.wslBundle;
           wslStatusAnchor = captured.wslStatus || null;
         }
+        if (titlesChanged) persistAnchor(tickPricingRevision);
       }
       const transformedSummary = await onUpdate?.(summary, reason);
       const visibleSummary = transformedSummary && typeof transformedSummary === 'object'
@@ -2617,6 +2715,7 @@ function startCollector(options) {
             ...(options.dailyHistoryArchiveOptions || {}),
             liveDays: liveDailyHistoryDays,
             todayKey: visibleDateKey,
+            pricingRevision: tickPricingRevision,
             // Watch ticks update the in-memory maximum on every refresh, but
             // only full/history ticks write it. This avoids a disk write for
             // every few-second watch event without dropping the value before
@@ -2721,8 +2820,26 @@ function startCollector(options) {
       return new Promise((resolve) => pendingWaiters.push(resolve));
     }
     tickInFlight = true;
+    let pricingReplayUsed = false;
+    const performWithPricingReplay = async (tickReason, scanOptions) => {
+      const result = await performTick(tickReason, scanOptions);
+      if (result !== pricingChangedDuringScan || pricingReplayUsed || stopped) return result;
+      pricingReplayUsed = true;
+      // At most one automatic replay belongs to this initiating tick, including
+      // its coalesced work. A second mismatch waits for a normal tick; neither
+      // mixed result is published. Already acknowledged source sync stays consumed.
+      return performTick('pricing-change', {
+        ...scanOptions,
+        forceHistory: true,
+        todayOnly: false,
+        targetClients: [],
+        forceSelfSync: null,
+        sourceSelfSync: null,
+        acknowledgedSourceSync: null
+      });
+    };
     try {
-      const initialResult = await performTick(reason, {
+      const initialResult = await performWithPricingReplay(reason, {
         ...effectiveTickOptions,
         acknowledgedSourceSync: sourceSyncQueue.acknowledge(effectiveTickOptions.forceSelfSync)
       });
@@ -2747,7 +2864,7 @@ function startCollector(options) {
         pendingTargetClients = null;
         pendingActivityRevision = null;
         const acknowledgedSourceSync = sourceSyncQueue.acknowledge(forceSelfSync);
-        const result = await performTick('coalesced', {
+        const result = await performWithPricingReplay('coalesced', {
           forceHistory,
           rolloverHistoryRetry,
           forceSelfSync,
@@ -3151,6 +3268,7 @@ module.exports = {
   clientWatchCandidates,
   computePeriodWindows,
   collectorAnchorTrust,
+  pricingFingerprint,
   configFingerprint,
   qoderCnDbPathForClients,
   qoderCnProjectsDirForClients,

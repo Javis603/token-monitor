@@ -10,6 +10,7 @@ const { claudeSessionRoots } = require('./providers/claude/paths');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
+const { MCODE_SOURCE_CHECK_ID, mcodeSessionDirs } = require('./providers/mcode/paths');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
 const {
@@ -364,6 +365,15 @@ function clientSourceRoots(clientsCsv, options = {}) {
     'qodercn',
     ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]),
     ['qodercn-projects', qoderCnPaths.projectsDir]
+  );
+  // MiniMax Code — upstream reads only captured `tokscale headless mcode exec`
+  // streams; the fork adds the CLI and desktop runtime store from tokscale's
+  // effective home (providers/mcode/paths.js). Only the default `.minimax`
+  // store is expected; `.mavis`, profiles and captures are optional.
+  add(
+    'mcode',
+    ...mcodeSessionDirs({ env, homeDir: tokscaleHome }).map((dir, index) => [MCODE_SOURCE_CHECK_ID, dir, null, index > 0]),
+    ...tokscaleHeadlessRoots(home).map(({ dir, optional }) => [MCODE_SOURCE_CHECK_ID, path.join(dir, 'mcode'), null, optional])
   );
   add('reasonix', [
     REASONIX_SOURCE_CHECK_ID,
