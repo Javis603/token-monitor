@@ -1316,7 +1316,9 @@ test('the partition resolves on verified or documented platforms only', () => {
   assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'darwin', home }), [
     path.join(home, 'Library', 'Application Support', 'Xiaomi MiMo', 'Partitions', 'xiaomi-account', 'Cookies')
   ]);
-  assert.equal(mimoDesktopCookieCandidates({ platform: 'win32', home, env: {} }).length, 1);
+  assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'win32', home, env: {} }), [
+    path.join(home, 'AppData', 'Roaming', 'Xiaomi MiMo', 'Partitions', 'xiaomi-account', 'Network', 'Cookies')
+  ]);
   assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'linux', home, env: {} }), []);
   assert.deepEqual(mimoDesktopCookieCandidates({ platform: 'freebsd', home, env: {} }), []);
 });
