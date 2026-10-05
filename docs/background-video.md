@@ -12,6 +12,8 @@ The renderer receives an opaque `token-monitor-background:` URL instead of a fil
 
 Publication and removal run serially. Clearing removes the saved video before its manifest; if the video cannot be deleted, the error is reported and the saved record remains available for retry, including after restarting the app. Failed imports only clean up files created by that import.
 
+Switching to an image first validates and stages its PNG privately. The saved image is replaced only after video removal succeeds, so a removal error leaves the previously saved image unchanged.
+
 ## Preview
 
 Focused appearance-control preview using a generated H.264 test video:

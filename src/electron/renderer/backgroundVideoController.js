@@ -94,14 +94,20 @@
       status.title = status.textContent;
     }
 
+    // Reset only the presentation after main has removed the saved video.
+    function reset() {
+      generation += 1;
+      release(video); video = null; record = null; failed = false;
+      shell.classList.remove('has-background-video');
+      sync();
+    }
+
     async function apply(next) {
-      const current = ++generation;
       if (!next) {
-        release(video); video = null; record = null; failed = false;
-        shell.classList.remove('has-background-video');
-        sync();
+        reset();
         return;
       }
+      const current = ++generation;
       const candidate = makeVideo();
       try {
         await loadPlayable(candidate, next.url);
@@ -127,13 +133,13 @@
     }
 
     async function clear() {
-      if (busy) return;
+      if (busy || imageBusy()) return;
       generation += 1;
       busy = true;
       sync();
       try {
         await api.clearBackgroundVideo();
-        await apply(null);
+        reset();
       } finally {
         busy = false;
         sync();
@@ -171,7 +177,7 @@
     window.addEventListener('pagehide', () => { generation += 1; release(video); video = null; });
     sync();
     return {
-      sync, clear, isBusy: () => busy,
+      sync, clear, reset, isBusy: () => busy,
       async load() {
         const request = ++generation;
         try {

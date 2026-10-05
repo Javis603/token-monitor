@@ -7,14 +7,16 @@ const vm = require('node:vm');
 const test = require('node:test');
 const { translate } = require('../../src/electron/renderer/i18n');
 
-function fixture() {
+function fixture(withImage = false) {
   const classes = () => {
     const values = new Set();
     return { add: (v) => values.add(v), remove: (v) => values.delete(v), contains: (v) => values.has(v),
       toggle(v, enabled) { if (enabled) values.add(v); else values.delete(v); } };
   };
   const nodes = new Map();
-  const shell = { classList: classes(), children: [], prepend(el) { this.children.unshift(el); } };
+  const styles = new Map();
+  const shell = { classList: classes(), children: [], prepend(el) { this.children.unshift(el); },
+    style: { setProperty: (name, value) => styles.set(name, value), removeProperty: (name) => styles.delete(name) } };
   class Element extends EventTarget { constructor() { super(); this.classList = classes(); } }
   class Video extends Element {
     constructor() { super(); this.paused = true; this.videoWidth = 320; this.videoHeight = 240; }
@@ -47,12 +49,29 @@ function fixture() {
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/backgroundVideoController.js'), 'utf8'),
     { window, document, setTimeout, clearTimeout, console });
-  const controller = window.TokenMonitorBackgroundVideo.createBackgroundVideoController({
+  let renderer;
+  if (withImage) {
+    window.tokenMonitor = api;
+    let imageId = 0;
+    const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+    const context = {
+      window, document, Uint8Array, Blob,
+      URL: { createObjectURL: () => `blob:image-${++imageId}`, revokeObjectURL() {} },
+      els: { shell, ...Object.fromEntries(['backgroundImageStatus', 'clearBackgroundImageButton',
+        'chooseBackgroundImageButton', 'backgroundImageOpacityRow'].map((id) => [id, document.getElementById(id)])) },
+      t: (key, params) => translate(locale, key, params), nativeMaterialState: { type: 'vibrancy' },
+      prefersReducedMotion: () => reduced, state: { windowVisible: true, floatingBubble: { collapsed: false } }
+    };
+    vm.runInNewContext(app.slice(app.indexOf('let backgroundImageActive ='), app.indexOf('const themePresetsApi =')) +
+      '\nglobalThis.renderer = { controller: backgroundVideoController, changeImage: changeBackgroundImage, applyImage: applyBackgroundImage };', context);
+    renderer = context.renderer;
+  }
+  const controller = renderer?.controller || window.TokenMonitorBackgroundVideo.createBackgroundVideoController({
     api, shell, t: (key, params) => translate(locale, key, params), imageActive: () => true,
     imageBusy: () => imageBusy,
     reducedMotion: () => reduced, visible: () => shown && !document.hidden, blocked: () => blocked
   });
-  return { controller, shell, document, nodes, api, isBlocked: window.TokenMonitorBackgroundVideo.isBackgroundVideoBlocked, commits: () => commits,
+  return { ...renderer, controller, shell, document, nodes, api, styles, isBlocked: window.TokenMonitorBackgroundVideo.isBackgroundVideoBlocked, commits: () => commits,
     setBlocked(value) { blocked = value; }, setLocale(value) { locale = value; }, setImageBusy(value) { imageBusy = value; },
     setReduced(value) { reduced = value; }, setShown(value) { shown = value; } };
 }
@@ -168,22 +187,91 @@ test('clearing a video blocks new selections and repeated removal until it finis
   assert.equal(f.nodes.get('chooseBackgroundImageButton').disabled, false);
 });
 
-test('choosing an image can clear the video while the image controls are busy', async () => {
+test('a presentation reset removes video without a second clear while image controls are busy', async () => {
   const f = fixture();
   await f.controller.load();
   let clears = 0;
   f.api.clearBackgroundVideo = async () => { clears += 1; };
   f.setImageBusy(true);
 
-  await f.controller.clear();
+  f.controller.reset();
 
-  assert.equal(clears, 1);
+  assert.equal(clears, 0);
   assert.equal(f.shell.children.length, 0);
   assert.equal(f.controller.isBusy(), false);
   assert.equal(f.nodes.get('chooseBackgroundImageButton').disabled, true);
   f.setImageBusy(false); f.controller.sync();
   assert.equal(f.nodes.get('chooseBackgroundImageButton').disabled, false);
 });
+
+test('a presentation reset invalidates a late startup video read', async () => {
+  const f = fixture();
+  let finish;
+  f.api.getBackgroundVideo = () => new Promise((resolve) => { finish = resolve; });
+  const loading = f.controller.load();
+  f.controller.reset();
+  finish({ id: 'old', name: 'old.mp4', url: 'video://good' });
+  await loading;
+  assert.equal(f.shell.children.length, 0);
+  assert.equal(f.shell.classList.contains('has-background-video'), false);
+});
+
+test('the image renderer keeps controls busy and displays the committed image without clearing video twice', async () => {
+  const f = fixture(true);
+  f.applyImage(Buffer.from('old-image'));
+  await f.controller.load();
+  const oldImage = f.styles.get('--custom-background-image');
+  let finish;
+  let selections = 0;
+  let clears = 0;
+  f.api.chooseBackgroundImage = () => {
+    selections += 1;
+    return new Promise((resolve) => { finish = resolve; });
+  };
+  f.api.clearBackgroundVideo = async () => { clears += 1; throw new Error('Unexpected second clear'); };
+
+  const choosing = f.changeImage();
+  for (const id of ['chooseBackgroundVideoButton', 'clearBackgroundVideoButton', 'chooseBackgroundImageButton', 'clearBackgroundImageButton']) {
+    assert.equal(f.nodes.get(id).disabled, true);
+  }
+  await f.changeImage();
+  f.nodes.get('clearBackgroundVideoButton').dispatchEvent(new Event('click'));
+  assert.equal(selections, 1);
+  assert.equal(clears, 0);
+  assert.equal(f.styles.get('--custom-background-image'), oldImage);
+  finish({ bytes: Buffer.from('committed-image') });
+  await choosing;
+
+  assert.equal(clears, 0);
+  assert.notEqual(f.styles.get('--custom-background-image'), oldImage);
+  assert.equal(f.shell.children.length, 0);
+  assert.equal(f.shell.classList.contains('has-background-video'), false);
+  assert.equal(f.nodes.get('clearBackgroundVideoButton').classList.contains('hidden'), true);
+  assert.equal(f.nodes.get('chooseBackgroundImageButton').disabled, false);
+  assert.equal(f.nodes.get('chooseBackgroundVideoButton').disabled, false);
+});
+
+for (const outcome of ['canceled', 'failed']) {
+  test(`a ${outcome} image choice preserves the rendered image and video`, async () => {
+    const f = fixture(true);
+    f.applyImage(Buffer.from('old-image'));
+    await f.controller.load();
+    const oldImage = f.styles.get('--custom-background-image');
+    const oldVideo = f.shell.children[0];
+    f.api.chooseBackgroundImage = async () => {
+      if (outcome === 'failed') throw new Error('Cannot remove video');
+      return { canceled: true };
+    };
+
+    await f.changeImage();
+
+    assert.equal(f.styles.get('--custom-background-image'), oldImage);
+    assert.equal(f.shell.children[0], oldVideo);
+    assert.equal(f.nodes.get('chooseBackgroundImageButton').disabled, false);
+    assert.equal(f.nodes.get('chooseBackgroundVideoButton').disabled, false);
+    if (outcome === 'failed') assert.match(f.nodes.get('backgroundImageStatus').textContent, /Could not load/);
+  });
+}
 
 test('a failed clear releases the busy state and preserves the existing video', async () => {
   const f = fixture();

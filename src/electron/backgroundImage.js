@@ -33,7 +33,7 @@ async function getBackgroundImage(userDataPath) {
   }
 }
 
-async function importBackgroundImage(sourcePath, userDataPath, nativeImage) {
+async function importBackgroundImage(sourcePath, userDataPath, nativeImage, beforePublish) {
   const bytes = await readRegularImage(sourcePath, MAX_SOURCE_BYTES);
   let image = nativeImage.createFromBuffer(bytes);
   if (image.isEmpty()) throw new Error('Image format is not supported');
@@ -50,6 +50,9 @@ async function importBackgroundImage(sourcePath, userDataPath, nativeImage) {
   const temporary = path.join(userDataPath, `.background-image-${crypto.randomUUID()}.png`);
   try {
     await fs.promises.writeFile(temporary, png, { flag: 'wx', mode: 0o600 });
+    // Finish validation and staging before removing a saved video. If removal
+    // fails, the old image stays published and this private candidate is discarded.
+    await beforePublish?.();
     await fs.promises.rename(temporary, destination);
   } finally {
     await fs.promises.unlink(temporary).catch((error) => {

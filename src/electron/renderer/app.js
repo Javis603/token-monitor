@@ -7075,7 +7075,7 @@ async function changeBackgroundImage(clear = false) {
     } else {
       const result = await window.tokenMonitor.chooseBackgroundImage();
       if (!result?.canceled && result?.bytes) {
-        await backgroundVideoController?.clear();
+        backgroundVideoController?.reset();
         applyBackgroundImage(result.bytes);
       }
     }

@@ -5,12 +5,112 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
+const { installBackgroundVideo } = require('../../src/electron/backgroundVideo');
 const {
   backgroundImagePath,
   clearBackgroundImage,
   getBackgroundImage,
   importBackgroundImage
 } = require('../../src/electron/backgroundImage');
+
+async function imagePickerFixture(t) {
+  const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'background-image-picker-'));
+  t.after(() => fs.promises.rm(root, { recursive: true, force: true }));
+  const data = path.join(root, 'userData');
+  await fs.promises.mkdir(data);
+  const source = path.join(root, 'chosen.jpg');
+  const videoSource = path.join(root, 'chosen.mp4');
+  await fs.promises.writeFile(source, 'source');
+  await fs.promises.writeFile(videoSource, 'saved-video');
+  await fs.promises.writeFile(backgroundImagePath(data), 'saved-image');
+  const output = Buffer.from('new-image');
+  const handlers = new Map();
+  const dialog = { showOpenDialog: async () => ({ filePaths: [source] }) };
+  const nativeImage = { createFromBuffer: () => ({
+    isEmpty: () => false, getSize: () => ({ width: 100, height: 100 }), toPNG: () => output
+  }) };
+  let manager;
+  // Execute the actual main-process image IPC wiring with the real storage
+  // managers, without booting Electron and its unrelated application services.
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = main.lastIndexOf('\n', main.indexOf('installBackgroundVideo({ app,')) + 1;
+  vm.runInNewContext(main.slice(start, main.indexOf('\n\n', start)), {
+    app: { getPath: () => data }, ipcMain: { handle(name, handler) { handlers.set(name, handler); } },
+    dialog, protocol: { handle() {} }, net: {}, mainWindow: null, nativeImage,
+    clearBackgroundImage, getBackgroundImage, importBackgroundImage,
+    installBackgroundVideo(options) { manager = installBackgroundVideo(options); return manager; }
+  });
+  const selection = await manager.prepare(videoSource);
+  const saved = await manager.commit(selection.id);
+  return { data, output, dialog, nativeImage, manager, saved,
+    choose: () => handlers.get('appearance:chooseBackgroundImage')() };
+}
+
+test('image picker stages a private PNG and clears the video before publishing it', async (t) => {
+  const f = await imagePickerFixture(t);
+  const savedVideo = await f.manager.resolve(f.saved.url);
+  const unlink = fs.promises.unlink.bind(fs.promises);
+  let clears = 0;
+  t.mock.method(fs.promises, 'unlink', async (file) => {
+    if (file === savedVideo) {
+      clears += 1;
+      assert.equal((await getBackgroundImage(f.data)).toString(), 'saved-image');
+      const temporary = (await fs.promises.readdir(f.data)).filter((name) => name.startsWith('.background-image-'));
+      assert.equal(temporary.length, 1);
+      const staged = path.join(f.data, temporary[0]);
+      assert.deepEqual(await fs.promises.readFile(staged), f.output);
+      if (process.platform !== 'win32') assert.equal((await fs.promises.stat(staged)).mode & 0o777, 0o600);
+    }
+    return unlink(file);
+  });
+
+  const result = await f.choose();
+
+  assert.equal(clears, 1);
+  assert.deepEqual(result.bytes, f.output);
+  assert.deepEqual(await getBackgroundImage(f.data), f.output);
+  assert.equal(await f.manager.get(), null);
+  assert.deepEqual(await fs.promises.readdir(f.data), ['background-image.png']);
+});
+
+test('failed video removal rejects the image picker and preserves both saved backgrounds', async (t) => {
+  const f = await imagePickerFixture(t);
+  const savedVideo = await f.manager.resolve(f.saved.url);
+  const before = (await fs.promises.readdir(f.data)).sort();
+  const unlink = fs.promises.unlink.bind(fs.promises);
+  const failure = Object.assign(new Error('Video is in use'), { code: 'EPERM' });
+  t.mock.method(fs.promises, 'unlink', async (file) => {
+    if (file === savedVideo) throw failure;
+    return unlink(file);
+  });
+
+  await assert.rejects(f.choose(), failure);
+
+  assert.equal((await getBackgroundImage(f.data)).toString(), 'saved-image');
+  assert.deepEqual(await f.manager.get(), f.saved);
+  assert.equal(await fs.promises.readFile(savedVideo, 'utf8'), 'saved-video');
+  assert.deepEqual((await fs.promises.readdir(f.data)).sort(), before);
+});
+
+for (const outcome of ['canceled', 'invalid', 'staging failure']) {
+  test(`an image picker ${outcome} never clears the saved video`, async (t) => {
+    const f = await imagePickerFixture(t);
+    const before = (await fs.promises.readdir(f.data)).sort();
+    const clear = t.mock.method(f.manager, 'clear', async () => { throw new Error('Must not clear'); });
+    if (outcome === 'canceled') f.dialog.showOpenDialog = async () => ({ canceled: true });
+    else if (outcome === 'invalid') f.nativeImage.createFromBuffer = () => ({ isEmpty: () => true });
+    else t.mock.method(fs.promises, 'writeFile', async () => { throw new Error('Disk full'); });
+
+    if (outcome === 'canceled') assert.equal((await f.choose()).canceled, true);
+    else await assert.rejects(f.choose(), outcome === 'invalid' ? /not supported/ : /Disk full/);
+
+    assert.equal(clear.mock.callCount(), 0);
+    assert.equal((await getBackgroundImage(f.data)).toString(), 'saved-image');
+    assert.deepEqual(await f.manager.get(), f.saved);
+    assert.deepEqual((await fs.promises.readdir(f.data)).sort(), before);
+  });
+}
 
 test('chosen background survives source removal and can be cleared', async (t) => {
   const dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'token-background-test-'));

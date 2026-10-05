@@ -7206,7 +7206,7 @@ app.whenReady().then(() => {
   rateRefreshTimer = setInterval(() => { refreshExchangeRates(); }, 6 * 60 * 60 * 1000);
   syncEdgeDock();
   ipcMain.handle('settings:get', () => settingsForRenderer());
-  installBackgroundVideo({ app, ipcMain, dialog, protocol, net, getWindow: () => mainWindow });
+  const backgroundVideo = installBackgroundVideo({ app, ipcMain, dialog, protocol, net, getWindow: () => mainWindow });
   ipcMain.handle('appearance:getBackgroundImage', () => getBackgroundImage(app.getPath('userData')));
   ipcMain.handle('appearance:chooseBackgroundImage', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
@@ -7214,7 +7214,7 @@ app.whenReady().then(() => {
       filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }]
     });
     if (result.canceled || !result.filePaths[0]) return { canceled: true };
-    return { bytes: await importBackgroundImage(result.filePaths[0], app.getPath('userData'), nativeImage) };
+    return { bytes: await importBackgroundImage(result.filePaths[0], app.getPath('userData'), nativeImage, () => backgroundVideo.clear()) };
   });
   ipcMain.handle('appearance:clearBackgroundImage', async () => {
     await clearBackgroundImage(app.getPath('userData'));
