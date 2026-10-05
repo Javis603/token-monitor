@@ -407,15 +407,17 @@ test('default and explicit disable do not construct the source, while keeping st
   assert.equal(constructions, 0);
 });
 
-test('separate processes serialize duplicate ledger updates and transfer ownership after a crash', { timeout: 5000 }, async (t) => {
+test('separate processes serialize duplicate ledger updates and transfer ownership after a crash', { timeout: 20000 }, async (t) => {
   const { home, store } = fixture(t);
   const modulePath = require.resolve('../../src/shared/providers/codex/localUsageStore');
   const script = `
     const store = require(process.argv[1]).createLocalUsageStore({ databasePath: process.argv[2] });
     process.on('message', (message) => {
-      const result = message.method === 'observe' ? store.observe(message.event)
-        : store.claimObserver(message.owner);
-      process.send(result);
+      try {
+        const result = message.method === 'observe' ? store.observe(message.event)
+          : store.claimObserver(message.owner);
+        process.send({ result });
+      } catch (error) { process.send({ error: error.message }); }
     });
   `;
   const children = [0, 1].map(() => spawn(process.execPath, ['-e', script, modulePath, path.join(home, 'codex-local-usage.sqlite')], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }));
@@ -424,7 +426,13 @@ test('separate processes serialize duplicate ledger updates and transfer ownersh
       ? null : new Promise((resolve) => { child.once('close', resolve); child.kill('SIGKILL'); })));
   });
   const rpc = (child, message) => new Promise((resolve, reject) => {
-    child.once('message', resolve);
+    const failed = () => reject(new Error('ledger test subprocess exited before replying'));
+    child.once('exit', failed);
+    child.once('message', (reply) => {
+      child.removeListener('exit', failed);
+      if (reply.error) reject(new Error(reply.error));
+      else resolve(reply.result);
+    });
     child.send(message, (error) => { if (error) reject(error); });
   });
   const updates = await Promise.all(children.map((child) => rpc(child, { method: 'observe', event: event() })));

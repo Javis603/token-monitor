@@ -37,7 +37,7 @@ function createLocalUsageStore(options = {}) {
     fs.mkdirSync(path.dirname(databasePath), { recursive: true, mode: 0o700 });
     database = new DatabaseSync(databasePath);
     fs.chmodSync(databasePath, 0o600);
-    database.exec(`
+    try { database.exec(`
       PRAGMA busy_timeout = 2000;
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS threads (
@@ -57,7 +57,11 @@ function createLocalUsageStore(options = {}) {
       CREATE TABLE IF NOT EXISTS agent_observer_intent (
         singleton INTEGER PRIMARY KEY CHECK(singleton = 1), pid INTEGER NOT NULL, expires_at INTEGER NOT NULL
       );
-    `);
+    `); } catch (error) {
+      database.close();
+      database = null;
+      throw error;
+    }
     return database;
   }
 
