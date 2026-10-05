@@ -7796,7 +7796,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('session:getDetail', (_event, args) => {
     const { client, sessionId, period, sessionCost } = args || {};
-    return readSessionDetailForPlatform({ client, sessionId, period, sessionCost });
+    return readSessionDetailForPlatform({ client, sessionId, period, sessionCost }, { lookupModelPricing });
   });
   ipcMain.handle('stream:status', () => ({ connected: streamConnected, mode, ...(streamFailure || {}) }));
   ipcMain.handle('serviceStatus:get', (_event, options) => serviceStatusClient.getServiceStatus({

@@ -4900,7 +4900,7 @@ function turnNode(turn) {
   el.querySelector('.detail-turn-value').textContent = tokensAvailable
     ? formatNumber(turn.value)
     : (t('detailTokenUnavailable') || 'Unavailable');
-  el.querySelector('.detail-turn-cost').textContent = tokensAvailable ? formatCost(turn.cost) : '';
+  el.querySelector('.detail-turn-cost').textContent = tokensAvailable ? formatCost(turn.cost, turn.unpricedTokens) : '';
   return el;
 }
 

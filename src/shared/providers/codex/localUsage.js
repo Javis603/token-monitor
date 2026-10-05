@@ -5,17 +5,18 @@ const { localDayKey } = require('../../history');
 const { createLocalUsageStore } = require('./localUsageStore');
 
 function estimatedCost(usage, pricing) {
-  if (!pricing) return null;
+  if (!pricing) return { cost: 0, unpricedTokens: usage.total || 0 };
   let cost = 0;
+  let unpricedTokens = 0;
   for (const [field, rate] of [
     ['input', 'inputCostPerToken'], ['cacheRead', 'cacheReadInputTokenCost'],
     ['cacheWrite', 'cacheCreationInputTokenCost'], ['output', 'outputCostPerToken']
   ]) {
     if (!usage[field]) continue;
-    if (!Number.isFinite(pricing[rate]) || pricing[rate] < 0) return null;
-    cost += usage[field] * pricing[rate];
+    if (!Number.isFinite(pricing[rate]) || pricing[rate] < 0) unpricedTokens += usage[field];
+    else cost += usage[field] * pricing[rate];
   }
-  return cost;
+  return { cost, unpricedTokens };
 }
 
 function buildLocalUsageView(rows, options = {}) {
@@ -36,11 +37,11 @@ function buildLocalUsageView(rows, options = {}) {
     const at = Date.parse(row.observedAt);
     if (!Number.isFinite(at) || at > now.getTime()) continue;
     const estimate = estimatedCost(row.usage, row.model === 'unknown' ? null : options.pricingByModel?.[row.model.toLowerCase()]);
-    const cost = estimate ?? 0;
+    const cost = estimate.cost;
     const entry = {
       client: 'codex', provider: 'openai', sessionId: row.threadId, model: row.model,
       ...row.usage, output: row.usage.output - row.usage.reasoning,
-      cost, ...(estimate === null ? { unpricedTokens: row.usage.total } : {}), messageCount: 1, sessionTitle: row.title,
+      cost, ...(estimate.unpricedTokens > 0 ? { unpricedTokens: estimate.unpricedTokens } : {}), messageCount: 1, sessionTitle: row.title,
       startedAt: row.observedAt, lastUsedAt: row.observedAt,
       ...(options.projectsEnabled !== false ? options.projectIdentity(row.cwd) : {})
     };
@@ -60,7 +61,7 @@ function buildLocalUsageView(rows, options = {}) {
     for (const key of Object.keys(model.tokens)) model.tokens[key] += key === 'output'
       ? row.usage.output - row.usage.reasoning : row.usage[key];
     model.cost += cost;
-    if (estimate === null) model.unpricedTokens = (model.unpricedTokens || 0) + row.usage.total;
+    if (estimate.unpricedTokens > 0) model.unpricedTokens = (model.unpricedTokens || 0) + estimate.unpricedTokens;
     model.messages += 1;
   }
   function period(start) {
@@ -113,4 +114,42 @@ async function resolveLocalUsagePricing(rows, options = {}) {
   return result;
 }
 
-module.exports = { buildLocalUsageView, readLocalUsageView, resolveLocalUsagePricing };
+// Details carry request buckets through the worker, then resolve prices in main
+// with the same injected catalog lookup. No session-wide proportional split.
+async function priceLocalSessionDetail(detail, options = {}) {
+  if (detail?.usageSource !== 'codex-dots-local') return detail;
+  const models = [...new Set((detail.exchanges || []).flatMap((ex) => ex.turns || [])
+    .map((turn) => String(turn.model || 'unknown').toLowerCase()))];
+  const prices = new Map();
+  // Bound the work when opening unusually large multi-model sessions. Omitted
+  // models remain unpriced rather than blocking or borrowing another rate.
+  for (const model of models.filter((id) => id !== 'unknown').slice(0, 16)) {
+    let pricing = null;
+    try { pricing = (await options.lookupModelPricing?.(model, 1500))?.pricing || null; } catch (_) { /* Explicitly unpriced. */ }
+    prices.set(model, pricing);
+  }
+  let knownCost = 0;
+  let unpricedTokens = 0;
+  for (const ex of detail.exchanges || []) {
+    ex.costEstimate = 0;
+    delete ex.unpricedTokens;
+    for (const turn of ex.turns || []) {
+      const estimate = estimatedCost(turn.tokens || {}, prices.get(String(turn.model || 'unknown').toLowerCase()));
+      turn.costEstimate = estimate.cost;
+      delete turn.unpricedTokens;
+      if (estimate.unpricedTokens > 0) {
+        turn.unpricedTokens = estimate.unpricedTokens;
+        ex.unpricedTokens = (ex.unpricedTokens || 0) + turn.unpricedTokens;
+      }
+      ex.costEstimate += turn.costEstimate;
+    }
+    knownCost += ex.costEstimate;
+    unpricedTokens += ex.unpricedTokens || 0;
+  }
+  detail.totals.costUsd = knownCost;
+  delete detail.totals.unpricedTokens;
+  if (unpricedTokens > 0) detail.totals.unpricedTokens = unpricedTokens;
+  return detail;
+}
+
+module.exports = { buildLocalUsageView, readLocalUsageView, resolveLocalUsagePricing, priceLocalSessionDetail };

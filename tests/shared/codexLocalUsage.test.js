@@ -505,13 +505,84 @@ test('missing model or rates remain explicit across period/session/project norma
   applyProjectRollups(view);
   const normalized = normalizeDeviceRecord({ periods: { today: view.today } }).periods.today;
   assert.equal(normalized.totalTokens, 440);
-  assert.equal(normalized.unpricedTokens, 220);
-  assert.equal(normalized.costUsd, 1.1);
+  assert.equal(normalized.unpricedTokens, 120);
+  assert.equal(normalized.costUsd, 2.1);
   assert.equal(normalized.sessions['codex:' + ID + '0'].unpricedTokens, 110);
-  assert.equal(normalized.clientUnpricedTokens.codex, 220);
+  assert.equal(normalized.clientUnpricedTokens.codex, 120);
   assert.equal(normalized.modelUnpricedTokens.unknown, 110);
-  assert.equal(Object.values(normalized.projects)[0].unpricedTokens, 220);
+  assert.equal(Object.values(normalized.projects)[0].unpricedTokens, 120);
   assert.equal(sessionRowsForPeriod(normalized).find((row) => row.key === 'session:codex:' + ID + '0').unpricedTokens, 110);
-  assert.equal(projectRowsForPeriod(normalized)[0].unpricedTokens, 220);
-  assert.equal(mergePeriods(normalized, normalized).unpricedTokens, 440);
+  assert.equal(projectRowsForPeriod(normalized)[0].unpricedTokens, 120);
+  assert.equal(mergePeriods(normalized, normalized).unpricedTokens, 240);
+});
+
+test('ledger details price each observed request without allocating the known subtotal to unknown models', async (t) => {
+  const { home, env, store } = fixture(t);
+  const { readSessionDetailForPlatform } = require('../../src/shared/sessionDetailResolver');
+  const { exchangeRows } = require('../../src/electron/renderer/sessionDetail');
+  const { usageCostLabel } = require('../../src/electron/renderer/usageAttributionRows');
+  const previousDay = new Date(Date.parse(AT) - 86400000).toISOString();
+  store.observe(event({ thread: { ...LOCAL, model: 'unknown' }, now: previousDay }));
+  const next = addCounters(TOTAL, LAST);
+  store.observe(event({ thread: { ...LOCAL, model: 'detail-priced' }, turnId: 'priced-turn', tokenUsage: { last: LAST, total: next } }));
+  store.observe(event({ thread: { ...LOCAL, model: 'unknown' }, turnId: 'unknown-turn', tokenUsage: { last: LAST, total: addCounters(next, LAST) } }));
+  const raw = readSessionDetail({ client: 'codex', sessionId: ID, home, env, period: 'today', sessionCost: 999, deps: { now: () => Date.parse(AT) } });
+  assert.equal(raw.totals.costUsd, 0, 'an aggregate cannot price individual ledger requests');
+  assert.equal(raw.totals.unpricedTokens, LAST.totalTokens * 2);
+  const lookups = [];
+  // Real worker message boundary and main-process pricing injection, then both
+  // renderer adapters. IDs, models and counters only; no transcript content.
+  const detail = await readSessionDetailForPlatform({ client: 'codex', sessionId: ID, env, period: 'total', sessionCost: 999 }, {
+    lookupModelPricing: async (model) => {
+      lookups.push(model);
+      return { pricing: { inputCostPerToken: 0.000001, cacheReadInputTokenCost: 0.0000001, outputCostPerToken: 0.000002 } };
+    }
+  });
+  const expected = 44911 * 0.000001 + 105216 * 0.0000001 + 52 * 0.000002;
+  assert.deepEqual(lookups, ['detail-priced']);
+  assert.equal(detail.totals.costUsd, expected);
+  assert.equal(detail.totals.unpricedTokens, LAST.totalTokens * 2);
+  const row = exchangeRows(detail)[0];
+  assert.equal(row.unpricedTokens, LAST.totalTokens * 2);
+  assert.equal(row.cost, expected);
+  const unknown = row.turns.filter((turn) => turn.unpricedTokens > 0);
+  assert.equal(unknown.length, 2);
+  assert.ok(unknown.every((turn) => turn.cost === 0 && turn.unpricedTokens === LAST.totalTokens));
+  const label = usageCostLabel(unknown[0].cost, unknown[0].unpricedTokens, (value) => `$${value}`, String, 'unpriced tokens');
+  assert.match(label, /^—/);
+  assert.equal(row.turns.filter((turn) => !turn.unpricedTokens)[0].cost, expected);
+});
+
+
+test('detail estimates keep known bucket prices when another used bucket has no rate', async () => {
+  const { priceLocalSessionDetail } = require('../../src/shared/providers/codex/localUsage');
+  const detail = { usageSource: 'codex-dots-local', totals: {}, exchanges: [{ turns: [{
+    model: 'partial-price', tokens: { input: 100, cacheRead: 50, output: 10, total: 160 }
+  }] }] };
+  const priced = await priceLocalSessionDetail(detail, { lookupModelPricing: async () => ({ pricing: {
+    inputCostPerToken: 0.01, cacheReadInputTokenCost: 0.01
+  } }) });
+  assert.equal(priced.totals.costUsd, 1.5);
+  assert.equal(priced.totals.unpricedTokens, 10);
+  assert.equal(priced.exchanges[0].turns[0].costEstimate, 1.5);
+  assert.equal(priced.exchanges[0].turns[0].unpricedTokens, 10);
+});
+
+test('opening or refreshing Dots details bounds pricing work and never looks up unknown models', async () => {
+  const { priceLocalSessionDetail } = require('../../src/shared/providers/codex/localUsage');
+  const lookups = [];
+  const makeDetail = () => ({ usageSource: 'codex-dots-local', totals: {}, exchanges: [{ turns:
+    [...Array.from({ length: 20 }, (_, index) => `bounded-model-${index}`), 'unknown'].map((model) => ({ model, tokens: { input: 1, total: 1 } }))
+  }] });
+  const options = { lookupModelPricing: async (...args) => {
+    lookups.push(args);
+    return { pricing: { inputCostPerToken: 1 } };
+  } };
+  for (let refresh = 0; refresh < 2; refresh += 1) {
+    const detail = await priceLocalSessionDetail(makeDetail(), options);
+    assert.equal(detail.totals.costUsd, 16);
+    assert.equal(detail.totals.unpricedTokens, 5);
+  }
+  assert.equal(lookups.length, 32);
+  assert.ok(lookups.every(([model, timeout]) => model.startsWith('bounded-model-') && timeout === 1500));
 });
