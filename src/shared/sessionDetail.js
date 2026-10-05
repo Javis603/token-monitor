@@ -605,6 +605,7 @@ function readSessionDetail({ client, sessionId, period = 'total', sessionCost = 
         const grouped = filterExchangesByPeriod(groupEvents(events), period, new Date((deps.now || Date.now)()));
         distributeCost(grouped, sessionCost);
         return { found: true, client, sessionId, canonicalSessionId: sessionId, period,
+          usageSource: 'codex-dots-local', usageCoverage: 'observed-only',
           exchanges: grouped, totals: totalsOf(grouped, sessionCost) };
       }
     } catch (_) { /* A damaged supplemental ledger must not break native details. */ }

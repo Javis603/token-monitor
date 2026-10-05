@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { spawn } = require('node:child_process');
 const { executorIdsFromProcesses, localThreadEnvironment } = require('../../src/shared/providers/codex/localExecutor');
 const { createLocalUsageStore, usageCounters } = require('../../src/shared/providers/codex/localUsageStore');
 const { createLocalUsageSource } = require('../../src/shared/providers/codex/localUsageSource');
@@ -114,6 +115,8 @@ test('the collector, archive transform, renderer and details consume one canonic
     assert.equal(visible[name].totalTokens, 150179);
     assert.equal(visible[name].clients.codex, 150179);
     const session = visible[name].sessions[`codex:${ID}`];
+    assert.equal(session.usageSource, 'codex-dots-local');
+    assert.equal(session.usageCoverage, 'observed-only');
     assert.equal(session.inputTokens, 44911);
     assert.equal(session.reasoningTokens, 36);
     assert.equal(session.projectId, projectIdentity('/work/project').projectId);
@@ -141,6 +144,7 @@ test('the collector, archive transform, renderer and details consume one canonic
   assert.equal(wire.allTime.sessions, undefined);
   assert.equal(JSON.stringify(wire).includes('/work/project'), false);
   assert.equal(normalizeDeviceRecord(wire).periods.today.totalTokens, 150179);
+  assert.equal(normalizeDeviceRecord(wire).periods.today.sessions[`codex:${ID}`].usageCoverage, 'observed-only');
 });
 
 test('dates, model changes and project changes preserve request attribution; projects can be disabled', (t) => {
@@ -175,6 +179,9 @@ test('native rollout precedence does not resurrect an archived supplemental row'
   const next = transform.transform(await collectUsageOnce({ ...base, runTokscale: async () => ({ entries: [{ client: 'codex', sessionId: nativeId, model: 'gpt-test', input: 44911, cacheRead: 105216, output: 52 }] }) }));
   assert.equal(next.allTime.totalTokens, 150179);
   assert.deepEqual(Object.keys(next.allTime.sessions), [`codex:${nativeId}`]);
+  store.updateThread('test-account', ID, { nativeBacked: true });
+  assert.equal(store.observe(event({ tokenUsage: { last: LAST, total: addCounters(TOTAL, LAST) } })), false);
+  assert.equal(buildLocalUsageView(store.rows(), { now: AT, projectIdentity }).allTime.totalTokens, 0);
 });
 
 class FakeSocket extends EventTarget {
@@ -216,8 +223,10 @@ test('live source subscribes only to this executor, ignores content/approval req
   await new Promise(setImmediate);
   await source.whenIdle();
   assert.deepEqual(socket.sent.filter((item) => item.method === 'thread/resume').map((item) => item.params), [{ threadId: ID, excludeTurns: true }]);
-  socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'turn-1', tokenUsage: { last: LAST, total: TOTAL } });
-  socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'turn-1', tokenUsage: { last: LAST, total: TOTAL } });
+  socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'baseline', tokenUsage: { last: LAST, total: TOTAL } });
+  socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'turn-1', tokenUsage: { last: LAST, total: addCounters(TOTAL, LAST) } });
+  socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'baseline', tokenUsage: { last: LAST, total: TOTAL } });
+  socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'turn-1', tokenUsage: { last: LAST, total: addCounters(TOTAL, LAST) } });
   socket.notify('item/agentMessage/delta', { threadId: ID, delta: 'private-content' });
   const sent = socket.sent.length;
   socket.notify('item/commandExecution/requestApproval', { threadId: ID }, 112);
@@ -271,8 +280,8 @@ test('a live notification drives the real collector debounce and exact warm peri
     delete require.cache[collectorPath];
   });
   runtime = startCollector({
-    clients: 'codex', homeDir: home, env: { ...env, TOKEN_MONITOR_CODEX_LOCAL_USAGE: '' },
-    deviceId: 'test-mac', now: AT, historyEnabled: false, watchEnabled: false,
+    clients: 'codex', homeDir: home, env: { ...env, TOKEN_MONITOR_CODEX_LOCAL_USAGE: '1' },
+    deviceId: 'test-mac', agentRuntime: 'headless-agent', now: AT, historyEnabled: false, watchEnabled: false,
     anchorPersistenceEnabled: false, intervalMs: 60000, watchDebounceMs: 1,
     runTokscale: async () => { scans += 1; return { entries: [] }; },
     lookupModelPricing: async () => ({}),
@@ -281,7 +290,9 @@ test('a live notification drives the real collector debounce and exact warm peri
   await runtime.whenIdle();
   await source.whenIdle();
   assert.equal(scans, 3);
-  socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'turn-1', tokenUsage: { last: LAST, total: TOTAL } });
+  assert.equal(store.agentObserverRequested(), true);
+  socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'baseline', tokenUsage: { last: LAST, total: TOTAL } });
+  socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'turn-1', tokenUsage: { last: LAST, total: addCounters(TOTAL, LAST) } });
   const summary = await received;
   assert.equal(scans, 4);
   assert.equal(summary.today.totalTokens, 150179);
@@ -290,4 +301,180 @@ test('a live notification drives the real collector debounce and exact warm peri
   runtime.stop();
   await runtime.whenIdle();
   assert.equal(runtime.getDiagnostics().codexLocalUsage.state, 'stopped');
+  assert.equal(store.agentObserverRequested(), false);
+});
+
+test('observer lease admits one writer, releases only its owner and recovers dead/expired owners', (t) => {
+  const { env, store } = fixture(t);
+  const other = createLocalUsageStore({ env });
+  t.after(() => other.close());
+  assert.equal(store.claimObserver('widget', 101, 1000, () => true), true);
+  assert.equal(other.claimObserver('agent', 202, 1001, () => true), false);
+  other.releaseObserver('agent');
+  assert.equal(other.claimObserver('agent', 202, 1002, () => true), false);
+  store.releaseObserver('widget');
+  assert.equal(other.claimObserver('agent', 202, 1003, () => true), true);
+  assert.equal(store.claimObserver('new-widget', 303, 1004, () => false), true);
+  assert.equal(other.claimObserver('new-agent', 404, 31004, () => true), true);
+});
+
+test('reconnect discards its initial snapshot and offline gap, retaining only later observed requests', { timeout: 2000 }, async (t) => {
+  const { store } = fixture(t);
+  const sockets = [];
+  let connected;
+  const reconnect = new Promise((resolve) => { connected = resolve; });
+  const source = createLocalUsageSource({ store }, {
+    pollMs: 5, idlePollMs: 5,
+    shouldYield: () => false,
+    localExecutorIds: () => new Set(['executor-local']),
+    readAuth: () => ({ accessToken: 'fixture', accountId: 'account' }),
+    makeSocket() {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      queueMicrotask(() => { socket.dispatchEvent(new Event('open')); if (sockets.length === 2) connected(); });
+      return { socket };
+    }, now: () => new Date(AT)
+  });
+  t.after(() => source.stop());
+  source.start();
+  await new Promise(setImmediate);
+  await source.whenIdle();
+  const notify = (socket, total) => socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId: 'turn', tokenUsage: { last: LAST, total } });
+  notify(sockets[0], TOTAL);
+  assert.equal(store.rows().length, 0, 'old last request must not be charged on connection');
+  notify(sockets[0], addCounters(TOTAL, LAST));
+  sockets[0].close();
+  await reconnect;
+  await new Promise(setImmediate);
+  await source.whenIdle();
+  const gap = addCounters(addCounters(addCounters(TOTAL, LAST), LAST), LAST);
+  notify(sockets[1], gap);
+  assert.equal(store.rows().length, 1);
+  notify(sockets[1], addCounters(gap, LAST));
+  notify(sockets[1], addCounters(gap, LAST));
+  assert.equal(store.rows().length, 2);
+  assert.equal(store.rows().reduce((sum, row) => sum + row.usage.total, 0), LAST.totalTokens * 2);
+});
+
+test('an enabled source without a local executor never opens a socket; agent ownership avoids probes', async (t) => {
+  const { store } = fixture(t);
+  let scans = 0;
+  let sockets = 0;
+  const deps = {
+    shouldYield: () => false,
+    localExecutorIds: () => { scans += 1; return new Set(); },
+    readAuth: () => ({ accessToken: 'fixture', accountId: 'account' }),
+    makeSocket: () => { sockets += 1; return { socket: new FakeSocket() }; }
+  };
+  const source = createLocalUsageSource({ store }, deps);
+  source.start();
+  await source.whenIdle();
+  assert.equal(scans, 1);
+  assert.equal(sockets, 0);
+  source.stop();
+  const standby = createLocalUsageSource({ store }, { ...deps, shouldYield: () => true });
+  standby.start();
+  await standby.whenIdle();
+  assert.equal(standby.getDiagnostics().state, 'standby');
+  assert.equal(scans, 1);
+  assert.equal(sockets, 0);
+  standby.stop();
+});
+
+test('default and explicit disable do not construct the source, while keeping stored usage', async (t) => {
+  const { home, env, store } = fixture(t);
+  store.observe(event());
+  const sourceModule = require('../../src/shared/providers/codex/localUsageSource');
+  const collectorPath = require.resolve('../../src/shared/collector');
+  const original = sourceModule.createLocalUsageSource;
+  let constructions = 0;
+  sourceModule.createLocalUsageSource = () => { constructions += 1; throw new Error('must not construct'); };
+  delete require.cache[collectorPath];
+  t.after(() => { sourceModule.createLocalUsageSource = original; delete require.cache[collectorPath]; });
+  for (const flag of [undefined, '0']) {
+    const runtime = require(collectorPath).startCollector({
+      clients: 'codex', env: { ...env, TOKEN_MONITOR_CODEX_LOCAL_USAGE: flag }, homeDir: home,
+      codexLocalUsageStore: store, now: AT, deviceId: 'fixture',
+      allTimeSince: '2025-01-01', historyEnabled: false, watchEnabled: false,
+      anchorPersistenceEnabled: false, intervalMs: 60000,
+      runTokscale: async () => ({ entries: [] }), lookupModelPricing: async () => ({}),
+      onUpdate(summary) { assert.equal(summary.today.totalTokens, LAST.totalTokens); }
+    });
+    await runtime.whenIdle();
+    runtime.stop();
+    await runtime.whenIdle();
+  }
+  assert.equal(constructions, 0);
+});
+
+test('separate processes serialize duplicate ledger updates and transfer ownership after a crash', { timeout: 5000 }, async (t) => {
+  const { home, store } = fixture(t);
+  const modulePath = require.resolve('../../src/shared/providers/codex/localUsageStore');
+  const script = `
+    const store = require(process.argv[1]).createLocalUsageStore({ databasePath: process.argv[2] });
+    process.on('message', (message) => {
+      const result = message.method === 'observe' ? store.observe(message.event)
+        : store.claimObserver(message.owner);
+      process.send(result);
+    });
+  `;
+  const children = [0, 1].map(() => spawn(process.execPath, ['-e', script, modulePath, path.join(home, 'codex-local-usage.sqlite')], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }));
+  t.after(async () => {
+    await Promise.all(children.map((child) => child.exitCode != null || child.signalCode
+      ? null : new Promise((resolve) => { child.once('close', resolve); child.kill('SIGKILL'); })));
+  });
+  const rpc = (child, message) => new Promise((resolve, reject) => {
+    child.once('message', resolve);
+    child.send(message, (error) => { if (error) reject(error); });
+  });
+  const updates = await Promise.all(children.map((child) => rpc(child, { method: 'observe', event: event() })));
+  assert.deepEqual(updates.sort(), [false, true]);
+  assert.equal(store.rows().length, 1);
+  assert.equal(await rpc(children[0], { method: 'claim', owner: 'widget' }), true);
+  assert.equal(await rpc(children[1], { method: 'claim', owner: 'agent' }), false);
+  await new Promise((resolve) => { children[0].once('close', resolve); children[0].kill('SIGKILL'); });
+  assert.equal(await rpc(children[1], { method: 'claim', owner: 'agent' }), true);
+  assert.equal(await rpc(children[1], { method: 'observe', event: event() }), false);
+});
+
+test('live model attribution requires a turn-linked event rather than the thread current model', async (t) => {
+  const { store } = fixture(t);
+  const socket = new FakeSocket();
+  const source = createLocalUsageSource({ store }, {
+    shouldYield: () => false,
+    localExecutorIds: () => new Set(['executor-local']),
+    readAuth: () => ({ accessToken: 'fixture', accountId: 'account' }),
+    makeSocket: () => { queueMicrotask(() => socket.dispatchEvent(new Event('open'))); return { socket }; },
+    now: () => new Date(AT)
+  });
+  t.after(() => source.stop());
+  source.start();
+  await new Promise(setImmediate);
+  await source.whenIdle();
+  const notify = (turnId, total) => socket.notify('thread/tokenUsage/updated', { threadId: ID, turnId, tokenUsage: { last: LAST, total } });
+  notify('baseline', TOTAL);
+  socket.notify('model/rerouted', { threadId: ID, toModel: 'unscoped-model' });
+  const next = addCounters(TOTAL, LAST);
+  notify('turn-unknown', next);
+  socket.notify('turn/started', { threadId: ID, turn: { id: 'turn-known', model: 'confirmed-model' } });
+  notify('turn-known', addCounters(next, LAST));
+  assert.deepEqual(store.rows().map((row) => row.model), ['unknown', 'confirmed-model']);
+});
+
+test('native replacement removes previously observed Dots usage from retained daily history', async (t) => {
+  const { home, env, store } = fixture(t);
+  store.observe(event());
+  const base = {
+    clients: 'codex', env, homeDir: home, codexLocalUsageStore: store, now: AT,
+    allTimeSince: '2025-01-01', includeHistory: true, dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveOptions: { env }, lookupModelPricing: async () => ({})
+  };
+  const initial = await collectUsageOnce({ ...base, runTokscale: async () => ({ entries: [] }), runGraph: async () => ({ contributions: [] }) });
+  assert.equal(initial.history.daily[0].tokens, LAST.totalTokens);
+  const replacement = await collectUsageOnce({ ...base,
+    runTokscale: async () => ({ entries: [{ client: 'codex', sessionId: `rollout-${ID}`, model: 'gpt-test', input: 20, output: 0 }] }),
+    runGraph: async () => ({ contributions: [{ date: localTodayKey(new Date(AT)), clients: [{ client: 'codex', modelId: 'gpt-test', tokens: { input: 20, output: 0 }, messages: 1, cost: 0 }] }] })
+  });
+  assert.equal(replacement.today.totalTokens, 20);
+  assert.equal(replacement.history.daily[0].tokens, 20, 'generic archive must not resurrect the old Dots maximum');
 });

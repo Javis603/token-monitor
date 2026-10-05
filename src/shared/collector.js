@@ -33,7 +33,7 @@ const {
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
 const { createWatcherHost } = require('./watcherHost');
-const { localDayKey, parseGraphResult, normalizeHistory } = require('./history');
+const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories } = require('./history');
 const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
 const {
   createSubprocessTermination,
@@ -51,7 +51,7 @@ const {
 } = require('./sessionMetadata');
 const { kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
-const { readLocalUsageView } = require('./providers/codex/localUsage');
+const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
 const { createLocalUsageSource } = require('./providers/codex/localUsageSource');
 const {
   createReasonixNativeSessionCache,
@@ -766,10 +766,11 @@ async function collectHistoryOnce(options) {
       if (typeof options.logger === 'function') options.logger(`tokscale graph failed: ${error.message}`);
     }
   }
-  if (options.codexLocalGraph) {
-    rawGraphs.push(options.codexLocalGraph);
-    histories.push(normalizeHistory(parseGraphResult(options.codexLocalGraph), { capDays, todayKey }));
-  }
+  // Keep the supplemental ledger out of generic history retention too: a
+  // retained maximum would survive when a native rollout replaces this thread.
+  const withLocalHistory = (history) => options.codexLocalGraph
+    ? mergeHistories([history, normalizeHistory(parseGraphResult(options.codexLocalGraph), { capDays, todayKey })].filter(Boolean), { capDays, todayKey })
+    : history;
   if (options.dailyHistoryArchiveEnabled) {
     try {
       const retainedGraph = retainDailyHistory(rawGraphs, {
@@ -784,7 +785,7 @@ async function collectHistoryOnce(options) {
       const retained = normalizeHistory(parseGraphResult(retainedGraph), { capDays, todayKey });
       const result = retained.daily.length || retained.monthly.length ? retained : null;
       reportStatus(failureCode === null);
-      return result;
+      return withLocalHistory(result);
     } catch (error) {
       failureCode = failureCode || 'daily-history-archive-failed';
       if (typeof options.logger === 'function') options.logger(`daily history archive failed: ${error.message}`);
@@ -792,11 +793,11 @@ async function collectHistoryOnce(options) {
   }
   if (!liveHistory) {
     reportStatus(false);
-    return null;
+    return withLocalHistory(null);
   }
   const result = liveHistory.daily.length || liveHistory.monthly.length ? liveHistory : null;
   reportStatus(failureCode === null);
-  return result;
+  return withLocalHistory(result);
 }
 
 function shouldIncludeHistory(nowMs, lastHistoryAtMs, historyIntervalMs, force, enabled = true) {
@@ -1113,9 +1114,9 @@ async function collectUsageOnce(options) {
       codexLocalView = await readLocalUsageView({
         ...options, store: options.codexLocalUsageStore, now: collectedAt,
         nativePeriod: allTime, projectIdentity,
-        resolvePricing: (rows) => resolveModelPricing(rows, {
+        resolvePricing: (rows) => resolveLocalUsagePricing(rows, {
           ...options, lookupModelPricing: options.lookupModelPricing || lookupModelPricing,
-          commandTimeoutMs: options.pricingTimeoutMs
+          commandTimeoutMs: options.pricingTimeoutMs, pricingRevision: options.pricingRevision ?? pricingFingerprint(options)
         })
       });
       throwIfAborted(options.signal);
@@ -2715,7 +2716,10 @@ function startCollector(options) {
           const visibleDateKey = Number.isFinite(visibleDate.getTime())
             ? localTodayKey(visibleDate)
             : todayKey;
-          const retainedLive = retainLiveDailyHistory(visibleSummary.today, {
+          const retainedToday = codexLocalView
+            ? applyPeriodDelta(visibleSummary.today, emptyPeriod(), codexLocalView.today)
+            : visibleSummary.today;
+          const retainedLive = retainLiveDailyHistory(retainedToday, {
             ...(options.dailyHistoryArchiveOptions || {}),
             liveDays: liveDailyHistoryDays,
             todayKey: visibleDateKey,
@@ -3230,9 +3234,10 @@ function startCollector(options) {
   setupWatchers();
   loop();
   if (trackedClients.has('codex') && options.codexLocalUsageEnabled !== false
-    && (options.env || process.env).TOKEN_MONITOR_CODEX_LOCAL_USAGE !== '0') {
+    && (options.env || process.env).TOKEN_MONITOR_CODEX_LOCAL_USAGE === '1') {
     codexLocalSource = createLocalUsageSource({
       ...sourceOptions,
+      agentRuntime: options.agentRuntime,
       store: options.codexLocalUsageStore,
       onChange() {
         if (stopped) return;

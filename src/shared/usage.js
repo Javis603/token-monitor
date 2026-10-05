@@ -595,6 +595,10 @@ function mergeSession(target, source) {
   }
   if (!target.title && source.title) target.title = normalizeSessionTitle(source.title);
   if (!target.sessionKind && source.sessionKind) target.sessionKind = normalizeSessionKind(source.sessionKind);
+  if (source.usageSource === 'codex-dots-local') {
+    target.usageSource = 'codex-dots-local';
+    target.usageCoverage = 'observed-only';
+  }
   for (const [model, tokens] of Object.entries(source.models || {})) {
     const key = normalizeModelNameForClient(model, target.client);
     if (key) target.models[key] = (target.models[key] || 0) + Math.max(0, Math.round(asNumber(tokens)));
@@ -690,6 +694,10 @@ function normalizeSession(input, fallbackKey) {
   session.projectLabel = String(input.projectLabel || input.project_label || '').trim();
   session.title = normalizeSessionTitle(input.title || input.sessionTitle || input.session_title);
   session.sessionKind = normalizeSessionKind(input.sessionKind || input.session_kind);
+  if (client === 'codex' && input.usageSource === 'codex-dots-local') {
+    session.usageSource = 'codex-dots-local';
+    session.usageCoverage = 'observed-only';
+  }
   if (input.models && typeof input.models === 'object') {
     for (const [model, value] of Object.entries(input.models)) {
       const key = normalizeModelNameForClient(model, client);

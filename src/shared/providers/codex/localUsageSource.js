@@ -1,13 +1,17 @@
 'use strict';
 
 const fs = require('node:fs');
+const path = require('node:path');
+const { randomUUID } = require('node:crypto');
+const { sharedDataDir } = require('../../config');
+const { externalAgentActive } = require('../../usage/agentPid');
 const { Agent, EnvHttpProxyAgent, WebSocket } = require('undici');
 const { resolveProxyConfig } = require('../../outboundFetch');
 const { appVersion } = require('../../appVersion');
 const { codexOAuthRequestContext, hashAccountKey } = require('./auth');
 const { codexHomeDir } = require('./sessionMetadata');
 const { localExecutorIds, localThreadEnvironment } = require('./localExecutor');
-const { createLocalUsageStore } = require('./localUsageStore');
+const { createLocalUsageStore, usageCounters } = require('./localUsageStore');
 
 const APP_SERVER_URL = 'wss://codex-cloud-backend.chatgpt.com/';
 
@@ -24,6 +28,10 @@ function createLocalUsageSource(options = {}, deps = {}) {
   const env = options.env || process.env;
   const abortController = new AbortController();
   const store = options.store || createLocalUsageStore(options);
+  const owner = randomUUID();
+  const isAgent = options.agentRuntime === 'headless-agent';
+  const shouldYield = deps.shouldYield || (() => !isAgent && store.agentObserverRequested()
+    && externalAgentActive(path.join(sharedDataDir(options), 'agent.pid')));
   const makeSocket = deps.makeSocket || ((context) => {
     const proxy = resolveProxyConfig(env);
     const dispatcher = proxy.httpProxy || proxy.httpsProxy
@@ -129,7 +137,7 @@ function createLocalUsageSource(options = {}, deps = {}) {
     subscribing.add(thread.id);
     // Install metadata before resume: the server can notify while its reply
     // is in flight. No turn/configuration/approval request is ever sent.
-    threads.set(thread.id, { thread, local });
+    threads.set(thread.id, { thread, local, baselinePending: true, turnModels: new Map() });
     try {
       await request('thread/resume', { threadId: thread.id, excludeTurns: true });
     } catch (_) {
@@ -171,15 +179,25 @@ function createLocalUsageSource(options = {}, deps = {}) {
     const entry = threads.get(params.threadId);
     if (!entry || !localThreadEnvironment(entry.thread, executorIds)) return;
     const accountKey = hashAccountKey(context.accountId);
-    if (message.method === 'model/rerouted' && params.toModel) entry.thread.model = params.toModel;
+    const turnId = params.turnId || params.turn?.id;
+    const reportedModel = message.method === 'model/rerouted' ? params.toModel
+      : message.method === 'turn/started' ? params.turn?.model || params.model : null;
+    if (turnId && typeof reportedModel === 'string' && reportedModel.trim()) {
+      entry.turnModels.set(turnId, reportedModel.trim());
+      if (entry.turnModels.size > 32) entry.turnModels.delete(entry.turnModels.keys().next().value);
+    }
     if (message.method === 'thread/tokenUsage/updated') {
+      if (shouldYield() || !store.claimObserver(owner)) { disconnect(); store.releaseObserver(owner); return; }
       if (store.observe({
-        accountKey, thread: entry.thread, ...entry.local, turnId: params.turnId,
-        tokenUsage: params.tokenUsage, now: now()
+        accountKey, thread: { ...entry.thread, model: entry.turnModels.get(params.turnId) || 'unknown' }, ...entry.local, turnId: params.turnId,
+        tokenUsage: params.tokenUsage, baselineOnly: entry.baselinePending, now: now()
       })) {
         lastUsageAt = now().toISOString();
         changed();
       }
+      // A malformed notification must not consume the reconnect baseline.
+      if (usageCounters(params.tokenUsage?.total)
+        && usageCounters(params.tokenUsage?.last)) entry.baselinePending = false;
     } else if (message.method === 'turn/started' || message.method === 'turn/completed') {
       const ended = message.method === 'turn/completed';
       entry.thread.status = { type: ended ? 'idle' : 'active' };
@@ -241,6 +259,13 @@ function createLocalUsageSource(options = {}, deps = {}) {
   async function poll() {
     if (stopped) return;
     try {
+      if (isAgent) store.requestAgentObserver();
+      if (shouldYield() || !store.claimObserver(owner)) {
+        disconnect();
+        store.releaseObserver(owner);
+        state = 'standby';
+        return;
+      }
       const next = authContext();
       const ids = next?.accessToken && next.accountId && !next.isFedrampAccount ? await findExecutors() : new Set();
       if (stopped) return;
@@ -263,7 +288,9 @@ function createLocalUsageSource(options = {}, deps = {}) {
     } catch (_) {
       disconnect('local-usage-connect-failed');
     }
-    if (!stopped) timer = setTimeout(() => { executorScan = poll(); }, pollMs);
+    finally {
+      if (!stopped) timer = setTimeout(() => { executorScan = poll(); }, executorIds.size ? pollMs : Math.max(pollMs, deps.idlePollMs ?? 30000));
+    }
   }
 
   return {
@@ -275,6 +302,8 @@ function createLocalUsageSource(options = {}, deps = {}) {
       if (timer) clearTimeout(timer);
       timer = null;
       disconnect();
+      store.releaseObserver(owner);
+      if (isAgent) store.releaseAgentObserver();
       if (!options.store) store.close();
     },
     whenIdle: () => Promise.all([executorScan, discovery]).then(() => {}),

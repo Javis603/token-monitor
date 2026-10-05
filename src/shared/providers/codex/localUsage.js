@@ -65,6 +65,8 @@ function buildLocalUsageView(rows, options = {}) {
     const result = extractUsageFromTokscale({ entries: entries.filter((entry) => Date.parse(entry.lastUsedAt) >= start) });
     for (const session of Object.values(result.sessions)) {
       const row = metadata.get(session.sessionId);
+      session.usageSource = 'codex-dots-local';
+      session.usageCoverage = 'observed-only';
       session.turnEnded = row.turnEnded === true;
       session.contextTokens = row.contextTokens || 0;
       session.contextWindow = row.contextWindow || 0;
@@ -89,4 +91,23 @@ async function readLocalUsageView(options = {}) {
   }
 }
 
-module.exports = { buildLocalUsageView, readLocalUsageView };
+const pricingCache = new Map();
+async function resolveLocalUsagePricing(rows, options = {}) {
+  const result = {};
+  const models = [...new Set(rows.map((row) => row.model.toLowerCase()))];
+  for (const model of models) {
+    const key = `${options.pricingRevision || ''}:${model}`;
+    let cached = pricingCache.get(key);
+    if (!cached || cached.until <= Date.now()) {
+      let pricing = null;
+      try { pricing = (await options.lookupModelPricing(model, options.commandTimeoutMs || 1500))?.pricing || null; } catch (_) { /* Usage remains valid without a price. */ }
+      cached = { pricing, until: Date.now() + (pricing ? 300000 : 30000) };
+      pricingCache.set(key, cached);
+      if (pricingCache.size > 256) pricingCache.delete(pricingCache.keys().next().value);
+    }
+    result[model] = cached.pricing;
+  }
+  return result;
+}
+
+module.exports = { buildLocalUsageView, readLocalUsageView, resolveLocalUsagePricing };

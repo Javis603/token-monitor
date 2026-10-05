@@ -50,11 +50,18 @@ function createLocalUsageStore(options = {}) {
         PRIMARY KEY (account_key, thread_id, checkpoint_total)
       );
       CREATE INDEX IF NOT EXISTS requests_thread ON requests(thread_id, observed_at);
+      CREATE TABLE IF NOT EXISTS observer (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1), owner TEXT NOT NULL,
+        pid INTEGER NOT NULL, expires_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS agent_observer_intent (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1), pid INTEGER NOT NULL, expires_at INTEGER NOT NULL
+      );
     `);
     return database;
   }
 
-  function observe({ accountKey, thread, environmentId, cwd, turnId, tokenUsage, now = new Date() }) {
+  function observe({ accountKey, thread, environmentId, cwd, turnId, tokenUsage, baselineOnly = false, now = new Date() }) {
     let last = usageCounters(tokenUsage?.last);
     const total = usageCounters(tokenUsage?.total);
     if (!accountKey || !thread?.id || !turnId || !thread.model || !last || !total
@@ -69,7 +76,11 @@ function createLocalUsageStore(options = {}) {
     };
     db.exec('BEGIN IMMEDIATE');
     try {
-      const previous = db.prepare('SELECT checkpoint FROM threads WHERE account_key = ? AND thread_id = ?').get(accountKey, thread.id);
+      const previous = db.prepare('SELECT checkpoint, metadata FROM threads WHERE account_key = ? AND thread_id = ?').get(accountKey, thread.id);
+      if (previous && JSON.parse(previous.metadata).nativeBacked === true) {
+        db.exec('COMMIT');
+        return false;
+      }
       const checkpoint = previous?.checkpoint ? JSON.parse(previous.checkpoint) : null;
       // Replayed, duplicate or out-of-order counters must not be added again.
       // Only the reported last request is attributed to this observation. An
@@ -98,10 +109,10 @@ function createLocalUsageStore(options = {}) {
       db.prepare(`INSERT INTO threads VALUES (?, ?, ?, ?)
         ON CONFLICT(account_key, thread_id) DO UPDATE SET metadata = excluded.metadata, checkpoint = excluded.checkpoint`)
         .run(accountKey, thread.id, JSON.stringify(metadata), JSON.stringify(total));
-      if (last.total > 0) db.prepare('INSERT OR IGNORE INTO requests VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+      if (!baselineOnly && last.total > 0) db.prepare('INSERT OR IGNORE INTO requests VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
         .run(accountKey, thread.id, total.total, observedAt, turnId, thread.model, cwd, JSON.stringify(last));
       db.exec('COMMIT');
-      return last.total > 0;
+      return !baselineOnly && last.total > 0;
     } catch (error) {
       db.exec('ROLLBACK');
       throw error;
@@ -145,7 +156,40 @@ function createLocalUsageStore(options = {}) {
     database = null;
   }
 
-  return { observe, updateThread, rows, close };
+  function claimObserver(owner, pid = process.pid, at = Date.now(), alive = (id) => {
+    try { process.kill(id, 0); return true; } catch (_) { return false; }
+  }) {
+    const db = open(true);
+    if (!db) return false;
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const previous = db.prepare('SELECT * FROM observer WHERE singleton = 1').get();
+      const allowed = !previous || previous.owner === owner || previous.expires_at <= at || !alive(previous.pid);
+      if (allowed) db.prepare('INSERT OR REPLACE INTO observer VALUES (1, ?, ?, ?)').run(owner, pid, at + 30000);
+      db.exec('COMMIT');
+      return allowed;
+    } catch (error) { db.exec('ROLLBACK'); throw error; }
+  }
+
+  function releaseObserver(owner) {
+    open()?.prepare('DELETE FROM observer WHERE owner = ?').run(owner);
+  }
+
+  function requestAgentObserver() {
+    open(true)?.prepare('INSERT OR REPLACE INTO agent_observer_intent VALUES (1, ?, ?)').run(process.pid, Date.now() + 60000);
+  }
+
+  function agentObserverRequested() {
+    const row = open()?.prepare('SELECT * FROM agent_observer_intent WHERE singleton = 1').get();
+    return Boolean(row && row.expires_at > Date.now());
+  }
+
+  function releaseAgentObserver() {
+    open()?.prepare('DELETE FROM agent_observer_intent WHERE pid = ?').run(process.pid);
+  }
+
+  return { observe, updateThread, rows, close, claimObserver, releaseObserver,
+    requestAgentObserver, agentObserverRequested, releaseAgentObserver };
 }
 
 module.exports = { createLocalUsageStore, localUsageDatabasePath, usageCounters };
