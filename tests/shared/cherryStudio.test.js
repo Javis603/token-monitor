@@ -158,7 +158,8 @@ test('Cherry Studio ignores foreign-platform roots for watches and source health
 
 
 test('Cherry Studio chat database and WAL refresh usage without watching unrelated app data', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'cherrystudio-ledger-'));
+  // Windows runners expose an 8.3 tmp path; the matcher canonicalizes roots.
+  const home = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'cherrystudio-ledger-'));
   const options = { homeDir: home, platform: 'linux', env: {} };
   const dataDir = path.join(home, '.config', 'CherryStudio', 'Data');
   const db = path.join(dataDir, 'cherrystudio.sqlite');
