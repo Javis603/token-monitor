@@ -70,3 +70,7 @@ Run the Codex session, limits, login and account-switching tests when changing t
 ```bash
 node --test tests/shared/codex*.test.js tests/shared/limitCollector.codex*.test.js tests/shared/sessionContext.test.js tests/electron/codex*.test.js
 ```
+
+## Desktop live-capture entry
+
+`codex-cloud-capture-desktop.js` wraps the existing explicitly selected cloud event observer with a native UUID dialog, bounded duration and per-run private reports. The separate test-app installer verifies the old package and preserves a rollback backup; it does not install an account-wide scanner or a new archive. See [desktop capture and deployment](../codex-cloud-capture-desktop.md).
