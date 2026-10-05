@@ -45,7 +45,7 @@ class Element {
   setAttribute(name, value) { this[name] = value; }
 }
 
-test('sync connection summary and inline editor precede frequency and devices without another disclosure', () => {
+test('sync connection stays inline and optional content follows frequency before devices', () => {
   const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
   const start = html.indexOf('id="syncSettingsDetails"');
   const end = html.indexOf('<section class="total-panel">', start);
@@ -54,8 +54,12 @@ test('sync connection summary and inline editor precede frequency and devices wi
   assert.ok(section.indexOf('id="syncPanelConnection"') < section.indexOf('id="hubUrlInput"'));
   assert.ok(section.indexOf('id="saveSettingsButton"') < section.indexOf('id="syncUploadIntervalRow"'));
   assert.ok(section.indexOf('id="syncUploadIntervalRow"') < section.indexOf('id="syncDevicePanel"'));
+  assert.ok(section.indexOf('id="syncUploadIntervalRow"') < section.indexOf('id="syncContentDetails"'));
+  assert.ok(section.indexOf('id="syncContentDetails"') < section.indexOf('id="syncDevicePanel"'));
   assert.equal((section.match(/id="syncPanelConnection"/g) || []).length, 1);
-  assert.doesNotMatch(section, /<details|<summary|syncConnectionSettings|syncConnectionMode/);
+  assert.doesNotMatch(section.slice(0, section.indexOf('id="syncContentDetails"')), /<summary|syncConnectionSettings|syncConnectionMode/);
+  assert.match(section, /id="syncContentToggle"[^>]*class="settings-group-header cursor-settings-toggle"[^>]*aria-expanded="false"[^>]*aria-controls="syncContentDetails"/);
+  assert.match(section, /id="syncContentDetails" class="cursor-settings-details hidden" inert/);
   assert.match(section, /class="sync-mode-select"[\s\S]*?<select id="hubModeOptions"[\s\S]*?<span class="settings-section-disclosure" aria-hidden="true">/);
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
   assert.doesNotMatch(css.match(/\.sync-connection-fields\s*\{([^}]+)\}/)?.[1] || '', /\bgap:/);
@@ -109,15 +113,16 @@ test('select and navigation popups share their regular and native glass surface'
   const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
   const rule = selector => [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
     .find(match => match[1].trim() === selector)?.[2];
-  const surface = rule('.view-switcher-menu,\n.select-control-popup');
+  const surface = rule('.view-switcher-menu,\n.select-control-popup,\n.sync-content-dialog,\n.settings-help-popover');
   assert.ok(surface);
-  for (const property of ['padding', 'border', 'border-radius', 'background', 'box-shadow', 'backdrop-filter']) {
+  for (const property of ['border', 'border-radius', 'background', 'box-shadow', 'backdrop-filter']) {
     assert.ok(surface.includes(`${property}:`), property);
   }
   assert.match(surface, /var\(--glass-rgb\)/);
   assert.doesNotMatch(rule('.select-control-popup'), /background:|border-radius:|box-shadow:/);
+  assert.doesNotMatch(rule('.sync-content-dialog,\n.settings-help-popover'), /background:|border-radius:|box-shadow:/);
   assert.doesNotMatch(rule('.view-switcher-menu'), /background:|border-radius:|box-shadow:/);
-  assert.ok(rule('html.native-liquid-glass .select-control-popup,\nhtml.native-liquid-glass .view-switcher-menu'));
+  assert.ok(rule('html.native-liquid-glass .select-control-popup,\nhtml.native-liquid-glass .view-switcher-menu,\nhtml.native-liquid-glass .sync-content-dialog,\nhtml.native-liquid-glass .settings-help-popover'));
   assert.ok(rule('html.native-liquid-glass .select-control-option,\nhtml.native-liquid-glass .view-switcher-menu-item'));
   const selected = '.select-control-option[data-selected="true"]';
   const highlighted = '.select-control-option[data-highlighted="true"]';
@@ -163,6 +168,7 @@ test('sync method selects the corresponding fields without touching draft input 
     const hidden = {};
     const field = id => ({ classList: { toggle(name, value) { hidden[id] = value; } } });
     const context = vm.createContext({
+      syncContentForm: null,
       state: { settings: { hubMode: mode }, appInfo: { platform: 'win32' } },
       els: {
         hubModeOptions: {}, syncModeDescription: {}, icloudModeOption: {},

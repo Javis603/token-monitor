@@ -299,7 +299,7 @@ test('view switcher preserves click-to-cycle and direct selection without crowdi
   assert.match(cssRule(css, '.view-switcher-menu'), /transition:[\s\S]*opacity 190ms/);
   assert.match(cssRule(css, '.view-switcher-menu'), /visibility 0s linear 0s/);
   assert.doesNotMatch(cssRule(css, '.view-switcher-menu'), /width:\s*154px/);
-  const menuSurface = cssRule(css, '.view-switcher-menu,\n.select-control-popup');
+  const menuSurface = cssRule(css, '.view-switcher-menu,\n.select-control-popup,\n.sync-content-dialog,\n.settings-help-popover');
   assert.match(menuSurface, /background:[\s\S]*var\(--glass-rgb\)/);
   assert.doesNotMatch(menuSurface, /var\(--panel-rgb\)/);
   assert.doesNotMatch(cssRule(css, '.view-switcher-menu.hidden'), /display:\s*none/);

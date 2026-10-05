@@ -1714,6 +1714,52 @@ span.settings-note.settings-item-desc {
 .hub-address-iface { color: var(--muted); font-size: 9.5px; flex: 0 0 auto; }
 .hub-address-row .icon-button { width: 26px; height: 26px; flex: 0 0 auto; font-size: 12px; }
 .settings-note.hub-warning { color: var(--orange); }
+.sync-content-body { display: grid; min-width: 0; gap: 10px; }
+.sync-content-options { min-width: 0; }
+.settings-panel .sync-content-options .sync-content-option { flex-wrap: nowrap; align-items: center; min-height: 44px; padding: 8px 0; box-sizing: border-box; }
+.sync-content-options > .sync-content-option ~ .sync-content-option { border-top: 1px solid rgba(var(--line-rgb), 0.06); }
+.sync-content-option .settings-item-text { flex: 1 1 0; gap: 3px; }
+.sync-content-option:has(> input:disabled) .settings-item-title { color: var(--muted); }
+.sync-content-notice { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 6px; background: rgba(var(--overlay-rgb), 0.04); }
+.sync-content-notice > .settings-note { flex: 1 1 0; min-width: 0; }
+.settings-panel button.sync-content-retry { flex: 0 0 auto; margin: 0; padding: 0; min-height: 0; border: 0; border-radius: 2px; background: transparent; color: var(--accent); font: inherit; font-size: 10px; line-height: 1.45; cursor: pointer; }
+.settings-panel button.sync-content-retry:hover { text-decoration: underline; background: transparent; }
+.settings-panel button.sync-content-retry:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+.settings-panel button.sync-content-retry:disabled { opacity: 0.5; cursor: default; }
+.sync-content-cleanup { display: grid; gap: 6px; }
+.settings-panel .sync-content-body .checkbox-label > input[type="checkbox"] { appearance: auto; width: 14px; height: 14px; flex: 0 0 14px; margin: 0; border: initial; background: initial; accent-color: var(--accent); }
+.settings-panel .sync-content-body .checkbox-label > input[type="checkbox"]::before { content: none; }
+.sync-content-dialog,
+.settings-help-popover { width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-sizing: border-box; overflow-y: auto; padding: 16px; color: var(--text); font-size: 11px; line-height: 1.5; -webkit-app-region: no-drag; }
+.sync-title-heading { display: flex; align-items: center; gap: 3px; }
+.settings-panel .sync-title-heading > label { display: inline; margin: 0; color: inherit; font-size: inherit; }
+button.settings-help-trigger { position: relative; display: inline-grid; place-items: center; flex: 0 0 18px; width: 18px; height: 18px; margin: -2px 0; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: inherit; font-size: 8px; line-height: 1; cursor: pointer; pointer-events: auto; -webkit-app-region: no-drag; }
+button.settings-help-trigger::before { content: ''; position: absolute; width: 11px; height: 11px; border: 1px solid currentColor; border-radius: 50%; opacity: 0.6; }
+button.settings-help-trigger:hover { background: transparent; color: var(--text); }
+button.settings-help-trigger:hover::before { opacity: 1; }
+button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.settings-help-popover { position: fixed; inset: auto; margin: 0; width: min(280px, calc(100vw - 16px)); padding: 12px; font-size: 10px; line-height: 1.6; }
+.settings-help-popover > strong { display: block; font-size: 12px; font-weight: 600; line-height: 1.4; }
+.settings-help-popover dl { margin: 12px 0 0; }
+.settings-help-popover dt { margin-top: 14px; font-size: 10.5px; font-weight: 600; line-height: 1.4; }
+.settings-help-popover dt:first-child { margin-top: 0; }
+.settings-help-popover dd { margin: 5px 0 0; color: var(--muted); }
+.settings-help-popover code { display: block; margin-top: 7px; padding: 6px 8px; border: 1px solid rgba(var(--line-rgb), 0.12); border-radius: 4px; background: rgba(var(--overlay-rgb), 0.04); color: var(--text); font-size: 9.5px; line-height: 1.5; overflow-wrap: anywhere; white-space: normal; user-select: text; }
+.settings-help-popover > p { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid rgba(var(--line-rgb), 0.14); color: var(--muted); font-size: 9.5px; line-height: 1.6; }
+.sync-content-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.sync-content-dialog > strong { display: block; font-size: 12px; }
+.sync-content-dialog p { overflow-wrap: anywhere; }
+.sync-content-dialog .settings-actions { flex-wrap: wrap; gap: 6px; }
+.sync-content-source-choices { display: grid; gap: 6px; margin: 14px 0 10px; }
+.sync-content-source-choices > button { width: 100%; min-width: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; font: inherit; }
+.sync-content-dialog button { min-height: 30px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px; background: rgba(var(--overlay-rgb), var(--control-alpha)); color: var(--text); cursor: pointer; }
+.sync-content-dialog button:hover { background: rgba(var(--overlay-rgb), 0.12); }
+.sync-content-dialog #syncContentCancel { background: transparent; color: var(--muted); }
+.sync-content-dialog #syncContentCancel:hover:not(:disabled) { background: rgba(var(--overlay-rgb), 0.06); color: var(--text); }
+.sync-content-dialog button.sync-content-primary { border-color: rgba(var(--accent-rgb), 0.35); background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
+.sync-content-dialog button.sync-content-primary:hover:not(:disabled) { background: rgba(var(--accent-rgb), 0.2); border-color: rgba(var(--accent-rgb), 0.5); }
+.sync-content-dialog button:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.sync-content-dialog button:disabled { opacity: 0.5; cursor: not-allowed; }
 /* Connection summary and controls stay above the device list, without a nested card. */
 .sync-panel {
   container-type: inline-size;
@@ -3029,8 +3075,11 @@ span.settings-note.settings-item-desc {
   transform: rotate(45deg);
 }
 .view-switcher-menu,
-.select-control-popup {
-  padding: 4px;
+.select-control-popup { padding: 4px; }
+.view-switcher-menu,
+.select-control-popup,
+.sync-content-dialog,
+.settings-help-popover {
   border: 1px solid rgba(var(--line-rgb), 0.22);
   border-radius: 7px;
   background:
@@ -3061,7 +3110,9 @@ span.settings-note.settings-item-desc {
 .select-control-option[aria-disabled="true"] { opacity: 0.5; cursor: default; }
 @supports not (backdrop-filter: blur(1px)) {
   .view-switcher-menu,
-  .select-control-popup { background: rgb(var(--glass-rgb)); }
+  .select-control-popup,
+  .sync-content-dialog,
+  .settings-help-popover { background: rgb(var(--glass-rgb)); }
 }
 /* Chromium delegates an open <select> popup to a platform-specific surface.
    Windows can give that popup a light system background while retaining our
@@ -5817,8 +5868,11 @@ html.native-liquid-glass .view-switcher-disclosure { width: 28px; flex-basis: 28
    covers. It stays a dense frosted plate; only its shape and edge follow the
    glass controls. */
 html.native-liquid-glass .select-control-popup,
-html.native-liquid-glass .view-switcher-menu {
-  padding: 5px;
+html.native-liquid-glass .view-switcher-menu { padding: 5px; }
+html.native-liquid-glass .select-control-popup,
+html.native-liquid-glass .view-switcher-menu,
+html.native-liquid-glass .sync-content-dialog,
+html.native-liquid-glass .settings-help-popover {
   border-color: rgba(var(--line-rgb), 0.16);
   border-radius: 14px;
   background:

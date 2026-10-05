@@ -581,3 +581,22 @@ test('postSyncPayload reports omitted session detail without changing period tot
   assert.ok(payload.sessionDetailsOmitted.month > 0);
   assert.match(logs.at(-1), /^session detail omitted for sync \(month: \d+\)/);
 });
+
+
+test('discarded allTime sessions are never accessed or cloned before text sanitization', () => {
+  for (const syncSessionTitles of [false, true]) {
+    let reads = 0;
+    const session = { client: 'codex', sessionId: 'a', totalTokens: 1 };
+    Object.defineProperty(session, 'title', { enumerable: true, get() { reads += 1; throw new Error('discarded title read'); } });
+    const allTime = { totalTokens: 1 };
+    Object.defineProperty(allTime, 'sessions', { enumerable: true, get() { reads += 1; throw new Error('discarded sessions read'); } });
+    const summary = { deviceId: 'a', allTime, periods: { allTime: { totalTokens: 1, sessions: { a: session } } } };
+    const serialized = serializeSyncPayload(summary, { syncSessionTitles, sessionTitleSyncGeneration: 1 });
+    assert.equal(reads, 0);
+    assert.equal(Object.hasOwn(serialized.payload.allTime, 'sessions'), false);
+    assert.equal(Object.hasOwn(serialized.payload.periods.allTime, 'sessions'), false);
+    assert.equal(serialized.payload.allTime.totalTokens, 1);
+    assert.equal(Object.hasOwn(allTime, 'sessions'), true);
+    assert.strictEqual(summary.periods.allTime.sessions.a, session);
+  }
+});

@@ -134,6 +134,12 @@ test('popup geometry flips, clamps width and aligns to either trigger edge', () 
   assert.equal(below.opensAbove, false);
 });
 
+test('select popup retains its height cap when more viewport space is available', () => {
+  const result = popupPosition({ left: 40, right: 160, top: 20, bottom: 50, width: 120 },
+    { width: 400, height: 900 }, { height: 600 });
+  assert.equal(result.maxHeight, 320);
+});
+
 test('enhancement preserves source interface and links accessible name and description', () => {
   const f = harness();
   assert.equal(f.select.hidden, true);

@@ -648,6 +648,7 @@
               <div id="customPricingSettingsDetails" class="cursor-settings-details hidden">
                 <p class="settings-note" data-i18n="settings.customPricing.note">Override a model's price (USD per 1M tokens) when its auto-detected price is wrong. Applies to all providers of that model.</p>
                 <div id="customPricingList" class="managed-account-list"></div>
+                <p id="customPricingSyncError" class="settings-note error hidden" role="alert"></p>
                 <div class="settings-actions">
                   <button id="customPricingAddButton" type="button" data-i18n="settings.customPricing.add">Add override</button>
                 </div>
@@ -1486,6 +1487,36 @@
                 </select>
               </label>
             </div>
+            <div id="syncContentGroup" class="settings-group cursor-account-group theme-color-accordion">
+              <button id="syncContentToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="syncContentDetails">
+                <span data-i18n="settings.sync.content.title">Additional sync</span>
+                <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
+              </button>
+              <div id="syncContentDetails" class="cursor-settings-details hidden" inert>
+                <div class="sync-content-body">
+                  <p class="settings-note" data-i18n="settings.sync.content.basis">Usage, cost, tool limits and subscriptions sync automatically.</p>
+                  <p id="syncContentLocalNote" class="settings-note" data-i18n="settings.sync.content.localNote">Optional content sync is available when connected to or hosting a hub.</p>
+                  <div id="syncContentNotice" class="sync-content-notice" hidden>
+                    <p id="syncContentStatus" class="settings-note" role="status" aria-live="polite" hidden></p>
+                    <button id="syncContentRetry" class="sync-content-retry" type="button" data-i18n="settings.sync.content.retry" hidden>Check again</button>
+                  </div>
+                  <div id="syncContentOptions" class="sync-content-options" hidden>
+                    <label id="syncContentHostRow" class="settings-item checkbox-label sync-content-option" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.hostPermission">Allow devices to sync session titles</span><span class="settings-item-desc" data-i18n="settings.sync.content.hostNote">Controls what this hub accepts. Each device chooses separately whether to send titles.</span></span><input id="syncContentHostPermission" type="checkbox" /></label>
+                    <div class="settings-item checkbox-label sync-content-option">
+                      <div class="settings-item-text">
+                        <span class="sync-title-heading"><label for="syncContentsessionTitles" class="settings-item-title" data-i18n="settings.sync.content.sessionTitles">Session titles</label><button id="syncContentTitleHelp" class="settings-help-trigger" type="button" aria-describedby="syncContentTitleHelpPopover" aria-expanded="false" aria-controls="syncContentTitleHelpPopover" data-i18n-aria-label="settings.sync.content.helpLabel" aria-label="How to enable title sync"><span aria-hidden="true">i</span></button></span>
+                        <span id="syncContentTitleNote" class="settings-item-desc" data-i18n="settings.sync.content.titleNote">Let other devices display session titles.</span>
+                        <span id="syncContentTitleUnavailable" class="settings-item-desc sync-title-unavailable" hidden><span data-i18n="settings.sync.content.titleUnavailable">Title sync is not enabled on the server.</span></span>
+                      </div>
+                      <input id="syncContentsessionTitles" type="checkbox" aria-describedby="syncContentStatus syncContentTitleUnavailable syncContentCleanup" disabled />
+                    </div>
+                    <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.modelAliases">Model aliases and grouping</span><span class="settings-item-desc" data-i18n="settings.sync.content.aliasesNote">Use the same model names and groups on your devices.</span></span><input id="syncContentmodelAliases" type="checkbox" aria-describedby="syncContentStatus" disabled /></label>
+                    <label class="settings-item checkbox-label sync-content-option"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.customPricing">Custom pricing</span><span class="settings-item-desc" data-i18n="settings.sync.content.pricingNote">Use the same custom rates on your devices.</span></span><input id="syncContentcustomPricing" type="checkbox" aria-describedby="syncContentStatus" disabled /></label>
+                  </div>
+                  <div id="syncContentCleanup" class="sync-content-cleanup" hidden><p class="settings-note hub-warning" data-i18n="settings.sync.content.cleanup_pending">Title sync is off, but previously shared titles still need to be removed from the server. Retry when connected.</p><div class="settings-actions"><button id="syncContentCleanupRetry" type="button" data-i18n="settings.sync.content.cleanupRetry">Retry title removal</button></div></div>
+                </div>
+              </div>
+            </div>
             <div id="syncDevicePanel" class="sync-panel" hidden>
               <div class="sync-panel-heading">
                 <span data-i18n="settings.sync.panel.devices">Devices</span>
@@ -1560,6 +1591,34 @@
         </div>
       </div>
     </main>
+    <div id="syncContentTitleHelpPopover" class="settings-help-popover" popover="auto" role="tooltip">
+      <strong data-i18n="settings.sync.content.helpTitle">Enable title sync on the server</strong>
+      <dl>
+        <dt data-i18n="settings.sync.content.helpDesktop">Desktop Hub</dt>
+        <dd data-i18n="settings.sync.content.helpDesktopBody">On the device hosting the Hub, open Additional sync and turn on Allow devices to sync session titles.</dd>
+        <dt data-i18n="settings.sync.hubBuild.targetNode">Node Hub</dt>
+        <dd><span data-i18n="settings.sync.content.helpNodeBody">Set this in the project’s .env file or deployment environment, then restart the Hub:</span><code>TOKEN_MONITOR_SYNC_SESSION_TITLES=1</code></dd>
+        <dt data-i18n="settings.sync.hubBuild.targetWorker">Cloudflare Worker</dt>
+        <dd><span data-i18n="settings.sync.content.helpWorkerBody">Set this variable to true, then redeploy:</span><code>TOKEN_MONITOR_SYNC_SESSION_TITLES</code></dd>
+      </dl>
+      <p data-i18n="settings.sync.content.helpAfter">After enabling it, collapse and reopen Additional sync to check again. Each device still chooses whether to share titles.</p>
+    </div>
+    <dialog id="syncContentDialog" class="sync-content-dialog" aria-labelledby="syncContentDialogTitle" aria-describedby="syncContentDialogCopy">
+      <strong id="syncContentDialogTitle"></strong>
+      <p id="syncContentDialogCopy"></p>
+      <p id="syncContentCounts"></p>
+      <p id="syncContentNoShared" class="settings-note" data-i18n="settings.sync.content.noShared" hidden>No shared settings yet. Use server settings to wait for a future shared edit, or publish this device's settings.</p>
+      <p id="syncContentDialogStatus" class="settings-note error" role="status" aria-live="polite" hidden></p>
+      <div id="syncContentSourceChoices" class="sync-content-source-choices" hidden>
+        <button id="syncContentUseServer" type="button" data-i18n="settings.sync.content.useServer">Use server settings</button>
+        <button id="syncContentPublish" type="button" data-i18n="settings.sync.content.publish">Publish this device's settings</button>
+      </div>
+      <div class="settings-actions">
+        <button id="syncContentCancel" type="button" data-i18n="settings.common.cancel" autofocus>Cancel</button>
+        <button id="syncContentDialogRetry" type="button" data-i18n="settings.sync.content.retry" hidden>Reload sync status</button>
+        <button id="syncContentConfirm" class="sync-content-primary" type="button" data-i18n="settings.sync.content.enableTitles">Enable title sync</button>
+      </div>
+    </dialog>
     <button id="floatingBubbleTab" class="floating-bubble-tab" type="button" title="Show Token Monitor" aria-label="Show Token Monitor" data-i18n-title="floatingBubble.expand" data-i18n-aria-label="floatingBubble.expand">
       <span id="floatingBubbleContent" aria-hidden="true">Σ</span>
     </button>
@@ -1623,6 +1682,8 @@
     <script src="customPricingForm.js"></script>
     <script src="modelAliases.js"></script>
     <script src="modelAliasForm.js"></script>
+    <script src="helpPopover.js"></script>
+    <script src="syncContentForm.js"></script>
     <script src="../windowShortcut.js"></script>
     <script src="../../shared/currency.js"></script>
     <script src="../../shared/subscriptionDisplay.js"></script>
