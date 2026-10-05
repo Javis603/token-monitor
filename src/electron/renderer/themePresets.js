@@ -159,10 +159,11 @@
         const rgb = custom ? hexToRgbTriplet(custom).split(', ').map(Number) : null;
         for (let level = 1; level <= 4; level += 1) {
           const tint = (level - 1) * 0.18;
-          entries.push({
-            name: `--chart-heat-${level}-rgb`,
-            value: rgb ? rgb.map((channel) => Math.round(channel + (255 - channel) * tint)).join(', ') : null
-          });
+          const value = rgb ? rgb.map((channel) => Math.round(channel + (255 - channel) * tint)).join(', ') : null;
+          entries.push({ name: `--chart-heat-${level}-rgb`, value });
+          // The spotlight uses stronger opacity, but must keep the same hue.
+          // Clear separately so its original blue ramp survives reset.
+          entries.push({ name: `--chart-heat-bright-${level}-rgb`, value });
         }
         continue;
       }

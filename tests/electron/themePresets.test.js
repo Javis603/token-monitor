@@ -241,6 +241,9 @@ test('chart preview, invalid input and reset share one isolated palette mapping'
   assert.equal(custom['--chart-bar'], '#cc8844');
   assert.equal(custom['--chart-heat-1-rgb'], '204, 136, 68');
   assert.equal(custom['--chart-heat-4-rgb'], '232, 200, 169');
+  for (let level = 1; level <= 4; level += 1) {
+    assert.equal(custom[`--chart-heat-bright-${level}-rgb`], custom[`--chart-heat-${level}-rgb`]);
+  }
   assert.equal(custom['--accent'], '#112233');
   assert.ok(!('--blue' in custom));
   assert.ok(!('--blue-rgb' in custom));

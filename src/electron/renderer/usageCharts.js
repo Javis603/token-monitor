@@ -600,7 +600,7 @@
     const radius = svgRound(Math.max(1, Number(o.spotlightRadius) || 86));
     const defsParts = [];
     if (glowFilterId) {
-      defsParts.push(`<filter id="${escapeXml(glowFilterId)}" x="-80%" y="-80%" width="260%" height="260%" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="0" stdDeviation="2.1" flood-color="rgb(120, 190, 255)" flood-opacity="0.95"></feDropShadow><feDropShadow dx="0" dy="0" stdDeviation="4.2" flood-color="rgb(120, 190, 255)" flood-opacity="0.42"></feDropShadow></filter>`);
+      defsParts.push(`<filter id="${escapeXml(glowFilterId)}" x="-80%" y="-80%" width="260%" height="260%" color-interpolation-filters="sRGB"><feDropShadow dx="0" dy="0" stdDeviation="2.1" flood-color="rgb(var(--chart-heat-2-rgb, 120, 190, 255))" flood-opacity="0.95"></feDropShadow><feDropShadow dx="0" dy="0" stdDeviation="4.2" flood-color="rgb(var(--chart-heat-2-rgb, 120, 190, 255))" flood-opacity="0.42"></feDropShadow></filter>`);
     }
     if (spotlightId) {
       defsParts.push(`<radialGradient id="${escapeXml(spotlightGradientId)}" gradientUnits="userSpaceOnUse" cx="-200" cy="-200" r="${radius}"><stop offset="0" stop-color="white" stop-opacity="1"></stop><stop offset="0.35" stop-color="white" stop-opacity="0.62"></stop><stop offset="0.75" stop-color="white" stop-opacity="0"></stop></radialGradient><mask id="${escapeXml(spotlightMaskId)}"><rect x="0" y="0" width="${svgRound(modelWidth)}" height="${svgRound(modelHeight)}" fill="url(#${escapeXml(spotlightGradientId)})"></rect></mask>`);
