@@ -56,11 +56,7 @@ test('forecast details use the shared accessible tooltip without repeating third
   const renderer = view.slice(view.indexOf('function codexResetForecastTooltip'), view.indexOf('function appendCodexResetForecast'));
   assert.match(renderer, /limitDetailInfoNode\([\s\S]*?'codex-reset-forecast-info-wrap'/);
   assert.match(renderer, /limits\.codexResetForecast\.lastReset/);
-  assert.match(renderer, /limits\.codexResetForecast\.resetType/);
-  assert.match(renderer, /forecast\?\.status === 'scheduled' \? forecast\?\.scheduledResetType : forecast\?\.latestResetType/);
-  assert.match(renderer, /limits\.codexResetForecast\.scheduledFor/);
-  assert.match(renderer, /limits\.codexResetForecast\.sourceAnnouncement/);
-  assert.match(renderer, /limits\.codexResetForecast\.sourceSignal/);
+  assert.match(renderer, /limits\.codexResetForecast\.scheduled'/);
   assert.match(renderer, /if \(forecast\?\.error\)[\s\S]*?limits\.codexResetForecast\.lastAttempt/);
   assert.doesNotMatch(renderer, /limits\.codexResetForecast\.checked/);
   assert.match(renderer, /limits\.codexResetForecast\.expiresLabel/);
@@ -141,6 +137,7 @@ test('forecast tooltip safely stays absent before the first response arrives', (
   const tooltip = vm.runInNewContext(`(${view.slice(start, end)})`, {
     t: (key) => key,
     codexResetForecastDate: () => '',
+    codexResetForecastExpired: () => false,
     codexResetForecastTimeUntil: () => '',
     codexResetForecastAge: () => '',
     codexResetForecastSourceAuthor: () => '',
@@ -172,7 +169,7 @@ test('renderer hides an active forecast at its expiry boundary', () => {
   assert.match(renderer, /forecast\?\.status === 'active' && !expired/);
   assert.match(renderer, /forecast\?\.status === 'inactive' \|\| expired/);
   assert.match(renderer, /forecast\?\.status === 'scheduled'/);
-  assert.match(renderer, /limits\.codexResetForecast\.scheduled/);
+  assert.match(renderer, /limits\.codexResetForecast\.scheduled'/);
   assert.match(renderer, /limits\.codexResetForecast\.expected/);
   assert.match(renderer, /limits\.codexResetForecast\.schedulePending/);
 });
@@ -181,12 +178,10 @@ test('scheduled reset labels exist in every locale', () => {
   const i18n = fs.readFileSync(path.join(root, 'src/electron/renderer/i18n.js'), 'utf8');
   for (const key of [
     'limits.codexResetForecast.scheduled',
-    'limits.codexResetForecast.scheduledFor',
     'limits.codexResetForecast.schedulePending',
-    'limits.codexResetForecast.expected',
-    'limits.codexResetForecast.sourceAnnouncement'
+    'limits.codexResetForecast.expected'
   ]) {
-    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+    assert.equal(i18n.split(`'${key}':`).length - 1, 6, `${key} should exist in all bundled locales`);
   }
   assert.match(i18n, /'limits\.codexResetForecast\.scheduled': '已排程'/);
   assert.doesNotMatch(i18n, /'limits\.codexResetForecast\.scheduled': '重置已排程'/);
@@ -222,6 +217,121 @@ test('forecast reset type uses localized labels only for supported API values', 
   assert.equal(typeLabel('banked'), 'limits.codexResetForecast.resetType.banked');
   assert.equal(typeLabel('regular'), 'limits.codexResetForecast.resetType.regular');
   assert.equal(typeLabel('surprise'), '');
+});
+
+test('forecast tooltip keeps scheduled and historical reset types distinct', () => {
+  const start = view.indexOf('function codexResetForecastTooltip');
+  const end = view.indexOf('\n  function renderCodexResetForecast', start);
+  const { translate } = require('../../src/electron/renderer/i18n');
+  let entries;
+  const tooltip = vm.runInNewContext(`(${view.slice(start, end)})`, {
+    t: (key) => translate('zh-TW', key),
+    codexResetForecastType: (type) => ['regular', 'banked'].includes(type)
+      ? translate('zh-TW', `limits.codexResetForecast.resetType.${type}`) : '',
+    codexResetForecastDate: (value) => value || '',
+    codexResetForecastExpired: () => false,
+    codexResetForecastTimeUntil: () => '',
+    codexResetForecastAge: () => '',
+    codexResetForecastSourceAuthor: (value) => value ? `@${value}` : '',
+    limitDetailInfoNode: (values) => {
+      entries = JSON.parse(JSON.stringify(values));
+      return { querySelector: () => null };
+    }
+  });
+  const forecast = {
+    status: 'scheduled',
+    scheduledResetType: 'regular',
+    sourceAuthor: 'thsottiaux',
+    scheduledFor: '2026-10-02T17:00:00Z',
+    latestResetType: 'banked',
+    latestResetAt: '2026-09-29T19:00:00Z'
+  };
+  tooltip(forecast);
+  assert.deepEqual(entries, [
+    { full: '已排程 · 一般重置', heading: true },
+    { full: forecast.scheduledFor },
+    { full: '@thsottiaux', caption: true },
+    { full: '上次重置', heading: true, separated: true },
+    { full: `備用重置額度 · ${forecast.latestResetAt}` }
+  ]);
+  tooltip({ ...forecast, scheduledResetType: '' });
+  assert.equal(entries[0].full, '已排程', 'unknown scheduled type must not inherit the historical type');
+  tooltip({ ...forecast, status: 'active', scheduledFor: '', expiresAt: '2026-10-03T16:00:00Z' });
+  assert.deepEqual(entries, [
+    { full: '偵測到訊號', heading: true },
+    { full: '有效至 2026-10-03T16:00:00Z' },
+    { full: '@thsottiaux', caption: true },
+    { full: '上次重置', heading: true, separated: true },
+    { full: `備用重置額度 · ${forecast.latestResetAt}` }
+  ]);
+  tooltip({ status: 'inactive', latestResetType: 'regular', latestResetAt: forecast.latestResetAt });
+  assert.deepEqual(entries, [
+    { full: '上次重置', heading: true, separated: false },
+    { full: `一般重置 · ${forecast.latestResetAt}` }
+  ]);
+
+});
+
+test('forecast tooltip gates retained metadata by the current signal state', () => {
+  const { translate } = require('../../src/electron/renderer/i18n');
+  const nowMs = Date.parse('2026-10-02T04:00:00Z');
+  const expiredStart = view.indexOf('function codexResetForecastExpired');
+  const expiredEnd = view.indexOf('\n  function renderLimitProviderRow', expiredStart);
+  const expired = vm.runInNewContext(`(${view.slice(expiredStart, expiredEnd)})`, { Date, Number });
+  const start = view.indexOf('function codexResetForecastTooltip');
+  const end = view.indexOf('\n  function renderCodexResetForecast', start);
+  let entries;
+  const tooltip = vm.runInNewContext(`(${view.slice(start, end)})`, {
+    t: (key) => translate('zh-TW', key),
+    codexResetForecastType: (type) => translate('zh-TW', `limits.codexResetForecast.resetType.${type}`),
+    codexResetForecastDate: (value) => value || '',
+    codexResetForecastExpired: (forecast) => expired(forecast, nowMs),
+    codexResetForecastTimeUntil: () => '',
+    codexResetForecastAge: (value) => value === 'attempt' ? '1 分鐘前' : '',
+    codexResetForecastSourceAuthor: (value) => value ? `@${value}` : '',
+    limitDetailInfoNode: (values) => {
+      entries = JSON.parse(JSON.stringify(values));
+      return { querySelector: () => null };
+    }
+  });
+  const forecast = {
+    scheduledFor: '2026-10-02T17:00:00Z',
+    scheduledAnnouncedAt: '2026-10-02T02:00:00Z',
+    scheduledResetType: 'regular',
+    expiresAt: '2026-10-02T04:00:00Z',
+    observedAt: '2026-10-02T01:00:00Z',
+    sourceAuthor: 'thsottiaux',
+    latestResetAt: '2026-09-29T19:00:00Z',
+    latestResetType: 'banked'
+  };
+  const history = [
+    { full: '上次重置', heading: true, separated: false },
+    { full: `備用重置額度 · ${forecast.latestResetAt}` }
+  ];
+  for (const status of ['inactive', 'active', 'unavailable']) {
+    tooltip({ ...forecast, status });
+    assert.deepEqual(entries, history, `${status} at expiry must omit all upcoming metadata`);
+    tooltip({ ...forecast, status, error: 'offline', checkedAt: 'attempt' });
+    assert.deepEqual(entries, [
+      ...history,
+      ['連線失敗', '請檢查網路或 DNS 設定'],
+      ['最後嘗試', '1 分鐘前']
+    ], `${status} still reports explicit request errors`);
+  }
+  tooltip({ ...forecast, status: 'scheduled' });
+  assert.deepEqual(entries.slice(0, 3), [
+    { full: '已排程 · 一般重置', heading: true },
+    { full: forecast.scheduledFor },
+    { full: '@thsottiaux', caption: true }
+  ], 'scheduled resets must not carry an old watch expiry');
+  assert.equal(entries.length, 5);
+  tooltip({ ...forecast, status: 'active', expiresAt: '2026-10-03T04:00:00Z' });
+  assert.deepEqual(entries.slice(0, 3), [
+    { full: '偵測到訊號', heading: true },
+    { full: '有效至 2026-10-03T04:00:00Z' },
+    { full: '@thsottiaux', caption: true }
+  ], 'active forecasts must not carry an old scheduled time');
+  assert.equal(entries.length, 5);
 });
 
 test('forecast requests use the widget outbound transport', () => {

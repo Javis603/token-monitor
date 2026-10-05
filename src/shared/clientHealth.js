@@ -208,6 +208,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'kiro-ide-globalstorage',
   'kiro-sessions',
   'lmstudio-server-logs',
+  'mcode-sessions',
   'mimocode-data',
   'mimocode-orca-data',
   'muse-sessions',

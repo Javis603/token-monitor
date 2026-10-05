@@ -12,6 +12,8 @@ const {
   handleBreakdownRowKeydown,
   sessionBreakdownIncomplete,
   sessionIdLabel,
+  sessionDetailIdLabel,
+  sessionModelTooltipEntries,
   sessionRowsForPeriod
 } = require('../../src/electron/renderer/sessionRows');
 
@@ -116,6 +118,199 @@ test('session rows group client and model apart from activity metadata', () => {
   assert.equal(row.detail, 'titled');
 });
 
+test('session activity ends with the share of input served from cache', () => {
+  const now = new Date(2026, 4, 30, 12, 30);
+  const session = (id, fields) => ({
+    client: 'codex',
+    sessionId: id,
+    title: id,
+    totalTokens: 1_000,
+    models: { 'gpt-5.6-sol': 1_000 },
+    messageCount: 4,
+    lastUsedAt: localIso(2026, 5, 30, 12, 7),
+    ...fields
+  });
+  const rows = sessionRowsForPeriod({ sessions: {
+    'codex:warm': session('warm', { inputTokens: 40, cacheReadTokens: 940, cacheWriteTokens: 20, outputTokens: 50 }),
+    'codex:sliver': session('sliver', { inputTokens: 995, cacheReadTokens: 5, outputTokens: 50 }),
+    // Writes with no reads is a real cold start, so it reads 0%.
+    'codex:cold': session('cold', { inputTokens: 500, cacheWriteTokens: 500, outputTokens: 50 }),
+    // No cache traffic at all says nothing about caching: no reading.
+    'codex:unreported': session('unreported', { inputTokens: 950, outputTokens: 50 })
+  } }, {
+    clientLabels,
+    clientColors,
+    now
+  });
+  const byName = Object.fromEntries(rows.map((row) => [row.name, row]));
+
+  assert.equal(byName.warm.activity, '12:07 · 4 calls · 94%');
+  assert.equal(byName.sliver.activity, '12:07 · 4 calls · <1%');
+  assert.equal(byName.cold.activity, '12:07 · 4 calls · 0%');
+  assert.equal(byName.unreported.activity, '12:07 · 4 calls');
+});
+
+test('session activity ends with the session own generation speed after its cache hit', () => {
+  const now = new Date(2026, 4, 30, 12, 30);
+  const base = {
+    client: 'codex',
+    totalTokens: 1_000,
+    models: { 'gpt-5.6-sol': 1_000 },
+    messageCount: 4,
+    lastUsedAt: localIso(2026, 5, 30, 12, 7),
+    inputTokens: 40,
+    cacheReadTokens: 940,
+    cacheWriteTokens: 20,
+    outputTokens: 50
+  };
+  const rows = sessionRowsForPeriod({ sessions: {
+    'codex:timed': { ...base, sessionId: 'timed', title: 'timed', outputTokens: 1_850, timedOutputTokens: 1_850, timedDurationMs: 20_000 },
+    // The client reported no durations: no reading rather than "0 tok/s".
+    'codex:untimed': { ...base, sessionId: 'untimed', title: 'untimed' },
+    // Untitled rows carry the same line as their subtitle.
+    'codex:untitled': { ...base, sessionId: 'untitled', outputTokens: 1_200, timedOutputTokens: 1_200, timedDurationMs: 1_000 }
+  } }, { clientLabels, clientColors, now });
+  const byId = Object.fromEntries(rows.map((row) => [row.detail, row]));
+
+  // Cache before speed: in a window too narrow for the line, the fade eats the
+  // `tok/s` unit rather than the percentage's digits.
+  assert.equal(byId.timed.activity, '12:07 · 4 calls · 94% · 93 tok/s');
+  assert.equal(byId.untimed.activity, '12:07 · 4 calls · 94%');
+  assert.equal(byId.untitled.subtitle, '12:07 · 4 calls · 94% · 1,200 tok/s');
+});
+
+test('session rows bound malformed generation speeds even without wire normalization', () => {
+  for (const [outputTokens, timedOutputTokens, timedDurationMs, expected] of [
+    [10, 1_000_000, 1000, '10 tok/s'],
+    [10, 6, 1000, '6 tok/s'],
+    [undefined, 1_000_000, 1000, ''],
+    [10, -1, 1000, ''],
+    [10, 10, 0, '']
+  ]) {
+    const [row] = sessionRowsForPeriod({ sessions: {
+      'codex:malformed': { client: 'codex', sessionId: 'malformed', totalTokens: 100, outputTokens, timedOutputTokens, timedDurationMs }
+    } });
+    assert.equal(row.subtitle, expected);
+  }
+});
+
+test('multi-model sessions expose every model with its tokens and share of the session', () => {
+  const session = {
+    totalTokens: 100,
+    models: { 'gpt-5.6-sol': 70, 'claude-opus-5': 20 }
+  };
+  assert.deepEqual(sessionModelTooltipEntries(session), [
+    ['gpt-5.6-sol', '70', '70%'],
+    ['claude-opus-5', '20', '20%'],
+    ['Unclassified', '10', '10%']
+  ]);
+  assert.deepEqual(sessionModelTooltipEntries(session, { unattributedLabel: '未分類' }).at(-1), [
+    '未分類', '10', '10%'
+  ]);
+  // The rows follow the heaviest model first, not the models map's order,
+  // with the tokens no model claimed trailing them.
+  assert.deepEqual(
+    sessionModelTooltipEntries({ totalTokens: 100, models: { 'claude-opus-5': 20, 'gpt-5.6-sol': 70 } })
+      .map(([model]) => model),
+    ['gpt-5.6-sol', 'claude-opus-5', 'Unclassified']
+  );
+});
+
+test('model tooltip shares read the session total and floor at a real sliver', () => {
+  // Models can out-sum the recorded total (overlapping reads); the share is
+  // then of the attributed tokens rather than over 100% each.
+  assert.deepEqual(sessionModelTooltipEntries({ totalTokens: 30, models: { a: 30, b: 10 } }), [
+    ['a', '30', '75%'],
+    ['b', '10', '25%']
+  ]);
+  assert.deepEqual(sessionModelTooltipEntries({ totalTokens: 1000, models: { a: 999, b: 1 } }), [
+    ['a', '999', '100%'],
+    ['b', '1', '<1%']
+  ]);
+  // Fewer than two models never abbreviates to "N models", so there is no
+  // tooltip behind a label that names the model already.
+  assert.deepEqual(sessionModelTooltipEntries({ totalTokens: 10, models: { a: 10 } }), []);
+  assert.deepEqual(sessionModelTooltipEntries({ totalTokens: 10, models: { a: 10, b: 0 } }), []);
+  assert.deepEqual(sessionModelTooltipEntries(null), []);
+});
+
+test('session rows carry the model tooltip entries behind the "N models" label', () => {
+  const [row] = sessionRowsForPeriod({ sessions: {
+    'codex:mixed': {
+      client: 'codex',
+      sessionId: 'mixed',
+      title: 'Mixed run',
+      totalTokens: 100,
+      models: { 'gpt-5.6-sol': 60, 'gpt-5.6': 40 },
+      lastUsedAt: localIso(2026, 5, 30, 12, 7)
+    }
+  } }, {
+    clientLabels,
+    clientColors,
+    now: new Date(2026, 4, 30, 12, 30),
+    unattributedLabel: 'Unclassified'
+  });
+  assert.equal(row.modelLabel, '2 models');
+  assert.equal(row.subtitle, 'Codex · 2 models');
+  assert.deepEqual(row.modelTooltipEntries, [
+    ['gpt-5.6-sol', '60', '60%'],
+    ['gpt-5.6', '40', '40%']
+  ]);
+});
+
+test('a hovered background-review run tooltip holds the session repaint', () => {
+  // The periodic rebuild of an open review detail replaces every run node;
+  // sessionTooltipShouldHoldRender is what keeps a tooltip open through it.
+  // The guard's selector must cover the run title, which carries the wrap
+  // class itself — matching only the Sessions list's containers would leave
+  // this surface unprotected.
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const body = source.slice(
+    source.indexOf('function sessionTooltipShouldHoldRender('),
+    source.indexOf('function flushPendingLimitDetailTooltipRender(')
+  );
+  const matchesPart = (part, el) => {
+    const compounds = part.trim().split(/\s+/);
+    const [cls, ...pseudos] = compounds.at(-1).split(':');
+    if (!cls.split('.').filter(Boolean).every((c) => el.classes.includes(c))) return false;
+    if (pseudos.includes('hover') && !el.hovered) return false;
+    if (pseudos.includes('focus-within') && !el.focusWithin) return false;
+    let anc = el.parent;
+    for (let i = compounds.length - 2; i >= 0; i -= 1) {
+      const required = compounds[i].split('.').filter(Boolean);
+      while (anc && !required.every((c) => anc.classes.includes(c))) anc = anc.parent;
+      if (!anc) return false;
+      anc = anc.parent;
+    }
+    return true;
+  };
+  const document = {
+    element: null,
+    querySelector(selector) {
+      return this.element && selector.split(',').some((part) => matchesPart(part, this.element))
+        ? this.element
+        : null;
+    }
+  };
+  const shouldHold = Function('document', `${body}\nreturn sessionTooltipShouldHoldRender;`)(document);
+
+  for (const flag of ['hovered', 'focusWithin']) {
+    document.element = { classes: ['detail-ex-title', 'limit-detail-tooltip-wrap'], [flag]: true, parent: null };
+    assert.equal(shouldHold(), true);
+  }
+  document.element = { classes: ['detail-ex-title', 'limit-detail-tooltip-wrap'], parent: null };
+  assert.equal(shouldHold(), false);
+});
+
+test('the periodic review-detail rebuild defers to the tooltip hold', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const branch = source.slice(
+    source.indexOf("state.openSession.kind === 'background-review-group'"),
+    source.indexOf('state.openSession.renderOptions')
+  );
+  assert.match(branch, /!sessionTooltipShouldHoldRender\(\)/);
+});
+
 test('Codex merged rollout labels contain UUIDs only', () => {
   const first = '01a084ff-20ff-7563-beb4-045b31e5a47a';
   const second = '01a0876b-d178-7be2-a485-529a745ea1b0';
@@ -123,6 +318,35 @@ test('Codex merged rollout labels contain UUIDs only', () => {
     sessionIdLabel(`rollout-2026-09-10T02-33-00-${first}_rollout-2026-09-10T02-40-00-${second}`),
     `${first} · ${second}`
   );
+});
+
+test('detail identities use Codex metadata without guessing a UUID position', () => {
+  const first = '01a084ff-20ff-7563-beb4-045b31e5a47a';
+  const second = '01a0876b-d178-7be2-a485-529a745ea1b0';
+  for (const [raw, expected] of [
+    [`rollout-2026-09-10T02-33-00-${first}_rollout-2026-09-10T02-40-00-${second}`, [first, second]],
+    [`rollout-2026-09-10T02-33-00-${first}`, [first]],
+    [first, [first]],
+    ['ordinary · label', ['ordinary · label']],
+    ['reasonix:ABC123', ['ABC123']],
+    ['reasonix-stats:/private/stats/day.jsonl', []],
+    ['reasonix:reasonix-stats:/private/stats/day.jsonl', []],
+    ['2026-09-10T02-33-00', []],
+    ['', []],
+    [undefined, []]
+  ]) {
+    assert.equal(sessionIdLabel(raw), expected.join(' · '));
+    assert.equal(sessionDetailIdLabel('claude', raw), expected.join(' · '));
+    assert.equal(sessionDetailIdLabel('codex', raw), expected.length === 1 ? expected[0] : '');
+  }
+  const raw = `rollout-2026-09-10T02-33-00-${first}_${second}`;
+  for (const canonicalSessionId of [first, second]) {
+    assert.equal(sessionDetailIdLabel('codex', raw, { found: true, canonicalSessionId }), canonicalSessionId);
+  }
+  for (const detail of [undefined, { found: false, canonicalSessionId: first },
+    { found: true }, { found: true, canonicalSessionId: `${first} · ${second}` }]) {
+    assert.equal(sessionDetailIdLabel('codex', raw, detail), '');
+  }
 });
 
 test('background review sessions collapse into one interactive aggregate row with newest-run context', () => {
@@ -164,8 +388,56 @@ test('background review sessions collapse into one interactive aggregate row wit
     'session:codex:review-a',
     'session:codex:review-b'
   ]);
+  assert.deepEqual(collapsed[1].backgroundReviewRows.map((row) => row.modelLabel), [
+    'codex-auto-review',
+    'gpt-5.6-sol'
+  ]);
   assert.equal(Object.hasOwn(collapsed[1], 'sessionGroupExpanded'), false);
   assert.equal(Object.hasOwn(collapsed[1], 'sessionDetailAvailable'), false);
+});
+
+test('background review run headings show the model independently of session titles and keep the time', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const body = source.slice(source.indexOf('function backgroundReviewRunNode('), source.indexOf('function renderBackgroundReviewDetail('));
+  const sessionRowsApi = require('../../src/electron/renderer/sessionRows');
+  let opened;
+  const createNode = () => {
+    const children = new Map();
+    return {
+      events: {},
+      setAttribute() {},
+      querySelector(selector) {
+        if (!children.has(selector)) children.set(selector, {});
+        return children.get(selector);
+      },
+      addEventListener(type, handler) { this.events[type] = handler; }
+    };
+  };
+  const render = Function('document', 'sessionRowsApi', 't', 'formatNumber', 'formatCost', 'applyBarScale', 'rowWidth', 'openSessionDetail', 'bindHoverMarquee', 'limitWindowsView', `${body}\nreturn backgroundReviewRunNode;`)(
+    { createElement: createNode }, sessionRowsApi, () => 'Codex Auto Review', String, String, () => {}, () => 100,
+    (request) => { opened = request; }, () => {}, { setDetailTooltip() {} }
+  );
+  for (const [models, expectedModel] of [
+    [{ 'gpt-5.6-sol': 30 }, 'gpt-5.6-sol'],
+    [{ 'gpt-5.6-sol': 20, 'gpt-5.6': 10 }, '2 models'],
+    [{}, '']
+  ]) {
+    const [row] = sessionRowsForPeriod({ sessions: { 'codex:review': {
+      client: 'codex', sessionId: 'review', title: 'Automatic review', sessionKind: 'background-review',
+      totalTokens: 30, models, lastUsedAt: new Date().toISOString()
+    } } });
+    const parent = { kind: 'background-review-group' };
+    const node = render(row, 30, parent);
+    const time = sessionRowsApi.compactSessionTime(row.sortTime);
+    const expectedTitle = [expectedModel, time].filter(Boolean).join(' · ');
+    assert.equal(node.querySelector('.detail-ex-title').textContent, expectedTitle);
+    assert.equal(node.querySelector('.detail-ex-title').title, expectedTitle);
+    assert.equal(node.querySelector('.detail-ex-sub').textContent, 'review');
+    node.events.click();
+    assert.equal(opened.title, expectedTitle);
+    assert.equal(opened.sessionId, 'review');
+    assert.equal(opened.returnTo, parent);
+  }
 });
 
 test('model name alone does not hide an ordinary Codex session in background reviews', () => {
@@ -273,7 +545,7 @@ test('Reasonix native rows reuse the common session schema without a native acco
   assert.equal(row.kind, 'session');
   assert.equal(row.key, 'session:reasonix:ABC123');
   assert.equal(row.name, 'Reasonix · deepseek/deepseek-v4-flash');
-  assert.equal(row.subtitle, '14:10 · 2 calls');
+  assert.equal(row.subtitle, '14:10 · 2 calls · 20%');
   assert.equal(row.detail, 'ABC123');
   assert.equal(row.value, 15382);
   assert.equal(row.cost, 0.25);
@@ -305,6 +577,28 @@ test('Reasonix native rows reuse the common session schema without a native acco
   }
   assert.equal(ordinary.name, 'Codex · gpt-5.6-luna');
   assert.equal(ordinary.subtitle, '14:09 · 1 call');
+});
+
+test('Reasonix cache percentages use native hits and misses without double-counting prompt tokens', () => {
+  for (const [fields, expected] of [
+    [{ promptTokens: 1000, cacheHitTokens: 900, cacheMissTokens: 80, cacheWriteTokens: 20 }, '90%'],
+    [{ promptTokens: 1000, cacheHitTokens: 900 }, '90%'],
+    [{ promptTokens: 1000, cacheHitTokens: 900, cacheMissTokens: 0 }, '100%'],
+    [{ promptTokens: 1000, cacheHitTokens: 0, cacheMissTokens: 500, cacheWriteTokens: 500 }, '0%'],
+    [{ promptTokens: 1000, cacheHitTokens: 5, cacheMissTokens: 995 }, '<1%'],
+    [{ promptTokens: 1000, cacheHitTokens: 0, cacheMissTokens: 1000, cacheWriteTokens: 0 }, '0%'],
+    [{ promptTokens: 1000, cacheHitTokens: 0, cacheMissTokens: 0, cacheWriteTokens: 0 }, ''],
+    [{ promptTokens: 1000 }, ''],
+    [{ cacheHitTokens: 0, cacheMissTokens: 0, cacheWriteTokens: 0 }, ''],
+    [{ tokenDataUnavailable: true, cacheHitTokens: 0, cacheMissTokens: 1000 }, ''],
+    [{ tokenDataUnavailable: true, cacheHitTokens: 900, cacheMissTokens: 100 }, '']
+  ]) {
+    const [row] = sessionRowsForPeriod({ sessions: {} }, { nativeSessions: {
+      'reasonix:cache': { client: 'reasonix', sessionId: 'reasonix:cache', totalTokens: 1000, ...fields }
+    } });
+    assert.equal(row.subtitle, expected);
+    assert.equal(row.sessionDetailAvailable, false, 'cache data does not enable per-turn details');
+  }
 });
 
 test('Reasonix native rows omit turns from the compact subtitle when turns are unavailable', () => {
@@ -456,10 +750,12 @@ test('session layout keeps page chrome consistent and scrolls long labels on one
   assert.match(styles, /\.shell\.session-mode \.row-detail\s*\{[^}]*white-space:\s*nowrap;/s);
   assert.match(styles, /\.shell\.session-mode \.row-title\.is-hover-scrolling,/);
   assert.match(styles, /\.shell\.session-mode \.row-detail\.is-hover-scrolling\s*\{[^}]*text-overflow:\s*clip;/s);
-  assert.match(styles, /\.shell\.session-mode \.session-row \.row-metrics::after,[^{]+\{[^}]*position:\s*absolute;[^}]*bottom:\s*0;/s);
+  // A clickable row is marked by a hover wash keyed off its button role, not by
+  // a `›` that would collide with the third right-hand line.
+  assert.doesNotMatch(styles, /\.row-metrics::after/);
+  assert.match(styles, /\.shell\.session-mode \.row\[role="button"\]:hover::before,\s*\.shell\.session-mode \.row\[role="button"\]:focus-visible::before\s*\{[^}]*opacity:\s*1;/s);
   assert.match(renderer, /class="row-activity"/);
-  assert.match(renderer, /function setHoverMarqueeText\([^]*?element\.removeAttribute\('title'\);\n}/);
-  assert.doesNotMatch(renderer, /function setHoverMarqueeText\([^]*?element\.title\s*=/);
+  assert.match(renderer, /function setHoverMarqueeText\([^]*?overflowText\.setText\(element, value\)/);
 });
 
 test('a session still being written to is marked running and shows its context headroom', () => {

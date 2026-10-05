@@ -721,6 +721,7 @@ function sanitizeDiagnosticSnapshot(input = {}) {
       chromiumVersion: text(environment.chromiumVersion),
       tokscaleVersion: text(environment.tokscaleVersion),
       tokscaleSource: text(environment.tokscaleSource),
+      tokscaleBundledBuild: text(environment.tokscaleBundledBuild, 'none'),
       packaged: environment.packaged === true,
       platform: text(environment.platform),
       osName: text(environment.osName),

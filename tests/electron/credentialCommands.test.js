@@ -18,7 +18,7 @@ function response(status, body = {}) {
 
 // The real DeepSeek fetcher behind a fake transport, so each verdict is taken
 // from the provider's own classification of an HTTP answer.
-function commands({ answer = () => response(200, BALANCE), settings = {} } = {}) {
+function commands({ answer = () => response(200, BALANCE), settings = {}, env = {} } = {}) {
   const patches = [];
   const writes = [];
   let current = { ...settings };
@@ -36,7 +36,7 @@ function commands({ answer = () => response(200, BALANCE), settings = {} } = {})
       readJson: () => ({}),
       writeJsonAtomic: (file) => writes.push(file)
     }),
-    env: {}
+    env
   });
   return { api, patches, writes };
 }
@@ -380,4 +380,20 @@ test('a confirmed Ollama cookie answers the next poll from the probe', async () 
   });
   assert.equal(polled.status, 'unavailable');
   assert.equal(requests, 1);
+});
+
+test('MiniMax credential save keeps an implicit region and probes the effective env region', async () => {
+  const urls = [];
+  const { api, patches } = commands({
+    settings: { minimaxApiRegion: '', limitProviders: 'minimax' },
+    env: { MINIMAX_API_REGION: 'cn' },
+    answer: (url) => {
+      urls.push(url);
+      return response(200, { data: { model_remains: [{ model_name: 'general', current_interval_remaining_percent: 60 }] } });
+    }
+  });
+  const result = await api.saveCredential('minimax', { minimaxApiKey: 'sk-cp-test', minimaxApiRegion: 'auto' });
+  assert.equal(result.saved, true);
+  assert.deepEqual(urls, ['https://api.minimaxi.com/v1/token_plan/remains']);
+  assert.equal(Object.hasOwn(patches[0], 'minimaxApiRegion'), false);
 });

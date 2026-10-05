@@ -49,7 +49,7 @@ function normalizeInitialRendererViewState(value = {}, fallback = {}) {
   const source = value || {};
   const fallbackSource = fallback || {};
   const fallbackPeriod = normalizedInitialRendererValue(fallbackSource.period, INITIAL_RENDERER_PERIODS, 'today');
-  const fallbackBreakdown = normalizedInitialRendererValue(fallbackSource.breakdown, INITIAL_RENDERER_BREAKDOWNS, 'tool');
+  const fallbackBreakdown = normalizedInitialRendererValue(fallbackSource.breakdown, INITIAL_RENDERER_BREAKDOWNS, 'home');
   return {
     period: normalizedInitialRendererValue(source.period, INITIAL_RENDERER_PERIODS, fallbackPeriod),
     breakdown: normalizedInitialRendererValue(source.breakdown, INITIAL_RENDERER_BREAKDOWNS, fallbackBreakdown)
@@ -58,9 +58,9 @@ function normalizeInitialRendererViewState(value = {}, fallback = {}) {
 
 function initialRendererViewStateQuery(viewState = {}) {
   // Always carry both fields. Omitting a value just because it equals the
-  // default ('today'/'tool') is lossy: the renderer can't then tell "the user
-  // is on tool" from "no view was provided", and falls back to the first
-  // custom-ordered view — silently losing a persisted last view of tool/today.
+  // default ('today'/'home') is lossy: the renderer can't then tell "the user
+  // is on home" from "no view was provided", and falls back to the first
+  // custom-ordered view — silently losing a persisted last view of home/today.
   const normalized = normalizeInitialRendererViewState(viewState);
   return { period: normalized.period, breakdown: normalized.breakdown };
 }

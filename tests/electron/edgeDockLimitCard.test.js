@@ -1424,20 +1424,21 @@ const windowTitles = (card) => [...card.walk()]
   .filter((node) => node.classNames.has('limit-window'))
   .map((node) => node.children[0].children[0].textContent);
 
-test('the checklist lists what the card draws, in card order, without Codex additional pools', () => {
+test('the checklist lists what the card draws, in card order, Codex additional pools included', () => {
   const items = dockView().limitProviderUsageItems([codexRecord()]);
   assert.deepEqual(items.map((item) => item.id), [
     usageItems.limitWindowKey({ kind: 'session', label: 'Session' }),
     usageItems.limitWindowKey({ kind: 'weekly', label: '' }),
     usageItems.limitWindowKey({ kind: 'billing', label: 'Monthly' }),
+    usageItems.limitWindowKey({ kind: 'session', label: 'Spark', additional: true }),
     'resets'
   ]);
-  assert.deepEqual(items.map((item) => item.label), ['Session', 'Weekly', 'Monthly', 'Resets']);
+  assert.deepEqual(items.map((item) => item.label), ['Session', 'Weekly', 'Monthly', 'Spark', 'Resets']);
 });
 
 test('the checklist names each row once across accounts', () => {
   const items = dockView().limitProviderUsageItems([codexRecord(), codexRecord()]);
-  assert.equal(items.length, 4);
+  assert.equal(items.length, 5);
 });
 
 test('an unchecked row leaves the card and its partner takes the full width', () => {
@@ -1451,12 +1452,19 @@ test('an unchecked row leaves the card and its partner takes the full width', ()
   assert.equal(session.classNames.has('limit-window-wide'), true, 'a row left alone spans its grid row');
 });
 
-test('the Codex additional pools answer to their own switch, not the checklist', () => {
-  const spark = { kind: 'session', label: 'Spark', additional: true };
-  const card = dockView({
-    limitProviderHiddenItems: { codex: [usageItems.limitWindowKey(spark)] }
-  }).renderProviderWindows(codexRecord(), '#10A37F');
-  assert.ok(windowTitles(card).includes('Spark'));
+test('each Codex additional pool is its own item, and the retired switch still hides them all', () => {
+  const pool = (kind, windowMinutes) => ({
+    kind, label: 'GPT-5.3-Codex-Spark', limitId: 'codex_spark', windowMinutes, additional: true, remainingPercent: 80
+  });
+  const record = { provider: 'codex', windows: [{ kind: 'session', label: 'Session', remainingPercent: 70 }, pool('session', 300), pool('weekly', 10080)] };
+  const titles = (settings) => windowTitles(dockView(settings).renderProviderWindows(record, '#10A37F'));
+
+  assert.deepEqual(titles({}), ['Session', 'GPT-5.3-Codex-Spark · 5-hour', 'GPT-5.3-Codex-Spark · Weekly']);
+  assert.deepEqual(
+    titles({ limitProviderHiddenItems: { codex: [usageItems.limitWindowKey(pool('weekly', 10080))] } }),
+    ['Session', 'GPT-5.3-Codex-Spark · 5-hour']
+  );
+  assert.deepEqual(titles({ showCodexAdditionalLimits: false }), ['Session']);
 });
 
 test('another provider\'s hidden items leave this card alone', () => {
@@ -1554,10 +1562,9 @@ const windowlessRecord = (provider) => ({ provider, windows: [], balance: { curr
 const shapeRecords = (provider) => [
   everyShapeRecord(provider), legacyShapeRecord(provider), sparseShapeRecord(provider), windowlessRecord(provider)
 ];
-// Rows deliberately off the checklist: Codex's additional pools answer to
-// showCodexAdditionalLimits, and Antigravity's `--` Weekly stands in for a
-// payload with no weekly window at all.
-const offChecklist = { codex: ['Spark'], antigravity: ['Weekly'] };
+// A row deliberately off the checklist: Antigravity's `--` Weekly stands in
+// for a payload with no weekly window at all.
+const offChecklist = { antigravity: ['Weekly'] };
 // The whole drawn tree, so a window that only moves a meter still counts as
 // drawn. Tooltip anchor names count up on every render, so they are masked.
 const cardSnapshot = (node) => (node instanceof FakeElement
@@ -1597,7 +1604,6 @@ test('with every item unchecked, Home and the picker keep no window the card dre
       const full = cardSnapshot(view.renderProviderWindows(record, '#888888'));
       const hidden = { [provider]: view.limitProviderUsageItems([record]).map((item) => item.id) };
       for (const [index, window] of record.windows.entries()) {
-        if (provider === 'codex' && window.additional) continue;
         if (usageItems.isLimitWindowHidden(hidden, provider, window)) continue;
         const without = { ...record, windows: record.windows.filter((_, other) => other !== index) };
         if (cardSnapshot(view.renderProviderWindows(without, '#888888')) !== full) {

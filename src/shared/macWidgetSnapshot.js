@@ -587,7 +587,7 @@ function buildPresentation(source = {}) {
     numberStyle: source.compactNumbers === false ? 'full' : 'compact',
     compactTokenUnits: source.compactTokenUnits === 'localized' ? 'localized' : 'western',
     showCost: source.showCost !== false,
-    locale: /^(?:auto|en|zh-CN|zh-TW|ko|ja)$/.test(locale) ? locale : 'auto',
+    locale: /^(?:auto|en|zh-CN|zh-TW|ko|ja|pt-BR)$/.test(locale) ? locale : 'auto',
     theme: source.theme === 'custom' ? 'custom' : 'system'
   };
 }

@@ -126,9 +126,9 @@ for (const form of limitAccountFormsForRenderer()) {
       input.value = `${field.key}-draft`;
     }
 
-    // Every field reaches the caller: whether the draft is complete, rejected
+    // Credential draft fields reach the caller: whether it is complete, rejected
     // or saved is the save path's call, and so is the message line.
-    const expected = Object.fromEntries(form.fields.map((field) => [
+    const expected = Object.fromEntries(form.fields.filter((field) => field.submitWithCredential !== false).map((field) => [
       field.key,
       field.input === 'select' ? field.options[0].value : `${field.key}-draft`
     ]));
@@ -145,7 +145,7 @@ for (const form of limitAccountFormsForRenderer()) {
     await submit.click();
     // Clearing the draft empties secrets and leaves settings beside them.
     for (const field of form.fields) {
-      assert.equal(group.byId(`${field.key}Input`).value, field.secret ? '' : expected[field.key], field.key);
+      assert.equal(group.byId(`${field.key}Input`).value, field.secret ? '' : field.options[0].value, field.key);
     }
   });
 }
@@ -206,9 +206,15 @@ test('selects drive their dependent hints, notes and landing page before they ar
   assert.equal([...zai.group.byId('zaiManualPanel').walk()].some((node) => node.id === 'zaiApiRegionInput'), false,
     'the region stays reachable once the paste panel hides');
 
-  // MiniMax follows the region of its last successful poll.
-  assert.equal(resolveOpenUrl(forms.minimax, { provider: { region: 'en' } }), 'https://platform.minimax.io/user-center/payment/token-plan');
-  assert.equal(resolveOpenUrl(forms.minimax, { provider: null }), 'https://platform.minimaxi.com/user-center/payment/token-plan');
+  // MiniMax Auto follows the region of its last successful poll.
+  assert.equal(resolveOpenUrl(forms.minimax, { document: { getElementById: () => ({ value: 'auto' }) }, provider: { region: 'en' } }), 'https://platform.minimax.io/user-center/payment/token-plan');
+  assert.equal(resolveOpenUrl(forms.minimax, { document: { getElementById: () => ({ value: 'auto' }) }, provider: { region: 'cn' } }), 'https://platform.minimaxi.com/user-center/payment/token-plan');
+  assert.equal(resolveOpenUrl(forms.minimax, { document: { getElementById: () => ({ value: 'auto' }) }, provider: null }), 'https://platform.minimaxi.com/user-center/payment/token-plan');
+
+  const minimax = renderPanel(forms.minimax);
+  const region = minimax.group.byId('minimaxApiRegionInput');
+  syncCredentialFields(forms.minimax, { document: minimax.document, settings: { minimaxApiRegion: 'cn' } });
+  assert.equal(region.value, 'cn');
 });
 
 test('a plain-text setting is shown again after a save, a secret never is', () => {
@@ -345,4 +351,163 @@ test('every shared account message exists in each locale with its placeholders',
       for (const param of params) assert.match(messages[key], new RegExp(`\\{${param}\\}`), `${key} ${locale}`);
     }
   }
+});
+
+test('MiniMax explicit regions drive Open before a probe and override stale status', async () => {
+  const { resolveOpenUrl, syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
+  const opened = [];
+  let provider = null;
+  const panel = renderPanel(form, { onOpen: () => opened.push(resolveOpenUrl(form, { document: panel.document, provider })) });
+  syncCredentialFields(form, { document: panel.document, settings: { minimaxApiRegion: 'auto' } });
+  const region = panel.group.byId('minimaxApiRegionInput');
+  await region.change('intl');
+  panel.group.byId('minimaxOpenBrowser').click();
+  assert.equal(opened.pop(), 'https://platform.minimax.io/user-center/payment/token-plan');
+  provider = { region: 'en' };
+  await region.change('cn');
+  panel.group.byId('minimaxOpenBrowser').click();
+  assert.equal(opened.pop(), 'https://platform.minimaxi.com/user-center/payment/token-plan');
+  await region.change('auto');
+  panel.group.byId('minimaxOpenBrowser').click();
+  assert.equal(opened.pop(), 'https://platform.minimax.io/user-center/payment/token-plan');
+  provider = null;
+  panel.group.byId('minimaxOpenBrowser').click();
+  assert.equal(opened.pop(), 'https://platform.minimaxi.com/user-center/payment/token-plan');
+});
+
+test('MiniMax key submission waits for a region save without submitting an implicit region', async () => {
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
+  const drafts = [];
+  let finish;
+  const { group } = renderPanel(form, {
+    onFieldChange: () => new Promise((resolve) => { finish = resolve; }),
+    onSave: (_, values) => drafts.push(values)
+  });
+  group.byId('minimaxApiKeyInput').value = 'sk-cp-test';
+  const submit = group.byId('minimaxCredentialSubmit');
+  await submit.click();
+  assert.deepEqual(drafts, [{ minimaxApiKey: 'sk-cp-test' }]);
+  group.byId('minimaxApiRegionInput').change('cn');
+  const pending = submit.click();
+  assert.equal(submit.disabled, true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(drafts.length, 1);
+  finish();
+  await pending;
+  assert.deepEqual(drafts[1], { minimaxApiKey: 'sk-cp-test' });
+});
+
+test('MiniMax serializes rapid region writes and waits for changes queued during submission', async () => {
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
+  const writes = [];
+  const drafts = [];
+  let stored = 'auto';
+  const { group } = renderPanel(form, {
+    onFieldChange: (_, field, value) => new Promise((resolve) => {
+      writes.push({ value, finish: () => { stored = value; resolve(); } });
+    }),
+    onSave: (_, values) => drafts.push({ values, region: stored })
+  });
+  const region = group.byId('minimaxApiRegionInput');
+  const submit = group.byId('minimaxCredentialSubmit');
+  group.byId('minimaxApiKeyInput').value = 'sk-cp-test';
+  region.change('cn');
+  const pending = submit.click();
+  region.change('intl');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(writes.map(({ value }) => value), ['cn']);
+  assert.deepEqual(drafts, []);
+  writes[0].finish();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(writes.map(({ value }) => value), ['cn', 'intl']);
+  assert.deepEqual(drafts, []);
+  assert.equal(submit.disabled, true);
+  writes[1].finish();
+  await pending;
+  assert.deepEqual(drafts, [{ values: { minimaxApiKey: 'sk-cp-test' }, region: 'intl' }]);
+});
+
+test('MiniMax reports failed region writes and permits later key submission after UI resync', async () => {
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
+  const { syncCredentialFields } = require('../../src/electron/renderer/limits/accountPanels');
+  const drafts = [];
+  const errors = [];
+  let fail;
+  const { group, document } = renderPanel(form, {
+    onFieldChange: () => new Promise((_, reject) => { fail = reject; }),
+    onFieldError: (receivedForm, error) => errors.push([receivedForm.id, error.message]),
+    onSave: (_, values) => drafts.push(values)
+  });
+  group.byId('minimaxApiKeyInput').value = 'sk-cp-test';
+  group.byId('minimaxApiRegionInput').change('cn');
+  const submit = group.byId('minimaxCredentialSubmit');
+  const first = submit.click();
+  await new Promise((resolve) => setImmediate(resolve));
+  syncCredentialFields(form, { document, settings: { minimaxApiRegion: 'auto' } });
+  fail(new Error('disk full'));
+  await first;
+  assert.deepEqual(errors, [['minimax', 'disk full']]);
+  assert.deepEqual(drafts, []);
+  assert.equal(submit.disabled, false);
+  assert.equal(group.byId('minimaxApiKeyInput').value, 'sk-cp-test');
+  await submit.click();
+  assert.deepEqual(drafts, [{ minimaxApiKey: 'sk-cp-test' }]);
+});
+
+test('MiniMax queued region changes recover after an earlier write rejects', async () => {
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
+  const writes = [];
+  const saved = [];
+  let fail;
+  let finish;
+  const { group } = renderPanel(form, {
+    onFieldChange: (_, field, value) => {
+      writes.push(value);
+      if (value === 'cn') return new Promise((_, reject) => { fail = reject; });
+      return new Promise((resolve) => { finish = resolve; });
+    },
+    onSave: () => saved.push(true)
+  });
+  const region = group.byId('minimaxApiRegionInput');
+  region.change('cn');
+  region.change('intl');
+  await new Promise((resolve) => setImmediate(resolve));
+  fail(new Error('temporary failure'));
+  const pending = group.byId('minimaxCredentialSubmit').click();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(saved, []);
+  finish();
+  await pending;
+  assert.deepEqual(writes, ['cn', 'intl']);
+  assert.deepEqual(saved, [true]);
+});
+
+test('account setting errors are reported through the persistent panel message', () => {
+  const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
+  const start = app.indexOf('function setupLimitAccountPanels()');
+  const end = app.indexOf('\nfunction limitProviderAccountGroup(', start);
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'minimax');
+  const messages = [];
+  const renders = [];
+  let callbacks;
+  const context = {
+    state: { settings: { limitAccountForms: [form] } },
+    document: { getElementById: (id) => id === 'accountsSettingsDetails' ? { insertBefore() {} } : null },
+    limitAccountPanelsApi: { createCredentialPanel: (_, received) => { callbacks = received; return {}; } },
+    LIMIT_PROVIDERS: [{ id: 'minimax' }],
+    t: translated,
+    limitProviderAccountGroup: () => null,
+    setExternalAccountExpanded() {},
+    initSettingsAnimationWrappers() {},
+    renderExternalProviderStatus: (id) => renders.push(id),
+    setAccountPanelMessage: (id, message) => messages.push({ id, message })
+  };
+  context.limitAccountPanelsApi.syncCredentialFields = () => {};
+  vm.runInNewContext(`${app.slice(start, end)}\nsetupLimitAccountPanels();`, context);
+  callbacks.onFieldError(form, new Error('disk full'));
+  assert.equal(messages[0].id, 'minimax');
+  assert.equal(messages[0].message.key, form.failedKey);
+  assert.equal(messages[0].message.params.message, 'disk full');
+  assert.deepEqual(renders, ['minimax', 'minimax']);
 });

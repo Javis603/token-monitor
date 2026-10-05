@@ -165,3 +165,37 @@ test('applyCustomPricing is a no-op when no overrides and no prior state (no fil
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('cache-write rates round-trip with zero distinct from unset and reject invalid rates', () => {
+  const entries = normalizeCustomPricingSetting([
+    { modelId: 'complete', inputPerM: 3, outputPerM: 15, cacheWritePerM: 3.75, cacheWrite1hPerM: 6 },
+    { modelId: 'zero-write', outputPerM: 1, cacheWritePerM: 0, cacheWrite1hPerM: 0 },
+    { modelId: 'partial', inputPerM: 1, cacheWritePerM: '', cacheWrite1hPerM: null }
+  ]);
+  assert.equal(entries[0].cacheWrite1hPerM, 6);
+  const models = buildTokscaleModels(entries);
+  assert.deepEqual(models.complete, {
+    input_cost_per_million_tokens: 3, output_cost_per_million_tokens: 15,
+    cache_creation_input_token_cost_per_million_tokens: 3.75,
+    cache_creation_input_token_cost_per_million_tokens_above_1hr: 6
+  });
+  assert.equal(models['zero-write'].cache_creation_input_token_cost_per_million_tokens, 0);
+  assert.equal(models['zero-write'].cache_creation_input_token_cost_per_million_tokens_above_1hr, 0);
+  assert.deepEqual(models.partial, { input_cost_per_million_tokens: 1 });
+  for (const key of ['cacheWritePerM', 'cacheWrite1hPerM']) {
+    for (const value of [-1, Number.NaN, Infinity, false, '1']) {
+      assert.deepEqual(normalizeCustomPricingSetting([{ modelId: 'bad', inputPerM: 1, [key]: value }]), []);
+    }
+  }
+  const dir = tmpDir();
+  try {
+    const pricingPath = path.join(dir, 'custom-pricing.json');
+    const sidecarPath = path.join(dir, 'sidecar.json');
+    applyCustomPricing(entries, { pricingPath, sidecarPath });
+    assert.deepEqual(JSON.parse(fs.readFileSync(pricingPath, 'utf8')).models, models);
+    applyCustomPricing([{ modelId: 'complete', inputPerM: 1 }], { pricingPath, sidecarPath });
+    assert.deepEqual(JSON.parse(fs.readFileSync(pricingPath, 'utf8')).models, { complete: { input_cost_per_million_tokens: 1 } });
+    applyCustomPricing([], { pricingPath, sidecarPath });
+    assert.deepEqual(JSON.parse(fs.readFileSync(pricingPath, 'utf8')).models, {});
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});

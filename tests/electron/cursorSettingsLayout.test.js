@@ -748,12 +748,16 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
   const css = readRendererFile('styles.css');
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const forms = limitAccountFormsForRenderer();
+  const expectedFields = {
+    deepseek: [['deepseekApiKey', 'password']],
+    minimax: [['minimaxApiRegion', 'select'], ['minimaxApiKey', 'password']]
+  };
   for (const id of ['deepseek', 'minimax']) {
     assert.doesNotMatch(html, new RegExp(`id="${id}(AccountGroup|ManualPanel|ApiKeyInput)"`), id);
     assert.doesNotMatch(css, new RegExp(`#${id}ManualPanel`), id);
     const form = forms.find((candidate) => candidate.id === id);
     assert.equal(form.kind, 'credential', id);
-    assert.deepEqual(form.fields.map(({ key, input }) => [key, input]), [[`${id}ApiKey`, 'password']], id);
+    assert.deepEqual(form.fields.map(({ key, input }) => [key, input]), expectedFields[id], id);
     assert.deepEqual(form.manual[0], { note: `settings.${id}.note` }, id);
     assert.deepEqual(form.status, {
       configuredKey: `${id}ApiKeyConfigured`,
@@ -763,18 +767,50 @@ test('DeepSeek and MiniMax API key panels come from the generic account form', (
     for (const key of ['titleKey', 'openKey', 'clearKey', 'saveKey', 'emptyKey', 'failedKey']) {
       assert.match(form[key], new RegExp(`^settings\\.${id}\\.`), `${id} ${key}`);
     }
-    assert.match(form.fields[0].placeholderKey, new RegExp(`^settings\\.${id}\\.`), id);
+    assert.match(
+      form.fields.find(({ key }) => key === `${id}ApiKey`).placeholderKey,
+      new RegExp(`^settings\\.${id}\\.`),
+      id
+    );
   }
   assert.deepEqual(forms.find(({ id }) => id === 'deepseek').openUrl, { url: 'https://platform.deepseek.com/api_keys' });
 
-  // MiniMax keeps landing on the region its last successful poll resolved to;
+  // MiniMax follows the selection, with successful-probe status for Auto;
   // the form declares that, so the renderer has no MiniMax branch of its own.
   const app = readRendererFile('app.js');
   assert.deepEqual(forms.find(({ id }) => id === 'minimax').openUrl, {
+    byField: 'minimaxApiRegion',
+    urls: {
+      cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
+      intl: 'https://platform.minimax.io/user-center/payment/token-plan'
+    },
     byStatus: 'region',
-    urls: { en: 'https://platform.minimax.io/user-center/payment/token-plan' },
+    statusUrls: {
+      cn: 'https://platform.minimaxi.com/user-center/payment/token-plan',
+      en: 'https://platform.minimax.io/user-center/payment/token-plan'
+    },
     default: 'https://platform.minimaxi.com/user-center/payment/token-plan'
   });
+
+  // The region is a plain setting beside the credential, so Clear leaves it
+  // alone and it stays reachable once a key is saved — a user whose auto-probe
+  // keeps flapping needs the switch after linking, not before.
+  const minimax = forms.find(({ id }) => id === 'minimax');
+  const region = minimax.fields.find(({ key }) => key === 'minimaxApiRegion');
+  assert.equal(region.saveOnChange, true);
+  assert.deepEqual(region.options.map(({ value }) => value), ['auto', 'cn', 'intl']);
+  for (const { labelKey } of region.options) {
+    assert.match(labelKey, /^settings\.minimax\./, labelKey);
+  }
+  assert.deepEqual(minimax.top, [{ field: 'minimaxApiRegion' }]);
+
+  // The region never becomes a credential: no store path, so it stays in
+  // settings.json only after a selection; an implicit default stays empty.
+  const { initialAccountSettings } = require('../../src/electron/limits/accountSettings');
+  assert.equal(initialAccountSettings({}).minimaxApiRegion, '');
+  assert.equal(initialAccountSettings({ MINIMAX_API_REGION: 'cn' }).minimaxApiRegion, '');
+  assert.equal(initialAccountSettings({ TOKEN_MONITOR_MINIMAX_API_REGION: 'intl' }).minimaxApiRegion, '');
+  assert.equal(initialAccountSettings({ MINIMAX_API_HOST: 'api.minimax.io' }).minimaxApiRegion, '');
   assert.match(app, /limitAccountPanelsApi\.resolveOpenUrl\(form, \{\s*document,\s*provider: externalProviderForAccount\(form\.id\)/);
   assert.doesNotMatch(app, /minimaxPlatformUrl|form\.id === 'minimax'/);
   const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
@@ -905,7 +941,7 @@ test('Volcengine keeps its hand-built panel and saves through the shared credent
   const { limitProviderEntry } = require('../../src/shared/limits/registry');
   assert.equal(limitProviderEntry('volcengine').form.kind, 'custom');
   for (const key of ['secretRequired', 'agentSecretRequired']) {
-    assert.equal(readRendererFile('i18n.js').split(`'settings.volcengine.${key}':`).length - 1, 5, key);
+    assert.equal(readRendererFile('i18n.js').split(`'settings.volcengine.${key}':`).length - 1, 6, key);
   }
 });
 
@@ -1011,7 +1047,7 @@ test('Zed account panel follows the manual browser Cookie flow without exposing 
     'settings.zed.saveCookie',
     'settings.zed.statusInvalid'
   ]) {
-    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+    assert.equal(i18n.split(`'${key}':`).length - 1, 6, `${key} should exist in all bundled locales`);
   }
 });
 
@@ -1095,7 +1131,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
     rejected: 'settings.claude.cookieRejected'
   });
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
-  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja']) {
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) {
     for (const key of ['organization', 'organizationChoose', 'organizationRequired', 'organizationSelect', 'organizationUnavailable', 'organizationLoadFailed']) {
       assert.ok(MESSAGES[locale][`settings.claude.${key}`], `${locale} ${key}`);
     }
@@ -1329,7 +1365,7 @@ test('Devin account panel uses the shared status label and opens the allowlisted
   assert.match(i18n, /'settings\.devin\.statusNotSet': 'Not configured'/);
   assert.match(i18n, /'settings\.devin\.statusNotSet': '尚未設定'/);
   for (const key of ['settings.devin.statusNotSet', 'settings.devin.credentialsRequired']) {
-    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+    assert.equal(i18n.split(`'${key}':`).length - 1, 6, `${key} should exist in all bundled locales`);
   }
 
 
@@ -1383,7 +1419,7 @@ test('Factory API key validation keeps its translated rejection message', () => 
   assert.deepEqual({ ...form.messages }, { rejected: 'settings.factory.validationInvalid' });
 
   const i18n = readRendererFile('i18n.js');
-  assert.equal(i18n.match(/'settings\.factory\.validationInvalid':/g)?.length, 5);
+  assert.equal(i18n.match(/'settings\.factory\.validationInvalid':/g)?.length, 6);
   assert.doesNotMatch(i18n, /settings\.factory\.validation(RateLimited|Unavailable)/);
 });
 
@@ -1408,7 +1444,7 @@ test('Factory identifies environment and Droid .env credentials separately', () 
   assert.deepEqual(Array.from(labels), ['settings.factory.statusEnv', 'settings.factory.statusDroidEnv']);
 
   const i18n = readRendererFile('i18n.js');
-  assert.equal((i18n.match(/'settings\.factory\.statusDroidEnv'/g) || []).length, 5);
+  assert.equal((i18n.match(/'settings\.factory\.statusDroidEnv'/g) || []).length, 6);
 });
 
 test('Cline account form keeps sign-in precedence, accessible input, and allowlisted setup URL', () => {
@@ -1464,7 +1500,7 @@ test('Cline API key validation keeps its rejection copy in every locale', () => 
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'cline');
   assert.deepEqual({ ...form.messages }, { rejected: 'settings.cline.validationInvalid' });
 
-  // Every cline string the UI can render exists in all five locales — the same
+  // Every cline string the UI can render exists in all bundled locales — the same
   // completeness Antigravity copy is held to, derived here from the source of truth
   // rather than hand-listed so a key added later cannot skip a locale.
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
@@ -1535,7 +1571,8 @@ test('Cline names the credential lane that went bad, not always the key field', 
     'zh-TW': '開啟 Cline',
     'zh-CN': '打开 Cline',
     ko: 'Cline 열기',
-    ja: 'Cline を開く'
+    ja: 'Cline を開く',
+    'pt-BR': 'Abrir o Cline'
   });
   assert.deepEqual(Object.fromEntries(Object.entries(MESSAGES).map(([locale, messages]) => [
     locale,
@@ -1545,7 +1582,8 @@ test('Cline names the credential lane that went bad, not always the key field', 
     'zh-TW': '已連線',
     'zh-CN': '已连接',
     ko: '연결됨',
-    ja: '接続済み'
+    ja: '接続済み',
+    'pt-BR': 'Conectado'
   });
 });
 
@@ -1673,7 +1711,8 @@ test('an account message survives the stats re-renders until its own condition r
 
 test('account credentials persist through the settings:update body, not a second write path', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
-  assert.match(main, /ipcMain\.handle\('settings:update', async \(_event, patch\) => \{\s*const result = applySettingsPatch\(patch\);/);
+  const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf('function applySettingsPatch(patch) {'));
+  assert.match(updateHandler, /const result = applySettingsPatch\(patch\);/);
   assert.match(main, /createCredentialCommands\(\{\s*getSettings: \(\) => settings,\s*applySettingsPatch,\s*probeDeps: credentialProbeDeps\s*\}\)/);
   const body = main.slice(main.indexOf('function applySettingsPatch(patch) {'), main.indexOf("ipcMain.handle('appearance:preview'"));
   assert.match(body, /credentialCommands\.noteSettingsPatch\(patch\);/);
@@ -1923,9 +1962,9 @@ test('collection cadence setting is exposed in the Collection panel', () => {
 
 test('sync upload interval setting is exposed in the Multi-device Sync panel', () => {
   const html = readRendererFile('index.html');
-  const controls = html.match(/<label class="sync-upload-interval-row[^"]*"[\s\S]*?<select id="syncUploadIntervalInput"[\s\S]*?<\/select>[\s\S]*?<\/label>/)?.[0] || '';
-  const clientFields = html.slice(html.indexOf('<div id="hubClientFields"'), html.indexOf('<div id="hubHostFields"'));
-  assert.match(clientFields, /sync-upload-interval-row/);
+  const controls = html.match(/<label id="syncUploadIntervalRow" class="sync-upload-interval-row[^"]*"[\s\S]*?<select id="syncUploadIntervalInput"[\s\S]*?<\/select>[\s\S]*?<\/label>/)?.[0] || '';
+  assert.ok(html.indexOf('id="syncUploadIntervalRow"') > html.indexOf('id="saveSettingsButton"'));
+  assert.ok(html.indexOf('id="syncUploadIntervalRow"') < html.indexOf('id="syncDevicePanel"'));
   assert.match(controls, /data-i18n="settings\.sync\.uploadInterval"/);
   assert.match(controls, /<option value="0"[\s\S]*data-i18n="settings\.sync\.uploadInterval\.live"/);
   assert.match(controls, /<option value="600000"[\s\S]*data-i18n="settings\.sync\.uploadInterval\.10m"/);
@@ -1954,6 +1993,8 @@ function fakeHubControl(value = '') {
   return {
     value,
     disabled: false,
+    contains() { return false; },
+    focus() { this.focused = true; },
     addEventListener(type, listener) {
       const current = listeners.get(type) || [];
       current.push(listener);
@@ -1975,6 +2016,9 @@ function fakeHubControl(value = '') {
 }
 
 function loadHubSettingsWiring(els, context) {
+  for (const id of ['syncConnectionEditor', 'syncConnectionIdentity', 'syncConnectionEndpoint', 'syncConnectionEdit', 'syncConnectionCancel', 'syncConnectionSaveError', 'syncDeviceSettings', 'syncUploadIntervalRow']) {
+    els[id] ||= fakeHubControl();
+  }
   const app = readRendererFile('app.js');
   const modeStart = app.indexOf('function syncHubModeUi()');
   const modeEnd = app.indexOf('function renderHubStatus()', modeStart);
@@ -1994,9 +2038,18 @@ function loadHubSettingsWiring(els, context) {
   assert.notEqual(intervalEnd, -1, 'collection cadence wiring should follow sync upload wiring');
   const vmContext = {
     els,
+    syncContentForm: null,
+    SYNC_MODE_DESCRIPTIONS: { local: 'local', client: 'client', host: 'host', icloud: 'icloud' },
+    syncModeSelect: { sync() {} },
+    document: { activeElement: null },
+    preserveSettingsPanelScroll: callback => callback(),
+    isSettingsSurfaceVisible: () => true,
+    setHoverMarqueeText: (element, value) => { element.textContent = value; },
+    t: key => key,
+    syncDevicePanelApi: require('../../src/electron/renderer/syncDevicePanel'),
     ...context,
     renderHubStatus: () => {},
-    renderSyncClientStatus: () => {},
+    renderSyncPanel: () => {},
     renderHubBuildStatus: () => {}
   };
   vm.runInNewContext(
@@ -2055,7 +2108,11 @@ test('Hub Save disables for clean and reverted drafts', async () => {
 
   state.settings.hubUrl = 'https://pushed.example';
   vmContext.syncHubDraftFields();
+  assert.equal(els.hubUrlInput.value, 'https://saved.example');
+  assert.equal(els.saveSettingsButton.disabled, false);
+  vmContext.cancelClientConnectionEdit();
   assert.equal(els.hubUrlInput.value, 'https://pushed.example');
+  assert.equal(els.syncConnectionEditor.hidden, true);
 });
 
 test('Hub Save exposes busy state and ignores repeated clicks', async () => {
@@ -2146,7 +2203,9 @@ test('Hub Save re-enables a failed draft after clearing busy state', async () =>
 
   els.hubUrlInput.value = 'https://draft.example';
   await els.hubUrlInput.dispatch('input');
-  await assert.rejects(els.saveSettingsButton.dispatch('click'), /save failed/);
+  await els.saveSettingsButton.dispatch('click');
+  assert.equal(els.syncConnectionSaveError.hidden, false);
+  assert.equal(els.syncConnectionSaveError.textContent, 'settings.sync.saveFailed');
 
   assert.equal(els.saveSettingsButton.disabled, false);
   assert.equal(els.saveSettingsButton.getAttribute('aria-busy'), null);
@@ -2593,7 +2652,8 @@ test('remote Hub build status is wired as a separate localized sync hint', () =>
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const clientFields = html.slice(html.indexOf('<div id="hubClientFields"'), html.indexOf('<div id="hubHostFields"'));
 
-  assert.match(clientFields, /id="syncClientStatus"[\s\S]*id="hubBuildStatus"[\s\S]*role="status"[\s\S]*hidden/);
+  assert.match(clientFields, /id="hubBuildStatus"[\s\S]*role="status"[\s\S]*hidden/);
+  assert.doesNotMatch(clientFields, /id="syncClientStatus"/);
   assert.ok(html.indexOf('hubBuildPresentation.js') < html.indexOf('app.js'));
   assert.match(app, /getHubBuildStatus/);
   assert.match(app, /function renderHubBuildStatus\(\)/);
@@ -2606,8 +2666,8 @@ test('remote Hub build status is wired as a separate localized sync hint', () =>
   assert.match(app, /handleWindowVisibilityChange[\s\S]*hubBuildStatusRefreshDue\(\)[\s\S]*void refreshHubBuildStatus\(\)/);
   assert.match(preload, /getHubBuildStatus: \(\) => ipcRenderer\.invoke\('hub:getBuildStatus'\)/);
   assert.match(main, /ipcMain\.handle\('hub:getBuildStatus'/);
-  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.current':/g)].length, 5);
-  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.updateAvailable':/g)].length, 5);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.current':/g)].length, 6);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.updateAvailable':/g)].length, 6);
   assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.legacy':/g)].length, 0);
 });
 
@@ -3196,9 +3256,9 @@ test('a ZCode-discovered GLM login reads as connected, not API-key configured', 
   assert.match(statusBody, /source === 'env' \? `settings\.\$\{providerName\}\.statusEnv` : `settings\.\$\{providerName\}\.statusSet`/);
 
   const i18n = readRendererFile('i18n.js');
-  // Five locales carry the key; translate() falls back to the raw key, so a
+  // All bundled locales carry the key; translate() falls back to the raw key, so a
   // missing entry would surface as literal text on the pill.
-  assert.equal((i18n.match(/'settings\.zai\.statusLinked'/g) || []).length, 5);
+  assert.equal((i18n.match(/'settings\.zai\.statusLinked'/g) || []).length, 6);
   assert.ok(/'settings\.zai\.statusLinked': 'Connected'/.test(i18n));
 });
 

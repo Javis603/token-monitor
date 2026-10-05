@@ -57,11 +57,11 @@ test('hiding, showing and restoring touch only the one provider', () => {
   assert.deepEqual(restoreUsageItemDefaults(value, 'codex'), { claude: ['credits'] });
 });
 
-test('a window is hidden only by its own provider\'s list, and never a Codex additional pool', () => {
+test('a window is hidden only by its own provider\'s list, Codex additional pools included', () => {
   const value = { codex: [weeklyKey, limitWindowKey({ kind: 'session', label: 'Spark', additional: true })] };
   assert.equal(isLimitWindowHidden(value, 'codex', weekly), true);
   assert.equal(isLimitWindowHidden(value, 'claude', weekly), false);
-  assert.equal(isLimitWindowHidden(value, 'codex', { kind: 'session', label: 'Spark', additional: true }), false);
+  assert.equal(isLimitWindowHidden(value, 'codex', { kind: 'session', label: 'Spark', additional: true }), true);
   assert.equal(isLimitWindowHidden(undefined, 'codex', weekly), false);
 });
 
@@ -80,6 +80,11 @@ test('a window drawn under another item is hidden with that item', () => {
 
 test('a hidden window the payload no longer draws is still named', () => {
   assert.equal(usageItemFallbackLabel('codex', weeklyKey), 'Weekly');
+  assert.equal(
+    usageItemFallbackLabel('codex', limitWindowKey({ kind: 'weekly', limitId: 'codex_spark', windowMinutes: 10080, additional: true })),
+    'codex_spark · Weekly',
+    'an unreported additional pool keeps its backend id, not just a period that reads like the main window'
+  );
   assert.equal(usageItemFallbackLabel('codex', 'credits'), 'Balance', 'fixed items keep the card\'s English name');
 });
 

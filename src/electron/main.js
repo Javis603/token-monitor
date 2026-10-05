@@ -90,6 +90,7 @@ const {
 const { seedSplitClients } = require('../shared/clientIdentitySplits');
 const {
   clientDiagnosticRoots,
+  getTokscaleStatus,
   lookupModelPricing,
   normalizeHistoryIntervalMs,
   visibleDiagnosticRoots
@@ -100,14 +101,18 @@ const {
 } = require('../shared/providers/antigravity/selfSync');
 const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
-const { actionWindowForEvent, handoffWindow, showWindow } = require('./windowLifecycle');
+const { actionWindowForEvent, activateWindowAction, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
+const { applyCodexAdditionalLimitsMigration } = require('./codexAdditionalLimitsMigration');
 const { createDeviceRuntime } = require('../shared/usage/deviceRuntime');
 const { externalAgentActive } = require('../shared/usage/agentPid');
 const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
 const { createDiagnosticReportGenerator } = require('./diagnostics');
 const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
 const { customPricingPath } = require('../shared/tokscaleConfig');
+const { normalizeSharedSyncValue } = require('../shared/syncContent');
+const { createSyncContentRuntime, normalizeSyncContentState, sameDestination } = require('./syncContentRuntime');
+const { createSyncContentCredentialQueue } = require('./syncContentCredentials');
 const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
 const {
   normalizeModelAliases,
@@ -177,13 +182,6 @@ const {
   normalizeHiddenHomeModules,
   normalizeHomeModuleOrder
 } = require('./renderer/homeModulePreferences');
-const {
-  checkNpmForNewer,
-  cleanupStaleStaging,
-  downloadFromNpm,
-  getTokscaleStatus,
-  resetToBundled
-} = require('../shared/tokscaleUpdater');
 const {
   appUpdateInstallSupport,
   classifyAppUpdateError,
@@ -344,6 +342,7 @@ const {
   createStatsPublicationBatcher,
   rendererStats
 } = require('./statsPublisher');
+const { withoutSessionTitleStats, withoutSessionTitles } = require('./sessionTitleDisplay');
 const { createSseBlockReader, parseSseBlock } = require('./sseEventReader');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
@@ -553,6 +552,8 @@ function defaultSettings() {
     // to a random secret generated in startEmbeddedHub() if env is empty.
     hubHostSecret: process.env.TOKEN_MONITOR_SECRET || '',
     secret: process.env.TOKEN_MONITOR_SECRET || '',
+    hubSyncSessionTitles: parseBoolean(process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES, false),
+    syncContentState: normalizeSyncContentState(null),
     windowBehavior,
     alwaysOnTop: windowBehavior === 'floating',
     keepAboveTaskbar: false,
@@ -580,6 +581,7 @@ function defaultSettings() {
     // `used` is what the Sessions view and this app's own readouts show, while
     // the clients' default footers tend to lead with what is left.
     sessionContextMetric: 'used',
+    sessionTitlesEnabled: true,
     periodMonthMode: 'month',
     themeColors: {},
     vendorColors: {},
@@ -599,7 +601,7 @@ function defaultSettings() {
     edgeDockOffset: null,
     edgeDockDisplayId: null,
     edgeDockItems: null,
-    lastViewState: { period: 'today', breakdown: 'tool' },
+    lastViewState: { period: 'today', breakdown: 'home' },
     discordRpcEnabled: false,
     deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
     icloudWriterId: '',
@@ -1991,6 +1993,7 @@ function normalizeLanguageSetting(value, fallback = 'auto') {
   if (lower === 'en' || lower.startsWith('en-')) return 'en';
   if (lower === 'zh-tw' || lower.startsWith('zh-hant') || /-(tw|hk|mo)\b/i.test(raw)) return 'zh-TW';
   if (lower === 'zh-cn' || lower.startsWith('zh-hans') || /-(cn|sg|my)\b/i.test(raw)) return 'zh-CN';
+  if (lower === 'pt' || lower.startsWith('pt-')) return 'pt-BR';
   return LANGUAGE_VALUES.has(raw) ? raw : fallback;
 }
 
@@ -2540,12 +2543,15 @@ function readSettings() {
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
+    merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
     merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
     merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
     merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
     merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
     merged.modelAliases = normalizeModelAliases(merged.modelAliases);
+    merged.syncContentState = normalizeSyncContentState(merged.syncContentState);
+    merged.hubSyncSessionTitles = parseBoolean(merged.hubSyncSessionTitles, false);
     merged.modelAliasGrouping = normalizeModelAliasGrouping(merged.modelAliasGrouping);
     merged.interfaceFontFamily = fontSettingsApi.normalizeFontFamily(merged.interfaceFontFamily);
     merged.displayFontFamily = fontSettingsApi.normalizeFontFamily(merged.displayFontFamily);
@@ -2648,6 +2654,16 @@ function seedInitialLimitProviders(summary) {
       deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
       pushSettingsToRenderer();
     }
+  });
+}
+
+// Runs on the presented stats rather than this device's record, so a Codex
+// account another device reports carries the switch over too.
+function migrateCodexAdditionalLimits(visibleStats) {
+  return applyCodexAdditionalLimitsMigration(visibleStats, {
+    settings,
+    saveSettings,
+    onPersisted: pushSettingsToRenderer
   });
 }
 
@@ -2931,9 +2947,9 @@ function electronPresentationStats(stats) {
   };
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
-  const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null]);
+  const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
   return presentationCache.get(stats, key, () => projectModelAliasStats(
-    projectLimitStatsForDisplay(stats, limitOptions),
+    projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(stats) : stats, limitOptions),
     aliases,
     { grouping }
   ));
@@ -2954,14 +2970,14 @@ function rendererAllTimeSessions(stats) {
   if (!stats) return null;
   const aliases = settings?.modelAliases;
   const grouping = settings?.modelAliasGrouping;
-  const key = JSON.stringify([aliases ?? null, grouping ?? null]);
+  const key = JSON.stringify([aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
   return allTimeSessionsCache.get(stats, key, () => {
     const complete = completeLocalSyncStats(stats);
     const hubSnapshot = snapshotLocalDevices.get(stats);
     const sessions = hubSnapshot
       ? mergedLocalAllTimeSessions(complete.periods, hubSnapshot.localDevice)
       : complete.periods?.allTime?.sessions || {};
-    return projectModelAliasSessions(stats, sessions, aliases, { grouping });
+    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sessions) : sessions, aliases, { grouping });
   });
 }
 
@@ -2981,8 +2997,6 @@ const providerTrayIcons = {};
 let registeredWindowToggleShortcut = '';
 let windowToggleShortcutRegistered = false;
 let defaultTrayIcon = null;
-let tokScaleNpmMetadata = null;
-let tokScaleUpdaterBusy = false;
 function getDefaultTrayIcon() {
   if (!defaultTrayIcon) defaultTrayIcon = buildTrayIcon();
   return defaultTrayIcon;
@@ -3205,16 +3219,16 @@ function drainPendingRuntimeActions(runtime) {
   drainPendingUsageClientRefreshes(runtime);
 }
 
-function effectiveHubConfig() {
-  if (settings?.hubMode === 'host') {
+function effectiveHubConfig(sourceSettings = settings) {
+  if (sourceSettings?.hubMode === 'host') {
     return {
-      url: `http://127.0.0.1:${normalizeHubPort(settings.hubHostPort)}`,
-      secret: settings.hubHostSecret || ''
+      url: `http://127.0.0.1:${normalizeHubPort(sourceSettings.hubHostPort)}`,
+      secret: sourceSettings.hubHostSecret || ''
     };
   }
-  if (settings?.hubMode === 'client') {
-    const url = String(settings.hubUrl || '').trim();
-    return { url: url || null, secret: settings.secret || '' };
+  if (sourceSettings?.hubMode === 'client') {
+    const url = String(sourceSettings.hubUrl || '').trim();
+    return { url: url || null, secret: sourceSettings.secret || '' };
   }
   return { url: null, secret: '' };
 }
@@ -3260,21 +3274,33 @@ async function getHubBuildStatus() {
 async function startEmbeddedHub() {
   if (embeddedHub) return embeddedHub;
   embeddedHubError = null;
-  if (!settings.hubHostSecret) {
-    settings.hubHostSecret = generateHubSecret();
-    saveSettings();
-  }
   const port = normalizeHubPort(settings.hubHostPort);
   try {
+    if (!settings.hubHostSecret) {
+      const previous = settings;
+      try {
+        const next = { ...settings, hubHostSecret: generateHubSecret() };
+        getSyncContentRuntime().beforeDestinationChange(syncContentContext(next));
+        next.syncContentState = normalizeSyncContentState(settings.syncContentState);
+        settings = next;
+        saveSettings({ throwOnError: true });
+      } catch (error) {
+        // Restore connection settings without undoing a preflight OFF/journal.
+        settings = { ...previous, syncContentState: normalizeSyncContentState(settings.syncContentState) };
+        throw error;
+      }
+      getSyncContentRuntime().invalidate();
+    }
     const hub = createHub({
       port,
       host: '0.0.0.0',
       secret: settings.hubHostSecret,
+      syncSessionTitles: settings.hubSyncSessionTitles === true,
       dataFile: hubDataFile(),
       logger: { error: (err) => console.log(`[hub] ${err?.message || err}`) }
     });
     await hub.start();
-    embeddedHub = { hub, port };
+    embeddedHub = { hub, port, secret: settings.hubHostSecret };
     console.log(`[hub] listening on 0.0.0.0:${port}`);
     sendHubPush({ type: 'listening', info: getHubInfo() });
     return embeddedHub;
@@ -3350,7 +3376,7 @@ async function deleteDeviceFromCurrentSync(deviceId) {
   if (!target) {
     throw Object.assign(new Error('device_not_found'), { code: 'device_not_found' });
   }
-  if (hubMode === 'icloud' && target.stale !== true) {
+  if (target.stale !== true) {
     throw Object.assign(new Error('device_not_stale'), { code: 'device_not_stale' });
   }
 
@@ -3360,6 +3386,8 @@ async function deleteDeviceFromCurrentSync(deviceId) {
 
 async function postToHub(summary) {
   const { url: hubUrl, secret } = effectiveHubConfig();
+  const uploadIdentity = getSyncContentRuntime().status().identity;
+  const uploadContext = syncContentContext();
   if (!hubUrl) throw new Error('hub not configured');
   const stale = settings.lastPostedDeviceId;
   if (stale && stale !== summary.deviceId) {
@@ -3367,7 +3395,17 @@ async function postToHub(summary) {
     catch (error) { console.log(`[sync] cleanup of old deviceId ${stale} failed: ${error.message}`); }
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/ingest`;
-  const { response } = await postSyncPayload(fetch, url, {
+  const runtime = getSyncContentRuntime();
+  const syncOptions = await runtime.prepareUpload();
+  if (syncOptions.identity !== uploadIdentity || syncOptions.signal.aborted
+    || syncOptions.identity !== getSyncContentRuntime().status().identity
+    || !sameDestination(uploadContext, syncContentContext())
+    || summary.deviceId !== syncContentContext().deviceId) throw new Error('hub_changed');
+  const fetchForUpload = (target, options) => fetch(target, { ...options, redirect: 'error',
+    signal: AbortSignal.any([syncOptions.signal, AbortSignal.timeout(15_000)]) });
+  const { response } = await postSyncPayload(fetchForUpload, url, {
+    syncSessionTitles: syncOptions.syncSessionTitles,
+    sessionTitleSyncGeneration: syncOptions.sessionTitleSyncGeneration,
     headers: {
       'content-type': 'application/json',
       [HUB_RESPONSE_HEADER]: HUB_RESPONSE_MINIMAL,
@@ -3382,6 +3420,85 @@ async function postToHub(summary) {
     saveSettings();
   }
   return response.json();
+}
+
+let syncContentRuntime = null;
+let applySyncSettingsPatch = null;
+
+function syncContentContext(sourceSettings = settings) {
+  const endpoint = effectiveHubConfig(sourceSettings);
+  return { ...endpoint, mode: sourceSettings?.hubMode, deviceId: sourceSettings?.deviceId || defaultDeviceId() };
+}
+
+function getSyncContentRuntime() {
+  if (syncContentRuntime) return syncContentRuntime;
+  const cleanupCredentials = createSyncContentCredentialQueue(ensureCredentialStore);
+  syncContentRuntime = createSyncContentRuntime({
+    resolveIdentity: cleanupCredentials.resolveIdentity,
+    loadCleanupContexts: cleanupCredentials.read,
+    saveCleanupContext: cleanupCredentials.save,
+    removeCleanupContext: cleanupCredentials.remove,
+    getContext: syncContentContext,
+    getState: () => settings?.syncContentState,
+    saveState: (next) => {
+      const previous = settings;
+      settings = { ...settings, syncContentState: next };
+      try {
+        // Sync policy changes never alter credentials. Persist OFF independently
+        // so a failed private journal write cannot block the preference journal.
+        writePrivateJsonAtomic(settingsPath, stripCredentialSettings(settings));
+        persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
+      } catch (error) { settings = previous; throw error; }
+    },
+    getLocalValue: (kind) => kind === 'modelAliases'
+      ? { modelAliases: settings.modelAliases, modelAliasGrouping: settings.modelAliasGrouping }
+      : settings.customModelPricing,
+    applyLocalValue: (kind, value) => {
+      if (!applySyncSettingsPatch) throw new Error('settings_not_ready');
+      return applySyncSettingsPatch(kind === 'modelAliases' ? value : { customModelPricing: value });
+    },
+    normalizeValue: normalizeSharedSyncValue,
+    request: async (context, pathname, method, body) => {
+      // The embedded Hub uses the same authenticated protocol in-process. Its
+      // own usage must keep working when outbound loopback traffic is blocked.
+      if (context.mode === 'host' && embeddedHub
+        && ((context.url === `http://127.0.0.1:${embeddedHub.port}` && context.secret === embeddedHub.secret)
+          // Every embedded host generation shares this app's hubDataFile. Old
+          // host journals may scrub that same store after port/secret rotation;
+          // they cannot read or admit a new generation through this exception.
+          || (method === 'PUT' && /^\/api\/sync\/titles\//.test(pathname) && body?.enabled === false))) {
+        const hub = embeddedHub.hub;
+        try {
+          if (pathname === '/api/sync/content') return { status: 200, body: hub.getSyncContent() };
+          const match = pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing)$/);
+          if (match) return { status: 200, body: { ok: true, ...(method === 'PUT'
+            ? hub.setSyncSettings(match[1], body) : hub.getSyncSettings(match[1])) } };
+          const titleMatch = pathname.match(/^\/api\/sync\/titles\/([^/]+)$/);
+          if (titleMatch && method === 'PUT') return { status: 200,
+            body: { ok: true, ...hub.setSyncTitlePolicy(decodeURIComponent(titleMatch[1]), body.enabled) } };
+          return { status: 404, body: null };
+        } catch (error) {
+          return { status: error.code === 'stale_write' ? 409 : error.code === 'forbidden' ? 403 : 400,
+            body: error.current || null };
+        }
+      }
+      const response = await fetch(`${context.url.replace(/\/$/, '')}${pathname}`, {
+        method, redirect: 'error',
+        headers: { 'content-type': 'application/json', ...(context.secret ? { authorization: `Bearer ${context.secret}` } : {}) },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        signal: AbortSignal.timeout(15_000)
+      });
+      let data;
+      try { data = await response.json(); } catch (_) { data = null; }
+      return { status: response.status, body: data };
+    },
+    onStatus: (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try { mainWindow.webContents.send('syncContent:push', status); } catch (_) {}
+      }
+    }
+  });
+  return syncContentRuntime;
 }
 
 // ---------------------------------------------------------------------------
@@ -4261,12 +4378,20 @@ function startHostCollector() {
       const visibleSummary = summary;
       lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
       if (!embeddedHub) return;
-      try {
+      const handle = embeddedHub;
+      const uploadIdentity = getSyncContentRuntime().status().identity;
+      const uploadContext = syncContentContext();
+      void (async () => {
+        const options = await getSyncContentRuntime().prepareUpload();
+        if (handle !== embeddedHub || options.identity !== uploadIdentity || options.signal.aborted
+          || options.identity !== getSyncContentRuntime().status().identity
+          || !sameDestination(uploadContext, syncContentContext())
+          || visibleSummary.deviceId !== syncContentContext().deviceId) return;
         const stale = settings.lastPostedDeviceId;
         if (stale && stale !== visibleSummary.deviceId) {
-          embeddedHub.hub.deleteDevice(stale);
+          handle.hub.deleteDevice(stale);
         }
-        const payload = syncPayload(visibleSummary);
+        const payload = syncPayload(visibleSummary, options);
         if (payload.allTimeProjectsOmitted === true) {
           console.log('[host-ingest] all-time project breakdown omitted to reduce the sync snapshot size');
         }
@@ -4275,9 +4400,9 @@ function startHostCollector() {
           settings.lastPostedDeviceId = visibleSummary.deviceId;
           saveSettings();
         }
-      } catch (error) {
+      })().catch((error) => {
         console.log(`[host-ingest] failed: ${error.message}`);
-      }
+      });
     }
   };
   const usageOptions = electronUsageConfig('host-collector');
@@ -4586,7 +4711,9 @@ function sendPush(payload, options = {}) {
   if (payload?.data?.stats) {
     injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    getSyncContentRuntime().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
+    migrateCodexAdditionalLimits(visibleStats);
     rendererPayload = {
       ...payload,
       data: { ...payload.data, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
@@ -5075,9 +5202,11 @@ function settingsForRenderer() {
   const rendererSettings = { ...settings };
   delete rendererSettings.icloudRetiredDeviceIds;
   delete rendererSettings.icloudWriterId;
+  delete rendererSettings.syncContentState;
   for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
   return {
     ...rendererSettings,
+    syncContentStatus: getSyncContentRuntime().status(),
     locale: trayMenuLocale(),
     ...redactedCredentials,
     // On a hub the shared list is the truth; settings.subscriptions is only the
@@ -5552,6 +5681,7 @@ function syncEdgeDock(rendererSettings) {
 function refreshLimitStatsPresentation() {
   if (!latestStats) return;
   const visibleStats = electronPresentationStats(latestStats);
+  migrateCodexAdditionalLimits(visibleStats);
   scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
   updateEdgeDockCells(visibleStats);
   updateTrayDisplay();
@@ -5881,6 +6011,7 @@ function exitTrayMode() {
 }
 
 function startMode() {
+  getSyncContentRuntime().invalidate();
   hubModeGeneration += 1;
   advanceMacWidgetProducerAndSourceEpoch();
   clearLatestHubStatsCache();
@@ -5910,14 +6041,15 @@ function startMode() {
         return;
       }
       if (!handle) {
-        // Bind failed (e.g. EADDRINUSE). The error is already surfaced via
-        // hub:push; fall back to the local collector so the widget still
-        // shows data while the user fixes the port.
+        // Hub startup or secret persistence failed. The error is already
+        // surfaced via hub:push; keep local collection available while the
+        // user resolves the startup failure.
         startLocalCollector();
         return;
       }
       startHostStats();
       startHostCollector();
+      void getSyncContentRuntime().refresh();
       reconcileSharedSubscriptions();
       return;
     }
@@ -5930,6 +6062,7 @@ function startMode() {
     if (effectiveHubConfig().url) {
       startStatsStream({ resetSnapshot: true });
       startSyncCollector();
+      void getSyncContentRuntime().refresh();
       reconcileSharedSubscriptions();
     } else {
       startLocalCollector();
@@ -6224,57 +6357,10 @@ function regenerateTokscalePricing() {
 async function refreshAfterPricingChange() {
   try {
     if (ownsUsageRuntime()) {
-      await deviceRuntimeHandle.tick('manual', {});
+      await deviceRuntimeHandle.tick('manual', { forceHistory: true });
     }
   } catch (error) {
     console.warn(`[pricing] refresh after pricing change failed: ${error.message}`);
-  }
-}
-
-function stripTokscaleMetadata(result) {
-  if (!result || typeof result !== 'object') return result;
-  const { metadata: _metadata, ...publicResult } = result;
-  return publicResult;
-}
-
-function sendTokscalePush(payload) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  try { mainWindow.webContents.send('tokscale:push', payload); } catch (_) {}
-}
-
-async function checkTokscaleNpm({ silent = false } = {}) {
-  try {
-    const result = await checkNpmForNewer(app.getVersion());
-    if (result.metadata) tokScaleNpmMetadata = result.metadata;
-    const publicResult = stripTokscaleMetadata(result);
-    sendTokscalePush({ type: 'check', ...publicResult });
-    return publicResult;
-  } catch (error) {
-    if (silent) {
-      console.log(`[tokscale] npm check failed: ${error.message}`);
-      return { supported: true, error: null, silent: true };
-    }
-    return { supported: true, error: error.message };
-  }
-}
-
-async function downloadTokscaleFromNpm() {
-  if (tokScaleUpdaterBusy) return { supported: true, busy: true };
-  tokScaleUpdaterBusy = true;
-  try {
-    if (!tokScaleNpmMetadata) {
-      const checked = await checkNpmForNewer(app.getVersion());
-      if (!checked.supported) return { supported: false };
-      tokScaleNpmMetadata = checked.metadata;
-    }
-    const result = await downloadFromNpm(tokScaleNpmMetadata);
-    const publicResult = stripTokscaleMetadata(result);
-    sendTokscalePush({ type: 'download', ...publicResult });
-    return publicResult;
-  } catch (error) {
-    return { supported: true, error: error.message };
-  } finally {
-    tokScaleUpdaterBusy = false;
   }
 }
 
@@ -7136,7 +7222,10 @@ app.whenReady().then(() => {
   createWindow();
   syncLoginItemSettingFromOs();
   configureWindowToggleShortcut();
-  cleanupStaleStaging().catch((error) => console.log(`[tokscale] staging cleanup failed: ${error.message}`));
+  // The retired in-app npm updater kept upstream tokscale builds here; the
+  // collector no longer reads them, so drop the leftovers.
+  fs.promises.rm(path.join(sharedDataDir(), 'tokscale'), { recursive: true, force: true })
+    .catch((error) => console.log(`[tokscale] removing retired npm downloads failed: ${error.message}`));
   ensureTray();
   if (settings.trayMode) enterTrayMode();
   regenerateTokscalePricing();
@@ -7156,7 +7245,6 @@ app.whenReady().then(() => {
   refreshExchangeRates();                // non-blocking: only fetches when stale
   rateRefreshTimer = setInterval(() => { refreshExchangeRates(); }, 6 * 60 * 60 * 1000);
   syncEdgeDock();
-  setTimeout(() => { checkTokscaleNpm({ silent: true }); }, 2000);
   ipcMain.handle('settings:get', () => settingsForRenderer());
   ipcMain.handle('appearance:getBackgroundImage', () => getBackgroundImage(app.getPath('userData')));
   ipcMain.handle('appearance:chooseBackgroundImage', async () => {
@@ -7235,6 +7323,11 @@ app.whenReady().then(() => {
       return { ok: false, error: error.message };
     }
   });
+  applySyncSettingsPatch = applySettingsPatch;
+  ipcMain.handle('syncContent:status', (_event, refresh = true) => refresh ? getSyncContentRuntime().refresh() : getSyncContentRuntime().status());
+  ipcMain.handle('syncContent:preview', (_event, kind) => getSyncContentRuntime().preview(kind));
+  ipcMain.handle('syncContent:configure', (_event, options) => getSyncContentRuntime().configure(options));
+  ipcMain.handle('syncContent:retryCleanup', () => getSyncContentRuntime().retryCleanup());
   const credentialCommands = createCredentialCommands({
     getSettings: () => settings,
     applySettingsPatch,
@@ -7244,6 +7337,12 @@ app.whenReady().then(() => {
   // pausing the session archive must not be reported done while the worker can
   // still capture under the old value.
   ipcMain.handle('settings:update', async (_event, patch) => {
+    const contentRuntime = getSyncContentRuntime();
+    const sharedEdit = patch.modelAliases !== undefined || patch.modelAliasGrouping !== undefined
+      || patch.customModelPricing !== undefined;
+    const settingsIdentity = contentRuntime.status().identity;
+    await contentRuntime.publishPatch(patch, patch?.syncContentBase);
+    if (sharedEdit && settingsIdentity !== contentRuntime.status().identity) throw new Error('hub_changed');
     const result = applySettingsPatch(patch);
     await latestUsageHost?.transformSettingsApplied?.();
     return result;
@@ -7251,6 +7350,7 @@ app.whenReady().then(() => {
   // The settings:update body, named so a credential save persists through the
   // exact same normalization, runtime reconfigure and limit invalidation.
   function applySettingsPatch(patch) {
+    const contentRuntime = getSyncContentRuntime();
     credentialCommands.noteSettingsPatch(patch);
     const previousSettingsState = settings;
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
@@ -7278,6 +7378,9 @@ app.whenReady().then(() => {
     delete normalizedPatch.workbuddyEndpoint;
     delete normalizedPatch.workbuddyLocalAppEnabled;
     delete normalizedPatch.customModelPricing;
+    delete normalizedPatch.syncContentState;
+    delete normalizedPatch.syncContentStatus;
+    delete normalizedPatch.syncContentBase;
     // Account fields declared persist:'never' (managed account lists, profile
     // maps, workbuddy session fields) are stripped by the registry walk below.
     normalizeAccountPatch(patch, normalizedPatch);
@@ -7317,6 +7420,8 @@ app.whenReady().then(() => {
         : normalizeHubMode(settings.hubMode, 'local', process.platform),
       hubHostPort: patch.hubHostPort !== undefined ? normalizeHubPort(patch.hubHostPort, settings.hubHostPort) : settings.hubHostPort,
       hubHostSecret: patch.hubHostSecret !== undefined ? String(patch.hubHostSecret) : settings.hubHostSecret,
+      hubSyncSessionTitles: parseBoolean(patch.hubSyncSessionTitles ?? settings.hubSyncSessionTitles, false),
+      syncContentState: normalizeSyncContentState(settings.syncContentState),
       deviceId: (patch.deviceId !== undefined ? String(patch.deviceId).trim() : settings.deviceId) || defaultDeviceId(),
       clients: patch.clients !== undefined ? clientsCsvForSetting(patch.clients, '') : clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS),
       customScanPaths: normalizeCustomScanPaths(patch.customScanPaths ?? settings.customScanPaths),
@@ -7392,6 +7497,7 @@ app.whenReady().then(() => {
       homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
       periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
       modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
+      sessionTitlesEnabled: parseBoolean(patch.sessionTitlesEnabled ?? settings.sessionTitlesEnabled, true),
       sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
       historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
@@ -7442,12 +7548,24 @@ app.whenReady().then(() => {
     settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
     if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
     delete settings.edgeDrawerEnabled;
+    const nextSettingsState = settings;
+    settings = previousSettingsState;
     try {
+      // Journal the previous title context and OFF while the old connection is
+      // still active. No replacement credentials/device may commit before this.
+      contentRuntime.beforeDestinationChange(syncContentContext(nextSettingsState));
+      nextSettingsState.syncContentState = normalizeSyncContentState(settings.syncContentState);
+      settings = nextSettingsState;
       saveSettings({ throwOnError: true });
     } catch (error) {
-      settings = previousSettingsState;
+      // Keep any OFF/cleanup journal already committed by the preflight.
+      settings = { ...previousSettingsState,
+        syncContentState: normalizeSyncContentState(persistedSettingsSnapshot?.syncContentState || settings.syncContentState) };
       throw error;
     }
+    contentRuntime.invalidate();
+    const receiverPermissionChanged = settings.hubSyncSessionTitles !== previousSettingsState.hubSyncSessionTitles;
+    if (receiverPermissionChanged) contentRuntime.receiverPermissionChanged(settings.hubSyncSessionTitles);
     // A worker-hosted transform holds its own copy of the settings it reads.
     // Update it now rather than when the usage reconfigure settles: pausing the
     // session archive must stop captures from the next summary on.
@@ -7494,7 +7612,7 @@ app.whenReady().then(() => {
       refreshMacWidgetHistorySource();
     }
     const limitInvalidations = settingsLimitInvalidationPlan(runtimeChange);
-    if (runtimeChange.modeStructural) {
+    if (runtimeChange.modeStructural || (receiverPermissionChanged && settings.hubMode === 'host')) {
       for (const { scope, reason, options } of limitInvalidations) {
         rememberPendingLimitInvalidation(scope, reason, options);
       }
@@ -7562,6 +7680,9 @@ app.whenReady().then(() => {
       }
     }
     pushSettingsToRenderer();
+    if (settings.sessionTitlesEnabled !== previousSettingsState.sessionTitlesEnabled) {
+      refreshLimitStatsPresentation();
+    }
     return settingsForRenderer();
   }
   ipcMain.handle('appearance:preview', (event, patch) => {
@@ -7734,9 +7855,7 @@ app.whenReady().then(() => {
   ipcMain.handle('hub:getInfo', () => getHubInfo());
   ipcMain.handle('hub:getBuildStatus', () => getHubBuildStatus());
   ipcMain.handle('hub:regenerateSecret', () => {
-    settings.hubHostSecret = generateHubSecret();
-    saveSettings({ throwOnError: true });
-    if (settings.hubMode === 'host') startMode();
+    applySettingsPatch({ hubHostSecret: generateHubSecret() });
     return getHubInfo();
   });
   ipcMain.handle('appearance:getNativeMaterial', (event) => {
@@ -7847,14 +7966,6 @@ app.whenReady().then(() => {
   ipcMain.handle('mimo:setAccountEnabled', (_event, id, enabled) => setMimoManagedAccountEnabled(id, enabled));
   ipcMain.handle('mimo:removeAccount', async (_event, id) => removeMimoManagedAccount(id));
   ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
-  ipcMain.handle('tokscale:checkNpm', () => checkTokscaleNpm());
-  ipcMain.handle('tokscale:downloadFromNpm', () => downloadTokscaleFromNpm());
-  ipcMain.handle('tokscale:resetToBundled', async () => {
-    tokScaleNpmMetadata = null;
-    const status = await resetToBundled();
-    sendTokscalePush({ type: 'reset', status });
-    return status;
-  });
   ipcMain.handle('appUpdate:getState', () => deriveAppUpdateState());
   ipcMain.handle('appUpdate:checkNow', () => runAppUpdateCheck({ force: true }));
   ipcMain.handle('appUpdate:download', () => downloadAndPrepareAppUpdate());
@@ -8792,14 +8903,21 @@ app.whenReady().then(() => {
   });
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
-  // The window this builds is about to be on screen, so the policy is resolved
-  // for a visible window exactly as focusExistingWindow() does. Without it this
-  // was the one path reaching applyMacSpaceBehavior() with a process type
-  // nothing had decided, which skipTransformProcessType now preserves.
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().some((win) => !edgeDockController?.owns(win))) return;
-    applyMacActivationPolicy({ mainWindowVisible: true });
-    createWindow();
+    const action = activateWindowAction({
+      mainWindow,
+      windows: BrowserWindow.getAllWindows(),
+      isDockOwned: (win) => Boolean(edgeDockController?.owns(win))
+    });
+    if (action === 'focusWindow') focusExistingWindow();
+    else if (action === 'createWindow') {
+      // The window this builds is about to be on screen, so the policy is resolved
+      // for a visible window exactly as focusExistingWindow() does. Without it this
+      // was the one path reaching applyMacSpaceBehavior() with a process type
+      // nothing had decided, which skipTransformProcessType now preserves.
+      applyMacActivationPolicy({ mainWindowVisible: true });
+      createWindow();
+    }
   });
   maybeRunBackgroundUpdateCheck();
   startAppUpdateBackgroundChecks();

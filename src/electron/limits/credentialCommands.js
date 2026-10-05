@@ -40,11 +40,12 @@ function invalid(status, errorCode = '') {
 
 // The draft as it would be stored. Only fields the caller sent are part of it,
 // so one of Kimi's two credential lanes can be saved without blanking the
-// other; a select always travels with its form, so it is always sent.
+// other. Independently saved settings are excluded so a rendered default
+// cannot become a stored override just because a credential is submitted.
 function draftFor(entry, values) {
   const candidate = {};
   for (const field of formFields(entry)) {
-    if (!Object.hasOwn(values, field.key)) continue;
+    if (field.submitWithCredential === false || !Object.hasOwn(values, field.key)) continue;
     const raw = String(values[field.key] ?? '');
     try {
       candidate[field.key] = normalizeAccountField(field.key, raw);

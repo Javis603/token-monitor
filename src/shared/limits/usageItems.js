@@ -123,7 +123,10 @@
     if (USAGE_ITEM_ID_SET.has(itemId)) return USAGE_ITEM_LABELS[itemId];
     const window = parseWindowKey(itemId);
     if (!window) return '';
-    return windowLabels?.limitWindowLabel(normalizedId(providerId), window) || String(window.kind);
+    const label = windowLabels?.limitWindowLabel(normalizedId(providerId), window) || String(window.kind);
+    // An additional pool's key keeps its backend id but not its name, and its
+    // period alone would read like the provider's main window.
+    return window.additional && window.limitId ? `${window.limitId} · ${label}` : label;
   }
 
   function hiddenItemList(raw) {
@@ -167,11 +170,8 @@
   }
 
   // For surfaces that list a provider's windows rather than its card rows (the
-  // Home module, the dock's pinned-window picker). Codex's additional pools are
-  // governed by their own switch and never appear on the checklist, so no
-  // stored id can hide them.
+  // Home module, the dock's pinned-window picker).
   function isLimitWindowHidden(value, providerId, window) {
-    if (normalizedId(providerId) === 'codex' && window?.additional === true) return false;
     const hidden = hiddenUsageItemSet(value, providerId);
     return hidden.size > 0 && hidden.has(limitUsageItemId(window, providerId));
   }

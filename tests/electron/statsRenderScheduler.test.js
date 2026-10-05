@@ -165,7 +165,7 @@ test('renderer wires visibility scheduling without deferring tray icon updates',
   assert.match(app, /onWindowVisibilityPush\?\.\(\(visible\) => \{/);
   assert.match(
     statsPush,
-    /state\.stats = allTimeSessions\.attach\(payload\.data\.stats\);[\s\S]*statsRenderScheduler\.request\(\);[\s\S]*maybeUpdateBarsIcon\(\);/
+    /state\.stats = sessionStatsForDisplay\(allTimeSessions\.attach\(payload\.data\.stats\)\);[\s\S]*statsRenderScheduler\.request\(\);[\s\S]*maybeUpdateBarsIcon\(\);/
   );
 });
 
@@ -450,7 +450,7 @@ test('hidden event sources defer DOM work and visible surfaces catch up', () => 
   assert.match(settingsPush, /statsRenderScheduler\.request\(\)/);
   assert.match(hubPush, /if \(settingsVisible\) renderHubStatus\(\)/);
   assert.match(hubPush, /const settingsVisible = isSettingsSurfaceVisible\(\)[\s\S]*settingsVisible && els\.hubSecretInput/);
-  assert.doesNotMatch(statsPush, /\b(?:setLiveDot|setStatus|renderSyncClientStatus)\(/);
+  assert.doesNotMatch(statsPush, /\b(?:setLiveDot|setStatus|renderSyncPanel)\(/);
   assert.match(statsPush, /if \(isRendererWindowHidden\(\)\) statsRenderScheduler\.request\(\);[\s\S]*else renderConnectionStatus\(\);/);
   assert.match(statsRender, /renderConnectionStatus\(surface\)/);
   assert.match(bubbleState, /if \(isSettingsPanelOpen\(\)\) syncSettingsForm\(\);[\s\S]*renderStatsUpdate\(\)/);

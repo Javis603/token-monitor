@@ -84,6 +84,6 @@ test('source markers declare each WSL path once and preserve discovery order', (
     '.local/share/devin/cli/sessions.db', 'AppData/Roaming/devin/cli/sessions.db',
     '.config/Devin/User/acp-events', '.config/devin/User/acp-events',
     'AppData/Roaming/Devin/User/acp-events', 'Library/Application Support/Devin/User/acp-events',
-    '.fx/sessions'
+    '.fx/sessions', '.minimax/v2/sessions', '.mavis/v2/sessions'
   ]);
 });

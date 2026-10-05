@@ -464,6 +464,8 @@
   // `{full: 'text'}` renders one full-width line that wraps in place — a long
   // sentence in a nowrap cell would push the popover past the window edge —
   // and `{separated: true}` draws a divider above it for a second block.
+  // `{caption: true}` marks secondary text; `{heading: true}` marks a section
+  // title whose emphasis is styled by the caller's wrapper.
   // `ariaLabel` overrides the spoken label for callers whose cells don't read
   // as `<name>: <value>` on their own.
   function limitDetailInfoNode(entries, extraClass = '', ariaLabel = '') {
@@ -503,6 +505,7 @@
         full.className = [
           'limit-detail-tooltip-full',
           entry?.caption === true ? 'is-caption' : '',
+          entry?.heading === true ? 'is-heading' : '',
           entry?.separated === true ? 'is-separated' : ''
         ].filter(Boolean).join(' ');
         full.textContent = String(entry?.full ?? '');
@@ -523,21 +526,35 @@
 
   // A gauge or plan label can be the trigger itself; no extra info icon needed.
   function setDetailTooltip(wrap, entries) {
-    wrap.removeAttribute('title');
     let tooltip = wrap.querySelector('.limit-detail-tooltip');
     if (!entries?.length) {
       tooltip?.hidePopover?.();
       tooltip?.replaceChildren();
       wrap.classList.remove('limit-detail-tooltip-wrap');
       wrap.removeAttribute('tabindex');
+      wrap.removeAttribute('aria-label');
+      wrap.style.removeProperty('-webkit-app-region');
       return;
     }
+    // The popover replaces whatever native tooltip the element had; do this on
+    // attach only — on detach the caller may have already restored `title` for
+    // its own fallback (the marquee's reduced-motion tooltip, say).
+    wrap.removeAttribute('title');
     wrap.classList.add('limit-detail-tooltip-wrap');
     wrap.style.setProperty('-webkit-app-region', 'no-drag');
     wrap.setAttribute('aria-label', entries.map((entry) => Array.isArray(entry) ? entry.join(': ') : entry.full).join(', '));
     wrap.tabIndex = 0;
-    const next = detailTooltipNode(entries);
+    // Widen to the triple-column layout when an entry carries a middle cell
+    // (e.g. model name · tokens · share) the same way limitDetailInfoNode does.
+    const columns = entries.reduce(
+      (widest, entry) => Math.max(widest, Array.isArray(entry) ? entry.length : 0),
+      0
+    );
+    const next = detailTooltipNode(entries, columns);
     if (tooltip) {
+      // Sync only the layout class: is-below is positional state the tooltip
+      // manages itself, and overwriting it mid-hover flips an open popover.
+      tooltip.classList.toggle('limit-detail-tooltip-triple', next.classList.contains('limit-detail-tooltip-triple'));
       tooltip.replaceChildren(...next.children);
     } else {
       tooltip = next;
@@ -882,6 +899,9 @@
       const session = codexCanonicalWindow(provider, 'session');
       const weekly = codexCanonicalWindow(provider, 'weekly');
       const monthly = codexCanonicalWindow(provider, 'billing');
+      // Each additional pool is a checklist item of its own. An install still
+      // carrying the retired `showCodexAdditionalLimits: false` hides them all
+      // until main carries the switch over (codexAdditionalLimitsMigration.js).
       const additionalWindows = settings()?.showCodexAdditionalLimits === false
         ? []
         : (provider.windows || []).filter((window) => window?.additional === true);
@@ -901,14 +921,10 @@
         windows.append(monthlyNode);
       }
       for (const additional of additionalWindows) {
-        const additionalNode = limitWindowNode(
-          codexAdditionalWindowLabel(additional, additionalWindows),
-          { ...additional, label: '' },
-          color,
-          0.78
-        );
-        // Additional pools answer to showCodexAdditionalLimits, not the checklist.
-        tagUsageItem(additionalNode, '');
+        const additionalLabel = codexAdditionalWindowLabel(additional, additionalWindows);
+        const additionalNode = limitWindowNode(additionalLabel, { ...additional, label: '' }, color, 0.78);
+        // Drawn from a relabelled copy, so the row is named by the pool itself.
+        tagUsageItem(additionalNode, usageItems.limitUsageItemId(additional), additionalLabel);
         additionalNode.classList.add('limit-window-wide');
         windows.append(additionalNode);
       }
@@ -1857,45 +1873,47 @@
   function codexResetForecastTooltip(forecast) {
     const entries = [];
     const disclaimer = t('limits.codexResetForecast.disclaimer');
-    const resetType = codexResetForecastType(
-      forecast?.status === 'scheduled' ? forecast?.scheduledResetType : forecast?.latestResetType
-    );
-    if (resetType) {
-      entries.push([t('limits.codexResetForecast.resetType'), resetType]);
+    const isScheduled = forecast?.status === 'scheduled';
+    const isActiveForecast = forecast?.status === 'active' && !codexResetForecastExpired(forecast);
+    if (isScheduled) {
+      const resetType = codexResetForecastType(forecast.scheduledResetType);
+      entries.push({
+        full: [t('limits.codexResetForecast.scheduled'), resetType].filter(Boolean).join(' · '),
+        heading: true
+      });
+      const scheduledFor = codexResetForecastDate(forecast.scheduledFor);
+      const scheduledIn = codexResetForecastTimeUntil(forecast.scheduledFor);
+      if (scheduledFor) {
+        entries.push({ full: [scheduledFor, scheduledIn].filter(Boolean).join(' · ') });
+      }
+    } else if (isActiveForecast) {
+      entries.push({ full: t('limits.codexResetForecast.signal'), heading: true });
+      const expiresAt = codexResetForecastDate(forecast.expiresAt);
+      const expiresIn = codexResetForecastTimeUntil(forecast.expiresAt);
+      if (expiresAt) {
+        entries.push({
+          full: `${t('limits.codexResetForecast.expiresLabel')} ${[expiresAt, expiresIn].filter(Boolean).join(' · ')}`
+        });
+      }
     }
-    const scheduledFor = codexResetForecastDate(forecast?.scheduledFor);
-    const scheduledIn = codexResetForecastTimeUntil(forecast?.scheduledFor);
-    if (scheduledFor) {
-      entries.push([
-        t('limits.codexResetForecast.scheduledFor'),
-        [scheduledFor, scheduledIn].filter(Boolean).join(' · ')
-      ]);
+    if (isScheduled || isActiveForecast) {
+      const sourceObservedAt = isScheduled ? forecast.scheduledAnnouncedAt : forecast.observedAt;
+      const source = [
+        codexResetForecastSourceAuthor(forecast.sourceAuthor),
+        codexResetForecastAge(sourceObservedAt)
+      ].filter(Boolean).join(' · ');
+      if (source) entries.push({ full: source, caption: true });
     }
     const latestReset = codexResetForecastDate(forecast?.latestResetAt);
-    if (latestReset) {
-      const age = codexResetForecastAge(forecast.latestResetAt);
-      entries.push([t('limits.codexResetForecast.lastReset'), [latestReset, age].filter(Boolean).join(' · ')]);
-    }
-    const sourceObservedAt = forecast?.status === 'scheduled'
-      ? forecast?.scheduledAnnouncedAt
-      : forecast?.observedAt;
-    const source = [
-      codexResetForecastSourceAuthor(forecast?.sourceAuthor),
-      codexResetForecastAge(sourceObservedAt)
-    ].filter(Boolean).join(' · ');
-    if (source) {
-      const sourceLabel = forecast?.status === 'scheduled'
-        ? 'limits.codexResetForecast.sourceAnnouncement'
-        : 'limits.codexResetForecast.sourceSignal';
-      entries.push([t(sourceLabel), source]);
-    }
-    const expiresAt = codexResetForecastDate(forecast?.expiresAt);
-    const expiresIn = codexResetForecastTimeUntil(forecast?.expiresAt);
-    if (expiresAt) {
-      entries.push([
-        t('limits.codexResetForecast.expiresLabel'),
-        [expiresAt, expiresIn].filter(Boolean).join(' · ')
-      ]);
+    const latestResetType = codexResetForecastType(forecast?.latestResetType);
+    if (latestReset || latestResetType) {
+      const age = latestReset ? codexResetForecastAge(forecast.latestResetAt) : '';
+      entries.push({
+        full: [t('limits.codexResetForecast.lastReset'), age].filter(Boolean).join(' · '),
+        heading: true,
+        separated: entries.length > 0
+      });
+      entries.push({ full: [latestResetType, latestReset].filter(Boolean).join(' · ') });
     }
     if (forecast?.error && forecast.errorKind !== 'invalid-response') {
       entries.push([
@@ -1911,7 +1929,7 @@
     const info = limitDetailInfoNode(
       entries,
       'codex-reset-forecast-info-wrap',
-      [...entries.map(([label, value]) => `${label}: ${value}`), disclaimer].join(', ')
+      [...entries.map((entry) => Array.isArray(entry) ? `${entry[0]}: ${entry[1]}` : entry.full), disclaimer].join(', ')
     );
     const tooltip = info.querySelector('.limit-detail-tooltip');
     if (tooltip) {

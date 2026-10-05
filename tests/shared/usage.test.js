@@ -1037,6 +1037,15 @@ test('fx rows keep Tokscale reasoning inside the output bucket', () => {
   assert.equal(session.reasoningTokens, 60);
 });
 
+test('MiniMax Code rows keep the tracked id apart from the MiniMax vendor', () => {
+  assert.equal(normalizeClientName('mcode'), 'mcode');
+  assert.equal(normalizeClientName('MiniMax Code'), 'mcode');
+  assert.equal(normalizeClientName('minimax-code'), 'mcode');
+  assert.equal(normalizeClientName('minimax'), 'minimax');
+  const period = extractUsageFromTokscale([{ client: 'mcode', model: 'MiniMax-M2.5', totalTokens: 12 }]);
+  assert.equal(period.clients.mcode, 12);
+});
+
 test('extractUsageFromTokscale keeps model usage grouped by client', () => {
   const period = extractUsageFromTokscale([
     { client: 'Hermes', model: 'claude-3-5-sonnet', totalTokens: 100, costUsd: 1.25 },

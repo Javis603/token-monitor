@@ -53,6 +53,12 @@ function exitChild(code, stderr = '') {
   return child;
 }
 
+// The capability probe also runs one empty scan of the fork-only ids, which
+// never appear in --help (see forkOnlyClientsAccepted in collector.js).
+function isForkOnlyProbe(args) {
+  return args.includes('--home') && args[args.indexOf('--client') + 1] === 'proma,qodercn';
+}
+
 function helpChild(possibleValues) {
   const child = new EventEmitter();
   child.stdout = new EventEmitter();
@@ -98,6 +104,7 @@ test('an unknown-client rejection probes once, retries, then filters proactively
   const originalSpawn = childProcess.spawn;
   const calls = [];
   let helpProbes = 0;
+  let forkOnlyProbes = 0;
 
   childProcess.spawn = (_bin, args) => {
     calls.push(args);
@@ -105,6 +112,7 @@ test('an unknown-client rejection probes once, retries, then filters proactively
       helpProbes += 1;
       return helpChild(['claude']);
     }
+    if (isForkOnlyProbe(args)) forkOnlyProbes += 1;
     const clientIndex = args.indexOf('--client');
     const requested = args[clientIndex + 1];
     if (requested.split(',').includes('dsh')) {
@@ -123,12 +131,13 @@ test('an unknown-client rejection probes once, retries, then filters proactively
       agentVersion: 'test',
       limitsEnabled: false
     });
-    // today: fail(1) + help(2) + retry-success(3); month/allTime: filtered up
-    // front, one spawn each — 5 total, one probe.
+    // today: fail(1) + help(2) + fork-only scan(3) + retry-success(4);
+    // month/allTime: filtered up front, one spawn each — 6 total, one probe.
     assert.equal(helpProbes, 1, 'the binary is probed exactly once for its whole identity');
-    assert.equal(calls.length, 5);
+    assert.equal(forkOnlyProbes, 1, 'fork-only acceptance is probed once alongside --help');
+    assert.equal(calls.length, 6);
     const clientArgsList = calls
-      .filter((args) => !args.includes('--help'))
+      .filter((args) => !args.includes('--help') && !isForkOnlyProbe(args))
       .map((args) => args[args.indexOf('--client') + 1]);
     assert.equal(clientArgsList.filter((csv) => csv.includes('dsh')).length, 1, 'only the first scan ever asks for the unsupported id');
     // The first scan's own retry plus the two later scans (filtered proactively
@@ -304,7 +313,7 @@ test('an old binary that rejects both the join and a client retries once per rej
     });
 
     const groupings = calls
-      .filter((args) => !args.includes('--help'))
+      .filter((args) => !args.includes('--help') && !isForkOnlyProbe(args))
       .map((args) => args[args.indexOf('--group-by') + 1]);
     // today: joined(rejected) → plain(unknown client) → plain(retry, ok);
     // month/allTime: both rejections already known, one plain scan each.
@@ -319,4 +328,52 @@ test('an old binary that rejects both the join and a client retries once per rej
     childProcess.spawn = originalSpawn;
     delete require.cache[collectorPath];
   }
+});
+
+async function collectWithFallback(clients, acceptsForkOnly) {
+  const childProcess = require('node:child_process');
+  const originalSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (_bin, args) => {
+    if (args.includes('--help')) return helpChild(['claude', 'dsh']);
+    const requested = args[args.indexOf('--client') + 1].split(',');
+    if (!isForkOnlyProbe(args)) calls.push(requested.join(','));
+    if (requested.includes('amp')) return exitChild(2, "error: invalid value 'amp' for --client");
+    if (!acceptsForkOnly && requested.some((id) => id === 'proma' || id === 'qodercn')) {
+      return exitChild(2, "error: invalid value 'proma' for --client");
+    }
+    return jsonChild({ entries: [] });
+  };
+  try {
+    const { collectUsageOnce } = freshCollector();
+    await collectUsageOnce({
+      clients,
+      allTimeSince: '2024-01-01',
+      commandTimeoutMs: 1000,
+      deviceId: 'test-device',
+      agentVersion: 'test',
+      limitsEnabled: false
+    });
+    return calls;
+  } finally {
+    childProcess.spawn = originalSpawn;
+    delete require.cache[collectorPath];
+  }
+}
+
+test('fork-only clients survive a capability fallback on the pinned fork', async () => {
+  // They are absent from --help by design, so filtering by --help alone would
+  // drop them for the binary's whole lifetime once any other id is rejected.
+  const calls = await collectWithFallback('claude,amp,proma,qodercn', true);
+  assert.deepEqual(calls, [
+    'claude,amp,proma,qodercn',
+    'claude,proma,qodercn',
+    'claude,proma,qodercn',
+    'claude,proma,qodercn'
+  ]);
+});
+
+test('an upstream binary that rejects fork-only ids drops them like any unsupported id', async () => {
+  const calls = await collectWithFallback('claude,amp,proma,qodercn', false);
+  assert.deepEqual(calls, ['claude,amp,proma,qodercn', 'claude', 'claude', 'claude']);
 });

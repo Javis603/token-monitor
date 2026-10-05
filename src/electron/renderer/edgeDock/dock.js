@@ -41,6 +41,9 @@ const { CLIENT_LABELS } = window.TokenMonitorClientCatalog;
 // at paint time rather than frozen at push time.
 const sessionLive = window.TokenMonitorSessionLive;
 const sessionRowsApi = window.TokenMonitorSessionRows;
+const overflowText = window.TokenMonitorOverflowText.create({
+  document, window, prefersReducedMotion
+});
 const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
   spin: 'edge-dock-session-spin',
   check: 'edge-dock-session-check',
@@ -1180,7 +1183,10 @@ function sessionsContainer(sessions, options = {}) {
     // made the row read as a different kind of row, and the colour carried no
     // more information than the dot does.
     nameNode.append(stateMark(session, key, state));
-    nameNode.append(document.createTextNode(name));
+    const title = el('span', 'edge-dock-session-title', name);
+    title.dataset.overflowKey = key;
+    overflowText.bind(title);
+    nameNode.append(title);
     // The glyph is decorative and its `title` only reaches pointer users, so the
     // translated state is rendered as real text for assistive technology. It
     // cannot go on the row itself: a plain `div` has the generic role and
@@ -1195,8 +1201,22 @@ function sessionsContainer(sessions, options = {}) {
     // The model label is composed by the Sessions list's own helper, so a
     // multi-model session reads "N models" here exactly as it does there —
     // projecting only the top model showed a different name than the list's
-    // for the same session.
-    meta.append(document.createTextNode([sessionRowsApi.sessionModelLabel(session), relativeAgo(session.lastUsedAt || session.startedAt)].filter(Boolean).join(' · ')));
+    // for the same session. The label is the tooltip trigger there too: one
+    // row per model with its tokens and share.
+    const modelLabel = sessionRowsApi.sessionModelLabel(session);
+    const age = relativeAgo(session.lastUsedAt || session.startedAt);
+    const modelEntries = sessionRowsApi.sessionModelTooltipEntries(session, {
+      unattributedLabel: t('dashboard.tooltip.unclassified'),
+      formatTokens: formatBreakdownTokens
+    });
+    if (modelLabel && modelEntries.length > 1) {
+      const models = el('span', 'session-models', modelLabel);
+      limitWindowsView.setDetailTooltip(models, modelEntries);
+      meta.append(models);
+      if (age) meta.append(document.createTextNode(` · ${age}`));
+    } else {
+      meta.append(document.createTextNode([modelLabel, age].filter(Boolean).join(' · ')));
+    }
     const context = contextNode(session);
     const cache = context ? null : sessionLive.sessionPromptCacheForRow(session);
     if (cache) {
@@ -1296,6 +1316,29 @@ function appendLiveRate(card, head, cell) {
   if (cell.deviceCount > 1) secondary.push(t('edgeDock.rate.devices', { count: cell.deviceCount }));
   if (secondary.length) headline.append(el('span', '', secondary.join(' · ')));
   card.append(headline);
+  appendLiveRateDetails(card, cell);
+}
+
+function appendLiveRateDetails(card, cell) {
+  const entries = window.TokenMonitorTokenRate.liveTokenRateTooltipEntries(
+    { devices: cell.rateDevices, deviceCount: cell.deviceCount }, cell.rateMode, formatRate
+  );
+  if (!entries.length) return;
+  const list = el('div', 'edge-dock-accounts edge-dock-clients edge-dock-rate-details');
+  for (const entry of entries) {
+    if (!Array.isArray(entry)) {
+      const heading = el('div', 'edge-dock-rate-device', entry.full);
+      heading.classList.toggle('is-separated', entry.separated === true);
+      list.append(heading);
+      continue;
+    }
+    const row = el('div', 'edge-dock-rate-model');
+    const mark = markNode(modelVendorFor(entry[0]) || 'token-monitor');
+    mark.setAttribute('aria-hidden', 'true');
+    row.append(mark, el('span', 'edge-dock-rate-model-name', entry[0]), el('span', 'edge-dock-rate-model-value', entry[1]));
+    list.append(row);
+  }
+  card.append(list);
 }
 
 function statCard(cell) {
@@ -1483,8 +1526,11 @@ function commitCard(card, cellId) {
   const scrollTop = sameCard ? previous.querySelector(CARD_SCROLL_SELECTOR)?.scrollTop || 0 : 0;
   const resetSnapshot = cardResetAnimator.capture(contentLayer);
   contentLayer.replaceChildren(card);
+  overflowText.refresh();
   const list = card.querySelector(CARD_SCROLL_SELECTOR);
   if (list) list.scrollTop = scrollTop;
+  // Measure reading targets only after mounting and restoring their scroll position.
+  if (sameCard) overflowText.preserveReading(previous, card);
   cardResetAnimator.animate(card, resetSnapshot);
 }
 

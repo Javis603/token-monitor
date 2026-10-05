@@ -1377,7 +1377,9 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   // The edge dock builds the same rows from the same view, so the preference
   // reaches that renderer through its appearance projection.
   assert.match(main, /showCodexAdditionalLimits: source\.showCodexAdditionalLimits,/);
-  assert.match(app, /key: 'showCodexAdditionalLimits',[\s\S]*?defaultValue: true/);
+  // The switch is retired from the options in favour of the usage-items
+  // checklist; a stored `false` is carried over by codexAdditionalLimitsMigration.
+  assert.doesNotMatch(app, /key: 'showCodexAdditionalLimits'/);
   assert.match(renderProviderWindows, /settings\(\)\?\.showCodexAdditionalLimits === false\s*\? \[\]\s*: \(provider\.windows \|\| \[\]\)\.filter\(\(window\) => window\?\.additional === true\);/);
   assert.match(renderProviderWindows, /codexAdditionalWindowLabel\(additional, additionalWindows\)/);
   assert.match(renderProviderWindows, /additionalNode\.classList\.add\('limit-window-wide'\);/);
@@ -2629,11 +2631,11 @@ test('account and automatic provider panels reuse the original account summary g
   assert.match(app, /antigravity: 'settings\.limits\.connection\.antigravity'/);
   assert.match(app, /grok: 'settings\.limits\.connection\.grok'/);
   assert.match(app, /kiro: 'settings\.limits\.connection\.kiro'/);
-  assert.equal((i18n.match(/'settings\.limits\.connection\.title':/g) || []).length, 5);
-  assert.equal((i18n.match(/'settings\.limits\.connection\.autoDetect':/g) || []).length, 5);
-  assert.equal((i18n.match(/'settings\.limits\.connection\.antigravity':/g) || []).length, 5);
-  assert.equal((i18n.match(/'settings\.limits\.connection\.grok':/g) || []).length, 5);
-  assert.equal((i18n.match(/'settings\.limits\.connection\.kiro':/g) || []).length, 5);
+  assert.equal((i18n.match(/'settings\.limits\.connection\.title':/g) || []).length, 6);
+  assert.equal((i18n.match(/'settings\.limits\.connection\.autoDetect':/g) || []).length, 6);
+  assert.equal((i18n.match(/'settings\.limits\.connection\.antigravity':/g) || []).length, 6);
+  assert.equal((i18n.match(/'settings\.limits\.connection\.grok':/g) || []).length, 6);
+  assert.equal((i18n.match(/'settings\.limits\.connection\.kiro':/g) || []).length, 6);
   assert.match(css, /\.limit-provider-main\s*\{[\s\S]*?display: flex;[\s\S]*?justify-content: space-between/);
   assert.match(css, /\.limit-provider-actions\s*\{[\s\S]*?flex: 0 1 auto;[\s\S]*?max-width: 58%;[\s\S]*?gap: 4px/);
   assert.doesNotMatch(css, /\.limit-provider-actions > \.cursor-status-pill\s*\{[^}]*min-width:/);
@@ -4095,7 +4097,7 @@ test('elapsed subscription time never reads as zero months', () => {
 
   const i18n = readRendererFile('i18n.js');
   for (const key of ['subscription.tooltip.daysCount', 'subscription.tooltip.notStarted']) {
-    assert.equal(i18n.split(`'${key}':`).length - 1, 5, `${key} should exist in all five locales`);
+    assert.equal(i18n.split(`'${key}':`).length - 1, 6, `${key} should exist in all bundled locales`);
   }
 });
 
@@ -4158,7 +4160,7 @@ test('one account holds one subscription record', () => {
   // display name — the duplicate this check exists to refuse.
   assert.equal(clash({ ...accounts[1], accountName: 'work' }), 's1');
   assert.match(submit, /settings\.subscriptions\.errorDuplicate/);
-  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.errorDuplicate':").length - 1, 5);
+  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.errorDuplicate':").length - 1, 6);
 });
 
 test('a first charge or last top-up cannot be dated in the future', () => {
@@ -4168,7 +4170,7 @@ test('a first charge or last top-up cannot be dated in the future', () => {
   // still submits it, and a future anchor makes every derived figure nonsense.
   assert.match(submit, /startDate > subscriptionApi\.todayString\(\)/);
   assert.match(submit, /settings\.subscriptions\.errorFutureDate/);
-  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.errorFutureDate':").length - 1, 5);
+  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.errorFutureDate':").length - 1, 6);
 });
 
 test('the subscription card is revealed by having a record, not by a preference', () => {
@@ -4224,7 +4226,7 @@ test('a plan that does not auto-renew asks when it ends, and stores it there', (
   assert.match(submit, /settings\.subscriptions\.errorRenewalDate/);
   assert.match(beginEdit, /subscription\.autoRenew \? subscription\.nextRenewalOverride : subscription\.endDate/);
   for (const key of ['coverageEnd', 'coverageEndNote', 'errorRenewalDate']) {
-    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${key}':`).length - 1, 5);
+    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${key}':`).length - 1, 6);
   }
 });
 
@@ -4232,7 +4234,7 @@ test('a lapsed plan reads as ended rather than counting days backwards', () => {
   const rows = viewBody('subscriptionPlanTooltipRows', 'topUpTooltipRows');
   const elapsed = functionBody(readSharedFile('subscriptionText.js'), 'elapsedText', 'topUpMinorText');
   assert.match(rows, /daysLeft < 0 \? t\('subscription\.tooltip\.expired'\)/);
-  assert.equal(readRendererFile('i18n.js').split("'subscription.tooltip.expired':").length - 1, 5);
+  assert.equal(readRendererFile('i18n.js').split("'subscription.tooltip.expired':").length - 1, 6);
   // Time on the plan stops at the day coverage ran out; it does not keep ageing
   // after the plan ended.
   assert.match(elapsed, /coverageStopDate\(subscription\)/);
@@ -4247,7 +4249,7 @@ test('removing a ledger entry has to be confirmed, like the rows above it', () =
   assert.match(render, /if \(!armed\) \{/);
   assert.match(render, /remove\.textContent = '✓'/);
   assert.match(render, /settings\.subscriptions\.topUpRemoveConfirm/);
-  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.topUpRemoveConfirm':").length - 1, 5);
+  assert.equal(readRendererFile('i18n.js').split("'settings.subscriptions.topUpRemoveConfirm':").length - 1, 6);
   assert.ok(cssBlock(readRendererFile('styles.css'), '.subscription-topup-row .subscription-topup-remove.is-armed'));
 });
 
@@ -4296,9 +4298,9 @@ test('the section says where the recorded data shows up', () => {
   // A record decorates a plan label somewhere else entirely; without being told,
   // there is nothing in this panel that points at it.
   const notes = [...i18n.matchAll(/'settings\.subscriptions\.note': '(.+?)',\n/g)].map((match) => match[1]);
-  assert.equal(notes.length, 5);
+  assert.equal(notes.length, 6);
   for (const note of notes) {
-    assert.match(note, /Hover|游標|光标|마우스|カーソル/);
+    assert.match(note, /Hover|游標|光标|마우스|カーソル|mouse/);
   }
   // The markup fallback is what renders before i18n applies, so it cannot lag.
   assert.ok(html.includes("Hover an account's plan label on the AI Tool Limits page"));
@@ -4352,7 +4354,7 @@ test('subscriptions are written through the hub-aware channel, never as a settin
   assert.match(save, /window\.tokenMonitor\.getSettings\(\)/);
   assert.match(save, /stale_write/);
   for (const key of ['errorStaleWrite', 'errorHubWrite', 'noteShared']) {
-    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${key}':`).length - 1, 5);
+    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${key}':`).length - 1, 6);
   }
 });
 
@@ -4590,7 +4592,7 @@ test('a refused write says which problem it was', () => {
   const save = functionBody(main, 'saveSubscriptions', 'stopSyncCollector');
   assert.match(save, /if \(!saveSettings\(\)\) \{/);
   for (const k of ['errorHubRejected', 'errorWriteFailed', 'orphanNotice', 'orphanAdopt', 'orphanDiscard']) {
-    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${k}':`).length - 1, 5);
+    assert.equal(readRendererFile('i18n.js').split(`'settings.subscriptions.${k}':`).length - 1, 6);
   }
 });
 

@@ -6,6 +6,7 @@ const test = require('node:test');
 
 const {
   actionWindowForEvent,
+  activateWindowAction,
   handoffWindow,
   showWindow
 } = require('../../src/electron/windowLifecycle');
@@ -15,6 +16,7 @@ class FakeWindow extends EventEmitter {
     super();
     this.destroyed = options.destroyed === true;
     this.visible = options.visible === true;
+    this.minimized = options.minimized === true;
     this.destroyCalls = 0;
     this.focusCalls = 0;
     this.showCalls = 0;
@@ -24,6 +26,7 @@ class FakeWindow extends EventEmitter {
   destroy() { this.destroyCalls += 1; this.destroyed = true; }
   focus() { this.focusCalls += 1; }
   isDestroyed() { return this.destroyed; }
+  isMinimized() { return this.minimized; }
   isVisible() { return this.visible; }
   show() { this.showCalls += 1; this.visible = true; this.emit('show'); }
   showInactive() { this.showInactiveCalls += 1; this.visible = true; this.emit('show'); }
@@ -154,4 +157,42 @@ test('window actions fall back only when the sender has no owning window', () =>
   fallbackWindow.destroyed = true;
   assert.equal(actionWindowForEvent(BrowserWindow, {}, fallbackWindow), null);
   assert.equal(actionWindowForEvent(BrowserWindow, {}, null), null);
+});
+
+test('activate refocuses a hidden or minimized main window', () => {
+  // The regression behind #886: a hidden main window used to count as "some
+  // window exists" and made activate a no-op, leaving nothing on screen.
+  const hidden = new FakeWindow();
+  assert.equal(activateWindowAction({ mainWindow: hidden, windows: [hidden] }), 'focusWindow');
+
+  const minimized = new FakeWindow({ visible: true, minimized: true });
+  assert.equal(activateWindowAction({ mainWindow: minimized, windows: [minimized] }), 'focusWindow');
+});
+
+test('activate leaves a visible main window alone', () => {
+  const visible = new FakeWindow({ visible: true });
+  assert.equal(activateWindowAction({ mainWindow: visible, windows: [visible] }), 'none');
+});
+
+test('activate treats a destroyed main window as absent', () => {
+  const destroyed = new FakeWindow({ destroyed: true });
+  const dashboard = new FakeWindow({ visible: true });
+  assert.equal(activateWindowAction({ mainWindow: destroyed, windows: [dashboard] }), 'none');
+  assert.equal(activateWindowAction({ mainWindow: destroyed, windows: [] }), 'createWindow');
+});
+
+test('activate only creates a window when the live set is empty or dock-owned', () => {
+  const dashboard = new FakeWindow({ visible: true });
+  const dockOwned = new FakeWindow({ visible: true });
+
+  assert.equal(activateWindowAction({ windows: [] }), 'createWindow');
+  assert.equal(activateWindowAction({ windows: [dashboard] }), 'none');
+  assert.equal(
+    activateWindowAction({ windows: [dockOwned], isDockOwned: () => true }),
+    'createWindow'
+  );
+  assert.equal(
+    activateWindowAction({ windows: [dockOwned, dashboard], isDockOwned: (win) => win === dockOwned }),
+    'none'
+  );
 });
